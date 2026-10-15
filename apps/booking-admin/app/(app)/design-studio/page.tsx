@@ -31,7 +31,7 @@ import CustomDomainCard from "@/components/design-studio/CustomDomainCard";
 import MediaTab, { type PropertyGalleryImage } from "@/components/design-studio/MediaTab";
 import ColorsTab from "@/components/design-studio/ColorsTab";
 import FontsTab from "@/components/design-studio/FontsTab";
-import { PageLayout } from "@/components/layout/PageLayout";
+import { PageHeader, PageLayout } from "@/components/layout/PageLayout";
 
 type Tab = "media" | "colors" | "fonts" | "layout" | "domain";
 
@@ -764,8 +764,8 @@ export default function DesignStudioPage() {
       <PageLayout>
         <link href={BOOKING_PAGE_FONT_STYLESHEET_URL} rel="stylesheet" />
         <div className="max-w-md">
-          <h1 className="text-xl font-bold text-gray-900">{t("designStudio.title")}</h1>
-          <FeedbackAlert type="error" message={t("designStudio.loadFailure")} className="mt-4" />
+          <PageHeader title={t("designStudio.title")} />
+          <FeedbackAlert type="error" message={t("designStudio.loadFailure")} />
           <button
             type="button"
             onClick={() => {
@@ -785,26 +785,27 @@ export default function DesignStudioPage() {
     // pb-24 keeps content clear of the fixed Save bar below lg.
     <PageLayout variant="full" className="pb-24 lg:pb-6 lg:h-full flex flex-col">
       <link href={BOOKING_PAGE_FONT_STYLESHEET_URL} rel="stylesheet" />
-      <div className="shrink-0 flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h1 className="text-2xl md:text-xl font-bold text-gray-900">{t("designStudio.title")}</h1>
-          <p className="text-sm text-gray-500 mt-0.5">{t("designStudio.subtitle")}</p>
-        </div>
-        <button
-          onClick={() => setPreviewOpen(true)}
-          className="lg:hidden inline-flex items-center gap-1.5 px-3 py-1.5 text-[13px] font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors shrink-0"
-        >
-          <EyeIcon className="w-4 h-4" />
-          {t("layout.header.preview")}
-        </button>
-      </div>
+      <PageHeader
+        className="shrink-0"
+        title={t("designStudio.title")}
+        subtitle={t("designStudio.subtitle")}
+        actions={
+          <button
+            onClick={() => setPreviewOpen(true)}
+            className="lg:hidden inline-flex items-center gap-1.5 px-3 py-1.5 text-[13px] font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+          >
+            <EyeIcon className="w-4 h-4" />
+            {t("layout.header.preview")}
+          </button>
+        }
+      />
 
       {/* Feedback banner */}
       {feedback && (
         <FeedbackAlert
           type={feedback.type}
           message={t(feedback.message)}
-          className="mt-3 shrink-0"
+          className="shrink-0"
           action={
             feedback.retryHeroUpload
               ? {

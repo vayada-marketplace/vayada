@@ -18,7 +18,7 @@ import {
 } from "@heroicons/react/24/outline";
 import { useTranslation } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
-import { PageLayout } from "@/components/layout/PageLayout";
+import { PageHeader, PageLayout } from "@/components/layout/PageLayout";
 import { legacySettingsPageUrl } from "@/lib/utils/settingsSectionUrl";
 
 type SettingsCardLink = {
@@ -143,9 +143,7 @@ export function SettingsIndex() {
 
   return (
     <PageLayout>
-      <h1 className="text-xl font-semibold text-gray-900 md:text-2xl">
-        {t("settings.index.title")}
-      </h1>
+      <PageHeader title={t("settings.index.title")} />
       <Link
         href={FEATURE_HUB.href}
         className={cn(

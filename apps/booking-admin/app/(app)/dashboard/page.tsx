@@ -7,7 +7,7 @@ import { settingsService, type PropertySettings } from "@/services/settings";
 import { BookingPageStatusCard } from "@/components/dashboard/BookingPageStatusCard";
 import { ConversionFunnelCard } from "@/components/dashboard/ConversionFunnelCard";
 import { SummaryCard } from "@/components/dashboard/SummaryCard";
-import { PageLayout } from "@/components/layout/PageLayout";
+import { PageHeader, PageLayout } from "@/components/layout/PageLayout";
 import { compareRate, compareSummary, type SummaryChange } from "@/lib/utils/dashboardSummary";
 import {
   dashboardService,
@@ -216,10 +216,7 @@ export default function DashboardPage() {
 
   return (
     <PageLayout className="space-y-3 md:space-y-4">
-      {/* Header */}
-      <div>
-        <h1 className="text-xl md:text-2xl font-bold text-gray-900">{t("dashboard.title")}</h1>
-      </div>
+      <PageHeader title={t("dashboard.title")} />
 
       <BookingPageStatusCard />
 

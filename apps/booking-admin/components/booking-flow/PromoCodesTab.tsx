@@ -14,6 +14,7 @@ import {
   XMarkIcon,
 } from "@heroicons/react/24/outline";
 import { Button, FeedbackAlert, Input, ToggleSwitch } from "@/components/ui";
+import { PageHeader } from "@/components/layout/PageLayout";
 import type { BookingPromoCode } from "@/services/api/bookingPromoCodesClient";
 
 export interface PromoRoomType {
@@ -320,24 +321,20 @@ export default function PromoCodesTab({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-gray-950">
-            {t("bookingFlow.tabs.promos")}
-          </h1>
-          <p className="mt-1 text-sm text-gray-500">
-            {t("admin.targetedDiscountsGuestsUnlockByEnteringACodeAtCheckout")}
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={() => openEditor(null)}
-          className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-primary-600 px-4 text-sm font-medium text-white hover:bg-primary-700"
-        >
-          <PlusIcon className="h-4 w-4" />
-          {t("admin.newPromoCode")}
-        </button>
-      </div>
+      <PageHeader
+        title={t("bookingFlow.tabs.promos")}
+        subtitle={t("admin.targetedDiscountsGuestsUnlockByEnteringACodeAtCheckout")}
+        actions={
+          <button
+            type="button"
+            onClick={() => openEditor(null)}
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-primary-600 px-4 text-sm font-medium text-white hover:bg-primary-700"
+          >
+            <PlusIcon className="h-4 w-4" />
+            {t("admin.newPromoCode")}
+          </button>
+        }
+      />
 
       {promoError && !isEditorOpen && (
         <div
