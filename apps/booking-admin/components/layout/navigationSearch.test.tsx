@@ -56,3 +56,19 @@ it("does not offer retired affiliate management even when activated", async () =
   expect((await loadSearchAccess("hotel-1")).has("affiliates")).toBe(false);
   expect(SEARCH_ENTRIES.map((entry) => entry[1])).not.toContain("/affiliates");
 });
+
+it("leaves Add-ons or Promo Codes out once Feature Hub says they are off (VAY-2200)", async () => {
+  const pages = async () => {
+    const access = await loadSearchAccess("hotel-1");
+    return SEARCH_ENTRIES.filter((entry) => access.has(entry[3])).map((entry) => entry[0]);
+  };
+  // Not known yet (no switch in the read): both stay searchable.
+  expect(await pages()).toEqual(expect.arrayContaining(["Add-ons", "Promo Codes"]));
+  reads.modules.mockResolvedValue({
+    supportedModules: ["add-ons", "promos"],
+    activeModules: ["add-ons"],
+    activations: [],
+  });
+  expect(await pages()).toContain("Add-ons");
+  expect(await pages()).not.toContain("Promo Codes");
+});

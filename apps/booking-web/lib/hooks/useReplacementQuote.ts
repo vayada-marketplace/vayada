@@ -8,6 +8,14 @@ import { ApiError } from "@/services/api/client";
 import { serverNow } from "@/lib/serverClock";
 import { requestReplacementQuote } from "@/services/api/replacementQuote";
 
+/** The server's code for a refused quote, when it sent one. */
+export function replacementQuoteErrorCode(error: unknown): string | undefined {
+  if (!(error instanceof ApiError) || !error.detail || typeof error.detail !== "object")
+    return undefined;
+  const code = (error.detail as { code?: unknown }).code;
+  return typeof code === "string" ? code : undefined;
+}
+
 /** The guest's message when a quote is refused. */
 export function replacementQuoteErrorMessage(error: unknown): string {
   // VAY-2145: bank transfer and PayPal need their payment deadline to end before check-in.
@@ -34,6 +42,7 @@ export function useReplacementQuote(slug: string, request: PublicBookingQuoteReq
     error?: string;
     /** The HTTP status of a refused quote, when the server answered. */
     errorStatus?: number;
+    errorCode?: string;
   }>();
   useEffect(() => {
     if (submitted !== identity) {
@@ -67,6 +76,7 @@ export function useReplacementQuote(slug: string, request: PublicBookingQuoteReq
             attempt,
             error: replacementQuoteErrorMessage(error),
             errorStatus: error instanceof ApiError ? error.status : undefined,
+            errorCode: replacementQuoteErrorCode(error),
           });
       });
     return () => {
@@ -81,6 +91,7 @@ export function useReplacementQuote(slug: string, request: PublicBookingQuoteReq
     quote: current?.quote,
     error: current?.error,
     errorStatus: current?.errorStatus,
+    errorCode: current?.errorCode,
     loading: !!request && submitted === identity && attempt > 0 && !current,
     submit: () => {
       setSubmitted(identity);

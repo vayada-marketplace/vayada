@@ -21,10 +21,10 @@ const definition = () => ({
   commission: "10",
   source: "private owner source",
 });
-function fixture(rows = [definition()], show = true) {
+function fixture(rows = [definition()], show = true, module = true) {
   const query = vi.fn(async (sql: string) => {
     if (sql.includes("SELECT show_addons_step"))
-      return { rows: [{ show_addons_step: show }], rowCount: 1 };
+      return { rows: [{ show_addons_step: show, addons_enabled: module }], rowCount: 1 };
     if (sql.includes("SELECT id FROM booking.addon_definitions"))
       return { rows: rows.map(({ id }) => ({ id })), rowCount: rows.length };
     if (sql.includes("FROM booking.addon_definitions a")) return { rows, rowCount: rows.length };
@@ -85,6 +85,13 @@ it("honors the current Booking visibility switch and excludes unsupported lead-t
   const row = definition();
   Object.assign(row.metadata, { leadTime: "24 hours" });
   expect((await fixture([row]).read())?.addons).toEqual([]);
+});
+it("offers no extras while the Feature Hub Add-ons module is off (VAY-2200)", async () => {
+  const off = fixture(undefined, true, false);
+  expect((await off.read())?.addons).toEqual([]);
+  expect(
+    off.query.mock.calls.some(([sql]) => sql.includes("SELECT id FROM booking.addon_definitions")),
+  ).toBe(false);
 });
 it("fails closed for malformed or stale add-on evidence", async () => {
   for (const change of [

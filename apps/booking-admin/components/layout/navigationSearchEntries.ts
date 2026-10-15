@@ -8,7 +8,7 @@ import { getFinancePlanStatus } from "@/services/api/financeSubscriptionsClient"
 export const SEARCH_ENTRIES = [
   ["Dashboard", "/", "Pages", "dashboard", "layout.sidebar.dashboard"],
   ["Design Studio", "/design-studio", "Pages", "design", "layout.sidebar.designStudio"],
-  ["Promo Codes", "/promo-codes", "Pages", "settings", "bookingFlow.promoCodes.title"],
+  ["Promo Codes", "/promo-codes", "Pages", "promos", "bookingFlow.promoCodes.title"],
   ["Settings", "/settings", "Pages", "settings", "layout.sidebar.settings"],
   ["Feature Hub", "/settings/feature-hub", "Pages", "modules", "layout.sidebar.featureHub"],
   ["General", "/settings/general", "Settings", "settings", "settings.cards.general.title"],
@@ -59,7 +59,7 @@ export const SEARCH_ENTRIES = [
     "settings",
     "settings.cards.roomFilters.title",
   ],
-  ["Add-ons", "/add-ons", "Pages", "settings", "bookingFlow.tabs.addons"],
+  ["Add-ons", "/add-ons", "Pages", "add-ons", "bookingFlow.tabs.addons"],
   [
     "Book Direct Benefits",
     "/settings/book-direct-benefits",
@@ -85,7 +85,17 @@ export async function loadSearchAccess(hotelId: string): Promise<SearchAccess> {
     billing: property.then(({ propertyId }) => getFinancePlanStatus(propertyId)),
   };
   const results = await Promise.allSettled(Object.values(checks));
-  return new Set(Object.keys(checks).filter((_, index) => results[index].status === "fulfilled"));
+  const access = new Set(
+    Object.keys(checks).filter((_, index) => results[index].status === "fulfilled"),
+  );
+  // Add-ons and Promos follow the settings read, unless Feature Hub says they are off (VAY-2200).
+  const listed = await modules.catch(() => null);
+  for (const moduleId of ["add-ons", "promos"]) {
+    const off =
+      listed?.supportedModules?.includes(moduleId) && !listed.activeModules?.includes(moduleId);
+    if (access.has("settings") && !off) access.add(moduleId);
+  }
+  return access;
 }
 
 export function matchesSearch(query: string, text: string): boolean {

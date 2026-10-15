@@ -68,6 +68,7 @@ function targetProfileRow(overrides: Record<string, unknown> = {}): QueryResultR
     bookingShowLanguageSelector: true,
     bookingShowCurrencySelector: true,
     bookingReferAGuestModuleEnabled: false,
+    bookingPromoCodes: false,
     publicSetupCompleteness: { status: "ready", missing: [] },
     sourceFreshness: {
       hotel_catalog: { status: "fresh", generatedAt: "2026-07-22T09:55:00.000Z" },
