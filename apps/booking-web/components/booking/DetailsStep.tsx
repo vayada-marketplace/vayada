@@ -5,6 +5,7 @@ import type {
   PublicBookingQuote,
   PublicQuoteGuestDisclosure,
 } from "@vayada/domain-booking/replacement-pricing";
+import { formatTimeZoneName } from "@/lib/utils";
 import BookingPageTerms from "./BookingPageTerms";
 import GuestDetailsForm, { type GuestDetails } from "./GuestDetailsForm";
 import type { SummaryRoom } from "./StaySummary";
@@ -192,7 +193,8 @@ export default function DetailsStep({
         ) : (
           <div className="divide-y divide-gray-100">
             <p className="pb-2.5 text-xs text-gray-500">
-              Times are in {disclosure.propertyTimeZone}.
+              {/* The step speaks English, so the zone is named in English too. */}
+              Times are in {formatTimeZoneName(disclosure.propertyTimeZone)}.
             </p>
             {ruleLines(disclosure).map(([title, text]) => (
               <div key={title} className="flex justify-between gap-6 py-2.5 text-sm">

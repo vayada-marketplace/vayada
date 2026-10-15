@@ -13,7 +13,7 @@ it("names the hotel's time zone in the page's language", () => {
   expect(formatTimeZoneName("Europe/Zurich", "de")).toBe("Mitteleuropäische Zeit");
   expect(formatTimeZoneName("UTC")).toBe("UTC");
   expect(formatTimeZoneName("Etc/UTC", "de")).toBe("UTC");
-  for (const alias of ["Etc/UCT", "Zulu", "Etc/Universal", "GMT0", ""]) {
+  for (const alias of ["Etc/UCT", "Zulu", "Etc/Universal", "GMT0", "", null, undefined]) {
     expect(formatTimeZoneName(alias)).toBe("UTC");
   }
   // A zone the browser doesn't know is shown as it came.

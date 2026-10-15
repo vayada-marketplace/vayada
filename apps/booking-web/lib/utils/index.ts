@@ -48,8 +48,8 @@ export function formatStayDate(date: string, locale?: string): string {
 }
 
 /** "Central European Time" for an IANA time zone, in the guest's language; UTC and no zone read "UTC". */
-export function formatTimeZoneName(timeZone: string, locale?: string): string {
-  if (!timeZone.trim() || /^(Etc\/)?(UTC|UCT|GMT0?|Universal|Zulu)$/i.test(timeZone)) return "UTC";
+export function formatTimeZoneName(timeZone: string | null | undefined, locale?: string): string {
+  if (!timeZone?.trim() || /^(Etc\/)?(UTC|UCT|GMT0?|Universal|Zulu)$/i.test(timeZone)) return "UTC";
   try {
     return (
       new Intl.DateTimeFormat(resolveLocale(locale), { timeZone, timeZoneName: "longGeneric" })
