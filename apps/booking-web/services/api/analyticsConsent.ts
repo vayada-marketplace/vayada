@@ -24,11 +24,28 @@ export function clearAnalyticsSession(slug: string) {
   } catch {}
 }
 
+const ALLOWED = "vayada:analytics-allowed";
+
+/** Runs when the guest switches analytics on for this hotel on this page (VAY-2197). */
+export function onAnalyticsAllowed(slug: string, listener: () => void): () => void {
+  const handle = (event: Event) => {
+    if ((event as CustomEvent<string>).detail === slug) listener();
+  };
+  window.addEventListener(ALLOWED, handle);
+  return () => window.removeEventListener(ALLOWED, handle);
+}
+
 export function saveAnalyticsChoice(slug: string, analytics: boolean): boolean {
   if (!analytics) clearAnalyticsSession(slug);
+  const before = analyticsChoice(slug);
   try {
     localStorage.setItem(key(slug), JSON.stringify({ version: 1, analytics }));
     denied.delete(slug);
+    if (analytics && before !== true) {
+      try {
+        window.dispatchEvent(new CustomEvent(ALLOWED, { detail: slug }));
+      } catch {}
+    }
     return true;
   } catch {
     denied.add(slug);

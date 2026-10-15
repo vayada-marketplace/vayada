@@ -191,7 +191,7 @@
   "dashboard.conversionFunnel.noData": "Sin datos de reservas para este período",
   "dashboard.conversionFunnel.subtitle": "De visitantes a huéspedes con reserva",
   "dashboard.conversionFunnel.infoLabel": "Acerca del embudo de conversión",
-  "dashboard.conversionFunnel.info": "Sesiones del sitio de reservas en este período, contadas en cada paso que alcanzaron en orden. Los números en rojo muestran cuántas abandonaron desde el paso anterior. Los pagos con tarjeta añaden un paso de autorización; el último paso se compara con las tarjetas autorizadas más otros métodos de pago.",
+  "dashboard.conversionFunnel.info": "Sesiones del sitio de reservas en este período, contadas en cada paso que alcanzaron en orden. Los números en rojo muestran cuántas abandonaron desde el paso anterior. Los pagos con tarjeta añaden un paso de autorización; el último paso se compara con las tarjetas autorizadas más otros métodos de pago. Las reservas completadas también incluyen las solicitudes de reserva que el hotel aún debe aceptar y las reservas por transferencia bancaria o PayPal que aún esperan el pago.",
   "dashboard.conversionFunnel.options": "Opciones del embudo",
   "dashboard.conversionFunnel.timeRange": "Periodo",
   "dashboard.conversionFunnel.exportCsv": "Exportar CSV",
