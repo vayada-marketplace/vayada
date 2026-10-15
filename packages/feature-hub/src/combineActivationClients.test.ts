@@ -154,3 +154,16 @@ describe("PMS navigation preview", () => {
     );
   });
 });
+
+describe("Booking Engine navigation preview", () => {
+  it("mirrors the sidebar: no Booking Flow (VAY-2144); Add-ons and Promos are modules after Design Studio (VAY-2200)", () => {
+    const core = CORE_NAV_ITEMS.booking_engine.map(({ label }) => label);
+    expect(core).toEqual(["Dashboard", "Design Studio", "Settings"]);
+    expect(core[FEATURE_MODULE_NAV_INDEX.booking_engine - 1]).toBe("Design Studio");
+    expect(
+      activeNavModules("booking_engine", ["promos", "add-ons"]).map(
+        ({ navItem }) => navItem!.label,
+      ),
+    ).toEqual(["Add-ons", "Promos"]);
+  });
+});

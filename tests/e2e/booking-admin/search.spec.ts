@@ -15,7 +15,7 @@ test.beforeEach(async ({ page }) => {
 test("searches from every main page and opens Domain directly with the keyboard", async ({
   page,
 }, testInfo) => {
-  for (const path of ["/", "/settings/general", "/booking-flow", "/design-studio"]) {
+  for (const path of ["/", "/settings/general", "/settings/room-filters", "/design-studio"]) {
     await page.goto(path);
     const search = page.getByRole("combobox", { name: "Search pages and settings" });
     await expect(search).toBeVisible();

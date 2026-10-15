@@ -8,7 +8,6 @@ import { getFinancePlanStatus } from "@/services/api/financeSubscriptionsClient"
 export const SEARCH_ENTRIES = [
   ["Dashboard", "/", "Pages", "dashboard", "layout.sidebar.dashboard"],
   ["Design Studio", "/design-studio", "Pages", "design", "layout.sidebar.designStudio"],
-  ["Booking Flow", "/booking-flow", "Pages", "settings", "layout.sidebar.bookingFlow"],
   ["Promo Codes", "/promo-codes", "Pages", "promos", "bookingFlow.promoCodes.title"],
   ["Settings", "/settings", "Pages", "settings", "layout.sidebar.settings"],
   ["Feature Hub", "/settings/feature-hub", "Pages", "modules", "layout.sidebar.featureHub"],
@@ -54,11 +53,11 @@ export const SEARCH_ENTRIES = [
   ["Fonts", "/design-studio?tab=fonts", "Design Studio", "design", "designStudio.tabs.fonts"],
   ["Layout", "/design-studio?tab=layout", "Design Studio", "design", "admin.layout"],
   [
-    "Room filters",
-    "/booking-flow?tab=rooms",
-    "Booking Flow",
+    "Room Filters",
+    "/settings/room-filters",
+    "Settings",
     "settings",
-    "bookingFlow.tabs.filters",
+    "settings.cards.roomFilters.title",
   ],
   ["Add-ons", "/add-ons", "Pages", "add-ons", "bookingFlow.tabs.addons"],
   [
@@ -68,13 +67,7 @@ export const SEARCH_ENTRIES = [
     "settings",
     "settings.cards.benefits.title",
   ],
-  [
-    "Guest form",
-    "/booking-flow?tab=guest-form",
-    "Booking Flow",
-    "settings",
-    "bookingFlow.tabs.guestForm",
-  ],
+  ["Guest Form", "/settings/guest-form", "Settings", "settings", "settings.cards.guestForm.title"],
 ] as const;
 
 export type SearchAccess = Set<string>;
