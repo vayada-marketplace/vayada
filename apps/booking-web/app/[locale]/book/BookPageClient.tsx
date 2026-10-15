@@ -288,7 +288,10 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     setExtras(null);
     setFallback(0);
   };
-  const { quote, error, errorStatus, loading, submit } = useReplacementQuote(slug, request);
+  const { quote, error, errorStatus, errorCode, loading, submit } = useReplacementQuote(
+    slug,
+    request,
+  );
   const { formatPrice } = useCurrency();
   // The old pages' prices: the charged currency ("€410"), then any approximation.
   const money = (minor: string, currency: string) =>
@@ -455,6 +458,13 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   const refused = !!errorStatus && errorStatus >= 400 && errorStatus < 500 && errorStatus !== 429;
   useEffect(() => {
     if (!error || !refused || quote) return;
+    // VAY-2200: the hotel switched promo codes or extras off meanwhile. Price again without them;
+    // the way to pay wasn't the problem.
+    if (errorCode === "PROMO_CODES_UNAVAILABLE" || errorCode === "ADDONS_UNAVAILABLE") {
+      if (errorCode === "PROMO_CODES_UNAVAILABLE") setPromoCode("");
+      else setExtras(null);
+      return;
+    }
     // A way to pay picked on Payment can only change there: before it, a refused one goes back
     // to the hotel's own order, starting with another way to pay.
     if (payment && step !== "payment") {
