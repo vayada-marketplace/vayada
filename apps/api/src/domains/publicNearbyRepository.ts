@@ -6,7 +6,8 @@ import {
   type NearbyPreview,
   type PropertyProfileLocation,
 } from "@vayada/domain-hotels";
-import { NEARBY_POLICY_VERSION } from "../integrations/googleNearbyPlaces.js";
+import { NEARBY_POLICY_VERSION, nearbyOriginKey } from "../integrations/googleNearbyPlaces.js";
+import { samePin } from "./propertyNearbyDiscoveryRepository.js";
 import type { NearbyScope } from "./propertyNearbyRepository.js";
 
 export type PublicNearby = NearbyPreview & {
@@ -40,8 +41,8 @@ export function createPgPublicNearbyRepository(
             WHEN location.geo_public AND location.map_display_mode='approximate' THEN round(location.latitude,2) END::double precision AS latitude,
           CASE WHEN location.geo_public AND location.map_display_mode='exact' THEN location.longitude
             WHEN location.geo_public AND location.map_display_mode='approximate' THEN round(location.longitude,2) END::double precision AS longitude,
-          c.revision AS curation_revision, c.saved_profile_revision, c.choices, c.custom_places,
-          d.profile_revision AS discovery_revision, d.policy_version, d.status AS discovery_status,
+          c.revision AS curation_revision, c.saved_profile_revision, c.saved_origin, c.choices, c.custom_places,
+          d.profile_revision AS discovery_revision, d.origin AS discovery_origin, d.policy_version, d.status AS discovery_status,
           d.places, d.valid_until > clock_timestamp() AS unexpired,
           d.lease_expires_at > clock_timestamp() AS refreshing
         FROM hotel_catalog.properties p
@@ -77,12 +78,21 @@ export function createPgPublicNearbyRepository(
       const row = result.rows[0];
       if (!row) return null;
       const revision = Number(row.profile_revision);
+      // The same search origin the discovery and editor use (VAY-2104).
+      const originKey =
+        row.latitude === null || row.longitude === null
+          ? null
+          : nearbyOriginKey({ latitude: row.latitude, longitude: row.longitude });
       const curation = parseNearbyCurationState({
         schemaVersion: 1,
         profileRevision: revision,
         curationRevision: Number(row.curation_revision ?? 0),
         savedProfileRevision:
-          row.saved_profile_revision === null ? null : Number(row.saved_profile_revision),
+          row.saved_profile_revision === null
+            ? null
+            : samePin(row.saved_origin, originKey)
+              ? revision
+              : Number(row.saved_profile_revision),
         choices: row.choices ?? [],
         customPlaces: row.custom_places ?? [],
       });
@@ -99,7 +109,8 @@ export function createPgPublicNearbyRepository(
         longitude: row.longitude,
       };
       const current =
-        Number(row.discovery_revision) === revision && row.policy_version === NEARBY_POLICY_VERSION;
+        (Number(row.discovery_revision) === revision || samePin(row.discovery_origin, originKey)) &&
+        row.policy_version === NEARBY_POLICY_VERSION;
       const ready = current && row.unexpired && ["ready", "empty"].includes(row.discovery_status);
       const refreshing = current && row.discovery_status === "refreshing" && row.refreshing;
       const discovery: NearbyDiscoveryState = {
