@@ -146,7 +146,7 @@ export default function ReplacementBookingConfirmation({
         conflict
           ? "This price is no longer available. Get a new price and review its terms again."
           : requestUnavailable
-            ? "This hotel confirms each booking itself, and booking requests can’t be sent online yet. No room was reserved and no payment was taken."
+            ? "We confirm each booking ourselves, and booking requests can’t be sent online yet. No room was reserved and no payment was taken."
             : cardUnavailable
               ? "Paying by card online isn’t available right now. Get a new price with “Pay at the hotel”. No room was reserved and no payment was taken."
               : manualUnavailable
@@ -154,7 +154,7 @@ export default function ReplacementBookingConfirmation({
                 : unavailable
                   ? "Online booking is not available for this hotel right now. No room was reserved and no payment was taken."
                   : request
-                    ? "We couldn’t confirm your request was sent. It may still have reached the hotel, so retry with the same details."
+                    ? "We couldn’t confirm your request was sent. It may still have reached us, so retry with the same details."
                     : "We couldn’t confirm your booking. Your room may still have been booked, so retry with the same details.",
       );
     } finally {
@@ -181,6 +181,7 @@ export default function ReplacementBookingConfirmation({
             month: "short",
             hour: "2-digit",
             minute: "2-digit",
+            timeZoneName: "short",
           })}
           . We’ll confirm your booking when your payment arrives. If it doesn’t arrive by then, the
           booking expires and the room is released.

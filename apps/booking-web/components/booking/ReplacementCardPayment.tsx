@@ -91,7 +91,7 @@ function CardForm({
     } catch {
       setError(
         request
-          ? "We couldn’t confirm your card authorisation yet. If it went through, we’ll email you when the hotel answers."
+          ? "We couldn’t confirm your card authorisation yet. If it went through, we’ll email you when we answer."
           : "We couldn’t confirm your payment yet. If your card was charged, your booking will be confirmed by email.",
       );
       started.current = false;
