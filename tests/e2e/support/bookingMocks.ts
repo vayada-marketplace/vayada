@@ -307,6 +307,8 @@ type MockBookingApisOptions = {
   publicContacts?: typeof publicHotelProfile.hotel.publicContacts;
   /** VAY-2200: false while the hotel has Promos off or no live code. */
   promoCodes?: boolean;
+  /** A Design Studio font pairing id, e.g. "high-end-serif". */
+  fontPairing?: string;
 };
 
 export async function mockBookingApis(page: Page, options: MockBookingApisOptions = {}) {
@@ -315,7 +317,7 @@ export async function mockBookingApis(page: Page, options: MockBookingApisOption
     ...publicHotelProfile,
     hotel: {
       ...publicHotelProfile.hotel,
-      ...(options.headerLogoUrl || options.headerSettings
+      ...(options.headerLogoUrl || options.headerSettings || options.fontPairing
         ? {
             branding: {
               logoUrl: options.headerLogoUrl ?? null,
@@ -328,7 +330,7 @@ export async function mockBookingApis(page: Page, options: MockBookingApisOption
               heroHeading: null,
               heroSubtext: null,
               primaryColor: null,
-              fontPairing: null,
+              fontPairing: options.fontPairing ?? null,
             },
           }
         : {}),

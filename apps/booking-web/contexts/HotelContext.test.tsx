@@ -15,6 +15,13 @@ const { getHotel, getAddons } = vi.hoisted(() => ({
 vi.mock("next/navigation", () => ({ usePathname: () => "/" }));
 vi.mock("@/components/AffiliateClickTracker", () => ({ AffiliateClickTracker: () => null }));
 vi.mock("@/services/api/hotel", () => ({ hotelService: { getHotel, getAddons } }));
+// next/font only runs inside Next's compiler; the pairing map has its own test.
+vi.mock("@/lib/brandFonts", () => ({
+  brandFontPairing: (id?: string) =>
+    id === "high-end-serif"
+      ? { heading: "'Heading', serif", body: "'Body', sans-serif" }
+      : undefined,
+}));
 
 async function renderProvider(children: ReactNode, slug?: string) {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
@@ -53,6 +60,25 @@ it("loads the hotel profile and its add-on catalogue", async () => {
   try {
     expect(result).toEqual({ hotelName: "Pricing Test Hotel", addonIds: ["breakfast"] });
     expect(container.textContent).toBe("Pricing Test Hotel");
+  } finally {
+    cleanup();
+  }
+});
+
+it("applies the hotel's font pairing without loading anything from Google", async () => {
+  getHotel.mockResolvedValue({
+    slug: "pricing-test",
+    name: "Pricing Test Hotel",
+    branding: { fontPairing: "high-end-serif" },
+  });
+  getAddons.mockResolvedValue([]);
+
+  const { cleanup } = await renderProvider(<p>Hotel content</p>, "pricing-test");
+  try {
+    const root = document.documentElement.style;
+    expect(root.getPropertyValue("--font-heading")).toBe("'Heading', serif");
+    expect(root.getPropertyValue("--font-body")).toBe("'Body', sans-serif");
+    expect(document.head.querySelector("link")).toBeNull();
   } finally {
     cleanup();
   }
