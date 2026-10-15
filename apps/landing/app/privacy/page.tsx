@@ -23,6 +23,16 @@ export default function PrivacyPage() {
             <p className="text-lg leading-relaxed">
               By accessing or using our Services, you agree to the terms of this Privacy Policy.
             </p>
+            <p className="text-lg leading-relaxed">
+              If you are visiting or booking on a hotel&apos;s booking site that runs on vayada, see{" "}
+              <a
+                href="#booking-guests"
+                className="text-primary-600 hover:text-primary-700 underline"
+              >
+                Section 9
+              </a>
+              .
+            </p>
 
             <section className="mt-12">
               <h2 className="text-2xl font-bold text-primary-800 mb-4">1. Data Controller</h2>
@@ -448,6 +458,102 @@ export default function PrivacyPage() {
                   periods, typically up to ten years, as per Article 6(1) lit. c of the GDPR). We
                   will delete your data at the latest when these statutory retention periods expire,
                   without requiring a specific request from you.
+                </p>
+              </div>
+            </section>
+
+            <section id="booking-guests" className="mt-12 scroll-mt-24">
+              <h2 className="text-2xl font-bold text-primary-800 mb-4">
+                9. Guests of Hotel Booking Sites
+              </h2>
+              <p className="mb-4">
+                Hotels use vayada to run their own booking sites (for example
+                hotel-name.booking.vayada.com, or a hotel&apos;s own domain). This section explains
+                how your data is handled when you visit or book on such a site.
+              </p>
+
+              <div className="mt-6">
+                <h3 className="text-xl font-semibold text-gray-900 mb-3">A. Who Is Responsible</h3>
+                <p>
+                  The hotel named on the booking site is the controller for your booking and for the
+                  optional analytics on its booking site. vayada runs the booking site and processes
+                  this data on the hotel&apos;s behalf and on its instructions (Article 28 GDPR).
+                  The hotel&apos;s contact details are shown at the bottom of its booking site.
+                </p>
+              </div>
+
+              <div className="mt-6">
+                <h3 className="text-xl font-semibold text-gray-900 mb-3">
+                  B. What the Booking Site Processes
+                </h3>
+                <ul className="list-disc list-inside ml-4 space-y-2">
+                  <li>
+                    <strong>Your booking:</strong> your name, email address, phone number, country,
+                    stay dates, rooms, guests, extras, price and payment method, and any arrival
+                    time or requests you add. The hotel uses this data to take and manage your
+                    booking and to contact you about it (Article 6(1) lit. b GDPR).
+                  </li>
+                  <li>
+                    <strong>Technical data:</strong> our servers log each request, including your IP
+                    address, to keep the booking site secure and working. These logs are kept for 30
+                    days (Article 6(1) lit. f GDPR).
+                  </li>
+                  <li>
+                    <strong>Optional analytics (only if you allow it):</strong> which pages and
+                    booking steps you reach, with a random identifier for your browser tab, so the
+                    hotel can see where guests leave the booking. These events contain no name,
+                    email address or phone number, and we do not store your IP address with them. We
+                    keep them for 13 months (Article 6(1) lit. a GDPR). Your choice is saved in your
+                    browser&apos;s local storage, for that hotel&apos;s booking site only. You can
+                    change it at any time with the &quot;Privacy choices&quot; button on the booking
+                    site; turning analytics off stops further events.
+                  </li>
+                  <li>
+                    <strong>Partner links:</strong> if you arrive through a link from one of the
+                    hotel&apos;s partners, such as a travel creator, we record that link and the
+                    page you came from, so the hotel can credit the partner (Article 6(1) lit. f
+                    GDPR).
+                  </li>
+                </ul>
+              </div>
+
+              <div className="mt-6">
+                <h3 className="text-xl font-semibold text-gray-900 mb-3">
+                  C. Card Payments and Other Services
+                </h3>
+                <p className="mb-3">
+                  If you pay by card, your card details go directly to Stripe, our payment provider;
+                  neither the hotel nor vayada sees your full card number. Stripe&apos;s payment
+                  form (Stripe.js) loads only when you open the card payment form, and Stripe
+                  processes your data under its own{" "}
+                  <a
+                    href="https://stripe.com/privacy"
+                    className="text-primary-600 hover:text-primary-700 underline"
+                  >
+                    privacy policy
+                  </a>
+                  .
+                </p>
+                <p>
+                  Fonts, images and all other parts of the booking site are served by vayada. Before
+                  you pay by card, the booking site does not load content from other companies, such
+                  as Google Fonts. Booking data is hosted in the European Union.
+                </p>
+              </div>
+
+              <div className="mt-6">
+                <h3 className="text-xl font-semibold text-gray-900 mb-3">D. Your Rights</h3>
+                <p>
+                  You have the rights described in Section 5, and you can complain to a data
+                  protection supervisory authority. To use them, please contact the hotel. You can
+                  also write to us at{" "}
+                  <a
+                    href="mailto:privacy@vayada.com"
+                    className="text-primary-600 hover:text-primary-700 underline"
+                  >
+                    privacy@vayada.com
+                  </a>
+                  , and we will pass your request on to the hotel.
                 </p>
               </div>
             </section>
