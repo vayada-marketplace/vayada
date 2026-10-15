@@ -103,7 +103,8 @@ function saveChoice(page: Page, analytics: boolean) {
   );
 }
 
-/** The events in the order sent; React's development double effects may repeat one. */
+/** The events in the order sent. The dev server's double effects can repeat the hotel page's
+ * visit, never a step's event. */
 function funnel(sent: Sent[]) {
   const ordered = [...sent].sort(
     (a, b) => Number(a.metadata.funnelSequence) - Number(b.metadata.funnelSequence),
@@ -115,7 +116,7 @@ function funnel(sent: Sent[]) {
     return [eventType, properties] as const;
   });
   return events.filter(
-    (event, index) => JSON.stringify(event) !== JSON.stringify(events[index - 1]),
+    ([type], index) => type !== "page_visit" || events[index - 1]?.[0] !== "page_visit",
   );
 }
 
@@ -207,9 +208,14 @@ test("a refused price is reported once, without the guest's details", async ({ p
   await page.goto(HOTEL);
   await page.getByTestId("select-rate-deluxe").click();
   await expect(page.getByText("We couldn't price this selection.")).toBeVisible();
+  const errors = () => funnel(sent).filter(([type]) => type === "booking_error");
   await expect
-    .poll(() => funnel(sent).filter(([type]) => type === "booking_error"))
+    .poll(errors)
     .toEqual([["booking_error", { step: "extras", reason: "price_refused" }]]);
+  // Still once after the guest has seen it a while.
+  await expect(page.getByRole("button", { name: "Choose another room" })).toBeVisible();
+  await page.waitForTimeout(1000);
+  expect(errors()).toHaveLength(1);
   expectPrivate(sent);
 });
 
@@ -218,7 +224,12 @@ for (const choice of ["rejected", "unanswered"] as const) {
     if (choice === "rejected") await saveChoice(page, false);
     const sent = await mockFunnel(page);
     await page.goto(HOTEL);
-    if (choice === "unanswered") await page.keyboard.press("Escape");
+    if (choice === "unanswered") {
+      const banner = page.getByRole("heading", { name: "Optional analytics", exact: true });
+      await expect(banner).toBeVisible();
+      await page.keyboard.press("Escape");
+      await expect(banner).toBeHidden();
+    }
     await book(page);
     expect(sent).toEqual([]);
     expect(
