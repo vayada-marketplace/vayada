@@ -242,7 +242,7 @@
     "paymentDetails": "Payment Details",
     "payWithCard": "Pay with Card",
     "cardAuthNote": "Your card will be charged securely via Stripe",
-    "payAtProperty": "Pay at Property",
+    "payAtProperty": "Pay at the hotel",
     "payAtPropertyNote": "Pay at check-in — cash & card accepted, no online payment needed",
     "payAtPropertyCashOnly": "Pay with cash at check-in — no online payment needed",
     "payAtPropertyCardOnly": "Pay with card at check-in — no online payment needed",

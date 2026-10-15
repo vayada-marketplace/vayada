@@ -35,6 +35,18 @@ export function formatDate(date: string | Date, locale?: string): string {
   });
 }
 
+/** "Fri, 13 Nov 2026" for a stay date (YYYY-MM-DD): the hotel's calendar day, in any time zone. */
+export function formatStayDate(date: string, locale?: string): string {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return date;
+  return new Date(`${date}T00:00:00Z`).toLocaleDateString(resolveLocale(locale), {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
 export function formatDateShort(date: string | Date, locale?: string): string {
   const d = typeof date === "string" ? new Date(date) : date;
   return d.toLocaleDateString(resolveLocale(locale), {
