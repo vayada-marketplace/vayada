@@ -115,13 +115,13 @@ either (table or column level, including PUBLIC or inherited grants).
 | `booking.affiliate_referral_production_preflight_revocations`                                                                                                                                                                         | yes                          | revocation evidence with no API writer                                                       |
 
 Name patterns are a safety net for future tables: in `platform`, anything
-matching `^(production_|source_extraction_|legacy_|channex_adoption_|hotel_setup_|identity_migration_)`
-is write-protected, and `^(hotel_setup_|identity_migration_|legacy_historical_binding_)`
+matching `^(production_|source_extraction_|legacy_|channex_adoption_|channex_management_worker_|identity_migration_)`
+is write-protected, and `^(identity_migration_|legacy_historical_binding_)`
 or `^finance_.*_worker_properties$` is also read-protected (the Channex worker
 allowlist stays readable: the API reads it today). Outside `platform`,
 `^pms\.channex_room_availability_`, `^pms\.channex_ari_schedule_`,
-`^(marketplace|booking)\.affiliate_click_` and `^finance\.expense_generation_`
-are write-protected. The grant task revokes by
+`^pms\.channex_offer_ari_deliver`, `^(marketplace|booking)\.affiliate_click_` and
+`^finance\.expense_generation_` are write-protected (platform main e8876a7). The grant task revokes by
 list and pattern; the preflight asserts both.
 
 ## Identity: lock capability only
@@ -158,9 +158,8 @@ resource_id)` and `UPDATE (metadata)` for Financials module activation
   (`routes/pmsModuleActivations.ts`) and the new-hotel Financials default
   (`platform/sharedHotelSetupStatusReadModel.ts`); `organization_resource_links`
   gets `UPDATE (status, updated_at)` for marketplace offer operator grant and
-  archive (`platform/marketplaceOfferIdentityAccess.ts`). No `DELETE`, no other
-  identity table gains a write, and the revoke scope restores the VAY-965
-  matrix exactly. The matrix's `UPDATE (id)` on `organization_resource_links`
+  archive (`platform/marketplaceOfferIdentityAccess.ts`). No `DELETE`, and no
+  other identity table gains a write. The matrix's `UPDATE (id)` on `organization_resource_links`
   is a live production grant that only serves locks; narrowing it to
   `created_at` is a candidate for the follow-up that re-pins the hotel-setup
   digests.
@@ -188,8 +187,6 @@ and the hotel-setup scope helpers remain owner- or purpose-role-only.
   (`identity.organization_roles` has no restrictive policy for this login);
   accepted until the next hotel-setup digest re-pin can add the lock-only
   policy.
-- The revoke scope restores the legacy-permitted superset (required plus
-  staged grants), not the exact live subset.
 - The grant task grants `USAGE` on `identity` without an ownership check on
   that schema; the identity tables it touches are ownership-checked.
 - The runner guard inspects the local checkout; the operator runs from `main`.
@@ -200,15 +197,10 @@ and the hotel-setup scope helpers remain owner- or purpose-role-only.
 
 ## Preflight contract
 
-`scripts/target-database-runtime-preflight.mjs` (platform) recognises two
-postures from `pg_default_acl` for the migration owner in the seven product
-schemas:
+`scripts/target-database-runtime-preflight.mjs` (platform) accepts one
+posture, read from `pg_default_acl` for the migration owner in the seven
+product schemas:
 
-- **legacy**: no default privileges for the role; the historical allowlist is
-  asserted as before, with one deliberate tightening: the no-read list, the
-  name patterns and `vayada_migration_evidence` are unreadable in both
-  postures (`pms.inventory_coverage_validation_queue` was only exempt from the
-  required reads before). Production passed this read-only on 2026-10-07.
 - **product DML**: default privileges exist in all seven schemas; the preflight
   then requires `SELECT, INSERT, UPDATE, DELETE` on every non-protected
   relation in those schemas (`runtime_product_dml_missing`), the narrowings,
@@ -218,13 +210,14 @@ schemas:
   no identity column writes outside the matrix plus that lock column, zero role
   memberships, and all the existing posture checks.
 
-A partial state (some schemas) fails closed
-(`runtime_product_dml_posture_partial`). `--preflight-runtime-product-dml`
-(env `VAYADA_DB_REQUIRE_PRODUCT_DML=1`) refuses the legacy posture; plain
-`preflight`, which `tf-apply` runs, accepts both until a follow-up removes the
-legacy branch.
+Missing or partial default privileges fail closed
+(`runtime_product_dml_posture_partial`). Until VAY-2211 the preflight also
+accepted the old **legacy** allowlist posture; production has run the product
+posture since at least 2026-10-13 (tf-apply preflight `"posture":"product_dml"`),
+so VAY-2211 removed that branch, its `--preflight-runtime-product-dml` /
+`VAYADA_DB_REQUIRE_PRODUCT_DML` switch and the revoke scope.
 
-## Transition plan (never breaks `tf-apply`)
+## Transition plan (completed; kept for history)
 
 1. App: merge this architecture note (no migration is needed).
 2. Platform: merge the grant mode, then the preflight that accepts both
@@ -242,15 +235,18 @@ legacy branch.
 5. Onboarding smoke: an original Owner saves "Present your hotel" through
    "Review" without a 42501.
 6. Follow-up platform PR: drop the legacy branch from the preflight so the
-   product posture is the only accepted state.
+   product posture is the only accepted state (VAY-2211).
 
-Rollback is `--revoke-runtime-product-dml`: it revokes the schema-wide DML,
-default privileges and the identity lock column, and re-grants the legacy
-allowlist, returning to the posture the legacy preflight branch accepts.
+Rollback was `--revoke-runtime-product-dml` until VAY-2211 removed it: the
+current preflight would reject the legacy posture it restored. Fix forward with
+`--grant-runtime-product-dml` instead.
 
 ## Conventions for new tables
 
 - A new product table needs nothing: default privileges cover it.
+- Migrations do not `GRANT` this login anything directly.
+  `packages/backend-migration/src/runtimeLoginGrants.test.ts` fails on a new
+  one and lists the two reviewed exceptions (0431, 0477) with their reasons.
 - A new protected-class table (credential scope, migration evidence, worker
   allowlist, guarded-command state) must be added to the protected list in the
   preflight **and** its migration should `REVOKE ALL ... FROM vayada_next_api_runtime`
