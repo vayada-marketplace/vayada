@@ -40,7 +40,7 @@ export default function NearbyEditor({
   };
   if (!profile || !location || !draft || !saved)
     return (
-      <div className="p-6">
+      <div>
         {editor.error ? (
           <div role="alert">
             <p>{editor.error}</p>
@@ -99,7 +99,7 @@ export default function NearbyEditor({
     editor.locationDirty ? null : currentDiscovery,
   );
   return (
-    <div className="mx-auto max-w-6xl space-y-6 p-4 sm:p-8">
+    <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold text-gray-950">Location & surroundings</h1>

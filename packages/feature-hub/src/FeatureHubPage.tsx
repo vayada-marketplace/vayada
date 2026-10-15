@@ -681,10 +681,10 @@ export const featureHubMessages = {
   "featureHub.modules.reviews.description":
     "View and manage guest reviews from connected channels.",
   "featureHub.modules.reviews.detail":
-    "See reviews from Booking.com, Airbnb and direct guests in one place, and reply where the channel allows it.",
+    "See reviews from Booking.com, Airbnb and Expedia in one place, and reply where the channel allows it.",
   "featureHub.modules.reviews.point.0": "All channel reviews in one view",
   "featureHub.modules.reviews.point.1": "Reply to reviews",
-  "featureHub.modules.reviews.point.2": "Collect reviews from direct guests after their stay",
+  "featureHub.modules.reviews.point.2": "Review your Airbnb guests after their stay",
   "featureHub.modules.financials.name": "Financials",
   "featureHub.modules.financials.description":
     "Revenue, expenses and profit and loss for your property.",

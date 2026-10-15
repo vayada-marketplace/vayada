@@ -499,7 +499,7 @@ function toDateString(value: string | Date | null | undefined): BookingDate | nu
 function conversionFunnelSql(): string {
   return `${bookingScopedPropertyCte()}
   SELECT timezone.name AS "timeZone",
-    (COALESCE(settings.show_addons_step, TRUE) AND EXISTS (
+    (COALESCE(settings.show_addons_step AND settings.addons_enabled, TRUE) AND EXISTS (
       SELECT 1 FROM booking.addon_definitions addon
       WHERE addon.property_id = scoped.property_id AND addon.status = 'active' AND addon.public_visible
     )) AS "addonsEnabled",
