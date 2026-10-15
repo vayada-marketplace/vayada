@@ -266,13 +266,14 @@ test.describe("booking-admin localization settings cutover", () => {
       paymentSettings: { defaultCurrency: "USD", supportedCurrencies: ["USD"] },
     });
 
-    const settingsContractRequestCount = contractRequests.length;
-    const assertBookingFlowHealthy = watchPageHealth(page, testInfo);
+    // Booking Flow is gone (VAY-2144): its old URL opens Room Filters, which has no localization.
+    const assertRoomFiltersHealthy = watchPageHealth(page, testInfo);
     await page.goto("/booking-flow");
+    await expect(page).toHaveURL(/\/settings\/room-filters$/);
+    await expect(page.getByRole("heading", { name: "Room Filters", level: 1 })).toBeVisible();
     await expect(page.getByRole("button", { name: "Localization", exact: true })).toHaveCount(0);
     await expect(page.getByRole("heading", { name: "Currency & Languages" })).toHaveCount(0);
-    await expect.poll(() => contractRequests.length).toBeGreaterThan(settingsContractRequestCount);
 
-    await assertBookingFlowHealthy();
+    await assertRoomFiltersHealthy();
   });
 });

@@ -87,8 +87,10 @@ test.describe("booking-admin guest-form settings cutover", () => {
       await route.fulfill({ json: { ok: true } });
     });
 
-    await page.goto("/booking-flow");
-    await page.getByRole("button", { name: /^Guest Form$/ }).click();
+    // Guest Form moved from Booking Flow to Settings (VAY-2144); old tab links still land there.
+    await page.goto("/booking-flow?tab=guest-form");
+    await expect(page).toHaveURL(/\/settings\/guest-form$/);
+    await expect(page.getByRole("heading", { name: "Guest Form", level: 1 })).toBeVisible();
 
     await expect(page.getByRole("heading", { name: "Guest Information Form" })).toBeVisible();
 
@@ -129,5 +131,39 @@ test.describe("booking-admin guest-form settings cutover", () => {
     expect(pmsSyncWrites).toEqual([]);
 
     await assertHealthy();
+  });
+
+  test("shows Retry instead of default fields when the read fails", async ({ page }) => {
+    test.skip(
+      !PROD,
+      "Requires a production booking-admin build so the authenticated shell hydrates.",
+    );
+    await mockBookingAdminBookingFlow(page);
+    let failRead = true;
+    await page.route(`**${BOOKING_ADMIN_GUEST_FORM_SETTINGS_PATH}*`, async (route) => {
+      if (failRead) {
+        failRead = false;
+        await route.fulfill({ status: 503, json: { message: "Unavailable" } });
+        return;
+      }
+      await route.fulfill({
+        json: {
+          specialRequestsEnabled: false,
+          arrivalTimeEnabled: true,
+          guestCountEnabled: false,
+          adultAgeThreshold: 16,
+          childrenEnabled: true,
+        },
+      });
+    });
+
+    await page.goto("/settings/guest-form");
+    // The defaults after a failed read would let a Save overwrite the real form.
+    await expect(
+      page.getByRole("alert").filter({ hasText: "Failed to load settings" }),
+    ).toBeVisible();
+    await expect(page.getByRole("button", { name: /^Save Changes$/ })).toHaveCount(0);
+    await page.getByRole("button", { name: "Retry", exact: true }).click();
+    await expect(page.getByRole("spinbutton", { name: "Adult age threshold" })).toHaveValue("16");
   });
 });

@@ -62,9 +62,17 @@ test.describe("booking-admin room-filter settings cutover", () => {
       }),
     );
 
-    await page.goto("/booking-flow");
-
-    await expect(page.getByRole("heading", { name: "Room Filters" })).toBeVisible();
+    // Room Filters moved from Booking Flow to Settings (VAY-2144); old links still land there.
+    for (const legacy of ["/booking-flow", "/booking-flow?tab=rooms"]) {
+      await page.goto(legacy);
+      await expect(page).toHaveURL(/\/settings\/room-filters$/);
+    }
+    const breadcrumb = page.getByRole("navigation", { name: "Breadcrumb" });
+    await expect(breadcrumb.getByRole("link", { name: "Settings" })).toHaveAttribute(
+      "href",
+      "/settings",
+    );
+    await expect(page.getByRole("heading", { name: "Room Filters", level: 1 })).toBeVisible();
     await expect(page.getByText("Include Breakfast")).toBeVisible();
     await expect(page.getByText("Rooftop Terrace")).toBeVisible();
     await expect(page.getByText("Alpine Suite").first()).toBeVisible();
@@ -89,5 +97,37 @@ test.describe("booking-admin room-filter settings cutover", () => {
 
     await assertNoLegacyCalls();
     await assertHealthy();
+  });
+
+  test("shows Retry instead of empty filters when the read fails", async ({ page }) => {
+    test.skip(
+      !PROD,
+      "Requires a production booking-admin build so the authenticated shell hydrates.",
+    );
+    await mockBookingAdminBookingFlow(page);
+    let failRead = true;
+    await page.route(`**${BOOKING_ADMIN_ROOM_FILTER_SETTINGS_PATH}*`, async (route) => {
+      if (failRead) {
+        failRead = false;
+        await route.fulfill({ status: 503, json: { message: "Unavailable" } });
+        return;
+      }
+      await route.fulfill({
+        json: {
+          bookingFilters: ["rooftop"],
+          customFilters: { rooftop: "Rooftop Terrace" },
+          filterRooms: { rooftop: ["room-suite"] },
+        },
+      });
+    });
+
+    await page.goto("/settings/room-filters");
+    // "Filters off" after a failed read would let a Save wipe the real filters.
+    await expect(
+      page.getByRole("alert").filter({ hasText: "Failed to load settings" }),
+    ).toBeVisible();
+    await expect(page.getByRole("button", { name: /^Save Filters$/ })).toHaveCount(0);
+    await page.getByRole("button", { name: "Retry", exact: true }).click();
+    await expect(page.getByText("Rooftop Terrace")).toBeVisible();
   });
 });

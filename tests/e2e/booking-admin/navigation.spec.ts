@@ -4,15 +4,8 @@ import {
   mockBookingAdminShellRoutes,
 } from "../support/bookingAdminMocks";
 
-const NAV_LABELS = [
-  "Dashboard",
-  "Design Studio",
-  "Booking Flow",
-  "Add-ons",
-  "Promos",
-  "Settings",
-  "Feature Hub",
-];
+// Booking Flow's pages and Feature Hub live under Settings (VAY-2133, VAY-2144).
+const NAV_LABELS = ["Dashboard", "Design Studio", "Add-ons", "Promos", "Settings"];
 
 test.describe("booking-admin navigation", () => {
   test.beforeEach(async ({ page }) => {
@@ -33,6 +26,23 @@ test.describe("booking-admin navigation", () => {
     expect(
       await navigation.locator("a").evaluateAll((links) => links.map((link) => link.title)),
     ).toEqual(NAV_LABELS);
+  });
+
+  test("marks Settings current on the pages that moved under it", async ({ page }) => {
+    // Settings pages also have a breadcrumb navigation with a "Settings" link; use the menu.
+    const menu = page.getByRole("navigation", { name: "Main" });
+    for (const path of [
+      "/settings/feature-hub",
+      "/settings/room-filters",
+      "/settings/guest-form",
+    ]) {
+      await page.goto(path);
+      await expect(menu.getByRole("link", { name: "Settings" })).toHaveAttribute(
+        "aria-current",
+        "page",
+      );
+      await expect(menu.locator("[aria-current=page]")).toHaveCount(1);
+    }
   });
 
   test("shows the same order in the mobile drawer", async ({ page }) => {
