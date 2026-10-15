@@ -181,7 +181,10 @@ test("mobile editing, discard and navigation protection retain dirty forms", asy
   await page.getByLabel("Street address", { exact: true }).fill("Changed street");
   await expect(page.getByLabel(/^latitude$/i)).toHaveValue("");
   page.once("dialog", (dialog) => dialog.dismiss());
-  await page.getByRole("link", { name: "Back to settings", exact: true }).click();
+  await page
+    .getByRole("navigation", { name: "Breadcrumb" })
+    .getByRole("link", { name: "General", exact: true })
+    .click();
   await expect(page).toHaveURL(/settings\/location/);
   await expect(page.getByLabel("Street address", { exact: true })).toHaveValue("Changed street");
   page.once("dialog", (dialog) => dialog.dismiss());
@@ -238,7 +241,10 @@ test("fallback protects same-document back, forward and app navigation", async (
     await expect(page.getByLabel("Street address", { exact: true })).toHaveValue("Keep this draft");
   }
   page.once("dialog", (dialog) => dialog.dismiss());
-  await page.getByRole("link", { name: "Settings", exact: true }).click();
+  await page
+    .getByRole("complementary")
+    .getByRole("link", { name: "Settings", exact: true })
+    .click();
   await expect(page).toHaveURL(/step=1/);
 });
 test("late Google imports cannot mount cards after timeout", async ({ page }) => {

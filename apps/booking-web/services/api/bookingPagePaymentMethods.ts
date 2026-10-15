@@ -9,7 +9,7 @@ const DEFAULT_METHODS: readonly PricingPaymentMethod[] = ["card", "pay_at_proper
 
 export const bookingPagePaymentMethodLabels: Record<PricingPaymentMethod, string> = {
   card: "Card",
-  pay_at_property: "Pay at property",
+  pay_at_property: "Pay at the hotel",
   bank_transfer: "Bank transfer",
   paypal: "PayPal",
 };

@@ -189,23 +189,26 @@ export default function PaymentStep({
           </div>
         )}
       </section>
-      <section aria-label="Before you book" className={`${card} space-y-4`}>
-        <h2 className="text-base font-bold text-gray-900">Before you book</h2>
-        {acknowledgements}
-        {termsText && (
-          <div className="space-y-2">
-            <button
-              type="button"
-              className="text-xs font-medium text-primary-600 underline"
-              aria-expanded={showTerms}
-              onClick={() => setShowTerms((value) => !value)}
-            >
-              {showTerms ? "Hide our terms & conditions" : "Read our terms & conditions"}
-            </button>
-            {showTerms && <BookingPageTerms text={termsText} />}
-          </div>
-        )}
-      </section>
+      {/* What the guest agrees to belongs to a price: without one there is nothing to accept. */}
+      {quote && (
+        <section aria-label="Before you book" className={`${card} space-y-4`}>
+          <h2 className="text-base font-bold text-gray-900">Before you book</h2>
+          {acknowledgements}
+          {termsText && (
+            <div className="space-y-2">
+              <button
+                type="button"
+                className="text-xs font-medium text-primary-600 underline"
+                aria-expanded={showTerms}
+                onClick={() => setShowTerms((value) => !value)}
+              >
+                {showTerms ? "Hide our terms & conditions" : "Read our terms & conditions"}
+              </button>
+              {showTerms && <BookingPageTerms text={termsText} />}
+            </div>
+          )}
+        </section>
+      )}
       {cancellation.length > 0 && (
         <section aria-label="Cancellation" className={card}>
           <h2 className="text-base font-bold text-gray-900 mb-2">Cancellation</h2>
