@@ -22,12 +22,12 @@ import { createPgPmsRoomFactsReadModel } from "./pmsRoomFactsReadModel.js";
 // VAY-2132: one Delete retires the units, closes the future nights and takes the room out of the calendar.
 const TEST_DATABASE_URL = process.env["TEST_DATABASE_URL"];
 const acceptedAt = "2026-08-04T10:00:00.000Z";
-let organizationId = randomUUID();
-let propertyId = randomUUID();
-let actorUserId = randomUUID();
-let roomTypeA = randomUUID();
-let roomTypeB = randomUUID();
-let roomTypeC = randomUUID();
+let organizationId: string = randomUUID();
+let propertyId: string = randomUUID();
+let actorUserId: string = randomUUID();
+let roomTypeA: string = randomUUID();
+let roomTypeB: string = randomUUID();
+let roomTypeC: string = randomUUID();
 const roleKey = `room_delete_${randomUUID()}`;
 
 describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL room type Delete with cleanup", () => {
@@ -505,6 +505,12 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL room type Delete with cleanup", 
   }
 
   async function seedPublicOffers(): Promise<void> {
+    await admin.query(
+      `INSERT INTO hotel_catalog.property_public_profile_read_model
+      (property_id,public_id,display_name,canonical_slug,default_locale,supported_locales,profile_status)
+      VALUES ($1::uuid,$1::text,'VAY-2132 Delete',$1::text,'en',ARRAY['en'],'complete')`,
+      [propertyId],
+    );
     await admin.query(
       `INSERT INTO distribution.public_hotel_bookability_profiles
       (property_id,public_id,canonical_slug,canonical_url,booking_base_url,timezone,default_currency,supported_currencies,profile_status,freshness_status,public_setup_completeness)
