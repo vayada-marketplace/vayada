@@ -25,6 +25,23 @@ const routes = [
 ];
 
 test.describe("landing smoke", () => {
+  // VAY-2213: the booking sites' "Privacy notice" link lands on this section, below the fixed
+  // navigation.
+  test("/privacy#booking-guests opens the booking guests section", async ({ page }, testInfo) => {
+    const assertHealthy = watchPageHealth(page, testInfo);
+
+    await page.goto("/privacy#booking-guests");
+
+    const heading = page.getByRole("heading", { name: "9. Guests of Hotel Booking Sites" });
+    await expect(heading).toBeInViewport();
+    const nav = (await page.locator("nav").first().boundingBox())!;
+    await expect
+      .poll(async () => (await heading.boundingBox())!.y)
+      .toBeGreaterThanOrEqual(nav.y + nav.height);
+
+    await assertHealthy();
+  });
+
   for (const route of routes) {
     test(`${route.path} renders the public shell`, async ({ page }, testInfo) => {
       const assertHealthy = watchPageHealth(page, testInfo);
