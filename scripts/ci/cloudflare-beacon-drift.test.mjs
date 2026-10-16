@@ -3,17 +3,19 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import {
   BOT,
-  FIXTURE_FILE,
   ISSUE_TITLE,
   MARKER,
   PIN_FILE,
+  RECORD_FILE,
   beaconVersion,
   buildReport,
   fetchBeacon,
+  fingerprint,
   githubClient,
   integrityOf,
   readPin,
   reconcile,
+  reviewRecord,
   statementDiff,
   surface,
   touchesIssues,
@@ -31,10 +33,37 @@ const live = (bytes) => ({
   lastModified: "Thu, 15 Oct 2026 18:26:54 GMT",
 });
 const drift = (overrides = {}) =>
-  buildReport({ pin: integrityOf(OLD), override: "", fixture: OLD, live: live(NEW), ...overrides });
+  buildReport({
+    pin: integrityOf(OLD),
+    override: "",
+    record: reviewRecord(OLD),
+    live: live(NEW),
+    ...overrides,
+  });
 
-test("the committed beacon copy is exactly the bytes the app pins", () => {
-  assert.equal(integrityOf(readFileSync(FIXTURE_FILE)), readPin(readFileSync(PIN_FILE, "utf8")));
+test("the reviewed record is for the pinned beacon and holds no vendor code", () => {
+  const record = JSON.parse(readFileSync(RECORD_FILE, "utf8"));
+  assert.equal(record.integrity, readPin(readFileSync(PIN_FILE, "utf8")));
+  assert.match(record.version, /^\d{4}\.\d+\.\d+$/);
+  assert.match(record.statements, /^[\w-]{12}( [\w-]{12})+$/);
+  assert.ok(record.statements.split(" ").length > 100);
+});
+
+test("reviewRecord keeps the hash, version, counts, URLs and one fingerprint per statement", () => {
+  assert.deepEqual(reviewRecord(OLD), {
+    version: "2026.10.0",
+    size: OLD.length,
+    integrity: integrityOf(OLD),
+    counts: Object.fromEntries(surface(OLD.toString()).counts),
+    urls: ["https://cloudflareinsights.com/cdn-cgi/rum"],
+    statements: [
+      "var a=1",
+      'navigator.sendBeacon("https://cloudflareinsights.com/cdn-cgi/rum",x)',
+      'versions:{js:"2026.10.0"}',
+    ]
+      .map(fingerprint)
+      .join(" "),
+  });
 });
 
 test("readPin rejects a source without a sha384 integrity constant", () => {
@@ -49,14 +78,20 @@ test("beaconVersion reads the js version and falls back to unknown", () => {
   assert.equal(beaconVersion('js:"1.0\n| **x**"'), "unknown");
 });
 
-test("statementDiff lists statements only one side has, counting duplicates", () => {
-  assert.deepEqual(statementDiff("a;b;b;c;", "a;b;c;d;"), {
+test("statementDiff counts gone reviewed statements and lists new ones, counting duplicates", () => {
+  const prints = (...list) => list.map(fingerprint);
+  assert.deepEqual(statementDiff(prints("a", "b", "b", "c"), "a;b;c;d;"), {
     before: 4,
     after: 4,
-    removed: ["b"],
-    added: ["d"],
+    removed: 1,
+    added: 1,
   });
-  assert.deepEqual(statementDiff("a; b ;", "a;b"), { before: 2, after: 2, removed: [], added: [] });
+  assert.deepEqual(statementDiff(prints("a", "b"), "a; b ;"), {
+    before: 2,
+    after: 2,
+    removed: 0,
+    added: 0,
+  });
 });
 
 test("surface counts transports and lists endpoints", () => {
@@ -76,7 +111,7 @@ test("a matching live file produces no report body", () => {
   const report = buildReport({
     pin: integrityOf(NEW),
     override: "",
-    fixture: NEW,
+    record: reviewRecord(NEW),
     live: live(NEW),
   });
   assert.equal(report.matches, true);
@@ -96,8 +131,8 @@ test("a drifted live file reports versions, the new hash and what changed", () =
   assert.match(report.body, /\| fetch\(\) \| 0 \| 1 ⚠️ \|/);
   assert.match(report.body, /\| navigator\.sendBeacon \| 1 \| 1 \|/);
   assert.match(report.body, /\| `https:\/\/example\.com\/collect` \| no \| yes ⚠️ \|/);
-  assert.match(report.body, /Removed statements \(2\)/);
-  assert.match(report.body, /Added statements \(3\)/);
+  assert.match(report.body, /3 reviewed, 4 now; 2 reviewed statements are gone and 3 are new/);
+  assert.doesNotMatch(report.body, /var a=|fetch\("https/);
   assert.match(
     report.body,
     /\(https:\/\/github\.com\/o\/r\/blob\/main\/engineering\/cloudflare-beacon-pin-runbook\.md\)/,
@@ -113,37 +148,25 @@ test("a drifted live file reports versions, the new hash and what changed", () =
 
 test("an override run is labelled as a test", () => {
   const override = `sha384-${"A".repeat(64)}`;
-  const report = buildReport({ pin: integrityOf(NEW), override, fixture: NEW, live: live(NEW) });
+  const report = buildReport({
+    pin: integrityOf(NEW),
+    override,
+    record: reviewRecord(NEW),
+    live: live(NEW),
+  });
   assert.equal(report.matches, false);
   assert.match(report.body, /\*\*Test run\.\*\*/);
   assert.match(report.body, new RegExp(`Expected \\(workflow_dispatch input\\): \`${override}\``));
-  assert.match(report.body, /No statement differs from the committed copy\./);
+  assert.match(report.body, /No statement differs from the reviewed version\./);
 });
 
-test("long statement lists are capped", () => {
-  const many = (prefix) =>
-    Buffer.from(Array.from({ length: 50 }, (_, i) => `${prefix}${i}`).join(";"));
-  const report = buildReport({
-    pin: integrityOf(many("a")),
-    override: "",
-    fixture: many("a"),
-    live: live(Buffer.from(`${"x".repeat(400)};${many("b")}`)),
-  });
-  assert.match(report.body, /… and 11 more/);
-  assert.match(report.body, new RegExp(`${"x".repeat(300)} …`));
-  assert.ok(report.body.length < 65536);
-});
-
-test("vendor code cannot close the statement code block", () => {
-  const sneaky = Buffer.from("a=`x`;b=1;s='````\n@someone ![x](https://e.example)'");
-  const report = buildReport({
-    pin: integrityOf(OLD),
-    override: "",
-    fixture: OLD,
-    live: live(sneaky),
-  });
-  assert.match(report.body, /\n`````js\n/);
-  assert.match(report.body, /\n`````\n\n<\/details>/);
+test("a transport the record has no count for is flagged only when the live file uses it", () => {
+  const record = reviewRecord(OLD);
+  delete record.counts["fetch()"];
+  delete record.counts["postMessage"];
+  const { body } = drift({ record });
+  assert.match(body, /\| fetch\(\) \| not recorded \| 1 ⚠️ \|/);
+  assert.match(body, /\| postMessage \| not recorded \| 0 \|/);
 });
 
 function fakeClient(issues) {
@@ -151,7 +174,10 @@ function fakeClient(issues) {
   return {
     calls,
     openIssues: async () => issues,
-    createIssue: async (title, body) => (calls.push(["create", title, body]), { number: 99 }),
+    createIssue: async (title, body, labels) => (
+      calls.push(["create", title, body, labels]),
+      { number: 99 }
+    ),
     updateIssue: async (number, fields) => (calls.push(["update", number, fields]), {}),
     comment: async (number, body) => (calls.push(["comment", number, body]), {}),
   };
@@ -162,7 +188,7 @@ test("reconcile opens one issue on the first mismatch", async () => {
   const report = drift();
   const client = fakeClient([issue(5, `quoting ${MARKER}`, "someone")]);
   assert.equal(await reconcile({ client, report, override: "" }), "opened #99");
-  assert.deepEqual(client.calls, [["create", ISSUE_TITLE, report.body]]);
+  assert.deepEqual(client.calls, [["create", ISSUE_TITLE, report.body, ["monitoring"]]]);
 });
 
 test("reconcile leaves an up-to-date issue alone and rewrites a stale one", async () => {
@@ -197,7 +223,7 @@ test("reconcile closes the bot's issues once the live file matches the pin", asy
   const report = buildReport({
     pin: integrityOf(NEW),
     override: "",
-    fixture: NEW,
+    record: reviewRecord(NEW),
     live: live(NEW),
   });
   const client = fakeClient([issue(4, MARKER), issue(6, MARKER, "someone"), issue(9, "unrelated")]);
@@ -223,7 +249,7 @@ test("a run against an override never closes issues", async () => {
   const report = buildReport({
     pin: "sha384-x",
     override: integrityOf(NEW),
-    fixture: NEW,
+    record: reviewRecord(NEW),
     live: live(NEW),
   });
   const client = fakeClient([issue(4, MARKER)]);
@@ -269,6 +295,14 @@ test("githubClient pages through open issues, skips pull requests and fails loud
     fetchImpl: async () => response(403, "no"),
   });
   await assert.rejects(failing.createIssue("t", "b"), /POST \/issues: HTTP 403/);
+  let sent;
+  const creating = githubClient({
+    token: "t",
+    repository: "o/r",
+    fetchImpl: async (url, init) => ((sent = JSON.parse(init.body)), response(201, "{}")),
+  });
+  await creating.createIssue("title", "body", ["monitoring"]);
+  assert.deepEqual(sent, { title: "title", body: "body", labels: ["monitoring"] });
 });
 
 test("only main runs and test runs touch issues; dry runs never do", () => {
