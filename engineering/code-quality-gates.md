@@ -132,7 +132,7 @@ Currently the PR workflow runs `npm run check:architecture-boundaries`, root fro
 
 The six packages above are the ones no API code depends on; `scripts/ci/pr-checks.test.mjs` recomputes their jobs from every `package.json` and fails when anything else starts to reach them, read workflow files or run Playwright.
 
-`pull_request` runs and merge queue entries are narrowed. A merge queue entry is diffed from its merge-base with `main` (fetched by the `changes` job), which covers that PR and every queued PR ahead of it that has not landed yet, with the same rules; if git cannot find that base, it runs every job. Any other event (a push, a manual run) runs every job.
+`pull_request` runs and merge queue entries are narrowed. A merge queue entry is diffed from its merge-base with `main` (fetched by the `changes` job), which covers that PR and every queued PR ahead of it that has not landed yet, with the same rules; if git cannot find that base, it runs every job. A manual run (`workflow_dispatch`) runs every job.
 
 The API and package unit-suite job runs `npm run test:unit-suites` (the full `vayada-api` suite and the backend package suites, no database); `.github/workflows/main-unit-suites.yml` repeats it on every push to `main` and nightly.
 
