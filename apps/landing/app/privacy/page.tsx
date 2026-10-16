@@ -510,8 +510,9 @@ export default function PrivacyPage() {
                   <li>
                     <strong>Technical data:</strong> our servers log each request, including your IP
                     address, to keep the booking site secure and working. These logs are kept for 30
-                    days. When you look up a booking, we also keep a pseudonymous record of the
-                    attempt to stop abuse (Article 6(1) lit. f GDPR).
+                    days. When you look up a booking, we also count the attempts from your IP
+                    address for one minute, in memory only, to stop abuse; this count is not stored
+                    (Article 6(1) lit. f GDPR).
                   </li>
                   <li>
                     <strong>Optional analytics (only if you allow it):</strong> which pages and

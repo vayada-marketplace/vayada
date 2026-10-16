@@ -2,7 +2,8 @@
 import { useTranslation } from "@/lib/i18n";
 
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { BoltIcon, PencilSquareIcon, PlusIcon, TrashIcon } from "@heroicons/react/24/outline";
+import { BoltIcon, PencilSquareIcon, TrashIcon } from "@heroicons/react/24/outline";
+import { PrimaryActionButton } from "@/components/ui";
 import {
   getBookingLastMinuteSettings,
   updateBookingLastMinuteSettings,
@@ -77,18 +78,15 @@ function NewPromotionMenu({
 
   return (
     <div ref={rootRef} className="relative shrink-0">
-      <button
+      <PrimaryActionButton
         ref={buttonRef}
-        type="button"
         aria-haspopup="menu"
         aria-expanded={open}
         disabled={disabled}
         onClick={toggle}
-        className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-primary-600 px-4 text-sm font-medium text-white hover:bg-primary-700 disabled:opacity-50"
       >
-        <PlusIcon className="h-4 w-4" />
         {t("admin.newPromotion")}
-      </button>
+      </PrimaryActionButton>
       {open && (
         <div
           ref={menuRef}
