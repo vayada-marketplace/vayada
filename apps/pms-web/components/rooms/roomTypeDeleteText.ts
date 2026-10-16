@@ -8,11 +8,13 @@ type Blocker = RoomTypeRetirementImpact["blockers"][number];
 /** The confirmation when Delete also does the cleanup (VAY-2132). */
 export function roomTypeDeleteMessage(t: Translate, name: string, cleanup: Cleanup): string {
   return [
-    t("rooms.edit.deleteCleanupMessage", {
-      name,
-      units: cleanup.physicalUnits,
-      nights: cleanup.futureNights,
-    }),
+    t("rooms.edit.deleteCleanupMessage", { name }),
+    cleanup.physicalUnits
+      ? t("rooms.edit.deleteCleanupUnits", { count: cleanup.physicalUnits })
+      : "",
+    cleanup.futureNights
+      ? t("rooms.edit.deleteCleanupNights", { count: cleanup.futureNights })
+      : "",
     cleanup.roomBlocks ? t("rooms.edit.deleteCleanupBlocks", { count: cleanup.roomBlocks }) : "",
     cleanup.linkedGroups ? t("rooms.edit.deleteCleanupLinked") : "",
     t("rooms.edit.deleteCleanupFinal"),
@@ -36,7 +38,7 @@ export function roomTypeDeleteErrorText(t: Translate, error: unknown, fallback: 
   if (error instanceof RoomTypeRetirementBlockedError && error.impact.cleanup)
     return roomTypeDeleteBlockedMessage(t, error.impact);
   if (error instanceof ApiErrorResponse) {
-    if (error.status === 403 && error.data.code === "missing_permission")
+    if (error.status === 403 && error.data.code === "room_type_delete_not_allowed")
       return t("rooms.edit.deleteNotAllowed");
     // Something changed between the confirmation and the Delete.
     const impact = (error.data as { impact?: RoomTypeRetirementImpact }).impact;

@@ -771,9 +771,11 @@ export const roomsService = {
     return pmsOperationsRoomsReadService.inspectRoomTypeRetirement(propertyId, id);
   },
 
-  delete: async (id: string) => {
+  /** Retires the room type; `shown` is the impact a confirmation already read (VAY-2132). */
+  delete: async (id: string, shown?: RoomTypeRetirementImpact) => {
     const propertyId = await resolveSelectedPmsPropertyId("retiring room type");
-    const impact = await pmsOperationsRoomsReadService.inspectRoomTypeRetirement(propertyId, id);
+    const impact =
+      shown ?? (await pmsOperationsRoomsReadService.inspectRoomTypeRetirement(propertyId, id));
     if (!impact.canRetire) throw new RoomTypeRetirementBlockedError(impact);
     await runRoomTypeLifecycleCommand(
       ["retire", propertyId, id, impact.version],

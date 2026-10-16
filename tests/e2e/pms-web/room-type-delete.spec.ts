@@ -20,7 +20,10 @@ const impact = {
 };
 const main = (page: Page) => page.locator("main");
 
-async function mockRoom(page: Page, preview: typeof impact) {
+async function mockRoom(
+  page: Page,
+  preview: Omit<typeof impact, "cleanup"> & Partial<typeof impact>,
+) {
   await mockPmsWebAuthenticatedSession(page);
   await mockPmsWebTargetRoutes(page);
   const deletes: Record<string, unknown>[] = [];
@@ -56,11 +59,35 @@ test("deletes a test room type with its rooms, future nights and calendar place 
 
   const dialog = page.getByRole("dialog", { name: "Delete Room Type" });
   await expect(dialog).toContainText(
-    `Delete “${name}”? This retires its rooms (1), closes its future nights (363) and removes it from the calendar. Past bookings stay in your records. This can't be undone.`,
+    `Delete “${name}”? Its rooms (1) are retired. Its future nights (363) are closed and it leaves the calendar. Past bookings stay in your records. This can't be undone.`,
   );
   await dialog.getByRole("button", { name: "Delete", exact: true }).click();
   await expect(page).toHaveURL(/\/rooms$/);
   expect(deletes).toEqual([expect.objectContaining({ expectedVersion: "room-type-facts-v3" })]);
+});
+
+test("keeps today's confirmation where Delete does no cleanup", async ({ page }) => {
+  const deletes = await mockRoom(page, { ...impact, cleanup: undefined });
+  await page.goto(`/rooms/${roomTypeId}`);
+  await main(page).getByRole("button", { name: "Delete", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Delete Room Type" });
+  await expect(dialog).toContainText("Retire this room type?");
+  await dialog.getByRole("button", { name: "Retire", exact: true }).click();
+  await expect(page).toHaveURL(/\/rooms$/);
+  expect(deletes).toHaveLength(1);
+});
+
+test("says what still stops the Delete from the Prices tab too", async ({ page }) => {
+  await mockRoom(page, {
+    ...impact,
+    canRetire: false,
+    blockers: [{ category: "publication", code: "channel_mapping", affectedCount: 1, action: "" }],
+  });
+  await page.goto(`/rooms/${roomTypeId}?tab=prices`);
+  await main(page).getByRole("button", { name: "Delete", exact: true }).click();
+  await expect(main(page).locator('p[role="alert"]')).toHaveText(
+    "This room type can't be deleted yet. It is connected in the Channel Manager: disconnect it there first.",
+  );
 });
 
 test("says what still stops the Delete, without a confirmation", async ({ page }) => {
@@ -146,12 +173,17 @@ test("points the last room of a room type to Delete on the room type", async ({ 
           })
         : route.fallback(),
   );
+  // This room type's Delete does the cleanup, so it is the way to remove the last room.
+  await page.route(
+    `**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/room-types/${unitTypeId}/retirement-impact`,
+    (route) => route.fulfill({ json: { ...impact, roomTypeId: unitTypeId } }),
+  );
   await page.goto("/rooms");
   await page.getByText("Alpine Suite", { exact: true }).first().click();
   await page.getByRole("button", { name: /delete room/i }).click();
   await page
+    .getByRole("dialog")
     .getByRole("button", { name: /delete room/i })
-    .last()
     .click();
   await expect(page.locator('p[role="alert"]')).toHaveText(
     "This is the last room of this room type. To remove it, delete the room type.",

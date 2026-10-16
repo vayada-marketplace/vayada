@@ -44,6 +44,8 @@ export default function EditRoomPage({ params }: { params: Promise<{ id: string 
   // What Delete would do, read before the confirmation (VAY-2132).
   const [deleteImpact, setDeleteImpact] = useState<RoomTypeRetirementImpact | null>(null);
   const [checkingDelete, setCheckingDelete] = useState(false);
+  // Shown under the title on every tab: the form's own banner is hidden on the Prices tab.
+  const [deleteError, setDeleteError] = useState("");
   const [propertyPlan, setPropertyPlan] = useState<PropertyPlan | null>(null);
   const [pricesNeedPublishing, setPricesNeedPublishing] = useState(false);
   const propertyPrices = usePropertyPrices();
@@ -118,18 +120,19 @@ export default function EditRoomPage({ params }: { params: Promise<{ id: string 
   };
 
   const openDelete = async () => {
-    setError("");
+    setDeleteError("");
+    setSuccess("");
     setCheckingDelete(true);
     try {
       const impact = await roomsService.deleteImpact(id);
       if (impact.cleanup && !impact.canRetire) {
-        setError(roomTypeDeleteBlockedMessage(t, impact));
+        setDeleteError(roomTypeDeleteBlockedMessage(t, impact));
         return;
       }
       setDeleteImpact(impact);
       setShowDeleteConfirm(true);
     } catch (error) {
-      setError(roomTypeDeleteErrorText(t, error, t("rooms.edit.failedToRetire")));
+      setDeleteError(roomTypeDeleteErrorText(t, error, t("rooms.edit.failedToRetire")));
     } finally {
       setCheckingDelete(false);
     }
@@ -137,13 +140,14 @@ export default function EditRoomPage({ params }: { params: Promise<{ id: string 
 
   const handleDelete = async () => {
     setDeleting(true);
-    setError("");
+    setDeleteError("");
     try {
-      await roomsService.delete(id);
+      // The Delete uses the impact the confirmation showed, including its version.
+      await roomsService.delete(id, deleteImpact ?? undefined);
       router.push("/rooms");
     } catch (error) {
       setShowDeleteConfirm(false);
-      setError(roomTypeDeleteErrorText(t, error, t("rooms.edit.failedToRetire")));
+      setDeleteError(roomTypeDeleteErrorText(t, error, t("rooms.edit.failedToRetire")));
       setDeleting(false);
     }
   };
@@ -207,6 +211,15 @@ export default function EditRoomPage({ params }: { params: Promise<{ id: string 
           <span className="hidden md:inline">{t("common.delete")}</span>
         </button>
       </div>
+
+      {deleteError && (
+        <p
+          role="alert"
+          className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-[11px] text-red-700 font-medium"
+        >
+          {deleteError}
+        </p>
+      )}
 
       {pricesNeedPublishing && (
         <RoomsPricesStrip {...propertyPrices} staleOnly onSaved={refreshPrices} />

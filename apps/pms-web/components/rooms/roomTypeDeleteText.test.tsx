@@ -28,7 +28,7 @@ const impact = (overrides: Partial<RoomTypeRetirementImpact> = {}): RoomTypeReti
 describe("room type Delete text (VAY-2132)", () => {
   it("says what one Delete cleans up", () => {
     expect(roomTypeDeleteMessage(t, "TEST ONLY calendar check", impact().cleanup!)).toBe(
-      "Delete “TEST ONLY calendar check”? This retires its rooms (1), closes its future nights (363) and removes it from the calendar. Past bookings stay in your records. This can't be undone.",
+      "Delete “TEST ONLY calendar check”? Its rooms (1) are retired. Its future nights (363) are closed and it leaves the calendar. Past bookings stay in your records. This can't be undone.",
     );
     expect(
       roomTypeDeleteMessage(t, "Villa", {
@@ -38,6 +38,17 @@ describe("room type Delete text (VAY-2132)", () => {
         linkedGroups: 1,
       }),
     ).toContain("Its room blocks (2) are released. It is taken out of its linked rooms.");
+    // A room the calendar doesn't hold has no nights to mention.
+    expect(
+      roomTypeDeleteMessage(t, "Added later", {
+        physicalUnits: 1,
+        futureNights: 0,
+        roomBlocks: 0,
+        linkedGroups: 0,
+      }),
+    ).toBe(
+      "Delete “Added later”? Its rooms (1) are retired. Past bookings stay in your records. This can't be undone.",
+    );
   });
 
   it("says why Delete can't run yet, one sentence per blocker", () => {
@@ -78,10 +89,21 @@ describe("room type Delete text (VAY-2132)", () => {
     expect(
       roomTypeDeleteErrorText(
         t,
-        new ApiErrorResponse(403, { code: "missing_permission", message: "Only…" }),
+        new ApiErrorResponse(403, { code: "room_type_delete_not_allowed", message: "Only…" }),
         "",
       ),
     ).toBe("Only the property's owner or operator can delete a room type.");
+    // The route's own permission refusal keeps its text.
+    expect(
+      roomTypeDeleteErrorText(
+        t,
+        new ApiErrorResponse(403, {
+          code: "missing_permission",
+          message: "Missing required PMS operations permission.",
+        }),
+        "",
+      ),
+    ).toBe("Missing required PMS operations permission.");
     const legacy = new RoomTypeRetirementBlockedError(
       impact({
         cleanup: undefined,
