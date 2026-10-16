@@ -121,7 +121,7 @@ Currently the PR workflow runs `npm run check:architecture-boundaries`, root fro
 
 The API and package unit-suite job runs `npm run test:unit-suites` (the full `vayada-api` suite and the backend package suites, no database); `.github/workflows/main-unit-suites.yml` repeats it on every push to `main` and nightly.
 
-The TypeScript API PostgreSQL job is a `postgres × shard` matrix (`platform`, `pms`, `hotel-setup`); every shard gets a fresh cluster so cluster-wide role proofs stay ordered. Adding an integration step means picking a shard with `if: matrix.shard == '<shard>'`.
+The TypeScript API PostgreSQL job is a `postgres × shard` matrix (`platform`, `pms`, `pricing`, `hotel-setup`); every shard gets a fresh cluster so cluster-wide role proofs stay ordered. `pricing` runs the pricing suites in their own database next to the `pms` batch instead of after it (VAY-2238). Adding an integration step means picking a shard with `if: matrix.shard == '<shard>'`.
 
 ### Required Checks fails closed
 
