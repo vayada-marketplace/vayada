@@ -1,0 +1,73 @@
+# Cloudflare beacon pin runbook
+
+`apps/landing/lib/cloudflareAnalytics.ts` loads Cloudflare's Web Analytics beacon
+(`https://static.cloudflareinsights.com/beacon.min.js`) with an SRI hash. Cloudflare cannot
+version-pin that URL, so each Cloudflare release changes the bytes. Browsers then refuse to run
+it, and Cloudflare analytics on vayada.com stays off until the pin is updated. Nothing leaks: the
+pin fails closed. Do not drop SRI and do not self-host the beacon.
+
+## How you find out
+
+- The daily **Cloudflare Beacon Drift** workflow (`.github/workflows/cloudflare-beacon-drift.yml`)
+  opens the issue "Cloudflare beacon changed: review and update the landing SRI pin" and fails.
+  The issue lists the versions, the new hash, endpoint and transport counts (⚠️ marks a change)
+  and the changed statements.
+- PR checks keep passing. The landing consent spec and `scripts/ci/cloudflare-beacon-drift.test.mjs`
+  use the committed copy `tests/e2e/landing/fixtures/cloudflare-beacon.min.js`, and both fail if
+  that copy differs from the pin.
+
+## Update the pin
+
+1. **Download the new file** and check that its hash matches the issue's "New pin":
+
+   ```sh
+   curl -sS -D headers.txt -o new-beacon.min.js https://static.cloudflareinsights.com/beacon.min.js
+   grep -iE '^(etag|last-modified|content-length):' headers.txt   # ETag holds the version
+   printf 'sha384-%s\n' "$(openssl dgst -sha384 -binary new-beacon.min.js | base64)"
+   ```
+
+2. **Review the change.** The minified file is one line, so diff it statement by statement:
+
+   ```sh
+   diff <(tr ';' '\n' < tests/e2e/landing/fixtures/cloudflare-beacon.min.js) \
+        <(tr ';' '\n' < new-beacon.min.js)
+   ```
+
+   The landing guards cover only `navigator.sendBeacon` and `XMLHttpRequest` to
+   `https://cloudflareinsights.com/cdn-cgi/rum` and same-origin `/cdn-cgi/rum`. Check that the new
+   version still uses only those. Also check that it adds no `fetch`, WebSocket, `eval`,
+   `new Function`, script injection, cookies or storage. If it adds any of them, stop. Analytics
+   stays off until the guards in `cloudflareAnalytics.ts` and the consent spec cover the new
+   behaviour. Never copy the hash without this review.
+
+3. **Open one PR** with both changes:
+   - copy the file over the fixture byte for byte:
+     `cp new-beacon.min.js tests/e2e/landing/fixtures/cloudflare-beacon.min.js`.
+     Do not open it in an editor or run a formatter on it; `.prettierignore` excludes it;
+   - set `integrity` in `apps/landing/lib/cloudflareAnalytics.ts` to the new hash, and update
+     its "Reviewed …" comment (date and version);
+   - in the PR body, give the version, Last-Modified, size, old and new hash, and what the diff
+     changes. #3277 is an example.
+
+   PR Checks run the landing consent spec against the new copy ("Frontend Build and App Tests" →
+   "Landing consent browser regressions"). To run it yourself, see
+   `apps/landing/lib/cloudflareAnalytics.md`.
+
+4. **Merge.** Merging to `main` (through the merge queue; an open release-train-hold issue pauses
+   it) runs Deploy Landing (`.github/workflows/deploy-landing.yml`). That workflow pushes the
+   `vayada-landing` image to ECR as `latest`, and the App Runner service publishes it at
+   vayada.com.
+
+5. **Verify on vayada.com** once the App Runner deployment finishes. Use a private window with
+   DevTools open:
+   - after "Accept all", `beacon.min.js` loads, the console shows no integrity error, and a
+     request goes to `/cdn-cgi/rum`;
+   - after "Cookie settings" → "Necessary only", no further `/cdn-cgi/rum` requests go out.
+
+6. **Close the loop.** Run Cloudflare Beacon Drift from the Actions tab (no input), or wait for the
+   next daily run. It closes the issue when the live file matches the pin on `main`.
+
+## Testing the alert
+
+Run the workflow manually with `expected_integrity` set to any other `sha384-…` value. It opens
+(or updates) the issue, marked as a test run, and fails. A normal run then closes the issue.

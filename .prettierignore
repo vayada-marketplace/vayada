@@ -20,6 +20,8 @@ infra/.terraform/**
 
 # Tests / coverage
 coverage
+# Vendor bytes pinned by SRI: reformatting changes the hash
+tests/e2e/landing/fixtures/cloudflare-beacon.min.js
 
 # Python (formatted by Ruff)
 **/*.py

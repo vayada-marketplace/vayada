@@ -3,10 +3,12 @@ import { readFileSync } from "node:fs";
 import { expect, test, type Page } from "@playwright/test";
 
 // Opt-in suite: build Landing with a public 32-hex test token, then run with
-// E2E_LANDING_ANALYTICS=1. The real vendor bytes are fetched once or supplied locally.
+// E2E_LANDING_ANALYTICS=1. The vendor bytes are the committed copy of the pinned beacon
+// (E2E_CLOUDFLARE_BEACON_FILE overrides it), so a Cloudflare release cannot fail this suite;
+// the scheduled Cloudflare Beacon Drift workflow watches the live file instead.
 // RUM requests are intercepted: tests never send measurements to Cloudflare.
 const source = "https://static.cloudflareinsights.com/beacon.min.js";
-const integrity = "DSBfgE0somecFTMgit0M4sNXN8O0JQ/LGM3DGGPVvgXIPZvW+H1zSYjc6O83LLBv";
+const fixture = "tests/e2e/landing/fixtures/cloudflare-beacon.min.js";
 const key = "vayada_cookie_consent";
 const choice = (analytics: boolean) => ({
   necessary: true,
@@ -16,11 +18,14 @@ const choice = (analytics: boolean) => ({
 });
 let beacon: Buffer;
 test.skip(process.env.E2E_LANDING_ANALYTICS !== "1", "Requires analytics-enabled Landing build");
-test.beforeAll(async ({ request }) => {
-  beacon = process.env.E2E_CLOUDFLARE_BEACON_FILE
-    ? readFileSync(process.env.E2E_CLOUDFLARE_BEACON_FILE)
-    : await (await request.get(source)).body();
-  expect(createHash("sha384").update(beacon).digest("base64")).toBe(integrity);
+test.beforeAll(() => {
+  // The app's pin is the single source of truth; the copy must be exactly the pinned bytes.
+  const pin = /const integrity = "(sha384-[^"]+)"/.exec(
+    readFileSync("apps/landing/lib/cloudflareAnalytics.ts", "utf8"),
+  )?.[1];
+  beacon = readFileSync(process.env.E2E_CLOUDFLARE_BEACON_FILE || fixture);
+  expect(pin, "sha384 pin in apps/landing/lib/cloudflareAnalytics.ts").toBeTruthy();
+  expect(`sha384-${createHash("sha384").update(beacon).digest("base64")}`).toBe(pin);
 });
 async function intercept(page: Page) {
   const requests: string[] = [];
