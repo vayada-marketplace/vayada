@@ -9,6 +9,13 @@ import {
 } from "@vayada/domain-pms";
 import { createHash } from "node:crypto";
 import pg, { type QueryResult, type QueryResultRow } from "pg";
+import { lockPmsManageScope } from "./pmsManageScope.js";
+import { lockPmsRoomClosureScope } from "./pmsRoomClosureCommandRepository.js";
+import {
+  closeRoomTypeForDelete,
+  readPmsRoomTypeDeletePlan,
+  type PmsRoomTypeDeletePlan,
+} from "./pmsRoomTypeDelete.js";
 
 import { enqueueBookingTransitionNotifications } from "../jobs/bookingEmails.js";
 import { publishAffiliateReservationLifecycle } from "./bookingAffiliateReservationLifecycle.js";
@@ -152,6 +159,8 @@ export type TargetPmsOperationsCommandRepositoryConfig = {
   stripePaymentProvider?: StripeBookingPaymentProvider;
   now?: () => Date;
   roomAssignmentOptimization?: PmsRoomAssignmentOptimizationTriggerPort;
+  /** Properties whose room type Delete also does the cleanup (VAY-2132). */
+  roomTypeDeleteCleanup?: (propertyId: string) => boolean;
 };
 
 type PmsAssignmentRow = {
@@ -675,7 +684,10 @@ export function createTargetPmsOperationsCommandRepository(
     async inspectRoomTypeRetirement(propertyId, roomTypeId) {
       const client = await pool.connect();
       try {
-        return inspectRoomTypeRetirement(client, propertyId, roomTypeId);
+        const impact = await inspectRoomTypeRetirement(client, propertyId, roomTypeId);
+        if (!impact || config.roomTypeDeleteCleanup?.(propertyId) !== true) return impact;
+        const plan = await readPmsRoomTypeDeletePlan(client, { propertyId, roomTypeId }, now());
+        return plan ? roomTypeDeleteImpact(impact, plan) : null;
       } finally {
         client.release();
       }
@@ -683,7 +695,22 @@ export function createTargetPmsOperationsCommandRepository(
 
     async retireRoomType(command) {
       const client = await pool.connect();
-      const acceptedAt = now().toISOString();
+      const at = now();
+      const acceptedAt = at.toISOString();
+      const actor = command.audit.actor;
+      // VAY-2132: for these properties Delete also retires the units, closes the future nights and
+      // takes the room out of the operating calendar, in this transaction.
+      const closureScope =
+        config.roomTypeDeleteCleanup?.(command.propertyId) === true
+          ? actor.kind === "user"
+            ? {
+                organizationId: actor.organizationId,
+                propertyId: command.propertyId,
+                roomTypeId: command.roomTypeId,
+                actorUserId: actor.userId,
+              }
+            : false
+          : null;
       const keyHash = sha256(command.idempotencyKey);
       const requestFingerprintHash = sha256(stableJson(roomTypeCommandFingerprint(command)));
       const commandMeta: PmsCommandMeta = {
@@ -705,6 +732,19 @@ export function createTargetPmsOperationsCommandRepository(
           await client.query("ROLLBACK");
           return replay;
         }
+        if (closureScope !== null) {
+          // The closure's owner/operator check and lock order, before any row lock.
+          if (!closureScope || !(await lockPmsManageScope(client, closureScope, at))) {
+            await client.query("ROLLBACK");
+            return {
+              ok: false,
+              statusCode: 403,
+              code: "missing_permission",
+              message: "Only the property's owner or operator can delete a room type.",
+            };
+          }
+          await lockPmsRoomClosureScope(client, command.propertyId);
+        }
         const source = await lockActiveRoomTypeForLifecycle(client, command);
         if (!source) {
           await client.query("ROLLBACK");
@@ -721,18 +761,20 @@ export function createTargetPmsOperationsCommandRepository(
           command.propertyId,
           command.roomTypeId,
         );
-        if (!impact) {
+        const plan = closureScope ? await readPmsRoomTypeDeletePlan(client, command, at) : null;
+        if (!impact || (closureScope && !plan)) {
           await client.query("ROLLBACK");
           return roomTypeRetireNotFound(command.roomTypeId);
         }
-        if (!impact.canRetire) {
+        const checked = plan ? roomTypeDeleteImpact(impact, plan) : impact;
+        if (!checked.canRetire) {
           await client.query("ROLLBACK");
           return {
             ...roomTypeRetireConflict(
               "room_type_retirement_blocked",
               "Resolve the reported room type dependencies before retirement.",
             ),
-            impact,
+            impact: checked,
           };
         }
 
@@ -751,6 +793,27 @@ export function createTargetPmsOperationsCommandRepository(
             "Room type retirement idempotency key could not be reserved.",
           );
         }
+        const cleanup =
+          plan && closureScope
+            ? await closeRoomTypeForDelete(
+                client,
+                closureScope,
+                plan.closure,
+                {
+                  keyHash,
+                  requestFingerprintHash,
+                  requestId: command.audit.requestId,
+                  correlationId: command.audit.correlationId,
+                },
+                at,
+              )
+            : undefined;
+        if (
+          cleanup &&
+          !(await inspectRoomTypeRetirement(client, command.propertyId, command.roomTypeId))
+            ?.canRetire
+        )
+          throw new Error("Room type delete left retirement dependencies");
 
         // Canonical pricing remains historical source evidence; its schema requires
         // active = TRUE. The owning room type's active flag gates its availability.
@@ -772,7 +835,7 @@ export function createTargetPmsOperationsCommandRepository(
         );
         if (retired.rowCount !== 1) throw new Error("Room type retirement lost its locked row");
         const retiredImpact: PmsRoomTypeRetirementImpact = {
-          ...impact,
+          ...(cleanup ? { ...impact, blockers: [], cleanup } : impact),
           version: roomTypeVersion(retired.rows[0]!.roomFactsRevision),
           canRetire: false,
         };
@@ -791,7 +854,7 @@ export function createTargetPmsOperationsCommandRepository(
           command.roomTypeId,
           commandMeta,
           keyHash,
-          { dependencyImpact: impact },
+          cleanup ? { dependencyImpact: checked, cleanup } : { dependencyImpact: impact },
         );
         await completeRoomTypeRetireIdempotency(
           client,
@@ -3383,6 +3446,19 @@ async function inspectRoomTypeRetirement(
     version: roomTypeVersion(row.roomFactsRevision),
     canRetire: blockers.length === 0,
     blockers,
+  };
+}
+
+/** The impact a Delete that does the cleanup reports: only what still stops it, and what it cleans up. */
+function roomTypeDeleteImpact(
+  impact: PmsRoomTypeRetirementImpact,
+  plan: PmsRoomTypeDeletePlan,
+): PmsRoomTypeRetirementImpact {
+  return {
+    ...impact,
+    canRetire: plan.blockers.length === 0,
+    blockers: plan.blockers,
+    cleanup: plan.cleanup,
   };
 }
 

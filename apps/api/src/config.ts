@@ -198,6 +198,8 @@ export type ApiConfig = {
   marketplaceAdminLegacySuperadminFallbackEnabled: boolean;
   pmsOperationsSource: PmsOperationsSource;
   pmsRoomClosureEnabled: boolean;
+  /** Properties whose room type Delete also does the cleanup (VAY-2132); [] is off, "all" every property. */
+  pmsRoomTypeDeleteCleanupPropertyIds: readonly string[] | "all";
   pmsInboxSendingEnabled: boolean;
   financeSource: FinanceSource;
   financeExpenseWorker?: { databaseUrl: string; propertyId: string };
@@ -1365,6 +1367,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     financeExportWorker,
     financeFolioRecipientKms,
     pmsRoomClosureEnabled: readBooleanEnv(env, "PMS_ROOM_CLOSURE_ENABLED", false),
+    pmsRoomTypeDeleteCleanupPropertyIds:
+      readOptionalEnv(env, "PMS_ROOM_TYPE_DELETE_CLEANUP_PROPERTY_IDS") === "*"
+        ? "all"
+        : readPropertyIdAllowlistEnv(env, "PMS_ROOM_TYPE_DELETE_CLEANUP_PROPERTY_IDS"),
     pmsInboxSendingEnabled: readBooleanEnv(env, "PMS_INBOX_SENDING_ENABLED", true),
     financeBankTransferKms: loadBankTransferKms(env),
     marketplaceDiscoveryAllowedOrigins: readOptionalCsvEnv(

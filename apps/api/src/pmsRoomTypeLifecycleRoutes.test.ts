@@ -129,6 +129,30 @@ describe("PMS room type lifecycle routes", () => {
     });
   });
 
+  it("sends the cleanup a Delete reports and refuses a Delete that isn't the owner's or operator's (VAY-2132)", async () => {
+    const test = await testApp();
+    app = test.app;
+    const cleanup = { physicalUnits: 1, futureNights: 363, roomBlocks: 0, linkedGroups: 0 };
+    test.commands.inspectRoomTypeRetirement.mockResolvedValue({ ...clearImpact, cleanup });
+    const impact = await inject(app, "GET", `${endpoint()}/retirement-impact`);
+    expect(impact.json()).toEqual({ ...clearImpact, cleanup });
+
+    test.commands.retireRoomType.mockResolvedValue({
+      ok: false,
+      statusCode: 403,
+      code: "missing_permission",
+      message: "Only the property's owner or operator can delete a room type.",
+    });
+    const response = await inject(app, "DELETE", endpoint(), body("retire"));
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toEqual({
+      statusCode: 403,
+      code: "missing_permission",
+      category: "authorization",
+      message: "Only the property's owner or operator can delete a room type.",
+    });
+  });
+
   it.each([
     ["permission", context({ permissions: [] })],
     ["entitlement", context({ entitlements: [] })],
