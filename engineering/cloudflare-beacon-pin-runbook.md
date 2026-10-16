@@ -25,6 +25,10 @@ commit Cloudflare's file, only its hash and the reviewed record below.
     "GitHub Actions to create and approve pull requests" (Settings → Actions → General). If not,
     the issue links the page that opens it. The commit message becomes its description. From a
     terminal: `gh pr create --base main --head automation/cloudflare-beacon-pin-main --fill`.
+  - When the branch moves under an open pull request (Cloudflare shipped again), the job comments
+    the new report on it: review that one. A pull request closed without merging is not opened
+    again for the same commit. A live version older than the reviewed one (edges mid-rollout)
+    gets no fix.
   - When the live file matches the pin again (the fix merged, or Cloudflare went back), the next
     run closes the issue, closes the pull request if still open, and deletes the branch.
 - PR checks keep passing. The landing consent spec runs offline against a stub beacon it
@@ -33,9 +37,10 @@ commit Cloudflare's file, only its hash and the reviewed record below.
 ## Update the pin
 
 Normally: review the prepared pull request (step 2), then merge it (step 4). **Merging it deploys
-the landing site.** Then do steps 5 and 6. Its commit sets the pin comment to "Merging confirmed
-the review", so merge only after step 2. Use steps 1 and 3 when no pull request was prepared, or
-when the fix needs more than a new hash (for example, new guards).
+the landing site.** Then do steps 5 and 6. Its PR Checks never run Cloudflare's new file (the
+consent spec uses a stub), so they are not the review. The commit writes "pinned via Cloudflare
+Beacon Drift after review" above the pin: merge only after step 2. Use steps 1 and 3 when no
+pull request was prepared, or when the fix needs more than a new hash (for example, new guards).
 
 1. **Download the new file** and check that its hash matches the issue's "New pin":
 
@@ -67,7 +72,7 @@ when the fix needs more than a new hash (for example, new guards).
 
 3. **Open one PR** with both changes:
    - set `integrity` in `apps/landing/lib/cloudflareAnalytics.ts` to the new hash, and update
-     its "Reviewed …" comment (date and version);
+     the comment above it (version and date);
    - regenerate the reviewed record (hashes and counts only, no vendor code):
      `node scripts/ci/cloudflare-beacon-drift.mjs --record new-beacon.min.js > scripts/ci/cloudflare-beacon-reviewed.json`;
    - in the PR body, give the version, Last-Modified, size, old and new hash, and what the diff
