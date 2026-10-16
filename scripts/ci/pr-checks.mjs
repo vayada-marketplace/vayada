@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 
 export const SELECTABLE_JOBS = [
   "frontend",
+  "frontend_build",
   "first_party_auth",
   "pms_web_e2e",
   "marketplace_web_e2e",
@@ -21,8 +22,12 @@ export const SELECTABLE_JOBS = [
   "backend",
 ];
 
+// The two halves of the old frontend job: typecheck, lint and package tests; build and the tests
+// of the built apps. A path that needs one needs both.
+const FRONTEND_JOBS = ["frontend", "frontend_build"];
+
 const TYPESCRIPT_JOBS = [
-  "frontend",
+  ...FRONTEND_JOBS,
   "first_party_auth",
   "api_unit",
   "api_postgres",
@@ -30,7 +35,27 @@ const TYPESCRIPT_JOBS = [
 ];
 
 // The mocked Playwright projects that gate PRs (one dev server each, no backend).
-const BROWSER_E2E_JOBS = ["pms_web_e2e", "marketplace_web_e2e", "booking_web_e2e"];
+export const BROWSER_E2E_JOBS = ["pms_web_e2e", "marketplace_web_e2e", "booking_web_e2e"];
+
+// Packages that neither apps/api nor any backend package depends on, with the extra jobs their
+// changes need: the browser projects of the apps that use them, and api_unit when
+// test:unit-suites runs their tests. frontend, frontend_build and first_party_auth always run too. The guard
+// tests in pr-checks.test.mjs recompute this from every package.json and fail when anything
+// else starts to reach one of these packages.
+export const FRONTEND_ONLY_PACKAGES = {
+  // booking-admin, booking-web, marketplace-web, pms-web, vayada-admin
+  "product-onboarding": BROWSER_E2E_JOBS,
+  // booking-admin, pms-web
+  "feature-hub": ["pms_web_e2e"],
+  // booking-admin, marketplace-web, pms-web; its tests are in test:unit-suites
+  "settings-ui": ["pms_web_e2e", "marketplace_web_e2e", "api_unit"],
+  // landing, marketplace-web, vayada-admin
+  "marketplace-shared": ["marketplace_web_e2e"],
+  // booking-web, pms-web
+  "locale-ui": ["pms_web_e2e", "booking_web_e2e"],
+  // no app; its tests are in test:unit-suites
+  "pms-vayada-adapter": ["api_unit"],
+};
 
 // The first matching rule decides what a changed file selects. A file that matches no rule
 // selects every job, so new directories and tooling changes fail safe (run everything).
@@ -39,6 +64,21 @@ export const RULES = [
   { name: "docs", test: /^(LICENSE|\.gitignore|\.coderabbit\.yaml)$/, jobs: [] },
   { name: "docs", test: /^\.agents\//, jobs: [] },
   { name: "evidence", test: /^engineering\/evidence\//, jobs: [] },
+  // Other workflows only reach PR checks through tests that read them: the pr-checks and
+  // coordinated-release contracts (frontend) and first-party-auth/production-config.spec.ts
+  // (first_party_auth). pr-checks.yml itself is handled by selectJobs.
+  {
+    name: "other-workflows",
+    test: /^\.github\/workflows\/(?!pr-checks\.yml$)[^/]+\.ya?ml$/,
+    jobs: ["frontend", "first_party_auth"],
+  },
+  // Only the Playwright runs read the root config: landing (frontend_build), first-party auth and the
+  // three mocked browser projects.
+  {
+    name: "playwright-config",
+    test: /^playwright\.config\.ts$/,
+    jobs: [...FRONTEND_JOBS, "first_party_auth", ...BROWSER_E2E_JOBS],
+  },
   {
     name: "python-backend",
     test: /^apps\/(marketplace-api|booking-api|pms-api)\//,
@@ -48,51 +88,56 @@ export const RULES = [
   {
     name: "pms-web",
     test: /^apps\/pms-web\//,
-    jobs: ["frontend", "first_party_auth", "pms_web_e2e"],
+    jobs: [...FRONTEND_JOBS, "first_party_auth", "pms_web_e2e"],
   },
   {
     name: "marketplace-web",
     test: /^apps\/marketplace-web\//,
-    jobs: ["frontend", "first_party_auth", "marketplace_web_e2e"],
+    jobs: [...FRONTEND_JOBS, "first_party_auth", "marketplace_web_e2e"],
   },
   {
     name: "booking-web",
     test: /^apps\/booking-web\//,
-    jobs: ["frontend", "first_party_auth", "booking_web_e2e"],
+    jobs: [...FRONTEND_JOBS, "first_party_auth", "booking_web_e2e"],
   },
   {
     name: "frontend",
     test: /^apps\/(vayada-admin|booking-admin|landing)\//,
-    jobs: ["frontend", "first_party_auth"],
+    jobs: [...FRONTEND_JOBS, "first_party_auth"],
   },
   {
     name: "pms-web-e2e",
     test: /^tests\/e2e\/pms-web\//,
-    jobs: ["frontend", "first_party_auth", "pms_web_e2e"],
+    jobs: [...FRONTEND_JOBS, "first_party_auth", "pms_web_e2e"],
   },
   // Shared mocks and helpers: every mocked browser project imports from these.
   {
     name: "browser-e2e-support",
     test: /^tests\/e2e\/(support|helpers|marketplace-web\/utils)\//,
-    jobs: ["frontend", "first_party_auth", ...BROWSER_E2E_JOBS],
+    jobs: [...FRONTEND_JOBS, "first_party_auth", ...BROWSER_E2E_JOBS],
   },
   {
     name: "marketplace-web-e2e",
     test: /^tests\/e2e\/marketplace-web\//,
-    jobs: ["frontend", "first_party_auth", "marketplace_web_e2e"],
+    jobs: [...FRONTEND_JOBS, "first_party_auth", "marketplace_web_e2e"],
   },
   {
     name: "booking-web-e2e",
     test: /^tests\/e2e\/booking-web\//,
-    jobs: ["frontend", "first_party_auth", "booking_web_e2e"],
+    jobs: [...FRONTEND_JOBS, "first_party_auth", "booking_web_e2e"],
   },
-  // The frontend job runs the landing Playwright suite; first_party_auth runs the auth suite. The
+  // frontend_build runs the landing Playwright suite; first_party_auth runs the auth suite. The
   // other projects here are not PR-gated. A new folder under tests/e2e/ matches no rule (every job).
   {
     name: "e2e",
     test: /^tests\/e2e\/(landing|first-party-auth|booking-admin|vayada-admin|next-stack-smoke|booking-public-canary)\//,
-    jobs: ["frontend", "first_party_auth"],
+    jobs: [...FRONTEND_JOBS, "first_party_auth"],
   },
+  ...Object.entries(FRONTEND_ONLY_PACKAGES).map(([name, jobs]) => ({
+    name: `frontend-only package ${name}`,
+    test: new RegExp(`^packages/${name}/`),
+    jobs: [...FRONTEND_JOBS, "first_party_auth", ...jobs],
+  })),
   // Packages the apps build on (everything but backend-*) also run the mocked browser projects.
   {
     name: "frontend-packages",
