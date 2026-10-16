@@ -1152,6 +1152,20 @@ test("the hold CLI repeats reads conditionally and keeps the cached holds on a 3
   assert.equal(result.requests[1].headers["if-none-match"], '"v1"');
 });
 
+test("the hold CLI never treats a 304 without a cached reply as no hold", async () => {
+  const result = await runHoldCli(() => ({ status: 304 }));
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(result.stderr, /could not read holds \(GET .* HTTP 304\)/);
+  assert.ok(result.requests.every((request) => !request.headers["if-none-match"]));
+});
+
+test("the hold CLI reads unconditionally when a reply carried no ETag", async () => {
+  const result = await runHoldCli(() => ({ body: [hold(5)] }));
+  assert.equal(result.status, 1, result.stderr);
+  assert.ok(result.requests.length >= 2);
+  assert.ok(result.requests.every((request) => !request.headers["if-none-match"]));
+});
+
 test("the hold CLI refuses to run without a token", async () => {
   const result = await runHoldCli(() => ({ body: [] }), { GH_TOKEN: "" });
   assert.equal(result.status, 1);
