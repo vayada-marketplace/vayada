@@ -21,14 +21,14 @@ Cloudflare and same-origin `/cdn-cgi/rum` destinations only. SRI pins the review
 bytes. A vendor update fails closed instead of introducing an unguarded transport.
 The daily Cloudflare Beacon Drift workflow opens an issue when the live file
 changes. To update, follow `engineering/cloudflare-beacon-pin-runbook.md`: review
-all network transports, then change the digest and the committed copy together.
-Do not merely replace the digest.
+all network transports, then change the digest and regenerate the reviewed record
+together. Do not merely replace the digest.
 
 PR Checks builds with a dummy public token and runs all Landing browser tests.
-The analytics suite serves the committed copy
-`tests/e2e/landing/fixtures/cloudflare-beacon.min.js` after checking it against the
-pinned digest, so a Cloudflare release cannot fail PRs. All measurement requests
-are intercepted and never reach Cloudflare. For local
+The analytics suite runs offline against a stub beacon it generates; only in the
+JavaScript the test browser receives is the pin swapped for the stub's hash. A
+Cloudflare release cannot fail PRs, and the drift workflow checks the real file.
+All measurement requests are intercepted and never reach Cloudflare. For local
 runs, build with NEXT_PUBLIC_CLOUDFLARE_ANALYTICS_TOKEN set to 32 zeroes, start
 Landing through portless, and run:
 
