@@ -427,11 +427,9 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS calendar auto-open candidate selection"
       [first.propertyId, connectionId],
     );
     for (const table of ["channel_room_type_mappings", "channel_rate_plan_mappings"]) {
-      const channelScope = table === "channel_rate_plan_mappings" ? " AND channel='airbnb'" : "";
-      await admin.query(
-        `UPDATE pms.${table} SET status='disabled' WHERE connection_id=$1::uuid${channelScope}`,
-        [connectionId],
-      );
+      await admin.query(`UPDATE pms.${table} SET status='disabled' WHERE connection_id=$1::uuid`, [
+        connectionId,
+      ]);
       await expect(managementProvider.execute(forceResyncJob)).resolves.toMatchObject({
         ok: false,
         code: "invalid_state",
@@ -441,24 +439,28 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS calendar auto-open candidate selection"
         status: "failed",
         lastErrorCode: "mapping_missing",
       });
-      await admin.query(
-        `UPDATE pms.${table} SET status='active' WHERE connection_id=$1::uuid${channelScope}`,
-        [connectionId],
-      );
+      await admin.query(`UPDATE pms.${table} SET status='active' WHERE connection_id=$1::uuid`, [
+        connectionId,
+      ]);
     }
+    expect((await readSnapshot()).sync.ari).toMatchObject({ status: "ok", lastErrorCode: null });
+    // VAY-2206: one channel's variant going away no longer fails a room that keeps another rate
+    // mapping; that OTA sells the shared base rate, as in the legacy system.
+    await admin.query(
+      "UPDATE pms.channel_rate_plan_mappings SET status='disabled' WHERE connection_id=$1::uuid AND channel='airbnb'",
+      [connectionId],
+    );
     expect((await readSnapshot()).sync.ari).toMatchObject({ status: "ok", lastErrorCode: null });
     await admin.query(
       "DELETE FROM pms.channel_rate_plan_mappings WHERE connection_id=$1::uuid AND channel='airbnb'",
       [connectionId],
     );
+    // invalid_state comes from the PRICING_UNAVAILABLE ariPlan stub, not from the mappings.
     await expect(managementProvider.execute(forceResyncJob)).resolves.toMatchObject({
       ok: false,
       code: "invalid_state",
     });
-    expect((await readSnapshot()).sync.ari).toMatchObject({
-      status: "failed",
-      lastErrorCode: "mapping_missing",
-    });
+    expect((await readSnapshot()).sync.ari).toMatchObject({ status: "ok", lastErrorCode: null });
 
     const beforeReprice = (
       await admin.query<{
@@ -1247,7 +1249,224 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS calendar auto-open candidate selection"
       ),
     ).toMatchObject({ rows: [{ coverageThrough: "2026-09-30", days: 56, changed: 56 }] });
   });
+
+  it("accepts imported rooms and OTAs on the shared base rate but not rooms without a rate", async () => {
+    const read = createPgPmsChannexManagementReadRepository({
+      connectionString: TEST_DATABASE_URL!,
+      pool: admin,
+      now: () => now,
+    });
+    const ari = async (propertyId: string) =>
+      (
+        await read.getSnapshot(propertyId, {
+          connection: "observe_only",
+          provisioning: "observe_only",
+          ariSync: "observe_only",
+          bookingSync: "observe_only",
+          markups: "observe_only",
+          messaging: "observe_only",
+          iframe: "observe_only",
+        })
+      ).sync.ari;
+    const missing = { status: "failed", lastErrorCode: "mapping_missing" };
+    const synced = { status: "ok", lastErrorCode: null };
+    const setting = {
+      enabled: false,
+      mode: "rolling" as const,
+      rollingMonths: 12 as const,
+      fixedEndMonth: null,
+    };
+
+    // Shaped like the VAY-1362 import: unmapped LEGACY-FLEX/NRF plans, one CH-xxxx plan per legacy
+    // channel mapping, and discovery that also found OpenChannel and Expedia.
+    const legacy = await seedProperty(admin, 30, setting);
+    const legacyFixture = await seedChannexAriFixture(admin, legacy, [
+      { key: "booking_com", application: "BookingCom", title: null, isActive: true },
+      { key: "airbnb", application: "AirBNB", title: null, isActive: true },
+      { key: "openchannel", application: "OpenChannel", title: null, isActive: true },
+      { key: "expedia", application: "Expedia", title: null, isActive: true },
+      { key: "agoda", application: "Agoda", title: null, isActive: false },
+    ]);
+    await seedRatePlan(admin, legacy, "LEGACY-FLEX", "flexible");
+    await seedRatePlan(admin, legacy, "LEGACY-NRF", "non_refundable");
+    for (const channel of ["direct", "booking_com", "airbnb"]) {
+      const plan = await seedRatePlan(admin, legacy, `CH-${channel.toUpperCase()}`, "manual");
+      await mapChannexRate(admin, legacy, legacyFixture, plan, channel);
+    }
+    expect(await ari(legacy.propertyId)).toMatchObject(synced);
+    // Still fails closed when the room has no active rate mapping at all.
+    await admin.query(
+      "UPDATE pms.channel_rate_plan_mappings SET status='disabled' WHERE connection_id=$1::uuid",
+      [legacyFixture.connectionId],
+    );
+    expect(await ari(legacy.propertyId)).toMatchObject(missing);
+
+    // Published-offer hotel: no legacy rate mappings; the offer target is the base rate.
+    const published = await seedProperty(admin, 31, setting);
+    const publishedFixture = await seedChannexAriFixture(admin, published, [
+      { key: "openchannel", application: "OpenChannel", title: null, isActive: true },
+    ]);
+    await seedRatePlan(admin, published, "flexible", "flexible");
+    expect(await ari(published.propertyId)).toMatchObject(missing);
+    await seedActiveOfferTarget(admin, published, publishedFixture);
+    expect(await ari(published.propertyId)).toMatchObject(synced);
+    // The target must name the Channex room the room is mapped to now.
+    for (const externalRoom of ["vay-2206-other-room", "vay-2206-room"]) {
+      await withReplicaRole(admin, (client) =>
+        client.query(
+          "UPDATE pms.channel_room_type_mappings SET external_room_type_id=$2 WHERE connection_id=$1::uuid",
+          [publishedFixture.connectionId, externalRoom],
+        ),
+      );
+      expect(await ari(published.propertyId)).toMatchObject(
+        externalRoom === "vay-2206-room" ? synced : missing,
+      );
+    }
+    // A target from an earlier binding does not serve the current connection.
+    await withReplicaRole(admin, (client) =>
+      client.query(
+        "UPDATE pms.channel_connections SET binding_generation=gen_random_uuid() WHERE id=$1::uuid",
+        [publishedFixture.connectionId],
+      ),
+    );
+    expect(await ari(published.propertyId)).toMatchObject(missing);
+  });
 });
+
+type ChannexAriFixture = {
+  connectionId: string;
+  externalPropertyId: string;
+  bindingGeneration: string;
+};
+
+async function seedChannexAriFixture(
+  admin: pg.Pool,
+  property: SeededProperty,
+  connectedChannels: unknown[],
+): Promise<ChannexAriFixture> {
+  const connectionId = randomUUID();
+  const externalPropertyId = `vay-2206-${property.propertyId}`;
+  const bindingGeneration = await withReplicaRole(admin, async (client) => {
+    await client.query(
+      `INSERT INTO pms.channel_binding_claims
+         (property_id,provider,external_property_id,claim_state,claim_source)
+       VALUES ($1::uuid,'channex',$2,'active','repair')`,
+      [property.propertyId, externalPropertyId],
+    );
+    const connection = await client.query<{ bindingGeneration: string }>(
+      `INSERT INTO pms.channel_connections
+         (id,property_id,provider,connection_status,external_property_id,connection_metadata)
+       VALUES ($1::uuid,$2::uuid,'channex','connected',$3,
+         jsonb_build_object('connectedChannels',$4::jsonb))
+       RETURNING binding_generation::text AS "bindingGeneration"`,
+      [connectionId, property.propertyId, externalPropertyId, JSON.stringify(connectedChannels)],
+    );
+    await client.query(
+      `INSERT INTO pms.channel_room_type_mappings
+         (property_id,connection_id,room_type_id,external_room_type_id)
+       VALUES ($1::uuid,$2::uuid,$3::uuid,'vay-2206-room')`,
+      [property.propertyId, connectionId, property.roomTypeId],
+    );
+    await client.query(
+      `INSERT INTO pms.channel_sync_status (property_id,connection_id,sync_domain,status)
+       VALUES ($1::uuid,$2::uuid,'ari','ok')`,
+      [property.propertyId, connectionId],
+    );
+    await seedSparseInventoryDay(client, property, "2026-09-10");
+    return connection.rows[0]!.bindingGeneration;
+  });
+  return { connectionId, externalPropertyId, bindingGeneration };
+}
+
+async function seedRatePlan(
+  admin: pg.Pool,
+  property: SeededProperty,
+  code: string,
+  rateType: "flexible" | "non_refundable" | "manual",
+) {
+  const ratePlanId = randomUUID();
+  await withReplicaRole(admin, (client) =>
+    client.query(
+      `INSERT INTO pms.rate_plans(id,property_id,room_type_id,code,name,rate_type,currency)
+       VALUES($1::uuid,$2::uuid,$3::uuid,$4,$4,$5,'EUR')`,
+      [ratePlanId, property.propertyId, property.roomTypeId, code, rateType],
+    ),
+  );
+  return ratePlanId;
+}
+
+async function mapChannexRate(
+  admin: pg.Pool,
+  property: SeededProperty,
+  fixture: ChannexAriFixture,
+  ratePlanId: string,
+  channel: string,
+): Promise<void> {
+  await admin.query(
+    `INSERT INTO pms.channel_rate_plan_mappings
+       (property_id,connection_id,room_type_id,rate_plan_id,channel,
+        external_room_type_id,external_rate_plan_id)
+     VALUES ($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5,'vay-2206-room',$6)`,
+    [
+      property.propertyId,
+      fixture.connectionId,
+      property.roomTypeId,
+      ratePlanId,
+      channel,
+      `${channel}-${ratePlanId}`,
+    ],
+  );
+}
+
+async function seedActiveOfferTarget(
+  admin: pg.Pool,
+  property: SeededProperty,
+  fixture: ChannexAriFixture,
+): Promise<void> {
+  const targetId = randomUUID();
+  const intentId = randomUUID();
+  await withReplicaRole(admin, async (client) => {
+    await client.query(
+      `INSERT INTO pms.channex_offer_targets
+         (id,property_id,connection_id,room_type_id,offer_id,next_version,active_version)
+       VALUES ($1::uuid,$2::uuid,$3::uuid,$4::uuid,'flex',2,1)`,
+      [targetId, property.propertyId, fixture.connectionId, property.roomTypeId],
+    );
+    await client.query(
+      `INSERT INTO pms.channex_offer_target_intents
+         (id,target_id,version,operation_key,status,proposal)
+       VALUES ($1::uuid,$2::uuid,1,'vay-2206','sealed','{"offerId":"flex"}')`,
+      [intentId, targetId],
+    );
+    await client.query(
+      `INSERT INTO pms.channex_offer_target_versions
+         (target_id,version,intent_id,binding_generation,external_property_id,
+          external_room_type_id,external_rate_plan_id,configuration,readback_evidence)
+       VALUES ($1::uuid,1,$2::uuid,$3::uuid,$4,'vay-2206-room','vay-2206-offer-rate',
+         '{"title":"Flex"}','{"verified":true}')`,
+      [targetId, intentId, fixture.bindingGeneration, fixture.externalPropertyId],
+    );
+  });
+}
+
+async function withReplicaRole<T>(
+  admin: pg.Pool,
+  work: (client: pg.PoolClient) => Promise<T>,
+): Promise<T> {
+  const client = await admin.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SET LOCAL session_replication_role = replica");
+    const result = await work(client);
+    await client.query("COMMIT");
+    return result;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
 
 // Candidate selection is global, so abandoned fixtures from a previous run must not
 // contribute extra incomplete sources or pending jobs to this suite.
@@ -1264,7 +1483,14 @@ async function cleanupSchedulerFixtures(pool: pg.Pool): Promise<void> {
       "DELETE FROM platform.job_attempts WHERE job_id IN (SELECT id FROM platform.jobs WHERE property_id=ANY($1::uuid[]))",
       [ids],
     );
+    for (const table of ["pms.channex_offer_target_versions", "pms.channex_offer_target_intents"])
+      await client.query(
+        `DELETE FROM ${table} WHERE target_id IN
+           (SELECT id FROM pms.channex_offer_targets WHERE property_id=ANY($1::uuid[]))`,
+        [ids],
+      );
     for (const table of [
+      "pms.channex_offer_targets",
       "pms.pricing_v2_rooms",
       "pms.pricing_v2_revisions",
       "pms.pricing_v2_heads",

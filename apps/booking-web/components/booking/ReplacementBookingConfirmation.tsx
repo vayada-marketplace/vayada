@@ -7,6 +7,8 @@ import {
   type PublicQuoteGuestDisclosure,
 } from "@vayada/domain-booking/replacement-pricing";
 import { ApiError } from "@/services/api/client";
+import type { FunnelPaymentMethod } from "@vayada/domain-booking/conversion-funnel";
+import { funnelErrorCode, trackEvent } from "@/services/api/tracking";
 import {
   acceptPricingQuote,
   pricingQuoteBookableOnline,
@@ -75,6 +77,8 @@ export default function ReplacementBookingConfirmation({
   const setPending = (value: BookingAttempt | null) =>
     held ? onAttemptChange(value) : setOwnAttempt(value);
   const supported = pricingQuoteBookableOnline(quote);
+  // The funnel's name for it; the event allowlist drops any other value (VAY-2197).
+  const funnelMethod = quote.paymentMethod as FunnelPaymentMethod;
   // A request-mode hotel confirms each booking itself; nothing is charged when the guest asks.
   // Bank transfer and PayPal wait for the payment instead, in either mode.
   const request =
@@ -84,24 +88,30 @@ export default function ReplacementBookingConfirmation({
     !refreshRequired &&
     (!!pending || (!!guest && termsAccepted && disclosure?.quoteId === quote.quoteId));
   useEffect(() => {
-    if (result)
-      onBooked?.({
-        bookingReference: result.bookingReference,
-        requested: result.kind === "requested" || (result.kind === "replayed" && request),
-      });
+    if (!result) return;
+    const requested = result.kind === "requested" || (result.kind === "replayed" && request);
+    trackEvent(slug, "booking_completed", {
+      paymentMethod: funnelMethod,
+      outcome: requested ? "requested" : "confirmed",
+    });
+    onBooked?.({ bookingReference: result.bookingReference, requested });
     // Once per booking.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [result]);
   useEffect(() => {
-    if (manualPayment)
-      onBooked?.({
-        bookingReference: manualPayment.bookingReference,
-        requested: false,
-        confirmationUrl: `/confirmation?${new URLSearchParams({
-          booking: manualPayment.bookingReference,
-          token: manualPayment.confirmationToken,
-        })}`,
-      });
+    if (!manualPayment) return;
+    trackEvent(slug, "booking_completed", {
+      paymentMethod: funnelMethod,
+      outcome: "awaiting_payment",
+    });
+    onBooked?.({
+      bookingReference: manualPayment.bookingReference,
+      requested: false,
+      confirmationUrl: `/confirmation?${new URLSearchParams({
+        booking: manualPayment.bookingReference,
+        token: manualPayment.confirmationToken,
+      })}`,
+    });
     // Once per reservation.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [manualPayment]);
@@ -111,6 +121,12 @@ export default function ReplacementBookingConfirmation({
     const acceptedDisclosure = pending?.disclosure ?? disclosure;
     const attempted = pending?.guest ?? guest;
     if (!ready || !acceptedDisclosure || !attempted || loading || result) return;
+    // A retry of an attempt whose outcome isn't known is the same click.
+    if (!pending)
+      trackEvent(slug, "complete_booking_clicked", {
+        paymentMethod: funnelMethod,
+        mode: request ? "request" : "instant",
+      });
     setPending({ quoteId: quote.quoteId, guest: attempted, disclosure: acceptedDisclosure });
     setLoading(true);
     setError("");
@@ -142,6 +158,15 @@ export default function ReplacementBookingConfirmation({
       setRefreshRequired(conflict || unavailable);
       // Nothing was stored: the attempt is over and only a new price can continue.
       if (conflict || unavailable) setPending(null);
+      trackEvent(slug, "booking_error", {
+        step: "payment",
+        reason: conflict
+          ? "price_expired"
+          : unavailable
+            ? "booking_unavailable"
+            : "booking_uncertain",
+        code: funnelErrorCode(code),
+      });
       setError(
         conflict
           ? "This price is no longer available. Get a new price and review its terms again."

@@ -8,7 +8,19 @@ import type {
 } from "@vayada/domain-booking/replacement-pricing";
 import { ApiError } from "@/services/api/client";
 import { acceptPricingQuote } from "@/services/api/pricingAcceptance";
+import { trackEvent } from "@/services/api/tracking";
 import ReplacementBookingConfirmation from "./ReplacementBookingConfirmation";
+
+vi.mock("@/services/api/tracking", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/services/api/tracking")>()),
+  trackEvent: vi.fn(),
+}));
+/** The funnel events sent so far (VAY-2197), never with anything about the guest. */
+function funnel() {
+  const calls = vi.mocked(trackEvent).mock.calls;
+  expect(JSON.stringify(calls)).not.toMatch(/Ada|Lovelace|example\.test|\+49|Quiet|VAY-/);
+  return calls.map(([, type, properties]) => [type, properties]);
+}
 
 vi.mock("@/services/api/pricingAcceptance", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/services/api/pricingAcceptance")>()),
@@ -138,6 +150,10 @@ it("books with the guest's details and shows the public confirmation reference",
   expect(document.body.textContent).toContain("Booking confirmed");
   expect(document.body.textContent).toContain(result.bookingReference);
   expect(document.querySelector("form")).toBeNull();
+  expect(funnel()).toEqual([
+    ["complete_booking_clicked", { paymentMethod: "pay_at_property", mode: "instant" }],
+    ["booking_completed", { paymentMethod: "pay_at_property", outcome: "confirmed" }],
+  ]);
 });
 
 it("retires a rejected quote", async () => {
@@ -148,6 +164,10 @@ it("retires a rejected quote", async () => {
     "price is no longer available",
   );
   expect(document.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled).toBe(true);
+  expect(funnel()[1]).toEqual([
+    "booking_error",
+    { step: "payment", reason: "price_expired", code: undefined },
+  ]);
 });
 
 it("says nothing was booked when online booking is unavailable", async () => {
@@ -182,6 +202,13 @@ it("stops a request the hotel cannot receive online yet, without inviting a retr
   );
   expect(document.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled).toBe(true);
   expect(document.body.textContent).not.toContain("may still have reached us");
+  expect(funnel()).toEqual([
+    ["complete_booking_clicked", { paymentMethod: "pay_at_property", mode: "request" }],
+    [
+      "booking_error",
+      { step: "payment", reason: "booking_unavailable", code: "REQUEST_ACCEPTANCE_UNAVAILABLE" },
+    ],
+  ]);
 });
 
 it("keeps an uncertain attempt retryable", async () => {
@@ -202,6 +229,12 @@ it("keeps an uncertain attempt retryable", async () => {
     "uncertain-retry",
   ]);
   expect(document.body.textContent).toContain(result.bookingReference);
+  // The retry is the same click; the booking is still counted once it is made.
+  expect(funnel()).toEqual([
+    ["complete_booking_clicked", { paymentMethod: "pay_at_property", mode: "instant" }],
+    ["booking_error", { step: "payment", reason: "booking_uncertain", code: undefined }],
+    ["booking_completed", { paymentMethod: "pay_at_property", outcome: "confirmed" }],
+  ]);
 });
 
 it.each([

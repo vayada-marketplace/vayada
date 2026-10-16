@@ -29,7 +29,7 @@ export default function CheckinChecklistPreviewPage() {
   }, []);
 
   return (
-    <main className="min-h-[100dvh] bg-gray-50 p-4 md:p-6">
+    <div className="p-4 md:p-6">
       <div className="mx-auto max-w-3xl space-y-5">
         <header className="flex items-start justify-between gap-3">
           <div>
@@ -57,6 +57,6 @@ export default function CheckinChecklistPreviewPage() {
           <CheckinChecklistPreview steps={steps} />
         )}
       </div>
-    </main>
+    </div>
   );
 }
