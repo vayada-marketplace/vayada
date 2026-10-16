@@ -13,6 +13,7 @@ import pg, { type QueryResult, type QueryResultRow } from "pg";
 import { lockPmsManageScope } from "./pmsManageScope.js";
 import { lockPmsRoomClosureScope } from "./pmsRoomClosureCommandRepository.js";
 import { reconcileRoomBlockInventory } from "./pmsRoomBlockInventory.js";
+import { PmsLinkedInventoryNotCanonicalError } from "./pmsLinkedInventoryReconciler.js";
 import {
   closeRoomTypeForDelete,
   readPmsRoomTypeDeletePlan,
@@ -3403,15 +3404,38 @@ async function retireRoomTypeWithCleanup(
       "Room type retirement idempotency key could not be reserved.",
     );
   }
-  const released =
-    plan.cleanup.roomBlocks || plan.cleanup.linkedGroups
-      ? await releaseRoomTypeForDelete(client, command, plan.cutoffDate, {
-          commandId: command.commandId,
-          keyHash: ids.keyHash,
-          acceptedAt,
-          audit: command.audit,
-        })
-      : { roomBlocks: 0, linkedGroups: 0 };
+  let released = { roomBlocks: 0, linkedGroups: 0 };
+  try {
+    if (plan.cleanup.roomBlocks || plan.cleanup.linkedGroups)
+      released = await releaseRoomTypeForDelete(client, command, plan.cutoffDate, {
+        commandId: command.commandId,
+        keyHash: ids.keyHash,
+        acceptedAt,
+        audit: command.audit,
+      });
+  } catch (error) {
+    if (!(error instanceof PmsLinkedInventoryNotCanonicalError)) throw error;
+    // Linked rooms need canonical inventory, which a calendar update in setup restores.
+    await client.query("ROLLBACK");
+    return {
+      ...roomTypeRetireConflict(
+        "room_type_retirement_blocked",
+        "Resolve the reported room type dependencies before retirement.",
+      ),
+      impact: {
+        ...checked,
+        canRetire: false,
+        blockers: [
+          {
+            category: "inventory",
+            code: "calendar_not_current",
+            affectedCount: 1,
+            action: "Update the property calendar in setup, then delete the room type.",
+          },
+        ],
+      },
+    };
+  }
   // What the released blocks and links held is rechecked under the same locks.
   const closing =
     released.roomBlocks || released.linkedGroups
