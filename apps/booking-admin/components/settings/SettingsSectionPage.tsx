@@ -2003,7 +2003,7 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
 
               {/* Pay at Hotel */}
               <div
-                className={`relative flex flex-col p-4 rounded-xl border-2 transition-all text-left cursor-pointer ${
+                className={`relative flex min-w-0 flex-col p-4 rounded-xl border-2 transition-all text-left cursor-pointer ${
                   settings.pay_at_property_enabled
                     ? "border-primary-500 bg-primary-50/30"
                     : "border-gray-200 hover:border-gray-300"
@@ -2103,48 +2103,51 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
                     </div>
                   </div>
                 </div>
+                {/* Status on its own line below the buttons, so it stays inside the card (VAY-2235). */}
                 {settings.pay_at_property_enabled && (
-                  <div className="flex items-center gap-2 mt-3 pt-3 border-t border-gray-200">
-                    {[
-                      { key: "cash", label: t("settings.billing.cash") },
-                      { key: "card", label: t("settings.billing.card") },
-                    ].map((m) => {
-                      const selected = settings.pay_at_hotel_methods.includes(m.key);
-                      return (
-                        <button
-                          key={m.key}
-                          type="button"
-                          aria-pressed={selected}
-                          onClick={() => {
-                            if (selected && settings.pay_at_hotel_methods.length > 1) {
-                              updateSetting(
-                                "pay_at_hotel_methods",
-                                settings.pay_at_hotel_methods.filter((v) => v !== m.key),
-                              );
-                            } else if (!selected) {
-                              updateSetting("pay_at_hotel_methods", [
-                                ...settings.pay_at_hotel_methods,
-                                m.key,
-                              ]);
-                            }
-                          }}
-                          className={`px-3 py-1.5 text-[12px] font-medium rounded-lg border transition-colors ${
-                            selected
-                              ? "border-primary-500 bg-primary-50 text-primary-700"
-                              : "border-gray-200 text-gray-500 hover:border-gray-300"
-                          }`}
-                        >
-                          {m.label}
-                        </button>
-                      );
-                    })}
-                    <span className="text-[11px] text-gray-400 ml-1">
+                  <div className="mt-3 pt-3 border-t border-gray-200">
+                    <div className="flex flex-wrap gap-2">
+                      {[
+                        { key: "cash", label: t("settings.billing.cash") },
+                        { key: "card", label: t("settings.billing.card") },
+                      ].map((m) => {
+                        const selected = settings.pay_at_hotel_methods.includes(m.key);
+                        return (
+                          <button
+                            key={m.key}
+                            type="button"
+                            aria-pressed={selected}
+                            onClick={() => {
+                              if (selected && settings.pay_at_hotel_methods.length > 1) {
+                                updateSetting(
+                                  "pay_at_hotel_methods",
+                                  settings.pay_at_hotel_methods.filter((v) => v !== m.key),
+                                );
+                              } else if (!selected) {
+                                updateSetting("pay_at_hotel_methods", [
+                                  ...settings.pay_at_hotel_methods,
+                                  m.key,
+                                ]);
+                              }
+                            }}
+                            className={`px-3 py-1.5 text-[12px] font-medium rounded-lg border transition-colors ${
+                              selected
+                                ? "border-primary-500 bg-primary-50 text-primary-700"
+                                : "border-gray-200 text-gray-500 hover:border-gray-300"
+                            }`}
+                          >
+                            {m.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <p className="mt-2 text-[11px] text-gray-500">
                       {settings.pay_at_hotel_methods.length === 2
                         ? t("settings.billing.cashCardAccepted")
                         : settings.pay_at_hotel_methods.includes("cash")
                           ? t("settings.billing.cashOnly")
                           : t("settings.billing.cardOnly")}
-                    </span>
+                    </p>
                   </div>
                 )}
               </div>

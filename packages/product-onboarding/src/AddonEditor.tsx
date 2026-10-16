@@ -79,7 +79,8 @@ const models = [
     "addons.editor.unitPerGuestNight",
   ],
 ] as const;
-const categories = ["dining", "transport", "wellness", "experience", "other"] as const;
+/** The add-on categories, in the order the editor and the Add-ons filter chips show them. */
+export const ADDON_CATEGORIES = ["dining", "transport", "wellness", "experience", "other"] as const;
 // Fields under "More options"; opened when they hold values or have errors.
 const optionalFields = [
   "maxQuantity",
@@ -251,7 +252,7 @@ export function AddonEditor({
                 {t("addons.editor.category")}
               </legend>
               <div className="flex flex-wrap gap-2">
-                {categories.map((category) => (
+                {ADDON_CATEGORIES.map((category) => (
                   <label
                     key={category}
                     className={`relative cursor-pointer rounded-full border px-3.5 py-1.5 text-sm focus-within:ring-2 focus-within:ring-primary-500 ${values.category === category ? "border-primary-500 bg-primary-50 text-primary-700" : "border-gray-200 text-gray-700 hover:border-gray-300"}`}
