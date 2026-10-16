@@ -51,10 +51,10 @@ export async function readPmsRoomTypeDeletePlan(
         (SELECT count(*)::int FROM pms.room_blocks block WHERE block.property_id=$1::uuid
           AND (block.room_type_id=$2::uuid OR block.source_room_type_id=$2::uuid)
           AND block.status='active' AND block.ends_on>=$3::date) AS "roomBlocks",
-        -- Host or channel overrides on future nights; the calendar-owned parts are calendar_not_current.
+        -- Host or channel limits on future nights (bookings and holds are counted above).
         (SELECT count(*)::int FROM pms.inventory_days day WHERE day.property_id=$1::uuid
           AND day.room_type_id=$2::uuid AND day.stay_date>=$3::date
-          AND (day.assigned_count<>0 OR day.manual_sellable_limit_count IS NOT NULL
+          AND (day.manual_sellable_limit_count IS NOT NULL
             OR day.channel_sellable_limit_count IS NOT NULL OR day.closure_source_revision<>0)) AS "protectedNights",
         (SELECT count(*)::int FROM pms.rooms unit WHERE unit.property_id=$1::uuid
           AND unit.room_type_id=$2::uuid AND unit.status NOT IN ('available','retired')) AS "unavailableUnits"`,
@@ -93,7 +93,7 @@ export async function readPmsRoomTypeDeletePlan(
   // protected nights that no block, link or override explains) means the calendar needs updating.
   const explained = new Set([
     "last_operating_room",
-    ...(counts.reservations ? ["active_reservations"] : []),
+    ...(counts.reservations ? ["active_reservations", "protected_inventory"] : []),
     ...(counts.unavailableUnits ? ["protected_units"] : []),
     ...(counts.protectedNights ? ["protected_inventory"] : []),
     ...(counts.roomBlocks ? ["active_blocks", "protected_inventory"] : []),
