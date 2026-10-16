@@ -2,14 +2,18 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import {
+  BOT,
   FIXTURE_FILE,
+  ISSUE_TITLE,
   MARKER,
   PIN_FILE,
   beaconVersion,
   buildReport,
   fetchBeacon,
+  githubClient,
   integrityOf,
   readPin,
+  reconcile,
   statementDiff,
   surface,
 } from "./cloudflare-beacon-drift.mjs";
@@ -146,6 +150,82 @@ test("vendor code cannot close the statement code block", () => {
   assert.match(report.body, /\n`````\n\n<\/details>/);
 });
 
+function fakeClient(issues) {
+  const calls = [];
+  return {
+    calls,
+    openIssues: async () => issues,
+    createIssue: async (title, body) => (calls.push(["create", title, body]), { number: 99 }),
+    updateIssue: async (number, fields) => (calls.push(["update", number, fields]), {}),
+    comment: async (number, body) => (calls.push(["comment", number, body]), {}),
+  };
+}
+const issue = (number, body, login = BOT) => ({ number, body, user: { login } });
+
+test("reconcile opens one issue on the first mismatch", async () => {
+  const report = drift();
+  const client = fakeClient([issue(5, `quoting ${MARKER}`, "someone")]);
+  assert.equal(await reconcile({ client, report, override: "" }), "opened #99");
+  assert.deepEqual(client.calls, [["create", ISSUE_TITLE, report.body]]);
+});
+
+test("reconcile leaves an up-to-date issue alone and rewrites a stale one", async () => {
+  const report = drift();
+  const same = fakeClient([issue(7, report.body)]);
+  assert.equal(await reconcile({ client: same, report, override: "" }), "#7 is up to date");
+  assert.deepEqual(same.calls, []);
+
+  const reworded = fakeClient([issue(7, report.body.replace("Next step", "Next"))]);
+  assert.equal(await reconcile({ client: reworded, report, override: "" }), "updated #7");
+  assert.deepEqual(reworded.calls, [["update", 7, { body: report.body }]]);
+});
+
+test("reconcile comments when the live file changed again", async () => {
+  const report = drift();
+  const client = fakeClient([
+    issue(8, `${MARKER}\n<!-- live: sha384-older -->\n`),
+    issue(3, `${MARKER}`),
+  ]);
+  assert.equal(await reconcile({ client, report, override: "" }), "updated #3");
+  assert.deepEqual(
+    client.calls.map((c) => c.slice(0, 2)),
+    [
+      ["update", 3],
+      ["comment", 3],
+    ],
+  );
+  assert.match(client.calls[1][2], /changed again: now 2026\.10\.1/);
+});
+
+test("reconcile closes the bot's issues once the live file matches the pin", async () => {
+  const report = buildReport({
+    pin: integrityOf(NEW),
+    override: "",
+    fixture: NEW,
+    live: live(NEW),
+  });
+  const client = fakeClient([issue(4, MARKER), issue(6, MARKER, "someone"), issue(9, "unrelated")]);
+  assert.equal(await reconcile({ client, report, override: "" }), "closed #4");
+  assert.deepEqual(client.calls, [
+    ["comment", 4, `The live beacon matches the pin again (\`${integrityOf(NEW)}\`). Closing.`],
+    ["update", 4, { state: "closed", state_reason: "completed" }],
+  ]);
+  const none = fakeClient([]);
+  assert.equal(await reconcile({ client: none, report, override: "" }), "no open drift issue");
+});
+
+test("a run against an override never closes issues", async () => {
+  const report = buildReport({
+    pin: "sha384-x",
+    override: integrityOf(NEW),
+    fixture: NEW,
+    live: live(NEW),
+  });
+  const client = fakeClient([issue(4, MARKER)]);
+  assert.match(await reconcile({ client, report, override: integrityOf(NEW) }), /left as they are/);
+  assert.deepEqual(client.calls, []);
+});
+
 const response = (status, body, headers = {}) => new Response(body, { status, headers });
 
 test("fetchBeacon retries transient failures, then gives up", async () => {
@@ -159,4 +239,29 @@ test("fetchBeacon retries transient failures, then gives up", async () => {
     fetchBeacon({ fetchImpl: async () => response(404, ""), attempts: 2, delayMs: 0 }),
     /HTTP 404/,
   );
+});
+
+test("githubClient pages through open issues, skips pull requests and fails loudly", async () => {
+  const requests = [];
+  const page = (n) =>
+    Array.from({ length: n }, (_, i) => ({ number: i, pull_request: i === 0 ? {} : undefined }));
+  const client = githubClient({
+    token: "t",
+    repository: "o/r",
+    fetchImpl: async (url, init) => {
+      requests.push([url, init.method, init.headers.authorization]);
+      return response(200, JSON.stringify(url.endsWith("page=1") ? page(100) : page(2)));
+    },
+  });
+  assert.equal((await client.openIssues()).length, 99 + 1);
+  assert.deepEqual(requests, [
+    ["https://api.github.com/repos/o/r/issues?state=open&per_page=100&page=1", "GET", "Bearer t"],
+    ["https://api.github.com/repos/o/r/issues?state=open&per_page=100&page=2", "GET", "Bearer t"],
+  ]);
+  const failing = githubClient({
+    token: "t",
+    repository: "o/r",
+    fetchImpl: async () => response(403, "no"),
+  });
+  await assert.rejects(failing.createIssue("t", "b"), /POST \/issues: HTTP 403/);
 });

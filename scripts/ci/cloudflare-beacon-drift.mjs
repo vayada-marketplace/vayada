@@ -2,10 +2,12 @@
 // Daily drift check for the Cloudflare Web Analytics beacon that apps/landing pins with SRI, run
 // by .github/workflows/cloudflare-beacon-drift.yml. Cloudflare cannot version-pin the beacon, so
 // every Cloudflare release makes browsers refuse it on vayada.com until the pin is updated. On a
-// mismatch this prints a report for the reviewer and exits 1, so the scheduled run fails. It
-// never changes the pin: see engineering/cloudflare-beacon-pin-runbook.md.
+// mismatch this opens or updates one GitHub issue and exits 1; when the live file matches the pin
+// again it closes that issue. It never changes the pin: see
+// engineering/cloudflare-beacon-pin-runbook.md.
 //
-//   node scripts/ci/cloudflare-beacon-drift.mjs
+//   node scripts/ci/cloudflare-beacon-drift.mjs            # needs GITHUB_TOKEN, GITHUB_REPOSITORY
+//   node scripts/ci/cloudflare-beacon-drift.mjs --dry-run  # prints the report, touches no issue
 //
 // EXPECTED_INTEGRITY (the workflow_dispatch input) replaces the pin to exercise the alert path.
 // No dependencies on purpose: the job runs without `npm ci`.
@@ -17,6 +19,7 @@ export const BEACON_URL = "https://static.cloudflareinsights.com/beacon.min.js";
 export const PIN_FILE = "apps/landing/lib/cloudflareAnalytics.ts";
 export const FIXTURE_FILE = "tests/e2e/landing/fixtures/cloudflare-beacon.min.js";
 export const RUNBOOK = "engineering/cloudflare-beacon-pin-runbook.md";
+export const ISSUE_TITLE = "Cloudflare beacon changed: review and update the landing SRI pin";
 export const MARKER = "<!-- cloudflare-beacon-drift -->";
 const INTEGRITY = /^sha384-[A-Za-z0-9+/]+={0,2}$/;
 // Listed in the report so the reviewer sees at a glance how a new version sends data, loads code
@@ -95,7 +98,7 @@ function statementList(summary, statements) {
 }
 
 // Everything the report says, from the pin, the committed copy and the live response. The body is
-// deterministic for a given live file.
+// deterministic for a given live file, so a daily rerun leaves an up-to-date issue untouched.
 export function buildReport({ pin, override, fixture, live, repoUrl, runUrl }) {
   const expected = override || pin;
   const liveIntegrity = integrityOf(live.bytes);
@@ -190,12 +193,85 @@ export async function fetchBeacon({ fetchImpl = fetch, attempts = 3, delayMs = 5
   }
 }
 
+export function githubClient({
+  token,
+  repository,
+  api = "https://api.github.com",
+  fetchImpl = fetch,
+}) {
+  const request = async (method, path, body) => {
+    const response = await fetchImpl(`${api}/repos/${repository}${path}`, {
+      method,
+      headers: {
+        accept: "application/vnd.github+json",
+        authorization: `Bearer ${token}`,
+        "x-github-api-version": "2022-11-28",
+        ...(body ? { "content-type": "application/json" } : {}),
+      },
+      body: body ? JSON.stringify(body) : undefined,
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!response.ok) throw new Error(`${method} ${path}: HTTP ${response.status}`);
+    return response.json();
+  };
+  return {
+    // Open issues and pull requests; reconcile() keeps the ones this workflow opened.
+    async openIssues() {
+      const issues = [];
+      for (let page = 1; ; page++) {
+        const batch = await request("GET", `/issues?state=open&per_page=100&page=${page}`);
+        issues.push(...batch.filter((issue) => !issue.pull_request));
+        if (batch.length < 100) return issues;
+      }
+    },
+    createIssue: (title, body) => request("POST", "/issues", { title, body }),
+    updateIssue: (number, fields) => request("PATCH", `/issues/${number}`, fields),
+    comment: (number, body) => request("POST", `/issues/${number}/comments`, { body }),
+  };
+}
+
+// One open issue at a time: open it on the first mismatch, rewrite it when the report changes
+// (with a comment when the live file changed again), close it once the live file matches the
+// pin. A run against an EXPECTED_INTEGRITY override never closes anything. Only issues the
+// workflow opened count: in this public repository anyone can file one quoting the marker.
+export const BOT = "github-actions[bot]";
+export async function reconcile({ client, report, override }) {
+  const open = (await client.openIssues())
+    .filter((issue) => issue.user?.login === BOT && issue.body?.includes(MARKER))
+    .sort((a, b) => a.number - b.number);
+  if (report.matches) {
+    if (override) return "matches the override; issues left as they are";
+    for (const issue of open) {
+      await client.comment(
+        issue.number,
+        `The live beacon matches the pin again (\`${report.liveIntegrity}\`). Closing.`,
+      );
+      await client.updateIssue(issue.number, { state: "closed", state_reason: "completed" });
+    }
+    return open.length
+      ? `closed ${open.map((i) => `#${i.number}`).join(", ")}`
+      : "no open drift issue";
+  }
+  const [issue] = open;
+  if (!issue) return `opened #${(await client.createIssue(ISSUE_TITLE, report.body)).number}`;
+  if (issue.body === report.body) return `#${issue.number} is up to date`;
+  await client.updateIssue(issue.number, { body: report.body });
+  if (!issue.body.includes(`<!-- live: ${report.liveIntegrity} -->`)) {
+    await client.comment(
+      issue.number,
+      `The live beacon changed again: now ${report.liveVersion}, \`${report.liveIntegrity}\`. The description is updated.`,
+    );
+  }
+  return `updated #${issue.number}`;
+}
+
 async function main() {
+  const dryRun = process.argv.includes("--dry-run");
   const override = process.env.EXPECTED_INTEGRITY?.trim() ?? "";
   if (override && !INTEGRITY.test(override)) {
     throw new Error("EXPECTED_INTEGRITY must be sha384-<base64>");
   }
-  const { GITHUB_SERVER_URL, GITHUB_REPOSITORY, GITHUB_RUN_ID } = process.env;
+  const { GITHUB_SERVER_URL, GITHUB_REPOSITORY, GITHUB_RUN_ID, GITHUB_TOKEN } = process.env;
   const repoUrl =
     GITHUB_REPOSITORY && `${GITHUB_SERVER_URL || "https://github.com"}/${GITHUB_REPOSITORY}`;
   const report = buildReport({
@@ -208,8 +284,20 @@ async function main() {
   });
   console.log(report.summary);
   if (report.body) console.log(`\n${report.body}`);
-  if (process.env.GITHUB_STEP_SUMMARY) {
-    appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${report.summary}\n\n${report.body ?? ""}`);
+  const stepSummary = process.env.GITHUB_STEP_SUMMARY;
+  if (stepSummary) appendFileSync(stepSummary, `${report.summary}\n\n${report.body ?? ""}`);
+  if (!dryRun) {
+    if (!GITHUB_TOKEN || !GITHUB_REPOSITORY) {
+      throw new Error("needs GITHUB_TOKEN and GITHUB_REPOSITORY");
+    }
+    const client = githubClient({
+      token: GITHUB_TOKEN,
+      repository: GITHUB_REPOSITORY,
+      api: process.env.GITHUB_API_URL,
+    });
+    const outcome = await reconcile({ client, report, override });
+    console.log(`Issue: ${outcome}.`);
+    if (stepSummary) appendFileSync(stepSummary, `\nIssue: ${outcome}.\n`);
   }
   if (!report.matches) {
     console.error(`::error::${report.summary} See ${RUNBOOK}.`);
