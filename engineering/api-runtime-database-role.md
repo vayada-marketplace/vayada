@@ -246,7 +246,7 @@ current preflight would reject the legacy posture it restored. Fix forward with
 - A new product table needs nothing: default privileges cover it.
 - Migrations do not `GRANT` this login anything directly.
   `packages/backend-migration/src/runtimeLoginGrants.test.ts` fails on a new
-  one and lists the two reviewed exceptions (0431, 0477) with their reasons.
+  one and lists the reviewed exceptions (0431, 0477, 0486) with their reasons.
 - A new protected-class table (credential scope, migration evidence, worker
   allowlist, guarded-command state) must be added to the protected list in the
   preflight **and** its migration should `REVOKE ALL ... FROM vayada_next_api_runtime`
