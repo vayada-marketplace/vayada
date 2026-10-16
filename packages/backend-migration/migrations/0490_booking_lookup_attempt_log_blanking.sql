@@ -16,6 +16,7 @@ BEGIN
   IF EXISTS (
     SELECT 1 FROM platform.product_audit_events
     WHERE product = 'booking' AND action = 'booking.guest_lookup.attempt'
+      AND target_resource_product = 'booking'
       AND target_resource_type = 'lookup_client_address_hash'
       AND occurred_at > now() - INTERVAL '1 hour'
   ) THEN
