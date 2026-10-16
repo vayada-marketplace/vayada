@@ -2,7 +2,8 @@ import { create } from "react-test-renderer";
 import { describe, expect, it } from "vitest";
 
 import { BookingPagePreview } from "./BookingPagePreview";
-import { BOOKING_PAGE_FONT_PAIRINGS } from "./bookingPageBranding";
+
+const font = { headingFamily: "'Inter', sans-serif", bodyFamily: "'Inter', sans-serif" };
 
 describe("BookingPagePreview", () => {
   it("renders the shared Design Studio preview with live brand and localization values", () => {
@@ -10,7 +11,7 @@ describe("BookingPagePreview", () => {
       <BookingPagePreview
         currency="CHF"
         defaultLanguage="de"
-        font={BOOKING_PAGE_FONT_PAIRINGS[1]}
+        font={font}
         heroHeading="Hotel One"
         heroImage=""
         heroSubtext="A quiet stay in the mountains."
@@ -35,7 +36,7 @@ describe("BookingPagePreview", () => {
       <BookingPagePreview
         currency="CHF"
         defaultLanguage="de"
-        font={BOOKING_PAGE_FONT_PAIRINGS[1]}
+        font={font}
         heroHeading="Hotel One"
         heroImage=""
         heroSubtext="A quiet stay in the mountains."
@@ -71,7 +72,7 @@ describe("BookingPagePreview", () => {
       <BookingPagePreview
         currency="CHF"
         defaultLanguage="de"
-        font={BOOKING_PAGE_FONT_PAIRINGS[1]}
+        font={font}
         heroHeading="Hotel One"
         heroImage=""
         heroSubtext="A quiet stay in the mountains."

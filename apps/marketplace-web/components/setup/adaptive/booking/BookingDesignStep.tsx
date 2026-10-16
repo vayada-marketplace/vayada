@@ -13,6 +13,7 @@ import {
   type BookingDesignRendererSnapshot,
   type BookingDesignRevision,
 } from "@vayada/domain-booking";
+import { BRAND_FONT_PAIRINGS } from "@vayada/fonts/brand";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { AdaptiveSetupStepComponentProps } from "../AdaptiveSetupStepFormDispatcher";
@@ -59,8 +60,6 @@ const FONT_LABELS: Record<BookingDesignFontPairing, string> = {
   "imperial-serif": "Imperial Serif",
   "italiana-serif": "Italiana Serif",
 };
-const BOOKING_PREVIEW_FONT_STYLESHEET =
-  "https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Inter:wght@300;400;500;600;700&family=Italiana&family=Lora:ital,wght@0,400;0,700;1,400&family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Source+Sans+Pro:wght@300;400;600;700&display=swap";
 const DRAFT_FIELDS = ["booking.primary_color", "booking.font_pairing"] as const;
 type BookingDesignField = (typeof DRAFT_FIELDS)[number];
 
@@ -94,19 +93,6 @@ export function BookingDesignStep(props: AdaptiveSetupStepComponentProps) {
   const [saving, setSaving] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [reload, setReload] = useState(0);
-
-  useEffect(() => {
-    if (typeof document === "undefined") return;
-    const id = "adaptive-booking-preview-fonts";
-    const existing = document.getElementById(id);
-    if (existing) return;
-    const link = document.createElement("link");
-    link.id = id;
-    link.rel = "stylesheet";
-    link.href = BOOKING_PREVIEW_FONT_STYLESHEET;
-    document.head.appendChild(link);
-    return () => link.remove();
-  }, []);
 
   useEffect(() => {
     const next = adaptiveStepDraftRevision(route, step, "booking_design");
@@ -409,7 +395,7 @@ export function BookingDesignStep(props: AdaptiveSetupStepComponentProps) {
                       <span
                         className="text-base text-gray-950"
                         style={{
-                          fontFamily: BOOKING_DESIGN_FONT_PAIRINGS[fontPairing].headingFamily,
+                          fontFamily: BRAND_FONT_PAIRINGS[fontPairing].heading,
                         }}
                       >
                         {FONT_LABELS[fontPairing]}
@@ -482,7 +468,7 @@ function BookingPreview({
   choices: BookingDesignForm;
   message: string | null;
 }) {
-  const pairing = BOOKING_DESIGN_FONT_PAIRINGS[choices.fontPairing];
+  const fonts = BRAND_FONT_PAIRINGS[choices.fontPairing];
   const button = createBookingDesignButtonColors(choices.primaryColor);
   if (!snapshot) {
     return (
@@ -514,7 +500,7 @@ function BookingPreview({
     <section
       aria-label="Booking page preview"
       className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm"
-      style={{ fontFamily: pairing.bodyFamily }}
+      style={{ fontFamily: fonts.body }}
     >
       <div className="relative flex min-h-80 items-end overflow-hidden bg-gray-900 p-6 sm:min-h-[28rem] sm:p-10">
         {coverUrl && (
@@ -533,7 +519,7 @@ function BookingPreview({
           </p>
           <h3
             className="mt-3 text-3xl leading-tight sm:text-5xl"
-            style={{ fontFamily: pairing.headingFamily }}
+            style={{ fontFamily: fonts.heading }}
           >
             {snapshot.profile.displayName}
           </h3>

@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { EyeIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { BOOKING_GUEST_LANGUAGE_CODES } from "@vayada/locale-constants";
-import { BOOKING_PAGE_FONT_STYLESHEET_URL, BookingPagePreview } from "@vayada/product-onboarding";
+import { BookingPagePreview } from "@vayada/product-onboarding";
 import { settingsService, type CustomDomainStatus } from "@/services/settings";
 import { requireSelectedBookingHotelId } from "@/services/api/bookingHotelScope";
 import { getBookingHotelPropertyLink } from "@/services/api/bookingPropertyLinkClient";
@@ -741,7 +741,6 @@ export default function DesignStudioPage() {
   if (loading) {
     return (
       <div className="p-4 md:p-6 h-full flex items-center justify-center">
-        <link href={BOOKING_PAGE_FONT_STYLESHEET_URL} rel="stylesheet" />
         <div className="w-6 h-6 border-2 border-primary-500 border-t-transparent rounded-full animate-spin" />
       </div>
     );
@@ -750,7 +749,6 @@ export default function DesignStudioPage() {
   if (loadFailed) {
     return (
       <PageLayout>
-        <link href={BOOKING_PAGE_FONT_STYLESHEET_URL} rel="stylesheet" />
         <div className="max-w-md">
           <PageHeader title={t("designStudio.title")} />
           <FeedbackAlert type="error" message={t("designStudio.loadFailure")} />
@@ -772,7 +770,6 @@ export default function DesignStudioPage() {
   return (
     // pb-24 keeps content clear of the fixed Save bar below lg.
     <PageLayout variant="full" className="pb-24 lg:pb-6 lg:h-full flex flex-col">
-      <link href={BOOKING_PAGE_FONT_STYLESHEET_URL} rel="stylesheet" />
       <PageHeader
         className="shrink-0"
         title={t("designStudio.title")}
