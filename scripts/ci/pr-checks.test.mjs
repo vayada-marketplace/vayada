@@ -520,7 +520,8 @@ const SKIP_DIRS = new Set([
   ".turbo",
 ]);
 const CODE_FILE = /\.(?:[cm]?[jt]sx?|py|sh)$/;
-const CONFIG_FILE = /\.(?:json|ya?ml|css)$/;
+// Dockerfiles stay out: PR checks never build an image (asserted below).
+const CONFIG_FILE = /\.(?:json|ya?ml|css|scss|html|toml|ini|sql)$/;
 
 // Every source and config file in the checkout, as repo-relative paths.
 function repoFiles(dir = ROOT, out = []) {
@@ -574,6 +575,14 @@ function dependentsOf(name) {
   return [...found.values()];
 }
 
+const FRONTEND_ONLY = Object.keys(FRONTEND_ONLY_PACKAGES).map((dir) => {
+  const pkg = WORKSPACES.find((ws) => ws.dir === `packages/${dir}`);
+  assert.ok(pkg, `packages/${dir} is not a workspace`);
+  return pkg;
+});
+const ruleOf = (pkg) => selectJobs([`${pkg.dir}/src/index.ts`]).jobs;
+const jobsOf = (file) => selectJobs([file]).jobs;
+
 const APP_BROWSER_JOB = {
   "apps/pms-web": "pms_web_e2e",
   "apps/marketplace-web": "marketplace_web_e2e",
@@ -581,74 +590,116 @@ const APP_BROWSER_JOB = {
 };
 const ROOT_SCRIPTS = JSON.parse(read("package.json")).scripts;
 const API_SCRIPTS = WORKSPACES.find((ws) => ws.dir === "apps/api").scripts;
-const workspacesIn = (script) => [...script.matchAll(/--workspace[= ](\S+)/g)].map((m) => m[1]);
+const workspacesIn = (script) =>
+  [...script.matchAll(/(?:--workspace|-w)[= ](\S+)/g)].map((match) => match[1]);
+const WORKFLOW_JOBS = parse(WORKFLOW).jobs;
+const runText = (job) => (job.steps ?? []).map((step) => step.run ?? "").join("\n");
+const npmRuns = (text) => [...text.matchAll(/npm run ([\w:.-]+)/g)].map((match) => match[1]);
+
+// The root package.json scripts a job runs: `npm run <script>` in its steps, followed through
+// nested `npm run` calls and pre/post hooks.
+function rootScriptsRunBy(job) {
+  const found = new Set();
+  const queue = npmRuns(runText(job));
+  while (queue.length > 0) {
+    const name = queue.shift();
+    for (const script of [`pre${name}`, name, `post${name}`]) {
+      if (found.has(script) || ROOT_SCRIPTS[script] === undefined) continue;
+      found.add(script);
+      queue.push(...npmRuns(ROOT_SCRIPTS[script]));
+    }
+  }
+  return [...found];
+}
 
 test("frontend-only package rules match the dependents declared in every package.json", () => {
   const unitSuites = workspacesIn(ROOT_SCRIPTS["test:unit-suites"]);
   const backendBuild = workspacesIn(API_SCRIPTS["build:backend-packages"]);
-  for (const [dir, jobs] of Object.entries(FRONTEND_ONLY_PACKAGES)) {
-    const pkg = WORKSPACES.find((ws) => ws.dir === `packages/${dir}`);
-    assert.ok(pkg, `packages/${dir} is not a workspace`);
+  for (const pkg of FRONTEND_ONLY) {
+    const rule = ruleOf(pkg);
     const dependents = dependentsOf(pkg.name);
     for (const ws of dependents) {
+      const frontendOnly = FRONTEND_ONLY.find((other) => other.dir === ws.dir);
       assert.ok(
-        ws.dir !== "apps/api" && !ws.dir.startsWith("packages/backend-"),
+        frontendOnly || (ws.dir.startsWith("apps/") && ws.dir !== "apps/api"),
         `${ws.dir} depends on ${pkg.name}: remove it from FRONTEND_ONLY_PACKAGES`,
       );
+      for (const job of frontendOnly ? ruleOf(frontendOnly) : []) {
+        assert.ok(rule.includes(job), `${ws.dir} runs ${job}, so ${pkg.name} must too`);
+      }
     }
-    assert.ok(!backendBuild.includes(pkg.name), `build:backend-packages builds ${pkg.name}`);
+    for (const ws of [pkg, ...dependents]) {
+      assert.ok(!backendBuild.includes(ws.name), `build:backend-packages builds ${ws.name}`);
+    }
     const expected = new Set(dependents.map((ws) => APP_BROWSER_JOB[ws.dir]).filter(Boolean));
     if ([pkg, ...dependents].some((ws) => unitSuites.includes(ws.name))) expected.add("api_unit");
     assert.deepEqual(
-      [...jobs].sort(),
+      [...FRONTEND_ONLY_PACKAGES[pkg.dir.slice("packages/".length)]].sort(),
       [...expected].sort(),
-      `FRONTEND_ONLY_PACKAGES["${dir}"] must list the jobs of ${dependents.map((ws) => ws.dir).join(", ") || "no app"}`,
+      `${pkg.dir} must list the jobs of ${dependents.map((ws) => ws.dir).join(", ") || "no app"}`,
     );
+    // npm ci runs install scripts in every job, including the ones this rule skips.
+    for (const hook of ["preinstall", "install", "postinstall", "prepare"]) {
+      assert.equal(pkg.scripts[hook], undefined, `${pkg.name} has a ${hook} script`);
+    }
   }
 });
 
-// Files outside a frontend-only package that may still name it: they run in a job that every
-// frontend-only rule selects, or in none.
+// Files that may point at a frontend-only package even though their own changes run jobs its
+// rule skips.
 const PACKAGE_REFERENCE_ALLOWED = [
   /^scripts\/ci\/pr-checks(\.test)?\.mjs$/, // this selector
-  /^tests\/e2e\/first-party-auth\//, // first_party_auth
-  /^\.github\/workflows\/deploy-[\w-]+\.yml$/, // deploy path filters, not run by PR checks
   /^tools\/hotel-import-simulator\//, // a local tool no PR check runs
-  // Playwright projects no PR check runs (the Playwright guard below pins the ones that do).
-  /^tests\/e2e\/(booking-admin|vayada-admin|next-stack-smoke|booking-public-canary)\//,
 ];
 
 const IMPORT_SPECIFIER =
-  /(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*|^\s*import\s+)["'`]([^"'`]+)["'`]/gm;
+  /(?:\bfrom\s*|\bimport\s*\(\s*|\brequire(?:\.resolve)?\s*\(\s*|\bvi\.(?:mock|importActual)\s*\(\s*|^\s*import\s+)["'`]([^"'`]+)["'`]/gm;
+const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
 
-test("nothing outside their dependents reaches a frontend-only package", () => {
+// How a file can point at a package: its npm name, `packages/<dir>`, `../<dir>`, or `"<dir>"` as
+// a path segment of its own (join(root, "packages", "<dir>")).
+function referenceTo(pkg) {
+  const dir = pkg.dir.slice("packages/".length);
+  return new RegExp(
+    `${escapeRegExp(pkg.name)}(?![\\w-])|packages/${dir}(?![\\w-])|\\.\\./${dir}(?![\\w-])|["'\`]${dir}["'\`]`,
+  );
+}
+
+test("nothing that a skipped job runs reaches a frontend-only package", () => {
   const problems = [];
-  for (const dir of Object.keys(FRONTEND_ONLY_PACKAGES)) {
-    const pkg = WORKSPACES.find((ws) => ws.dir === `packages/${dir}`);
+  for (const pkg of FRONTEND_ONLY) {
+    const rule = ruleOf(pkg);
     const reachable = new Set([pkg.dir, ...dependentsOf(pkg.name).map((ws) => ws.dir)]);
-    const nameOrPath = new RegExp(
-      `${pkg.name.replace("/", "\\/")}(?![\\w-])|packages/${dir}(?![\\w-])`,
-    );
+    const reference = referenceTo(pkg);
     for (const file of FILES) {
       const ws = workspaceOf(file);
       if (ws && reachable.has(ws.dir)) continue;
-      if (file === "package.json") continue; // the root scripts; checked by the test above
-      if (file === WORKFLOW_FILE) continue; // checked per job below
+      // A change to this file runs only jobs that a change to the package runs anyway.
+      if (jobsOf(file).every((job) => rule.includes(job))) continue;
+      if (file === "package.json" || file === WORKFLOW_FILE) continue; // checked per job below
       if (PACKAGE_REFERENCE_ALLOWED.some((pattern) => pattern.test(file))) continue;
       const text = read(file);
-      if (nameOrPath.test(text)) problems.push(`${file} names ${pkg.name}`);
+      if (reference.test(text)) problems.push(`${file} names ${pkg.name}`);
+      if (/packages\/\*/.test(text)) problems.push(`${file} globs packages/*`);
       if (!CODE_FILE.test(file)) continue;
       for (const [, specifier] of text.matchAll(IMPORT_SPECIFIER)) {
         if (!specifier.startsWith(".")) continue;
         const target = relative(ROOT, resolve(dirname(join(ROOT, file)), specifier));
-        if (target.split("\\").join("/").startsWith(`${pkg.dir}/`))
-          problems.push(`${file} imports ${specifier}`);
+        const into = workspaceOf(`${target.split("\\").join("/")}/`);
+        if (into && reachable.has(into.dir)) {
+          problems.push(`${file} imports ${specifier}, and ${into.dir} uses ${pkg.name}`);
+        }
       }
     }
-    const rule = selectJobs([`${pkg.dir}/src/index.ts`]).jobs;
-    for (const [id, job] of Object.entries(parse(WORKFLOW).jobs)) {
-      if (nameOrPath.test(JSON.stringify(job)) && !rule.includes(id))
-        problems.push(`pr-checks.yml job ${id} names ${pkg.name}`);
+    for (const [id, job] of Object.entries(WORKFLOW_JOBS)) {
+      if (!SELECTABLE_JOBS.includes(id) || rule.includes(id)) continue;
+      if (reference.test(JSON.stringify(job))) problems.push(`pr-checks.yml job ${id} names it`);
+      for (const script of rootScriptsRunBy(job)) {
+        const text = ROOT_SCRIPTS[script];
+        if (reference.test(text) || /--workspaces\b|(^|\s)-ws\b/.test(text)) {
+          problems.push(`${id} runs the root script ${script}, which reaches ${pkg.name}`);
+        }
+      }
     }
   }
   assert.deepEqual(problems, [], "update FRONTEND_ONLY_PACKAGES or its allowed references");
@@ -663,7 +714,7 @@ const WORKFLOW_READERS = {
 
 test("only the frontend and first-party auth jobs run code that reads workflow files", () => {
   const readers = FILES.filter(
-    (file) => CODE_FILE.test(file) && /\.?github\/workflows/.test(read(file)),
+    (file) => CODE_FILE.test(file) && /\.?github\/workflows|["'`]\.github["'`]/.test(read(file)),
   );
   for (const file of readers) {
     assert.ok(
@@ -671,25 +722,35 @@ test("only the frontend and first-party auth jobs run code that reads workflow f
       `${file} reads workflow files: add the job that runs it to the other-workflows rule`,
     );
   }
-  const workflow = parse(WORKFLOW);
   const rule = selectJobs([".github/workflows/deploy-landing.yml"]).jobs;
   for (const command of Object.values(WORKFLOW_READERS)) {
-    const jobs = Object.entries(workflow.jobs)
-      .filter(([, job]) => job.steps?.some((step) => step.run?.includes(command)))
+    const jobs = Object.entries(WORKFLOW_JOBS)
+      .filter(([, job]) => runText(job).includes(command))
       .map(([id]) => id);
     assert.ok(jobs.length > 0, `no job runs ${command}`);
     for (const job of jobs) assert.ok(rule.includes(job), `${job} runs ${command}`);
+  }
+  // No other job may run code from those folders, directly or through a root script.
+  for (const [id, job] of Object.entries(WORKFLOW_JOBS)) {
+    if (!SELECTABLE_JOBS.includes(id) || rule.includes(id)) continue;
+    const text = [runText(job), ...rootScriptsRunBy(job).map((s) => ROOT_SCRIPTS[s])].join("\n");
+    for (const dir of Object.keys(WORKFLOW_READERS)) {
+      assert.ok(!text.includes(dir), `${id} runs code from ${dir}`);
+    }
   }
   // A local reusable workflow or action would make another workflow file part of PR checks.
   assert.doesNotMatch(WORKFLOW, /uses:\s*\.\//);
 });
 
+test("PR checks build no Docker image, so Dockerfiles cannot change what they test", () => {
+  assert.doesNotMatch(WORKFLOW, /docker\s+(?:build|buildx|compose)|docker\/build-push-action/);
+});
+
 test("only the Playwright jobs run Playwright, and nothing imports the root config", () => {
-  const workflow = parse(WORKFLOW);
   const rule = selectJobs(["playwright.config.ts"]).jobs;
   const projects = new Set();
-  for (const [id, job] of Object.entries(workflow.jobs)) {
-    const runs = (job.steps ?? []).map((step) => step.run ?? "").join("\n");
+  for (const [id, job] of Object.entries(WORKFLOW_JOBS)) {
+    const runs = runText(job);
     for (const [, project] of runs.matchAll(/npm run e2e:([\w-]+)/g)) projects.add(project);
     if (/playwright|\be2e:/.test(runs)) assert.ok(rule.includes(id), `${id} runs Playwright`);
   }
@@ -701,6 +762,21 @@ test("only the Playwright jobs run Playwright, and nothing imports the root conf
     "marketplace-web",
     "pms-web",
   ]);
+  // Project patterns are unanchored (/booking-web\/.*\.spec\.ts/): a spec anywhere whose path
+  // contains a PR-run project's folder runs in that project, so it must live in that folder.
+  const config = read("playwright.config.ts");
+  const patterns = Object.fromEntries(
+    [...config.matchAll(/name: "([\w-]+)-chromium",\s*testMatch: \/((?:\\\/|[^/\n])+)\//g)].map(
+      ([, name, source]) => [name, new RegExp(source)],
+    ),
+  );
+  const specs = FILES.filter((file) => file.startsWith("tests/e2e/"));
+  for (const project of projects) {
+    assert.ok(patterns[project], `no testMatch for ${project}-chromium`);
+    for (const spec of specs.filter((file) => patterns[project].test(file))) {
+      assert.ok(spec.startsWith(`tests/e2e/${project}/`), `${spec} runs in ${project}-chromium`);
+    }
+  }
   const rootConfig = join(ROOT, "playwright.config");
   const importers = FILES.filter(
     (file) =>
