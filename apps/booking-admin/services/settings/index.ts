@@ -331,6 +331,9 @@ export interface AddonItem {
   imageMediaObjectId?: string | null;
   photos?: AddonPhoto[];
   maxQuantity?: number;
+  /** VAY-2232: the notice guests must give, in hours. */
+  leadTimeHours?: number;
+  /** A lead time typed as free text before VAY-2232, until it is converted. */
   leadTime?: string;
   duration?: string;
   perPerson?: boolean;
