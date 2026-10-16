@@ -532,8 +532,8 @@ export default function PrivacyPage() {
                   </li>
                   <li>
                     <strong>Your browser:</strong> the booking site also keeps a few necessary items
-                    in your browser: which hotel and currency you chose, and the booking details you
-                    are filling in (for the current tab only).
+                    in your browser: the currency you chose, and the booking details you are filling
+                    in (for the current tab only).
                   </li>
                 </ul>
               </div>
@@ -553,7 +553,8 @@ export default function PrivacyPage() {
                   >
                     privacy policy
                   </a>
-                  .
+                  . To prevent fraud, Stripe.js stores two cookies on the booking site once the card
+                  payment form opens: __stripe_mid (for one year) and __stripe_sid (for 30 minutes).
                 </p>
                 <p className="mb-3">
                   The booking site and booking data are hosted by Amazon Web Services in the
