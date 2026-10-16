@@ -198,6 +198,7 @@ describe.skipIf(!url)("canonical Channex stay restrictions", () => {
       expect(fetcher).not.toHaveBeenCalled();
       expect(await allowed("2026-09-12", "2026-09-14")).toBe(true);
     }
+    // Rule edits no longer queue restriction-only ARI (0489, VAY-2208).
     expect(
       (
         await db.query(
@@ -205,7 +206,7 @@ describe.skipIf(!url)("canonical Channex stay restrictions", () => {
           [property],
         )
       ).rows[0].n,
-    ).toBeGreaterThan(0);
+    ).toBe(0);
     // Several full-horizon recomputations share the populated CI database.
   }, 15_000);
   it("scopes refresh and claims to one property and leaves other operations untouched", async () => {
@@ -486,7 +487,8 @@ describe.skipIf(!url)("canonical Channex stay restrictions", () => {
         targetState: state,
         ariSyncMutating,
       });
-    await setStayRestrictions([{ ...base, stopSell: true }]);
+    // A restriction-only job queued before 0489 dropped the rule and calendar triggers.
+    await db.query("SELECT pms.enqueue_restriction_ari($1,'rules:guarded')", [property]);
     expect(await store(false).claim({ workerId: "guarded", now: new Date() })).toBeNull();
     const worker = store(true);
     const claimed = await worker.claim({ workerId: "worker", now: new Date() });

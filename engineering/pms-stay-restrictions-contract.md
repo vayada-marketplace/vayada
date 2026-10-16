@@ -52,8 +52,9 @@ record unavailable capabilities, and restore bounded synthetic configuration.
 the old pricing was removed (#1764): every restriction-only `sync_ari` job ends in
 `PRICING_UNAVAILABLE`. The `GET`/`PUT /api/pms/properties/:propertyId/channex/stay-restrictions`
 route, its command input and the worker's daily restriction refresh are removed.
-The `pms.rate_rules` and operating-calendar triggers that still queue
-restriction-only jobs are dropped in a follow-up migration. Booking quotes keep
+Migration 0489 drops the `pms.rate_rules` and operating-calendar triggers that
+queued restriction-only jobs; `pms.enqueue_restriction_ari` stays because the
+platform runtime preflight and grant scripts still require it. Booking quotes keep
 enforcing `pms.rate_rules` (imported rules) through `pms.effective_stay_restrictions`.
 
 Hotels now edit stay rules in pricing-v2 (room Prices › Stay rules/dates). The

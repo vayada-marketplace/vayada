@@ -181,13 +181,12 @@ commission context.
 
 Dashboard source after VAY-769: Booking Web page/funnel telemetry is target-only
 when `BOOKING_WEB_EVENT_SINK=target` and `AUTH_DATABASE_URL`/WorkOS auth config
-are present. Dashboard readers should query `platform.domain_events` for
-`booking_web.*` distribution events and join the matching
-`platform.product_audit_events` rows when audit/correlation context is needed.
-The TypeScript intake no longer best-effort forwards telemetry to legacy Booking
-`/api/events`. Telemetry event keys use a client `eventId`/`idempotencyKey` when
-provided and otherwise the API request id; they must not dedupe all repeated
-events in a browser session.
+are present. Since VAY-2212 the sink writes one row per event to
+`distribution.booking_web_events` (no audit copy, no bots), which dashboard
+readers query; rows are deleted after 13 months. The TypeScript intake no longer
+best-effort forwards telemetry to legacy Booking `/api/events`. Events are unique
+per property by the browser's random `eventId`, so a retry is stored once while
+repeated events in a session stay separate rows.
 
 ## Transitional Compatibility
 
