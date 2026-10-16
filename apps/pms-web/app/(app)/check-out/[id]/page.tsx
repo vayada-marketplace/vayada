@@ -27,8 +27,8 @@ function NotCheckedInPage({ booking }: { booking: Booking }) {
   const isConfirmed = booking.status === "confirmed";
 
   return (
-    <main className="p-4 md:p-6">
-      <div className="mx-auto max-w-lg space-y-4">
+    <div className="p-4 md:p-6">
+      <div className="max-w-lg space-y-4">
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
           {t("checkOut.notCheckedInDescription")}
         </div>
@@ -58,7 +58,7 @@ function NotCheckedInPage({ booking }: { booking: Booking }) {
           </Link>
         </div>
       </div>
-    </main>
+    </div>
   );
 }
 
@@ -337,7 +337,7 @@ export default function CheckOutPage() {
 
   if (booking.status === "checked_out" && !confirmationFlags) {
     return (
-      <main className="mx-auto max-w-3xl p-4 md:p-6">
+      <div className="max-w-3xl p-4 md:p-6">
         <div className="rounded-2xl border border-green-200 bg-white p-6 shadow-sm">
           <p className="text-sm font-semibold uppercase tracking-wide text-green-700">
             {t("checkOut.checkedOut")}
@@ -356,13 +356,13 @@ export default function CheckOutPage() {
             </Link>
           </div>
         </div>
-      </main>
+      </div>
     );
   }
 
   if (confirmationFlags) {
     return (
-      <main className="mx-auto max-w-3xl p-4 md:p-6">
+      <div className="max-w-3xl p-4 md:p-6">
         <div className="rounded-2xl border border-green-200 bg-white p-6 shadow-sm">
           <p className="text-sm font-semibold uppercase tracking-wide text-green-700">
             {t("checkOut.checkedOut")}
@@ -407,13 +407,13 @@ export default function CheckOutPage() {
             </Link>
           </div>
         </div>
-      </main>
+      </div>
     );
   }
 
   return (
-    <main className="min-h-[100dvh] bg-gray-50 p-4 md:p-6">
-      <div className="mx-auto max-w-7xl space-y-5">
+    <div className="p-4 md:p-6">
+      <div className="max-w-7xl space-y-5">
         <header className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <p className="text-sm text-gray-500">
@@ -837,7 +837,7 @@ export default function CheckOutPage() {
           </aside>
         </div>
       </div>
-    </main>
+    </div>
   );
 }
 

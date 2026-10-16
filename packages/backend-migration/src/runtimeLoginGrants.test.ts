@@ -9,6 +9,8 @@ const REVIEWED: Record<string, string> = {
   "0431_channex_alert_resolution_runtime_grant.sql": "column grant to resolve Channex alerts",
   "0477_booking_pricing_acceptance_amendments.sql":
     "the default-privilege DML, explicit because a trigger reads the table as the writing role",
+  "0486_booking_web_events.sql":
+    "repeats the default-privilege DML on a new product table; merged just after this guard (VAY-2212) and kept as applied",
 };
 const GRANT_TO_API_LOGIN = /\b(?:GRANT\b[^;]*?\bTO|OWNER\s+TO)\b[^;]*?\bvayada_next_api_runtime\b/i;
 const directory = new URL("../migrations/", import.meta.url);

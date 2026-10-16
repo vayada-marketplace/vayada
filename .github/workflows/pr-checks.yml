@@ -9,6 +9,14 @@ on:
       - "fm/**"
       - "fix/**"
       - "flamurmaliqi2811/**"
+  # The merge queue tests each queued PR on top of main and the entries ahead of it; the ruleset
+  # waits for the same "Required Checks" status there.
+  merge_group:
+    types: [checks_requested]
+    branches:
+      - main
+  # A full run of every job on any branch, e.g. as the release precheck on the main tip.
+  workflow_dispatch:
 
 concurrency:
   group: pr-checks-${{ github.event.pull_request.number || github.ref }}
@@ -28,6 +36,7 @@ jobs:
       contents: read
     outputs:
       run_frontend: ${{ steps.select.outputs.run_frontend }}
+      run_frontend_build: ${{ steps.select.outputs.run_frontend_build }}
       run_first_party_auth: ${{ steps.select.outputs.run_first_party_auth }}
       run_pms_web_e2e: ${{ steps.select.outputs.run_pms_web_e2e }}
       run_marketplace_web_e2e: ${{ steps.select.outputs.run_marketplace_web_e2e }}
@@ -41,15 +50,27 @@ jobs:
       - name: Checkout merge commit and its parents
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          fetch-depth: 2
+          # A queue entry sits on the entries ahead of it, so it needs enough history to reach main.
+          fetch-depth: ${{ github.event_name == 'merge_group' && 50 || 2 }}
           persist-credentials: false
+
+      - name: Fetch the merge queue's base branch
+        if: github.event_name == 'merge_group'
+        env:
+          BASE_REF: ${{ github.event.merge_group.base_ref }}
+        # Without the base the selector cannot find a merge-base and runs every job.
+        run: |
+          git fetch --no-tags --depth=50 origin "+${BASE_REF}:refs/remotes/origin/merge-queue-base" ||
+            echo "::warning::Could not fetch ${BASE_REF}; every job will run"
 
       - name: Select jobs from changed paths
         id: select
+        env:
+          MERGE_GROUP_BASE: refs/remotes/origin/merge-queue-base
         run: node scripts/ci/pr-checks.mjs select
 
   frontend:
-    name: Frontend Test, Typecheck, Lint, Build
+    name: Frontend Test, Typecheck, Lint
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: [changes]
@@ -107,6 +128,31 @@ jobs:
 
       - name: Booking Web tests
         run: npm --workspace vayada-booking-engine-frontend run test
+
+  # The second half of the old frontend job, so it builds while frontend typechecks and lints.
+  # `npm run build` needs nothing from frontend's steps: apps/api comes first and its prebuild
+  # builds every backend and domain package the apps import.
+  frontend_build:
+    name: Frontend Build and App Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [changes]
+    if: needs.changes.outputs.run_frontend_build == 'true'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
 
       - name: Build
         run: npm run build
@@ -446,6 +492,7 @@ jobs:
   # Each shard gets its own PostgreSQL cluster, so cluster-wide role proofs stay isolated:
   #   platform    - identity, legacy owner, finance worker, Channex worker and authorization proofs
   #   pms         - the PMS/booking/finance integration batch and the migration suites
+  #   pricing     - pricing on the ordinary login in its own database (split from pms, VAY-2238)
   #   hotel-setup - hotel setup on the ordinary API login, shared setup profile, logo media and
   #                 nearby places
   # Steps without a `matrix.shard` condition run in every shard.
@@ -459,11 +506,11 @@ jobs:
       fail-fast: false
       matrix:
         postgres: [16, 17]
-        shard: [platform, pms, hotel-setup]
+        shard: [platform, pms, pricing, hotel-setup]
 
     services:
       postgres:
-        image: public.ecr.aws/docker/library/postgres:${{ matrix.postgres }}-alpine
+        image: ghcr.io/vayada-marketplace/ci-postgres:${{ matrix.postgres }}-alpine
         env:
           POSTGRES_USER: vayada_test
           POSTGRES_PASSWORD: vayada_test
@@ -856,11 +903,12 @@ jobs:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
       # Pricing on the ordinary login (VAY-2057). Own database: these suites commit fixture
-      # properties and slugs that other PMS-shard suites would see. The whole offer-owner file
+      # properties and slugs, so they stay out of vayada_api_test. The whole offer-owner file
       # runs here, last, including its restricted Channex login cases (VAY-2113): they create,
-      # grant and drop the cluster-wide Channex worker role inside each case.
+      # grant and drop the cluster-wide Channex worker role inside each case. Its own shard so it
+      # runs alongside the PMS batch instead of after it (VAY-2238).
       - name: Run pricing PostgreSQL integration in an isolated database
-        if: matrix.shard == 'pms'
+        if: matrix.shard == 'pricing'
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_pricing_test
           TARGET_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_pricing_test
@@ -949,9 +997,25 @@ jobs:
           src/platform/platformMediaS3.test.ts
           src/domains/propertyMediaCommandRepository.test.ts
 
+      - name: Verify booking-page analytics storage and readers on PostgreSQL
+        if: matrix.shard == 'hotel-setup'
+        run: >-
+          npm --workspace vayada-api run test -- --no-file-parallelism
+          src/platform/bookingWebTelemetry.integration.test.ts
+          src/platform/bookingFunnel.integration.test.ts
+          src/bookingDashboardMoney.integration.test.ts
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+
       - name: Verify platform media cleanup on PostgreSQL
         if: matrix.shard == 'hotel-setup'
         run: npm --workspace vayada-api run test -- --no-file-parallelism src/jobs/platformMediaCleanup.integration.test.ts
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+
+      - name: Verify booking web event retention on PostgreSQL
+        if: matrix.shard == 'hotel-setup'
+        run: npm --workspace vayada-api run test -- --no-file-parallelism src/jobs/bookingWebEventRetention.integration.test.ts
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
@@ -1066,7 +1130,7 @@ jobs:
 
     services:
       postgres:
-        image: public.ecr.aws/docker/library/postgres:${{ matrix.postgres }}-alpine
+        image: ghcr.io/vayada-marketplace/ci-postgres:${{ matrix.postgres }}-alpine
         env:
           POSTGRES_USER: vayada_test
           POSTGRES_PASSWORD: vayada_test
@@ -1148,7 +1212,7 @@ jobs:
 
     services:
       postgres:
-        image: public.ecr.aws/docker/library/postgres:15-alpine
+        image: ghcr.io/vayada-marketplace/ci-postgres:15-alpine
         env:
           POSTGRES_USER: ${{ matrix.db_user }}
           POSTGRES_PASSWORD: ${{ matrix.db_password }}
@@ -1162,7 +1226,7 @@ jobs:
           - ${{ matrix.db_port }}:5432
 
       auth-postgres:
-        image: public.ecr.aws/docker/library/postgres:15-alpine
+        image: ghcr.io/vayada-marketplace/ci-postgres:15-alpine
         env:
           POSTGRES_USER: vayada_auth_user
           POSTGRES_PASSWORD: vayada_auth_password
@@ -1272,6 +1336,7 @@ jobs:
     needs:
       - changes
       - frontend
+      - frontend_build
       - first_party_auth
       - pms_web_e2e
       - marketplace_web_e2e

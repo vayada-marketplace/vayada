@@ -237,6 +237,10 @@ export type ApiConfig = {
   propertySetupDraftRetentionEnabled: boolean;
   propertySetupDraftRetentionIntervalMs: number;
   propertySetupDraftRetentionBatchSize: number;
+  /** Deletes booking-page analytics older than 13 months (VAY-2212); on by default. */
+  bookingWebEventRetentionEnabled: boolean;
+  bookingWebEventRetentionIntervalMs: number;
+  bookingWebEventRetentionBatchSize: number;
   pmsInventoryPublicOfferRetryEnabled: boolean;
   pmsInventoryPublicOfferRetryIntervalMs: number;
   /** Kill switch for the hourly calendar auto-open producer (VAY-2066); on by default. */
@@ -1420,6 +1424,21 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       env,
       "PROPERTY_SETUP_DRAFT_RETENTION_BATCH_SIZE",
       100,
+    ),
+    bookingWebEventRetentionEnabled: readBooleanEnv(
+      env,
+      "BOOKING_WEB_EVENT_RETENTION_ENABLED",
+      true,
+    ),
+    bookingWebEventRetentionIntervalMs: readTimerIntervalEnv(
+      env,
+      "BOOKING_WEB_EVENT_RETENTION_INTERVAL_MS",
+      24 * 60 * 60 * 1000,
+    ),
+    bookingWebEventRetentionBatchSize: readPositiveIntegerEnv(
+      env,
+      "BOOKING_WEB_EVENT_RETENTION_BATCH_SIZE",
+      1_000,
     ),
     pmsInventoryPublicOfferRetryEnabled: readBooleanEnv(
       env,

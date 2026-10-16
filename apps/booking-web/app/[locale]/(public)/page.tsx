@@ -14,6 +14,7 @@ import PropertyGallery from "@/components/booking/PropertyGallery";
 import { useHotel, useSlug } from "@/contexts/HotelContext";
 import { calculateNights, formatDateShort, formatDate, ensureMinOneNight } from "@/lib/utils";
 import { trackEvent } from "@/services/api/tracking";
+import { onAnalyticsAllowed } from "@/services/api/analyticsConsent";
 import { hotelService } from "@/services/api/hotel";
 import { useBookingSteps } from "@/lib/hooks/useBookingSteps";
 import { useStayPrices } from "@/lib/hooks/useStayPrices";
@@ -98,7 +99,9 @@ function HomePageContent() {
   const searchParams = useSearchParams();
 
   useEffect(() => {
-    trackEvent(slug, "page_visit");
+    trackEvent(slug, "page_visit", {});
+    // VAY-2197: a first visit starts before the guest answers; "Allow" starts it then.
+    return onAnalyticsAllowed(slug, () => trackEvent(slug, "page_visit", {}));
   }, [slug]);
 
   // Initialize from URL params so back-navigation from /book preserves the
@@ -201,6 +204,7 @@ function HomePageContent() {
           : 0,
   );
   const selectRoom = (publicOfferKey: string, roomCount: number) => {
+    trackEvent(slug, "rate_selected", { entry: "room_card" });
     const params = new URLSearchParams(bookParams);
     params.set("offer", publicOfferKey);
     if (roomCount > 1) params.set("rooms", String(roomCount));
@@ -602,6 +606,7 @@ function HomePageContent() {
                   childGuests={effectiveChildren}
                   promoCode={appliedPromo?.code ?? null}
                   onSelect={selectRoom}
+                  onView={() => trackEvent(slug, "room_viewed", { roomTypeId: room.roomTypeId })}
                 />
               ))}
             </div>

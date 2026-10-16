@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { loadStripe } = vi.hoisted(() => ({ loadStripe: vi.fn(() => Promise.resolve(null)) }));
 
-vi.mock("@stripe/stripe-js", () => ({ loadStripe }));
+vi.mock("@stripe/stripe-js/pure", () => ({ loadStripe }));
 
 import stripeForAccount from "./stripe";
 

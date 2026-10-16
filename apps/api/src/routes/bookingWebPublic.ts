@@ -40,12 +40,13 @@ import type { ExternalChangePresentationPort } from "../domains/booking/external
 import { pmsRoomStayRestrictionReason } from "../domains/pmsRoomSelectionConflicts.js";
 import {
   bestBookingPromotion,
+  BOOKING_WEB_ANALYTICS_CONSENT_VERSION,
   evaluateSameDayBooking,
-  FUNNEL_EVENT_TYPES,
-  FUNNEL_PAYMENT_METHODS,
+  isFunnelId,
   isManualPricingPaymentMethod,
   parseBookingFlexibleCancellationTerms,
   parseBookingRoomSelection,
+  parseFunnelEventMetadata,
   SAME_DAY_BOOKING_POLICY_DEFAULTS,
   type AddonEconomicTerms,
   type BookedCancellationOutcome,
@@ -75,6 +76,7 @@ import { publishAffiliateReservationLifecycle } from "../domains/bookingAffiliat
 import type { BankTransferBookingOperations } from "../domains/financeBankTransferBooking.js";
 import { lockPmsInventoryMutationScope } from "../domains/pmsInventoryMutationLock.js";
 import { releaseAbandonedBookingEdits } from "../jobs/pendingBookingEditCleanup.js";
+import { createBookingWebEventRateLimit } from "../platform/bookingWebEventRateLimit.js";
 import { quoteTargetRoomSelection } from "./bookingWebMixedQuote.js";
 import { pricingRetiredError } from "./pricingRetired.js";
 import { reserveTargetMixedBooking } from "./bookingWebMixedReservation.js";
@@ -211,8 +213,6 @@ type BookingWebTelemetryEventRequest = {
   event_type?: string;
   eventId?: string;
   event_id?: string;
-  idempotencyKey?: string;
-  idempotency_key?: string;
   sessionId?: string;
   session_id?: string;
   metadata?: Record<string, unknown>;
@@ -237,16 +237,16 @@ export type BookingWebAffiliateClickEvent = {
   userAgent?: string;
 };
 
+/** No request id or IP address: neither leads back to the guest (VAY-2197). */
 export type BookingWebTelemetryEvent = {
   propertyId: string;
   hotelSlug: string;
   eventType: string;
-  eventId?: string;
-  sessionId?: string;
-  requestId: string;
+  eventId: string;
+  sessionId: string;
   occurredAt: Date;
+  /** Only to tell bots apart; not stored. */
   userAgent?: string;
-  ipAddress?: string;
   metadata: Record<string, unknown>;
 };
 
@@ -510,6 +510,7 @@ export async function registerBookingWebPublicRoutes(
   options: BookingWebPublicRoutesOptions,
 ): Promise<void> {
   const now = options.now ?? (() => new Date());
+  const eventRateLimit = createBookingWebEventRateLimit({ now: () => now().getTime() });
   const checkoutAdapter = options.checkoutAdapter;
   const affiliateAdapter =
     options.affiliateAdapter ?? createUnavailableBookingWebAffiliateAdapter();
@@ -1140,59 +1141,75 @@ export async function registerBookingWebPublicRoutes(
     },
   );
 
-  app.post<{ Body: BookingWebTelemetryEventRequest }>("/events", async (request, reply) => {
-    if (request.body?.analyticsConsent !== true || request.body?.consentVersion !== 1) {
-      return reply.header("Cache-Control", "no-store").status(204).send();
-    }
-    const hotelSlug = firstString(request.body?.hotelSlug, request.body?.hotel_slug);
-    const eventType = firstString(request.body?.eventType, request.body?.event_type);
-    if (!hotelSlug || !eventType) {
-      throw createHttpError(400, "Hotel slug and event type are required.");
-    }
-    const metadata = recordBody(request.body?.metadata);
-    if (metadata["funnelVersion"] === 1) {
-      const sequence = metadata["funnelSequence"];
-      const method = metadata["paymentMethod"];
+  // Funnel events only (VAY-2197): each type's own allowlisted properties and random ids, so
+  // nothing a guest typed can be stored. Events are a few hundred bytes.
+  app.post<{ Body: BookingWebTelemetryEventRequest }>(
+    "/events",
+    { bodyLimit: 2048 },
+    async (request, reply) => {
+      // Booking Web posts these straight to next-api as text/plain, a CORS "simple" request with
+      // no preflight, so the API sees the guest's address (VAY-2214). Fastify hands it over as a
+      // string.
+      const body =
+        typeof request.body === "string" ? parseTelemetryEventBody(request.body) : request.body;
       if (
-        !(FUNNEL_EVENT_TYPES as readonly string[]).includes(eventType) ||
-        !firstString(request.body?.sessionId, request.body?.session_id) ||
-        !Number.isSafeInteger(sequence) ||
-        Number(sequence) < 1 ||
-        (["complete_booking_clicked", "payment_authorized", "booking_completed"].includes(
-          eventType,
-        ) &&
-          !(FUNNEL_PAYMENT_METHODS as readonly unknown[]).includes(method))
+        body?.analyticsConsent !== true ||
+        body?.consentVersion !== BOOKING_WEB_ANALYTICS_CONSENT_VERSION
       ) {
+        return reply.header("Cache-Control", "no-store").status(204).send();
+      }
+      const hotelSlug = firstString(body?.hotelSlug, body?.hotel_slug);
+      const eventType = firstString(body?.eventType, body?.event_type);
+      if (!hotelSlug || !eventType) {
+        throw createHttpError(400, "Hotel slug and event type are required.");
+      }
+      const metadata = parseFunnelEventMetadata(eventType, body?.metadata);
+      const eventId = firstString(body?.eventId, body?.event_id);
+      const sessionId = firstString(body?.sessionId, body?.session_id);
+      if (!metadata || !isFunnelId(eventId) || !isFunnelId(sessionId)) {
         throw createHttpError(400, "Invalid booking funnel event.");
       }
-    }
-    if (options.attributionSink) {
-      const profile = await options.profileRepository.findProfileBySlug(hotelSlug);
-      if (!profile) {
-        throw createHttpError(404, "Hotel not found.");
+      // Per address, session and hotel, before any database read (VAY-2214). Nothing is stored
+      // for a refused event, and the browser ignores the answer.
+      const limit = eventRateLimit({ address: request.ip, sessionId, hotelSlug });
+      if (!limit.allowed) {
+        // No address or session; the slug names the hotel being flooded.
+        if (limit.firstInWindow)
+          request.log.warn(
+            limit.scope === "hotel" ? { limit: limit.scope, hotelSlug } : { limit: limit.scope },
+            "Booking Web funnel events rate limited",
+          );
+        return reply
+          .header("Cache-Control", "no-store")
+          .header("Retry-After", String(limit.retryAfterSeconds))
+          .status(429)
+          .send({
+            statusCode: 429,
+            error: "Too Many Requests",
+            message: "Too many booking funnel events.",
+          });
       }
-      await options.attributionSink.recordTelemetryEvent({
-        propertyId: profile.hotel.propertyId,
-        hotelSlug,
-        eventType,
-        eventId: firstString(
-          request.body?.eventId,
-          request.body?.event_id,
-          request.body?.idempotencyKey,
-          request.body?.idempotency_key,
-        ),
-        sessionId: firstString(request.body?.sessionId, request.body?.session_id),
-        requestId: String(request.id),
-        occurredAt: now(),
-        userAgent: request.headers["user-agent"],
-        ipAddress: request.ip,
-        metadata: recordBody(request.body?.metadata),
-      });
-    }
-    reply.header("Cache-Control", "no-store");
-    reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-telemetry");
-    return reply.status(204).send();
-  });
+      if (options.attributionSink) {
+        const profile = await options.profileRepository.findProfileBySlug(hotelSlug);
+        if (!profile) {
+          throw createHttpError(404, "Hotel not found.");
+        }
+        await options.attributionSink.recordTelemetryEvent({
+          propertyId: profile.hotel.propertyId,
+          hotelSlug,
+          eventType,
+          eventId,
+          sessionId,
+          occurredAt: now(),
+          userAgent: request.headers["user-agent"],
+          metadata,
+        });
+      }
+      reply.header("Cache-Control", "no-store");
+      reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-telemetry");
+      return reply.status(204).send();
+    },
+  );
 
   if (options.affiliateRepository) {
     await registerBookingWebAffiliateRoutes(app, {
@@ -1223,7 +1240,12 @@ export async function registerBookingWebPublicRoutes(
 
 function writeBookingWebCorsHeaders(request: FastifyRequest, reply: FastifyReply): void {
   const origin = request.headers.origin;
-  if (!isAllowedBookingWebOrigin(origin)) {
+  // Funnel events come from any hotel's booking site, custom domains included (VAY-2214). The
+  // endpoint is public, takes no credentials and answers with no body, so any https origin may post.
+  const allowed =
+    isAllowedBookingWebOrigin(origin) ||
+    (request.url.split("?", 1)[0] === "/api/booking-web/events" && isHttpsOrigin(origin));
+  if (!allowed || typeof origin !== "string") {
     reply.header("Vary", "Origin");
     return;
   }
@@ -1240,6 +1262,27 @@ function writeBookingWebCorsHeaders(request: FastifyRequest, reply: FastifyReply
 
 function bookingLookupClientAddressHash(request: FastifyRequest): string {
   return sha256Hex(`booking-lookup-client:${request.ip || "unknown"}`);
+}
+
+function isHttpsOrigin(origin: unknown): origin is string {
+  if (typeof origin !== "string") return false;
+  try {
+    return new URL(origin).protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function parseTelemetryEventBody(text: string): BookingWebTelemetryEventRequest {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw createHttpError(400, "Invalid booking funnel event.");
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+    throw createHttpError(400, "Invalid booking funnel event.");
+  return parsed as BookingWebTelemetryEventRequest;
 }
 
 function isAllowedBookingWebOrigin(origin: unknown): origin is string {

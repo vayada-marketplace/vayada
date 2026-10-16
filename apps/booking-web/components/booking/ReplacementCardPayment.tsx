@@ -5,6 +5,7 @@ import { PaymentElement, useElements, useStripe } from "@stripe/react-stripe-js"
 import StripeProvider from "@/components/StripeProvider";
 import { ApiError } from "@/services/api/client";
 import { deviceTimeOf } from "@/lib/serverClock";
+import { trackEvent } from "@/services/api/tracking";
 import {
   completePricingCardPayment,
   type PricingCardPaymentRequired,
@@ -83,12 +84,18 @@ function CardForm({
         redirect: "if_required",
       });
       if (stripeError) {
+        // A card form that isn't filled in yet isn't a failed payment. Never Stripe's decline
+        // code: it says something about the guest's card.
+        if (stripeError.type !== "validation_error")
+          trackEvent(slug, "booking_error", { step: "payment", reason: "payment_failed" });
         setError(stripeError.message || "The card payment did not go through. Please try again.");
         started.current = false;
         return;
       }
+      trackEvent(slug, "payment_authorized", { paymentMethod: "card" });
       onPaid(await confirmWithServer());
     } catch {
+      trackEvent(slug, "booking_error", { step: "payment", reason: "booking_uncertain" });
       setError(
         request
           ? "We couldn’t confirm your card authorisation yet. If it went through, we’ll email you when we answer."

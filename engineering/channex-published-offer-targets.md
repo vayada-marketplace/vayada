@@ -1274,8 +1274,8 @@ Inventory-owned changes reach this availability lane through
 materialization, room closure, physical-capacity changes, room blocks, assignment
 transfers, host actions, and linked-inventory reconciliation retain that outbox
 intent in the same transaction as their source mutation. Inventory outbox work
-enqueues an unrestricted `channex.sync_ari` job; rule and calendar-restriction
-triggers continue to enqueue `restrictionsOnly` work.
+enqueues an unrestricted `channex.sync_ari` job. The rule and calendar-restriction
+triggers that queued `restrictionsOnly` work were dropped in 0489 (VAY-2208).
 
 Manual-booking creation and the manual no-show, cancellation, and stay-correction
 paths return the exact primary room-type dates changed by occupied-inventory
