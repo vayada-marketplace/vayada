@@ -192,7 +192,7 @@
     "addedToTrip": "Added to Trip",
     "addToTrip": "Add to Trip",
     "pricePerPersonNight": "Price per person / night",
-    "leadTime": "Lead time",
+    "needsNotice": "{hours, plural, =48 {Needs 2 days’ notice} =72 {Needs 3 days’ notice} =168 {Needs 1 week’s notice} other {Needs # hours’ notice}}",
     "showPhoto": "Show photo {number}",
     "closeDetails": "Close add-on details"
   },

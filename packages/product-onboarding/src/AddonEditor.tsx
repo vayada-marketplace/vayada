@@ -17,7 +17,10 @@ export type AddonEditorValues = {
   duration: string;
   location: string;
   maxGuests: string;
-  leadTime: string;
+  /** VAY-2232: the notice guests must give, in hours ("" for none). */
+  leadTimeHours: "" | `${AddonLeadTimeHours}`;
+  /** A lead time typed as free text before the fixed choices; kept until one is chosen. */
+  legacyLeadTime: string;
   maxQuantity: string;
   perPerson: boolean;
   perNight: boolean;
@@ -35,7 +38,8 @@ export function emptyAddonValues(currency: string): AddonEditorValues {
     duration: "",
     location: "",
     maxGuests: "",
-    leadTime: "",
+    leadTimeHours: "",
+    legacyLeadTime: "",
     maxQuantity: "1",
     perPerson: false,
     perNight: false,
@@ -81,11 +85,25 @@ const models = [
 ] as const;
 /** The add-on categories, in the order the editor and the Add-ons filter chips show them. */
 export const ADDON_CATEGORIES = ["dining", "transport", "wellness", "experience", "other"] as const;
+/** VAY-2232: the lead times a host can pick (the API accepts exactly these), with the option's
+ * label and the notice guests see. */
+export const addonLeadTimes = [
+  [12, "addons.editor.leadTime12h", "addons.editor.needs12hNotice"],
+  [24, "addons.editor.leadTime24h", "addons.editor.needs24hNotice"],
+  [48, "addons.editor.leadTime2d", "addons.editor.needs2dNotice"],
+  [72, "addons.editor.leadTime3d", "addons.editor.needs3dNotice"],
+  [168, "addons.editor.leadTime1w", "addons.editor.needs1wNotice"],
+] as const;
+export type AddonLeadTimeHours = (typeof addonLeadTimes)[number][0];
+/** The "Needs 24 hours' notice" message key for a lead time, or null for none. */
+export function addonLeadTimeNoticeKey(hours: number | string | null | undefined) {
+  return addonLeadTimes.find(([value]) => String(value) === String(hours))?.[2] ?? null;
+}
 // Fields under "More options"; opened when they hold values or have errors.
 const optionalFields = [
   "maxQuantity",
   "duration",
-  "leadTime",
+  "leadTimeHours",
   "location",
   "maxGuests",
   "partnerCommissionRate",
@@ -129,7 +147,7 @@ export function AddonEditor({
   const [saving, setSaving] = useState(false);
   const [moreOpen, setMoreOpen] = useState(
     initialValues.ownershipKind === "partner" ||
-      ["duration", "leadTime", "location", "maxGuests"].some(
+      ["duration", "leadTimeHours", "location", "maxGuests"].some(
         (key) => initialValues[key as keyof AddonEditorValues],
       ) ||
       initialValues.maxQuantity !== "1",
@@ -146,6 +164,7 @@ export function AddonEditor({
     ) ?? models[0];
   const price = /^\d+(?:\.\d{1,2})?$/.test(values.price) ? Number(values.price) : 0;
   const cover = values.photos.find((photo) => photo.isCover) ?? values.photos[0];
+  const notice = addonLeadTimeNoticeKey(values.leadTimeHours);
   function field(key: keyof AddonEditorValues, label: string, type = "text", placeholder = "") {
     return (
       <label className="block text-xs font-medium text-gray-800">
@@ -435,12 +454,34 @@ export function AddonEditor({
                     "text",
                     t("addons.editor.eG2Hours"),
                   )}
-                  {field(
-                    "leadTime",
-                    t("addons.editor.leadTime"),
-                    "text",
-                    t("addons.editor.eG24hBefore"),
-                  )}
+                  <label className="block text-xs font-medium text-gray-800">
+                    {t("addons.editor.leadTime")}
+                    <select
+                      value={values.leadTimeHours || (values.legacyLeadTime ? "typed" : "")}
+                      aria-label={t("addons.editor.leadTime")}
+                      className={inputClass}
+                      onChange={(e) =>
+                        setValues((v) => ({
+                          ...v,
+                          leadTimeHours: e.target.value as AddonEditorValues["leadTimeHours"],
+                          // Any choice replaces text typed before the fixed choices.
+                          legacyLeadTime: "",
+                        }))
+                      }
+                    >
+                      {values.legacyLeadTime && !values.leadTimeHours && (
+                        <option value="typed" disabled>
+                          {t("addons.editor.typedLeadTime", { text: values.legacyLeadTime })}
+                        </option>
+                      )}
+                      <option value="">{t("addons.editor.noLeadTime")}</option>
+                      {addonLeadTimes.map(([hours, label]) => (
+                        <option key={hours} value={String(hours)}>
+                          {t(label)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                   {field(
                     "location",
                     t("addons.editor.location"),
@@ -511,6 +552,7 @@ export function AddonEditor({
                       {t("addons.editor.add")}
                     </span>
                   </div>
+                  {notice && <p className="text-xs text-gray-500">{t(notice)}</p>}
                 </div>
               </div>
               <p className="mt-3 text-xs text-gray-500">{t("addons.editor.previewHint")}</p>
@@ -597,7 +639,18 @@ export const AddonEditorMessages = {
   "addons.editor.maxGuests": "Max guests",
   "addons.editor.eG6": "e.g., 6",
   "addons.editor.leadTime": "Lead time",
-  "addons.editor.eG24hBefore": "e.g., 24h before",
+  "addons.editor.noLeadTime": "No lead time",
+  "addons.editor.typedLeadTime": "{text} (typed earlier)",
+  "addons.editor.leadTime12h": "12 hours",
+  "addons.editor.leadTime24h": "24 hours",
+  "addons.editor.leadTime2d": "2 days",
+  "addons.editor.leadTime3d": "3 days",
+  "addons.editor.leadTime1w": "1 week",
+  "addons.editor.needs12hNotice": "Needs 12 hours’ notice",
+  "addons.editor.needs24hNotice": "Needs 24 hours’ notice",
+  "addons.editor.needs2dNotice": "Needs 2 days’ notice",
+  "addons.editor.needs3dNotice": "Needs 3 days’ notice",
+  "addons.editor.needs1wNotice": "Needs 1 week’s notice",
   "addons.editor.maxQuantity": "Max quantity",
   "addons.editor.maxQuantityIsTheNumberOfPackagesPerBooking":
     "Max quantity is the number of packages per booking.",

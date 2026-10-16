@@ -14,6 +14,8 @@ const catalogue: PricingAddon[] = [
     pricingModel: "per_guest_night",
     maxQuantity: 2,
     maxGuests: null,
+    leadTimeHours: null,
+    bookableFrom: null,
   },
 ];
 const selection: PublicBookingQuoteRequest["selection"] = {
