@@ -16,7 +16,7 @@ function expandIpv4Tail(ip: string): string {
   ).toString(16)}`;
 }
 
-function sourcePrefix(ip: string): string {
+export function sourcePrefix(ip: string): string {
   if (!isIPv6(ip)) return ip;
   const [head, tail = ""] = expandIpv4Tail(ip.toLowerCase()).split("::");
   const left = head ? head.split(":") : [];
@@ -82,7 +82,8 @@ export function createMarketplaceAffiliatePublicLinkQuota(pool: pg.Pool, key: st
       [publicToken],
     );
     const row = result.rows[0] as
-      { allowed: boolean; retry_after_seconds: number | null } | undefined;
+      | { allowed: boolean; retry_after_seconds: number | null }
+      | undefined;
     if (!row || typeof row.allowed !== "boolean") throw new Error("Invalid affiliate quota result");
     return row.allowed
       ? { allowed: true }
