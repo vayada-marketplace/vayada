@@ -56,6 +56,18 @@ describe("api config", () => {
     );
   });
 
+  it("keeps the room type Delete cleanup off unless properties are listed (VAY-2132)", () => {
+    const key = "PMS_ROOM_TYPE_DELETE_CLEANUP_PROPERTY_IDS";
+    expect(loadConfig({}).pmsRoomTypeDeleteCleanupPropertyIds).toEqual([]);
+    expect(loadConfig({ [key]: " " }).pmsRoomTypeDeleteCleanupPropertyIds).toEqual([]);
+    expect(loadConfig({ [key]: "*" }).pmsRoomTypeDeleteCleanupPropertyIds).toBe("all");
+    expect(
+      loadConfig({ [key]: "1DEE5712-6074-4FB0-8B1D-EC3601943526" })
+        .pmsRoomTypeDeleteCleanupPropertyIds,
+    ).toEqual(["1dee5712-6074-4fb0-8b1d-ec3601943526"]);
+    expect(() => loadConfig({ [key]: "sri-journeys" })).toThrow(key);
+  });
+
   it("keeps affiliate capture closed unless its isolated runtime is complete", () => {
     expect(loadConfig(completeCreatorMarketplaceEnv).affiliateCapture).toBeUndefined();
     expect(
