@@ -463,7 +463,7 @@ jobs:
 
     services:
       postgres:
-        image: public.ecr.aws/docker/library/postgres:${{ matrix.postgres }}-alpine
+        image: ghcr.io/vayada-marketplace/ci-postgres:${{ matrix.postgres }}-alpine
         env:
           POSTGRES_USER: vayada_test
           POSTGRES_PASSWORD: vayada_test
@@ -949,9 +949,25 @@ jobs:
           src/platform/platformMediaS3.test.ts
           src/domains/propertyMediaCommandRepository.test.ts
 
+      - name: Verify booking-page analytics storage and readers on PostgreSQL
+        if: matrix.shard == 'hotel-setup'
+        run: >-
+          npm --workspace vayada-api run test -- --no-file-parallelism
+          src/platform/bookingWebTelemetry.integration.test.ts
+          src/platform/bookingFunnel.integration.test.ts
+          src/bookingDashboardMoney.integration.test.ts
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+
       - name: Verify platform media cleanup on PostgreSQL
         if: matrix.shard == 'hotel-setup'
         run: npm --workspace vayada-api run test -- --no-file-parallelism src/jobs/platformMediaCleanup.integration.test.ts
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+
+      - name: Verify booking web event retention on PostgreSQL
+        if: matrix.shard == 'hotel-setup'
+        run: npm --workspace vayada-api run test -- --no-file-parallelism src/jobs/bookingWebEventRetention.integration.test.ts
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
@@ -1065,7 +1081,7 @@ jobs:
 
     services:
       postgres:
-        image: public.ecr.aws/docker/library/postgres:${{ matrix.postgres }}-alpine
+        image: ghcr.io/vayada-marketplace/ci-postgres:${{ matrix.postgres }}-alpine
         env:
           POSTGRES_USER: vayada_test
           POSTGRES_PASSWORD: vayada_test
@@ -1147,7 +1163,7 @@ jobs:
 
     services:
       postgres:
-        image: public.ecr.aws/docker/library/postgres:15-alpine
+        image: ghcr.io/vayada-marketplace/ci-postgres:15-alpine
         env:
           POSTGRES_USER: ${{ matrix.db_user }}
           POSTGRES_PASSWORD: ${{ matrix.db_password }}
@@ -1161,7 +1177,7 @@ jobs:
           - ${{ matrix.db_port }}:5432
 
       auth-postgres:
-        image: public.ecr.aws/docker/library/postgres:15-alpine
+        image: ghcr.io/vayada-marketplace/ci-postgres:15-alpine
         env:
           POSTGRES_USER: vayada_auth_user
           POSTGRES_PASSWORD: vayada_auth_password

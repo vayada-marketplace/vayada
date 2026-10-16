@@ -1330,17 +1330,15 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
         return {
           release: client.release.bind(client),
           query: (text: string, values?: unknown[]) =>
-            text.includes("pms.enqueue_restriction_ari")
-              ? Promise.resolve({ rows: [], rowCount: 0 })
-              : client.query(
-                  text.includes('max_attempts AS "maxAttempts"')
-                    ? text.replace(
-                        "WHERE queue_name = $1",
-                        `WHERE id='${f.job.jobId}'::uuid AND queue_name = $1`,
-                      )
-                    : text,
-                  values,
-                ),
+            client.query(
+              text.includes('max_attempts AS "maxAttempts"')
+                ? text.replace(
+                    "WHERE queue_name = $1",
+                    `WHERE id='${f.job.jobId}'::uuid AND queue_name = $1`,
+                  )
+                : text,
+              values,
+            ),
         };
       },
       end: async () => {},

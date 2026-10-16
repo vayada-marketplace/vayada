@@ -4,7 +4,7 @@ import { watchPageHealth } from "../support/pageHealth";
 
 test.describe("booking-web tenant smoke", () => {
   for (const width of [1280, 390]) {
-    test(`hides retired public enrolment while preserving referral cookies at ${width}px`, async ({
+    test(`hides retired public enrolment and keeps referrals out of cookies at ${width}px`, async ({
       page,
       context,
     }) => {
@@ -13,9 +13,8 @@ test.describe("booking-web tenant smoke", () => {
       await page.goto("/?ref=RETAINED-REFERRAL");
       await expect(page.getByRole("heading", { name: "Hotel Alpenrose", level: 1 })).toBeVisible();
       await expect(page.locator("nav").getByRole("button", { name: /refer/i })).toHaveCount(0);
-      expect((await context.cookies()).find((cookie) => cookie.name === "ref")?.value).toBe(
-        "RETAINED-REFERRAL",
-      );
+      // VAY-2223: the referral is read from the URL; no cookie before the privacy choice.
+      expect(await context.cookies()).toEqual([]);
     });
   }
 
