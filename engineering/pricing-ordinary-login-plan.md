@@ -240,7 +240,8 @@ h,r` lock to succeed). ~120 lines. **0.5 day.** **Production step:** the
   grant mode applies the grant set and the protected-list revokes in one
   transaction, so if the VAY-2054 grant has already run, an operator must
   re-run `--grant-runtime-product-dml` after 0.3 merges, then
-  `--preflight-runtime-product-dml` must PASS. Until then authority, offers
+  the runtime preflight must PASS (`--preflight-runtime-product-dml` until
+  VAY-2211; plain `preflight` since). Until then authority, offers
   and quotes keep returning 503 exactly as today; nothing regresses.
 - Risk: none functional; the runtime-scope unit tests encode the old boundary
   and must be deleted, not weakened.

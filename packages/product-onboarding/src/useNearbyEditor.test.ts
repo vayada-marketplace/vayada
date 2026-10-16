@@ -66,3 +66,53 @@ it("releases refresh state on reload and ignores the superseded refresh", async 
     act(() => renderer.unmount());
   }
 });
+
+it("takes the server's word on saved places after a location save (VAY-2104)", async () => {
+  const at = (profileRevision: number, savedProfileRevision: number) =>
+    ({
+      profileRevision,
+      savedProfileRevision,
+      curationRevision: 1,
+      choices: [],
+      customPlaces: [],
+    }) as unknown as NearbyCurationState;
+  const profile = (profileRevision: number) =>
+    ({ propertyId: "test", profileRevision, profile: { location: {} } }) as PropertyProfileResponse;
+  const api = {
+    read: vi
+      .fn()
+      .mockResolvedValueOnce(at(1, 1))
+      .mockResolvedValueOnce(at(2, 2))
+      .mockResolvedValueOnce(at(3, 2)),
+    refresh: vi.fn().mockResolvedValue({ status: "empty", profileRevision: 1 }),
+  } as unknown as NearbyApi;
+  const profileApi = {
+    getPropertyProfile: vi.fn().mockResolvedValue(profile(1)),
+    updatePropertyProfile: vi
+      .fn()
+      .mockResolvedValueOnce(profile(2))
+      .mockResolvedValueOnce(profile(3)),
+  } as unknown as SharedHotelSetupApi;
+  let editor!: ReturnType<typeof useNearbyEditor>;
+  function Probe() {
+    editor = useNearbyEditor("test", api, profileApi);
+    return null;
+  }
+  let renderer!: TestRenderer.ReactTestRenderer;
+  try {
+    await act(async () => {
+      renderer = TestRenderer.create(React.createElement(Probe));
+    });
+    // Same pin: the server still counts the places as confirmed.
+    await act(() => editor.saveLocation());
+    expect(editor.saved).toMatchObject({ profileRevision: 2, savedProfileRevision: 2 });
+    expect(editor.draft).toMatchObject({ profileRevision: 2, savedProfileRevision: 2 });
+    expect(editor.notice).toBe("Location saved.");
+    // Moved pin: the places need a look before they show again.
+    await act(() => editor.saveLocation());
+    expect(editor.saved).toMatchObject({ profileRevision: 3, savedProfileRevision: 2 });
+    expect(editor.notice).toBe("Location saved. Review your saved places for this location.");
+  } finally {
+    act(() => renderer.unmount());
+  }
+});

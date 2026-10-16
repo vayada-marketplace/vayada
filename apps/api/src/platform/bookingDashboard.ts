@@ -371,11 +371,6 @@ function pageViewBucketsSql(): string {
     JOIN hotel_catalog.property_locations location ON location.property_id = scoped.property_id
     JOIN pg_timezone_names timezone ON timezone.name = location.timezone
   ),
-  known_slugs AS (
-    SELECT DISTINCT slug.slug
-    FROM hotel_catalog.property_slugs slug
-    JOIN scoped_property scoped ON scoped.property_id = slug.property_id
-  ),
   buckets AS (
     SELECT day::date AS bucket_date
     FROM generate_series($2::date, $3::date, INTERVAL '1 day') day
@@ -387,29 +382,12 @@ function pageViewBucketsSql(): string {
     COUNT(DISTINCT event.id)::text AS "pageViewCount"
   FROM buckets bucket
   LEFT JOIN telemetry_scope scope ON TRUE
-  LEFT JOIN platform.domain_events event
-    ON event.source_system = 'distribution'
-   AND event.event_type = 'booking_web.page_visit'
-   AND event.resource_product = 'distribution'
-   AND event.resource_type = 'booking_web_hotel'
-   AND (
-     (event.tenant_scope = 'property' AND event.property_id = scope.property_id)
-     OR (
-       event.tenant_scope = 'external'
-       AND event.property_id IS NULL
-       AND event.resource_id IN (SELECT slug FROM known_slugs)
-       AND 1 = (
-         SELECT COUNT(DISTINCT slug_owner.property_id)
-         FROM hotel_catalog.property_slugs slug_owner
-         WHERE slug_owner.slug = event.resource_id
-       )
-     )
-   )
-   AND event.event_status IN ('recorded', 'projected')
-   AND COALESCE(event.event_metadata ->> 'trafficClass', 'human') NOT IN ('bot', 'test')
-   AND event.payload -> 'metadata' -> 'isTestData' IS DISTINCT FROM 'true'::jsonb
-   AND event.payload -> 'metadata' -> 'testData' IS DISTINCT FROM 'true'::jsonb
-   AND (event.occurred_at AT TIME ZONE scope.time_zone)::date = bucket.bucket_date
+  LEFT JOIN distribution.booking_web_events event
+    ON event.property_id = scope.property_id
+   AND event.event_type = 'page_visit'
+   AND event.traffic_class = 'human'
+   AND event.occurred_at >= (bucket.bucket_date::timestamp AT TIME ZONE scope.time_zone)
+   AND event.occurred_at < ((bucket.bucket_date + 1)::timestamp AT TIME ZONE scope.time_zone)
   GROUP BY bucket.bucket_date
   ORDER BY bucket.bucket_date`;
 }
@@ -504,24 +482,18 @@ function conversionFunnelSql(): string {
       WHERE addon.property_id = scoped.property_id AND addon.status = 'active' AND addon.public_visible
     )) AS "addonsEnabled",
     COALESCE((SELECT jsonb_agg(jsonb_build_object(
-      'sessionId', event.payload ->> 'sessionId',
-      'sequence', event.payload -> 'metadata' -> 'funnelSequence',
-      'stage', substring(event.event_type FROM 13),
-      'paymentMethod', event.payload -> 'metadata' ->> 'paymentMethod'
+      'sessionId', event.session_id::text,
+      'sequence', event.metadata -> 'funnelSequence',
+      'stage', event.event_type,
+      'paymentMethod', event.metadata ->> 'paymentMethod'
     ) ORDER BY event.occurred_at, event.id)
-    FROM platform.domain_events event
+    FROM distribution.booking_web_events event
     WHERE property.profile_status = 'complete'
-      AND event.property_id = scoped.property_id AND event.tenant_scope = 'property'
-      AND event.source_system = 'distribution' AND event.resource_product = 'distribution'
-      AND event.resource_type = 'booking_web_hotel'
-      AND event.event_type IN ('booking_web.page_visit',
-        'booking_web.rate_selected', 'booking_web.addons_step_passed', 'booking_web.details_completed',
-        'booking_web.complete_booking_clicked', 'booking_web.payment_authorized', 'booking_web.booking_completed')
-      AND event.event_status IN ('recorded', 'projected')
-      AND event.payload -> 'metadata' -> 'funnelVersion' = '1'::jsonb
-      AND COALESCE(event.event_metadata ->> 'trafficClass', 'human') NOT IN ('bot', 'test')
-      AND event.payload -> 'metadata' -> 'isTestData' IS DISTINCT FROM 'true'::jsonb
-      AND event.payload -> 'metadata' -> 'testData' IS DISTINCT FROM 'true'::jsonb
+      AND event.property_id = scoped.property_id
+      AND event.event_type IN ('page_visit', 'rate_selected', 'addons_step_passed',
+        'details_completed', 'complete_booking_clicked', 'payment_authorized', 'booking_completed')
+      AND event.metadata -> 'funnelVersion' = '1'::jsonb
+      AND event.traffic_class = 'human'
       AND event.occurred_at >= ($2::date::timestamp AT TIME ZONE timezone.name)
       AND event.occurred_at < (($3::date + 1)::timestamp AT TIME ZONE timezone.name)
     ), '[]'::jsonb) AS events

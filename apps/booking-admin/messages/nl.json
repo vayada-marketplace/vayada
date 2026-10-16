@@ -191,7 +191,7 @@
   "dashboard.conversionFunnel.noData": "Geen boekingsgegevens voor deze periode",
   "dashboard.conversionFunnel.subtitle": "Van bezoekers tot geboekte gasten",
   "dashboard.conversionFunnel.infoLabel": "Over de conversietrechter",
-  "dashboard.conversionFunnel.info": "Sessies op de boekingssite in deze periode, geteld bij elke stap die ze op volgorde bereikten. Rode cijfers tonen hoeveel er sinds de vorige stap zijn afgehaakt. Kaartbetalingen hebben een extra autorisatiestap; de laatste stap wordt vergeleken met geautoriseerde kaarten plus andere betaalmethoden.",
+  "dashboard.conversionFunnel.info": "Sessies op de boekingssite in deze periode, geteld bij elke stap die ze op volgorde bereikten. Rode cijfers tonen hoeveel er sinds de vorige stap zijn afgehaakt. Kaartbetalingen hebben een extra autorisatiestap; de laatste stap wordt vergeleken met geautoriseerde kaarten plus andere betaalmethoden. Voltooide boekingen omvatten ook boekingsaanvragen die het hotel nog moet accepteren en boekingen per bankoverschrijving of PayPal die nog op betaling wachten.",
   "dashboard.conversionFunnel.options": "Trechteropties",
   "dashboard.conversionFunnel.timeRange": "Periode",
   "dashboard.conversionFunnel.exportCsv": "CSV exporteren",

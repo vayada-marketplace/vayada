@@ -8,7 +8,8 @@ import {
   type PublicBookabilityHotelProfile,
   type PublicBookabilityQuoteProjection,
 } from "@vayada/domain-distribution";
-import { createHash } from "node:crypto";
+import { BOOKING_WEB_ANALYTICS_CONSENT_VERSION } from "@vayada/domain-booking";
+import { createHash, randomUUID } from "node:crypto";
 import type { QueryResultRow } from "pg";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -231,21 +232,84 @@ describe("Booking Web public bootstrap parity", () => {
         referralCode: "REF-123",
         clickId: "click-123",
         sessionId: "sid_123",
-        landingUrl: "https://hotel-alpenrose.booking.localhost/?ref=REF-123",
+        referrer: "https://www.instagram.com",
       },
     });
 
     expect(response.statusCode).toBe(204);
-    expect(events).toMatchObject([
+    expect(events).toEqual([
       {
         slug: "hotel-alpenrose",
         referralCode: "REF-123",
         clickId: "click-123",
         sessionId: "sid_123",
-        landingUrl: "https://hotel-alpenrose.booking.localhost/?ref=REF-123",
+        referrerSource: "instagram",
+        occurredAt: new Date("2026-06-06T11:00:00.000Z"),
+        userAgent: "lightMyRequest",
       },
     ]);
     await app.close();
+  });
+
+  it("keeps only the referrer's site and a token session ID from callers that send guest details", async () => {
+    const events: Record<string, unknown>[] = [];
+    const app = buildApp({
+      logger: false,
+      publicHotelProfileRepository: createProfileRepository(legacyHotel, {}),
+      bookingWebCheckoutAdapter: unusedBookingWebCheckoutAdapter,
+      bookingWebAttributionSink: {
+        async recordAffiliateClick(event) {
+          events.push(event);
+        },
+        async recordTelemetryEvent() {},
+      },
+    });
+    const guestPage =
+      "https://hotel.booking.localhost/en/confirmation?booking=VAY-1&email=guest%40example.test&token=secret&ref=A";
+    try {
+      for (const [body, referer, source] of [
+        [
+          { landingUrl: guestPage, referrer: "https://l.instagram.com/?u=x&e=guest" },
+          guestPage,
+          "instagram",
+        ],
+        [
+          {
+            landing_url: guestPage,
+            referrer: "",
+            metadata: { email: "guest@example.test" },
+            session_id: "guest@example.test",
+          },
+          "https://www.tiktok.com/@creator",
+          "unknown",
+        ],
+        [{ referrer: guestPage }, undefined, "unknown"],
+      ] as const) {
+        const response = await app.inject({
+          method: "POST",
+          url: "/api/booking-web/hotels/hotel/attribution/clicks",
+          headers: referer ? { referer } : {},
+          payload: { referralCode: "A", ...body },
+        });
+        expect(response.statusCode).toBe(204);
+        expect(events.at(-1)?.referrerSource).toBe(source);
+      }
+      expect(events).toHaveLength(3);
+      for (const event of events) {
+        expect(Object.keys(event).sort()).toEqual([
+          "clickId",
+          "occurredAt",
+          "referralCode",
+          "referrerSource",
+          "sessionId",
+          "slug",
+          "userAgent",
+        ]);
+        expect(JSON.stringify(event)).not.toMatch(/guest|secret|VAY-1|confirmation|\?/);
+      }
+    } finally {
+      await app.close();
+    }
   });
 
   it("rejects malformed click IDs before intake and accepts older callers without one", async () => {
@@ -313,64 +377,285 @@ describe("Booking Web public bootstrap parity", () => {
       expect(events).toEqual([]);
     }
 
-    const response = await app.inject({
-      method: "POST",
-      url: "/api/booking-web/events",
-      payload: {
-        analyticsConsent: true,
-        consentVersion: 1,
-        hotelSlug: "hotel-alpenrose",
-        eventType: "page_visit",
-        eventId: "event_page_visit_001",
-        sessionId: "sid_123",
-        metadata: { locale: "de" },
-      },
-    });
-
-    for (const metadata of [
-      { funnelVersion: 1, funnelSequence: 0 },
-      { funnelVersion: 1, funnelSequence: 2, paymentMethod: "unknown" },
-    ]) {
-      const invalid = await app.inject({
+    // VAY-2197: funnel events only, with each type's allowlisted properties and random ids.
+    const sessionId = "0b6f0f6e-6a1b-4c39-9d1e-5d3c2a1b0f9e";
+    const event = (eventType: string, metadata: unknown, ids = {}) =>
+      app.inject({
         method: "POST",
         url: "/api/booking-web/events",
         payload: {
           analyticsConsent: true,
           consentVersion: 1,
           hotelSlug: "hotel-alpenrose",
-          eventType: "complete_booking_clicked",
-          sessionId: "sid",
+          eventType,
+          eventId: randomUUID(),
+          sessionId,
           metadata,
+          ...ids,
         },
       });
+    const response = await event("page_visit", { funnelVersion: 1, funnelSequence: 1 });
+
+    for (const [eventType, metadata, ids] of [
+      ["page_visit", { funnelVersion: 1, funnelSequence: 0 }],
+      ["page_visit", { locale: "de" }],
+      ["page_visit", { funnelVersion: 1, funnelSequence: 2, email: "guest@example.com" }],
+      [
+        "complete_booking_clicked",
+        { funnelVersion: 1, funnelSequence: 2, paymentMethod: "unknown", mode: "instant" },
+      ],
+      ["searched_dates", { funnelVersion: 1, funnelSequence: 2 }],
+      ["page_visit", { funnelVersion: 1, funnelSequence: 2 }, { sessionId: "sid_123" }],
+      ["page_visit", { funnelVersion: 1, funnelSequence: 2 }, { eventId: undefined }],
+    ] as const) {
+      const invalid = await event(eventType, metadata, ids);
       expect(invalid.statusCode).toBe(400);
     }
-    // Room-detail views stay accepted funnel telemetry although they are no longer a stage.
-    const roomViewed = await app.inject({
-      method: "POST",
-      url: "/api/booking-web/events",
-      payload: {
-        analyticsConsent: true,
-        consentVersion: 1,
-        hotelSlug: "hotel-alpenrose",
-        eventType: "room_viewed",
-        sessionId: "sid_123",
-        metadata: { funnelVersion: 1, funnelSequence: 2 },
-      },
+    const oversized = await event("page_visit", {
+      funnelVersion: 1,
+      funnelSequence: 2,
+      pad: "x".repeat(4096),
     });
-    expect(response.statusCode).toBe(204);
-    expect(roomViewed.statusCode).toBe(204);
+    expect(oversized.statusCode).toBe(413);
+    // Room-detail views, step views and errors are accepted although none is a stage.
+    const roomViewed = await event("room_viewed", {
+      funnelVersion: 1,
+      funnelSequence: 2,
+      roomTypeId: "suite",
+    });
+    const stepViewed = await event("step_viewed", {
+      funnelVersion: 1,
+      funnelSequence: 3,
+      step: "extras",
+    });
+    const failed = await event("booking_error", {
+      funnelVersion: 1,
+      funnelSequence: 4,
+      step: "payment",
+      reason: "booking_unavailable",
+      code: "CARD_PAYMENT_UNAVAILABLE",
+    });
+    expect([response, roomViewed, stepViewed, failed].map((r) => r.statusCode)).toEqual([
+      204, 204, 204, 204,
+    ]);
     expect(events).toMatchObject([
       {
         propertyId: "booking_hotel_alpenrose",
         hotelSlug: "hotel-alpenrose",
         eventType: "page_visit",
-        eventId: "event_page_visit_001",
-        sessionId: "sid_123",
-        metadata: { locale: "de" },
+        sessionId,
+        metadata: { funnelVersion: 1, funnelSequence: 1 },
       },
-      { eventType: "room_viewed", sessionId: "sid_123" },
+      { eventType: "room_viewed", sessionId, metadata: { roomTypeId: "suite" } },
+      { eventType: "step_viewed", metadata: { step: "extras" } },
+      { eventType: "booking_error", metadata: { code: "CARD_PAYMENT_UNAVAILABLE" } },
     ]);
+    for (const recorded of events) {
+      expect(recorded).not.toHaveProperty("ipAddress");
+      expect(recorded).not.toHaveProperty("requestId");
+    }
+    await app.close();
+  });
+
+  it("writes no access log line for funnel events (VAY-2197)", async () => {
+    let logs = "";
+    const app = buildApp({
+      logger: { level: "info", stream: { write: (chunk: string) => (logs += chunk) } },
+      publicHotelProfileRepository: createProfileRepository(legacyHotel, {}),
+      bookingWebCheckoutAdapter: unusedBookingWebCheckoutAdapter,
+      bookingWebAttributionSink: {
+        async recordAffiliateClick() {},
+        async recordTelemetryEvent() {},
+      },
+    });
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/booking-web/events",
+      remoteAddress: "203.0.113.7",
+      payload: {
+        analyticsConsent: true,
+        consentVersion: 1,
+        hotelSlug: "hotel-alpenrose",
+        eventType: "page_visit",
+        eventId: randomUUID(),
+        sessionId: randomUUID(),
+        metadata: { funnelVersion: 1, funnelSequence: 1 },
+      },
+    });
+    expect(response.statusCode).toBe(204);
+    expect(logs).not.toContain("203.0.113.7");
+    expect(logs).not.toContain("/api/booking-web/events");
+    await app.close();
+  });
+
+  describe("funnel event rate limit (VAY-2214)", () => {
+    const funnelEvent = (sessionId = randomUUID()) => ({
+      analyticsConsent: true,
+      consentVersion: BOOKING_WEB_ANALYTICS_CONSENT_VERSION,
+      hotelSlug: "hotel-alpenrose",
+      eventType: "page_visit",
+      eventId: randomUUID(),
+      sessionId,
+      metadata: { funnelVersion: 1, funnelSequence: 1 },
+    });
+    const limitedApp = (events: unknown[], logs?: { text: string }) =>
+      buildApp({
+        logger: logs
+          ? { level: "info", stream: { write: (chunk: string) => (logs.text += chunk) } }
+          : false,
+        trustProxy: ["10.0.0.1"],
+        publicHotelProfileRepository: createProfileRepository(legacyHotel, {}),
+        bookingWebCheckoutAdapter: unusedBookingWebCheckoutAdapter,
+        bookingWebPublicNow: () => new Date("2026-10-15T12:00:00.000Z"),
+        bookingWebAttributionSink: {
+          async recordAffiliateClick() {},
+          async recordTelemetryEvent(event) {
+            events.push(event);
+          },
+        },
+      });
+
+    it("refuses the 61st event a minute from one address, whatever the forwarded-for spoof", async () => {
+      const events: unknown[] = [];
+      const app = limitedApp(events);
+      // Behind the trusted proxy the client is the last untrusted hop; spoofed hops before it
+      // don't make a new bucket.
+      const viaProxy = (i: number) =>
+        app.inject({
+          method: "POST",
+          url: "/api/booking-web/events",
+          remoteAddress: "10.0.0.1",
+          headers: { "x-forwarded-for": `192.0.2.${i % 250}, 203.0.113.9` },
+          payload: funnelEvent(),
+        });
+      for (let i = 0; i < 60; i += 1) expect((await viaProxy(i)).statusCode).toBe(204);
+      const refused = await viaProxy(60);
+      expect(refused.statusCode).toBe(429);
+      expect(refused.headers["retry-after"]).toBe("60");
+      expect(refused.headers["cache-control"]).toBe("no-store");
+      expect(events).toHaveLength(60);
+      const other = await app.inject({
+        method: "POST",
+        url: "/api/booking-web/events",
+        remoteAddress: "198.51.100.7",
+        payload: funnelEvent(),
+      });
+      expect(other.statusCode).toBe(204);
+      await app.close();
+    });
+
+    it("refuses the 31st event a minute from one session", async () => {
+      const events: unknown[] = [];
+      const app = limitedApp(events);
+      const sessionId = randomUUID();
+      const send = (i: number) =>
+        app.inject({
+          method: "POST",
+          url: "/api/booking-web/events",
+          remoteAddress: `198.51.100.${i + 1}`,
+          payload: funnelEvent(sessionId),
+        });
+      for (let i = 0; i < 30; i += 1) expect((await send(i)).statusCode).toBe(204);
+      expect((await send(30)).statusCode).toBe(429);
+      expect(events).toHaveLength(30);
+      await app.close();
+    });
+
+    it("logs a refusal once a minute, without the address", async () => {
+      const logs = { text: "" };
+      const app = limitedApp([], logs);
+      for (let i = 0; i < 63; i += 1)
+        await app.inject({
+          method: "POST",
+          url: "/api/booking-web/events",
+          remoteAddress: "203.0.113.50",
+          payload: funnelEvent(),
+        });
+      expect(logs.text.match(/funnel events rate limited/g)).toHaveLength(1);
+      expect(logs.text).toContain('"limit":"address"');
+      expect(logs.text).not.toContain("203.0.113.50");
+      await app.close();
+    });
+
+    it("accepts a text/plain event from any https booking site, CORS on this route only", async () => {
+      const events: unknown[] = [];
+      const app = limitedApp(events);
+      const origin = "https://www.hotel-example.com";
+      const plain = (payload: string, from = origin) =>
+        app.inject({
+          method: "POST",
+          url: "/api/booking-web/events",
+          headers: { "content-type": "text/plain;charset=UTF-8", origin: from },
+          payload,
+        });
+      const accepted = await plain(JSON.stringify(funnelEvent()));
+      expect(accepted.statusCode).toBe(204);
+      expect(accepted.headers["access-control-allow-origin"]).toBe(origin);
+      expect(accepted.headers["access-control-allow-credentials"]).toBeUndefined();
+      expect(events).toHaveLength(1);
+      expect((await plain("not json")).statusCode).toBe(400);
+      expect((await plain('["page_visit"]')).statusCode).toBe(400);
+      expect((await plain("x".repeat(4096))).statusCode).toBe(413);
+      const insecure = await plain(JSON.stringify(funnelEvent()), "http://www.hotel-example.com");
+      expect(insecure.headers["access-control-allow-origin"]).toBeUndefined();
+      // A preflight from an older JSON client, and the route with a query string, get the same rule.
+      const preflightEvents = await app.inject({
+        method: "OPTIONS",
+        url: "/api/booking-web/events",
+        headers: { origin, "access-control-request-method": "POST" },
+      });
+      expect(preflightEvents.statusCode).toBe(204);
+      expect(preflightEvents.headers["access-control-allow-origin"]).toBe(origin);
+      expect(
+        (
+          await app.inject({
+            method: "POST",
+            url: "/api/booking-web/events?source=test",
+            headers: { "content-type": "text/plain", origin },
+            payload: JSON.stringify(funnelEvent()),
+          })
+        ).headers["access-control-allow-origin"],
+      ).toBe(origin);
+      // Other public routes keep the Vayada booking origins only.
+      const preflight = await app.inject({
+        method: "OPTIONS",
+        url: "/api/booking-web/hotels/hotel-alpenrose",
+        headers: { origin },
+      });
+      expect(preflight.headers["access-control-allow-origin"]).toBeUndefined();
+      await app.close();
+    });
+  });
+
+  it("logs no guest address when storing a funnel event fails (VAY-2214)", async () => {
+    let logs = "";
+    const app = buildApp({
+      logger: { level: "info", stream: { write: (chunk: string) => (logs += chunk) } },
+      publicHotelProfileRepository: createProfileRepository(legacyHotel, {}),
+      bookingWebCheckoutAdapter: unusedBookingWebCheckoutAdapter,
+      bookingWebAttributionSink: {
+        async recordAffiliateClick() {},
+        async recordTelemetryEvent() {
+          throw new Error("storage unavailable");
+        },
+      },
+    });
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/booking-web/events",
+      remoteAddress: "203.0.113.77",
+      payload: {
+        analyticsConsent: true,
+        consentVersion: BOOKING_WEB_ANALYTICS_CONSENT_VERSION,
+        hotelSlug: "hotel-alpenrose",
+        eventType: "page_visit",
+        eventId: randomUUID(),
+        sessionId: randomUUID(),
+        metadata: { funnelVersion: 1, funnelSequence: 1 },
+      },
+    });
+    expect(response.statusCode).toBe(500);
+    expect(logs).not.toContain("203.0.113.77");
     await app.close();
   });
 
@@ -396,6 +681,9 @@ describe("Booking Web public bootstrap parity", () => {
         consentVersion: 1,
         hotelSlug: "unknown-hotel",
         eventType: "page_visit",
+        eventId: randomUUID(),
+        sessionId: randomUUID(),
+        metadata: { funnelVersion: 1, funnelSequence: 1 },
       },
     });
 

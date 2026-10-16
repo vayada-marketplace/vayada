@@ -1411,6 +1411,31 @@ describe("api config", () => {
     );
   });
 
+  it("configures and can disable booking web event retention", () => {
+    expect(loadConfig({})).toMatchObject({
+      bookingWebEventRetentionEnabled: true,
+      bookingWebEventRetentionIntervalMs: 24 * 60 * 60 * 1000,
+      bookingWebEventRetentionBatchSize: 1_000,
+    });
+    expect(
+      loadConfig({
+        BOOKING_WEB_EVENT_RETENTION_ENABLED: "false",
+        BOOKING_WEB_EVENT_RETENTION_INTERVAL_MS: "60000",
+        BOOKING_WEB_EVENT_RETENTION_BATCH_SIZE: "25",
+      }),
+    ).toMatchObject({
+      bookingWebEventRetentionEnabled: false,
+      bookingWebEventRetentionIntervalMs: 60_000,
+      bookingWebEventRetentionBatchSize: 25,
+    });
+    expect(() => loadConfig({ BOOKING_WEB_EVENT_RETENTION_BATCH_SIZE: "0" })).toThrow(
+      "BOOKING_WEB_EVENT_RETENTION_BATCH_SIZE must be a positive integer",
+    );
+    expect(() => loadConfig({ BOOKING_WEB_EVENT_RETENTION_INTERVAL_MS: "2147483648" })).toThrow(
+      "BOOKING_WEB_EVENT_RETENTION_INTERVAL_MS must not exceed 2147483647",
+    );
+  });
+
   it("configures and can disable the PMS public-offer retry interval", () => {
     expect(loadConfig({})).toMatchObject({
       pmsInventoryPublicOfferRetryEnabled: true,

@@ -191,7 +191,7 @@
   "dashboard.conversionFunnel.noData": "Keine Buchungsdaten für diesen Zeitraum",
   "dashboard.conversionFunnel.subtitle": "Von Besuchern zu gebuchten Gästen",
   "dashboard.conversionFunnel.infoLabel": "Über den Conversion-Trichter",
-  "dashboard.conversionFunnel.info": "Sitzungen auf der Buchungsseite in diesem Zeitraum, gezählt bei jedem Schritt, den sie der Reihe nach erreicht haben. Rote Zahlen zeigen, wie viele seit dem vorherigen Schritt abgesprungen sind. Kartenzahlungen haben einen zusätzlichen Autorisierungsschritt; der letzte Schritt vergleicht mit autorisierten Karten plus anderen Zahlungsarten.",
+  "dashboard.conversionFunnel.info": "Sitzungen auf der Buchungsseite in diesem Zeitraum, gezählt bei jedem Schritt, den sie der Reihe nach erreicht haben. Rote Zahlen zeigen, wie viele seit dem vorherigen Schritt abgesprungen sind. Kartenzahlungen haben einen zusätzlichen Autorisierungsschritt; der letzte Schritt vergleicht mit autorisierten Karten plus anderen Zahlungsarten. Abgeschlossene Buchungen umfassen auch Buchungsanfragen, die das Hotel noch annehmen muss, sowie Buchungen per Banküberweisung oder PayPal, deren Zahlung noch aussteht.",
   "dashboard.conversionFunnel.options": "Trichter-Optionen",
   "dashboard.conversionFunnel.timeRange": "Zeitraum",
   "dashboard.conversionFunnel.exportCsv": "CSV exportieren",

@@ -171,10 +171,10 @@ until their owner supplies equivalent host-control and redirect-chain evidence.
 ## Native Booking arrival-to-checkout contract
 
 The current Booking Web `?ref` flow is legacy diagnostic traffic. Middleware
-stores its value in a 30-day `ref` cookie; `AffiliateClickTracker` posts a
-browser-supplied referral code, session ID, landing URL and referrer to the
-diagnostic click endpoint. Neither that cookie nor those fields may identify a
-creator in the new attribution path. Native pricing checkout currently posts to
+stores no cookie for it (the old 30-day `ref` cookie was removed, VAY-2223);
+`AffiliateClickTracker` posts a browser-supplied referral code, session ID,
+landing URL and referrer to the diagnostic click endpoint. None of those fields
+may identify a creator in the new attribution path. Native pricing checkout currently posts to
 a same-origin `/api/booking-web/.../accept` URL, which Next.js rewrites to the
 TypeScript Booking API. Its public command contains no affiliate context. The
 synthetic server-only context argument added to the pricing writer is not a

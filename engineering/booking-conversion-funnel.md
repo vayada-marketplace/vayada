@@ -3,9 +3,10 @@
 Target contract for [VAY-1034](https://linear.app/vayadacom/issue/VAY-1034), extending
 VAY-1284 and `typescript-backend-structure.md`. No legacy event backfill or forwarding.
 
-- Reuse property-scoped `platform.domain_events`, `booking_web.*` events and
-  the existing public telemetry sink. Browser events are analytics evidence,
-  never payment authority. No guest or card details are included.
+- Events are stored per property in `distribution.booking_web_events` through
+  the public telemetry sink and deleted after 13 months (VAY-2212; before that
+  they were `booking_web.*` rows in `platform.domain_events`). Browser events are
+  analytics evidence, never payment authority. No guest or card details are included.
 - New events carry `funnelVersion: 1`, a session ID, an occurrence UUID and a
   positive session sequence. Sequence preserves interaction order even when
   concurrent network requests arrive out of order. Unversioned history is excluded.
