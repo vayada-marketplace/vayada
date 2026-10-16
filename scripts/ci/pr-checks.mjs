@@ -72,7 +72,7 @@ export const RULES = [
     test: /^\.github\/workflows\/(?!pr-checks\.yml$)[^/]+\.ya?ml$/,
     jobs: ["frontend", "first_party_auth"],
   },
-  // Only the Playwright runs read the root config: landing (frontend), first-party auth and the
+  // Only the Playwright runs read the root config: landing (frontend_build), first-party auth and the
   // three mocked browser projects.
   {
     name: "playwright-config",
