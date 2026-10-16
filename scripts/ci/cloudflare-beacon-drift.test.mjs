@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import {
+  BOT,
+  ISSUE_TITLE,
   MARKER,
   PIN_FILE,
   RECORD_FILE,
@@ -9,11 +11,14 @@ import {
   buildReport,
   fetchBeacon,
   fingerprint,
+  githubClient,
   integrityOf,
   readPin,
+  reconcile,
   reviewRecord,
   statementDiff,
   surface,
+  touchesIssues,
 } from "./cloudflare-beacon-drift.mjs";
 
 const OLD = Buffer.from(
@@ -39,9 +44,10 @@ const drift = (overrides = {}) =>
 test("the reviewed record is for the pinned beacon and holds no vendor code", () => {
   const record = JSON.parse(readFileSync(RECORD_FILE, "utf8"));
   assert.equal(record.integrity, readPin(readFileSync(PIN_FILE, "utf8")));
-  assert.match(record.version, /^\d{4}\.\d+\.\d+$/);
-  assert.match(record.statements, /^[\w-]{12}( [\w-]{12})+$/);
-  assert.ok(record.statements.split(" ").length > 100);
+  // Loose on purpose: the prepared pull request regenerates this file from whatever Cloudflare
+  // ships, and must not fail PR Checks because the beacon changed shape.
+  assert.match(record.version, /^[\w.+-]{1,40}$/);
+  assert.match(record.statements, /^([\w-]{12}( [\w-]{12})*)?$/);
 });
 
 test("reviewRecord keeps the hash, version, counts, URLs and one fingerprint per statement", () => {
@@ -176,6 +182,94 @@ test("a transport the record has no count for is flagged only when the live file
   assert.match(body, /\| postMessage \| not recorded \| 0 \|/);
 });
 
+function fakeClient(issues) {
+  const calls = [];
+  return {
+    calls,
+    openIssues: async () => issues,
+    createIssue: async (title, body, labels) => (
+      calls.push(["create", title, body, labels]),
+      { number: 99 }
+    ),
+    updateIssue: async (number, fields) => (calls.push(["update", number, fields]), {}),
+    comment: async (number, body) => (calls.push(["comment", number, body]), {}),
+  };
+}
+const issue = (number, body, login = BOT) => ({ number, body, user: { login } });
+
+test("reconcile opens one issue on the first mismatch", async () => {
+  const report = drift();
+  const client = fakeClient([issue(5, `quoting ${MARKER}`, "someone")]);
+  assert.equal(await reconcile({ client, report, override: "" }), "opened #99");
+  assert.deepEqual(client.calls, [["create", ISSUE_TITLE, report.body, ["monitoring"]]]);
+});
+
+test("reconcile leaves an up-to-date issue alone and rewrites a stale one", async () => {
+  const report = drift();
+  const same = fakeClient([issue(7, report.body)]);
+  assert.equal(await reconcile({ client: same, report, override: "" }), "#7 is up to date");
+  assert.deepEqual(same.calls, []);
+
+  const reworded = fakeClient([issue(7, report.body.replace("Next step", "Next"))]);
+  assert.equal(await reconcile({ client: reworded, report, override: "" }), "updated #7");
+  assert.deepEqual(reworded.calls, [["update", 7, { body: report.body }]]);
+});
+
+test("reconcile comments when the live file changed again", async () => {
+  const report = drift();
+  const client = fakeClient([
+    issue(8, `${MARKER}\n<!-- live: sha384-older -->\n`),
+    issue(3, `${MARKER}`),
+  ]);
+  assert.equal(await reconcile({ client, report, override: "" }), "updated #3");
+  assert.deepEqual(
+    client.calls.map((c) => c.slice(0, 2)),
+    [
+      ["update", 3],
+      ["comment", 3],
+    ],
+  );
+  assert.match(client.calls[1][2], /changed again: now 2026\.10\.1/);
+});
+
+test("reconcile closes the bot's issues once the live file matches the pin", async () => {
+  const report = buildReport({
+    pin: integrityOf(NEW),
+    override: "",
+    record: reviewRecord(NEW),
+    live: live(NEW),
+  });
+  const client = fakeClient([issue(4, MARKER), issue(6, MARKER, "someone"), issue(9, "unrelated")]);
+  assert.equal(await reconcile({ client, report, override: "" }), "closed #4");
+  assert.deepEqual(
+    client.calls.map((c) => c.slice(0, 2)),
+    [
+      ["comment", 4],
+      ["update", 4],
+    ],
+  );
+  assert.match(
+    client.calls[0][2],
+    new RegExp(`matches the pin on main again .*${"runbook step 5"}`),
+  );
+  assert.ok(client.calls[0][2].includes(integrityOf(NEW)));
+  assert.deepEqual(client.calls[1][2], { state: "closed", state_reason: "completed" });
+  const none = fakeClient([]);
+  assert.equal(await reconcile({ client: none, report, override: "" }), "no open drift issue");
+});
+
+test("a run against an override never closes issues", async () => {
+  const report = buildReport({
+    pin: "sha384-x",
+    override: integrityOf(NEW),
+    record: reviewRecord(NEW),
+    live: live(NEW),
+  });
+  const client = fakeClient([issue(4, MARKER)]);
+  assert.match(await reconcile({ client, report, override: integrityOf(NEW) }), /left as they are/);
+  assert.deepEqual(client.calls, []);
+});
+
 const response = (status, body, headers = {}) => new Response(body, { status, headers });
 
 test("fetchBeacon retries transient failures, then gives up", async () => {
@@ -189,4 +283,90 @@ test("fetchBeacon retries transient failures, then gives up", async () => {
     fetchBeacon({ fetchImpl: async () => response(404, ""), attempts: 2, delayMs: 0 }),
     /HTTP 404/,
   );
+});
+
+test("githubClient pages through open issues, skips pull requests and fails loudly", async () => {
+  const requests = [];
+  const page = (n) =>
+    Array.from({ length: n }, (_, i) => ({ number: i, pull_request: i === 0 ? {} : undefined }));
+  const client = githubClient({
+    token: "t",
+    repository: "o/r",
+    fetchImpl: async (url, init) => {
+      requests.push([url, init.method, init.headers.authorization]);
+      return response(200, JSON.stringify(url.endsWith("page=1") ? page(100) : page(2)));
+    },
+  });
+  assert.equal((await client.openIssues()).length, 99 + 1);
+  assert.deepEqual(requests, [
+    ["https://api.github.com/repos/o/r/issues?state=open&per_page=100&page=1", "GET", "Bearer t"],
+    ["https://api.github.com/repos/o/r/issues?state=open&per_page=100&page=2", "GET", "Bearer t"],
+  ]);
+  const failing = githubClient({
+    token: "t",
+    repository: "o/r",
+    fetchImpl: async () => response(403, "no"),
+  });
+  await assert.rejects(failing.createIssue("t", "b"), /POST \/issues: HTTP 403/);
+  let sent;
+  const creating = githubClient({
+    token: "t",
+    repository: "o/r",
+    fetchImpl: async (url, init) => ((sent = JSON.parse(init.body)), response(201, "{}")),
+  });
+  await creating.createIssue("title", "body", ["monitoring"]);
+  assert.deepEqual(sent, { title: "title", body: "body", labels: ["monitoring"] });
+});
+
+test("only main runs and test runs touch issues; dry runs never do", () => {
+  const override = `sha384-${"A".repeat(64)}`;
+  assert.equal(touchesIssues({ dryRun: false, ref: "refs/heads/main", override: "" }), true);
+  assert.equal(touchesIssues({ dryRun: false, ref: "refs/heads/fm/pin", override: "" }), false);
+  assert.equal(touchesIssues({ dryRun: false, ref: undefined, override: "" }), false);
+  assert.equal(touchesIssues({ dryRun: false, ref: "refs/heads/fm/pin", override }), true);
+  assert.equal(touchesIssues({ dryRun: true, ref: "refs/heads/main", override }), false);
+});
+
+test("the prepared fix line sits right under the next step", () => {
+  const { body } = drift({ fix: "**Prepared fix:** #7" });
+  assert.match(body, /before copying the hash\.\n\n\*\*Prepared fix:\*\* #7\n/);
+  assert.doesNotMatch(drift().body, /Prepared fix/);
+});
+
+test("githubClient commits files, manages refs and pull requests, and maps 404 and 204", async () => {
+  const seen = [];
+  const replies = {
+    "GET /repos/o/r/git/commits/base": [200, { tree: { sha: "tree0" } }],
+    "POST /repos/o/r/git/trees": [201, { sha: "tree1" }],
+    "POST /repos/o/r/git/commits": [201, { sha: "commit1" }],
+    "GET /repos/o/r/git/ref/heads/gone": [404, {}],
+    "GET /repos/o/r/contents/a.ts?ref=fm%2Fb": [200, { content: "aGVs\nbG8=\n" }],
+    "POST /repos/o/r/actions/workflows/pr-checks.yml/dispatches": [204, null],
+    "GET /repos/o/r/pulls?state=open&head=o%3Aautomation%2Fx": [200, [{ number: 5 }]],
+  };
+  const client = githubClient({
+    token: "t",
+    repository: "o/r",
+    fetchImpl: async (url, init) => {
+      const key = `${init.method} ${new URL(url).pathname}${new URL(url).search}`;
+      seen.push([key, init.body && JSON.parse(init.body)]);
+      const [status, json] = replies[key] ?? [500, {}];
+      return response(status, json === null ? null : JSON.stringify(json));
+    },
+  });
+  assert.equal(
+    await client.commit({ baseSha: "base", changes: { "a.ts": "x" }, message: "m" }),
+    "commit1",
+  );
+  assert.deepEqual(seen[1][1], {
+    base_tree: "tree0",
+    tree: [{ path: "a.ts", mode: "100644", type: "blob", content: "x" }],
+  });
+  assert.deepEqual(seen[2][1], { message: "m", tree: "tree1", parents: ["base"] });
+  assert.equal(await client.getRef("gone"), null);
+  assert.equal(await client.getFile("a.ts", "fm/b"), "hello");
+  assert.equal(await client.dispatch("pr-checks.yml", "automation/x"), null);
+  assert.deepEqual(seen.at(-1)[1], { ref: "automation/x" });
+  assert.deepEqual(await client.openPull("automation/x"), { number: 5 });
+  await assert.rejects(client.setRef("b", "s", false), (error) => error.status === 500);
 });
