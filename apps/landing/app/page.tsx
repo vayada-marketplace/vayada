@@ -27,3 +27,5 @@ export default function Home() {
     </main>
   );
 }
+
+// VAY-2241 sandbox: throwaway change, never merged to main.
