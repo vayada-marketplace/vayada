@@ -140,3 +140,86 @@ it("picks a category chip, labels the price by pricing model and opens More opti
     maxQuantity: "2",
   });
 });
+
+it("offers the fixed lead times and shows the guests' notice in the preview (VAY-2232)", async () => {
+  const save = vi.fn();
+  let view: ReactTestRenderer;
+  await act(async () => {
+    view = create(
+      <AddonEditor
+        initialValues={{
+          ...emptyAddonValues("EUR"),
+          name: "Airport transfer",
+          price: "30.00",
+          leadTimeHours: "24",
+        }}
+        currency="EUR"
+        editing
+        onSave={save}
+        onCancel={() => {}}
+      />,
+    );
+  });
+  const text = () => JSON.stringify(view!.toJSON());
+  const select = () =>
+    view!.root.findAllByType("select").find((s) => s.findAllByType("option").length === 6)!;
+  // A saved lead time opens More options.
+  expect(view!.root.findByType("details").props.open).toBe(true);
+  expect(select().props.value).toBe("24");
+  expect(
+    select()
+      .findAllByType("option")
+      .map((o) => o.props.children),
+  ).toEqual(["No lead time", "12 hours", "24 hours", "2 days", "3 days", "1 week"]);
+  expect(text()).toContain("Needs 24 hours’ notice");
+  await act(async () => {
+    select().props.onChange({ target: { value: "168" } });
+  });
+  expect(text()).toContain("Needs 1 week’s notice");
+  await act(async () => {
+    await view!.root.findByType("form").props.onSubmit({ preventDefault() {} });
+  });
+  expect(save.mock.calls[0][0].leadTimeHours).toBe("168");
+  await act(async () => {
+    select().props.onChange({ target: { value: "" } });
+  });
+  expect(text()).not.toContain("notice");
+});
+
+it("shows a lead time typed before the fixed choices until one is picked (VAY-2232)", async () => {
+  const save = vi.fn();
+  let view: ReactTestRenderer;
+  await act(async () => {
+    view = create(
+      <AddonEditor
+        initialValues={{
+          ...emptyAddonValues("EUR"),
+          name: "Airport transfer",
+          price: "30.00",
+          legacyLeadTime: "10h",
+        }}
+        currency="EUR"
+        editing
+        onSave={save}
+        onCancel={() => {}}
+      />,
+    );
+  });
+  const select = () =>
+    view!.root.findAllByType("select").find((s) => s.findAllByType("option").length === 7)!;
+  expect(select().props.value).toBe("typed");
+  const typed = select().findAllByType("option")[0]!;
+  expect(typed.props).toMatchObject({
+    value: "typed",
+    disabled: true,
+    children: "10h (typed earlier)",
+  });
+  // Choosing "No lead time" is a choice too: the typed text goes.
+  await act(async () => {
+    select().props.onChange({ target: { value: "" } });
+  });
+  await act(async () => {
+    await view!.root.findByType("form").props.onSubmit({ preventDefault() {} });
+  });
+  expect(save.mock.calls[0][0]).toMatchObject({ leadTimeHours: "", legacyLeadTime: "" });
+});
