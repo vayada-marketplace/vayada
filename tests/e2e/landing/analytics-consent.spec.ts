@@ -3,12 +3,12 @@ import { readFileSync } from "node:fs";
 import { expect, test, type Page } from "@playwright/test";
 
 // Opt-in suite: build Landing with a public 32-hex test token, then run with
-// E2E_LANDING_ANALYTICS=1. The vendor bytes are the committed copy of the pinned beacon, so a
-// Cloudflare release cannot fail this suite; the scheduled Cloudflare Beacon Drift workflow
-// watches the live file instead.
+// E2E_LANDING_ANALYTICS=1. It runs offline: Cloudflare's beacon is replaced by a stub generated
+// here, and in the JavaScript the browser receives, the app's SRI pin is swapped for the stub's
+// hash (test only; the built app keeps the real pin). Whether that pin still matches Cloudflare's
+// live file is the job of the scheduled Cloudflare Beacon Drift workflow.
 // RUM requests are intercepted: tests never send measurements to Cloudflare.
 const source = "https://static.cloudflareinsights.com/beacon.min.js";
-const fixture = "tests/e2e/landing/fixtures/cloudflare-beacon.min.js";
 const key = "vayada_cookie_consent";
 const choice = (analytics: boolean) => ({
   necessary: true,
@@ -16,19 +16,45 @@ const choice = (analytics: boolean) => ({
   analytics,
   marketing: false,
 });
-let beacon: Buffer;
+// Stand-in beacon: sends through both guarded transports when it runs, and again on the events
+// the real beacon reports (SPA navigation, pagehide, visibilitychange).
+const beacon = Buffer.from(`(() => {
+  const send = () => {
+    navigator.sendBeacon("https://cloudflareinsights.com/cdn-cgi/rum", "{}");
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/cdn-cgi/rum");
+    xhr.send("{}");
+  };
+  const push = history.pushState;
+  history.pushState = function (...args) {
+    push.apply(this, args);
+    send();
+  };
+  addEventListener("pagehide", send);
+  document.addEventListener("visibilitychange", send);
+  send();
+})();`);
+const stubIntegrity = `sha384-${createHash("sha384").update(beacon).digest("base64")}`;
+const pin = /const integrity = "(sha384-[^"]+)"/.exec(
+  readFileSync("apps/landing/lib/cloudflareAnalytics.ts", "utf8"),
+)?.[1];
 test.skip(process.env.E2E_LANDING_ANALYTICS !== "1", "Requires analytics-enabled Landing build");
 test.beforeAll(() => {
-  // The app's pin is the single source of truth; the copy must be exactly the pinned bytes.
-  const pin = /const integrity = "(sha384-[^"]+)"/.exec(
-    readFileSync("apps/landing/lib/cloudflareAnalytics.ts", "utf8"),
-  )?.[1];
-  beacon = readFileSync(fixture);
   expect(pin, "sha384 pin in apps/landing/lib/cloudflareAnalytics.ts").toBeTruthy();
-  expect(`sha384-${createHash("sha384").update(beacon).digest("base64")}`).toBe(pin);
 });
-async function intercept(page: Page) {
+async function intercept(page: Page, { override = true } = {}) {
   const requests: string[] = [];
+  if (override) {
+    // Test-only override: the app's chunks carry the pin; hand the browser the stub's hash instead.
+    await page.route(/\/_next\/static\/.+\.js(\?|$)/, async (route) => {
+      const response = await route.fetch();
+      const headers = response.headers();
+      delete headers["content-encoding"];
+      delete headers["content-length"];
+      const body = (await response.text()).replaceAll(pin!, stubIntegrity);
+      await route.fulfill({ response, headers, body });
+    });
+  }
   await page.route(/cloudflareinsights\.com|\/cdn-cgi\/rum/, async (route) => {
     requests.push(route.request().url());
     if (route.request().url() === source) {
@@ -70,6 +96,7 @@ test("off before acceptance; actual beacon starts, withdrawal seals the document
   await page.getByRole("button", { name: "Cookie settings", exact: true }).click();
   expect(requests).toEqual([]);
   await page.getByRole("button", { name: /^Accept all$/i }).click();
+  await expect(page.locator("script[data-cf-beacon]")).toHaveAttribute("integrity", stubIntegrity);
   await expect
     .poll(() => requests.filter((u) => u.includes("/cdn-cgi/rum")).length)
     .toBeGreaterThan(0);
@@ -180,6 +207,16 @@ test("unexpected vendor bytes cannot execute", async ({ page }) => {
   await page.getByRole("button", { name: /^Accept all$/i }).click();
   await page.waitForTimeout(500);
   expect(requests).toEqual([]);
+});
+
+test("without the override, the built pin refuses any other beacon bytes", async ({ page }) => {
+  const requests = await intercept(page, { override: false });
+  await page.goto("/");
+  await page.getByRole("button", { name: /^Accept all$/i }).click();
+  await expect(page.locator("script[data-cf-beacon]")).toHaveAttribute("integrity", pin!);
+  await expect.poll(() => requests.includes(source)).toBe(true);
+  await page.waitForTimeout(500);
+  expect(requests.filter((u) => u.includes("/cdn-cgi/rum"))).toEqual([]);
 });
 
 test("failed storage update and removal cannot restore stale acceptance after reload", async ({
