@@ -8,12 +8,11 @@ import {
   ChevronDownIcon,
   MagnifyingGlassIcon,
   PencilSquareIcon,
-  PlusIcon,
   TicketIcon,
   TrashIcon,
   XMarkIcon,
 } from "@heroicons/react/24/outline";
-import { Button, FeedbackAlert, Input, ToggleSwitch } from "@/components/ui";
+import { Button, FeedbackAlert, Input, PrimaryActionButton, ToggleSwitch } from "@/components/ui";
 import { PageHeader } from "@/components/layout/PageLayout";
 import type { BookingPromoCode } from "@/services/api/bookingPromoCodesClient";
 
@@ -325,14 +324,9 @@ export default function PromoCodesTab({
         title={t("bookingFlow.tabs.promos")}
         subtitle={t("admin.targetedDiscountsGuestsUnlockByEnteringACodeAtCheckout")}
         actions={
-          <button
-            type="button"
-            onClick={() => openEditor(null)}
-            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-primary-600 px-4 text-sm font-medium text-white hover:bg-primary-700"
-          >
-            <PlusIcon className="h-4 w-4" />
+          <PrimaryActionButton onClick={() => openEditor(null)}>
             {t("admin.newPromoCode")}
-          </button>
+          </PrimaryActionButton>
         }
       />
 
