@@ -352,7 +352,7 @@ function emit(line) {
 function runSelect() {
   let changes = { files: null };
   // Only a pull_request merge commit and a merge queue entry have a meaningful diff (see
-  // changedFiles). Any other event (a push, a manual run) runs every job.
+  // changedFiles). Any other event (a manual run, or a trigger added later) runs every job.
   const event = process.env.GITHUB_EVENT_NAME || "pull_request";
   if (event !== "pull_request" && event !== "merge_group") {
     console.error(`${event} event: running every job`);
