@@ -114,8 +114,10 @@ export const RULES = [
 export const WORKFLOW_FILE = ".github/workflows/pr-checks.yml";
 
 // GitHub Actions accepts YAML anchors, aliases and merge keys. A block shared that way would let
-// an edit inside one job change another, so any of them in either version runs every job.
-const YAML_ANCHOR = /(^|\s)[&*][A-Za-z_][\w-]*(\s|$)|<<\s*:/m;
+// an edit inside one job change another, so any of them in either version runs every job. Anchor
+// names may hold any character but whitespace and flow indicators; a false match (say, a shell
+// line starting with `&&`) only runs every job.
+export const YAML_ANCHOR = /(^[ \t]*|:[ \t]+|-[ \t]+|[[{,][ \t]*)[&*][^\s[\]{},]+|<<\s*:/m;
 
 // Maps each line (index = 1-based line number) of pr-checks.yml to the job whose block it is in.
 // Everything that is not inside one job maps to null: lines before `jobs:`, other top-level
@@ -137,8 +139,12 @@ export function workflowLineJobs(text) {
       lines.push(null);
     } else if (/^\s*$/.test(line)) {
       lines.push(inJobs ? job : null);
+    } else if (inJobs && /^ {4}/.test(line)) {
+      lines.push(job);
     } else {
-      lines.push(inJobs && /^ {4}/.test(line) ? job : null);
+      // Anything else under jobs: (a quoted or oddly indented key, say) ends the current block.
+      job = null;
+      lines.push(null);
     }
   }
   return lines;
