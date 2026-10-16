@@ -3411,24 +3411,18 @@ async function retireRoomTypeWithCleanup(
     if (!(error instanceof PmsLinkedInventoryNotCanonicalError)) throw error;
     // Linked rooms need canonical inventory, which a calendar update in setup restores.
     await client.query("ROLLBACK");
-    return {
-      ...roomTypeRetireConflict(
-        "room_type_retirement_blocked",
-        "Resolve the reported room type dependencies before retirement.",
-      ),
-      impact: {
-        ...checked,
-        canRetire: false,
-        blockers: [
-          {
-            category: "inventory",
-            code: "calendar_not_current",
-            affectedCount: 1,
-            action: "Update the property calendar in setup, then delete the room type.",
-          },
-        ],
-      },
-    };
+    return roomTypeRetireBlocked({
+      ...checked,
+      canRetire: false,
+      blockers: [
+        {
+          category: "inventory",
+          code: "calendar_not_current",
+          affectedCount: 1,
+          action: "Update the property calendar in setup, then delete the room type.",
+        },
+      ],
+    });
   }
   // What the released blocks and links held is rechecked under the same locks.
   const closing =
@@ -3437,13 +3431,7 @@ async function retireRoomTypeWithCleanup(
       : plan;
   if (!closing || closing.blockers.length) {
     await client.query("ROLLBACK");
-    return {
-      ...roomTypeRetireConflict(
-        "room_type_retirement_blocked",
-        "Resolve the reported room type dependencies before retirement.",
-      ),
-      impact: closing ? roomTypeDeleteImpact(impact, closing) : checked,
-    };
+    return roomTypeRetireBlocked(closing ? roomTypeDeleteImpact(impact, closing) : checked);
   }
   const cleanup: PmsRoomTypeDeleteCleanup = {
     ...(closing.mode === "closure"
