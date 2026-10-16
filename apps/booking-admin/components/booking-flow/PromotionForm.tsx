@@ -2,6 +2,7 @@
 import { useTranslation } from "@/lib/i18n";
 
 import { useState } from "react";
+import { CalendarDaysIcon, ClockIcon, MoonIcon, SunIcon } from "@heroicons/react/24/outline";
 import type { BookingPromotion } from "@/services/api/bookingLastMinuteSettingsClient";
 import type { PromoRoomType } from "./PromoCodesTab";
 
@@ -10,6 +11,22 @@ export const names = {
   EARLY_BIRD: "admin.earlyBird",
   EXTENDED_STAY: "admin.extendedStay",
   MIDWEEK: "admin.midweekGetaway",
+};
+export const promotionIcons = {
+  LAST_MINUTE: ClockIcon,
+  EARLY_BIRD: SunIcon,
+  EXTENDED_STAY: MoonIcon,
+  MIDWEEK: CalendarDaysIcon,
+};
+/** Type menu label and one-line description (VAY-2234). */
+export const promotionTypeCopy: Record<
+  BookingPromotion["type"],
+  { label: string; description: string }
+> = {
+  LAST_MINUTE: { label: "admin.lastMinute", description: "admin.lastMinuteDescription" },
+  EARLY_BIRD: { label: "admin.earlyBird", description: "admin.earlyBirdDescription" },
+  EXTENDED_STAY: { label: "admin.extendedStay", description: "admin.extendedStayDescription" },
+  MIDWEEK: { label: "admin.midweek", description: "admin.midweekDescription" },
 };
 const types = Object.keys(names) as BookingPromotion["type"][];
 export const fresh = (type: BookingPromotion["type"]): BookingPromotion => ({

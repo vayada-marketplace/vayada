@@ -1000,7 +1000,6 @@
   "admin.promotions": "Promociones",
   "admin.automaticRateRulesThatApplyWithoutACodeGuestsSee": "Reglas de tarifas automáticas que se aplican sin código. Los huéspedes ven el descuento tan pronto como sus fechas coincidan.",
   "admin.theHighestSingleDiscountAppliesPromotionsAndPromoCodesNever": "Se aplica el descuento individual más alto. Las promociones y los códigos promocionales nunca se acumulan; el mejor trato gana.",
-  "admin.newPromotion2": "+ Nueva promoción",
   "admin.loadingPromotions": "Cargando promociones…",
   "admin.tieredPercentageOff": "Porcentaje de descuento escalonado",
   "admin.unavailableRoom": "Habitación no disponible",
@@ -1472,5 +1471,14 @@
   "addons.editor.unitPerGuest": "por huésped",
   "addons.editor.unitPerNight": "por noche",
   "addons.editor.unitPerGuestNight": "por huésped y noche",
-  "addons.editor.previewHint": "Una vista previa de cómo aparece este extra en el proceso de reserva."
+  "addons.editor.previewHint": "Una vista previa de cómo aparece este extra en el proceso de reserva.",
+  "admin.lastMinute": "Última hora",
+  "admin.midweek": "Entre semana",
+  "admin.lastMinuteDescription": "Tarifas con descuento para llegadas en los próximos días; llena habitaciones vacías rápido.",
+  "admin.earlyBirdDescription": "Premia a los huéspedes que reservan con antelación y asegura ingresos pronto.",
+  "admin.extendedStayDescription": "Descuento para estancias largas: menos rotación y mayor valor por reserva.",
+  "admin.midweekDescription": "Tarifas más bajas de domingo a jueves para llenar el hueco entre fines de semana.",
+  "admin.added": "Añadida",
+  "admin.noPromotionsYet": "Aún no hay promociones",
+  "admin.addOneToGiveGuestsAnAutomaticDiscount": "Añade una para dar a los huéspedes un descuento automático cuando coincidan sus fechas."
 }

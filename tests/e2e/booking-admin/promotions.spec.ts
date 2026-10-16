@@ -37,13 +37,19 @@ test("manages all automatic promotions in Promos and preserves last-minute tiers
   ).toHaveValue("12.5");
   await page.getByRole("button", { name: "Save promotion", exact: true }).click();
   expect(settings.promotions[0].tiers).toEqual(originalTiers);
-  for (const [type, name] of [
-    ["EARLY_BIRD", "Early bird"],
-    ["EXTENDED_STAY", "Extended stay"],
-    ["MIDWEEK", "Midweek getaway"],
+  await page.getByRole("button", { name: "New promotion", exact: true }).click();
+  await expect(page.getByRole("menuitem", { name: /^Last minute/ })).toBeDisabled();
+  await expect(page.getByRole("menuitem", { name: /^Last minute/ })).toContainText("Added");
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("menu")).toHaveCount(0);
+  for (const [type, label, name] of [
+    ["EARLY_BIRD", "Early bird", "Early bird"],
+    ["EXTENDED_STAY", "Extended stay", "Extended stay"],
+    ["MIDWEEK", "Midweek", "Midweek getaway"],
   ]) {
-    await page.getByRole("button", { name: "+ New promotion", exact: true }).click();
-    await page.getByLabel("Promotion type").selectOption(type!);
+    await page.getByRole("button", { name: "New promotion", exact: true }).click();
+    await page.getByRole("menuitem", { name: new RegExp(`^${label}`) }).click();
+    await expect(page.getByLabel("Promotion type")).toHaveValue(type!);
     if (type === "EXTENDED_STAY") {
       await page.getByLabel("Discount format").selectOption("free");
       await page.getByLabel("Free nights", { exact: true }).fill("");
@@ -53,7 +59,7 @@ test("manages all automatic promotions in Promos and preserves last-minute tiers
     await page.getByRole("button", { name: "Save promotion", exact: true }).click();
     await expect(page.getByRole("heading", { name: name!, exact: true })).toBeVisible();
   }
-  await expect(page.getByRole("button", { name: "+ New promotion", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "New promotion", exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "Edit Extended stay" }).click();
   await expect(page.getByLabel("Discount format")).toHaveValue("free");
   await expect(page.getByLabel("Free nights", { exact: true })).toHaveValue("2");
@@ -76,9 +82,9 @@ test("manages all automatic promotions in Promos and preserves last-minute tiers
   await page
     .locator("article")
     .filter({ has: page.getByRole("heading", { name: "Midweek getaway", exact: true }) })
-    .getByRole("button", { name: "Delete", exact: true })
+    .getByRole("button", { name: "Delete Midweek getaway", exact: true })
     .click();
-  await expect(page.getByRole("button", { name: "+ New promotion", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "New promotion", exact: true })).toBeVisible();
   await testInfo.attach("promotions-desktop", {
     body: await page.screenshot({ fullPage: true }),
     contentType: "image/png",
@@ -96,4 +102,55 @@ test("manages all automatic promotions in Promos and preserves last-minute tiers
   await expect(page.getByRole("button", { name: /^Last-Minute$/ })).toHaveCount(0);
   await healthy();
   await noLegacy();
+});
+
+test("shows the empty state and a keyboard-friendly type menu styled like New promo code", async ({
+  page,
+}, testInfo) => {
+  test.skip(process.env.E2E_BOOKING_ADMIN_PROD !== "1", "Requires production booking-admin build.");
+  const healthy = watchPageHealth(page, testInfo);
+  await mockBookingAdminBookingFlow(page);
+  await page.route(`**${BOOKING_ADMIN_LAST_MINUTE_SETTINGS_PATH}*`, (route) =>
+    route.fulfill({
+      json: { enabled: false, stackWithPromo: false, tiers: [], updatedAt: "2026-09-05T10:00:00Z" },
+    }),
+  );
+  await page.goto("/promo-codes");
+  await expect(page.getByRole("heading", { name: "No promotions yet" })).toBeVisible();
+
+  // VAY-2234: both create buttons look the same, and the section title matches the page title.
+  const look = (name: string) =>
+    page.getByRole("button", { name, exact: true }).evaluate((element) => {
+      const style = getComputedStyle(element);
+      return [style.backgroundColor, style.color, style.height, style.fontSize, style.borderRadius];
+    });
+  expect(await look("New promotion")).toEqual(await look("New promo code"));
+  const titleSize = (name: string) =>
+    page
+      .getByRole("heading", { name, exact: true })
+      .evaluate((element) => getComputedStyle(element).fontSize);
+  expect(await titleSize("Promotions")).toBe(await titleSize("Promos"));
+
+  const button = page.getByRole("button", { name: "New promotion", exact: true });
+  await button.click();
+  await expect(button).toHaveAttribute("aria-expanded", "true");
+  const items = page.getByRole("menuitem");
+  await expect(items).toHaveCount(4);
+  await expect(items.first()).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(items.nth(1)).toBeFocused();
+  await page.keyboard.press("ArrowUp");
+  await page.keyboard.press("ArrowUp");
+  await expect(items.nth(3)).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("menu")).toHaveCount(0);
+  await expect(button).toBeFocused();
+
+  await page.getByRole("button", { name: "Collapse", exact: true }).click();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await button.click();
+  const menu = await page.getByRole("menu").boundingBox();
+  expect(menu!.x).toBeGreaterThanOrEqual(0);
+  expect(menu!.x + menu!.width).toBeLessThanOrEqual(390);
+  await healthy();
 });

@@ -1000,7 +1000,6 @@
   "admin.promotions": "Promosi",
   "admin.automaticRateRulesThatApplyWithoutACodeGuestsSee": "Aturan tarif otomatis yang berlaku tanpa kode. Para tamu akan melihat diskon segera setelah tanggal mereka cocok.",
   "admin.theHighestSingleDiscountAppliesPromotionsAndPromoCodesNever": "Diskon tunggal tertinggi berlaku. Promosi dan kode promo tidak pernah bertumpuk; kesepakatan yang lebih baik menang.",
-  "admin.newPromotion2": "+ Promosi baru",
   "admin.loadingPromotions": "Memuat promosi…",
   "admin.tieredPercentageOff": "Diskon persentase berjenjang",
   "admin.unavailableRoom": "Kamar tidak tersedia",
@@ -1472,5 +1471,14 @@
   "addons.editor.unitPerGuest": "per tamu",
   "addons.editor.unitPerNight": "per malam",
   "addons.editor.unitPerGuestNight": "per tamu per malam",
-  "addons.editor.previewHint": "Pratinjau tampilan tambahan ini di alur pemesanan."
+  "addons.editor.previewHint": "Pratinjau tampilan tambahan ini di alur pemesanan.",
+  "admin.lastMinute": "Menit terakhir",
+  "admin.midweek": "Tengah pekan",
+  "admin.lastMinuteDescription": "Tarif diskon untuk check-in dalam beberapa hari ke depan, cepat mengisi kamar kosong.",
+  "admin.earlyBirdDescription": "Beri hadiah tamu yang memesan jauh hari dan amankan pendapatan lebih awal.",
+  "admin.extendedStayDescription": "Diskon untuk menginap lebih lama: pergantian lebih sedikit, nilai pemesanan lebih tinggi.",
+  "admin.midweekDescription": "Tarif lebih rendah Minggu hingga Kamis untuk mengisi celah di antara akhir pekan.",
+  "admin.added": "Ditambahkan",
+  "admin.noPromotionsYet": "Belum ada promosi",
+  "admin.addOneToGiveGuestsAnAutomaticDiscount": "Tambahkan satu agar tamu otomatis mendapat diskon saat tanggal mereka cocok."
 }

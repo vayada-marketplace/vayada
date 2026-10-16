@@ -1000,7 +1000,6 @@
   "admin.promotions": "Promoties",
   "admin.automaticRateRulesThatApplyWithoutACodeGuestsSee": "Automatische tariefregels die zonder code gelden. Gasten zien de korting zodra hun data overeenkomen.",
   "admin.theHighestSingleDiscountAppliesPromotionsAndPromoCodesNever": "De hoogste eenmalige korting geldt. Promoties en promotiecodes stapelen zich nooit op; de betere deal wint.",
-  "admin.newPromotion2": "+ Nieuwe promotie",
   "admin.loadingPromotions": "Promoties laden...",
   "admin.tieredPercentageOff": "Gelaagd percentage korting",
   "admin.unavailableRoom": "Niet beschikbare kamer",
@@ -1472,5 +1471,14 @@
   "addons.editor.unitPerGuest": "per gast",
   "addons.editor.unitPerNight": "per nacht",
   "addons.editor.unitPerGuestNight": "per gast per nacht",
-  "addons.editor.previewHint": "Een voorbeeld van hoe deze extra in het boekingsproces verschijnt."
+  "addons.editor.previewHint": "Een voorbeeld van hoe deze extra in het boekingsproces verschijnt.",
+  "admin.lastMinute": "Last minute",
+  "admin.midweek": "Doordeweeks",
+  "admin.lastMinuteDescription": "Korting voor aankomsten in de komende dagen, vult lege kamers snel.",
+  "admin.earlyBirdDescription": "Beloon gasten die ruim vooruit boeken en zet omzet vroeg vast.",
+  "admin.extendedStayDescription": "Korting op langere verblijven: minder wisselingen, hogere boekingswaarde.",
+  "admin.midweekDescription": "Lagere prijzen van zondag tot en met donderdag om het gat tussen weekenden te vullen.",
+  "admin.added": "Toegevoegd",
+  "admin.noPromotionsYet": "Nog geen acties",
+  "admin.addOneToGiveGuestsAnAutomaticDiscount": "Voeg er een toe zodat gasten automatisch korting krijgen als hun data passen."
 }

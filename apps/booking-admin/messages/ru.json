@@ -1000,7 +1000,6 @@
   "admin.promotions": "Акции",
   "admin.automaticRateRulesThatApplyWithoutACodeGuestsSee": "Правила автоматических ставок, которые применяются без кода. Гости увидят скидку, как только их даты совпадут.",
   "admin.theHighestSingleDiscountAppliesPromotionsAndPromoCodesNever": "Применяется максимальная разовая скидка. Акции и промокоды никогда не суммируются; выигрывает более выгодная сделка.",
-  "admin.newPromotion2": "+ Новая акция",
   "admin.loadingPromotions": "Загрузка промоакций…",
   "admin.tieredPercentageOff": "Многоуровневая процентная скидка",
   "admin.unavailableRoom": "Недоступная комната",
@@ -1472,5 +1471,14 @@
   "addons.editor.unitPerGuest": "за гостя",
   "addons.editor.unitPerNight": "за ночь",
   "addons.editor.unitPerGuestNight": "за гостя за ночь",
-  "addons.editor.previewHint": "Так эта доп. услуга будет выглядеть при бронировании."
+  "addons.editor.previewHint": "Так эта доп. услуга будет выглядеть при бронировании.",
+  "admin.lastMinute": "Горящее предложение",
+  "admin.midweek": "Будни",
+  "admin.lastMinuteDescription": "Скидки на заезды в ближайшие дни, чтобы быстро заполнить свободные номера.",
+  "admin.earlyBirdDescription": "Поощряйте гостей, которые бронируют заранее, и получайте доход раньше.",
+  "admin.extendedStayDescription": "Скидка на долгое проживание: меньше смен гостей, выше сумма бронирования.",
+  "admin.midweekDescription": "Сниженные цены с воскресенья по четверг, чтобы заполнить промежуток между выходными.",
+  "admin.added": "Добавлено",
+  "admin.noPromotionsYet": "Акций пока нет",
+  "admin.addOneToGiveGuestsAnAutomaticDiscount": "Добавьте акцию, чтобы гости автоматически получали скидку при подходящих датах."
 }

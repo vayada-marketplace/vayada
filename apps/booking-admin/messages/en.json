@@ -1000,7 +1000,6 @@
   "admin.promotions": "Promotions",
   "admin.automaticRateRulesThatApplyWithoutACodeGuestsSee": "Automatic rate rules that apply without a code. Guests see the discount as soon as their dates match.",
   "admin.theHighestSingleDiscountAppliesPromotionsAndPromoCodesNever": "The highest single discount applies. Promotions and promo codes never stack; the better deal wins.",
-  "admin.newPromotion2": "+ New promotion",
   "admin.loadingPromotions": "Loading promotions…",
   "admin.tieredPercentageOff": "Tiered percentage off",
   "admin.unavailableRoom": "Unavailable room",
@@ -1472,5 +1471,14 @@
   "addons.editor.unitPerGuest": "per guest",
   "addons.editor.unitPerNight": "per night",
   "addons.editor.unitPerGuestNight": "per guest per night",
-  "addons.editor.previewHint": "A preview of how this add-on appears in the booking flow."
+  "addons.editor.previewHint": "A preview of how this add-on appears in the booking flow.",
+  "admin.lastMinute": "Last minute",
+  "admin.midweek": "Midweek",
+  "admin.lastMinuteDescription": "Discounted rates for check-ins inside the next few days, fills empty rooms fast.",
+  "admin.earlyBirdDescription": "Reward guests who book well ahead and lock in revenue early.",
+  "admin.extendedStayDescription": "Discount longer stays, fewer turnovers, higher total booking value.",
+  "admin.midweekDescription": "Lower rates Sunday through Thursday to fill the gap between weekends.",
+  "admin.added": "Added",
+  "admin.noPromotionsYet": "No promotions yet",
+  "admin.addOneToGiveGuestsAnAutomaticDiscount": "Add one to give guests an automatic discount when their dates match."
 }

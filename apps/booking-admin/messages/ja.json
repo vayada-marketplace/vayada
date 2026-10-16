@@ -1000,7 +1000,6 @@
   "admin.promotions": "プロモーション",
   "admin.automaticRateRulesThatApplyWithoutACodeGuestsSee": "コードなしで適用される自動料金ルール。ゲストには日付が一致するとすぐに割引が表示されます。",
   "admin.theHighestSingleDiscountAppliesPromotionsAndPromoCodesNever": "最大の単一割引が適用されます。プロモーションとプロモーション コードは重複しません。より良い取引が得られます。",
-  "admin.newPromotion2": "+ 新しいプロモーション",
   "admin.loadingPromotions": "プロモーションを読み込み中…",
   "admin.tieredPercentageOff": "段階的パーセンテージ割引",
   "admin.unavailableRoom": "空室あり",
@@ -1472,5 +1471,14 @@
   "addons.editor.unitPerGuest": "ゲスト1人あたり",
   "addons.editor.unitPerNight": "1泊あたり",
   "addons.editor.unitPerGuestNight": "ゲスト1人・1泊あたり",
-  "addons.editor.previewHint": "この追加オプションが予約の流れでどう表示されるかのプレビューです。"
+  "addons.editor.previewHint": "この追加オプションが予約の流れでどう表示されるかのプレビューです。",
+  "admin.lastMinute": "直前割",
+  "admin.midweek": "平日割",
+  "admin.lastMinuteDescription": "数日以内のチェックインを割引し、空室をすばやく埋めます。",
+  "admin.earlyBirdDescription": "早めに予約するゲストに特典を提供し、早期に売上を確保します。",
+  "admin.extendedStayDescription": "長期滞在を割引し、入れ替えを減らして予約単価を上げます。",
+  "admin.midweekDescription": "日曜〜木曜の料金を下げ、週末の間の空きを埋めます。",
+  "admin.added": "追加済み",
+  "admin.noPromotionsYet": "プロモーションはまだありません",
+  "admin.addOneToGiveGuestsAnAutomaticDiscount": "追加すると、日程が合うゲストに自動で割引が適用されます。"
 }

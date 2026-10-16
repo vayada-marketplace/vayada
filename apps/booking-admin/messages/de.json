@@ -1000,7 +1000,6 @@
   "admin.promotions": "Werbeaktionen",
   "admin.automaticRateRulesThatApplyWithoutACodeGuestsSee": "Automatische Tarifregeln, die ohne Code gelten. Gäste sehen den Rabatt, sobald ihre Daten übereinstimmen.",
   "admin.theHighestSingleDiscountAppliesPromotionsAndPromoCodesNever": "Es gilt der höchste Einzelrabatt. Werbeaktionen und Aktionscodes stapeln sich nie; der bessere Deal gewinnt.",
-  "admin.newPromotion2": "+ Neue Aktion",
   "admin.loadingPromotions": "Werbeaktionen werden geladen…",
   "admin.tieredPercentageOff": "Gestaffelter prozentualer Rabatt",
   "admin.unavailableRoom": "Nicht verfügbares Zimmer",
@@ -1472,5 +1471,14 @@
   "addons.editor.unitPerGuest": "pro Gast",
   "addons.editor.unitPerNight": "pro Nacht",
   "addons.editor.unitPerGuestNight": "pro Gast und Nacht",
-  "addons.editor.previewHint": "Eine Vorschau, wie dieses Extra im Buchungsablauf erscheint."
+  "addons.editor.previewHint": "Eine Vorschau, wie dieses Extra im Buchungsablauf erscheint.",
+  "admin.lastMinute": "Last Minute",
+  "admin.midweek": "Unter der Woche",
+  "admin.lastMinuteDescription": "Rabatt für Anreisen in den nächsten Tagen, füllt freie Zimmer schnell.",
+  "admin.earlyBirdDescription": "Belohnen Sie Gäste, die früh buchen, und sichern Sie Umsatz frühzeitig.",
+  "admin.extendedStayDescription": "Rabatt für längere Aufenthalte: weniger Wechsel, höherer Buchungswert.",
+  "admin.midweekDescription": "Günstigere Preise von Sonntag bis Donnerstag, um die Lücke zwischen den Wochenenden zu füllen.",
+  "admin.added": "Hinzugefügt",
+  "admin.noPromotionsYet": "Noch keine Aktionen",
+  "admin.addOneToGiveGuestsAnAutomaticDiscount": "Fügen Sie eine hinzu, damit Gäste automatisch einen Rabatt erhalten, wenn ihre Daten passen."
 }

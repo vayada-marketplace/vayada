@@ -1000,7 +1000,6 @@
   "admin.promotions": "促销活动",
   "admin.automaticRateRulesThatApplyWithoutACodeGuestsSee": "无需代码即可应用的自动费率规则。客人在日期匹配后即可看到折扣。",
   "admin.theHighestSingleDiscountAppliesPromotionsAndPromoCodesNever": "适用最高单次折扣。促销和促销代码永远不会叠加；更好的交易获胜。",
-  "admin.newPromotion2": "+ 新促销",
   "admin.loadingPromotions": "正在加载促销活动...",
   "admin.tieredPercentageOff": "分级折扣",
   "admin.unavailableRoom": "没有空房",
@@ -1472,5 +1471,14 @@
   "addons.editor.unitPerGuest": "每位客人",
   "addons.editor.unitPerNight": "每晚",
   "addons.editor.unitPerGuestNight": "每位客人每晚",
-  "addons.editor.previewHint": "预览此附加服务在预订流程中的显示效果。"
+  "addons.editor.previewHint": "预览此附加服务在预订流程中的显示效果。",
+  "admin.lastMinute": "最后一刻",
+  "admin.midweek": "平日",
+  "admin.lastMinuteDescription": "为未来几天内入住提供折扣，快速填满空房。",
+  "admin.earlyBirdDescription": "奖励提前预订的客人，尽早锁定收入。",
+  "admin.extendedStayDescription": "为长住提供折扣：减少换客，提高预订总额。",
+  "admin.midweekDescription": "周日至周四降价，填补周末之间的空档。",
+  "admin.added": "已添加",
+  "admin.noPromotionsYet": "还没有促销",
+  "admin.addOneToGiveGuestsAnAutomaticDiscount": "添加后，日期符合的客人会自动获得折扣。"
 }
