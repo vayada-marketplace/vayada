@@ -10,6 +10,15 @@ import {
   type PmsRoomClosureState,
 } from "./pmsRoomClosureState.js";
 import { retireClosingRoomUnits } from "./pmsRoomClosureUnits.js";
+import { reconcileRoomBlockInventory } from "./pmsRoomBlockInventory.js";
+import {
+  deletePmsLinkedInventoryGroup,
+  lockPmsLinkedInventoryGroup,
+  type PmsLinkedInventoryGroupAudit,
+  type PmsLinkedInventoryGroupClient,
+} from "./pmsLinkedInventoryGroupMutations.js";
+import { reconcilePmsLinkedInventory } from "./pmsLinkedInventoryReconciler.js";
+import { enqueuePmsLinkedInventorySideEffects } from "./pmsLinkedInventorySideEffects.js";
 
 /**
  * One Delete for a room type (VAY-2132): what it would clean up and what still stops it. A room the
@@ -63,8 +72,9 @@ export async function readPmsRoomTypeDeletePlan(
           WHERE mapping.property_id=$1::uuid AND mapping.room_type_id=$2::uuid AND mapping.status<>'disabled')
          + (SELECT count(*) FROM pms.channel_rate_plan_mappings mapping
           WHERE mapping.property_id=$1::uuid AND mapping.room_type_id=$2::uuid AND mapping.status<>'disabled'))::int AS mappings,
+        -- The host's own blocks; blocks derived from linked rooms go with the link.
         (SELECT count(*)::int FROM pms.room_blocks block WHERE block.property_id=$1::uuid
-          AND (block.room_type_id=$2::uuid OR block.source_room_type_id=$2::uuid)
+          AND block.room_type_id=$2::uuid AND block.block_kind='manual'
           AND block.status='active' AND block.ends_on>=$3::date) AS "roomBlocks",
         -- Host or channel limits on future nights (bookings and holds are counted above).
         (SELECT count(*)::int FROM pms.inventory_days day WHERE day.property_id=$1::uuid
@@ -107,13 +117,14 @@ export async function readPmsRoomTypeDeletePlan(
   );
   // Every closure blocker the host can't fix on this room type (a stale calendar, missing coverage,
   // protected nights that no block, link or override explains) means the calendar needs updating.
+  // The Delete itself releases the room's own blocks and takes it out of its linked rooms.
   const explained = new Set([
     "last_operating_room",
     ...(counts.reservations ? ["active_reservations", "protected_inventory"] : []),
     ...(counts.unavailableUnits ? ["protected_units"] : []),
     ...(counts.protectedNights ? ["protected_inventory"] : []),
     ...(counts.roomBlocks ? ["active_blocks", "protected_inventory"] : []),
-    ...(linked ? ["linked_inventory", "protected_inventory"] : []),
+    ...(linked ? ["linked_inventory", "active_blocks", "protected_inventory"] : []),
   ]);
   // A room outside the calendar is fine to retire as long as it has no nights of its own.
   const calendarStale =
@@ -137,13 +148,6 @@ export async function readPmsRoomTypeDeletePlan(
     "unavailable_units",
     counts.unavailableUnits,
     "Set this room type's rooms back to available first.",
-  );
-  add("inventory", "room_blocks", counts.roomBlocks, "Release this room type's room blocks first.");
-  add(
-    "inventory",
-    "linked_inventory",
-    linked,
-    "Remove this room type from its linked rooms first.",
   );
   return {
     mode,
@@ -272,4 +276,106 @@ export async function closeRoomTypeForDelete(
     [key.id, at.toISOString(), createHash("sha256").update(metadata).digest("hex"), metadata],
   );
   return cleanup;
+}
+
+/**
+ * Releases the room type's own future blocks (one that started before the cutoff now ends the night
+ * before it, so past nights keep their history) and takes it out of its linked rooms (a group of two
+ * ends). Runs before the closure; the caller holds the delete's locks and reads the plan again after.
+ */
+export async function releaseRoomTypeForDelete(
+  client: PmsLinkedInventoryGroupClient,
+  scope: { propertyId: string; roomTypeId: string },
+  cutoffDate: string,
+  command: {
+    commandId: string;
+    keyHash: string;
+    acceptedAt: string;
+    audit: PmsLinkedInventoryGroupAudit;
+  },
+): Promise<{ roomBlocks: number; linkedGroups: number }> {
+  const blocks = [scope.propertyId, scope.roomTypeId, cutoffDate, command.acceptedAt];
+  const lastNight = (
+    await client.query<{ endsOn: string | null }>(
+      `SELECT max(ends_on)::text AS "endsOn" FROM pms.room_blocks
+       WHERE property_id=$1::uuid AND room_type_id=$2::uuid AND block_kind='manual'
+         AND status='active' AND ends_on>=$3::date`,
+      blocks.slice(0, 3),
+    )
+  ).rows[0]?.endsOn;
+  let roomBlocks = 0;
+  if (lastNight) {
+    const shortened = await client.query(
+      `UPDATE pms.room_blocks
+       SET ends_on=$3::date-1, revision=revision+1, updated_at=$4::timestamptz
+       WHERE property_id=$1::uuid AND room_type_id=$2::uuid AND block_kind='manual'
+         AND status='active' AND starts_on<$3::date AND ends_on>=$3::date`,
+      blocks,
+    );
+    const released = await client.query(
+      `UPDATE pms.room_blocks
+       SET status='released', released_at=$4::timestamptz, revision=revision+1, updated_at=$4::timestamptz
+       WHERE property_id=$1::uuid AND room_type_id=$2::uuid AND block_kind='manual'
+         AND status='active' AND starts_on>=$3::date`,
+      blocks,
+    );
+    roomBlocks = (shortened.rowCount ?? 0) + (released.rowCount ?? 0);
+    await reconcileRoomBlockInventory(
+      client,
+      scope.propertyId,
+      scope.roomTypeId,
+      cutoffDate,
+      lastNight,
+      command.acceptedAt,
+    );
+  }
+  const groupId = (
+    await client.query<{ groupId: string | null }>(
+      `SELECT linked_inventory_group_id::text AS "groupId" FROM pms.room_types
+       WHERE property_id=$1::uuid AND id=$2::uuid`,
+      [scope.propertyId, scope.roomTypeId],
+    )
+  ).rows[0]?.groupId;
+  if (groupId) {
+    const group = await lockPmsLinkedInventoryGroup(client, scope.propertyId, groupId);
+    if (!group) throw new Error("Room type delete lost its linked inventory group");
+    if (group.memberRoomTypeIds.length <= 2) {
+      const ended = await deletePmsLinkedInventoryGroup(client, {
+        propertyId: scope.propertyId,
+        groupId,
+        expectedRevision: group.revision,
+        commandId: command.commandId,
+        idempotencyKey: command.keyHash,
+        audit: command.audit,
+      });
+      if (!ended.ok)
+        throw new Error(`Room type delete could not end its linked rooms: ${ended.code}`);
+    } else {
+      // Leaving can't make the others overlap, so the group isn't checked again; it just moves on.
+      await client.query(
+        `UPDATE pms.room_types SET linked_inventory_group_id=NULL
+         WHERE property_id=$1::uuid AND id=$2::uuid`,
+        [scope.propertyId, scope.roomTypeId],
+      );
+      await client.query(
+        `UPDATE pms.linked_inventory_groups SET revision=revision+1, updated_at=now()
+         WHERE property_id=$1::uuid AND id=$2::uuid`,
+        [scope.propertyId, groupId],
+      );
+    }
+    const changes = await reconcilePmsLinkedInventory(client, scope.propertyId, command.acceptedAt);
+    await enqueuePmsLinkedInventorySideEffects(
+      client,
+      {
+        propertyId: scope.propertyId,
+        operation: "room_type_delete",
+        commandId: command.commandId,
+        keyHash: command.keyHash,
+        acceptedAt: command.acceptedAt,
+        audit: command.audit,
+      },
+      changes,
+    );
+  }
+  return { roomBlocks, linkedGroups: groupId ? 1 : 0 };
 }

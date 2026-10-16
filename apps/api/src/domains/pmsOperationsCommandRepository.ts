@@ -4,6 +4,7 @@ import {
   PMS_ROOM_TYPE_DUPLICATION_COPIED_FACTS,
   PMS_ROOM_TYPE_DUPLICATION_RESET_FACTS,
   PMS_ROOM_TYPE_LIFECYCLE_CONTRACT_VERSION,
+  type PmsRoomTypeDeleteCleanup,
   type PmsRoomTypeRetirementBlocker,
   type PmsRoomTypeRetirementImpact,
 } from "@vayada/domain-pms";
@@ -11,9 +12,12 @@ import { createHash } from "node:crypto";
 import pg, { type QueryResult, type QueryResultRow } from "pg";
 import { lockPmsManageScope } from "./pmsManageScope.js";
 import { lockPmsRoomClosureScope } from "./pmsRoomClosureCommandRepository.js";
+import { reconcileRoomBlockInventory } from "./pmsRoomBlockInventory.js";
+import { PmsLinkedInventoryNotCanonicalError } from "./pmsLinkedInventoryReconciler.js";
 import {
   closeRoomTypeForDelete,
   readPmsRoomTypeDeletePlan,
+  releaseRoomTypeForDelete,
   retireUnboundRoomTypeUnits,
   type PmsRoomTypeDeletePlan,
 } from "./pmsRoomTypeDelete.js";
@@ -2781,45 +2785,6 @@ async function roomBlockCapacityIsAvailable(
   );
 }
 
-async function reconcileRoomBlockInventory(
-  client: PmsOperationsCommandClient,
-  propertyId: string,
-  roomTypeId: string,
-  affectedFrom: string,
-  affectedTo: string,
-  acceptedAt: string,
-): Promise<void> {
-  await client.query(
-    `WITH affected_dates AS (
-       SELECT generate_series($3::date, $4::date, interval '1 day')::date AS stay_date
-     ), changes AS (
-       SELECT affected.stay_date,
-              COALESCE(SUM(block.blocked_count), 0)::integer AS blocked_count
-       FROM affected_dates affected
-       LEFT JOIN pms.room_blocks block
-         ON block.property_id = $1::uuid AND block.room_type_id = $2::uuid
-        AND block.status = 'active'
-        AND affected.stay_date BETWEEN block.starts_on AND block.ends_on
-       GROUP BY affected.stay_date
-     )
-     UPDATE pms.inventory_days inventory
-     SET blocked_count = changes.blocked_count,
-         available_count = CASE WHEN inventory.status = 'closed' OR inventory.linked_stop_sell
-           THEN 0 ELSE GREATEST(
-           0, COALESCE(inventory.effective_sellable_limit_count, inventory.total_count)
-             - inventory.assigned_count - changes.blocked_count
-         ) END,
-         inventory_revision = CASE WHEN inventory.inventory_revision IS NULL THEN NULL ELSE inventory.inventory_revision + 1 END,
-         block_source_revision = CASE WHEN inventory.block_source_revision IS NULL THEN NULL ELSE inventory.block_source_revision + 1 END,
-         updated_at = $5::timestamptz
-     FROM changes
-     WHERE inventory.property_id = $1::uuid AND inventory.room_type_id = $2::uuid
-       AND inventory.stay_date = changes.stay_date
-       AND inventory.blocked_count IS DISTINCT FROM changes.blocked_count`,
-    [propertyId, roomTypeId, affectedFrom, affectedTo, acceptedAt],
-  );
-}
-
 async function findRoomBlock(
   client: PmsOperationsCommandClient,
   propertyId: string,
@@ -3433,12 +3398,47 @@ async function retireRoomTypeWithCleanup(
       "Room type retirement idempotency key could not be reserved.",
     );
   }
-  const cleanup =
-    plan.mode === "closure"
+  let released = { roomBlocks: 0, linkedGroups: 0 };
+  try {
+    if (plan.cleanup.roomBlocks || plan.cleanup.linkedGroups)
+      released = await releaseRoomTypeForDelete(client, command, plan.cutoffDate, {
+        commandId: command.commandId,
+        keyHash: ids.keyHash,
+        acceptedAt,
+        audit: command.audit,
+      });
+  } catch (error) {
+    if (!(error instanceof PmsLinkedInventoryNotCanonicalError)) throw error;
+    // Linked rooms need canonical inventory, which a calendar update in setup restores.
+    await client.query("ROLLBACK");
+    return roomTypeRetireBlocked({
+      ...checked,
+      canRetire: false,
+      blockers: [
+        {
+          category: "inventory",
+          code: "calendar_not_current",
+          affectedCount: 1,
+          action: "Update the property calendar in setup, then delete the room type.",
+        },
+      ],
+    });
+  }
+  // What the released blocks and links held is rechecked under the same locks.
+  const closing =
+    released.roomBlocks || released.linkedGroups
+      ? await readPmsRoomTypeDeletePlan(client, command, at)
+      : plan;
+  if (!closing || closing.blockers.length) {
+    await client.query("ROLLBACK");
+    return roomTypeRetireBlocked(closing ? roomTypeDeleteImpact(impact, closing) : checked);
+  }
+  const cleanup: PmsRoomTypeDeleteCleanup = {
+    ...(closing.mode === "closure"
       ? await closeRoomTypeForDelete(
           client,
           scope,
-          plan.closure,
+          closing.closure,
           {
             keyHash: ids.keyHash,
             requestFingerprintHash: ids.requestFingerprintHash,
@@ -3447,7 +3447,9 @@ async function retireRoomTypeWithCleanup(
           },
           at,
         )
-      : await retireUnboundRoomTypeUnits(client, command, acceptedAt);
+      : await retireUnboundRoomTypeUnits(client, command, acceptedAt)),
+    ...released,
+  };
   if (!(await inspectRoomTypeRetirement(client, command.propertyId, command.roomTypeId))?.canRetire)
     throw new Error("Room type delete left retirement dependencies");
   return finishRoomTypeRetirement(

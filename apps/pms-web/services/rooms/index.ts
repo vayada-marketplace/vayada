@@ -326,10 +326,23 @@ export interface RoomTypeRetirementImpact {
       | "active_reservations"
       | "active_physical_units"
       | "future_inventory"
-      | "active_publication";
+      | "active_publication"
+      // What still stops a Delete that does the cleanup (VAY-2132).
+      | "channel_mapping"
+      | "last_room_type"
+      | "calendar_not_current"
+      | "protected_inventory"
+      | "unavailable_units";
     affectedCount: number;
     action: string;
   }>;
+  /** Present where Delete also retires the rooms, closes the future nights and leaves the calendar. */
+  cleanup?: {
+    physicalUnits: number;
+    futureNights: number;
+    roomBlocks: number;
+    linkedGroups: number;
+  };
 }
 
 export interface RoomCreate {
@@ -752,9 +765,17 @@ export const roomsService = {
     return { roomType: current, pricesNeedPublishing: facts !== null || location !== null };
   },
 
-  delete: async (id: string) => {
+  /** What Delete would do, and what still stops it, for the confirmation. */
+  deleteImpact: async (id: string) => {
     const propertyId = await resolveSelectedPmsPropertyId("retiring room type");
-    const impact = await pmsOperationsRoomsReadService.inspectRoomTypeRetirement(propertyId, id);
+    return pmsOperationsRoomsReadService.inspectRoomTypeRetirement(propertyId, id);
+  },
+
+  /** Retires the room type; `shown` is the impact a confirmation already read (VAY-2132). */
+  delete: async (id: string, shown?: RoomTypeRetirementImpact) => {
+    const propertyId = await resolveSelectedPmsPropertyId("retiring room type");
+    const impact =
+      shown ?? (await pmsOperationsRoomsReadService.inspectRoomTypeRetirement(propertyId, id));
     if (!impact.canRetire) throw new RoomTypeRetirementBlockedError(impact);
     await runRoomTypeLifecycleCommand(
       ["retire", propertyId, id, impact.version],
