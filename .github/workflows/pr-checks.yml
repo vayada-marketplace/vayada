@@ -9,6 +9,14 @@ on:
       - "fm/**"
       - "fix/**"
       - "flamurmaliqi2811/**"
+  # The merge queue tests each queued PR on top of main and the entries ahead of it; the ruleset
+  # waits for the same "Required Checks" status there.
+  merge_group:
+    types: [checks_requested]
+    branches:
+      - main
+  # A full run of every job on any branch, e.g. as the release precheck on the main tip.
+  workflow_dispatch:
 
 concurrency:
   group: pr-checks-${{ github.event.pull_request.number || github.ref }}
@@ -42,11 +50,23 @@ jobs:
       - name: Checkout merge commit and its parents
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          fetch-depth: 2
+          # A queue entry sits on the entries ahead of it, so it needs enough history to reach main.
+          fetch-depth: ${{ github.event_name == 'merge_group' && 50 || 2 }}
           persist-credentials: false
+
+      - name: Fetch the merge queue's base branch
+        if: github.event_name == 'merge_group'
+        env:
+          BASE_REF: ${{ github.event.merge_group.base_ref }}
+        # Without the base the selector cannot find a merge-base and runs every job.
+        run: |
+          git fetch --no-tags --depth=50 origin "+${BASE_REF}:refs/remotes/origin/merge-queue-base" ||
+            echo "::warning::Could not fetch ${BASE_REF}; every job will run"
 
       - name: Select jobs from changed paths
         id: select
+        env:
+          MERGE_GROUP_BASE: refs/remotes/origin/merge-queue-base
         run: node scripts/ci/pr-checks.mjs select
 
   frontend:
