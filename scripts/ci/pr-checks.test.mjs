@@ -292,7 +292,7 @@ test("every API PostgreSQL step belongs to exactly one shard or runs in all of t
   );
   const job = workflow.jobs.api_postgres;
   const shards = job.strategy.matrix.shard;
-  assert.deepEqual(shards, ["platform", "pms", "hotel-setup"]);
+  assert.deepEqual(shards, ["platform", "pms", "pricing", "hotel-setup"]);
   const perShard = Object.fromEntries(shards.map((shard) => [shard, 0]));
   for (const step of job.steps) {
     if (!step.if) continue;
