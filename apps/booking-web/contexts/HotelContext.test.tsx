@@ -16,7 +16,7 @@ vi.mock("next/navigation", () => ({ usePathname: () => "/" }));
 vi.mock("@/components/AffiliateClickTracker", () => ({ AffiliateClickTracker: () => null }));
 vi.mock("@/services/api/hotel", () => ({ hotelService: { getHotel, getAddons } }));
 // next/font only runs inside Next's compiler; the pairing map has its own test.
-vi.mock("@/lib/brandFonts", () => ({
+vi.mock("@vayada/fonts/brand", () => ({
   brandFontPairing: (id?: string) =>
     id === "high-end-serif"
       ? { heading: "'Heading', serif", body: "'Body', sans-serif" }

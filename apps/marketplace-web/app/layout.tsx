@@ -1,13 +1,12 @@
+import type { CSSProperties } from "react";
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import { uiFontFamily } from "@vayada/fonts/ui";
 import "./globals.css";
 import { CookieConsentProvider } from "@/context/CookieConsentContext";
 import { CookieBanner, CookieSettingsModal } from "@/components/consent";
 
-const inter = Inter({
-  subsets: ["latin"],
-  variable: "--font-sans",
-});
+// Self-hosted Inter (packages/fonts): no build or browser contacts Google.
+const uiFont = { fontFamily: uiFontFamily, "--font-sans": uiFontFamily } as CSSProperties;
 
 export const metadata: Metadata = {
   title: "vayada Marketplace - Direct distribution for independent hotels",
@@ -25,7 +24,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body className={`${inter.className} ${inter.variable}`}>
+      <body style={uiFont}>
         <CookieConsentProvider>
           {children}
           <CookieBanner />
