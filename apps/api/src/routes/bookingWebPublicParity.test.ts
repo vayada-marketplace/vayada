@@ -9,7 +9,7 @@ import {
   type PublicBookabilityQuoteProjection,
 } from "@vayada/domain-distribution";
 import { BOOKING_WEB_ANALYTICS_CONSENT_VERSION } from "@vayada/domain-booking";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import type { QueryResultRow } from "pg";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -1009,7 +1009,6 @@ describe("Booking Web public bootstrap parity", () => {
       occurredAt: string | undefined;
     }> = [];
     let closed = 0;
-    const lookupAdmissionHashes: string[] = [];
     const record = (context: Parameters<BookingWebCheckoutAdapter["getCheckoutConfig"]>[1]) => {
       operations.push({
         operation: context?.operation,
@@ -1021,9 +1020,6 @@ describe("Booking Web public bootstrap parity", () => {
       });
     };
     const checkoutAdapter: BookingWebCheckoutAdapter = {
-      async consumeLookupAttempt(clientAddressHash) {
-        lookupAdmissionHashes.push(clientAddressHash);
-      },
       async getCheckoutConfig(_slug, context) {
         record(context);
         return { payAtPropertyEnabled: true, bankTransfer: true, paypalEnabled: false };
@@ -1222,7 +1218,6 @@ describe("Booking Web public bootstrap parity", () => {
       ),
     ).toBe(true);
     expect(operations.every((entry) => entry.idempotencyKey)).toBe(true);
-    expect(lookupAdmissionHashes).toEqual([expect.stringMatching(/^[a-f0-9]{64}$/)]);
     const withdrawContexts = operations.filter((entry) => entry.operation === "booking-withdraw");
     const changePreviewContexts = operations.filter(
       (entry) => entry.operation === "booking-change-preview",
@@ -1237,106 +1232,49 @@ describe("Booking Web public bootstrap parity", () => {
     expect(closed).toBe(1);
   });
 
-  it("admits five booking lookups per minute per client address", async () => {
-    const auditInserts: Array<{ text: string; values?: readonly unknown[] }> = [];
-    const pool = {
-      async query(text: string, values?: readonly unknown[]) {
-        if (text.includes("count(*)::text AS count")) {
-          return { rows: [{ count: String(auditInserts.length) }] };
-        }
-        if (text.includes("INSERT INTO platform.product_audit_events")) {
-          auditInserts.push({ text, values });
-        }
-        return { rows: [] };
-      },
-      async end() {},
-    };
-    const adapter = createTargetBookingWebCheckoutAdapter({
-      externalChanges: externalBookingChanges,
-      connectionString: "postgres://unused",
-      inventoryReservationPort: createTargetPmsInventoryReservationPort(),
-      pool: pool as never,
-    });
-    const context = (attempt: number) => ({
-      operation: "booking-lookup",
-      requestId: "lookup-restarted-process",
-      correlationId: `lookup-${attempt}`,
-      idempotencyKey: `lookup-${attempt}`,
-      fingerprint: String(attempt).padStart(64, "0"),
-      occurredAt: new Date("2026-09-02T10:00:30.000Z"),
-    });
-
-    for (let attempt = 1; attempt <= 5; attempt += 1) {
-      await expect(
-        adapter.consumeLookupAttempt("client-address-hash", context(attempt)),
-      ).resolves.toBeUndefined();
-    }
-    await expect(adapter.consumeLookupAttempt("client-address-hash", context(6))).rejects.toThrow(
-      "Too many booking lookup attempts",
-    );
-    expect(auditInserts).toHaveLength(5);
-    expect(new Set(auditInserts.map((entry) => entry.values?.[0]))).toHaveLength(5);
-    expect(auditInserts[0]?.text).toContain("'security', 'restricted'");
-    expect(auditInserts[0]?.values).not.toContain("198.51.100.1");
-
-    let lookupCalled = false;
-    const app = buildApp({
-      logger: false,
-      publicHotelProfileRepository: createProfileRepository(legacyHotel, {}),
-      bookingWebCheckoutAdapter: {
-        ...unusedBookingWebCheckoutAdapter,
-        async consumeLookupAttempt() {
-          throw Object.assign(new Error("Too many booking lookup attempts."), { statusCode: 429 });
-        },
-        async lookup() {
-          lookupCalled = true;
-          return {};
-        },
-      },
-    });
-    const limited = await app.inject({
-      method: "POST",
-      url: "/api/booking-web/hotels/hotel-alpenrose/bookings/lookup",
-      payload: { bookingReference: "VAY-ABC123", guestEmail: "guest@example.test" },
-    });
-    expect(limited.statusCode).toBe(429);
-    expect(limited.headers["retry-after"]).toBe("60");
-    expect(lookupCalled).toBe(false);
-    await app.close();
-  });
-
-  it("only trusts forwarding headers from known proxies for booking lookup limits", async () => {
-    const hashes: string[] = [];
+  it("admits five booking lookups per minute per client address, counted in memory", async () => {
+    const lookups: string[] = [];
     const app = buildApp({
       logger: false,
       trustProxy: ["10.0.0.1"],
+      bookingWebPublicNow: () => new Date("2026-09-02T10:00:30.000Z"),
       publicHotelProfileRepository: createProfileRepository(legacyHotel, {}),
+      // The adapter has no lookup-attempt method any more: nothing about the address reaches
+      // the database (VAY-2222).
       bookingWebCheckoutAdapter: {
         ...unusedBookingWebCheckoutAdapter,
-        async consumeLookupAttempt(hash) {
-          hashes.push(hash);
-        },
-        async lookup() {
+        async lookup(_slug, request) {
+          lookups.push(String(request.bookingReference));
           return {};
         },
       },
     });
-    const injectLookup = (remoteAddress: string, forwardedFor: string) =>
+    const injectLookup = (remoteAddress: string, forwardedFor: string, reference: string) =>
       app.inject({
         method: "POST",
         url: "/api/booking-web/hotels/hotel-alpenrose/bookings/lookup",
         remoteAddress,
         headers: { "x-forwarded-for": forwardedFor },
-        payload: { bookingReference: "VAY-ABC123", guestEmail: "guest@example.test" },
+        payload: { bookingReference: reference, guestEmail: "guest@example.test" },
       });
 
-    await injectLookup("198.51.100.44", "192.0.2.1");
-    await injectLookup("198.51.100.44", "192.0.2.2");
-    await injectLookup("10.0.0.1", "198.51.100.1, 203.0.113.9");
+    // An untrusted caller can't spread its tries over made-up forwarded addresses.
+    for (let attempt = 1; attempt <= 5; attempt += 1)
+      expect(
+        (await injectLookup("198.51.100.44", `192.0.2.${attempt}`, `VAY-${attempt}`)).statusCode,
+      ).toBe(200);
+    const limited = await injectLookup("198.51.100.44", "192.0.2.6", "VAY-6");
+    expect(limited.statusCode).toBe(429);
+    expect(limited.headers["retry-after"]).toBe("30");
+    expect(limited.json()).toMatchObject({
+      message: "Too many booking lookup attempts. Please try again later.",
+    });
 
-    const hash = (address: string) =>
-      createHash("sha256").update(`booking-lookup-client:${address}`).digest("hex");
-    expect(hashes).toEqual([hash("198.51.100.44"), hash("198.51.100.44"), hash("203.0.113.9")]);
+    // Behind a trusted proxy the forwarded client address has its own bucket.
+    expect((await injectLookup("10.0.0.1", "198.51.100.1, 203.0.113.9", "VAY-7")).statusCode).toBe(
+      200,
+    );
+    expect(lookups).toEqual(["VAY-1", "VAY-2", "VAY-3", "VAY-4", "VAY-5", "VAY-7"]);
     await app.close();
   });
 
