@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -9,6 +9,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,13 +18,16 @@ import { LineCounter, isAlias, parse, parseDocument, visit } from "yaml";
 import {
   BROWSER_E2E_JOBS,
   FRONTEND_ONLY_PACKAGES,
+  HOLD_LABEL,
   RULES,
   SELECTABLE_JOBS,
   WORKFLOW_FILE,
   YAML_ANCHOR,
   changedFiles,
+  openHolds,
   selectJobs,
   verifyRequiredChecks,
+  waitWhileHeld,
   workflowChangeJobs,
   workflowLineJobs,
 } from "./pr-checks.mjs";
@@ -994,6 +998,192 @@ const runVerify = (needs, script = cli) =>
     env: { ...process.env, NEEDS: JSON.stringify(needs) },
   });
 
+const hold = (number, extra = {}) => ({
+  number,
+  state: "open",
+  html_url: `https://github.com/o/r/issues/${number}`,
+  ...extra,
+});
+
+test("only open issues count as merge queue holds, never pull requests", () => {
+  assert.equal(HOLD_LABEL, "release-train-hold");
+  const issues = [hold(1), hold(2, { state: "closed" }), hold(3, { pull_request: {} })];
+  assert.deepEqual(
+    openHolds(issues).map((issue) => issue.number),
+    [1],
+  );
+});
+
+// A fake clock: sleep() advances time instantly. `reads` are the successive hold-list results;
+// the last one repeats.
+const holdHarness = (reads) => {
+  let time = 0;
+  const logs = [];
+  const sleeps = [];
+  return {
+    logs,
+    sleeps,
+    options: {
+      listHolds: async () => {
+        const next = reads.length > 1 ? reads.shift() : reads[0];
+        if (next instanceof Error) throw next;
+        return next;
+      },
+      sleep: async (ms) => {
+        sleeps.push(ms);
+        time += ms;
+      },
+      now: () => time,
+      maxWaitMs: 120 * 60_000,
+      pollMs: 60_000,
+      log: (line) => logs.push(line),
+    },
+  };
+};
+
+test("the hold gate passes at once when no hold is open", async () => {
+  const { options, sleeps, logs } = holdHarness([[]]);
+  await waitWhileHeld(options);
+  assert.deepEqual(sleeps, []);
+  assert.deepEqual(logs, []);
+});
+
+test("the hold gate waits while a hold is open and passes once it closes", async () => {
+  const { options, sleeps, logs } = holdHarness([[hold(7)], [hold(7)], []]);
+  await waitWhileHeld(options);
+  assert.deepEqual(sleeps, [60_000, 60_000]);
+  assert.deepEqual(logs, [
+    "merge queue hold: https://github.com/o/r/issues/7; waiting (0 min so far)",
+  ]);
+});
+
+test("the hold gate fails at the deadline and names the hold", async () => {
+  const { options } = holdHarness([[hold(7)]]);
+  await assert.rejects(
+    waitWhileHeld(options),
+    /^Error: release hold still open after 120 min: https:\/\/github.com\/o\/r\/issues\/7$/,
+  );
+});
+
+test("the hold gate treats an unreadable hold list as held (fail closed)", async () => {
+  const recovered = holdHarness([new Error("HTTP 502"), []]);
+  await waitWhileHeld(recovered.options);
+  assert.match(recovered.logs[0], /could not read holds \(HTTP 502\)/);
+
+  const down = holdHarness([new Error("HTTP 502")]);
+  await assert.rejects(
+    waitWhileHeld(down.options),
+    /still open after 120 min: could not read holds/,
+  );
+});
+
+// Runs the hold CLI against a local stand-in for the GitHub issues API. `reply` maps the request
+// number (0-based) and headers to { status, body, etag }.
+const runHoldCli = async (reply, env = {}) => {
+  const requests = [];
+  const server = createServer((request, response) => {
+    const answer = reply(requests.length, request.headers);
+    requests.push({ url: request.url, headers: request.headers });
+    response.statusCode = answer.status ?? 200;
+    if (answer.etag) response.setHeader("etag", answer.etag);
+    response.setHeader("content-type", "application/json");
+    response.end(answer.body === undefined ? "" : JSON.stringify(answer.body));
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const child = spawn(process.execPath, [cli, "hold"], {
+      timeout: 20_000,
+      env: {
+        ...process.env,
+        GITHUB_API_URL: `http://127.0.0.1:${server.address().port}`,
+        GITHUB_REPOSITORY: "o/r",
+        GH_TOKEN: "test-token",
+        HOLD_POLL_SECONDS: "0.05",
+        HOLD_MAX_WAIT_MINUTES: "0.005",
+        ...env,
+      },
+    });
+    let stderr = "";
+    child.stderr.on("data", (chunk) => (stderr += chunk));
+    const status = await new Promise((resolve) => child.on("close", resolve));
+    return { status, stderr, requests };
+  } finally {
+    server.close();
+  }
+};
+
+test("the hold CLI passes without a hold and asks for open release-train-hold issues", async () => {
+  const result = await runHoldCli(() => ({ body: [hold(3, { pull_request: {} })] }));
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stderr, /No merge queue hold is open/);
+  assert.equal(
+    result.requests[0].url,
+    "/repos/o/r/issues?state=open&labels=release-train-hold&per_page=100",
+  );
+  assert.equal(result.requests[0].headers.authorization, "Bearer test-token");
+});
+
+test("the hold CLI fails while a hold stays open past its deadline", async () => {
+  const result = await runHoldCli(() => ({ body: [hold(9)] }));
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(
+    result.stderr,
+    /::error::release hold still open after 0 min: https:\/\/github.com\/o\/r\/issues\/9/,
+  );
+  assert.ok(result.requests.length >= 2, "polls more than once before giving up");
+});
+
+test("the hold CLI counts an error reply as held", async () => {
+  const result = await runHoldCli(() => ({ status: 500, body: { message: "boom" } }));
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(result.stderr, /still open after 0 min: could not read holds \(GET .* HTTP 500\)/);
+});
+
+test("the hold CLI repeats reads conditionally and keeps the cached holds on a 304", async () => {
+  const result = await runHoldCli((index, headers) =>
+    index === 0
+      ? { body: [hold(4)], etag: '"v1"' }
+      : headers["if-none-match"] === '"v1"'
+        ? { status: 304 }
+        : { body: [] },
+  );
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(result.stderr, /still open after 0 min: https:\/\/github.com\/o\/r\/issues\/4/);
+  assert.equal(result.requests[1].headers["if-none-match"], '"v1"');
+});
+
+test("the hold CLI never treats a 304 without a cached reply as no hold", async () => {
+  const result = await runHoldCli(() => ({ status: 304 }));
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(result.stderr, /could not read holds \(GET .* HTTP 304\)/);
+  assert.ok(result.requests.every((request) => !request.headers["if-none-match"]));
+});
+
+test("the hold CLI reads unconditionally when a reply carried no ETag", async () => {
+  const result = await runHoldCli(() => ({ body: [hold(5)] }));
+  assert.equal(result.status, 1, result.stderr);
+  assert.ok(result.requests.length >= 2);
+  assert.ok(result.requests.every((request) => !request.headers["if-none-match"]));
+});
+
+test("the hold CLI refuses to run without a token", async () => {
+  const result = await runHoldCli(() => ({ body: [] }), { GH_TOKEN: "" });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /::error::hold needs GITHUB_REPOSITORY and GH_TOKEN/);
+});
+
+test("no issue template applies the hold label, so only maintainers can pause the queue", () => {
+  // Markdown templates and YAML issue forms both live here (or in ISSUE_TEMPLATE.md).
+  const dir = join(ROOT, ".github/ISSUE_TEMPLATE");
+  const templates = [
+    ...(existsSync(dir) ? readdirSync(dir).map((name) => `.github/ISSUE_TEMPLATE/${name}`) : []),
+    ...[".github/ISSUE_TEMPLATE.md", "ISSUE_TEMPLATE.md", "docs/ISSUE_TEMPLATE.md"].filter((file) =>
+      existsSync(join(ROOT, file)),
+    ),
+  ];
+  for (const file of templates) assert.ok(!read(file).includes(HOLD_LABEL), file);
+});
+
 test("the verify CLI exits non-zero on a failed job and zero when everything passed", () => {
   const failed = runVerify(needsFor({ api_postgres: "failure" }));
   assert.equal(failed.status, 1, failed.stderr);
@@ -1070,6 +1260,20 @@ test("pr-checks.yml reports Required Checks to the merge queue with the base bra
     steps[0].with["fetch-depth"],
     "${{ github.event_name == 'merge_group' && 50 || 2 }}",
   );
+});
+
+test("Required Checks waits out a merge queue hold only after the jobs verified", () => {
+  const required = parse(WORKFLOW).jobs.required;
+  assert.equal(
+    required["timeout-minutes"],
+    "${{ github.event_name == 'merge_group' && 130 || 5 }}",
+  );
+  assert.deepEqual(required.permissions, { contents: "read", issues: "read" });
+  const verify = required.steps.findIndex((step) => step.run?.includes("pr-checks.mjs verify"));
+  const wait = required.steps.findIndex((step) => step.run?.includes("pr-checks.mjs hold"));
+  assert.ok(verify >= 0 && wait === verify + 1, "the hold wait runs right after verify");
+  assert.equal(required.steps[wait].if, "github.event_name == 'merge_group'");
+  assert.equal(required.steps[wait].env.GH_TOKEN, "${{ github.token }}");
 });
 
 test("pr-checks.yml runs for main and every stacked base branch without per-ticket entries", () => {
