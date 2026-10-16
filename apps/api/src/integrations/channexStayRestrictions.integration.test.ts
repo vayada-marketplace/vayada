@@ -5,7 +5,6 @@ import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { createPgChannexManagementPlanPort } from "./channexManagementPlans.js";
 import { createChannexManagementProvider } from "./channexManagement.js";
 import { pmsRoomStayRestrictionReason } from "../domains/pmsRoomSelectionConflicts.js";
-import { replaceStayRestrictions } from "../domains/pmsStayRestrictions.js";
 
 const url = process.env.TEST_DATABASE_URL;
 describe.skipIf(!url)("canonical Channex stay restrictions", () => {
@@ -137,16 +136,30 @@ describe.skipIf(!url)("canonical Channex stay restrictions", () => {
       })) === null
     );
   }
+  // Booking quotes still enforce imported rules; the old Channex route that wrote them is gone.
+  async function setStayRestrictions(rules: object[]) {
+    await db.query(
+      `DELETE FROM pms.rate_rules WHERE property_id=$1::uuid AND room_type_id=$2::uuid
+         AND rate_plan_id=$3::uuid AND rule_type='stay_restriction'`,
+      [property, room, rate],
+    );
+    await db.query(
+      `INSERT INTO pms.rate_rules(property_id,room_type_id,rate_plan_id,rule_type,starts_on,ends_on,
+         days_of_week,min_stay_nights,max_stay_nights,closed_to_arrival,closed_to_departure,stop_sell,enabled)
+       SELECT $1::uuid,$2::uuid,$3::uuid,'stay_restriction',r."startsOn",r."endsOn",r."daysOfWeek",
+         r."minStayNights",r."maxStayNights",r."closedToArrival",r."closedToDeparture",r."stopSell",r.enabled
+       FROM jsonb_to_recordset($4::jsonb) AS r("startsOn" date,"endsOn" date,"daysOfWeek" integer[],
+         "minStayNights" integer,"maxStayNights" integer,"closedToArrival" boolean,
+         "closedToDeparture" boolean,"stopSell" boolean,enabled boolean)`,
+      [property, room, rate, JSON.stringify(rules)],
+    );
+  }
   it("retains local arrival, departure and rate-scoped restrictions while ARI is unavailable", async () => {
-    await replaceStayRestrictions(db, property, {
-      roomTypeId: room,
-      ratePlanId: rate,
-      rules: [
-        { ...base, daysOfWeek: [5], minStayNights: 3, maxStayNights: 14 },
-        { ...base, daysOfWeek: [0], closedToArrival: true, closedToDeparture: true },
-        { ...base, startsOn: "2026-09-14", stopSell: true },
-      ],
-    });
+    await setStayRestrictions([
+      { ...base, daysOfWeek: [5], minStayNights: 3, maxStayNights: 14 },
+      { ...base, daysOfWeek: [0], closedToArrival: true, closedToDeparture: true },
+      { ...base, startsOn: "2026-09-14", stopSell: true },
+    ]);
     await expectPricingUnavailable();
     expect(await allowed("2026-09-11", "2026-09-13")).toBe(false);
     expect(await allowed("2026-09-11", "2026-09-14")).toBe(true);
@@ -163,12 +176,8 @@ describe.skipIf(!url)("canonical Channex stay restrictions", () => {
       VALUES($1,$2,'season','2026-09-11','2026-09-15',2,14)`,
       [property, room],
     );
-    const replacement = {
-      roomTypeId: room,
-      ratePlanId: rate,
-      rules: [{ ...base, minStayNights: 3, stopSell: true }],
-    };
-    await replaceStayRestrictions(db, property, replacement);
+    const rule = { ...base, minStayNights: 3, stopSell: true };
+    await setStayRestrictions([rule]);
     const oldJob = job();
     const fetcher = vi
       .fn<typeof fetch>()
@@ -179,12 +188,8 @@ describe.skipIf(!url)("canonical Channex stay restrictions", () => {
       plans: port(),
       fetch: fetcher,
     });
-    for (const rules of [
-      [{ ...replacement.rules[0]!, endsOn: "2026-09-11" }],
-      [{ ...replacement.rules[0]!, enabled: false }],
-      [],
-    ]) {
-      await replaceStayRestrictions(db, property, { ...replacement, rules });
+    for (const rules of [[{ ...rule, endsOn: "2026-09-11" }], [{ ...rule, enabled: false }], []]) {
+      await setStayRestrictions(rules);
       await expectPricingUnavailable({ ...oldJob, attemptNumber: 2 });
       expect(await provider.execute({ ...oldJob, attemptNumber: 2 })).toMatchObject({
         ok: false,
@@ -193,6 +198,7 @@ describe.skipIf(!url)("canonical Channex stay restrictions", () => {
       expect(fetcher).not.toHaveBeenCalled();
       expect(await allowed("2026-09-12", "2026-09-14")).toBe(true);
     }
+    // Rule edits no longer queue restriction-only ARI (0489, VAY-2208).
     expect(
       (
         await db.query(
@@ -200,7 +206,7 @@ describe.skipIf(!url)("canonical Channex stay restrictions", () => {
           [property],
         )
       ).rows[0].n,
-    ).toBeGreaterThan(0);
+    ).toBe(0);
     // Several full-horizon recomputations share the populated CI database.
   }, 15_000);
   it("scopes refresh and claims to one property and leaves other operations untouched", async () => {
@@ -232,6 +238,8 @@ describe.skipIf(!url)("canonical Channex stay restrictions", () => {
         [property, otherProperty],
       ])
     ).rows;
+    // A restriction-only job as the rule triggers queue it; the worker no longer adds its own.
+    await db.query("SELECT pms.enqueue_restriction_ari($1,'rules:scoped')", [property]);
     const worker = createPgPmsChannexManagementWorkerStore({
       connectionString: url!,
       stagingRestrictionsPropertyId: property,
@@ -266,11 +274,12 @@ describe.skipIf(!url)("canonical Channex stay restrictions", () => {
         ])
       ).rows,
     ).toEqual(before);
+    // The worker no longer queues a daily restrictions-only refresh (VAY-2208).
     expect(
       (
         await db.query(
-          "SELECT count(*)::int n FROM platform.jobs WHERE property_id=$1 AND job_key LIKE '%full:%'",
-          [otherProperty],
+          "SELECT count(*)::int n FROM platform.jobs WHERE property_id=ANY($1::uuid[]) AND job_key LIKE '%full:%'",
+          [[property, otherProperty]],
         )
       ).rows[0].n,
     ).toBe(0);
@@ -402,8 +411,6 @@ describe.skipIf(!url)("canonical Channex stay restrictions", () => {
         [id, owner, JSON.stringify(payload)],
       );
     }
-    // Suppress the unrelated periodic restrictions enqueue for this claim-only test.
-    await db.query("DELETE FROM hotel_catalog.property_locations WHERE property_id=$1", [property]);
     const worker = (enabled: boolean, ari = true) =>
       createPgPmsChannexManagementWorkerStore({
         connectionString: url!,
@@ -480,11 +487,8 @@ describe.skipIf(!url)("canonical Channex stay restrictions", () => {
         targetState: state,
         ariSyncMutating,
       });
-    await replaceStayRestrictions(db, property, {
-      roomTypeId: room,
-      ratePlanId: rate,
-      rules: [{ ...base, stopSell: true }],
-    });
+    // A restriction-only job queued before 0489 dropped the rule and calendar triggers.
+    await db.query("SELECT pms.enqueue_restriction_ari($1,'rules:guarded')", [property]);
     expect(await store(false).claim({ workerId: "guarded", now: new Date() })).toBeNull();
     const worker = store(true);
     const claimed = await worker.claim({ workerId: "worker", now: new Date() });
@@ -499,7 +503,7 @@ describe.skipIf(!url)("canonical Channex stay restrictions", () => {
           [property],
         )
       ).rows[0].n,
-    ).toBe(1);
+    ).toBe(0);
     const result = await worker.fail(
       claimed!,
       { ok: false, code: "timeout", message: "test timeout" },
@@ -561,24 +565,7 @@ describe.skipIf(!url)("canonical Channex stay restrictions", () => {
     await expectPricingUnavailable();
   });
 
-  it("rejects conflicting overlaps and tenant-crossing mappings before provider delivery", async () => {
-    await db.query(
-      `INSERT INTO pms.rate_rules(property_id,room_type_id,rule_type,starts_on,ends_on,min_stay_nights)
-      VALUES($1,$2,'season','2026-09-11','2026-09-15',5)`,
-      [property, room],
-    );
-    await db.query("SAVEPOINT invalid_rule");
-    await expect(
-      replaceStayRestrictions(db, property, {
-        roomTypeId: room,
-        ratePlanId: rate,
-        rules: [{ ...base, maxStayNights: 3 }],
-      }),
-    ).rejects.toThrow("Conflicting");
-    await db.query("ROLLBACK TO invalid_rule");
-    await expect(
-      replaceStayRestrictions(db, randomUUID(), { roomTypeId: room, ratePlanId: rate, rules: [] }),
-    ).rejects.toThrow("scope_not_found");
+  it("never contacts Channex for restriction-only ARI when a rate mapping is missing", async () => {
     await db.query("DELETE FROM pms.channel_rate_plan_mappings WHERE rate_plan_id=$1", [otherRate]);
     const fetcher = vi.fn<typeof fetch>();
     const provider = createChannexManagementProvider({

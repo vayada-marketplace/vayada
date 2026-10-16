@@ -3,6 +3,7 @@
 //
 //   node scripts/ci/pr-checks.mjs select   # "changes" job: writes run_<job>=true|false outputs
 //   node scripts/ci/pr-checks.mjs verify   # "Required Checks" job: exits 1 unless every job passed
+//   node scripts/ci/pr-checks.mjs hold     # "Required Checks" on merge_group: waits out a hold
 //
 // No dependencies on purpose: both jobs run before (or without) `npm ci`.
 import { execFileSync } from "node:child_process";
@@ -11,6 +12,7 @@ import { fileURLToPath } from "node:url";
 
 export const SELECTABLE_JOBS = [
   "frontend",
+  "frontend_build",
   "first_party_auth",
   "pms_web_e2e",
   "marketplace_web_e2e",
@@ -21,8 +23,12 @@ export const SELECTABLE_JOBS = [
   "backend",
 ];
 
+// The two halves of the old frontend job: typecheck, lint and package tests; build and the tests
+// of the built apps. A path that needs one needs both.
+const FRONTEND_JOBS = ["frontend", "frontend_build"];
+
 const TYPESCRIPT_JOBS = [
-  "frontend",
+  ...FRONTEND_JOBS,
   "first_party_auth",
   "api_unit",
   "api_postgres",
@@ -30,7 +36,27 @@ const TYPESCRIPT_JOBS = [
 ];
 
 // The mocked Playwright projects that gate PRs (one dev server each, no backend).
-const BROWSER_E2E_JOBS = ["pms_web_e2e", "marketplace_web_e2e", "booking_web_e2e"];
+export const BROWSER_E2E_JOBS = ["pms_web_e2e", "marketplace_web_e2e", "booking_web_e2e"];
+
+// Packages that neither apps/api nor any backend package depends on, with the extra jobs their
+// changes need: the browser projects of the apps that use them, and api_unit when
+// test:unit-suites runs their tests. frontend, frontend_build and first_party_auth always run too. The guard
+// tests in pr-checks.test.mjs recompute this from every package.json and fail when anything
+// else starts to reach one of these packages.
+export const FRONTEND_ONLY_PACKAGES = {
+  // booking-admin, booking-web, marketplace-web, pms-web, vayada-admin
+  "product-onboarding": BROWSER_E2E_JOBS,
+  // booking-admin, pms-web
+  "feature-hub": ["pms_web_e2e"],
+  // booking-admin, marketplace-web, pms-web; its tests are in test:unit-suites
+  "settings-ui": ["pms_web_e2e", "marketplace_web_e2e", "api_unit"],
+  // landing, marketplace-web, vayada-admin
+  "marketplace-shared": ["marketplace_web_e2e"],
+  // booking-web, pms-web
+  "locale-ui": ["pms_web_e2e", "booking_web_e2e"],
+  // no app; its tests are in test:unit-suites
+  "pms-vayada-adapter": ["api_unit"],
+};
 
 // The first matching rule decides what a changed file selects. A file that matches no rule
 // selects every job, so new directories and tooling changes fail safe (run everything).
@@ -39,6 +65,21 @@ export const RULES = [
   { name: "docs", test: /^(LICENSE|\.gitignore|\.coderabbit\.yaml)$/, jobs: [] },
   { name: "docs", test: /^\.agents\//, jobs: [] },
   { name: "evidence", test: /^engineering\/evidence\//, jobs: [] },
+  // Other workflows only reach PR checks through tests that read them: the pr-checks and
+  // coordinated-release contracts (frontend) and first-party-auth/production-config.spec.ts
+  // (first_party_auth). pr-checks.yml itself is handled by selectJobs.
+  {
+    name: "other-workflows",
+    test: /^\.github\/workflows\/(?!pr-checks\.yml$)[^/]+\.ya?ml$/,
+    jobs: ["frontend", "first_party_auth"],
+  },
+  // Only the Playwright runs read the root config: landing (frontend_build), first-party auth and the
+  // three mocked browser projects.
+  {
+    name: "playwright-config",
+    test: /^playwright\.config\.ts$/,
+    jobs: [...FRONTEND_JOBS, "first_party_auth", ...BROWSER_E2E_JOBS],
+  },
   {
     name: "python-backend",
     test: /^apps\/(marketplace-api|booking-api|pms-api)\//,
@@ -48,51 +89,56 @@ export const RULES = [
   {
     name: "pms-web",
     test: /^apps\/pms-web\//,
-    jobs: ["frontend", "first_party_auth", "pms_web_e2e"],
+    jobs: [...FRONTEND_JOBS, "first_party_auth", "pms_web_e2e"],
   },
   {
     name: "marketplace-web",
     test: /^apps\/marketplace-web\//,
-    jobs: ["frontend", "first_party_auth", "marketplace_web_e2e"],
+    jobs: [...FRONTEND_JOBS, "first_party_auth", "marketplace_web_e2e"],
   },
   {
     name: "booking-web",
     test: /^apps\/booking-web\//,
-    jobs: ["frontend", "first_party_auth", "booking_web_e2e"],
+    jobs: [...FRONTEND_JOBS, "first_party_auth", "booking_web_e2e"],
   },
   {
     name: "frontend",
     test: /^apps\/(vayada-admin|booking-admin|landing)\//,
-    jobs: ["frontend", "first_party_auth"],
+    jobs: [...FRONTEND_JOBS, "first_party_auth"],
   },
   {
     name: "pms-web-e2e",
     test: /^tests\/e2e\/pms-web\//,
-    jobs: ["frontend", "first_party_auth", "pms_web_e2e"],
+    jobs: [...FRONTEND_JOBS, "first_party_auth", "pms_web_e2e"],
   },
   // Shared mocks and helpers: every mocked browser project imports from these.
   {
     name: "browser-e2e-support",
     test: /^tests\/e2e\/(support|helpers|marketplace-web\/utils)\//,
-    jobs: ["frontend", "first_party_auth", ...BROWSER_E2E_JOBS],
+    jobs: [...FRONTEND_JOBS, "first_party_auth", ...BROWSER_E2E_JOBS],
   },
   {
     name: "marketplace-web-e2e",
     test: /^tests\/e2e\/marketplace-web\//,
-    jobs: ["frontend", "first_party_auth", "marketplace_web_e2e"],
+    jobs: [...FRONTEND_JOBS, "first_party_auth", "marketplace_web_e2e"],
   },
   {
     name: "booking-web-e2e",
     test: /^tests\/e2e\/booking-web\//,
-    jobs: ["frontend", "first_party_auth", "booking_web_e2e"],
+    jobs: [...FRONTEND_JOBS, "first_party_auth", "booking_web_e2e"],
   },
-  // The frontend job runs the landing Playwright suite; first_party_auth runs the auth suite. The
+  // frontend_build runs the landing Playwright suite; first_party_auth runs the auth suite. The
   // other projects here are not PR-gated. A new folder under tests/e2e/ matches no rule (every job).
   {
     name: "e2e",
     test: /^tests\/e2e\/(landing|first-party-auth|booking-admin|vayada-admin|next-stack-smoke|booking-public-canary)\//,
-    jobs: ["frontend", "first_party_auth"],
+    jobs: [...FRONTEND_JOBS, "first_party_auth"],
   },
+  ...Object.entries(FRONTEND_ONLY_PACKAGES).map(([name, jobs]) => ({
+    name: `frontend-only package ${name}`,
+    test: new RegExp(`^packages/${name}/`),
+    jobs: [...FRONTEND_JOBS, "first_party_auth", ...jobs],
+  })),
   // Packages the apps build on (everything but backend-*) also run the mocked browser projects.
   {
     name: "frontend-packages",
@@ -111,7 +157,72 @@ export const RULES = [
   { name: "typescript", test: /^(apps\/api|packages)\//, jobs: TYPESCRIPT_JOBS },
 ];
 
-export function selectJobs(files) {
+export const WORKFLOW_FILE = ".github/workflows/pr-checks.yml";
+
+// GitHub Actions accepts YAML anchors, aliases and merge keys. A block shared that way would let
+// an edit inside one job change another, so any of them in either version runs every job. Anchor
+// names may hold any character but whitespace and flow indicators; a false match (say, a shell
+// line starting with `&&`) only runs every job.
+export const YAML_ANCHOR = /(^[ \t]*|:[ \t]+|-[ \t]+|[[{,][ \t]*)[&*][^\s[\]{},]+|<<\s*:/m;
+
+// Maps each line (index = 1-based line number) of pr-checks.yml to the job whose block it is in.
+// Everything that is not inside one job maps to null: lines before `jobs:`, other top-level
+// keys, job key lines, and anything indented less than a job's own keys. Comment lines at indent
+// 0-2 under `jobs:` map to "#": YAML cannot nest them inside a job, so they change nothing.
+export function workflowLineJobs(text) {
+  const lines = [undefined];
+  let inJobs = false;
+  let job = null;
+  for (const line of text.split("\n")) {
+    if (inJobs && /^ {0,2}#/.test(line)) {
+      lines.push("#");
+    } else if (/^\S/.test(line)) {
+      inJobs = /^jobs:\s*$/.test(line);
+      job = null;
+      lines.push(null);
+    } else if (inJobs && /^ {2}[A-Za-z_][\w-]*\s*:/.test(line)) {
+      job = /^ {2}([A-Za-z_][\w-]*)/.exec(line)[1];
+      lines.push(null);
+    } else if (/^\s*$/.test(line)) {
+      lines.push(inJobs ? job : null);
+    } else if (inJobs && /^ {4}/.test(line)) {
+      lines.push(job);
+    } else {
+      // Anything else under jobs: (a quoted or oddly indented key, say) ends the current block.
+      job = null;
+      lines.push(null);
+    }
+  }
+  return lines;
+}
+
+// The jobs an edit to pr-checks.yml can affect, from the file before and after and their -U0
+// diff, or null when the edit is not confined to selectable job blocks (run every job). Jobs only
+// interact through needs/outputs, which live in the "changes" and "required" blocks, and through
+// YAML anchors; both fall back to every job. Frontend always runs because its pr-checks contract
+// tests parse this file.
+export function workflowChangeJobs(before, after, diff) {
+  if (typeof before !== "string" || typeof after !== "string" || typeof diff !== "string") {
+    return null;
+  }
+  if (YAML_ANCHOR.test(before) || YAML_ANCHOR.test(after)) return null;
+  const hunks = [...diff.matchAll(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/gm)];
+  if (hunks.length === 0) return null;
+  const oldLines = workflowLineJobs(before);
+  const newLines = workflowLineJobs(after);
+  const touched = new Set();
+  for (const [, oldStart, oldCount = "1", newStart, newCount = "1"] of hunks) {
+    for (let line = +oldStart; line < +oldStart + +oldCount; line++) touched.add(oldLines[line]);
+    for (let line = +newStart; line < +newStart + +newCount; line++) touched.add(newLines[line]);
+  }
+  touched.delete("#");
+  if (![...touched].every((job) => SELECTABLE_JOBS.includes(job))) return null;
+  return SELECTABLE_JOBS.filter((job) => job === "frontend" || touched.has(job));
+}
+
+// `workflowJobs` is workflowChangeJobs() for this change; without it a pr-checks.yml edit runs
+// every job.
+export function selectJobs(files, { workflowJobs = null } = {}) {
   const selected = new Set();
   const reasons = [];
   if (!files || files.length === 0) {
@@ -119,6 +230,15 @@ export function selectJobs(files) {
     return { jobs: [...SELECTABLE_JOBS], reasons };
   }
   for (const file of files) {
+    if (file === WORKFLOW_FILE) {
+      for (const job of workflowJobs ?? SELECTABLE_JOBS) selected.add(job);
+      reasons.push(
+        workflowJobs
+          ? `${file}: only job blocks changed (${workflowJobs.join(", ")})`
+          : `${file}: changed outside job blocks (runs every job)`,
+      );
+      continue;
+    }
     const rule = RULES.find((candidate) => candidate.test.test(file));
     for (const job of rule ? rule.jobs : SELECTABLE_JOBS) selected.add(job);
     reasons.push(`${file}: ${rule ? rule.name : "unclassified (runs every job)"}`);
@@ -150,17 +270,78 @@ export function verifyRequiredChecks(needs) {
   return problems;
 }
 
-// On pull_request events HEAD is GitHub's merge commit, so HEAD^1 is the base branch tip and
-// `git diff HEAD^1 HEAD` is exactly the PR's "Files changed" view. Needs fetch-depth >= 2.
-function changedFiles() {
+// Merge queue pause (VAY-2241). While an open issue carries this label, a queued entry's
+// "Required Checks" waits in `hold` instead of passing, so nothing merges into main while a release
+// is being cut; the entry keeps its place and its finished checks. Labels can only be set by users
+// with triage access, by issue templates or forms that name the label (there are none; a test
+// guards that) and by apps with issue write access. A stray hold only delays merges, so every open
+// labelled issue counts.
+export const HOLD_LABEL = "release-train-hold";
+
+export function openHolds(issues) {
+  return issues.filter((issue) => issue.state === "open" && !issue.pull_request);
+}
+
+// Resolves once no hold is open. A failed read counts as "still held" (fail closed). Rejects at the
+// deadline, which must stay below the ruleset's status check timeout so the reason is reported.
+export async function waitWhileHeld({ listHolds, sleep, now, maxWaitMs, pollMs, log }) {
+  const started = now();
+  let reported = null;
+  for (;;) {
+    let state;
+    try {
+      const holds = await listHolds();
+      if (holds.length === 0) return;
+      state = holds.map((issue) => issue.html_url).join(", ");
+    } catch (error) {
+      state = `could not read holds (${error.message})`;
+    }
+    const waited = Math.round((now() - started) / 60_000);
+    if (state !== reported) log(`merge queue hold: ${state}; waiting (${waited} min so far)`);
+    reported = state;
+    if (now() - started >= maxWaitMs)
+      throw new Error(`release hold still open after ${waited} min: ${state}`);
+    await sleep(pollMs);
+  }
+}
+
+// The changed files and the pr-checks.yml job-block change, diffed from one base commit per event:
+//   pull_request: HEAD is GitHub's merge commit, so HEAD^1 is the base branch tip and diffing from
+//     it is exactly the PR's "Files changed" view. Needs fetch-depth >= 2.
+//   merge_group: HEAD is the queue's commit for this entry, stacked on the entries ahead of it
+//     (merge_group.base_sha is the entry ahead, not main). Diffing from the merge-base with the
+//     base branch (`base`, fetched by the workflow) covers this entry and every entry ahead that
+//     has not landed yet: a superset of each queued PR's own diff.
+// Any git failure throws, and the caller runs every job.
+export function changedFiles({ event = "pull_request", base, cwd } = {}) {
   const git = (args) =>
-    execFileSync("git", args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
-  const parents = git(["rev-list", "--parents", "-n", "1", "HEAD"]).trim().split(/\s+/).length - 1;
-  if (parents !== 2)
-    throw new Error(`HEAD has ${parents} parent(s); expected a pull request merge commit`);
-  return git(["diff", "--name-only", "--no-renames", "-z", "HEAD^1", "HEAD"])
+    execFileSync("git", args, { cwd, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  let from = "HEAD^1";
+  if (event === "merge_group") {
+    if (!base) throw new Error("merge_group selection needs the fetched base branch ref");
+    from = git(["merge-base", base, "HEAD"]).trim();
+  } else {
+    const parents =
+      git(["rev-list", "--parents", "-n", "1", "HEAD"]).trim().split(/\s+/).length - 1;
+    if (parents !== 2)
+      throw new Error(`HEAD has ${parents} parent(s); expected a pull request merge commit`);
+  }
+  const files = git(["diff", "--name-only", "--no-renames", "-z", from, "HEAD"])
     .split("\0")
     .filter(Boolean);
+  let workflowJobs = null;
+  if (files.includes(WORKFLOW_FILE)) {
+    const show = (rev) => {
+      try {
+        return git(["show", `${rev}:${WORKFLOW_FILE}`]);
+      } catch {
+        return null; // added or deleted: workflowChangeJobs runs every job
+      }
+    };
+    const diff = git(["diff", "--no-ext-diff", "-U0", from, "HEAD", "--", WORKFLOW_FILE]);
+    workflowJobs = workflowChangeJobs(show(from), show("HEAD"), diff);
+  }
+  return { files, workflowJobs };
 }
 
 function emit(line) {
@@ -169,15 +350,22 @@ function emit(line) {
 }
 
 function runSelect() {
-  let files = null;
-  try {
-    files = changedFiles();
-  } catch (error) {
-    console.error(
-      `::warning::Could not determine changed files, running every job: ${error.message}`,
-    );
+  let changes = { files: null };
+  // Only a pull_request merge commit and a merge queue entry have a meaningful diff (see
+  // changedFiles). Any other event (a manual run, or a trigger added later) runs every job.
+  const event = process.env.GITHUB_EVENT_NAME || "pull_request";
+  if (event !== "pull_request" && event !== "merge_group") {
+    console.error(`${event} event: running every job`);
+  } else {
+    try {
+      changes = changedFiles({ event, base: process.env.MERGE_GROUP_BASE });
+    } catch (error) {
+      console.error(
+        `::warning::Could not determine changed files, running every job: ${error.message}`,
+      );
+    }
   }
-  const { jobs, reasons } = selectJobs(files);
+  const { jobs, reasons } = selectJobs(changes.files, changes);
   for (const line of [...reasons, `selected jobs: ${jobs.join(", ") || "none"}`])
     console.error(line);
   for (const job of SELECTABLE_JOBS) emit(`run_${job}=${jobs.includes(job)}`);
@@ -195,13 +383,48 @@ function runVerify() {
   console.error("All required jobs succeeded or were legitimately skipped.");
 }
 
-const commands = { select: runSelect, verify: runVerify };
+async function runHold() {
+  const { GITHUB_REPOSITORY: repository, GH_TOKEN: token } = process.env;
+  if (!repository || !token) throw new Error("hold needs GITHUB_REPOSITORY and GH_TOKEN");
+  const api = process.env.GITHUB_API_URL || "https://api.github.com";
+  const url = `${api}/repos/${repository}/issues?state=open&labels=${HOLD_LABEL}&per_page=100`;
+  // Every queued entry polls while held, and the token's hourly budget is shared by the whole
+  // repository, so repeat reads are conditional: a 304 reply does not count against it.
+  let cached = null;
+  const listHolds = async () => {
+    const headers = { accept: "application/vnd.github+json", authorization: `Bearer ${token}` };
+    if (cached) headers["if-none-match"] = cached.etag;
+    const response = await fetch(url, { headers, signal: AbortSignal.timeout(20_000) });
+    if (response.status === 304 && cached) return cached.holds;
+    if (!response.ok) throw new Error(`GET ${url}: HTTP ${response.status}`);
+    const holds = openHolds(await response.json());
+    const etag = response.headers.get("etag");
+    cached = etag ? { etag, holds } : null;
+    return holds;
+  };
+  await waitWhileHeld({
+    listHolds,
+    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    now: Date.now,
+    maxWaitMs: Number(process.env.HOLD_MAX_WAIT_MINUTES || 120) * 60_000,
+    pollMs: Number(process.env.HOLD_POLL_SECONDS || 60) * 1000,
+    log: (line) => console.error(line),
+  });
+  console.error("No merge queue hold is open.");
+}
+
+const commands = { select: runSelect, verify: runVerify, hold: runHold };
 // Compare real paths so a symlinked invocation can never turn the CLI into a silent no-op.
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const command = commands[process.argv[2]];
   if (!command) {
-    console.error("usage: pr-checks.mjs <select|verify>");
+    console.error("usage: pr-checks.mjs <select|verify|hold>");
     process.exit(2);
   }
-  command();
+  Promise.resolve()
+    .then(command)
+    .catch((error) => {
+      console.error(`::error::${error.message}`);
+      process.exit(1);
+    });
 }

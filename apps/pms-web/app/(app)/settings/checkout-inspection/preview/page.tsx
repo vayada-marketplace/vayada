@@ -34,7 +34,7 @@ export default function CheckoutInspectionPreviewPage() {
   }
 
   return (
-    <main className="min-h-[100dvh] bg-gray-50 p-4 md:p-6">
+    <div className="p-4 md:p-6">
       <div className="mx-auto max-w-xl space-y-4">
         <div>
           <p className="text-sm text-gray-500">
@@ -53,6 +53,6 @@ export default function CheckoutInspectionPreviewPage() {
           {t("settings.inspection.backToEditor")}
         </Link>
       </div>
-    </main>
+    </div>
   );
 }

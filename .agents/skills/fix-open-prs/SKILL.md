@@ -122,16 +122,17 @@ commits were already cherry-picked into main.
 ### Merge fallback
 
 When using `git merge origin/main`, `--ours` and `--theirs` refer to:
+
 - `--ours` → the current PR branch (the branch being fixed)
 - `--theirs` → main (the incoming branch)
 
 Resolution strategy per file type:
 
-| File type | Strategy |
-|---|---|
+| File type                                                                    | Strategy                                                         |
+| ---------------------------------------------------------------------------- | ---------------------------------------------------------------- |
 | Source files the PR intentionally changed (e.g. tests with CodeRabbit fixes) | `git checkout --ours <file>` — keep the PR branch's improvements |
-| Generated lock files (`package-lock.json`, `poetry.lock`) | Delete and regenerate: `npm install` / `poetry lock` |
-| Files changed on both sides with unrelated edits | Merge manually, keeping both sets of changes |
+| Generated lock files (`package-lock.json`, `poetry.lock`)                    | Delete and regenerate: `npm install` / `poetry lock`             |
+| Files changed on both sides with unrelated edits                             | Merge manually, keeping both sets of changes                     |
 
 After resolving all conflicts, `git add` the files and `git commit` (the merge
 commit message is sufficient — no need to reword it).
@@ -148,13 +149,14 @@ gh pr checks {number} --json name,status,conclusion,detailsUrl
 
 For each check with `conclusion: FAILURE`:
 
-| Check name                            | Fix strategy                                                                       |
-| ------------------------------------- | ---------------------------------------------------------------------------------- |
-| `Frontend Typecheck, Lint, Build`     | Run `npm run typecheck` and `npm run lint` in each affected Next.js app; fix errors. |
-| `Backend Tests (marketplace-api)`     | Run `pytest` in `apps/marketplace-api`; fix failing tests.                         |
-| `Backend Tests (booking-api)`         | Run `pytest` in `apps/booking-api`; fix failing tests.                             |
-| `Backend Tests (pms-api)`             | Run `pytest` in `apps/pms-api`; fix failing tests.                                 |
-| `Playwright Smoke`                    | Check for obvious structural breaks (missing routes, missing env vars); fix or skip. |
+| Check name                        | Fix strategy                                                                              |
+| --------------------------------- | ----------------------------------------------------------------------------------------- |
+| `Frontend Test, Typecheck, Lint`  | Run `npm run typecheck` and `npm run lint` in each affected Next.js app; fix errors.      |
+| `Frontend Build and App Tests`    | Run `npm run build`, then the failing app's `npm --workspace <app> run test`; fix errors. |
+| `Backend Tests (marketplace-api)` | Run `pytest` in `apps/marketplace-api`; fix failing tests.                                |
+| `Backend Tests (booking-api)`     | Run `pytest` in `apps/booking-api`; fix failing tests.                                    |
+| `Backend Tests (pms-api)`         | Run `pytest` in `apps/pms-api`; fix failing tests.                                        |
+| `Playwright Smoke`                | Check for obvious structural breaks (missing routes, missing env vars); fix or skip.      |
 
 To get failure details, fetch the check's log output:
 

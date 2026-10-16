@@ -31,7 +31,7 @@ export function SettingsLayout({
   return (
     <div className="min-h-full">
       {(title || description) && (
-        <div className="px-4 md:px-6 lg:px-8 pt-4 md:pt-6 pb-3">
+        <div className="px-4 md:px-6 pt-4 md:pt-6 pb-3">
           {title && <h1 className="text-xl md:text-2xl font-semibold text-gray-900">{title}</h1>}
           {description && <p className="text-[13px] text-gray-500 mt-1">{description}</p>}
         </div>
@@ -66,7 +66,7 @@ export function SettingsLayout({
           </nav>
         </aside>
 
-        <div className="flex-1 min-w-0 px-4 md:px-6 lg:px-8 py-4 md:py-6">
+        <div className="flex-1 min-w-0 px-4 md:px-6 py-4 md:py-6">
           <div className="max-w-3xl">{children}</div>
         </div>
       </div>

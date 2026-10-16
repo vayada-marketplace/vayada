@@ -95,27 +95,40 @@ describe("affiliate click occurrence persistence", () => {
 
 describe("Booking Web funnel event persistence", () => {
   beforeEach(() => query.mockClear());
+  const event = {
+    propertyId: "11111111-1111-4111-8111-111111111111",
+    hotelSlug: "hotel",
+    eventType: "step_viewed",
+    eventId: "22222222-2222-4222-8222-222222222222",
+    sessionId: "33333333-3333-4333-8333-333333333333",
+    occurredAt: new Date("2026-10-15T12:00:00Z"),
+    userAgent: "Mozilla/5.0 Safari/605.1.15",
+    metadata: { funnelVersion: 1, funnelSequence: 2, step: "extras" },
+  };
 
-  it("stores no request id and no IP or user-agent hashes (VAY-2197)", async () => {
+  it("stores the event in its own table with no slug, request id or visitor traces (VAY-2212)", async () => {
     const sink = createPgBookingWebEventSink({ connectionString: "unused" });
-    await sink.recordTelemetryEvent({
-      propertyId: "11111111-1111-4111-8111-111111111111",
-      hotelSlug: "hotel",
-      eventType: "step_viewed",
-      eventId: "22222222-2222-4222-8222-222222222222",
-      sessionId: "33333333-3333-4333-8333-333333333333",
-      occurredAt: new Date("2026-10-15T12:00:00Z"),
-      userAgent: "Googlebot/2.1",
-      metadata: { funnelVersion: 1, funnelSequence: 2, step: "extras" },
-    });
-    const values = query.mock.calls[0]![1] as unknown[];
-    const stored = JSON.stringify(values);
-    expect(JSON.parse(values[12] as string)).toEqual({
-      source: "apps/api-booking-web-public",
-      trafficClass: "bot",
-    });
-    expect(values[9]).toBe("33333333-3333-4333-8333-333333333333");
-    expect(stored).not.toMatch(/requestId|ipAddress|userAgent|Googlebot/);
+    await sink.recordTelemetryEvent(event);
+    expect(query).toHaveBeenCalledOnce();
+    const [statement, values] = query.mock.calls[0]! as [string, unknown[]];
+    expect(statement).toContain("INSERT INTO distribution.booking_web_events");
+    expect(statement).toContain("ON CONFLICT (property_id, event_id) DO NOTHING");
+    expect(statement).not.toMatch(/domain_events|product_audit_events/);
+    expect(values).toEqual([
+      event.propertyId,
+      "step_viewed",
+      event.eventId,
+      event.sessionId,
+      JSON.stringify(event.metadata),
+      event.occurredAt,
+    ]);
+    expect(JSON.stringify(values)).not.toMatch(/hotel"|Safari|requestId|ipAddress|userAgent/);
+  });
+
+  it("stores nothing for bot traffic (VAY-2214)", async () => {
+    const sink = createPgBookingWebEventSink({ connectionString: "unused" });
+    await sink.recordTelemetryEvent({ ...event, userAgent: "Googlebot/2.1" });
+    expect(query).not.toHaveBeenCalled();
   });
 });
 

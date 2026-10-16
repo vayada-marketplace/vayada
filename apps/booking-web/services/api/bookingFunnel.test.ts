@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { BOOKING_WEB_ANALYTICS_CONSENT_VERSION } from "@vayada/domain-booking/conversion-funnel";
 import { trackEvent } from "./tracking";
 import { analyticsChoice, onAnalyticsAllowed, saveAnalyticsChoice } from "./analyticsConsent";
 import { BOOKING_WEB_ANALYTICS_CONSENT_VERSION as CONSENT } from "@vayada/domain-booking/conversion-funnel";
@@ -118,6 +119,35 @@ describe("Booking funnel instrumentation", () => {
       metadata: { step: "payment", reason: "price_refused", funnelVersion: 1, funnelSequence: 1 },
     });
     expect(JSON.parse(init.body as string).metadata).not.toHaveProperty("code");
+  });
+
+  it("posts straight to the API as text/plain, without cookies or the page address (VAY-2214)", () => {
+    mockBrowser({ version: BOOKING_WEB_ANALYTICS_CONSENT_VERSION, analytics: true });
+    const fetch = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetch);
+    vi.stubEnv("NEXT_PUBLIC_BOOKING_WEB_API_URL", "https://next-api.example.test/");
+    trackEvent("hotel", "page_visit", {});
+    vi.stubEnv("NEXT_PUBLIC_BOOKING_WEB_API_URL", "");
+    trackEvent("hotel", "page_visit", {});
+    vi.unstubAllEnvs();
+
+    const [[direct, init], [sameOrigin]] = fetch.mock.calls as unknown as [string, RequestInit][];
+    expect(direct).toBe("https://next-api.example.test/api/booking-web/events");
+    expect(sameOrigin).toBe("/api/booking-web/events");
+    expect(init).toMatchObject({
+      method: "POST",
+      mode: "cors",
+      credentials: "omit",
+      keepalive: true,
+      referrerPolicy: "no-referrer",
+      headers: { "Content-Type": "text/plain;charset=UTF-8" },
+    });
+    expect(JSON.parse(init.body as string)).toMatchObject({
+      analyticsConsent: true,
+      consentVersion: BOOKING_WEB_ANALYTICS_CONSENT_VERSION,
+      hotelSlug: "hotel",
+      eventType: "page_visit",
+    });
   });
 
   it("tells the hotel page when the guest switches analytics on, once", () => {

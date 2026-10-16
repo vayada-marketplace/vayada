@@ -195,7 +195,7 @@ Ponytail comes from the installed plugin; its hooks and skills own the detailed 
 - For shared packages, cross-domain architecture, auth, tenant boundaries, booking, payment, availability, or PMS workflows: explicitly use an independent subagent adversarial review before opening or finalizing the PR. Do not count a local self-review as satisfying this requirement.
 - PR descriptions should include the Linear issue ID, summary, validation, and risk notes.
 - CodeRabbit is expected to review every non-draft PR; address or explicitly resolve its findings before merge.
-- Merge with squash merge after required checks pass.
+- Merge with squash merge after required checks pass. Once the `main` ruleset requires the merge queue, merging means adding the PR to the queue; an open `release-train-hold` issue pauses it during releases. See [Merge queue and holds](engineering/code-quality-gates.md#merge-queue-and-holds).
 - Do not reintroduce app submodules or submodule pointer commits.
 
 ## Linear workflow
