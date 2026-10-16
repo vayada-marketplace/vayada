@@ -6,6 +6,10 @@ name: Cloudflare Beacon Drift
 # mismatch (the run then fails); it closes the issue once they match again. It never changes the
 # pin: engineering/cloudflare-beacon-pin-runbook.md. PR checks use the committed copy instead.
 on:
+  # TEMPORARY (VAY-2226 test): registers the workflow so workflow_dispatch works on this branch.
+  push:
+    branches:
+      - fm/vay-2226-beacon-issue
   schedule:
     - cron: "17 6 * * *"
   workflow_dispatch:
