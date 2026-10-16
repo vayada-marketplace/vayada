@@ -76,6 +76,7 @@ import { publishAffiliateReservationLifecycle } from "../domains/bookingAffiliat
 import type { BankTransferBookingOperations } from "../domains/financeBankTransferBooking.js";
 import { lockPmsInventoryMutationScope } from "../domains/pmsInventoryMutationLock.js";
 import { releaseAbandonedBookingEdits } from "../jobs/pendingBookingEditCleanup.js";
+import { createBookingLookupRateLimit } from "../platform/bookingLookupRateLimit.js";
 import { createBookingWebEventRateLimit } from "../platform/bookingWebEventRateLimit.js";
 import { quoteTargetRoomSelection } from "./bookingWebMixedQuote.js";
 import { pricingRetiredError } from "./pricingRetired.js";
@@ -274,10 +275,6 @@ export type BookingWebCheckoutCommandContext = {
 };
 
 export type BookingWebCheckoutAdapter = {
-  consumeLookupAttempt(
-    clientAddressHash: string,
-    context: BookingWebCheckoutCommandContext,
-  ): Promise<void>;
   getPricingOffers?(slug: string): Promise<unknown>;
   getPricingStayPrices?(slug: string, query: unknown): Promise<unknown>;
   getPricingAddons?(slug: string): Promise<unknown>;
@@ -511,6 +508,7 @@ export async function registerBookingWebPublicRoutes(
 ): Promise<void> {
   const now = options.now ?? (() => new Date());
   const eventRateLimit = createBookingWebEventRateLimit({ now: () => now().getTime() });
+  const lookupRateLimit = createBookingLookupRateLimit({ now: () => now().getTime() });
   const checkoutAdapter = options.checkoutAdapter;
   const affiliateAdapter =
     options.affiliateAdapter ?? createUnavailableBookingWebAffiliateAdapter();
@@ -884,26 +882,19 @@ export async function registerBookingWebPublicRoutes(
   app.post<{ Params: BookingWebHotelParams; Body: BookingWebLookupRequest }>(
     "/hotels/:slug/bookings/lookup",
     async (request, reply) => {
+      // Counted in memory before any database work; nothing about the caller goes to the
+      // database (VAY-2222).
+      const limit = lookupRateLimit(request.ip || "unknown");
+      if (!limit.allowed) {
+        reply.header("Retry-After", String(limit.retryAfterSeconds));
+        throw createHttpError(429, "Too many booking lookup attempts. Please try again later.");
+      }
       const body = request.body ?? {};
-      const context = checkoutCommandContext(
-        request,
-        "booking-lookup",
+      const response = await checkoutAdapter.lookup(
         request.params.slug,
         body,
-        now,
+        checkoutCommandContext(request, "booking-lookup", request.params.slug, body, now),
       );
-      try {
-        await checkoutAdapter.consumeLookupAttempt(
-          bookingLookupClientAddressHash(request),
-          context,
-        );
-      } catch (error) {
-        if (isHttpError(error) && error.statusCode === 429) {
-          reply.header("Retry-After", "60");
-        }
-        throw error;
-      }
-      const response = await checkoutAdapter.lookup(request.params.slug, body, context);
       reply.header("Cache-Control", "no-store");
       reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-booking-lookup");
       reply.header("X-Robots-Tag", "noindex");
@@ -1260,10 +1251,6 @@ function writeBookingWebCorsHeaders(request: FastifyRequest, reply: FastifyReply
   reply.header("Vary", "Origin");
 }
 
-function bookingLookupClientAddressHash(request: FastifyRequest): string {
-  return sha256Hex(`booking-lookup-client:${request.ip || "unknown"}`);
-}
-
 function isHttpsOrigin(origin: unknown): origin is string {
   if (typeof origin !== "string") return false;
   try {
@@ -1559,8 +1546,6 @@ const TARGET_CHECKOUT_SUPPORTED_PAYMENT_METHODS = [
 ] as const;
 const TARGET_REQUEST_HOST_RESPONSE_HOURS = 24;
 const BOOKING_CONFIRMATION_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
-const BOOKING_LOOKUP_RATE_LIMIT = 5;
-const BOOKING_LOOKUP_RATE_WINDOW_MS = 60 * 1000;
 
 // prettier-ignore
 type TargetCheckoutCommandReservation = { status: "reserved" } | { status: "replay"; body: unknown };
@@ -1733,52 +1718,6 @@ export function createTargetBookingWebCheckoutAdapter(
   };
 
   return {
-    async consumeLookupAttempt(clientAddressHash, context) {
-      await withTargetCheckoutTransaction(pool, async (client) => {
-        await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
-          `booking-lookup:${clientAddressHash}`,
-        ]);
-        const attempts = await client.query<{ count: string }>(
-          `SELECT count(*)::text AS count
-             FROM platform.product_audit_events
-            WHERE product = 'booking'
-              AND action = 'booking.guest_lookup.attempt'
-              AND target_resource_product = 'booking'
-              AND target_resource_type = 'lookup_client_address_hash'
-              AND target_resource_id = $1
-              AND occurred_at > $2::timestamptz`,
-          [
-            clientAddressHash,
-            new Date(context.occurredAt.getTime() - BOOKING_LOOKUP_RATE_WINDOW_MS).toISOString(),
-          ],
-        );
-        if (Number(attempts.rows[0]?.count ?? 0) >= BOOKING_LOOKUP_RATE_LIMIT) {
-          throw createHttpError(429, "Too many booking lookup attempts. Please try again later.");
-        }
-        await client.query(
-          `INSERT INTO platform.product_audit_events (
-             audit_key, product, action, occurred_at, tenant_scope,
-             actor_type, target_resource_product, target_resource_type,
-             target_resource_id, correlation_id, causation_id,
-             redacted_payload, private_payload, audit_metadata,
-             retention_class, privacy_scope
-           ) VALUES (
-             $1, 'booking', 'booking.guest_lookup.attempt', $2::timestamptz, 'external',
-             'system', 'booking', 'lookup_client_address_hash', $3, $4, $5,
-             $6::jsonb, '{}'::jsonb, $7::jsonb, 'security', 'restricted'
-           )`,
-          [
-            `booking.guest_lookup.attempt.${randomBytes(16).toString("hex")}`,
-            context.occurredAt.toISOString(),
-            clientAddressHash,
-            context.correlationId,
-            context.requestId,
-            JSON.stringify({ operation: context.operation }),
-            JSON.stringify({ source: "apps/api-booking-web-public" }),
-          ],
-        );
-      });
-    },
     async findLatestChangeRequest(propertyId, bookingId) {
       const result = await loadLatestTargetChangeRequest(pool, propertyId, bookingId);
       return result
