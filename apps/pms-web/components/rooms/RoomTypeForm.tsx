@@ -1280,9 +1280,9 @@ export default function RoomTypeForm({
         </div>
       )}
 
-      {/* Submit / Cancel — sticky on mobile, inline on desktop */}
+      {/* Submit / Cancel — sticky, with its own background so the form scrolls under it (VAY-2184) */}
       {activeTab !== "prices" && (
-        <div className="mt-6 flex flex-wrap items-center justify-end gap-3 sticky bottom-0 -mx-4 md:mx-0 px-4 md:px-0 py-3 md:py-0 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:pb-0 bg-gray-50/95 md:bg-transparent backdrop-blur md:backdrop-blur-none border-t border-gray-200 md:border-t-0 z-10">
+        <div className="mt-6 flex flex-wrap items-center justify-end gap-3 sticky bottom-0 -mx-4 md:mx-0 px-4 md:px-0 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-gray-50/95 backdrop-blur border-t border-gray-200 z-10">
           {actionNote && (
             <p className="w-full text-[11px] text-gray-500 md:mr-auto md:w-auto">{actionNote}</p>
           )}
