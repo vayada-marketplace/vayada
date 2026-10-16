@@ -47,8 +47,10 @@ test("manages all automatic promotions in Promos and preserves last-minute tiers
   await expect(editor).toHaveCount(0);
   expect(settings.promotions[0].tiers).toEqual(originalTiers);
   await page.getByRole("button", { name: "New promotion", exact: true }).click();
-  await expect(page.getByRole("menuitem", { name: /^Last minute/ })).toBeDisabled();
-  await expect(page.getByRole("menuitem", { name: /^Last minute/ })).toContainText("Added");
+  await expect(page.getByRole("menuitem", { name: "Last minute", exact: true })).toBeDisabled();
+  await expect(page.getByRole("menuitem", { name: "Last minute", exact: true })).toContainText(
+    "Added",
+  );
   await page.keyboard.press("Escape");
   await expect(page.getByRole("menu")).toHaveCount(0);
   for (const [type, label, name] of [
@@ -57,7 +59,7 @@ test("manages all automatic promotions in Promos and preserves last-minute tiers
     ["MIDWEEK", "Midweek", "Midweek getaway"],
   ]) {
     await page.getByRole("button", { name: "New promotion", exact: true }).click();
-    await page.getByRole("menuitem", { name: new RegExp(`^${label}`) }).click();
+    await page.getByRole("menuitem", { name: label!, exact: true }).click();
     const dialog = page.getByRole("dialog", { name: `New ${label!.toLowerCase()} promotion` });
     await expect(dialog).toBeVisible();
     if (type === "EXTENDED_STAY") {
@@ -191,7 +193,7 @@ test("shows the empty state and a keyboard-friendly type menu styled like New pr
   await expect(button).toBeFocused();
 
   await button.click();
-  await page.getByRole("menuitem", { name: /^Last minute/ }).click();
+  await page.getByRole("menuitem", { name: "Last minute", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "New last minute promotion" });
   await expect(dialog.getByRole("radio", { name: "Next 5 days", exact: true })).toBeFocused();
   await expect(dialog).toContainText(

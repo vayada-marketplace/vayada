@@ -167,7 +167,7 @@ test.describe("booking-admin promo-code settings cutover", () => {
     for (const [left, right] of [
       ["#promo-code", "#promo-min-booking-value"],
       ['label:has(> input[value="percentage"])', "#promo-max-uses"],
-      ["#promo-discount-value", "summary"],
+      ["#promo-discount-value", "details"],
       ["#promo-valid-from", "#promo-stay-from"],
     ]) {
       expect(

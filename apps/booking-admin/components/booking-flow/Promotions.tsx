@@ -106,6 +106,8 @@ function NewPromotionMenu({
                 key={type}
                 type="button"
                 role="menuitem"
+                aria-labelledby={`new-promotion-${type}-label`}
+                aria-describedby={`new-promotion-${type}-description`}
                 disabled={taken}
                 onClick={() => {
                   setOpen(false);
@@ -120,6 +122,7 @@ function NewPromotionMenu({
                 <span className="min-w-0">
                   <span className="flex items-center gap-2">
                     <span
+                      id={`new-promotion-${type}-label`}
                       className={`text-sm font-semibold ${taken ? "text-gray-400" : "text-gray-900"}`}
                     >
                       {t(promotionTypeCopy[type].label)}
@@ -131,6 +134,7 @@ function NewPromotionMenu({
                     )}
                   </span>
                   <span
+                    id={`new-promotion-${type}-description`}
                     className={`mt-0.5 block text-[13px] ${taken ? "text-gray-400" : "text-gray-500"}`}
                   >
                     {t(promotionTypeCopy[type].description)}
