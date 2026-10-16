@@ -882,7 +882,8 @@ export async function registerBookingWebPublicRoutes(
   app.post<{ Params: BookingWebHotelParams; Body: BookingWebLookupRequest }>(
     "/hotels/:slug/bookings/lookup",
     async (request, reply) => {
-      // Counted in memory before any database work; no address or hash of it is stored (VAY-2222).
+      // Counted in memory before any database work; nothing about the caller goes to the
+      // database (VAY-2222).
       const limit = lookupRateLimit(request.ip || "unknown");
       if (!limit.allowed) {
         reply.header("Retry-After", String(limit.retryAfterSeconds));

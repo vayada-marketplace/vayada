@@ -259,6 +259,8 @@ describe.skipIf(!TEST_DATABASE_URL)(
       const before = await auditRows();
       const app = buildApp({
         logger: false,
+        // A fixed clock, so the six tries can't straddle the limit's one-minute window.
+        bookingWebPublicNow: () => occurredAt,
         publicHotelProfileRepository: { findProfileBySlug: async () => null },
         bookingWebCheckoutAdapter: createAdapter(checkoutPool),
       });

@@ -12,7 +12,7 @@ describe("Find my booking rate limit (VAY-2222)", () => {
     for (let attempt = 1; attempt <= 5; attempt += 1)
       expect(limit("203.0.113.1")).toEqual({ allowed: true });
     expect(limit("203.0.113.1")).toEqual({ allowed: false, retryAfterSeconds: 40 });
-    // Refused tries use up nothing, and other addresses have their own bucket.
+    // Other addresses have their own bucket.
     expect(limit("203.0.113.2")).toEqual({ allowed: true });
     at = START + 59_500;
     expect(limit("203.0.113.1")).toEqual({ allowed: false, retryAfterSeconds: 1 });
