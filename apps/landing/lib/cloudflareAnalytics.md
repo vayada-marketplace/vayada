@@ -20,9 +20,10 @@ The pinned beacon (version and review date next to `integrity` in
 Cloudflare and same-origin `/cdn-cgi/rum` destinations only. SRI pins the reviewed
 bytes. A vendor update fails closed instead of introducing an unguarded transport.
 The daily Cloudflare Beacon Drift workflow opens an issue when the live file
-changes. To update, follow `engineering/cloudflare-beacon-pin-runbook.md`: review
-all network transports, then change the digest and regenerate the reviewed record
-together. Do not merely replace the digest.
+changes and prepares a pull request with the new digest and reviewed record.
+Follow `engineering/cloudflare-beacon-pin-runbook.md`: review all network
+transports before merging it (merging deploys Landing). Do not merely replace the
+digest.
 
 PR Checks builds with a dummy public token and runs all Landing browser tests.
 The analytics suite runs offline against a stub beacon it generates; only in the
