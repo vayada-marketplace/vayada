@@ -133,14 +133,23 @@ export function buildReport({ pin, override, record, live, repoUrl }) {
       return `| \`${url.replaceAll("|", "\\|")}\` | ${before} | ${after}${flag(before, after)} |`;
     })
     .join("\n");
+  // A test run can miss its input while the live file still matches the real pin. Then nothing
+  // is broken, and the report must not say so or ask for a new pin.
+  const drifted = liveIntegrity !== pin;
+  const intro = drifted
+    ? `Cloudflare's live Web Analytics beacon no longer matches the SRI pin in \`${PIN_FILE}\`. Browsers refuse to run it, so Cloudflare analytics on vayada.com is off for visitors who accepted it until the pin is updated. It fails closed: nothing is sent. PR checks are unaffected: the consent spec uses a stub beacon.
+
+**Next step:** follow [\`${RUNBOOK}\`](${repoUrl ?? ".."}/blob/main/${RUNBOOK}). Review the change before copying the hash.`
+    : `The live beacon still matches the SRI pin in \`${PIN_FILE}\`: nothing is broken. It only differs from the hash this test run was given.`;
+  const newPin = drifted
+    ? `New pin, only after review:\n\n\`\`\`\n${liveIntegrity}\n\`\`\`\n\n`
+    : "";
   const note = override
     ? "\n> [!NOTE]\n> **Test run.** The expected hash came from the workflow_dispatch input `expected_integrity`, not from the pin. A run without the input compares with the pin again.\n"
     : "";
   const body = `${MARKER}
 <!-- live: ${liveIntegrity} -->
-Cloudflare's live Web Analytics beacon no longer matches the SRI pin in \`${PIN_FILE}\`. Browsers refuse to run it, so Cloudflare analytics on vayada.com is off for visitors who accepted it until the pin is updated. It fails closed: nothing is sent. PR checks are unaffected: the consent spec uses a stub beacon.
-
-**Next step:** follow [\`${RUNBOOK}\`](${repoUrl ?? ".."}/blob/main/${RUNBOOK}). Review the change before copying the hash.
+${intro}
 ${note}
 | | reviewed | live |
 |---|---|---|
@@ -150,13 +159,7 @@ ${note}
 
 Expected ${override ? "(workflow_dispatch input)" : `(pin in \`${PIN_FILE}\`)`}: \`${expected}\`. Live response: ETag \`${live.etag ?? "none"}\`, Last-Modified \`${live.lastModified ?? "none"}\`.
 
-New pin, only after review:
-
-\`\`\`
-${liveIntegrity}
-\`\`\`
-
-### What changed
+${newPin}### What changed
 
 ${diff.removed + diff.added === 0 ? "No statement differs from the reviewed version." : `Statements split on \`;\`: ${diff.before} reviewed, ${diff.after} now; ${diff.removed} reviewed statements are gone and ${diff.added} are new. The report never quotes vendor code; runbook step 2 shows how to diff the two versions locally.`}
 
