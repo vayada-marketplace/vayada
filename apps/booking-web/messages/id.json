@@ -168,6 +168,7 @@
     "subtitle": "Temukan tempat peristirahatan pegunungan yang sempurna"
   },
   "addons": {
+    "needsNotice": "{hours, plural, =48 {Perlu dipesan 2 hari sebelumnya} =72 {Perlu dipesan 3 hari sebelumnya} =168 {Perlu dipesan 1 minggu sebelumnya} other {Perlu dipesan # jam sebelumnya}}",
     "title": "Tingkatkan Masa Menginap Anda",
     "subtitle": "Sesuaikan pengalaman Anda dengan layanan dan aktivitas premium kami.",
     "allServices": "Semua Layanan",

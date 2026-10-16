@@ -11,7 +11,13 @@ const lateCheckOut = "44444444-4444-4444-8444-444444444444";
 const reference = "VAY-66666666666646668666666666666666";
 const STAY = `/book?checkIn=2026-11-06&checkOut=2026-11-08&adults=2&offer=${offerKey}`;
 
-async function mockFlow(page: Page, { extras = true } = {}) {
+async function mockFlow(
+  page: Page,
+  {
+    extras = true,
+    lateCheckOutNotice = null as { leadTimeHours: number; bookableFrom: string | null } | null,
+  } = {},
+) {
   await mockBookingApis(page);
   const config = {
     addons: [
@@ -70,6 +76,7 @@ async function mockFlow(page: Page, { extras = true } = {}) {
                 pricingModel: "per_stay",
                 maxQuantity: 1,
                 maxGuests: null,
+                ...lateCheckOutNotice,
               },
             ]
           : [],
@@ -82,6 +89,8 @@ async function mockFlow(page: Page, { extras = true } = {}) {
   // status, or make them run out quickly.
   const prices = {
     refuse: false as boolean | string,
+    // A refusal with a code (e.g. ADDON_NEEDS_NOTICE) answers once.
+    code: "",
     status: 422,
     lastsMs: 600_000,
     asked: [] as string[],
@@ -89,8 +98,14 @@ async function mockFlow(page: Page, { extras = true } = {}) {
   await page.route("**/bookings/quote", (route) => {
     const { selection, paymentMethod } = route.request().postDataJSON();
     prices.asked.push(paymentMethod);
-    if (prices.refuse === true || prices.refuse === paymentMethod)
-      return route.fulfill({ status: prices.status, json: { detail: "Room is not available." } });
+    if (prices.refuse === true || prices.refuse === paymentMethod) {
+      const code = prices.code;
+      if (code) Object.assign(prices, { refuse: false, code: "" });
+      return route.fulfill({
+        status: prices.status,
+        json: { detail: "Room is not available.", ...(code ? { code } : {}) },
+      });
+    }
     const quoteId = `55555555-5555-4555-8555-${String(quotes.size + 1).padStart(12, "0")}`;
     const times = {
       issuedAt: new Date(Date.now() - 1000).toISOString(),
@@ -314,6 +329,60 @@ for (const width of [1440, 390]) {
     await assertHealthy();
   });
 }
+
+// VAY-2232: the stay starts on 2026-11-06; the hotel needs 24 hours' notice for late check-out.
+test("shows an extra that needs more notice than the stay gives as unavailable", async ({
+  page,
+}, testInfo) => {
+  await mockFlow(page, { lateCheckOutNotice: { leadTimeHours: 24, bookableFrom: "2026-11-07" } });
+  await page.goto(STAY);
+  const extras = page.getByRole("region", { name: "Optional extras" });
+  const late = extras.getByRole("article", { name: "Late check-out" });
+  await expect(late.getByRole("button", { name: "Add Late check-out" })).toBeDisabled();
+  await expect(late).toContainText("Needs 24 hours’ notice");
+  await extras.getByRole("button", { name: "Add Garden breakfast" }).click();
+  await expect(page.getByRole("status", { name: "Your stay total" })).toContainText("€340");
+  await page.screenshot({ path: testInfo.outputPath("extras-needs-notice.png"), fullPage: true });
+  // In the guest's language.
+  await page.goto(`/de${STAY}`);
+  await expect(
+    page.getByRole("article", { name: "Late check-out" }).getByText("Nur mit 24 Stunden Vorlauf"),
+  ).toBeVisible();
+});
+
+test("offers an extra with a lead time from its first bookable check-in date", async ({
+  page,
+}, testInfo) => {
+  await mockFlow(page, { lateCheckOutNotice: { leadTimeHours: 48, bookableFrom: "2026-11-06" } });
+  await page.goto(STAY);
+  const late = page.getByRole("article", { name: "Late check-out" });
+  await expect(late.getByRole("button", { name: "Add Late check-out" })).toBeEnabled();
+  await expect(late).not.toContainText("notice");
+  await page.screenshot({ path: testInfo.outputPath("extras-enough-notice.png"), fullPage: true });
+});
+
+test("prices the stay again without extras when an extra's notice ran out meanwhile", async ({
+  page,
+}) => {
+  const { prices } = await mockFlow(page);
+  let catalogues = 0;
+  page.on("request", (request) => {
+    if (request.url().endsWith("/pricing-addons")) catalogues += 1;
+  });
+  await page.goto(STAY);
+  const extras = page.getByRole("region", { name: "Optional extras" });
+  const total = page.getByRole("status", { name: "Your stay total" });
+  await expect(total).toContainText("€268");
+  // React's dev mode can load the extras twice on the way in; count from here.
+  const loaded = catalogues;
+  Object.assign(prices, { refuse: true, code: "ADDON_NEEDS_NOTICE" });
+  await extras.getByRole("button", { name: "Add Garden breakfast" }).click();
+  // The extra is dropped, the extras load again and the stay is priced without them.
+  await expect.poll(() => catalogues).toBeGreaterThan(loaded);
+  await expect(extras.getByText("Your extras (1)")).toHaveCount(0);
+  await expect(total).toContainText("€268");
+  await expect(page.getByText("We couldn't price this selection")).toHaveCount(0);
+});
 
 test("skips Extras for a hotel without extras", async ({ page }) => {
   await mockFlow(page, { extras: false });

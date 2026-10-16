@@ -168,6 +168,7 @@
     "subtitle": "Encuentra tu refugio alpino perfecto"
   },
   "addons": {
+    "needsNotice": "{hours, plural, =48 {Requiere 2 días de antelación} =72 {Requiere 3 días de antelación} =168 {Requiere 1 semana de antelación} other {Requiere # horas de antelación}}",
     "title": "Mejora Tu Estancia",
     "subtitle": "Personaliza tu experiencia con nuestros servicios y actividades premium.",
     "allServices": "Todos los Servicios",
