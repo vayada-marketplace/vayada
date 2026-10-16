@@ -37,8 +37,11 @@ all adults; dates default to the stay and may be selected individually. A EUR 15
 per-person-per-night breakfast for two adults and four nights costs EUR 120.
 An optional `addonPackageQuantities` map carries package counts independently
 of guests and dates through the quote and booking request. Max quantity limits
-packages for all four models; existing requests default to one package. Lead time is descriptive copy,
-not an availability cutoff rule.
+packages for all four models; existing requests default to one package. Lead time is a cutoff
+(VAY-2232): guests can add the add-on only when check-in, at the hotel's check-in time in the
+property's time zone, is at least that many hours away (the VAY-2145 bank-transfer rule). The
+pricing-addons catalog names each add-on's first allowed check-in date (`bookableFrom`); the quote
+and its acceptance check the rule against the database clock. Unconverted free text stays hidden.
 
 The shared AddonEditor is used by Booking Flow settings. The unused onboarding
 AddonsStep was deleted in VAY-2174; restoring an onboarding navigation step is a

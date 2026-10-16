@@ -71,6 +71,15 @@ describe("replacement booking quote issuer", () => {
     });
   });
 
+  it("tells the guest when an extra needs more notice than the stay gives (VAY-2232)", async () => {
+    const issue = vi.fn().mockRejectedValue(new PricingStorageError("denied", "addon_lead_time"));
+    const on = createReplacementBookingQuoteIssuer({ issue }, []);
+    await expect(on("hotel", request("card"), "key")).rejects.toMatchObject({
+      statusCode: 422,
+      code: "ADDON_NEEDS_NOTICE",
+    });
+  });
+
   it("refuses new quotes with extras or a code the hotel switched off in Feature Hub (VAY-2200)", async () => {
     const issue = vi.fn().mockRejectedValue(new PricingStorageError("stale"));
     const switches = { addOns: false, promoCodes: false };

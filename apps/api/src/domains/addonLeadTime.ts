@@ -1,6 +1,9 @@
+import type { PoolClient } from "pg";
+import { pricingObject } from "@vayada/domain-pms";
 import {
   checkInLeadAllows,
   checkInLeadEarliestArrival,
+  readPricingCheckInPlace,
   type PricingCheckInPlace,
 } from "./pricingManualPaymentLead.js";
 
@@ -49,5 +52,34 @@ export function addonLeadTimeEarliestArrival(input: {
 }): string | null {
   return checkInLeadEarliestArrival(input.place, input.now, (checkIn) =>
     addonLeadTimeAllows({ ...input, checkIn }),
+  );
+}
+
+/** Whether every selected add-on's notice fits this check-in. Only names the reason a quote was
+ * refused, so the booking page can offer the extras again; the quote owner enforces the rule. */
+export async function selectedAddonLeadTimesAllow(
+  client: Pick<PoolClient, "query">,
+  propertyId: string,
+  addonIds: readonly string[],
+  checkIn: string,
+): Promise<boolean> {
+  if (!addonIds.length) return true;
+  const rows = (
+    await client.query(
+      "SELECT metadata FROM booking.addon_definitions WHERE property_id=$1 AND id::text = ANY($2::text[])",
+      [propertyId, addonIds.map((id) => id.toLowerCase())],
+    )
+  ).rows;
+  const notices = rows.flatMap((row) => {
+    const hours = pricingObject(row.metadata) ? readAddonLeadTime(row.metadata)?.hours : null;
+    return hours ? [hours] : [];
+  });
+  if (!notices.length) return true;
+  const read = await readPricingCheckInPlace(client, propertyId);
+  return (
+    !!read &&
+    notices.every((hours) =>
+      addonLeadTimeAllows({ hours, checkIn, place: read.place, now: read.now }),
+    )
   );
 }
