@@ -163,6 +163,7 @@ test.describe("booking-admin promo-code settings cutover", () => {
     expect(Math.abs(desktopDetails!.y - desktopRules!.y)).toBeLessThanOrEqual(1);
     // VAY-2233: both cards end together and their fields line up row by row.
     expect(Math.abs(desktopDetails!.height - desktopRules!.height)).toBeLessThanOrEqual(1);
+    expect(Math.abs(desktopDetails!.width - desktopRules!.width)).toBeLessThanOrEqual(1);
     const topOf = async (selector: string) => (await editor.locator(selector).boundingBox())!.y;
     for (const [left, right] of [
       ["#promo-code", "#promo-min-booking-value"],
@@ -185,6 +186,8 @@ test.describe("booking-admin promo-code settings cutover", () => {
         footerSwitch!.y + footerSwitch!.height / 2 - (cancelButton!.y + cancelButton!.height / 2),
       ),
     ).toBeLessThanOrEqual(2);
+    // On a short desktop viewport (1280×720) the body scrolls and the footer stays on screen.
+    expect(cancelButton!.y + cancelButton!.height).toBeLessThanOrEqual(page.viewportSize()!.height);
     const accessibility = await new AxeBuilder({ page }).include('[role="dialog"]').analyze();
     expect(
       accessibility.violations
