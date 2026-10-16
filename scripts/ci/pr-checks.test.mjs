@@ -1305,15 +1305,13 @@ test("every API PostgreSQL step belongs to exactly one shard or runs in all of t
   for (const shard of shards) assert.ok(perShard[shard] > 0, `${shard} has no steps`);
 });
 
-// The release precheck runs some suites alone in a new database (VAY-2245). A step whose URL named
-// another database would run them in a shared one without failing.
+// A step whose URL named another database would run its suites in a shared one without failing.
 test("every API PostgreSQL step that creates its test database runs its suites there", () => {
   const workflow = parse(WORKFLOW);
   const isolated = workflow.jobs.api_postgres.steps.filter((step) => {
     const created = [...(step.run ?? "").matchAll(/CREATE DATABASE (\w+)/g)].map((m) => m[1]);
     return created.length === 1 && step.env?.TEST_DATABASE_URL;
   });
-  assert.ok(isolated.length >= 10, "expected the precheck's isolated database steps");
   for (const step of isolated) {
     const [, database] = /CREATE DATABASE (\w+)/.exec(step.run);
     assert.match(database, /_test$/, `${step.name}: Channex suites require a *_test database`);
@@ -1328,5 +1326,73 @@ test("every API PostgreSQL step that creates its test database runs its suites t
         `${step.name}: migrates ${database} before its suites`,
       );
     }
+  }
+});
+
+// The release precheck's isolated database blocks (VAY-2245). A workflow_dispatch of this workflow
+// replaces that precheck, so each block keeps its own new database, both URLs and its exact files.
+const PRECHECK_ISOLATED_BLOCKS = {
+  vayada_booking_edit_test: ["src/routes/pendingBookingEdits.integration.test.ts"],
+  vayada_role_test: ["src/pmsDashboardRoleAccess.integration.test.ts"],
+  vayada_pay_settings_test: [
+    "src/financePaymentSettingsOrdinary.integration.test.ts",
+    "src/bookingAddonCurrencyOrdinary.integration.test.ts",
+  ],
+  vayada_conf_emails_test: ["src/domains/pmsConfirmationEmails.integration.test.ts"],
+  vayada_fin_plan_test: [
+    "src/financeBillingPlanOrdinary.integration.test.ts",
+    "src/financeBillingPlanParity.integration.test.ts",
+  ],
+  vayada_fin_writers_test: [
+    "src/domains/financePaymentWriters.integration.test.ts",
+    "src/jobs/financeSubscriptions.integration.test.ts",
+  ],
+  vayada_public_profile_test: ["src/activeBookingPublicationProfile.integration.test.ts"],
+  vayada_feature_hub_test: [
+    "src/pmsBookingModules.integration.test.ts",
+    "src/domains/replacementPromoCode.integration.test.ts",
+    "src/domains/replacementAddons.integration.test.ts",
+    "src/domains/pmsInventoryBundle.integration.test.ts",
+    "src/platform/bookingFunnel.integration.test.ts",
+  ],
+  vayada_pub_cmd_test: ["src/domains/bookingPublicationCommandRepository.integration.test.ts"],
+  vayada_guest_terms_test: ["src/domains/bookingGuestTermsStore.integration.test.ts"],
+  vayada_mkt_approval_test: [
+    "src/domains/marketplaceHotelSubmissionModerationRepository.integration.test.ts",
+    "src/marketplaceHotelSubmissionApproval.integration.test.ts",
+  ],
+};
+
+test("the release precheck's isolated database blocks keep their database, env and files", () => {
+  const steps = parse(WORKFLOW).jobs.api_postgres.steps;
+  for (const [database, files] of Object.entries(PRECHECK_ISOLATED_BLOCKS)) {
+    const matches = steps.filter((step) =>
+      new RegExp(`CREATE DATABASE ${database}\\b`).test(step.run ?? ""),
+    );
+    assert.equal(matches.length, 1, `${database}: exactly one step creates it`);
+    const [step] = matches;
+    assert.match(
+      step.if ?? "",
+      /^matrix\.shard == '[a-z-]+'$/,
+      `${database}: runs on every dispatch`,
+    );
+    for (const name of ["TEST_DATABASE_URL", "TARGET_DATABASE_URL"]) {
+      assert.equal(
+        new URL(step.env?.[name] ?? "x:").pathname,
+        `/${database}`,
+        `${database}: ${name}`,
+      );
+    }
+    assert.doesNotMatch(step.run, /\b[A-Z_]*DATABASE_URL=/, `${database}: no inline database URL`);
+    const migrate = step.run.indexOf("run target:migrate");
+    const suites = step.run.indexOf("--workspace vayada-api run test");
+    assert.ok(migrate >= 0 && migrate < suites, `${database}: migrates before its suites`);
+    assert.equal(step.run.indexOf("--workspace vayada-api run test", suites + 1), -1);
+    assert.match(step.run.slice(suites), /run test -- --no-file-parallelism /);
+    assert.deepEqual(
+      [...step.run.matchAll(/\bsrc\/\S+\.test\.ts\b/g)].map((m) => m[0]).sort(),
+      [...files].sort(),
+      `${database}: suites`,
+    );
   }
 });
