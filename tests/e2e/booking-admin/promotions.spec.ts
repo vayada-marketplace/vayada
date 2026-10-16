@@ -61,7 +61,10 @@ test("manages all automatic promotions in Promos and preserves last-minute tiers
     const dialog = page.getByRole("dialog", { name: `New ${label!.toLowerCase()} promotion` });
     await expect(dialog).toBeVisible();
     if (type === "EXTENDED_STAY") {
-      await dialog.getByRole("radio", { name: /^Free nights/ }).check();
+      // Chips and cards hide their input; click the visible label like a guest would.
+      const freeNights = dialog.getByRole("radio", { name: /^Free nights/ });
+      await freeNights.locator("..").click();
+      await expect(freeNights).toBeChecked();
       await dialog.getByLabel("Free nights", { exact: true }).fill("");
       await dialog.getByRole("button", { name: "Create promotion", exact: true }).click();
       await expect(dialog.getByRole("alert")).toContainText("Free nights must be at least 1");
@@ -105,12 +108,14 @@ test("manages all automatic promotions in Promos and preserves last-minute tiers
   await expect(toggle).toHaveAttribute("aria-checked", "true");
   await page.getByRole("button", { name: "Edit Early bird" }).click();
   const birdEditor = page.getByRole("dialog", { name: "Edit early bird promotion" });
-  await birdEditor.getByRole("radio", { name: "60+ days", exact: true }).check();
-  await birdEditor
+  await birdEditor.getByRole("radio", { name: "60+ days", exact: true }).locator("..").click();
+  await expect(birdEditor.getByRole("radio", { name: "60+ days", exact: true })).toBeChecked();
+  const firstRoom = birdEditor
     .getByRole("group", { name: "Applicable rooms" })
     .getByRole("checkbox")
-    .nth(1)
-    .check();
+    .nth(1);
+  await firstRoom.locator("..").click();
+  await expect(firstRoom).toBeChecked();
   await expect(
     birdEditor.getByRole("checkbox", { name: "All rooms", exact: true }),
   ).not.toBeChecked();
