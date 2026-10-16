@@ -4,6 +4,7 @@ import { parseAddonEconomicTerms, type AddonEconomicTerms } from "@vayada/domain
 import { pricingAmountStep, pricingCurrencyScale, pricingObject } from "@vayada/domain-pms";
 import { pricingDecimalMinor } from "./pricingDecimalMinor.js";
 import { lockPmsInventoryMutationScope } from "./pmsInventoryMutationLock.js";
+import { readAddonLeadTime, type AddonLeadTimeHours } from "./addonLeadTime.js";
 
 const uuid = (v: unknown): v is string =>
   typeof v === "string" &&
@@ -17,7 +18,10 @@ type Addon = AddonEconomicTerms & {
   pricingModel: (typeof models)[number];
   maxQuantity: number;
   maxGuests: number | null;
-  leadTime: string | null;
+  /** VAY-2232: the notice guests must give before check-in; null for none. */
+  leadTimeHours: AddonLeadTimeHours | null;
+  /** Free-text lead time from before VAY-2232: not bookable until it is converted. */
+  legacyLeadTime: boolean;
 };
 const limit = (v: unknown): v is number =>
   typeof v === "number" && Number.isSafeInteger(v) && v >= 1 && v <= 2147483647;
@@ -83,7 +87,7 @@ export async function lockReplacementAddons(
     });
     const maxQuantity = row.metadata.maxQuantity === undefined ? 1 : row.metadata.maxQuantity;
     const maxGuests = row.metadata.maxGuests === undefined ? null : row.metadata.maxGuests;
-    const leadTime = row.metadata.leadTime === undefined ? null : row.metadata.leadTime;
+    const leadTime = readAddonLeadTime(row.metadata);
     if (
       amountMinor === null ||
       // Whole rupiah for IDR (VAY-2085); other currencies step by one minor unit.
@@ -91,7 +95,7 @@ export async function lockReplacementAddons(
       !terms ||
       !limit(maxQuantity) ||
       (maxGuests !== null && !limit(maxGuests)) ||
-      (leadTime !== null && typeof leadTime !== "string")
+      !leadTime
     )
       return null;
     addons.push({
@@ -102,7 +106,8 @@ export async function lockReplacementAddons(
       pricingModel: row.pricing_model,
       maxQuantity,
       maxGuests,
-      leadTime,
+      leadTimeHours: leadTime.hours,
+      legacyLeadTime: leadTime.legacy !== null,
       ...terms,
     });
   }

@@ -38,6 +38,47 @@ export function propertyLocalDate(instant: Date, timeZone: string): string | nul
 }
 
 /**
+ * Whether check-in (the arrival day at the hotel's check-in time, in the property's time zone) is
+ * at least `hours` after `now`, or further away than that when `strict`. Unknown places or dates
+ * answer false.
+ */
+export function checkInLeadAllows(input: {
+  hours: number;
+  strict?: boolean;
+  checkIn: string;
+  place: PricingCheckInPlace;
+  now: Date;
+}): boolean {
+  const start = propertyLocalInstant(
+    input.checkIn,
+    input.place.checkInTime ?? "00:00",
+    input.place.timeZone,
+  );
+  if (!start || !Number.isFinite(input.hours)) return false;
+  const lead = start.getTime() - input.now.getTime();
+  const window = input.hours * 3_600_000;
+  return input.strict ? lead > window : lead >= window;
+}
+
+/** The first property-local arrival date `allows` accepts, or null if unknown. */
+export function checkInLeadEarliestArrival(
+  place: PricingCheckInPlace,
+  now: Date,
+  allows: (checkIn: string) => boolean,
+): string | null {
+  const today = propertyLocalDate(now, place.timeZone);
+  if (!today) return null;
+  // The longest window is 168 h, so the answer is at most nine days out.
+  for (let days = 0; days <= 10; days += 1) {
+    const date = new Date(`${today}T00:00:00.000Z`);
+    date.setUTCDate(date.getUTCDate() + days);
+    const checkIn = date.toISOString().slice(0, 10);
+    if (allows(checkIn)) return checkIn;
+  }
+  return null;
+}
+
+/**
  * VAY-2145: bank transfer only when check-in is at least its payment window (48 h) away, PayPal
  * only when check-in is further away than the hotel's PayPal window. A booking's payment deadline
  * then always falls before the guest arrives. Unknown places or dates answer false.
@@ -49,15 +90,13 @@ export function manualPaymentLeadTimeAllows(input: {
   place: PricingCheckInPlace;
   now: Date;
 }): boolean {
-  const start = propertyLocalInstant(
-    input.checkIn,
-    input.place.checkInTime ?? "00:00",
-    input.place.timeZone,
-  );
-  if (!start || !Number.isFinite(input.paymentWindowHours)) return false;
-  const lead = start.getTime() - input.now.getTime();
-  const window = input.paymentWindowHours * 3_600_000;
-  return input.method === "bank_transfer" ? lead >= window : lead > window;
+  return checkInLeadAllows({
+    hours: input.paymentWindowHours,
+    strict: input.method !== "bank_transfer",
+    checkIn: input.checkIn,
+    place: input.place,
+    now: input.now,
+  });
 }
 
 /** The first property-local arrival date the method may be offered for, or null if unknown. */
@@ -67,16 +106,9 @@ export function manualPaymentEarliestArrival(input: {
   place: PricingCheckInPlace;
   now: Date;
 }): string | null {
-  const today = propertyLocalDate(input.now, input.place.timeZone);
-  if (!today) return null;
-  // The longest window is 168 h, so the answer is at most nine days out.
-  for (let days = 0; days <= 10; days += 1) {
-    const date = new Date(`${today}T00:00:00.000Z`);
-    date.setUTCDate(date.getUTCDate() + days);
-    const checkIn = date.toISOString().slice(0, 10);
-    if (manualPaymentLeadTimeAllows({ ...input, checkIn })) return checkIn;
-  }
-  return null;
+  return checkInLeadEarliestArrival(input.place, input.now, (checkIn) =>
+    manualPaymentLeadTimeAllows({ ...input, checkIn }),
+  );
 }
 
 /** The property's check-in place and the database clock, or null without a time zone. The check-in

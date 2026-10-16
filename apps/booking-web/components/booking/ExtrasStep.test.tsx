@@ -27,6 +27,8 @@ const breakfast = {
   pricingModel: "per_guest_night" as const,
   maxQuantity: 1,
   maxGuests: null,
+  leadTimeHours: null,
+  bookableFrom: null,
 };
 const transfer = {
   ...breakfast,
@@ -70,6 +72,7 @@ const render = (props: Partial<ComponentProps<typeof ExtrasStep>> = {}) =>
         onChange: () => undefined,
         formatMoney: (minor: string) => `€${Number(minor) / 100}`,
         formatDay: (date: string) => ({ weekday: "Day", day: date.slice(8) }),
+        formatNotice: (hours: number) => `Needs ${hours} hours’ notice`,
         ...props,
       }),
     ),
@@ -123,4 +126,26 @@ it("asks for a missing day instead of waiting for a total that can't come", () =
   expect(host.textContent).toContain("Extras totalUpdating…");
   render({ value: breakfastOnly, priceFailed: true });
   expect(host.textContent).toContain("Extras total—");
+});
+
+it("shows an extra that needs more notice than the stay gives, but doesn't let it be added", () => {
+  const onChange = vi.fn();
+  // VAY-2232: check-in is 2026-11-06; the transfer can be added from 2026-11-07 on.
+  const late = { ...transfer, leadTimeHours: 24, bookableFrom: "2026-11-07" };
+  render({ catalogue: [breakfast, late], onChange });
+  expect(button("Add Late check-out").disabled).toBe(true);
+  expect(host.textContent).toContain("Needs 24 hours’ notice");
+  // The button names why it is disabled.
+  const notice = button("Add Late check-out").getAttribute("aria-describedby")!;
+  expect(host.querySelector(`#${notice}`)?.textContent).toBe("Needs 24 hours’ notice");
+  expect(button("Add Garden breakfast").disabled).toBe(false);
+  act(() => button("Add Late check-out").click());
+  expect(onChange).not.toHaveBeenCalled();
+  // From its first bookable date on it is an ordinary extra.
+  render({ catalogue: [breakfast, { ...late, bookableFrom: "2026-11-06" }], onChange });
+  expect(button("Add Late check-out").disabled).toBe(false);
+  expect(host.textContent).not.toContain("notice");
+  // Without a date (the hotel's time zone is unknown) it can't be added.
+  render({ catalogue: [breakfast, { ...late, bookableFrom: null }], onChange });
+  expect(button("Add Late check-out").disabled).toBe(true);
 });

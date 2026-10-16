@@ -48,6 +48,7 @@ import { createFixedChargePolicyStore } from "./fixedChargePolicyStore.js";
 import type { FixedChargePolicy } from "./replacementFixedCharges.js";
 import { lockPublicPricingChargeTotals } from "./publicPricingChargeTotals.js";
 import { lockPublicPricingComponents } from "./publicPricingComponents.js";
+import { createPublicPricingAddonCatalog } from "./publicPricingAddonCatalog.js";
 import { dispatchNextChannexClosedUpload } from "./channexNextClosedUpload.js";
 import { advancePublishedChannexOfferCreates } from "./channexPublishedOfferCreate.js";
 import { runPmsChannexManagementWorkerOnce } from "../jobs/pmsChannexManagementWorker.js";
@@ -6485,10 +6486,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     const shown = async () => {
       const read = await catalog.read(id);
       return read
-        ? byName(read.rooms).map((room) => [
-            room.name,
-            room.offers.map((offer) => offer.mealPlan),
-          ])
+        ? byName(read.rooms).map((room) => [room.name, room.offers.map((offer) => offer.mealPlan)])
         : null;
     };
     const photos = async (source: typeof catalog) =>
@@ -8125,6 +8123,79 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       [f.scope.propertyId],
     );
     expect(await revalidate(f, original.quote.quoteId)).toBeNull();
+  });
+  // VAY-2232: the catalog names the first check-in date, the quote refuses earlier stays, and
+  // acceptance refuses a quote once the notice has passed.
+  it("enforces an extra's lead time in the catalog, the quote and acceptance", async () => {
+    const f = await componentsFixture(fixedPolicy(), propertyTerms),
+      store = createCurrentPricingQuoteStore(pool, 300);
+    // The test reads the live clock and checks in at 23:59: stay clear of the property's midnight.
+    await pool.query(
+      `SELECT pg_sleep(CASE WHEN local >= time '23:58'
+         THEN extract(epoch FROM time '24:00' - local) + 1 ELSE 0 END)
+       FROM (SELECT (clock_timestamp() AT TIME ZONE 'Etc/UTC')::time AS local) clock`,
+    );
+    const dates = (
+      await pool.query(
+        `SELECT (today+1)::text AS arrival,(today+2)::text AS departure,(today+2)::text AS bookable
+         FROM (SELECT (clock_timestamp() AT TIME ZONE 'Etc/UTC')::date AS today) dates`,
+      )
+    ).rows[0];
+    await pool.query(
+      `UPDATE booking.addon_definitions SET metadata='{"maxQuantity":2,"leadTimeHours":24}'
+       WHERE id=$1`,
+      [f.id],
+    );
+    const catalog = createPublicPricingAddonCatalog(pool);
+    // Without a check-in time tomorrow starts at 00:00: less than 24 hours away.
+    expect((await catalog.read(f.scope.propertyId))?.addons).toMatchObject([
+      { id: f.id, leadTimeHours: 24, bookableFrom: dates.bookable },
+    ]);
+    // No promo code: its minimum would refuse the stay without the extra for another reason.
+    const selection = {
+      ...f.selection,
+      checkIn: dates.arrival,
+      checkOut: dates.departure,
+      promoCode: null,
+    };
+    expect(await f.components(selection)).toBeNull();
+    // The refused quote names the reason, so the booking page can offer the extras again.
+    await expect(
+      store.issue(f.scope.propertyId, {
+        requestId: randomUUID(),
+        selection,
+        paymentMethod: "pay_at_property",
+      }),
+    ).rejects.toMatchObject({ code: "denied", reason: "addon_lead_time" });
+    expect(await f.components({ ...selection, addons: [] })).not.toBeNull();
+    // With check-in at 23:59 tomorrow is a day away: the quote includes the extra.
+    await pool.query(
+      "INSERT INTO hotel_catalog.property_policy_summaries(property_id,check_in_time) VALUES($1,'23:59')",
+      [f.scope.propertyId],
+    );
+    expect((await catalog.read(f.scope.propertyId))?.addons).toMatchObject([
+      { id: f.id, bookableFrom: dates.arrival },
+    ]);
+    const issued = await store.issue(f.scope.propertyId, {
+      requestId: randomUUID(),
+      selection,
+      paymentMethod: "pay_at_property",
+    });
+    const plain = await store.issue(f.scope.propertyId, {
+      requestId: randomUUID(),
+      selection: { ...selection, addons: [] },
+      paymentMethod: "pay_at_property",
+    });
+    expect(issued.quote.stay.addons).toHaveLength(1);
+    expect(await revalidate(f, issued.quote.quoteId)).not.toBeNull();
+    // The arrival moves to 00:00, as when the notice runs out before the guest accepts. Only the
+    // quote with the extra is refused.
+    await pool.query(
+      "UPDATE hotel_catalog.property_policy_summaries SET check_in_time='00:00' WHERE property_id=$1",
+      [f.scope.propertyId],
+    );
+    expect(await revalidate(f, issued.quote.quoteId)).toBeNull();
+    expect(await revalidate(f, plain.quote.quoteId)).not.toBeNull();
   });
   it("retains current owner locks for the caller's subsequent acceptance work", async () => {
     const f = await componentsFixture(fixedPolicy(), propertyTerms),
