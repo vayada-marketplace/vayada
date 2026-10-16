@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mockBookingApis, mockStayPrices, SEEDED_BOOKING_SLUG } from "../support/bookingMocks";
 import { fillGuestDetails, mockAnyPrice } from "../support/bookFlow";
+import { BOOKING_WEB_ANALYTICS_CONSENT_VERSION as CONSENT } from "@vayada/domain-booking/conversion-funnel";
 
 // VAY-2197: the booking steps report where guests leave, only with analytics consent and never
 // with anything about the guest.
@@ -94,12 +95,12 @@ async function mockFunnel(page: Page, { extras = true, refusePrices = false } = 
 
 function saveChoice(page: Page, analytics: boolean) {
   return page.addInitScript(
-    ({ slug, analytics }) =>
+    ({ slug, analytics, version }) =>
       localStorage.setItem(
         `vayada_booking_analytics:${slug}`,
-        JSON.stringify({ version: 1, analytics }),
+        JSON.stringify({ version, analytics }),
       ),
-    { slug: SEEDED_BOOKING_SLUG, analytics },
+    { slug: SEEDED_BOOKING_SLUG, analytics, version: CONSENT },
   );
 }
 

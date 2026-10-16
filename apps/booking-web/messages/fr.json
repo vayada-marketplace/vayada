@@ -2,7 +2,8 @@
   "analyticsConsent": {
     "settings": "Choix de confidentialité",
     "title": "Statistiques facultatives",
-    "description": "Nous utilisons des statistiques facultatives pour comprendre les visites et les étapes de réservation. Vous pouvez réserver sans les activer. Votre choix concerne uniquement le site de réservation de cet hôtel.",
+    "description": "Nous utilisons des statistiques facultatives pour comprendre les visites et les étapes de réservation. Vous pouvez réserver sans les activer. Votre choix concerne uniquement notre site de réservation.",
+    "controller": "Nous, {hotel}, sommes responsables de ces données. Vayada exploite notre site de réservation et traite les données pour notre compte. <policy>Avis de confidentialité</policy>",
     "enabled": "Statistiques activées.",
     "disabled": "Statistiques désactivées.",
     "saveError": "Impossible d’enregistrer votre choix. Les statistiques restent désactivées.",

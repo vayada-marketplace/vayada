@@ -1,5 +1,6 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { mockBookingApis, SEEDED_BOOKING_SLUG } from "../support/bookingMocks";
+import { BOOKING_WEB_ANALYTICS_CONSENT_VERSION as CONSENT } from "@vayada/domain-booking/conversion-funnel";
 
 // VAY-2163: guests must see the real state of their booking and confirm before withdrawing.
 const hotelApi = `**/api/booking-web/hotels/${SEEDED_BOOKING_SLUG}`;
@@ -37,12 +38,15 @@ for (const width of [1440, 390]) {
   }, testInfo) => {
     await page.setViewportSize({ width, height: 900 });
     // Analytics choice already made, so the consent banner doesn't cover the buttons.
-    await page.addInitScript((slug) => {
-      localStorage.setItem(
-        `vayada_booking_analytics:${slug}`,
-        JSON.stringify({ version: 1, analytics: false }),
-      );
-    }, SEEDED_BOOKING_SLUG);
+    await page.addInitScript(
+      ({ slug, version }) => {
+        localStorage.setItem(
+          `vayada_booking_analytics:${slug}`,
+          JSON.stringify({ version, analytics: false }),
+        );
+      },
+      { slug: SEEDED_BOOKING_SLUG, version: CONSENT },
+    );
     await mockBookingApis(page);
     await page.route(`${hotelApi}/bookings/lookup`, (route) =>
       route.fulfill({

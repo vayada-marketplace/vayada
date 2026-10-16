@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { mockBookingApis, SEEDED_BOOKING_SLUG } from "../support/bookingMocks";
+import { BOOKING_WEB_ANALYTICS_CONSENT_VERSION as CONSENT } from "@vayada/domain-booking/conversion-funnel";
 import {
   continueToPayment,
   fillGuestDetails,
@@ -246,6 +247,15 @@ test("retries unavailable catalogue without inventing a room option", async ({
   page,
 }, testInfo) => {
   await mockBookingApis(page);
+  // Analytics choice already made, so the privacy panel doesn't cover the retry button.
+  await page.addInitScript(
+    ({ slug, version }) =>
+      localStorage.setItem(
+        `vayada_booking_analytics:${slug}`,
+        JSON.stringify({ version, analytics: false }),
+      ),
+    { slug: SEEDED_BOOKING_SLUG, version: CONSENT },
+  );
   await page.route("**/pricing-addons", (route) =>
     route.fulfill({
       json: { version: "public-pricing-addons.v1", addons: [] },

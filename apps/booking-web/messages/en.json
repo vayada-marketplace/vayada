@@ -2,7 +2,8 @@
   "analyticsConsent": {
     "settings": "Privacy choices",
     "title": "Optional analytics",
-    "description": "We use optional analytics to understand visits and booking steps. Booking works with analytics off. Your choice applies only to this hotel’s booking site.",
+    "description": "We use optional analytics to understand visits and booking steps. Booking works with analytics off. Your choice applies only to our booking site.",
+    "controller": "We, {hotel}, are responsible for this data. Vayada runs our booking site and processes the data for us. <policy>Privacy notice</policy>",
     "enabled": "Analytics is on.",
     "disabled": "Analytics is off.",
     "saveError": "Could not save your choice. Analytics stays off.",

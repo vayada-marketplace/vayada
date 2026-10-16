@@ -364,9 +364,11 @@ describe("Booking Web public bootstrap parity", () => {
 
     for (const consent of [
       {},
-      { analyticsConsent: false, consentVersion: 1 },
-      { analyticsConsent: "true", consentVersion: 1 },
-      { analyticsConsent: true, consentVersion: 2 },
+      { analyticsConsent: false, consentVersion: BOOKING_WEB_ANALYTICS_CONSENT_VERSION },
+      { analyticsConsent: "true", consentVersion: BOOKING_WEB_ANALYTICS_CONSENT_VERSION },
+      // A choice under the earlier consent text (VAY-2213 asks everyone again) or a future one.
+      { analyticsConsent: true, consentVersion: 1 },
+      { analyticsConsent: true, consentVersion: BOOKING_WEB_ANALYTICS_CONSENT_VERSION + 1 },
     ]) {
       const denied = await app.inject({
         method: "POST",
@@ -385,7 +387,7 @@ describe("Booking Web public bootstrap parity", () => {
         url: "/api/booking-web/events",
         payload: {
           analyticsConsent: true,
-          consentVersion: 1,
+          consentVersion: BOOKING_WEB_ANALYTICS_CONSENT_VERSION,
           hotelSlug: "hotel-alpenrose",
           eventType,
           eventId: randomUUID(),
@@ -474,7 +476,7 @@ describe("Booking Web public bootstrap parity", () => {
       remoteAddress: "203.0.113.7",
       payload: {
         analyticsConsent: true,
-        consentVersion: 1,
+        consentVersion: BOOKING_WEB_ANALYTICS_CONSENT_VERSION,
         hotelSlug: "hotel-alpenrose",
         eventType: "page_visit",
         eventId: randomUUID(),
@@ -678,7 +680,7 @@ describe("Booking Web public bootstrap parity", () => {
       url: "/api/booking-web/events",
       payload: {
         analyticsConsent: true,
-        consentVersion: 1,
+        consentVersion: BOOKING_WEB_ANALYTICS_CONSENT_VERSION,
         hotelSlug: "unknown-hotel",
         eventType: "page_visit",
         eventId: randomUUID(),
