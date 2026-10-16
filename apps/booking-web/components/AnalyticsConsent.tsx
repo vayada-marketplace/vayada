@@ -93,6 +93,7 @@ export default function AnalyticsConsent() {
               policy: (chunks) => (
                 <a
                   href={PRIVACY_NOTICE_URL}
+                  hrefLang="en"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="underline"

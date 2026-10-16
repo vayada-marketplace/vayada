@@ -62,19 +62,29 @@ test("asks again when the saved choice was made under the earlier consent text",
     events.push(route.request().postDataJSON());
     return route.fulfill({ status: 204 });
   });
-  await page.addInitScript(
-    (slug) =>
-      localStorage.setItem(
-        `vayada_booking_analytics:${slug}`,
-        JSON.stringify({ version: 1, analytics: true }),
-      ),
-    SEEDED_BOOKING_SLUG,
-  );
+  // A version-1 "Allow" and the analytics session it started.
+  await page.addInitScript((slug) => {
+    if (sessionStorage.getItem("vay2213-seeded")) return;
+    sessionStorage.setItem("vay2213-seeded", "1");
+    localStorage.setItem(
+      `vayada_booking_analytics:${slug}`,
+      JSON.stringify({ version: 1, analytics: true }),
+    );
+    sessionStorage.setItem(`vayada_sid:${slug}`, "old-session");
+    sessionStorage.setItem("vayada_funnel_sequence:old-session", "3");
+  }, SEEDED_BOOKING_SLUG);
   await page.goto("/");
   await expect(
     page.getByRole("heading", { name: "Optional analytics", exact: true }),
   ).toBeVisible();
   await expect(page.getByText("Analytics is on.", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("link", { name: "Choose rooms and get a price" })).toBeVisible();
+  expect(
+    await page.evaluate(() =>
+      Object.keys(sessionStorage).filter((key) => key.startsWith("vayada_")),
+    ),
+  ).toEqual([]);
+  // Nothing to wait for when all is well: give a late page_visit a moment to show up.
+  await page.waitForTimeout(1500);
   expect(events).toEqual([]);
 });
