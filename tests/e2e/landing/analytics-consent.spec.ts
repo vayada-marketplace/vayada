@@ -3,9 +3,9 @@ import { readFileSync } from "node:fs";
 import { expect, test, type Page } from "@playwright/test";
 
 // Opt-in suite: build Landing with a public 32-hex test token, then run with
-// E2E_LANDING_ANALYTICS=1. The vendor bytes are the committed copy of the pinned beacon
-// (E2E_CLOUDFLARE_BEACON_FILE overrides it), so a Cloudflare release cannot fail this suite;
-// the scheduled Cloudflare Beacon Drift workflow watches the live file instead.
+// E2E_LANDING_ANALYTICS=1. The vendor bytes are the committed copy of the pinned beacon, so a
+// Cloudflare release cannot fail this suite; the scheduled Cloudflare Beacon Drift workflow
+// watches the live file instead.
 // RUM requests are intercepted: tests never send measurements to Cloudflare.
 const source = "https://static.cloudflareinsights.com/beacon.min.js";
 const fixture = "tests/e2e/landing/fixtures/cloudflare-beacon.min.js";
@@ -23,7 +23,7 @@ test.beforeAll(() => {
   const pin = /const integrity = "(sha384-[^"]+)"/.exec(
     readFileSync("apps/landing/lib/cloudflareAnalytics.ts", "utf8"),
   )?.[1];
-  beacon = readFileSync(process.env.E2E_CLOUDFLARE_BEACON_FILE || fixture);
+  beacon = readFileSync(fixture);
   expect(pin, "sha384 pin in apps/landing/lib/cloudflareAnalytics.ts").toBeTruthy();
   expect(`sha384-${createHash("sha384").update(beacon).digest("base64")}`).toBe(pin);
 });
