@@ -23,6 +23,8 @@ export const PIN_FILE = "apps/landing/lib/cloudflareAnalytics.ts";
 export const RECORD_FILE = "scripts/ci/cloudflare-beacon-reviewed.json";
 export const RUNBOOK = "engineering/cloudflare-beacon-pin-runbook.md";
 export const ISSUE_TITLE = "Cloudflare beacon changed: review and update the landing SRI pin";
+// New issues are labelled and left unassigned; who gets assigned or mentioned is still open.
+export const ISSUE_LABELS = ["monitoring"];
 export const MARKER = "<!-- cloudflare-beacon-drift -->";
 const INTEGRITY = /^sha384-[A-Za-z0-9+/]+={0,2}$/;
 // Listed in the report so the reviewer sees at a glance how a new version sends data, loads code
@@ -224,7 +226,7 @@ export function githubClient({
         if (batch.length < 100) return issues;
       }
     },
-    createIssue: (title, body) => request("POST", "/issues", { title, body }),
+    createIssue: (title, body, labels) => request("POST", "/issues", { title, body, labels }),
     updateIssue: (number, fields) => request("PATCH", `/issues/${number}`, fields),
     comment: (number, body) => request("POST", `/issues/${number}/comments`, { body }),
   };
@@ -253,7 +255,8 @@ export async function reconcile({ client, report, override }) {
       : "no open drift issue";
   }
   const [issue] = open;
-  if (!issue) return `opened #${(await client.createIssue(ISSUE_TITLE, report.body)).number}`;
+  if (!issue)
+    return `opened #${(await client.createIssue(ISSUE_TITLE, report.body, ISSUE_LABELS)).number}`;
   if (issue.body === report.body) return `#${issue.number} is up to date`;
   await client.updateIssue(issue.number, { body: report.body });
   if (!issue.body.includes(`<!-- live: ${report.liveIntegrity} -->`)) {

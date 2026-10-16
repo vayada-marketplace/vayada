@@ -174,7 +174,10 @@ function fakeClient(issues) {
   return {
     calls,
     openIssues: async () => issues,
-    createIssue: async (title, body) => (calls.push(["create", title, body]), { number: 99 }),
+    createIssue: async (title, body, labels) => (
+      calls.push(["create", title, body, labels]),
+      { number: 99 }
+    ),
     updateIssue: async (number, fields) => (calls.push(["update", number, fields]), {}),
     comment: async (number, body) => (calls.push(["comment", number, body]), {}),
   };
@@ -185,7 +188,7 @@ test("reconcile opens one issue on the first mismatch", async () => {
   const report = drift();
   const client = fakeClient([issue(5, `quoting ${MARKER}`, "someone")]);
   assert.equal(await reconcile({ client, report, override: "" }), "opened #99");
-  assert.deepEqual(client.calls, [["create", ISSUE_TITLE, report.body]]);
+  assert.deepEqual(client.calls, [["create", ISSUE_TITLE, report.body, ["monitoring"]]]);
 });
 
 test("reconcile leaves an up-to-date issue alone and rewrites a stale one", async () => {
@@ -292,6 +295,14 @@ test("githubClient pages through open issues, skips pull requests and fails loud
     fetchImpl: async () => response(403, "no"),
   });
   await assert.rejects(failing.createIssue("t", "b"), /POST \/issues: HTTP 403/);
+  let sent;
+  const creating = githubClient({
+    token: "t",
+    repository: "o/r",
+    fetchImpl: async (url, init) => ((sent = JSON.parse(init.body)), response(201, "{}")),
+  });
+  await creating.createIssue("title", "body", ["monitoring"]);
+  assert.deepEqual(sent, { title: "title", body: "body", labels: ["monitoring"] });
 });
 
 test("only main runs and test runs touch issues; dry runs never do", () => {
