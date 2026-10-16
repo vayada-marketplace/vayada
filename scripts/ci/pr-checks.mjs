@@ -54,8 +54,8 @@ export const FRONTEND_ONLY_PACKAGES = {
   "marketplace-shared": ["marketplace_web_e2e"],
   // booking-web, pms-web
   "locale-ui": ["pms_web_e2e", "booking_web_e2e"],
-  // booking-web
-  fonts: ["booking_web_e2e"],
+  // booking-admin, booking-web, landing, marketplace-web, pms-web, vayada-admin
+  fonts: BROWSER_E2E_JOBS,
   // no app; its tests are in test:unit-suites
   "pms-vayada-adapter": ["api_unit"],
 };

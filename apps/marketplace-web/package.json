@@ -21,6 +21,7 @@
     "@vayada/domain-hotels": "*",
     "@vayada/domain-marketplace": "*",
     "@vayada/domain-pms": "*",
+    "@vayada/fonts": "*",
     "@vayada/marketplace-shared": "*",
     "@vayada/product-onboarding": "*",
     "clsx": "^2.0.0",

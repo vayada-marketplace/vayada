@@ -18,6 +18,7 @@
     "@vayada/domain-hotels": "*",
     "@heroicons/react": "^2.2.0",
     "@vayada/feature-hub": "*",
+    "@vayada/fonts": "*",
     "@vayada/product-onboarding": "*",
     "@vayada/settings-ui": "*",
     "@vayada/locale-constants": "*",
