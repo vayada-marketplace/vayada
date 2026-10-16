@@ -6,6 +6,12 @@ import type { PropertyPlanReadModel } from "@vayada/domain-finance";
 import pg, { type QueryResultRow } from "pg";
 
 import { readPropertyPlan } from "../domains/propertyPlanReadModel.js";
+import {
+  ADDON_LEAD_TIME_HOURS,
+  isAddonLeadTimeHours,
+  readAddonLeadTime,
+  type AddonLeadTimeHours,
+} from "../domains/addonLeadTime.js";
 import { enforceRoutePolicy } from "./policy.js";
 
 const ADDON_CATEGORIES = new Set(["dining", "experience", "transport", "wellness", "other"]);
@@ -19,6 +25,9 @@ type AddonDetails = {
   photos?: AddonPhoto[];
   location?: string | null;
   maxGuests?: number | null;
+  /** VAY-2232: the notice guests must give, one of ADDON_LEAD_TIME_HOURS; null for none. */
+  leadTimeHours?: AddonLeadTimeHours | null;
+  /** Free text from before VAY-2232; returned only until the add-on has a structured lead time. */
   leadTime?: string | null;
   maxQuantity?: number;
 };
@@ -437,7 +446,15 @@ export function createPgTargetBookingAddonItemsRepository(config: {
       const metadata = metadataFromBody(body, image);
       if (Object.keys(metadata).length > 0) {
         values.push(JSON.stringify(metadata));
-        sets.push(`metadata = metadata || $${values.length}::jsonb`);
+        // A choice replaces typed text. Text from an older editor replaces a choice, so the add-on
+        // stays off the booking page (as typed text always was) instead of losing its notice.
+        const base =
+          "leadTimeHours" in metadata
+            ? "(metadata - 'leadTime')"
+            : typeof metadata.leadTime === "string" && metadata.leadTime.trim()
+              ? "(metadata - 'leadTimeHours')"
+              : "metadata";
+        sets.push(`metadata = ${base} || $${values.length}::jsonb`);
       }
       values.push(new Date());
       sets.push(`updated_at = $${values.length}`);
@@ -576,6 +593,7 @@ function toAddonItem(row: AddonItemRow, hotelId: string): BookingAddonItem {
   const imageMediaObjectId = nullableString(metadata.mediaObjectId);
   const duration = nullableString(metadata.duration);
   const sortOrder = typeof metadata.sortOrder === "number" ? metadata.sortOrder : 0;
+  const leadTime = readAddonLeadTime(metadata);
   return {
     addonItemId: row.addonItemId,
     hotelId,
@@ -594,7 +612,8 @@ function toAddonItem(row: AddonItemRow, hotelId: string): BookingAddonItem {
         ? [{ imageUrl, mediaObjectId: imageMediaObjectId, isCover: true }]
         : [],
     location: nullableString(metadata.location),
-    leadTime: nullableString(metadata.leadTime),
+    leadTimeHours: leadTime?.hours ?? null,
+    leadTime: leadTime?.legacy ?? null,
     maxGuests: typeof metadata.maxGuests === "number" ? metadata.maxGuests : null,
     maxQuantity: typeof metadata.maxQuantity === "number" ? metadata.maxQuantity : 1,
     pricingModel: row.pricingModel,
@@ -618,9 +637,18 @@ function metadataFromBody(
   }
   if ("duration" in body) metadata.duration = body.duration ?? null;
   if ("sortOrder" in body) metadata.sortOrder = body.sortOrder ?? 0;
-  for (const key of ["photos", "location", "leadTime", "maxGuests", "maxQuantity"] as const) {
+  for (const key of [
+    "photos",
+    "location",
+    "leadTime",
+    "leadTimeHours",
+    "maxGuests",
+    "maxQuantity",
+  ] as const) {
     if (body[key] !== undefined) metadata[key] = body[key];
   }
+  // A structured lead time replaces the old free text (the update also removes the stored one).
+  if (body.leadTimeHours !== undefined) delete metadata.leadTime;
   return metadata;
 }
 
@@ -718,6 +746,7 @@ const KNOWN_FIELDS = new Set([
   "photos",
   "location",
   "leadTime",
+  "leadTimeHours",
   "maxGuests",
   "maxQuantity",
   "name",
@@ -1076,6 +1105,11 @@ function parseAddonDetails(input: Record<string, unknown>, details: string[]): A
   const value: AddonDetails = {};
   for (const key of ["location", "leadTime"] as const)
     if (key in input) value[key] = optionalNullableString(input, key, details);
+  if ("leadTimeHours" in input) {
+    const hours = input.leadTimeHours;
+    if (hours === null || isAddonLeadTimeHours(hours)) value.leadTimeHours = hours;
+    else details.push(`leadTimeHours must be null or one of ${ADDON_LEAD_TIME_HOURS.join(", ")}.`);
+  }
   for (const key of ["maxGuests", "maxQuantity"] as const) {
     if (!(key in input)) continue;
     if (key === "maxGuests" && input[key] === null) {

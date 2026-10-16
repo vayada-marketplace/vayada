@@ -11,8 +11,12 @@ remain authoritative. The four toggle combinations already map to `per_stay`,
 pricing conversion. This change does not touch legacy databases or APIs.
 
 The existing metadata object gains `photos` (ordered, maximum five, exactly one
-cover unless empty), `location`, `leadTime` (descriptive text), `maxGuests`
-(optional positive integer), and `maxQuantity` (positive integer, default one).
+cover unless empty), `location`, `leadTimeHours` (VAY-2232: null, 12, 24, 48, 72
+or 168), `maxGuests` (optional positive integer), and `maxQuantity` (positive
+integer, default one). Saving `leadTimeHours` removes the free-text `leadTime`
+older editors wrote; the API returns that text only while no choice is saved.
+Text an older editor still writes replaces a saved choice, so that add-on stays off
+the booking page until a choice is saved again.
 The single `imageUrl`/`mediaObjectId` fields mirror the cover for compatibility.
 Existing single images are projected as a one-photo gallery on read, so no
 schema or destructive data migration is needed. Existing highlights and included
