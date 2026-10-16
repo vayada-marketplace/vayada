@@ -1056,6 +1056,7 @@ jobs:
           src/channexAdoptionEvidence.integration.test.ts
           src/stripeWebhookReceiptRetention.integration.test.ts
           src/bookingWebEventsMigration.integration.test.ts
+          src/bookingWebEventsLogBlanking.integration.test.ts
           src/productionMediaMigration.integration.test.ts
           src/productionCatalogWriters.integration.test.ts
           src/productionBookingWriters.integration.test.ts
