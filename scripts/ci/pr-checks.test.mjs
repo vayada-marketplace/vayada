@@ -17,6 +17,7 @@ import { LineCounter, isAlias, parse, parseDocument, visit } from "yaml";
 import {
   BROWSER_E2E_JOBS,
   FRONTEND_ONLY_PACKAGES,
+  RULES,
   SELECTABLE_JOBS,
   WORKFLOW_FILE,
   YAML_ANCHOR,
@@ -27,8 +28,9 @@ import {
 } from "./pr-checks.mjs";
 
 const ALL = [...SELECTABLE_JOBS];
+const FRONTEND = ["frontend", "frontend_build"];
 const TYPESCRIPT = [
-  "frontend",
+  ...FRONTEND,
   "first_party_auth",
   "api_unit",
   "api_postgres",
@@ -67,7 +69,7 @@ test("packages the apps build on also run the mocked browser projects", () => {
   ]) {
     assert.deepEqual(
       selectJobs([file]).jobs,
-      ["frontend", "first_party_auth", ...BROWSER_E2E, ...TYPESCRIPT.slice(2)],
+      [...FRONTEND, "first_party_auth", ...BROWSER_E2E, ...TYPESCRIPT.slice(3)],
       file,
     );
   }
@@ -86,17 +88,17 @@ test("each app and its own browser specs run only that app's browser project", (
     ],
   ]) {
     for (const file of files) {
-      assert.deepEqual(selectJobs([file]).jobs, ["frontend", "first_party_auth", job], file);
+      assert.deepEqual(selectJobs([file]).jobs, [...FRONTEND, "first_party_auth", job], file);
     }
   }
 });
 
 test("the apps/api read model a marketplace-web spec imports also runs that project", () => {
   assert.deepEqual(selectJobs(["apps/api/src/domains/pmsRoomFactsReadModel.ts"]).jobs, [
-    "frontend",
+    ...FRONTEND,
     "first_party_auth",
     "marketplace_web_e2e",
-    ...TYPESCRIPT.slice(2),
+    ...TYPESCRIPT.slice(3),
   ]);
 });
 
@@ -109,7 +111,7 @@ test("shared e2e mocks and helpers run every mocked browser project", () => {
   ]) {
     assert.deepEqual(
       selectJobs([file]).jobs,
-      ["frontend", "first_party_auth", ...BROWSER_E2E],
+      [...FRONTEND, "first_party_auth", ...BROWSER_E2E],
       file,
     );
   }
@@ -117,15 +119,15 @@ test("shared e2e mocks and helpers run every mocked browser project", () => {
 
 test("frontend-only changes skip the PostgreSQL and Python jobs", () => {
   assert.deepEqual(selectJobs(["apps/booking-admin/app/page.tsx"]).jobs, [
-    "frontend",
+    ...FRONTEND,
     "first_party_auth",
   ]);
   assert.deepEqual(selectJobs(["tests/e2e/first-party-auth/login.spec.ts"]).jobs, [
-    "frontend",
+    ...FRONTEND,
     "first_party_auth",
   ]);
   assert.deepEqual(selectJobs(["tests/e2e/landing/smoke.spec.ts"]).jobs, [
-    "frontend",
+    ...FRONTEND,
     "first_party_auth",
   ]);
 });
@@ -156,7 +158,7 @@ test("anything unclassified runs every job", () => {
 test("mixed changes take the union and an unknown file list runs everything", () => {
   assert.deepEqual(
     selectJobs(["README.md", "apps/pms-api/app/main.py", "apps/landing/app/page.tsx"]).jobs,
-    ["frontend", "first_party_auth", "backend"],
+    [...FRONTEND, "first_party_auth", "backend"],
   );
   assert.deepEqual(selectJobs(null).jobs, ALL);
   assert.deepEqual(selectJobs([]).jobs, ALL);
@@ -453,6 +455,18 @@ test("the select CLI runs every job for any event other than pull_request", () =
   }
 });
 
+test("every path rule that runs frontend also runs frontend_build", () => {
+  for (const rule of RULES) {
+    // Workflow files are read only by contract tests in the frontend job (guard test below).
+    if (rule.name === "other-workflows") continue;
+    assert.equal(
+      rule.jobs.includes("frontend"),
+      rule.jobs.includes("frontend_build"),
+      `${rule.name}: frontend and frontend_build go together`,
+    );
+  }
+});
+
 test("other workflow files run the jobs whose tests read workflow files", () => {
   for (const file of [
     ".github/workflows/deploy-next-pms-web.yml",
@@ -467,7 +481,7 @@ test("other workflow files run the jobs whose tests read workflow files", () => 
 
 test("the root Playwright config runs every Playwright job and nothing else", () => {
   assert.deepEqual(selectJobs(["playwright.config.ts"]).jobs, [
-    "frontend",
+    ...FRONTEND,
     "first_party_auth",
     ...BROWSER_E2E_JOBS,
   ]);
@@ -475,33 +489,33 @@ test("the root Playwright config runs every Playwright job and nothing else", ()
 
 test("frontend-only packages run only the jobs of the apps that use them", () => {
   assert.deepEqual(selectJobs(["packages/product-onboarding/src/index.ts"]).jobs, [
-    "frontend",
+    ...FRONTEND,
     "first_party_auth",
     ...BROWSER_E2E_JOBS,
   ]);
   assert.deepEqual(selectJobs(["packages/feature-hub/src/index.ts"]).jobs, [
-    "frontend",
+    ...FRONTEND,
     "first_party_auth",
     "pms_web_e2e",
   ]);
   assert.deepEqual(selectJobs(["packages/settings-ui/package.json"]).jobs, [
-    "frontend",
+    ...FRONTEND,
     "first_party_auth",
     "pms_web_e2e",
     "marketplace_web_e2e",
     "api_unit",
   ]);
   assert.deepEqual(selectJobs(["packages/pms-vayada-adapter/src/index.ts"]).jobs, [
-    "frontend",
+    ...FRONTEND,
     "first_party_auth",
     "api_unit",
   ]);
   // A neighbour with a similar name keeps the broad rule.
   assert.deepEqual(selectJobs(["packages/settings-ui-next/src/index.ts"]).jobs, [
-    "frontend",
+    ...FRONTEND,
     "first_party_auth",
     ...BROWSER_E2E_JOBS,
-    ...TYPESCRIPT.slice(2),
+    ...TYPESCRIPT.slice(3),
   ]);
 });
 

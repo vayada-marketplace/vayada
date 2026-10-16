@@ -128,6 +128,8 @@ Currently the PR workflow runs `npm run check:architecture-boundaries`, root fro
 | `playwright.config.ts`                                                                                      | Frontend, First-Party Auth Contracts, PMS, Marketplace and Booking Web Browser Specs                                                                                                          |
 | anything else (`scripts/**`, lockfiles, `auth-db/**`, fixtures, …)                                          | every job                                                                                                                                                                                     |
 
+**Frontend** is two jobs that run side by side: _Frontend Test, Typecheck, Lint_ and _Frontend Build and App Tests_ (build, then the PMS Web, Vayada Admin and Marketplace Web tests and the landing browser specs). Every row that lists Frontend runs both, except the two workflow rows: they run only the first, because the tests that read workflow files run there (a `pr-checks.yml` edit inside the build job's block also runs that job).
+
 The six packages above are the ones no API code depends on; `scripts/ci/pr-checks.test.mjs` recomputes their jobs from every `package.json` and fails when anything else starts to reach them, read workflow files or run Playwright.
 
 Only `pull_request` runs are narrowed: any other event (a merge queue's `merge_group`, a push, a manual run) runs every job.
