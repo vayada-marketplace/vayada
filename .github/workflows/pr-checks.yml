@@ -463,7 +463,7 @@ jobs:
 
     services:
       postgres:
-        image: public.ecr.aws/docker/library/postgres:${{ matrix.postgres }}-alpine
+        image: ghcr.io/vayada-marketplace/ci-postgres:${{ matrix.postgres }}-alpine
         env:
           POSTGRES_USER: vayada_test
           POSTGRES_PASSWORD: vayada_test
@@ -1071,7 +1071,7 @@ jobs:
 
     services:
       postgres:
-        image: public.ecr.aws/docker/library/postgres:${{ matrix.postgres }}-alpine
+        image: ghcr.io/vayada-marketplace/ci-postgres:${{ matrix.postgres }}-alpine
         env:
           POSTGRES_USER: vayada_test
           POSTGRES_PASSWORD: vayada_test
@@ -1153,7 +1153,7 @@ jobs:
 
     services:
       postgres:
-        image: public.ecr.aws/docker/library/postgres:15-alpine
+        image: ghcr.io/vayada-marketplace/ci-postgres:15-alpine
         env:
           POSTGRES_USER: ${{ matrix.db_user }}
           POSTGRES_PASSWORD: ${{ matrix.db_password }}
@@ -1167,7 +1167,7 @@ jobs:
           - ${{ matrix.db_port }}:5432
 
       auth-postgres:
-        image: public.ecr.aws/docker/library/postgres:15-alpine
+        image: ghcr.io/vayada-marketplace/ci-postgres:15-alpine
         env:
           POSTGRES_USER: vayada_auth_user
           POSTGRES_PASSWORD: vayada_auth_password
