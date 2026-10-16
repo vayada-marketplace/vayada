@@ -94,10 +94,10 @@ describe.skipIf(!url)("Booking add-on lead time on the ordinary API login", () =
     const listed = (await addons.listAddonItemsByHotelId(propertyId))?.addonItems;
     expect(listed).toMatchObject([{ addonItemId: id, leadTimeHours: null, leadTime: "10h" }]);
 
-    // Saving other fields keeps the text for the migration.
+    // Saving other fields keeps the text for the migration. The answer is the saved add-on.
     await expect(
       addons.updateAddonItemByHotelId(propertyId, id, { price: "55.00" }),
-    ).resolves.toMatchObject({ leadTimeHours: null, leadTime: "10h" });
+    ).resolves.toMatchObject({ price: "55.00", leadTimeHours: null, leadTime: "10h" });
     expect(await metadata(id)).toMatchObject({ leadTime: "10h" });
 
     // A chosen lead time replaces it.

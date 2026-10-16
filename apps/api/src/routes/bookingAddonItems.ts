@@ -459,15 +459,16 @@ export function createPgTargetBookingAddonItemsRepository(config: {
       values.push(new Date());
       sets.push(`updated_at = $${values.length}`);
 
+      // The saved row comes from RETURNING: a query beside the UPDATE in the same statement
+      // would still read the row as it was before it.
       const result = await pool.query<AddonItemRow>(
         `WITH updated AS (
            UPDATE booking.addon_definitions
            SET ${sets.join(", ")}
            WHERE property_id = $1 AND id::text = $2 AND status <> 'retired'
-           RETURNING id
+           RETURNING *
          )
-         ${addonItemSelectSql()}
-         JOIN updated ON updated.id = addon_definitions.id`,
+         ${addonItemSelectSql("updated AS addon_definitions")}`,
         values,
       );
       const row = result.rows[0];
@@ -509,7 +510,7 @@ type AddonItemRow = {
   updatedAt: Date | string;
 };
 
-function addonItemSelectSql(): string {
+function addonItemSelectSql(source = "booking.addon_definitions"): string {
   return `SELECT
     addon_definitions.id::text AS "addonItemId",
     addon_definitions.property_id::text AS "propertyId",
@@ -526,7 +527,7 @@ function addonItemSelectSql(): string {
     addon_definitions.metadata,
     addon_definitions.created_at AS "createdAt",
     addon_definitions.updated_at AS "updatedAt"
-   FROM booking.addon_definitions`;
+   FROM ${source}`;
 }
 
 function addSet(
