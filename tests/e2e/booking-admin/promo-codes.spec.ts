@@ -176,9 +176,10 @@ test.describe("booking-admin promo-code settings cutover", () => {
       ).toBeLessThanOrEqual(1);
     }
     // The Active switch sits in the footer, on the same line as Cancel.
+    await expect(promoDetails.getByRole("switch")).toHaveCount(0);
+    await expect(promoRules.getByRole("switch")).toHaveCount(0);
     const footerSwitch = await editor.getByRole("switch", { name: "Active" }).boundingBox();
     const cancelButton = await editor.getByRole("button", { name: "Cancel" }).boundingBox();
-    expect(footerSwitch!.y).toBeGreaterThan(desktopRules!.y + desktopRules!.height);
     expect(
       Math.abs(
         footerSwitch!.y + footerSwitch!.height / 2 - (cancelButton!.y + cancelButton!.height / 2),
