@@ -33,9 +33,17 @@ export function trackEvent<T extends FunnelEventType>(
     const key = `vayada_funnel_sequence:${sessionId}`;
     const sequence = Number(sessionStorage.getItem(key) || 0) + 1;
     sessionStorage.setItem(key, String(sequence));
-    void fetch(`${bookingWebPublic.baseURL}/api/booking-web/events`, {
+    // Straight to the API, not through this site's proxy, so its rate limit sees the guest's
+    // address rather than this server's (VAY-2214). text/plain keeps it a CORS "simple" request:
+    // no preflight, which keepalive requests can't always make. No cookies are sent.
+    // A plain read, so Next.js inlines the build-time value.
+    const configured = process.env.NEXT_PUBLIC_BOOKING_WEB_API_URL;
+    const api = configured ? configured.replace(/\/+$/, "") : bookingWebPublic.baseURL;
+    void fetch(`${api}/api/booking-web/events`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      mode: "cors",
+      credentials: "omit",
+      headers: { "Content-Type": "text/plain;charset=UTF-8" },
       body: JSON.stringify({
         analyticsConsent: true,
         consentVersion: BOOKING_WEB_ANALYTICS_CONSENT_VERSION,
