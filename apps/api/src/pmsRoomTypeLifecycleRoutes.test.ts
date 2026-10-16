@@ -140,14 +140,14 @@ describe("PMS room type lifecycle routes", () => {
     test.commands.retireRoomType.mockResolvedValue({
       ok: false,
       statusCode: 403,
-      code: "missing_permission",
+      code: "room_type_delete_not_allowed",
       message: "Only the property's owner or operator can delete a room type.",
     });
     const response = await inject(app, "DELETE", endpoint(), body("retire"));
     expect(response.statusCode).toBe(403);
     expect(response.json()).toEqual({
       statusCode: 403,
-      code: "missing_permission",
+      code: "room_type_delete_not_allowed",
       category: "authorization",
       message: "Only the property's owner or operator can delete a room type.",
     });

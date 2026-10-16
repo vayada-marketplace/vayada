@@ -943,7 +943,7 @@ export type PmsRoomTypeRetireCommandResult =
       // A Delete that does the cleanup is for the property's owner or operator (VAY-2132).
       ok: false;
       statusCode: 403;
-      code: "missing_permission";
+      code: "room_type_delete_not_allowed";
       message: string;
     };
 
