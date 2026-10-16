@@ -1,0 +1,45 @@
+name: Cloudflare Beacon Drift
+
+# apps/landing pins the SRI hash of Cloudflare's Web Analytics beacon, and Cloudflare cannot
+# version-pin it, so each Cloudflare release turns analytics off on vayada.com until the pin is
+# updated. This compares the live file with the pin every day and fails on a mismatch, with a
+# report for the reviewer in the run summary. It never changes the pin:
+# engineering/cloudflare-beacon-pin-runbook.md. PR checks use the committed copy instead.
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+    inputs:
+      expected_integrity:
+        description: "Compare with this sha384-… instead of the pin (tests the alert path)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cloudflare-beacon-drift
+  cancel-in-progress: false
+
+jobs:
+  drift:
+    name: Compare the live beacon with the pin
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version-file: .nvmrc
+
+      - name: Compare and report
+        run: node scripts/ci/cloudflare-beacon-drift.mjs
+        env:
+          EXPECTED_INTEGRITY: ${{ inputs.expected_integrity }}
