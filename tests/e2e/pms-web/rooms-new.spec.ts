@@ -505,6 +505,8 @@ for (const viewport of [
     expect(await bar.evaluate((node) => getComputedStyle(node).backgroundColor)).not.toBe(
       "rgba(0, 0, 0, 0)",
     );
+    // The page is taller than the screen, so the form really scrolls under the bar.
+    expect(await main(page).evaluate((node) => node.scrollHeight > node.clientHeight)).toBe(true);
     const box = (await bar.boundingBox())!;
     expect(box.y + box.height).toBeLessThanOrEqual(viewport.height + 1);
   });

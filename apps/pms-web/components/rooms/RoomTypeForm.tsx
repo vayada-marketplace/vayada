@@ -9,6 +9,7 @@ import { pmsRoomMediaResource } from "@/services/upload";
 import { parseBookingAmenities } from "@/lib/parseBookingAmenities";
 import { SELECTED_PMS_PROPERTY_ID_KEY } from "@/lib/utils/pmsPropertySelectionKeys";
 import { useTranslation } from "@/lib/i18n";
+import { actionBar } from "@/components/pricing/pricingStyles";
 
 const BED_TYPES = [
   "King Bed",
@@ -1282,7 +1283,7 @@ export default function RoomTypeForm({
 
       {/* Submit / Cancel — sticky, with its own background so the form scrolls under it (VAY-2184) */}
       {activeTab !== "prices" && (
-        <div className="mt-6 flex flex-wrap items-center justify-end gap-3 sticky bottom-0 -mx-4 md:mx-0 px-4 md:px-0 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-gray-50/95 backdrop-blur border-t border-gray-200 z-10">
+        <div className={`flex-wrap ${actionBar}`}>
           {actionNote && (
             <p className="w-full text-[11px] text-gray-500 md:mr-auto md:w-auto">{actionNote}</p>
           )}
