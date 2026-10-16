@@ -239,20 +239,6 @@ function hashKey(...parts: string[]): string {
   return crypto.createHash("sha256").update(parts.join("|")).digest("hex");
 }
 
-function requestMetadata(
-  requestId: string,
-  userAgent: string | undefined,
-  ipAddress: string | undefined,
-): Record<string, unknown> {
-  return {
-    requestId,
-    source: "apps/api-booking-web-public",
-    trafficClass: classifyBookingWebTraffic(userAgent),
-    userAgentHash: userAgent ? hashKey(userAgent) : null,
-    ipAddressHash: ipAddress ? hashKey(ipAddress) : null,
-  };
-}
-
 export function classifyBookingWebTraffic(userAgent: string | undefined): "bot" | "human" {
   return userAgent &&
     /(bot(?:\b|\/)|crawler|spider|headlesschrome|lighthouse|pagespeed|pingdom|uptimerobot)/i.test(
