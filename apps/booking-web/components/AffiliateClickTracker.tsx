@@ -9,7 +9,7 @@ export function AffiliateClickTracker({ slug }: { slug: string }) {
   const occurrence = useRef<{ slug: string; referralCode: string; clickId: string } | null>(null);
 
   useEffect(() => {
-    // A retained cookie is booking context, not evidence of a new link arrival.
+    // Only a link with ?ref= is an arrival; nothing keeps the code in a cookie (VAY-2223).
     if (!referralCode) {
       occurrence.current = null;
       return;
