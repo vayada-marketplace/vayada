@@ -8,6 +8,7 @@
 //
 //   node scripts/ci/cloudflare-beacon-drift.mjs            # needs GITHUB_TOKEN, GITHUB_REPOSITORY
 //   node scripts/ci/cloudflare-beacon-drift.mjs --dry-run  # prints the report, touches no issue
+//   node scripts/ci/cloudflare-beacon-drift.mjs --record beacon.min.js > scripts/ci/cloudflare-beacon-reviewed.json
 //
 // EXPECTED_INTEGRITY (the workflow_dispatch input) replaces the pin to exercise the alert path.
 // No dependencies on purpose: the job runs without `npm ci`.
@@ -17,7 +18,9 @@ import { fileURLToPath } from "node:url";
 
 export const BEACON_URL = "https://static.cloudflareinsights.com/beacon.min.js";
 export const PIN_FILE = "apps/landing/lib/cloudflareAnalytics.ts";
-export const FIXTURE_FILE = "tests/e2e/landing/fixtures/cloudflare-beacon.min.js";
+// What the repository keeps of the reviewed beacon: hashes and counts, never the code itself,
+// because this repository is public. Regenerated with --record whenever the pin changes.
+export const RECORD_FILE = "scripts/ci/cloudflare-beacon-reviewed.json";
 export const RUNBOOK = "engineering/cloudflare-beacon-pin-runbook.md";
 export const ISSUE_TITLE = "Cloudflare beacon changed: review and update the landing SRI pin";
 export const MARKER = "<!-- cloudflare-beacon-drift -->";
@@ -38,8 +41,6 @@ export const SURFACE = [
   ["cookies / storage", /document\.cookie|\blocalStorage\b|\bsessionStorage\b|\bindexedDB\b/g],
   ["postMessage", /\bpostMessage\b/g],
 ];
-const MAX_LISTED = 40;
-const MAX_STATEMENT = 300;
 
 export function readPin(source) {
   const match = /const integrity = "(sha384-[^"]+)"/.exec(source);
@@ -65,68 +66,72 @@ export function surface(text) {
   };
 }
 
-// The file is one minified line, so diff it statement by statement (split on `;`): statements
-// that only one version has, in file order, duplicates counted.
-export function statementDiff(before, after) {
-  const split = (text) =>
-    text
-      .split(";")
-      .map((part) => part.trim())
-      .filter(Boolean);
-  const only = (list, other) => {
-    const left = new Map();
-    for (const statement of other) left.set(statement, (left.get(statement) ?? 0) + 1);
-    return list.filter((statement) => {
-      const count = left.get(statement) ?? 0;
-      left.set(statement, count - 1);
-      return count <= 0;
-    });
+// The file is one minified line, so it is compared statement by statement (split on `;`).
+const statements = (text) =>
+  text
+    .split(";")
+    .map((part) => part.trim())
+    .filter(Boolean);
+export const fingerprint = (statement) =>
+  createHash("sha256").update(statement).digest("base64url").slice(0, 12);
+
+export function reviewRecord(bytes) {
+  const text = bytes.toString("utf8");
+  const { urls, counts } = surface(text);
+  return {
+    version: beaconVersion(text),
+    size: bytes.length,
+    integrity: integrityOf(bytes),
+    counts: Object.fromEntries(counts),
+    urls,
+    statements: statements(text).map(fingerprint).join(" "),
   };
-  const a = split(before);
-  const b = split(after);
-  return { before: a.length, after: b.length, removed: only(a, b), added: only(b, a) };
+}
+
+// Against the reviewed fingerprints: how many reviewed statements are gone and how many live
+// statements are new, duplicates counted. Only counts: the report never quotes vendor code.
+export function statementDiff(reviewed, text) {
+  const left = new Map();
+  for (const print of reviewed) left.set(print, (left.get(print) ?? 0) + 1);
+  const live = statements(text);
+  const added = live.filter((statement) => {
+    const count = left.get(fingerprint(statement)) ?? 0;
+    left.set(fingerprint(statement), count - 1);
+    return count <= 0;
+  }).length;
+  const removed = [...left.values()].reduce((sum, count) => sum + Math.max(0, count), 0);
+  return { before: reviewed.length, after: live.length, removed, added };
 }
 
 const bytes = (n) => `${n.toLocaleString("en-US")} bytes`;
 
-function statementList(summary, statements) {
-  if (statements.length === 0) return "";
-  const shown = statements
-    .slice(0, MAX_LISTED)
-    .map((s) => (s.length > MAX_STATEMENT ? `${s.slice(0, MAX_STATEMENT)} …` : s));
-  const more =
-    statements.length > MAX_LISTED ? `\n… and ${statements.length - MAX_LISTED} more` : "";
-  // Longer than any backtick run in the vendor code, so nothing in it can end the code block.
-  const longest = Math.max(0, ...(shown.join("").match(/`+/g) ?? []).map((run) => run.length));
-  const fence = "`".repeat(Math.max(3, longest + 1));
-  return `<details><summary>${summary} (${statements.length})</summary>\n\n${fence}js\n${shown.join(";\n")}${more}\n${fence}\n\n</details>\n`;
-}
-
-// Everything the report says, from the pin, the committed copy and the live response. The body is
-// deterministic for a given live file, so a daily rerun leaves an up-to-date issue untouched.
-export function buildReport({ pin, override, fixture, live, repoUrl }) {
+// Everything the report says, from the pin, the reviewed record and the live response. The body
+// is deterministic for a given live file, so a daily rerun leaves an up-to-date issue untouched.
+export function buildReport({ pin, override, record, live, repoUrl }) {
   const expected = override || pin;
   const liveIntegrity = integrityOf(live.bytes);
   const matches = liveIntegrity === expected;
   const liveText = live.bytes.toString("utf8");
-  const fixtureText = fixture.toString("utf8");
   const liveVersion = beaconVersion(liveText);
   const summary = matches
     ? `Live beacon ${liveVersion} matches ${override ? "EXPECTED_INTEGRITY" : "the pin"} (${expected}).`
     : `Live beacon ${liveVersion} (${liveIntegrity}) does not match ${override ? "EXPECTED_INTEGRITY" : "the pin"} (${expected}).`;
   if (matches) return { matches, summary, liveIntegrity };
 
-  const diff = statementDiff(fixtureText, liveText);
-  const was = surface(fixtureText);
+  const diff = statementDiff(record.statements.split(" ").filter(Boolean), liveText);
   const now = surface(liveText);
   const flag = (a, b) => (a === b ? "" : " ⚠️");
-  const counts = was.counts
-    .map(([name, n], i) => `| ${name} | ${n} | ${now.counts[i][1]}${flag(n, now.counts[i][1])} |`)
+  // A row added to SURFACE after the record was made has no reviewed count: flag it if used.
+  const counts = now.counts
+    .map(([name, n]) => {
+      const before = record.counts[name];
+      return `| ${name} | ${before ?? "not recorded"} | ${n}${flag(before ?? 0, n)} |`;
+    })
     .join("\n");
-  const urls = [...new Set([...was.urls, ...now.urls])]
+  const urls = [...new Set([...record.urls, ...now.urls])]
     .sort()
     .map((url) => {
-      const before = was.urls.includes(url) ? "yes" : "no";
+      const before = record.urls.includes(url) ? "yes" : "no";
       const after = now.urls.includes(url) ? "yes" : "no";
       return `| \`${url.replaceAll("|", "\\|")}\` | ${before} | ${after}${flag(before, after)} |`;
     })
@@ -136,15 +141,15 @@ export function buildReport({ pin, override, fixture, live, repoUrl }) {
     : "";
   const body = `${MARKER}
 <!-- live: ${liveIntegrity} -->
-Cloudflare's live Web Analytics beacon no longer matches the SRI pin in \`${PIN_FILE}\`. Browsers refuse to run it, so Cloudflare analytics on vayada.com is off for visitors who accepted it until the pin is updated. It fails closed: nothing is sent. PR checks are unaffected because they use the committed copy.
+Cloudflare's live Web Analytics beacon no longer matches the SRI pin in \`${PIN_FILE}\`. Browsers refuse to run it, so Cloudflare analytics on vayada.com is off for visitors who accepted it until the pin is updated. It fails closed: nothing is sent. PR checks are unaffected: the consent spec uses a stub beacon.
 
 **Next step:** follow [\`${RUNBOOK}\`](${repoUrl ?? ".."}/blob/main/${RUNBOOK}). Review the change before copying the hash.
 ${note}
-| | committed copy | live |
+| | reviewed | live |
 |---|---|---|
-| version (\`js:\`) | ${beaconVersion(fixtureText)} | ${liveVersion} |
-| size | ${bytes(fixture.length)} | ${bytes(live.bytes.length)} |
-| sha384 | \`${integrityOf(fixture)}\` | \`${liveIntegrity}\` |
+| version (\`js:\`) | ${record.version} | ${liveVersion} |
+| size | ${bytes(record.size)} | ${bytes(live.bytes.length)} |
+| sha384 | \`${record.integrity}\` | \`${liveIntegrity}\` |
 
 Expected ${override ? "(workflow_dispatch input)" : `(pin in \`${PIN_FILE}\`)`}: \`${expected}\`. Live response: ETag \`${live.etag ?? "none"}\`, Last-Modified \`${live.lastModified ?? "none"}\`.
 
@@ -156,17 +161,16 @@ ${liveIntegrity}
 
 ### What changed
 
-${diff.removed.length + diff.added.length === 0 ? "No statement differs from the committed copy." : `Statements split on \`;\`: ${diff.before} before, ${diff.after} now; ${diff.removed.length} removed, ${diff.added.length} added.`}
+${diff.removed + diff.added === 0 ? "No statement differs from the reviewed version." : `Statements split on \`;\`: ${diff.before} reviewed, ${diff.after} now; ${diff.removed} reviewed statements are gone and ${diff.added} are new. The report never quotes vendor code; runbook step 2 shows how to diff the two versions locally.`}
 
-| network, code loading, storage | committed copy | live |
+| network, code loading, storage | reviewed | live |
 |---|---|---|
 ${counts}
 
-| URL or path in the file | committed copy | live |
+| URL or path in the file | reviewed | live |
 |---|---|---|
 ${urls}
 
-${[statementList("Removed statements", diff.removed), statementList("Added statements", diff.added)].join("")}
 Checked daily by [Cloudflare Beacon Drift](${repoUrl ?? ".."}/actions/workflows/cloudflare-beacon-drift.yml).
 `;
   return { matches, summary, liveIntegrity, liveVersion, body };
@@ -268,6 +272,13 @@ export function touchesIssues({ dryRun, ref, override }) {
 }
 
 async function main() {
+  const recordIndex = process.argv.indexOf("--record");
+  if (recordIndex !== -1) {
+    const file = process.argv[recordIndex + 1];
+    if (!file) throw new Error("usage: --record <downloaded beacon.min.js>");
+    console.log(JSON.stringify(reviewRecord(readFileSync(file)), null, 2));
+    return;
+  }
   const dryRun = process.argv.includes("--dry-run");
   const override = process.env.EXPECTED_INTEGRITY?.trim() ?? "";
   if (override && !INTEGRITY.test(override)) {
@@ -279,7 +290,7 @@ async function main() {
   const report = buildReport({
     pin: readPin(readFileSync(PIN_FILE, "utf8")),
     override,
-    fixture: readFileSync(FIXTURE_FILE),
+    record: JSON.parse(readFileSync(RECORD_FILE, "utf8")),
     live: await fetchBeacon(),
     repoUrl,
   });
