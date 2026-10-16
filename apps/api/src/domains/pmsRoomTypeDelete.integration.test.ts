@@ -9,6 +9,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { PmsRoomTypeRetireCommand } from "../routes/pmsOperations.js";
 import { createPgHotelCatalogOperatingCalendarPropertyProfileEvidencePort } from "./hotelCatalogOperatingCalendarPropertyProfileEvidence.js";
 import { createPgPmsInventoryMaterializationRepository } from "./pmsInventoryMaterializationRepository.js";
+import { createPgPmsLinkedInventoryGroupCommandRepository } from "./pmsLinkedInventoryGroupRepository.js";
 import { createTargetPmsInventoryReservationPort } from "./pmsInventoryReservation.js";
 import { createPgPmsOperatingCalendarCommandRepository } from "./pmsOperatingCalendarCommandRepository.js";
 import { createPgPmsOperatingCalendarReadModel } from "./pmsOperatingCalendarReadModel.js";
@@ -26,6 +27,7 @@ let propertyId = randomUUID();
 let actorUserId = randomUUID();
 let roomTypeA = randomUUID();
 let roomTypeB = randomUUID();
+let roomTypeC = randomUUID();
 const roleKey = `room_delete_${randomUUID()}`;
 
 describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL room type Delete with cleanup", () => {
@@ -66,6 +68,10 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL room type Delete with cleanup", 
     connectionString,
     now: () => new Date(acceptedAt),
   });
+  const linkedRooms = createPgPmsLinkedInventoryGroupCommandRepository({
+    connectionString,
+    now: () => new Date(acceptedAt),
+  });
 
   beforeAll(async () => {
     if (!/(^|[_-])test([_-]|$)/i.test(new URL(connectionString).pathname))
@@ -73,10 +79,10 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL room type Delete with cleanup", 
     await admin.connect();
   });
   beforeEach(async () => {
-    [organizationId, propertyId, actorUserId, roomTypeA, roomTypeB] = Array.from(
-      { length: 5 },
+    [organizationId, propertyId, actorUserId, roomTypeA, roomTypeB, roomTypeC] = Array.from(
+      { length: 6 },
       () => randomUUID(),
-    ) as [string, string, string, string, string];
+    ) as [string, string, string, string, string, string];
     cleanupEnabled = true;
     await seedAuthorizedProperty();
     await seedRooms();
@@ -86,6 +92,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL room type Delete with cleanup", 
   });
   afterAll(async () => {
     await units.close();
+    await linkedRooms.close();
     await rooms.close?.();
     await readRepository.close?.();
     await calendarRead.close();
@@ -125,14 +132,18 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL room type Delete with cleanup", 
         closure_source_revision: 1,
       })),
     );
-    expect(state.bindings).toEqual([{ calendar_revision: 2, room_type_id: roomTypeB }]);
+    expect(state.bindings).toEqual(
+      [roomTypeB, roomTypeC].sort().map((room_type_id) => ({ calendar_revision: 2, room_type_id })),
+    );
     expect(state.coverage).toMatchObject({
       calendar_revision: 2,
       materialized_revision: 2,
-      room_type_count: 1,
+      room_type_count: 2,
     });
     expect(state.receipts).toBe(1);
-    expect(state.sellableOffers).toEqual([roomTypeB, roomTypeB, roomTypeB]);
+    expect(state.sellableOffers).toEqual(
+      [roomTypeB, roomTypeC].sort().flatMap((id) => [id, id, id]),
+    );
     expect(state.outbox).toEqual(
       expect.arrayContaining([
         "distribution.inventory-projection",
@@ -141,7 +152,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL room type Delete with cleanup", 
       ]),
     );
 
-    // The other room is untouched and its calendar is current: units can still change.
+    // The other rooms are untouched and the calendar is current: units can still change.
     expect(
       (
         await readPmsRoomClosureState(
@@ -150,7 +161,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL room type Delete with cleanup", 
           new Date(acceptedAt),
         )
       )?.blockers,
-    ).toEqual(["last_operating_room"]);
+    ).toEqual([]);
     expect(await calendarRead.getCurrentOperatingCalendarConfiguration(propertyId)).toMatchObject({
       sourceStatus: "current",
       sourceConflicts: [],
@@ -183,19 +194,23 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL room type Delete with cleanup", 
   });
 
   it("keeps the property's only room type, and writes nothing when blocked", async () => {
+    for (const [roomTypeId, version] of [
+      [roomTypeA, "room-type-facts-v3"],
+      [roomTypeB, "room-type-facts-v4"],
+    ] as const)
+      expect(await rooms.retireRoomType(deleteCommand(roomTypeId, version))).toMatchObject({
+        ok: true,
+      });
+    const before = await snapshot(roomTypeC);
     expect(
-      await rooms.retireRoomType(deleteCommand(roomTypeA, "room-type-facts-v3")),
-    ).toMatchObject({ ok: true });
-    const before = await snapshot(roomTypeB);
-    expect(
-      await rooms.retireRoomType(deleteCommand(roomTypeB, "room-type-facts-v4")),
+      await rooms.retireRoomType(deleteCommand(roomTypeC, "room-type-facts-v2")),
     ).toMatchObject({
       ok: false,
       statusCode: 409,
       code: "room_type_retirement_blocked",
       impact: { canRetire: false, blockers: [{ code: "last_room_type", affectedCount: 1 }] },
     });
-    expect(await snapshot(roomTypeB)).toEqual(before);
+    expect(await snapshot(roomTypeC)).toEqual(before);
   });
 
   it.each<[string, () => Promise<unknown>]>([
@@ -217,15 +232,6 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL room type Delete with cleanup", 
           [propertyId, roomTypeA, externalId],
         );
       },
-    ],
-    [
-      "room_blocks",
-      () =>
-        admin.query(
-          `INSERT INTO pms.room_blocks(property_id,room_type_id,starts_on,ends_on)
-          VALUES ($1,$2,'2026-08-05','2026-08-06')`,
-          [propertyId, roomTypeA],
-        ),
     ],
     [
       "protected_inventory",
@@ -260,6 +266,93 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL room type Delete with cleanup", 
       impact: { blockers: expect.arrayContaining([expect.objectContaining({ code })]) },
     });
     expect(await snapshot()).toEqual(before);
+  });
+
+  it("releases the room's blocks and takes it out of its linked rooms in the same Delete", async () => {
+    const [unitId] = (
+      await admin.query<{ id: string }>(
+        "SELECT id::text FROM pms.rooms WHERE property_id=$1 AND room_type_id=$2 ORDER BY id LIMIT 1",
+        [propertyId, roomTypeA],
+      )
+    ).rows.map((row) => row.id);
+    const blockAudit = deleteCommand(roomTypeA, "").audit;
+    expect(
+      await rooms.createRoomBlocks!({
+        propertyId,
+        commandId: randomUUID(),
+        idempotencyKey: randomUUID(),
+        roomTypeId: roomTypeA,
+        roomIds: [unitId!],
+        startsOn: "2026-08-05",
+        endsOn: "2026-08-06",
+        reason: "Painting",
+        audit: blockAudit,
+      }),
+    ).toMatchObject({ ok: true });
+    const linkCommand = {
+      propertyId,
+      commandId: randomUUID(),
+      idempotencyKey: randomUUID(),
+      name: "Shared villa",
+      memberRoomTypeIds: [roomTypeA, roomTypeB, roomTypeC],
+      audit: blockAudit,
+    };
+    expect(await linkedRooms.create(linkCommand)).toMatchObject({ ok: true });
+    expect(await rooms.inspectRoomTypeRetirement(propertyId, roomTypeA)).toMatchObject({
+      canRetire: true,
+      blockers: [],
+      cleanup: { physicalUnits: 2, futureNights: 3, roomBlocks: 1, linkedGroups: 1 },
+    });
+
+    expect(
+      await rooms.retireRoomType(deleteCommand(roomTypeA, "room-type-facts-v3")),
+    ).toMatchObject({
+      ok: true,
+      impact: { cleanup: { physicalUnits: 2, futureNights: 3, roomBlocks: 1, linkedGroups: 1 } },
+    });
+    const links = () =>
+      admin
+        .query<{ id: string; group: string | null }>(
+          `SELECT id::text, linked_inventory_group_id::text AS "group" FROM pms.room_types
+           WHERE property_id=$1 ORDER BY id`,
+          [propertyId],
+        )
+        .then(({ rows }) => Object.fromEntries(rows.map((row) => [row.id, row.group])));
+    const kept = await links();
+    expect(kept[roomTypeA]).toBeNull();
+    expect(kept[roomTypeB]).toBeTruthy();
+    expect(kept[roomTypeC]).toBe(kept[roomTypeB]);
+    expect(
+      (
+        await admin.query(
+          "SELECT status FROM pms.room_blocks WHERE property_id=$1 AND room_type_id=$2 AND block_kind='manual'",
+          [propertyId, roomTypeA],
+        )
+      ).rows,
+    ).toEqual([{ status: "released" }]);
+
+    // Deleting the next room ends the group of two that is left.
+    expect(
+      await rooms.retireRoomType(deleteCommand(roomTypeB, "room-type-facts-v4")),
+    ).toMatchObject({ ok: true, impact: { cleanup: { linkedGroups: 1 } } });
+    expect(await links()).toEqual({ [roomTypeA]: null, [roomTypeB]: null, [roomTypeC]: null });
+    expect(
+      (
+        await admin.query(
+          `SELECT count(*)::int AS count FROM pms.linked_inventory_groups WHERE property_id=$1`,
+          [propertyId],
+        )
+      ).rows[0].count,
+    ).toBe(0);
+    expect(
+      (
+        await admin.query(
+          `SELECT count(*)::int AS count FROM pms.inventory_days WHERE property_id=$1
+           AND room_type_id=$2 AND (linked_stop_sell OR blocked_count<>0 OR status<>'open')`,
+          [propertyId, roomTypeC],
+        )
+      ).rows[0].count,
+    ).toBe(0);
   });
 
   it("is blocked by a guest's hold that commits first", async () => {
@@ -481,8 +574,11 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL room type Delete with cleanup", 
           "bathroomType":"private","size":{"value":20,"unit":"sqm"}}'::jsonb, TRUE, 3, 5),
        ($2::uuid, $3::uuid, 'Loft Suite', '', '{"total":4,"adults":3,"children":1}'::jsonb,
         '{"beds":[{"type":"king","quantity":1}],"bedrooms":1,"bathrooms":1,
-          "bathroomType":"private","size":{"value":40,"unit":"sqm"}}'::jsonb, TRUE, 4, 8)`,
-      [roomTypeA, roomTypeB, propertyId],
+          "bathroomType":"private","size":{"value":40,"unit":"sqm"}}'::jsonb, TRUE, 4, 8),
+       ($4::uuid, $3::uuid, 'Garden Room', '', '{"total":2,"adults":2,"children":0}'::jsonb,
+        '{"beds":[{"type":"double","quantity":1}],"bedrooms":1,"bathrooms":1,
+          "bathroomType":"private","size":{"value":18,"unit":"sqm"}}'::jsonb, TRUE, 2, 3)`,
+      [roomTypeA, roomTypeB, propertyId, roomTypeC],
     );
     for (const [roomTypeId, roomNumber] of [
       [roomTypeA, "A-101"],
@@ -490,6 +586,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL room type Delete with cleanup", 
       [roomTypeB, "B-201"],
       [roomTypeB, "B-202"],
       [roomTypeB, "B-203"],
+      [roomTypeC, "C-301"],
     ] as const)
       await admin.query(
         `INSERT INTO pms.rooms (id, property_id, room_type_id, room_number, status, operational_label_status)
@@ -519,6 +616,12 @@ function calendarCommand(): UpsertPmsOperatingCalendarCommand {
         expectedRoomFactsRevision: 4,
         expectedRoomUnitsRevision: 8,
         startingSellableLimitCount: 3,
+      },
+      {
+        roomTypeId: roomTypeC,
+        expectedRoomFactsRevision: 2,
+        expectedRoomUnitsRevision: 3,
+        startingSellableLimitCount: 1,
       },
     ],
     impactConfirmation: {

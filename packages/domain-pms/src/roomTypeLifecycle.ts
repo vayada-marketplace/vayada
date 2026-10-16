@@ -60,9 +60,7 @@ export type PmsRoomTypeRetirementBlocker = {
     | "last_room_type"
     | "calendar_not_current"
     | "protected_inventory"
-    | "unavailable_units"
-    | "room_blocks"
-    | "linked_inventory";
+    | "unavailable_units";
   readonly affectedCount: number;
   readonly action: string;
 };

@@ -4,6 +4,7 @@ import {
   PMS_ROOM_TYPE_DUPLICATION_COPIED_FACTS,
   PMS_ROOM_TYPE_DUPLICATION_RESET_FACTS,
   PMS_ROOM_TYPE_LIFECYCLE_CONTRACT_VERSION,
+  type PmsRoomTypeDeleteCleanup,
   type PmsRoomTypeRetirementBlocker,
   type PmsRoomTypeRetirementImpact,
 } from "@vayada/domain-pms";
@@ -11,9 +12,11 @@ import { createHash } from "node:crypto";
 import pg, { type QueryResult, type QueryResultRow } from "pg";
 import { lockPmsManageScope } from "./pmsManageScope.js";
 import { lockPmsRoomClosureScope } from "./pmsRoomClosureCommandRepository.js";
+import { reconcileRoomBlockInventory } from "./pmsRoomBlockInventory.js";
 import {
   closeRoomTypeForDelete,
   readPmsRoomTypeDeletePlan,
+  releaseRoomTypeForDelete,
   type PmsRoomTypeDeletePlan,
 } from "./pmsRoomTypeDelete.js";
 
@@ -793,21 +796,48 @@ export function createTargetPmsOperationsCommandRepository(
             "Room type retirement idempotency key could not be reserved.",
           );
         }
-        const cleanup =
-          plan && closureScope
-            ? await closeRoomTypeForDelete(
-                client,
-                closureScope,
-                plan.closure,
-                {
+        let cleanup: PmsRoomTypeDeleteCleanup | undefined;
+        if (plan && closureScope) {
+          const released =
+            plan.cleanup.roomBlocks || plan.cleanup.linkedGroups
+              ? await releaseRoomTypeForDelete(client, command, plan.closure.cutoffDate!, {
+                  commandId: command.commandId,
                   keyHash,
-                  requestFingerprintHash,
-                  requestId: command.audit.requestId,
-                  correlationId: command.audit.correlationId,
-                },
-                at,
-              )
-            : undefined;
+                  acceptedAt,
+                  audit: command.audit,
+                })
+              : { roomBlocks: 0, linkedGroups: 0 };
+          // What the released blocks and links held is rechecked under the same locks.
+          const closing =
+            released.roomBlocks || released.linkedGroups
+              ? await readPmsRoomTypeDeletePlan(client, command, at)
+              : plan;
+          if (!closing || closing.blockers.length) {
+            await client.query("ROLLBACK");
+            return {
+              ...roomTypeRetireConflict(
+                "room_type_retirement_blocked",
+                "Resolve the reported room type dependencies before retirement.",
+              ),
+              impact: closing ? roomTypeDeleteImpact(impact, closing) : checked,
+            };
+          }
+          cleanup = {
+            ...(await closeRoomTypeForDelete(
+              client,
+              closureScope,
+              closing.closure,
+              {
+                keyHash,
+                requestFingerprintHash,
+                requestId: command.audit.requestId,
+                correlationId: command.audit.correlationId,
+              },
+              at,
+            )),
+            ...released,
+          };
+        }
         if (
           cleanup &&
           !(await inspectRoomTypeRetirement(client, command.propertyId, command.roomTypeId))
@@ -2859,45 +2889,6 @@ async function roomBlockCapacityIsAvailable(
         requestedCount
       );
     })
-  );
-}
-
-async function reconcileRoomBlockInventory(
-  client: PmsOperationsCommandClient,
-  propertyId: string,
-  roomTypeId: string,
-  affectedFrom: string,
-  affectedTo: string,
-  acceptedAt: string,
-): Promise<void> {
-  await client.query(
-    `WITH affected_dates AS (
-       SELECT generate_series($3::date, $4::date, interval '1 day')::date AS stay_date
-     ), changes AS (
-       SELECT affected.stay_date,
-              COALESCE(SUM(block.blocked_count), 0)::integer AS blocked_count
-       FROM affected_dates affected
-       LEFT JOIN pms.room_blocks block
-         ON block.property_id = $1::uuid AND block.room_type_id = $2::uuid
-        AND block.status = 'active'
-        AND affected.stay_date BETWEEN block.starts_on AND block.ends_on
-       GROUP BY affected.stay_date
-     )
-     UPDATE pms.inventory_days inventory
-     SET blocked_count = changes.blocked_count,
-         available_count = CASE WHEN inventory.status = 'closed' OR inventory.linked_stop_sell
-           THEN 0 ELSE GREATEST(
-           0, COALESCE(inventory.effective_sellable_limit_count, inventory.total_count)
-             - inventory.assigned_count - changes.blocked_count
-         ) END,
-         inventory_revision = CASE WHEN inventory.inventory_revision IS NULL THEN NULL ELSE inventory.inventory_revision + 1 END,
-         block_source_revision = CASE WHEN inventory.block_source_revision IS NULL THEN NULL ELSE inventory.block_source_revision + 1 END,
-         updated_at = $5::timestamptz
-     FROM changes
-     WHERE inventory.property_id = $1::uuid AND inventory.room_type_id = $2::uuid
-       AND inventory.stay_date = changes.stay_date
-       AND inventory.blocked_count IS DISTINCT FROM changes.blocked_count`,
-    [propertyId, roomTypeId, affectedFrom, affectedTo, acceptedAt],
   );
 }
 
