@@ -34,6 +34,7 @@ export default function RoomCard({
   childGuests,
   promoCode,
   onSelect,
+  onView: onViewed,
 }: {
   room: PricingRoom;
   /** Stay prices for this room; null while loading, when they failed or aren't offered. */
@@ -49,6 +50,8 @@ export default function RoomCard({
   /** The guest's promo code, to say when it doesn't apply to this room. */
   promoCode?: string | null;
   onSelect: (publicOfferKey: string, roomCount: number) => void;
+  /** The room's details were opened. */
+  onView?: () => void;
 }) {
   const t = useTranslations("home");
   const tc = useTranslations("common");
@@ -57,7 +60,10 @@ export default function RoomCard({
   const [imageIndex, setImageIndex] = useState(0);
   const [picked, setPicked] = useState<string | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const onView = () => setDetailsOpen(true);
+  const onView = () => {
+    setDetailsOpen(true);
+    onViewed?.();
+  };
 
   const images = room.images ?? [];
   // Without prices for this room (failed, no read, or the room missing from the answer) the

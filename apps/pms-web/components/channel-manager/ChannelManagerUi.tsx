@@ -130,7 +130,7 @@ export function ChannelManagerSkeleton() {
   const { t } = useTranslation();
   return (
     <div className="p-4 md:p-6" aria-label={t("channels.loading")} role="status">
-      <div className="mx-auto max-w-6xl animate-pulse">
+      <div className="max-w-6xl animate-pulse">
         <div className="h-7 w-52 rounded bg-gray-200" />
         <div className="mt-3 h-4 w-full max-w-xl rounded bg-gray-200" />
         <div className="mt-7 grid gap-5 lg:grid-cols-[minmax(0,1.25fr)_minmax(300px,0.75fr)]">

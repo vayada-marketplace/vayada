@@ -107,7 +107,7 @@ export function ProfitLossTab({
     <div className="space-y-5 pt-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h2 className="text-base font-semibold text-gray-900">Profit & loss</h2>
+          <h3 className="text-base font-semibold text-gray-900">Profit & loss</h3>
           <p className="mt-1 text-sm text-gray-600">
             {year === currentYear ? "Year-to-date" : "Full-year"} performance by month and expense
             category.

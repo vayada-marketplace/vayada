@@ -58,6 +58,7 @@ import {
 import { useReplacementQuote } from "@/lib/hooks/useReplacementQuote";
 import { serverNow } from "@/lib/serverClock";
 import { bookingService } from "@/services/api/booking";
+import { funnelErrorCode, trackEvent } from "@/services/api/tracking";
 import {
   saveGuestDetails,
   saveLastBooking,
@@ -411,15 +412,34 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     // go reads the current URL.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settled, step, wanted, attemptOpen]);
+  // VAY-2197: the funnel counts the Extras stage for every hotel with extras, so a stay without
+  // the step still passes it.
+  const passMissingExtras = () => {
+    if (!steps.includes("extras"))
+      trackEvent(slug, "addons_step_passed", { extrasShown: false, extrasChosen: false });
+  };
+  // The step last reported as shown; a room card's hand-off never shows the rooms.
+  const viewed = useRef<BookStep | null>(null);
   // A room card's complete choice opens at the first step after the rooms.
   useEffect(() => {
     if (!settled || handedOver.current) return;
     handedOver.current = true;
     if (wanted === "rooms" && new URLSearchParams(window.location.search).get("offer"))
-      if (roomsComplete) go(steps[1] ?? "payment", true);
+      if (roomsComplete) {
+        viewed.current = "rooms";
+        passMissingExtras();
+        go(steps[1] ?? "payment", true);
+      }
     // Only the first settled render decides.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settled]);
+  // Each step the guest is shown, once per arrival, after the page knows which one it is.
+  useEffect(() => {
+    if (!settled || viewed.current === step) return;
+    viewed.current = step;
+    trackEvent(slug, "step_viewed", { step });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settled, step]);
   useEffect(() => {
     if (entry === null) return;
     saveBookFlowDraft(slug, {
@@ -476,6 +496,25 @@ function RoomQuoteForm({ slug }: { slug: string }) {
         ),
       );
     } else if (!payment && fallback + 1 < defaultMethods.length) setFallback((value) => value + 1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [error]);
+  // VAY-2197: an error the guest sees, once per price; a refusal the steps recover from by
+  // themselves (pricing again without promo codes or extras, or another way to pay) isn't one,
+  // and neither is one hidden behind an open booking attempt or on the room form.
+  useEffect(() => {
+    if (!error || !settled || attemptOpen || step === "rooms") return;
+    const recovers =
+      refused &&
+      !quote &&
+      (errorCode === "PROMO_CODES_UNAVAILABLE" ||
+        errorCode === "ADDONS_UNAVAILABLE" ||
+        (payment ? step !== "payment" : fallback + 1 < defaultMethods.length));
+    if (recovers) return;
+    trackEvent(slug, "booking_error", {
+      step,
+      reason: quote ? "price_expired" : refused ? "price_refused" : "pricing_failed",
+      code: funnelErrorCode(errorCode),
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [error]);
   // A room card's hand-off goes back to the cards; the room form goes back to itself.
@@ -679,7 +718,10 @@ function RoomQuoteForm({ slug }: { slug: string }) {
             className="space-y-6"
             onSubmit={(event) => {
               event.preventDefault();
-              if (roomsComplete && settled) go(next);
+              if (!roomsComplete || !settled) return;
+              trackEvent(slug, "rate_selected", { entry: "rooms_form" });
+              passMissingExtras();
+              go(next);
             }}
           >
             <div className="grid gap-4 sm:grid-cols-2">
@@ -942,7 +984,13 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                     type="button"
                     className={button}
                     disabled={addons === null || !quote}
-                    onClick={() => go(next)}
+                    onClick={() => {
+                      trackEvent(slug, "addons_step_passed", {
+                        extrasShown: true,
+                        extrasChosen: !!addons?.length,
+                      });
+                      go(next);
+                    }}
                   >
                     {addonError ? "Continue without extras" : "Continue to your details"}
                   </button>
@@ -1001,7 +1049,10 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                   type="button"
                   className={button}
                   disabled={!detailsComplete || !quote}
-                  onClick={() => go(next)}
+                  onClick={() => {
+                    trackEvent(slug, "details_completed", {});
+                    go(next);
+                  }}
                 >
                   Continue to payment
                 </button>

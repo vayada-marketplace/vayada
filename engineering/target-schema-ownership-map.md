@@ -263,6 +263,7 @@ Owner package: `domain-distribution`.
 | `booking_deep_link_contexts`        | Distribution/bookability | Booking checkout context, booking-web URL behavior, locale/currency/promo/referral state.                      | Lets public quote responses deep-link into checkout.                                                                   |
 | `external_api_clients`              | Distribution/bookability | New target table.                                                                                              | Client identity, terms, rate-limit tier, revocation.                                                                   |
 | `external_api_usage_events`         | Distribution/bookability | New target table plus API logs.                                                                                | Abuse/rate-limit and public API audit signals.                                                                         |
+| `booking_web_events`                | Distribution/bookability | Booking Web's consented funnel events (VAY-2212); earlier `booking_web.*` rows in `platform.domain_events`.    | Pseudonymous funnel and page-view analytics; the API deletes rows after 13 months.                                     |
 
 ### Ask Intelligence (retired)
 
