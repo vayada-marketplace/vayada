@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import AxeBuilder from "@axe-core/playwright";
 import {
   BOOKING_ADMIN_LAST_MINUTE_SETTINGS_PATH,
   mockBookingAdminBookingFlow,
@@ -32,10 +33,18 @@ test("manages all automatic promotions in Promos and preserves last-minute tiers
   await expect(page.getByRole("heading", { name: "Promos", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Promotions", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Edit Last minute escape" }).click();
+  const editor = page.getByRole("dialog", { name: "Edit last minute promotion" });
   await expect(
-    page.getByRole("spinbutton", { name: "Discount %", exact: true }).first(),
+    editor.getByRole("spinbutton", { name: "Discount %", exact: true }).first(),
   ).toHaveValue("12.5");
-  await page.getByRole("button", { name: "Save promotion", exact: true }).click();
+  // VAY-2234: the shared window, with Active in the footer and the guest line.
+  await expect(editor.getByRole("switch", { name: "Active" })).toHaveAttribute(
+    "aria-checked",
+    "true",
+  );
+  await expect(editor).toContainText("Guests will see: Last minute escape — Tiered percentage off");
+  await editor.getByRole("button", { name: "Save changes", exact: true }).click();
+  await expect(editor).toHaveCount(0);
   expect(settings.promotions[0].tiers).toEqual(originalTiers);
   await page.getByRole("button", { name: "New promotion", exact: true }).click();
   await expect(page.getByRole("menuitem", { name: /^Last minute/ })).toBeDisabled();
@@ -49,21 +58,43 @@ test("manages all automatic promotions in Promos and preserves last-minute tiers
   ]) {
     await page.getByRole("button", { name: "New promotion", exact: true }).click();
     await page.getByRole("menuitem", { name: new RegExp(`^${label}`) }).click();
-    await expect(page.getByLabel("Promotion type")).toHaveValue(type!);
+    const dialog = page.getByRole("dialog", { name: `New ${label!.toLowerCase()} promotion` });
+    await expect(dialog).toBeVisible();
     if (type === "EXTENDED_STAY") {
-      await page.getByLabel("Discount format").selectOption("free");
-      await page.getByLabel("Free nights", { exact: true }).fill("");
-      await expect(page.getByLabel("Discount format")).toHaveValue("free");
-      await page.getByLabel("Free nights", { exact: true }).fill("2");
+      await dialog.getByRole("radio", { name: /^Free nights/ }).check();
+      await dialog.getByLabel("Free nights", { exact: true }).fill("");
+      await dialog.getByRole("button", { name: "Create promotion", exact: true }).click();
+      await expect(dialog.getByRole("alert")).toContainText("Free nights must be at least 1");
+      await dialog.getByLabel("Free nights", { exact: true }).fill("2");
     }
-    await page.getByRole("button", { name: "Save promotion", exact: true }).click();
+    if (type === "MIDWEEK") {
+      await dialog.getByRole("spinbutton", { name: "Discount", exact: true }).fill("120");
+      await dialog.getByRole("button", { name: "Create promotion", exact: true }).click();
+      await expect(dialog.getByRole("alert")).toHaveText("Enter a discount from 0.01 to 100%.");
+      await expect(
+        dialog.getByRole("spinbutton", { name: "Discount", exact: true }),
+      ).toHaveAttribute("aria-invalid", "true");
+      await dialog.getByRole("spinbutton", { name: "Discount", exact: true }).fill("10");
+    }
+    await dialog.getByRole("button", { name: "Create promotion", exact: true }).click();
+    await expect(dialog).toHaveCount(0);
     await expect(page.getByRole("heading", { name: name!, exact: true })).toBeVisible();
   }
   await expect(page.getByRole("button", { name: "New promotion", exact: true })).toHaveCount(0);
+  expect(settings.promotions.find((p: any) => p.type === "EXTENDED_STAY")).toMatchObject({
+    freeNights: 2,
+    discountPercent: 0,
+  });
+  expect(settings.promotions.find((p: any) => p.type === "MIDWEEK")).toMatchObject({
+    discountPercent: 10,
+    weekdays: [0, 1, 2, 3, 4],
+  });
   await page.getByRole("button", { name: "Edit Extended stay" }).click();
-  await expect(page.getByLabel("Discount format")).toHaveValue("free");
-  await expect(page.getByLabel("Free nights", { exact: true })).toHaveValue("2");
-  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  const stayEditor = page.getByRole("dialog", { name: "Edit extended stay promotion" });
+  await expect(stayEditor.getByRole("radio", { name: /^Free nights/ })).toBeChecked();
+  await expect(stayEditor.getByLabel("Free nights", { exact: true })).toHaveValue("2");
+  await stayEditor.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(stayEditor).toHaveCount(0);
   const toggle = page.getByRole("switch", { name: "Activate Last minute escape" });
   await toggle.click();
   await expect(toggle).toHaveAttribute("aria-checked", "false");
@@ -73,10 +104,18 @@ test("manages all automatic promotions in Promos and preserves last-minute tiers
   await toggle.click();
   await expect(toggle).toHaveAttribute("aria-checked", "true");
   await page.getByRole("button", { name: "Edit Early bird" }).click();
-  await page.getByLabel("Minimum days ahead").fill("45");
-  await page.getByRole("group", { name: "Room targeting" }).getByRole("checkbox").nth(1).check();
-  await page.getByRole("button", { name: "Save promotion", exact: true }).click();
-  await expect(page.getByText("Book 45+ days ahead", { exact: true })).toBeVisible();
+  const birdEditor = page.getByRole("dialog", { name: "Edit early bird promotion" });
+  await birdEditor.getByRole("radio", { name: "60+ days", exact: true }).check();
+  await birdEditor
+    .getByRole("group", { name: "Applicable rooms" })
+    .getByRole("checkbox")
+    .nth(1)
+    .check();
+  await expect(
+    birdEditor.getByRole("checkbox", { name: "All rooms", exact: true }),
+  ).not.toBeChecked();
+  await birdEditor.getByRole("button", { name: "Save changes", exact: true }).click();
+  await expect(page.getByText("Book 60+ days ahead", { exact: true })).toBeVisible();
   expect(settings.promotions.find((p: any) => p.type === "EARLY_BIRD").roomTypeIds).toHaveLength(1);
   page.once("dialog", (dialog) => dialog.accept());
   await page
@@ -144,6 +183,23 @@ test("shows the empty state and a keyboard-friendly type menu styled like New pr
   await expect(items.nth(3)).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(page.getByRole("menu")).toHaveCount(0);
+  await expect(button).toBeFocused();
+
+  await button.click();
+  await page.getByRole("menuitem", { name: /^Last minute/ }).click();
+  const dialog = page.getByRole("dialog", { name: "New last minute promotion" });
+  await expect(dialog.getByRole("radio", { name: "Next 5 days", exact: true })).toBeFocused();
+  await expect(dialog).toContainText(
+    "Guests will see: Last minute escape — 10% off · Check-in within 5 days",
+  );
+  const accessibility = await new AxeBuilder({ page }).include('[role="dialog"]').analyze();
+  expect(
+    accessibility.violations
+      .filter(({ impact }) => impact === "critical" || impact === "serious")
+      .map(({ id, nodes }) => ({ id, targets: nodes.map(({ target }) => target) })),
+  ).toEqual([]);
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
   await expect(button).toBeFocused();
 
   await page.getByRole("button", { name: "Collapse", exact: true }).click();

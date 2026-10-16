@@ -14,7 +14,7 @@ import {
 import { Input } from "@/components/ui";
 import { PageHeader } from "@/components/layout/PageLayout";
 import type { BookingPromoCode } from "@/services/api/bookingPromoCodesClient";
-import { EditorModal } from "./EditorModal";
+import { EditorModal, EditorSectionHeading } from "./EditorModal";
 
 export interface PromoRoomType {
   roomTypeId: string;
@@ -493,9 +493,9 @@ export default function PromoCodesTab({
           {/* Both cards share the grid rows (subgrid), so fields line up row by row. */}
           <div className="grid gap-5 md:grid-cols-2">
             <section aria-labelledby="promo-details-heading" className={sectionClass}>
-              <SectionHeading id="promo-details-heading" icon={TicketIcon}>
+              <EditorSectionHeading id="promo-details-heading" icon={TicketIcon}>
                 {t("admin.promoDetails")}
-              </SectionHeading>
+              </EditorSectionHeading>
               <Field
                 id="promo-code"
                 label={t("affiliates.allAffiliates.code")}
@@ -599,9 +599,9 @@ export default function PromoCodesTab({
             </section>
 
             <section aria-labelledby="promo-rules-heading" className={sectionClass}>
-              <SectionHeading id="promo-rules-heading" icon={AdjustmentsHorizontalIcon}>
+              <EditorSectionHeading id="promo-rules-heading" icon={AdjustmentsHorizontalIcon}>
                 {t("admin.rulesRestrictions")}
-              </SectionHeading>
+              </EditorSectionHeading>
               <Field
                 id="promo-min-booking-value"
                 label={t("admin.minimumBookingValue")}
@@ -723,27 +723,6 @@ const inputClass = "h-11 !text-sm placeholder:text-gray-500";
 // Header + four field rows; on md+ both cards take the same rows of the parent grid.
 const sectionClass =
   "grid min-w-0 gap-5 rounded-xl border border-gray-200 bg-white p-4 shadow-sm sm:p-5 md:row-span-5 md:grid-rows-subgrid";
-
-function SectionHeading({
-  id,
-  icon: Icon,
-  children,
-}: {
-  id: string;
-  icon: React.ComponentType<{ className?: string }>;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="flex items-center gap-2.5 border-b border-gray-100 pb-4">
-      <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary-50 text-primary-700">
-        <Icon className="h-4 w-4" />
-      </span>
-      <h3 id={id} className="text-sm font-semibold text-gray-950">
-        {children}
-      </h3>
-    </div>
-  );
-}
 
 /** Label, then the control, then help text, so controls in a row line up across both cards. */
 function Field({

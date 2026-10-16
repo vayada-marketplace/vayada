@@ -10,35 +10,18 @@ import {
   type BookingLastMinuteSettings,
 } from "@/services/api/bookingLastMinuteSettingsClient";
 import type { PromoRoomType } from "./PromoCodesTab";
-import PromotionForm, { names, fresh, promotionIcons, promotionTypeCopy } from "./PromotionForm";
+import PromotionForm, {
+  names,
+  fresh,
+  promotionDiscount,
+  promotionIcons,
+  promotionSummary,
+  promotionTypeCopy,
+} from "./PromotionForm";
 
 type PromotionType = BookingPromotion["type"];
 const types = Object.keys(names) as PromotionType[];
 const MENU_WIDTH = 380;
-
-function summary(p: BookingPromotion, t: ReturnType<typeof useTranslation>["t"], locale: string) {
-  if (p.type === "LAST_MINUTE")
-    return p.tiers.length
-      ? p.tiers
-          .map((tier) =>
-            t("admin.minMaxDaysDiscount", {
-              min: tier.daysBeforeMin,
-              max: tier.daysBeforeMax ?? "∞",
-              discount: tier.discountPercent,
-            }),
-          )
-          .join("; ")
-      : t("admin.checkInWithinDaysDays", { days: p.threshold });
-  if (p.type === "EARLY_BIRD") return t("admin.bookDaysDaysAhead", { days: p.threshold });
-  if (p.type === "EXTENDED_STAY") return t("admin.stayNightsNights", { nights: p.threshold });
-  return p.weekdays
-    .map((day) =>
-      new Intl.DateTimeFormat(locale, { weekday: "short", timeZone: "UTC" }).format(
-        new Date(Date.UTC(2026, 0, 4 + day)),
-      ),
-    )
-    .join(", ");
-}
 
 /** "+ New promotion" and its type menu. Types that already exist show "Added" (one per type). */
 function NewPromotionMenu({
@@ -165,9 +148,11 @@ function NewPromotionMenu({
 export default function Promotions({
   hotelId,
   roomTypes,
+  propertyCurrency,
 }: {
   hotelId: string;
   roomTypes: PromoRoomType[];
+  propertyCurrency: string;
 }) {
   const { t, locale } = useTranslation();
   const [settings, setSettings] = useState<BookingLastMinuteSettings | null>(null);
@@ -198,8 +183,9 @@ export default function Promotions({
     };
   }, [hotelId]);
 
+  /** Saves the whole list; resolves false when the save failed. */
   async function save(next: BookingPromotion[]) {
-    if (!settings || busy) return;
+    if (!settings || busy) return false;
     setBusy(true);
     setError("");
     try {
@@ -215,8 +201,11 @@ export default function Promotions({
       setSettings(saved);
       setPromotions(saved.promotions ?? next);
       setDraft(null);
+      return true;
     } catch {
-      setError("admin.couldNotSavePromotions");
+      // The editor shows its own error; the section shows errors from toggles and deletes.
+      if (!draft) setError("admin.couldNotSavePromotions");
+      return false;
     } finally {
       setBusy(false);
     }
@@ -255,7 +244,7 @@ export default function Promotions({
       {!settings && !error && (
         <p className="mt-4 text-sm text-gray-500">{t("admin.loadingPromotions")}</p>
       )}
-      {settings && promotions.length === 0 && !draft && (
+      {settings && promotions.length === 0 && (
         <div className="mt-[var(--page-header-gap)] rounded-xl border border-gray-200 bg-white px-6 py-14 text-center shadow-sm">
           <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-gray-100">
             <BoltIcon className="h-6 w-6 text-gray-500" />
@@ -291,12 +280,8 @@ export default function Promotions({
                 </div>
                 <div className="mt-3.5 flex flex-wrap gap-2 text-xs text-gray-700">
                   {[
-                    p.freeNights
-                      ? t("admin.freeNightsCount", { count: p.freeNights })
-                      : p.tiers.length
-                        ? t("admin.tieredPercentageOff")
-                        : `${p.discountPercent}${t("bookingFlow.promoCodes.percentageOff")}`,
-                    summary(p, t, locale),
+                    promotionDiscount(p, t),
+                    promotionSummary(p, t, locale),
                     p.roomTypeIds.length
                       ? p.roomTypeIds
                           .map(
@@ -369,6 +354,7 @@ export default function Promotions({
           editing={editing}
           promotions={promotions}
           roomTypes={roomTypes}
+          propertyCurrency={propertyCurrency}
           busy={busy}
           save={save}
           onCancel={() => setDraft(null)}

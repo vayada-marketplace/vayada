@@ -26,6 +26,7 @@ export function EditorModal({
   submitLabel,
   onClose,
   onSubmit,
+  noValidate,
   children,
 }: {
   idPrefix: string;
@@ -42,6 +43,8 @@ export function EditorModal({
   submitLabel: string;
   onClose: () => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  /** Skip the browser's own validation bubbles when the caller validates and shows the error. */
+  noValidate?: boolean;
   children: ReactNode;
 }) {
   const { t } = useTranslation();
@@ -104,6 +107,7 @@ export function EditorModal({
         aria-labelledby={`${idPrefix}-title`}
         aria-describedby={`${idPrefix}-description${error ? ` ${idPrefix}-error` : ""}`}
         onSubmit={onSubmit}
+        noValidate={noValidate}
         className="flex h-[100dvh] w-full max-w-[920px] flex-col overflow-hidden bg-white shadow-2xl sm:h-auto sm:max-h-[92dvh] sm:rounded-2xl"
       >
         <div className="flex shrink-0 items-start justify-between gap-4 border-b border-gray-200 px-5 py-5 sm:px-7">
@@ -188,5 +192,27 @@ export function EditorModal({
       </form>
     </div>,
     document.body,
+  );
+}
+
+/** Card title inside the editor body: tinted icon and a small heading. */
+export function EditorSectionHeading({
+  id,
+  icon: Icon,
+  children,
+}: {
+  id: string;
+  icon: ComponentType<{ className?: string }>;
+  children: ReactNode;
+}) {
+  return (
+    <div className="flex items-center gap-2.5 border-b border-gray-100 pb-4">
+      <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary-50 text-primary-700">
+        <Icon className="h-4 w-4" />
+      </span>
+      <h3 id={id} className="text-sm font-semibold text-gray-950">
+        {children}
+      </h3>
+    </div>
   );
 }
