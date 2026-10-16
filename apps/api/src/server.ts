@@ -608,6 +608,9 @@ const pmsOperationsCommandRepository = pmsOperationsRepository
       readRepository: pmsOperationsRepository,
       stripePaymentProvider: stripeBookingPaymentProvider,
       roomAssignmentOptimization: createPmsRoomAssignmentOptimizationTriggerPort(),
+      roomTypeDeleteCleanup: (propertyId) =>
+        config.pmsRoomTypeDeleteCleanupPropertyIds === "all" ||
+        config.pmsRoomTypeDeleteCleanupPropertyIds.includes(propertyId.toLowerCase()),
     })
   : undefined;
 const pmsRoomClosureRepository =

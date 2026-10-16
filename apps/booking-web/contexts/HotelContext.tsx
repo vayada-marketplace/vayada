@@ -8,7 +8,7 @@ import { Hotel, Addon } from "@/lib/types";
 import { hotelService } from "@/services/api/hotel";
 import { ApiError } from "@/services/api/client";
 import { generateColorPalette } from "@/lib/utils/colors";
-import { brandFontPairing } from "@/lib/brandFonts";
+import { brandFontPairing } from "@vayada/fonts/brand";
 
 // Rooms, availability and prices are served by the room-and-price page (/book); this
 // provider only carries the hotel profile and its add-on catalogue.
@@ -164,7 +164,7 @@ export function HotelProvider({
     }
   }, [hotel?.branding?.accentColor]);
 
-  // Apply the branding font pairing (self-hosted, see lib/brandFonts) as CSS variables
+  // Apply the branding font pairing (self-hosted, see packages/fonts) as CSS variables
   useEffect(() => {
     const pairing = brandFontPairing(hotel?.branding?.fontPairing);
     if (pairing) {

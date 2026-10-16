@@ -20,6 +20,7 @@
     "@vayada/domain-finance": "*",
     "@vayada/domain-pms-channex": "*",
     "@vayada/feature-hub": "*",
+    "@vayada/fonts": "*",
     "@vayada/locale-constants": "*",
     "@vayada/locale-ui": "*",
     "@vayada/product-onboarding": "*",

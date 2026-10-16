@@ -10,11 +10,17 @@ import {
   RoomType,
   RoomTypeUpdate,
   type PropertyPlan,
+  type RoomTypeRetirementImpact,
 } from "@/services/rooms";
 import RoomTypeForm, { type RoomTab } from "@/components/rooms/RoomTypeForm";
 import { RoomPricesTab } from "@/components/pricing/RoomPricesTab";
 import { RoomsPricesStrip, usePropertyPrices } from "@/components/pricing/RoomsPrices";
 import ConfirmDialog from "@/components/ConfirmDialog";
+import {
+  roomTypeDeleteBlockedMessage,
+  roomTypeDeleteErrorText,
+  roomTypeDeleteMessage,
+} from "@/components/rooms/roomTypeDeleteText";
 import { useTranslation } from "@/lib/i18n";
 import { localizedErrorText } from "@/lib/i18n/localizedErrorText";
 
@@ -35,6 +41,11 @@ export default function EditRoomPage({ params }: { params: Promise<{ id: string 
   const [success, setSuccess] = useState("");
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  // What Delete would do, read before the confirmation (VAY-2132).
+  const [deleteImpact, setDeleteImpact] = useState<RoomTypeRetirementImpact | null>(null);
+  const [checkingDelete, setCheckingDelete] = useState(false);
+  // Shown under the title on every tab: the form's own banner is hidden on the Prices tab.
+  const [deleteError, setDeleteError] = useState("");
   const [propertyPlan, setPropertyPlan] = useState<PropertyPlan | null>(null);
   const [pricesNeedPublishing, setPricesNeedPublishing] = useState(false);
   const propertyPrices = usePropertyPrices();
@@ -108,18 +119,39 @@ export default function EditRoomPage({ params }: { params: Promise<{ id: string 
     }
   };
 
+  const openDelete = async () => {
+    setDeleteError("");
+    setSuccess("");
+    setCheckingDelete(true);
+    try {
+      const impact = await roomsService.deleteImpact(id);
+      if (impact.cleanup && !impact.canRetire) {
+        setDeleteError(roomTypeDeleteBlockedMessage(t, impact));
+        return;
+      }
+      setDeleteImpact(impact);
+      setShowDeleteConfirm(true);
+    } catch (error) {
+      setDeleteError(roomTypeDeleteErrorText(t, error, t("rooms.edit.failedToRetire")));
+    } finally {
+      setCheckingDelete(false);
+    }
+  };
+
   const handleDelete = async () => {
     setDeleting(true);
-    setError("");
+    setDeleteError("");
     try {
-      await roomsService.delete(id);
+      // The Delete uses the impact the confirmation showed, including its version.
+      await roomsService.delete(id, deleteImpact ?? undefined);
       router.push("/rooms");
     } catch (error) {
       setShowDeleteConfirm(false);
-      setError(error instanceof Error ? error.message : t("rooms.edit.failedToRetire"));
+      setDeleteError(roomTypeDeleteErrorText(t, error, t("rooms.edit.failedToRetire")));
       setDeleting(false);
     }
   };
+  const deleteCleanup = deleteImpact?.cleanup;
 
   if (loading) {
     return (
@@ -170,14 +202,24 @@ export default function EditRoomPage({ params }: { params: Promise<{ id: string 
           </h1>
         </div>
         <button
-          onClick={() => setShowDeleteConfirm(true)}
-          disabled={deleting}
+          onClick={() => void openDelete()}
+          disabled={deleting || checkingDelete}
+          aria-label={t("common.delete")}
           className="inline-flex items-center gap-1.5 px-3 py-2 text-sm text-red-600 border border-red-200 rounded-lg hover:bg-red-50 disabled:opacity-50 shrink-0"
         >
           <TrashIcon className="w-4 h-4" />
           <span className="hidden md:inline">{t("common.delete")}</span>
         </button>
       </div>
+
+      {deleteError && (
+        <p
+          role="alert"
+          className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-[11px] text-red-700 font-medium"
+        >
+          {deleteError}
+        </p>
+      )}
 
       {pricesNeedPublishing && (
         <RoomsPricesStrip {...propertyPrices} staleOnly onSaved={refreshPrices} />
@@ -221,8 +263,20 @@ export default function EditRoomPage({ params }: { params: Promise<{ id: string 
       {showDeleteConfirm && (
         <ConfirmDialog
           title={t("rooms.edit.deleteTitle")}
-          message={t("rooms.edit.deleteMessage")}
-          confirmLabel={deleting ? t("rooms.edit.retiring") : t("rooms.edit.retire")}
+          message={
+            deleteCleanup
+              ? roomTypeDeleteMessage(t, room.name, deleteCleanup)
+              : t("rooms.edit.deleteMessage")
+          }
+          confirmLabel={
+            deleteCleanup
+              ? deleting
+                ? t("rooms.edit.deleting")
+                : t("common.delete")
+              : deleting
+                ? t("rooms.edit.retiring")
+                : t("rooms.edit.retire")
+          }
           cancelLabel={t("common.cancel")}
           variant="danger"
           onConfirm={handleDelete}
