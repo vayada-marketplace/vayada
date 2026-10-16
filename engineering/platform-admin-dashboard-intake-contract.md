@@ -78,8 +78,9 @@ empty list means none. `booking_property_id` narrows **both** charts and all fou
 KPI cards within that set. An unknown or excluded ID produces zeros, never global
 fallback. Clearing the dropdown restores the outer set.
 
-Page views count persisted `booking_web.page_visit` events using the VAY-1284
-canonical-property and unambiguous historical-slug rules. Bots never contribute;
+Page views count `page_visit` rows in `distribution.booking_web_events` for the
+selected properties (VAY-2212); older rows were resolved with the VAY-1284
+canonical-property and unambiguous historical-slug rules when they were copied there. Bots never contribute;
 the existing test-data switch also controls classified/explicit test events and
 bookings marked `isTestBooking`, `isTestData`, or `testData`. Booking requests count
 target guest bookings by creation date, regardless of later lifecycle changes.
@@ -180,9 +181,9 @@ longer depends on legacy Booking event reads.
 
 VAY-1284 pins the page-view portion of that target read model:
 
-- Source only `booking_web.page_visit` evidence written by the Distribution
-  Booking Web event sink to `platform.domain_events`; legacy Booking events are
-  not a runtime fallback.
+- Source only `page_visit` evidence written by the Distribution Booking Web
+  event sink to `distribution.booking_web_events` (VAY-2212; before that
+  `platform.domain_events`); legacy Booking events are not a runtime fallback.
 - Resolve the requested Booking hotel resource through the canonical property
   link. New telemetry resolves the public profile at intake and persists the
   canonical `property_id` with `tenant_scope = 'property'`; the submitted slug
