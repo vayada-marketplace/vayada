@@ -15,7 +15,7 @@ preserved. Accepting again after withdrawal starts fresh measurement on the next
 full page load; an old beacon cannot replay activity from the withdrawn period.
 Other origins and account consent are independent.
 
-The pinned beacon (version and review date next to `integrity` in
+The pinned beacon (version and date in the comment above `integrity` in
 `cloudflareAnalytics.ts`) uses XHR and navigator.sendBeacon. Guards cover its
 Cloudflare and same-origin `/cdn-cgi/rum` destinations only. SRI pins the reviewed
 bytes. A vendor update fails closed instead of introducing an unguarded transport.
