@@ -883,7 +883,7 @@ jobs:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
       # Pricing on the ordinary login (VAY-2057). Own database: these suites commit fixture
-      # properties and slugs that other PMS-shard suites would see. The whole offer-owner file
+      # properties and slugs, so they stay out of vayada_api_test. The whole offer-owner file
       # runs here, last, including its restricted Channex login cases (VAY-2113): they create,
       # grant and drop the cluster-wide Channex worker role inside each case. Its own shard so it
       # runs alongside the PMS batch instead of after it (VAY-2238).
@@ -976,6 +976,16 @@ jobs:
           src/platform/platformMediaRepository.test.ts
           src/platform/platformMediaS3.test.ts
           src/domains/propertyMediaCommandRepository.test.ts
+
+      - name: Verify booking-page analytics storage and readers on PostgreSQL
+        if: matrix.shard == 'hotel-setup'
+        run: >-
+          npm --workspace vayada-api run test -- --no-file-parallelism
+          src/platform/bookingWebTelemetry.integration.test.ts
+          src/platform/bookingFunnel.integration.test.ts
+          src/bookingDashboardMoney.integration.test.ts
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
       - name: Verify platform media cleanup on PostgreSQL
         if: matrix.shard == 'hotel-setup'
