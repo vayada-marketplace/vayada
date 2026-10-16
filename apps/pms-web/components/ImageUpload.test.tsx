@@ -2,7 +2,8 @@ import { createElement } from "react";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import ImageUpload, { fitPhotoPick } from "./ImageUpload";
+import ImageUpload from "./ImageUpload";
+import { ApiErrorResponse } from "@/services/api/client";
 import { pmsRoomMediaResource, type RoomImageReference } from "@/services/upload";
 
 const uploadImages = vi.hoisted(() => vi.fn());
@@ -59,14 +60,6 @@ function render(props: Partial<Parameters<typeof ImageUpload>[0]> = {}) {
 const text = () => JSON.stringify(view.toJSON());
 const links = () => view.root.findAllByType("a").map((link) => link.props.href);
 
-describe("fitPhotoPick", () => {
-  it("keeps the first picks that fit the free slots and counts the rest", () => {
-    expect(fitPhotoPick(["a", "b", "c"], 8, 10)).toEqual({ accepted: ["a", "b"], skipped: 1 });
-    expect(fitPhotoPick(["a", "b"], 0, 10)).toEqual({ accepted: ["a", "b"], skipped: 0 });
-    expect(fitPhotoPick(["a"], 11, 10)).toEqual({ accepted: [], skipped: 1 });
-  });
-});
-
 describe("ImageUpload photo limit (VAY-2131)", () => {
   it.each([
     ["commission", 0, 10],
@@ -97,18 +90,53 @@ describe("ImageUpload photo limit (VAY-2131)", () => {
     expect(view.root.findAllByProps({ type: "file" })).toHaveLength(0);
   });
 
-  it("uploads only the photos that fit to a saved room", async () => {
+  it("uploads only the photos that fit to a saved room and counts the ones it got back", async () => {
     uploadImages.mockResolvedValue({ images: [{ url: "https://cdn.example/new.jpg" }], total: 1 });
+    const { onChange, pick } = render({
+      images: photos(7),
+      mediaResource: pmsRoomMediaResource("p", "room-1"),
+    });
+    const picked = files(5);
+    await pick(picked);
+
+    expect(uploadImages).toHaveBeenCalledWith(picked.slice(0, 3), expect.anything());
+    expect(onChange.mock.calls[0][0]).toHaveLength(8);
+    expect(text()).toContain('images.skippedPhotos {\\"added\\":1,\\"picked\\":5,\\"max\\":10}');
+  });
+
+  it("refuses the whole pick when any picked file is not an image, wherever it is", async () => {
+    const { onChange, pick } = render({ images: photos(8) });
+    await pick([...files(3), new File(["x"], "notes.pdf", { type: "application/pdf" })]);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(text()).toContain("rooms.form.onlyImageFiles");
+    expect(text()).not.toContain("images.skippedPhotos");
+  });
+
+  it("explains that removed photos count until saved when the server refuses the upload", async () => {
+    uploadImages.mockRejectedValue(
+      new ApiErrorResponse(409, {
+        code: "media_plan_limit_reached",
+        message:
+          "You've reached the 10-photo limit. Upgrade to the paid plan for up to 15 photos per room.",
+      }),
+    );
     const { onChange, pick } = render({
       images: photos(9),
       mediaResource: pmsRoomMediaResource("p", "room-1"),
     });
-    const picked = files(3);
-    await pick(picked);
+    await pick(files(1));
+    expect(onChange).not.toHaveBeenCalled();
+    expect(text()).toContain("images.saveRemovalsFirst");
+    expect(text()).not.toMatch(
+      /reached the 10-photo limit|images\.limitReached|images\.skippedPhotos/,
+    );
+  });
 
-    expect(uploadImages).toHaveBeenCalledWith(picked.slice(0, 1), expect.anything());
-    expect(onChange.mock.calls[0][0]).toHaveLength(10);
-    expect(text()).toContain('images.skippedPhotos {\\"added\\":1,\\"picked\\":3,\\"max\\":10}');
+  it("keeps the over-the-limit message and the upgrade link for a downgraded room", () => {
+    render({ images: photos(12) });
+    expect(text()).toContain("images.overCommissionLimit");
+    expect(text()).toContain("images.upgradeForMore");
+    expect(view.root.findAllByProps({ type: "file" })).toHaveLength(0);
   });
 
   it("drops the skipped note once a photo is removed", async () => {

@@ -5,6 +5,7 @@ import { XMarkIcon, PhotoIcon, ArrowUpTrayIcon } from "@heroicons/react/24/outli
 import { imageReferenceUrl, isRoomImageReference, uploadService } from "@/services/upload";
 import type { RoomImageReference, UploadedImage } from "@/services/upload";
 import type { PlatformMediaResourceScope } from "@/services/platform-media";
+import { ApiErrorResponse } from "@/services/api/client";
 import { useTranslation } from "@/lib/i18n";
 
 interface ImageUploadProps {
@@ -63,26 +64,9 @@ export default function ImageUpload({
         e.target.value = "";
         return;
       }
-      // A pick bigger than the free slots adds the first photos that fit and skips the rest.
-      const { accepted: fileArray, skipped } = fitPhotoPick(
-        Array.from(files),
-        validImages.length,
-        maxImages,
-      );
-      if (fileArray.length === 0) {
-        e.target.value = "";
-        return;
-      }
-      const notice = skipped
-        ? t("images.skippedPhotos", {
-            added: fileArray.length,
-            picked: files.length,
-            max: maxImages,
-          })
-        : "";
-
+      const picked = Array.from(files);
       // Validate each file
-      for (const file of fileArray) {
+      for (const file of picked) {
         if (!file.type.startsWith("image/")) {
           setError(t("rooms.form.onlyImageFiles"));
           e.target.value = "";
@@ -94,6 +78,16 @@ export default function ImageUpload({
           return;
         }
       }
+      // A pick bigger than the free slots adds the first photos that fit and skips the rest.
+      const fileArray = picked.slice(0, Math.max(0, maxImages - validImages.length));
+      if (fileArray.length === 0) {
+        e.target.value = "";
+        return;
+      }
+      const skippedNotice = (added: number) =>
+        fileArray.length < picked.length
+          ? t("images.skippedPhotos", { added, picked: picked.length, max: maxImages })
+          : "";
 
       setUploading(true);
       try {
@@ -105,7 +99,7 @@ export default function ImageUpload({
               pendingFile: file,
             })),
           ]);
-          setSkipNotice(notice);
+          setSkipNotice(skippedNotice(fileArray.length));
           return;
         }
         const result = await uploadService.uploadImages(fileArray, mediaResource);
@@ -114,15 +108,22 @@ export default function ImageUpload({
           platformMediaObjectId: img.platformMediaObjectId,
         }));
         onChange([...validImages, ...newImages]);
-        setSkipNotice(notice);
+        setSkipNotice(skippedNotice(newImages.length));
       } catch (err: any) {
-        setError(err.message || t("images.uploadError"));
+        // The server counts the room's saved photos, so photos removed here still count until the room is saved.
+        if (err instanceof ApiErrorResponse && err.data.code === "media_plan_limit_reached")
+          setError(
+            validImages.length < maxImages
+              ? t("images.saveRemovalsFirst")
+              : photoLimitMessage(t, plan, validImages.length, maxImages),
+          );
+        else setError(err.message || t("images.uploadError"));
       } finally {
         setUploading(false);
         e.target.value = "";
       }
     },
-    [validImages, onChange, maxImages, maxSizeMB, mediaResource, t],
+    [validImages, onChange, maxImages, maxSizeMB, mediaResource, plan, t],
   );
 
   const removeImage = useCallback(
@@ -281,7 +282,10 @@ export default function ImageUpload({
       )}
 
       {(skipNotice || isAtLimit) && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs leading-5 text-amber-950">
+        <div
+          role="status"
+          className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs leading-5 text-amber-950"
+        >
           {skipNotice && <p>{skipNotice}</p>}
           {isAtLimit && maxImages !== null && (
             <p>
@@ -307,16 +311,6 @@ export default function ImageUpload({
 }
 
 type Translate = (key: string, params?: Record<string, string | number>) => string;
-
-/** Keeps the first picked files that fit in the room's free photo slots. */
-export function fitPhotoPick<T>(
-  picked: T[],
-  currentCount: number,
-  maxImages: number,
-): { accepted: T[]; skipped: number } {
-  const accepted = picked.slice(0, Math.max(0, maxImages - currentCount));
-  return { accepted, skipped: picked.length - accepted.length };
-}
 
 function photoLimitMessage(
   t: Translate,

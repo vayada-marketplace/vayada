@@ -2884,6 +2884,7 @@
   "images.limitReached": "You've reached the {max}-photo limit.",
   "images.upgradeForMore": "Upgrade to the paid plan for up to 15 photos per room.",
   "images.skippedPhotos": "Added {added} of {picked} photos. A room can have up to {max} photos, so the rest were skipped.",
+  "images.saveRemovalsFirst": "Photos you removed still count until you save. Save the room type, then add new photos.",
   "images.paidLimit": "You've reached the 15-photo limit for the paid plan.",
   "channels.attemptOf": "Attempt {attempt} of {total}",
   "channels.lastSuccess": "Last success: {time}",
