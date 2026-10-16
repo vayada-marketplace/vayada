@@ -13,15 +13,17 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import { parse } from "yaml";
+import { LineCounter, isAlias, parse, parseDocument, visit } from "yaml";
 import {
   BROWSER_E2E_JOBS,
   FRONTEND_ONLY_PACKAGES,
   SELECTABLE_JOBS,
   WORKFLOW_FILE,
+  YAML_ANCHOR,
   selectJobs,
   verifyRequiredChecks,
   workflowChangeJobs,
+  workflowLineJobs,
 } from "./pr-checks.mjs";
 
 const ALL = [...SELECTABLE_JOBS];
@@ -163,7 +165,7 @@ test("mixed changes take the union and an unknown file list runs everything", ()
 const cli = new URL("./pr-checks.mjs", import.meta.url).pathname;
 const WORKFLOW = readFileSync(new URL(`../../${WORKFLOW_FILE}`, import.meta.url), "utf8");
 
-// Replaces exactly one occurrence, so a fixture edit fails loudly when the workflow moves on.
+// Replaces exactly one occurrence, so a fixture edit fails loudly when the text moves on.
 const once = (from, to) => (text) => {
   assert.equal(text.split(from).length, 2, `expected exactly one ${JSON.stringify(from)}`);
   return text.replace(from, to);
@@ -180,100 +182,204 @@ function workflowDiff(before, after) {
   return result.stdout;
 }
 
-const jobsForEdit = (...edits) => {
-  const after = edits.reduce((text, edit) => edit(text), WORKFLOW);
-  return workflowChangeJobs(WORKFLOW, after, workflowDiff(WORKFLOW, after));
+const jobsForEdit = (before, ...edits) => {
+  const after = edits.reduce((text, edit) => edit(text), before);
+  return workflowChangeJobs(before, after, workflowDiff(before, after));
 };
 
-const PMS_BATCH_LAST_FILE = "          src/platform/workosWebhooks.integration.test.ts\n";
-const addPmsBatchFile = once(
-  PMS_BATCH_LAST_FILE,
-  `${PMS_BATCH_LAST_FILE}          src/newSuite.integration.test.ts\n`,
+// The shape of pr-checks.yml in a few lines, so these cases survive edits to the real file.
+const FIXTURE = [
+  "name: PR Checks",
+  "on:",
+  "  pull_request:",
+  '    branches: [main, "fm/**"]',
+  "concurrency:",
+  "  group: pr-checks-${{ github.ref }}",
+  "  cancel-in-progress: true",
+  "# Job selection is path-based.",
+  "jobs:",
+  "  changes:",
+  "    runs-on: ubuntu-latest",
+  "    outputs:",
+  "      run_frontend: ${{ steps.select.outputs.run_frontend }}",
+  "    steps:",
+  "      - id: select",
+  "        run: node scripts/ci/pr-checks.mjs select",
+  "",
+  "  frontend:",
+  "    runs-on: ubuntu-latest",
+  "    steps:",
+  "      - name: Lint",
+  "        run: npm run lint",
+  "",
+  "  api_unit:",
+  "    runs-on: ubuntu-latest",
+  "    steps:",
+  "      - run: npm run test:unit-suites",
+  "",
+  "  # Each shard gets its own cluster.",
+  "  api_postgres:",
+  "    runs-on: ubuntu-latest",
+  "    steps:",
+  "      # Suites on the ordinary login.",
+  "      - name: Run suites",
+  "        run: >-",
+  "          npm test --",
+  "          src/a.integration.test.ts",
+  "          src/b.integration.test.ts",
+  "",
+  "  backend:",
+  "    runs-on: ubuntu-latest",
+  "    steps:",
+  "      - run: python -m pytest tests/ -v",
+  "",
+  "  required:",
+  "    name: Required Checks",
+  "    needs: [changes, frontend, api_unit, api_postgres, backend]",
+  "    runs-on: ubuntu-latest",
+  "    steps:",
+  "      - run: node scripts/ci/pr-checks.mjs verify",
+  "",
+].join("\n");
+
+const addSuite = once(
+  "          src/b.integration.test.ts\n",
+  "          src/b.integration.test.ts\n          src/c.integration.test.ts\n",
 );
 
 test("a pr-checks.yml edit inside one job block runs that job and frontend", () => {
-  assert.deepEqual(jobsForEdit(addPmsBatchFile), ["frontend", "api_postgres"]);
-  assert.deepEqual(
-    jobsForEdit(once("run: python -m pytest tests/ -v --tb=short", "run: python -m pytest tests/")),
-    ["frontend", "backend"],
-  );
-  // A deleted line maps through the old file.
-  assert.deepEqual(jobsForEdit(once("          src/propertySetupDraftCommand.test.ts\n", "")), [
+  assert.deepEqual(jobsForEdit(FIXTURE, addSuite), ["frontend", "api_postgres"]);
+  assert.deepEqual(jobsForEdit(FIXTURE, once("tests/ -v", "tests/")), ["frontend", "backend"]);
+  assert.deepEqual(jobsForEdit(FIXTURE, once("npm run lint", "npm run lint -- --quiet")), [
     "frontend",
-    "setup_draft_reset_postgres",
+  ]);
+  // A deleted line maps through the old file.
+  assert.deepEqual(jobsForEdit(FIXTURE, once("          src/a.integration.test.ts\n", "")), [
+    "frontend",
+    "api_postgres",
   ]);
   // A comment inside a job is part of that job (a folded `run: >-` line could start with #).
-  assert.deepEqual(
-    jobsForEdit(
-      once("      # Pricing on the ordinary login (VAY-2057).", "      # Pricing (VAY-2057)."),
-    ),
-    ["frontend", "api_postgres"],
-  );
+  assert.deepEqual(jobsForEdit(FIXTURE, once("# Suites on the", "# Suites for the")), [
+    "frontend",
+    "api_postgres",
+  ]);
 });
 
 test("edits in several job blocks run the union of those jobs", () => {
   assert.deepEqual(
     jobsForEdit(
-      addPmsBatchFile,
-      once("          src/propertySetupDraftCommand.test.ts\n", ""),
-      once(
-        "        run: npm run test:unit-suites\n",
-        "        run: npm run test:unit-suites -- \n",
-      ),
+      FIXTURE,
+      addSuite,
+      once("test:unit-suites", "test:unit-suites -- --bail"),
+      once("tests/ -v", "tests/"),
     ),
-    ["frontend", "api_unit", "api_postgres", "setup_draft_reset_postgres"],
+    ["frontend", "api_unit", "api_postgres", "backend"],
   );
 });
 
 test("a comment between jobs changes nothing but frontend", () => {
-  assert.deepEqual(
-    jobsForEdit(
-      once(
-        "  # Steps without a `matrix.shard` condition",
-        "  # Steps with no `matrix.shard` condition",
-      ),
-    ),
-    ["frontend"],
-  );
+  assert.deepEqual(jobsForEdit(FIXTURE, once("its own cluster", "a fresh cluster")), ["frontend"]);
 });
 
 test("pr-checks.yml edits outside the selectable job blocks run every job", () => {
   const edits = {
-    "trigger branches": once('      - "fix/**"\n', '      - "fix/**"\n      - "hotfix/**"\n'),
-    concurrency: once("  cancel-in-progress: true", "  cancel-in-progress: false"),
-    "a top-level comment": once("# Job selection is path-based", "# Job selection is file-based"),
-    "the changes job": once(
-      "        run: node scripts/ci/pr-checks.mjs select",
-      "        run: node scripts/ci/pr-checks.mjs select --verbose",
-    ),
-    "the required job": once(
-      "    timeout-minutes: 5\n    needs:\n",
-      "    timeout-minutes: 6\n    needs:\n",
-    ),
-    "a new job": once(
-      "  required:\n",
-      "  lint_yaml:\n    runs-on: ubuntu-latest\n    steps: []\n\n  required:\n",
-    ),
+    "trigger branches": once('[main, "fm/**"]', '[main, "fm/**", "fix/**"]'),
+    concurrency: once("cancel-in-progress: true", "cancel-in-progress: false"),
+    "a top-level comment": once("# Job selection is path-based.", "# Job selection is file-based."),
+    "the changes job": once("pr-checks.mjs select", "pr-checks.mjs select --verbose"),
+    "the required job": once("pr-checks.mjs verify", "pr-checks.mjs verify --strict"),
+    "a new job": once("  required:\n", "  lint_yaml:\n    runs-on: ubuntu-latest\n\n  required:\n"),
     "a renamed job key": once("  api_unit:\n", "  api_units:\n"),
-    "a YAML anchor inside one job": once(
-      "        run: npm run test:unit-suites\n",
-      "        run: &unit npm run test:unit-suites\n",
-    ),
+    "a quoted job key": once("  api_unit:\n", '  "api_unit":\n'),
+    "an anchor and its alias": (text) =>
+      once(
+        "npm run lint",
+        "npm run lint\n        env: &shared.env {A: b}",
+      )(once("tests/ -v", "tests/ -v\n        env: *shared.env")(text)),
   };
-  for (const [what, edit] of Object.entries(edits)) assert.equal(jobsForEdit(edit), null, what);
+  for (const [what, edit] of Object.entries(edits)) {
+    assert.equal(jobsForEdit(FIXTURE, edit), null, what);
+  }
+});
+
+test("lines after a quoted or oddly indented job key never count as the job before it", () => {
+  const quoted = once("  api_postgres:\n", '  "api_postgres":\n')(FIXTURE);
+  assert.equal(jobsForEdit(quoted, once("          src/a.integration.test.ts\n", "")), null);
+});
+
+test("any YAML anchor, alias or merge key in either version runs every job", () => {
+  for (const anchored of [
+    "env: &pg.env {A: b}",
+    "env: *pg.env",
+    "x: &1 a",
+    "list: [&a x, *a]",
+    "m: {y: *a}",
+    "<<: *base",
+  ]) {
+    const before = once("npm run lint", `npm run lint\n        ${anchored}`)(FIXTURE);
+    assert.equal(jobsForEdit(before, once("tests/ -v", "tests/")), null, anchored);
+  }
 });
 
 test("an added, deleted or undiffable pr-checks.yml runs every job", () => {
-  const after = addPmsBatchFile(WORKFLOW);
-  const diff = workflowDiff(WORKFLOW, after);
+  const after = addSuite(FIXTURE);
+  const diff = workflowDiff(FIXTURE, after);
   assert.equal(workflowChangeJobs(null, after, diff), null);
-  assert.equal(workflowChangeJobs(WORKFLOW, null, diff), null);
-  assert.equal(workflowChangeJobs(WORKFLOW, after, ""), null);
-  assert.equal(workflowChangeJobs(WORKFLOW, after, undefined), null);
+  assert.equal(workflowChangeJobs(FIXTURE, null, diff), null);
+  assert.equal(workflowChangeJobs(FIXTURE, after, ""), null);
+  assert.equal(workflowChangeJobs(FIXTURE, after, undefined), null);
 });
 
-test("the current pr-checks.yml has no YAML anchors, so job-block selection applies", () => {
-  assert.doesNotMatch(WORKFLOW, /(^|\s)[&*][A-Za-z_][\w-]*(\s|$)|<<\s*:/m);
+// Each job's block in the real file as the YAML parser sees it: key line and last line.
+function parsedJobBlocks(text) {
+  const lineCounter = new LineCounter();
+  const jobs = parseDocument(text, { lineCounter }).get("jobs", true);
+  return jobs.items.map((pair) => ({
+    id: pair.key.value,
+    keyLine: lineCounter.linePos(pair.key.range[0]).line,
+    lastLine: lineCounter.linePos(pair.value.range[1] - 1).line,
+  }));
+}
+
+test("workflowLineJobs agrees with the YAML parser on every line of the real pr-checks.yml", () => {
+  const mapped = workflowLineJobs(WORKFLOW);
+  const lines = WORKFLOW.split("\n");
+  const owner = new Map();
+  for (const { id, keyLine, lastLine } of parsedJobBlocks(WORKFLOW)) {
+    assert.equal(mapped[keyLine], null, `${id} key line`);
+    for (let line = keyLine + 1; line <= lastLine; line++) owner.set(line, id);
+  }
+  for (let line = 1; line <= lines.length; line++) {
+    const text = lines[line - 1];
+    if (/^\s*(#|$)/.test(text)) continue; // blank and comment lines change nothing on their own
+    assert.equal(mapped[line], owner.get(line) ?? null, `line ${line}: ${text}`);
+  }
+});
+
+test("a line added or removed in any job block of the real pr-checks.yml runs just that job", () => {
+  for (const { id, lastLine } of parsedJobBlocks(WORKFLOW)) {
+    if (!SELECTABLE_JOBS.includes(id)) continue;
+    const lines = WORKFLOW.split("\n");
+    const expected = id === "frontend" ? ["frontend"] : ["frontend", id];
+    const added = [...lines.slice(0, lastLine), "        # probe", ...lines.slice(lastLine)];
+    const removed = [...lines.slice(0, lastLine - 1), ...lines.slice(lastLine)];
+    for (const after of [added.join("\n"), removed.join("\n")]) {
+      assert.deepEqual(
+        workflowChangeJobs(WORKFLOW, after, workflowDiff(WORKFLOW, after)),
+        expected,
+        id,
+      );
+    }
+  }
+});
+
+test("the current pr-checks.yml has no YAML anchors or aliases, so job-block selection applies", () => {
+  let found = 0;
+  visit(parseDocument(WORKFLOW), (key, node) => {
+    if (isAlias(node) || node?.anchor) found += 1;
+  });
+  assert.equal(found, 0);
+  assert.doesNotMatch(WORKFLOW, YAML_ANCHOR);
 });
 
 test("a pr-checks.yml change selects its job blocks alongside the other changed files", () => {
@@ -300,11 +406,11 @@ function pullRequestMergeRepo(editWorkflow) {
   };
   git("init", "-q", "-b", "main");
   mkdirSync(join(dir, ".github/workflows"), { recursive: true });
-  writeFileSync(join(dir, WORKFLOW_FILE), WORKFLOW);
+  writeFileSync(join(dir, WORKFLOW_FILE), FIXTURE);
   git("add", "-A");
   git("commit", "-q", "-m", "base");
   git("checkout", "-q", "-b", "pr");
-  writeFileSync(join(dir, WORKFLOW_FILE), editWorkflow(WORKFLOW));
+  writeFileSync(join(dir, WORKFLOW_FILE), editWorkflow(FIXTURE));
   git("commit", "-q", "-am", "pr");
   git("checkout", "-q", "main");
   writeFileSync(join(dir, "README.md"), "the base branch moved on\n");
@@ -332,16 +438,16 @@ function runSelectCli(dir, event) {
 }
 
 test("the select CLI runs only the edited job blocks of a pull request's pr-checks.yml", () => {
-  const dir = pullRequestMergeRepo(addPmsBatchFile);
-  assert.deepEqual(runSelectCli(dir, "pull_request"), ["frontend", "api_postgres"]);
-  assert.deepEqual(
-    runSelectCli(pullRequestMergeRepo(once("  api_unit:\n", "  api_units:\n")), "pull_request"),
-    ALL,
-  );
+  assert.deepEqual(runSelectCli(pullRequestMergeRepo(addSuite), "pull_request"), [
+    "frontend",
+    "api_postgres",
+  ]);
+  const renamed = pullRequestMergeRepo(once("  api_unit:\n", "  api_units:\n"));
+  assert.deepEqual(runSelectCli(renamed, "pull_request"), ALL);
 });
 
 test("the select CLI runs every job for any event other than pull_request", () => {
-  const dir = pullRequestMergeRepo(addPmsBatchFile);
+  const dir = pullRequestMergeRepo(addSuite);
   for (const event of ["merge_group", "push", "workflow_dispatch"]) {
     assert.deepEqual(runSelectCli(dir, event), ALL, event);
   }
@@ -732,6 +838,11 @@ test("pr-checks.yml wires every job through the change detector and the aggregat
 
   const required = workflow.jobs.required;
   assert.equal(required.name, "Required Checks");
+  // The ruleset requires this status by name, so no other job may report it.
+  assert.deepEqual(
+    Object.keys(workflow.jobs).filter((id) => workflow.jobs[id].name === "Required Checks"),
+    ["required"],
+  );
   assert.equal(required.if, "always()");
   assert.deepEqual([...required.needs].sort(), ["changes", ...SELECTABLE_JOBS].sort());
   const verify = required.steps.find((step) => step.run?.includes("pr-checks.mjs verify"));

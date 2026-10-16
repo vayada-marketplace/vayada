@@ -214,7 +214,8 @@ coordinator or Flamur. Step 5 is application code.
 1. **Check:** legacy PMS counts of affiliates by status and of affiliate payouts by
    status (read-only). Continue only if no approved affiliate has a scheduled payout.
    On 2026-10-15: 90 affiliates (32 approved) and no affiliate payout ever, in any status.
-2. **Redirect** ([vayada-platform#538](https://github.com/vayada-marketplace/vayada-platform/pull/538)):
+2. **Redirect** ([vayada-platform#538](https://github.com/vayada-marketplace/vayada-platform/pull/538),
+   applied 2026-10-16):
    - rules 45 and 56 change from forward to a temporary `302` to
      `https://next-marketplace.vayada.com/earnings`, dropping the query so a legacy
      `set-password` token is never forwarded;
@@ -222,22 +223,23 @@ coordinator or Flamur. Step 5 is application code.
      `tf-apply` probes every gateway in `auth-gateways.json` after each apply and fails
      on a redirect, so the next portal's gateway stays reachable until step 6.
 3. **Verify:** `curl -sI` on `/`, `/login` and `/set-password?token=x` for both hosts
-   returns `302` with `location` exactly the earnings URL (no `?`).
+   returns `302` with `location` exactly `https://next-marketplace.vayada.com:443/earnings`
+   (the load balancer adds `:443`; no `?`).
    `next-affiliate.vayada.com/auth/session?surface=affiliate-dashboard` still returns
-   `401`. A fresh `terraform plan` shows no changes. Then, manually in the WorkOS
-   production environment (coordinator, with Flamur's go), remove next-affiliate's only
-   redirect URI, `https://next-affiliate.vayada.com/auth/oauth/google/callback`. The
-   gateway probe only checks that Google start answers `302` to WorkOS; it does not
-   follow it.
+   `401`. A fresh `terraform plan` shows no changes. Verified 2026-10-16.
 4. **Scale the old portal to 0:** re-run the step 1 count, then set
    `desired_count = 0` on `affiliate-dashboard` in `infra/ecs.tf`. A CLI scale-down is
    reverted by the next apply. Its target group is no longer attached, so a
-   replacement task could not register anyway.
+   replacement task could not register anyway. Done 2026-10-16 with
+   [vayada-platform#543](https://github.com/vayada-marketplace/vayada-platform/pull/543):
+   the recount just before showed no affiliate payout ever, and
+   `vayada-affiliate-dashboard-service` is at 0.
 5. **Code:** remove the `affiliate-dashboard` auth surface (today
    `AUTH_AFFILIATE_DASHBOARD_ORIGIN` is required whenever auth is configured), the
    `/affiliate/*` continuity contract and the legacy affiliate JWT setting from
    `apps/api`. Release it before step 6, or `next-api` fails its config check.
-6. **After 30 days, delete** (re-run the step 1 count first):
+6. **After 30 days, delete** ([VAY-2242](https://linear.app/vayadacom/issue/VAY-2242),
+   due 2026-11-16; re-run the step 1 count first):
    - the `next-affiliate-dashboard` entry in `auth-gateways.json` and its expected
      origins, `next-api`'s `AUTH_AFFILIATE_DASHBOARD_*` and the
      `AUTH_LEGACY_AFFILIATE_PMS_JWT_SECRET` mapping (keep the shared JWT parameter
@@ -245,7 +247,11 @@ coordinator or Flamur. Step 5 is application code.
    - both ECS services and task definitions, the two target groups, log groups,
      `ecr_repo_map` entries and the `deploy.yml` service cases;
    - the two ECR repositories, after emptying them (`force_delete = false`);
-   - the `next-affiliate` Route 53 and Cloudflare records.
+   - the `next-affiliate` Route 53 and Cloudflare records;
+   - next-affiliate's only WorkOS production redirect URI,
+     `https://next-affiliate.vayada.com/auth/oauth/google/callback`, as a single delete in
+     the WorkOS dashboard. Do not use the MCP `setRedirectUris`: it replaces the whole
+     list, and its dry run did not recognise the default URI's id.
 
    Keep the `affiliate` DNS records, rule 45 and the certificate.
 
@@ -256,8 +262,7 @@ The redirect is a `302`, not a `301`: browsers cache a `301` indefinitely, the t
 is a temporary `next-*` host, and `affiliate.vayada.com` will later serve `/r/*` share
 links. When Marketplace moves to its final host, re-point rules 45/56.
 
-Step 4 is [vayada-platform#543](https://github.com/vayada-marketplace/vayada-platform/pull/543)
-and covers only the old portal. `vayada-next-affiliate-dashboard-service` stays at 1
+Step 4 covered only the old portal. `vayada-next-affiliate-dashboard-service` stays at 1
 until step 6: the auth-gateway probe reaches `/auth/*` through that app, which proxies
 to `next-api`, so with no task the probe gets a `503` and the apply fails.
 
