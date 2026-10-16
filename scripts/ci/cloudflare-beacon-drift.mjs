@@ -16,7 +16,7 @@
 import { createHash } from "node:crypto";
 import { appendFileSync, readFileSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { BOT, dropFix, pinSource, prepareFix } from "./cloudflare-beacon-fix.mjs";
+import { BOT, dropFix, isOlder, pinSource, prepareFix } from "./cloudflare-beacon-fix.mjs";
 
 export { BOT };
 
@@ -279,6 +279,17 @@ export function githubClient({
       const head = encodeURIComponent(`${owner}:${branch}`);
       return (await request("GET", `/pulls?state=open&head=${head}`))[0] ?? null;
     },
+    async closedPull(branch, sha) {
+      const head = encodeURIComponent(`${owner}:${branch}`);
+      const pulls = await request("GET", `/pulls?state=closed&head=${head}&per_page=10`);
+      return pulls.find((pull) => !pull.merged_at && pull.head?.sha === sha) ?? null;
+    },
+    async checksRan(branch, sha) {
+      const query = `branch=${encodeURIComponent(branch)}&head_sha=${sha}&per_page=1`;
+      return (
+        (await request("GET", `/actions/workflows/pr-checks.yml/runs?${query}`)).total_count > 0
+      );
+    },
     createPull: (fields) => request("POST", "/pulls", fields),
     updatePull: (number, fields) => request("PATCH", `/pulls/${number}`, fields),
   };
@@ -317,6 +328,51 @@ export async function reconcile({ client, report, override }) {
     );
   }
   return `updated #${issue.number}`;
+}
+
+// The pull request half (cloudflare-beacon-fix.mjs), where issues may change. It never throws: a
+// failure becomes the issue's "Prepared fix" line, so the alert still goes out.
+export async function fixStep({ client, inputs, report, source, base, baseSha }) {
+  const { pin, override, record, live, repoUrl } = inputs;
+  if (report.matches) {
+    if (override) return { report, log: "Fix: left alone (test run)." };
+    try {
+      const done = await dropFix({ git: client, base, liveIntegrity: report.liveIntegrity });
+      return { report, log: `Fix: ${done}.` };
+    } catch (error) {
+      return { report, log: `::warning::Removing the prepared fix failed: ${error.message}` };
+    }
+  }
+  // A test run against a correct pin: there is nothing to fix.
+  if (report.liveIntegrity === pin) return { report, log: "Fix: none needed." };
+  let fix;
+  let log;
+  if (isOlder(report.liveVersion, record.version)) {
+    fix = `**Prepared fix:** none. The live version ${report.liveVersion} is older than the reviewed ${record.version}, which usually means Cloudflare's edges are mid-rollout; the next run checks again.`;
+    log = "Fix: none (the live version is older than the reviewed one).";
+  } else {
+    try {
+      const next = reviewRecord(live.bytes);
+      const prepared = await prepareFix({
+        git: client,
+        base,
+        baseSha,
+        changes: {
+          [PIN_FILE]: pinSource(source, { ...next, lastModified: live.lastModified }),
+          [RECORD_FILE]: recordJson(next),
+        },
+        report,
+        repoUrl,
+        override,
+      });
+      fix = prepared.line;
+      log = `Fix: ${prepared.pull ? `#${prepared.pull}` : prepared.branch}${prepared.pushed ? " (pushed)" : " (up to date)"}.`;
+    } catch (error) {
+      fix = `**Prepared fix:** failed (${error.message}). Update the pin by hand (runbook step 3).`;
+      log = `::warning::Preparing the fix failed: ${error.message}`;
+    }
+  }
+  return { report: buildReport({ ...inputs, fix }), log };
 }
 
 // Only main's pin is the real one. Elsewhere only a test run (EXPECTED_INTEGRITY) touches issues,
@@ -372,39 +428,16 @@ async function main() {
       repository: GITHUB_REPOSITORY,
       api: process.env.GITHUB_API_URL,
     });
-    const base = process.env.GITHUB_REF_NAME;
-    if (!report.matches && report.liveIntegrity !== pin) {
-      // The checked-out pin differs from the live file: prepare the pull request that fixes it.
-      let fix;
-      try {
-        const record = reviewRecord(live.bytes);
-        const changes = {
-          [PIN_FILE]: pinSource(source, { ...record, lastModified: live.lastModified }),
-          [RECORD_FILE]: recordJson(record),
-        };
-        const prepared = await prepareFix({
-          git: client,
-          base,
-          baseSha: process.env.GITHUB_SHA,
-          changes,
-          report,
-          repoUrl,
-          override,
-        });
-        console.log(
-          `Fix: ${prepared.pull ? `#${prepared.pull}` : prepared.branch}${prepared.pushed ? " (pushed, PR Checks dispatched)" : " (up to date)"}.`,
-        );
-        fix = prepared.line;
-      } catch (error) {
-        console.error(`::warning::Preparing the fix failed: ${error.message}`);
-        fix = `**Prepared fix:** failed (${error.message}). Update the pin by hand (runbook step 3).`;
-      }
-      report = buildReport({ ...inputs, fix });
-    } else if (report.matches && !override) {
-      console.log(
-        `Fix: ${await dropFix({ git: client, base, liveIntegrity: report.liveIntegrity })}.`,
-      );
-    }
+    const step = await fixStep({
+      client,
+      inputs,
+      report,
+      source,
+      base: process.env.GITHUB_REF_NAME,
+      baseSha: process.env.GITHUB_SHA,
+    });
+    console.log(step.log);
+    report = step.report;
     const outcome = await reconcile({ client, report, override });
     console.log(`Issue: ${outcome}.`);
     if (stepSummary) appendFileSync(stepSummary, `\nIssue: ${outcome}.\n`);

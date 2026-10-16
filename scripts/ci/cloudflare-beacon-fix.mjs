@@ -17,7 +17,18 @@ export const BOT = "github-actions[bot]";
 export const FIX_BRANCH_PREFIX = "automation/cloudflare-beacon-pin-";
 export const fixBranch = (base) => `${FIX_BRANCH_PREFIX}${base.replace(/[^\w.-]+/g, "-")}`;
 
-// Rewrites the pin and the comment block above it, which says what merging confirms.
+// "2026.10.1" < "2026.10.2"; anything without numbers compares as not older.
+export function isOlder(version, than) {
+  const parts = (v) => (String(v).match(/\d+/g) ?? []).map(Number);
+  const [a, b] = [parts(version), parts(than)];
+  if (!a.length || !b.length) return false;
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    if ((a[i] ?? 0) !== (b[i] ?? 0)) return (a[i] ?? 0) < (b[i] ?? 0);
+  }
+  return false;
+}
+
+// Rewrites the pin and the comment block above it.
 export function pinSource(source, { integrity, version, lastModified }) {
   const pattern = /^(?:\/\/[^\n]*\n)+(const integrity = ")sha384-[^"]+(";)$/m;
   if (!pattern.test(source)) throw new Error("no commented `const integrity` line to update");
@@ -26,55 +37,83 @@ export function pinSource(source, { integrity, version, lastModified }) {
     : new Date(lastModified).toISOString().slice(0, 10);
   return source.replace(
     pattern,
-    `// Beacon ${version} (${day}), pinned by Cloudflare Beacon Drift. Merging confirmed the review:\n// XHR and sendBeacon only. Vendor changes fail closed.\n$1${integrity}$2`,
+    `// Beacon ${version} (Cloudflare, ${day}), pinned via Cloudflare Beacon Drift after review:\n// XHR and sendBeacon only. Vendor changes fail closed.\n$1${integrity}$2`,
   );
 }
 
+const report = (body) =>
+  body
+    .split("\n")
+    .filter((line) => !line.startsWith("<!--"))
+    .join("\n");
+
 // The pull request text. It is also the commit message, so a pull request opened by hand from
 // the branch gets the same description.
-export function fixText({ report, branch, repoUrl, override }) {
-  const title = `${override ? "[test] " : ""}Landing: pin Cloudflare beacon ${report.liveVersion} (automated; merging deploys landing)`;
+export function fixText({ report: drift, branch, repoUrl, override }) {
+  const title = `${override ? "[test] " : ""}Landing: pin Cloudflare beacon ${drift.liveVersion} (automated; merging deploys landing)`;
   const runs = `${repoUrl}/actions/workflows/pr-checks.yml?query=${encodeURIComponent(`branch:${branch}`)}`;
   const body = `Prepared by [Cloudflare Beacon Drift](${repoUrl}/actions/workflows/cloudflare-beacon-drift.yml) (VAY-2226). It sets the live beacon's sha384 in \`apps/landing/lib/cloudflareAnalytics.ts\` and regenerates \`scripts/ci/cloudflare-beacon-reviewed.json\`. The alert issue links here.
 
 - **Review before merging** (runbook step 2): the tables below, plus a local diff of the two versions. Close this pull request if the new version uses a transport or endpoint the landing guards do not cover.
 - **Merging deploys the landing site** (Deploy Landing → ECR → App Runner). Then check vayada.com (runbook step 5).
-- **PR Checks** were started on this branch by the workflow, because pull requests and pushes made with GITHUB_TOKEN start none: [runs](${runs}).
+- **PR Checks** were started on this branch by the workflow, because pull requests and pushes made with GITHUB_TOKEN start none: [runs](${runs}). They never run Cloudflare's new file (the consent spec uses a stub), so they are not the review.
 
-${report.body
-  .split("\n")
-  .filter((line) => !line.startsWith("<!--"))
-  .join("\n")}`;
+${report(drift.body)}`;
   return { title, body };
 }
 
-export async function prepareFix({ git, base, baseSha, changes, report, repoUrl, override }) {
+export async function prepareFix({
+  git,
+  base,
+  baseSha,
+  changes,
+  report: drift,
+  repoUrl,
+  override,
+}) {
+  // Branch names may hold shell and markdown characters; this one goes into both.
+  if (!/^[\w./-]+$/.test(base)) throw new Error(`unexpected branch name ${JSON.stringify(base)}`);
   const branch = fixBranch(base);
-  const { title, body } = fixText({ report, branch, repoUrl, override });
-  const exists = Boolean(await git.getRef(branch));
-  let stale = !exists;
+  const { title, body } = fixText({ report: drift, branch, repoUrl, override });
+  const ref = await git.getRef(branch);
+  let stale = !ref;
   for (const [path, content] of Object.entries(changes)) {
     if (!stale) stale = (await git.getFile(path, branch)) !== content;
   }
-  if (stale) {
-    const sha = await git.commit({ baseSha, changes, message: `${title}\n\n${body}` });
-    await git.setRef(branch, sha, exists);
-    await git.dispatch("pr-checks.yml", branch);
-  }
   let pull = await git.openPull(branch);
+  let head = ref?.object?.sha;
+  if (stale) {
+    head = await git.commit({ baseSha, changes, message: `${title}\n\n${body}` });
+    await git.setRef(branch, head, Boolean(ref));
+    // Whoever reviews an open pull request must see that its branch now pins a different file.
+    if (pull) {
+      await git.comment(
+        pull.number,
+        `The live beacon changed again, so this branch now pins **${drift.liveVersion}** (\`${drift.liveIntegrity}\`). Review this report, not the earlier one:\n\n${report(drift.body)}`,
+      );
+    }
+  }
+  if (stale || !(await git.checksRan(branch, head))) await git.dispatch("pr-checks.yml", branch);
+  let rejected = null;
   if (!pull) {
-    try {
-      pull = await git.createPull({ head: branch, base, title, body });
-    } catch (error) {
-      // 403: Actions may not open pull requests in this repository.
-      if (error.status !== 403 && error.status !== 422) throw error;
+    // A pull request someone closed without merging stays closed for this exact commit.
+    rejected = await git.closedPull(branch, head);
+    if (!rejected) {
+      try {
+        pull = await git.createPull({ head: branch, base, title, body });
+      } catch (error) {
+        if (error.status !== 403) throw error; // 403: Actions may not open pull requests here.
+      }
     }
   } else if (pull.user?.login === BOT && (pull.title !== title || pull.body !== body)) {
     await git.updatePull(pull.number, { title, body });
   }
+  const merge = "Review it, then merge it: **merging deploys the landing site**.";
   const line = pull
-    ? `**Prepared fix:** #${pull.number} sets the new pin; PR Checks run on its branch. Review it, then merge it: **merging deploys the landing site**.`
-    : `**Prepared fix:** branch \`${branch}\` sets the new pin; PR Checks run on it. GitHub Actions may not open pull requests here, so [open the pull request](${repoUrl}/compare/${base}...${branch}?expand=1) (or \`gh pr create --base ${base} --head ${branch} --fill\`), review it, then merge it: **merging deploys the landing site**.`;
+    ? `**Prepared fix:** #${pull.number} sets the new pin; PR Checks run on its branch. ${merge}`
+    : rejected
+      ? `**Prepared fix:** #${rejected.number} was closed without merging. The branch \`${branch}\` is kept: reopen #${rejected.number}, or update the pin by hand (runbook step 3).`
+      : `**Prepared fix:** branch \`${branch}\` sets the new pin; PR Checks run on it. GitHub Actions may not open pull requests here, so [open the pull request](${repoUrl}/compare/${base}...${branch}?expand=1) (or \`gh pr create --base ${base} --head ${branch} --fill\`). ${merge}`;
   return { branch, pushed: stale, pull: pull?.number ?? null, line };
 }
 
