@@ -160,6 +160,20 @@ E2E_PMS_BASE_URL=http://localhost:3004 npm run e2e:pms-web
 E2E_VAYADA_ADMIN_BASE_URL=http://localhost:3001 npm run e2e:vayada-admin
 ```
 
+When you start booking-admin yourself (dev or production build), give it the env from its
+`webServer` entry in `playwright.config.ts`. `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=e2e-google-places` lets
+the nearby cards reach the specs' mocked Google SDK. `NEXT_PUBLIC_MARKETPLACE_URL` must equal the
+`E2E_MARKETPLACE_BASE_URL` you pass to Playwright, because `setup.spec.ts` intercepts the Marketplace
+redirect at that origin:
+
+```bash
+NEXT_PUBLIC_AUTHKIT_COMPATIBILITY_TOKEN_ENABLED=true NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=e2e-google-places \
+  NEXT_PUBLIC_PMS_FRONTEND_URL=http://pms.localhost:3004 \
+  NEXT_PUBLIC_MARKETPLACE_URL=http://marketplace.localhost:3000 PORT=3003 npm run dev:booking-admin &
+E2E_BOOKING_ADMIN_BASE_URL=http://127.0.0.1:3003 \
+  E2E_MARKETPLACE_BASE_URL=http://marketplace.localhost:3000 npm run e2e:booking-admin
+```
+
 ## Booking Tenant Smoke
 
 The booking-web pilot verifies tenant host routing with the seeded `hotel-alpenrose` slug. It mocks the browser-side hotel, room, add-on, and tracking API calls so the smoke test can prove the storefront shell and host-derived slug without requiring a full local database bootstrap.
@@ -281,13 +295,12 @@ automated.
 
 ## Shared Hotel Setup Smoke
 
-The focused first-run setup smoke lives in `tests/e2e/pms-web/setup.spec.ts`.
-It enters through PMS at `/setup?entryProduct=pms&returnTo=/dashboard`, mocks an
-empty shared hotel setup status, creates the first property under the resolved
-hotel-group organization, and verifies the flow selects a setup track before
-creating the property. The Hotel Operations track enables PMS and Booking
-Engine together; after track selection, the smoke verifies the adaptive,
-property-scoped setup plan only shows tasks for the selected track.
+The focused setup-entry smoke lives in `tests/e2e/pms-web/setup.spec.ts`. PMS
+no longer hosts setup: the smoke enters at `/setup` and verifies PMS hands off
+to the canonical Marketplace setup with the entry product and a safe return path
+preserved (defaulting to PMS and `/dashboard`). The Marketplace setup flow itself
+is covered by `tests/e2e/marketplace-web/adaptive-*.spec.ts`,
+`setup-activation.spec.ts`, and `hotel-account-prerequisites.spec.ts`.
 
 Run just that coverage from the repo root:
 

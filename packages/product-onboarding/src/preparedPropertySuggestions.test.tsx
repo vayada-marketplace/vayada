@@ -62,8 +62,7 @@ describe("prepared property suggestions", () => {
               timezone: "Europe/Berlin",
             }}
             propertyCreateIdempotencyKey="prepared-property:invite"
-            onContinue={() => undefined}
-            renderTaskForm={() => null}
+            renderAfterHotelDetails={() => null}
           />,
         );
       });

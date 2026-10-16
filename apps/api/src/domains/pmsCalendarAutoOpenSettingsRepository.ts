@@ -274,7 +274,6 @@ async function readSetupError(
              AND NOT EXISTS (SELECT 1 FROM pms.room_type_closures closure
                WHERE closure.property_id=room.property_id AND closure.room_type_id=room.id)
              AND (binding.room_type_id IS NULL
-               OR binding.source_room_facts_revision IS DISTINCT FROM room.room_facts_revision
                OR binding.source_room_units_revision IS DISTINCT FROM room.room_units_revision)
          ) OR EXISTS (
            SELECT 1

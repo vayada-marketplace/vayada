@@ -647,13 +647,14 @@ async function loadCurrentSource(
                    ELSE setting.rolling_months END AS "rollingMonths",
               setting.fixed_end_month AS "fixedEndMonth",
               COALESCE(setting.revision, 0) AS "settingRevision",
-              property.profile_revision AS "propertyProfileRevision",
+              calendar.property_profile_revision AS "propertyProfileRevision",
               calendar.organization_id::text AS "organizationId",
               calendar.calendar_revision AS "operatingCalendarRevision"
        FROM hotel_catalog.properties property
        LEFT JOIN pms.calendar_auto_open_settings setting ON setting.property_id=property.id
        LEFT JOIN LATERAL (
-         SELECT organization_id, calendar_revision FROM pms.operating_calendar_revisions
+         SELECT organization_id, calendar_revision, property_profile_revision
+         FROM pms.operating_calendar_revisions
          WHERE property_id=property.id ORDER BY calendar_revision DESC LIMIT 1
        ) calendar ON TRUE
        WHERE property.id=$1::uuid
@@ -688,11 +689,19 @@ async function loadCurrentSource(
   ) {
     return null;
   }
+  // The calendar's own room-facts pins, like the scheduler: room detail edits don't re-run
+  // auto-open (VAY-2150).
   const rooms = await client.query<RoomRow>(
-    `SELECT id::text AS "roomTypeId", room_facts_revision AS "roomFactsRevision",
-            room_units_revision AS "roomUnitsRevision"
-     FROM pms.room_types WHERE property_id=$1::uuid AND active IS TRUE ORDER BY id FOR SHARE`,
-    [propertyId],
+    `SELECT room.id::text AS "roomTypeId",
+            COALESCE(binding.source_room_facts_revision, room.room_facts_revision)
+              AS "roomFactsRevision",
+            room.room_units_revision AS "roomUnitsRevision"
+     FROM pms.room_types room
+     LEFT JOIN pms.operating_calendar_room_bindings binding
+       ON binding.property_id=room.property_id AND binding.room_type_id=room.id
+      AND binding.calendar_revision=$2
+     WHERE room.property_id=$1::uuid AND room.active IS TRUE ORDER BY room.id FOR SHARE OF room`,
+    [propertyId, root.operatingCalendarRevision],
   );
   const unverifiedLabels = await client.query(
     `SELECT physical_room.id

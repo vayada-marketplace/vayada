@@ -226,6 +226,10 @@ export type ApiConfig = {
   /** Request-mode pay-at-property quotes in public acceptance: the hotel confirms each booking.
    * Off until host accept, decline and expiry handle these bookings. */
   replacementPricingRequestAcceptanceEnabled: boolean;
+  /** Bank-transfer and PayPal quotes in public acceptance: the guest pays the hotel directly and
+   * the hotel confirms receipt. Off until acceptance, payment confirmation, decline and expiry
+   * handle these bookings (VAY-2139). */
+  replacementPricingManualPaymentAcceptanceEnabled: boolean;
   bookingHostBase?: string;
   platformMediaServing?: PlatformMediaServingConfig;
   platformMediaCleanupEnabled: boolean;
@@ -233,6 +237,10 @@ export type ApiConfig = {
   propertySetupDraftRetentionEnabled: boolean;
   propertySetupDraftRetentionIntervalMs: number;
   propertySetupDraftRetentionBatchSize: number;
+  /** Deletes booking-page analytics older than 13 months (VAY-2212); on by default. */
+  bookingWebEventRetentionEnabled: boolean;
+  bookingWebEventRetentionIntervalMs: number;
+  bookingWebEventRetentionBatchSize: number;
   pmsInventoryPublicOfferRetryEnabled: boolean;
   pmsInventoryPublicOfferRetryIntervalMs: number;
   /** Kill switch for the hourly calendar auto-open producer (VAY-2066); on by default. */
@@ -1390,6 +1398,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       env,
       "REPLACEMENT_PRICING_REQUEST_ACCEPTANCE_ENABLED",
     ),
+    replacementPricingManualPaymentAcceptanceEnabled: readBooleanEnv(
+      env,
+      "REPLACEMENT_PRICING_MANUAL_PAYMENT_ACCEPTANCE_ENABLED",
+    ),
     bookingHostBase: readOptionalEnv(env, "BOOKING_HOST_BASE"),
     platformMediaServing,
     platformMediaCleanupEnabled: readBooleanEnv(env, "PLATFORM_MEDIA_CLEANUP_ENABLED", true),
@@ -1412,6 +1424,21 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       env,
       "PROPERTY_SETUP_DRAFT_RETENTION_BATCH_SIZE",
       100,
+    ),
+    bookingWebEventRetentionEnabled: readBooleanEnv(
+      env,
+      "BOOKING_WEB_EVENT_RETENTION_ENABLED",
+      true,
+    ),
+    bookingWebEventRetentionIntervalMs: readTimerIntervalEnv(
+      env,
+      "BOOKING_WEB_EVENT_RETENTION_INTERVAL_MS",
+      24 * 60 * 60 * 1000,
+    ),
+    bookingWebEventRetentionBatchSize: readPositiveIntegerEnv(
+      env,
+      "BOOKING_WEB_EVENT_RETENTION_BATCH_SIZE",
+      1_000,
     ),
     pmsInventoryPublicOfferRetryEnabled: readBooleanEnv(
       env,

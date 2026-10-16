@@ -7,8 +7,8 @@ import { createReplacementPricingClient } from "@/services/api/replacementPricin
 import type { SetupRoom } from "./FirstPricingSetup";
 import type { NewRoomPrices } from "./newRoomPrices";
 import { PricingEditor } from "./PricingEditor";
-import { errorText } from "./pricingAmounts";
 import * as ui from "./pricingStyles";
+import { PricingRoomsError } from "./PricingRoomsError";
 import { usePricingRooms } from "./usePricingRooms";
 
 /** The New room page's Prices tab (VAY-2147): prices for the room being typed, under a temporary id; the page's
@@ -31,7 +31,7 @@ export function NewRoomPricesTab({
   /** A leave confirmation is waiting in this tab: the page shows it. */
   onAttention: () => void;
 }) {
-  const { rooms, error } = usePricingRooms();
+  const { rooms, error, retry } = usePricingRooms();
   const { t } = useTranslation();
   const propertyId = rooms?.propertyId;
   const client = useMemo(
@@ -43,9 +43,7 @@ export function NewRoomPricesTab({
     return (
       <section className="space-y-4">
         {error ? (
-          <p role="alert" className={ui.errorBanner}>
-            {errorText(error, t, "pricing.page.loadFailed")}
-          </p>
+          <PricingRoomsError error={error} onRetry={retry} />
         ) : (
           <p role="status" className="text-[12px] text-gray-500">
             {t("pricing.page.loading")}

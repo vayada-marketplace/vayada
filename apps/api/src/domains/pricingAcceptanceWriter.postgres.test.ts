@@ -5,6 +5,7 @@ import { replacementStayKey } from "@vayada/domain-booking";
 import { parsePmsInventoryReservationBundle } from "@vayada/domain-pms";
 import { pricingDraftFixture } from "./pricingBookingDraft.fixtures.js";
 import { acceptanceFixture } from "./pricingAcceptanceHistory.fixtures.js";
+import { readPricingCheckInPlace } from "./pricingManualPaymentLead.js";
 import { writePricingAcceptance } from "./pricingAcceptanceWriter.js";
 import {
   completePricingCardPayment,
@@ -24,12 +25,20 @@ import { finishCurrentQuoteAcceptanceTime } from "./currentQuoteAcceptanceTime.j
 import { pricingRoomRevenueProjection } from "./pricingRoomRevenueProjection.js";
 import { parseBookingQuoteAcceptanceInput } from "./bookingQuoteAcceptanceInput.js";
 import { createTargetPmsOperationsCommandRepository } from "./pmsOperationsCommandRepository.js";
+import { createTargetPmsOperationsReadRepository } from "./pmsOperationsReadModel.js";
 import { createBookingHostActions } from "./bookingHostActions.js";
-import { createTargetBookingWebCheckoutAdapter } from "../routes/bookingWebPublic.js";
+import {
+  createTargetBookingWebCheckoutAdapter,
+  issueTargetBookingConfirmationToken,
+} from "../routes/bookingWebPublic.js";
+import { createBankTransferBookingOperations } from "./financeBankTransferBooking.js";
 import { externalBookingChanges } from "../integrations/externalBookingChanges.js";
 import { targetBookingHostActionGuards } from "./bookingHostActionGuards.js";
 import { createFinanceHostBookingPayments } from "./financeHostBookingPayments.js";
-import type { PmsOperationsReadRepository } from "../routes/pmsOperations.js";
+import type {
+  PmsBookingLifecycleCommand,
+  PmsOperationsReadRepository,
+} from "../routes/pmsOperations.js";
 import {
   createPgBookingLifecycleStore,
   runBookingLifecycleSchedulerJobs,
@@ -1972,9 +1981,649 @@ async function withdrawAsGuest(
   }
 }
 
+describe.skipIf(!url)("pricing acceptance writer bank transfer and PayPal (PostgreSQL)", () => {
+  beforeEach(() => vi.resetAllMocks());
+  const manualQuote = (method: string, acceptanceMode: "instant" | "request") => {
+    return (quote: Fixture["f"]["current"]["quote"]) => {
+      Object.assign(quote, { paymentMethod: method, acceptanceMode });
+      Object.assign(quote.evidence, { dueNowMinor: quote.evidence.totalMinor, dueLaterMinor: "0" });
+      Object.assign(quote.evidence.terms[0], {
+        payment: { kind: "full", acceptedMethods: [method] },
+      });
+    };
+  };
+  const bankOperations = () =>
+    createBankTransferBookingOperations(url!, {
+      async encrypt() {
+        throw new Error("not used");
+      },
+      decrypt: async () => ({
+        accountHolder: "Writer Hotel",
+        accountType: "iban" as const,
+        accountNumber: "DE89370400440532013000",
+        bankName: "Writer Bank",
+        bicSwift: "",
+        instructions: "",
+      }),
+    });
+  async function finance(fixture: Fixture, method: string, depositPolicy: object = {}) {
+    await fixture.observer.query(
+      `INSERT INTO hotel_catalog.property_contact_channels
+        (property_id,channel_type,value,source_system,purpose)
+       VALUES($1,'email','ops@writer.example.test','platform','operations')`,
+      [fixture.propertyId],
+    );
+    await fixture.observer.query(
+      `INSERT INTO finance.payment_settings(property_id,payments_enabled,accepted_methods,default_currency,deposit_policy)
+       VALUES($1,true,ARRAY[$2],$3,$4)`,
+      [fixture.propertyId, method, fixture.f.current.quote.stay.currency, depositPolicy],
+    );
+    if (method === "bank_transfer")
+      await fixture.observer.query(
+        `INSERT INTO finance.bank_transfer_destinations(property_id,revision,ciphertext,key_arn,account_last4)
+         VALUES($1,1,$2,'key','3000')`,
+        [fixture.propertyId, Buffer.alloc(40)],
+      );
+  }
+  const bookingRow = async (fixture: Fixture, bookingId: string) =>
+    (
+      await fixture.observer.query(
+        `SELECT b.lifecycle_status,b.payment_status,b.expected_payment_method,
+          b.booking_metadata->>'pendingExpiresAt' AS deadline,
+          b.booking_metadata ? 'hostResponseDeadlineAt' AS host_deadline,
+          b.booking_metadata->'paymentInstructions' AS instructions,
+          e.public_message AS message,
+          EXISTS(SELECT 1 FROM finance.bank_transfer_bookings t WHERE t.guest_booking_id=b.id) AS bank_bound
+         FROM booking.guest_bookings b JOIN booking.booking_status_events e ON e.guest_booking_id=b.id
+         WHERE b.id=$1`,
+        [bookingId],
+      )
+    ).rows[0];
+
+  it("holds the rooms for a bank transfer until a 48-hour deadline and binds the bank details", async () => {
+    const fixture = await setupFixture(manualQuote("bank_transfer", "request"), undefined, true);
+    const bank = bankOperations();
+    try {
+      mockOwners(fixture);
+      vi.mocked(finishCurrentQuoteAcceptanceTime).mockImplementation(async () =>
+        new Date().toISOString(),
+      );
+      await finance(fixture, "bank_transfer");
+      const accept = (manual?: Parameters<typeof writePricingAcceptance>[5]) =>
+        writePricingAcceptance(fixture.pool, fixture.input, undefined, undefined, false, manual);
+      // Off, or on without the bank-details binding: unavailable, nothing written.
+      for (const manual of [undefined, {}])
+        await expect(accept(manual)).rejects.toMatchObject({ code: "manual_unavailable" });
+      await expect(snapshot(fixture.observer, fixture)).resolves.toMatchObject({
+        bookings: 0,
+        available: 3,
+      });
+
+      // Request mode needs no request switch: the hotel's step is confirming the payment.
+      const pending = await accept({ bankTransfers: bank });
+      if (pending.kind !== "payment_pending" || !("acceptedAt" in pending))
+        throw new Error(`unexpected ${pending.kind}`);
+      const quote = fixture.f.current.quote;
+      expect(pending).toMatchObject({
+        propertyId: fixture.propertyId,
+        payment: {
+          method: "bank_transfer",
+          amountMinor: quote.evidence.totalMinor,
+          currency: quote.stay.currency,
+        },
+      });
+      const window = Date.parse(pending.payment.deadlineAt) - Date.parse(pending.acceptedAt);
+      expect(window).toBeGreaterThan(48 * 3600_000 - 60_000);
+      expect(window).toBeLessThanOrEqual(48 * 3600_000);
+      expect(await bookingRow(fixture, pending.bookingId)).toEqual({
+        lifecycle_status: "pending_payment",
+        payment_status: "unpaid",
+        expected_payment_method: "bank_transfer",
+        deadline: pending.payment.deadlineAt,
+        host_deadline: false,
+        instructions: null,
+        message: "We are waiting for your bank transfer.",
+        bank_bound: true,
+      });
+      // Rooms held; no revenue and no PMS job until the hotel confirms the payment.
+      await expect(snapshot(fixture.observer, fixture)).resolves.toMatchObject({
+        bookings: 1,
+        acceptances: 1,
+        revenue: 0,
+        available: 2,
+        assigned: 1,
+      });
+      // The guest gets the instructions (bank details added when sent), the hotel is told.
+      const jobs = (
+        await fixture.observer.query(
+          `SELECT job_type,payload->>'recipientRole' AS role,
+            (payload->>'requiresBankTransferInstructions')::boolean AS bank
+           FROM platform.jobs WHERE property_id=$1 ORDER BY job_type`,
+          [fixture.propertyId],
+        )
+      ).rows;
+      expect(jobs).toEqual([
+        { job_type: "email.booking-host-payment-pending", role: "host", bank: false },
+        { job_type: "email.booking-reserved-pending-payment", role: "guest", bank: true },
+      ]);
+
+      // A replay answers with the same pending payment.
+      await expect(accept({ bankTransfers: bank })).resolves.toEqual({
+        kind: "payment_pending",
+        bookingId: pending.bookingId,
+        bookingReference: pending.bookingReference,
+        propertyId: fixture.propertyId,
+        replayed: true,
+        payment: pending.payment,
+      });
+      // The confirmation token opens the bank details for this booking.
+      const token = await issueTargetBookingConfirmationToken(
+        fixture.observer,
+        { guestBookingId: pending.bookingId, propertyId: fixture.propertyId },
+        new Date(),
+      );
+      await expect(
+        bank.confirmation({
+          propertyId: fixture.propertyId,
+          bookingId: pending.bookingId,
+          tokenHash: createHash("sha256").update(token.token).digest("hex"),
+        }),
+      ).resolves.toContain("IBAN: DE89370400440532013000");
+      // Past the deadline but not yet swept: a retry is a conflict, not a pending payment.
+      await fixture.observer.query(
+        `UPDATE booking.guest_bookings SET booking_metadata=jsonb_set(booking_metadata,
+          '{pendingExpiresAt}',to_jsonb((clock_timestamp()-interval '1 minute')::text)) WHERE id=$1`,
+        [pending.bookingId],
+      );
+      await expect(accept({ bankTransfers: bank })).rejects.toMatchObject({ code: "conflict" });
+    } finally {
+      await bank.close();
+      await fixture.close();
+    }
+  });
+
+  it("holds the rooms for PayPal within the hotel's window and keeps the PayPal email for the guest", async () => {
+    const fixture = await setupFixture(manualQuote("paypal", "instant"), undefined, true);
+    try {
+      mockOwners(fixture);
+      vi.mocked(finishCurrentQuoteAcceptanceTime).mockImplementation(async () =>
+        new Date().toISOString(),
+      );
+      await finance(fixture, "paypal", { paypalEmail: "not an email" });
+      const accept = () =>
+        writePricingAcceptance(fixture.pool, fixture.input, undefined, undefined, false, {});
+      // The hotel's PayPal email went bad after the quote: a conflict, nothing written.
+      await expect(accept()).rejects.toMatchObject({ code: "conflict" });
+      await expect(snapshot(fixture.observer, fixture)).resolves.toMatchObject({ bookings: 0 });
+      await fixture.observer.query(
+        `UPDATE finance.payment_settings SET deposit_policy=
+          '{"paypalEmail":" pay@writer.example.test ","paypalPaymentWindowHours":6}' WHERE property_id=$1`,
+        [fixture.propertyId],
+      );
+      const pending = await accept();
+      if (pending.kind !== "payment_pending" || !("acceptedAt" in pending))
+        throw new Error(`unexpected ${pending.kind}`);
+      expect(pending.payment.method).toBe("paypal");
+      const window = Date.parse(pending.payment.deadlineAt) - Date.parse(pending.acceptedAt);
+      expect(window).toBeGreaterThan(6 * 3600_000 - 60_000);
+      expect(window).toBeLessThanOrEqual(6 * 3600_000);
+      expect(await bookingRow(fixture, pending.bookingId)).toEqual({
+        lifecycle_status: "pending_payment",
+        payment_status: "unpaid",
+        expected_payment_method: "unknown",
+        deadline: pending.payment.deadlineAt,
+        host_deadline: false,
+        instructions: { paypalEmail: "pay@writer.example.test", paypalPaymentWindowHours: 6 },
+        message: "We are waiting for your PayPal payment.",
+        bank_bound: false,
+      });
+      await expect(snapshot(fixture.observer, fixture)).resolves.toMatchObject({
+        revenue: 0,
+        available: 2,
+      });
+    } finally {
+      await fixture.close();
+    }
+  });
+  it("refuses bank transfer when check-in is closer than its deadline, and takes PayPal with a short window (VAY-2145)", async () => {
+    // Check-in is tomorrow at 00:00 in Rome (no check-in time): inside the 48-hour bank deadline.
+    const bankFixture = await setupFixture(manualQuote("bank_transfer", "instant"), undefined, 1);
+    try {
+      mockOwners(bankFixture);
+      vi.mocked(finishCurrentQuoteAcceptanceTime).mockImplementation(async () =>
+        new Date().toISOString(),
+      );
+      await finance(bankFixture, "bank_transfer");
+      await expect(
+        writePricingAcceptance(bankFixture.pool, bankFixture.input, undefined, undefined, false, {
+          bankTransfers: bankOperations(),
+        }),
+      ).rejects.toMatchObject({ code: "manual_unavailable" });
+      await expect(snapshot(bankFixture.observer, bankFixture)).resolves.toMatchObject({
+        bookings: 0,
+      });
+    } finally {
+      await bankFixture.close();
+    }
+    // Two days out, a six-hour PayPal window ends well before check-in.
+    const paypalFixture = await setupFixture(manualQuote("paypal", "instant"), undefined, 2);
+    try {
+      mockOwners(paypalFixture);
+      vi.mocked(finishCurrentQuoteAcceptanceTime).mockImplementation(async () =>
+        new Date().toISOString(),
+      );
+      await finance(paypalFixture, "paypal", {
+        paypalEmail: "pay@writer.example.test",
+        paypalPaymentWindowHours: 6,
+      });
+      const pending = await writePricingAcceptance(
+        paypalFixture.pool,
+        paypalFixture.input,
+        undefined,
+        undefined,
+        false,
+        {},
+      );
+      expect(pending.kind).toBe("payment_pending");
+    } finally {
+      await paypalFixture.close();
+    }
+  });
+  it("reads the check-in time guests see: the guest rules, then the policy summary (VAY-2145)", async () => {
+    const fixture = await setupFixture(manualQuote("paypal", "instant"), undefined, true);
+    const read = () => readPricingCheckInPlace(fixture.observer, fixture.propertyId);
+    try {
+      await fixture.observer.query("BEGIN");
+      await expect(read()).resolves.toMatchObject({
+        place: { timeZone: "Europe/Rome", checkInTime: null },
+      });
+      await fixture.observer.query(
+        "INSERT INTO hotel_catalog.property_policy_summaries(property_id,check_in_time) VALUES($1,'18:00')",
+        [fixture.propertyId],
+      );
+      await expect(read()).resolves.toMatchObject({ place: { checkInTime: "18:00" } });
+      const [actor, revision] = [randomUUID(), randomUUID()];
+      await fixture.observer.query(
+        "INSERT INTO identity.users(id,email,status) VALUES($1,$2,'active')",
+        [actor, `guest-rules-${actor}@example.test`],
+      );
+      await fixture.observer.query(
+        `INSERT INTO booking.guest_choice_revisions
+           (revision,property_id,organization_id,actor_user_id,choices,request_id,request_hash)
+         VALUES($1,$2,$3,$4,$5,$6,$7)`,
+        [
+          revision,
+          fixture.propertyId,
+          fixture.organizationId,
+          actor,
+          { checkInTime: "15:30" },
+          `guest-rules-${revision}`,
+          "a".repeat(64),
+        ],
+      );
+      await fixture.observer.query(
+        "INSERT INTO booking.guest_choice_heads(property_id,revision) VALUES($1,$2)",
+        [fixture.propertyId, revision],
+      );
+      // The guest rules shown on /book win over an older summary.
+      await expect(read()).resolves.toMatchObject({ place: { checkInTime: "15:30" } });
+    } finally {
+      await fixture.observer.query("ROLLBACK");
+      await fixture.close();
+    }
+  });
+  it("expires an unpaid bank transfer at its deadline, releases the rooms and tells both sides", async () => {
+    const fixture = await setupFixture(manualQuote("bank_transfer", "instant"), undefined, true);
+    const bank = bankOperations();
+    const sweepPool = new pg.Pool({ connectionString: url, max: 2 });
+    const released: unknown[] = [];
+    const store = createPgBookingLifecycleStore({
+      connectionString: url!,
+      pool: sweepPool,
+      inventoryReservationPort: {
+        reserve: async () => null,
+        async release({ reservation }) {
+          released.push(reservation);
+        },
+      },
+    });
+    try {
+      mockOwners(fixture);
+      vi.mocked(finishCurrentQuoteAcceptanceTime).mockImplementation(async () =>
+        new Date().toISOString(),
+      );
+      await finance(fixture, "bank_transfer");
+      // The sweep dates revenue corrections in the hotel's timezone (Europe/Rome, from the fixture).
+      const pending = await writePricingAcceptance(
+        fixture.pool,
+        fixture.input,
+        undefined,
+        undefined,
+        false,
+        { bankTransfers: bank },
+      );
+      if (pending.kind !== "payment_pending" || !("acceptedAt" in pending))
+        throw new Error(`unexpected ${pending.kind}`);
+      const deadline = Date.parse(pending.payment.deadlineAt);
+      const sweep = (now: number) =>
+        runBookingLifecycleSchedulerJobs(store, {
+          now: new Date(now),
+          run: ["pendingBookingExpiry"],
+        });
+      await sweep(deadline - 60_000);
+      expect((await bookingRow(fixture, pending.bookingId)).lifecycle_status).toBe(
+        "pending_payment",
+      );
+      expect(released).toEqual([]);
+      expect((await sweep(deadline + 1_000)).failed).toBe(0);
+      expect(
+        (
+          await fixture.observer.query(
+            "SELECT lifecycle_status FROM booking.guest_bookings WHERE id=$1",
+            [pending.bookingId],
+          )
+        ).rows[0].lifecycle_status,
+      ).toBe("expired");
+      expect(released).toHaveLength(1);
+      const emails = (
+        await fixture.observer.query(
+          "SELECT job_type FROM platform.jobs WHERE property_id=$1 AND job_type LIKE '%expired' ORDER BY 1",
+          [fixture.propertyId],
+        )
+      ).rows.map((row) => row.job_type);
+      expect(emails).toEqual(["email.booking-expired", "email.booking-host-payment-expired"]);
+      // A retry of the guest's booking now is a conflict, not a confirmation.
+      await expect(
+        writePricingAcceptance(fixture.pool, fixture.input, undefined, undefined, false, {
+          bankTransfers: bank,
+        }),
+      ).rejects.toMatchObject({ code: "conflict" });
+    } finally {
+      await store.close();
+      await sweepPool.end().catch(() => undefined);
+      await bank.close();
+      await fixture.close();
+    }
+  });
+
+  it("confirms a PayPal booking only when the hotel marks it paid before its deadline", async () => {
+    const fixture = await setupFixture(manualQuote("paypal", "request"), undefined, true);
+    const pmsPool = new pg.Pool({ connectionString: url, max: 2 });
+    const pms = createTargetPmsOperationsCommandRepository({
+      connectionString: url!,
+      pool: pmsPool,
+      readRepository: {
+        findReservationByGuestBookingId: async () => ({}),
+      } as unknown as PmsOperationsReadRepository,
+    });
+    const command = (bookingId: string): PmsBookingLifecycleCommand => ({
+      propertyId: fixture.propertyId,
+      guestBookingId: bookingId,
+      commandId: randomUUID(),
+      idempotencyKey: randomUUID(),
+      audit: {
+        actor: { kind: "system", service: "apps/api" },
+        requestId: randomUUID(),
+        reason: "Payment received",
+        requestedAt: new Date().toISOString(),
+      },
+    });
+    const deadline = (bookingId: string, interval: string) =>
+      fixture.observer.query(
+        `UPDATE booking.guest_bookings SET booking_metadata=jsonb_set(booking_metadata,
+          '{pendingExpiresAt}',to_jsonb((clock_timestamp()+$2::interval)::text)) WHERE id=$1`,
+        [bookingId, interval],
+      );
+    try {
+      mockOwners(fixture);
+      vi.mocked(finishCurrentQuoteAcceptanceTime).mockImplementation(async () =>
+        new Date().toISOString(),
+      );
+      await finance(fixture, "paypal", { paypalEmail: "pay@writer.example.test" });
+      const pending = await writePricingAcceptance(
+        fixture.pool,
+        fixture.input,
+        undefined,
+        undefined,
+        false,
+        {},
+      );
+      const refused = { ok: false, code: "invalid_status_transition" };
+      const reservations = createTargetPmsOperationsReadRepository({
+        connectionString: url!,
+        pool: pmsPool,
+      });
+      const flag = async () =>
+        (await reservations.findReservationByGuestBookingId(fixture.propertyId, pending.bookingId))
+          ?.awaitingHotelPaymentConfirmation;
+      expect(await flag()).toBe(true);
+      // The request-mode accept step does not apply: the hotel confirms the payment instead.
+      await expect(pms.acceptBooking(command(pending.bookingId))).resolves.toMatchObject(refused);
+      await deadline(pending.bookingId, "-1 minute");
+      await expect(pms.markBookingPaid(command(pending.bookingId))).resolves.toMatchObject(refused);
+      await deadline(pending.bookingId, "1 hour");
+      await expect(pms.markBookingPaid(command(pending.bookingId))).resolves.toMatchObject({
+        ok: true,
+      });
+      expect(await flag()).toBeUndefined();
+      // Keep the shared adoption worker from claiming this fixture's job before cleanup.
+      await fixture.observer.query(
+        "UPDATE platform.jobs SET run_after=clock_timestamp()+interval '1 day' WHERE queue_name='pms-reservation-handoff' AND property_id=$1",
+        [fixture.propertyId],
+      );
+      const state = (
+        await fixture.observer.query(
+          `SELECT b.lifecycle_status,b.payment_status,b.balance_amount::text AS balance,
+            s.lifecycle_status AS summary,s.payment_status AS summary_payment,
+            ARRAY(SELECT event_type FROM booking.booking_status_events
+              WHERE guest_booking_id=b.id ORDER BY event_type) AS events,
+            (SELECT jsonb_build_object('kind',payment_kind,'method',payment_method,'status',status,
+              'amount',amount::text) FROM finance.payments WHERE guest_booking_id=b.id) AS payment
+           FROM booking.guest_bookings b JOIN booking.direct_booking_summary_read_model s
+             ON s.guest_booking_id=b.id WHERE b.id=$1`,
+          [pending.bookingId],
+        )
+      ).rows[0];
+      expect(state).toEqual({
+        lifecycle_status: "confirmed",
+        payment_status: "paid",
+        balance: "0.00",
+        summary: "confirmed",
+        summary_payment: "paid",
+        events: [
+          "guest_booking.accepted",
+          "guest_booking.created",
+          "guest_booking.payment_received",
+        ],
+        payment: {
+          kind: "manual",
+          method: "paypal",
+          status: "paid",
+          amount: expect.stringMatching(/^\d+\.\d{2}$/),
+        },
+      });
+      const nights = fixture.f.current.quote.rooms.reduce((n, r) => n + r.nights.length, 0);
+      await expect(snapshot(fixture.observer, fixture)).resolves.toMatchObject({
+        revenue: nights,
+        available: 2,
+        assigned: 1,
+      });
+      const jobs = (
+        await fixture.observer.query(
+          `SELECT job_type,payload->>'recipientRole' AS role FROM platform.jobs WHERE property_id=$1`,
+          [fixture.propertyId],
+        )
+      ).rows;
+      expect(jobs).toContainEqual({ job_type: "email.booking-final-confirmation", role: "guest" });
+      expect(jobs).toContainEqual({ job_type: "email.booking-host-new-booking", role: "host" });
+      expect(jobs).toContainEqual({
+        job_type: "pms.reservation.accepted-pricing.create",
+        role: null,
+      });
+      await expect(pms.markBookingPaid(command(pending.bookingId))).resolves.toMatchObject(refused);
+      await expect(snapshot(fixture.observer, fixture)).resolves.toMatchObject({
+        revenue: nights,
+        jobs: jobs.length,
+      });
+    } finally {
+      await pmsPool.end();
+      await fixture.close();
+    }
+  });
+
+  it("confirms a bank transfer when the hotel marks it paid, with Finance's commission", async () => {
+    const fixture = await setupFixture(manualQuote("bank_transfer", "instant"), undefined, true);
+    const bank = bankOperations();
+    const pmsPool = new pg.Pool({ connectionString: url, max: 2 });
+    const pms = createTargetPmsOperationsCommandRepository({
+      connectionString: url!,
+      pool: pmsPool,
+      readRepository: {
+        findReservationByGuestBookingId: async () => ({}),
+      } as unknown as PmsOperationsReadRepository,
+    });
+    try {
+      // A commission plan (the fixture's plan is fixed, which takes no commission).
+      Object.assign(fixture.f.finance, { billingPlanSnapshot: "commission" });
+      mockOwners(fixture);
+      vi.mocked(finishCurrentQuoteAcceptanceTime).mockImplementation(async () =>
+        new Date().toISOString(),
+      );
+      await finance(fixture, "bank_transfer");
+      const pending = await writePricingAcceptance(
+        fixture.pool,
+        fixture.input,
+        undefined,
+        undefined,
+        false,
+        { bankTransfers: bank },
+      );
+      const token = await issueTargetBookingConfirmationToken(
+        fixture.observer,
+        { guestBookingId: pending.bookingId, propertyId: fixture.propertyId },
+        new Date(),
+      );
+      const reveal = () =>
+        bank.confirmation({
+          propertyId: fixture.propertyId,
+          bookingId: pending.bookingId,
+          tokenHash: createHash("sha256").update(token.token).digest("hex"),
+        });
+      await expect(reveal()).resolves.toContain("IBAN");
+      const command: PmsBookingLifecycleCommand = {
+        propertyId: fixture.propertyId,
+        guestBookingId: pending.bookingId,
+        commandId: randomUUID(),
+        idempotencyKey: randomUUID(),
+        audit: {
+          actor: { kind: "system", service: "apps/api" },
+          requestId: randomUUID(),
+          reason: "Bank transfer received",
+          requestedAt: new Date().toISOString(),
+        },
+      };
+      await expect(pms.markBookingPaid(command)).resolves.toMatchObject({ ok: true });
+      await fixture.observer.query(
+        "UPDATE platform.jobs SET run_after=clock_timestamp()+interval '1 day' WHERE queue_name='pms-reservation-handoff' AND property_id=$1",
+        [fixture.propertyId],
+      );
+      const state = (
+        await fixture.observer.query(
+          `SELECT b.lifecycle_status,b.payment_status,b.expected_payment_method,
+            p.payment_kind,p.payment_method,p.status,p.amount::text,p.fee_amount::text,p.net_amount::text
+           FROM booking.guest_bookings b JOIN finance.payments p ON p.guest_booking_id=b.id
+           WHERE b.id=$1`,
+          [pending.bookingId],
+        )
+      ).rows;
+      expect(state).toHaveLength(1);
+      expect(state[0]).toMatchObject({
+        lifecycle_status: "confirmed",
+        payment_status: "paid",
+        expected_payment_method: "bank_transfer",
+        payment_kind: "manual",
+        payment_method: "bank_transfer",
+        status: "paid",
+      });
+      // The booking engine's 5% commission from the booking's terms; the rest goes to the hotel.
+      const cents = (v: string) => Math.round(Number(v) * 100);
+      expect(cents(state[0].fee_amount)).toBe(Math.round(cents(state[0].amount) * 0.05));
+      expect(cents(state[0].fee_amount)).toBeGreaterThan(0);
+      expect(cents(state[0].net_amount)).toBe(cents(state[0].amount) - cents(state[0].fee_amount));
+      // Paid: the bank details are no longer shown.
+      await expect(reveal()).resolves.toBeNull();
+    } finally {
+      await pmsPool.end();
+      await bank.close();
+      await fixture.close();
+    }
+  });
+
+  it("lets the hotel decline an unpaid PayPal booking: rooms released, guest told", async () => {
+    const fixture = await setupFixture(manualQuote("paypal", "instant"), undefined, true);
+    const hostPool = new pg.Pool({ connectionString: url, max: 2 });
+    const released: unknown[] = [];
+    const actions = createBookingHostActions({
+      pool: hostPool,
+      guards: targetBookingHostActionGuards,
+      inventory: {
+        reserve: async () => null,
+        async release({ reservation }) {
+          released.push(reservation);
+        },
+      },
+    });
+    const actorUserId = randomUUID();
+    try {
+      mockOwners(fixture);
+      vi.mocked(finishCurrentQuoteAcceptanceTime).mockImplementation(async () =>
+        new Date().toISOString(),
+      );
+      await finance(fixture, "paypal", { paypalEmail: "pay@writer.example.test" });
+      const pending = await writePricingAcceptance(
+        fixture.pool,
+        fixture.input,
+        undefined,
+        undefined,
+        false,
+        {},
+      );
+      await fixture.observer.query(
+        "INSERT INTO identity.users (id,email,status) VALUES ($1,$2,'active')",
+        [actorUserId, `${actorUserId}@example.test`],
+      );
+      const scope = { propertyId: fixture.propertyId, bookingId: pending.bookingId, actorUserId };
+      const preview = await actions.preview(scope, { action: "reject", reason: "No payment" });
+      await expect(actions.apply(scope, preview.previewId, "decline")).resolves.toEqual({
+        bookingId: pending.bookingId,
+        lifecycleStatus: "declined",
+      });
+      expect(released).toHaveLength(1);
+      const jobs = (
+        await fixture.observer.query("SELECT job_type FROM platform.jobs WHERE property_id=$1", [
+          fixture.propertyId,
+        ])
+      ).rows.map((row) => row.job_type);
+      expect(jobs).toContain("email.booking-rejected");
+      expect(jobs.filter((job) => job.startsWith("pms."))).toEqual([]);
+      // A retry of the guest's booking is now a conflict, not a confirmation.
+      await expect(
+        writePricingAcceptance(fixture.pool, fixture.input, undefined, undefined, false, {}),
+      ).rejects.toMatchObject({ code: "conflict" });
+    } finally {
+      await actions.close();
+      await hostPool.end().catch(() => undefined);
+      await fixture.close();
+    }
+  });
+});
+
 async function setupFixture(
   changeQuote?: (quote: Fixture["f"]["current"]["quote"]) => void,
   currency?: string,
+  /** Move the stay to 10 days from today (or that many days): bank-transfer and PayPal need the
+   * hotel's time zone and a check-in further away than their deadline (VAY-2145). */
+  futureStay: boolean | number = false,
 ) {
   if (!url || !/(^|[_-])test([_-]|$)/i.test(new URL(url).pathname.slice(1)))
     throw new Error("test database required");
@@ -1997,6 +2646,17 @@ async function setupFixture(
   };
   const f = pricingDraftFixture((quote) => {
     if (currency) inCurrency(quote, currency);
+    if (futureStay) {
+      const day = (offset: number) =>
+        new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + offset))
+          .toISOString()
+          .slice(0, 10);
+      const nights = quote.rooms[0].nights.length;
+      const offset = futureStay === true ? 10 : futureStay;
+      Object.assign(quote.stay, { checkIn: day(offset), checkOut: day(offset + nights) });
+      for (const room of quote.rooms)
+        room.nights.forEach((night, index) => Object.assign(night, { date: day(offset + index) }));
+    }
     Object.assign(quote, { quoteId: randomUUID() });
     Object.assign(quote.stay, { propertyId });
     Object.assign(quote.stay.rooms[0], { roomTypeId });
@@ -2050,6 +2710,11 @@ async function setupFixture(
     "INSERT INTO hotel_catalog.properties(id,public_id,display_name) VALUES($1,($1::uuid)::text,'Writer test')",
     [propertyId],
   );
+  if (futureStay)
+    await observer.query(
+      "INSERT INTO hotel_catalog.property_locations(property_id,timezone) VALUES($1,'Europe/Rome')",
+      [propertyId],
+    );
   await observer.query(
     `INSERT INTO pms.room_types(id,property_id,name,occupancy_limits,base_rate_amount,currency)
      VALUES($1,$2,'Writer room','{"adults":2,"children":1,"total":3}',100,$3)`,

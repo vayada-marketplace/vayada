@@ -21,6 +21,7 @@ import {
 import { FeedbackAlert } from "@/components/ui";
 import { uploadSingleImageWithMediaReference } from "@/lib/utils/uploadImage";
 import AddonsTab, { type AddonItemFormValues } from "@/components/booking-flow/AddonsTab";
+import { PageLayout } from "@/components/layout/PageLayout";
 
 const DEFAULT_ADDON_SETTINGS: AddonSettings = {
   showAddonsStep: true,
@@ -370,7 +371,7 @@ export default function AddonsPage() {
 
   if (loadFailed) {
     return (
-      <div className="mx-auto max-w-5xl px-4 py-6 md:px-6 lg:px-8">
+      <PageLayout>
         <div
           role="alert"
           className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-200 bg-white p-5"
@@ -384,16 +385,14 @@ export default function AddonsPage() {
             {t("auth.chooseProperty.retry")}
           </button>
         </div>
-      </div>
+      </PageLayout>
     );
   }
 
   return (
-    <div className="mx-auto max-w-5xl px-4 py-6 md:px-6 lg:px-8">
-      {feedback && (
-        <FeedbackAlert type={feedback.type} message={feedback.message} className="mb-4" />
-      )}
+    <PageLayout>
       <AddonsTab
+        banner={feedback && <FeedbackAlert type={feedback.type} message={feedback.message} />}
         addons={addons}
         addonSettings={addonSettings}
         propertyCurrency={addonCurrency}
@@ -405,6 +404,6 @@ export default function AddonsPage() {
         onToggleAddonLive={handleToggleAddonLive}
         onReorderAddon={handleReorderAddon}
       />
-    </div>
+    </PageLayout>
   );
 }

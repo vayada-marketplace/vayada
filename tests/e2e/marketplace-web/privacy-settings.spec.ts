@@ -97,8 +97,10 @@ test("unavailable account consent is unknown and cannot be toggled", async ({ pa
   await expect(
     page.getByText("Failed to load your consent settings. Please try again."),
   ).toBeVisible();
-  await expect(page.getByText("Unavailable", { exact: true })).toHaveCount(3);
-  await expect(page.getByText("Not accepted", { exact: true })).toHaveCount(0);
+  // Scoped to the page: in dev, Next's error overlay also prints the logged "Unavailable".
+  const main = page.getByRole("main");
+  await expect(main.getByText("Unavailable", { exact: true })).toHaveCount(3);
+  await expect(main.getByText("Not accepted", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("switch", { name: "Marketing communications" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Manage Cookies" })).toBeVisible();
 });

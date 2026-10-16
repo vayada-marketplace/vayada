@@ -304,8 +304,49 @@ it("shows requested changes without treating them as publication", async () => {
   });
   const tree = await mount();
   expect(text(tree)).toContain("Changes requested");
+  expect(text(tree)).toContain("Note from Vayada");
   expect(text(tree)).toContain("Please update your summary.");
+  expect(text(tree)).toContain("Update your hotel profile, then submit it again.");
+  expect(text(tree)).toContain("Resubmit to Marketplace");
+  expect(text(tree)).not.toContain("current profile stays live");
   expect(text(tree)).not.toContain("Open Marketplace profile");
+});
+it("keeps the live profile while an update waits for review or is sent back", async () => {
+  const live = {
+    ...review,
+    activeSubmission: { revisionId: "active", status: "active" },
+    publishedUrl: `/hotels/${propertyId}`,
+  };
+  mocks.load.mockResolvedValue({ ...live, latestSubmission: operation });
+  let tree = await mount();
+  expect(text(tree)).toContain("Pending review");
+  expect(text(tree)).toContain(
+    "Your changes were submitted. Your current profile stays live until Vayada approves the update.",
+  );
+  expect(text(tree)).not.toContain('"Live"');
+  expect(tree.root.findByType("a").props.href).toBe(`/hotels/${propertyId}`);
+  expect(text(tree)).not.toContain("Resubmit to Marketplace");
+
+  mocks.load.mockResolvedValue({
+    ...live,
+    latestSubmission: { ...operation, status: "changes_requested", decisionReason: "Add photos." },
+  });
+  tree = await mount();
+  expect(text(tree)).toContain("Changes requested");
+  expect(text(tree)).toContain("Update your hotel profile, then submit it again.");
+  expect(text(tree)).toContain(" Your current profile stays live.");
+});
+it("doesn't ask a suspended hotel to resubmit after changes were requested", async () => {
+  mocks.load.mockResolvedValue({
+    ...review,
+    activeSubmission: { revisionId: "active", status: "suspended" },
+    latestSubmission: { ...operation, status: "changes_requested", decisionReason: "Add photos." },
+  });
+  const tree = await mount();
+  expect(text(tree)).toContain("Suspended");
+  expect(text(tree)).toContain("Add photos.");
+  expect(text(tree)).not.toContain("submit it again");
+  expect(text(tree)).not.toContain("Resubmit to Marketplace");
 });
 it("keeps suspended profiles private and prevents resubmission from implying reinstatement", async () => {
   mocks.load.mockResolvedValue({
@@ -325,8 +366,9 @@ it("withholds the unavailable public page while preserving active status", async
     activeSubmission: { revisionId: "active", status: "active" },
   });
   const tree = await mount();
-  expect(text(tree)).toContain("Published");
+  expect(text(tree)).toContain('"Live"');
   expect(text(tree)).toContain("public Marketplace page is currently unavailable");
+  expect(text(tree)).not.toContain("Your hotel profile is live on the Creator Marketplace");
   expect(tree.root.findAllByType("a")).toHaveLength(0);
 });
 
@@ -337,6 +379,10 @@ it("opens the verified public profile without submitting or leaving setup", asyn
     publishedUrl: `/hotels/${propertyId}`,
   });
   const tree = await mount();
+  expect(text(tree)).toContain('"Live"');
+  expect(text(tree)).toContain(
+    "Your hotel profile is live on the Creator Marketplace. Later changes need a new review before they go live.",
+  );
   const link = tree.root.findByType("a");
   expect(link.props.href).toBe(`/hotels/${propertyId}`);
   expect(link.props.target).toBe("_blank");

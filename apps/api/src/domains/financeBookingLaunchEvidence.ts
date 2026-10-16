@@ -17,6 +17,8 @@ import {
   serializePmsPricingSourceEntityRevision,
 } from "@vayada/domain-pms";
 
+import type { BillingPlanReadPort } from "./financeBillingConfigReadModel.js";
+import type { FinanceManualPaymentReadinessReadPort } from "./financeManualPaymentReadiness.js";
 import type { FinancePaymentReadinessScopePort } from "./financePaymentReadinessReadModel.js";
 
 const EXTERNAL_PENDING = new Set<FinancePaymentReadinessBlocker>([
@@ -27,6 +29,10 @@ const EXTERNAL_PENDING = new Set<FinancePaymentReadinessBlocker>([
 
 export function createFinanceBookingLaunchEvidenceAdapter(dependencies: {
   financeReadPort: FinancePaymentReadinessReadPort;
+  /** Finance's billing config is null until the hotel has a usable plan: the acceptance rule. */
+  billingPlan: BillingPlanReadPort;
+  /** Bank transfer and PayPal, only while their acceptance is on (VAY-2139). */
+  manualPayments?: FinanceManualPaymentReadinessReadPort;
   scope?: FinancePaymentReadinessScopePort;
 }): BookingLaunchFinanceEvidencePort {
   return {
@@ -37,6 +43,18 @@ export function createFinanceBookingLaunchEvidenceAdapter(dependencies: {
         value = await dependencies.financeReadPort.getPaymentReadiness(request);
       } catch {
         return unavailable("system", "payment_readiness_read_failed");
+      }
+      // Bookings are refused without a chosen plan, so publishing waits for one (VAY-2171).
+      let planBlockers: BookingLaunchOwnerBlocker[];
+      try {
+        planBlockers = (await dependencies.billingPlan.getBillingConfig(
+          request.propertyId,
+          request.organizationId,
+        ))
+          ? []
+          : [ownerBlocker("billing_plan_not_selected", "user_fixable")];
+      } catch {
+        return unavailable("system", "billing_plan_read_failed");
       }
       // No versioned payment methods yet: never chosen, or saved only by the older settings
       // page. The setup Payments step creates them (VAY-2134). A missing organization, PMS
@@ -49,7 +67,7 @@ export function createFinanceBookingLaunchEvidenceAdapter(dependencies: {
           return unavailable("system", "payment_scope_read_failed");
         }
         return inScope
-          ? notConfigured(request)
+          ? notConfigured(request, planBlockers)
           : unavailable("provider", "payment_scope_unavailable");
       }
       const snapshot = parseFinancePaymentReadinessSnapshot(value);
@@ -77,8 +95,19 @@ export function createFinanceBookingLaunchEvidenceAdapter(dependencies: {
           .flatMap(({ blockers }) => blockers);
         const blockers = ownerBlockers(blockingCodes, Boolean(pricingSource));
         if (!snapshot.bookingPaymentReady && blockers.length === 0 && blockingCodes.length === 0) {
-          blockers.push(ownerBlocker("ready_payment_method_missing", "user_fixable"));
+          // A bank-transfer or PayPal hotel is ready when the hotel can be paid that way.
+          let manual: readonly string[];
+          try {
+            manual = dependencies.manualPayments
+              ? await dependencies.manualPayments.readyMethods({ propertyId: request.propertyId })
+              : [];
+          } catch {
+            return unavailable("system", "payment_readiness_read_failed");
+          }
+          if (manual.length === 0)
+            blockers.push(ownerBlocker("ready_payment_method_missing", "user_fixable"));
         }
+        blockers.push(...planBlockers);
         const advisories = ownerAdvisories(
           snapshot.methods
             .filter(({ method, consequence }) => method === "card" && consequence === "warning")
@@ -118,7 +147,10 @@ export function createFinanceBookingLaunchEvidenceAdapter(dependencies: {
   };
 }
 
-function notConfigured(request: { organizationId: string; propertyId: string }) {
+function notConfigured(
+  request: { organizationId: string; propertyId: string },
+  planBlockers: readonly BookingLaunchOwnerBlocker[],
+) {
   const source = {
     ownerDomain: "finance",
     entityType: FINANCE_PAYMENT_READINESS_SOURCE_ENTITY_TYPE,
@@ -136,7 +168,7 @@ function notConfigured(request: { organizationId: string; propertyId: string }) 
         groupId: "booking.payments",
         owningStepId: "payments",
         source,
-        blockers: [ownerBlocker("payment_methods_not_configured", "user_fixable")],
+        blockers: [ownerBlocker("payment_methods_not_configured", "user_fixable"), ...planBlockers],
       },
     ],
   } as const satisfies BookingLaunchOwnerEvidence<"finance">;

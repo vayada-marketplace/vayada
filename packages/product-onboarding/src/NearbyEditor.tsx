@@ -40,7 +40,7 @@ export default function NearbyEditor({
   };
   if (!profile || !location || !draft || !saved)
     return (
-      <div className="p-6">
+      <div>
         {editor.error ? (
           <div role="alert">
             <p>{editor.error}</p>
@@ -99,11 +99,16 @@ export default function NearbyEditor({
     editor.locationDirty ? null : currentDiscovery,
   );
   return (
-    <div className="mx-auto max-w-6xl space-y-6 p-4 sm:p-8">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold text-gray-950">Location & surroundings</h1>
-          <p className="mt-1 text-sm text-gray-500">{profile.profile.displayName}</p>
+    <div className="space-y-6">
+      {/* page-header: Booking Admin's shared header spacing (VAY-2199). */}
+      <div className="page-header flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
+        <div className="min-w-0 flex-[1_1_14rem]">
+          <h1 className="text-xl font-semibold text-gray-900 md:text-2xl">
+            Location & surroundings
+          </h1>
+          <p className="mt-[var(--page-subtitle-gap,4px)] text-[13px] text-gray-500">
+            {profile.profile.displayName}
+          </p>
         </div>
         <button
           className={button}

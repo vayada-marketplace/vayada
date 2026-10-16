@@ -1,4 +1,5 @@
 import { expect, type Page } from "@playwright/test";
+import { createFinancePaymentReadinessSnapshot } from "@vayada/domain-finance";
 import { createMarketplaceHotelCollaborationPreferencesEvidence } from "@vayada/domain-marketplace";
 import {
   PMS_OPERATING_CALENDAR_CONTRACT_VERSION,
@@ -15,6 +16,11 @@ const organizationId = "11111111-1111-4111-8111-111111111111";
 const roomTypeId = "33333333-3333-4333-8333-333333333333";
 const planId = "44444444-4444-4444-8444-444444444444";
 const acceptedAt = "2026-08-04T12:00:00.000Z";
+
+/** The unpublished pricing-v2 read's 404; pass to watchPageHealth's expectedMissingUrls. */
+export const ownerReadsExpectedMissingUrls = [
+  new RegExp(`/api/pms/properties/${propertyId}/pricing-v2$`),
+];
 
 // Shell navigation mounts the real owner forms. Keep reads valid and reject any
 // writes; step-specific suites exercise editing and canonical persistence.
@@ -127,6 +133,25 @@ export async function mockAdaptiveSetupOwnerReads(page: Page) {
       organizationId,
       propertyId,
     },
+    // The Pricing step: bank transfer and PayPal acceptance is off, as in production (VAY-2139).
+    [`/api/pms/properties/${propertyId}/pricing-v2/payment-methods`]: {
+      acceptanceEnabled: false,
+      readyMethods: [],
+    },
+    // The Pricing step reads how guests pay from the Payments step: pay at the hotel (VAY-2188).
+    [`/api/finance/properties/${propertyId}/payment-readiness`]:
+      createFinancePaymentReadinessSnapshot({
+        propertyId,
+        selectedMethods: ["pay_at_property"],
+        paymentMethodsRevision: 1,
+        committedPricing: pricingCurrency(),
+        currentPricing: pricingCurrency(),
+        onlineCardReadiness: "execution_unavailable",
+        updatedAt: acceptedAt,
+      }),
+    // The Guest experience step: no confirmed guest rules or saved terms yet (terms: VAY-2176).
+    [`/api/booking/properties/${propertyId}/guest-rules`]: { current: null },
+    [`/api/booking/properties/${propertyId}/guest-terms`]: { termsText: null },
   };
   for (const [path, json] of Object.entries(reads)) {
     await page.route(
@@ -138,6 +163,19 @@ export async function mockAdaptiveSetupOwnerReads(page: Page) {
       },
     );
   }
+  // No first prices are published yet: the pricing-v2 read answers 404 not_found.
+  await page.route(
+    (url) => url.pathname === `/api/pms/properties/${propertyId}/pricing-v2`,
+    async (route) => {
+      if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
+      expect(route.request().method()).toBe("GET");
+      await route.fulfill({
+        status: 404,
+        headers: corsHeaders(route),
+        json: { code: "not_found" },
+      });
+    },
+  );
   await page.route(
     /\/api\/pms\/setup\/properties\/[^/]+\/room-type-bindings\/[^/]+$/,
     async (route) => {
@@ -153,6 +191,14 @@ export async function mockAdaptiveSetupOwnerReads(page: Page) {
   await page.route("https://fonts.googleapis.com/**", (route) =>
     route.fulfill({ status: 200, contentType: "text/css", body: "" }),
   );
+}
+
+function pricingCurrency() {
+  return {
+    contractVersion: PMS_PRICING_CONTRACT_VERSION,
+    currency: "EUR",
+    pricingCurrencyRevision: 2,
+  };
 }
 
 export function roomList() {

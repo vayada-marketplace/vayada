@@ -1,4 +1,3 @@
-import { mockSetupExitHandoff } from "../support/setupExitHandoff";
 import {
   createPropertySetupRouteMock,
   mockPropertySetupRoute,
@@ -65,9 +64,17 @@ test.describe("marketplace-web shared setup activation", () => {
     });
     await mockSharedSetupStatus(page, sharedSetupStatus());
     await mockMarketplaceProfileApis(page);
+    await mockPropertySetupRoute(
+      page,
+      createPropertySetupRouteMock({
+        propertyId,
+        selectedTracks: ["creator_marketplace"],
+        resumeStepId: "present_hotel",
+      }),
+    );
     await page.goto(setupUrl(baseURL));
 
-    await expect(page.getByRole("heading", { name: "Describe your hotel" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Present your hotel", level: 1 })).toBeVisible();
     await expect(page.getByLabel("Profile photo file")).toHaveCount(0);
     expect(accountProfileWrites).toBe(0);
     expect(personalMediaRequests).toBe(0);
@@ -100,9 +107,359 @@ test.describe("marketplace-web shared setup activation", () => {
     await expect(page.getByRole("button", { name: "Add External Creator" })).toHaveCount(0);
   });
 
+  test("offers the address search when an existing hotel has an address but no map pin", async ({
+    page,
+    baseURL,
+  }) => {
+    await mockGooglePlaces(page);
+    await primeBrowserState(page, true);
+    await mockAuthSession(page);
+    // Open hotel basics land straight in the shared profile editor (update mode).
+    await mockSharedSetupStatus(page, hotelBasicsOpenStatus());
+    const profileWrites: unknown[] = [];
+    await mockMarketplaceProfileApis(
+      page,
+      [],
+      [{ mediaType: "logo", url: "https://media.example/alpenrose-logo.webp" }],
+      { profile: profileWrites },
+    );
+    await routeJson(page, /\/api\/hotel-setup\/property-types/, {
+      contractVersion: "adaptive-hotel-property-types.v1",
+      propertyTypes: [{ value: "hotel", label: "Hotel" }],
+    });
+    await mockPropertySetupRoute(
+      page,
+      createPropertySetupRouteMock({
+        propertyId,
+        selectedTracks: ["creator_marketplace"],
+        resumeStepId: "present_hotel",
+      }),
+    );
+    await page.goto(setupUrl(baseURL));
+
+    await expect(page.getByRole("textbox", { name: /Hotel name/ })).toHaveValue("Alpenrose Munich");
+    await page.getByRole("button", { name: "Continue" }).click();
+
+    // The saved address (Marienplatz 1, no coordinates) keeps its fields open, and the
+    // labelled Google search sits above them: typed fields never set a map pin.
+    const locationSearchPanel = page.getByTestId("location-search-panel");
+    const locationActionBar = page.getByTestId("location-action-bar");
+    await expect(
+      locationSearchPanel.getByRole("heading", { name: "Where is your property?" }),
+    ).toBeVisible();
+    await expect(page.getByRole("textbox", { name: /Street address/ })).toHaveValue(
+      "Marienplatz 1",
+    );
+    await expect(
+      locationSearchPanel.getByText("Search for your address", { exact: true }),
+    ).toBeVisible();
+    const googleAddressSearch = page.locator(".vayada-google-place-autocomplete");
+    await expect(locationSearchPanel.getByPlaceholder("Search for an address")).toBeVisible();
+    await expect(page.getByTestId("google-address-map-canvas")).not.toHaveAttribute(
+      "data-marker",
+      /./,
+    );
+    await expect(locationActionBar.getByText("Add your map pin")).toBeVisible();
+
+    await selectExactGoogleAddress(googleAddressSearch);
+    await expect(locationActionBar.getByText("Is this the right location?")).toBeVisible();
+    await expect(page.getByTestId("google-address-map-canvas")).toHaveAttribute(
+      "data-marker",
+      "48.1373932,11.5754485",
+    );
+    await locationActionBar.getByRole("button", { name: "Continue" }).click();
+
+    await expect(page.getByRole("heading", { name: "How can guests reach you?" })).toBeVisible();
+    await page.getByRole("button", { name: "Save and continue" }).click();
+    await expect.poll(() => profileWrites.length).toBe(1);
+    expect(profileWrites[0]).toMatchObject({
+      patch: { location: { latitude: 48.1373932, longitude: 11.5754485 } },
+    });
+  });
+
+  test("lets a hotel place and drag its map pin when Google address search is unavailable", async ({
+    page,
+    baseURL,
+  }) => {
+    const profileWrites = await openLocationWithOpenBasics(page, baseURL, {
+      placesUnavailable: true,
+    });
+
+    const locationSearchPanel = page.getByTestId("location-search-panel");
+    const locationActionBar = page.getByTestId("location-action-bar");
+    const map = page.getByTestId("google-address-map-canvas");
+    await expect(
+      locationSearchPanel.getByText(
+        "Address suggestions are unavailable. Enter the address, then click your property on the map.",
+      ),
+    ).toBeVisible();
+    await expect(
+      locationSearchPanel.getByText("Search for your address", { exact: true }),
+    ).toHaveCount(0);
+    await expect(locationActionBar.getByText("Add your map pin")).toBeVisible();
+    await expect(
+      locationActionBar.getByText(
+        "Needed for the Marketplace. Zoom in and click your property; drag the pin to adjust.",
+      ),
+    ).toBeVisible();
+    await expect(map).toHaveAttribute("data-zoom-control", "true");
+    await expect(map).toHaveAttribute("data-marker-draggable", "true");
+
+    await expect(map).toHaveAttribute("data-zoom-control-position", "3");
+    // The open fields stop above the action bar that asks for the pin.
+    const panelBox = await locationSearchPanel.boundingBox();
+    const actionBarBox = await locationActionBar.boundingBox();
+    expect((panelBox?.y ?? 0) + (panelBox?.height ?? 0)).toBeLessThanOrEqual(actionBarBox?.y ?? 0);
+    // Keyboard users get the coordinates instead of the pointer-only map.
+    await locationSearchPanel.getByRole("button", { name: "Enter coordinates instead" }).click();
+    await expect(page.getByRole("textbox", { name: "Latitude" })).toBeFocused();
+
+    // Zoomed out, a click zooms in on that spot instead of dropping a vague pin.
+    const clickMap = () => map.click({ position: { x: 1000, y: 300 } });
+    await clickMap();
+    await expect(map).toHaveAttribute("data-zoom", "6");
+    await expect(map).toHaveAttribute("data-center", "48.1374,11.5754");
+    await clickMap();
+    await expect(map).toHaveAttribute("data-zoom", "10");
+    await clickMap();
+    await expect(map).toHaveAttribute("data-zoom", "14");
+    await expect(map).not.toHaveAttribute("data-marker", /./);
+    await expect(locationActionBar.getByText("Add your map pin")).toBeVisible();
+
+    await clickMap();
+    await expect(map).toHaveAttribute("data-marker", "48.1374,11.5754");
+    await expect(map).toHaveAttribute("data-zoom", "17");
+    await expect(locationActionBar.getByText("Is this the right location?")).toBeVisible();
+    await expect(
+      locationActionBar.getByText(
+        "Drag the pin if it isn’t exactly on your property · Time zone · Europe/Berlin",
+      ),
+    ).toBeVisible();
+    // The complete address folds away so the pin is in view.
+    await expect(page.getByRole("textbox", { name: /Street address/ })).toHaveCount(0);
+
+    await map.evaluate((element) =>
+      (
+        element as HTMLElement & { vayadaE2eDragMarker: (lat: number, lng: number) => void }
+      ).vayadaE2eDragMarker(48.13745, 11.5756),
+    );
+    await expect(map).toHaveAttribute("data-marker", "48.13745,11.5756");
+    // Dragging keeps the hotel's view: the map doesn't jump to recenter on the pin.
+    await expect(map).toHaveAttribute("data-center", "48.1374,11.5754");
+    // Once there is a pin, a stray click can't move it; only a drag does.
+    await clickMap();
+    await expect(map).toHaveAttribute("data-marker", "48.13745,11.5756");
+    await expect(page.getByRole("textbox", { name: "Latitude" })).toHaveValue("48.13745");
+
+    await locationActionBar.getByRole("button", { name: "Continue" }).click();
+    await expect(page.getByRole("heading", { name: "How can guests reach you?" })).toBeVisible();
+    await page.getByRole("button", { name: "Save and continue" }).click();
+    await expect.poll(() => profileWrites.length).toBe(1);
+    expect(profileWrites[0]).toMatchObject({
+      patch: { location: { latitude: 48.13745, longitude: 11.5756 } },
+    });
+  });
+
+  test("keeps the map clickable on a phone while the address fields are open", async ({
+    page,
+    baseURL,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await openLocationWithOpenBasics(page, baseURL, { placesUnavailable: true });
+    const map = page.getByTestId("google-address-map-canvas");
+    await expect(page.getByRole("textbox", { name: /Street address/ })).toBeVisible();
+
+    // The card moves to the top only while it holds focus, and a touch keeps the pointer on the
+    // map while it moves; Playwright's mouse doesn't, so settle focus before measuring.
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    // The card stays below 70% of the screen, so part of the map is always free to tap.
+    const card = await page.getByTestId("location-search-panel").locator("..").boundingBox();
+    const mapBox = await map.boundingBox();
+    if (!card || !mapBox) throw new Error("The location card or map has no box.");
+    const y = card.y > 120 ? card.y / 2 : Math.min(card.y + card.height + 60, 844 - 60);
+    await map.click({ position: { x: 300 - mapBox.x, y: y - mapBox.y } });
+    await expect(map).toHaveAttribute("data-zoom", "6");
+  });
+
+  test("keeps the picked map pin clear of the location card on a phone", async ({
+    page,
+    baseURL,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await openLocationWithOpenBasics(page, baseURL);
+    await selectExactGoogleAddress(page.locator(".vayada-google-place-autocomplete"));
+    await expect(
+      page.getByTestId("location-action-bar").getByText("Is this the right location?"),
+    ).toBeVisible();
+
+    // Focused on arrival, the card sits at the top of the screen: the pin shows below it.
+    await expect.poll(() => locationCardTop(page)).toBeLessThan(100);
+    await expect.poll(() => mapPointClearOfLocationCard(page)).toBe(true);
+
+    // A tap on the map takes focus from the card, which drops to the bottom: the pin shows above it.
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await expect.poll(() => locationCardTop(page)).toBeGreaterThan(200);
+    await expect.poll(() => mapPointClearOfLocationCard(page)).toBe(true);
+  });
+
+  test("keeps a found area clear of the location card on a phone", async ({ page, baseURL }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await openLocationWithOpenBasics(page, baseURL);
+    const locationActionBar = page.getByTestId("location-action-bar");
+    await page.getByRole("textbox", { name: /Street address/ }).fill("Unknown Street 5");
+    await locationActionBar.getByRole("button", { name: "Find on map" }).click();
+    await expect(
+      locationActionBar.getByText(
+        "Google found the area, not the exact address. Click your property on the map.",
+      ),
+    ).toBeVisible();
+    const map = page.getByTestId("google-address-map-canvas");
+    await expect(map).toHaveAttribute("data-center", "48.1351,11.582");
+    await expect(map).not.toHaveAttribute("data-marker", /./);
+
+    // The button is disabled while it searches, so focus may have left the card without an event:
+    // wherever the card ended up, the area is clear of it.
+    await expect.poll(() => mapPointClearOfLocationCard(page)).toBe(true);
+
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await expect.poll(() => locationCardTop(page)).toBeGreaterThan(200);
+    await expect.poll(() => mapPointClearOfLocationCard(page)).toBe(true);
+
+    // Back in the address fields, the card moves to the top: the area shows below it.
+    await page.getByRole("textbox", { name: /Street address/ }).focus();
+    await expect.poll(() => locationCardTop(page)).toBeLessThan(100);
+    await expect.poll(() => mapPointClearOfLocationCard(page)).toBe(true);
+  });
+
+  test("offers typed coordinates when Google rejects the map key", async ({ page, baseURL }) => {
+    await openLocationWithOpenBasics(page, baseURL, { mapsAuthFailure: true });
+    await expect(page.getByText("Map unavailable")).toBeVisible();
+    await expect(
+      page.getByText(
+        "The map couldn’t load. Enter your property’s coordinates, for example copied from Google Maps.",
+      ),
+    ).toBeVisible();
+    await expect(page.getByRole("textbox", { name: "Latitude" })).toBeVisible();
+  });
+
+  test("takes typed coordinates when the map itself can't load", async ({ page, baseURL }) => {
+    const profileWrites = await openLocationWithOpenBasics(page, baseURL, {
+      placesUnavailable: true,
+      mapsUnavailable: true,
+    });
+    const locationActionBar = page.getByTestId("location-action-bar");
+    await expect(page.getByText("Map unavailable")).toBeVisible();
+    await expect(
+      locationActionBar.getByText(
+        "Needed for the Marketplace. Enter your property’s coordinates above.",
+      ),
+    ).toBeVisible();
+
+    await page.getByRole("textbox", { name: "Latitude" }).fill("48.1374");
+    await expect(locationActionBar.getByText("Add your map pin")).toBeVisible();
+    await page.getByRole("textbox", { name: "Longitude" }).fill("181");
+    await expect(locationActionBar.getByText("Add your map pin")).toBeVisible();
+    await page.getByRole("textbox", { name: "Longitude" }).fill("11.5754");
+    await expect(locationActionBar.getByText("Is this the right location?")).toBeVisible();
+    await expect(page.getByRole("textbox", { name: "Longitude" })).toHaveValue("11.5754");
+
+    await locationActionBar.getByRole("button", { name: "Continue" }).click();
+    await expect(page.getByRole("heading", { name: "How can guests reach you?" })).toBeVisible();
+    await page.getByRole("button", { name: "Save and continue" }).click();
+    await expect.poll(() => profileWrites.length).toBe(1);
+    expect(profileWrites[0]).toMatchObject({
+      patch: { location: { latitude: 48.1374, longitude: 11.5754 } },
+    });
+  });
+
+  test("finds a typed address on the map and says when Google can't place it", async ({
+    page,
+    baseURL,
+  }) => {
+    await mockGooglePlaces(page);
+    await primeBrowserState(page, true);
+    await mockAuthSession(page);
+    await mockSharedSetupStatus(page, hotelBasicsOpenStatus());
+    const profileWrites: unknown[] = [];
+    await mockMarketplaceProfileApis(
+      page,
+      [],
+      [{ mediaType: "logo", url: "https://media.example/alpenrose-logo.webp" }],
+      { profile: profileWrites },
+    );
+    await routeJson(page, /\/api\/hotel-setup\/property-types/, {
+      contractVersion: "adaptive-hotel-property-types.v1",
+      propertyTypes: [{ value: "hotel", label: "Hotel" }],
+    });
+    await mockPropertySetupRoute(
+      page,
+      createPropertySetupRouteMock({
+        propertyId,
+        selectedTracks: ["creator_marketplace"],
+        resumeStepId: "present_hotel",
+      }),
+    );
+    await page.goto(setupUrl(baseURL));
+    await page.getByRole("button", { name: "Continue" }).click();
+
+    const locationActionBar = page.getByTestId("location-action-bar");
+    const map = page.getByTestId("google-address-map-canvas");
+    const streetAddress = page.getByRole("textbox", { name: /Street address/ });
+    const findOnMap = locationActionBar.getByRole("button", { name: "Find on map" });
+    await expect(locationActionBar.getByText("Add your map pin")).toBeVisible();
+
+    await streetAddress.fill("Nowhere 1");
+    await findOnMap.click();
+    await expect(
+      locationActionBar.getByText(
+        "We couldn’t find this address on the map. Click your property on the map instead.",
+      ),
+    ).toBeVisible();
+    await expect(map).not.toHaveAttribute("data-marker", /./);
+
+    // A postcode-level match only shows the area: no pin until the hotel clicks its property.
+    await streetAddress.fill("Unknown Street 5");
+    await findOnMap.click();
+    await expect(
+      locationActionBar.getByText(
+        "Google found the area, not the exact address. Click your property on the map.",
+      ),
+    ).toBeVisible();
+    await expect(map).toHaveAttribute("data-center", "48.1351,11.582");
+    await expect(map).toHaveAttribute("data-zoom", "16");
+    await expect(map).not.toHaveAttribute("data-marker", /./);
+
+    await streetAddress.fill("Marienplatz 1");
+    await expect(
+      locationActionBar.getByText("Needed for the Marketplace. Click your property on the map."),
+    ).toBeVisible();
+    await findOnMap.click();
+    await expect(map).toHaveAttribute("data-marker", "48.1373932,11.5754485");
+    await expect(map).toHaveAttribute("data-center", "48.1373932,11.5754485");
+    await expect(map).toHaveAttribute("data-zoom", "17");
+    await expect(locationActionBar.getByText("Is this the right location?")).toBeVisible();
+    await expect(findOnMap).toHaveCount(0);
+    expect(
+      await page.evaluate(
+        () => (window as { vayadaE2ePlaceQueries?: string[] }).vayadaE2ePlaceQueries,
+      ),
+    ).toEqual([
+      "Nowhere 1, 80331 Munich, Germany | location,types",
+      "Unknown Street 5, 80331 Munich, Germany | location,types",
+      "Marienplatz 1, 80331 Munich, Germany | location,types",
+    ]);
+
+    await locationActionBar.getByRole("button", { name: "Continue" }).click();
+    await expect(page.getByRole("heading", { name: "How can guests reach you?" })).toBeVisible();
+    await page.getByRole("button", { name: "Save and continue" }).click();
+    await expect.poll(() => profileWrites.length).toBe(1);
+    expect(profileWrites[0]).toMatchObject({
+      patch: { location: { latitude: 48.1373932, longitude: 11.5754485 } },
+    });
+  });
+
   const recoverFirstHotel = async (
     { page, baseURL }: { page: Page; baseURL?: string },
-    adaptive = false,
     adding = false,
   ) => {
     await mockGooglePlaces(page);
@@ -369,17 +726,14 @@ test.describe("marketplace-web shared setup activation", () => {
       url.searchParams.set("propertyId", "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee");
       url.searchParams.set("step", "payments");
     }
-    if (adaptive) {
-      url.searchParams.set("_adaptive", "1");
-      await mockPropertySetupRoute(
-        page,
-        createPropertySetupRouteMock({
-          propertyId,
-          selectedTracks: ["creator_marketplace"],
-          resumeStepId: "present_hotel",
-        }),
-      );
-    }
+    await mockPropertySetupRoute(
+      page,
+      createPropertySetupRouteMock({
+        propertyId,
+        selectedTracks: ["creator_marketplace"],
+        resumeStepId: "present_hotel",
+      }),
+    );
     await page.goto(url.toString());
 
     if (!adding) {
@@ -493,7 +847,7 @@ test.describe("marketplace-web shared setup activation", () => {
 
     if (searchFirst) {
       await locationSearchPanel.getByRole("button", { name: "Done editing" }).click();
-      await expect(locationActionBar.getByText("Address details entered")).toBeVisible();
+      await expect(locationActionBar.getByText("Add your map pin")).toBeVisible();
       await expect(
         locationActionBar.getByText("Marienplatz 1, 80331 Munich, Germany"),
       ).toBeVisible();
@@ -503,19 +857,9 @@ test.describe("marketplace-web shared setup activation", () => {
 
     await page.getByRole("button", { name: "Continue" }).click();
 
-    await expect(page.getByRole("heading", { name: "Set up guest preferences" })).toBeVisible();
-    await expect(page.getByRole("combobox", { name: /Default currency/ })).toHaveValue("EUR");
-    await expect(page.getByRole("combobox", { name: /Default language/ })).toHaveValue("de");
-    await expect(page.getByRole("button", { name: "Remove English" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Skip for now, configure later" })).toBeVisible();
-    await page.getByRole("button", { name: "🇨🇭 CHF", exact: true }).click();
-    await page.getByRole("textbox", { name: /Instagram/ }).fill("https://instagram.com/alpenrose");
-    await page.getByRole("textbox", { name: /Facebook/ }).fill("https://facebook.com/alpenrose");
-    await page.getByRole("textbox", { name: /TikTok/ }).fill("https://tiktok.com/@alpenrose");
-    await page.getByRole("textbox", { name: /YouTube/ }).fill("https://youtube.com/@alpenrose");
-    await page.getByRole("button", { name: "Continue" }).click();
-
-    await expect(page.getByText("Step 4 of 4 · Contact information")).toBeVisible();
+    // Guest preferences (currencies, languages, socials) belong to Hotel Operations; a
+    // Marketplace-only hotel goes straight from Location to Contact information.
+    await expect(page.getByText("Step 3 of 3 · Contact information")).toBeVisible();
     await expect(page.getByRole("heading", { name: "How can guests reach you?" })).toBeVisible();
     await expect(
       page.getByText("This information is shown when guests click 'Contact' on your booking page."),
@@ -536,30 +880,8 @@ test.describe("marketplace-web shared setup activation", () => {
     await expect(page.getByRole("textbox", { name: /Website/ })).toHaveCount(0);
     await page.getByRole("button", { name: "Save and continue" }).click();
 
-    if (adaptive) {
-      await expect(
-        page.getByRole("heading", { name: "Present your hotel", level: 1 }),
-      ).toBeVisible();
-      await expect(page).toHaveURL(new RegExp(`propertyId=${propertyId}`));
-    } else {
-      await expect(page.getByRole("img", { name: "vayada" })).toBeVisible();
-      await expect(
-        page.getByRole("heading", { name: "Review and next steps", level: 1 }),
-      ).toBeVisible();
-      const marketplaceProgress = page.getByRole("progressbar", {
-        name: "Hotel setup progress",
-      });
-      await expect(marketplaceProgress).toHaveAttribute("aria-valuemin", "1");
-      await expect(marketplaceProgress).toHaveAttribute("aria-valuemax", "4");
-      await expect(marketplaceProgress).toHaveAttribute("aria-valuenow", "4");
-      await expect(marketplaceProgress).toHaveAttribute(
-        "aria-valuetext",
-        "Step 4 of 4: Review and next steps",
-      );
-      await expect(marketplaceProgress.locator('[data-state="reached"]')).toHaveCount(4);
-      await expect(marketplaceProgress.locator('[data-state="upcoming"]')).toHaveCount(0);
-      await expect(page.getByText("Step 4 of 4", { exact: true })).toBeVisible();
-    }
+    await expect(page.getByRole("heading", { name: "Present your hotel", level: 1 })).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`propertyId=${propertyId}`));
     expect(propertyCreated).toBe(true);
     expect(propertyCreateRequests).toBe(1);
     expect(logoUploadFinalized).toBe(true);
@@ -567,876 +889,18 @@ test.describe("marketplace-web shared setup activation", () => {
     expect(accountProfileWrites).toBe(0);
     expect(personalMediaRequests).toBe(0);
     expect(publicProfileWrites).toEqual([]);
-    expect(launchSettingsWrites).toEqual([
-      {
-        defaultCurrency: "EUR",
-        supportedCurrencies: ["CHF"],
-        defaultLanguage: "de",
-        supportedLanguages: ["en"],
-        instagram: "https://instagram.com/alpenrose",
-        facebook: "https://facebook.com/alpenrose",
-        tiktok: "https://tiktok.com/@alpenrose",
-        youtube: "https://youtube.com/@alpenrose",
-      },
-    ]);
-    if (adaptive) return;
-    const review = page.locator('section[aria-labelledby="setup-review-title"]');
-    await expect(review).toBeVisible();
-    await expect(
-      review.locator("dt", { hasText: /^Creator Marketplace$/ }).locator("xpath=../.."),
-    ).toContainText("Ready");
-    await expect(
-      review.locator("dt", { hasText: /^Hotel operations$/ }).locator("xpath=../.."),
-    ).toContainText("Not selected");
-    await expect(
-      review.locator("dt", { hasText: /^Direct booking$/ }).locator("xpath=../.."),
-    ).toContainText("Not selected");
-    await review.getByRole("button", { name: "Back" }).click();
-    await expect(
-      page.getByRole("heading", { name: "Prepare your collaboration offer" }),
-    ).toBeVisible();
-    await page.getByRole("button", { name: "Return to review" }).click();
-    await expect(review).toBeVisible();
-    expect(
-      await page.evaluate(
-        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
-      ),
-    ).toBe(true);
+    expect(launchSettingsWrites).toEqual([]);
+    expect(createdPropertyPayload).not.toHaveProperty("initialLaunchSettings");
   };
-  test("recovers the first hotel after a correlated create conflict", async ({ page, baseURL }) =>
-    recoverFirstHotel({ page, baseURL }));
   test("hands a newly created hotel to adaptive setup after saving contact and logo", async ({
     page,
     baseURL,
-  }) => recoverFirstHotel({ page, baseURL }, true));
+  }) => recoverFirstHotel({ page, baseURL }));
 
   test("hands an additional hotel to its own adaptive session instead of the previous hotel", async ({
     page,
     baseURL,
-  }) => recoverFirstHotel({ page, baseURL }, true, true));
-
-  test("shows both selected tracks as one inline property-scoped setup flow", async ({
-    page,
-    baseURL,
-  }) => {
-    await primeBrowserState(page, true);
-    await mockAuthSession(page);
-    await mockSharedSetupStatus(page, sharedRoadmapStatus());
-    await mockMarketplaceProfileApis(page, [], [canonicalHeroMedia()]);
-
-    await page.goto(setupUrl(baseURL));
-
-    await expect(page.getByRole("img", { name: "vayada" })).toBeVisible();
-    await expect(
-      page.getByRole("heading", { level: 1, name: "Describe your hotel" }),
-    ).toBeVisible();
-    await expect(page.getByText("Setting up", { exact: true })).toHaveCount(0);
-    await expect(page.getByText("Alpenrose Munich", { exact: true })).toHaveCount(0);
-    await expect(page.getByText("Hotel Operations", { exact: true })).toHaveCount(0);
-    await expect(page.getByText("Creator Marketplace", { exact: true })).toHaveCount(0);
-    const setupProgress = page.getByRole("progressbar", { name: "Hotel setup progress" });
-    await expect(setupProgress).toHaveAttribute("aria-valuemax", "9");
-    await expect(setupProgress).toHaveAttribute("aria-valuenow", "2");
-    await expect(setupProgress).toHaveAttribute(
-      "aria-valuetext",
-      "Step 2 of 9: Describe your hotel",
-    );
-    await expect(setupProgress.locator('[data-state="reached"]')).toHaveCount(2);
-    await expect(setupProgress.locator('[data-state="upcoming"]')).toHaveCount(7);
-    await expect(page.getByText("Step 2 of 9", { exact: true })).toBeVisible();
-    await expect(page.locator("aside")).toHaveCount(0);
-    const currentStep = page.locator('section[aria-labelledby="current-setup-step-title"]');
-    const formCard = page.getByTestId("hotel-setup-form-card");
-    await expect(currentStep.getByRole("textbox", { name: "Hotel description" })).toBeVisible();
-    await expect(formCard.getByRole("textbox", { name: "Hotel description" })).toBeVisible();
-    await expect(formCard.getByRole("heading", { name: "Describe your hotel" })).toHaveCount(0);
-    await expect(formCard.getByText("Step 2 of 9", { exact: true })).toHaveCount(0);
-    await expect(formCard.locator("form")).toHaveCount(1);
-    await expect(currentStep.getByRole("button", { name: "Save hotel profile" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Continue setup" })).toHaveCount(0);
-    await expect(page).toHaveURL(/\/setup\?/);
-    await page.setViewportSize({ width: 390, height: 844 });
-    expect(
-      await page.evaluate(
-        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
-      ),
-    ).toBe(true);
-    const progressBox = await setupProgress.boundingBox();
-    const stepHeadingBox = await currentStep
-      .getByRole("heading", { name: "Describe your hotel" })
-      .boundingBox();
-    const formCardBox = await formCard.boundingBox();
-    expect(progressBox?.y).toBeLessThan(stepHeadingBox?.y ?? Number.POSITIVE_INFINITY);
-    expect(stepHeadingBox?.y).toBeLessThan(formCardBox?.y ?? Number.POSITIVE_INFINITY);
-  });
-
-  test("keeps future Operations forms in the guided sequence", async ({ page, baseURL }) => {
-    await primeBrowserState(page, true);
-    await mockAuthSession(page);
-    await mockSharedSetupStatus(page, sharedRoadmapStatus());
-    await mockMarketplaceProfileApis(page, [], [canonicalHeroMedia()]);
-    let handoffRequests = 0;
-    await page.route(/\/api\/hotel-setup\/handoffs(?:\?|$)/, async (route) => {
-      handoffRequests += 1;
-      if (route.request().method() === "OPTIONS") {
-        await fulfillCorsPreflight(route);
-        return;
-      }
-      await route.fulfill({
-        status: 500,
-        headers: corsHeaders(route),
-        json: { error: "Inline setup must not create a handoff." },
-      });
-    });
-
-    await page.goto(setupUrl(baseURL));
-
-    const currentStep = page.locator('section[aria-labelledby="current-setup-step-title"]');
-    await expect(currentStep.getByRole("heading", { name: "Describe your hotel" })).toBeVisible();
-    await expect(currentStep.getByRole("textbox", { name: "Hotel description" })).toBeVisible();
-    const inlineSetupUrl = page.url();
-
-    const setupProgress = page.getByRole("progressbar", {
-      name: "Hotel setup progress",
-    });
-    await expect(setupProgress).toHaveAttribute("aria-valuemax", "9");
-    await expect(setupProgress).toHaveAttribute("aria-valuenow", "2");
-    await expect(page.getByRole("heading", { name: "Add your first room type" })).toHaveCount(0);
-    expect(page.url()).toBe(inlineSetupUrl);
-    expect(handoffRequests).toBe(0);
-  });
-
-  for (const failRefresh of [false, true]) {
-    test(`room step reloads readiness after an import (mock APIs, refresh fails: ${failRefresh})`, async ({
-      page,
-      baseURL,
-    }, testInfo) => {
-      await primeBrowserState(page, true);
-      await mockAuthSession(page);
-      await mockSharedSetupStatus(page, sharedRoadmapStatus("rooms_rates_availability"));
-      await mockOperationsApis(page);
-      let imported = false;
-      let failurePending = failRefresh;
-      let roomWrites = 0;
-      await page.route(
-        new RegExp(`/api/pms/properties/${propertyId}/room-types(?:\\?|$)`),
-        async (route) => {
-          if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
-          if (route.request().method() !== "GET") {
-            roomWrites++;
-            return route.fulfill({ status: 500 });
-          }
-          if (imported && failurePending) {
-            failurePending = false;
-            return route.fulfill({
-              status: 503,
-              headers: corsHeaders(route),
-              json: { code: "test_read_failure" },
-            });
-          }
-          return route.fulfill({
-            headers: corsHeaders(route),
-            json: {
-              items: imported
-                ? [
-                    {
-                      roomTypeId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
-                      active: true,
-                      name: "Imported Suite",
-                      roomCount: 0,
-                      occupancyLimits: { total: 2 },
-                      baseRate: { amountDecimal: "0.00", currency: "EUR" },
-                      rateRulesSummary: { minStayNights: null },
-                    },
-                  ]
-                : [],
-            },
-          });
-        },
-      );
-      await page.route(
-        /\/api\/hotel-setup\/(?:imports\/prepared|properties\/[^/]+\/import)(?:\?|$)/,
-        async (route) => {
-          if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
-          const item = {
-            itemId: "room:suite",
-            status: "applied",
-            resourceId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
-          };
-          if (route.request().method() === "POST") {
-            imported = true;
-            return route.fulfill({ headers: corsHeaders(route), json: { items: [item] } });
-          }
-          return route.fulfill({
-            headers: corsHeaders(route),
-            json: {
-              import: {
-                sourceId: "test-source",
-                propertyId,
-                results: imported ? { "room:suite": item } : {},
-                data: {
-                  contractVersion: "prepared-hotel-import.v1",
-                  property: {},
-                  rooms: [
-                    {
-                      id: "suite",
-                      name: "Imported Suite",
-                      description: "",
-                      maxGuests: 2,
-                      maxAdults: 2,
-                      maxChildren: 0,
-                      bedType: "queen",
-                      bedQuantity: 1,
-                      bathroomType: "private",
-                      sizeSquareMetres: null,
-                    },
-                  ],
-                },
-              },
-              profile: { propertyId, profileRevision: 1, profile: { displayName: "Test Hotel" } },
-              canImportRooms: true,
-            },
-          });
-        },
-      );
-      const url = new URL(setupUrl(baseURL), baseURL);
-      url.searchParams.set("propertyId", propertyId);
-      await page.goto(url.toString());
-      const current = page.locator('section[aria-labelledby="current-setup-step-title"]');
-      await expect(current.getByRole("button", { name: "Open Rooms & Rates" })).toBeVisible();
-      const panel = page.getByRole("region", { name: "Prepared hotel data" });
-      await panel.getByRole("button", { name: "Review prepared hotel data" }).click();
-      await panel.getByRole("checkbox", { name: "Imported Suite", exact: true }).check();
-      await panel.getByRole("button", { name: "Save selected items" }).click();
-      if (failRefresh) {
-        await expect(current.getByRole("alert")).toBeVisible();
-        await current.getByRole("button", { name: "Try again" }).click();
-      }
-      await expect(current.getByText("Imported Suite", { exact: true })).toBeVisible();
-      await expect(current.getByText("Add at least one active physical room.")).toBeVisible();
-      await expect(current.getByRole("button", { name: "Check setup again" })).toBeVisible();
-      await expect(current.getByRole("button", { name: "Open Rooms & Rates" })).toBeVisible();
-      expect(roomWrites).toBe(0);
-      await page.screenshot({
-        path: testInfo.outputPath("earlier-import-refresh.png"),
-        fullPage: true,
-      });
-    });
-  }
-
-  test("renders the recommended Operations form inline without leaving setup", async ({
-    page,
-    baseURL,
-  }) => {
-    await primeBrowserState(page, true);
-    await mockAuthSession(page);
-    await mockSharedSetupStatus(page, sharedRoadmapStatus("rooms_rates_availability"));
-    await mockOperationsApis(page);
-    let handoffRequests = 0;
-    await page.route(/\/api\/hotel-setup\/handoffs(?:\?|$)/, async (route) => {
-      handoffRequests += 1;
-      await route.fulfill({
-        status: 500,
-        headers: corsHeaders(route),
-        json: { error: "Inline setup must not create a handoff." },
-      });
-    });
-
-    await page.goto(setupUrl(baseURL));
-
-    const inlineSetupUrl = page.url();
-    const currentStep = page.locator('section[aria-labelledby="current-setup-step-title"]');
-    await expect(
-      currentStep.getByRole("heading", { name: "Add your first room type" }),
-    ).toBeVisible();
-    await expect(
-      currentStep.getByText(
-        "Just the basics to get started. You can add more rooms and fine-tune pricing anytime.",
-      ),
-    ).toBeVisible();
-    await expect(currentStep.getByText("Add your room types in Rooms & Rates.")).toBeVisible();
-    await expect(currentStep.getByText(/set its prices in the room's Prices tab/)).toBeVisible();
-    await expect(currentStep.getByLabel("Room type name")).toHaveCount(0);
-    await expect(currentStep.getByLabel("Nightly rate")).toHaveCount(0);
-    await expect(currentStep.getByRole("button", { name: "Open Rooms & Rates" })).toBeVisible();
-    expect(page.url()).toBe(inlineSetupUrl);
-    expect(handoffRequests).toBe(0);
-  });
-
-  test("persists an explicit Commission choice before payment methods", async ({
-    page,
-    baseURL,
-  }) => {
-    await primeBrowserState(page, true);
-    await mockAuthSession(page);
-    await mockSharedSetupStatus(page, sharedRoadmapStatus("billing_plan"));
-    let commissionSelection: Record<string, unknown> | null = null;
-    await page.route(
-      new RegExp(`/api/finance/properties/${propertyId}/(?:plan-status|select-commission)$`),
-      async (route) => {
-        if (route.request().method() === "OPTIONS") {
-          await fulfillCorsPreflight(route);
-          return;
-        }
-        if (route.request().method() === "POST") {
-          commissionSelection = route.request().postDataJSON() as Record<string, unknown>;
-        }
-        await route.fulfill({
-          status: route.request().method() === "POST" ? 201 : 200,
-          headers: corsHeaders(route),
-          json: {
-            planStatus: {
-              plan: "commission",
-              status: "commission",
-              currency: "EUR",
-              activeRoomCount: 2,
-              amountMinor: 3_500,
-              checkoutPending: false,
-              updatedAt: "2026-08-11T12:00:00.000Z",
-            },
-          },
-        });
-      },
-    );
-
-    await page.goto(setupUrl(baseURL));
-    const currentStep = page.locator('section[aria-labelledby="current-setup-step-title"]');
-    await expect(currentStep.getByRole("heading", { name: "Choose your plan" })).toBeVisible();
-    await expect(currentStep.getByText("5% per direct booking")).toBeVisible();
-    await expect(currentStep.getByText("€35 / 30 days")).toBeVisible();
-    const commissionRequest = page.waitForRequest(
-      (request) => request.method() === "POST" && request.url().endsWith(`/select-commission`),
-    );
-    await currentStep.getByRole("button", { name: "Continue to payment methods" }).click();
-    await commissionRequest;
-
-    expect(commissionSelection).toMatchObject({
-      commandId: expect.stringContaining("finance-plan-commission"),
-      idempotencyKey: expect.any(String),
-    });
-  });
-
-  for (const mode of ["provider-only", "bank-only", "both"] as const)
-    test(`saves independent payment configuration: ${mode}`, async ({ page, baseURL }) => {
-      await primeBrowserState(page, true);
-      await mockAuthSession(page);
-      await mockSharedSetupStatus(page, sharedRoadmapStatus("payment"));
-      let policyFailed = false;
-      let destinationCalls = 0;
-      let paymentWrite: Record<string, unknown> | null = null;
-      let destinationWrite: Record<string, unknown> | null = null;
-      await page.route(
-        new RegExp(`/api/finance/properties/${propertyId}/bank-transfer-destination$`),
-        async (route) => {
-          if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
-          if (route.request().method() === "PUT") {
-            destinationCalls++;
-            destinationWrite = route.request().postDataJSON();
-          }
-          await route.fulfill({
-            status: 200,
-            headers: corsHeaders(route),
-            json: {
-              destination: destinationWrite
-                ? {
-                    id: propertyId,
-                    revision: 1,
-                    version: 1,
-                    enabled: true,
-                    deleted: false,
-                    maskedAccount: "•••• 7890",
-                  }
-                : null,
-            },
-          });
-        },
-      );
-      await page.route(
-        new RegExp(`/api/finance/properties/${propertyId}/payment-settings$`),
-        async (route) => {
-          if (route.request().method() === "OPTIONS") {
-            await fulfillCorsPreflight(route);
-            return;
-          }
-          if (route.request().method() === "PATCH") {
-            paymentWrite = route.request().postDataJSON() as Record<string, unknown>;
-            if (mode === "bank-only" && !policyFailed) {
-              policyFailed = true;
-              await route.fulfill({
-                status: 503,
-                headers: corsHeaders(route),
-                json: { code: "unavailable" },
-              });
-              return;
-            }
-          }
-          const paymentSettings =
-            route.request().method() === "PATCH"
-              ? (paymentWrite?.paymentSettings as Record<string, unknown>)
-              : {
-                  paymentsEnabled: false,
-                  paymentProvider: "stripe",
-                  acceptedMethods: [],
-                  depositPolicy: {},
-                  requiresManualReview: false,
-                };
-          await route.fulfill({
-            status: 200,
-            headers: corsHeaders(route),
-            json: {
-              paymentSettings: {
-                ...paymentSettings,
-                defaultCurrency: "IDR",
-                supportedCurrencies: ["IDR"],
-                providerAccount: {
-                  providerAccountId: "provider_account_123",
-                  provider: "stripe",
-                  status: "active",
-                  onboardingStatus: "completed",
-                  chargesEnabled: true,
-                  payoutsEnabled: true,
-                  ready: true,
-                },
-              },
-            },
-          });
-        },
-      );
-
-      await page.goto(setupUrl(baseURL));
-      const currentStep = page.locator('section[aria-labelledby="current-setup-step-title"]');
-      await expect(currentStep.getByRole("heading", { name: "How guests can pay" })).toBeVisible();
-      await expect(currentStep.getByLabel("Currency")).toHaveCount(0);
-      await expect(
-        currentStep.getByText("Payments use your property currency: IDR."),
-      ).toBeVisible();
-      if (mode !== "bank-only")
-        await currentStep.getByRole("button", { name: /Online Card/ }).click();
-      if (mode !== "provider-only") {
-        await currentStep.getByRole("button", { name: /Bank Transfer/ }).click();
-        await currentStep.getByLabel("Bank name").fill("Bank Central Asia");
-        await currentStep.getByLabel("Account holder").fill("Hotel Alpenrose");
-        await currentStep.getByLabel("Account number / IBAN").fill("1234567890");
-      }
-      const paymentSettingsRequest = page.waitForResponse(
-        (response) =>
-          response.request().method() === "PATCH" && response.url().endsWith(`/payment-settings`),
-      );
-      await currentStep.getByRole("button", { name: /Save and (continue|connect Stripe)/ }).click();
-      await paymentSettingsRequest;
-      if (mode === "bank-only") {
-        await expect(currentStep.getByRole("button", { name: "Save and continue" })).toBeEnabled();
-        const retry = page.waitForResponse(
-          (response) =>
-            response.request().method() === "PATCH" &&
-            response.url().endsWith("/payment-settings") &&
-            response.status() === 200,
-        );
-        await currentStep.getByRole("button", { name: "Save and continue" }).click();
-        await retry;
-        expect(destinationCalls).toBe(1);
-      }
-
-      const expected = [
-        "pay_at_property",
-        "cash",
-        "manual_card",
-        ...(mode !== "bank-only" ? ["card"] : []),
-        ...(mode !== "provider-only" ? ["bank_transfer"] : []),
-      ];
-      expect(
-        (paymentWrite?.paymentSettings as { acceptedMethods: string[] }).acceptedMethods.sort(),
-      ).toEqual(expected.sort());
-      expect(JSON.stringify(paymentWrite)).not.toContain("1234567890");
-      expect(JSON.stringify(paymentWrite)).not.toContain("Bank Central Asia");
-      if (mode === "provider-only") expect(destinationWrite).toBeNull();
-      else
-        expect(destinationWrite).toMatchObject({
-          action: "replace",
-          details: { accountNumber: "1234567890", bankName: "Bank Central Asia" },
-        });
-      if (mode === "bank-only")
-        expect(paymentWrite?.paymentSettings).not.toHaveProperty("paymentProvider");
-      else expect(paymentWrite?.paymentSettings).toHaveProperty("paymentProvider", "stripe");
-      expect(paymentWrite?.paymentSettings).not.toHaveProperty("defaultCurrency");
-      expect(paymentWrite?.paymentSettings).not.toHaveProperty("supportedCurrencies");
-      if (mode !== "provider-only") {
-        await expect(currentStep.getByLabel("Account number / IBAN")).toHaveValue("");
-        await expect(currentStep.getByText(/Saved account: •••• 7890/)).toBeVisible();
-        await page.screenshot({ path: `/tmp/v1041-${mode}-saved.png`, fullPage: true });
-      }
-    });
-
-  test("refreshes canonical Stripe readiness once on the exact Marketplace return", async ({
-    page,
-    baseURL,
-  }) => {
-    await primeBrowserState(page, true);
-    await mockAuthSession(page);
-    await mockSharedSetupStatus(page, sharedRoadmapStatus("payment"));
-    let reconciled = false;
-    let reconciliationCalls = 0;
-    let paymentSettingsReads = 0;
-    let otherProviderWrites = 0;
-    await page.route(
-      new RegExp(`/api/finance/properties/${propertyId}/payment-settings$`),
-      async (route) => {
-        if (route.request().method() === "OPTIONS") {
-          await fulfillCorsPreflight(route);
-          return;
-        }
-        paymentSettingsReads += 1;
-        await route.fulfill({
-          status: 200,
-          headers: corsHeaders(route),
-          json: { paymentSettings: stripePaymentSettings(reconciled) },
-        });
-      },
-    );
-    await page.route(
-      new RegExp(`/api/finance/properties/${propertyId}/provider-accounts/`),
-      async (route) => {
-        if (route.request().method() === "OPTIONS") {
-          await fulfillCorsPreflight(route);
-          return;
-        }
-        if (!route.request().url().endsWith("/stripe/reconcile")) {
-          otherProviderWrites += 1;
-          await route.fulfill({ status: 500, headers: corsHeaders(route), json: {} });
-          return;
-        }
-        reconciliationCalls += 1;
-        const body = route.request().postDataJSON() as Record<string, unknown>;
-        expect(body).toEqual({
-          commandId: expect.stringMatching(/^stripe-onboarding-.+:attempt:1$/),
-          idempotencyKey: body.commandId,
-        });
-        expect(body).not.toHaveProperty("providerAccountId");
-        reconciled = true;
-        await route.fulfill({
-          status: 200,
-          headers: corsHeaders(route),
-          json: { propertyId, providerAccount: { ready: true } },
-        });
-      },
-    );
-
-    await page.goto(`${setupUrl(baseURL)}&propertyId=${propertyId}&step=payments&stripe=return`);
-    const currentStep = page.locator('section[aria-labelledby="current-setup-step-title"]');
-    await expect(currentStep.getByText("Stripe is connected.")).toBeVisible();
-
-    expect(reconciliationCalls).toBe(1);
-    expect(paymentSettingsReads).toBe(2);
-    expect(otherProviderWrites).toBe(0);
-    await expect(page).toHaveURL(new RegExp(`propertyId=${propertyId}.*step=payments`));
-    expect(page.url()).not.toContain("stripe=");
-  });
-
-  test("hands a hotel with no rooms to PMS Rooms & Rates instead of the retired room route", async ({
-    page,
-    baseURL,
-  }) => {
-    await primeBrowserState(page, true);
-    await mockAuthSession(page);
-    await mockSharedSetupStatus(page, sharedRoadmapStatus("rooms_rates_availability"));
-    const retiredRoomWrites: string[] = [];
-    await mockOperationsApis(page, retiredRoomWrites);
-    const expectedHandoffUrl = await mockSetupExitHandoff(page, baseURL, propertyId, "/rooms");
-
-    await page.goto(setupUrl(baseURL));
-    const currentStep = page.locator('section[aria-labelledby="current-setup-step-title"]');
-    await expect(currentStep.getByText("Add your room types in Rooms & Rates.")).toBeVisible();
-    await currentStep.getByRole("button", { name: "Open Rooms & Rates" }).click();
-
-    await expect.poll(() => page.url()).toBe(expectedHandoffUrl);
-    await expect(page).toHaveTitle("PMS handoff");
-    expect(retiredRoomWrites).toEqual([]);
-  });
-
-  test("seeds the default guest terms on the step after rooms", async ({ page, baseURL }) => {
-    await primeBrowserState(page, true);
-    await mockAuthSession(page);
-    await mockSharedSetupStatus(page, sharedRoadmapStatus("guest_settings_policies"));
-    await mockOperationsApis(page);
-    await routeJson(
-      page,
-      new RegExp(`/api/booking/hotels/${propertyId}/settings/property(?:\\?|$)`),
-      {
-        property_name: "Hotel Alpenrose",
-        check_in_time: "15:00",
-        check_out_time: "11:00",
-        terms_text: "",
-        cancellation_policy_text: "Free cancellation until 7 days before arrival.",
-      },
-    );
-
-    await page.goto(setupUrl(baseURL));
-    const currentStep = page.locator('section[aria-labelledby="current-setup-step-title"]');
-    await expect(
-      currentStep.getByRole("heading", { name: "Review guest settings and policies" }),
-    ).toBeVisible();
-    const terms = currentStep.getByRole("textbox", { name: "Terms & Conditions", exact: true });
-    await expect(terms).toHaveValue(/direct agreement with us for our accommodation services/);
-    await expect(terms).toHaveAttribute(
-      "placeholder",
-      "Enter your Terms & Conditions. These are shown to guests before they confirm a booking.",
-    );
-    await terms.fill("");
-    await expect(
-      currentStep.getByText(
-        "Without Terms & Conditions, guests won't see a T&C link on the payment page. We recommend keeping at least the default.",
-      ),
-    ).toBeVisible();
-    await expect(
-      currentStep.getByText(
-        "Guests see these policies before they confirm a booking. They must agree to your Terms & Conditions and Cancellation Policy on the payment page.",
-      ),
-    ).toBeVisible();
-  });
-
-  test("shows only Hotel Operations steps when Marketplace is not selected", async ({
-    page,
-    baseURL,
-  }) => {
-    await primeBrowserState(page, true);
-    await mockAuthSession(page);
-    await mockSharedSetupStatus(page, operationsOnlyStatus());
-    await mockOperationsApis(page);
-
-    await page.goto(setupUrl(baseURL));
-
-    const setupProgress = page.getByRole("progressbar", { name: "Hotel setup progress" });
-    await expect(setupProgress).toHaveAttribute("aria-valuemax", "7");
-    await expect(setupProgress.locator('[data-state="reached"]')).toHaveCount(2);
-    await expect(setupProgress.locator('[data-state="upcoming"]')).toHaveCount(5);
-    await expect(page.getByRole("heading", { name: "Add your first room type" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Describe your hotel" })).toHaveCount(0);
-    await expect(
-      page.getByRole("heading", { name: "Prepare your collaboration offer" }),
-    ).toHaveCount(0);
-  });
-
-  for (const returnCase of [
-    {
-      source: "Booking",
-      entryProduct: "pms",
-      returnProduct: "booking",
-      returnTo: "/settings?section=booking",
-      requestedProductCanOpen: true,
-    },
-    {
-      source: "PMS",
-      entryProduct: "marketplace",
-      returnProduct: "pms",
-      returnTo: "/reservations?view=arrivals",
-      requestedProductCanOpen: false,
-    },
-  ] as const) {
-    test(`exits a ${returnCase.source} entry through the scoped incomplete PMS handoff`, async ({
-      page,
-      baseURL,
-    }) => {
-      await primeBrowserState(page, true);
-      await mockAuthSession(page);
-      await mockSharedSetupStatus(
-        page,
-        operationsOnlyStatus(returnCase.entryProduct, returnCase.requestedProductCanOpen),
-      );
-      await mockOperationsApis(page);
-
-      const expectedReturnUrl = await mockSetupExitHandoff(page, baseURL, propertyId);
-      await page.route(/\/__before-canonical-setup$/, (route) =>
-        route.fulfill({
-          contentType: "text/html",
-          body: "<!doctype html><title>Before setup</title><h1>Before setup</h1>",
-        }),
-      );
-
-      await page.goto("/__before-canonical-setup");
-      await page.goto(
-        productSetupUrl(baseURL, {
-          entryProduct: returnCase.entryProduct,
-          returnProduct: returnCase.returnProduct,
-          returnTo: returnCase.returnTo,
-        }),
-      );
-      await page.getByRole("button", { name: "Exit setup" }).click();
-
-      await expect.poll(() => page.url()).toBe(expectedReturnUrl);
-      await expect(page).toHaveTitle("PMS handoff");
-      await page.goBack();
-      await expect(page.getByRole("heading", { name: "Before setup" })).toBeVisible();
-    });
-  }
-
-  test("uploads a canonical hotel cover, saves both profiles, and advances to the collaboration offer", async ({
-    page,
-    baseURL,
-  }) => {
-    await primeBrowserState(page, true);
-    await mockAuthSession(page);
-    const publicProfileUpdates: unknown[] = [];
-    const marketplaceProfileUpdates: unknown[] = [];
-    const propertyPresentationUpdates: unknown[] = [];
-    const uploadedMediaObjectId = "00000000-0000-4000-8000-000000000099";
-    let uploadSessionRequest: Record<string, unknown> | null = null;
-    let uploadFinalized = false;
-    await page.route(/\/api\/hotel-setup\/status/, async (route) => {
-      if (route.request().method() === "OPTIONS") {
-        await fulfillCorsPreflight(route);
-        return;
-      }
-      const profileSaved = publicProfileUpdates.length > 0 && marketplaceProfileUpdates.length > 0;
-      await route.fulfill({
-        status: 200,
-        headers: corsHeaders(route),
-        json: profileSaved
-          ? sharedSetupStatus(["marketplaceOffer"])
-          : sharedSetupStatus(["publicProfile"]),
-      });
-    });
-    await mockMarketplaceProfileApis(page, [], [], {
-      publicProfile: publicProfileUpdates,
-      marketplaceProfile: marketplaceProfileUpdates,
-      propertyPresentation: propertyPresentationUpdates,
-    });
-    await routeJson(
-      page,
-      new RegExp(`/api/hotel-setup/properties/${propertyId}/steps/present-hotel`),
-      {
-        contractVersion: "hotel-catalog-step1.v1",
-        propertyId,
-        displayName: "Alpenrose Munich",
-        profileRevision: 1,
-        supportedLocales: ["en"],
-        profile: {
-          locale: "en",
-          shortDescription: "A welcoming independent hotel close to Munich's historic city centre.",
-          publicSlug: "alpenrose-munich",
-          amenities: { reviewed: true, keys: [] },
-          media: { coverMediaObjectId: null, galleryMediaObjectIds: [] },
-        },
-        baseRevisions: {
-          "hotel_catalog.profile": "profile:1",
-          "hotel_catalog.media": "profile:1",
-          "hotel_catalog.amenities": "profile:1",
-        },
-      },
-    );
-    await page.route(/\/api\/media\/upload-sessions(?:\/[^/]+\/finalize)?$/, async (route) => {
-      if (route.request().method() === "OPTIONS") {
-        await fulfillCorsPreflight(route);
-        return;
-      }
-      if (route.request().url().endsWith("/finalize")) {
-        uploadFinalized = true;
-        await route.fulfill({
-          status: 200,
-          headers: corsHeaders(route),
-          json: {
-            contractVersion: "platform-media-upload.v2",
-            mediaObjects: [
-              {
-                mediaObjectId: uploadedMediaObjectId,
-                purpose: "property.gallery_image",
-                status: "private_ready",
-                publicVariants: [],
-              },
-            ],
-          },
-        });
-        return;
-      }
-      uploadSessionRequest = route.request().postDataJSON() as Record<string, unknown>;
-      await route.fulfill({
-        status: 201,
-        headers: corsHeaders(route),
-        json: {
-          contractVersion: "platform-media-upload.v2",
-          uploadSession: { sessionId: "hotel-cover-e2e", status: "signed" },
-          uploadTargets: [
-            {
-              uploadTargetId: "hotel-cover-target-e2e",
-              clientFileId: "file_1",
-              method: "PUT",
-              uploadUrl: "https://uploads.vayada.localhost/hotel-cover-e2e",
-              headers: {},
-            },
-          ],
-        },
-      });
-    });
-
-    await page.goto(setupUrl(baseURL));
-
-    const setupProgress = page.getByTestId("hotel-setup-progress");
-    await expect(setupProgress.getByRole("button", { name: "Exit setup" })).toBeVisible();
-    await expect(page.getByText("Setting up", { exact: true })).toHaveCount(0);
-    await expect(page.getByText("Alpenrose Munich", { exact: true })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Add another service" })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Open Creator Marketplace" })).toHaveCount(0);
-    await expect(
-      page.getByRole("heading", { level: 1, name: "Describe your hotel" }),
-    ).toBeVisible();
-
-    const description = page.getByLabel("Hotel description", { exact: true });
-    await expect(description).toHaveCount(1);
-    await expect(page.locator("textarea")).toHaveCount(1);
-    const sharedCopy =
-      "An independent Munich stay that gives guests and creators a memorable city base.";
-    await description.fill(sharedCopy);
-    await page.getByLabel("Hotel cover photo file").setInputFiles({
-      name: "hotel-cover.webp",
-      mimeType: "image/webp",
-      buffer: Buffer.from("hotel-cover"),
-    });
-    const saveProfile = page.getByRole("button", { name: "Save hotel profile" });
-    await expect(saveProfile).toBeEnabled();
-    await saveProfile.click();
-
-    await expect(
-      page.getByRole("heading", { level: 1, name: "Prepare your collaboration offer" }),
-    ).toBeVisible();
-    expect(publicProfileUpdates).toEqual([
-      {
-        expectedProfileRevision: 2,
-        patch: { shortDescription: sharedCopy },
-      },
-    ]);
-    expect(uploadSessionRequest).toMatchObject({
-      purpose: "property.gallery_image",
-      visibility: "private",
-      resource: {
-        product: "hotel_catalog",
-        resourceType: "property",
-        resourceId: propertyId,
-        propertyId,
-      },
-    });
-    expect(uploadSessionRequest).not.toHaveProperty("expectedProfileRevision");
-    expect(uploadFinalized).toBe(true);
-    expect(propertyPresentationUpdates).toEqual([
-      {
-        expectedProfileRevision: 1,
-        assignments: [
-          {
-            mediaObjectId: uploadedMediaObjectId,
-            role: "cover",
-            altText: null,
-            sortOrder: 0,
-          },
-        ],
-      },
-    ]);
-    expect(marketplaceProfileUpdates).toEqual([{ hostSummary: sharedCopy }]);
-    await expect(page.getByLabel("Hotel description", { exact: true })).toHaveCount(0);
-    await expect(
-      page.getByRole("checkbox", { name: /Show city and country on public vayada surfaces/ }),
-    ).toHaveCount(0);
-    await expect(page.getByRole("heading", { name: /Public hotel cover/ })).toHaveCount(0);
-    await expect(page.getByLabel("Offer title", { exact: true })).toBeVisible();
-    await expect(page).toHaveURL(/\/setup\?/);
-  });
+  }) => recoverFirstHotel({ page, baseURL }, true));
 
   test("keeps Marketplace pages accessible while Marketplace setup tasks remain", async ({
     page,
@@ -1458,358 +922,6 @@ test.describe("marketplace-web shared setup activation", () => {
     await expect(page.getByRole("button", { name: "External creators coming soon" })).toBeVisible();
   });
 
-  test("reuses the shared hotel hero for a replacement offer", async ({ page, baseURL }) => {
-    test.skip(!baseURL, "Playwright base URL is required.");
-    await page.setViewportSize({ width: 2048, height: 1125 });
-    await primeBrowserState(page, true);
-    await mockAuthSession(page);
-    await mockSharedSetupStatus(page, sharedSetupStatus(["offerDeliverables"]));
-    const sharedHeroUrl = "https://media.example/alpenrose.webp";
-    await mockMarketplaceProfileApis(
-      page,
-      [marketplaceOffer("rejected")],
-      [
-        {
-          mediaType: "hero_image",
-          url: sharedHeroUrl,
-          altText: "Hotel Alpenrose",
-          sortOrder: 0,
-        },
-      ],
-    );
-    await page.route(sharedHeroUrl, async (route) => {
-      await route.fulfill({
-        status: 200,
-        headers: { ...corsHeaders(route), "content-type": "image/webp" },
-        body: Buffer.from("shared-hotel-photo"),
-      });
-    });
-    let createdOfferPayload: Record<string, unknown> | null = null;
-    let updatedOfferPayload: Record<string, unknown> | null = null;
-    let uploadFinalized = false;
-    await page.route(
-      new RegExp(`/api/marketplace/properties/${propertyId}/offers(?:\\?|$)`),
-      async (route) => {
-        if (route.request().method() === "OPTIONS") {
-          await fulfillCorsPreflight(route);
-          return;
-        }
-        if (route.request().method() === "POST") {
-          createdOfferPayload = route.request().postDataJSON() as Record<string, unknown>;
-          await route.fulfill({
-            status: 201,
-            headers: corsHeaders(route),
-            json: createdMarketplaceOffer(createdOfferPayload),
-          });
-          return;
-        }
-        await route.fulfill({
-          status: 200,
-          headers: corsHeaders(route),
-          json: { offers: [marketplaceOffer("rejected")] },
-        });
-      },
-    );
-    await page.route(
-      new RegExp(`/api/marketplace/properties/${propertyId}/offers/created-offer$`),
-      async (route) => {
-        if (route.request().method() === "OPTIONS") {
-          await fulfillCorsPreflight(route);
-          return;
-        }
-        updatedOfferPayload = route.request().postDataJSON() as Record<string, unknown>;
-        await route.fulfill({
-          status: 200,
-          headers: corsHeaders(route),
-          json: {
-            ...createdMarketplaceOffer(createdOfferPayload ?? {}),
-            media: [
-              {
-                mediaObjectId: "offer-media-e2e",
-                url: "https://media.example/offer.png",
-              },
-            ],
-          },
-        });
-      },
-    );
-    await page.route(/\/api\/media\/upload-sessions(?:\/[^/]+\/finalize)?$/, async (route) => {
-      if (route.request().method() === "OPTIONS") {
-        await fulfillCorsPreflight(route);
-        return;
-      }
-      if (route.request().url().endsWith("/finalize")) {
-        uploadFinalized = true;
-        await route.fulfill({
-          status: 200,
-          headers: corsHeaders(route),
-          json: {
-            mediaObjects: [
-              {
-                mediaId: "offer-media-e2e",
-                storageKey: "private/marketplace/offers/offer-media-e2e/original-safe.webp",
-                contentType: "image/webp",
-                sizeBytes: 11,
-                originalFilename: "shared-hotel-photo-1.webp",
-                variants: [
-                  {
-                    publicCdnUrl: null,
-                    storageKey: "private/marketplace/offers/offer-media-e2e/original-safe.webp",
-                  },
-                ],
-              },
-            ],
-          },
-        });
-        return;
-      }
-      expect(route.request().postDataJSON()).toMatchObject({
-        purpose: "marketplace.offer.media",
-        files: [
-          expect.objectContaining({
-            filename: "shared-hotel-photo-1.webp",
-            contentType: "image/webp",
-          }),
-        ],
-        resource: {
-          product: "marketplace",
-          resourceType: "marketplace_offer",
-          resourceId: "created-offer",
-        },
-      });
-      await route.fulfill({
-        status: 201,
-        headers: corsHeaders(route),
-        json: {
-          uploadSession: { sessionId: "offer-e2e" },
-          uploadTargets: [
-            {
-              uploadTargetId: "offer-target-e2e",
-              clientFileId: "file_1",
-              method: "PUT",
-              uploadUrl: "https://uploads.vayada.localhost/offer-e2e",
-              headers: {},
-            },
-          ],
-        },
-      });
-    });
-
-    await page.goto(setupUrl(baseURL));
-    const inlineSetupUrl = page.url();
-
-    await expect(
-      page.getByRole("heading", { level: 1, name: "Prepare your collaboration offer" }),
-    ).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Offer details" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Offerings" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Looking For", exact: true })).toBeVisible();
-    await expect(page.getByText("Your collaboration offer is already saved")).toHaveCount(0);
-    const completeSetup = page.getByRole("button", { name: "Save collaboration offer" });
-    await expect(completeSetup).toBeDisabled();
-    expect(
-      await page.evaluate(
-        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
-      ),
-    ).toBe(true);
-
-    await page.getByLabel("Offer title", { exact: true }).fill("Three-night creator stay");
-    await page
-      .getByLabel(/Description/)
-      .fill("A memorable city stay with breakfast and a guided local experience.");
-    await expect(page.getByAltText("Three-night creator stay main photo")).toHaveAttribute(
-      "src",
-      sharedHeroUrl,
-    );
-    const offerings = page
-      .getByRole("heading", { name: "Offerings" })
-      .locator("xpath=ancestor::section[1]");
-    const requirements = page
-      .getByRole("heading", { name: "Looking For", exact: true })
-      .locator("xpath=ancestor::section[1]");
-    await offerings.getByText("Affiliate", { exact: true }).click();
-    await offerings.getByRole("button", { name: "Select All Year" }).click();
-    await offerings.getByText("Instagram", { exact: true }).click();
-    await requirements.getByText("TikTok", { exact: true }).click();
-    await expect(completeSetup).toBeEnabled();
-    await expect(offerings.getByRole("checkbox", { name: "Affiliate" })).toBeChecked();
-    await expect(offerings.getByRole("checkbox", { name: "Instagram" })).toBeChecked();
-    await expect(requirements.getByRole("checkbox", { name: "TikTok" })).toBeChecked();
-
-    await page.setViewportSize({ width: 390, height: 844 });
-    expect(
-      await page.evaluate(
-        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
-      ),
-    ).toBe(true);
-
-    await completeSetup.click();
-    await expect.poll(() => createdOfferPayload).not.toBeNull();
-    expect(createdOfferPayload).toMatchObject({
-      deliverables: [
-        {
-          platform: "instagram",
-          deliverableType: "content",
-          quantity: 1,
-          timingGuidance: null,
-        },
-      ],
-      compensationOptions: [expect.objectContaining({ platforms: ["instagram"] })],
-      creatorRequirements: expect.objectContaining({ platforms: ["tiktok"] }),
-    });
-    await expect.poll(() => uploadFinalized).toBe(true);
-    await expect.poll(() => updatedOfferPayload).not.toBeNull();
-    expect(page.url()).toBe(inlineSetupUrl);
-  });
-
-  test("autosaves an unfinished collaboration draft before exiting the canonical flow", async ({
-    page,
-    baseURL,
-  }) => {
-    test.skip(!baseURL, "Playwright base URL is required.");
-    await primeBrowserState(page, true);
-    await mockAuthSession(page);
-    await mockSharedSetupStatus(page, sharedSetupStatus(["marketplaceOffer"]));
-    await mockMarketplaceProfileApis(page, []);
-    const destination = await mockSetupExitHandoff(page, baseURL, propertyId);
-
-    await page.goto(setupUrl(baseURL));
-    await expect(
-      page.getByRole("heading", { level: 1, name: "Prepare your collaboration offer" }),
-    ).toBeVisible();
-    await expect(page.getByTestId("marketplace-offer-draft-note")).toContainText(
-      "you may need to select them again",
-    );
-    await page.getByLabel("Offer title", { exact: true }).fill("Draft creator stay");
-    await page
-      .getByLabel(/Description/)
-      .fill("A draft collaboration stay that can be completed after returning.");
-
-    await expect
-      .poll(() =>
-        page.evaluate((draftPropertyId) => {
-          const value = localStorage.getItem(`vayada_hotel_marketplace_draft:${draftPropertyId}`);
-          return value ? JSON.parse(value) : null;
-        }, propertyId),
-      )
-      .toMatchObject({
-        currentStep: 1,
-        listings: [
-          {
-            name: "Draft creator stay",
-            description: "A draft collaboration stay that can be completed after returning.",
-          },
-        ],
-      });
-
-    page.once("dialog", (dialog) => dialog.accept());
-    await page.getByRole("button", { name: "Exit setup" }).click();
-    await expect(page).toHaveURL(destination);
-  });
-
-  test("restores a hotel offer draft after a reload and asks only for local photos again", async ({
-    page,
-    baseURL,
-  }) => {
-    test.skip(!baseURL, "Playwright base URL is required.");
-    await primeBrowserState(page, true);
-    await page.addInitScript(
-      ({ draftPropertyId }) => {
-        localStorage.setItem(
-          `vayada_hotel_marketplace_draft:${draftPropertyId}`,
-          JSON.stringify({
-            version: 3,
-            savedAt: Date.now(),
-            currentStep: 4,
-            form: {
-              about:
-                "Alpenrose gives travel creators a welcoming base for memorable Munich stories.",
-              localityPublic: true,
-            },
-            listings: [
-              {
-                name: "Restored creator stay",
-                location: "Munich, DE",
-                description: "A restored city stay with breakfast and a local experience.",
-                accommodation_type: "hotel",
-                images: [],
-                imageMediaObjectIds: [],
-                collaborationTypes: ["Free Stay"],
-                availability: ["Jan"],
-                platforms: ["Instagram"],
-                freeStayMinNights: 2,
-                freeStayMaxNights: 3,
-                lookingForPlatforms: ["TikTok"],
-                targetGroupCountries: [],
-                targetGroupAgeGroups: [],
-              },
-            ],
-            omittedLocalPhotos: true,
-          }),
-        );
-      },
-      { draftPropertyId: propertyId },
-    );
-    await mockAuthSession(page);
-    await mockSharedSetupStatus(page, sharedSetupStatus(["marketplaceOffer"]));
-    await mockMarketplaceProfileApis(page, []);
-
-    await page.goto(setupUrl(baseURL));
-
-    await expect(
-      page.getByRole("alert").filter({ hasText: "Your saved offer details were restored" }),
-    ).toContainText("Select the local photos again");
-    await expect(page.getByLabel("Offer title", { exact: true })).toHaveValue(
-      "Restored creator stay",
-    );
-    await expect(page.getByLabel(/Description/)).toHaveValue(
-      "A restored city stay with breakfast and a local experience.",
-    );
-    await expect(page.getByRole("button", { name: "Save collaboration offer" })).toBeDisabled();
-    await expect(page.getByLabel("Hotel description", { exact: true })).toHaveCount(0);
-    await expect(
-      page.getByRole("checkbox", { name: /Show city and country on public vayada surfaces/ }),
-    ).toHaveCount(0);
-  });
-
-  test("asks for a replacement offer when the existing Marketplace offer was rejected", async ({
-    page,
-    baseURL,
-  }) => {
-    test.skip(!baseURL, "Playwright base URL is required.");
-    await primeBrowserState(page, true);
-    await mockAuthSession(page);
-    await mockSharedSetupStatus(page, sharedSetupStatus(["marketplaceOffer"]));
-    await mockMarketplaceProfileApis(page, [marketplaceOffer("rejected")]);
-
-    await page.goto(setupUrl(baseURL));
-
-    await expect(
-      page.getByRole("heading", { level: 1, name: "Prepare your collaboration offer" }),
-    ).toBeVisible();
-    await expect(page.getByLabel("Offer title", { exact: true })).toBeVisible();
-    await expect(page.getByLabel("Hotel description", { exact: true })).toHaveCount(0);
-    await expect(page.getByText("Your collaboration offer is already saved")).toHaveCount(0);
-  });
-
-  test("blocks suspended Marketplace activation instead of opening profile tools", async ({
-    page,
-    baseURL,
-  }) => {
-    await primeBrowserState(page);
-    await mockAuthSession(page);
-    await mockSharedSetupStatus(page, sharedSetupStatus([], "suspended"));
-
-    await page.goto(setupUrl(baseURL));
-
-    await expect(
-      page.getByText("Creator Marketplace is not available for this hotel right now.", {
-        exact: false,
-      }),
-    ).toBeVisible();
-    await expect(page.getByRole("button", { name: "Continue setup" })).toHaveCount(0);
-  });
-
   test("blocks a direct suspended activation URL before loading Marketplace profile data", async ({
     page,
     baseURL,
@@ -1817,6 +929,14 @@ test.describe("marketplace-web shared setup activation", () => {
     await primeBrowserState(page, true);
     await mockAuthSession(page);
     await mockSharedSetupStatus(page, sharedSetupStatus([], "suspended"));
+    await mockPropertySetupRoute(
+      page,
+      createPropertySetupRouteMock({
+        propertyId,
+        selectedTracks: ["creator_marketplace"],
+        resumeStepId: "present_hotel",
+      }),
+    );
     let loadedMarketplaceProfile = false;
     await page.route(/\/api\/marketplace\/properties\/.*\/(?:profile|offers)/, async (route) => {
       loadedMarketplaceProfile = true;
@@ -1826,11 +946,7 @@ test.describe("marketplace-web shared setup activation", () => {
     await page.goto(profileActivationUrl(baseURL));
 
     await expect(page).toHaveURL(new RegExp(`/setup\\?.*propertyId=${propertyId}`));
-    await expect(
-      page.getByText("Creator Marketplace is not available for this hotel right now.", {
-        exact: false,
-      }),
-    ).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Present your hotel", level: 1 })).toBeVisible();
     expect(loadedMarketplaceProfile).toBe(false);
   });
 
@@ -1871,37 +987,75 @@ test.describe("marketplace-web shared setup activation", () => {
     expect(authorizedScopeChecked).toBe(true);
     expect(loadedMarketplaceProfile).toBe(false);
   });
-
-  test("shows Marketplace verification as pending without asking for more setup", async ({
-    page,
-    baseURL,
-  }) => {
-    await primeBrowserState(page);
-    await mockAuthSession(page);
-    await mockSharedSetupStatus(page, sharedSetupStatus([], "pending_review"));
-
-    await page.goto(setupUrl(baseURL));
-
-    const review = page.locator('section[aria-labelledby="setup-review-title"]');
-    await expect(
-      review.locator("dt", { hasText: /^Creator Marketplace$/ }).locator("xpath=../.."),
-    ).toContainText("Pending");
-    await expect(page.getByRole("button", { name: "Continue setup" })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Open Creator Marketplace" })).toBeEnabled();
-    await expect(page.getByRole("button", { name: "Add another service" })).toBeVisible();
-    const setupProgress = page.getByTestId("hotel-setup-progress");
-    await expect(setupProgress.getByRole("button", { name: "Exit setup" })).toBeVisible();
-    await expect(setupProgress.getByRole("button", { name: "Add another service" })).toHaveCount(0);
-    await page.setViewportSize({ width: 390, height: 844 });
-    expect(
-      await page.evaluate(
-        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
-      ),
-    ).toBe(true);
-  });
 });
 
-async function mockGooglePlaces(page: Page) {
+// An existing hotel with open hotel basics: setup opens the shared profile editor on its
+// identity step; Continue moves to Location. Returns the profile PUT bodies.
+async function openLocationWithOpenBasics(
+  page: Page,
+  baseURL: string | undefined,
+  google: Parameters<typeof mockGooglePlaces>[1] = {},
+) {
+  await mockGooglePlaces(page, google);
+  await primeBrowserState(page, true);
+  await mockAuthSession(page);
+  await mockSharedSetupStatus(page, hotelBasicsOpenStatus());
+  const profileWrites: unknown[] = [];
+  await mockMarketplaceProfileApis(
+    page,
+    [],
+    [{ mediaType: "logo", url: "https://media.example/alpenrose-logo.webp" }],
+    { profile: profileWrites },
+  );
+  await routeJson(page, /\/api\/hotel-setup\/property-types/, {
+    contractVersion: "adaptive-hotel-property-types.v1",
+    propertyTypes: [{ value: "hotel", label: "Hotel" }],
+  });
+  await mockPropertySetupRoute(
+    page,
+    createPropertySetupRouteMock({
+      propertyId,
+      selectedTracks: ["creator_marketplace"],
+      resumeStepId: "present_hotel",
+    }),
+  );
+  await page.goto(setupUrl(baseURL));
+  await expect(page.getByRole("textbox", { name: /Hotel name/ })).toHaveValue("Alpenrose Munich");
+  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(
+    page.getByTestId("location-search-panel").getByRole("heading", {
+      name: "Where is your property?",
+    }),
+  ).toBeVisible();
+  return profileWrites;
+}
+
+// The phone location card: the search panel's parent, a full-width sheet over the map.
+function locationCard(page: Page) {
+  return page.getByTestId("location-search-panel").locator("..");
+}
+
+async function locationCardTop(page: Page) {
+  return (await locationCard(page).boundingBox())?.y ?? Number.NaN;
+}
+
+// The map mock tracks where the point it was last centred on is drawn (data-center-y). A pin there
+// stands 43px tall above it; the whole pin must be on the map and outside the card.
+async function mapPointClearOfLocationCard(page: Page) {
+  const map = page.getByTestId("google-address-map-canvas");
+  const mapBox = await map.boundingBox();
+  const cardBox = await locationCard(page).boundingBox();
+  const pointY = Number(await map.getAttribute("data-center-y"));
+  if (!mapBox || !cardBox || !Number.isFinite(pointY)) return false;
+  const tip = mapBox.y + pointY;
+  const onMap = tip - 43 >= mapBox.y && tip <= mapBox.y + mapBox.height;
+  return onMap && (tip - 43 >= cardBox.y + cardBox.height || tip <= cardBox.y);
+}
+
+async function mockGooglePlaces(
+  page: Page,
+  { placesUnavailable = false, mapsUnavailable = false, mapsAuthFailure = false } = {},
+) {
   await page.route(/https:\/\/maps\.googleapis\.com\/maps\/api\/js/, async (route) => {
     expect(new URL(route.request().url()).searchParams.get("language")).toBe("en");
     await route.fulfill({
@@ -1924,23 +1078,77 @@ async function mockGooglePlaces(page: Page) {
           };
           customElements.define(elementName, PlaceAutocompleteElement);
         }
+        const latLng = (lat, lng) => ({ lat: () => lat, lng: () => lng });
+        // Text search knows one made-up building and one postcode area; queries are kept.
+        window.vayadaE2ePlaceQueries = [];
+        const Place = {
+          searchByText: async ({ textQuery, fields }) => {
+            window.vayadaE2ePlaceQueries.push(textQuery + " | " + fields.join(","));
+            return {
+              places: textQuery.startsWith("Marienplatz 1,")
+                ? [{ location: latLng(48.1373932, 11.5754485), types: ["street_address"] }]
+                : textQuery.startsWith("Unknown Street 5,")
+                  ? [{ location: latLng(48.1351, 11.582), types: ["postal_code"] }]
+                  : [],
+            };
+          },
+        };
         class GoogleMap {
           constructor(element, options) {
             this.element = element;
+            this.listeners = {};
             this.setCenter(options.center);
             this.setZoom(options.zoom);
+            element.dataset.zoomControl = String(Boolean(options.zoomControl));
+            element.dataset.zoomControlPosition = String(options.zoomControlOptions?.position ?? "");
+            // Google reports a rejected key after loading, through a global callback.
+            if (${mapsAuthFailure}) setTimeout(() => window.gm_authFailure?.(), 0);
+            // A real click anywhere on the map lands on one made-up spot.
+            element.addEventListener("click", () =>
+              this.listeners.click?.({ latLng: latLng(48.1374, 11.5754) }),
+            );
+          }
+          addListener(eventName, handler) {
+            this.listeners[eventName] = handler;
+            return { remove: () => delete this.listeners[eventName] };
+          }
+          getZoom() {
+            return this.zoom;
+          }
+          moveCamera({ center, zoom }) {
+            this.setCenter(center);
+            this.setZoom(zoom);
           }
           setCenter(position) {
             this.element.dataset.center = position.lat + "," + position.lng;
+            // Where the centred point is drawn (px from the map's top); panToBounds moves it.
+            this.element.dataset.centerY = String(this.element.clientHeight / 2);
+          }
+          panToBounds(bounds, padding) {
+            // Callers keep the point the map was just centred on in view: the least pan that brings
+            // it inside the padded map.
+            const centerY = Number(this.element.dataset.centerY);
+            const bottom = this.element.clientHeight - padding.bottom;
+            this.element.dataset.centerY = String(Math.min(Math.max(centerY, padding.top), bottom));
           }
           setZoom(zoom) {
+            this.zoom = zoom;
             this.element.dataset.zoom = String(zoom);
           }
         }
         class GoogleMarker {
           constructor(options) {
             this.element = options.map.element;
+            this.listeners = {};
+            this.element.dataset.markerDraggable = String(Boolean(options.draggable));
+            this.element.vayadaE2eDragMarker = (lat, lng) => {
+              this.setPosition({ lat, lng });
+              this.listeners.dragend?.({ latLng: latLng(lat, lng) });
+            };
             this.setPosition(options.position);
+          }
+          addListener(eventName, handler) {
+            this.listeners[eventName] = handler;
           }
           setPosition(position) {
             if (position) {
@@ -1954,10 +1162,16 @@ async function mockGooglePlaces(page: Page) {
           maps: {
             importLibrary: async (library) =>
               library === "maps"
-                ? { Map: GoogleMap }
+                ? ${mapsUnavailable}
+                  ? Promise.reject(new Error("Maps is unavailable."))
+                  : { Map: GoogleMap }
                 : library === "marker"
                   ? { Marker: GoogleMarker }
-                  : { PlaceAutocompleteElement },
+                  : library === "core"
+                    ? { ControlPosition: { RIGHT_TOP: 3 } }
+                    : ${placesUnavailable}
+                    ? Promise.reject(new Error("Places is unavailable."))
+                    : { PlaceAutocompleteElement, Place },
           },
         };
         window.__vayadaGoogleMapsReady?.();
@@ -2001,26 +1215,6 @@ function setupUrl(baseURL: string | undefined) {
     return url.toString();
   }
   return path;
-}
-
-function productSetupUrl(
-  baseURL: string | undefined,
-  input: {
-    entryProduct: "booking" | "marketplace" | "pms";
-    returnProduct: "booking" | "marketplace" | "pms";
-    returnTo: string;
-  },
-): string {
-  const query = new URLSearchParams(input);
-  if (!baseURL) return `/setup?${query.toString()}`;
-
-  const url = new URL(baseURL);
-  if (url.hostname === "127.0.0.1" && url.port === "3000") {
-    url.hostname = "localhost";
-  }
-  url.pathname = "/setup";
-  url.search = query.toString();
-  return url.toString();
 }
 
 function profileActivationUrl(baseURL: string | undefined) {
@@ -2114,70 +1308,12 @@ async function mockSharedSetupStatus(page: Page, status: AdaptiveHotelSetupStatu
   });
 }
 
-async function mockOperationsApis(page: Page, retiredRoomWrites?: string[]) {
-  await mockPropertyLaunchSettings(page);
-  await page.route(
-    new RegExp(`/api/pms/properties/${propertyId}/room-types(?:\\?|$)`),
-    async (route) => {
-      if (route.request().method() === "OPTIONS") {
-        await fulfillCorsPreflight(route);
-        return;
-      }
-      if (route.request().method() === "GET") {
-        await route.fulfill({
-          status: 200,
-          headers: corsHeaders(route),
-          json: {
-            contractVersion: "pms-operations.v1",
-            propertyId,
-            items: [],
-            sourceFreshness: {},
-          },
-        });
-        return;
-      }
-      // Room creation moved to the PMS setup route; this one answers 503 in production.
-      retiredRoomWrites?.push(route.request().method());
-      await route.fulfill({
-        status: 503,
-        headers: corsHeaders(route),
-        json: { code: "PRICING_UNAVAILABLE" },
-      });
-    },
-  );
-}
-
-async function mockPropertyLaunchSettings(page: Page, currency: string | (() => string) = "EUR") {
-  await page.route(
-    new RegExp(`/api/hotel-setup/properties/${propertyId}/launch-settings(?:\\?|$)`),
-    async (route) => {
-      if (route.request().method() === "OPTIONS") {
-        await fulfillCorsPreflight(route);
-        return;
-      }
-      await route.fulfill({
-        status: 200,
-        headers: corsHeaders(route),
-        json: {
-          defaultCurrency: typeof currency === "function" ? currency() : currency,
-          supportedCurrencies: [],
-          defaultLanguage: "en",
-          supportedLanguages: [],
-          instagram: "",
-          facebook: "",
-          tiktok: "",
-          youtube: "",
-        },
-      });
-    },
-  );
-}
-
 async function mockMarketplaceProfileApis(
   page: Page,
   offers: unknown[] = [],
   media: unknown[] = [],
   writes?: {
+    profile?: unknown[];
     publicProfile?: unknown[];
     marketplaceProfile?: unknown[];
     propertyPresentation?: unknown[];
@@ -2261,6 +1397,7 @@ async function mockMarketplaceProfileApis(
       }
       if (route.request().method() === "PUT") {
         const request = route.request().postDataJSON() as Record<string, unknown>;
+        writes?.profile?.push(request);
         expect(request).toEqual({
           expectedProfileRevision: canonicalProfile.profileRevision,
           patch: expect.any(Object),
@@ -2473,6 +1610,24 @@ async function routeJson(page: Page, pattern: RegExp, json: unknown) {
     await route.fulfill({ status: 200, headers: corsHeaders(route), json });
   });
 }
+function hotelBasicsOpenStatus(): AdaptiveHotelSetupStatus {
+  return createAdaptiveHotelSetupStatusMock({
+    entryProduct: "marketplace",
+    organizationId: "11111111-1111-4111-8111-111111111111",
+    organizationDisplayName: "Alpenrose Hotel Group",
+    selectedTracks: ["creator_marketplace"],
+    propertyId,
+    propertyDisplayName: "Alpenrose Munich",
+    taskOverrides: {
+      shared_identity: {
+        ownerProgress: "not_started",
+        readiness: "actionable",
+        actionableBy: "owner",
+      },
+    },
+  });
+}
+
 function sharedSetupStatus(
   missingSteps = [
     "publicProfile",
@@ -2481,7 +1636,7 @@ function sharedSetupStatus(
     "compensationOptions",
     "creatorRequirements",
   ],
-  marketplaceState: "setup_required" | "suspended" | "pending_review" | "ready" = "setup_required",
+  marketplaceState: "setup_required" | "suspended" | "ready" = "setup_required",
 ): AdaptiveHotelSetupStatus {
   const taskId: SetupTaskId = missingSteps.includes("publicProfile")
     ? "public_profile"
@@ -2512,34 +1667,6 @@ function sharedSetupStatus(
         decision: "unavailable",
         destinationRouteKey: null,
         reasonCode: "marketplace_suspended",
-      },
-    });
-  }
-  if (marketplaceState === "pending_review") {
-    return createAdaptiveHotelSetupStatusMock({
-      entryProduct: "marketplace",
-      organizationId: "11111111-1111-4111-8111-111111111111",
-      organizationDisplayName: "Alpenrose Hotel Group",
-      selectedTracks: ["creator_marketplace"],
-      propertyId,
-      publicId: "alpenrose-munich",
-      propertyDisplayName: "Alpenrose Munich",
-      locationSummary: "Munich, DE",
-      taskOverrides: {
-        creator_offer: {
-          callerCapability: "waiting",
-          ownerProgress: "owner_complete",
-          readiness: "pending_review",
-          actionableBy: "operator",
-          reasonCodes: ["marketplace_review_pending"],
-        },
-      },
-      recommendedTaskId: null,
-      entryDecision: {
-        propertyId,
-        decision: "enter",
-        destinationRouteKey: "marketplace.workspace",
-        reasonCode: null,
       },
     });
   }
@@ -2603,127 +1730,6 @@ function sharedSetupStatus(
   });
 }
 
-function sharedRoadmapStatus(
-  recommendedTaskId: SetupTaskId = "public_profile",
-): AdaptiveHotelSetupStatus {
-  const orderedTaskIds: SetupTaskId[] = [
-    "public_profile",
-    "creator_offer",
-    "rooms_rates_availability",
-    "guest_settings_policies",
-    "billing_plan",
-    "payment",
-    "direct_booking_publication",
-  ];
-  const recommendedIndex = orderedTaskIds.indexOf(recommendedTaskId);
-  return createAdaptiveHotelSetupStatusMock({
-    entryProduct: "marketplace",
-    organizationId: "11111111-1111-4111-8111-111111111111",
-    organizationDisplayName: "Alpenrose Hotel Group",
-    selectedTracks: ["hotel_operations", "creator_marketplace"],
-    propertyId,
-    publicId: "alpenrose-munich",
-    propertyDisplayName: "Alpenrose Munich",
-    locationSummary: "Munich, DE",
-    taskOverrides: Object.fromEntries(
-      orderedTaskIds.map((taskId, index) => [
-        taskId,
-        index < recommendedIndex
-          ? {
-              ownerProgress: "owner_complete",
-              readiness: "complete",
-              actionableBy: null,
-              reasonCodes: [],
-            }
-          : {
-              ownerProgress: "not_started",
-              readiness: "actionable",
-              actionableBy: "owner",
-              reasonCodes:
-                taskId === "rooms_rates_availability"
-                  ? [
-                      "missing_active_room_type",
-                      "missing_non_retired_room",
-                      "missing_active_rate_plan",
-                      "missing_future_inventory",
-                    ]
-                  : [`${taskId}_required`],
-            },
-      ]),
-    ),
-    recommendedTaskId,
-    entryDecision: {
-      propertyId,
-      decision: "enter",
-      destinationRouteKey: "marketplace.workspace",
-      reasonCode: null,
-    },
-  });
-}
-
-function stripePaymentSettings(ready: boolean) {
-  return {
-    paymentsEnabled: true,
-    paymentProvider: "stripe",
-    acceptedMethods: ["card"],
-    defaultCurrency: "EUR",
-    supportedCurrencies: ["EUR"],
-    depositPolicy: {},
-    requiresManualReview: false,
-    providerAccount: {
-      providerAccountId: "stripe-account-1",
-      provider: "stripe",
-      status: ready ? "active" : "setup_incomplete",
-      onboardingStatus: ready ? "completed" : "invited",
-      chargesEnabled: ready,
-      payoutsEnabled: ready,
-    },
-  };
-}
-
-function operationsOnlyStatus(
-  entryProduct: "booking" | "marketplace" | "pms" = "marketplace",
-  requestedProductCanOpen = false,
-): AdaptiveHotelSetupStatus {
-  return createAdaptiveHotelSetupStatusMock({
-    entryProduct,
-    organizationId: "11111111-1111-4111-8111-111111111111",
-    organizationDisplayName: "Alpenrose Hotel Group",
-    selectedTracks: ["hotel_operations"],
-    propertyId,
-    publicId: "alpenrose-munich",
-    propertyDisplayName: "Alpenrose Munich",
-    locationSummary: "Munich, DE",
-    taskOverrides: {
-      rooms_rates_availability: {
-        ownerProgress: "not_started",
-        readiness: "actionable",
-        actionableBy: "operator",
-        reasonCodes: [
-          "missing_active_room_type",
-          "missing_non_retired_room",
-          "missing_active_rate_plan",
-          "missing_future_inventory",
-        ],
-      },
-    },
-    recommendedTaskId: "rooms_rates_availability",
-    entryDecision: requestedProductCanOpen
-      ? {
-          propertyId,
-          decision: "enter",
-          destinationRouteKey: `${entryProduct}.workspace`,
-          reasonCode: null,
-        }
-      : {
-          propertyId,
-          decision: "setup_required",
-          destinationRouteKey: "hotel_setup",
-          reasonCode: "track_not_selected",
-        },
-  });
-}
-
 function marketplaceOffer(status: "pending" | "verified" | "rejected") {
   return {
     offerId: `${status}-offer`,
@@ -2736,27 +1742,6 @@ function marketplaceOffer(status: "pending" | "verified" | "rejected") {
     deliverables: [],
     compensationOptions: [],
     creatorRequirements: null,
-    createdAt: "2026-06-30T00:00:00.000Z",
-    updatedAt: "2026-06-30T00:00:00.000Z",
-  };
-}
-
-function createdMarketplaceOffer(payload: Record<string, unknown>) {
-  const compensationOptions = (payload.compensationOptions ?? []) as Array<Record<string, unknown>>;
-  return {
-    offerId: "created-offer",
-    mediaResourceId: "created-offer",
-    propertyId,
-    offerStatus: "pending",
-    title: payload.title ?? "Created offer",
-    offerSummary: payload.offerSummary ?? null,
-    media: [],
-    deliverables: payload.deliverables ?? [],
-    compensationOptions: compensationOptions.map((option, index) => ({
-      compensationOptionId: `compensation-${index + 1}`,
-      ...option,
-    })),
-    creatorRequirements: payload.creatorRequirements ?? null,
     createdAt: "2026-06-30T00:00:00.000Z",
     updatedAt: "2026-06-30T00:00:00.000Z",
   };

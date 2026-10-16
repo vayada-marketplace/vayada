@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { parsePublicBookingQuote, type PublicBookingQuoteRequest } from "@vayada/domain-booking/replacement-pricing";
 import { requestReplacementQuote } from "./replacementQuote";
+import { resetServerClock } from "@/lib/serverClock";
 const request: PublicBookingQuoteRequest = {
   version: "public-booking-quote-request.v1", paymentMethod: "pay_at_property",
   selection: { version: "public-pricing-selection.v1", checkIn: "2026-10-01", checkOut: "2026-10-03", currency: "EUR", promoCode: null, addons: [], rooms: [
@@ -18,7 +19,7 @@ const reply = () => ({
 });
 const fetcher = vi.fn<typeof fetch>();
 beforeEach(() => {
-  sessionStorage.clear(); vi.useFakeTimers(); vi.setSystemTime(new Date("2026-09-14T12:01:00.000Z"));
+  sessionStorage.clear(); resetServerClock(); vi.useFakeTimers(); vi.setSystemTime(new Date("2026-09-14T12:01:00.000Z"));
   vi.stubGlobal("fetch", fetcher); fetcher.mockReset();
   fetcher.mockImplementation(async () => new Response(JSON.stringify(reply()), { status: 200 }));
 });
@@ -48,6 +49,8 @@ it("retains uncertain retry keys and separates slug, guests, offers and payment"
   expect(new Set([sentKey(1), sentKey(2), sentKey(3), sentKey(4), sentKey(5)]).size).toBe(5);
 });
 it("rejects expired historical replies and rotates the next retry key", async () => {
+  // A replay keeps its original issue time, so it doesn't vouch for the server's clock.
+  fetcher.mockImplementation(async () => new Response(JSON.stringify({ ...reply(), replayed: true }), { status: 200 }));
   vi.setSystemTime(new Date("2026-09-14T12:06:00.000Z"));
   await expect(requestReplacementQuote("hotel", request)).rejects.toThrow("expired");
   await expect(requestReplacementQuote("hotel", request)).rejects.toThrow("expired");
@@ -124,4 +127,33 @@ it("rotates only the exact refresh-required request key, preserving newer and un
   await expect(requestReplacementQuote("hotel", request)).rejects.toMatchObject({ status: 409 });
   await requestReplacementQuote("hotel", request);
   expect(sentKey(5)).toBe(sentKey(4));
+});
+
+it.each([
+  ["1 s behind", -1000],
+  ["2 min behind", -120_000],
+  ["1 s ahead", 1000],
+  ["2 min ahead", 120_000],
+  ["6 min ahead", 360_000],
+])("accepts a fresh quote when the device clock is %s, and expires it on the server's clock (VAY-2134)", async (_label, skew) => {
+  const issued = Date.parse(reply().issuedAt);
+  vi.setSystemTime(issued + skew);
+  await expect(requestReplacementQuote("hotel", request)).resolves.toMatchObject({ quoteId: reply().quoteId });
+  vi.setSystemTime(Date.parse(reply().expiresAt) + skew);
+  await expect(requestReplacementQuote("hotel", request)).rejects.toThrow("expired");
+});
+
+it("keeps the server clock across a reload, so a replayed quote is judged on it (VAY-2134)", async () => {
+  // The device is 6 minutes ahead; a fresh quote calibrates the server clock.
+  vi.setSystemTime(Date.parse(reply().issuedAt) + 360_000);
+  await requestReplacementQuote("hotel", request);
+  // After a reload the same checkout key replays the quote with its original timestamps.
+  resetServerClock();
+  fetcher.mockImplementation(async () => new Response(JSON.stringify({ ...reply(), replayed: true }), { status: 200 }));
+  await expect(requestReplacementQuote("hotel", request)).resolves.toMatchObject({ replayed: true });
+  expect(sentKey(1)).toBe(sentKey(0));
+  // Without the saved estimate the device clock would call the quote expired.
+  sessionStorage.clear();
+  resetServerClock();
+  await expect(requestReplacementQuote("hotel", request)).rejects.toThrow("expired");
 });

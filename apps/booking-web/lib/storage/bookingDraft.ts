@@ -149,8 +149,10 @@ const PAYMENT_STATUSES = [
   "pending",
   "authorized",
   "captured",
+  "partially_paid",
   "paid",
   "refunded",
+  "waived",
   "failed",
   "cancelled",
 ] as const;
@@ -191,6 +193,10 @@ function nightsBetween(checkIn: string, checkOut: string): number {
 function bookingStatus(value: unknown): Booking["status"] | null {
   if (value === "canceled") return "cancelled";
   if (value === "pending_payment") return "pending";
+  // Migrated legacy rows (VAY-2163): "completed" is a checked-out stay, and a no-show reads as
+  // confirmed, the way the API reports no-shows marked in the PMS.
+  if (value === "completed") return "checked_out";
+  if (value === "no_show") return "confirmed";
   return BOOKING_STATUSES.includes(value as Booking["status"])
     ? (value as Booking["status"])
     : null;

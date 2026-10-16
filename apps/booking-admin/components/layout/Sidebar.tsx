@@ -4,15 +4,12 @@ import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  BoltIcon,
   ChevronLeftIcon,
   ChevronDownIcon,
   CheckIcon,
   Cog6ToothIcon,
-  CubeIcon,
-  TicketIcon,
 } from "@heroicons/react/24/outline";
-import { activeNavModules, useFeatureModuleActivations } from "@vayada/feature-hub";
+import { useFeatureModuleActivations, visibleNavModules } from "@vayada/feature-hub";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "@/lib/i18n";
 import { moduleActivationClient } from "@/services/api/moduleActivationClient";
@@ -39,26 +36,18 @@ interface NavItem {
 const coreNavItems: NavItem[] = [
   { labelKey: "layout.sidebar.dashboard", href: "/", icon: DashboardIcon },
   { labelKey: "layout.sidebar.designStudio", href: "/design-studio", icon: DesignStudioIcon },
-  { labelKey: "layout.sidebar.bookingFlow", href: "/booking-flow", icon: BookingFlowIcon },
-  { labelKey: "bookingFlow.tabs.addons", href: "/add-ons", icon: CubeIcon },
 ];
 
-const promoCodesNavItem: NavItem = {
-  labelKey: "bookingFlow.tabs.promos",
-  href: "/promo-codes",
-  icon: TicketIcon,
+// Feature Hub module items keep the labels of their pages (VAY-2200).
+const MODULE_LABEL_KEYS: Record<string, string> = {
+  "add-ons": "bookingFlow.tabs.addons",
+  promos: "bookingFlow.tabs.promos",
 };
 
 const settingsNavItem: NavItem = {
   labelKey: "layout.sidebar.settings",
   href: "/settings",
   icon: Cog6ToothIcon,
-};
-
-const featureHubNavItem: NavItem = {
-  labelKey: "layout.sidebar.featureHub",
-  href: "/settings/feature-hub",
-  icon: BoltIcon,
 };
 
 export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
@@ -71,21 +60,15 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   );
   const switcherRef = useRef<HTMLDivElement>(null);
   const { t } = useTranslation();
-  const { activeModuleIds, hotelId: activationPropertyId } =
+  const { activeModuleIds, supportedModuleIds } =
     useFeatureModuleActivations(moduleActivationClient);
-  const activeFeatureNavItems: NavItem[] = activationPropertyId
-    ? activeNavModules("booking_engine", activeModuleIds).map((module) => ({
-        ...module.navItem!,
-        labelKey: `featureHub.module.${module.id}.name`,
-      }))
-    : [];
-  const navItems = [
-    ...coreNavItems,
-    ...activeFeatureNavItems,
-    promoCodesNavItem,
-    settingsNavItem,
-    featureHubNavItem,
-  ];
+  // Add-ons and Promos stay listed unless Feature Hub says they are off (VAY-2200).
+  const moduleNavItems: NavItem[] = visibleNavModules(
+    "booking_engine",
+    activeModuleIds,
+    supportedModuleIds,
+  ).map((module) => ({ ...module.navItem!, labelKey: MODULE_LABEL_KEYS[module.id] }));
+  const navItems = [...coreNavItems, ...moduleNavItems, settingsNavItem];
 
   const switchApp = async (
     baseUrl: string,
@@ -339,20 +322,16 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 px-2 py-3 space-y-0.5 overflow-y-auto">
+      <nav aria-label="Main" className="flex-1 px-2 py-3 space-y-0.5 overflow-y-auto">
         {navItems.map((item) => {
-          const isActive =
-            item.href === "/"
-              ? pathname === "/"
-              : pathname.startsWith(item.href) &&
-                // Feature Hub lives under /settings but has its own sidebar item.
-                !(item === settingsNavItem && pathname.startsWith(featureHubNavItem.href));
+          const isActive = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
           const label = item.labelKey ? t(item.labelKey) : item.label || "";
           return (
             <Link
               key={item.href}
               href={item.href}
               onClick={onNavigate}
+              aria-current={isActive ? "page" : undefined}
               className={cn(
                 "flex items-center gap-2.5 px-2.5 py-2 rounded-md text-[13px] transition-colors",
                 isActive
@@ -431,30 +410,6 @@ function DesignStudioIcon({ className }: { className?: string }) {
       <path d="M12 17v4" />
       <path d="M3 12h4" />
       <path d="M17 12h4" />
-    </svg>
-  );
-}
-
-function BookingFlowIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <rect x="3" y="4" width="4" height="4" rx="1" />
-      <rect x="10" y="4" width="4" height="4" rx="1" />
-      <rect x="17" y="4" width="4" height="4" rx="1" />
-      <path d="M5 8v3" />
-      <path d="M12 8v3" />
-      <path d="M19 8v3" />
-      <path d="M5 11h14" />
-      <path d="M12 11v5" />
-      <rect x="9" y="16" width="6" height="4" rx="1" />
     </svg>
   );
 }

@@ -13,7 +13,7 @@ const LOCALE_MAP: Record<string, string> = {
   id: "id-ID",
 };
 
-function resolveLocale(locale?: string): string {
+export function resolveLocale(locale?: string): string {
   return LOCALE_MAP[locale || "en"] || "en-GB";
 }
 
@@ -33,6 +33,32 @@ export function formatDate(date: string | Date, locale?: string): string {
     month: "short",
     year: "numeric",
   });
+}
+
+/** "Fri, 13 Nov 2026" for a stay date (YYYY-MM-DD): the hotel's calendar day, in any time zone. */
+export function formatStayDate(date: string, locale?: string): string {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return date;
+  return new Date(`${date}T00:00:00Z`).toLocaleDateString(resolveLocale(locale), {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+/** "Central European Time" for an IANA time zone, in the guest's language; UTC and no zone read "UTC". */
+export function formatTimeZoneName(timeZone: string | null | undefined, locale?: string): string {
+  if (!timeZone?.trim() || /^(Etc\/)?(UTC|UCT|GMT0?|Universal|Zulu)$/i.test(timeZone)) return "UTC";
+  try {
+    return (
+      new Intl.DateTimeFormat(resolveLocale(locale), { timeZone, timeZoneName: "longGeneric" })
+        .formatToParts(new Date())
+        .find((part) => part.type === "timeZoneName")?.value ?? timeZone
+    );
+  } catch {
+    return timeZone;
+  }
 }
 
 export function formatDateShort(date: string | Date, locale?: string): string {

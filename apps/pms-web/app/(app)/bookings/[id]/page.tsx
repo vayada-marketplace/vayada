@@ -1728,7 +1728,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
 
   if (loading) {
     return (
-      <div className="p-6">
+      <div className="p-4 md:p-6">
         <div className="animate-pulse space-y-4">
           <div className="h-8 bg-gray-200 rounded w-48" />
           <div className="h-64 bg-gray-200 rounded" />
@@ -1739,7 +1739,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
 
   if (!booking) {
     return (
-      <div className="p-6">
+      <div className="p-4 md:p-6">
         <p className="text-gray-500">{t("bookings.detail.notFound")}</p>
       </div>
     );
@@ -1841,7 +1841,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
   });
 
   return (
-    <div className="p-4 sm:p-6 max-w-3xl mx-auto">
+    <div className="p-4 md:p-6 max-w-3xl">
       {/* 1. Header */}
       <div className="flex items-center gap-3 mb-6">
         <Link href="/bookings" className="text-gray-400 hover:text-gray-600 -ml-1 p-1">
@@ -3003,9 +3003,13 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
             most urgent action stays visible without scrolling further. */}
         {isPending && booking.hostResponseDeadline && (
           <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
-            <p className="mb-2 text-xs text-gray-500">{t("bookings.detail.reviewManualPayment")}</p>
+            <p className="mb-2 text-xs text-gray-500">
+              {booking.awaitingPaymentConfirmation
+                ? t("bookings.detail.confirmManualPaymentReceipt")
+                : t("bookings.detail.reviewManualPayment")}
+            </p>
             <div className="flex flex-wrap gap-3">
-              {booking.paymentMethod === "paypal" ? (
+              {booking.paymentMethod === "paypal" || booking.awaitingPaymentConfirmation ? (
                 <button
                   onClick={handleMarkPaid}
                   disabled={
@@ -3014,7 +3018,9 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                   className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
                 >
                   <CheckCircleIcon className="w-4 h-4" />
-                  {t("bookings.detail.markAsPaid")}
+                  {booking.paymentMethod === "bank_transfer"
+                    ? t("bookings.detail.markBankTransferReceived")
+                    : t("bookings.detail.markAsPaid")}
                 </button>
               ) : (
                 <button

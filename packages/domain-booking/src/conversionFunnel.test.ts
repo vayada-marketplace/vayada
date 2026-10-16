@@ -3,6 +3,8 @@ import {
   buildBookingConversionFunnel,
   FUNNEL_EVENT_TYPES,
   FUNNEL_STAGES,
+  isFunnelId,
+  parseFunnelEventMetadata,
   type BookingFunnelEvent,
   type FunnelPaymentMethod,
 } from "./conversionFunnel.js";
@@ -110,5 +112,95 @@ describe("sequential Booking conversion funnel", () => {
       ),
     ).toBe(true);
     expect(result.biggestDrop).toBeNull();
+  });
+});
+
+describe("funnel event allowlist (VAY-2197)", () => {
+  const sequence = { funnelVersion: 1, funnelSequence: 3 };
+
+  it("accepts each event with exactly its own properties", () => {
+    for (const [type, properties] of [
+      ["page_visit", {}],
+      ["room_viewed", { roomTypeId: "f6853000-0000-4000-8000-000000000010" }],
+      ["rate_selected", { entry: "room_card" }],
+      ["step_viewed", { step: "extras" }],
+      ["addons_step_passed", { extrasShown: false, extrasChosen: false }],
+      ["details_completed", {}],
+      ["complete_booking_clicked", { paymentMethod: "pay_at_property", mode: "request" }],
+      ["payment_authorized", { paymentMethod: "card" }],
+      ["booking_completed", { paymentMethod: "bank_transfer", outcome: "awaiting_payment" }],
+      ["booking_error", { step: "payment", reason: "booking_uncertain" }],
+      [
+        "booking_error",
+        { step: "payment", reason: "booking_unavailable", code: "CARD_PAYMENT_UNAVAILABLE" },
+      ],
+    ] as const) {
+      expect(parseFunnelEventMetadata(type, { ...properties, ...sequence })).toEqual({
+        ...properties,
+        ...sequence,
+      });
+    }
+  });
+
+  it("rejects guest data, free text, unknown events and broken sequences", () => {
+    for (const [type, metadata] of [
+      ["page_visit", { ...sequence, email: "guest@example.com" }],
+      ["page_visit", { ...sequence, locale: "de" }],
+      ["details_completed", { ...sequence, firstName: "Ada" }],
+      ["room_viewed", { ...sequence, roomTypeId: "guest@example.com" }],
+      ["room_viewed", sequence],
+      ["rate_selected", { ...sequence, entry: "elsewhere" }],
+      ["step_viewed", { ...sequence, step: "confirmation" }],
+      ["addons_step_passed", { ...sequence, extrasShown: "yes", extrasChosen: false }],
+      ["complete_booking_clicked", { ...sequence, paymentMethod: "unknown", mode: "instant" }],
+      ["payment_authorized", { ...sequence, paymentMethod: "pay_at_property" }],
+      [
+        "booking_completed",
+        { ...sequence, paymentMethod: "card", outcome: "paid", reference: "VAY-1" },
+      ],
+      [
+        "booking_error",
+        { ...sequence, step: "payment", reason: "payment_failed", code: "card_declined" },
+      ],
+      [
+        "booking_error",
+        { ...sequence, step: "payment", reason: "payment_failed", message: "Declined" },
+      ],
+      ["page_visit", { funnelSequence: 1 }],
+      ["page_visit", { funnelVersion: 1, funnelSequence: 0 }],
+      ["page_visit", { funnelVersion: 1, funnelSequence: "1" }],
+      ["page_visit", null],
+      ["page_visit", []],
+      ["searched_dates", sequence],
+      ["toString", sequence],
+      ["__proto__", sequence],
+    ] as const) {
+      expect(parseFunnelEventMetadata(type, metadata), `${type} ${JSON.stringify(metadata)}`).toBe(
+        null,
+      );
+    }
+  });
+
+  it("keeps the new events out of the dashboard stages", () => {
+    expect(FUNNEL_EVENT_TYPES).toEqual(expect.arrayContaining(["step_viewed", "booking_error"]));
+    expect(FUNNEL_STAGES).not.toContain("step_viewed");
+    expect(FUNNEL_STAGES).not.toContain("booking_error");
+  });
+
+  it("counts the same with gaps in the sequence (step views and errors aren't read as stages)", () => {
+    const plain = journey("plain", "pay_at_property", true);
+    const gapped = journey("gapped", "pay_at_property", true).map((event) => ({
+      ...event,
+      sequence: event.sequence * 3,
+    }));
+    expect(buildBookingConversionFunnel(gapped, true)).toEqual(
+      buildBookingConversionFunnel(plain, true),
+    );
+  });
+
+  it("only takes random UUIDs as session and event ids", () => {
+    expect(isFunnelId("0b6f0f6e-6a1b-4c39-9d1e-5d3c2a1b0f9e")).toBe(true);
+    for (const id of ["sid_123", "guest@example.com", "", 7, undefined])
+      expect(isFunnelId(id)).toBe(false);
   });
 });

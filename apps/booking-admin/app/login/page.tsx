@@ -12,12 +12,17 @@ import {
 import { resolveBookingSetupGuard } from "@/lib/utils/sharedSetupGuard";
 import { useTranslation } from "@/lib/i18n";
 
+const MARKETPLACE_URL = process.env.NEXT_PUBLIC_MARKETPLACE_URL || "https://app.vayada.com";
+
 function LoginContent() {
   const { t } = useTranslation();
   const router = useRouter();
   const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [hotelSetupRequired, setHotelSetupRequired] = useState(
+    searchParams.get("auth_error_code") === "hotel_workspace_required",
+  );
   const [submitError, setSubmitError] = useState(
     searchParams.get("auth_error") ??
       (searchParams.get("expired") === "true" ? t("auth.login.errorSessionExpired") : ""),
@@ -46,6 +51,7 @@ function LoginContent() {
   const handleOrganizationSelect = useCallback(
     async (workosOrganizationId: string) => {
       setSubmitError("");
+      setHotelSetupRequired(false);
       setIsSubmitting(true);
       try {
         const response = passwordOrganizations.length
@@ -70,6 +76,7 @@ function LoginContent() {
     async (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
       setSubmitError("");
+      setHotelSetupRequired(false);
       setIsSubmitting(true);
       setPasswordOrganizations([]);
       try {
@@ -86,6 +93,10 @@ function LoginContent() {
           error.organizations?.length
         ) {
           setPasswordOrganizations(error.organizations);
+          return;
+        }
+        if (error instanceof AuthStateError && error.state === "hotel_workspace_required") {
+          setHotelSetupRequired(true);
           return;
         }
         setSubmitError(error instanceof Error ? error.message : t("auth.login.errorUnexpected"));
@@ -159,7 +170,12 @@ function LoginContent() {
       email={email}
       password={password}
       isSubmitting={isSubmitting}
-      submitError={submitError}
+      submitError={hotelSetupRequired ? t("auth.login.hotelWorkspaceRequired") : submitError}
+      submitErrorAction={
+        hotelSetupRequired
+          ? { label: t("auth.login.setUpHotel"), href: `${MARKETPLACE_URL}/login` }
+          : undefined
+      }
       organizations={workspaceOptions ?? null}
       forgotPasswordHref="/forgot-password"
       onEmailChange={setEmail}
@@ -174,6 +190,7 @@ function LoginContent() {
               setPassword("");
               setPasswordOrganizations([]);
               setSubmitError("");
+              setHotelSetupRequired(false);
             }
           : undefined
       }

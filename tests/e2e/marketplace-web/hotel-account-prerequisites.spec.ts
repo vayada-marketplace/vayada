@@ -1,5 +1,9 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 
+import {
+  createPropertySetupRouteMock,
+  mockPropertySetupRoute,
+} from "../support/propertySetupRouteMocks";
 import { createAdaptiveHotelSetupStatusMock } from "../support/sharedHotelSetupMocks";
 import { corsHeaders, fulfillCorsPreflight } from "./utils/cors";
 
@@ -56,8 +60,12 @@ test.describe("hotel account prerequisites", () => {
     await mockPropertyTypes(page);
     await page.route(/\/api\/hotel-setup\/properties$/, async (route) => {
       writes.push(requestWrite(route));
-      const body = route.request().postDataJSON() as Record<string, unknown>;
-      await fulfillJson(route, { propertyId, profileRevision: 1, profile: body });
+      // A new hotel carries its guest preferences in the create command; the response
+      // returns only the stored profile.
+      const { initialLaunchSettings: _launchSettings, ...profile } = route
+        .request()
+        .postDataJSON() as Record<string, unknown>;
+      await fulfillJson(route, { propertyId, profileRevision: 1, profile });
     });
     await page.route(/\/api\/media\/upload-sessions(?:\/[^/]+\/finalize)?$/, async (route) => {
       writes.push(requestWrite(route));
@@ -116,6 +124,14 @@ test.describe("hotel account prerequisites", () => {
       },
     );
 
+    await mockPropertySetupRoute(
+      page,
+      createPropertySetupRouteMock({
+        propertyId,
+        selectedTracks: ["hotel_operations", "creator_marketplace"],
+        resumeStepId: "present_hotel",
+      }),
+    );
     await page.goto(setupUrl(baseURL));
     await page.getByLabel("Hotel Operations").locator("xpath=ancestor::label").click();
     await page.getByLabel("Creator Marketplace").locator("xpath=ancestor::label").click();
@@ -182,7 +198,7 @@ test.describe("hotel account prerequisites", () => {
     await expect(page.getByLabel("Website")).toHaveCount(0);
     await page.getByRole("button", { name: "Save and continue" }).click();
 
-    await expect(page.getByRole("heading", { name: "Review and next steps" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Present your hotel", level: 1 })).toBeVisible();
     expect(selectedTracks).toEqual(["hotel_operations", "creator_marketplace"]);
     const profileWrite = writes.find(({ path }) => path.endsWith("/hotel-setup/properties"));
     expect(profileWrite?.body).toMatchObject({
@@ -213,13 +229,15 @@ test.describe("hotel account prerequisites", () => {
       },
     });
     expect(assignmentWrite?.idempotencyKey).toBeTruthy();
-    const launchSettingsWrite = writes.find(({ path }) => path.endsWith("/launch-settings"));
-    expect(launchSettingsWrite?.body).toMatchObject({
-      defaultCurrency: "EUR",
-      supportedCurrencies: ["USD", "LKR"],
-      defaultLanguage: "de",
-      supportedLanguages: ["en", "nl"],
+    expect(profileWrite?.body).toMatchObject({
+      initialLaunchSettings: {
+        defaultCurrency: "EUR",
+        supportedCurrencies: ["USD", "LKR"],
+        defaultLanguage: "de",
+        supportedLanguages: ["en", "nl"],
+      },
     });
+    expect(writes.filter(({ path }) => path.endsWith("/launch-settings"))).toEqual([]);
   });
 
   test("resumes a finalized logo assignment after reload and replays the exact command", async ({
@@ -309,15 +327,26 @@ test.describe("hotel account prerequisites", () => {
       },
     );
 
+    await mockPropertySetupRoute(
+      page,
+      createPropertySetupRouteMock({
+        propertyId,
+        selectedTracks: ["creator_marketplace"],
+        resumeStepId: "present_hotel",
+      }),
+    );
     await page.goto(setupUrl(baseURL, propertyId));
     await expect(page.getByText("Logo ready to finish")).toBeVisible();
     await completePrefilledProfile(page);
-    await expect(page.getByRole("main").getByRole("alert")).toContainText("Failed to fetch");
+    // A dropped connection shows the wizard's retry copy, not the raw fetch error.
+    await expect(page.getByRole("main").getByRole("alert")).toContainText(
+      "Couldn't save. Check your connection and try again.",
+    );
     await page.reload();
     await expect(page.getByText("Logo ready to finish")).toBeVisible();
     await completePrefilledProfile(page);
 
-    await expect(page.getByRole("heading", { name: "Review and next steps" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Present your hotel", level: 1 })).toBeVisible();
     expect(assignmentKeys).toEqual([
       pending.assignmentIdempotencyKey,
       pending.assignmentIdempotencyKey,

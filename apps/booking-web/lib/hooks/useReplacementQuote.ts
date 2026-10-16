@@ -4,7 +4,31 @@ import type {
   PublicBookingQuote,
   PublicBookingQuoteRequest,
 } from "@vayada/domain-booking/replacement-pricing";
+import { ApiError } from "@/services/api/client";
+import { serverNow } from "@/lib/serverClock";
 import { requestReplacementQuote } from "@/services/api/replacementQuote";
+
+/** The server's code for a refused quote, when it sent one. */
+export function replacementQuoteErrorCode(error: unknown): string | undefined {
+  if (!(error instanceof ApiError) || !error.detail || typeof error.detail !== "object")
+    return undefined;
+  const code = (error.detail as { code?: unknown }).code;
+  return typeof code === "string" ? code : undefined;
+}
+
+/** The guest's message when a quote is refused. */
+export function replacementQuoteErrorMessage(error: unknown): string {
+  // VAY-2145: bank transfer and PayPal need their payment deadline to end before check-in.
+  if (
+    error instanceof ApiError &&
+    error.status === 422 &&
+    !!error.detail &&
+    typeof error.detail === "object" &&
+    (error.detail as { code?: unknown }).code === "MANUAL_PAYMENT_TOO_SOON"
+  )
+    return "This payment method isn’t available this close to check-in. Choose another way to pay.";
+  return "We couldn't price this selection. Check your room choices and try again.";
+}
 
 /** Display only the submitted selection, and retire it on edit, tenant change or expiry. */
 export function useReplacementQuote(slug: string, request: PublicBookingQuoteRequest | null) {
@@ -16,6 +40,9 @@ export function useReplacementQuote(slug: string, request: PublicBookingQuoteReq
     attempt: number;
     quote?: PublicBookingQuote;
     error?: string;
+    /** The HTTP status of a refused quote, when the server answered. */
+    errorStatus?: number;
+    errorCode?: string;
   }>();
   useEffect(() => {
     if (submitted !== identity) {
@@ -39,15 +66,17 @@ export function useReplacementQuote(slug: string, request: PublicBookingQuoteReq
               quote,
               error: "This price has expired. Get an updated price.",
             }),
-          Math.max(0, Date.parse(quote.expiresAt) - Date.now()),
+          Math.max(0, Date.parse(quote.expiresAt) - serverNow()),
         );
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (!controller.signal.aborted)
           setResult({
             identity,
             attempt,
-            error: "We couldn't price this selection. Check your room choices and try again.",
+            error: replacementQuoteErrorMessage(error),
+            errorStatus: error instanceof ApiError ? error.status : undefined,
+            errorCode: replacementQuoteErrorCode(error),
           });
       });
     return () => {
@@ -61,6 +90,8 @@ export function useReplacementQuote(slug: string, request: PublicBookingQuoteReq
   return {
     quote: current?.quote,
     error: current?.error,
+    errorStatus: current?.errorStatus,
+    errorCode: current?.errorCode,
     loading: !!request && submitted === identity && attempt > 0 && !current,
     submit: () => {
       setSubmitted(identity);

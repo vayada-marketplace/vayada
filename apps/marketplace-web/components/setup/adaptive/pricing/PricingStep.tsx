@@ -1,11 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { FirstPricingSetup, type SetupRoom } from "@vayada/product-onboarding/FirstPricingSetup";
+import type { FinancePaymentReadinessSnapshot } from "@vayada/domain-finance";
 import {
-  englishPricingSetup,
-  type Translate,
-} from "@vayada/product-onboarding/firstPricingSetupMessages";
+  AcceptedPaymentMethods,
+  type ManualPaymentMethod,
+  type PaymentMethod,
+} from "@vayada/product-onboarding/AcceptedPaymentMethods";
+import type { SetupRoom } from "@vayada/product-onboarding/FirstPricingSetup";
+import { englishPricingSetup } from "@vayada/product-onboarding/firstPricingSetupMessages";
 
 import type { AdaptiveSetupStepComponentProps } from "../AdaptiveSetupStepFormDispatcher";
 import {
@@ -14,7 +17,15 @@ import {
   type CurrentPublication,
   type FirstPricing,
 } from "./publishFirstPricing";
+import {
+  defaultCancellation,
+  freeCancellationDays,
+  paymentsStepMethods,
+  setupRates,
+  type SetupCancellation,
+} from "./setupRates";
 import { ApiErrorResponse } from "@/services/api/client";
+import { financePaymentReadinessClient } from "@/services/api/financePaymentReadinessClient";
 import {
   onboardingPricingApi,
   PricingOwnerError,
@@ -22,21 +33,22 @@ import {
 } from "@/services/api/onboardingPricingClient";
 
 type Loaded = { owners: OnboardingPricingOwners; publication: CurrentPublication };
+/** Something to fill in before publishing: a room's price (keyed by the room) or how guests pay ("pay"). */
+type Problem = { key: string; text: string };
 
-/** The shared form's English text, except where it describes the PMS editor's draft flow. */
-const onboardingText: Record<string, string> = {
-  // The currency is always fixed here, which the form reads as "another room".
-  "pricing.setup.titleAnotherRoom": "Set a room rate",
-  "pricing.setup.continue": "Add this rate",
-  "pricing.setup.continueHint":
-    "Added rates are published together when you publish prices below. Nothing is sent to channels.",
+// The Payments step's names for the ways to pay.
+const methodWords: Record<PaymentMethod, string> = {
+  pay_at_property: "Pay at hotel",
+  card: "Online card",
+  bank_transfer: "Bank transfer",
+  paypal: "PayPal",
 };
-const t: Translate = (key, params) => onboardingText[key] ?? englishPricingSetup(key, params);
 
 /**
- * First pricing of a new hotel: one property currency, a first rate for every operating room
- * through the shared PMS first-setup form, published as pricing-v2 offers, and the final-price
- * confirmation. Later price changes happen in each room's Prices tab in the PMS.
+ * First pricing of a new hotel (VAY-2188): one property currency, a price per night for every
+ * operating room, one cancellation choice and the ways to pay from the Payments step, published
+ * as pricing-v2 offers with the final-price confirmation. Children under 12 stay free and there is
+ * no minimum stay; seasons, meals and more are set later in each room's Prices tab in the PMS.
  */
 export function PricingStep({
   route,
@@ -54,13 +66,51 @@ export function PricingStep({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
   const [currencyChoice, setCurrencyChoice] = useState("");
-  const [added, setAdded] = useState<FirstPricing[]>([]);
+  const [prices, setPrices] = useState<Record<string, string>>({});
+  const [cancellation, setCancellation] = useState<SetupCancellation>(defaultCancellation);
+  // The Payments step's choice (undefined while it loads, null when it can't be read); `picked`
+  // counts only while the step has to ask.
+  const [readiness, setReadiness] = useState<FinancePaymentReadinessSnapshot | null | undefined>();
+  const [picked, setPicked] = useState<PaymentMethod[] | null>(null);
+  const [missing, setMissing] = useState<Problem[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<{ message: string; reload: boolean } | null>(null);
   const progress = useRef(newPublishProgress());
+  // One offer id per room for a publish attempt, so pressing Publish again resumes it.
+  const offerIds = useRef<Record<string, string>>({});
   const running = useRef(false);
   const lastAction = useRef<() => Promise<void>>(async () => undefined);
   const mounted = useRef(true);
+  const [manualMethods, setManualMethods] = useState<ManualPaymentMethod[]>([]);
+  useEffect(() => {
+    let current = true;
+    // First prices may take bank transfer and PayPal only while they can be used (VAY-2139).
+    pricingClient.paymentMethods().then(
+      (value) => {
+        if (current) setManualMethods(value);
+      },
+      () => {
+        if (current) setManualMethods([]);
+      },
+    );
+    return () => {
+      current = false;
+    };
+  }, [pricingClient]);
+  useEffect(() => {
+    let current = true;
+    financePaymentReadinessClient.load(propertyId).then(
+      (value) => {
+        if (current) setReadiness(value);
+      },
+      () => {
+        if (current) setReadiness(null);
+      },
+    );
+    return () => {
+      current = false;
+    };
+  }, [propertyId, reload]);
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -134,10 +184,7 @@ export function PricingStep({
       .filter(({ offers }) => offers.length > 0)
       .map(({ roomTypeId }) => roomTypeId),
   );
-  const addedRoomIds = new Set(added.map(({ configuration }) => configuration.roomTypeId));
-  const unpriced = owners.rooms.filter(
-    ({ roomTypeId }) => !publishedRoomIds.has(roomTypeId) && !addedRoomIds.has(roomTypeId),
-  );
+  const unpriced = owners.rooms.filter(({ roomTypeId }) => !publishedRoomIds.has(roomTypeId));
   const setupRooms: SetupRoom[] = unpriced.map((room) => ({
     roomTypeId: room.roomTypeId,
     name: room.facts.name,
@@ -155,22 +202,71 @@ export function PricingStep({
   // current prices are published again (the PMS editor allows the same re-save).
   const stale = !!publication?.stale;
   // The server completes the step: every operating room published and prices confirmed final.
-  const complete = allPriced && added.length === 0 && !stale && step.state === "complete";
+  const complete = allPriced && !stale && step.state === "complete";
+  const stepMethods =
+    readiness === undefined
+      ? undefined
+      : readiness && paymentsStepMethods(readiness, manualMethods);
+  const methods = stepMethods ?? picked ?? [];
+  const pricing = !!currency && !currencyMismatch && setupRooms.length > 0 && !paymentsPending;
+  const children = setupRooms.some(({ capacity }) => capacity.children > 0);
+  /** An edit starts a new publish attempt; `solved` names the problem it fixes. */
+  const changed = (solved?: string) => {
+    progress.current = newPublishProgress();
+    offerIds.current = {};
+    lastAction.current = async () => undefined;
+    setError(null);
+    if (solved) setMissing((previous) => previous.filter(({ key }) => key !== solved));
+  };
 
-  const finish = async () => {
-    if (added.length > 0 || stale) {
-      await publishFirstPricing(pricingClient, publication, added, progress.current);
+  const finish = async (rates: FirstPricing[]) => {
+    if (rates.length > 0 || stale) {
+      await publishFirstPricing(pricingClient, publication, rates, progress.current);
       const published = await pricingClient.read();
       if (!mounted.current) return;
       setLoaded({ owners, publication: published });
-      setAdded([]);
+      setPrices({});
     }
     await refreshRoute();
     await saveAndContinue();
   };
+  const publishPrices = () => {
+    // Each room is built on its own, so a price that doesn't parse is named with its room.
+    const problems: Problem[] = [];
+    const rates: FirstPricing[] = [];
+    for (const room of setupRooms) {
+      if (!prices[room.roomTypeId]?.trim()) {
+        problems.push({ key: room.roomTypeId, text: `A price per night for ${room.name}` });
+        continue;
+      }
+      if (!methods.length) continue;
+      try {
+        rates.push(
+          ...setupRates(
+            propertyId.toLowerCase(),
+            [room],
+            prices,
+            currency!,
+            cancellation,
+            methods,
+            (roomTypeId) => (offerIds.current[roomTypeId] ??= crypto.randomUUID()),
+          ),
+        );
+      } catch {
+        problems.push({
+          key: room.roomTypeId,
+          text: `A price per night for ${room.name} in numbers only, like 89.50`,
+        });
+      }
+    }
+    if (setupRooms.length && !methods.length) problems.push({ key: "pay", text: "How guests pay" });
+    setMissing(problems);
+    if (problems.length) return;
+    void run(() => finish(rates));
+  };
   const startOver = async () => {
-    setAdded([]);
-    setError(null);
+    setPrices({});
+    changed();
     await refreshRoute();
     setReload((value) => value + 1);
   };
@@ -192,105 +288,124 @@ export function PricingStep({
         </div>
       )}
 
-      <section aria-labelledby="pricing-currency-heading">
-        <SectionHeading
-          id="pricing-currency-heading"
-          title="Currency"
-          description="One currency for every room, rate and payment method of this hotel."
-        />
-        {currency ? (
-          <p className="mt-4 text-sm text-gray-800">
-            All prices are in <strong>{currency}</strong>.
-          </p>
-        ) : (
-          <div className="mt-4 flex max-w-md flex-wrap items-end gap-3">
-            <label className="block grow text-sm font-semibold text-gray-900">
-              Hotel pricing currency
-              <select
-                value={currencyChoice}
-                onChange={(event) => setCurrencyChoice(event.target.value)}
-                className={inputClass}
-              >
-                <option value="" disabled>
-                  Choose currency
-                </option>
-                {owners.currencies.map((code) => (
-                  <option key={code} value={code}>
-                    {code}
+      {(!currency || currencyMismatch) && (
+        <section aria-labelledby="pricing-currency-heading">
+          <SectionHeading
+            id="pricing-currency-heading"
+            title="Currency"
+            description="One currency for every room, rate and payment method of this hotel."
+          />
+          {currency ? (
+            <p className="mt-4 text-sm text-gray-800">
+              All prices are in <strong>{currency}</strong>.
+            </p>
+          ) : (
+            <div className="mt-4 flex max-w-md flex-wrap items-end gap-3">
+              <label className="block grow text-sm font-semibold text-gray-900">
+                Hotel pricing currency
+                <select
+                  value={currencyChoice}
+                  onChange={(event) => setCurrencyChoice(event.target.value)}
+                  className={inputClass}
+                >
+                  <option value="" disabled>
+                    Choose currency
                   </option>
-                ))}
-              </select>
-            </label>
-            <button
-              type="button"
-              disabled={busy || !currencyChoice}
-              className={secondaryButton}
-              onClick={() =>
-                void run(async () => {
-                  const next = await onboardingPricingApi.saveCurrency(
-                    propertyId,
-                    currencyChoice,
-                    owners,
-                  );
-                  if (mounted.current) setLoaded({ owners: next, publication });
-                })
-              }
-            >
-              Save currency
-            </button>
-          </div>
-        )}
-        {currencyMismatch && (
-          <p className="mt-3 text-sm text-red-800" role="alert">
-            Published prices are in {publication.currency}, but the hotel currency is {currency}.
-            Update the prices in the PMS before continuing.
-          </p>
-        )}
-      </section>
+                  {owners.currencies.map((code) => (
+                    <option key={code} value={code}>
+                      {code}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="button"
+                disabled={busy || !currencyChoice}
+                className={secondaryButton}
+                onClick={() =>
+                  void run(async () => {
+                    const next = await onboardingPricingApi.saveCurrency(
+                      propertyId,
+                      currencyChoice,
+                      owners,
+                    );
+                    if (mounted.current) setLoaded({ owners: next, publication });
+                  })
+                }
+              >
+                Save currency
+              </button>
+            </div>
+          )}
+          {currencyMismatch && (
+            <p className="mt-3 text-sm text-red-800" role="alert">
+              Published prices are in {publication.currency}, but the hotel currency is {currency}.
+              Update the prices in the PMS before continuing.
+            </p>
+          )}
+        </section>
+      )}
 
       <section className="border-t border-gray-200 pt-8" aria-labelledby="room-rates-heading">
         <SectionHeading
           id="room-rates-heading"
-          title="Room rates"
-          description="Give every room a first rate. Guests booking directly need a rate with free cancellation for each room. Seasons, weekdays, meal plans and more rates are edited later in the PMS, in each room's Prices tab under Rooms & Rates."
+          title="Price per night"
+          description={`One price for each room${currency ? `. All prices are in ${currency}` : ""}.`}
         />
         {owners.rooms.length === 0 ? (
           <p className="mt-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
             Complete at least one room before setting prices.
           </p>
         ) : (
-          <ul className="mt-5 divide-y divide-gray-200 rounded-xl border border-gray-200 bg-white">
+          <ul className="mt-5 space-y-3">
             {owners.rooms.map((room) => {
-              const pending = added.find(
-                ({ configuration }) => configuration.roomTypeId === room.roomTypeId,
-              );
               const offers =
                 publication?.rooms.find(({ roomTypeId }) => roomTypeId === room.roomTypeId)?.offers
                   .length ?? 0;
+              const { maxAdults, maxChildren } = room.facts.occupancy;
+              const empty = missing.some(({ key }) => key === room.roomTypeId);
               return (
-                <li key={room.roomTypeId} className="flex items-center justify-between gap-4 p-4">
-                  <span className="font-medium text-gray-950">{room.facts.name}</span>
+                <li
+                  key={room.roomTypeId}
+                  className="flex flex-wrap items-center gap-4 rounded-xl border border-gray-200 bg-white px-4 py-3.5"
+                >
+                  <div className="min-w-0 grow">
+                    <p className="font-semibold text-gray-950">{room.facts.name}</p>
+                    <p className="text-sm text-gray-600">
+                      {maxAdults === 1 ? "1 adult" : `Up to ${maxAdults} adults`}
+                      {maxChildren > 0 &&
+                        ` and ${maxChildren} ${maxChildren === 1 ? "child" : "children"}`}
+                    </p>
+                  </div>
                   {offers > 0 ? (
                     <span className="text-sm text-emerald-800">
                       Published · {offers} {offers === 1 ? "rate" : "rates"}
                     </span>
-                  ) : pending ? (
-                    <span className="flex items-center gap-3 text-sm text-gray-700">
-                      Ready to publish
-                      <button
-                        type="button"
-                        disabled={busy}
-                        className="text-sm font-semibold text-primary-700 underline disabled:opacity-50"
-                        onClick={() => {
-                          setAdded((items) => items.filter((item) => item !== pending));
-                          progress.current = newPublishProgress();
-                        }}
+                  ) : pricing ? (
+                    <label className="flex items-center gap-3 text-sm text-gray-600">
+                      <span
+                        className={`flex h-11 w-44 items-center gap-2 rounded-lg bg-gray-100 px-3 focus-within:ring-2 focus-within:ring-primary-600 ${empty ? "ring-2 ring-red-400" : ""}`}
                       >
-                        Change
-                      </button>
-                    </span>
+                        <span aria-hidden="true" className="text-gray-600">
+                          {currency}
+                        </span>
+                        <input
+                          aria-label={`Price per night for ${room.facts.name}`}
+                          aria-invalid={empty || undefined}
+                          inputMode="decimal"
+                          disabled={busy}
+                          value={prices[room.roomTypeId] ?? ""}
+                          onChange={(event) => {
+                            setPrices({ ...prices, [room.roomTypeId]: event.target.value });
+                            changed(room.roomTypeId);
+                          }}
+                          className="min-w-0 grow bg-transparent text-base font-semibold text-gray-950 outline-none"
+                        />
+                      </span>
+                      per night
+                    </label>
                   ) : (
-                    <span className="text-sm text-amber-800">Needs a rate</span>
+                    <span className="text-sm text-amber-800">Needs a price</span>
                   )}
                 </li>
               );
@@ -307,26 +422,135 @@ export function PricingStep({
             />
           </div>
         )}
-        {currency && !currencyMismatch && setupRooms.length > 0 && !paymentsPending && (
-          <div className="mt-6 rounded-xl border border-gray-200 bg-white p-5">
-            <FirstPricingSetup
-              key={setupRooms.map(({ roomTypeId }) => roomTypeId).join()}
-              propertyId={propertyId.toLowerCase()}
-              rooms={setupRooms}
-              fixedCurrency={currency}
-              disabled={busy}
-              onDirty={() => setError(null)}
-              onCreate={(input) => {
-                setAdded((items) => [...items, input]);
-                progress.current = newPublishProgress();
-              }}
-              t={t}
-            />
-          </div>
-        )}
       </section>
 
-      {allPriced && added.length === 0 && stale && (
+      {pricing && (
+        <section className="border-t border-gray-200 pt-8" aria-labelledby="cancellation-heading">
+          <SectionHeading
+            id="cancellation-heading"
+            title="Cancellation"
+            description="The same for every room. You can change it per room later in the PMS."
+          />
+          <div className="mt-4 flex flex-wrap gap-2" role="group" aria-label="Cancellation">
+            {(
+              [
+                ["free", "Free cancellation"],
+                ["non_refundable", "Non-refundable"],
+              ] as const
+            ).map(([kind, label]) => (
+              <button
+                key={kind}
+                type="button"
+                aria-pressed={cancellation.kind === kind}
+                disabled={busy}
+                onClick={() => {
+                  setCancellation(
+                    kind === "free"
+                      ? { kind, days: cancellation.kind === "free" ? cancellation.days : 3 }
+                      : { kind },
+                  );
+                  changed();
+                }}
+                className={chip(cancellation.kind === kind)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {cancellation.kind === "free" && (
+            <label className="mt-4 flex flex-wrap items-center gap-2.5 text-sm text-gray-800">
+              Guests can cancel for free until
+              <select
+                aria-label="Days before arrival"
+                disabled={busy}
+                value={cancellation.days}
+                onChange={(event) => {
+                  setCancellation({ kind: "free", days: Number(event.target.value) });
+                  changed();
+                }}
+                className="min-h-10 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-950"
+              >
+                {freeCancellationDays.map((days) => (
+                  <option key={days} value={days}>
+                    {days === 1 ? "1 day" : `${days} days`}
+                  </option>
+                ))}
+              </select>
+              before arrival.
+            </label>
+          )}
+        </section>
+      )}
+
+      {pricing && (
+        <section className="border-t border-gray-200 pt-8" aria-labelledby="pay-heading">
+          <SectionHeading
+            id="pay-heading"
+            title="How guests pay"
+            description="Taken from the Payments step."
+          />
+          {stepMethods === undefined ? (
+            <p className="mt-4 text-sm text-gray-600" role="status">
+              Loading how guests pay...
+            </p>
+          ) : stepMethods ? (
+            <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-gray-200 bg-white px-4 py-3">
+              <span className="grow text-sm text-gray-900">
+                {stepMethods.map((method) => methodWords[method]).join(" · ")}
+              </span>
+              <button
+                type="button"
+                aria-label="Change how guests pay"
+                disabled={busy}
+                className="text-sm font-semibold text-primary-700 underline disabled:opacity-50"
+                onClick={() => goToStep?.("payments")}
+              >
+                Change
+              </button>
+            </div>
+          ) : (
+            <div
+              className={`mt-4 rounded-xl border bg-white px-4 py-3 ${missing.some(({ key }) => key === "pay") ? "border-red-400" : "border-gray-200"}`}
+            >
+              <p className="mb-2 text-sm text-gray-700">
+                {readiness === null
+                  ? "The Payments step's choice couldn't be read, so choose how guests pay."
+                  : "None of the ways to pay from the Payments step is ready yet. Choose how guests pay, or finish Payments first."}
+              </p>
+              <AcceptedPaymentMethods
+                methods={methods}
+                disabled={busy}
+                manualMethods={manualMethods}
+                onChange={(next) => {
+                  setPicked(next);
+                  changed(next.length ? "pay" : undefined);
+                }}
+                t={englishPricingSetup}
+              />
+            </div>
+          )}
+          <p className="mt-6 rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm leading-6 text-gray-700">
+            {children
+              ? "Children under 12 stay free and there is no minimum stay."
+              : "There is no minimum stay."}{" "}
+            Seasons, weekend prices, breakfast and more can be added later in Rooms &amp; Rates,
+            room by room.
+          </p>
+        </section>
+      )}
+
+      {missing.length > 0 && (
+        <div role="alert" className="rounded-xl border border-red-300 bg-red-50 px-4 py-3">
+          <p className="text-sm font-semibold text-red-950">Fill in what is still missing:</p>
+          <ul className="mt-1 list-disc pl-5 text-sm text-red-900">
+            {missing.map(({ key, text }) => (
+              <li key={key}>{text}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {allPriced && stale && (
         <p
           role="status"
           className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950"
@@ -336,7 +560,7 @@ export function PricingStep({
         </p>
       )}
 
-      {allPriced && added.length === 0 && !stale && !complete && (
+      {allPriced && !stale && !complete && (
         <Panel
           title="Pricing is not complete yet"
           message="Every room has a published rate, but setup has not confirmed it. Reload pricing; if this stays, check the room rates in the PMS, in each room's Prices tab under Rooms & Rates."
@@ -359,10 +583,15 @@ export function PricingStep({
           <>
             <button
               type="button"
-              disabled={busy || !allPriced || (added.length === 0 && !stale) || currencyMismatch}
+              disabled={
+                busy ||
+                currencyMismatch ||
+                !(pricing || (allPriced && stale)) ||
+                (pricing && stepMethods === undefined)
+              }
               aria-describedby="publish-prices-declaration"
               className={primaryButton}
-              onClick={() => void run(finish)}
+              onClick={pricing ? publishPrices : () => void run(() => finish([]))}
             >
               {busy ? "Publishing prices..." : "Publish prices and continue"}
             </button>
@@ -415,6 +644,12 @@ function errorMessage(cause: unknown): string {
 
 const inputClass =
   "mt-2 min-h-11 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-950 outline-none focus-visible:border-primary-600 focus-visible:ring-2 focus-visible:ring-primary-600 focus-visible:ring-offset-1";
+const chip = (selected: boolean) =>
+  `min-h-10 rounded-full border px-4 text-sm outline-none focus-visible:ring-2 focus-visible:ring-primary-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${
+    selected
+      ? "border-primary-600 bg-primary-600 font-semibold text-white"
+      : "border-gray-300 bg-white text-gray-800 hover:bg-gray-50"
+  }`;
 const secondaryButton =
   "mt-3 min-h-11 rounded-full border border-gray-300 bg-white px-5 text-sm font-semibold text-gray-800 outline-none hover:bg-gray-50 focus-visible:ring-2 focus-visible:ring-primary-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:text-gray-400";
 const primaryButton =

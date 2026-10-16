@@ -47,6 +47,31 @@ describe("Booking public content", () => {
     expect(build({ rooms: [{ ...rooms()[0], rates: [offer] }], finance: { ...finance(), readyPaymentMethods: [] } })).toBeNull();
   });
 
+  it("publishes pricing offers for a hotel paid only by bank transfer or PayPal (VAY-2139)", () => {
+    const publicProfile = profile();
+    publicProfile.hotel.capabilities.onlinePayment = false;
+    publicProfile.hotel.capabilities.payAtProperty = false;
+    const offer = { ratePlanId: `pricing-offer.v2:${"b".repeat(64)}`, currency: "EUR",
+      pricing: { kind: "quote_required", publicationRevision: 7, termsRevision: "11111111-1111-4111-8111-111111111111" }, mealPlan: "room_only" };
+    const result = build({
+      profile: publicProfile,
+      rooms: [{ ...rooms()[0], rates: [offer] }],
+      finance: {
+        ...finance(),
+        onlinePayment: false,
+        payAtProperty: false,
+        readyPaymentMethods: ["paypal", "bank_transfer"],
+      },
+    });
+    expect(result?.publicContent.payments).toEqual({ readyMethods: ["bank_transfer", "paypal"] });
+    expect(parseBookingPublicContent(result?.publicContent, { manualPayments: true })).toEqual(
+      result?.publicContent,
+    );
+    // With their acceptance off again, the stored page no longer counts.
+    expect(parseBookingPublicContent(result?.publicContent)).toBeNull();
+    expect(parseBookingPublicContent(result?.publicContent, { manualPayments: false })).toBeNull();
+  });
+
   it("omits rates whose payment method is not ready", () => {
     const publicProfile = profile();
     publicProfile.hotel.capabilities.onlinePayment = false;
@@ -91,6 +116,27 @@ describe("Booking public content", () => {
 
   // prettier-ignore
   it("scales calendar evidence across rooms", () => expect(build({ rooms: [rooms()[0]!, { ...rooms()[0]!, roomTypeId: "room-suite" }], calendar: { ...calendar(), roomTypeIds: ["room-deluxe", "room-suite"], expectedDayCount: 732, materializedDayCount: 732 } })).not.toBeNull());
+
+  it.each([
+    ["prepared yesterday", { coverageFrom: "2026-06-05", coverageThrough: "2027-06-05" }, 366],
+    ["opened to a month end", { coverageThrough: "2027-06-30" }, 390],
+    ["an 11-month floor", { coverageFrom: "2026-05-07", coverageThrough: "2027-05-06" }, 365],
+  ] as const)("accepts calendar coverage %s (VAY-2150)", (_label, window, days) => {
+    const value = { ...calendar(), ...window, materializedThrough: window.coverageThrough };
+    expect(
+      build({ calendar: { ...value, expectedDayCount: days, materializedDayCount: days } }),
+    ).not.toBeNull();
+  });
+
+  it.each([
+    ["shorter than 11 months", { coverageFrom: "2026-05-06", coverageThrough: "2027-05-05" }, 365],
+    ["starting after today", { coverageFrom: "2026-06-07", coverageThrough: "2027-06-07" }, 366],
+  ] as const)("rejects calendar coverage %s (VAY-2150)", (_label, window, days) => {
+    const value = { ...calendar(), ...window, materializedThrough: window.coverageThrough };
+    expect(
+      build({ calendar: { ...value, expectedDayCount: days, materializedDayCount: days } }),
+    ).toBeNull();
+  });
 
   it.each([
     [

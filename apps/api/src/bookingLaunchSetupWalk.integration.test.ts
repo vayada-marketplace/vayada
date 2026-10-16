@@ -1,5 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
+
+import Fastify from "fastify";
 import type { RequestContext } from "@vayada/backend-auth";
+import { createPgPropertyAccessRepository } from "@vayada/backend-authorization";
 import {
   createBookingDesignReadinessProvider,
   type ReadyBookingPublicationEvidence,
@@ -19,6 +22,7 @@ import {
   parsePreviewPmsOperatingCalendarImpactCommand,
   parseReconcilePhysicalRoomUnitsCommand,
   parseSetPhysicalRoomOperationalLabelCommand,
+  parseUpdateRoomTypeFactsCommand,
   parseUpsertPmsOperatingCalendarCommand,
   parseUpsertPropertyPricingCurrencyCommand,
   type RoomTypeFacts,
@@ -26,18 +30,26 @@ import {
 import pg from "pg";
 import { describe, expect, it } from "vitest";
 
+import type { ApiConfig } from "./config.js";
 import { createPgBookingDesignCatalogEvidenceRepository } from "./domains/bookingDesignCatalogEvidenceRepository.js";
 import { createPgBookingDesignRepository } from "./domains/bookingDesignRepository.js";
 import { createBookingGuestChoicePublicationReader } from "./domains/bookingGuestChoicePublication.js";
 import { createBookingGuestChoiceStore } from "./domains/bookingGuestChoiceStore.js";
+import { createBookingGuestTermsStore } from "./domains/bookingGuestTermsStore.js";
 import { createPgBookingGuestPolicyScopeAuthorizationPort } from "./domains/bookingGuestPolicyScopeAuthorization.js";
 import { createBookingPublicationProductionRuntime } from "./domains/bookingPublicationProductionRuntime.js";
 import { createPgFinancePaymentReadinessCommandRepository } from "./domains/financePaymentReadinessCommandRepository.js";
+import { createFinanceSubscriptionService } from "./domains/financeSubscriptionService.js";
+import { configureActiveBookingPublicationGate } from "./domains/activeBookingPublicationGate.js";
+import { createFinanceManualPaymentReadinessReader } from "./domains/financeManualPaymentReadiness.js";
+import { createPgFinanceSubscriptionStore } from "./domains/financeSubscriptionStore.js";
 import { createPgFinancePaymentReadinessReadModel } from "./domains/financePaymentReadinessReadModel.js";
 import { createPgHotelCatalogOperatingCalendarPropertyProfileEvidencePort } from "./domains/hotelCatalogOperatingCalendarPropertyProfileEvidence.js";
 import { createPgHotelCatalogStep1Repository } from "./domains/hotelCatalogStep1Repository.js";
 import { createPgHotelSetupTrackCommandRepository } from "./domains/hotelSetupTrackCommandRepository.js";
 import { createPgPlatformPropertyLifecycleCommandRepository } from "./domains/platformPropertyLifecycleCommandRepository.js";
+import { processNextPmsAcceptedPricingReservationJob } from "./domains/pmsAcceptedPricingReservationWorker.js";
+import { createTargetPmsInventoryReservationPort } from "./domains/pmsInventoryReservation.js";
 import { createPgPmsOperatingCalendarReadModel } from "./domains/pmsOperatingCalendarReadModel.js";
 import { createPmsOperatingCalendarProductionRuntime } from "./domains/pmsOperatingCalendarProductionRuntime.js";
 import { createPgPmsPhysicalRoomOperationalLabelRepository } from "./domains/pmsPhysicalRoomOperationalLabelRepository.js";
@@ -45,22 +57,33 @@ import { createPgPmsPhysicalRoomUnitReconcileRepository } from "./domains/pmsPhy
 import { createPgPmsPricingCommandRepository } from "./domains/pmsPricingCommandRepository.js";
 import { PMS_PRICING_CURRENCY_CHANGE_FAIL_CLOSED_GUARD } from "./domains/pmsPricingCurrencyCapabilities.js";
 import { createPgPmsPricingReadModel } from "./domains/pmsPricingReadModel.js";
+import { createTargetPmsRoomInventoryReadPort } from "./domains/pmsRoomInventoryReadModel.js";
 import { createPmsRoomAmenityVocabularyValidationPort } from "./domains/pmsRoomAmenityVocabulary.js";
 import { createPgPmsRoomFactsCommandRepository } from "./domains/pmsRoomFactsCommandRepository.js";
 import { createPgPmsRoomFactsReadModel } from "./domains/pmsRoomFactsReadModel.js";
 import { createPmsRoomFactsVocabularyValidationPort } from "./domains/pmsRoomFactsVocabulary.js";
 import { createPgPmsRoomPublicationCommandRepository } from "./domains/pmsRoomPublicationCommandRepository.js";
+import { createPmsBookingPublicationSource } from "./domains/pmsBookingPublicationSource.js";
 import { createPgPmsRoomPublicationReadModel } from "./domains/pmsRoomPublicationReadModel.js";
 import { createPgS3PropertyMediaCommandRepository } from "./domains/propertyMediaCommandRepository.js";
+import { lockPublicPricingAuthority } from "./domains/publicPricingAuthority.js";
 import { createReplacementPricingCommands } from "./domains/replacementPricingCommands.js";
 import { createReplacementPricingPublicationReader } from "./domains/replacementPricingPublicationReader.js";
 import { createHotelSetupOrdinaryLoginFixture } from "./hotelSetupOrdinaryLogin.fixture.js";
+import { registerFinanceSubscriptionRoutes } from "./routes/financeSubscriptions.js";
+import { externalBookingChanges } from "./integrations/externalBookingChanges.js";
 import { createPgHotelMediaResolutionPort } from "./platform/hotelMediaResolver.js";
 import type { PlatformMediaServingConfig } from "./platform/mediaServing.js";
 import {
   advancePublicProfileRevision,
   createPgSharedHotelSetupStatusRepository,
 } from "./platform/sharedHotelSetupStatusReadModel.js";
+import { createPublicRuntimeRepositories } from "./publicRuntime.js";
+import { createActiveBookingPublicationProfileRepository } from "./routes/activeBookingPublicationProfile.js";
+import {
+  createTargetBookingWebCheckoutAdapter,
+  registerBookingWebPublicRoutes,
+} from "./routes/bookingWebPublic.js";
 import { syncPropertyOfferReadModels } from "./routes/marketplaceAdmin.js";
 import { createTargetFinancePropertySettingsRepository } from "./routes/finance.js";
 
@@ -117,9 +140,17 @@ function parsed<T>(value: T | null, step: string): T {
  * first saved through the older settings page, and a room added the day after the calendar
  * was prepared. Readiness must explain every gap and end `ready` with a published page.
  * VAY-2140: no Vayada activation step; a suspended hotel can't publish or sell.
+ * VAY-2139 walks the same hotel paid only by bank transfer or only by PayPal, with their
+ * acceptance on: the page publishes with that method and stops counting once it is off.
+ * VAY-2171: publishing waits for a billing plan. The owner confirms Commission through
+ * POST /api/finance/properties/:id/select-commission, and a guest's pay-at-hotel request is then
+ * accepted.
  */
-describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", () => {
-  it("walks setup to ready and publishes the booking page", async () => {
+const METHODS = ["pay_at_property", "bank_transfer", "paypal"] as const;
+const WALK = { timeout: 300_000 };
+describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", WALK, () => {
+  it.each(METHODS)("walks setup to ready and publishes the booking page (%s)", async (method) => {
+    const manualMethod = method === "pay_at_property" ? null : method;
     const endpoint = new URL(url!);
     if (
       !["127.0.0.1", "localhost"].includes(endpoint.hostname) ||
@@ -242,6 +273,10 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
         inventory: calendar.inventory,
         finance: financeRead,
         financeScope: financeRead,
+        // Bank transfer and PayPal count only while their acceptance is on (VAY-2139).
+        ...(manualMethod
+          ? { manualPayments: createFinanceManualPaymentReadinessReader({ pool }) }
+          : {}),
         warn: (fields) => unavailable.push(fields),
       });
       closers.push(() => runtime.close());
@@ -304,6 +339,7 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
           "booking.guest_experience:guest_policy_not_configured",
           "booking.hotel_profile:hotel_profile_incomplete",
           "booking.page_style:booking_design_missing",
+          "booking.payments:billing_plan_not_selected",
           "booking.payments:payment_methods_not_configured",
           "booking.pricing:pricing_not_published",
           "booking.rooms:publishable_room_required",
@@ -330,46 +366,49 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
             ])
           ).rows[0]!.profile_revision,
         );
-      const presentKey = `present-${suffix}`;
-      const presentCommand = {
-        organizationId,
-        propertyId,
-        actorUserId: owner,
-        idempotencyKey: presentKey,
-        audit: requestAudit("present"),
-        request: {
-          expectedProfileRevision: await profileRevision(),
-          locale: "en" as const,
-          shortDescription: SUMMARY,
-          amenities: { reviewed: true as const, keys: [] },
-          media: { coverMediaObjectId: coverId, galleryMediaObjectIds: [] },
-        },
-      };
-      const prepared = await step1.prepare(presentCommand);
-      if (prepared.kind !== "prepared") throw new Error(`present: ${JSON.stringify(prepared)}`);
-      const presentation = ok(
-        await media.replacePresentation({
+      const presentHotel = async (step: string, shortDescription: string) => {
+        const presentKey = `${step}-${suffix}`;
+        const presentCommand = {
           organizationId,
           propertyId,
           actorUserId: owner,
-          audit: presentCommand.audit,
-          idempotencyKey: `hotel-catalog-step1-media:${createHash("sha256").update(presentKey).digest("hex")}`,
-          expectedProfileRevision: presentCommand.request.expectedProfileRevision,
-          assignments: createHotelCatalogStep1MediaAssignments(
-            presentCommand.request.media,
-            prepared.state.readModel.displayName,
-          ),
-        }),
-        "hotel photo",
-      );
-      ok(
-        await step1.save({
-          ...presentCommand,
-          claimToken: prepared.claimToken,
-          writeProfileRevision: presentation.response.profileRevision,
-        }),
-        "present your hotel",
-      );
+          idempotencyKey: presentKey,
+          audit: requestAudit(step),
+          request: {
+            expectedProfileRevision: await profileRevision(),
+            locale: "en" as const,
+            shortDescription,
+            amenities: { reviewed: true as const, keys: [] },
+            media: { coverMediaObjectId: coverId, galleryMediaObjectIds: [] },
+          },
+        };
+        const prepared = await step1.prepare(presentCommand);
+        if (prepared.kind !== "prepared") throw new Error(`present: ${JSON.stringify(prepared)}`);
+        const presentation = ok(
+          await media.replacePresentation({
+            organizationId,
+            propertyId,
+            actorUserId: owner,
+            audit: presentCommand.audit,
+            idempotencyKey: `hotel-catalog-step1-media:${createHash("sha256").update(presentKey).digest("hex")}`,
+            expectedProfileRevision: presentCommand.request.expectedProfileRevision,
+            assignments: createHotelCatalogStep1MediaAssignments(
+              presentCommand.request.media,
+              prepared.state.readModel.displayName,
+            ),
+          }),
+          "hotel photo",
+        );
+        ok(
+          await step1.save({
+            ...presentCommand,
+            claimToken: prepared.claimToken,
+            writeProfileRevision: presentation.response.profileRevision,
+          }),
+          "present your hotel",
+        );
+      };
+      await presentHotel("present", SUMMARY);
       // VAY-2140: completing the profile activates the hotel; nobody at Vayada approves it.
       expect(
         (
@@ -547,6 +586,14 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
       );
       const legacyPool = new pg.Pool({ connectionString: cs, max: 2 });
       closers.push(() => legacyPool.end());
+      if (manualMethod === "bank_transfer")
+        // TEST ONLY: production saves bank details, KMS-encrypted, through Booking Engine
+        // settings > Payments. The settings page then requires an enabled destination.
+        await admin.query(
+          `INSERT INTO finance.bank_transfer_destinations(property_id,revision,ciphertext,key_arn,account_last4)
+           VALUES($1,1,$2,'arn:aws:kms:eu-central-1:000000000000:key/walk','3000')`,
+          [propertyId, Buffer.alloc(40)],
+        );
       expect(
         await createTargetFinancePropertySettingsRepository({
           connectionString: cs,
@@ -563,7 +610,15 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
             reason: "Payments saved from the settings page",
             requestedAt: now(),
           },
-          payload: { paymentsEnabled: true, acceptedMethods: ["pay_at_property", "cash"] },
+          payload: manualMethod
+            ? {
+                paymentsEnabled: true,
+                acceptedMethods: [manualMethod],
+                ...(manualMethod === "paypal"
+                  ? { depositPolicy: { paypalEmail: `pay-${suffix}@example.test` } }
+                  : {}),
+              }
+            : { paymentsEnabled: true, acceptedMethods: ["pay_at_property", "cash"] },
         }),
       ).toMatchObject({ ok: true });
       // Before VAY-2134 this was "temporarily unavailable". Since VAY-2136 the settings page
@@ -587,25 +642,33 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
           pricingReadPort: pricingRead,
         }),
       );
-      ok(
-        await payments.replacePaymentMethods({
-          command: parsed(
-            parseReplaceFinancePaymentMethodsCommand({
-              organizationId,
-              propertyId,
-              idempotencyKey: `payments-${suffix}`,
-              expectedPaymentMethodsRevision: paymentMethodsRevision,
-              expectedPricingCurrencyRevision:
-                currencySaved.response.pricingCurrency.pricingCurrencyRevision,
-              selectedMethods: ["pay_at_property"],
-              audit: commandAudit("payments"),
-            }),
-            "payments",
-          ),
-          currentPricing: null,
-        }),
-        "setup payments",
-      );
+      if (manualMethod) {
+        // A hotel paid only by bank transfer or PayPal selects no setup readiness method; the
+        // settings page save above is its payment choice (VAY-2139).
+        expect(blockerCodes(await readiness())).not.toContain(
+          "booking.payments:ready_payment_method_missing",
+        );
+      } else {
+        ok(
+          await payments.replacePaymentMethods({
+            command: parsed(
+              parseReplaceFinancePaymentMethodsCommand({
+                organizationId,
+                propertyId,
+                idempotencyKey: `payments-${suffix}`,
+                expectedPaymentMethodsRevision: paymentMethodsRevision,
+                expectedPricingCurrencyRevision:
+                  currencySaved.response.pricingCurrency.pricingCurrencyRevision,
+                selectedMethods: ["pay_at_property"],
+                audit: commandAudit("payments"),
+              }),
+              "payments",
+            ),
+            currentPricing: null,
+          }),
+          "setup payments",
+        );
+      }
 
       // 6. Set your room prices (pricing-v2 draft, charges, publish).
       const context: RequestContext = {
@@ -655,7 +718,7 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
                   roomTypeId,
                   offerId: "standard",
                   cancellation: { kind: "non_refundable" },
-                  payment: { kind: "full", acceptedMethods: ["pay_at_property"] },
+                  payment: { kind: "full", acceptedMethods: [method] },
                 },
               },
               draft,
@@ -736,12 +799,18 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
           },
         },
       );
+      // The setup Guest step also saves the default guest terms, without touching the hotel
+      // profile revision the earlier steps' drafts were saved against (VAY-2176).
+      const profileBeforeTerms = await profileRevision();
+      await createBookingGuestTermsStore(pool, (client) =>
+        createPgBookingGuestPolicyScopeAuthorizationPort({ pool: client }),
+      ).save({ propertyId, organizationId, actorUserId: owner }, "Our guest terms.", null);
+      expect(await profileRevision()).toBe(profileBeforeTerms);
 
       // 8. Open your calendar. The first save happened "yesterday" in the hotel's time zone.
-      const saveCalendar = async (
+      const saveCalendarRevision = async (
         roomTypeIds: readonly string[],
         expectedCalendarRevision: number,
-        horizon: { from: string; through: string },
       ) => {
         const roomRows = (
           await admin.query(
@@ -775,7 +844,7 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
           ),
           "calendar preview",
         );
-        const saved = ok(
+        return ok(
           await calendar.routes.commandPort.upsertOperatingCalendar(
             parsed(
               parseUpsertPmsOperatingCalendarCommand({
@@ -788,17 +857,27 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
             ),
           ),
           "calendar save",
-        );
-        return calendar.routes.materializationPort!.materializeInventory({
+        ).response.configuration;
+      };
+      const prepareCalendar = (
+        configuration: Awaited<ReturnType<typeof saveCalendarRevision>>,
+        horizon: { from: string; through: string },
+      ) =>
+        calendar.routes.materializationPort!.materializeInventory({
           organizationId,
           propertyId,
-          configurationSource: saved.response.configuration.source,
-          expectedMaterializedRevision: saved.response.configuration.calendarRevision,
+          configurationSource: configuration.source,
+          expectedMaterializedRevision: configuration.calendarRevision,
           horizon,
-          idempotencyKey: `materialize-${expectedCalendarRevision}-${suffix}`,
-          audit: commandAudit(`materialize-${expectedCalendarRevision}`),
+          idempotencyKey: `materialize-${configuration.calendarRevision}-${suffix}`,
+          audit: commandAudit(`materialize-${configuration.calendarRevision}`),
         });
-      };
+      const saveCalendar = async (
+        roomTypeIds: readonly string[],
+        expectedCalendarRevision: number,
+        horizon: { from: string; through: string },
+      ) =>
+        prepareCalendar(await saveCalendarRevision(roomTypeIds, expectedCalendarRevision), horizon);
       ok(
         await saveCalendar([gardenSuite], 0, { from: localDate(-1), through: localDate(364) }),
         "first calendar",
@@ -810,9 +889,36 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
       const afterRoomAdded = blockerCodes(await readiness());
       expect(afterRoomAdded).toContain("booking.calendar:operating_calendar_source_stale");
       expect(afterRoomAdded).not.toContain("booking.pricing:pricing_rooms_changed");
-      // Before VAY-2134 this horizon, starting at today, was rejected with a 409.
+      // TEST ONLY on 10-11: the calendar with the added room was saved, but preparing its
+      // availability failed, so guests could still book only the first calendar.
+      const unprepared = await saveCalendarRevision([gardenSuite, seaSuite], 1);
+      // 10-12: the hotel edits its profile and style before it comes back to the calendar. Before
+      // VAY-2150 that made the saved calendar stale, so it could never be prepared.
+      await presentHotel("present-again", `${SUMMARY} Every suite now has a sea-view terrace.`);
       ok(
-        await saveCalendar([gardenSuite, seaSuite], 1, {
+        await designRepository.upsertDesign({
+          organizationId,
+          propertyId,
+          actorUserId: owner,
+          idempotencyKey: `design-again-${suffix}`,
+          expectedRevision: 1,
+          choices: { primaryColor: "#4F46E5", fontPairing: "high-end-serif" },
+          audit: {
+            requestId: `design-again-${suffix}`,
+            correlationId: `design-again-${suffix}`,
+            source: "web",
+          },
+        }),
+        "booking design again",
+      );
+      expect(unprepared.calendarRevision).toBe(2);
+      expect(
+        await operatingCalendar.getCurrentOperatingCalendarConfiguration(propertyId),
+      ).toMatchObject({ sourceStatus: "current", configuration: { calendarRevision: 2 } });
+      // Saving again previews against the first calendar instead of refusing (VAY-2134). Before
+      // VAY-2134 this horizon, starting at today, was also rejected with a 409.
+      ok(
+        await saveCalendar([gardenSuite, seaSuite], 2, {
           from: localDate(0),
           through: localDate(365),
         }),
@@ -820,10 +926,113 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
       );
       await savePrices([gardenSuite, seaSuite], 2);
 
-      // 10. Ready with no admin action, then "Publish booking page".
+      // 10. Everything is set up but the billing plan: guests couldn't book yet (VAY-2171).
+      const withoutPlan = await readiness();
+      expect(blockerCodes(withoutPlan)).toEqual(["booking.payments:billing_plan_not_selected"]);
+      expect(withoutPlan).toMatchObject({ outcome: "evaluated", status: "blocked" });
+      // "Publish booking page" is refused while the plan is missing.
+      await expect(
+        runtime.refresh({
+          ...scope,
+          actorUserId: owner,
+          idempotencyKey: `publish-without-plan-${suffix}`,
+          audit: {
+            requestId: `no-plan-${suffix}`,
+            correlationId: `no-plan-${suffix}`,
+            source: "web",
+          },
+        }),
+      ).rejects.toThrow("Booking publication readiness is incomplete.");
+      // "Your vayada plan" in Payments: the owner confirms Commission through the API route.
+      const plans = createFinanceSubscriptionService({
+        store: createPgFinanceSubscriptionStore({ connectionString: cs, max: 2 }),
+        roomInventory: createTargetPmsRoomInventoryReadPort({ connectionString: cs }),
+        pricing: pricingRead,
+        returnBaseUrls: { bookingAdmin: "https://admin.booking.example.test" },
+      });
+      const propertyAccess = createPgPropertyAccessRepository({ connectionString: url!, max: 1 });
+      // The owner's session carries every active resource link setup created for the hotel.
+      const ownerLinks = (
+        await admin.query(
+          `SELECT product, resource_type AS "resourceType", resource_id AS "resourceId",
+             relationship, status
+           FROM identity.organization_resource_links
+           WHERE organization_id=$1 AND resource_id=$2 AND status='active'`,
+          [organizationId, propertyId],
+        )
+      ).rows as RequestContext["linkedResources"];
+      expect(ownerLinks).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ product: "hotel_catalog", resourceType: "property" }),
+          expect.objectContaining({ product: "pms", resourceType: "pms_property" }),
+        ]),
+      );
+      const billingApi = Fastify({ logger: false });
+      billingApi.decorateRequest("authContext", null);
+      billingApi.addHook("onRequest", async (request) => {
+        request.authContext = {
+          ...context,
+          linkedResources: ownerLinks,
+          membership: {
+            ...context.membership,
+            permissions: ["booking.settings.manage", "pms.finance.read", "pms.operations.manage"],
+          },
+          audit: requestAudit("plan"),
+        } as RequestContext;
+      });
+      await billingApi.register(registerFinanceSubscriptionRoutes, {
+        prefix: "/api",
+        service: plans,
+        propertyAccessRepository: propertyAccess,
+      });
+      closers.push(() => billingApi.close());
+      closers.push(async () => propertyAccess.close?.());
+      const chosen = await billingApi.inject({
+        method: "POST",
+        url: `/api/finance/properties/${propertyId}/select-commission`,
+        payload: { commandId: `plan-${suffix}`, idempotencyKey: `plan-${suffix}` },
+      });
+      expect(chosen.statusCode, chosen.body).toBe(201);
+      expect(chosen.json()).toMatchObject({ planStatus: { plan: "commission" } });
+      const planStatus = await billingApi.inject({
+        method: "GET",
+        url: `/api/finance/properties/${propertyId}/plan-status`,
+      });
+      expect(planStatus.json()).toMatchObject({
+        planStatus: { plan: "commission", status: "commission" },
+      });
+
+      // Ready with no admin action, then "Publish booking page".
       const ready = await readiness();
       expect(blockerCodes(ready)).toEqual([]);
       expect(ready).toMatchObject({ outcome: "evaluated", status: "ready" });
+      // VAY-2150: availability prepared today (TEST ONLY prepared it "yesterday") stays ready the
+      // next days; launch needs it open at least 11 months ahead, not a full year from today.
+      const calendarBlockersInDays = async (days: number) => {
+        const evidence = await createPmsBookingPublicationSource({
+          rooms: closing(
+            createPgPmsRoomPublicationReadModel({
+              connectionString: cs,
+              roomFacts,
+              roomCapacity: roomFacts,
+              amenityVocabulary,
+              mediaResolver,
+            }),
+          ),
+          pricing: createReplacementPricingPublicationReader(pool),
+          pricingCurrency: pricingRead,
+          operatingCalendar,
+          inventory: calendar.inventory,
+          now: () => new Date(Date.now() + days * 86_400_000),
+        }).getBookingLaunchEvidence(scope);
+        if (evidence.outcome !== "evidence") throw new Error(JSON.stringify(evidence));
+        return evidence.entities
+          .filter(({ groupId }) => groupId === "booking.calendar")
+          .flatMap(({ blockers }) => blockers.map(({ code }) => code));
+      };
+      expect(await calendarBlockersInDays(1)).toEqual([]);
+      expect(await calendarBlockersInDays(31)).toEqual([]);
+      expect(await calendarBlockersInDays(32)).toEqual(["inventory_launch_readiness_incomplete"]);
       const requested = await runtime.routes.repository.requestPublication({
         ...scope,
         actorUserId: owner,
@@ -864,6 +1073,324 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
           .map(({ roomTypeId }) => roomTypeId)
           .sort(),
       ).toEqual([gardenSuite, seaSuite].sort());
+      const content = active[0]!.content as {
+        payments: { readyMethods: string[] };
+        profile: { hotel: { slug: string } };
+      };
+      expect(content.payments.readyMethods).toEqual([method]);
+      // The public page counts bank transfer and PayPal only while their acceptance is on.
+      const publicProfile = (manualPayments: boolean) =>
+        createActiveBookingPublicationProfileRepository({
+          connectionString: cs,
+          pool,
+          manualPayments,
+        }).findProfileBySlug(content.profile.hotel.slug);
+      expect(await publicProfile(true)).toMatchObject({ hotel: { propertyId } });
+      if (manualMethod) expect(await publicProfile(false)).toBeNull();
+      else expect(await publicProfile(false)).toMatchObject({ hotel: { propertyId } });
+      // The public site in active_publication mode serves the page, its prices, checkout and a
+      // quote. The Sea Suite got its first price after the calendar, right before publishing, as
+      // TEST ONLY's rooms did on 10-13; production read only legacy profiles then (VAY-2134).
+      if (!manualMethod) {
+        configureActiveBookingPublicationGate({ servesPublications: true, manualPayments: false });
+        closers.push(async () =>
+          configureActiveBookingPublicationGate({
+            servesPublications: false,
+            manualPayments: false,
+          }),
+        );
+        const site = Fastify({ logger: false });
+        closers.push(() => site.close());
+        const publicRuntime = createPublicRuntimeRepositories(
+          {
+            publicHotelProfileSource: "active_publication",
+            targetDatabaseUrl: cs,
+            replacementPricingManualPaymentAcceptanceEnabled: false,
+          } as ApiConfig,
+          {
+            publicHotelProfilePool: pool,
+            publicHotelQuotePool: pool,
+            bookingWebCalendarPool: pool,
+            marketplaceDiscoveryPool: pool,
+          },
+        );
+        await site.register(registerBookingWebPublicRoutes, {
+          prefix: "/api/booking-web",
+          profileRepository: publicRuntime.publicHotelProfileRepository,
+          quoteRepository: publicRuntime.publicHotelQuoteRepository,
+          calendarRepository: publicRuntime.bookingWebCalendarRepository,
+          checkoutAdapter: createTargetBookingWebCheckoutAdapter({
+            externalChanges: externalBookingChanges,
+            connectionString: cs,
+            pool,
+            mediaServing: serving,
+            inventoryReservationPort: createTargetPmsInventoryReservationPort(),
+            replacementPricingAcceptanceEnabled: true,
+            replacementPricingRequestAcceptanceEnabled: true,
+          }),
+        });
+        const slug = content.profile.hotel.slug;
+        const read = async (path: string) => {
+          const response = await site.inject({ method: "GET", url: `/api/booking-web${path}` });
+          expect(response.statusCode, `${path}: ${response.body}`).toBe(200);
+          return response.json() as unknown;
+        };
+        await read(`/hosts/${slug}.next-booking.vayada.com`);
+        await read(`/hotels/${slug}?locale=en`);
+        type Offers = { rooms: { roomTypeId: string; offers: { publicOfferKey: string }[] }[] };
+        const offered = (await read(`/hotels/${slug}/pricing-offers`)) as Offers;
+        expect(offered.rooms.map(({ roomTypeId }) => roomTypeId).sort()).toEqual(
+          [gardenSuite, seaSuite].sort(),
+        );
+        // The room cards' facts: size, category and amenities as public labels (VAY-2190).
+        expect(offered.rooms.find(({ roomTypeId }) => roomTypeId === seaSuite)).toMatchObject({
+          size: { value: 28, unit: "sqm" },
+          category: "Suite",
+          amenities: ["Wi-Fi", "Air conditioning"],
+        });
+        expect(await read(`/hotels/${slug}/checkout-config`)).toMatchObject({
+          termsText: "Our guest terms.",
+        });
+        const quoteSeaSuite = async () => {
+          const offers = (await read(`/hotels/${slug}/pricing-offers`)) as Offers;
+          return site.inject({
+            method: "POST",
+            url: `/api/booking-web/hotels/${slug}/bookings/quote`,
+            headers: { "Idempotency-Key": randomUUID() },
+            payload: {
+              version: "public-booking-quote-request.v1",
+              selection: {
+                version: "public-pricing-selection.v1",
+                checkIn: localDate(30),
+                checkOut: localDate(32),
+                currency: "EUR",
+                rooms: [
+                  {
+                    selectionId: "sea-suite",
+                    publicOfferKey: offers.rooms.find(({ roomTypeId }) => roomTypeId === seaSuite)!
+                      .offers[0]!.publicOfferKey,
+                    guests: { adults: 2, childAgesAtCheckIn: [] },
+                  },
+                ],
+                addons: [],
+                promoCode: null,
+              },
+              paymentMethod: "pay_at_property",
+            },
+          });
+        };
+        // TEST ONLY's prices declare "all mandatory charges included": the quote is the room price
+        // with no extra charges, and the guest can book the stay (VAY-2134).
+        const quote = await quoteSeaSuite();
+        expect(quote.statusCode, quote.body).toBe(200);
+        const quoted = quote.json() as {
+          quoteId: string;
+          totalMinor: string;
+          lines: { kind: string; amountMinor: string }[];
+        };
+        expect(quoted.lines.length).toBeGreaterThan(0);
+        expect(quoted.lines.filter(({ kind }) => kind === "charge")).toEqual([]);
+        // The room cards' stay prices use the quote's calculation and issue no quote (VAY-2190).
+        const quoteRows = async () =>
+          (
+            await pool.query(
+              "SELECT count(*)::int AS n FROM booking.pricing_quotes WHERE property_id=$1",
+              [propertyId],
+            )
+          ).rows[0].n as number;
+        const quotesBefore = await quoteRows();
+        type StayPrices = {
+          rooms: {
+            roomTypeId: string;
+            roomCount: number;
+            availability: string;
+            offers: { status: string; totalMinor?: string }[];
+          }[];
+        };
+        const stayPrices = (await read(
+          `/hotels/${slug}/pricing-offers/stay-prices?checkIn=${localDate(30)}&checkOut=${localDate(32)}&adults=2`,
+        )) as StayPrices;
+        const seaPrices = stayPrices.rooms.find(({ roomTypeId }) => roomTypeId === seaSuite)!;
+        expect(seaPrices).toMatchObject({ roomCount: 1, availability: "available" });
+        expect(seaPrices.offers[0]).toMatchObject({
+          status: "priced",
+          totalMinor: quoted.totalMinor,
+        });
+        expect(await quoteRows()).toBe(quotesBefore);
+        // The hotel chose Commission in setup Payments before publishing (VAY-2171), which is the
+        // billing plan the acceptance terms need. The PMS reservation worker below runs as admin.
+        const billingPool = new pg.Pool({ connectionString: url, max: 1 });
+        closers.push(() => billingPool.end());
+        const acceptQuote = async ({ quoteId }: { quoteId: string }, guest: string) => {
+          const disclosure = (await read(
+            `/hotels/${slug}/bookings/quotes/${quoteId}/guest-disclosure`,
+          )) as { quoteEvidenceId: string; guestPolicyEvidenceId: string };
+          const acceptanceKey = randomUUID();
+          const accepted = await site.inject({
+            method: "POST",
+            url: `/api/booking-web/hotels/${slug}/bookings/quotes/${quoteId}/accept`,
+            headers: { "Idempotency-Key": acceptanceKey },
+            payload: {
+              version: "booking-quote-acceptance.v1",
+              requestId: acceptanceKey,
+              quoteId,
+              acceptance: {
+                accepted: true,
+                quoteEvidenceId: disclosure.quoteEvidenceId,
+                guestPolicyEvidenceId: disclosure.guestPolicyEvidenceId,
+              },
+              guest: {
+                firstName: "Walk",
+                lastName: "Guest",
+                email: `${guest}-${suffix}@example.test`,
+                phone: "+94 77 123 4567",
+                countryCode: "LK",
+                arrivalTime: null,
+                specialRequests: null,
+              },
+            },
+          });
+          expect(accepted.statusCode, accepted.body).toBe(200);
+          expect(accepted.json()).toMatchObject({
+            kind: "accepted",
+            bookingReference: expect.any(String),
+          });
+          // The booking queued its PMS reservation: the worker adopts it, which also leaves
+          // nothing queued for another suite's worker on the same database.
+          const outcomes: string[] = [];
+          const workerClient = await billingPool.connect();
+          try {
+            for (let attempt = 0; attempt < 5 && outcomes.at(-1) !== "empty"; attempt += 1) {
+              await workerClient.query("BEGIN");
+              try {
+                outcomes.push(
+                  await processNextPmsAcceptedPricingReservationJob(workerClient, `walk-${suffix}`),
+                );
+                await workerClient.query("COMMIT");
+              } catch (error) {
+                await workerClient.query("ROLLBACK");
+                throw error;
+              }
+            }
+          } finally {
+            workerClient.release();
+          }
+          expect(outcomes).toContain("adopted");
+          expect(outcomes.at(-1)).toBe("empty");
+        };
+        await acceptQuote(quoted, "guest");
+
+        // VAY-2150: hotel and room detail edits after the calendar save keep it current, so the
+        // page stays ready and guests can still book. Before, accepting failed with "Quote
+        // inventory is unavailable" until the calendar was saved again.
+        await presentHotel("present-after-calendar", `${SUMMARY} Breakfast is served until noon.`);
+        await advancePublicProfileRevision(pool, propertyId); // a hotel photo finished processing
+        const seaSuiteRevisions = async () =>
+          (
+            await admin.query<{ facts: string; units: string }>(
+              `SELECT room_facts_revision AS facts, room_units_revision AS units
+               FROM pms.room_types WHERE id=$1`,
+              [seaSuite],
+            )
+          ).rows[0]!;
+        ok(
+          await rooms.facts.updateRoomTypeFacts(
+            parsed(
+              parseUpdateRoomTypeFactsCommand({
+                organizationId,
+                propertyId,
+                roomTypeId: seaSuite,
+                expectedRevision: Number((await seaSuiteRevisions()).facts),
+                facts: { ...roomFacts2("Sea Suite"), description: "Sea Suite with a bathtub." },
+                idempotencyKey: `facts-after-calendar-${suffix}`,
+                audit: commandAudit("facts-after-calendar"),
+              }),
+              "room details edit",
+            ),
+          ),
+          "room details edit",
+        );
+        expect(
+          await operatingCalendar.getCurrentOperatingCalendarConfiguration(propertyId),
+        ).toMatchObject({ sourceStatus: "current", sourceConflicts: [] });
+        expect(blockerCodes(await readiness())).toEqual([]);
+        const quoteAfterEdits = await quoteSeaSuite();
+        expect(quoteAfterEdits.statusCode, quoteAfterEdits.body).toBe(200);
+        await acceptQuote(quoteAfterEdits.json() as { quoteId: string }, "guest-after-edits");
+        // A changed unit count still changes the calendar.
+        ok(
+          await rooms.units.reconcilePhysicalRoomUnits(
+            parsed(
+              parseReconcilePhysicalRoomUnitsCommand({
+                organizationId,
+                propertyId,
+                roomTypeId: seaSuite,
+                expectedRevision: Number((await seaSuiteRevisions()).units),
+                targetActiveUnitCount: 3,
+                idempotencyKey: `units-after-calendar-${suffix}`,
+                audit: commandAudit("units-after-calendar"),
+              }),
+              "room units change",
+            ),
+          ),
+          "room units change",
+        );
+        expect(
+          await operatingCalendar.getCurrentOperatingCalendarConfiguration(propertyId),
+        ).toMatchObject({
+          sourceStatus: "stale",
+          sourceConflicts: [{ code: "room_units_revision_conflict", roomTypeId: seaSuite }],
+        });
+        expect(blockerCodes(await readiness())).toContain(
+          "booking.calendar:operating_calendar_source_stale",
+        );
+      }
+      if (manualMethod) {
+        // Once the site serves setup publications, prices follow the page: hidden while bank
+        // transfer and PayPal acceptance is off, quotable while it is on (VAY-2134).
+        const authority = async () => {
+          const client = await pool.connect();
+          try {
+            await client.query("BEGIN");
+            return await lockPublicPricingAuthority(client, content.profile.hotel.slug);
+          } finally {
+            await client.query("ROLLBACK");
+            client.release();
+          }
+        };
+        configureActiveBookingPublicationGate({ servesPublications: true, manualPayments: false });
+        try {
+          expect(await authority()).toBeNull();
+          configureActiveBookingPublicationGate({ servesPublications: true, manualPayments: true });
+          expect(await authority()).toMatchObject({ propertyId });
+        } finally {
+          configureActiveBookingPublicationGate({
+            servesPublications: false,
+            manualPayments: false,
+          });
+        }
+        // Without its bank details or PayPal email the page is hidden; restored, it comes back
+        // without a new publication.
+        const [remove, restore] =
+          manualMethod === "bank_transfer"
+            ? [
+                "UPDATE finance.bank_transfer_destinations SET enabled=false WHERE property_id=$1",
+                "UPDATE finance.bank_transfer_destinations SET enabled=true WHERE property_id=$1",
+              ]
+            : [
+                "UPDATE finance.payment_settings SET deposit_policy=deposit_policy-'paypalEmail' WHERE property_id=$1",
+                `UPDATE finance.payment_settings
+                 SET deposit_policy=jsonb_set(deposit_policy,'{paypalEmail}',to_jsonb('pay-' || $2 || '@example.test'))
+                 WHERE property_id=$1`,
+              ];
+        await admin.query(remove, [propertyId]);
+        expect(await publicProfile(true)).toBeNull();
+        await admin.query(
+          restore,
+          manualMethod === "bank_transfer" ? [propertyId] : [propertyId, suffix],
+        );
+        expect(await publicProfile(true)).toMatchObject({ hotel: { propertyId } });
+      }
       expect(unavailable).toEqual([]);
 
       // 11. Vayada can still suspend a hotel: it can't publish or take bookings any more.
@@ -960,7 +1487,7 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
       await login.drop();
       await admin.end();
     }
-  }, 300_000);
+  });
 });
 
 function roomFacts2(name: string): RoomTypeFacts {

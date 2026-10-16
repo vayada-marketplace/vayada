@@ -56,11 +56,14 @@ type GooglePlacesLibrary = {
 export default function GooglePlacesAddressField({
   addressRevision,
   apiKey,
+  label,
   onUnavailable,
   onSelect,
 }: {
   addressRevision: RefObject<number>;
   apiKey: string;
+  // Google's element ignores our placeholder, so callers can show their own visible label.
+  label?: string;
   onUnavailable: (autocompleteWasFocused: boolean) => void;
   onSelect: (address: GooglePlacesAddress, isExactAddress: boolean) => void;
 }) {
@@ -150,6 +153,9 @@ export default function GooglePlacesAddressField({
 
   return (
     <div>
+      {label && status !== "unavailable" && (
+        <p className="mb-1.5 text-sm font-medium text-gray-700">{label}</p>
+      )}
       {status === "loading" && (
         <div
           className="h-12 animate-pulse rounded-xl border border-gray-200 bg-gray-50"

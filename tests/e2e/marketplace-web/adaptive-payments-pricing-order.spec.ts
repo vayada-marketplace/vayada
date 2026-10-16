@@ -62,6 +62,19 @@ test.describe("adaptive setup asks how guests pay before prices", () => {
     await page.getByRole("checkbox", { name: "Pay at hotel" }).check();
     await page.getByRole("button", { name: "Save selection" }).click();
     await expect(page.getByText("Payment selection saved.")).toBeVisible();
+
+    // VAY-2171: bookings need a chosen vayada plan. Commission is pre-selected, never assumed.
+    await expect(page.getByRole("heading", { name: "Your vayada plan" })).toBeVisible();
+    await expect(page.getByRole("radio", { name: /Commission/ })).toBeChecked();
+    await expect(page.getByText("Confirm your vayada plan to continue.")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Save and continue" })).toBeDisabled();
+    await page.screenshot({ path: testInfo.outputPath("payments-plan-1.png"), fullPage: true });
+    await page.getByRole("button", { name: "Confirm Commission plan" }).click();
+    await expect(
+      page.getByText("Commission plan confirmed. You pay 5% per direct booking."),
+    ).toBeVisible();
+    await expect(page.getByText("Your plan: Commission · 5% per direct booking")).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath("payments-plan-2.png"), fullPage: true });
     await page.getByRole("button", { name: "Save and continue" }).click();
 
     // Continue lands on Pricing with the rate form, not a detour back to Payments.
@@ -72,7 +85,7 @@ test.describe("adaptive setup asks how guests pay before prices", () => {
     await expect(page.getByText("Step 5 of 8")).toBeVisible();
     await expect(page.getByText("All prices are in EUR.")).toBeVisible();
     await expect(page.getByText("Choose how guests pay first")).toHaveCount(0);
-    await expect(page.getByRole("combobox", { name: "Room type" })).toBeVisible();
+    await expect(page.getByRole("textbox", { name: /^Price per night for / })).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath("payments-2-pricing.png"), fullPage: true });
 
     // Going back and continuing with the same selection writes nothing, so prices never go stale.
@@ -81,6 +94,7 @@ test.describe("adaptive setup asks how guests pay before prices", () => {
       page.getByRole("heading", { name: "Choose how guests can pay", level: 1 }),
     ).toBeVisible();
     await expect(page.getByRole("checkbox", { name: "Pay at hotel" })).toBeChecked();
+    await expect(page.getByText("Your plan: Commission · 5% per direct booking")).toBeVisible();
     await page.getByRole("button", { name: "Save and continue" }).click();
     await expect(
       page.getByRole("heading", { name: "Set your room prices", level: 1 }),
@@ -94,6 +108,7 @@ test.describe("adaptive setup asks how guests pay before prices", () => {
         selectedMethods: ["pay_at_property"],
       },
     ]);
+    expect(api.planWrites).toEqual([1]);
     expect(api.unexpectedCalls).toEqual([]);
     await assertHealthy();
   });
@@ -107,7 +122,18 @@ async function mockPaymentsPricingApis(page: Page) {
   const drafts = new Map<PropertySetupStepId, PropertySetupStepDraft>();
   const currencyWrites: unknown[] = [];
   const paymentWrites: unknown[] = [];
+  const planWrites: number[] = [];
   const unexpectedCalls: string[] = [];
+  const planStatus = () => ({
+    plan: planWrites.length ? "commission" : null,
+    status: planWrites.length ? "commission" : "not_selected",
+    currency: "EUR",
+    activeRoomCount: 1,
+    amountMinor: 3_000,
+    fixedPlanAvailable: true,
+    checkoutPending: false,
+    updatedAt: acceptedAt,
+  });
 
   const pricingEvidence = () =>
     currencyRevision
@@ -160,7 +186,9 @@ async function mockPaymentsPricingApis(page: Page) {
             present_hotel: "complete",
             booking_design: "complete",
             rooms: "complete",
-            ...(selectedMethods.length ? { payments: "complete" as const } : {}),
+            ...(selectedMethods.length && planWrites.length
+              ? { payments: "complete" as const }
+              : {}),
           },
         });
         const steps = base.steps.map((step) => ({
@@ -257,6 +285,33 @@ async function mockPaymentsPricingApis(page: Page) {
       await ok(route, readiness());
       return;
     }
+    // Bank-transfer and PayPal acceptance is off, as in production today (VAY-2139).
+    if (pathname.endsWith("/manual-payment-methods") && request.method() === "GET") {
+      await ok(route, { acceptanceEnabled: false, readyMethods: [] });
+      return;
+    }
+    if (pathname.endsWith("/plan-status") && request.method() === "GET") {
+      await ok(route, {
+        contractVersion: "finance-subscriptions.v1",
+        propertyId,
+        planStatus: planStatus(),
+      });
+      return;
+    }
+    if (pathname.endsWith("/select-commission") && request.method() === "POST") {
+      const body = request.postDataJSON() as { commandId?: string; idempotencyKey?: string };
+      if (!body.commandId || body.commandId !== body.idempotencyKey) {
+        await unexpected(route, unexpectedCalls);
+        return;
+      }
+      planWrites.push(1);
+      await ok(route, {
+        contractVersion: "finance-subscriptions.v1",
+        propertyId,
+        planStatus: planStatus(),
+      });
+      return;
+    }
     if (pathname.endsWith("/payment-methods") && request.method() === "PUT") {
       const body = request.postDataJSON() as {
         expectedPaymentMethodsRevision: number;
@@ -330,6 +385,10 @@ async function mockPaymentsPricingApis(page: Page) {
       });
       return;
     }
+    if (pathname.endsWith("/pricing-v2/payment-methods") && method === "GET") {
+      await ok(route, { acceptanceEnabled: false, readyMethods: [] });
+      return;
+    }
     if (pathname.endsWith("/pricing-v2") && method === "GET") {
       await route.fulfill({
         status: 404,
@@ -341,7 +400,7 @@ async function mockPaymentsPricingApis(page: Page) {
     await unexpected(route, unexpectedCalls);
   });
 
-  return { currencyWrites, paymentWrites, unexpectedCalls };
+  return { currencyWrites, paymentWrites, planWrites, unexpectedCalls };
 }
 
 async function primeBrowserState(page: Page) {
@@ -403,7 +462,6 @@ function setupUrl(baseURL: string | undefined) {
     returnProduct: "marketplace",
     returnTo: "/marketplace",
     propertyId,
-    _adaptive: "1",
   });
   if (!baseURL) return `/setup?${query.toString()}`;
   const url = new URL(baseURL);

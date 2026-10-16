@@ -209,6 +209,9 @@ describe("Finance subscription store", () => {
     const update = calls.find(({ text }) => text.includes("UPDATE finance.billing_entitlements"));
     expect(update?.text).toContain("billing_subscription_ref = $4");
     expect(update?.text).toContain("provider_subscription_status IN ('active', 'trialing')");
+    // A hotel that picks Fixed without choosing a plan first still gets the 5% booking rule.
+    const rule = calls.find(({ text }) => text.includes("INSERT INTO finance.commission_rules"));
+    expect(rule?.values?.[2]).toBe("onboarding-booking:a9fccec2-eb4c-4c35-bfd3-02a748c2e117");
     expect(calls.some(({ text }) => text === "COMMIT")).toBe(true);
   });
 });

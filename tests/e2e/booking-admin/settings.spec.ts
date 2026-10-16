@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { stripeOnboardingPropertyKey } from "../../../apps/booking-admin/lib/utils/stripeOnboardingRefresh";
 import {
   BOOKING_ADMIN_CUSTOM_DOMAIN_PATH,
@@ -9,7 +9,10 @@ import {
   BOOKING_ADMIN_PROPERTY_SETTINGS_PATH,
   BOOKING_ADMIN_SAME_DAY_PATH,
   BOOKING_ADMIN_PROPERTY_PROFILE_PATH,
+  BOOKING_ADMIN_PUBLIC_BOOKABILITY_PATH,
+  BOOKING_ADMIN_PUBLIC_PROPERTY_PROFILE_PATH,
   defaultBookingAdminPropertyProfile,
+  defaultBookingAdminPublicPropertyProfile,
   defaultBookingAdminPropertySettings,
   defaultCustomDomain,
   mockBookingAdminDesignSettings,
@@ -281,6 +284,113 @@ test.describe("booking-admin settings no-legacy guard", () => {
     expect(profileWrites).toHaveLength(1);
   });
 
+  test("edits the property description shown in the booking site footer", async ({
+    page,
+  }, testInfo) => {
+    test.skip(
+      !PROD,
+      "Requires a production booking-admin build so the authenticated shell hydrates.",
+    );
+    // VAY-2142: the footer description had no edit field in Booking Admin.
+    const assertHealthy = watchPageHealth(page, testInfo);
+    await mockBookingAdminAuthenticatedSession(page);
+    const persisted = { ...defaultBookingAdminPropertySettings, property_name: "Alpenrose" };
+    await mockBookingAdminShellRoutes(page, { propertySettings: persisted });
+    const writes: string[] = [];
+    const publicProfile = structuredClone(defaultBookingAdminPublicPropertyProfile);
+    const descriptionWrites: unknown[] = [];
+    let failDescriptionWrite = false;
+    await page.route(`**${BOOKING_ADMIN_PUBLIC_PROPERTY_PROFILE_PATH}*`, async (route) => {
+      if (route.request().method() === "PUT") {
+        if (failDescriptionWrite) {
+          await route.fulfill({ status: 500, json: { message: "Unavailable" } });
+          return;
+        }
+        const body = route.request().postDataJSON() as {
+          expectedProfileRevision: number;
+          patch: { shortDescription: string };
+        };
+        writes.push("description");
+        descriptionWrites.push(body);
+        publicProfile.profileRevision += 1;
+        publicProfile.publicProfile.shortDescription = body.patch.shortDescription;
+      }
+      await route.fulfill({ json: publicProfile });
+    });
+    await page.route(`**${BOOKING_ADMIN_PROPERTY_SETTINGS_PATH}*`, async (route) => {
+      if (route.request().method() === "PATCH") writes.push("settings");
+      await route.fulfill({ json: persisted });
+    });
+    const clientRefreshes: string[] = [];
+    await page.route(`**${BOOKING_ADMIN_PUBLIC_BOOKABILITY_PATH}*`, async (route) => {
+      clientRefreshes.push(route.request().url());
+      await route.fallback();
+    });
+    const save = page.getByRole("button", { name: "Save property details", exact: true });
+
+    await page.goto("/settings/general");
+    const description = page.getByLabel("Property description");
+    await expect(description).toHaveValue(
+      defaultBookingAdminPublicPropertyProfile.publicProfile.shortDescription,
+    );
+    await expect(
+      page.getByText("A short line about your property, shown in the booking site footer."),
+    ).toBeVisible();
+
+    // Setup's rule for the same text: 50 to 500 characters, checked before anything is saved.
+    await description.fill("Too short.");
+    await save.click();
+    await expect(
+      page.getByText("The property description needs 50 to 500 characters."),
+    ).toBeVisible();
+    expect(writes).toEqual([]);
+
+    const text = "A family-run alpine hotel in the heart of Munich, ten minutes from the old town.";
+    await description.fill(`  ${text}  `);
+    await save.click();
+    await expect(page.getByText("Settings saved successfully")).toBeVisible();
+    expect(descriptionWrites).toEqual([
+      { expectedProfileRevision: 1, patch: { shortDescription: text } },
+    ]);
+    // The description lands first, so the settings save's own refresh of a live booking page
+    // carries it; the page sends no refresh of its own.
+    expect(writes).toEqual(["description", "settings"]);
+    expect(clientRefreshes).toEqual([]);
+    await expect(description).toHaveValue(text);
+
+    // Editing hides the success banner; saving without changes writes no description.
+    await description.fill(`${text} `);
+    await expect(page.getByText("Settings saved successfully")).toHaveCount(0);
+    await save.click();
+    await expect(page.getByText("Settings saved successfully")).toBeVisible();
+    expect(writes).toEqual(["description", "settings", "settings"]);
+    await testInfo.attach("settings-general-description", {
+      body: await page.screenshot({ fullPage: true }),
+      contentType: "image/png",
+    });
+    await assertHealthy();
+
+    // A failed description write stops the save, so nothing changes.
+    // (The refused requests log console errors, so page health is checked above.)
+    failDescriptionWrite = true;
+    await description.fill(`${text} Breakfast is served on the terrace.`);
+    await save.click();
+    await expect(
+      page.getByText("The property description couldn't be saved, so nothing was changed."),
+    ).toBeVisible();
+    expect(writes).toEqual(["description", "settings", "settings"]);
+
+    // A failed read keeps the field locked, so a Save can never clear the text.
+    await page.route(`**${BOOKING_ADMIN_PUBLIC_PROPERTY_PROFILE_PATH}*`, (route) =>
+      route.fulfill({ status: 503, json: { message: "Unavailable" } }),
+    );
+    await page.reload();
+    await expect(
+      page.getByText("The description couldn't be loaded. Reload the page to edit it."),
+    ).toBeVisible();
+    await expect(description).toBeDisabled();
+  });
+
   test("loads migrated settings surfaces without helper calls", async ({ page }, testInfo) => {
     test.skip(
       !PROD,
@@ -541,7 +651,7 @@ test.describe("booking-admin settings no-legacy guard", () => {
     await assertHealthy();
   });
 
-  test("keeps Refer a Guest visible in the mobile Design Studio preview", async ({
+  test("keeps Refer a Guest off even with a legacy affiliate activation (VAY-2143)", async ({
     page,
   }, testInfo) => {
     test.skip(
@@ -574,14 +684,18 @@ test.describe("booking-admin settings no-legacy guard", () => {
     );
 
     await page.goto("/design-studio");
+    // The old referral product is retired: the switch says so instead of pointing to Feature Hub.
     const referToggle = page.getByRole("switch", { name: "Refer a Guest button" });
-    await expect(referToggle).toBeEnabled();
-    await referToggle.click();
+    await expect(referToggle).toBeDisabled();
+    await expect(referToggle).not.toBeChecked();
+    await expect(
+      page.getByText("This feature is currently unavailable.", { exact: true }),
+    ).toBeVisible();
+    await expect(page.getByText("Enable Refer a Guest in Feature Hub first.")).toHaveCount(0);
     await page.setViewportSize({ width: 375, height: 812 });
     await page.getByRole("button", { name: "Preview" }).click();
 
-    await expect(page.getByTestId("booking-preview-refer")).toBeVisible();
-    await expect(page.getByTestId("booking-preview-refer")).toContainText("Refer");
+    await expect(page.getByTestId("booking-preview-refer")).toHaveCount(0);
     await assertHealthy();
   });
 
@@ -623,30 +737,37 @@ test.describe("booking-admin settings no-legacy guard", () => {
     );
 
     await page.goto("/settings", { waitUntil: "networkidle" });
-    await expect(page.getByRole("heading", { name: "Booking Engine settings" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Booking Engine Settings" })).toBeVisible();
     const main = page.getByRole("main");
     await expect(main.getByRole("link", { name: /^Feature Hub/ })).toHaveAttribute(
       "href",
       "/settings/feature-hub",
     );
-    for (const [card, href] of [
+    // Timo's card order (VAY-2144): Room Filters and Guest Form joined from Booking Flow.
+    const cards: [string, string | null][] = [
       ["Booking rules", "/settings/booking-rules"],
       ["General", "/settings/general"],
       ["Payments", "/settings/payments"],
+      ["Book Direct Benefits", "/settings/book-direct-benefits"],
       ["Policies", "/settings/policies"],
+      ["Room Filters", "/settings/room-filters"],
+      ["Guest Form", "/settings/guest-form"],
       ["Billing", "/settings/billing"],
-    ]) {
-      await expect(main.getByRole("link", { name: new RegExp(`^${card}`) })).toHaveAttribute(
-        "href",
-        href,
-      );
+      ["Account", null],
+    ];
+    const items = main.getByRole("listitem");
+    await expect(items).toHaveCount(cards.length);
+    for (const [index, [card, href]] of cards.entries()) {
+      await expect(items.nth(index)).toContainText(card);
+      if (href) {
+        await expect(items.nth(index).getByRole("link")).toHaveAttribute("href", href);
+      } else {
+        await expect(items.nth(index).getByRole("link")).toHaveCount(0);
+        await expect(items.nth(index).getByText("Coming soon")).toBeVisible();
+      }
     }
-    for (const card of ["Email & notifications", "Account"]) {
-      await expect(main.getByRole("link", { name: new RegExp(`^${card}`) })).toHaveCount(0);
-      await expect(
-        main.getByRole("listitem").filter({ hasText: card }).getByText("Coming soon"),
-      ).toBeVisible();
-    }
+    // Email & notifications stays hidden until it has a page.
+    await expect(main.getByText("Email & notifications")).toHaveCount(0);
     await testInfo.attach("settings-grid-desktop", {
       body: await page.screenshot({ fullPage: true }),
       contentType: "image/png",
@@ -681,7 +802,7 @@ test.describe("booking-admin settings no-legacy guard", () => {
 
     for (const unknown of ["unknown", "account", "location", "notifications"]) {
       await page.goto(`/settings?section=${unknown}`, { waitUntil: "networkidle" });
-      await expect(page.getByRole("heading", { name: "Booking Engine settings" })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Booking Engine Settings" })).toBeVisible();
     }
     await page.goto("/settings/account", { waitUntil: "networkidle" });
     await expect(page.getByRole("heading", { name: "Account", exact: true })).toHaveCount(0);
@@ -692,7 +813,7 @@ test.describe("booking-admin settings no-legacy guard", () => {
     ] as const) {
       await page.setViewportSize({ width, height });
       await page.goto("/settings", { waitUntil: "networkidle" });
-      await expect(page.getByRole("heading", { name: "Booking Engine settings" })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Booking Engine Settings" })).toBeVisible();
       await testInfo.attach(`settings-grid-${name}`, {
         body: await page.screenshot({ fullPage: true }),
         contentType: "image/png",
@@ -753,9 +874,10 @@ test.describe("booking-admin settings no-legacy guard", () => {
           : plan === "fixed"
             ? "active"
             : "commission",
-        currency: "EUR",
-        activeRoomCount: 3,
-        amountMinor: 4_000,
+        // A USD-priced hotel: the card shows the plan's own currency, never a hard-coded one (VAY-2201).
+        currency: "USD",
+        activeRoomCount: 6,
+        amountMinor: 5_500,
         currentPeriodStart: plan === "fixed" ? "2026-08-11T12:00:00.000Z" : null,
         currentPeriodEnd: plan === "fixed" ? "2026-09-10T12:00:00.000Z" : null,
         nextBillingDate: plan === "fixed" && !cancelAtPeriodEnd ? "2026-09-10T12:00:00.000Z" : null,
@@ -788,9 +910,9 @@ test.describe("booking-admin settings no-legacy guard", () => {
             checkout: {
               checkoutSessionId: "cs_fixed",
               checkoutUrl: new URL("/settings?billing=success", page.url()).toString(),
-              currency: "EUR",
-              amountMinor: 4_000,
-              activeRoomCount: 3,
+              currency: "USD",
+              amountMinor: 5_500,
+              activeRoomCount: 6,
             },
           },
         });
@@ -812,14 +934,37 @@ test.describe("booking-admin settings no-legacy guard", () => {
     await page.goto("/settings/billing");
     // Billing is only the Vayada plan; guest payment methods live on Payments.
     await expect(page.getByRole("heading", { name: "Payment Methods" })).toHaveCount(0);
-    await testInfo.attach("settings-billing", {
-      body: await page.screenshot({ fullPage: true }),
-      contentType: "image/png",
-    });
+    await expect(page.getByText("Fixed fee based on active units")).toBeVisible();
+    await expect(page.getByText("$55.00", { exact: true })).toBeVisible();
+    await expect(page.getByText("every month", { exact: true })).toBeVisible();
+    const unitPricing = page.getByTestId("fixed-plan-unit-pricing");
+    await expect(unitPricing).toHaveText(
+      "$30 for the first active unit + $5 per additional unit · 6 active units",
+    );
+    await expect(page.getByRole("main").getByText(/€|rooms|30 days/)).toHaveCount(0);
+    for (const [width, height, name] of [
+      [1440, 900, "desktop"],
+      [820, 1180, "tablet"],
+      [390, 844, "mobile"],
+    ] as const) {
+      await page.setViewportSize({ width, height });
+      // The description takes two lines at most: the formula, then the unit count (VAY-2201).
+      const [paragraph, line] = await Promise.all([
+        unitPricing.boundingBox(),
+        unitPricing.locator("span").last().boundingBox(),
+      ]);
+      expect(Math.round(paragraph!.height / line!.height), name).toBeLessThanOrEqual(2);
+      await testInfo.attach(`settings-billing-${name}`, {
+        body: await page.screenshot({ fullPage: true }),
+        contentType: "image/png",
+      });
+    }
+    await page.setViewportSize({ width: 1280, height: 720 });
     await page.getByRole("button", { name: "Switch to Fixed Plan" }).click();
     const fixedDialog = page.getByRole("dialog");
+    await expect(fixedDialog).toContainText("You're switching to the Fixed Plan at $55.00/month.");
     await expect(fixedDialog).toContainText(
-      "Your first payment will be charged today. Future payments will be charged every 30 days.",
+      "Your first payment will be charged today. Future payments will be charged every month.",
     );
     await fixedDialog.getByRole("button", { name: "Continue to payment" }).click();
     await expect(page.getByText("Fixed Plan is active.")).toBeVisible();
@@ -1020,7 +1165,9 @@ test.describe("booking-admin settings no-legacy guard", () => {
 
     expect(order).toEqual(["save"]);
     expect(accountCreates).toBe(1);
-    await expect(page.getByText("Failed to save")).toBeVisible();
+    await expect(
+      page.getByText("Could not save payment settings. Please try again."),
+    ).toBeVisible();
     await expect(page).toHaveURL(/\/settings\/payments$/);
   });
 
@@ -1346,4 +1493,210 @@ test("saves direct-only transfers while retaining an existing hosted provider", 
       { exact: true },
     ),
   ).toBeVisible();
+});
+
+// VAY-2185: setup saves plain Pay at Hotel (no Cash/Card choice); Booking Admin showed nothing
+// picked and every Save failed in the browser with "Failed to save".
+function financePaymentSettings(acceptedMethods: string[], paymentsEnabled = true) {
+  return {
+    contractVersion: "finance-route-contracts.v1",
+    propertyId: BOOKING_ADMIN_PROPERTY_ID,
+    paymentSettings: {
+      paymentsEnabled,
+      paymentProvider: "manual",
+      acceptedMethods,
+      defaultCurrency: "EUR",
+      supportedCurrencies: ["EUR"],
+      depositPolicy: {},
+      requiresManualReview: false,
+      providerAccount: {
+        providerAccountId: null,
+        provider: null,
+        status: "not_configured",
+        onboardingStatus: "not_started",
+        chargesEnabled: false,
+        payoutsEnabled: false,
+        capabilities: [],
+      },
+    },
+  };
+}
+
+async function mockPaymentWrites(
+  page: Page,
+  acceptedMethods: string[],
+  responses: Array<{ status: number; json: Record<string, unknown> }> = [],
+  paymentsEnabled = true,
+) {
+  await mockBookingAdminAuthenticatedSession(page);
+  await mockBookingAdminShellRoutes(page);
+  const writes: Array<{ acceptedMethods: string[] }> = [];
+  await page.route(`**${BOOKING_ADMIN_FINANCE_PAYMENT_SETTINGS_PATH}`, async (route) => {
+    if (route.request().method() === "PATCH") {
+      const body = route.request().postDataJSON() as {
+        paymentSettings: { acceptedMethods: string[] };
+      };
+      writes.push({ acceptedMethods: body.paymentSettings.acceptedMethods });
+      const response = responses.shift();
+      if (response) return route.fulfill(response);
+      return route.fulfill({ json: financePaymentSettings(body.paymentSettings.acceptedMethods) });
+    }
+    return route.fulfill({ json: financePaymentSettings(acceptedMethods, paymentsEnabled) });
+  });
+  return writes;
+}
+
+const savePaymentsButton = (page: Page) =>
+  page.getByRole("button", { name: "Save Changes", exact: true });
+
+test("keeps setup's plain Pay at Hotel when it is saved untouched", async ({ page }, testInfo) => {
+  const assertHealthy = watchPageHealth(page, testInfo);
+  const writes = await mockPaymentWrites(page, ["pay_at_property"]);
+  await page.goto("/settings/payments");
+  await expect(page.getByRole("button", { name: "Cash", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(page.getByRole("button", { name: "Card", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(page.getByText("Cash & Card accepted", { exact: true })).toBeVisible();
+  await testInfo.attach("settings-payments-plain-pay-at-hotel", {
+    body: await page.screenshot({ fullPage: true }),
+    contentType: "image/png",
+  });
+  await savePaymentsButton(page).click();
+  await expect(page.getByText("Payment settings saved").first()).toBeVisible();
+  expect(writes).toEqual([{ acceptedMethods: ["pay_at_property"] }]);
+
+  // Off and on again still shows Cash and Card, so nothing changed.
+  await page.getByText("Pay at Hotel", { exact: true }).click();
+  await page.getByText("Pay at Hotel", { exact: true }).click();
+  await savePaymentsButton(page).click();
+  await expect.poll(() => writes.length).toBe(2);
+  expect(writes[1]).toEqual({ acceptedMethods: ["pay_at_property"] });
+
+  // A changed choice is sent as shown.
+  await page.getByRole("button", { name: "Card", exact: true }).click();
+  await savePaymentsButton(page).click();
+  await expect.poll(() => writes.length).toBe(3);
+  expect(writes[2]).toEqual({ acceptedMethods: ["pay_at_property", "cash"] });
+  await assertHealthy();
+});
+
+test("re-sends Cash and Card once when Finance needs the Pay at Hotel choice", async ({ page }) => {
+  const writes = await mockPaymentWrites(
+    page,
+    ["pay_at_property"],
+    [
+      {
+        status: 400,
+        json: {
+          statusCode: 400,
+          code: "invalid_command",
+          category: "validation",
+          message: "Pay at Hotel requires cash, card, or both.",
+        },
+      },
+    ],
+  );
+  await page.goto("/settings/payments");
+  await expect(page.getByText("Cash & Card accepted", { exact: true })).toBeVisible();
+  await savePaymentsButton(page).click();
+  await expect(page.getByText("Payment settings saved").first()).toBeVisible();
+  expect(writes).toEqual([
+    { acceptedMethods: ["pay_at_property"] },
+    { acceptedMethods: ["pay_at_property", "cash", "manual_card"] },
+  ]);
+});
+
+test("starts a newly switched-on Pay at Hotel with Cash and Card", async ({ page }) => {
+  const writes = await mockPaymentWrites(page, [], [], false);
+  await page.goto("/settings/payments");
+  await expect(page.getByRole("heading", { name: "Payment Methods" })).toBeVisible();
+  await page.getByText("Pay at Hotel", { exact: true }).click();
+  await expect(page.getByText("Cash & Card accepted", { exact: true })).toBeVisible();
+  await savePaymentsButton(page).click();
+  await expect(page.getByText("Payment settings saved").first()).toBeVisible();
+  expect(writes).toEqual([{ acceptedMethods: ["pay_at_property", "cash", "manual_card"] }]);
+});
+
+// A click made before the saved methods arrived was undone when they did, which also made
+// the test above flaky on a slow load.
+test("waits for the saved payment methods before a click counts", async ({ page }) => {
+  const writes = await mockPaymentWrites(page, [], [], false);
+  let releaseRead = () => {};
+  let readHeld = () => {};
+  const readReleased = new Promise<void>((resolve) => (releaseRead = resolve));
+  const readIsHeld = new Promise<void>((resolve) => (readHeld = resolve));
+  await page.route(`**${BOOKING_ADMIN_FINANCE_PAYMENT_SETTINGS_PATH}`, async (route) => {
+    if (route.request().method() === "GET") {
+      readHeld();
+      await readReleased;
+    }
+    await route.fallback();
+  });
+  await page.goto("/settings/payments");
+  // The cards are on screen and the saved methods are still on their way.
+  await expect(page.getByText("Pay at Hotel", { exact: true })).toBeVisible();
+  await readIsHeld;
+  const click = page.getByText("Pay at Hotel", { exact: true }).click();
+  await page.waitForTimeout(300);
+  releaseRead();
+  await click;
+  await expect(page.getByText("Cash & Card accepted", { exact: true })).toBeVisible();
+  await savePaymentsButton(page).click();
+  await expect(page.getByText("Payment settings saved").first()).toBeVisible();
+  expect(writes).toEqual([{ acceptedMethods: ["pay_at_property", "cash", "manual_card"] }]);
+});
+
+test("says what went wrong when payments don't save, and offers Try again", async ({
+  page,
+}, testInfo) => {
+  const writes = await mockPaymentWrites(
+    page,
+    ["pay_at_property", "cash"],
+    [
+      {
+        status: 409,
+        json: {
+          statusCode: 409,
+          code: "property_currency_conflict",
+          category: "conflict",
+          message: "Payment currency changed to LKR. Reload before saving.",
+        },
+      },
+      {
+        status: 503,
+        json: {
+          statusCode: 503,
+          code: "write_model_unavailable",
+          category: "write_model",
+          message: "Finance is unavailable.",
+        },
+      },
+    ],
+  );
+  await page.goto("/settings/payments");
+  await expect(page.getByText("Cash only", { exact: true })).toBeVisible();
+  await savePaymentsButton(page).click();
+  const banner = page.getByRole("alert").filter({ hasText: "Your hotel's currency changed." });
+  await expect(banner).toHaveText(
+    "Your hotel's currency changed. Reload the page, then save again.",
+  );
+  await expect(page.getByRole("button", { name: "Try again" })).toHaveCount(0);
+
+  await savePaymentsButton(page).click();
+  await expect(
+    page.getByText("Could not save payment settings. Please try again.").first(),
+  ).toBeVisible();
+  await testInfo.attach("settings-payments-save-error", {
+    body: await page.screenshot({ fullPage: true }),
+    contentType: "image/png",
+  });
+  await page.getByRole("button", { name: "Try again" }).click();
+  await expect(page.getByText("Payment settings saved").first()).toBeVisible();
+  expect(writes).toHaveLength(3);
+  await expect(page.getByText("Failed to save", { exact: true })).toHaveCount(0);
 });

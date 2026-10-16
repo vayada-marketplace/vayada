@@ -4,8 +4,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "@/lib/i18n";
 import { formatCurrency, formatNumber } from "@/lib/utils";
 import { settingsService, type PropertySettings } from "@/services/settings";
+import { BookingPageStatusCard } from "@/components/dashboard/BookingPageStatusCard";
 import { ConversionFunnelCard } from "@/components/dashboard/ConversionFunnelCard";
 import { SummaryCard } from "@/components/dashboard/SummaryCard";
+import { PageHeader, PageLayout } from "@/components/layout/PageLayout";
 import { compareRate, compareSummary, type SummaryChange } from "@/lib/utils/dashboardSummary";
 import {
   dashboardService,
@@ -213,11 +215,10 @@ export default function DashboardPage() {
     : [];
 
   return (
-    <div className="p-4 md:p-6 max-w-7xl mx-auto space-y-3 md:space-y-4">
-      {/* Header */}
-      <div>
-        <h1 className="text-xl md:text-2xl font-bold text-gray-900">{t("dashboard.title")}</h1>
-      </div>
+    <PageLayout className="space-y-3 md:space-y-4">
+      <PageHeader title={t("dashboard.title")} />
+
+      <BookingPageStatusCard />
 
       {/* Time Range Tabs */}
       <div className="flex gap-1 bg-gray-100 rounded-lg p-1 w-full sm:w-fit">
@@ -406,7 +407,7 @@ export default function DashboardPage() {
           onTimeRangeChange={selectTimeRange}
         />
       </div>
-    </div>
+    </PageLayout>
   );
 }
 

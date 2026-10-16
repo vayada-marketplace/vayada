@@ -231,6 +231,9 @@ export type PmsOperationalReservation = {
     };
   };
   hostResponseDeadlineAt?: PmsUtcDateTime | null;
+  /** Pricing-v2 bank transfer or PayPal waiting for the payment, which the hotel confirms with
+   * mark-paid; there is no separate accept step (VAY-2139). Present only when true. */
+  awaitingHotelPaymentConfirmation?: true;
 };
 
 export type PmsReservationListFilters = {
@@ -918,6 +921,7 @@ type TargetPmsOperationalReservationRow = {
   paymentStatus: string;
   paymentBreakdown: unknown;
   hostResponseDeadlineAt: string | null;
+  awaitingHotelPaymentConfirmation?: boolean;
 };
 
 const PMS_OPERATIONAL_RESERVATION_STATUS_SQL = `CASE
@@ -1035,6 +1039,10 @@ function pmsOperationalReservationSelectSql(
     booking.booking_metadata ->> 'hostResponseDeadlineAt',
     booking.booking_metadata ->> 'pendingExpiresAt'
   ) AS "hostResponseDeadlineAt",
+  (booking.lifecycle_status = 'pending_payment'
+    AND booking.booking_metadata ->> 'targetSource' = 'pricing_quote_draft'
+    AND booking.booking_metadata ->> 'paymentMethod' IN ('bank_transfer', 'paypal')
+  ) AS "awaitingHotelPaymentConfirmation",
   COALESCE(assignments.items, '[]'::jsonb) AS "assignments",
   COALESCE(addons.items, '[]'::jsonb) AS "addOns",
   checkin.completed_at AS "checkinCompletedAt",
@@ -1551,6 +1559,9 @@ function toPmsOperationalReservation(
       ...paymentBreakdown(row.paymentBreakdown),
     },
     hostResponseDeadlineAt: toIsoDateTimeOrNull(row.hostResponseDeadlineAt),
+    ...(row.awaitingHotelPaymentConfirmation === true
+      ? { awaitingHotelPaymentConfirmation: true as const }
+      : {}),
   };
 }
 

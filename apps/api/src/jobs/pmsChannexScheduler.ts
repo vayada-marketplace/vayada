@@ -489,8 +489,8 @@ function effectiveCalendarAutoOpenSettingsSql(first: number): string {
            stored.property_id IS NOT NULL
            OR (
              EXISTS (
-               -- The current calendar was saved against the current profile and timezone;
-               -- after a profile edit the calendar needs a re-save (a stale-source conflict).
+               -- The current calendar was saved for the current time zone; a new time zone needs
+               -- a re-save. Other profile edits keep it current (VAY-2150).
                SELECT 1
                FROM pms.operating_calendar_revisions latest
                JOIN hotel_catalog.property_locations location
@@ -500,7 +500,6 @@ function effectiveCalendarAutoOpenSettingsSql(first: number): string {
                    SELECT max(revision.calendar_revision) FROM pms.operating_calendar_revisions revision
                    WHERE revision.property_id = property.id
                  )
-                 AND latest.property_profile_revision = property.profile_revision
                  AND latest.property_time_zone = location.timezone
              )
              AND NOT EXISTS (
@@ -530,7 +529,6 @@ function effectiveCalendarAutoOpenSettingsSql(first: number): string {
                  )
                  AND (
                    binding.room_type_id IS NULL
-                   OR binding.source_room_facts_revision IS DISTINCT FROM room.room_facts_revision
                    OR binding.source_room_units_revision IS DISTINCT FROM room.room_units_revision
                  )
              )
@@ -956,7 +954,9 @@ async function selectCalendarAutoOpenCandidates(
          setting.mode,
          setting.rolling_months AS "rollingMonths",
          setting.fixed_end_month AS "fixedEndMonth",
-         property.profile_revision AS "propertyProfileRevision",
+         -- The calendar's own profile and room-facts pins, so detail edits don't change the job
+         -- source and re-run auto-open (VAY-2150).
+         calendar.property_profile_revision AS "propertyProfileRevision",
          location.timezone AS "propertyTimeZone",
          calendar.calendar_revision AS "operatingCalendarRevision",
          room_source.rooms,
@@ -992,7 +992,8 @@ async function selectCalendarAutoOpenCandidates(
        LEFT JOIN pms.property_pricing_settings pricing
          ON pricing.property_id = setting.property_id
        LEFT JOIN LATERAL (
-         SELECT revision.organization_id, revision.calendar_revision
+         SELECT revision.organization_id, revision.calendar_revision,
+                revision.property_profile_revision
          FROM pms.operating_calendar_revisions revision
          WHERE revision.property_id = setting.property_id
          ORDER BY revision.calendar_revision DESC
@@ -1002,12 +1003,18 @@ async function selectCalendarAutoOpenCandidates(
          SELECT COALESCE(
            json_agg(json_build_object(
              'roomTypeId', room_type.id::text,
-             'roomFactsRevision', room_type.room_facts_revision,
+             'roomFactsRevision', COALESCE(
+               binding.source_room_facts_revision, room_type.room_facts_revision
+             ),
              'roomUnitsRevision', room_type.room_units_revision
            ) ORDER BY room_type.id),
            '[]'::json
          ) AS rooms
          FROM pms.room_types room_type
+         LEFT JOIN pms.operating_calendar_room_bindings binding
+           ON binding.property_id = room_type.property_id
+          AND binding.room_type_id = room_type.id
+          AND binding.calendar_revision = calendar.calendar_revision
          WHERE room_type.property_id = setting.property_id AND room_type.active IS TRUE
        ) room_source ON TRUE
        LEFT JOIN LATERAL (

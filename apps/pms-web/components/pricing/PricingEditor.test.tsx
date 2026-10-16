@@ -13,7 +13,7 @@ import { changeIncludedAdjustments } from "./PricingIncludedAdjustments";
 import { changeDatePrice } from "./PricingDates";
 import { NewLinkedOffer, linkedOfferInput } from "./NewLinkedOffer";
 import { changeLinkedParent, linkedParentChoices } from "./PricingLinkedParent";
-import { changeMealPlan } from "./PricingMealPlan";
+import { changeMealPlan, PricingMealPlan } from "./PricingMealPlan";
 import { changeMealCharges } from "./PricingMealCharges";
 import { changeChildCharges } from "./PricingChildCharges";
 import { changeLinkedAdjustment } from "./PricingLinkedAdjustment";
@@ -99,6 +99,7 @@ const client = {
   confirmationAction: vi.fn(() => confirm),
   publicationAction: vi.fn<(draft: PricingDraft) => typeof publish>(),
   readDraft: vi.fn(),
+  paymentMethods: vi.fn(),
 };
 /** A button by its text; icons beside the text (e.g. "+ Add linked offer") are ignored. */
 const button = (label: string) =>
@@ -118,6 +119,20 @@ const click = async (label: string) => {
 };
 const input = () =>
   view.root.findAllByType("input").find((node) => node.props.inputMode === "decimal")!;
+/** Checkboxes other than More options' payment methods (VAY-2188), e.g. a window's confirmation. */
+const paymentLabels = ["Card online", "Pay at property", "Bank transfer", "PayPal"];
+const checkboxes = () =>
+  view.root
+    .findAllByProps({ type: "checkbox" })
+    .filter((node) => node.type === "input" && !paymentLabels.includes(node.props["aria-label"]));
+const onlyCheckbox = () => {
+  const [only, ...more] = checkboxes();
+  if (!only || more.length) throw new Error(`expected one checkbox, found ${checkboxes().length}`);
+  return only;
+};
+/** The card's switch for an extra choice, by its name ("Non-refundable", "With breakfast"). */
+const extraSwitch = (name: string) =>
+  view.root.findByProps({ role: "switch", "aria-label": `Offer “${name}”` });
 /** Re-enter the shown base price: something to save without changing any amount. */
 const touch = async () => {
   await act(async () => input().props.onChange({ target: { value: input().props.value } }));
@@ -127,20 +142,20 @@ const reload = async () => {
   for (const confirm of ["Discard and reload", "Discard changes"])
     if (button(confirm)) await click(confirm);
 };
-/** Step 4's "Own option": opens the new-option window and picks how the option is priced. Does nothing while
- * "Own option" is disabled. */
+/** More options' "Your own option": opens the new-option window and picks how the option is priced. Does nothing
+ * while "Your own option" is disabled. */
 const addOption = async (kind: "Based on another option" | "With its own prices") => {
-  if (button("Own option").props.disabled) return;
-  await click("Own option");
+  if (button("Your own option").props.disabled) return;
+  await click("Your own option");
   await click(kind);
 };
-/** Opens step 2's season window: a season from the year bar by its name, or "Add season". */
+/** Opens the season window: a season from the "Busier dates" list by its name, or "Add a season". */
 const openSeason = async (name?: string) => {
   const target = name
     ? view.root
         .findAllByType("button")
         .find((node) => String(node.props["aria-label"] ?? "").startsWith(`Edit season ${name} `))!
-    : button("Add season");
+    : button("Add a season");
   await act(async () => target.props.onClick());
 };
 /** A button in the open season window (its footer has its own Cancel). */
@@ -173,6 +188,8 @@ beforeEach(() => {
   vi.stubGlobal("React", React);
   vi.stubGlobal("window", { addEventListener: vi.fn(), removeEventListener: vi.fn() });
   vi.stubGlobal("document", { addEventListener: vi.fn(), removeEventListener: vi.fn() });
+  // Bank-transfer and PayPal acceptance off (VAY-2139).
+  client.paymentMethods.mockResolvedValue([]);
   client.readTerms.mockImplementation(async (roomTypeId, offerId, revision) => ({
     roomTypeId,
     offerId,
@@ -220,7 +237,7 @@ it("offers no price-source choice: published prices are the direct-booking price
 it("saves edited prices in one action: the press declares mandatory charges and a lost publication retries exactly", async () => {
   await mount();
   expect(button("Save prices").props.disabled).toBe(true);
-  expect(view.root.findAllByProps({ type: "checkbox" })).toHaveLength(0);
+  expect(checkboxes()).toHaveLength(0);
   const rendered = JSON.stringify(view.toJSON());
   for (const text of [
     "By saving, you confirm these prices include all mandatory taxes and fees.",
@@ -567,9 +584,12 @@ it.each([new Error("lost preparation response")])(
       freeDays: "",
       payment: "full",
     });
-    await act(async () => view.root.findByType(StepFirstPrices).props.onCreate(input));
-    expect(client.termsAction).not.toHaveBeenCalled();
-    await click("Save prices");
+    // VAY-2188: the first prices save at once.
+    await act(async () =>
+      view.root
+        .findByType(StepFirstPrices)
+        .props.onCreate({ configuration: input.configuration, terms: [input.terms] }, "save"),
+    );
     expect(button("Reload pricing").props.disabled).toBe(true);
     await click("Retry last action");
     expect(policy).toHaveBeenCalledOnce();
@@ -1114,7 +1134,7 @@ it("protects the season window independently and requires review after adding a 
       ],
     },
   });
-  expect(button("Add season").props.disabled).toBe(true);
+  expect(button("Add a season").props.disabled).toBe(true);
   expect(button("Save prices").props.disabled).toBe(true);
   expect(JSON.stringify(view.toJSON())).toContain("Summer · €180.25");
 });
@@ -1606,10 +1626,8 @@ it("guards ownership confirmation, cancels without mutation, and saves the ackno
   await click("Cancel ownership change");
   expect(button("Save prices").props.disabled).toBe(false);
   await click("Use own stay rules");
-  expect(view.root.findByProps({ type: "checkbox" }).props.checked).toBe(false);
-  await act(async () =>
-    view.root.findByProps({ type: "checkbox" }).props.onChange({ target: { checked: true } }),
-  );
+  expect(onlyCheckbox().props.checked).toBe(false);
+  await act(async () => onlyCheckbox().props.onChange({ target: { checked: true } }));
   await click("Apply stay-rule ownership");
   await click("Save prices");
   expect(saved.snapshot.rooms[0].offers[1].restrictions).toEqual(root.restrictions);
@@ -2107,7 +2125,7 @@ it("requires fresh meal-plan confirmation, blocks competing edits, and reviews t
   expect(button("Apply meal plan")).toBeUndefined();
   await click("Cancel meal charges");
   await click("Change meal plan");
-  const checkbox = () => view.root.findByProps({ type: "checkbox" });
+  const checkbox = onlyCheckbox;
   const plan = () => view.root.findByProps({ "aria-label": "Meal plan for Room 1 Offer 1" });
   const amount = () =>
     view.root.findByProps({ "aria-label": "New meal charge Per room for Room 1 Offer 1" });
@@ -2252,7 +2270,7 @@ it("confirms parent changes with exclusive pending guards and fresh saved review
   expect(button("Apply parent rate")).toBeUndefined();
   await click("Cancel child charges");
   await click("Change parent rate");
-  const checkbox = () => view.root.findByProps({ type: "checkbox" });
+  const checkbox = onlyCheckbox;
   const parent = () => view.root.findByProps({ "aria-label": "Parent rate for Room 1 Offer 2" });
   expect(parent().props.value).toBe(root.id);
   expect(checkbox().props.checked).toBe(false);
@@ -2395,14 +2413,14 @@ it("appends linked offers preserving prices, revisions and accepted-policy retry
   );
   expect(saved.snapshot.rooms[0].offers[1].id).toBe(offerId);
   expect(saved.snapshot.rooms[0].offers[1].termsRevision).toBe(offerId);
-  expect(button("Own option").props.disabled).toBe(true);
+  expect(button("Your own option").props.disabled).toBe(true);
   expect(button("Save prices").props.disabled).toBe(true);
 });
 it("cancels new-offer setup without writes and protects pending entries and leaving", async () => {
   await mount();
   await touch();
   await click("Edit child charges");
-  expect(button("Own option").props.disabled).toBe(true);
+  expect(button("Your own option").props.disabled).toBe(true);
   await addOption("Based on another option");
   expect(button("Cancel new offer")).toBeUndefined();
   await click("Cancel child charges");
@@ -2536,7 +2554,7 @@ it("creates an independent offer through fixed-room setup and retains policy ret
   await mount(id);
   await touch();
   await click("Edit child charges");
-  expect(button("Own option").props.disabled).toBe(true);
+  expect(button("Your own option").props.disabled).toBe(true);
   await click("Cancel child charges");
   await addOption("With its own prices");
   expect(view.root.findByType(FirstPricingSetup).props.existingRoom).toMatchObject({
@@ -2599,7 +2617,7 @@ it("creates an independent offer through fixed-room setup and retains policy ret
     kind: "independent",
     calendar: { base: { amountMinor: "20000" } },
   });
-  expect(button("Own option").props.disabled).toBe(true);
+  expect(button("Your own option").props.disabled).toBe(true);
   expect(button("Save prices").props.disabled).toBe(true);
 });
 
@@ -2783,7 +2801,7 @@ it("prefills included settings, guards pending edits and saves current bases thr
   expect(field("Adjustment for 3 adults").props.value).toBe("19.25");
   expect(button("Save prices").props.disabled).toBe(true);
   expect(input().props.disabled).toBe(true);
-  expect(button("Own option").props.disabled).toBe(true);
+  expect(button("Your own option").props.disabled).toBe(true);
   expect(button("Change meal plan").props.disabled).toBe(true);
   expect(button("Edit stay rules").props.disabled).toBe(true);
   const warn = vi
@@ -4101,7 +4119,7 @@ it("disables the stay preview for unapplied calendar edits", async () => {
 const familyId = "61000000-0000-4000-8000-000000000004", family = { ...snapshot.rooms[0], roomTypeId: familyId };
 const familySetup = { roomTypeId: familyId, name: "Family", capacity: family.capacity };
 const published = (rooms: PricingSnapshot["rooms"] = [snapshot.rooms[0], family], revision = 1) => ({ ...snapshot, rooms, revision, sources, stale: false });
-type RoomProps = Partial<Pick<Parameters<typeof PricingEditor>[0], "onAttention" | "onPublished" | "refresh">>;
+type RoomProps = Partial<Pick<Parameters<typeof PricingEditor>[0], "onAttention" | "onPublished" | "refresh" | "staleShown">>;
 const roomEditor = (rooms: { roomTypeId: string; name: string; capacity: PricingSnapshot["rooms"][number]["capacity"] }[], extra: RoomProps = {}) =>
   <PricingEditor client={client as ReturnType<typeof createReplacementPricingClient>} roomNames={{ room: "Existing", [familyId]: "Family" }} setup={{ propertyId: "property", rooms }} roomTypeId={familyId} {...extra} />;
 const mountRoom = async (rooms = [{ roomTypeId: "room", name: "Existing", capacity: snapshot.rooms[0].capacity }, familySetup], extra: RoomProps = {}) => {
@@ -4110,10 +4128,10 @@ const mountRoom = async (rooms = [{ roomTypeId: "room", name: "Existing", capaci
 const familyInput = (base: string) => firstPricingInput("property", familySetup, familyId, { mode: "flat", occupancy: [], included: { adults: "", adjustments: [] }, methods: ["pay_at_property"], room: familyId, currency: "EUR", base, adultAge: "12", childPrice: "0", countChildren: "yes", minimum: "1", maximum: "", cancellation: "non_refundable", freeDays: "", payment: "full" });
 it("on a room page, edits only that room, publishes every other room exactly as read and continues from the new publication (VAY-2093)", async () => {
   client.read.mockResolvedValue(published()); await mountRoom();
-  expect(view.root.findAllByProps({ inputMode: "decimal" }).filter((node) => node.type === "input")).toHaveLength(1);
+  expect(view.root.findAllByProps({ inputMode: "decimal" }).filter((node) => node.type === "input" && !["How much cheaper, in percent", "Breakfast price"].includes(node.props["aria-label"]))).toHaveLength(1);
   expect(input().props["aria-label"]).toContain("Family"); expect(button("Add another room")).toBeUndefined();
   await act(async () => {});
-  expect(view.root.findByProps({ "aria-label": "Preview room and offer" }).findAllByType("option").map((node) => node.children.join(""))).toEqual(["Family · Non-refundable + breakfast"]);
+  expect(view.root.findByProps({ "aria-label": "Preview room and offer" }).findAllByType("option").map((node) => node.children.join(""))).toEqual(["Family · Breakfast included, non-refundable"]);
   await act(async () => input().props.onChange({ target: { value: "123.45" } })); await click("Save prices");
   expect(saved.baseRevision).toBe(1); expect(saved.snapshot.rooms[0]).toEqual({ ...snapshot.rooms[0], revision: 2 });
   expect(saved.snapshot.rooms[1]).toMatchObject({ roomTypeId: familyId, revision: 2, offers: [{ price: { calendar: { base: { amountMinor: "12345" } } } }] });
@@ -4148,8 +4166,10 @@ it("starts an unpriced room with the first setup in the property currency and pu
   const policy = vi.fn().mockResolvedValue({ revision: familyId }); client.termsAction.mockReturnValue(policy);
   await mountRoom();
   expect(view.root.findByType(StepFirstPrices).props).toMatchObject({ rooms: [familySetup], fixedCurrency: "EUR" });
-  expect(button("Save prices")).toBeUndefined(); expect(view.root.findAllByType(PricingStayPreview)).toHaveLength(0);
-  await act(async () => view.root.findByType(StepFirstPrices).props.onCreate(familyInput("90"))); await click("Save prices");
+  // The first-price form has its own Save; the bar's comes with prices.
+  expect(view.root.findAllByType("button").filter((node) => node.props.type !== "submit" && node.children.includes("Save prices"))).toHaveLength(0); expect(view.root.findAllByType(PricingStayPreview)).toHaveLength(0);
+  const first = familyInput("90");
+  await act(async () => view.root.findByType(StepFirstPrices).props.onCreate({ configuration: first.configuration, terms: [first.terms] }, "save"));
   expect(saved.baseRevision).toBe(3); expect(saved.snapshot.rooms.map((room) => [room.roomTypeId, room.revision])).toEqual([["room", 4], [familyId, 4]]);
   expect(saved.snapshot.rooms[0]).toEqual({ ...snapshot.rooms[0], revision: 4 }); expect(policy).toHaveBeenCalledOnce();
 });
@@ -4248,12 +4268,13 @@ it("adds a quick-add option with its terms and deletes an option after folding t
   await mount(id);
   await act(async () => {});
   const text = () => JSON.stringify(view.toJSON());
-  expect(text()).toContain("With breakfast");
-  expect(text()).toContain("With breakfast 2");
-  await click("Non-refundable");
-  await act(async () => view.root.findByType(Modal).findAllByType("button").find((node) => node.children.includes("Add option"))!.props.onClick());
+  expect(text()).toContain("Breakfast included");
+  expect(text()).toContain("Breakfast included 2");
+  // VAY-2188: non-refundable is a switch on the card; on adds the option at once, 10% cheaper.
+  expect(extraSwitch("Non-refundable").props["aria-checked"]).toBe(false);
+  await act(async () => extraSwitch("Non-refundable").props.onClick());
   expect(view.root.findAllByType(Modal)).toHaveLength(0);
-  expect(text()).toContain("Room only · 10% cheaper · No refund if cancelled");
+  expect(extraSwitch("Non-refundable").props["aria-checked"]).toBe(true);
   // The main option now has an option based on it, so its window explains instead of offering Delete.
   expect(text()).toContain("Other options are based on this one. Delete or change them first: Non-refundable.");
   await act(async () => input().props.onChange({ target: { value: "123" } }));
@@ -4283,10 +4304,10 @@ it("retries option names whose terms failed and keeps a window open on a price i
   await click("Try again");
   await act(async () => {});
   expect(text()).not.toContain("couldn't be loaded");
-  expect(text()).toContain("Non-refundable + breakfast 2");
+  expect(text()).toContain("Breakfast included, non-refundable 2");
   await act(async () => view.root.findByProps({ "aria-label": "Room 1 Offer 2 Per room" }).props.onChange({ target: { value: "12,5" } }));
   // Step 5's child-price window is an OptionWindow too, so the option's window is found by its title.
-  const done = () => view.root.findAllByType(OptionWindow).find((node) => node.props.title === "Non-refundable + breakfast 2")!.findAllByType("button").find((node) => node.children.includes("Done"))!;
+  const done = () => view.root.findAllByType(OptionWindow).find((node) => node.props.title === "Breakfast included, non-refundable 2")!.findAllByType("button").find((node) => node.children.includes("Done"))!;
   expect(done().props.disabled).toBe(true);
   await act(async () => view.root.findByProps({ "aria-label": "Room 1 Offer 2 Per room" }).props.onChange({ target: { value: "125" } }));
   expect(done().props.disabled).toBe(false);
@@ -4306,7 +4327,7 @@ it("shows add and delete errors in the window that asked, and counts the quick-a
   }));
   await mount(id);
   await act(async () => {});
-  await click("Non-refundable");
+  await click("Half board");
   // The open form is unsaved work: Save waits, and leaving asks first.
   expect(button("Save prices").props.disabled).toBe(true);
   const warn = vi.mocked(window.addEventListener).mock.calls.filter(([name]) => name === "beforeunload").at(-1)![1] as (event: unknown) => void;
@@ -4320,7 +4341,7 @@ it("shows add and delete errors in the window that asked, and counts the quick-a
   await act(async () => view.root.findByType(Modal).findAllByType("button").find((node) => node.children.includes("Cancel"))!.props.onClick());
   // The same for a delete: the option's window says why.
   await act(async () => view.root.findAllByType(StepOptions)[0].props.onEdit("second"));
-  const edit = () => view.root.findAllByType(OptionWindow).find((node) => node.props.title === "With breakfast 2")!;
+  const edit = () => view.root.findAllByType(OptionWindow).find((node) => node.props.title === "Breakfast included 2")!;
   await act(async () => edit().findAllByType("button").find((node) => node.children.includes("Delete option"))!.props.onClick());
   await act(async () => view.root.findByType(ConfirmDialog).props.onConfirm());
   expect(edit().props.open).toBe(true);
@@ -4348,7 +4369,7 @@ it("changes the main option's minimum nights in step 5, keeps own stay rules and
   await act(async () => {});
   const text = () => JSON.stringify(view.toJSON());
   expect(text()).toContain("1 monthly price · 1 single date · 1 date or season rule · Advanced rules");
-  expect(text()).toContain("These options have their own stay rules and keep them: Non-refundable + breakfast 2.");
+  expect(text()).toContain("These options have their own stay rules and keep them: Breakfast included, non-refundable 2.");
   expect(text()).toContain("0–11 €25 per night");
   const more = () => view.root.findByProps({ "aria-label": "One night more" });
   await act(async () => more().props.onClick());
@@ -4395,4 +4416,106 @@ it("says in the guest card whether free cancellation is still open for the sampl
   expect(text()).toContain("Free cancellation until 11 Jul");
   await act(async () => view.root.findByType(PriceCalendar).props.onPick("2020-07-18"));
   expect(text()).toContain("No free cancellation for these dates");
+});
+
+it("shows a Price group in an option's window only with something to edit, and says each card's meal plan (VAY-2157)", async () => {
+  const [flex] = snapshot.rooms[0].offers;
+  if (flex.price.kind !== "independent") throw new Error("fixture");
+  const price = flex.price;
+  const roomOnly = { ...flex, id: "plain", meal: { kind: "room_only" as const, charge: { kind: "room" as const, amountMinor: "0" } },
+    price: { kind: "linked" as const, parentId: "flex", adjustment: { kind: "percentage" as const, basisPoints: -1000 }, dateOverrides: [] }, restrictions: { kind: "inherit" as const } };
+  const read = (base: typeof price.calendar.base) => ({ ...snapshot, rooms: [{ ...snapshot.rooms[0], offers: [{ ...flex, price: { ...price, calendar: { ...price.calendar, base } } }, roomOnly] }], revision: 1, sources, stale: false });
+  // Option windows by offer, in order (step 5's children window has no meal plan).
+  const headings = () => view.root.findAllByType(OptionWindow).filter((node) => node.findAllByType(PricingMealPlan).length)
+    .map((node) => node.findAllByType("h3").map((heading) => heading.children.join("")));
+  client.read.mockResolvedValue(read({ mode: "flat", amountMinor: "10000" }));
+  await mount();
+  await act(async () => {});
+  // A flat main price is step 1, so its window starts with Meals; a linked option edits its link under Price.
+  expect(headings()).toEqual([["Meals", "Cancellation and payment"], ["Price", "Meals", "Cancellation and payment", "Stay rules"]]);
+  const text = JSON.stringify(view.toJSON());
+  // VAY-2188: the main option is the card's price, which says its meal; the list holds the others.
+  expect(text).toContain("Includes breakfast: €12 per adult a night");
+  expect(text).toContain("per normal night for 2 adults, room only");
+  expect(text).not.toContain("meals included");
+  act(() => view.unmount());
+  // An included-guest main price keeps its other guest counts under Price.
+  client.read.mockResolvedValue(read({ mode: "included_guests", baseGuests: 2, baseMinor: "10000", adjustments: [{ kind: "fixed", deltaMinor: "-2000" }, { kind: "fixed", deltaMinor: "0" }] }));
+  await mount();
+  await act(async () => {});
+  expect(headings()[0]).toEqual(["Price", "Meals", "Cancellation and payment"]);
+});
+it("leaves the stale-prices warning to the room page when the page shows it, and still saves them (VAY-2157)", async () => {
+  client.read.mockResolvedValue({ ...published(), stale: true });
+  await mountRoom();
+  const text = () => JSON.stringify(view.toJSON());
+  expect(text()).toContain("Prices need to be saved again");
+  act(() => view.unmount());
+  await mountRoom(undefined, { staleShown: true });
+  expect(text()).not.toContain("Prices need to be saved again");
+  expect(button("Save prices").props.disabled).toBe(false);
+});
+/** A room-only room with free cancellation until 3 days before arrival, paid by card (VAY-2188 review fixes). Terms
+ * need a UUID room. */
+const simpleCard = async (payment: Record<string, unknown> = { kind: "full", acceptedMethods: ["card"] }) => {
+  const id = "61000000-0000-4000-8000-000000000014";
+  const [flex] = snapshot.rooms[0].offers;
+  const room = { ...snapshot.rooms[0], roomTypeId: id, offers: [{ ...flex, meal: { kind: "room_only" as const, charge: { kind: "room" as const, amountMinor: "0" } } }] };
+  client.read.mockResolvedValueOnce({ ...snapshot, rooms: [room], revision: 7, sources, stale: false });
+  client.readTerms.mockImplementation(async (roomTypeId, offerId, termsRevision) => ({
+    roomTypeId,
+    offerId,
+    revision: termsRevision,
+    cancellation: { kind: "flexible", terms: { type: "free_until_days_before_arrival", freeCancellationDeadlineDays: 3, afterDeadlinePenalty: "full_booking_amount", noShowPenalty: "full_booking_amount" } },
+    payment,
+  }));
+  client.termsAction.mockReturnValue(vi.fn().mockResolvedValue({ revision: "61000000-0000-4000-8000-000000000006" }));
+  await mount(id);
+  await act(async () => {});
+};
+const field = (label: string) => view.root.findByProps({ "aria-label": label });
+const type = async (label: string, value: string) => act(async () => field(label).props.onChange({ target: { value } }));
+it("keeps a switch's typed amount as typed, and an empty or wrong amount never locks the card (VAY-2188)", async () => {
+  await simpleCard();
+  const text = () => JSON.stringify(view.toJSON());
+  // Breakfast without a price only says so; the rest of the card stays usable.
+  await act(async () => extraSwitch("With breakfast").props.onClick());
+  expect(text()).toContain("Enter the breakfast price to offer it.");
+  expect(button("Non-refundable").props.disabled).toBe(false);
+  await type("Breakfast price", "15");
+  await act(async () => extraSwitch("With breakfast").props.onClick());
+  expect(extraSwitch("With breakfast").props["aria-checked"]).toBe(true);
+  // Typing 18 over 15 goes through "1": the field keeps "1", not the saved "1.00".
+  await type("Breakfast price", "1");
+  expect(field("Breakfast price").props.value).toBe("1");
+  await type("Breakfast price", "18");
+  expect(field("Breakfast price").props.value).toBe("18");
+  // Non-refundable for the card waits while the non-refundable switch is on: guests would see two.
+  await act(async () => extraSwitch("Non-refundable").props.onClick());
+  await click("Non-refundable");
+  expect(text()).toContain("First turn off “Non-refundable” under Extra choices for guests.");
+  expect(button("Free cancellation").props["aria-pressed"]).toBe(true);
+  // A discount that doesn't parse holds Save, but the switch still turns off.
+  await type("How much cheaper, in percent", "abc");
+  expect(button("Save prices").props.disabled).toBe(true);
+  await act(async () => extraSwitch("Non-refundable").props.onClick());
+  await act(async () => view.root.findByType(ConfirmDialog).props.onConfirm());
+  expect(extraSwitch("Non-refundable").props["aria-checked"]).toBe(false);
+  await click("Save prices");
+  const offers = saved.snapshot.rooms[0].offers;
+  expect(offers).toHaveLength(2);
+  expect(offers[1].meal).toEqual({ kind: "breakfast", charge: { kind: "person", adultMinor: "1800", childBandAmountsMinor: ["0"] } });
+});
+it("names a deposit and counts it as a kept setting, and prices by adult count from the typed price (VAY-2188)", async () => {
+  await simpleCard({ kind: "deposit", basisPoints: 3000, balanceDaysBeforeArrival: 14, acceptedMethods: ["card"] });
+  const text = () => JSON.stringify(view.toJSON());
+  expect(text()).toContain("Deposit 30%");
+  expect(text()).toContain("Deposit: 30% of the final total. Balance due 14 days before arrival.");
+  expect(text()).toContain("This room has more settings than the simple view shows.");
+  await act(async () => input().props.onChange({ target: { value: "120" } }));
+  await click("Set a price for each number of adults");
+  expect(text()).toContain("Now: 1 adult €120 · 2 adults €120");
+  await click("Save prices");
+  expect(saved.snapshot.rooms[0].offers[0].price).toMatchObject({ calendar: { base: { mode: "occupancy", amountsMinor: ["12000", "12000"] } } });
+  expect(client.termsAction).not.toHaveBeenCalled();
 });

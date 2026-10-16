@@ -18,11 +18,14 @@ type CapturedShellProps = {
   onBack?: (() => void) | null;
   onExit: () => void;
   children?: ReactNode;
+  marketplaceSuspended?: { bookingPage: boolean } | null;
 };
 
 const mocks = vi.hoisted(() => ({
   guestLoad: vi.fn(),
   guestSave: vi.fn(),
+  guestLoadTerms: vi.fn(),
+  guestSaveTerms: vi.fn(),
   getRoute: vi.fn(),
   push: vi.fn(),
   replace: vi.fn(),
@@ -36,7 +39,12 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("@/services/api/bookingGuestRulesClient", () => ({
-  bookingGuestRulesClient: { load: mocks.guestLoad, save: mocks.guestSave },
+  bookingGuestRulesClient: {
+    load: mocks.guestLoad,
+    save: mocks.guestSave,
+    loadTerms: mocks.guestLoadTerms,
+    saveTerms: mocks.guestSaveTerms,
+  },
   guestRulesErrorMessage: (error: Error) => error.message,
 }));
 import { GuestExperienceStep } from "./final/GuestExperienceStep";
@@ -68,6 +76,8 @@ describe("AdaptiveHotelSetupController", () => {
   beforeEach(() => {
     mocks.guestLoad.mockReset();
     mocks.guestSave.mockReset();
+    mocks.guestLoadTerms.mockReset().mockResolvedValue("Our terms.");
+    mocks.guestSaveTerms.mockReset();
     mocks.getRoute.mockReset();
     mocks.push.mockReset();
     mocks.replace.mockReset();
@@ -605,7 +615,97 @@ describe("AdaptiveHotelSetupController", () => {
 
     renderer?.unmount();
   });
+  it.each([
+    {
+      name: "announces the suspended profile from the first step",
+      tracks: ["hotel_operations", "creator_marketplace"] as const,
+      step: "present_hotel" as const,
+      suspended: true,
+      expected: { bookingPage: true },
+    },
+    {
+      name: "drops the booking page for a Marketplace-only hotel",
+      tracks: ["creator_marketplace"] as const,
+      step: "marketplace_preferences" as const,
+      suspended: true,
+      expected: { bookingPage: false },
+    },
+    {
+      name: "leaves Review to explain the suspension in its card",
+      tracks: ["hotel_operations", "creator_marketplace"] as const,
+      step: "review" as const,
+      suspended: true,
+      expected: null,
+    },
+    {
+      name: "shows no notice without a suspension",
+      tracks: ["hotel_operations", "creator_marketplace"] as const,
+      step: "present_hotel" as const,
+      suspended: false,
+      expected: null,
+    },
+  ])("$name (VAY-2177)", async ({ tracks, step, suspended, expected }) => {
+    mocks.searchParams = setupSearchParams(step);
+    mocks.getRoute.mockResolvedValue(suspendedRoute([...tracks], step, suspended));
+    let renderer: ReactTestRenderer | undefined;
+    await act(async () => {
+      renderer = create(
+        createElement(AdaptiveHotelSetupController, {
+          propertyId,
+          requestedStepId: step,
+          onExit: vi.fn(),
+          StepForm: () => null,
+        }),
+      );
+    });
+    expect(currentShell().marketplaceSuspended ?? null).toEqual(expected);
+    renderer?.unmount();
+  });
 });
+
+function suspendedRoute(
+  selectedTracks: ("hotel_operations" | "creator_marketplace")[],
+  resumeStepId: "present_hotel" | "marketplace_preferences" | "review",
+  suspended = true,
+) {
+  return {
+    ...buildPropertySetupRoute({
+      organizationId,
+      propertyId,
+      selectedTracks,
+      trackRevision: 1,
+      session: null,
+      ownerFacts: getActivePropertySetupStepIds(selectedTracks).map((stepId) => ({
+        organizationId,
+        propertyId,
+        stepId,
+        state: stepId === "review" && suspended ? ("blocked" as const) : ("not_started" as const),
+        sourceRevision: `${stepId}:1`,
+        currentBaseRevisions: Object.fromEntries(
+          PROPERTY_SETUP_STEP_DEFINITIONS.find(
+            (definition) => definition.stepId === stepId,
+          )!.baseRevisionKeys.map((key) => [key, `${key}:1`]),
+        ),
+        blockers:
+          stepId === "review" && suspended
+            ? [
+                {
+                  code: "marketplace_profile_suspended",
+                  product: "marketplace" as const,
+                  ownerDomain: "marketplace" as const,
+                  owningStepId: "review" as const,
+                  message:
+                    "The Marketplace profile is suspended. Contact support for the available next action.",
+                  kind: "external_pending" as const,
+                  sourceRevision: "marketplace:suspended:1",
+                },
+              ]
+            : [],
+      })),
+    }),
+    resumeStepId,
+  };
+}
 
 function currentShell(): CapturedShellProps {
   if (!mocks.shellProps) throw new Error("Adaptive setup shell has not rendered.");

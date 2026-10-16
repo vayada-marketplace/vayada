@@ -7,12 +7,27 @@ import {
   PUBLIC_BOOKABILITY_DATA_SOURCE_OWNERS,
   PUBLIC_BOOKABILITY_VISIBILITY,
   assertPublicBookabilityPublicSafe,
+  publicManualPaymentReady,
   type PublicBookabilityProfileProjection,
 } from "./index.js";
 import { parsePublicBookabilityProfileProjection } from "./publicBookabilityProfileParser.js";
 
 export const BOOKING_PUBLIC_CONTENT_CONTRACT_VERSION = "booking-public-content.v1" as const;
-export type BookingPublicPaymentMethod = "card" | "pay_at_property";
+
+/**
+ * A booking page needs availability prepared from today through at least 334 more days (11
+ * months, VAY-2150). Setup prepares a full year and auto-open keeps 12+ months to a month end,
+ * so this leaves a month of slack. Launch readiness asks for the same window.
+ */
+export const BOOKING_PUBLICATION_MIN_OPEN_DAYS = 334;
+/** Bank transfer and PayPal are paid to the hotel, which confirms the payment (VAY-2139). */
+export type BookingPublicPaymentMethod = "card" | "pay_at_property" | "bank_transfer" | "paypal";
+const BOOKING_PUBLIC_PAYMENT_METHODS: readonly string[] = [
+  "card",
+  "pay_at_property",
+  "bank_transfer",
+  "paypal",
+];
 type BookingPublicFinanceEvidence = Readonly<{
   defaultCurrency: string;
   supportedCurrencies: readonly string[];
@@ -92,11 +107,13 @@ export function buildBookingPublicContent(input: {
   finance: BookingPublicFinanceEvidence;
 }): BookingPublicContentBuild | null {
   if (!validHash(input.sourceManifestHash) || !validHash(input.readinessHash)) return null;
-  const profile = parsePublicBookabilityProfileProjection(input.profile);
-  if (!profile) return null;
   const readyMethods = [...new Set(input.finance.readyPaymentMethods)]
-    .filter((method) => method === "card" || method === "pay_at_property")
+    .filter((method) => BOOKING_PUBLIC_PAYMENT_METHODS.includes(method))
     .sort();
+  const profile = parsePublicBookabilityProfileProjection(input.profile, {
+    manualPaymentReady: publicManualPaymentReady(readyMethods),
+  });
+  if (!profile) return null;
   const rooms = sanitizeRooms(input.rooms, input.finance, readyMethods);
   const calendar = sanitizeCalendar(input.calendar, rooms, profile);
   if (
@@ -123,13 +140,21 @@ export function buildBookingPublicContent(input: {
   });
 }
 
-/** Parses stored immutable JSON into the exact public Booking content contract. */
-export function parseBookingPublicContent(value: unknown): BookingPublicContent | null {
+/** Parses stored immutable JSON into the exact public Booking content contract. Content
+ * published with bank transfer or PayPal counts only while their acceptance is on
+ * (`manualPayments`), so turning it off takes such pages down again (VAY-2139). */
+export function parseBookingPublicContent(
+  value: unknown,
+  context: { manualPayments?: boolean } = {},
+): BookingPublicContent | null {
   try {
     if (!record(value) || !Array.isArray(value.rooms) || !record(value.calendar)) return null;
-    const profile = parsePublicBookabilityProfileProjection(value.profile);
     const payments = record(value.payments) ? value.payments.readyMethods : null;
-    if (!profile || !Array.isArray(payments)) return null;
+    if (!Array.isArray(payments)) return null;
+    const manualPaymentReady = publicManualPaymentReady(payments);
+    if (manualPaymentReady && context.manualPayments !== true) return null;
+    const profile = parsePublicBookabilityProfileProjection(value.profile, { manualPaymentReady });
+    if (!profile) return null;
     const built = buildBookingPublicContent({
       sourceManifestHash: `sha256:${"0".repeat(64)}`,
       readinessHash: `sha256:${"0".repeat(64)}`,
@@ -347,16 +372,21 @@ function sanitizeCalendar(
   const { generatedAt } = profile;
   const roomTypeIds = [...new Set(value.roomTypeIds)].sort();
   const expectedRooms = rooms.map(({ roomTypeId }) => roomTypeId).sort();
+  // Coverage may have started before today (prepared yesterday) and may run past a year
+  // (auto-open to a month end); it must cover today and the next 11 months.
+  const coveredDays = inclusiveDays(value.coverageFrom, value.coverageThrough);
   if (
     !validInstant(generatedAt) ||
     value.currentLocalDate !== localDateAt(generatedAt, profile.hotel.timezone) ||
     !nonEmpty(value.sourceRevision) ||
     value.sourceRevision !== value.materializedRevision ||
-    value.currentLocalDate !== value.coverageFrom ||
+    coveredDays < 1 ||
+    value.coverageFrom > value.currentLocalDate ||
+    inclusiveDays(value.currentLocalDate, value.coverageThrough) <
+      BOOKING_PUBLICATION_MIN_OPEN_DAYS + 1 ||
     value.coverageThrough !== value.materializedThrough ||
-    inclusiveDays(value.coverageFrom, value.coverageThrough) !== 366 ||
-    value.expectedDayCount !== 366 * rooms.length ||
-    value.materializedDayCount !== 366 * rooms.length ||
+    value.expectedDayCount !== coveredDays * rooms.length ||
+    value.materializedDayCount !== coveredDays * rooms.length ||
     value.gapCount !== 0 ||
     JSON.stringify(roomTypeIds) !== JSON.stringify(expectedRooms) ||
     !validInstant(value.observedAt) ||

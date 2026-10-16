@@ -25,12 +25,12 @@ import {
 } from "@/lib/utils/headerLogo";
 import { buildBookingPreviewUrl } from "@/lib/utils/bookingPreviewUrl";
 import { useTranslation } from "@/lib/i18n";
-import { moduleActivationClient } from "@/services/api/moduleActivationClient";
 
 import CustomDomainCard from "@/components/design-studio/CustomDomainCard";
 import MediaTab, { type PropertyGalleryImage } from "@/components/design-studio/MediaTab";
 import ColorsTab from "@/components/design-studio/ColorsTab";
 import FontsTab from "@/components/design-studio/FontsTab";
+import { PageHeader, PageLayout } from "@/components/layout/PageLayout";
 
 type Tab = "media" | "colors" | "fonts" | "layout" | "domain";
 
@@ -62,8 +62,6 @@ export default function DesignStudioPage() {
   const [headerLogoUrl, setHeaderLogoUrl] = useState("");
   const [headerLogoMediaObjectId, setHeaderLogoMediaObjectId] = useState<string | null>(null);
   const [showContactButton, setShowContactButton] = useState(true);
-  const [showReferAGuestButton, setShowReferAGuestButton] = useState(false);
-  const [referAGuestModuleEnabled, setReferAGuestModuleEnabled] = useState<boolean | null>(null);
   const [showLanguageSelector, setShowLanguageSelector] = useState(true);
   const [showCurrencySelector, setShowCurrencySelector] = useState(true);
   const [heroHeading, setHeroHeading] = useState("");
@@ -164,7 +162,6 @@ export default function DesignStudioPage() {
   useEffect(() => {
     setLoadFailed(false);
     setDomainStatus(null);
-    setReferAGuestModuleEnabled(null);
     propertyIdRef.current = null;
     profileRevisionRef.current = null;
     try {
@@ -185,12 +182,6 @@ export default function DesignStudioPage() {
         const message = "admin.failedToLoadCustomDomainStatus";
         setFeedback({ type: "error", message });
       });
-    moduleActivationClient
-      .list()
-      .then(({ activeModules }) =>
-        setReferAGuestModuleEnabled(activeModules.includes("affiliates")),
-      )
-      .catch(() => setReferAGuestModuleEnabled(null));
     Promise.all([
       settingsService.getDesignSettings(hotelId),
       settingsService.getPropertySettings(hotelId).catch(() => null),
@@ -207,7 +198,6 @@ export default function DesignStudioPage() {
         setHeaderLogo(settings.header_logo || "");
         setHeaderLogoMediaObjectId(settings.header_logo_media_object_id);
         setShowContactButton(settings.show_contact_button);
-        setShowReferAGuestButton(settings.show_refer_a_guest_button);
         setShowLanguageSelector(settings.show_language_selector);
         setShowCurrencySelector(settings.show_currency_selector);
         // Guests see the canonical cover; the settings URL only covers heroes saved before it existed.
@@ -695,7 +685,6 @@ export default function DesignStudioPage() {
         {
           header_logo_media_object_id: headerLogoMediaObjectId,
           show_contact_button: showContactButton,
-          ...(referAGuestModuleEnabled ? { show_refer_a_guest_button: showReferAGuestButton } : {}),
           show_language_selector: showLanguageSelector,
           show_currency_selector: showCurrencySelector,
           hero_image: heroImage,
@@ -760,15 +749,11 @@ export default function DesignStudioPage() {
 
   if (loadFailed) {
     return (
-      <div className="p-4 md:p-6 h-full flex items-center justify-center">
+      <PageLayout>
         <link href={BOOKING_PAGE_FONT_STYLESHEET_URL} rel="stylesheet" />
-        <div className="w-full max-w-md text-center">
-          <h1 className="text-xl font-bold text-gray-900">{t("designStudio.title")}</h1>
-          <FeedbackAlert
-            type="error"
-            message={t("designStudio.loadFailure")}
-            className="mt-4 text-left"
-          />
+        <div className="max-w-md">
+          <PageHeader title={t("designStudio.title")} />
+          <FeedbackAlert type="error" message={t("designStudio.loadFailure")} />
           <button
             type="button"
             onClick={() => {
@@ -780,33 +765,35 @@ export default function DesignStudioPage() {
             {t("dashboard.pageViewsModal.retry")}
           </button>
         </div>
-      </div>
+      </PageLayout>
     );
   }
 
   return (
-    <div className="p-4 md:p-6 pb-24 lg:pb-6 lg:h-full flex flex-col">
+    // pb-24 keeps content clear of the fixed Save bar below lg.
+    <PageLayout variant="full" className="pb-24 lg:pb-6 lg:h-full flex flex-col">
       <link href={BOOKING_PAGE_FONT_STYLESHEET_URL} rel="stylesheet" />
-      <div className="shrink-0 flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h1 className="text-2xl md:text-xl font-bold text-gray-900">{t("designStudio.title")}</h1>
-          <p className="text-sm text-gray-500 mt-0.5">{t("designStudio.subtitle")}</p>
-        </div>
-        <button
-          onClick={() => setPreviewOpen(true)}
-          className="lg:hidden inline-flex items-center gap-1.5 px-3 py-1.5 text-[13px] font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors shrink-0"
-        >
-          <EyeIcon className="w-4 h-4" />
-          {t("layout.header.preview")}
-        </button>
-      </div>
+      <PageHeader
+        className="shrink-0"
+        title={t("designStudio.title")}
+        subtitle={t("designStudio.subtitle")}
+        actions={
+          <button
+            onClick={() => setPreviewOpen(true)}
+            className="lg:hidden inline-flex items-center gap-1.5 px-3 py-1.5 text-[13px] font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+          >
+            <EyeIcon className="w-4 h-4" />
+            {t("layout.header.preview")}
+          </button>
+        }
+      />
 
       {/* Feedback banner */}
       {feedback && (
         <FeedbackAlert
           type={feedback.type}
           message={t(feedback.message)}
-          className="mt-3 shrink-0"
+          className="shrink-0"
           action={
             feedback.retryHeroUpload
               ? {
@@ -867,9 +854,6 @@ export default function DesignStudioPage() {
                 uploadingLogo={uploadingLogo}
                 showContactButton={showContactButton}
                 setShowContactButton={setShowContactButton}
-                showReferAGuestButton={showReferAGuestButton}
-                setShowReferAGuestButton={setShowReferAGuestButton}
-                referAGuestModuleEnabled={referAGuestModuleEnabled}
                 showLanguageSelector={showLanguageSelector}
                 setShowLanguageSelector={setShowLanguageSelector}
                 languageSelectorAvailable={languageSelectorAvailable}
@@ -960,7 +944,7 @@ export default function DesignStudioPage() {
             font={currentFont}
             headerLogo={headerLogo}
             showContactButton={showContactButton}
-            showReferAGuestButton={Boolean(referAGuestModuleEnabled && showReferAGuestButton)}
+            showReferAGuestButton={false}
             showLanguageSelector={showLanguageSelector && languageSelectorAvailable}
             showCurrencySelector={showCurrencySelector && currencySelectorAvailable}
             supportedLanguages={supportedLanguages ?? undefined}
@@ -1001,7 +985,7 @@ export default function DesignStudioPage() {
           {t("common.save")}
         </button>
       </div>
-    </div>
+    </PageLayout>
   );
 }
 

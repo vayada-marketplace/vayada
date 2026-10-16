@@ -8,6 +8,8 @@ import type { preparePricingAcceptance } from "./preparePricingAcceptance.js";
 import type { stagePricingBookingLifecycle } from "./pricingBookingLifecycle.js";
 import type { stagePricingBookingRevenue } from "./pricingBookingRevenue.js";
 import { pricingCardQuoteSupported } from "./pricingCardPayment.js";
+import { isManualPricingPaymentMethod } from "@vayada/domain-booking";
+import { pricingManualQuoteSupported } from "./pricingManualPayment.js";
 
 type Prepared = Extract<Awaited<ReturnType<typeof preparePricingAcceptance>>, { kind: "fresh" }>;
 /** After draft/lifecycle/revenue staging, using their unchanged results on the
@@ -33,8 +35,10 @@ export async function storePricingAcceptance(
   const scope = await lockPublicPricingAuthority(client, slug);
   const quote = current.quote;
   const card = quote.paymentMethod === "card";
+  // Bank transfer and PayPal: like card, revenue and the PMS job follow the payment (VAY-2139).
+  const manual = isManualPricingPaymentMethod(quote.paymentMethod);
   const request = quote.acceptanceMode === "request";
-  const expectedStatus = card || request ? "pending_payment" : "confirmed";
+  const expectedStatus = card || manual || request ? "pending_payment" : "confirmed";
   if (
     !scope ||
     !isDeepStrictEqual(scope, current.scope) ||
@@ -43,13 +47,15 @@ export async function storePricingAcceptance(
     !isDeepStrictEqual(quote, disclosure.quote) ||
     (card
       ? !pricingCardQuoteSupported(quote)
-      : quote.paymentMethod !== "pay_at_property" ||
-        (quote.acceptanceMode !== "instant" && !request)) ||
+      : manual
+        ? !pricingManualQuoteSupported(quote)
+        : quote.paymentMethod !== "pay_at_property" ||
+          (quote.acceptanceMode !== "instant" && !request)) ||
     lifecycle.lifecycleStatus !== expectedStatus ||
-    (request && !card
+    (request && !card && !manual
       ? typeof lifecycle.hostResponseDeadlineAt !== "string"
       : lifecycle.hostResponseDeadlineAt !== null) ||
-    (card
+    (card || manual
       ? revenue !== null || typeof lifecycle.paymentDeadlineAt !== "string"
       : request
         ? revenue !== null || lifecycle.paymentDeadlineAt !== null

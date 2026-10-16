@@ -441,6 +441,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL room closure calendar fence", ()
       sourceConflicts: [],
     });
     expect((await roomEvidence.getRoomTypeFacts(propertyId, roomTypeA))?.lifecycle).toBe("active");
+    // Calendar changes no longer queue restriction-only Channex ARI (0489, VAY-2208).
     expect(
       (
         await admin.query(
@@ -448,7 +449,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL room closure calendar fence", ()
           [propertyId],
         )
       ).rows[0].count,
-    ).toBe(1);
+    ).toBe(0);
   });
   it("commits room closure once, rejects stale/unauthorized commands, and replays the recorded phase", async () => {
     expect(await repository.upsertOperatingCalendar(command("atomic"))).toMatchObject({ ok: true });

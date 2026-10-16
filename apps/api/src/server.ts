@@ -2,6 +2,7 @@ import { createChannexInboxProviderActions } from "./integrations/channexInboxPr
 import { createReplacementPricingPublicationReader } from "./domains/replacementPricingPublicationReader.js";
 import { createBookingGuestChoicePublicationReader } from "./domains/bookingGuestChoicePublication.js";
 import { createBookingGuestChoiceStore } from "./domains/bookingGuestChoiceStore.js";
+import { createBookingGuestTermsStore } from "./domains/bookingGuestTermsStore.js";
 import { dispatchNextChannexClosedUpload } from "./domains/channexNextClosedUpload.js";
 import { advancePublishedChannexOfferCreates } from "./domains/channexPublishedOfferCreate.js";
 import { createPgChannexAriSchedule } from "./jobs/pmsChannexAriSchedule.js";
@@ -18,6 +19,7 @@ import { externalBookingChanges } from "./integrations/externalBookingChanges.js
 import { createAirbnbAlterationRuntime } from "./airbnbAlterationRuntime.js";
 import { createAirbnbImportRuntime } from "./airbnbImportRuntime.js";
 import { createPgMarketplaceSubmissionRepository } from "./domains/marketplaceSubmissionRepository.js";
+import { createPgMarketplaceHotelSubmissionModerationRepository } from "./domains/marketplaceHotelSubmissionModerationRepository.js";
 import { marketplaceSubmissionTransactionSources } from "./platform/marketplaceSubmissionTransactionSources.js";
 import { createPgPmsRoomClosureRepository } from "./domains/pmsRoomClosureCommandRepository.js";
 import { createPgPreparedImportRepository } from "./domains/preparedHotelImportRepository.js";
@@ -202,7 +204,10 @@ import { createPgPmsRecurringPricingReadModel } from "./domains/pmsRecurringPric
 import { createPgPmsRecurringPricingCommandRepository } from "./domains/pmsRecurringPricingCommandRepository.js";
 import { createPgPmsMandatoryChargeConfirmationReadModel } from "./domains/pmsMandatoryChargeConfirmationReadModel.js";
 import { createPgPmsMandatoryChargeConfirmationCommandRepository } from "./domains/pmsMandatoryChargeConfirmationCommandRepository.js";
-import { createPgHotelCatalogOperatingCalendarPropertyProfileEvidencePort } from "./domains/hotelCatalogOperatingCalendarPropertyProfileEvidence.js";
+import {
+  createPgHotelCatalogOperatingCalendarPropertyProfileEvidencePort,
+  lockHotelCatalogOperatingCalendarPropertyProfileEvidence,
+} from "./domains/hotelCatalogOperatingCalendarPropertyProfileEvidence.js";
 import { createPgPmsOperatingCalendarReadModel } from "./domains/pmsOperatingCalendarReadModel.js";
 import { createPmsOperatingCalendarProductionRuntime } from "./domains/pmsOperatingCalendarProductionRuntime.js";
 import { createPgPmsInventoryMaterializationRepository } from "./domains/pmsInventoryMaterializationRepository.js";
@@ -212,6 +217,7 @@ import {
   createBookingPublicationProductionRuntime,
   startBookingPublicationWorker,
 } from "./domains/bookingPublicationProductionRuntime.js";
+import { createFinanceManualPaymentReadinessReader } from "./domains/financeManualPaymentReadiness.js";
 import { createTargetFinanceBillingConfigReadPort } from "./domains/financeBillingConfigReadModel.js";
 import { createFinanceSubscriptionService } from "./domains/financeSubscriptionService.js";
 import { createPgFinanceSubscriptionStore } from "./domains/financeSubscriptionStore.js";
@@ -299,6 +305,10 @@ import {
   createPgPropertySetupDraftRetentionStore,
   startPropertySetupDraftRetentionWorker,
 } from "./jobs/propertySetupDraftRetention.js";
+import {
+  createPgBookingWebEventRetentionStore,
+  startBookingWebEventRetentionWorker,
+} from "./jobs/bookingWebEventRetention.js";
 import { createTargetPublicHotelProfileRepository } from "./routes/aiHotels.js";
 import {
   createPgBookingWebAffiliateHotelResolver,
@@ -318,6 +328,7 @@ import {
 } from "./routes/finance.js";
 import { createPgPmsModuleActivationRepository } from "./routes/pmsModuleActivations.js";
 import { createPgPmsNavigationModuleRepository } from "./routes/pmsNavigationModules.js";
+import { createPgBookingModuleRepository } from "./routes/pmsBookingModules.js";
 import { createPgGuestReviewCommands } from "./domains/pmsGuestReviews.js";
 import { createChannexGuestReviews } from "./integrations/channexGuestReviews.js";
 import { createPgReviewReplyCommands } from "./domains/pmsReviewReplies.js";
@@ -336,6 +347,7 @@ import { createPgSharedHotelSetupStatusRepository } from "./platform/sharedHotel
 import { createPgPropertyNearbyDiscoveryRepository } from "./domains/propertyNearbyDiscoveryRepository.js";
 import { createPgPropertyNearbyRepository } from "./domains/propertyNearbyRepository.js";
 import { createPgPublicNearbyRepository } from "./domains/publicNearbyRepository.js";
+import { configureActiveBookingPublicationGate } from "./domains/activeBookingPublicationGate.js";
 import { createPgIdentityAdminUsersReadRepository } from "./routes/identityAdminUsers.js";
 import { createPgIdentityPrivacyRepository } from "./routes/identityPrivacy.js";
 import { createPgMarketplaceCreatorPlatformConnectionRepository } from "./routes/marketplaceCreatorPlatformConnections.js";
@@ -413,6 +425,13 @@ const propertyLaunchSettingsRepository = {
   findPropertySettingsByHotelId: findPropertyLaunchSettings,
   updatePropertySettingsByHotelId: updatePropertyLaunchSettings,
 };
+
+// Checkout and pricing read the same pages as the public site: setup publications once it serves
+// them, legacy bookability profiles until then (VAY-2134).
+configureActiveBookingPublicationGate({
+  servesPublications: config.publicHotelProfileSource === "active_publication",
+  manualPayments: config.replacementPricingManualPaymentAcceptanceEnabled === true,
+});
 
 const publicBookabilityPublisher =
   config.publicHotelProfileSource === "target"
@@ -522,6 +541,8 @@ const bookingWebCheckoutAdapter = createTargetBookingWebCheckoutAdapter({
   replacementPricingAcceptanceEnabled: config.replacementPricingAcceptanceEnabled,
   replacementPricingCardAcceptanceEnabled: config.replacementPricingCardAcceptanceEnabled,
   replacementPricingRequestAcceptanceEnabled: config.replacementPricingRequestAcceptanceEnabled,
+  replacementPricingManualPaymentAcceptanceEnabled:
+    config.replacementPricingManualPaymentAcceptanceEnabled,
   bankTransfers: bankTransferBookings,
   connectionString: targetDatabaseUrl,
   inventoryReservationPort: createTargetPmsInventoryReservationPort(),
@@ -625,6 +646,9 @@ const pmsModuleActivationRepository = config.auth
   : undefined;
 const pmsNavigationModuleRepository = config.auth
   ? createPgPmsNavigationModuleRepository({ connectionString: targetDatabaseUrl })
+  : undefined;
+const bookingModuleRepository = config.auth
+  ? createPgBookingModuleRepository({ connectionString: targetDatabaseUrl })
   : undefined;
 
 const stripeConnectProvider = config.stripeSubscriptions.secretKey
@@ -956,6 +980,8 @@ const marketplaceSubmissionRepository = createPgMarketplaceSubmissionRepository(
   connectionString: targetDatabaseUrl,
   sources: marketplaceSubmissionTransactionSources,
 });
+const marketplaceHotelSubmissionModerationRepository =
+  createPgMarketplaceHotelSubmissionModerationRepository({ connectionString: targetDatabaseUrl });
 const marketplaceHotelCollaborationPreferencesRepository =
   createPgMarketplaceHotelCollaborationPreferencesRepository({
     connectionString: targetDatabaseUrl,
@@ -1164,6 +1190,12 @@ const propertySetupPmsRuntime = (() => {
     propertyProfileEvidence: readOnlyPropertyProfileEvidence,
     roomEvidence: { roomFacts, roomCapacity: roomFacts },
   });
+  // Setup reads the time zone the calendar is pinned to: the same SELECT, without the command lock.
+  const timeZonePool = new pg.Pool({
+    connectionString: targetDatabaseUrl,
+    connectionTimeoutMillis: 5_000,
+    max: 2,
+  });
   return {
     roomFacts,
     propertyProfileEvidence,
@@ -1178,6 +1210,10 @@ const propertySetupPmsRuntime = (() => {
       mandatoryCharges,
       operatingCalendar,
       calendarRegistry: propertyProfileEvidence,
+      propertyTimeZone: {
+        getPropertyProfileEvidence: (propertyId) =>
+          lockHotelCatalogOperatingCalendarPropertyProfileEvidence(timeZonePool, propertyId, true),
+      },
       catalogLocation: hotelCatalogCurrentOwnerEvidence.location,
     }),
     bookingGuestPolicyEvidence: createPropertySetupBookingGuestPolicyPmsCurrentOwnerEvidenceAdapter(
@@ -1194,6 +1230,7 @@ const propertySetupPmsRuntime = (() => {
       propertyProfileEvidence,
       readOnlyPropertyProfileEvidence,
       operatingCalendar,
+      { close: () => timeZonePool.end() },
     ],
   };
 })();
@@ -1442,6 +1479,10 @@ const bookingGuestPolicyProjectionProjector = createBookingGuestPolicyOutboxProj
     : undefined,
 });
 
+// Bank transfer and PayPal count for booking launch only while their acceptance is on (VAY-2139).
+const financeManualPaymentReadiness = config.replacementPricingManualPaymentAcceptanceEnabled
+  ? createFinanceManualPaymentReadinessReader({ pool: propertySetupOwnerPool })
+  : undefined;
 const bookingPublicationRuntime = (() => {
   const dependenciesMissing =
     config.apiRuntime !== "next" ||
@@ -1468,6 +1509,7 @@ const bookingPublicationRuntime = (() => {
     operatingCalendar: propertySetupPmsRuntime.operatingCalendar,
     inventory: pmsOperatingCalendarRuntime.inventory,
     finance: financePaymentReadinessReadModel,
+    manualPayments: financeManualPaymentReadiness,
     financeScope: financePaymentReadinessReadModel,
     // Called per request, after `app` below exists.
     warn: (fields, message) => app.log.warn(fields, message),
@@ -1492,6 +1534,11 @@ const propertySetupRouteStateReadPort = createPropertySetupRouteStateReadPort({
       scope: createPgPropertySetupFinanceOwnerScopePort({ pool: propertySetupOwnerPool }),
       finance: financePaymentReadinessReadModel,
       pricing: pmsPricingReadModel,
+      manualPayments: financeManualPaymentReadiness,
+      billingPlan: createTargetFinanceBillingConfigReadPort({
+        connectionString: targetDatabaseUrl,
+        pool: propertySetupOwnerPool,
+      }),
     }),
     review_lifecycle: createPropertySetupReviewLifecycleStateProvider({
       marketplace: marketplaceSetupLifecycleStatusRepository,
@@ -1803,10 +1850,16 @@ const app = buildApp({
       }
     : undefined,
   bookingReservationsRepository,
-  financePaymentSetup: financePaymentSetupRuntime.routes,
+  financePaymentSetup: {
+    ...financePaymentSetupRuntime.routes,
+    manualPayments: financeManualPaymentReadiness,
+  },
   publicPageRefresh: refreshLivePublicPage,
   bookingGuestChoices: {
     store: bookingGuestChoiceStore,
+    termsStore: createBookingGuestTermsStore(propertySetupOwnerPool, (client) =>
+      createPgBookingGuestPolicyScopeAuthorizationPort({ pool: client }),
+    ),
     propertyAccessRepository: bookingPropertyAccessRepository,
   },
   bookingGuestPolicy: bookingGuestPolicyApplication
@@ -1882,6 +1935,7 @@ const app = buildApp({
     config.pmsOperationsSource === "target"
       ? {
           commands: (context) => createReplacementPricingCommands(propertySetupOwnerPool, context),
+          manualPayments: financeManualPaymentReadiness,
         }
       : undefined,
   pmsPricing: pmsGuestPolicySetupCommands
@@ -1924,6 +1978,7 @@ const app = buildApp({
     : undefined,
   pmsModuleActivationRepository,
   pmsNavigationModuleRepository,
+  bookingModuleRepository,
   ...hotelSetupOrdinaryOptions,
   financialsActivationPropertyIds: config.financialsActivationPropertyIds,
   pmsReviewRepository: createPgPmsReviewRepository({
@@ -2173,6 +2228,11 @@ const app = buildApp({
       }
     : undefined,
   marketplaceSubmission: { repository: marketplaceSubmissionRepository },
+  marketplaceHotelSubmissionModeration: {
+    repository: marketplaceHotelSubmissionModerationRepository,
+    mediaResolver: () =>
+      bookingDesignMediaAdapter ? createHotelMediaResolutionPort(bookingDesignMediaAdapter) : null,
+  },
   marketplacePublicHotel: {
     read: async (propertyId) => {
       if (!bookingDesignMediaAdapter) throw new Error("Public media resolver unavailable");
@@ -2214,6 +2274,7 @@ const app = buildApp({
     ? {
         ...bookingPublicationRuntime.routes,
         propertyAccessRepository: bookingPropertyAccessRepository,
+        publicSiteServesPublications: config.publicHotelProfileSource === "active_publication",
       }
     : undefined,
   marketplaceDiscoveryAllowedOrigins: config.marketplaceDiscoveryAllowedOrigins,
@@ -2381,6 +2442,7 @@ app.addHook("onClose", async () => {
   await bookingPublicationRuntime?.close();
   await Promise.all([
     marketplaceSubmissionRepository.close(),
+    marketplaceHotelSubmissionModerationRepository.close(),
     marketplaceHotelCollaborationPreferencesRepository.close(),
     marketplaceCommunicationPreferencesRepository.close(),
     bookingDesignRepository.close(),
@@ -3281,6 +3343,18 @@ const propertySetupDraftRetentionWorker = startPropertySetupDraftRetentionWorker
 
 app.addHook("onClose", async () => {
   await propertySetupDraftRetentionWorker.close();
+});
+
+const bookingWebEventRetentionWorker = startBookingWebEventRetentionWorker({
+  store: createPgBookingWebEventRetentionStore({ connectionString: targetDatabaseUrl, max: 1 }),
+  enabled: config.backgroundWorkersEnabled && config.bookingWebEventRetentionEnabled,
+  intervalMs: config.bookingWebEventRetentionIntervalMs,
+  batchSize: config.bookingWebEventRetentionBatchSize,
+  logger: app.log,
+});
+
+app.addHook("onClose", async () => {
+  await bookingWebEventRetentionWorker.close();
 });
 
 if (authSessionHandoffRepository) {

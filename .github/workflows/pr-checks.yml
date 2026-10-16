@@ -2,61 +2,21 @@ name: PR Checks
 
 on:
   pull_request:
+    # Every base branch a stack sits on, so a new stack never edits this list. GitHub matches
+    # these against the PR's base branch; `**` also matches `/`.
     branches:
       - main
-      # VAY-2147 New room prices stack bases (top of the list to avoid append conflicts).
-      - "fm/vay-2147-*"
-      # VAY-2138 room addition tail stack bases (top of the list to avoid append conflicts).
-      - "fm/vay-2138-*"
-      # VAY-2139 bank transfer / PayPal launch stack bases (top of the list to avoid append conflicts).
-      - "fm/vay-2139-*"
-      # VAY-2136 payment-method writers stack bases (top of the list to avoid append conflicts).
-      - "fm/vay-2136-*"
-      # VAY-2137 setup payments-before-pricing stack bases (top of the list to avoid append conflicts).
-      - "fm/vay-2137-*"
-      # VAY-2129 save-is-enough stack bases (top of the list to avoid append conflicts).
-      - "fm/vay-2129-*"
-      # VAY-2125 step-by-step Prices tab stack bases (top of the list to avoid append conflicts).
-      - "fm/vay-2125-*"
-      # VAY-2123 sellable room offers stack bases (top of the list to avoid append conflicts).
-      - "fm/vay-2123-*"
-      # VAY-2122 Prices tab restyle stack bases (top of the list to avoid append conflicts).
-      - "fm/vay-2122-*"
-      # VAY-2114 guest currency stack bases (top of the list to avoid append conflicts).
-      - "fm/vay-2114-*"
-      # VAY-2074 stack bases (top of the list to avoid append conflicts).
-      - "fm/vay-2113-*"
-      - "fm/vay-2074-*"
-      - "fm/vay-2075-*"
-      - "fm/vay-1092-*"
-      - "fix/vay-965-*"
-      - "fm/vay-965-*"
-      - "fm/vay-1943-*"
-      - "fm/vay-2056-*"
-      - "fm/vay-1543-*"
-      - "fm/vay-2066-*"
-      - "fm/vay-2078-*"
-      - "fm/vay-2079-*"
-      - "fm/vay-2088-*"
-      - "fm/vay-2082-*"
-      - "fm/vay-2084-*"
-      - "fm/vay-2089-*"
-      - "fm/vay-2110-*"
-      - "fm/vay-2093-*"
-      - "fm/vay-2072-*"
-      - "fm/vay-2077-*"
-      - "fm/vay-2099-*"
-      - "fm/vay-2094-*"
-      - "fm/vay-2100-*"
-      - "fm/vay-2101-*"
-      - "fm/vay-2102-*"
-      - "fm/vay-2120-*"
-      - "fm/vay-2134-*"
-      - "fm/vay-2140-*"
-      - flamurmaliqi2811/vay-2044-expense-worker-runtime
-      - fm/vay-2041-worker-permissions
-      - fm/vay-2041-worker-source-permissions
-      - fm/vay-2041-worker-preflight
+      - "fm/**"
+      - "fix/**"
+      - "flamurmaliqi2811/**"
+  # The merge queue tests each queued PR on top of main and the entries ahead of it; the ruleset
+  # waits for the same "Required Checks" status there.
+  merge_group:
+    types: [checks_requested]
+    branches:
+      - main
+  # A full run of every job on any branch, e.g. as the release precheck on the main tip.
+  workflow_dispatch:
 
 concurrency:
   group: pr-checks-${{ github.event.pull_request.number || github.ref }}
@@ -76,8 +36,11 @@ jobs:
       contents: read
     outputs:
       run_frontend: ${{ steps.select.outputs.run_frontend }}
+      run_frontend_build: ${{ steps.select.outputs.run_frontend_build }}
       run_first_party_auth: ${{ steps.select.outputs.run_first_party_auth }}
       run_pms_web_e2e: ${{ steps.select.outputs.run_pms_web_e2e }}
+      run_marketplace_web_e2e: ${{ steps.select.outputs.run_marketplace_web_e2e }}
+      run_booking_web_e2e: ${{ steps.select.outputs.run_booking_web_e2e }}
       run_api_unit: ${{ steps.select.outputs.run_api_unit }}
       run_api_postgres: ${{ steps.select.outputs.run_api_postgres }}
       run_setup_draft_reset_postgres: ${{ steps.select.outputs.run_setup_draft_reset_postgres }}
@@ -87,15 +50,27 @@ jobs:
       - name: Checkout merge commit and its parents
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          fetch-depth: 2
+          # A queue entry sits on the entries ahead of it, so it needs enough history to reach main.
+          fetch-depth: ${{ github.event_name == 'merge_group' && 50 || 2 }}
           persist-credentials: false
+
+      - name: Fetch the merge queue's base branch
+        if: github.event_name == 'merge_group'
+        env:
+          BASE_REF: ${{ github.event.merge_group.base_ref }}
+        # Without the base the selector cannot find a merge-base and runs every job.
+        run: |
+          git fetch --no-tags --depth=50 origin "+${BASE_REF}:refs/remotes/origin/merge-queue-base" ||
+            echo "::warning::Could not fetch ${BASE_REF}; every job will run"
 
       - name: Select jobs from changed paths
         id: select
+        env:
+          MERGE_GROUP_BASE: refs/remotes/origin/merge-queue-base
         run: node scripts/ci/pr-checks.mjs select
 
   frontend:
-    name: Frontend Test, Typecheck, Lint, Build
+    name: Frontend Test, Typecheck, Lint
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: [changes]
@@ -135,6 +110,8 @@ jobs:
         run: |
           npm --workspace @vayada/domain-hotels run build
           npm --workspace @vayada/domain-hotels run test
+          # product-onboarding's publication client imports @vayada/domain-booking at runtime.
+          npm --workspace @vayada/domain-booking run build
           npm --workspace @vayada/product-onboarding run test
 
       - name: Typecheck
@@ -151,6 +128,31 @@ jobs:
 
       - name: Booking Web tests
         run: npm --workspace vayada-booking-engine-frontend run test
+
+  # The second half of the old frontend job, so it builds while frontend typechecks and lints.
+  # `npm run build` needs nothing from frontend's steps: apps/api comes first and its prebuild
+  # builds every backend and domain package the apps import.
+  frontend_build:
+    name: Frontend Build and App Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [changes]
+    if: needs.changes.outputs.run_frontend_build == 'true'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
 
       - name: Build
         run: npm run build
@@ -298,6 +300,164 @@ jobs:
             test-results
           retention-days: 7
 
+  # The mocked marketplace-web Playwright project against a plain-port dev server, then the
+  # opt-in Airbnb import specs against a second dev server with the callback preview on. Every API
+  # call is mocked in the specs and tests/e2e/support.
+  marketplace_web_e2e:
+    name: Marketplace Web Browser Specs
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [changes]
+    if: needs.changes.outputs.run_marketplace_web_e2e == 'true'
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build the packages marketplace-web imports
+        run: npm --workspace vayada-api run build:backend-packages
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run the marketplace-web browser specs
+        run: |
+          # The dev server's env matches playwright.config.ts's marketplace-web webServer entry.
+          # Usage: start_dev_server LOG_NAME [EXTRA_ENV=value ...]
+          start_dev_server() {
+            dev_log="$RUNNER_TEMP/$1-dev.log"
+            shift
+            env "$@" NEXT_PUBLIC_BOOKING_ADMIN_URL=http://admin.booking.localhost:3003 \
+              NEXT_PUBLIC_PMS_URL=http://pms.localhost:3004 PORT=3000 \
+              npm run dev:marketplace-web > "$dev_log" 2>&1 &
+            dev_pid=$!
+            for attempt in $(seq 1 120); do
+              kill -0 "$dev_pid" 2>/dev/null || break
+              if curl --silent --fail --max-time 5 http://127.0.0.1:3000/login >/dev/null; then return 0; fi
+              sleep 2
+            done
+            tail -50 "$dev_log"
+            return 1
+          }
+          stop_dev_server() {
+            kill "$dev_pid" 2>/dev/null || true
+            # npm runs next as a child: wait until nothing listens on the port (curl exit 7).
+            for attempt in $(seq 1 30); do
+              status=0
+              curl --silent --max-time 2 http://127.0.0.1:3000/login >/dev/null || status=$?
+              [ "$status" = 7 ] && return 0
+              pkill -f "[n]ext dev" || true
+              sleep 1
+            done
+            echo "The marketplace-web dev server still holds port 3000."
+            return 1
+          }
+          trap 'stop_dev_server || true' EXIT
+          start_dev_server marketplace-web
+          npm run e2e:marketplace-web -- --workers=1 --retries=1
+          stop_dev_server
+          start_dev_server marketplace-web-airbnb AIRBNB_IMPORT_CALLBACK_ENABLED=true
+          E2E_AIRBNB_IMPORT_CALLBACK=1 npm run e2e:marketplace-web -- --workers=1 --retries=1 \
+            tests/e2e/marketplace-web/airbnb-import-start.spec.ts \
+            tests/e2e/marketplace-web/airbnb-import-return.spec.ts
+        env:
+          # Any non-empty CI makes playwright.config.ts use CI reporters; "false" keeps it from
+          # starting every app's webServer (that needs CI === "true").
+          CI: "false"
+          PLAYWRIGHT_HTML_OPEN: never
+          E2E_START_SERVERS: "0"
+          E2E_MARKETPLACE_BASE_URL: http://127.0.0.1:3000
+          # The dev server's test Maps key (playwright.config.ts); in the Playwright process it also
+          # makes setup-activation require the Google address search.
+          NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: e2e-google-places
+
+      - name: Upload the Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: marketplace-web-playwright-report
+          path: |
+            playwright-report
+            test-results
+            ${{ runner.temp }}/*-dev.log
+          retention-days: 7
+
+  # The mocked booking-web Playwright project against a plain-port dev server on the seeded
+  # hotel-alpenrose tenant host. The project runs with one worker (playwright.config.ts).
+  booking_web_e2e:
+    name: Booking Web Browser Specs
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [changes]
+    if: needs.changes.outputs.run_booking_web_e2e == 'true'
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build the packages booking-web imports
+        run: npm --workspace vayada-api run build:backend-packages
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run the booking-web browser specs
+        run: |
+          npm run dev:booking-web > "$RUNNER_TEMP/booking-web-dev.log" 2>&1 &
+          dev_pid=$!
+          trap 'kill "$dev_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 120); do
+            kill -0 "$dev_pid" 2>/dev/null || break
+            if curl --silent --fail --max-time 5 http://127.0.0.1:3002/api/health >/dev/null; then break; fi
+            sleep 2
+          done
+          curl --silent --fail --max-time 10 http://127.0.0.1:3002/api/health >/dev/null || { tail -50 "$RUNNER_TEMP/booking-web-dev.log"; exit 1; }
+          npm run e2e:booking-web -- --retries=1
+        env:
+          # See pms_web_e2e: "false" keeps playwright.config.ts from starting every webServer.
+          CI: "false"
+          PLAYWRIGHT_HTML_OPEN: never
+          E2E_START_SERVERS: "0"
+          PORT: "3002"
+          E2E_BOOKING_BASE_URL: http://hotel-alpenrose.booking.localhost:3002
+
+      - name: Upload the Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: booking-web-playwright-report
+          path: |
+            playwright-report
+            test-results
+            ${{ runner.temp }}/*-dev.log
+          retention-days: 7
+
   # Every unit suite under apps/api and the backend packages, with no database. Files that need
   # PostgreSQL skip themselves here; api_postgres runs only the integration files it names (full
   # integration coverage is VAY-2111). Main pushes and a nightly run repeat this job
@@ -332,7 +492,9 @@ jobs:
   # Each shard gets its own PostgreSQL cluster, so cluster-wide role proofs stay isolated:
   #   platform    - identity, legacy owner, finance worker, Channex worker and authorization proofs
   #   pms         - the PMS/booking/finance integration batch and the migration suites
-  #   hotel-setup - hotel setup on the ordinary API login, shared setup profile and logo media
+  #   pricing     - pricing on the ordinary login in its own database (split from pms, VAY-2238)
+  #   hotel-setup - hotel setup on the ordinary API login, shared setup profile, logo media and
+  #                 nearby places
   # Steps without a `matrix.shard` condition run in every shard.
   api_postgres:
     name: TypeScript API PostgreSQL Integration (PG${{ matrix.postgres }}, ${{ matrix.shard }})
@@ -344,11 +506,11 @@ jobs:
       fail-fast: false
       matrix:
         postgres: [16, 17]
-        shard: [platform, pms, hotel-setup]
+        shard: [platform, pms, pricing, hotel-setup]
 
     services:
       postgres:
-        image: public.ecr.aws/docker/library/postgres:${{ matrix.postgres }}-alpine
+        image: ghcr.io/vayada-marketplace/ci-postgres:${{ matrix.postgres }}-alpine
         env:
           POSTGRES_USER: vayada_test
           POSTGRES_PASSWORD: vayada_test
@@ -605,11 +767,11 @@ jobs:
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
-      - name: Verify the complete-hotel activation backfill
+      - name: Verify public booking pages from setup publications and legacy profiles
         if: matrix.shard == 'pms'
         run: >-
-          npm --workspace @vayada/backend-migration run test -- --no-file-parallelism
-          src/hotelCatalogActivateCompleteHotels.integration.test.ts
+          npm --workspace vayada-api run test -- --no-file-parallelism
+          src/activeBookingPublicationProfile.integration.test.ts
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
@@ -622,6 +784,12 @@ jobs:
       - name: Verify current authorization and effective property access
         if: matrix.shard == 'platform'
         run: npm --workspace @vayada/backend-authorization run test -- --no-file-parallelism src/index.test.ts -t 'createPgPropertyAccessRepository|createAuthorizationResolver|resolveMembershipRolePermissions'
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+
+      - name: Verify PMS dashboard reads per staff role preset
+        if: matrix.shard == 'platform'
+        run: npm --workspace vayada-api run test -- --no-file-parallelism src/pmsDashboardRoleAccess.integration.test.ts
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
@@ -674,6 +842,8 @@ jobs:
           src/domains/pmsCalendarAutoOpenSettingsRepository.integration.test.ts
           src/pmsNavigationModules.integration.test.ts
           src/pmsNavigationModules.test.ts
+          src/pmsBookingModules.integration.test.ts
+          src/pmsBookingModules.test.ts
           src/jobs/pmsChannexScheduler.integration.test.ts
           src/jobs/pmsCalendarAutoOpenScheduler.integration.test.ts
           src/domains/pmsInboxProviderActionCommand.integration.test.ts
@@ -693,6 +863,7 @@ jobs:
           src/pmsManualBookingPreviewRoutes.test.ts
           src/pmsManualBookingCreateRoutes.test.ts
           src/domains/bookingGuestPolicyRepository.integration.test.ts
+          src/domains/bookingGuestTermsStore.integration.test.ts
           src/bookingSettingsPropertyAddress.integration.test.ts
           src/domains/financeOtaCommissionRuleRepository.integration.test.ts
           src/domains/financeExpenseCategoryRepository.integration.test.ts
@@ -719,18 +890,25 @@ jobs:
           src/jobs/channexStagingImport.integration.test.ts
           src/domains/channexStagingAlertRecovery.integration.test.ts
           src/routes/bookingWebPublicAttribution.integration.test.ts
+          src/platform/bookingWebEvents.integration.test.ts
           src/jobs/financeSubscriptions.integration.test.ts
+          src/financeBillingPlanOrdinary.integration.test.ts
+          src/financeBillingPlanParity.integration.test.ts
+          src/financePaymentSettingsOrdinary.integration.test.ts
+          src/domains/financePaymentWriters.integration.test.ts
+          src/bookingAddonCurrencyOrdinary.integration.test.ts
           src/platform/postgresRuntime.integration.test.ts
           src/platform/workosWebhooks.integration.test.ts
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
       # Pricing on the ordinary login (VAY-2057). Own database: these suites commit fixture
-      # properties and slugs that other PMS-shard suites would see. The whole offer-owner file
+      # properties and slugs, so they stay out of vayada_api_test. The whole offer-owner file
       # runs here, last, including its restricted Channex login cases (VAY-2113): they create,
-      # grant and drop the cluster-wide Channex worker role inside each case.
+      # grant and drop the cluster-wide Channex worker role inside each case. Its own shard so it
+      # runs alongside the PMS batch instead of after it (VAY-2238).
       - name: Run pricing PostgreSQL integration in an isolated database
-        if: matrix.shard == 'pms'
+        if: matrix.shard == 'pricing'
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_pricing_test
           TARGET_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_pricing_test
@@ -748,6 +926,7 @@ jobs:
           npm --workspace vayada-api run test -- --no-file-parallelism \
             src/domains/publicPricingOwners.integration.test.ts \
             src/domains/financeReplacementPricingSource.integration.test.ts \
+            src/domains/financeManualPaymentReadiness.integration.test.ts \
             src/domains/replacementPricingStore.integration.test.ts \
             src/domains/pmsInventoryPublicOfferProjection.integration.test.ts \
             src/domains/replacementPricingCommands.integration.test.ts \
@@ -802,6 +981,15 @@ jobs:
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
+      # Runs 0482 again inside a rolled-back transaction on the migrated shared database.
+      - name: Verify the complete-hotel activation backfill
+        if: matrix.shard == 'hotel-setup'
+        run: >-
+          npm --workspace @vayada/backend-migration run test -- --no-file-parallelism
+          src/hotelCatalogActivateCompleteHotels.integration.test.ts
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+
       - name: Verify hotel setup routes, currency and logo media
         if: matrix.shard == 'hotel-setup'
         run: >-
@@ -818,9 +1006,46 @@ jobs:
           src/platform/platformMediaS3.test.ts
           src/domains/propertyMediaCommandRepository.test.ts
 
+      - name: Verify booking-page analytics storage and readers on PostgreSQL
+        if: matrix.shard == 'hotel-setup'
+        run: >-
+          npm --workspace vayada-api run test -- --no-file-parallelism
+          src/platform/bookingWebTelemetry.integration.test.ts
+          src/platform/bookingFunnel.integration.test.ts
+          src/bookingDashboardMoney.integration.test.ts
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+
       - name: Verify platform media cleanup on PostgreSQL
         if: matrix.shard == 'hotel-setup'
         run: npm --workspace vayada-api run test -- --no-file-parallelism src/jobs/platformMediaCleanup.integration.test.ts
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+
+      - name: Verify booking web event retention on PostgreSQL
+        if: matrix.shard == 'hotel-setup'
+        run: npm --workspace vayada-api run test -- --no-file-parallelism src/jobs/bookingWebEventRetention.integration.test.ts
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+
+      - name: Verify Marketplace submission review on PostgreSQL
+        if: matrix.shard == 'hotel-setup'
+        run: >-
+          npm --workspace vayada-api run test -- --no-file-parallelism
+          src/domains/marketplaceSubmissionRepository.integration.test.ts
+          src/domains/marketplaceHotelSubmissionModerationRepository.integration.test.ts
+          src/marketplaceHotelSubmissionApproval.integration.test.ts
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+
+      - name: Verify nearby places on PostgreSQL
+        if: matrix.shard == 'hotel-setup'
+        run: >-
+          npm --workspace vayada-api run test -- --no-file-parallelism
+          src/domains/propertyNearbyRepository.integration.test.ts
+          src/domains/propertyNearbyDiscoveryRepository.integration.test.ts
+          src/domains/publicNearbyRepository.integration.test.ts
+          src/domains/nearbyProfileSave.integration.test.ts
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
@@ -839,6 +1064,8 @@ jobs:
           src/channexAdoptionConsumer.integration.test.ts
           src/channexAdoptionEvidence.integration.test.ts
           src/stripeWebhookReceiptRetention.integration.test.ts
+          src/bookingWebEventsMigration.integration.test.ts
+          src/bookingWebEventsLogBlanking.integration.test.ts
           src/productionMediaMigration.integration.test.ts
           src/productionCatalogWriters.integration.test.ts
           src/productionBookingWriters.integration.test.ts
@@ -912,7 +1139,7 @@ jobs:
 
     services:
       postgres:
-        image: public.ecr.aws/docker/library/postgres:${{ matrix.postgres }}-alpine
+        image: ghcr.io/vayada-marketplace/ci-postgres:${{ matrix.postgres }}-alpine
         env:
           POSTGRES_USER: vayada_test
           POSTGRES_PASSWORD: vayada_test
@@ -950,6 +1177,7 @@ jobs:
           npm --workspace vayada-api run test --
           --no-file-parallelism
           src/propertySetupDraftCommand.test.ts
+          src/propertySetupCalendarDraftManifest.integration.test.ts
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
@@ -993,7 +1221,7 @@ jobs:
 
     services:
       postgres:
-        image: public.ecr.aws/docker/library/postgres:15-alpine
+        image: ghcr.io/vayada-marketplace/ci-postgres:15-alpine
         env:
           POSTGRES_USER: ${{ matrix.db_user }}
           POSTGRES_PASSWORD: ${{ matrix.db_password }}
@@ -1007,7 +1235,7 @@ jobs:
           - ${{ matrix.db_port }}:5432
 
       auth-postgres:
-        image: public.ecr.aws/docker/library/postgres:15-alpine
+        image: ghcr.io/vayada-marketplace/ci-postgres:15-alpine
         env:
           POSTGRES_USER: vayada_auth_user
           POSTGRES_PASSWORD: vayada_auth_password
@@ -1113,12 +1341,20 @@ jobs:
   required:
     name: Required Checks
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # A merge queue entry may also wait here while a hold is open (up to 120 minutes), which must
+    # stay below the ruleset's status check timeout (180 minutes).
+    timeout-minutes: ${{ github.event_name == 'merge_group' && 130 || 5 }}
+    permissions:
+      contents: read
+      issues: read
     needs:
       - changes
       - frontend
+      - frontend_build
       - first_party_auth
       - pms_web_e2e
+      - marketplace_web_e2e
+      - booking_web_e2e
       - api_unit
       - api_postgres
       - setup_draft_reset_postgres
@@ -1137,3 +1373,11 @@ jobs:
         env:
           NEEDS: ${{ toJSON(needs) }}
         run: node scripts/ci/pr-checks.mjs verify
+
+      # A passing queue entry merges as soon as this job succeeds, so an open release-train-hold
+      # issue keeps it waiting here. Failed entries stop at the step above and leave the queue.
+      - name: Wait while a merge queue hold is open
+        if: github.event_name == 'merge_group'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/ci/pr-checks.mjs hold

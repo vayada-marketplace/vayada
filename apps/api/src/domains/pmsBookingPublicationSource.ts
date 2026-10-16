@@ -1,8 +1,8 @@
 import {
   type BookingLaunchOwnerBlocker,
   type BookingLaunchPmsEvidencePort,
-  type BookingLaunchSourceRevision,
 } from "@vayada/domain-booking";
+import { BOOKING_PUBLICATION_MIN_OPEN_DAYS } from "@vayada/domain-distribution/booking-publication";
 import {
   BOOKING_OWNER_SNAPSHOT_VERSION,
   type BookingPublicationOwnerSnapshotPort,
@@ -27,13 +27,13 @@ import type {
 import { buildPmsBookingPublicationContent } from "./pmsBookingPublicationContent.js";
 
 type PmsSource = Omit<SourceEntityRevision, "ownerDomain"> & { ownerDomain: "pms" };
+
 type LoadedPms = {
   sources: PmsSource[];
   rooms: readonly { source: PmsSource; blockers: BookingLaunchOwnerBlocker[] }[];
   pricingSource: PmsSource;
   pricingBlockers: BookingLaunchOwnerBlocker[];
   calendarSource: PmsSource;
-  calendarBindings: BookingLaunchSourceRevision[];
   calendarBlockers: BookingLaunchOwnerBlocker[];
   content: BookingPublicationSnapshotContent["pms"] | null;
 };
@@ -86,11 +86,9 @@ export function createPmsBookingPublicationSource(dependencies: {
               groupId: "booking.calendar",
               owningStepId: "calendar",
               source: loaded.calendarSource,
+              // No binding to the hotel profile revision: the PMS read model reports the only
+              // profile change the calendar uses, a new time zone, as stale (VAY-2150).
               blockers: loaded.calendarBlockers,
-              bindings: loaded.calendarBindings.map((expectedSource) => ({
-                expectedSource,
-                mismatchBlocker: blocker("operating_calendar_source_stale"),
-              })),
             },
           ],
         });
@@ -166,7 +164,11 @@ async function load(
     currentLocalDate
       ? dependencies.inventory.getInventoryLaunchReadiness({
           propertyId: scope.propertyId,
-          requiredCoverage: { from: currentLocalDate, through: addDays(currentLocalDate, 365) },
+          requiredCoverage: {
+            from: currentLocalDate,
+            // The same 11-month window the publication builder checks (VAY-2150).
+            through: addDays(currentLocalDate, BOOKING_PUBLICATION_MIN_OPEN_DAYS),
+          },
         })
       : null,
     dependencies.pricingCurrency.getPropertyPricingCurrency(scope.propertyId),
@@ -269,9 +271,6 @@ async function load(
     pricingSource,
     pricingBlockers,
     calendarSource,
-    calendarBindings: currentCalendar
-      ? [currentCalendar.configuration.sourceInputs.propertyProfile]
-      : [],
     calendarBlockers,
     content,
   };

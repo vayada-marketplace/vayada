@@ -1,11 +1,5 @@
 import type { ListingFormData } from "@/lib/types";
 
-export function canRemoveListingImage(listing: ListingFormData, imageIndex: number): boolean {
-  if (!listing.marketplaceOnboarding?.existingOffer) return true;
-  const localImageStart = Math.max(0, listing.images.length - listing.imageFiles.length);
-  return imageIndex >= localImageStart;
-}
-
 export function removeListingImageAt(
   listing: ListingFormData,
   imageIndex: number,

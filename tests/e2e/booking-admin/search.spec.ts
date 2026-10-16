@@ -15,7 +15,7 @@ test.beforeEach(async ({ page }) => {
 test("searches from every main page and opens Domain directly with the keyboard", async ({
   page,
 }, testInfo) => {
-  for (const path of ["/", "/settings/general", "/booking-flow", "/design-studio"]) {
+  for (const path of ["/", "/settings/general", "/settings/room-filters", "/design-studio"]) {
     await page.goto(path);
     const search = page.getByRole("combobox", { name: "Search pages and settings" });
     await expect(search).toBeVisible();
@@ -37,6 +37,9 @@ test("searches from every main page and opens Domain directly with the keyboard"
   await page.getByRole("option", { name: "Payment Settings" }).click();
   await expect(page).toHaveURL(/\/settings\/payments$/);
   await expect(page.getByRole("heading", { name: "Payments", exact: true })).toBeVisible();
+  // The click above left the pointer over the results; hovering an option makes it active,
+  // so move it away before testing keyboard selection.
+  await page.mouse.move(0, 0);
   await page.getByRole("combobox", { name: "Search pages and settings" }).fill("");
   await expect(page.getByRole("option").first()).toBeVisible();
   await page.keyboard.press("ArrowDown");

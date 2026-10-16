@@ -71,7 +71,7 @@ type Fixture = Readonly<{
     staleOnRead: number | null;
   };
   capacityState: { revision: number; count: number };
-  profileState: { available: boolean; revision: number };
+  profileState: { available: boolean; revision: number; timeZone: string | null };
   authorizationState: { allowed: boolean };
   authorize: ReturnType<typeof vi.fn>;
   repository: PmsInventoryMaterializationRepository;
@@ -1320,15 +1320,16 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
     await book(randomUUID(), "2026-08-06", "2026-08-07");
     await expect(check()).rejects.toThrow("alteration_rooms_unavailable");
     input.changes.requestedCheckOut = "2026-08-06";
+    // Changed units make the inventory not current; room details would not (VAY-2150).
     await admin.query(
-      `UPDATE pms.room_types SET room_facts_revision=room_facts_revision+1 WHERE id=$1`,
+      `UPDATE pms.room_types SET room_units_revision=room_units_revision+1 WHERE id=$1`,
       [roomTypeId],
     );
     await expect(check()).rejects.toThrow("alteration_inventory_not_current");
     // Full tracked sequence: accepted alteration, ordinary modification, cancellation and replay.
     financeEnabled = true;
     await admin.query(
-      "UPDATE pms.room_types SET room_facts_revision=room_facts_revision-1 WHERE id=$1",
+      "UPDATE pms.room_types SET room_units_revision=room_units_revision-1 WHERE id=$1",
       [roomTypeId],
     );
     await admin.query(
@@ -1435,14 +1436,21 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
     } finally {
       await admin.query("ROLLBACK");
     }
+    // Only a new time zone conflicts with the calendar; other profile edits don't (VAY-2150).
+    const zone = (
+      await admin.query<{ timezone: string }>(
+        "SELECT timezone FROM hotel_catalog.property_locations WHERE property_id=$1",
+        [propertyId],
+      )
+    ).rows[0]!.timezone;
     await admin.query(
-      "UPDATE hotel_catalog.properties SET profile_revision=profile_revision+1 WHERE id=$1",
+      "UPDATE hotel_catalog.property_locations SET timezone='Asia/Kolkata' WHERE property_id=$1",
       [propertyId],
     );
     await rejectTrackedRevision("nightly_revenue_evidence_conflict");
     await admin.query(
-      "UPDATE hotel_catalog.properties SET profile_revision=profile_revision-1 WHERE id=$1",
-      [propertyId],
+      "UPDATE hotel_catalog.property_locations SET timezone=$2 WHERE property_id=$1",
+      [propertyId, zone],
     );
     // Ordinary modifications must roll back canonical changes when evidence is unavailable.
     providerRevision.attributes.amount = "40.00";
@@ -2825,17 +2833,15 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
         return {
           release: client.release.bind(client),
           query: (text: string, values?: unknown[]) =>
-            text.includes("pms.enqueue_restriction_ari")
-              ? Promise.resolve({ rows: [], rowCount: 0 })
-              : client.query(
-                  text.includes('max_attempts AS "maxAttempts"')
-                    ? text.replace(
-                        "WHERE queue_name = $1",
-                        `WHERE id='${f.job.jobId}'::uuid AND queue_name = $1`,
-                      )
-                    : text,
-                  values,
-                ),
+            client.query(
+              text.includes('max_attempts AS "maxAttempts"')
+                ? text.replace(
+                    "WHERE queue_name = $1",
+                    `WHERE id='${f.job.jobId}'::uuid AND queue_name = $1`,
+                  )
+                : text,
+              values,
+            ),
         };
       },
       end: async () => {},
@@ -2995,7 +3001,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
       await blocker.end();
     }
   });
-  it("cannot snapshot old room facts while their writer owns the scope", async () => {
+  it("cannot snapshot the old room set while its writer owns the scope", async () => {
     const f = await dailyFixture(),
       blocker = new pg.Client({ connectionString: TEST_DATABASE_URL });
     await blocker.connect();
@@ -3005,9 +3011,8 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
         [f.propertyId],
       );
       await expect(f.read()).rejects.toMatchObject({ code: "55P03" });
-      await blocker.query("UPDATE pms.room_types SET room_facts_revision=2 WHERE id=$1", [
-        f.roomTypeId,
-      ]);
+      // A room-set change, which the calendar uses (room details alone no longer stale it).
+      await blocker.query("UPDATE pms.room_types SET active=false WHERE id=$1", [f.roomTypeId]);
       await blocker.query(
         "SELECT pg_advisory_unlock(hashtext('pms.room_facts'),hashtext($1::uuid::text))",
         [f.propertyId],
@@ -3126,7 +3131,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
     "calendar",
     "profile",
     "capacity",
-    "room-facts",
+    "room-set",
     "missing-day",
     "coverage",
     "foreign-room",
@@ -3135,17 +3140,23 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
   ])("does not manufacture availability for %s", async (mode) => {
     const f = await dailyFixture(mode !== "missing-day");
     if (mode === "calendar") await activateCalendarRevision(admin, f, 2);
-    if (mode === "profile") f.profileState.revision = 2;
+    if (mode === "profile") f.profileState.timeZone = "Asia/Kolkata";
     if (mode === "capacity") f.capacityState.revision = 2;
-    if (mode === "room-facts")
-      await admin.query("UPDATE pms.room_types SET room_facts_revision=2 WHERE id=$1", [
-        f.roomTypeId,
-      ]);
+    if (mode === "room-set")
+      await admin.query("UPDATE pms.room_types SET active=false WHERE id=$1", [f.roomTypeId]);
     if (mode === "coverage") f.request.stayDate = "2026-08-07";
     if (mode === "foreign-room") f.request.roomTypeId = randomUUID();
     if (mode === "foreign-property") f.request.propertyId = randomUUID();
     if (mode === "invalid-date") f.request.stayDate = "2026-02-30";
     expect(await f.read()).toMatchObject({ kind: "unavailable" });
+  });
+  it("keeps reading a day after hotel profile and room detail edits (VAY-2150)", async () => {
+    const f = await dailyFixture();
+    f.profileState.revision = 2;
+    await admin.query("UPDATE pms.room_types SET room_facts_revision=2 WHERE id=$1", [
+      f.roomTypeId,
+    ]);
+    expect(await f.read()).toMatchObject({ kind: "available" });
   });
   it("does not read across a concurrent inventory mutation", async () => {
     const f = await dailyFixture(),
@@ -3926,8 +3937,9 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
       outbox: 0,
     });
 
+    // Only a new time zone makes the hotel profile stale for the calendar (VAY-2150).
     const staleProfile = await createFixture(admin, repositories, [2]);
-    staleProfile.profileState.revision = 2;
+    staleProfile.profileState.timeZone = "Asia/Kolkata";
     await expect(
       staleProfile.repository.materializeInventory(
         materializationCommand(staleProfile, "stale-profile", 1, "2026-08-04", "2026-08-04"),
@@ -4132,7 +4144,7 @@ async function createFixture(
     staleOnRead: null as number | null,
   };
   const capacityState = { revision: 1, count: 2 };
-  const profileState = { available: true, revision: 1 };
+  const profileState = { available: true, revision: 1, timeZone: null as string | null };
   const authorizationState = { allowed: true };
   const authorize = vi.fn(async () => authorizationState.allowed);
   const authorization: PmsInventoryMaterializationAuthorizationPort = {
@@ -4179,7 +4191,7 @@ async function createFixture(
   const propertyProfileEvidence: PmsOperatingCalendarPropertyProfileEvidencePort = {
     ownerDomain: "hotel_catalog",
     registryVersion: "test.v1",
-    isCanonicalIanaTimeZone: (value) => value === "Europe/Berlin",
+    isCanonicalIanaTimeZone: (value) => value === "Europe/Berlin" || value === "Asia/Kolkata",
     async runWithPropertyProfileEvidence(_input, guarded) {
       const configuration = configurations.get(calendarState.currentRevision);
       if (!configuration) throw new Error("Missing current test configuration");
@@ -4195,7 +4207,8 @@ async function createFixture(
               status: "available",
               evidence: {
                 source,
-                timeZone: configuration.sourceInputs.propertyTimeZone,
+                timeZone: (profileState.timeZone ??
+                  configuration.sourceInputs.propertyTimeZone) as never,
               },
             }
           : { status: "timezone_missing", source },

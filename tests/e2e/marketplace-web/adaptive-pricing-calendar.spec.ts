@@ -11,6 +11,7 @@ import {
   mockHotelSetupPrerequisites,
 } from "../support/sharedHotelSetupMocks";
 import AxeBuilder from "@axe-core/playwright";
+import { createFinancePaymentReadinessSnapshot } from "@vayada/domain-finance";
 import { expect, test, type Page, type Route } from "@playwright/test";
 import type {
   PropertySetupRouteReadModel,
@@ -59,32 +60,17 @@ test.describe("adaptive pricing and calendar", () => {
     await expect(
       page.getByRole("heading", { name: "Set your room prices", level: 1 }),
     ).toBeVisible();
-    await expect(page.getByText("All prices are in EUR.")).toBeVisible();
-    await expect(page.getByText("Needs a rate")).toBeVisible();
+    await expect(page.getByText("All prices are in EUR.", { exact: false })).toBeVisible();
+    // VAY-2188: one price per room; how guests pay comes from the Payments step.
+    await expect(page.getByText("Pay at hotel", { exact: true })).toBeVisible();
     await expectNoSeriousAccessibilityViolations(page);
     await page.screenshot({
       path: testInfo.outputPath("pricing-1-first-rate.png"),
       fullPage: true,
     });
 
-    await page.getByRole("combobox", { name: "Room type" }).selectOption(roomTypeId);
-    await page.getByRole("combobox", { name: "How is the room priced?" }).selectOption("flat");
-    await page.getByRole("textbox", { name: "Room price per night" }).fill("175.50");
-    await page.getByRole("textbox", { name: "Adult pricing starts at age (1–18)" }).fill("12");
-    await page.getByRole("textbox", { name: "Price per child per night (0 is allowed)" }).fill("0");
-    await page
-      .getByRole("combobox", { name: "Children count toward room capacity" })
-      .selectOption("yes");
-    await page.getByRole("textbox", { name: "Minimum stay in nights" }).fill("1");
-    await page.getByRole("combobox", { name: "Cancellation policy" }).selectOption("flexible");
-    await page
-      .getByRole("textbox", { name: "Free cancellation until days before arrival (0–365)" })
-      .fill("7");
-    await page.getByRole("combobox", { name: "Payment policy" }).selectOption("full");
-    await page.getByRole("checkbox", { name: "Pay at property" }).check();
-    await page.getByRole("button", { name: "Add this rate" }).click();
-
-    await expect(page.getByText("Ready to publish")).toBeVisible();
+    await page.getByRole("textbox", { name: /^Price per night for / }).fill("175.50");
+    await page.getByRole("combobox", { name: "Days before arrival" }).selectOption("7");
     // Publishing is the mandatory-charges declaration (VAY-2079): no checkbox, one line.
     await expect(page.getByRole("checkbox", { name: /final prices/ })).toHaveCount(0);
     const publish = page.getByRole("button", { name: "Publish prices and continue" });
@@ -261,22 +247,54 @@ async function mockPricingCalendarApis(page: Page) {
     },
   );
 
-  // The Guest experience step opens after the calendar with no saved guest rules.
+  // The Guest experience step opens after the calendar with no saved guest rules or terms.
   await page.route(
-    new RegExp(`/api/booking/properties/${propertyId}/guest-rules(?:\\?|$)`),
+    new RegExp(`/api/booking/properties/${propertyId}/guest-(?:rules|terms)(?:\\?|$)`),
     async (route) => {
       if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
       if (route.request().method() !== "GET") return unexpected(route, unexpectedCalls);
-      await ok(route, { current: null });
+      const terms = new URL(route.request().url()).pathname.endsWith("/guest-terms");
+      await ok(route, terms ? { termsText: null } : { current: null });
+    },
+  );
+
+  // VAY-2188: Pricing reads how guests pay from the Payments step (pay at the hotel, ready).
+  await page.route(
+    new RegExp(`/api/finance/properties/${propertyId}/payment-readiness(?:\\?|$)`),
+    async (route) => {
+      if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
+      if (route.request().method() !== "GET") return unexpected(route, unexpectedCalls);
+      const pricing = {
+        contractVersion: PMS_PRICING_CONTRACT_VERSION,
+        currency: "EUR",
+        pricingCurrencyRevision: 2,
+      };
+      await ok(
+        route,
+        createFinancePaymentReadinessSnapshot({
+          propertyId,
+          selectedMethods: ["pay_at_property"],
+          paymentMethodsRevision: 1,
+          committedPricing: pricing,
+          currentPricing: pricing,
+          onlineCardReadiness: "execution_unavailable",
+          updatedAt: acceptedAt,
+        }),
+      );
     },
   );
 
   page.on("request", (request) => {
     const pathname = new URL(request.url()).pathname;
-    // The Guest experience step, opened after the calendar, reads its own booking rules.
+    // The Guest experience step, opened after the calendar, reads its own booking rules; Pricing
+    // reads how guests pay (VAY-2188).
     const nextStepRead =
       request.method() === "GET" &&
-      pathname === `/api/booking/properties/${propertyId}/guest-rules`;
+      [
+        `/api/booking/properties/${propertyId}/guest-rules`,
+        `/api/booking/properties/${propertyId}/guest-terms`,
+        `/api/finance/properties/${propertyId}/payment-readiness`,
+      ].includes(pathname);
     if (
       !nextStepRead &&
       (/^\/api\/hotel-setup\/(?:tracks|handoffs)(?:\/|$)/.test(pathname) ||
@@ -430,6 +448,14 @@ async function mockPricingCalendarApis(page: Page) {
     const pricingV2 = pathname.match(new RegExp(`/pricing-v2(/.*)?$`));
     if (pricingV2) {
       const suffix = pricingV2[1] ?? "";
+      // Bank-transfer and PayPal acceptance is off, as in production today (VAY-2139).
+      if (suffix === "/payment-methods" && method === "GET") {
+        await route.fulfill({
+          headers: corsHeaders(route),
+          json: { acceptanceEnabled: false, readyMethods: [] },
+        });
+        return;
+      }
       const body = (method === "GET" ? {} : request.postDataJSON()) as Record<string, any>;
       const write = (name: string) =>
         pricingV2Writes.push({
@@ -767,7 +793,6 @@ function setupUrl(baseURL: string | undefined, step: PropertySetupStepId) {
     returnTo: "/marketplace",
     propertyId,
     step,
-    _adaptive: "1",
   });
   if (!baseURL) return `/setup?${query.toString()}`;
   const url = new URL(baseURL);

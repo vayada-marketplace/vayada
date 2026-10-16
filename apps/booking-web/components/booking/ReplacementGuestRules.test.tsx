@@ -67,7 +67,7 @@ it("discloses every guest rule without inventing booking submission or dropping 
   await render();
   const text = document.body.textContent;
   for (const phrase of [
-    "Europe/Berlin",
+    "Times are in Central European Time.",
     "15:00",
     "midnight at the end of your arrival day",
     "from 06:00 by 11:00",
@@ -77,6 +77,7 @@ it("discloses every guest rule without inventing booking submission or dropping 
     "include special requests",
   ])
     expect(text).toContain(phrase);
+  expect(text).not.toContain("Europe/Berlin");
   expect(checkbox().checked).toBe(false);
   expect(document.querySelector("button")).toBeNull();
 });
@@ -105,7 +106,8 @@ it("aborts superseded reads and ignores a late result", async () => {
   await render("other");
   expect(firstSignal.aborted).toBe(true);
   await act(async () => resolve({ ...disclosure, propertyTimeZone: "Asia/Tokyo" }));
-  expect(document.body.textContent).toContain("Europe/Berlin");
+  expect(document.body.textContent).toContain("Central European Time");
+  expect(document.body.textContent).not.toContain("Japan");
   expect(document.body.textContent).not.toContain("Asia/Tokyo");
 });
 it("fails closed on fetch failure and retries without prior agreement", async () => {
@@ -140,4 +142,49 @@ it("supplies exact server evidence only while the current rules are acknowledged
   vi.mocked(getQuoteGuestDisclosure).mockResolvedValue({ ...disclosure, quoteId: next.quoteId });
   await render("hotel", next, changed);
   expect(changed).toHaveBeenLastCalledWith(null);
+});
+it("reports the loaded rules whether or not they are ticked, and none on failure (VAY-2163)", async () => {
+  const rules = vi.fn();
+  const renderWith = async (value = quote) =>
+    act(async () =>
+      root.render(
+        createElement(ReplacementGuestRules, { slug: "hotel", quote: value, onRulesChange: rules }),
+      ),
+    );
+  await renderWith();
+  expect(rules).toHaveBeenLastCalledWith(disclosure);
+  vi.setSystemTime(new Date(quote.expiresAt));
+  act(() => checkbox().click());
+  expect(checkbox().checked).toBe(false);
+  expect(rules).toHaveBeenLastCalledWith(disclosure);
+  const next = { ...quote, quoteId: "22222222-2222-4222-8222-222222222222" };
+  vi.mocked(getQuoteGuestDisclosure).mockRejectedValueOnce(new Error("unavailable"));
+  await renderWith(next);
+  expect(rules).toHaveBeenLastCalledWith(null);
+  act(() => root.render(null));
+  expect(rules).toHaveBeenLastCalledWith(null);
+});
+
+it("shows the tick first and the rules behind Read on the payment step (VAY-2195)", async () => {
+  const change = vi.fn();
+  await act(async () =>
+    root.render(
+      createElement(ReplacementGuestRules, {
+        slug: "hotel",
+        quote,
+        onAcknowledgementChange: change,
+        compact: true,
+      }),
+    ),
+  );
+  expect(document.body.textContent).toContain("I have read our guest rules for this price.");
+  expect(document.querySelector('[aria-label="Guest rules"]')).toBeNull();
+  const read = Array.from(document.querySelectorAll("button")).find((b) =>
+    b.textContent?.includes("guest rules"),
+  )!;
+  act(() => read.click());
+  expect(document.querySelector('[aria-label="Guest rules"]')).not.toBeNull();
+  expect(document.querySelectorAll('input[type="checkbox"]')).toHaveLength(1);
+  act(() => checkbox().click());
+  expect(change).toHaveBeenLastCalledWith(disclosure);
 });

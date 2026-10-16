@@ -235,6 +235,9 @@ async function mockPricing(page: Page) {
     const suffix = new URL(request.url()).pathname.split("/pricing-v2")[1] ?? "";
     const body = (method === "GET" ? {} : request.postDataJSON()) as Record<string, any>;
     if (method !== "GET") state.writes += 1;
+    // Bank-transfer and PayPal acceptance is off, as in production today (VAY-2139).
+    if (suffix === "/payment-methods" && method === "GET")
+      return ok(route, { acceptanceEnabled: false, readyMethods: [] });
     if (suffix === "" && method === "GET") return ok(route, state.publication);
     const step = suffix === "/prepare" ? "prepare" : suffix === "/publish" ? "publish" : null;
     if (step && state.refuse?.step === step) {
@@ -325,13 +328,10 @@ async function fillRoomAndPrices(page: Page, path = "/rooms/new") {
   await page.getByPlaceholder("e.g. Two-Bedroom Villa").fill("Castrop Suite");
   await page.getByPlaceholder("50").fill("32");
   await main(page).getByRole("button", { name: "Prices", exact: true }).click();
-  await expect(main(page).getByText("Optional: you can also set prices later")).toBeVisible();
+  await expect(main(page).getByText("Prices are optional here.", { exact: false })).toBeVisible();
+  // VAY-2188: one price; the rest is filled in (ways to pay from Payment settings).
   await main(page).getByLabel("Room price per night").fill("120");
-  await main(page).getByRole("button", { name: "No, non-refundable" }).click();
-  await main(page).getByRole("checkbox", { name: "Card online" }).check();
-  await main(page).getByLabel("Adult pricing starts at age (1–18)").fill("12");
-  await main(page).getByLabel("Price per child per night (0 is allowed)").fill("0");
-  await main(page).getByRole("button", { name: "Yes", exact: true }).click();
+  await main(page).getByRole("button", { name: "Non-refundable", exact: true }).click();
   await expect(
     main(page).getByText(
       "By creating the room type, you confirm these prices include all mandatory taxes and fees.",
@@ -346,9 +346,8 @@ test("creates a room and its prices with one Create Room Type", async ({ page },
   const pricing = await mockPricing(page);
   const assertHealthy = watchPageHealth(page, testInfo);
   await fillRoomAndPrices(page);
-  await main(page).getByRole("button", { name: "Continue" }).click();
-  await expect(main(page).getByText("Prices added.", { exact: false })).toBeVisible();
-  await expect(main(page).getByLabel("Castrop Suite Offer 1 Per room")).toHaveValue("120.00");
+  // VAY-2188: the typed price stays on the tab, unsaved, until Create Room Type saves it with the room.
+  await expect(main(page).getByLabel("Room price per night")).toHaveValue("120");
   // The declaration goes along to the other tabs, where "Create Room Type" saves the prices too.
   await main(page).getByRole("button", { name: "Room Details" }).click();
   await expect(
@@ -377,7 +376,7 @@ test("creates a room and its prices with one Create Room Type", async ({ page },
   await assertHealthy();
 });
 
-test("saves first answers given without Continue", async ({ page }) => {
+test("saves a typed first price with Create Room Type", async ({ page }) => {
   await mockRooms(page);
   const pricing = await mockPricing(page);
   await fillRoomAndPrices(page);
@@ -393,7 +392,7 @@ test("creates the room alone when the Prices tab stays empty", async ({ page }) 
   await page.getByPlaceholder("e.g. Two-Bedroom Villa").fill("Castrop Suite");
   await page.getByPlaceholder("50").fill("32");
   await main(page).getByRole("button", { name: "Prices", exact: true }).click();
-  await expect(main(page).getByText("Optional: you can also set prices later")).toBeVisible();
+  await expect(main(page).getByText("Prices are optional here.", { exact: false })).toBeVisible();
   await expect(main(page).getByText("By creating the room type", { exact: false })).toHaveCount(0);
   await main(page).getByRole("button", { name: "Create Room Type" }).click();
   await expect(page).toHaveURL(/\/rooms$/);

@@ -275,10 +275,11 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS calendar auto-open scheduler (runtime l
     const off = await seedProperty(admin, 6, { setting: "disabled" });
     const noCalendar = await seedProperty(admin, 7, { setting: "none", calendar: false });
     const enabledNoCalendar = await seedProperty(admin, 10, { calendar: false });
-    const profileEdited = await seedProperty(admin, 8, { setting: "none" });
+    // A new time zone needs a calendar re-save; other profile edits don't (VAY-2150).
+    const zoneChanged = await seedProperty(admin, 8, { setting: "none" });
     await admin.query(
-      `UPDATE hotel_catalog.properties SET profile_revision=profile_revision+1 WHERE id=$1::uuid`,
-      [profileEdited.propertyId],
+      `UPDATE hotel_catalog.property_locations SET timezone='Asia/Kolkata' WHERE property_id=$1::uuid`,
+      [zoneChanged.propertyId],
     );
     const store = schedulerStore();
 
@@ -290,7 +291,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS calendar auto-open scheduler (runtime l
       off.propertyId,
       noCalendar.propertyId,
       enabledNoCalendar.propertyId,
-      profileEdited.propertyId,
+      zoneChanged.propertyId,
     ]);
     expect(
       selection.ran && [
@@ -298,6 +299,50 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS calendar auto-open scheduler (runtime l
         ...selection.value.failures.filter(({ propertyId }) => ids.has(propertyId)),
       ],
     ).toEqual([]);
+  });
+
+  it("keeps a default property ready, with the same job source, after detail edits (VAY-2150)", async () => {
+    const property = await seedProperty(admin, 11, { setting: "none" });
+    const store = schedulerStore();
+    const select = async () => {
+      const selection = await store.withRunLock((session) =>
+        session.findCalendarAutoOpenCandidates(now, 100),
+      );
+      if (!selection.ran) throw new Error("Scheduler lock unavailable");
+      return selection.value.candidates.find(
+        ({ propertyId }) => propertyId === property.propertyId,
+      );
+    };
+    const before = await select();
+    expect(before).toBeDefined();
+    await admin.query(
+      `UPDATE hotel_catalog.properties SET profile_revision=profile_revision+1 WHERE id=$1::uuid`,
+      [property.propertyId],
+    );
+    await admin.query(
+      `UPDATE pms.room_types SET room_facts_revision=room_facts_revision+1 WHERE id=$1::uuid`,
+      [property.roomTypeId],
+    );
+    expect((await select())?.sourceFingerprint).toBe(before!.sourceFingerprint);
+    // The worker builds the same source, so the job applies instead of recording "unchanged".
+    const worker = workerStore();
+    await store.withRunLock((session) =>
+      runPmsCalendarAutoOpenScheduler(session, { now, limit: 1, workerId: "vay-2150-test" }),
+    );
+    await drainUntilDone(worker, property.propertyId);
+    const applied = await admin.query(
+      `SELECT job.status,
+              (SELECT attempt.error_metadata->>'applicationOutcome' FROM platform.job_attempts attempt
+               WHERE attempt.job_id=job.id ORDER BY attempt.attempt_number DESC LIMIT 1) AS outcome,
+              (SELECT to_char(coverage_through, 'YYYY-MM-DD')
+               FROM pms.inventory_materialization_coverage coverage
+               WHERE coverage.property_id=job.property_id) AS through
+       FROM platform.jobs job WHERE job.property_id=$1::uuid AND job.queue_name=$2`,
+      [property.propertyId, PMS_CALENDAR_AUTO_OPEN_QUEUE],
+    );
+    expect(applied.rows).toEqual([
+      { status: "succeeded", outcome: "applied", through: "2027-09-30" },
+    ]);
   });
 
   it("turns a queued default job into a no-op when the owner saves Off", async () => {

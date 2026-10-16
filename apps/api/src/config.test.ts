@@ -915,6 +915,14 @@ describe("api config", () => {
     ).toBe(true);
   });
 
+  it("keeps bank-transfer and PayPal quote acceptance off unless explicitly enabled", () => {
+    expect(loadConfig({}).replacementPricingManualPaymentAcceptanceEnabled).toBe(false);
+    expect(
+      loadConfig({ REPLACEMENT_PRICING_MANUAL_PAYMENT_ACCEPTANCE_ENABLED: "true" })
+        .replacementPricingManualPaymentAcceptanceEnabled,
+    ).toBe(true);
+  });
+
   it("rejects next API runtime when source selectors would default to legacy or disabled", () => {
     expect(() =>
       loadConfig({
@@ -1400,6 +1408,31 @@ describe("api config", () => {
     );
     expect(() => loadConfig({ PROPERTY_SETUP_DRAFT_RETENTION_INTERVAL_MS: "2147483648" })).toThrow(
       "PROPERTY_SETUP_DRAFT_RETENTION_INTERVAL_MS must not exceed 2147483647",
+    );
+  });
+
+  it("configures and can disable booking web event retention", () => {
+    expect(loadConfig({})).toMatchObject({
+      bookingWebEventRetentionEnabled: true,
+      bookingWebEventRetentionIntervalMs: 24 * 60 * 60 * 1000,
+      bookingWebEventRetentionBatchSize: 1_000,
+    });
+    expect(
+      loadConfig({
+        BOOKING_WEB_EVENT_RETENTION_ENABLED: "false",
+        BOOKING_WEB_EVENT_RETENTION_INTERVAL_MS: "60000",
+        BOOKING_WEB_EVENT_RETENTION_BATCH_SIZE: "25",
+      }),
+    ).toMatchObject({
+      bookingWebEventRetentionEnabled: false,
+      bookingWebEventRetentionIntervalMs: 60_000,
+      bookingWebEventRetentionBatchSize: 25,
+    });
+    expect(() => loadConfig({ BOOKING_WEB_EVENT_RETENTION_BATCH_SIZE: "0" })).toThrow(
+      "BOOKING_WEB_EVENT_RETENTION_BATCH_SIZE must be a positive integer",
+    );
+    expect(() => loadConfig({ BOOKING_WEB_EVENT_RETENTION_INTERVAL_MS: "2147483648" })).toThrow(
+      "BOOKING_WEB_EVENT_RETENTION_INTERVAL_MS must not exceed 2147483647",
     );
   });
 

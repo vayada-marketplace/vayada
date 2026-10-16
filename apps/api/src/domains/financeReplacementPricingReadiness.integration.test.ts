@@ -65,6 +65,33 @@ describe.skipIf(!url)("replacement pricing Finance owner readiness", () => {
     await pool.query("UPDATE finance.payment_settings SET payments_enabled=false WHERE property_id=$1", [f.propertyId]);
     expect(await f.read()).toMatchObject({ reason: "payments_disabled" });
   });
+  it("adds bank transfer and PayPal only with bank details or a PayPal email, keeping the evidence (VAY-2139)", async () => {
+    const destination = async (propertyId: string) => (await pool.query(`INSERT INTO finance.bank_transfer_destinations
+      (property_id,revision,ciphertext,key_arn,account_last4) VALUES($1,1,$2,'key','3000') RETURNING id`, [propertyId, Buffer.alloc(40)])).rows[0].id;
+    const paypal = (propertyId: string, email: string) => pool.query(
+      "UPDATE finance.payment_settings SET deposit_policy=jsonb_build_object('paypalEmail',$2::text) WHERE property_id=$1", [propertyId, email]);
+    const f = await fixture(["pay_at_property", "bank_transfer", "paypal"]), before = await f.read();
+    expect(before).toMatchObject({ kind: "ready", methods: ["pay_at_property"] });
+    if (before.kind !== "ready") throw new Error("expected readiness");
+    const destinationId = await destination(f.propertyId);
+    await paypal(f.propertyId, "pay@example.test");
+    // Saved prices stay current: the methods are outside the evidence hash.
+    expect(await f.read({ expectedEvidenceId: before.evidenceId })).toEqual({ ...before, methods: ["pay_at_property", "bank_transfer", "paypal"] });
+    await pool.query("UPDATE finance.bank_transfer_destinations SET enabled=false WHERE id=$1", [destinationId]);
+    await paypal(f.propertyId, "not an email");
+    expect(await f.read({ expectedEvidenceId: before.evidenceId })).toEqual(before);
+    const bankOnly = await fixture(["bank_transfer"]), paypalOnly = await fixture(["paypal"]);
+    expect(await bankOnly.read()).toMatchObject({ reason: "method_unavailable" });
+    expect(await paypalOnly.read()).toMatchObject({ reason: "method_unavailable" });
+    await destination(bankOnly.propertyId);
+    await paypal(paypalOnly.propertyId, " pay@example.test ");
+    expect(await bankOnly.read()).toMatchObject({ kind: "ready", methods: ["bank_transfer"] });
+    expect(await paypalOnly.read()).toMatchObject({ kind: "ready", methods: ["paypal"] });
+    // A card hotel without Stripe readiness still fails, even with bank details.
+    const cardAndBank = await fixture(["card", "bank_transfer"]);
+    await destination(cardAndBank.propertyId);
+    expect(await cardAndBank.read()).toMatchObject({ reason: "method_unavailable" });
+  });
   it("requires actual scoped execution evidence and invalidates it when provider capability changes", async () => {
     const f = await fixture(["card"]), other = await fixture(["card"]);
     await other.executionEvidence();

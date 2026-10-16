@@ -12,6 +12,7 @@ import {
   buildCalendarDraftResetRequest,
   buildCalendarProposal,
   calendarDraftManifestIsCurrent,
+  calendarDraftMatchesSaved,
   calendarDraftRevisionContext,
   hydrateCalendarDraft,
   mergeCalendarLocalInput,
@@ -162,8 +163,8 @@ describe("calendarState", () => {
     expect(request.expectedBaseRevisions).toEqual({
       "pms.operating_calendar": "calendar:1",
       "pms.inventory": "inventory:1",
-      "pms.room_types": "types:3",
-      "hotel_catalog.location": "location:7",
+      "pms.room_units": "units:3",
+      "hotel_catalog.time_zone": "time-zone:7",
     });
     expect(request.payload).toMatchObject({
       "rate.operating_periods": { mode: "year_round", periods: [] },
@@ -214,6 +215,68 @@ describe("calendarState", () => {
     expect(firstVisit.draftRevision).toBe(0);
     expect(firstVisit.baseRevisions).toEqual(firstVisitStep.currentBaseRevisions);
     expect(calendarDraftManifestIsCurrent(firstVisitStep)).toBe(true);
+  });
+
+  it("keeps a legacy manifest's own keys and compares like with like (VAY-2198)", () => {
+    const legacy = {
+      "pms.operating_calendar": "calendar:1",
+      "pms.inventory": "inventory:1",
+      "pms.room_types": "types:3",
+      "hotel_catalog.location": "location:7",
+    };
+    // An API that has not switched yet serves legacy manifests on both sides.
+    const route = setupRoute({ ...calendarDraft({}), baseRevisions: legacy });
+    const step = route.steps[0]!;
+    step.currentBaseRevisions = { ...legacy };
+    expect(calendarDraftManifestIsCurrent(step)).toBe(true);
+    const context = calendarDraftRevisionContext(route, step);
+    expect(context.baseRevisions).toEqual(legacy);
+    expect(buildCalendarDraftRequest(completeDraft(), context).expectedBaseRevisions).toEqual(
+      legacy,
+    );
+    expect(buildCalendarDraftResetRequest(route, step).expectedBaseRevisions).toEqual(legacy);
+    step.currentBaseRevisions = { ...legacy, "hotel_catalog.location": "location:8" };
+    expect(calendarDraftManifestIsCurrent(step)).toBe(false);
+
+    // A legacy draft never matches the time zone, rooms and units manifest.
+    step.currentBaseRevisions = setupRoute(calendarDraft({})).steps[0]!.currentBaseRevisions;
+    expect(calendarDraftManifestIsCurrent(step)).toBe(false);
+    expect(buildCalendarDraftResetRequest(route, step).expectedBaseRevisions).toEqual(legacy);
+
+    // A mixed or partial manifest is unusable rather than silently compared.
+    step.currentBaseRevisions = { ...legacy, "pms.room_units": "units:3" };
+    expect(calendarDraftManifestIsCurrent(step)).toBe(false);
+    expect(calendarDraftRevisionContext(route, { ...step, draft: null }).baseRevisions).toBeNull();
+  });
+
+  it("recognizes a historical draft that only repeats the saved calendar (VAY-2150)", () => {
+    const saved = currentWorkspace();
+    const savedOnly = { ...workspace(saved), rooms: [workspace(null).rooms[0]!] };
+    const repeated = calendarDraft({
+      "rate.operating_periods": { mode: "year_round", periods: [] },
+      "rate.minimum_stay": 2,
+      "rate.initial_availability": { limits: { [roomA]: 3 }, confirmed: true },
+    });
+    expect(calendarDraftMatchesSaved(savedOnly, repeated)).toBe(true);
+    // Untouched fields fall back to the saved calendar too.
+    expect(calendarDraftMatchesSaved(savedOnly, calendarDraft({}))).toBe(true);
+    expect(
+      calendarDraftMatchesSaved(
+        savedOnly,
+        calendarDraft({ ...repeated.payload, "rate.minimum_stay": 3 }),
+      ),
+    ).toBe(false);
+    expect(
+      calendarDraftMatchesSaved(
+        savedOnly,
+        calendarDraft({
+          ...repeated.payload,
+          "rate.initial_availability": { limits: { [roomA]: 4 }, confirmed: true },
+        }),
+      ),
+    ).toBe(false);
+    expect(calendarDraftMatchesSaved(workspace(null), repeated)).toBe(false);
+    expect(calendarDraftMatchesSaved(savedOnly, null)).toBe(false);
   });
 
   it("retains local calendar input while rebinding rooms to latest owner revisions", () => {
@@ -363,8 +426,8 @@ function calendarDraft(
     baseRevisions: {
       "pms.operating_calendar": "calendar:1",
       "pms.inventory": "inventory:1",
-      "pms.room_types": "types:3",
-      "hotel_catalog.location": "location:7",
+      "pms.room_units": "units:3",
+      "hotel_catalog.time_zone": "time-zone:7",
     },
     piiClassification: "potential_incidental_pii",
     retentionExpiresAt: "2026-11-02T12:00:00.000Z",
@@ -394,8 +457,8 @@ function setupRoute(
         currentBaseRevisions: {
           "pms.operating_calendar": "calendar:1",
           "pms.inventory": "inventory:1",
-          "pms.room_types": "types:3",
-          "hotel_catalog.location": "location:7",
+          "pms.room_units": "units:3",
+          "hotel_catalog.time_zone": "time-zone:7",
         },
         draft,
         blockers: [],

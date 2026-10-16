@@ -4,7 +4,7 @@ import { watchPageHealth } from "../support/pageHealth";
 
 test.describe("booking-web tenant smoke", () => {
   for (const width of [1280, 390]) {
-    test(`hides retired public enrolment while preserving referral cookies at ${width}px`, async ({
+    test(`hides retired public enrolment and keeps referrals out of cookies at ${width}px`, async ({
       page,
       context,
     }) => {
@@ -13,9 +13,8 @@ test.describe("booking-web tenant smoke", () => {
       await page.goto("/?ref=RETAINED-REFERRAL");
       await expect(page.getByRole("heading", { name: "Hotel Alpenrose", level: 1 })).toBeVisible();
       await expect(page.locator("nav").getByRole("button", { name: /refer/i })).toHaveCount(0);
-      expect((await context.cookies()).find((cookie) => cookie.name === "ref")?.value).toBe(
-        "RETAINED-REFERRAL",
-      );
+      // VAY-2223: the referral is read from the URL; no cookie before the privacy choice.
+      expect(await context.cookies()).toEqual([]);
     });
   }
 
@@ -98,7 +97,8 @@ test.describe("booking-web tenant smoke", () => {
     await expect(logo).toBeVisible();
     expect((await logo.boundingBox())?.height).toBeLessThanOrEqual(32);
     await expect(nav.getByTestId("mobile-contact-button")).toBeVisible();
-    await expect(nav.getByRole("button", { name: "Refer", exact: true })).toBeVisible();
+    // The Refer button was retired with public affiliate enrolment (VAY-1499).
+    await expect(nav.getByRole("button", { name: /Refer/ })).toHaveCount(0);
     await expect(nav.getByRole("button", { name: "EN", exact: true })).toBeVisible();
     await expect(nav.getByRole("button", { name: "EUR", exact: true })).toBeVisible();
     expect((await nav.boundingBox())?.height).toBe(64);
@@ -260,9 +260,12 @@ test.describe("booking-web tenant smoke", () => {
     await expect(dateInputs).toHaveCount(2);
     await expect(dateInputs.nth(0)).toHaveValue("2026-09-12");
     await expect(dateInputs.nth(1)).toHaveValue("2026-09-15");
+    // The summary reads like the rest of the page: "Sat, 12 Sept 2026", not "2026-09-12".
+    await expect(page.getByText(/^Sat, 12 Sept? 2026 → Tue, 15 Sept? 2026$/)).toHaveCount(2);
 
     await dateInputs.nth(0).fill("2026-09-16");
     await dateInputs.nth(1).fill("2026-09-18");
+    await expect(page.getByText(/^Wed, 16 Sept? 2026 → Fri, 18 Sept? 2026$/)).toBeVisible();
 
     await expect.poll(() => previewPayload?.checkIn).toBe("2026-09-16");
     expect(previewPayload).toMatchObject({

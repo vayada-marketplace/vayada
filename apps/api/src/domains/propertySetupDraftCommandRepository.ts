@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import type { RequestAuditMetadata } from "@vayada/backend-auth";
 import {
   getActivePropertySetupStepIds,
+  isPropertySetupLegacyCalendarBaseRevisionManifest,
   PROPERTY_SETUP_ACTIVE_RETENTION_DAYS,
   PROPERTY_SETUP_DRAFT_CONTRACT_VERSION,
   PROPERTY_SETUP_DRAFT_PII_CLASSIFICATION,
@@ -408,9 +409,7 @@ export function createPgPropertySetupDraftCommandRepository(
           await finalizeResetConflict(client, command, idempotency, keyHash, result, resetAt);
           return result;
         }
-        if (
-          stableJson(draft!.baseRevisions) !== stableJson(command.request.expectedBaseRevisions)
-        ) {
+        if (!sameResetBase(draft!.baseRevisions, command.request.expectedBaseRevisions)) {
           const result = resetFailure({ code: "draft_base_revision_conflict" });
           await finalizeResetConflict(client, command, idempotency, keyHash, result, resetAt);
           return result;
@@ -1429,6 +1428,25 @@ function isIsoDate(value: unknown): value is string {
 function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
   const actual = Object.keys(value);
   return actual.length === keys.length && actual.every((key) => keys.includes(key));
+}
+
+/**
+ * The reset names the manifest the route showed. A calendar draft saved before VAY-2198 is shown
+ * with a converted manifest, so for it only the calendar and inventory revisions it shares with
+ * the stored one must match; the draft revision check already guards concurrent changes.
+ */
+function sameResetBase(
+  stored: Record<string, string>,
+  expected: ResetPropertySetupDraftRequest["expectedBaseRevisions"],
+): boolean {
+  if (stableJson(stored) === stableJson(expected)) return true;
+  const sent: Readonly<Record<string, string>> = expected;
+  return (
+    isPropertySetupLegacyCalendarBaseRevisionManifest(stored) &&
+    !isPropertySetupLegacyCalendarBaseRevisionManifest(sent) &&
+    sent["pms.operating_calendar"] === stored["pms.operating_calendar"] &&
+    sent["pms.inventory"] === stored["pms.inventory"]
+  );
 }
 
 function stableJson(value: unknown): string {

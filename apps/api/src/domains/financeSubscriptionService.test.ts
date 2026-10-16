@@ -30,6 +30,22 @@ describe("Finance subscription service", () => {
     expect(fixture.afterPlanChange).toHaveBeenCalledWith("property-1");
   });
 
+  it("reports no plan until the hotel chooses one (VAY-2171)", async () => {
+    const fixture = setup();
+    const notSelected = { plan: null, status: "not_selected", checkoutPending: false };
+    await expect(fixture.service.getPlanStatus("property-1")).resolves.toMatchObject(notSelected);
+    // Billing details create the row too; they are not a plan choice.
+    fixture.store.entitlement.customerRef = "cus_details";
+    fixture.store.entitlement.metadata = { planSelectedAt: "not a date" };
+    await expect(fixture.service.getPlanStatus("property-1")).resolves.toMatchObject(notSelected);
+
+    await fixture.service.selectCommissionPlan(command());
+    await expect(fixture.service.getPlanStatus("property-1")).resolves.toMatchObject({
+      plan: "commission",
+      status: "commission",
+    });
+  });
+
   it("retries publication after a committed Commission selection", async () => {
     const fixture = setup();
     fixture.afterPlanChange.mockRejectedValueOnce(new Error("projection unavailable"));
@@ -85,7 +101,7 @@ describe("Finance subscription service", () => {
       }),
     );
     await expect(fixture.service.getPlanStatus("property-1")).resolves.toMatchObject({
-      plan: "commission",
+      plan: null,
       status: "checkout_pending",
       checkoutPending: true,
     });
@@ -264,8 +280,8 @@ describe("Finance subscription service", () => {
     };
 
     await expect(fixture.service.getPlanStatus("property-1")).resolves.toMatchObject({
-      plan: "commission",
-      status: "commission",
+      plan: null,
+      status: "not_selected",
       customerPortalAvailable: false,
     });
     expect(fixture.stripe.createFixedPlanCheckout).not.toHaveBeenCalled();
@@ -429,7 +445,7 @@ describe("Finance subscription service", () => {
     const fixture = setup({ currency: "CHF" });
 
     await expect(fixture.service.getBillingOverview("property-1")).resolves.toMatchObject({
-      planStatus: { plan: "commission", currency: "CHF", fixedPlanAvailable: false },
+      planStatus: { plan: null, currency: "CHF", fixedPlanAvailable: false },
     });
     await expect(fixture.service.createFixedPlanCheckout(command())).resolves.toMatchObject({
       ok: false,
@@ -615,6 +631,10 @@ class MemoryStore implements FinanceSubscriptionStore {
   ) {
     this.replay.set(`select-commission:${value.idempotencyKey}`, result);
     this.entitlement.planKey = "commission";
+    this.entitlement.metadata = {
+      ...(this.entitlement.metadata as object),
+      planSelectedAt: result.planStatus.updatedAt,
+    };
     this.entitlement.checkoutSessionRef = null;
     this.entitlement.providerSubscriptionStatus = null;
     this.entitlement.updatedAt = result.planStatus.updatedAt;
@@ -645,6 +665,10 @@ class MemoryStore implements FinanceSubscriptionStore {
   ) {
     this.replay.set(`switch-commission-now:${value.idempotencyKey}`, result);
     this.entitlement.planKey = "commission";
+    this.entitlement.metadata = {
+      ...(this.entitlement.metadata as object),
+      planSelectedAt: result.planStatus.updatedAt,
+    };
     return { status: "updated" as const, result };
   }
 

@@ -14,8 +14,16 @@ import PropertyGallery from "@/components/booking/PropertyGallery";
 import { useHotel, useSlug } from "@/contexts/HotelContext";
 import { calculateNights, formatDateShort, formatDate, ensureMinOneNight } from "@/lib/utils";
 import { trackEvent } from "@/services/api/tracking";
+import { onAnalyticsAllowed } from "@/services/api/analyticsConsent";
 import { hotelService } from "@/services/api/hotel";
 import { useBookingSteps } from "@/lib/hooks/useBookingSteps";
+import { useStayPrices } from "@/lib/hooks/useStayPrices";
+import RoomCard from "@/components/booking/RoomCard";
+import {
+  getReplacementOffers,
+  quoteMoneyAmount,
+  type PricingRoom,
+} from "@/services/api/replacementOffers";
 
 interface AppliedPromo {
   code: string;
@@ -91,7 +99,9 @@ function HomePageContent() {
   const searchParams = useSearchParams();
 
   useEffect(() => {
-    trackEvent(slug, "page_visit");
+    trackEvent(slug, "page_visit", {});
+    // VAY-2197: a first visit starts before the guest answers; "Allow" starts it then.
+    return onAnalyticsAllowed(slug, () => trackEvent(slug, "page_visit", {}));
   }, [slug]);
 
   // Initialize from URL params so back-navigation from /book preserves the
@@ -131,6 +141,7 @@ function HomePageContent() {
   const [appliedPromo, setAppliedPromo] = useState<AppliedPromo | null>(null);
   const [promoLoading, setPromoLoading] = useState(false);
   const [promoError, setPromoError] = useState("");
+  const promoCodesEnabled = hotel?.promoCodesEnabled !== false;
 
   const nights = calculateNights(checkIn, checkOut);
   const { steps: STEPS } = useBookingSteps("rooms");
@@ -141,6 +152,64 @@ function HomePageContent() {
   if (effectiveChildren > 0) bookParams.set("children", String(effectiveChildren));
   if (appliedPromo) bookParams.set("promoCode", appliedPromo.code);
   const bookTarget = `/book?${bookParams}`;
+
+  // Room cards (VAY-2190): the public catalog's rooms, priced for the stay above. Without the
+  // catalog the page keeps the plain "Choose rooms and get a price" entry.
+  const [rooms, setRooms] = useState<PricingRoom[] | null>(null);
+  const [roomsFailed, setRoomsFailed] = useState(false);
+  useEffect(() => {
+    const controller = new AbortController();
+    getReplacementOffers(slug, controller.signal)
+      .then((value) => {
+        if (!controller.signal.aborted) setRooms(value);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setRoomsFailed(true);
+      });
+    return () => controller.abort();
+  }, [slug]);
+  const stay = useStayPrices(
+    slug,
+    rooms?.length
+      ? {
+          checkIn,
+          checkOut,
+          adults,
+          children: effectiveChildren,
+          promoCode: appliedPromo?.code ?? null,
+        }
+      : null,
+  );
+  const [sortOption, setSortOption] = useState("recommended");
+  const roomPrices = (room: PricingRoom) =>
+    stay.prices?.rooms.find(({ roomTypeId }) => roomTypeId === room.roomTypeId) ?? null;
+  const cheapest = (room: PricingRoom) => {
+    const totals = (roomPrices(room)?.offers ?? []).flatMap((offer) =>
+      offer.status === "priced" ? [quoteMoneyAmount(offer.totalMinor, offer.currency)] : [],
+    );
+    return totals.length ? Math.min(...totals) : null;
+  };
+  // Rooms without a price for this stay sort last either way.
+  const byPrice = (a: PricingRoom, b: PricingRoom, direction: 1 | -1) => {
+    const [x, y] = [cheapest(a), cheapest(b)];
+    return x === null || y === null ? Number(x === null) - Number(y === null) : (x - y) * direction;
+  };
+  const shownRooms = [...(rooms ?? [])].sort((a, b) =>
+    sortOption === "priceLow"
+      ? byPrice(a, b, 1)
+      : sortOption === "priceHigh"
+        ? byPrice(a, b, -1)
+        : sortOption === "roomSize"
+          ? (b.size?.value ?? 0) - (a.size?.value ?? 0)
+          : 0,
+  );
+  const selectRoom = (publicOfferKey: string, roomCount: number) => {
+    trackEvent(slug, "rate_selected", { entry: "room_card" });
+    const params = new URLSearchParams(bookParams);
+    params.set("offer", publicOfferKey);
+    if (roomCount > 1) params.set("rooms", String(roomCount));
+    router.push(`/book?${params}`);
+  };
 
   const heroImage = hotel.heroImage;
   const heroHeading = hotel.branding?.heroHeading || hotel.name;
@@ -279,111 +348,126 @@ function HomePageContent() {
             />
           </div>
 
-          {/* Divider */}
-          <div className="hidden md:block w-px h-12 bg-gray-200" />
+          {/* VAY-2200: no promo field while the hotel has Promos off or no live code. */}
+          {promoCodesEnabled && (
+            <>
+              {/* Divider */}
+              <div className="hidden md:block w-px h-12 bg-gray-200" />
 
-          {/* Promo */}
-          <div className="relative flex justify-center md:justify-start w-full md:w-auto">
-            {appliedPromo ? (
-              <div className="flex items-center gap-2">
-                <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-primary-50 text-primary-700 rounded-full text-xs font-semibold">
-                  <svg
-                    className="w-3.5 h-3.5"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M5 13l4 4L19 7"
-                    />
-                  </svg>
-                  {appliedPromo.code}
-                  {appliedPromo.discountType === "percentage"
-                    ? ` (-${appliedPromo.discountValue}%)`
-                    : ` (-${appliedPromo.discountValue})`}
-                </span>
-                <button
-                  onClick={() => {
-                    setAppliedPromo(null);
-                    setPromoCode("");
-                    setPromoError("");
-                  }}
-                  className="text-gray-400 hover:text-gray-600 transition-colors"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M6 18L18 6M6 6l12 12"
-                    />
-                  </svg>
-                </button>
-              </div>
-            ) : (
-              <>
-                <button
-                  onClick={() => {
-                    setPromoOpen(!promoOpen);
-                    setCalendarOpen(false);
-                    setGuestsOpen(false);
-                  }}
-                  className="flex items-center gap-2 text-gray-500 hover:text-primary-600 transition-colors"
-                >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"
-                    />
-                  </svg>
-                  <span className="text-sm font-medium">{t("addPromo")}</span>
-                </button>
-                {promoOpen && (
-                  <PromoPopover
-                    open={promoOpen}
-                    onClose={() => setPromoOpen(false)}
-                    value={promoCode}
-                    onChange={(v) => {
-                      setPromoCode(v);
-                      setPromoError("");
-                    }}
-                    onApply={async () => {
-                      if (!promoCode.trim() || !slug) return;
-                      setPromoLoading(true);
-                      setPromoError("");
-                      try {
-                        const result = await hotelService.validatePromoCode(slug, promoCode, {
-                          checkIn: checkIn || undefined,
-                        });
-                        if (result.valid) {
-                          setAppliedPromo({
-                            code: result.code,
-                            discountType: result.discountType!,
-                            discountValue: result.discountValue!,
-                          });
-                          setPromoOpen(false);
-                        } else {
-                          setPromoError(result.message);
-                        }
-                      } catch {
-                        setPromoError("Failed to validate promo code");
-                      } finally {
-                        setPromoLoading(false);
-                      }
-                    }}
-                    loading={promoLoading}
-                    error={promoError}
-                    t={t}
-                  />
+              {/* Promo */}
+              <div className="relative flex justify-center md:justify-start w-full md:w-auto">
+                {appliedPromo ? (
+                  <div className="flex items-center gap-2">
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-primary-50 text-primary-700 rounded-full text-xs font-semibold">
+                      <svg
+                        className="w-3.5 h-3.5"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M5 13l4 4L19 7"
+                        />
+                      </svg>
+                      {appliedPromo.code}
+                      {appliedPromo.discountType === "percentage"
+                        ? ` (-${appliedPromo.discountValue}%)`
+                        : ` (-${appliedPromo.discountValue})`}
+                    </span>
+                    <button
+                      onClick={() => {
+                        setAppliedPromo(null);
+                        setPromoCode("");
+                        setPromoError("");
+                      }}
+                      className="text-gray-400 hover:text-gray-600 transition-colors"
+                    >
+                      <svg
+                        className="w-4 h-4"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M6 18L18 6M6 6l12 12"
+                        />
+                      </svg>
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <button
+                      onClick={() => {
+                        setPromoOpen(!promoOpen);
+                        setCalendarOpen(false);
+                        setGuestsOpen(false);
+                      }}
+                      className="flex items-center gap-2 text-gray-500 hover:text-primary-600 transition-colors"
+                    >
+                      <svg
+                        className="w-5 h-5"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"
+                        />
+                      </svg>
+                      <span className="text-sm font-medium">{t("addPromo")}</span>
+                    </button>
+                    {promoOpen && (
+                      <PromoPopover
+                        open={promoOpen}
+                        onClose={() => setPromoOpen(false)}
+                        value={promoCode}
+                        onChange={(v) => {
+                          setPromoCode(v);
+                          setPromoError("");
+                        }}
+                        onApply={async () => {
+                          if (!promoCode.trim() || !slug) return;
+                          setPromoLoading(true);
+                          setPromoError("");
+                          try {
+                            const result = await hotelService.validatePromoCode(slug, promoCode, {
+                              checkIn: checkIn || undefined,
+                            });
+                            if (result.valid) {
+                              setAppliedPromo({
+                                code: result.code,
+                                discountType: result.discountType!,
+                                discountValue: result.discountValue!,
+                              });
+                              setPromoOpen(false);
+                            } else {
+                              setPromoError(result.message);
+                            }
+                          } catch {
+                            setPromoError("Failed to validate promo code");
+                          } finally {
+                            setPromoLoading(false);
+                          }
+                        }}
+                        loading={promoLoading}
+                        error={promoError}
+                        t={t}
+                      />
+                    )}
+                  </>
                 )}
-              </>
-            )}
-          </div>
+              </div>
+            </>
+          )}
 
           {/* Check Availability Button */}
           <button
@@ -391,7 +475,10 @@ function HomePageContent() {
               setCalendarOpen(false);
               setGuestsOpen(false);
               setPromoOpen(false);
-              router.push(bookTarget);
+              // The cards already show this stay; without them, go straight to /book.
+              if (rooms?.length)
+                document.getElementById("rooms")?.scrollIntoView({ behavior: "smooth" });
+              else router.push(bookTarget);
             }}
             className="w-full md:w-auto px-8 py-3 bg-primary-600 text-white font-semibold rounded-full hover:bg-primary-700 transition-colors whitespace-nowrap flex items-center justify-center gap-2"
           >
@@ -401,7 +488,7 @@ function HomePageContent() {
       </div>
 
       {/* Main Content */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+      <div id="rooms" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 scroll-mt-36">
         {/* Section Header + Step Indicator */}
         <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
           <h2 className="text-2xl md:text-3xl font-heading text-gray-900">
@@ -438,13 +525,107 @@ function HomePageContent() {
           </div>
         </div>
 
-        {/* Rooms, availability and prices live on the room-and-price page. */}
-        <Link
-          href={bookTarget}
-          className="inline-block mb-6 rounded-full bg-primary-600 px-6 py-3 font-semibold text-white"
-        >
-          {t("chooseRoomsAndPrice")}
-        </Link>
+        {rooms === null && !roomsFailed ? (
+          <div className="space-y-6" aria-hidden="true">
+            {[0, 1].map((i) => (
+              <div
+                key={i}
+                className="bg-white border border-gray-200 rounded-2xl overflow-hidden animate-pulse flex flex-col md:flex-row"
+              >
+                <div className="w-full md:w-[420px] h-64 md:min-h-[320px] bg-gray-200" />
+                <div className="flex-1 p-5 space-y-4">
+                  <div className="h-6 bg-gray-200 rounded w-48" />
+                  <div className="h-4 bg-gray-200 rounded w-32" />
+                  <div className="h-16 bg-gray-200 rounded-xl" />
+                  <div className="h-16 bg-gray-200 rounded-xl" />
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : rooms?.length ? (
+          <>
+            <div className="flex items-center justify-end gap-2 mb-5">
+              <svg
+                className="w-4 h-4 text-gray-400"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"
+                />
+              </svg>
+              <select
+                aria-label={t("sortRooms")}
+                value={sortOption}
+                onChange={(event) => setSortOption(event.target.value)}
+                className="text-sm text-gray-700 border border-gray-300 rounded-lg px-3 py-2 bg-white"
+              >
+                <option value="recommended">{t("recommended")}</option>
+                <option value="priceLow">{t("priceLowHigh")}</option>
+                <option value="priceHigh">{t("priceHighLow")}</option>
+                <option value="roomSize">{t("roomSize")}</option>
+              </select>
+            </div>
+            {stay.failed && (
+              <div
+                role="alert"
+                className="mb-5 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800"
+              >
+                {t("pricesFailed")}{" "}
+                <button type="button" className="font-semibold underline" onClick={stay.retry}>
+                  {t("retryPrices")}
+                </button>
+              </div>
+            )}
+            {effectiveChildren > 0 && (
+              <p className="mb-5 text-sm text-gray-500">{t("childrenPricedLater")}</p>
+            )}
+            <div className="space-y-6">
+              {shownRooms.map((room) => (
+                <RoomCard
+                  key={room.roomTypeId}
+                  room={room}
+                  prices={roomPrices(room)}
+                  pricesState={
+                    stay.failed
+                      ? "failed"
+                      : stay.missing
+                        ? "missing"
+                        : stay.loading
+                          ? "loading"
+                          : "ready"
+                  }
+                  checkIn={checkIn}
+                  nights={nights}
+                  timezone={hotel.timezone}
+                  childGuests={effectiveChildren}
+                  promoCode={appliedPromo?.code ?? null}
+                  onSelect={selectRoom}
+                  onView={() => trackEvent(slug, "room_viewed", { roomTypeId: room.roomTypeId })}
+                />
+              ))}
+            </div>
+            <p className="mt-8 text-center text-gray-600">
+              {t("severalRooms")}{" "}
+              <Link href={bookTarget} className="font-semibold text-primary-600 underline">
+                {t("chooseRoomsAndPrice")}
+              </Link>
+            </p>
+          </>
+        ) : (
+          /* Without room cards, rooms and prices live on the room-and-price page. */
+          <Link
+            href={bookTarget}
+            className="inline-block mb-6 rounded-full bg-primary-600 px-6 py-3 font-semibold text-white"
+          >
+            {t("chooseRoomsAndPrice")}
+          </Link>
+        )}
       </div>
 
       {/* TODO(VAY-2098): the Location section ("Explore our surroundings", components/booking/

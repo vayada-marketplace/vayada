@@ -1,7 +1,21 @@
 import { createPublicPricingOfferCatalog } from "../domains/publicPricingOfferCatalog.js";
+import {
+  activeBookingPublicationGateConfig,
+  visibleActiveBookingPublication,
+} from "../domains/activeBookingPublicationGate.js";
 import { createPublicQuoteGuestDisclosure } from "../domains/publicQuoteGuestDisclosure.js";
 import { createPublicPricingAddonCatalog } from "../domains/publicPricingAddonCatalog.js";
+import { readGuestModuleSwitches } from "../domains/bookingGuestModules.js";
+import {
+  createPublicPricingStayPrices,
+  parseStayPricesQuery,
+} from "../domains/publicPricingStayPrices.js";
 import { createCurrentPricingQuoteStore } from "../domains/currentPricingQuoteStore.js";
+import { lockPricingManualPaymentTerms } from "../domains/pricingManualPayment.js";
+import {
+  manualPaymentEarliestArrival,
+  readPricingCheckInPlace,
+} from "../domains/pricingManualPaymentLead.js";
 import {
   PricingAcceptanceError,
   writePricingAcceptance,
@@ -12,6 +26,7 @@ import {
   voidPricingCardPayment,
 } from "../domains/pricingCardPaymentCompletion.js";
 import { admitAffiliateArrivalForCurrentHost } from "../domains/bookingAffiliateArrivalHost.js";
+import { affiliateTrafficSource } from "../domains/marketplaceAffiliateClickOccurrence.js";
 import { readBookingAffiliateContextForQuote } from "../domains/bookingAffiliateContextForQuote.js";
 import {
   bindLiveAffiliateOriginal,
@@ -25,14 +40,17 @@ import type { ExternalChangePresentationPort } from "../domains/booking/external
 import { pmsRoomStayRestrictionReason } from "../domains/pmsRoomSelectionConflicts.js";
 import {
   bestBookingPromotion,
+  BOOKING_WEB_ANALYTICS_CONSENT_VERSION,
   evaluateSameDayBooking,
-  FUNNEL_EVENT_TYPES,
-  FUNNEL_PAYMENT_METHODS,
+  isFunnelId,
+  isManualPricingPaymentMethod,
   parseBookingFlexibleCancellationTerms,
   parseBookingRoomSelection,
+  parseFunnelEventMetadata,
   SAME_DAY_BOOKING_POLICY_DEFAULTS,
   type AddonEconomicTerms,
   type BookedCancellationOutcome,
+  type ManualPricingPaymentMethod,
 } from "@vayada/domain-booking";
 import { pricingCurrencyScale } from "@vayada/domain-booking/replacement-pricing";
 import {
@@ -58,6 +76,7 @@ import { publishAffiliateReservationLifecycle } from "../domains/bookingAffiliat
 import type { BankTransferBookingOperations } from "../domains/financeBankTransferBooking.js";
 import { lockPmsInventoryMutationScope } from "../domains/pmsInventoryMutationLock.js";
 import { releaseAbandonedBookingEdits } from "../jobs/pendingBookingEditCleanup.js";
+import { createBookingWebEventRateLimit } from "../platform/bookingWebEventRateLimit.js";
 import { quoteTargetRoomSelection } from "./bookingWebMixedQuote.js";
 import { pricingRetiredError } from "./pricingRetired.js";
 import { reserveTargetMixedBooking } from "./bookingWebMixedReservation.js";
@@ -183,10 +202,7 @@ type BookingWebAttributionClickRequest = {
   referral_code?: string;
   sessionId?: string;
   session_id?: string;
-  landingUrl?: string;
-  landing_url?: string;
   referrer?: string;
-  metadata?: Record<string, unknown>;
 };
 type BookingWebTelemetryEventRequest = {
   analyticsConsent?: boolean;
@@ -197,8 +213,6 @@ type BookingWebTelemetryEventRequest = {
   event_type?: string;
   eventId?: string;
   event_id?: string;
-  idempotencyKey?: string;
-  idempotency_key?: string;
   sessionId?: string;
   session_id?: string;
   metadata?: Record<string, unknown>;
@@ -218,25 +232,21 @@ export type BookingWebAffiliateClickEvent = {
   slug: string;
   referralCode: string;
   sessionId?: string;
-  landingUrl?: string;
-  referrer?: string;
-  requestId: string;
+  referrerSource: ReturnType<typeof affiliateTrafficSource>;
   occurredAt: Date;
   userAgent?: string;
-  ipAddress?: string;
-  metadata: Record<string, unknown>;
 };
 
+/** No request id or IP address: neither leads back to the guest (VAY-2197). */
 export type BookingWebTelemetryEvent = {
   propertyId: string;
   hotelSlug: string;
   eventType: string;
-  eventId?: string;
-  sessionId?: string;
-  requestId: string;
+  eventId: string;
+  sessionId: string;
   occurredAt: Date;
+  /** Only to tell bots apart; not stored. */
   userAgent?: string;
-  ipAddress?: string;
   metadata: Record<string, unknown>;
 };
 
@@ -269,6 +279,7 @@ export type BookingWebCheckoutAdapter = {
     context: BookingWebCheckoutCommandContext,
   ): Promise<void>;
   getPricingOffers?(slug: string): Promise<unknown>;
+  getPricingStayPrices?(slug: string, query: unknown): Promise<unknown>;
   getPricingAddons?(slug: string): Promise<unknown>;
   getQuoteGuestDisclosure?(slug: string, quoteId: string): Promise<unknown>;
   acceptPricingQuote?(
@@ -499,6 +510,7 @@ export async function registerBookingWebPublicRoutes(
   options: BookingWebPublicRoutesOptions,
 ): Promise<void> {
   const now = options.now ?? (() => new Date());
+  const eventRateLimit = createBookingWebEventRateLimit({ now: () => now().getTime() });
   const checkoutAdapter = options.checkoutAdapter;
   const affiliateAdapter =
     options.affiliateAdapter ?? createUnavailableBookingWebAffiliateAdapter();
@@ -588,6 +600,19 @@ export async function registerBookingWebPublicRoutes(
       if (!checkoutAdapter.getPricingOffers)
         throw createHttpError(404, "Pricing offers unavailable.");
       return checkoutAdapter.getPricingOffers(request.params.slug);
+    },
+  );
+
+  // Room cards' read-only stay prices: no quote, no hold (VAY-2190).
+  app.get<{ Params: BookingWebHotelParams; Querystring: Record<string, string> }>(
+    "/hotels/:slug/pricing-offers/stay-prices",
+    async (request, reply) => {
+      reply.header("Cache-Control", "no-store");
+      reply.header("X-Robots-Tag", "noindex");
+      reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-stay-prices-read");
+      if (!checkoutAdapter.getPricingStayPrices)
+        throw createHttpError(404, "Stay prices unavailable.");
+      return checkoutAdapter.getPricingStayPrices(request.params.slug, request.query);
     },
   );
 
@@ -1093,19 +1118,21 @@ export async function registerBookingWebPublicRoutes(
       ) {
         throw createHttpError(400, "Invalid click ID.");
       }
+      // Booking Web sends a random analytics session id; anything else is not stored.
+      const sessionId = firstString(request.body?.sessionId, request.body?.session_id);
       if (options.attributionSink) {
         await options.attributionSink.recordAffiliateClick({
           clickId,
           slug: request.params.slug,
           referralCode,
-          sessionId: firstString(request.body?.sessionId, request.body?.session_id),
-          landingUrl: firstString(request.body?.landingUrl, request.body?.landing_url),
-          referrer: firstString(request.body?.referrer, request.headers.referer),
-          requestId: String(request.id),
+          sessionId: sessionId && /^[A-Za-z0-9_-]{1,128}$/.test(sessionId) ? sessionId : undefined,
+          // Attribution needs no page address (VAY-2215): booking-web URLs can carry a guest's
+          // email, booking reference or access token. Older browsers still send landingUrl,
+          // the full referrer and metadata; only the referrer's site is kept. The Referer
+          // header is never read: it is the booking page itself.
+          referrerSource: affiliateTrafficSource(request.body?.referrer),
           occurredAt: now(),
           userAgent: request.headers["user-agent"],
-          ipAddress: request.ip,
-          metadata: recordBody(request.body?.metadata),
         });
       }
       reply.header("Cache-Control", "no-store");
@@ -1114,59 +1141,75 @@ export async function registerBookingWebPublicRoutes(
     },
   );
 
-  app.post<{ Body: BookingWebTelemetryEventRequest }>("/events", async (request, reply) => {
-    if (request.body?.analyticsConsent !== true || request.body?.consentVersion !== 1) {
-      return reply.header("Cache-Control", "no-store").status(204).send();
-    }
-    const hotelSlug = firstString(request.body?.hotelSlug, request.body?.hotel_slug);
-    const eventType = firstString(request.body?.eventType, request.body?.event_type);
-    if (!hotelSlug || !eventType) {
-      throw createHttpError(400, "Hotel slug and event type are required.");
-    }
-    const metadata = recordBody(request.body?.metadata);
-    if (metadata["funnelVersion"] === 1) {
-      const sequence = metadata["funnelSequence"];
-      const method = metadata["paymentMethod"];
+  // Funnel events only (VAY-2197): each type's own allowlisted properties and random ids, so
+  // nothing a guest typed can be stored. Events are a few hundred bytes.
+  app.post<{ Body: BookingWebTelemetryEventRequest }>(
+    "/events",
+    { bodyLimit: 2048 },
+    async (request, reply) => {
+      // Booking Web posts these straight to next-api as text/plain, a CORS "simple" request with
+      // no preflight, so the API sees the guest's address (VAY-2214). Fastify hands it over as a
+      // string.
+      const body =
+        typeof request.body === "string" ? parseTelemetryEventBody(request.body) : request.body;
       if (
-        !(FUNNEL_EVENT_TYPES as readonly string[]).includes(eventType) ||
-        !firstString(request.body?.sessionId, request.body?.session_id) ||
-        !Number.isSafeInteger(sequence) ||
-        Number(sequence) < 1 ||
-        (["complete_booking_clicked", "payment_authorized", "booking_completed"].includes(
-          eventType,
-        ) &&
-          !(FUNNEL_PAYMENT_METHODS as readonly unknown[]).includes(method))
+        body?.analyticsConsent !== true ||
+        body?.consentVersion !== BOOKING_WEB_ANALYTICS_CONSENT_VERSION
       ) {
+        return reply.header("Cache-Control", "no-store").status(204).send();
+      }
+      const hotelSlug = firstString(body?.hotelSlug, body?.hotel_slug);
+      const eventType = firstString(body?.eventType, body?.event_type);
+      if (!hotelSlug || !eventType) {
+        throw createHttpError(400, "Hotel slug and event type are required.");
+      }
+      const metadata = parseFunnelEventMetadata(eventType, body?.metadata);
+      const eventId = firstString(body?.eventId, body?.event_id);
+      const sessionId = firstString(body?.sessionId, body?.session_id);
+      if (!metadata || !isFunnelId(eventId) || !isFunnelId(sessionId)) {
         throw createHttpError(400, "Invalid booking funnel event.");
       }
-    }
-    if (options.attributionSink) {
-      const profile = await options.profileRepository.findProfileBySlug(hotelSlug);
-      if (!profile) {
-        throw createHttpError(404, "Hotel not found.");
+      // Per address, session and hotel, before any database read (VAY-2214). Nothing is stored
+      // for a refused event, and the browser ignores the answer.
+      const limit = eventRateLimit({ address: request.ip, sessionId, hotelSlug });
+      if (!limit.allowed) {
+        // No address or session; the slug names the hotel being flooded.
+        if (limit.firstInWindow)
+          request.log.warn(
+            limit.scope === "hotel" ? { limit: limit.scope, hotelSlug } : { limit: limit.scope },
+            "Booking Web funnel events rate limited",
+          );
+        return reply
+          .header("Cache-Control", "no-store")
+          .header("Retry-After", String(limit.retryAfterSeconds))
+          .status(429)
+          .send({
+            statusCode: 429,
+            error: "Too Many Requests",
+            message: "Too many booking funnel events.",
+          });
       }
-      await options.attributionSink.recordTelemetryEvent({
-        propertyId: profile.hotel.propertyId,
-        hotelSlug,
-        eventType,
-        eventId: firstString(
-          request.body?.eventId,
-          request.body?.event_id,
-          request.body?.idempotencyKey,
-          request.body?.idempotency_key,
-        ),
-        sessionId: firstString(request.body?.sessionId, request.body?.session_id),
-        requestId: String(request.id),
-        occurredAt: now(),
-        userAgent: request.headers["user-agent"],
-        ipAddress: request.ip,
-        metadata: recordBody(request.body?.metadata),
-      });
-    }
-    reply.header("Cache-Control", "no-store");
-    reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-telemetry");
-    return reply.status(204).send();
-  });
+      if (options.attributionSink) {
+        const profile = await options.profileRepository.findProfileBySlug(hotelSlug);
+        if (!profile) {
+          throw createHttpError(404, "Hotel not found.");
+        }
+        await options.attributionSink.recordTelemetryEvent({
+          propertyId: profile.hotel.propertyId,
+          hotelSlug,
+          eventType,
+          eventId,
+          sessionId,
+          occurredAt: now(),
+          userAgent: request.headers["user-agent"],
+          metadata,
+        });
+      }
+      reply.header("Cache-Control", "no-store");
+      reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-telemetry");
+      return reply.status(204).send();
+    },
+  );
 
   if (options.affiliateRepository) {
     await registerBookingWebAffiliateRoutes(app, {
@@ -1197,7 +1240,12 @@ export async function registerBookingWebPublicRoutes(
 
 function writeBookingWebCorsHeaders(request: FastifyRequest, reply: FastifyReply): void {
   const origin = request.headers.origin;
-  if (!isAllowedBookingWebOrigin(origin)) {
+  // Funnel events come from any hotel's booking site, custom domains included (VAY-2214). The
+  // endpoint is public, takes no credentials and answers with no body, so any https origin may post.
+  const allowed =
+    isAllowedBookingWebOrigin(origin) ||
+    (request.url.split("?", 1)[0] === "/api/booking-web/events" && isHttpsOrigin(origin));
+  if (!allowed || typeof origin !== "string") {
     reply.header("Vary", "Origin");
     return;
   }
@@ -1214,6 +1262,27 @@ function writeBookingWebCorsHeaders(request: FastifyRequest, reply: FastifyReply
 
 function bookingLookupClientAddressHash(request: FastifyRequest): string {
   return sha256Hex(`booking-lookup-client:${request.ip || "unknown"}`);
+}
+
+function isHttpsOrigin(origin: unknown): origin is string {
+  if (typeof origin !== "string") return false;
+  try {
+    return new URL(origin).protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function parseTelemetryEventBody(text: string): BookingWebTelemetryEventRequest {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw createHttpError(400, "Invalid booking funnel event.");
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+    throw createHttpError(400, "Invalid booking funnel event.");
+  return parsed as BookingWebTelemetryEventRequest;
 }
 
 function isAllowedBookingWebOrigin(origin: unknown): origin is string {
@@ -1453,6 +1522,8 @@ export type PgTargetBookingWebCheckoutAdapterConfig = {
   replacementPricingCardAcceptanceEnabled?: boolean;
   /** Request-mode pay-at-property quotes in acceptance; the hotel confirms each booking. */
   replacementPricingRequestAcceptanceEnabled?: boolean;
+  /** Bank-transfer and PayPal quotes in acceptance; the hotel confirms each payment. */
+  replacementPricingManualPaymentAcceptanceEnabled?: boolean;
   externalChanges: ExternalChangePresentationPort;
   /** Register only with the reviewed provider runtime; absent keeps Airbnb actions disabled. */
   airbnbAlterations?: {
@@ -1546,9 +1617,24 @@ export function createTargetBookingWebCheckoutAdapter(
     mediaServing: config.mediaServing,
   });
   const pricingAddons = createPublicPricingAddonCatalog(pool);
+  // Room cards price every offer for each page view (VAY-2190). A small pool of their own keeps
+  // guests' browsing from using up the booking flow's connections; a busy pool fails fast.
+  const stayPricesPool = ownsPool
+    ? new pg.Pool({
+        connectionString: config.connectionString,
+        max: 2,
+        connectionTimeoutMillis: 2000,
+      })
+    : pool;
+  const stayPrices = createPublicPricingStayPrices(stayPricesPool, pricingOffers);
   const guestDisclosure = createPublicQuoteGuestDisclosure(pool);
   const issueReplacementQuote = createReplacementBookingQuoteIssuer(
     createCurrentPricingQuoteStore(pool, 300),
+    config.replacementPricingManualPaymentAcceptanceEnabled === true
+      ? ["paypal", ...(config.bankTransfers ? ["bank_transfer"] : [])]
+      : [],
+    async (slug) =>
+      readGuestModuleSwitches(pool, (await resolveTargetCheckoutProperty(pool, slug)).propertyId),
   );
   const serializeTargetChangeRequest = (row: TargetChangeRequestRow, enabled = false) =>
     serializeChangeRequest(
@@ -1925,11 +2011,22 @@ export function createTargetBookingWebCheckoutAdapter(
       return withCommand(slug, context, async () => {
         const property = await resolveTargetCheckoutProperty(pool, slug);
         const row = await loadTargetCheckoutConfig(pool, property.propertyId);
+        const methods = bookingPagePaymentMethods(row, config);
+        const earliest = await bookingPageManualEarliestArrival(pool, property.propertyId, methods);
         return {
           propertyId: property.propertyId,
           resourceType: "checkout_config",
           resourceId: property.propertyId,
-          body: serializeTargetCheckoutConfig(property, row),
+          body: {
+            ...serializeTargetCheckoutConfig(property, row),
+            // Without an earliest arrival date a method cannot be quoted, so /book leaves it out.
+            bookingPagePaymentMethods: earliest
+              ? methods.filter(
+                  (method) => !isManualPricingPaymentMethod(method) || earliest[method],
+                )
+              : methods,
+            ...(earliest ? { manualPaymentEarliestArrival: earliest } : {}),
+          },
         };
       });
     },
@@ -2117,13 +2214,30 @@ export function createTargetBookingWebCheckoutAdapter(
           config.replacementPricingCardAcceptanceEnabled && config.stripePaymentProvider
             ? { provider: config.stripePaymentProvider }
             : undefined;
-        return await writePricingAcceptance(
+        const result = await writePricingAcceptance(
           pool,
           { slug, command: request },
           contextId ? { affiliateContextId: contextId } : undefined,
           cardPayments,
           config.replacementPricingRequestAcceptanceEnabled === true,
+          config.replacementPricingManualPaymentAcceptanceEnabled
+            ? { bankTransfers: config.bankTransfers }
+            : undefined,
         );
+        if (result.kind !== "payment_pending") return result;
+        // Bank transfer or PayPal: the token lets the guest open the bank details or PayPal email
+        // (POST /bookings/confirmation); a replay gets a fresh one.
+        const { propertyId, ...body } = result;
+        const confirmation = await issueTargetBookingConfirmationToken(
+          pool,
+          { guestBookingId: result.bookingId, propertyId },
+          new Date(),
+        );
+        return {
+          ...body,
+          confirmationToken: confirmation.token,
+          confirmationTokenExpiresAt: confirmation.expiresAt,
+        };
       } catch (error) {
         if (error instanceof PricingAcceptanceError && error.code === "card_unavailable")
           throw Object.assign(createHttpError(404, "Online card payment is unavailable."), {
@@ -2133,6 +2247,11 @@ export function createTargetBookingWebCheckoutAdapter(
           throw Object.assign(createHttpError(404, "Online booking requests are unavailable."), {
             code: "REQUEST_ACCEPTANCE_UNAVAILABLE",
           });
+        if (error instanceof PricingAcceptanceError && error.code === "manual_unavailable")
+          throw Object.assign(
+            createHttpError(404, "Bank transfer and PayPal bookings are unavailable."),
+            { code: "MANUAL_PAYMENT_UNAVAILABLE" },
+          );
         const statusCode =
           error instanceof PricingAcceptanceError
             ? error.code === "conflict"
@@ -2203,6 +2322,20 @@ export function createTargetBookingWebCheckoutAdapter(
       }
       if (!offers) throw createHttpError(404, "Pricing offers unavailable.");
       return offers;
+    },
+    async getPricingStayPrices(slug, query) {
+      const stay = parseStayPricesQuery(query);
+      if (!stay) throw createHttpError(400, "Invalid stay.");
+      let prices;
+      try {
+        prices = await stayPrices.read(slug, stay);
+      } catch (error) {
+        throw Object.assign(new Error("Stay prices temporarily unavailable.", { cause: error }), {
+          statusCode: 503,
+        });
+      }
+      if (!prices) throw createHttpError(404, "Stay prices unavailable.");
+      return prices;
     },
     async quoteBooking(slug, request, context) {
       return issueReplacementQuote(slug, request, context?.idempotencyKey);
@@ -2649,6 +2782,7 @@ export function createTargetBookingWebCheckoutAdapter(
       if (editCleanupTimer) clearInterval(editCleanupTimer);
       if (ownsPool) {
         await pool.end();
+        await stayPricesPool.end();
       }
     },
   };
@@ -2720,6 +2854,14 @@ export async function resolveTargetCheckoutProperty(
   slug: string,
   requireBookable = false,
 ): Promise<TargetCheckoutPropertyRow> {
+  const gate = activeBookingPublicationGateConfig();
+  if (gate.servesPublications && !requireBookable) {
+    const published = await publishedCheckoutProperty(pool, slug, gate);
+    if (published === "hidden") {
+      throw createHttpError(404, "Booking Web hotel checkout target not found.");
+    }
+    if (published !== "absent") return published;
+  }
   const bookabilityPredicate = requireBookable
     ? `AND profile.freshness_status = 'fresh'
        AND p.lifecycle_status = 'active'
@@ -2791,6 +2933,57 @@ export async function resolveTargetCheckoutProperty(
   return { ...property, ...policy };
 }
 
+/** Once the public site serves setup publications, a hotel that published in setup is the
+ * checkout target exactly while its page is visible; hotels without one still need their
+ * legacy profile (VAY-2134). The legacy card checkout (`requireBookable`) keeps the profile. */
+async function publishedCheckoutProperty(
+  pool: BookingWebQueryExecutor,
+  slug: string,
+  context: { manualPayments: boolean },
+): Promise<TargetCheckoutPropertyRow | "absent" | "hidden"> {
+  const result = await pool.query<
+    TargetCheckoutPropertyRow & { publicContent: unknown; propertyActive: boolean }
+  >(
+    `SELECT
+       p.id::text AS "propertyId",
+       p.display_name AS "displayName",
+       p.default_locale AS "defaultLocale",
+       location.timezone,
+       COALESCE(same_day.enabled, $2::boolean) AS "sameDayBookingsEnabled",
+       CASE WHEN same_day.property_id IS NULL THEN $3::text
+         ELSE same_day.cutoff_local_time END AS "sameDayBookingCutoffTime",
+       revision.public_content AS "publicContent",
+       p.lifecycle_status = 'active' AS "propertyActive"
+     FROM hotel_catalog.property_slugs s
+     JOIN hotel_catalog.properties p ON p.id = s.property_id
+     JOIN hotel_catalog.property_locations location ON location.property_id = p.id
+     JOIN distribution.active_public_booking_revision active ON active.property_id = p.id
+     JOIN distribution.public_booking_content_revisions revision
+       ON revision.id = active.content_revision_id AND revision.property_id = active.property_id
+     LEFT JOIN booking.same_day_booking_policies same_day
+       ON same_day.property_id = p.id
+     WHERE s.slug = $1
+       AND s.locale IS NULL
+       AND s.purpose = 'canonical'
+       AND s.status = 'active'`,
+    [
+      slug,
+      SAME_DAY_BOOKING_POLICY_DEFAULTS.enabled,
+      SAME_DAY_BOOKING_POLICY_DEFAULTS.cutoffLocalTime,
+    ],
+  );
+  const row = result.rows[0];
+  if (!row) return "absent";
+  const { publicContent, propertyActive, ...property } = row;
+  if (result.rows.length !== 1 || propertyActive !== true) return "hidden";
+  const content = await visibleActiveBookingPublication(
+    pool,
+    { propertyId: row.propertyId, publicContent },
+    context,
+  );
+  return content?.profile.hotel.slug === slug ? property : "hidden";
+}
+
 export async function resolveTargetHistoricalBookingProperty(
   pool: BookingWebQueryExecutor,
   slug: string,
@@ -2829,7 +3022,8 @@ export async function loadTargetCheckoutConfig(
        bs.default_currency AS "defaultCurrency",
        bs.benefits,
        bs.last_minute_discount AS "promotionSettings",
-       bs.show_addons_step AS "showAddonsStep",
+       -- VAY-2200: the Feature Hub Add-ons switch hides the step like the page's own choice.
+       (bs.show_addons_step AND bs.addons_enabled) AS "showAddonsStep",
        (SELECT COALESCE(jsonb_agg(jsonb_build_object(
          'id', addon.id::text, 'name', addon.name, 'description', COALESCE(addon.description, ''),
          'price', addon.price_amount, 'currency', addon.currency, 'category', COALESCE(addon.category, 'other'),
@@ -2843,7 +3037,7 @@ export async function loadTargetCheckoutConfig(
        ) ORDER BY COALESCE((addon.metadata ->> 'sortOrder')::int, 0), addon.created_at, addon.id), '[]'::jsonb)
        FROM booking.addon_definitions addon WHERE addon.property_id = p.id
          AND addon.status = 'active' AND addon.public_visible
-         AND COALESCE(bs.show_addons_step, TRUE)) AS "publicAddons",
+         AND COALESCE(bs.show_addons_step AND bs.addons_enabled, TRUE)) AS "publicAddons",
        bs.group_addons_by_category AS "groupAddonsByCategory",
        bs.special_requests_enabled AS "specialRequestsEnabled",
        bs.arrival_time_enabled AS "arrivalTimeEnabled",
@@ -2893,6 +3087,60 @@ export function targetCheckoutReadyPaymentMethods(row: TargetCheckoutConfigRow |
     if (method === "paypal") return isValidPaymentEmail(depositPolicy["paypalEmail"]);
     return true;
   });
+}
+
+/** The methods the pricing-v2 booking page offers (VAY-2139). Until bank transfer and PayPal
+ * acceptance is on, it keeps its fixed card and pay-at-property choice. */
+function bookingPagePaymentMethods(
+  row: TargetCheckoutConfigRow | null,
+  config: Pick<
+    PgTargetBookingWebCheckoutAdapterConfig,
+    | "replacementPricingManualPaymentAcceptanceEnabled"
+    | "replacementPricingCardAcceptanceEnabled"
+    | "stripePaymentProvider"
+    | "bankTransfers"
+  >,
+): string[] {
+  if (config.replacementPricingManualPaymentAcceptanceEnabled !== true)
+    return ["card", "pay_at_property"];
+  if (row?.paymentsEnabled !== true) return [];
+  const ready = targetCheckoutReadyPaymentMethods(row);
+  const cardAcceptance =
+    config.replacementPricingCardAcceptanceEnabled === true && !!config.stripePaymentProvider;
+  // Bank transfer needs the bank-details binding (KMS settings) to be accepted.
+  return ["card", "pay_at_property", "bank_transfer", "paypal"].filter(
+    (method) =>
+      ready.includes(method) &&
+      (method !== "card" || cardAcceptance) &&
+      (method !== "bank_transfer" || !!config.bankTransfers),
+  );
+}
+
+/** VAY-2145: the first property-local arrival date each offered bank-transfer or PayPal method
+ * can be booked for, so /book hides it for closer stays. Null when neither is offered. */
+async function bookingPageManualEarliestArrival(
+  pool: Pick<pg.Pool, "query">,
+  propertyId: string,
+  methods: readonly string[],
+): Promise<Partial<Record<ManualPricingPaymentMethod, string>> | null> {
+  const manual = methods.filter(isManualPricingPaymentMethod);
+  if (!manual.length) return null;
+  const read = await readPricingCheckInPlace(pool, propertyId);
+  const earliest: Partial<Record<ManualPricingPaymentMethod, string>> = {};
+  for (const method of manual) {
+    const terms = read && (await lockPricingManualPaymentTerms(pool, propertyId, method, false));
+    const date =
+      read && terms
+        ? manualPaymentEarliestArrival({
+            method,
+            paymentWindowHours: terms.paymentWindowHours,
+            place: read.place,
+            now: read.now,
+          })
+        : null;
+    if (date) earliest[method] = date;
+  }
+  return earliest;
 }
 
 function serializeTargetCheckoutConfig(
@@ -5077,6 +5325,13 @@ async function validateTargetPromo(
     occurredAt: Date;
   },
 ): Promise<Record<string, unknown>> {
+  // VAY-2200: the Feature Hub Promos switch; stored codes stay for when it is back on.
+  if (!(await readGuestModuleSwitches(pool, property.propertyId)).promoCodes)
+    return {
+      valid: false,
+      code: code.toUpperCase(),
+      message: "Promo codes aren't available at this hotel.",
+    };
   const promo = await loadTargetPromoDefinition(pool, property.propertyId, code);
   if (!promo) return { valid: false, code: code.toUpperCase(), message: "Invalid promo code." };
   const message = targetPromoValidationMessage(promo, {

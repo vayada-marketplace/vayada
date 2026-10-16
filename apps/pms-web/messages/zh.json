@@ -83,6 +83,8 @@
   "auth.login.unexpectedError": "发生意外错误，请重试。",
   "auth.login.sessionExpiredBanner": "您的会话已过期，请重新登录。",
   "auth.login.signOut": "退出登录",
+  "auth.login.hotelWorkspaceRequired": "此账户尚未关联任何酒店。如果您是受酒店邀请的，请打开邀请邮件或请对方重新发送。",
+  "auth.login.setUpHotel": "设置您的酒店",
   "auth.register.title": "vayada PMS",
   "auth.register.subtitle": "创建您的物业管理账户",
   "auth.register.fullNameLabel": "全名",

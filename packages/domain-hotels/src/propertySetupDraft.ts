@@ -96,11 +96,12 @@ export const PROPERTY_SETUP_STEP_DEFINITIONS = [
     stepId: "calendar",
     track: "hotel_operations",
     permission: "pms.operations.manage",
+    // Only what the calendar uses: the time zone, the operating rooms and their units (VAY-2198).
     baseRevisionKeys: [
       "pms.operating_calendar",
       "pms.inventory",
-      "pms.room_types",
-      "hotel_catalog.location",
+      "pms.room_units",
+      "hotel_catalog.time_zone",
     ],
     fields: ["rate.operating_periods", "rate.minimum_stay", "rate.initial_availability"],
   },
@@ -137,6 +138,20 @@ export const PROPERTY_SETUP_STEP_DEFINITIONS = [
 }[];
 
 export type PropertySetupStepDefinition = (typeof PROPERTY_SETUP_STEP_DEFINITIONS)[number];
+
+/**
+ * Calendar drafts saved before VAY-2198 pinned room facts and the full location. Their manifests
+ * stay readable until those drafts expire (90-day retention); the API converts them on read.
+ */
+export const PROPERTY_SETUP_LEGACY_CALENDAR_BASE_REVISION_KEYS = [
+  "pms.operating_calendar",
+  "pms.inventory",
+  "pms.room_types",
+  "hotel_catalog.location",
+] as const;
+export type PropertySetupLegacyCalendarBaseRevisions = Readonly<
+  Record<(typeof PROPERTY_SETUP_LEGACY_CALENDAR_BASE_REVISION_KEYS)[number], string>
+>;
 export type PropertySetupStepId = PropertySetupStepDefinition["stepId"];
 type DefinitionFor<TStepId extends PropertySetupStepId> = Extract<
   PropertySetupStepDefinition,
@@ -146,7 +161,9 @@ type FieldFor<TStepId extends PropertySetupStepId> = DefinitionFor<TStepId>["fie
 type BaseRevisionKeyFor<TStepId extends PropertySetupStepId> =
   DefinitionFor<TStepId>["baseRevisionKeys"][number];
 export type PropertySetupFieldId = PropertySetupStepDefinition["fields"][number];
-export type PropertySetupBaseRevisionKey = PropertySetupStepDefinition["baseRevisionKeys"][number];
+export type PropertySetupBaseRevisionKey =
+  | PropertySetupStepDefinition["baseRevisionKeys"][number]
+  | (typeof PROPERTY_SETUP_LEGACY_CALENDAR_BASE_REVISION_KEYS)[number];
 export type PropertySetupBaseRevisionManifest = Readonly<
   Partial<Record<PropertySetupBaseRevisionKey, string>>
 >;
@@ -155,11 +172,11 @@ export type PropertySetupDraftPayload<TStepId extends PropertySetupStepId> = [
 ] extends [never]
   ? Readonly<Record<string, never>>
   : Readonly<Partial<Record<FieldFor<TStepId>, JsonValue>>>;
-export type PropertySetupBaseRevisions<TStepId extends PropertySetupStepId> = [
-  BaseRevisionKeyFor<TStepId>,
-] extends [never]
-  ? Readonly<Record<string, never>>
-  : Readonly<Record<BaseRevisionKeyFor<TStepId>, string>>;
+export type PropertySetupBaseRevisions<TStepId extends PropertySetupStepId> =
+  | ([BaseRevisionKeyFor<TStepId>] extends [never]
+      ? Readonly<Record<string, never>>
+      : Readonly<Record<BaseRevisionKeyFor<TStepId>, string>>)
+  | (TStepId extends "calendar" ? PropertySetupLegacyCalendarBaseRevisions : never);
 
 export type SavePropertySetupDraftRequest = {
   [TStepId in PropertySetupStepId]: {
@@ -249,17 +266,48 @@ export function isPropertySetupBaseRevisionManifest(
   stepId: PropertySetupStepId,
   value: unknown,
 ): value is PropertySetupBaseRevisionManifest {
+  return getPropertySetupBaseRevisionKeys(stepId, value) !== null;
+}
+
+/**
+ * The exact key set of a valid step manifest: the step's own keys, or for a calendar draft saved
+ * before VAY-2198 the legacy keys. Null when the value is not a valid manifest for the step.
+ */
+export function getPropertySetupBaseRevisionKeys(
+  stepId: PropertySetupStepId,
+  value: unknown,
+): readonly PropertySetupBaseRevisionKey[] | null {
   const definition = PROPERTY_SETUP_STEP_DEFINITIONS.find((step) => step.stepId === stepId);
-  if (!definition || !isPlainRecord(value)) return false;
-  const keys = Reflect.ownKeys(value);
-  return (
-    keys.length === definition.baseRevisionKeys.length &&
-    keys.every((key) => typeof key === "string") &&
-    definition.baseRevisionKeys.every((key) => Object.hasOwn(value, key)) &&
-    Object.values(value).every(
+  if (
+    !definition ||
+    !isPlainRecord(value) ||
+    !Object.values(value).every(
       (revision) =>
         typeof revision === "string" && PROPERTY_SETUP_BASE_REVISION_PATTERN.test(revision),
     )
+  ) {
+    return null;
+  }
+  const keys = Object.keys(value);
+  const candidates: readonly (readonly PropertySetupBaseRevisionKey[])[] =
+    stepId === "calendar"
+      ? [definition.baseRevisionKeys, PROPERTY_SETUP_LEGACY_CALENDAR_BASE_REVISION_KEYS]
+      : [definition.baseRevisionKeys];
+  return (
+    candidates.find(
+      (expected) =>
+        keys.length === expected.length && expected.every((key) => Object.hasOwn(value, key)),
+    ) ?? null
+  );
+}
+
+/** A calendar manifest saved before VAY-2198: room facts and the full location. */
+export function isPropertySetupLegacyCalendarBaseRevisionManifest(
+  value: unknown,
+): value is PropertySetupLegacyCalendarBaseRevisions {
+  return (
+    getPropertySetupBaseRevisionKeys("calendar", value) ===
+    PROPERTY_SETUP_LEGACY_CALENDAR_BASE_REVISION_KEYS
   );
 }
 

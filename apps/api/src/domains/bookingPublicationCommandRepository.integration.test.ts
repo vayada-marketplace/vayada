@@ -832,12 +832,18 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Booking publication command safe
     if (!accepted.ok) throw new Error("Expected accepted publication request");
     const projectionPool = new pg.Pool({ connectionString: TEST_DATABASE_URL!, max: 1 });
     const workerPool = new pg.Pool({ connectionString: TEST_DATABASE_URL!, max: 1 });
-    const projectionEntered = deferred<void>();
+    const projectionEntered = deferred<number>();
     const releaseProjection = deferred<void>();
-    const recoveryStarted = deferred<void>();
+    const recoveryStarted = deferred<number>();
+    const recoveryFinished = deferred<void>();
     const pausedProjection = createPgDistributionBookingPublicationProjection({
       connectionString: TEST_DATABASE_URL!,
-      pool: pauseBeforeProjectionCommitPool(projectionPool, projectionEntered, releaseProjection),
+      pool: pauseAroundProjectionCommitPool(
+        projectionPool,
+        projectionEntered,
+        releaseProjection,
+        recoveryFinished.promise,
+      ),
     });
     const firstWorker = createBookingPublicationProjector({
       connectionString: TEST_DATABASE_URL!,
@@ -850,7 +856,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Booking publication command safe
     });
     const replacementWorker = createBookingPublicationProjector({
       connectionString: TEST_DATABASE_URL!,
-      pool: signalLeaseRecoveryPool(workerPool, recoveryStarted),
+      pool: signalLeaseRecoveryPool(workerPool, recoveryStarted, recoveryFinished),
       projection: distributionPublication,
       attempts: attemptStatus,
       readiness: {
@@ -859,15 +865,31 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Booking publication command safe
       builder,
       now: () => new Date("2026-08-02T13:01:00.002Z"),
     });
+    let first: Promise<unknown> | undefined;
+    let replacement: Promise<unknown> | undefined;
     try {
-      const first = firstWorker.projectPending({ propertyId });
-      await projectionEntered.promise;
+      first = firstWorker.projectPending({ propertyId });
+      const projectionBackend = await beforeSettled(projectionEntered.promise, first);
       currentReadinessRevision = "booking-settings:5";
-      const replacement = replacementWorker.projectPending({ propertyId });
-      await recoveryStarted.promise;
+      replacement = replacementWorker.projectPending({ propertyId });
+      const recoveryBackend = await beforeSettled(recoveryStarted.promise, first, replacement);
+      // The paused activation holds the outbox row, so lease recovery must wait for its commit.
+      await waitForLockWaiter(admin, recoveryBackend, projectionBackend);
       releaseProjection.resolve();
-      await Promise.allSettled([first, replacement]);
+      const [firstResult, replacementResult] = await Promise.allSettled([first, replacement]);
 
+      // The first worker resumes only after recovery committed, so its lease-fenced status
+      // fallback finds the lease gone instead of locking the row the replacement must claim.
+      expect(firstResult).toMatchObject({
+        status: "rejected",
+        reason: {
+          message: "Booking publication outbox lease was lost during status reconciliation",
+        },
+      });
+      expect(replacementResult).toEqual({
+        status: "fulfilled",
+        value: { processed: 1, succeeded: 1, failed: 0, exhausted: 0 },
+      });
       await expect(
         repository.getPublicationStatus({
           actorUserId,
@@ -894,6 +916,8 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Booking publication command safe
       });
     } finally {
       releaseProjection.resolve();
+      recoveryFinished.resolve();
+      await Promise.allSettled([first, replacement]);
       await firstWorker.close?.();
       await replacementWorker.close?.();
       await pausedProjection.close?.();
@@ -1413,10 +1437,12 @@ function deferred<Value>(): Deferred<Value> {
   return { promise, resolve };
 }
 
-function pauseBeforeProjectionCommitPool(
+// Pauses before the activation commits (resolving its backend pid), and again after it.
+function pauseAroundProjectionCommitPool(
   pool: pg.Pool,
-  entered: Deferred<void>,
+  entered: Deferred<number>,
   resume: Deferred<void>,
+  resumeAfterCommit: Promise<void>,
 ): DistributionBookingPublicationPool {
   return {
     async connect() {
@@ -1431,8 +1457,12 @@ function pauseBeforeProjectionCommitPool(
             activationWritten = true;
           }
           if (text === "COMMIT" && activationWritten) {
-            entered.resolve();
+            const backend = await client.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
+            entered.resolve(backend.rows[0]!.pid);
             await resume.promise;
+            const committed = await client.query<T>(text, values as unknown[]);
+            await resumeAfterCommit;
+            return committed;
           }
           return client.query<T>(text, values as unknown[]);
         },
@@ -1443,13 +1473,16 @@ function pauseBeforeProjectionCommitPool(
   };
 }
 
+// Resolves the recovering backend's pid, then signals when recovery commits or rolls back.
 function signalLeaseRecoveryPool(
   pool: pg.Pool,
-  recoveryStarted: Deferred<void>,
+  recoveryStarted: Deferred<number>,
+  recoveryFinished: Deferred<void>,
 ): BookingPublicationProjectorPool {
   return {
     async connect() {
       const client = await pool.connect();
+      let recovering = false;
       return {
         async query<T extends QueryResultRow = QueryResultRow>(
           text: string,
@@ -1459,7 +1492,19 @@ function signalLeaseRecoveryPool(
             text.includes("UPDATE platform.outbox_events") &&
             text.includes("lease_expired_requeued")
           ) {
-            recoveryStarted.resolve();
+            recovering = true;
+            const backend = await client.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
+            const recovery = client.query<T>(text, values as unknown[]);
+            recoveryStarted.resolve(backend.rows[0]!.pid);
+            return recovery;
+          }
+          if (recovering && (text === "COMMIT" || text === "ROLLBACK")) {
+            recovering = false;
+            try {
+              return await client.query<T>(text, values as unknown[]);
+            } finally {
+              recoveryFinished.resolve();
+            }
           }
           return client.query<T>(text, values as unknown[]);
         },
@@ -1468,6 +1513,35 @@ function signalLeaseRecoveryPool(
     },
     end: () => pool.end(),
   };
+}
+
+// Fails instead of hanging when a worker settles before sending the signal.
+function beforeSettled<Value>(
+  signal: Promise<Value>,
+  ...workers: Promise<unknown>[]
+): Promise<Value> {
+  return Promise.race([
+    signal,
+    Promise.allSettled(workers).then((): never => {
+      throw new Error("A worker settled before signalling");
+    }),
+  ]);
+}
+
+async function waitForLockWaiter(
+  observer: pg.Client,
+  pid: number,
+  blockingPid: number,
+): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const result = await observer.query<{ blocked: boolean }>(
+      "SELECT $2::int = ANY(pg_blocking_pids($1::int)) AS blocked",
+      [pid, blockingPid],
+    );
+    if (result.rows[0]?.blocked) return;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error(`Backend ${pid} never waited for backend ${blockingPid}`);
 }
 
 function assertSafeTestDatabase(url: string): void {

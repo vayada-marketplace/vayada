@@ -31,28 +31,10 @@ export async function readGrowthTelemetry(
       SELECT id FROM hotel_catalog.properties WHERE id::text = ANY($1::text[])
     ), views AS (
       SELECT event.id, event.occurred_at AT TIME ZONE 'UTC' AS occurred_at
-      FROM platform.domain_events event
-      WHERE event.source_system = 'distribution'
-        AND event.event_type = 'booking_web.page_visit'
-        AND event.resource_product = 'distribution'
-        AND event.resource_type = 'booking_web_hotel'
-        AND event.event_status IN ('recorded', 'projected')
-        AND COALESCE(event.event_metadata ->> 'trafficClass', 'human') <> 'bot'
-        AND (NOT $4::boolean OR (
-          COALESCE(event.event_metadata ->> 'trafficClass', 'human') <> 'test'
-          AND event.payload -> 'metadata' -> 'isTestData' IS DISTINCT FROM 'true'::jsonb
-          AND event.payload -> 'metadata' -> 'testData' IS DISTINCT FROM 'true'::jsonb
-        ))
-        AND (
-          (event.tenant_scope = 'property' AND event.property_id IN (SELECT id FROM scoped_properties))
-          OR (event.tenant_scope = 'external' AND event.property_id IS NULL
-            AND event.resource_id IN (
-              SELECT slug.slug FROM hotel_catalog.property_slugs slug
-              JOIN scoped_properties property ON property.id = slug.property_id
-            )
-            AND 1 = (SELECT COUNT(DISTINCT property_id) FROM hotel_catalog.property_slugs WHERE slug = event.resource_id)
-          )
-        )
+      FROM distribution.booking_web_events event
+      WHERE event.event_type = 'page_visit'
+        AND event.property_id IN (SELECT id FROM scoped_properties)
+        AND (NOT $4::boolean OR event.traffic_class = 'human')
         AND event.occurred_at >= (SELECT MIN(start) AT TIME ZONE 'UTC' FROM buckets)
         AND event.occurred_at <= CURRENT_TIMESTAMP
     ), requests AS (

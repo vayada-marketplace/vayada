@@ -119,8 +119,7 @@ describe("atomic initial hotel settings", () => {
           api={api as unknown as SharedHotelSetupApi}
           entryProduct="marketplace"
           propertyLaunchSettingsApi={launchApi}
-          onContinue={() => undefined}
-          renderTaskForm={() => null}
+          renderAfterHotelDetails={() => null}
         />,
       );
     });

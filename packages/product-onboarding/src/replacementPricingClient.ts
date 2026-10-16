@@ -239,6 +239,22 @@ export function createReplacementPricingClient(
     }
   }
   return {
+    /** Bank transfer and PayPal the rate pickers may offer: their acceptance is on and the hotel
+     * takes them with their details in place (VAY-2139). An API without the read offers none. */
+    async paymentMethods(): Promise<("bank_transfer" | "paypal")[]> {
+      const value = await optionalRead(`${base}/payment-methods`);
+      if (value === missing) return [];
+      if (!exact(value, ["acceptanceEnabled", "readyMethods"])) return bad();
+      const { acceptanceEnabled, readyMethods: methods } = value;
+      if (
+        typeof acceptanceEnabled !== "boolean" ||
+        !Array.isArray(methods) ||
+        methods.some((method) => method !== "bank_transfer" && method !== "paypal") ||
+        new Set(methods).size !== methods.length
+      )
+        return bad();
+      return acceptanceEnabled ? [...(methods as ("bank_transfer" | "paypal")[])] : [];
+    },
     termsAction(input: PricingTermsInput, draftContext: PricingDraftContext) {
       const selected = context(draftContext);
       const sent = structuredClone(input);

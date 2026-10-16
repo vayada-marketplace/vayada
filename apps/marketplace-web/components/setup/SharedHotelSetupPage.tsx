@@ -9,14 +9,11 @@ import {
   crossAppReauthenticationUrl,
   isPmsSetupExitPath,
   isSharedAccountDetailsComplete,
-  isSafeSharedHotelSetupReturnTo,
   normalizeSharedAccountName,
   parseSharedHotelSetupEntryProduct,
   pmsSetupExitPath,
   safeSharedHotelSetupReturnTo,
-  type SharedFirstRunContinueInput,
   type SharedHotelSetupEntryProduct,
-  type SharedSetupTaskFormContext,
 } from "@vayada/product-onboarding";
 
 import { RoomImportRevisionContext } from "./RoomImportRevisionContext";
@@ -35,17 +32,16 @@ import {
   getAuthWorkosOrganizationId,
 } from "@/services/auth/sessionStore";
 import { AdaptiveRoomAuthoringSetupController } from "./adaptive/rooms/AdaptiveRoomAuthoringSetupController";
-import { SetupTaskFormRouter } from "./SetupTaskFormRouter";
+import { productHandoffReturnTo } from "./productHandoffReturnTo";
 
 import {
   PreparedHotelImportPanel,
   type PreparedImportResponse,
 } from "@vayada/product-onboarding/PreparedHotelImportPanel";
 
+export { productHandoffReturnTo };
+
 const PMS_FRONTEND_URL = process.env.NEXT_PUBLIC_PMS_URL || "https://pms.vayada.com";
-const BOOKING_ADMIN_URL =
-  process.env.NEXT_PUBLIC_BOOKING_ADMIN_URL || "https://admin.booking.vayada.com";
-const PMS_ROOMS_AND_RATES_PATH = "/rooms";
 const PROPERTY_LAUNCH_SETTINGS_API = {
   get: (propertyId: string, options?: RequestInit) =>
     hotelOperationsSetupApi.getPropertyLaunchSettings(propertyId, options?.signal ?? undefined),
@@ -54,13 +50,9 @@ const PROPERTY_LAUNCH_SETTINGS_API = {
 
 export function SharedHotelSetupPage({
   defaultEntryProduct,
-  defaultReturnTo,
-  adaptiveShellEnabled = false,
   airbnbImportEnabled = false,
 }: {
   defaultEntryProduct: SharedHotelSetupEntryProduct;
-  defaultReturnTo: string;
-  adaptiveShellEnabled?: boolean;
   airbnbImportEnabled?: boolean;
 }) {
   const router = useRouter();
@@ -134,18 +126,6 @@ export function SharedHotelSetupPage({
       parseSharedHotelSetupEntryProduct(searchParams.get("entryProduct")) ?? defaultEntryProduct,
     [defaultEntryProduct, searchParams],
   );
-  const returnProduct = useMemo(
-    () => parseSharedHotelSetupEntryProduct(searchParams.get("returnProduct")) ?? "marketplace",
-    [searchParams],
-  );
-  const returnTo = useMemo(
-    () =>
-      safeSharedHotelSetupReturnTo(
-        searchParams.get("returnTo"),
-        returnProduct === "marketplace" ? defaultReturnTo : "/dashboard",
-      ),
-    [defaultReturnTo, returnProduct, searchParams],
-  );
   const initialAddProperty = searchParams.get("mode") === "add";
   const initialPropertyId = searchParams.get("propertyId");
 
@@ -156,14 +136,8 @@ export function SharedHotelSetupPage({
     });
   };
 
-  const handoffToProduct = async (
-    product: Exclude<SharedHotelSetupEntryProduct, "marketplace">,
-    targetPath: string,
-    propertyId?: string | null,
-  ) => {
+  const handoffToPms = async (targetPath: string, propertyId: string | null) => {
     setHandoffError(null);
-    const baseUrl = product === "booking" ? BOOKING_ADMIN_URL : PMS_FRONTEND_URL;
-    const targetSurface = product === "booking" ? "booking-admin" : "pms-web";
     const csrfToken = getAuthCsrfToken();
     if (csrfToken) {
       try {
@@ -173,7 +147,7 @@ export function SharedHotelSetupPage({
             routingHints: propertyId ? { propertyId } : undefined,
             sourceSurface: "marketplace-web",
             targetPath,
-            targetSurface,
+            targetSurface: "pms-web",
           }),
         );
         return;
@@ -183,51 +157,23 @@ export function SharedHotelSetupPage({
     }
     try {
       const reauthenticationReturnTo =
-        propertyId?.trim() || (product === "pms" && isPmsSetupExitPath(targetPath))
+        propertyId?.trim() || isPmsSetupExitPath(targetPath)
           ? productHandoffReturnTo(targetPath, propertyId?.trim() || null, {
               organizationId: getAuthOrganizationId(),
               workosOrganizationId: getAuthWorkosOrganizationId(),
             })
           : targetPath;
-      window.location.replace(crossAppReauthenticationUrl(baseUrl, reauthenticationReturnTo));
+      window.location.replace(
+        crossAppReauthenticationUrl(PMS_FRONTEND_URL, reauthenticationReturnTo),
+      );
     } catch {
       setHandoffError("We couldn't open that app. Please check the app URL and try again.");
     }
   };
 
-  const handleContinue = async (input: SharedFirstRunContinueInput) => {
-    localStorage.setItem("selectedSharedPropertyId", input.propertyId);
-    const requestedReturnTo = input.product === returnProduct ? input.returnTo : null;
-    if (input.product === "booking") {
-      await handoffToProduct(
-        "booking",
-        safeSharedHotelSetupReturnTo(requestedReturnTo, "/dashboard"),
-        input.propertyId,
-      );
-      return;
-    }
-    if (input.product === "pms") {
-      await handoffToProduct(
-        "pms",
-        safeSharedHotelSetupReturnTo(requestedReturnTo, "/dashboard"),
-        input.propertyId,
-      );
-      return;
-    }
-    router.replace(
-      returnProduct === "marketplace" && isSafeSharedHotelSetupReturnTo(input.returnTo)
-        ? input.returnTo
-        : ROUTES.MARKETPLACE,
-    );
-  };
-
   const handleExit = (selectedPropertyId?: string | null) => {
     const propertyId = selectedPropertyId?.trim() || initialPropertyId?.trim() || null;
-    void handoffToProduct(
-      "pms",
-      setupExitPathForContext(searchParams.toString(), propertyId),
-      propertyId,
-    );
+    void handoffToPms(setupExitPathForContext(searchParams.toString(), propertyId), propertyId);
   };
 
   if (checkingAuth || !authorized || checkingPrepared) {
@@ -327,10 +273,8 @@ export function SharedHotelSetupPage({
         api={sharedHotelSetupApi}
         entryProduct={entryProduct}
         initialPropertyId={initialPropertyId}
-        returnTo={returnTo}
         initialAddProperty={initialAddProperty}
         propertyLaunchSettingsApi={PROPERTY_LAUNCH_SETTINGS_API}
-        onContinue={handleContinue}
         onPropertySelected={handlePropertySelected}
         renderSetupActions={
           airbnbImportEnabled
@@ -348,26 +292,13 @@ export function SharedHotelSetupPage({
               )
             : undefined
         }
-        renderAfterHotelDetails={
-          adaptiveShellEnabled
-            ? (propertyId, onEditHotelDetails) => (
-                <AdaptiveSetupHandoff
-                  propertyId={propertyId}
-                  onEditHotelDetails={onEditHotelDetails}
-                  onExit={() => handleExit(propertyId)}
-                />
-              )
-            : undefined
-        }
-        renderTaskForm={(context: SharedSetupTaskFormContext) => (
-          <SetupTaskFormRouter
-            {...context}
-            onOpenRoomsAndRates={() =>
-              handoffToProduct("pms", PMS_ROOMS_AND_RATES_PATH, context.propertyId)
-            }
+        renderAfterHotelDetails={(propertyId, onEditHotelDetails) => (
+          <AdaptiveSetupHandoff
+            propertyId={propertyId}
+            onEditHotelDetails={onEditHotelDetails}
+            onExit={() => handleExit(propertyId)}
           />
         )}
-        onExit={handleExit}
       />
     </RoomImportRevisionContext.Provider>
   );
@@ -422,26 +353,6 @@ export function setupPathForSelectedProperty(query: string, propertyId: string):
   searchParams.set("propertyId", propertyId);
   searchParams.delete("mode");
   return `${ROUTES.SETUP}?${searchParams.toString()}`;
-}
-
-export function productHandoffReturnTo(
-  targetPath: string,
-  propertyId: string | null,
-  organization: {
-    organizationId: string | null;
-    workosOrganizationId: string | null;
-  },
-): string {
-  const query = new URLSearchParams({ redirect: targetPath });
-  const fragment = new URLSearchParams();
-  if (propertyId) fragment.set("property_id", propertyId);
-  if (organization.organizationId) {
-    fragment.set("organization_id", organization.organizationId);
-  }
-  if (organization.workosOrganizationId) {
-    fragment.set("workos_organization_id", organization.workosOrganizationId);
-  }
-  return `/handoff?${query.toString()}${fragment.size > 0 ? `#${fragment.toString()}` : ""}`;
 }
 
 export function setupExitPathForContext(query: string, propertyId: string | null): string {

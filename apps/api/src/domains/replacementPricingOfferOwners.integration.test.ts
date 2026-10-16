@@ -1330,17 +1330,15 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
         return {
           release: client.release.bind(client),
           query: (text: string, values?: unknown[]) =>
-            text.includes("pms.enqueue_restriction_ari")
-              ? Promise.resolve({ rows: [], rowCount: 0 })
-              : client.query(
-                  text.includes('max_attempts AS "maxAttempts"')
-                    ? text.replace(
-                        "WHERE queue_name = $1",
-                        `WHERE id='${f.job.jobId}'::uuid AND queue_name = $1`,
-                      )
-                    : text,
-                  values,
-                ),
+            client.query(
+              text.includes('max_attempts AS "maxAttempts"')
+                ? text.replace(
+                    "WHERE queue_name = $1",
+                    `WHERE id='${f.job.jobId}'::uuid AND queue_name = $1`,
+                  )
+                : text,
+              values,
+            ),
         };
       },
       end: async () => {},
@@ -6061,9 +6059,14 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
               requiredCoverage,
               snapshot: {
                 configuration: { source },
+                // Setup prepares a full year from today (VAY-2150: launch needs 11 months).
                 coverage: {
                   coverageFrom: requiredCoverage.from,
-                  coverageThrough: requiredCoverage.through,
+                  coverageThrough: new Date(
+                    Date.parse(`${requiredCoverage.from}T00:00:00.000Z`) + 365 * 86_400_000,
+                  )
+                    .toISOString()
+                    .slice(0, 10),
                   expectedDayCount: 732,
                   materializedDayCount: 732,
                   gaps: [],
@@ -6435,6 +6438,38 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       },
     );
   }
+  it("tells guests each option's cancellation before a quote (VAY-2188)", async () => {
+    const flexible = {
+      kind: "flexible",
+      terms: {
+        type: "free_until_days_before_arrival",
+        freeCancellationDeadlineDays: 3,
+        afterDeadlinePenalty: "full_booking_amount",
+        noShowPenalty: "full_booking_amount",
+      },
+    } as const;
+    const f = await publicFixture(true, undefined, undefined, (terms) =>
+      terms.offerId === "other" ? { ...terms, cancellation: flexible } : terms,
+    );
+    await publishBookingPage(f.scope);
+    const read = await createPublicPricingOfferCatalog(pool).read(f.scope.propertyId);
+    const shown = new Map(
+      (read?.rooms ?? []).flatMap((room) =>
+        room.offers.map((offer) => [offer.publicOfferKey, offer.cancellation] as const),
+      ),
+    );
+    // Each offer by its own key: only "other" has free cancellation.
+    const bindings = publicPricingOfferBindings((await f.readPublic())!);
+    expect(shown.size).toBe(bindings.length);
+    for (const binding of bindings)
+      expect(shown.get(binding.publicOfferKey), binding.offerId).toEqual(
+        binding.offerId === "other"
+          ? { kind: "free_until_days_before_arrival", days: 3 }
+          : { kind: "non_refundable" },
+      );
+    // Only what a guest may know before a quote: no penalties, revisions or payment terms.
+    expect(JSON.stringify(read)).not.toMatch(/Penalty|termsRevision|acceptedMethods/);
+  });
   it("serves every saved change after go-live without republishing (VAY-2129)", async () => {
     const f = await publicFixture(),
       id = f.scope.propertyId,
@@ -7292,7 +7327,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     expect(longer?.additionalChargeMinor).toBe("1800");
     expect(longer?.charges.basisEvidenceId).not.toBe(result?.charges.basisEvidenceId);
   });
-  it("does not add included amounts twice and distinguishes explicit none from legacy confirmation", async () => {
+  it("does not add included amounts twice and quotes a legacy confirmation without charges", async () => {
     const included = await componentsFixture(fixedPolicy(true));
     expect(await chargeTotals(included)).toMatchObject({
       subtotalMinor: "20000",
@@ -7306,16 +7341,27 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       totalMinor: "20000",
       additionalChargeMinor: "0",
     });
+    // Prices declared "all mandatory charges included" quote the room price with no extra
+    // charges, bound to that declaration rather than a policy revision (VAY-2134).
     const legacy = await componentsFixture();
     expect(await legacy.components()).not.toBeNull();
-    expect(await chargeTotals(legacy)).toBeNull();
+    const confirmed = {
+      totalMinor: "20000",
+      includedChargeMinor: "0",
+      additionalChargeMinor: "0",
+      charges: {
+        charges: [],
+        sourceRevision: expect.stringMatching(/^booking\.included-charges\.v1:/),
+      },
+    };
+    expect(await chargeTotals(legacy)).toMatchObject(confirmed);
     // Saving a policy does not silently replace a legacy publication's confirmation.
     await createFixedChargePolicyStore(pool).save(legacy.context, legacy.scope, {
       requestId: randomUUID(),
       expectedRevision: null,
       policy: fixedPolicy(),
     });
-    expect(await chargeTotals(legacy)).toBeNull();
+    expect(await chargeTotals(legacy)).toMatchObject(confirmed);
   });
   it("invalidates publications after fee edits and rejects stale, foreign and wrong-currency adoption", async () => {
     const f = await componentsFixture(fixedPolicy()),

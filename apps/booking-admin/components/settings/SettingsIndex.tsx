@@ -7,16 +7,18 @@ import {
   AdjustmentsHorizontalIcon,
   ArrowRightIcon,
   BoltIcon,
+  ClipboardDocumentListIcon,
   Cog6ToothIcon,
   CreditCardIcon,
   DocumentTextIcon,
-  EnvelopeIcon,
+  FunnelIcon,
   GiftIcon,
   ReceiptPercentIcon,
   UserCircleIcon,
 } from "@heroicons/react/24/outline";
 import { useTranslation } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import { PageHeader, PageLayout } from "@/components/layout/PageLayout";
 import { legacySettingsPageUrl } from "@/lib/utils/settingsSectionUrl";
 
 type SettingsCardLink = {
@@ -34,6 +36,7 @@ const FEATURE_HUB = {
   href: "/settings/feature-hub",
 } satisfies SettingsCardLink;
 
+// Timo's order (VAY-2144). Email & notifications stays hidden until it has a page.
 const CARDS: SettingsCardLink[] = [
   {
     title: "settings.cards.bookingRules.title",
@@ -66,20 +69,27 @@ const CARDS: SettingsCardLink[] = [
     href: "/settings/policies",
   },
   {
-    title: "settings.cards.email.title",
-    description: "settings.cards.email.description",
-    icon: EnvelopeIcon,
+    title: "settings.cards.roomFilters.title",
+    description: "settings.cards.roomFilters.description",
+    icon: FunnelIcon,
+    href: "/settings/room-filters",
   },
   {
-    title: "settings.cards.account.title",
-    description: "settings.cards.account.description",
-    icon: UserCircleIcon,
+    title: "settings.cards.guestForm.title",
+    description: "settings.cards.guestForm.description",
+    icon: ClipboardDocumentListIcon,
+    href: "/settings/guest-form",
   },
   {
     title: "settings.tabs.billing",
     description: "settings.cards.billing.description",
     icon: ReceiptPercentIcon,
     href: "/settings/billing",
+  },
+  {
+    title: "settings.cards.account.title",
+    description: "settings.cards.account.description",
+    icon: UserCircleIcon,
   },
 ];
 
@@ -132,10 +142,8 @@ export function SettingsIndex() {
   if (!legacyChecked) return null;
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-6 md:px-6 lg:px-8 lg:py-8">
-      <h1 className="text-xl font-semibold text-gray-900 md:text-2xl">
-        {t("settings.index.title")}
-      </h1>
+    <PageLayout>
+      <PageHeader title={t("settings.index.title")} />
       <Link
         href={FEATURE_HUB.href}
         className={cn(
@@ -166,6 +174,6 @@ export function SettingsIndex() {
           </li>
         ))}
       </ul>
-    </div>
+    </PageLayout>
   );
 }

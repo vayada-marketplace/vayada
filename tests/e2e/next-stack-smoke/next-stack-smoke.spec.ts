@@ -851,7 +851,9 @@ async function runHotelFlow(
     const publicPage = await context.newPage();
     await publicPage.goto(publication.canonicalUrl);
     await expect(publicPage.getByRole("heading", { name: hotelName }).first()).toBeVisible();
-    await expect(publicPage.getByRole("heading", { name: "Unable to Load Hotel" })).toHaveCount(0);
+    await expect(
+      publicPage.getByRole("heading", { name: /Unable to Load Hotel|isn't online/ }),
+    ).toHaveCount(0);
     await publicPage.close();
 
     await page.goto(`${NEXT_STACK_ORIGINS.marketplace}/marketplace`);

@@ -195,7 +195,7 @@ Ponytail comes from the installed plugin; its hooks and skills own the detailed 
 - For shared packages, cross-domain architecture, auth, tenant boundaries, booking, payment, availability, or PMS workflows: explicitly use an independent subagent adversarial review before opening or finalizing the PR. Do not count a local self-review as satisfying this requirement.
 - PR descriptions should include the Linear issue ID, summary, validation, and risk notes.
 - CodeRabbit is expected to review every non-draft PR; address or explicitly resolve its findings before merge.
-- Merge with squash merge after required checks pass.
+- Merge with squash merge after required checks pass. Once the `main` ruleset requires the merge queue, merging means adding the PR to the queue; an open `release-train-hold` issue pauses it during releases. See [Merge queue and holds](engineering/code-quality-gates.md#merge-queue-and-holds).
 - Do not reintroduce app submodules or submodule pointer commits.
 
 ## Linear workflow
@@ -233,6 +233,8 @@ Shared agent skills live under `.agents/skills/<name>/SKILL.md`. The directory i
 Start with `.agents/skills/vayada-skills-storage/SKILL.md` to understand the three-layer model (shared skill / repo-local instructions / Linear issue) and where new skills should go.
 
 Use `.agents/skills/typescript-rewrite-workflow/SKILL.md` for the TypeScript backend rewrite and adjacent WorkOS, Ask Intelligence, target-schema, migration, and cutover work.
+
+Use `.agents/skills/vayada-paper-design/SKILL.md` whenever work touches the Paper design files. That means new screens or visible layout changes (design first in Paper, approved by Flamur, before building), and keeping the "(current)" Paper files in sync after each release that changes visible UI.
 
 ## Gotchas
 

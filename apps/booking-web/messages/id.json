@@ -2,7 +2,8 @@
   "analyticsConsent": {
     "settings": "Pilihan privasi",
     "title": "Analitik opsional",
-    "description": "Kami menggunakan analitik opsional untuk memahami kunjungan dan langkah pemesanan. Pemesanan tetap berfungsi tanpa analitik. Pilihan Anda hanya berlaku untuk situs pemesanan hotel ini.",
+    "description": "Kami menggunakan analitik opsional untuk memahami kunjungan dan langkah pemesanan. Pemesanan tetap berfungsi tanpa analitik. Pilihan Anda hanya berlaku untuk situs pemesanan kami.",
+    "controller": "Kami, {hotel}, bertanggung jawab atas data ini. Vayada mengelola situs pemesanan kami dan memproses data atas nama kami. <policy>Pemberitahuan privasi</policy>",
     "enabled": "Analitik aktif.",
     "disabled": "Analitik nonaktif.",
     "saveError": "Pilihan Anda tidak dapat disimpan. Analitik tetap nonaktif.",
@@ -124,7 +125,43 @@
       "checkingAvailability": "Memeriksa ketersediaan",
       "availabilityUnavailable": "Ketersediaan untuk tanggal ini sementara tidak dapat dimuat.",
       "availabilityUnavailableTooltip": "Ketersediaan tidak dapat dimuat"
-    }
+    },
+    "choice": {
+      "freeCancellation": "Pembatalan gratis",
+      "nonRefundable": "Tidak dapat dikembalikan",
+      "partialRefund": "Pengembalian sebagian",
+      "mealNonRefundable": "{meal}, tidak dapat dikembalikan",
+      "mealPartialRefund": "{meal}, pengembalian sebagian",
+      "freeUntil": "Pembatalan gratis hingga {date}",
+      "noRefund": "Tidak ada pengembalian dana jika Anda membatalkan atau tidak datang",
+      "partialRefundTerms": "Jika Anda membatalkan, kami mengembalikan sebagian harga. Lihat ketentuan kami di langkah berikutnya",
+      "noLongerFree": "Pembatalan gratis tidak lagi tersedia untuk tanggal ini",
+      "meal": {
+        "room_only": "Hanya kamar",
+        "breakfast": "Termasuk sarapan",
+        "half_board": "Setengah pensiun",
+        "full_board": "Pensiun penuh",
+        "all_inclusive": "Semua termasuk"
+      },
+      "mealTerms": {
+        "breakfast": "Sarapan setiap pagi",
+        "half_board": "Sarapan dan makan malam setiap hari",
+        "full_board": "Sarapan, makan siang dan makan malam setiap hari",
+        "all_inclusive": "Semua makanan dan minuman termasuk"
+      }
+    },
+    "sortRooms": "Urutkan kamar",
+    "pricesFailed": "Kami tidak dapat memuat harga untuk tanggal ini. Anda tetap dapat memilih kamar; kami akan memeriksa harganya di langkah berikutnya.",
+    "retryPrices": "Coba lagi",
+    "childrenPricedLater": "Harga untuk orang dewasa. Kami menambahkan anak-anak setelah Anda memberi tahu usia mereka di langkah berikutnya.",
+    "severalRooms": "Memesan lebih dari satu kamar?",
+    "notAvailable": "Tidak tersedia",
+    "tooManyGuests": "Kamar ini muat hingga {count} tamu. Pilih kamar yang lebih besar, atau pesan lebih dari satu kamar.",
+    "promoNotApplied": "Kode Anda {code} tidak berlaku untuk masa inap ini.",
+    "noChildren": "Kamar ini tidak menerima anak-anak. Pilih kamar lain untuk rombongan Anda.",
+    "percentOff": "-{percent}% HEMAT",
+    "closeRoomDetails": "Tutup detail kamar",
+    "soldOutForDates": "Habis untuk tanggal Anda"
   },
   "rooms": {
     "title": "Kamar Kami",
@@ -283,6 +320,11 @@
     "findBooking": "Cari Pemesanan Saya",
     "bookingFound": "Pemesanan Ditemukan",
     "confirmed": "Dikonfirmasi",
+    "pending": "Menunggu",
+    "expired": "Kedaluwarsa",
+    "checkedIn": "Sudah check-in",
+    "checkedOut": "Sudah check-out",
+    "pastStay": "Masa inap sudah lewat",
     "hotel": "Hotel",
     "room": "Kamar",
     "checkIn": "Check-in",
@@ -344,6 +386,18 @@
     "addons": "Tambahan",
     "totalPaid": "Total Dibayar",
     "totalDue": "Total Jatuh Tempo",
+    "total": "Total",
+    "depositPaid": "Deposit dibayar",
+    "depositPending": "Deposit tertunda",
+    "depositRefunded": "Deposit dikembalikan",
+    "balanceDueAtCheckIn": "Sisa pembayaran jatuh tempo saat check-in",
+    "paymentPaid": "Lunas",
+    "paymentPartlyPaid": "Dibayar sebagian",
+    "paymentAuthorized": "Diotorisasi",
+    "paymentUnpaid": "Belum dibayar",
+    "paymentRefunded": "Dikembalikan",
+    "paymentFailed": "Pembayaran gagal",
+    "paymentWaived": "Tidak perlu pembayaran",
     "paymentMethodLabel": "Pembayaran",
     "creditCard": "Kartu Kredit",
     "cash": "Tunai",
@@ -352,6 +406,10 @@
     "otherPayment": "Lainnya",
     "bankTransferPending": "Transfer bank tertunda",
     "paymentDeadline": "Batas waktu pembayaran",
+    "paypalPending": "Pembayaran PayPal tertunda",
+    "paypalInstructions": "Kirim {amount} ke {email} dan cantumkan {reference} di catatan PayPal agar kami dapat mencocokkannya. Pembayaran harus dikonfirmasi dalam {hours} jam.",
+    "copyEmail": "Salin email",
+    "copyReference": "Salin referensi pemesanan",
     "withdrawRequest": "Tarik Permintaan",
     "withdrawing": "Menarik...",
     "backToHotel": "Kembali ke {property}",
@@ -413,7 +471,9 @@
   "error": {
     "unableToLoad": "Tidak Dapat Memuat Hotel",
     "tryAgainLater": "Kami tidak dapat mengambil data hotel. Silakan coba lagi nanti.",
-    "retry": "Coba Lagi"
+    "retry": "Coba Lagi",
+    "notOnline": "Halaman pemesanan ini sedang tidak online",
+    "checkBackLater": "Silakan kembali lagi nanti."
   },
   "roomSelection": {
     "breakfastIncluded": "Termasuk sarapan",

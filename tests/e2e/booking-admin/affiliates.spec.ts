@@ -46,7 +46,8 @@ for (const width of [1280, 390]) {
     ).toHaveCount(0);
     expect(affiliateRequests).toEqual([]);
     await page.locator("main").getByRole("link", { name: "Dashboard", exact: true }).click();
-    await expect(page).toHaveURL(/\/$/);
+    // The link points at "/", which redirects to "/dashboard".
+    await expect(page).toHaveURL(/\/dashboard$/);
   });
 }
 

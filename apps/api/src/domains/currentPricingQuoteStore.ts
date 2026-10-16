@@ -1,8 +1,15 @@
 import { createHash } from "node:crypto";
-import { parsePublicPricingSelection, parseStoredPricingQuote } from "@vayada/domain-booking";
+import {
+  isManualPricingPaymentMethod,
+  isPricingPaymentMethod,
+  parsePublicPricingSelection,
+  parseStoredPricingQuote,
+} from "@vayada/domain-booking";
 import { pricingKeys, pricingObject } from "@vayada/domain-pms";
 import type { Pool } from "pg";
 import { lockCurrentPricingQuote } from "./currentPricingQuote.js";
+import { lockPricingManualPaymentTerms } from "./pricingManualPayment.js";
+import { pricingManualLeadTimeAllows } from "./pricingManualPaymentLead.js";
 import { lockPublicPricingAuthority } from "./publicPricingAuthority.js";
 import { PricingStorageError } from "./replacementPricingStore.js";
 const fail = (code: PricingStorageError["code"]): never => {
@@ -44,7 +51,7 @@ export function createCurrentPricingQuoteStore(pool: Pool, lifetimeSeconds: numb
         !input.requestId.length ||
         input.requestId.length > 200 ||
         input.requestId !== input.requestId.trim() ||
-        !["card", "pay_at_property"].includes(input.paymentMethod as string)
+        !isPricingPaymentMethod(input.paymentMethod)
       )
         return fail("invalid");
       const selection = parsePublicPricingSelection(input.selection);
@@ -92,6 +99,20 @@ export function createCurrentPricingQuoteStore(pool: Pool, lifetimeSeconds: numb
           lifetimeSeconds,
         );
         if (!record || record.quote.stay.propertyId !== scope.propertyId) return fail("denied");
+        if (isManualPricingPaymentMethod(method)) {
+          // VAY-2145: the payment deadline must fall before check-in.
+          const terms = await lockPricingManualPaymentTerms(client, scope.propertyId, method);
+          if (!terms) return fail("denied");
+          if (
+            !(await pricingManualLeadTimeAllows(
+              client,
+              scope.propertyId,
+              terms,
+              record.quote.stay.checkIn,
+            ))
+          )
+            throw new PricingStorageError("denied", "manual_payment_too_soon");
+        }
         const inserted = await client.query(
           `INSERT INTO booking.pricing_quotes(id,property_id,organization_id,request_id,request_hash,payload)
           SELECT $1,$2,$3,$4,$5,$6 WHERE $7::timestamptz > clock_timestamp() RETURNING id`,

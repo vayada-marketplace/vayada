@@ -14,15 +14,10 @@
     "./NearbyEditor": "./src/NearbyEditor.tsx",
     "./NearbyPreview": "./src/NearbyPreview.tsx",
     "./nearbyApi": "./src/nearbyApi.ts",
-    "./AddonsStep": "./src/AddonsStep.tsx",
-    "./BrandMediaStep": "./src/BrandMediaStep.tsx",
     "./localApiOrigin": "./src/localApiOrigin.ts",
     "./LocalizationMultiSelect": "./src/LocalizationMultiSelect.tsx",
-    "./PoliciesStep": "./src/PoliciesStep.tsx",
-    "./PropertyStep": "./src/PropertyStep.tsx",
     "./apiSessionRecovery": "./src/apiSessionRecovery.ts",
     "./returnTo": "./src/returnTo.ts",
-    "./RoomsStep": "./src/RoomsStep.tsx",
     "./SharedHotelLoginForm": "./src/SharedHotelLoginForm.tsx",
     "./SharedSignupPage": "./src/SharedSignupPage.tsx",
     "./bankTransferDestination": "./src/bankTransferDestination.ts",
@@ -34,7 +29,8 @@
     "./IncludedPricing": "./src/IncludedPricing.tsx",
     "./AcceptedPaymentMethods": "./src/AcceptedPaymentMethods.tsx",
     "./pricingSetupAmounts": "./src/pricingSetupAmounts.ts",
-    "./firstPricingSetupMessages": "./src/firstPricingSetupMessages.ts"
+    "./firstPricingSetupMessages": "./src/firstPricingSetupMessages.ts",
+    "./bookingPublicationReviewApi": "./src/bookingPublicationReviewApi.ts"
   },
   "dependencies": {
     "@vayada/domain-booking": "*",

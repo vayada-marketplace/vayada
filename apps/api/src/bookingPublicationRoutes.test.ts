@@ -33,6 +33,7 @@ type AuthOptions = {
   links?: readonly LinkedResource[];
   membershipStatus?: RequestContext["membership"]["status"];
   propertyScope?: Partial<MembershipPropertyScope> | null;
+  publicSiteServesPublications?: boolean;
 };
 type FakeRepository = BookingPublicationCommandPort &
   BookingPublicationReviewReadPort & {
@@ -100,6 +101,43 @@ describe("Booking publication routes", () => {
     ]);
     expect(repository.requestCalls).toHaveLength(0);
   });
+  it("says a published page waits for the booking site switch, without a link (VAY-2134)", async () => {
+    const repository = fakeRepository();
+    const review = repository.getPublicationReview.bind(repository);
+    repository.getPublicationReview = async (input) => {
+      const current = await review(input);
+      return (
+        current && {
+          ...current,
+          activeContentRevisionId: "85858585-8585-4585-8585-858585858599",
+          publishedUrl: "https://walk-hotel.next-booking.vayada.com/en",
+        }
+      );
+    };
+    const read = async (publicSiteServesPublications: boolean) => {
+      app = testApp(repository, readinessProvider(await readyEvidence()), {
+        publicSiteServesPublications,
+      });
+      const response = await injectJson(app, {
+        method: "GET",
+        url: `/api/hotel-setup/properties/${propertyId}/publications/booking`,
+        headers: { authorization: "Bearer valid-token" },
+      });
+      await app.close();
+      app = null;
+      return response.body;
+    };
+    expect(await read(false)).toMatchObject({
+      activeContentRevisionId: "85858585-8585-4585-8585-858585858599",
+      publishedUrl: null,
+      publicSite: "waiting_for_switch",
+    });
+    expect(await read(true)).toMatchObject({
+      publishedUrl: "https://walk-hotel.next-booking.vayada.com/en",
+      publicSite: "serving",
+    });
+  });
+
   it("keeps operation recovery available when readiness evaluation fails", async () => {
     const repository = fakeRepository(operation("succeeded"));
     app = testApp(repository, {
@@ -161,7 +199,7 @@ describe("Booking publication routes", () => {
     });
   });
 
-  it("allows publication and status reads for an explicitly assigned property", async () => {
+  it("allows publication and review reads for an explicitly assigned property", async () => {
     const readiness = await readyEvidence();
     const repository = fakeRepository();
     app = testApp(repository, readinessProvider(readiness), {
@@ -173,9 +211,9 @@ describe("Booking publication routes", () => {
       expectedReadinessHash: readiness.readinessHash,
     });
     expect(publication.statusCode).toBe(202);
-    expect((await getStatus(app)).statusCode).toBe(200);
+    expect((await getReview(app)).statusCode).toBe(200);
     expect(repository.requestCalls).toHaveLength(1);
-    expect(repository.statusCalls).toHaveLength(1);
+    expect(repository.reviewCalls).toHaveLength(1);
   });
 
   it.each(authorizationDenials)(
@@ -196,23 +234,6 @@ describe("Booking publication routes", () => {
       expect(response.statusCode).toBe(token === null || token === "invalid" ? 401 : 403);
       expect(provider.calls).toBe(0);
       expect(repository.requestCalls).toHaveLength(0);
-    },
-  );
-
-  it.each(authorizationDenials)(
-    "denies status GET for %s before repository access",
-    async (_name, token, options) => {
-      const repository = fakeRepository();
-      app = testApp(repository, readinessProvider(await readyEvidence()), options);
-      const headers: Record<string, string> = {};
-      if (token !== null) headers.authorization = `Bearer ${token}`;
-      const response = await injectJson(app, {
-        method: "GET",
-        url: `/api/hotel-setup/properties/${propertyId}/publications/booking/${operationId}`,
-        headers,
-      });
-      expect(response.statusCode).toBe(token === null || token === "invalid" ? 401 : 403);
-      expect(repository.statusCalls).toHaveLength(0);
     },
   );
 
@@ -296,7 +317,7 @@ describe("Booking publication routes", () => {
         "unassigned-key",
         otherPropertyId,
       ),
-      getStatus(app, otherPropertyId),
+      getReview(app, otherPropertyId),
       post(
         app,
         {
@@ -307,7 +328,7 @@ describe("Booking publication routes", () => {
         "foreign-key",
         foreignPropertyId,
       ),
-      getStatus(app, foreignPropertyId),
+      getReview(app, foreignPropertyId),
     ]);
 
     expect(responses.map(({ statusCode, body }) => ({ statusCode, body }))).toEqual(
@@ -321,7 +342,7 @@ describe("Booking publication routes", () => {
     );
     expect(provider.calls).toBe(0);
     expect(repository.requestCalls).toHaveLength(0);
-    expect(repository.statusCalls).toHaveLength(0);
+    expect(repository.reviewCalls).toHaveLength(0);
   });
 
   it("runs authorization before Fastify parses a malformed body", async () => {
@@ -367,41 +388,11 @@ describe("Booking publication routes", () => {
     expect(repository.requestCalls).toHaveLength(0);
   });
 
-  it("returns the safe operation projection and hides unknown operations", async () => {
-    const repository = fakeRepository(operation("unknown"));
-    app = testApp(repository, readinessProvider(await readyEvidence()));
-    const status = await injectJson<Record<string, unknown>>(app, {
-      method: "GET",
-      url: `/api/hotel-setup/properties/${propertyId}/publications/booking/${operationId}`,
-      headers: { authorization: "Bearer valid-token" },
-    });
-    expect(status.statusCode).toBe(200);
-    expect(status.body).toEqual(operation("unknown"));
-    expect(status.body).not.toHaveProperty("readiness");
-    expect(status.body).not.toHaveProperty("sourceManifest");
-    expect(status.body).not.toHaveProperty("publicContent");
-    expect(repository.statusCalls).toEqual([
-      { organizationId, propertyId, operationId, actorUserId },
-    ]);
-
-    await app.close();
-    repository.statusCalls.length = 0;
-    repository.statusResult = null;
-    app = testApp(repository, readinessProvider(await readyEvidence()));
-    const missing = await injectJson(app, {
-      method: "GET",
-      url: `/api/hotel-setup/properties/${propertyId}/publications/booking/${operationId}`,
-      headers: { authorization: "Bearer valid-token" },
-    });
-    expect(missing.statusCode).toBe(404);
-    expect(missing.body).toEqual({ code: "publication_operation_not_found" });
-  });
-
   it("does not mount without both concrete publication dependencies", async () => {
     app = buildApp({ logger: false });
     const response = await injectJson(app, {
       method: "GET",
-      url: `/api/hotel-setup/properties/${propertyId}/publications/booking/${operationId}`,
+      url: `/api/hotel-setup/properties/${propertyId}/publications/booking`,
     });
     expect(response.statusCode).toBe(404);
   });
@@ -470,6 +461,7 @@ function testApp(
       },
       repository,
       readinessProvider: provider,
+      publicSiteServesPublications: options.publicSiteServesPublications ?? true,
     },
   });
   app.decorateRequest("authContext", null);
@@ -639,10 +631,10 @@ async function post(
   });
 }
 
-async function getStatus(target: ReturnType<typeof buildApp>, targetPropertyId = propertyId) {
+async function getReview(target: ReturnType<typeof buildApp>, targetPropertyId = propertyId) {
   return injectJson<Record<string, unknown>>(target, {
     method: "GET",
-    url: `/api/hotel-setup/properties/${targetPropertyId}/publications/booking/${operationId}`,
+    url: `/api/hotel-setup/properties/${targetPropertyId}/publications/booking`,
     headers: { authorization: "Bearer valid-token" },
   });
 }

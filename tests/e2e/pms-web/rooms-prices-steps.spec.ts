@@ -219,6 +219,9 @@ async function mockPricing(page: Page, initial: ReturnType<typeof publicationOf>
     const method = request.method();
     const suffix = new URL(request.url()).pathname.split("/pricing-v2")[1] ?? "";
     const body = (method === "GET" ? {} : request.postDataJSON()) as Record<string, any>;
+    // Bank-transfer and PayPal acceptance is off, as in production today (VAY-2139).
+    if (suffix === "/payment-methods" && method === "GET")
+      return ok(route, { acceptanceEnabled: false, readyMethods: [] });
     if (suffix === "" && method === "GET") {
       if (!state.publication) return route.fulfill({ status: 404, json: { code: "not_found" } });
       return ok(route, state.publication);
@@ -341,39 +344,47 @@ async function openPms(page: Page) {
 const main = (page: Page) => page.locator("main");
 const prices = async (page: Page, id: string) => {
   await page.goto(`/rooms/${id}?tab=prices`);
-  // An unpriced room shows "Set this room's prices" and step 1's question together.
+  // An unpriced room shows "Set this room's prices"; a priced one the card's "Price per night".
   await expect(
     main(page)
-      .getByRole("heading", { name: /What does this room cost per night\?|Set this room's prices/ })
+      .getByRole("heading", { name: /^Price per night$|Set this room's prices/ })
       .first(),
   ).toBeVisible();
 };
 // Every option keeps a hidden Edit window mounted; the open window or form is the visible dialog.
 const dialog = (page: Page) => page.locator('[role="dialog"]:visible');
+/** The card's switch for an extra choice (VAY-2188). */
+const extra = (page: Page, name: string) =>
+  main(page).getByRole("switch", { name: `Offer “${name}”` });
+const openMoreOptions = async (page: Page) => {
+  // Editors inside keep their own <details>, so the row is found by its summary's first words.
+  const summary = main(page)
+    .locator("summary")
+    .filter({ hasText: /^More options/ })
+    .first();
+  if (!(await summary.evaluate((element) => (element.parentElement as HTMLDetailsElement).open)))
+    await summary.click();
+};
 
-test("answers the steps for a priced room and publishes only what changed", async ({
+test("edits a priced room on the simple card and publishes only what changed (VAY-2188)", async ({
   page,
 }, testInfo) => {
   await openPms(page);
   const pricing = await mockPricing(page, publicationOf(3, [designRoom(3), complexRoom(3)]));
   const assertHealthy = watchPageHealth(page, testInfo);
   await prices(page, DELUXE);
-  for (const heading of [
-    "Is it more expensive at certain times of year?",
-    "Do weekends cost more?",
-    "What can guests choose when they book?",
-    "Any rules for stays?",
-  ])
+  for (const heading of ["Cancellation", "Extra choices for guests", "Busier dates"])
     await expect(main(page).getByRole("heading", { name: heading })).toBeVisible();
-  // Step 4 matches the design: names from meal and terms, the engine's normal night.
-  for (const [name, price] of [
-    ["Flexible", "€100"],
-    ["Non-refundable", "€90"],
-    ["With breakfast", "€115"],
-  ])
-    await expect(
-      main(page).getByRole("listitem").filter({ hasText: name }).filter({ hasText: price }).first(),
-    ).toBeVisible();
+  // The design's options are the card's free cancellation and its two switches, with the engine's normal night.
+  await expect(
+    main(page).getByRole("button", { name: "Free cancellation", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await expect(main(page).getByLabel("Days before arrival")).toHaveValue("7");
+  await expect(extra(page, "Non-refundable")).toHaveAttribute("aria-checked", "true");
+  await expect(main(page).getByLabel("How much cheaper, in percent")).toHaveValue("10");
+  await expect(main(page).getByText("€90 a night", { exact: true })).toBeVisible();
+  await expect(extra(page, "With breakfast")).toHaveAttribute("aria-checked", "true");
+  await expect(main(page).getByText("€115 a night for 2", { exact: true })).toBeVisible();
   await expect(main(page).getByText("Save 10%")).toBeVisible();
 
   await main(page).getByRole("button", { name: "+10%" }).click();
@@ -382,7 +393,7 @@ test("answers the steps for a priced room and publishes only what changed", asyn
     "true",
   );
 
-  await main(page).getByRole("button", { name: "Add season" }).click();
+  await main(page).getByRole("button", { name: "Add a season" }).click();
   await dialog(page).getByLabel("Season name").fill("Peak");
   await dialog(page).getByLabel("Starts: day").fill("20");
   await dialog(page).getByLabel("Starts: month").selectOption("12");
@@ -396,6 +407,8 @@ test("answers the steps for a priced room and publishes only what changed", asyn
       .first(),
   ).toBeVisible();
 
+  // Other options live under More options.
+  await openMoreOptions(page);
   await main(page).getByRole("button", { name: "Half board", exact: true }).click();
   await dialog(page).getByLabel("Half board price").fill("25");
   await dialog(page).getByRole("button", { name: "Add option" }).click();
@@ -403,12 +416,10 @@ test("answers the steps for a priced room and publishes only what changed", asyn
     main(page).getByRole("listitem").filter({ hasText: "Half board €25 per adult" }),
   ).toBeVisible();
 
-  await main(page).getByRole("button", { name: "Edit With breakfast" }).click();
-  await dialog(page).getByRole("button", { name: "Delete option" }).click();
+  // Switching breakfast off asks, then deletes its option.
+  await extra(page, "With breakfast").click();
   await page.getByRole("button", { name: "Delete option" }).last().click();
-  await expect(main(page).getByRole("listitem").filter({ hasText: "With breakfast" })).toHaveCount(
-    0,
-  );
+  await expect(extra(page, "With breakfast")).toHaveAttribute("aria-checked", "false");
 
   await main(page).getByRole("button", { name: "Save prices" }).click();
   await expect(main(page).getByText("Prices saved.", { exact: false })).toBeVisible();
@@ -451,11 +462,18 @@ test("answers the steps for a priced room and publishes only what changed", asyn
   await assertHealthy();
 });
 
-test("keeps a setup the steps can't show unchanged through a save", async ({ page }, testInfo) => {
+test("keeps a setup the simple card can't show unchanged through a save", async ({
+  page,
+}, testInfo) => {
   await openPms(page);
   const pricing = await mockPricing(page, publicationOf(3, [designRoom(3), complexRoom(3)]));
   const assertHealthy = watchPageHealth(page, testInfo);
   await prices(page, GARDEN);
+  await expect(
+    main(page).getByText("This room has more settings than the simple view shows.", {
+      exact: false,
+    }),
+  ).toBeVisible();
   await expect(main(page).getByRole("button", { name: "Other days…" })).toHaveAttribute(
     "aria-expanded",
     "true",
@@ -477,33 +495,122 @@ test("keeps a setup the steps can't show unchanged through a save", async ({ pag
   await assertHealthy();
 });
 
-test("sets the first prices of an unpriced room as steps, then saves them next to the other rooms", async ({
+test("sets the first price of an unpriced room with one Save, next to the other rooms (VAY-2188)", async ({
   page,
 }, testInfo) => {
   await openPms(page);
   const pricing = await mockPricing(page, publicationOf(3, [designRoom(3)]));
   const assertHealthy = watchPageHealth(page, testInfo);
   await prices(page, LAKE);
-  await expect(main(page).getByText("This room has no prices yet")).toBeVisible();
+  await expect(main(page).getByText("Lake Loft has no price yet", { exact: false })).toBeVisible();
   await expect(main(page).getByLabel("Room type")).toHaveCount(0);
-  await main(page).getByLabel("Room price per night").fill("120");
-  await main(page).getByRole("button", { name: "No, non-refundable" }).click();
-  await main(page).getByRole("checkbox", { name: "Card online" }).check();
-  await main(page).getByLabel("Adult pricing starts at age (1–18)").fill("12");
-  await main(page).getByLabel("Price per child per night (0 is allowed)").fill("0");
-  await main(page).getByRole("button", { name: "Yes", exact: true }).click();
-  await main(page).getByRole("button", { name: "Continue" }).click();
+  // Save without a price names what is missing; nothing else needs an answer.
+  await main(page).getByRole("button", { name: "Save prices" }).click();
   await expect(
-    main(page).getByRole("heading", { name: "What does this room cost per night?" }),
-  ).toBeVisible();
-  await expect(main(page).getByLabel("Lake Loft Offer 1 Per room")).toHaveValue("120.00");
+    main(page).getByRole("listitem").filter({ hasText: "Room price per night" }),
+  ).toHaveCount(1);
+  await expect(main(page).getByLabel("Room price per night")).toHaveAttribute(
+    "aria-invalid",
+    "true",
+  );
+  await main(page).getByLabel("Room price per night").fill("120");
   await main(page).getByRole("button", { name: "Save prices" }).click();
   await expect(main(page).getByText("Prices saved.", { exact: false })).toBeVisible();
   const published = pricing.publishes[0].snapshot.rooms as Room[];
   expect(published.map((value) => value.roomTypeId)).toEqual([DELUXE, LAKE]);
+  expect(published[1].offers).toHaveLength(1);
   expect(published[1].offers[0].price.calendar.base).toEqual(flat("12000"));
+  // Children under 12 free, counted toward the room's guests; no minimum stay.
+  expect(published[1].children).toEqual({
+    adultFromAge: 12,
+    bands: [{ fromAge: 0, throughAge: 11, nightlyMinor: "0", countsTowardCapacity: true }],
+  });
+  expect(published[1].offers[0].restrictions.rules.minArrivalNights).toBe(1);
+  // Free cancellation until 3 days before arrival, paid as Payment settings allow (the shared mock: at the property).
   expect(pricing.termsWrites).toEqual([
-    expect.objectContaining({ cancellation: { kind: "non_refundable" } }),
+    expect.objectContaining({
+      cancellation: expect.objectContaining({
+        kind: "flexible",
+        terms: expect.objectContaining({ freeCancellationDeadlineDays: 3 }),
+      }),
+      payment: { kind: "full", acceptedMethods: ["pay_at_property"] },
+    }),
   ]);
   await assertHealthy();
+});
+
+test("adds the switches and a season to a first price before saving it (VAY-2188)", async ({
+  page,
+}, testInfo) => {
+  await openPms(page);
+  const pricing = await mockPricing(page, publicationOf(3, [designRoom(3)]));
+  const assertHealthy = watchPageHealth(page, testInfo);
+  await prices(page, LAKE);
+  await main(page).getByLabel("Room price per night").fill("100");
+  await extra(page, "Non-refundable").click();
+  await extra(page, "With breakfast").click();
+  await main(page).getByLabel("Breakfast price").fill("12");
+  // "Add a season" adds the prices to the tab, unsaved, and opens the season window.
+  await main(page).getByRole("button", { name: "Add a season" }).click();
+  await dialog(page).getByLabel("Season name").fill("Peak");
+  await dialog(page).getByLabel("Starts: day").fill("20");
+  await dialog(page).getByLabel("Starts: month").selectOption("12");
+  await dialog(page).getByLabel("Ends: day").fill("31");
+  await dialog(page).getByLabel("Ends: month").selectOption("12");
+  await dialog(page).getByLabel("Season price Per room").fill("160");
+  await dialog(page).getByRole("button", { name: "Save season" }).click();
+  await expect(extra(page, "Non-refundable")).toHaveAttribute("aria-checked", "true");
+  await expect(extra(page, "With breakfast")).toHaveAttribute("aria-checked", "true");
+  await main(page).getByRole("button", { name: "Save prices" }).click();
+  await expect(main(page).getByText("Prices saved.", { exact: false })).toBeVisible();
+  const lake = (pricing.publishes[0].snapshot.rooms as Room[]).find(
+    (value) => value.roomTypeId === LAKE,
+  )!;
+  expect(lake.offers).toHaveLength(3);
+  expect(lake.offers[0].price.calendar.seasons).toContainEqual(
+    expect.objectContaining({ name: "Peak", price: flat("16000") }),
+  );
+  expect(lake.offers[1]).toMatchObject({
+    price: { kind: "linked", adjustment: { kind: "percentage", basisPoints: -1000 } },
+  });
+  expect(lake.offers[2]).toMatchObject({
+    meal: { kind: "breakfast", charge: { kind: "person", adultMinor: "1200" } },
+  });
+  expect(pricing.termsWrites.map((write) => write.cancellation.kind)).toEqual([
+    "flexible",
+    "non_refundable",
+    "flexible",
+  ]);
+  await assertHealthy();
+});
+
+test("shows one stale-prices warning, a plain Price-free main window and a retry when rooms can't be read (VAY-2157)", async ({
+  page,
+}) => {
+  // No page-health watch: the failed room read (500) is the point of this test.
+  await openPms(page);
+  await mockPricing(page, { ...publicationOf(3, [designRoom(3)]), stale: true });
+  let failing = true;
+  await page.route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/room-types*`, (route) =>
+    failing
+      ? route.fulfill({ status: 500, json: { message: "Internal Server Error" } })
+      : route.fallback(),
+  );
+  await page.goto(`/rooms/${DELUXE}?tab=prices`);
+  await expect(
+    main(page).getByText("Prices couldn't be loaded right now. Try again in a moment."),
+  ).toBeVisible();
+  await expect(main(page).getByText("Internal Server Error")).toHaveCount(0);
+  failing = false;
+  await main(page).getByRole("button", { name: "Retry" }).click();
+  await expect(
+    main(page).getByRole("heading", { name: "Price per night", exact: true }),
+  ).toBeVisible();
+  // The room page's banner, with its "Save prices again", is the only warning.
+  await expect(main(page).getByRole("button", { name: "Save prices again" })).toBeVisible();
+  await expect(main(page).getByText("Prices need to be saved again")).toHaveCount(1);
+  // The main option's price is the card's: its window has no empty "Price" group.
+  await main(page).getByRole("button", { name: "Edit what the price includes" }).click();
+  await expect(dialog(page).getByRole("heading", { name: "Meals" })).toBeVisible();
+  await expect(dialog(page).getByRole("heading", { name: "Price", exact: true })).toHaveCount(0);
 });

@@ -1,4 +1,5 @@
 import {
+  isManualPricingPaymentMethod,
   parsePublicQuoteGuestDisclosure,
   type PublicBookingQuote,
   type PublicQuoteGuestDisclosure,
@@ -7,6 +8,7 @@ import {
   expireCheckoutIdempotencyKeyAt,
   getCheckoutIdempotencyKey,
 } from "@/lib/storage/bookingDraft";
+import { deviceTimeOf, serverNow } from "@/lib/serverClock";
 import { ApiError, bookingWebPublic } from "./client";
 
 export type PricingAcceptanceGuest = Readonly<{
@@ -44,6 +46,21 @@ export type PricingAcceptanceResult =
       bookingReference: string;
       replayed: true;
     }>;
+
+/** A bank-transfer or PayPal booking held until the guest pays the hotel (VAY-2139). The token
+ * opens the bank details or PayPal email on the confirmation page. */
+export type PricingManualPaymentPending = Readonly<{
+  kind: "payment_pending";
+  bookingId: string;
+  bookingReference: string;
+  payment: Readonly<{
+    method: "bank_transfer" | "paypal";
+    amountMinor: string;
+    currency: string;
+    deadlineAt: string;
+  }>;
+  confirmationToken: string;
+}>;
 
 /** An accepted card quote whose booking waits for the guest's card payment. */
 export type PricingCardPaymentRequired = Readonly<{
@@ -123,6 +140,41 @@ function parseCardPaymentRequired(
   };
 }
 
+function parseManualPaymentPending(value: unknown): PricingManualPaymentPending | null {
+  const keys = ["kind", "bookingId", "bookingReference", "payment", "confirmationToken"];
+  const fresh = ["acceptanceId", "acceptedAt", "checkedAt", "confirmationTokenExpiresAt"];
+  const replay = ["replayed", "confirmationTokenExpiresAt"];
+  if (
+    !(exact(value, [...keys, ...fresh]) || exact(value, [...keys, ...replay])) ||
+    value.kind !== "payment_pending" ||
+    !uuid(value.bookingId) ||
+    !bookingReference(value.bookingReference) ||
+    typeof value.confirmationToken !== "string" ||
+    !/^[A-Za-z0-9_-]{40,80}$/.test(value.confirmationToken) ||
+    !exact(value.payment, ["method", "amountMinor", "currency", "deadlineAt"]) ||
+    (value.payment.method !== "bank_transfer" && value.payment.method !== "paypal") ||
+    typeof value.payment.amountMinor !== "string" ||
+    !/^[1-9][0-9]*$/.test(value.payment.amountMinor) ||
+    typeof value.payment.currency !== "string" ||
+    !/^[A-Z]{3}$/.test(value.payment.currency) ||
+    !iso(value.payment.deadlineAt)
+  )
+    return null;
+  const payment = value.payment;
+  return {
+    kind: "payment_pending",
+    bookingId: value.bookingId,
+    bookingReference: value.bookingReference,
+    payment: {
+      method: payment.method as "bank_transfer" | "paypal",
+      amountMinor: payment.amountMinor as string,
+      currency: payment.currency as string,
+      deadlineAt: payment.deadlineAt as string,
+    },
+    confirmationToken: value.confirmationToken,
+  };
+}
+
 function parsePricingAcceptanceResult(value: unknown): PricingAcceptanceResult | null {
   if (
     exact(value, ["kind", "bookingId", "bookingReference", "replayed"]) &&
@@ -186,12 +238,12 @@ export async function acceptPricingQuote(
   guest: PricingAcceptanceGuest,
   signal?: AbortSignal,
   mode: "fresh" | "uncertain-retry" = "fresh",
-): Promise<PricingAcceptanceResult | PricingCardPaymentRequired> {
+): Promise<PricingAcceptanceResult | PricingCardPaymentRequired | PricingManualPaymentPending> {
   const verifiedDisclosure = parsePublicQuoteGuestDisclosure(disclosure, quote);
   if (
     !pricingQuoteBookableOnline(quote) ||
     !verifiedDisclosure ||
-    (mode === "fresh" && Date.parse(quote.expiresAt) <= Date.now())
+    (mode === "fresh" && Date.parse(quote.expiresAt) <= serverNow())
   )
     throw new Error("This price cannot be booked online. Please refresh the price.");
 
@@ -240,9 +292,24 @@ export async function acceptPricingQuote(
   const card = parseCardPaymentRequired(raw, requestId);
   // Keep the key while the card payment is open, so a retry returns the same payment.
   if (card) return card;
+  const manual = parseManualPaymentPending(raw);
+  if (manual) {
+    expireCheckoutIdempotencyKeyAt(
+      "pricing-acceptance",
+      identity,
+      new Date(deviceTimeOf(quote.expiresAt)).toISOString(),
+      requestId,
+    );
+    return manual;
+  }
   const result = parsePricingAcceptanceResult(raw);
   if (!result) throw new Error("The booking confirmation could not be verified. Please try again.");
-  expireCheckoutIdempotencyKeyAt("pricing-acceptance", identity, quote.expiresAt, requestId);
+  expireCheckoutIdempotencyKeyAt(
+    "pricing-acceptance",
+    identity,
+    new Date(deviceTimeOf(quote.expiresAt)).toISOString(),
+    requestId,
+  );
   return result;
 }
 
@@ -251,8 +318,9 @@ export async function acceptPricingQuote(
 export function pricingQuoteBookableOnline(quote: PublicBookingQuote): boolean {
   if (quote.paymentMethod === "pay_at_property")
     return quote.dueNowMinor === "0" && quote.dueLaterMinor === quote.totalMinor;
+  // Card is charged in full now; bank transfer and PayPal are paid in full before the deadline.
   return (
-    quote.paymentMethod === "card" &&
+    (quote.paymentMethod === "card" || isManualPricingPaymentMethod(quote.paymentMethod)) &&
     quote.dueNowMinor === quote.totalMinor &&
     quote.dueLaterMinor === "0"
   );

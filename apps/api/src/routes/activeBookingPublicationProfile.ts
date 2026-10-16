@@ -1,13 +1,22 @@
 import type { PublicBookabilityProfileProjection } from "@vayada/domain-distribution";
-import { parseBookingPublicContent } from "@vayada/domain-distribution/booking-publication";
 import pg, { type QueryResultRow } from "pg";
+import { LIVE_PROMO_CODES_SQL } from "../domains/bookingGuestModules.js";
 
-import type { PublicHotelProfileReadPool, PublicHotelProfileRepository } from "./aiHotels.js";
+import {
+  ACTIVE_BOOKING_PUBLICATION_CONTRACT,
+  normalizedDomain,
+  visibleActiveBookingPublication,
+  type ActiveBookingPublicationRow,
+} from "../domains/activeBookingPublicationGate.js";
+import {
+  createTargetPublicHotelProfileRepository,
+  type PublicHotelProfileReadPool,
+  type PublicHotelProfileRepository,
+} from "./aiHotels.js";
 
-type ActiveProfileRow = QueryResultRow & { propertyId: string; publicContent: unknown };
 type CurrentPublicGatesRow = QueryResultRow & {
-  domainVerified: boolean;
   referralEnabled: boolean;
+  promoCodes: boolean;
   latitude: number | null;
   longitude: number | null;
 };
@@ -19,12 +28,14 @@ FROM distribution.active_public_booking_revision active
 JOIN distribution.public_booking_content_revisions revision
   ON revision.id = active.content_revision_id
  AND revision.property_id = active.property_id
-WHERE revision.public_content ->> 'contractVersion' = 'booking-public-content.v1'`;
+WHERE revision.public_content ->> 'contractVersion' = '${ACTIVE_BOOKING_PUBLICATION_CONTRACT}'`;
 
 export function createActiveBookingPublicationProfileRepository(config: {
   connectionString: string;
   max?: number;
   pool?: PublicHotelProfileReadPool;
+  /** Bank-transfer and PayPal pages count only while their acceptance is on (VAY-2139). */
+  manualPayments?: boolean;
 }): PublicHotelProfileRepository {
   if (!config.connectionString.trim()) {
     throw new Error("Active Booking publication profile connectionString must not be empty");
@@ -32,12 +43,23 @@ export function createActiveBookingPublicationProfileRepository(config: {
   const ownsPool = !config.pool;
   const pool =
     config.pool ?? new pg.Pool({ connectionString: config.connectionString, max: config.max });
+  const content = { manualPayments: config.manualPayments === true };
+  // A hotel that never published in setup keeps the page it had before the public site switched to
+  // setup publications, as checkout and pricing already do. Once it publishes, only its
+  // publication counts, even while that is hidden. Only the legacy publisher writes those
+  // profiles and it doesn't run in this mode, so this is the set that was online at the switch,
+  // less hotels suspended or retired since (VAY-2186).
+  const legacy = createTargetPublicHotelProfileRepository({
+    connectionString: config.connectionString,
+    pool,
+    unpublishedOnly: true,
+  });
 
   return {
     async findProfileBySlug(value) {
       const slug = normalizedSlug(value);
       if (!slug) return null;
-      const result = await pool.query<ActiveProfileRow>(
+      const result = await pool.query<ActiveBookingPublicationRow>(
         `${ACTIVE_PROFILE_SELECT}
          AND (
            lower(revision.public_content #>> '{profile,hotel,slug}') = $1
@@ -57,13 +79,15 @@ export function createActiveBookingPublicationProfileRepository(config: {
          LIMIT 1`,
         [slug],
       );
-      return currentActiveProfile(pool, result.rows[0]);
+      const row = result.rows[0];
+      if (!row) return legacy.findProfileBySlug(slug);
+      return currentActiveProfile(pool, row, content);
     },
 
     async findProfileByCustomDomain(value) {
       const domain = normalizedDomain(value);
       if (!domain) return null;
-      const result = await pool.query<ActiveProfileRow>(
+      const result = await pool.query<ActiveBookingPublicationRow>(
         `${ACTIVE_PROFILE_SELECT}
          AND EXISTS (
            SELECT 1
@@ -76,7 +100,9 @@ export function createActiveBookingPublicationProfileRepository(config: {
          LIMIT 1`,
         [domain],
       );
-      const profile = await currentActiveProfile(pool, result.rows[0]);
+      const row = result.rows[0];
+      if (!row) return (await legacy.findProfileByCustomDomain?.(domain)) ?? null;
+      const profile = await currentActiveProfile(pool, row, content);
       return profile && normalizedDomain(profile.hotel.customDomainUrl ?? "") === domain
         ? profile
         : null;
@@ -88,29 +114,14 @@ export function createActiveBookingPublicationProfileRepository(config: {
   };
 }
 
-function activeProfile(
-  row: ActiveProfileRow | undefined,
-): PublicBookabilityProfileProjection | null {
-  if (!row) return null;
-  const profile = parseBookingPublicContent(row.publicContent)?.profile;
-  return profile &&
-    profile.hotel.propertyId === row.propertyId &&
-    profile.hotel.trust.bookabilityStatus === "bookable" &&
-    profile.freshness.status === "fresh"
-    ? profile
-    : null;
-}
-
 async function currentActiveProfile(
   pool: PublicHotelProfileReadPool,
-  row: ActiveProfileRow | undefined,
+  row: ActiveBookingPublicationRow | undefined,
+  content: { manualPayments: boolean },
 ): Promise<PublicBookabilityProfileProjection | null> {
-  const profile = activeProfile(row);
-  if (!profile || !row) return null;
-  const domain = profile.hotel.customDomainUrl
-    ? normalizedDomain(profile.hotel.customDomainUrl)
-    : null;
-  if (profile.hotel.customDomainUrl && !domain) return null;
+  const parsed = await visibleActiveBookingPublication(pool, row, content);
+  if (!parsed || !row) return null;
+  const profile = parsed.profile;
   const result = await pool.query<CurrentPublicGatesRow>(
     `SELECT
        (SELECT CASE WHEN geo_public AND map_display_mode='exact' THEN latitude
@@ -121,14 +132,6 @@ async function currentActiveProfile(
          WHEN geo_public AND map_display_mode='approximate' THEN round(longitude,2) END::double precision
          FROM hotel_catalog.property_locations WHERE property_id=$1::uuid
            AND latitude IS NOT NULL AND longitude IS NOT NULL) AS longitude,
-       CASE WHEN $2::text IS NULL THEN TRUE ELSE EXISTS (
-         SELECT 1
-         FROM hotel_catalog.property_domains current_domain
-         WHERE current_domain.property_id = $1::uuid
-           AND current_domain.hostname = $2
-           AND current_domain.verification_status = 'verified'
-           AND current_domain.canonical_when_verified = TRUE
-       ) END AS "domainVerified",
        EXISTS (
          SELECT 1
          FROM identity.product_entitlements entitlement
@@ -160,12 +163,12 @@ async function currentActiveProfile(
                AND booking_resource.relationship IN ('owner', 'operator')
                AND booking_resource.status = 'active'
            )
-       ) AS "referralEnabled"`,
-    [row.propertyId, domain],
+       ) AS "referralEnabled",
+       ${LIVE_PROMO_CODES_SQL("$1::uuid")} AS "promoCodes"`,
+    [row.propertyId],
   );
   const gates = result.rows[0];
-  if (gates?.domainVerified !== true) return null;
-  const referralEnabled = gates.referralEnabled === true;
+  const referralEnabled = gates?.referralEnabled === true;
   const branding = profile.hotel.branding;
   return {
     ...profile,
@@ -173,12 +176,14 @@ async function currentActiveProfile(
       ...profile.hotel,
       location: {
         ...profile.hotel.location,
-        latitude: gates.latitude ?? null,
-        longitude: gates.longitude ?? null,
+        latitude: gates?.latitude ?? null,
+        longitude: gates?.longitude ?? null,
       },
       capabilities: {
         ...profile.hotel.capabilities,
         referralCodes: profile.hotel.capabilities.referralCodes && referralEnabled,
+        // Live, not from the publication: the Promos switch (VAY-2200) and codes made later.
+        promoCodes: gates?.promoCodes === true,
       },
       ...(branding
         ? {
@@ -195,22 +200,4 @@ async function currentActiveProfile(
 const normalizedSlug = (value: string) => {
   const normalized = value.trim().toLowerCase();
   return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(normalized) ? normalized : null;
-};
-
-const normalizedDomain = (value: string) => {
-  try {
-    const input = value.trim();
-    const url = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(input) ? input : `https://${input}`);
-    const hostname = url.hostname.toLowerCase().replace(/\.$/, "");
-    return (url.protocol === "https:" || url.protocol === "http:") &&
-      !url.username &&
-      !url.password &&
-      hostname &&
-      !hostname.includes("..") &&
-      /^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/.test(hostname)
-      ? hostname
-      : null;
-  } catch {
-    return null;
-  }
 };

@@ -2,7 +2,8 @@
   "analyticsConsent": {
     "settings": "Privacy choices",
     "title": "Optional analytics",
-    "description": "We use optional analytics to understand visits and booking steps. Booking works with analytics off. Your choice applies only to this hotel’s booking site.",
+    "description": "We use optional analytics to understand visits and booking steps. Booking works with analytics off. Your choice applies only to our booking site.",
+    "controller": "We, {hotel}, are responsible for this data. Vayada runs our booking site and processes the data for us. <policy>Privacy notice</policy>",
     "enabled": "Analytics is on.",
     "disabled": "Analytics is off.",
     "saveError": "Could not save your choice. Analytics stays off.",
@@ -59,7 +60,7 @@
   },
   "steps": {
     "rooms": "Rooms",
-    "addons": "Add-ons",
+    "addons": "Extras",
     "details": "Details",
     "payment": "Payment"
   },
@@ -124,7 +125,43 @@
       "checkingAvailability": "Checking availability",
       "availabilityUnavailable": "Availability is temporarily unavailable for these dates.",
       "availabilityUnavailableTooltip": "Availability unavailable"
-    }
+    },
+    "choice": {
+      "freeCancellation": "Free cancellation",
+      "nonRefundable": "Non-refundable",
+      "partialRefund": "Partial refund",
+      "mealNonRefundable": "{meal}, non-refundable",
+      "mealPartialRefund": "{meal}, partial refund",
+      "freeUntil": "Free cancellation until {date}",
+      "noRefund": "No refund if you cancel or don't arrive",
+      "partialRefundTerms": "Part of the price is refunded if you cancel. See our terms on the next step",
+      "noLongerFree": "Free cancellation is no longer available for these dates",
+      "meal": {
+        "room_only": "Room only",
+        "breakfast": "Breakfast included",
+        "half_board": "Half board",
+        "full_board": "Full board",
+        "all_inclusive": "All inclusive"
+      },
+      "mealTerms": {
+        "breakfast": "Breakfast every morning",
+        "half_board": "Breakfast and dinner every day",
+        "full_board": "Breakfast, lunch and dinner every day",
+        "all_inclusive": "All meals and drinks included"
+      }
+    },
+    "sortRooms": "Sort rooms",
+    "pricesFailed": "We couldn't load prices for these dates. You can still choose a room; we'll check the price on the next step.",
+    "retryPrices": "Try again",
+    "childrenPricedLater": "Prices are for the adults. We add children once you tell us their ages on the next step.",
+    "severalRooms": "Booking more than one room?",
+    "notAvailable": "Not available",
+    "tooManyGuests": "This room fits up to {count, plural, one {# guest} other {# guests}}. Choose a bigger room, or book more than one room.",
+    "promoNotApplied": "Your code {code} doesn't apply to this stay.",
+    "noChildren": "This room doesn't take children. Choose another room for your group.",
+    "percentOff": "-{percent}% OFF",
+    "closeRoomDetails": "Close room details",
+    "soldOutForDates": "Sold out for your dates"
   },
   "rooms": {
     "title": "Our Rooms",
@@ -206,7 +243,7 @@
     "paymentDetails": "Payment Details",
     "payWithCard": "Pay with Card",
     "cardAuthNote": "Your card will be charged securely via Stripe",
-    "payAtProperty": "Pay at Property",
+    "payAtProperty": "Pay at the hotel",
     "payAtPropertyNote": "Pay at check-in — cash & card accepted, no online payment needed",
     "payAtPropertyCashOnly": "Pay with cash at check-in — no online payment needed",
     "payAtPropertyCardOnly": "Pay with card at check-in — no online payment needed",
@@ -287,6 +324,11 @@
     "findBooking": "Find My Booking",
     "bookingFound": "Booking Found",
     "confirmed": "Confirmed",
+    "pending": "Pending",
+    "expired": "Expired",
+    "checkedIn": "Checked in",
+    "checkedOut": "Checked out",
+    "pastStay": "Past stay",
     "hotel": "Hotel",
     "room": "Room",
     "checkIn": "Check-in",
@@ -348,6 +390,18 @@
     "addons": "Add-ons",
     "totalPaid": "Total Paid",
     "totalDue": "Total Due",
+    "total": "Total",
+    "depositPaid": "Deposit paid",
+    "depositPending": "Deposit pending",
+    "depositRefunded": "Deposit refunded",
+    "balanceDueAtCheckIn": "Remaining balance due at check-in",
+    "paymentPaid": "Paid",
+    "paymentPartlyPaid": "Partly paid",
+    "paymentAuthorized": "Authorised",
+    "paymentUnpaid": "Not paid yet",
+    "paymentRefunded": "Refunded",
+    "paymentFailed": "Payment failed",
+    "paymentWaived": "No payment needed",
     "paymentMethodLabel": "Payment",
     "creditCard": "Credit Card",
     "cash": "Cash",
@@ -356,6 +410,10 @@
     "otherPayment": "Other",
     "bankTransferPending": "Bank transfer pending",
     "paymentDeadline": "Payment deadline",
+    "paypalPending": "PayPal payment pending",
+    "paypalInstructions": "Send {amount} to {email} and include {reference} in the PayPal note so we can match it. Payment must be confirmed within {hours} hours.",
+    "copyEmail": "Copy email",
+    "copyReference": "Copy booking reference",
     "withdrawRequest": "Withdraw Request",
     "withdrawing": "Withdrawing...",
     "backToHotel": "Back to {property}",
@@ -417,7 +475,9 @@
   "error": {
     "unableToLoad": "Unable to Load Hotel",
     "tryAgainLater": "We couldn't fetch the hotel data. Please try again later.",
-    "retry": "Retry"
+    "retry": "Retry",
+    "notOnline": "This booking page isn't online right now",
+    "checkBackLater": "Please check back later."
   },
   "roomSelection": {
     "breakfastIncluded": "Breakfast included",

@@ -10,6 +10,13 @@ import { useTranslation } from "@/lib/i18n";
 import type { MessageKey } from "./pricingAmounts";
 import * as ui from "./pricingStyles";
 
+const termsMethodKeys = {
+  card: "pricing.terms.methodCard",
+  pay_at_property: "pricing.terms.methodPayAtProperty",
+  bank_transfer: "pricing.terms.methodBankTransfer",
+  paypal: "pricing.terms.methodPaypal",
+} as const;
+
 type Reference = { propertyId: string; client: ReturnType<typeof createReplacementPricingClient>; roomTypeId: string; offerId: string; revision: string; savedDraft?: { draftId: string; revision: number }; local?: PricingTermsInput; verified?: ReplacementOfferTerms; disabled?: boolean; blocked?: boolean; expanded?: boolean; onApply?(terms: ReplacementOfferTerms): void; onPending?(pending: boolean): void };
 // A new reference gets a new component: old policy data never flashes under a different offer.
 export function PricingTerms(props: Reference) {
@@ -67,7 +74,7 @@ function Policy({ terms }: { terms: ReplacementOfferTerms }) {
       <p>{t("pricing.terms.deposit", { percent: payment.basisPoints / 100, days: payment.balanceDaysBeforeArrival })}</p>
       <p>{t("pricing.terms.depositNote")}</p>
     </>}
-    {payment.acceptedMethods?.length ? <p>{t("pricing.terms.methods", { methods: payment.acceptedMethods.map((method) => t(method === "card" ? "pricing.terms.methodCard" : "pricing.terms.methodPayAtProperty")).join(", ") })}</p>
+    {payment.acceptedMethods?.length ? <p>{t("pricing.terms.methods", { methods: payment.acceptedMethods.map((method) => t(termsMethodKeys[method])).join(", ") })}</p>
       : <p className="text-amber-700">{t("pricing.terms.noMethods")}</p>}
     <p className={ui.hint}>{t("pricing.terms.footer")}</p>
   </div>;

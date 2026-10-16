@@ -1,11 +1,9 @@
 import {
-  isSetupTaskLaunchable,
   PRODUCT_ENTRY_PRODUCTS,
   type AdaptiveHotelSetupStatus,
   type ProductEntryDecision,
   type PropertySetupPlan,
   type SetupComponentProduct,
-  type SetupTask,
   type SetupTrack,
 } from "@vayada/domain-hotels";
 
@@ -55,13 +53,12 @@ export function resolveSharedFirstRunSetupView(
   status: AdaptiveHotelSetupStatus | null,
   options: {
     forceCreateProperty?: boolean;
-    forceTrackSelection?: boolean;
     editPropertyProfile?: boolean;
   } = {},
 ): SharedFirstRunSetupViewModel {
   if (!status) return emptyView("loading", "Loading setup");
 
-  if (status.organization.selectedTracks.length === 0 || options.forceTrackSelection) {
+  if (status.organization.selectedTracks.length === 0) {
     return emptyView("track_selection", "Choose how you’ll use vayada");
   }
 
@@ -130,12 +127,6 @@ export function toggleSetupTrackSelection(
   return (["hotel_operations", "creator_marketplace"] as const).filter((candidate) =>
     next.includes(candidate),
   );
-}
-
-export function isSetupTaskActionable(
-  task: Pick<SetupTask, "track" | "readiness" | "callerCapability">,
-): boolean {
-  return isSetupTaskLaunchable(task);
 }
 
 function emptyView(screen: SharedFirstRunSetupScreen, title: string): SharedFirstRunSetupViewModel {

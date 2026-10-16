@@ -8,25 +8,25 @@ Existing hotel selection and add-hotel prerequisite entry were also verified.
 
 This is evidence for the handoff, not acceptance of every adaptive step.
 
-## Safe cleanup
+## Safe cleanup (done)
 
-The private `@vayada/product-onboarding` workspace has no app consumers of
-`BenefitsStep`, `useSetupWizardState`, or `LastMinuteStep`. Their only references
-are package exports and the old state hook's last-minute configuration import.
-Remove these unused components, hook, and exports in small dependency-ordered
-PRs. Keep the live room benefits editor and pricing controls.
+`BenefitsStep`, `useSetupWizardState`, and `LastMinuteStep` were removed in
+VAY-1051. VAY-2174 removed the other unused steps of the earlier first-run
+onboarding (`PropertyStep`, `RoomsStep`, `PoliciesStep`, `AddonsStep`) and the
+old direct-booking form's `BrandMediaStep`. The live room benefits editor,
+pricing controls, and `AddonEditor` stay.
 
-## Required before retiring the active fallback
+## Fallback retired (VAY-2174)
 
-`AdaptiveSetupStepFormDispatcher` handles presentation, marketplace preferences,
-booking design, pricing, and calendar. Room authoring has its own controller.
-The dispatcher currently returns `null` for `guest_experience`, `payments`, and
-`review`. Those steps need implementations and acceptance testing before the
-remaining fallback can be retired. A successful handoff does not validate them.
-
-Retain `SetupTaskFormRouter` and its forms, including guest policies, billing,
-payments, and publication. Retain the flag-disabled setup path until its complete
-replacement has passed validation and the cutover is explicitly reviewed.
+`AdaptiveSetupStepFormDispatcher` now handles every step, including
+`guest_experience`, `payments`, and `review`; room authoring has its own
+controller. Production ran only the step-by-step setup, so VAY-2174 removed
+the `HOTEL_SETUP_ADAPTIVE_SHELL_ENABLED` switch and deleted the flag-disabled
+setup plan: the wizard's task-list screen, `SetupTaskFormRouter`, and its
+Marketplace, rooms, guest-policy, billing, payment, and publication forms.
+`GET /api/hotel-setup/status` still returns `setupPlan`: every app's status
+validator and the hotel-basics gate read it, so shrinking it is a separate,
+two-release follow-up.
 
 Preserve `SharedFirstRunPropertySetupWizard` creation/selection and hotel details,
 plus prepared-import suggestions, source idempotency keys, and unsaved adjacent

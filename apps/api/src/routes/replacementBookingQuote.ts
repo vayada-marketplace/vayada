@@ -1,7 +1,8 @@
 import type { PublicBookingQuote } from "@vayada/domain-booking/replacement-pricing";
 import type { FastifyRequest } from "fastify";
-import { parsePublicPricingSelection } from "@vayada/domain-booking";
+import { isManualPricingPaymentMethod, parsePublicPricingSelection } from "@vayada/domain-booking";
 import { pricingKeys, pricingObject } from "@vayada/domain-pms";
+import type { GuestModuleSwitches } from "../domains/bookingGuestModules.js";
 import type { createCurrentPricingQuoteStore } from "../domains/currentPricingQuoteStore.js";
 import { PricingStorageError } from "../domains/replacementPricingStore.js";
 
@@ -22,6 +23,12 @@ export function requirePublicQuoteKey(request: FastifyRequest): string {
 /** Public DTO boundary. Private calculation/provenance never leaves the quote store. */
 export function createReplacementBookingQuoteIssuer(
   store: Pick<ReturnType<typeof createCurrentPricingQuoteStore>, "issue">,
+  /** The bank-transfer and PayPal methods acceptance can take: none while
+   * REPLACEMENT_PRICING_MANUAL_PAYMENT_ACCEPTANCE_ENABLED is off, and bank transfer only with the
+   * bank-details binding. */
+  manualMethods: readonly string[] = [],
+  /** The hotel's Feature Hub Add-ons and Promos switches (VAY-2200). */
+  guestModules?: (slug: string) => Promise<GuestModuleSwitches>,
 ) {
   return async (slug: string, input: unknown, requestId: unknown, signal?: AbortSignal) => {
     if (
@@ -29,11 +36,35 @@ export function createReplacementBookingQuoteIssuer(
       !pricingObject(input) ||
       !pricingKeys(input, ["version", "selection", "paymentMethod"]) ||
       input.version !== "public-booking-quote-request.v1" ||
-      !["card", "pay_at_property"].includes(input.paymentMethod as string)
+      !(
+        ["card", "pay_at_property"].includes(input.paymentMethod as string) ||
+        (isManualPricingPaymentMethod(input.paymentMethod) &&
+          manualMethods.includes(input.paymentMethod))
+      )
     )
       throw httpError(400, "Invalid quote request.");
     const selection = parsePublicPricingSelection(input.selection);
     if (!selection) throw httpError(400, "Invalid quote selection.");
+    // Only new quotes are gated: accepting a quote issued before a switch keeps the shown price.
+    if (guestModules && (selection.addons.length > 0 || selection.promoCode !== null)) {
+      let switches: GuestModuleSwitches;
+      try {
+        switches = await guestModules(slug);
+      } catch (error) {
+        if (typeof (error as { statusCode?: unknown }).statusCode === "number") throw error;
+        throw Object.assign(new Error("Quote temporarily unavailable.", { cause: error }), {
+          statusCode: 503,
+        });
+      }
+      if (selection.addons.length > 0 && !switches.addOns)
+        throw Object.assign(httpError(422, "Extras aren't available at this hotel."), {
+          code: "ADDONS_UNAVAILABLE",
+        });
+      if (selection.promoCode !== null && !switches.promoCodes)
+        throw Object.assign(httpError(422, "Promo codes aren't available at this hotel."), {
+          code: "PROMO_CODES_UNAVAILABLE",
+        });
+    }
     try {
       const { quote, replayed } = await store.issue(
         slug,
@@ -85,6 +116,12 @@ export function createReplacementBookingQuoteIssuer(
           statusCode: 503,
         });
       if (error.code === "invalid") throw httpError(400, "Invalid quote request.");
+      // VAY-2145: check-in is too close for this method's payment deadline.
+      if (error.code === "denied" && error.reason === "manual_payment_too_soon")
+        throw Object.assign(
+          httpError(422, "This payment method isn't available this close to check-in."),
+          { code: "MANUAL_PAYMENT_TOO_SOON" },
+        );
       if (error.code === "idempotency_conflict")
         throw httpError(409, "Quote request changed. Use a new Idempotency-Key.");
       if (error.code === "stale")

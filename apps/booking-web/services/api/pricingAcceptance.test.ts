@@ -216,6 +216,57 @@ it("sends a pay-at-property request and returns the hotel's deadline", async () 
   }
 });
 
+it("returns a bank-transfer or PayPal booking waiting for payment, fresh or replayed (VAY-2139)", async () => {
+  const bank = {
+    ...quote,
+    paymentMethod: "bank_transfer",
+    dueNowMinor: "20600",
+    dueLaterMinor: "0",
+  } as PublicBookingQuote;
+  const payment = {
+    method: "bank_transfer",
+    amountMinor: "20600",
+    currency: "EUR",
+    deadlineAt: "2026-09-16T12:01:01.000Z",
+  };
+  const token = "t".repeat(43);
+  const pending = {
+    kind: "payment_pending",
+    bookingId: fresh.bookingId,
+    acceptanceId: fresh.acceptanceId,
+    acceptedAt: fresh.acceptedAt,
+    bookingReference: fresh.bookingReference,
+    payment,
+    checkedAt: fresh.checkedAt,
+    confirmationToken: token,
+    confirmationTokenExpiresAt: "2026-09-15T12:01:01.000Z",
+  };
+  const expected = {
+    kind: "payment_pending",
+    bookingId: fresh.bookingId,
+    bookingReference: fresh.bookingReference,
+    payment,
+    confirmationToken: token,
+  };
+  fetcher.mockResolvedValueOnce(new Response(JSON.stringify(pending)));
+  await expect(acceptPricingQuote("hotel", bank, disclosure, guest)).resolves.toEqual(expected);
+  const { acceptanceId, acceptedAt, checkedAt, ...rest } = pending;
+  void [acceptanceId, acceptedAt, checkedAt];
+  fetcher.mockResolvedValueOnce(new Response(JSON.stringify({ ...rest, replayed: true })));
+  await expect(acceptPricingQuote("hotel", bank, disclosure, guest)).resolves.toEqual(expected);
+  for (const invalid of [
+    { ...pending, confirmationToken: "short" },
+    { ...pending, payment: { ...payment, method: "card" } },
+    { ...pending, payment: { ...payment, deadlineAt: "tomorrow" } },
+    { ...pending, propertyId: "private" },
+  ]) {
+    fetcher.mockResolvedValueOnce(new Response(JSON.stringify(invalid)));
+    await expect(acceptPricingQuote("hotel", bank, disclosure, guest)).rejects.toThrow(
+      "confirmation could not be verified",
+    );
+  }
+});
+
 it("returns a card payment step and confirms it with the same request key", async () => {
   const card = { ...quote, paymentMethod: "card", dueNowMinor: "20600", dueLaterMinor: "0" };
   const required = {

@@ -4,17 +4,26 @@ import type {
   PublicBookingQuote,
   PublicQuoteGuestDisclosure,
 } from "@vayada/domain-booking/replacement-pricing";
+import { serverNow } from "@/lib/serverClock";
+import { formatTimeZoneName } from "@/lib/utils";
 import { getQuoteGuestDisclosure } from "@/services/api/quoteGuestDisclosure";
 
 export default function ReplacementGuestRules({
   slug,
   quote,
   onAcknowledgementChange,
+  onRulesChange,
+  compact = false,
 }: {
   slug: string;
   quote: PublicBookingQuote;
   onAcknowledgementChange?: (value: PublicQuoteGuestDisclosure | null) => void;
+  /** The loaded rules, ticked or not and after the price expires, so the guest form keeps them. */
+  onRulesChange?: (value: PublicQuoteGuestDisclosure | null) => void;
+  /** The payment step's short form (VAY-2195): the tick first, the rules behind "Read". */
+  compact?: boolean;
 }) {
+  const [open, setOpen] = useState(false);
   const [disclosure, setDisclosure] = useState<PublicQuoteGuestDisclosure | null>(null);
   const [error, setError] = useState(false);
   const [retry, setRetry] = useState(0);
@@ -37,7 +46,7 @@ export default function ReplacementGuestRules({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [identity, retry]);
   const current =
-    disclosure?.quoteId === quote.quoteId && Date.parse(disclosure.expiresAt) > Date.now();
+    disclosure?.quoteId === quote.quoteId && Date.parse(disclosure.expiresAt) > serverNow();
   const consent = disclosure
     ? JSON.stringify([identity, disclosure.quoteEvidenceId, disclosure.guestPolicyEvidenceId])
     : null;
@@ -46,6 +55,10 @@ export default function ReplacementGuestRules({
     onAcknowledgementChange?.(agreed ? disclosure : null);
     return () => onAcknowledgementChange?.(null);
   }, [agreed, disclosure, onAcknowledgementChange]);
+  useEffect(() => {
+    onRulesChange?.(disclosure);
+    return () => onRulesChange?.(null);
+  }, [disclosure, onRulesChange]);
   if (error)
     return (
       <p role="alert">
@@ -57,10 +70,28 @@ export default function ReplacementGuestRules({
     );
   if (!disclosure) return <p role="status">Loading guest rules…</p>;
   const rules = disclosure.choices;
-  return (
+  const tick = (
+    <label className={`flex items-start gap-3 ${compact ? "text-sm text-gray-700" : ""}`}>
+      <input
+        type="checkbox"
+        className={compact ? "mt-1 h-5 w-5 shrink-0 accent-primary-600" : undefined}
+        checked={current && acknowledged === consent}
+        disabled={!current}
+        onChange={(event) =>
+          setAcknowledged(
+            event.target.checked && Date.parse(disclosure.expiresAt) > serverNow() ? consent : null,
+          )
+        }
+      />
+      {compact
+        ? "I have read our guest rules for this price."
+        : "I have read the guest rules for this price preview."}
+    </label>
+  );
+  const section = (
     <section aria-label="Guest rules" className="rounded-xl border border-gray-200 p-5 space-y-3">
       <h2 className="text-xl font-semibold">Our guest rules</h2>
-      <p>Times are in {disclosure.propertyTimeZone}.</p>
+      <p>Times are in {formatTimeZoneName(disclosure.propertyTimeZone)}.</p>
       <p>
         Check-in from {rules.checkInTime}
         {rules.checkInUntil
@@ -92,21 +123,22 @@ export default function ReplacementGuestRules({
           ? "You can include special requests when booking."
           : "Special requests cannot be submitted online."}
       </p>
-      <label className="flex items-start gap-3">
-        <input
-          type="checkbox"
-          checked={current && acknowledged === consent}
-          disabled={!current}
-          onChange={(event) =>
-            setAcknowledged(
-              event.target.checked && Date.parse(disclosure.expiresAt) > Date.now()
-                ? consent
-                : null,
-            )
-          }
-        />
-        I have read the guest rules for this price preview.
-      </label>
+      {!compact && tick}
     </section>
+  );
+  if (!compact) return section;
+  return (
+    <div className="space-y-2">
+      {tick}
+      <button
+        type="button"
+        className="ml-8 text-xs font-medium text-primary-600 underline"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        {open ? "Hide our guest rules" : "Read our guest rules"}
+      </button>
+      {open && section}
+    </div>
   );
 }

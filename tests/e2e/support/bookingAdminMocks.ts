@@ -1,5 +1,7 @@
 import type { Page } from "@playwright/test";
+import { mockBookingPublication } from "./bookingPublicationMocks";
 import { createAdaptiveHotelSetupStatusMock } from "./sharedHotelSetupMocks";
+import { mockBookingModules } from "./featureHubModuleMocks";
 
 export const BOOKING_ADMIN_HOTEL_ID = "booking_hotel_alpenrose";
 export const BOOKING_ADMIN_PROPERTY_ID = "f6853000-0000-4000-8000-000000000001";
@@ -389,6 +391,8 @@ export async function mockBookingAdminShellRoutes(
   let bookingAcceptanceMode: "instant" | "request" = "instant";
   let sameDayEnabled = true;
   let sameDayCutoff: string | null = "18:00";
+  // The dashboard's booking page card; specs override it with their own state.
+  await mockBookingPublication(page, BOOKING_ADMIN_PROPERTY_ID);
   await page.route("**/api/pms/properties/*/module-activations", (route) =>
     route.fulfill({
       json: {
@@ -400,6 +404,7 @@ export async function mockBookingAdminShellRoutes(
       },
     }),
   );
+  await mockBookingModules(page, BOOKING_ADMIN_PROPERTY_ID);
   await page.route(/\/api\/pms\/properties\/[^/]+\/navigation-modules$/, (route) =>
     route.fulfill({
       json: {
@@ -639,6 +644,32 @@ export async function mockBookingAdminShellRoutes(
           previousBuckets: [],
           total: 0,
           previousTotal: 0,
+        },
+      },
+    }),
+  );
+  // An unanswered dashboard read logs an error, and Next's dev overlay badge then covers the
+  // sidebar's Collapse button. dashboard-funnel.spec registers its own funnel after these mocks.
+  await page.route("**/api/booking/properties/*/dashboard/conversion-funnel**", (route) =>
+    route.fulfill({
+      json: {
+        funnel: {
+          steps: [
+            "page_visit",
+            "rate_selected",
+            "details_completed",
+            "complete_booking_clicked",
+            "payment_authorized",
+            "booking_completed",
+          ].map((stage) => ({
+            stage,
+            count: 0,
+            previousCount: 0,
+            percentOfVisits: null,
+            conversionPercent: null,
+          })),
+          paymentMethods: [],
+          biggestDrop: null,
         },
       },
     }),

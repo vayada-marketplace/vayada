@@ -13,6 +13,7 @@ import pg, { type QueryResult, type QueryResultRow } from "pg";
 import { enqueueBookingTransitionNotifications } from "../jobs/bookingEmails.js";
 import { publishAffiliateReservationLifecycle } from "./bookingAffiliateReservationLifecycle.js";
 import { acceptPricingRequest } from "./pricingRequestAcceptance.js";
+import { confirmPricingManualPayment } from "./pricingManualPaymentConfirmation.js";
 import {
   PMS_OPERATIONS_CONTRACT_VERSION,
   type PmsAssignmentCommand,
@@ -300,6 +301,17 @@ type PmsPrivateNoteReplay = {
   noteId: string;
   note?: PmsPrivateNote;
 };
+
+// VAY-2210: New Booking saved notes with a blank author name; show the author's name, else email.
+// Erased users keep "Unknown" rather than their placeholder email.
+const PRIVATE_NOTE_AUTHOR_NAME_SQL = `COALESCE(
+  NULLIF(BTRIM(note.author_display_name), ''),
+  (SELECT COALESCE(NULLIF(BTRIM(author.name), ''), author.email)
+   FROM identity.users author
+   WHERE author.id = note.author_user_id
+     AND author.status <> 'deleted'),
+  ''
+)`;
 
 type PmsPrivateNoteRow = {
   noteId: string;
@@ -995,7 +1007,7 @@ export function createTargetPmsOperationsCommandRepository(
              note.id::text AS "noteId",
              note.body,
              note.author_user_id::text AS "authorUserId",
-             note.author_display_name AS "authorDisplayName",
+             ${PRIVATE_NOTE_AUTHOR_NAME_SQL} AS "authorDisplayName",
              note.source,
              note.created_at AS "createdAt",
              note.edited_by_user_id::text AS "editedByUserId",
@@ -1214,7 +1226,7 @@ export function createTargetPmsOperationsCommandRepository(
         }
 
         const updated = await client.query<PmsPrivateNoteRow>(
-          `UPDATE pms.booking_notes_private
+          `UPDATE pms.booking_notes_private note
            SET body = $4,
                edited_by_user_id = $5::uuid,
                edited_by_display_name = $6,
@@ -1226,7 +1238,7 @@ export function createTargetPmsOperationsCommandRepository(
              id::text AS "noteId",
              body,
              author_user_id::text AS "authorUserId",
-             author_display_name AS "authorDisplayName",
+             ${PRIVATE_NOTE_AUTHOR_NAME_SQL} AS "authorDisplayName",
              source,
              created_at AS "createdAt",
              edited_by_user_id::text AS "editedByUserId",
@@ -5901,6 +5913,43 @@ async function applyBookingMarkPaidCommandMutation(
   if (jsonObject(booking.bookingMetadata)["airbnbMoneyStatus"] === "unverified") {
     return invalidStatusTransition("booking_amount_unverified", "confirmed/paid");
   }
+  const recordPayment = async (
+    paymentMethod: FinanceBookingManualPaymentSettlementCommand["payload"]["paymentMethod"],
+  ) => {
+    const financeCommand: FinanceBookingManualPaymentSettlementCommand = {
+      commandId: command.commandId,
+      idempotencyKey: `pms.booking.mark-paid.finance:${command.idempotencyKey}`,
+      propertyId: command.propertyId,
+      audit: command.audit,
+      payload: {
+        invoiceId: booking.invoiceId,
+        amount: booking.balanceAmount,
+        currency: booking.currency,
+        paymentMethod,
+        reference: `PMS ${paymentMethod} confirmation`,
+      },
+    };
+    const financeResult = await recordBookingManualPaymentInClient(client, financeCommand);
+    if (!financeResult.ok) {
+      throw new Error(
+        `Finance rejected PMS booking payment ${command.guestBookingId}: ${financeResult.code}`,
+      );
+    }
+  };
+  // Pricing-v2 bank transfer or PayPal: the hotel's payment confirmation confirms the booking
+  // from its stored acceptance (VAY-2139).
+  if (
+    jsonObject(booking.bookingMetadata)["targetSource"] === "pricing_quote_draft" &&
+    (booking.paymentMethod === "bank_transfer" || booking.paymentMethod === "paypal")
+  ) {
+    const outcome = await confirmPricingManualPayment(client, command, acceptedAt, recordPayment);
+    return outcome === "confirmed"
+      ? { ok: true }
+      : invalidStatusTransition(
+          `${booking.lifecycleStatus}/${booking.paymentStatus}`,
+          "confirmed/paid",
+        );
+  }
   const isPayPalPending =
     booking.paymentMethod === "paypal" && booking.lifecycleStatus === "pending_payment";
   const isAcceptedBankTransfer =
@@ -5928,25 +5977,7 @@ async function applyBookingMarkPaidCommandMutation(
     : isAcceptedBankTransfer
       ? "bank_transfer"
       : "pay_at_property";
-  const financeCommand: FinanceBookingManualPaymentSettlementCommand = {
-    commandId: command.commandId,
-    idempotencyKey: `pms.booking.mark-paid.finance:${command.idempotencyKey}`,
-    propertyId: command.propertyId,
-    audit: command.audit,
-    payload: {
-      invoiceId: booking.invoiceId,
-      amount: booking.balanceAmount,
-      currency: booking.currency,
-      paymentMethod,
-      reference: `PMS ${paymentMethod} confirmation`,
-    },
-  };
-  const financeResult = await recordBookingManualPaymentInClient(client, financeCommand);
-  if (!financeResult.ok) {
-    throw new Error(
-      `Finance rejected PMS booking payment ${command.guestBookingId}: ${financeResult.code}`,
-    );
-  }
+  await recordPayment(paymentMethod);
 
   const updated = await client.query(
     `WITH booking_update AS (

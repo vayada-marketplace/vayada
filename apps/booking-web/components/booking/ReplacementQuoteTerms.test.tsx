@@ -90,7 +90,7 @@ it("discloses each physical room's actual name, meal, cancellation and payment t
   expect(rooms[0].textContent).toContain(
     "Contact us with cancellation requests.\nKeep your reference.",
   );
-  expect(rooms[0].textContent).toContain("Accepted methods: Card, Pay at property.");
+  expect(rooms[0].textContent).toContain("Accepted methods: Card, Pay at the hotel.");
   expect(rooms[1].textContent).toContain("Room 2: Garden suite");
   expect(rooms[1].textContent).toContain("Room only (no meals)");
   expect(rooms[1].textContent).toContain("Non-refundable.");
@@ -190,9 +190,12 @@ it("revokes acknowledgement at exact expiry and on unmount", () => {
   expect(change).toHaveBeenLastCalledWith(null);
 });
 
-it("blocks agreement for future, expired or unnamed rooms", () => {
+it("does not block a quote issued after the device clock (VAY-2134)", () => {
   render({ quote: { ...quote, issuedAt: "2027-01-01T00:01:00.000Z" } });
-  expect(checkbox().disabled).toBe(true);
+  expect(checkbox().disabled).toBe(false);
+});
+
+it("blocks agreement for expired or unnamed rooms", () => {
   render({ roomNames: {} });
   expect(checkbox().disabled).toBe(true);
   expect(document.body.textContent).toContain("Room details are unavailable");
@@ -215,4 +218,19 @@ it("shows the frozen confirmation mode and revokes agreement when it changes", (
   expect(document.body.textContent).toContain(
     "This price preview does not reserve a room or take payment.",
   );
+});
+
+it("shows the tick first and the terms behind Read on the payment step (VAY-2195)", () => {
+  render({ compact: true });
+  expect(document.body.textContent).toContain(
+    "I have read the room and rate terms for this price.",
+  );
+  expect(document.body.textContent).not.toContain("Free cancellation deadline");
+  const read = () =>
+    Array.from(document.querySelectorAll("button")).find((b) => b.textContent?.includes("terms"))!;
+  act(() => read().click());
+  expect(read().getAttribute("aria-expanded")).toBe("true");
+  expect(document.querySelectorAll('input[type="checkbox"]')).toHaveLength(1);
+  acknowledge();
+  expect(change).toHaveBeenLastCalledWith(expect.objectContaining({ quoteId: quote.quoteId }));
 });

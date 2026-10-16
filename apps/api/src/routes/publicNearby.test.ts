@@ -8,8 +8,8 @@ const apps: ReturnType<typeof Fastify>[] = [];
 afterEach(async () => {
   await Promise.all(apps.splice(0).map((app) => app.close()));
 });
-async function setup() {
-  const app = Fastify();
+async function setup(logStream?: { write(line: string): void }) {
+  const app = Fastify(logStream ? { logger: { stream: logStream } } : {});
   apps.push(app);
   const publicView = {
     schemaVersion: 1 as const,
@@ -26,14 +26,12 @@ async function setup() {
   const read = vi.fn().mockResolvedValue(snapshot);
   const profile = vi.fn().mockResolvedValue({ hotel: { propertyId: "property" } });
   const discover = vi.fn().mockResolvedValue({ status: "provider_unavailable", places: [] });
-  const claim = vi
-    .fn()
-    .mockResolvedValue({
-      status: "claimed",
-      token: "private-token",
-      profileRevision: 1,
-      origin: { latitude: 1.01, longitude: 2.02 },
-    });
+  const claim = vi.fn().mockResolvedValue({
+    status: "claimed",
+    token: "private-token",
+    profileRevision: 1,
+    origin: { latitude: 1.01, longitude: 2.02 },
+  });
   const complete = vi.fn();
   await registerBookingWebPublicRoutes(app, {
     profileRepository: { findProfileBySlug: profile } as PublicHotelProfileRepository,
@@ -67,6 +65,18 @@ it("refreshes once with public origin and returns only the public envelope even 
   expect(s.read).toHaveBeenCalledTimes(2);
   expect(response.body).not.toMatch(/server-secret|private-org|private-token|revision/i);
 });
+it("logs every paid lookup like the editor refresh, without the key", async () => {
+  const lines: string[] = [];
+  const s = await setup({ write: (line) => lines.push(line) });
+  await s.app.inject({ url: "/hotels/example/nearby" });
+  const logs = lines.map((line) => JSON.parse(line)).filter((l) => /^Nearby discovery/.test(l.msg));
+  expect(logs.map((l) => [l.msg, l.source, l.propertyId])).toEqual([
+    ["Nearby discovery started", "public", "property"],
+    ["Nearby discovery completed", "public", "property"],
+  ]);
+  expect(logs[1].status).toBe("provider_unavailable");
+  expect(lines.join("\n")).not.toContain("server-secret");
+});
 it("returns 404 before paid requests for unpublished or denied properties", async () => {
   const s = await setup();
   s.profile.mockResolvedValueOnce(null);
@@ -79,12 +89,10 @@ it("rechecks revocation and hidden-location changes after I/O", async () => {
   const s = await setup();
   s.read.mockResolvedValueOnce(s.snapshot).mockResolvedValueOnce(null);
   expect((await s.app.inject("/hotels/revoked/nearby")).statusCode).toBe(404);
-  s.read
-    .mockResolvedValueOnce(s.snapshot)
-    .mockResolvedValueOnce({
-      ...s.snapshot,
-      public: { schemaVersion: 1, status: "hidden", location: null, places: [] },
-    });
+  s.read.mockResolvedValueOnce(s.snapshot).mockResolvedValueOnce({
+    ...s.snapshot,
+    public: { schemaVersion: 1, status: "hidden", location: null, places: [] },
+  });
   expect((await s.app.inject("/hotels/hidden/nearby")).json()).toEqual({
     schemaVersion: 1,
     status: "hidden",

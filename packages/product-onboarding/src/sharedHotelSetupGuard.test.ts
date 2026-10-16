@@ -2,9 +2,40 @@ import type { AdaptiveHotelSetupStatus } from "@vayada/domain-hotels";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  buildSharedHotelSetupRedirectPath,
   resolveSharedHotelSetupGuard,
   resolveSharedHotelSetupGuardDecision,
 } from "./sharedHotelSetupGuard";
+import type { PropertySetupStepId } from "@vayada/domain-hotels";
+
+describe("buildSharedHotelSetupRedirectPath", () => {
+  const input = {
+    entryProduct: "booking" as const,
+    returnProduct: "booking" as const,
+    returnTo: "/dashboard",
+    propertyId: "property-1",
+    setupBaseUrl: "https://marketplace.localhost:1355",
+  };
+
+  it("opens setup on a requested step", () => {
+    const url = new URL(buildSharedHotelSetupRedirectPath({ ...input, step: "calendar" }));
+    expect(url.pathname).toBe("/setup");
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      entryProduct: "booking",
+      returnProduct: "booking",
+      returnTo: "/dashboard",
+      propertyId: "property-1",
+      step: "calendar",
+    });
+  });
+
+  it("drops a step setup does not know", () => {
+    const url = new URL(
+      buildSharedHotelSetupRedirectPath({ ...input, step: "unknown" as PropertySetupStepId }),
+    );
+    expect(url.searchParams.has("step")).toBe(false);
+  });
+});
 
 describe("resolveSharedHotelSetupGuardDecision", () => {
   it("uses the entry decision instead of setup task completion", () => {

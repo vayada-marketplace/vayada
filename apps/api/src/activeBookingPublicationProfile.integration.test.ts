@@ -4,6 +4,8 @@ import pg, { type QueryResultRow } from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { createActiveBookingPublicationProfileRepository } from "./routes/activeBookingPublicationProfile.js";
+import { resolveTargetCheckoutProperty } from "./routes/bookingWebPublic.js";
+import { configureActiveBookingPublicationGate } from "./domains/activeBookingPublicationGate.js";
 import {
   lockBookingAffiliateArrivalHostScope,
   readBookingAffiliateArrivalHost,
@@ -21,7 +23,10 @@ const revisionB = "85858585-8585-4585-8585-858585858505";
 const inactiveRevision = "85858585-8585-4585-8585-858585858506";
 const malformedRevision = "85858585-8585-4585-8585-858585858507";
 const lockProperty = "85858585-8585-4585-8585-858585858508";
+const legacyProperty = "85858585-8585-4585-8585-858585858509";
+const legacyRevision = "85858585-8585-4585-8585-858585858510";
 const hostname = "book.alpenrose.example";
+const legacyHostname = "book.legacy-alpenrose.example";
 const fixture = PUBLIC_BOOKABILITY_FIXTURES.find(({ caseId }) => caseId === "custom_domain")!;
 
 describe.skipIf(!TEST_DATABASE_URL)("active Booking publication reads in PostgreSQL", () => {
@@ -179,6 +184,93 @@ describe.skipIf(!TEST_DATABASE_URL)("active Booking publication reads in Postgre
     );
     await expect(repository.findProfileBySlug("hotel-alpenrose")).resolves.toBeNull();
   });
+
+  it("keeps a hotel that never published online from its legacy page (VAY-2186)", async () => {
+    await seedLegacyProperty(legacyProperty, "legacy-alpenrose");
+    configureActiveBookingPublicationGate({ servesPublications: true, manualPayments: false });
+    try {
+      await expect(repository.findProfileBySlug("legacy-alpenrose")).resolves.toMatchObject({
+        hotel: { propertyId: legacyProperty, slug: "legacy-alpenrose" },
+      });
+      await expect(repository.findProfileByCustomDomain?.(legacyHostname)).resolves.toMatchObject({
+        hotel: { propertyId: legacyProperty },
+      });
+      // Checkout agrees with the page.
+      await expect(resolveTargetCheckoutProperty(pool, "legacy-alpenrose")).resolves.toMatchObject({
+        propertyId: legacyProperty,
+      });
+
+      // Once it publishes, only the publication counts, even one the legacy lookup can't reach: this
+      // one has another slug and names a custom domain the hotel hasn't verified, so it is hidden.
+      await seedRevision(legacyProperty, legacyRevision, "legacy-alpenrose-next", 1, true);
+      await expect(repository.findProfileBySlug("legacy-alpenrose")).resolves.toBeNull();
+      await expect(repository.findProfileByCustomDomain?.(legacyHostname)).resolves.toBeNull();
+      await expect(resolveTargetCheckoutProperty(pool, "legacy-alpenrose")).rejects.toMatchObject({
+        statusCode: 404,
+      });
+    } finally {
+      configureActiveBookingPublicationGate({ servesPublications: false, manualPayments: false });
+    }
+  });
+
+  it("says guests can enter promo codes only while the Promos switch is on (VAY-2200)", async () => {
+    const promoCodes = async () =>
+      (await repository.findProfileBySlug("hotel-alpenrose"))?.hotel.capabilities.promoCodes;
+    // Read live, whatever the published revision said; no booking settings row keeps it on.
+    expect(await promoCodes()).toBe(true);
+    await admin.query(
+      "INSERT INTO booking.booking_settings (property_id, promo_codes_enabled) VALUES ($1::uuid, FALSE)",
+      [propertyA],
+    );
+    expect(await promoCodes()).toBe(false);
+    await admin.query(
+      "UPDATE booking.booking_settings SET promo_codes_enabled = TRUE WHERE property_id = $1::uuid",
+      [propertyA],
+    );
+    expect(await promoCodes()).toBe(true);
+  });
+
+  async function seedLegacyProperty(propertyId: string, slug: string): Promise<void> {
+    await admin.query(
+      `INSERT INTO hotel_catalog.properties (id, public_id, display_name, lifecycle_status)
+       VALUES ($1::uuid, $2, 'Legacy Alpenrose', 'active')`,
+      [propertyId, slug],
+    );
+    await admin.query(
+      `INSERT INTO hotel_catalog.property_slugs (property_id, slug, purpose, status)
+       VALUES ($1::uuid, $2, 'canonical', 'active')`,
+      [propertyId, slug],
+    );
+    await admin.query(
+      `INSERT INTO hotel_catalog.property_locations (property_id, timezone)
+       VALUES ($1::uuid, 'Europe/Vienna')`,
+      [propertyId],
+    );
+    await admin.query(
+      `INSERT INTO hotel_catalog.property_domains
+         (property_id, hostname, verification_status, canonical_when_verified, verified_at)
+       VALUES ($1::uuid, $2, 'verified', TRUE, now())`,
+      [propertyId, legacyHostname],
+    );
+    await admin.query(
+      `INSERT INTO hotel_catalog.property_public_profile_read_model
+         (property_id, public_id, display_name, canonical_slug, default_locale,
+          supported_locales, profile_status)
+       VALUES ($1::uuid, $2, 'Legacy Alpenrose', $2, 'en', ARRAY['en'], 'complete')`,
+      [propertyId, slug],
+    );
+    await admin.query(
+      `INSERT INTO distribution.public_hotel_bookability_profiles
+         (property_id, public_id, canonical_slug, canonical_url, booking_base_url,
+          custom_domain_url, timezone, default_currency, supported_currencies, profile_status,
+          freshness_status, public_identity, public_setup_completeness, capabilities)
+       VALUES ($1::uuid, $2, $2, $3 || '/en', $3, $3, 'Europe/Vienna', 'EUR', ARRAY['EUR'],
+               'public', 'fresh',
+               jsonb_build_object('propertyId', $1::text, 'slug', $2::text, 'name', 'Legacy Alpenrose'),
+               '{"status":"ready"}', '{"paymentMethods":["pay_at_property"]}')`,
+      [propertyId, slug, `https://${legacyHostname}`],
+    );
+  }
 
   async function seedProperty(propertyId: string, revisionId: string, slug: string): Promise<void> {
     await admin.query(

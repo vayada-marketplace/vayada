@@ -30,6 +30,10 @@ import {
   registerMarketplaceSubmissionRoutes,
   type MarketplaceSubmissionRoutesOptions,
 } from "./routes/marketplaceSubmission.js";
+import {
+  registerMarketplaceHotelSubmissionModerationRoutes,
+  type MarketplaceHotelSubmissionModerationRoutesOptions,
+} from "./routes/marketplaceHotelSubmissionModeration.js";
 import type { PmsRoomClosureRepository } from "./domains/pmsRoomClosureCommandRepository.js";
 import { registerPreparedHotelImportRoutes } from "./routes/preparedHotelImports.js";
 import type { PreparedImportRepository } from "./domains/preparedHotelImportRepository.js";
@@ -277,6 +281,10 @@ import {
   registerPmsNavigationModuleRoutes,
   type PmsNavigationModuleRepository,
 } from "./routes/pmsNavigationModules.js";
+import {
+  registerPmsBookingModuleRoutes,
+  type BookingModuleRepository,
+} from "./routes/pmsBookingModules.js";
 import type { PmsLinkedInventoryGroupCommandRepository } from "./domains/pmsLinkedInventoryGroupRepository.js";
 import {
   registerPmsManualBookingPreviewRoutes,
@@ -397,6 +405,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   pmsManualBookingCreate?: PmsManualBookingCreateRoutesOptions;
   pmsModuleActivationRepository?: PmsModuleActivationRepository;
   pmsNavigationModuleRepository?: PmsNavigationModuleRepository;
+  bookingModuleRepository?: BookingModuleRepository;
   financialsActivationPropertyIds?: readonly string[];
   pmsReviewRepository?: PmsReviewRepository;
   pmsChannexManagement?: PmsChannexManagementRoutesOptions;
@@ -480,6 +489,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
     mediaCommands: Pick<PropertyMediaCommandRepository, "replacePresentation">;
   };
   marketplaceSubmission?: MarketplaceSubmissionRoutesOptions;
+  marketplaceHotelSubmissionModeration?: MarketplaceHotelSubmissionModerationRoutesOptions;
   marketplacePublicHotel?: MarketplacePublicHotelRoutesOptions;
   marketplaceHotelCollaborationPreferences?: MarketplaceHotelCollaborationPreferencesRoutesOptions;
   marketplaceCommunicationPreferences?: MarketplaceCommunicationPreferencesRoutesOptions;
@@ -540,6 +550,9 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     trustProxy: options.trustProxy ?? false,
     disableRequestLogging: (request) =>
       shouldHideAffiliateRequestUrl(request.url) ||
+      // VAY-2197: an access log line (with the IP address) would pair up with the stored funnel
+      // event by its time.
+      request.url.startsWith("/api/booking-web/events") ||
       request.url.startsWith("/api/marketplace/communication-unsubscribe") ||
       request.url.startsWith("/api/marketplace/creator-platform-oauth/") ||
       (request.url.startsWith("/api/pms/properties/") &&
@@ -880,6 +893,12 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       ...options.marketplaceSubmission,
     });
   }
+  if (options.marketplaceHotelSubmissionModeration) {
+    app.register(registerMarketplaceHotelSubmissionModerationRoutes, {
+      prefix: "/api/marketplace",
+      ...options.marketplaceHotelSubmissionModeration,
+    });
+  }
   if (options.marketplaceHotelCollaborationPreferences) {
     app.register(registerMarketplaceHotelCollaborationPreferencesRoutes, {
       prefix: "/api/marketplace",
@@ -1152,6 +1171,14 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     app.register(registerPmsNavigationModuleRoutes, {
       prefix: "/api/pms",
       repository: options.pmsNavigationModuleRepository,
+      propertyAccessRepository: options.auth.propertyAccessRepository,
+      allowedOrigins: options.pmsOperationsAllowedOrigins,
+    });
+  }
+  if (options.bookingModuleRepository && options.auth) {
+    app.register(registerPmsBookingModuleRoutes, {
+      prefix: "/api/pms",
+      repository: options.bookingModuleRepository,
       propertyAccessRepository: options.auth.propertyAccessRepository,
       allowedOrigins: options.pmsOperationsAllowedOrigins,
     });

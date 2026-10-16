@@ -208,8 +208,8 @@ export function createCalendarApiClient(
       ) {
         throw ownerError;
       }
-      // A saved calendar whose availability was never prepared blocks every preview, so
-      // prepare the saved revision once and preview again (VAY-2134).
+      // Stored availability that doesn't match its calendar blocks a preview, so prepare the
+      // saved revision once and preview again (VAY-2134).
       await prepareSavedCalendar(http, propertyId);
       try {
         value = await post();
@@ -642,7 +642,9 @@ function calendarOwnerError(
     calendar_revision_conflict: "The operating calendar changed in another session.",
     property_timezone_missing: "Add a property timezone before configuring the calendar.",
     property_timezone_invalid: "The saved property timezone is not supported.",
-    property_profile_revision_conflict: "The property timezone changed in another session.",
+    // Any hotel profile change since this step loaded, such as a photo finishing (VAY-2150).
+    property_profile_revision_conflict:
+      "Your hotel details changed in another session. Reload the latest calendar and try again.",
     active_room_type_set_empty: "Add at least one complete room type before opening the calendar.",
     room_type_set_conflict: "The active room types changed in another session.",
     room_facts_revision_conflict: "A room changed in another session.",

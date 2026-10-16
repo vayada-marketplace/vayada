@@ -1,7 +1,12 @@
 "use client";
 
 import { useEffect, useId, useState } from "react";
-import type { PublicBookingQuote } from "@vayada/domain-booking/replacement-pricing";
+import {
+  isManualPricingPaymentMethod,
+  type PublicBookingQuote,
+} from "@vayada/domain-booking/replacement-pricing";
+import { serverNow } from "@/lib/serverClock";
+import { bookingPagePaymentMethodLabels } from "@/services/api/bookingPagePaymentMethods";
 
 export type QuoteTermsAcknowledgement = { quoteId: string; termsIdentity: string };
 export type ReplacementQuoteTermsProps = {
@@ -9,6 +14,8 @@ export type ReplacementQuoteTermsProps = {
   roomNames: Readonly<Record<string, string>>;
   stale?: boolean;
   onAcknowledgementChange?: (value: QuoteTermsAcknowledgement | null) => void;
+  /** The payment step's short form (VAY-2195): the tick first, the terms behind "Read". */
+  compact?: boolean;
 };
 const mealNames: Record<string, string> = {
   room_only: "Room only (no meals)",
@@ -17,7 +24,7 @@ const mealNames: Record<string, string> = {
   full_board: "Full board",
   all_inclusive: "All inclusive",
 };
-const methodNames: Record<string, string> = { card: "Card", pay_at_property: "Pay at property" };
+const methodNames: Record<string, string> = bookingPagePaymentMethodLabels;
 
 /** The caller supplies a validated quote and retires it when the selection becomes stale. */
 export default function ReplacementQuoteTerms({
@@ -25,29 +32,32 @@ export default function ReplacementQuoteTerms({
   roomNames,
   stale = false,
   onAcknowledgementChange,
+  compact = false,
 }: ReplacementQuoteTermsProps) {
   const headingId = useId();
+  const [open, setOpen] = useState(false);
   const identity = JSON.stringify([
     { ...quote, replayed: undefined },
     quote.rooms.map((room) => roomNames[room.selectionId] ?? null),
   ]);
   const [acknowledgedIdentity, setAcknowledgedIdentity] = useState<string | null>(null);
   const [expired, setExpired] = useState(false);
-  const issuedAt = Date.parse(quote.issuedAt);
+  // Judged on the server's clock: a device clock that is behind or ahead must not block a valid
+  // quote (VAY-2134).
   const expiresAt = Date.parse(quote.expiresAt);
-  const unavailable = stale || expired || issuedAt > Date.now() || expiresAt <= Date.now();
+  const unavailable = stale || expired || expiresAt <= serverNow();
   const missingLabels = quote.rooms.some((room) => !roomNames[room.selectionId]?.trim());
   const agreed = !unavailable && !missingLabels && acknowledgedIdentity === identity;
 
   useEffect(() => {
     setAcknowledgedIdentity(null);
-    setExpired(expiresAt <= Date.now());
+    setExpired(expiresAt <= serverNow());
     const timer = setTimeout(
       () => {
         setExpired(true);
         setAcknowledgedIdentity(null);
       },
-      Math.max(0, expiresAt - Date.now()),
+      Math.max(0, expiresAt - serverNow()),
     );
     return () => clearTimeout(timer);
   }, [identity, stale, expiresAt]);
@@ -57,7 +67,32 @@ export default function ReplacementQuoteTerms({
     return () => onAcknowledgementChange?.(null);
   }, [agreed, identity, quote.quoteId, onAcknowledgementChange]);
 
-  return (
+  const status = (unavailable || missingLabels) && (
+    <p role="status">
+      {unavailable
+        ? "This price is no longer current. Get an updated price to review and acknowledge its terms."
+        : "Room details are unavailable. Refresh your room selection before acknowledging these terms."}
+    </p>
+  );
+  const tick = (
+    <label className={`flex items-start gap-3 ${compact ? "text-sm text-gray-700" : ""}`}>
+      <input
+        type="checkbox"
+        className={`mt-1 h-5 w-5 shrink-0 ${compact ? "accent-primary-600" : ""}`}
+        checked={agreed}
+        disabled={unavailable || missingLabels}
+        onChange={(event) =>
+          setAcknowledgedIdentity(event.target.checked && expiresAt > serverNow() ? identity : null)
+        }
+      />
+      <span>
+        {compact
+          ? "I have read the room and rate terms for this price."
+          : "I have read the room and rate terms for this price preview."}
+      </span>
+    </label>
+  );
+  const terms = (
     <section
       aria-labelledby={headingId}
       className="space-y-4 rounded-xl border border-gray-200 p-5"
@@ -119,38 +154,39 @@ export default function ReplacementQuoteTerms({
       <div className="space-y-1">
         <h3 className="font-semibold">Booking confirmation</h3>
         <p>
-          {quote.acceptanceMode === "request"
-            ? "Your booking will need our approval. Sending a request does not confirm your stay."
-            : "Your booking will be confirmed when you complete the booking process. No separate approval from us is needed."}
+          {isManualPricingPaymentMethod(quote.paymentMethod)
+            ? "We hold your room until the payment deadline and confirm your booking when your payment arrives."
+            : quote.acceptanceMode === "request"
+              ? "Your booking will need our approval. Sending a request does not confirm your stay."
+              : "Your booking will be confirmed when you complete the booking process. No separate approval from us is needed."}
         </p>
       </div>
       <p>Selected payment method: {methodNames[quote.paymentMethod]}.</p>
-      <p className="text-sm text-gray-600">
-        This price preview does not reserve a room or take payment. These are rate terms only.
-        Please also review our guest rules before booking.
-      </p>
-      {(unavailable || missingLabels) && (
-        <p role="status">
-          {unavailable
-            ? "This price is no longer current. Get an updated price to review and acknowledge its terms."
-            : "Room details are unavailable. Refresh your room selection before acknowledging these terms."}
+      {!compact && (
+        <p className="text-sm text-gray-600">
+          This price preview does not reserve a room or take payment. These are rate terms only.
+          Please also review our guest rules before booking.
         </p>
       )}
-      <label className="flex items-start gap-3">
-        <input
-          type="checkbox"
-          className="mt-1 h-5 w-5 shrink-0"
-          checked={agreed}
-          disabled={unavailable || missingLabels}
-          onChange={(event) =>
-            setAcknowledgedIdentity(
-              event.target.checked && expiresAt > Date.now() ? identity : null,
-            )
-          }
-        />
-        <span>I have read the room and rate terms for this price preview.</span>
-      </label>
+      {!compact && status}
+      {!compact && tick}
     </section>
+  );
+  if (!compact) return terms;
+  return (
+    <div className="space-y-2">
+      {tick}
+      {status}
+      <button
+        type="button"
+        className="ml-8 text-xs font-medium text-primary-600 underline"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        {open ? "Hide the room and rate terms" : "Read the room and rate terms"}
+      </button>
+      {open && terms}
+    </div>
   );
 }
 

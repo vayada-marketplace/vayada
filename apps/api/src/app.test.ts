@@ -2565,6 +2565,7 @@ function targetPublicHotelProfileRow(): QueryResultRow {
     bookingShowLanguageSelector: false,
     bookingShowCurrencySelector: true,
     bookingReferAGuestModuleEnabled: true,
+    bookingPromoCodes: true,
     bookingHeroImage: "https://cdn.vayada.example/hotels/distribution-alpenrose/booking.jpg",
     bookingHeroHeading: "Stay in the heart of the Alps",
     bookingHeroSubtext: "Book direct for our best available rates.",
@@ -17005,6 +17006,187 @@ describe("vayada-api", () => {
       email: canExposeGuestContact ? additionalGuest.email : HIDDEN_GUEST_CONTACT,
       phone: canExposeGuestContact ? additionalGuest.phone : HIDDEN_GUEST_CONTACT,
     });
+  });
+
+  describe("payment breakdown visibility (VAY-2152)", () => {
+    const money = (amountDecimal: string) => ({ amountDecimal, currency: "EUR" });
+    const breakdown = {
+      grossAmount: money("200.00"),
+      stripeFee: money("3.10"),
+      vayadaCommission: money("10.00"),
+      netPayout: money("186.90"),
+    };
+    const paidReservation: PmsOperationalReservation = {
+      ...pmsReservations[1],
+      pricing: { totalAmount: money("200.00"), balanceAmount: money("0.00") },
+      payment: { method: "card", status: "captured", breakdown },
+    };
+    const reservationRepository: PmsOperationsReadRepository = {
+      ...pmsOperationsRepository,
+      async listReservationsByPropertyId() {
+        return { items: [paidReservation], total: 1 };
+      },
+      async listReservationsOverlappingStayRangeByPropertyId() {
+        return { items: [paidReservation], total: 1 };
+      },
+      async findReservationByGuestBookingId() {
+        return paidReservation;
+      },
+    };
+    const reservationsUrl = `/api/pms/properties/${pmsPropertyId}/reservations`;
+
+    it.each([
+      {
+        role: "owner",
+        roleKey: "hotel_owner",
+        permissions: ["pms.reservation.read", "pms.finance.read"] as PermissionKey[],
+        showsBreakdown: true,
+      },
+      {
+        role: "front desk",
+        roleKey: "front_desk",
+        permissions: ["pms.reservation.read", "pms.guest_contact.read"] as PermissionKey[],
+        showsBreakdown: false,
+      },
+      {
+        role: "reservation manager",
+        roleKey: "hotel_custom",
+        permissions: ["pms.reservation.read", "pms.finance.read"] as PermissionKey[],
+        showsBreakdown: true,
+      },
+    ])(
+      "$role reservation reads keep totals and show the breakdown only with Financials read",
+      async (testCase) => {
+        app = buildAuthenticatedApp({
+          permissions: testCase.permissions,
+          roleKey: testCase.roleKey,
+          entitlements: [{ product: "pms", key: "property-management", status: "active" }],
+          pmsOperationsRepository: reservationRepository,
+        });
+
+        const responses = await Promise.all(
+          [
+            reservationsUrl,
+            `${reservationsUrl}?stayFrom=2026-08-15&stayTo=2026-08-18`,
+            `${reservationsUrl}/${paidReservation.guestBookingId}`,
+          ].map((url) =>
+            injectJson(app!, {
+              method: "GET",
+              url,
+              headers: { authorization: "Bearer valid-token" },
+            }),
+          ),
+        );
+        const [list, stayRange, detail] = responses.map((response) => response.body);
+        const items = [
+          (list as PmsOperationsTestReservationListResponse).items[0],
+          (stayRange as PmsOperationsTestReservationListResponse).items[0],
+          (detail as PmsOperationsTestDetailResponse<PmsOperationalReservation>).item,
+        ];
+
+        expect(responses.map((response) => response.statusCode)).toEqual([200, 200, 200]);
+        for (const item of items) {
+          expect(item.pricing).toEqual(paidReservation.pricing);
+          expect(item.payment).toEqual(
+            testCase.showsBreakdown
+              ? paidReservation.payment
+              : { method: "card", status: "captured" },
+          );
+        }
+      },
+    );
+
+    it("refuses housekeeping every reservation read", async () => {
+      app = buildAuthenticatedApp({
+        permissions: ["pms.dashboard.read", "pms.calendar.read", "pms.room_status.read"],
+        roleKey: "housekeeping",
+        entitlements: [{ product: "pms", key: "property-management", status: "active" }],
+        pmsOperationsRepository: reservationRepository,
+      });
+
+      for (const url of [reservationsUrl, `${reservationsUrl}/${paidReservation.guestBookingId}`]) {
+        const response = await injectJson(app, {
+          method: "GET",
+          url,
+          headers: { authorization: "Bearer valid-token" },
+        });
+        expect(response.statusCode, url).toBe(403);
+        expect(JSON.stringify(response.body), url).not.toContain("stripeFee");
+      }
+    });
+
+    it.each([
+      { permissions: ["pms.operations.manage"] as PermissionKey[], showsBreakdown: false },
+      {
+        permissions: ["pms.operations.manage", "pms.finance.read"] as PermissionKey[],
+        showsBreakdown: true,
+      },
+    ])(
+      "command responses show the breakdown only with Financials read ($permissions)",
+      async (testCase) => {
+        const commandRepository = createPmsOperationsCommandRepository();
+        // Every command result carries the paid reservation, as the PostgreSQL repository does.
+        const paidCommandRepository = new Proxy(commandRepository, {
+          get(target, key, receiver) {
+            const value: unknown = Reflect.get(target, key, receiver);
+            if (typeof value !== "function") return value;
+            return async (...args: unknown[]) => {
+              const result = (await value.apply(target, args)) as {
+                ok?: boolean;
+                reservation?: PmsOperationalReservation;
+              };
+              return result?.ok && result.reservation
+                ? {
+                    ...result,
+                    reservation: { ...result.reservation, payment: paidReservation.payment },
+                  }
+                : result;
+            };
+          },
+        });
+        app = buildAuthenticatedApp({
+          permissions: testCase.permissions,
+          entitlements: [{ product: "pms", key: "property-management", status: "active" }],
+          pmsOperationsCommandRepository: paidCommandRepository,
+        });
+        const checkout = pmsCheckOutCases["checkout-charges-and-checkout"]!;
+        const commands = [
+          pmsAssignmentCommandCases["assignment-command-assign"]!,
+          pmsOperationalCommandCases["checkin-command"]!,
+          pmsOperationalCommandCases["operational-status-transition"]!,
+          pmsOperationalCommandCases["no-show-command"]!,
+          {
+            ...checkout,
+            request: {
+              ...checkout.request,
+              body: {
+                ...checkout.request.body,
+                fulfilledAddonSelectionIds: ["F6855600-0000-0000-0000-000000000001"],
+              },
+            },
+          },
+        ];
+
+        for (const commandCase of commands) {
+          const response = await injectJson(app, {
+            method: commandCase.request.method ?? "POST",
+            url: commandCase.request.path,
+            payload: commandCase.request.body,
+            headers: { authorization: "Bearer valid-token" },
+          });
+
+          expect(response.statusCode, commandCase.caseId).toBe(commandCase.expected.status);
+          expect(
+            (response.body as { reservation: PmsOperationalReservation }).reservation.payment,
+            commandCase.caseId,
+          ).toEqual(
+            testCase.showsBreakdown
+              ? paidReservation.payment
+              : { method: "card", status: "captured" },
+          );
+        }
+      },
+    );
   });
 
   it("returns PMS reservations overlapping the requested stay range for calendar reads", async () => {

@@ -18,10 +18,12 @@ must be generated from at least 128 bits of server randomness. Retries resolve t
 existing agreement binding instead of allocating another identity or token. A
 second creator can only receive a different agreement and link.
 
-The default relative path is `/r/{publicToken}`. Deployment origin is trusted server
-configuration. Resolution chooses the exact saved booking destination through the
-agreement's effective accepted terms; a request cannot supply or override a redirect
-URL. A missing, invalid, paused or ended agreement produces no earning click.
+The default relative path is `/r/{publicToken}`. The share origin is deployment
+configuration, never request input: Marketplace Web builds share URLs on the
+`NEXT_PUBLIC_AFFILIATE_LINK_ORIGIN` build argument (`https://affiliate.vayada.com` once
+links go live, VAY-2209) and falls back to the API host, which serves `/r` itself. Resolution chooses the exact saved booking destination
+through the agreement's effective accepted terms; a request cannot supply or override a
+redirect URL. A missing, invalid, paused or ended agreement produces no earning click.
 
 ## Source reporting and variants
 

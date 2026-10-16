@@ -7,9 +7,13 @@ import {
   BOOKING_OWNER_SNAPSHOT_VERSION,
   type BookingPublicationOwnerSnapshotPort,
 } from "@vayada/domain-distribution/booking-publication-owner-snapshots";
+import type { BookingPublicPaymentMethod } from "@vayada/domain-distribution/booking-publication";
+import type { FinanceManualPaymentReadinessReadPort } from "./financeManualPaymentReadiness.js";
 
 export function createFinanceBookingPublicationSnapshotPort(dependencies: {
   financeReadPort: FinancePaymentReadinessReadPort;
+  /** Bank transfer and PayPal, only while their acceptance is on (VAY-2139). */
+  manualPayments?: FinanceManualPaymentReadinessReadPort;
 }): BookingPublicationOwnerSnapshotPort<"finance"> {
   return {
     owner: "finance",
@@ -24,7 +28,6 @@ export function createFinanceBookingPublicationSnapshotPort(dependencies: {
           !snapshot ||
           snapshot.propertyId !== request.propertyId ||
           !snapshot.updatedAt ||
-          !snapshot.bookingPaymentReady ||
           !snapshot.pricingCurrency.committed ||
           !snapshot.pricingCurrency.matchesCurrent
         ) {
@@ -40,7 +43,7 @@ export function createFinanceBookingPublicationSnapshotPort(dependencies: {
         if (expectedSources.length !== 1 || sourceKey(expectedSources[0]!) !== sourceKey(source)) {
           return unavailable();
         }
-        const readyPaymentMethods = snapshot.methods
+        const ready = snapshot.methods
           .filter(
             ({ method, selected, availability, readiness }) =>
               (method === "card" || method === "pay_at_property") &&
@@ -48,7 +51,18 @@ export function createFinanceBookingPublicationSnapshotPort(dependencies: {
               availability === "available" &&
               readiness === "ready",
           )
-          .map(({ method }) => method as "card" | "pay_at_property");
+          .map(({ method }) => method as BookingPublicPaymentMethod);
+        // Bank transfer and PayPal only for a hotel without a ready card or pay-at-property method.
+        const readyPaymentMethods: BookingPublicPaymentMethod[] =
+          snapshot.bookingPaymentReady && ready.length > 0
+            ? ready
+            : dependencies.manualPayments
+              ? [
+                  ...(await dependencies.manualPayments.readyMethods({
+                    propertyId: request.propertyId,
+                  })),
+                ]
+              : [];
         if (readyPaymentMethods.length === 0) return unavailable();
         const currency = snapshot.pricingCurrency.committed.currency;
         return deepFreeze({

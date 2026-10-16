@@ -4,16 +4,19 @@ import { useEffect, useRef, type ReactNode } from "react";
 import { ChevronRightIcon } from "@heroicons/react/24/outline";
 import { useTranslation } from "@/lib/i18n";
 
-/** The closed "More options" row under the steps. A native <details> keeps its editors mounted while closed, so an
+/** The closed "More options" row under the card. A native <details> keeps its editors mounted while closed, so an
  * unapplied entry and its Save guard survive; with `keepOpen` (such an entry inside) it opens and stays open.
- * `summary` names what is set inside, marked with a dot, so nothing hides behind the closed row. */
+ * `summary` names what is set inside, so nothing hides behind the closed row; `marked` adds a dot and starts it open
+ * (settings the card's top doesn't show). */
 export function MoreOptions({
   keepOpen = false,
   summary,
+  marked = false,
   children,
 }: {
   keepOpen?: boolean;
   summary?: string | null;
+  marked?: boolean;
   children: ReactNode;
 }) {
   const { t } = useTranslation();
@@ -21,6 +24,13 @@ export function MoreOptions({
   useEffect(() => {
     if (keepOpen && details.current) details.current.open = true;
   }, [keepOpen]);
+  // Opened once when kept settings show up (their terms load after the room); afterwards the hotel decides.
+  const openedForKept = useRef(false);
+  useEffect(() => {
+    if (!marked || openedForKept.current || !details.current) return;
+    openedForKept.current = true;
+    details.current.open = true;
+  }, [marked]);
   return (
     <details ref={details} className="group rounded-2xl border border-gray-200 bg-white">
       <summary
@@ -33,16 +43,16 @@ export function MoreOptions({
           aria-hidden="true"
           className="h-4 w-4 shrink-0 text-gray-500 transition-transform group-open:rotate-90"
         />
-        <span className="text-[15px] font-semibold text-gray-900">
+        <span className="shrink-0 whitespace-nowrap text-[15px] font-semibold text-gray-900">
           {t("pricing.steps.more.title")}
         </span>
-        {summary && (
+        {marked && (
           <span aria-hidden="true" className="h-2 w-2 shrink-0 rounded-full bg-amber-500" />
         )}
         <span
           className={`ml-auto truncate text-[14px] ${summary ? "text-gray-700" : "hidden text-gray-500 sm:block"}`}
         >
-          {summary ?? t("pricing.steps.more.hint")}
+          {summary || t("pricing.steps.more.hint")}
         </span>
       </summary>
       <div className="space-y-4 border-t border-gray-100 p-5 md:p-7">{children}</div>

@@ -1235,6 +1235,128 @@ describe("AuthKit session routes", () => {
   );
 
   it.each([
+    { surface: "pms-web", kind: "hotel_group", origin: "https://pms.localhost", hotel: true },
+    {
+      surface: "booking-admin",
+      kind: "hotel_group",
+      origin: "https://admin.booking.localhost",
+      hotel: true,
+    },
+    {
+      surface: "platform-admin",
+      kind: "platform",
+      origin: "https://admin.localhost",
+      hotel: false,
+    },
+  ] as const)(
+    "flags $surface password login without any workspace for hotel setup only on hotel surfaces",
+    async ({ surface, kind, origin, hotel }) => {
+      app = buildAuthSessionApp({
+        allowedOrigins: [origin],
+        surfacePolicies: { [surface]: { requiredOrganizationKind: kind } },
+        authKitClient: createAuthKitClient({
+          async authenticateWithPassword() {
+            return { ...session, organizationId: undefined };
+          },
+        }),
+      });
+      const response = await app.inject({
+        method: "POST",
+        url: "/auth/password/login",
+        headers: { origin },
+        payload: { email: session.user.email, password: "correct-password", surface },
+      });
+
+      expect(response.statusCode).toBe(403);
+      expect(response.json()).toEqual({
+        error: "auth_session_rejected",
+        message: `No active ${kind} organization is available for this surface`,
+        ...(hotel ? { state: "hotel_workspace_required" } : {}),
+      });
+    },
+  );
+
+  it("returns Google hotel login without a hotel workspace with the setup code", async () => {
+    let state = "";
+    app = buildAuthSessionApp({
+      allowedOrigins: ["https://admin.localhost"],
+      surfacePolicies: { "pms-web": { requiredOrganizationKind: "hotel_group" } },
+      authKitClient: createAuthKitClient({
+        getAuthorizationUrl(input) {
+          state = input.state;
+          return "https://auth.workos.test/google";
+        },
+        async authenticateWithCode() {
+          return { ...session, organizationId: undefined };
+        },
+      }),
+    });
+    const start = await app.inject({
+      method: "GET",
+      url:
+        "/auth/oauth/google/start?surface=pms-web&flow=login" +
+        "&return_to=https%3A%2F%2Fadmin.localhost%2Flogin" +
+        "&error_return_to=https%3A%2F%2Fadmin.localhost%2Flogin",
+      headers: { host: "api.localhost", "x-forwarded-proto": "https" },
+    });
+    const response = await app.inject({
+      method: "GET",
+      url: `/auth/oauth/google/callback?code=google-code&state=${encodeURIComponent(state)}`,
+      headers: { cookie: cookieHeader(start, "vayada_oauth_state") },
+    });
+
+    expect(response.statusCode).toBe(302);
+    const location = new URL(String(response.headers.location));
+    expect(location.origin + location.pathname).toBe("https://admin.localhost/login");
+    expect(location.searchParams.get("auth_error")).toBe(
+      "No active hotel_group organization is available for this surface",
+    );
+    expect(location.searchParams.get("auth_error_code")).toBe("hotel_workspace_required");
+  });
+
+  it("keeps the plain error for hotel login when the account only has a past hotel membership", async () => {
+    app = buildAuthSessionApp({
+      allowedOrigins: ["https://pms.localhost"],
+      surfacePolicies: { "pms-web": { requiredOrganizationKind: "hotel_group" } },
+      identityRepository: createIdentityRepository({
+        membershipOrganizations: async () => [
+          {
+            organizationId: "org_former_hotel",
+            workosOrgId: "org_workos_former_hotel",
+            name: "Former Hotel",
+            kind: "hotel_group",
+            status: "active",
+            membership: {
+              membershipId: "membership_removed",
+              status: "inactive",
+              roleKey: "front_desk",
+              workosMembershipId: null,
+              workosRoleSlugs: [],
+            },
+          },
+        ],
+      }),
+      authKitClient: createAuthKitClient({
+        async authenticateWithPassword() {
+          return { ...session, organizationId: undefined };
+        },
+      }),
+    });
+    const response = await app.inject({
+      method: "POST",
+      url: "/auth/password/login",
+      headers: { origin: "https://pms.localhost" },
+      payload: { email: session.user.email, password: "correct-password", surface: "pms-web" },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toEqual({
+      error: "auth_session_rejected",
+      message: "No active hotel_group organization is available for this surface",
+    });
+  });
+
+  it.each([
     { reason: "no hotel", offered: ["org_platform"], selectCalled: false },
     { reason: "two hotels", offered: ["org_hotel", "org_hotel_other"], selectCalled: false },
     { reason: "unknown organization", offered: ["org_unknown"], selectCalled: false },

@@ -236,6 +236,86 @@ describe("property setup route state composition", () => {
     });
   });
 
+  it("converts calendar drafts saved before VAY-2198 on read", async () => {
+    const legacy = {
+      "pms.operating_calendar": "calendar:2",
+      "pms.inventory": "inventory:2",
+      "pms.room_types": "room-types:1",
+      "hotel_catalog.location": "hotel_catalog.location:r3",
+    };
+    const port = (
+      draftBase: Record<string, string>,
+      legacyFact: (stepId: PropertySetupStepId) => Record<string, string> | undefined,
+    ) => {
+      const providers = makeProviders(selectedTracks);
+      providers.pms = {
+        getOwnerState: vi.fn(async (request: PropertySetupOwnerStateRequest) => ({
+          outcome: "found" as const,
+          facts: request.stepIds.map((stepId) => {
+            const legacyBaseRevisions = legacyFact(stepId);
+            return legacyBaseRevisions
+              ? { ...ownerFact(stepId), legacyBaseRevisions: legacyBaseRevisions as never }
+              : ownerFact(stepId);
+          }),
+        })),
+      };
+      return createPropertySetupRouteStateReadPort({
+        draftRepository: {
+          getActiveSession: vi.fn(async () => sessionWithCalendarDraft(draftBase)),
+        },
+        trackRepository: trackRepository(selectedTracks, 4),
+        ownerStateProviders: providers,
+      });
+    };
+    const read = async (draftBase: Record<string, string>, today = legacy) => {
+      const result = await port(draftBase, (stepId) =>
+        stepId === "calendar" ? today : undefined,
+      ).getPropertySetupRouteState(input(selectedTracks));
+      if (result.outcome !== "found") throw new Error(result.outcome);
+      return result;
+    };
+    const current = ownerFact("calendar").currentBaseRevisions;
+
+    // Nothing changed since it was saved: shown with today's time zone, rooms and units manifest.
+    const unchanged = await read(legacy);
+    expect(unchanged.session?.drafts[0]).toMatchObject({
+      payload: { "rate.minimum_stay": 3 },
+      baseRevisions: current,
+    });
+    expect(unchanged.ownerFacts.find(({ stepId }) => stepId === "calendar")).not.toHaveProperty(
+      "legacyBaseRevisions",
+    );
+
+    // A room or address edit since: never current, with the stored calendar and inventory.
+    const changed = await read(legacy, { ...legacy, "pms.room_types": "room-types:2" });
+    expect(changed.session?.drafts[0]?.baseRevisions).toEqual({
+      "pms.operating_calendar": "calendar:2",
+      "pms.inventory": "inventory:2",
+      "pms.room_units": expect.stringMatching(/^legacy:[0-9a-f]{64}$/),
+      "hotel_catalog.time_zone": expect.stringMatching(/^legacy:[0-9a-f]{64}$/),
+    });
+
+    // Without legacy values from PMS (units changed since the saved calendar) it can't be current.
+    const unproven = await port(legacy, () => undefined).getPropertySetupRouteState(
+      input(selectedTracks),
+    );
+    expect(unproven).toMatchObject({
+      outcome: "found",
+      session: {
+        drafts: [{ baseRevisions: { "pms.room_units": expect.stringMatching(/^legacy:/) } }],
+      },
+    });
+
+    // Drafts saved with the new manifest are untouched.
+    const newer = { ...current, "pms.inventory": "inventory:9" };
+    expect((await read(newer)).session?.drafts[0]?.baseRevisions).toEqual(newer);
+
+    // Legacy values belong on the calendar fact only.
+    await expect(
+      port(legacy, () => legacy).getPropertySetupRouteState(input(selectedTracks)),
+    ).resolves.toEqual({ outcome: "provider_failure" });
+  });
+
   it("preserves historical track metadata but rejects unauthorized returned progress", async () => {
     const historical = sessionWithBookingDraft();
     historical.trackRevision = 3;
@@ -447,6 +527,26 @@ function trackRepository(selected: readonly SetupTrack[], revision: number) {
       selectedTracks: [...selected],
       tracks: [],
     })),
+  };
+}
+
+function sessionWithCalendarDraft(baseRevisions: Record<string, string>): PropertySetupSession {
+  const session = sessionWithBookingDraft();
+  return {
+    ...session,
+    resumeStepId: "calendar",
+    drafts: [
+      {
+        stepId: "calendar",
+        payload: { "rate.minimum_stay": 3 },
+        dirtyFields: ["rate.minimum_stay"],
+        baseRevisions: baseRevisions as never,
+        piiClassification: "potential_incidental_pii",
+        retentionExpiresAt: "2026-10-01T00:00:00.000Z",
+        revision: 2,
+        updatedAt: "2026-08-02T00:00:00.000Z",
+      },
+    ],
   };
 }
 

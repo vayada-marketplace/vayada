@@ -15,14 +15,17 @@ export const hotelService = {
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          // Only the referring site: page addresses can carry a guest's email, booking
+          // reference or access token (VAY-2215). no-referrer keeps the Referer header from
+          // sending this page's own address.
           body: JSON.stringify({
             clickId,
             referralCode,
             sessionId: getBookingWebSessionId(slug),
-            landingUrl: typeof window === "undefined" ? undefined : window.location.href,
-            referrer: typeof document === "undefined" ? undefined : document.referrer,
+            referrer: referrerOrigin(),
           }),
           keepalive: true,
+          referrerPolicy: "no-referrer",
         },
       );
     } catch {
@@ -59,3 +62,13 @@ export const hotelService = {
     );
   },
 };
+
+function referrerOrigin(): string | undefined {
+  if (typeof document === "undefined" || !document.referrer) return undefined;
+  try {
+    const url = new URL(document.referrer);
+    return url.protocol === "https:" || url.protocol === "http:" ? url.origin : undefined;
+  } catch {
+    return undefined;
+  }
+}

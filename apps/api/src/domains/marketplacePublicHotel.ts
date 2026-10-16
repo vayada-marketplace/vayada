@@ -58,19 +58,22 @@ const activeSubmissionSql = `
     AND active.moderation_status = 'approved' AND moderation.status = 'approved'
 `;
 
-/** Private snapshot stays inside this adapter; only the explicit public projection leaves. */
-export async function readMarketplacePublicHotel(
-  client: Pick<MarketplaceHotelCollaborationPreferencesClient, "query">,
+/** The submitted catalog facts, or null when the snapshot is not a valid public source. */
+export function parseMarketplaceSubmissionCatalog(snapshot: unknown, propertyId: string) {
+  const parsed = snapshotSchema.safeParse(snapshot);
+  if (!parsed.success || parsed.data.catalog.propertyId.toLowerCase() !== propertyId.toLowerCase())
+    return null;
+  return parsed.data.catalog;
+}
+
+/** Public projection of one submission revision; null when its media is not publicly servable. */
+export async function projectMarketplaceSubmission(
   mediaResolver: HotelMediaResolutionPort,
-  propertyId: string,
+  row: ActiveSubmission & { propertyId: string },
 ): Promise<MarketplacePublicHotel | null> {
-  const id = z.string().uuid().parse(propertyId).toLowerCase();
-  const row = (await client.query<ActiveSubmission>(activeSubmissionSql, [id])).rows[0];
-  if (!row) return null;
-  const parsed = snapshotSchema.safeParse(row.snapshot);
-  if (!parsed.success || parsed.data.catalog.propertyId.toLowerCase() !== id)
-    throw new Error("Marketplace public snapshot unavailable");
-  const catalog = parsed.data.catalog;
+  const id = row.propertyId.toLowerCase();
+  const catalog = parseMarketplaceSubmissionCatalog(row.snapshot, id);
+  if (!catalog) throw new Error("Marketplace public snapshot unavailable");
   const resolved = await mediaResolver.resolvePublicMedia({
     ownerOrganizationId: row.organizationId,
     target: { kind: "property", propertyId: id },
@@ -82,13 +85,13 @@ export async function readMarketplacePublicHotel(
     const current = resolved.batch.media.find(
       (value) => value.mediaObjectId === item.mediaObjectId.toLowerCase(),
     );
-    const expectedPurpose =
+    // Setup uploads every hotel photo as a gallery image and lets the hotel pick the cover, as
+    // the presentation command allows; only the logo has an upload purpose of its own.
+    const allowedPurposes: readonly string[] =
       item.mediaType === "logo"
-        ? "property.logo"
-        : item.mediaType === "hero_image"
-          ? "property.hero_image"
-          : "property.gallery_image";
-    if (!current || current.purpose !== expectedPurpose) return null;
+        ? ["property.logo"]
+        : ["property.hero_image", "property.gallery_image"];
+    if (!current || !allowedPurposes.includes(current.purpose)) return null;
     media.push({
       mediaType: item.mediaType,
       url: current.publicVariants.find((variant) => variant.variantName === "original_safe")!
@@ -96,8 +99,6 @@ export async function readMarketplacePublicHotel(
       altText: item.altText,
     });
   }
-  const current = (await client.query<ActiveSubmission>(activeSubmissionSql, [id])).rows[0];
-  if (current?.revisionId !== row.revisionId) return null;
   return {
     propertyId: id,
     revisionId: row.revisionId,
@@ -109,4 +110,20 @@ export async function readMarketplacePublicHotel(
       : null,
     media,
   };
+}
+
+/** Private snapshot stays inside this adapter; only the explicit public projection leaves. */
+export async function readMarketplacePublicHotel(
+  client: Pick<MarketplaceHotelCollaborationPreferencesClient, "query">,
+  mediaResolver: HotelMediaResolutionPort,
+  propertyId: string,
+): Promise<MarketplacePublicHotel | null> {
+  const id = z.string().uuid().parse(propertyId).toLowerCase();
+  const row = (await client.query<ActiveSubmission>(activeSubmissionSql, [id])).rows[0];
+  if (!row) return null;
+  const hotel = await projectMarketplaceSubmission(mediaResolver, { ...row, propertyId: id });
+  if (!hotel) return null;
+  const current = (await client.query<ActiveSubmission>(activeSubmissionSql, [id])).rows[0];
+  if (current?.revisionId !== row.revisionId) return null;
+  return hotel;
 }

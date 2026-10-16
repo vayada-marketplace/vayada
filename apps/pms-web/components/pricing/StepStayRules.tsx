@@ -6,11 +6,12 @@ import type { PricingConfiguration } from "@vayada/domain-pms/replacement-pricin
 import { useTranslation } from "@/lib/i18n";
 import { errorText } from "./pricingAmounts";
 import { childrenSummary, mainOffer, ownRuleOptions, setMinimumNights } from "./stepPricing";
-import { StepCard } from "./StepCard";
+import { MoreGroup } from "./SimpleMoreOptions";
 import * as ui from "./pricingStyles";
 
-/** Step 5: the main option's minimum nights (options that follow its stay rules too) and the child prices. Options
- * with their own stay rules are named, not changed. `children` is the child-price window, opened by its Edit. */
+/** More options' "Length of stay" and "Children": the main option's minimum nights (options that follow its stay rules
+ * too) and the child prices. Options with their own stay rules are named, not changed. `children` is the child-price
+ * window, opened by its Edit; a room that takes no children doesn't mention them. */
 export function StepStayRules({
   room,
   names,
@@ -42,14 +43,16 @@ export function StepStayRules({
     }
   };
   const nights = rules?.minArrivalNights ?? 1;
+  const bands = room.children.bands;
+  const counted = bands.every((band) => band.countsTowardCapacity)
+    ? t("pricing.simple.more.childrenCounted", { count: room.capacity.total })
+    : bands.every((band) => !band.countsTowardCapacity)
+      ? t("pricing.simple.more.childrenNotCounted")
+      : null;
   return (
-    <StepCard
-      number={5}
-      title={t("pricing.steps.rules.title")}
-      hint={t(own.length ? "pricing.steps.rules.hintSome" : "pricing.steps.rules.hint")}
-    >
-      <div className="grid gap-4 sm:grid-cols-[240px_minmax(0,1fr)]">
-        <div className="space-y-1.5">
+    <>
+      <MoreGroup title={t("pricing.simple.more.stay")}>
+        <div className="w-60 space-y-1.5">
           <p id={minimumId} className="text-[13px] font-medium text-gray-700">
             {t("pricing.steps.rules.minimum")}
           </p>
@@ -85,10 +88,21 @@ export function StepStayRules({
             </button>
           </div>
         </div>
-        <div className="min-w-0 space-y-1.5">
-          <p className="text-[13px] font-medium text-gray-700">
-            {t("pricing.steps.rules.children")}
+        {own.length > 0 && (
+          <p className={ui.stepHint}>
+            {t("pricing.steps.rules.own", {
+              names: own.map((offer) => names[offer.id] ?? "").join(", "),
+            })}
           </p>
+        )}
+        {error && (
+          <p role="alert" className={ui.errorText}>
+            {error}
+          </p>
+        )}
+      </MoreGroup>
+      {room.capacity.children > 0 && (
+        <MoreGroup title={t("pricing.steps.rules.children")}>
           <div className="flex h-[54px] items-center justify-between gap-3 rounded-[10px] bg-gray-100 px-[18px]">
             <span className="truncate text-[14px] text-gray-900">{childrenSummary(room, t)}</span>
             <button
@@ -101,21 +115,10 @@ export function StepStayRules({
               {t("pricing.steps.options.edit")}
             </button>
           </div>
-        </div>
-      </div>
-      {own.length > 0 && (
-        <p className={ui.stepHint}>
-          {t("pricing.steps.rules.own", {
-            names: own.map((offer) => names[offer.id] ?? "").join(", "),
-          })}
-        </p>
-      )}
-      {error && (
-        <p role="alert" className={ui.errorText}>
-          {error}
-        </p>
+          {counted && <p className={ui.stepHint}>{counted}</p>}
+        </MoreGroup>
       )}
       {children}
-    </StepCard>
+    </>
   );
 }
