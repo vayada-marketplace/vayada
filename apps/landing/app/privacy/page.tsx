@@ -9,8 +9,7 @@ export default function PrivacyPage() {
           <div className="mb-8">
             <h1 className="text-4xl md:text-5xl font-bold text-primary-800 mb-4">Privacy Policy</h1>
             <p className="text-gray-600">
-              {/* VAY-2213: the coordinator gives the release day; replace before merging. */}
-              <strong>Effective Date:</strong> [RELEASE DAY, SET BEFORE MERGE]
+              <strong>Effective Date:</strong> October 16, 2026
             </p>
           </div>
 
