@@ -154,6 +154,12 @@ The TypeScript API PostgreSQL job is a `postgres × shard` matrix (`platform`, `
 
 Selection is on the jobs, never on `on.pull_request.paths`: a workflow that does not trigger never reports the required status and the ruleset would wait forever. The aggregator keeps `if: always()` because a skipped required job would satisfy the ruleset.
 
+### Merge queue and holds
+
+Once the `main` ruleset requires a merge queue (squash, one PR per merge, entries must pass, 180-minute status check timeout), a PR merges by joining the queue: "Merge when ready" in the UI or `gh pr merge <n> --match-head-commit <sha>`, after its own checks pass and its review threads are resolved. The sync merge API (`PUT /pulls/<n>/merge`) cannot merge into a queue branch. The queue reruns PR Checks on the PR stacked on `main` and the entries ahead, removes a failing entry and merges each passing one in order. Only PRs based on `main` can join: collapse a stack into its bottom PR first.
+
+An open issue labelled `release-train-hold` pauses merging, which replaces asking for a merge freeze during a release. Queued entries still run their checks, then wait in **Required Checks** (`pr-checks.mjs hold`, polling once a minute) until no hold is open; close the issue to resume. A hold that outlives 120 minutes fails the waiting entries with the hold's link, before the status check timeout would remove them silently; re-enqueue them after the hold closes. Entries already past the check when a hold opens still merge, so wait until none can and `main` stays put before picking a release sha. A queued PR that edits `pr-checks.yml` or `pr-checks.mjs` runs its own copy of this gate, so do not enqueue one while a hold is open.
+
 When the baseline is clean enough to enforce globally, add a `.github/workflows/quality.yml` that runs:
 
 ```bash

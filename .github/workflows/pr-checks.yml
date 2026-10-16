@@ -1331,7 +1331,12 @@ jobs:
   required:
     name: Required Checks
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # A merge queue entry may also wait here while a hold is open (up to 120 minutes), which must
+    # stay below the ruleset's status check timeout (180 minutes).
+    timeout-minutes: ${{ github.event_name == 'merge_group' && 130 || 5 }}
+    permissions:
+      contents: read
+      issues: read
     needs:
       - changes
       - frontend
@@ -1358,3 +1363,11 @@ jobs:
         env:
           NEEDS: ${{ toJSON(needs) }}
         run: node scripts/ci/pr-checks.mjs verify
+
+      # A passing queue entry merges as soon as this job succeeds, so an open release-train-hold
+      # issue keeps it waiting here. Failed entries stop at the step above and leave the queue.
+      - name: Wait while a merge queue hold is open
+        if: github.event_name == 'merge_group'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/ci/pr-checks.mjs hold

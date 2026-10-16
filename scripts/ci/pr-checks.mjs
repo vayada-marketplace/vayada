@@ -3,6 +3,7 @@
 //
 //   node scripts/ci/pr-checks.mjs select   # "changes" job: writes run_<job>=true|false outputs
 //   node scripts/ci/pr-checks.mjs verify   # "Required Checks" job: exits 1 unless every job passed
+//   node scripts/ci/pr-checks.mjs hold     # "Required Checks" on merge_group: waits out a hold
 //
 // No dependencies on purpose: both jobs run before (or without) `npm ci`.
 import { execFileSync } from "node:child_process";
@@ -269,6 +270,41 @@ export function verifyRequiredChecks(needs) {
   return problems;
 }
 
+// Merge queue pause (VAY-2241). While an open issue carries this label, a queued entry's
+// "Required Checks" waits in `hold` instead of passing, so nothing merges into main while a release
+// is being cut; the entry keeps its place and its finished checks. Labels can only be set by users
+// with triage access, by issue templates or forms that name the label (there are none; a test
+// guards that) and by apps with issue write access. A stray hold only delays merges, so every open
+// labelled issue counts.
+export const HOLD_LABEL = "release-train-hold";
+
+export function openHolds(issues) {
+  return issues.filter((issue) => issue.state === "open" && !issue.pull_request);
+}
+
+// Resolves once no hold is open. A failed read counts as "still held" (fail closed). Rejects at the
+// deadline, which must stay below the ruleset's status check timeout so the reason is reported.
+export async function waitWhileHeld({ listHolds, sleep, now, maxWaitMs, pollMs, log }) {
+  const started = now();
+  let reported = null;
+  for (;;) {
+    let state;
+    try {
+      const holds = await listHolds();
+      if (holds.length === 0) return;
+      state = holds.map((issue) => issue.html_url).join(", ");
+    } catch (error) {
+      state = `could not read holds (${error.message})`;
+    }
+    const waited = Math.round((now() - started) / 60_000);
+    if (state !== reported) log(`merge queue hold: ${state}; waiting (${waited} min so far)`);
+    reported = state;
+    if (now() - started >= maxWaitMs)
+      throw new Error(`release hold still open after ${waited} min: ${state}`);
+    await sleep(pollMs);
+  }
+}
+
 // The changed files and the pr-checks.yml job-block change, diffed from one base commit per event:
 //   pull_request: HEAD is GitHub's merge commit, so HEAD^1 is the base branch tip and diffing from
 //     it is exactly the PR's "Files changed" view. Needs fetch-depth >= 2.
@@ -347,13 +383,48 @@ function runVerify() {
   console.error("All required jobs succeeded or were legitimately skipped.");
 }
 
-const commands = { select: runSelect, verify: runVerify };
+async function runHold() {
+  const { GITHUB_REPOSITORY: repository, GH_TOKEN: token } = process.env;
+  if (!repository || !token) throw new Error("hold needs GITHUB_REPOSITORY and GH_TOKEN");
+  const api = process.env.GITHUB_API_URL || "https://api.github.com";
+  const url = `${api}/repos/${repository}/issues?state=open&labels=${HOLD_LABEL}&per_page=100`;
+  // Every queued entry polls while held, and the token's hourly budget is shared by the whole
+  // repository, so repeat reads are conditional: a 304 reply does not count against it.
+  let cached = null;
+  const listHolds = async () => {
+    const headers = { accept: "application/vnd.github+json", authorization: `Bearer ${token}` };
+    if (cached) headers["if-none-match"] = cached.etag;
+    const response = await fetch(url, { headers, signal: AbortSignal.timeout(20_000) });
+    if (response.status === 304 && cached) return cached.holds;
+    if (!response.ok) throw new Error(`GET ${url}: HTTP ${response.status}`);
+    const holds = openHolds(await response.json());
+    const etag = response.headers.get("etag");
+    cached = etag ? { etag, holds } : null;
+    return holds;
+  };
+  await waitWhileHeld({
+    listHolds,
+    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    now: Date.now,
+    maxWaitMs: Number(process.env.HOLD_MAX_WAIT_MINUTES || 120) * 60_000,
+    pollMs: Number(process.env.HOLD_POLL_SECONDS || 60) * 1000,
+    log: (line) => console.error(line),
+  });
+  console.error("No merge queue hold is open.");
+}
+
+const commands = { select: runSelect, verify: runVerify, hold: runHold };
 // Compare real paths so a symlinked invocation can never turn the CLI into a silent no-op.
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const command = commands[process.argv[2]];
   if (!command) {
-    console.error("usage: pr-checks.mjs <select|verify>");
+    console.error("usage: pr-checks.mjs <select|verify|hold>");
     process.exit(2);
   }
-  command();
+  Promise.resolve()
+    .then(command)
+    .catch((error) => {
+      console.error(`::error::${error.message}`);
+      process.exit(1);
+    });
 }
