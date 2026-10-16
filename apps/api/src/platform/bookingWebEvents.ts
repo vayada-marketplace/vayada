@@ -62,50 +62,24 @@ export function createPgBookingWebEventSink(
       });
     },
     async recordTelemetryEvent(event) {
-      const normalizedType = event.eventType.replace(/[^a-zA-Z0-9_.:-]/g, "_").slice(0, 80);
-      const occurrenceKey = event.eventId;
-      await insertDomainEventWithAudit(pool, {
-        propertyId: event.propertyId,
-        sourceSystem: "distribution",
-        eventKey: eventKey(
-          "booking-web",
-          "telemetry",
+      // VAY-2212: funnel analytics live in their own table, which the API prunes after 13
+      // months, not in the append-only event log. Bots are not stored; the readers never count
+      // them (VAY-2214). No slug, request id, IP or user-agent trace is kept.
+      if (classifyBookingWebTraffic(event.userAgent) === "bot") return;
+      await pool.query(
+        `INSERT INTO distribution.booking_web_events
+           (property_id, event_type, event_id, session_id, metadata, occurred_at)
+         VALUES ($1::uuid, $2, $3::uuid, $4::uuid, $5::jsonb, $6)
+         ON CONFLICT (property_id, event_id) DO NOTHING`,
+        [
           event.propertyId,
-          event.hotelSlug,
-          normalizedType,
-          occurrenceKey,
-        ),
-        eventType: `booking_web.${normalizedType}`,
-        occurredAt: event.occurredAt,
-        resourceProduct: "distribution",
-        resourceType: "booking_web_hotel",
-        resourceId: event.hotelSlug,
-        correlationId: event.sessionId,
-        idempotencyKeyHash: hashKey(
-          event.propertyId,
-          event.hotelSlug,
-          normalizedType,
-          occurrenceKey,
-        ),
-        payload: {
-          hotelSlug: event.hotelSlug,
-          eventType: normalizedType,
-          eventId: event.eventId,
-          sessionId: event.sessionId,
-          metadata: event.metadata,
-        },
-        // VAY-2197: no request id (it joins the access log's IP address) and no IP or user-agent
-        // hashes (an unsalted IP hash can be reversed); only what the dashboards filter on.
-        eventMetadata: {
-          source: "apps/api-booking-web-public",
-          trafficClass: classifyBookingWebTraffic(event.userAgent),
-        },
-        auditProduct: "distribution",
-        auditAction: "booking_web.telemetry.recorded",
-        auditTargetProduct: "distribution",
-        auditTargetType: "booking_web_hotel",
-        auditTargetId: event.hotelSlug,
-      });
+          event.eventType,
+          event.eventId,
+          event.sessionId,
+          JSON.stringify(event.metadata),
+          event.occurredAt,
+        ],
+      );
     },
   };
 }

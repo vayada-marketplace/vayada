@@ -949,6 +949,16 @@ jobs:
           src/platform/platformMediaS3.test.ts
           src/domains/propertyMediaCommandRepository.test.ts
 
+      - name: Verify booking-page analytics storage and readers on PostgreSQL
+        if: matrix.shard == 'hotel-setup'
+        run: >-
+          npm --workspace vayada-api run test -- --no-file-parallelism
+          src/platform/bookingWebTelemetry.integration.test.ts
+          src/platform/bookingFunnel.integration.test.ts
+          src/bookingDashboardMoney.integration.test.ts
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+
       - name: Verify platform media cleanup on PostgreSQL
         if: matrix.shard == 'hotel-setup'
         run: npm --workspace vayada-api run test -- --no-file-parallelism src/jobs/platformMediaCleanup.integration.test.ts
