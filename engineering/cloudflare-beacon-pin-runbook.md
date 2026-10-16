@@ -35,8 +35,9 @@ pin fails closed. Do not drop SRI and do not self-host the beacon.
 
    The landing guards cover only `navigator.sendBeacon` and `XMLHttpRequest` to
    `https://cloudflareinsights.com/cdn-cgi/rum` and same-origin `/cdn-cgi/rum`. Check that the new
-   version still uses only those. Also check that it adds no `fetch`, WebSocket, `eval`,
-   `new Function`, script injection, cookies or storage. If it adds any of them, stop. Analytics
+   version still uses only those. Also check that it adds no `fetch`, WebSocket, `new Image()`
+   pixels, workers, `eval`, `new Function`, `document.write`, script injection, cookies or
+   storage. If it adds any of them, stop. Analytics
    stays off until the guards in `cloudflareAnalytics.ts` and the consent spec cover the new
    behaviour. Never copy the hash without this review.
 
@@ -64,10 +65,15 @@ pin fails closed. Do not drop SRI and do not self-host the beacon.
      request goes to `/cdn-cgi/rum`;
    - after "Cookie settings" → "Necessary only", no further `/cdn-cgi/rum` requests go out.
 
-6. **Close the loop.** Run Cloudflare Beacon Drift from the Actions tab (no input), or wait for the
-   next daily run. It closes the issue when the live file matches the pin on `main`.
+6. **Close the loop.** Run Cloudflare Beacon Drift on `main` from the Actions tab (no input), or
+   wait for the next daily run. It closes the issue when the live file matches the pin on `main`.
+   A closed issue means `main` is current, not that vayada.com is: step 5 checks the site.
 
 ## Testing the alert
 
 Run the workflow manually with `expected_integrity` set to any other `sha384-…` value. It opens
-(or updates) the issue, marked as a test run, and fails. A normal run then closes the issue.
+(or updates) the issue, marked as a test run, and fails. Close that issue by hand, or let the next
+run on `main` close it. Do not test while a real drift issue is open: the test rewrites its
+description until the next daily run. On branches other than `main`, a run without the input only
+prints the report and never touches issues, so checking a pin-update branch cannot close the real
+issue early.
