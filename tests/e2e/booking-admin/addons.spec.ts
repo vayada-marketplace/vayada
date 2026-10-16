@@ -475,6 +475,106 @@ test.describe("booking-admin add-ons settings cutover", () => {
     });
     await assertHealthy();
   });
+
+  // VAY-2230: "Other" was a chip only while an add-on used it. The chips now list every category
+  // the editor offers, and an add-on saved as "Other" is listed and filtered under it.
+  test("filters by every editor category and saves an add-on as Other", async ({
+    page,
+  }, testInfo) => {
+    test.skip(
+      !PROD,
+      "Requires a production booking-admin build so the authenticated shell hydrates.",
+    );
+    const assertHealthy = watchPageHealth(page, testInfo);
+    await mockBookingAdminBookingFlow(page);
+    let addonItems: Array<Record<string, unknown>> = [
+      {
+        hotelId: BOOKING_ADMIN_HOTEL_ID,
+        propertyId: "property_alpenrose",
+        addonItemId: "addon_transfer",
+        name: "Airport transfer",
+        description: "We pick you up at the airport.",
+        price: "30.00",
+        currency: "EUR",
+        category: "transport",
+        imageUrl: null,
+        duration: null,
+        maxQuantity: 1,
+        pricingModel: "per_stay",
+        ownershipKind: "property",
+        partnerCommissionRate: null,
+        publicVisible: true,
+        status: "active",
+        sortOrder: 0,
+        createdAt: "2026-06-01T10:00:00.000Z",
+        updatedAt: "2026-06-01T10:00:00.000Z",
+      },
+    ];
+    const writes: Array<Record<string, unknown>> = [];
+    await page.route(`**${BOOKING_ADMIN_ADDON_ITEMS_PATH}**`, async (route) => {
+      const request = route.request();
+      if (request.method() === "GET") {
+        await route.fulfill({
+          json: {
+            addonItems,
+            propertyCurrency: "EUR",
+            propertyPlan: {
+              propertyId: "property_alpenrose",
+              plan: "fixed",
+              limits: { maxRoomPhotosPerType: 10, maxAddons: 9, guestContactAccess: "always" },
+            },
+          },
+        });
+        return;
+      }
+      const body = request.postDataJSON() as Record<string, unknown>;
+      writes.push(body);
+      addonItems = addonItems.map((item) => ({ ...item, ...body }));
+      await route.fulfill({ json: addonItems[0] });
+    });
+
+    await page.goto("/add-ons");
+    const chips = page.locator("main button[aria-pressed]");
+    await expect(chips).toHaveText([
+      "All",
+      "Food & Beverage",
+      "Transport",
+      "Wellness",
+      "Experiences",
+      "Other",
+    ]);
+    const names = page.getByTestId("booking-addon-item-name");
+    await page.getByRole("button", { name: "Other", exact: true }).click();
+    await expect(page.getByText("No add-ons match your search.")).toBeVisible();
+    await page.getByRole("button", { name: "All", exact: true }).click();
+    await expect(names).toHaveText(["Airport transfer"]);
+
+    await page.getByRole("button", { name: "Edit Airport transfer" }).click();
+    const dialog = page.getByRole("dialog");
+    await dialog.getByRole("radio", { name: "Other" }).check();
+    await dialog.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(dialog).toBeHidden();
+    expect(writes).toEqual([expect.objectContaining({ category: "other" })]);
+    const row = page.getByTestId("booking-addon-item-addon_transfer");
+    await expect(row.getByText("Other", { exact: true })).toBeVisible();
+
+    await page.getByRole("button", { name: "Other", exact: true }).click();
+    await expect(names).toHaveText(["Airport transfer"]);
+    for (const [width, height] of [
+      [1440, 900],
+      [390, 844],
+    ] as const) {
+      await page.setViewportSize({ width, height });
+      await page.screenshot({
+        path: testInfo.outputPath(`vay2230-addons-other-${width}.png`),
+        fullPage: true,
+      });
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.getByRole("button", { name: "Transport", exact: true }).click();
+    await expect(page.getByText("No add-ons match your search.")).toBeVisible();
+    await assertHealthy();
+  });
 });
 
 // VAY-2141: add-on prices use the hotel's pricing currency, which only setup's Pricing step
