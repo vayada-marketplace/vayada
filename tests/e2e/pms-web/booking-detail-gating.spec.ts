@@ -124,7 +124,7 @@ test("shows the exact connected-account payment breakdown to the host", async ({
 
   await expect(page.getByText("Gross amount")).toBeVisible();
   await expect(page.getByText("Stripe fee")).toBeVisible();
-  await expect(page.getByText("Vayada commission")).toBeVisible();
+  await expect(page.getByText("vayada commission", { exact: true })).toBeVisible();
   await expect(page.getByText("Net payout")).toBeVisible();
   await expect(page.getByText("€91.80")).toBeVisible();
   await expect(page.getByText(/Stripe processing fees may not be returned/i)).toBeVisible();
@@ -133,7 +133,7 @@ test("shows the exact connected-account payment breakdown to the host", async ({
   netPayout = "96.80";
   await page.reload();
   await expect(page.getByText("Gross amount")).toBeVisible();
-  await expect(page.getByText("Vayada commission")).toHaveCount(0);
+  await expect(page.getByText("vayada commission", { exact: true })).toHaveCount(0);
   await expect(page.getByText("€96.80")).toBeVisible();
   await assertHealthy();
 });
