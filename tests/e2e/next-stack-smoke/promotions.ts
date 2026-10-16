@@ -77,8 +77,8 @@ export async function runPromotionAcceptance(input: {
   await test.step("create, edit and pause an automatic promotion in deployed Promos", async () => {
     await page.goto(`${NEXT_STACK_ORIGINS.bookingAdmin}/promo-codes`);
     await expect(page.getByRole("heading", { name: "Promos", exact: true })).toBeVisible();
-    await page.getByRole("button", { name: "+ New promotion", exact: true }).click();
-    await page.getByLabel("Promotion type").selectOption("EARLY_BIRD");
+    await page.getByRole("button", { name: "New promotion", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Early bird", exact: true }).click();
     await page.getByLabel("Minimum days ahead").fill("1");
     await page.getByRole("button", { name: "Save promotion", exact: true }).click();
     await expect(card).toContainText("10% off");
@@ -190,10 +190,10 @@ export async function runPromotionAcceptance(input: {
 
   await test.step("delete the promotion and confirm it disappears for guests", async () => {
     page.once("dialog", (dialog) => dialog.accept());
-    await card.getByRole("button", { name: "Delete", exact: true }).click();
+    await card.getByRole("button", { name: "Delete Early bird", exact: true }).click();
     await expect(card).toHaveCount(0);
     await page.reload();
-    await expect(page.getByRole("button", { name: "+ New promotion", exact: true })).toBeEnabled();
+    await expect(page.getByRole("button", { name: "New promotion", exact: true })).toBeEnabled();
     await expect(card).toHaveCount(0);
     const saved = await api.json<Record<string, unknown>>("GET", settingsPath);
     expect(saved.promotions).toEqual([]);
