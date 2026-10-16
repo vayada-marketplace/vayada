@@ -212,10 +212,14 @@ test("unexpected vendor bytes cannot execute", async ({ page }) => {
 test("without the override, the built pin refuses any other beacon bytes", async ({ page }) => {
   const requests = await intercept(page, { override: false });
   await page.goto("/");
+  // Chromium reports the refused script; nothing it would have sent can follow.
+  const refused = page.waitForEvent("console", {
+    predicate: (message) => message.type() === "error" && message.text().includes("integrity"),
+  });
   await page.getByRole("button", { name: /^Accept all$/i }).click();
   await expect(page.locator("script[data-cf-beacon]")).toHaveAttribute("integrity", pin!);
-  await expect.poll(() => requests.includes(source)).toBe(true);
-  await page.waitForTimeout(500);
+  await refused;
+  expect(requests).toContain(source);
   expect(requests.filter((u) => u.includes("/cdn-cgi/rum"))).toEqual([]);
 });
 
