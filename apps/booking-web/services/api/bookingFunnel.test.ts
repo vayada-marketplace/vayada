@@ -2,11 +2,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { BOOKING_WEB_ANALYTICS_CONSENT_VERSION } from "@vayada/domain-booking/conversion-funnel";
 import { trackEvent } from "./tracking";
 import { analyticsChoice, onAnalyticsAllowed, saveAnalyticsChoice } from "./analyticsConsent";
-import { BOOKING_WEB_ANALYTICS_CONSENT_VERSION as CONSENT } from "@vayada/domain-booking/conversion-funnel";
 
 afterEach(() => vi.unstubAllGlobals());
 
-function mockBrowser(choice: unknown = { version: CONSENT, analytics: true }) {
+function mockBrowser(
+  choice: unknown = { version: BOOKING_WEB_ANALYTICS_CONSENT_VERSION, analytics: true },
+) {
   const storage = new Map<string, string>();
   const local = new Map([["vayada_booking_analytics:hotel", JSON.stringify(choice)]]);
   vi.stubGlobal("window", {});
@@ -27,11 +28,11 @@ describe("Booking funnel instrumentation", () => {
   it.each([
     null,
     {},
-    { version: CONSENT, analytics: false },
+    { version: BOOKING_WEB_ANALYTICS_CONSENT_VERSION, analytics: false },
     // A choice under the earlier consent text (VAY-2213 asks everyone again) or a future one.
     { version: 1, analytics: true },
-    { version: CONSENT + 1, analytics: true },
-    { version: CONSENT, analytics: "true" },
+    { version: BOOKING_WEB_ANALYTICS_CONSENT_VERSION + 1, analytics: true },
+    { version: BOOKING_WEB_ANALYTICS_CONSENT_VERSION, analytics: "true" },
   ])("does not allocate identifiers or dispatch without valid consent: %j", (choice) => {
     const storage = mockBrowser(choice);
     const fetch = vi.fn();
