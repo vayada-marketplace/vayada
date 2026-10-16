@@ -28,6 +28,7 @@ jobs:
       contents: read
     outputs:
       run_frontend: ${{ steps.select.outputs.run_frontend }}
+      run_frontend_build: ${{ steps.select.outputs.run_frontend_build }}
       run_first_party_auth: ${{ steps.select.outputs.run_first_party_auth }}
       run_pms_web_e2e: ${{ steps.select.outputs.run_pms_web_e2e }}
       run_marketplace_web_e2e: ${{ steps.select.outputs.run_marketplace_web_e2e }}
@@ -49,7 +50,7 @@ jobs:
         run: node scripts/ci/pr-checks.mjs select
 
   frontend:
-    name: Frontend Test, Typecheck, Lint, Build
+    name: Frontend Test, Typecheck, Lint
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: [changes]
@@ -107,6 +108,31 @@ jobs:
 
       - name: Booking Web tests
         run: npm --workspace vayada-booking-engine-frontend run test
+
+  # The second half of the old frontend job, so it builds while frontend typechecks and lints.
+  # `npm run build` needs nothing from frontend's steps: apps/api comes first and its prebuild
+  # builds every backend and domain package the apps import.
+  frontend_build:
+    name: Frontend Build and App Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [changes]
+    if: needs.changes.outputs.run_frontend_build == 'true'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
 
       - name: Build
         run: npm run build
@@ -1279,6 +1305,7 @@ jobs:
     needs:
       - changes
       - frontend
+      - frontend_build
       - first_party_auth
       - pms_web_e2e
       - marketplace_web_e2e
