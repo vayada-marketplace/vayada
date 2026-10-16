@@ -185,12 +185,14 @@ export function CheckinChecklistBuilder() {
   };
 
   if (loading) {
-    return <div className="p-4 text-sm text-gray-500">{t("settings.checklist.loading")}</div>;
+    return (
+      <div className="p-4 md:p-6 text-sm text-gray-500">{t("settings.checklist.loading")}</div>
+    );
   }
 
   return (
-    <main className="min-h-[100dvh] bg-gray-50 p-4 md:p-6">
-      <div className="mx-auto max-w-6xl space-y-5">
+    <div className="p-4 md:p-6">
+      <div className="max-w-6xl space-y-5">
         <header className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <p className="text-sm text-gray-500">
@@ -382,7 +384,7 @@ export function CheckinChecklistBuilder() {
           <CheckinChecklistPreview steps={normalizedSteps} />
         </section>
       </div>
-    </main>
+    </div>
   );
 }
 
