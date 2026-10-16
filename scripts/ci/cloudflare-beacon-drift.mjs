@@ -2,8 +2,9 @@
 // Daily drift check for the Cloudflare Web Analytics beacon that apps/landing pins with SRI, run
 // by .github/workflows/cloudflare-beacon-drift.yml. Cloudflare cannot version-pin the beacon, so
 // every Cloudflare release makes browsers refuse it on vayada.com until the pin is updated. On a
-// mismatch this opens or updates one GitHub issue and exits 1; when the live file matches the pin
-// again it closes that issue. It never changes the pin: see
+// mismatch this opens or updates one GitHub issue, prepares one pull request with the new pin
+// (cloudflare-beacon-fix.mjs) and exits 1; when the live file matches the pin again it closes
+// both. It never changes main: a person reviews and merges. See
 // engineering/cloudflare-beacon-pin-runbook.md.
 //
 //   node scripts/ci/cloudflare-beacon-drift.mjs            # needs GITHUB_TOKEN, GITHUB_REPOSITORY
@@ -15,6 +16,9 @@
 import { createHash } from "node:crypto";
 import { appendFileSync, readFileSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { BOT, dropFix, pinSource, prepareFix } from "./cloudflare-beacon-fix.mjs";
+
+export { BOT };
 
 export const BEACON_URL = "https://static.cloudflareinsights.com/beacon.min.js";
 export const PIN_FILE = "apps/landing/lib/cloudflareAnalytics.ts";
@@ -77,6 +81,9 @@ const statements = (text) =>
 export const fingerprint = (statement) =>
   createHash("sha256").update(statement).digest("base64url").slice(0, 12);
 
+// The one serialization of the record, shared by --record and the prepared pull request.
+export const recordJson = (record) => `${JSON.stringify(record, null, 2)}\n`;
+
 export function reviewRecord(bytes) {
   const text = bytes.toString("utf8");
   const { urls, counts } = surface(text);
@@ -109,7 +116,7 @@ const bytes = (n) => `${n.toLocaleString("en-US")} bytes`;
 
 // Everything the report says, from the pin, the reviewed record and the live response. The body
 // is deterministic for a given live file, so a daily rerun leaves an up-to-date issue untouched.
-export function buildReport({ pin, override, record, live, repoUrl }) {
+export function buildReport({ pin, override, record, live, repoUrl, fix = "" }) {
   const expected = override || pin;
   const liveIntegrity = integrityOf(live.bytes);
   const matches = liveIntegrity === expected;
@@ -146,7 +153,7 @@ export function buildReport({ pin, override, record, live, repoUrl }) {
 Cloudflare's live Web Analytics beacon no longer matches the SRI pin in \`${PIN_FILE}\`. Browsers refuse to run it, so Cloudflare analytics on vayada.com is off for visitors who accepted it until the pin is updated. It fails closed: nothing is sent. PR checks are unaffected: the consent spec uses a stub beacon.
 
 **Next step:** follow [\`${RUNBOOK}\`](${repoUrl ?? ".."}/blob/main/${RUNBOOK}). Review the change before copying the hash.
-${note}
+${fix ? `\n${fix}\n` : ""}${note}
 | | reviewed | live |
 |---|---|---|
 | version (\`js:\`) | ${record.version} | ${liveVersion} |
@@ -213,9 +220,18 @@ export function githubClient({
       body: body ? JSON.stringify(body) : undefined,
       signal: AbortSignal.timeout(20_000),
     });
-    if (!response.ok) throw new Error(`${method} ${path}: HTTP ${response.status}`);
-    return response.json();
+    if (!response.ok) {
+      const error = new Error(`${method} ${path}: HTTP ${response.status}`);
+      error.status = response.status;
+      throw error;
+    }
+    return response.status === 204 ? null : response.json();
   };
+  const missing = (error) => {
+    if (error.status === 404) return null;
+    throw error;
+  };
+  const owner = repository.split("/")[0];
   return {
     // Open issues and pull requests; reconcile() keeps the ones this workflow opened.
     async openIssues() {
@@ -229,6 +245,42 @@ export function githubClient({
     createIssue: (title, body, labels) => request("POST", "/issues", { title, body, labels }),
     updateIssue: (number, fields) => request("PATCH", `/issues/${number}`, fields),
     comment: (number, body) => request("POST", `/issues/${number}/comments`, { body }),
+    // Git data and pull requests, for cloudflare-beacon-fix.mjs.
+    getRef: (branch) => request("GET", `/git/ref/heads/${branch}`).catch(missing),
+    async getFile(path, ref) {
+      const file = await request("GET", `/contents/${path}?ref=${encodeURIComponent(ref)}`).catch(
+        missing,
+      );
+      return file && Buffer.from(file.content, "base64").toString("utf8");
+    },
+    async commit({ baseSha, changes, message }) {
+      const base = await request("GET", `/git/commits/${baseSha}`);
+      const tree = await request("POST", "/git/trees", {
+        base_tree: base.tree.sha,
+        tree: Object.entries(changes).map(([path, content]) => ({
+          path,
+          mode: "100644",
+          type: "blob",
+          content,
+        })),
+      });
+      return (
+        await request("POST", "/git/commits", { message, tree: tree.sha, parents: [baseSha] })
+      ).sha;
+    },
+    setRef: (branch, sha, exists) =>
+      exists
+        ? request("PATCH", `/git/refs/heads/${branch}`, { sha, force: true })
+        : request("POST", "/git/refs", { ref: `refs/heads/${branch}`, sha }),
+    deleteRef: (branch) => request("DELETE", `/git/refs/heads/${branch}`).catch(missing),
+    dispatch: (workflow, ref) =>
+      request("POST", `/actions/workflows/${workflow}/dispatches`, { ref }),
+    async openPull(branch) {
+      const head = encodeURIComponent(`${owner}:${branch}`);
+      return (await request("GET", `/pulls?state=open&head=${head}`))[0] ?? null;
+    },
+    createPull: (fields) => request("POST", "/pulls", fields),
+    updatePull: (number, fields) => request("PATCH", `/pulls/${number}`, fields),
   };
 }
 
@@ -236,7 +288,6 @@ export function githubClient({
 // (with a comment when the live file changed again), close it once the live file matches the
 // pin. A run against an EXPECTED_INTEGRITY override never closes anything. Only issues the
 // workflow opened count: in this public repository anyone can file one quoting the marker.
-export const BOT = "github-actions[bot]";
 export async function reconcile({ client, report, override }) {
   const open = (await client.openIssues())
     .filter((issue) => issue.user?.login === BOT && issue.body?.includes(MARKER))
@@ -279,7 +330,7 @@ async function main() {
   if (recordIndex !== -1) {
     const file = process.argv[recordIndex + 1];
     if (!file) throw new Error("usage: --record <downloaded beacon.min.js>");
-    console.log(JSON.stringify(reviewRecord(readFileSync(file)), null, 2));
+    process.stdout.write(recordJson(reviewRecord(readFileSync(file))));
     return;
   }
   const dryRun = process.argv.includes("--dry-run");
@@ -290,13 +341,17 @@ async function main() {
   const { GITHUB_SERVER_URL, GITHUB_REPOSITORY, GITHUB_REF, GITHUB_TOKEN } = process.env;
   const repoUrl =
     GITHUB_REPOSITORY && `${GITHUB_SERVER_URL || "https://github.com"}/${GITHUB_REPOSITORY}`;
-  const report = buildReport({
-    pin: readPin(readFileSync(PIN_FILE, "utf8")),
+  const source = readFileSync(PIN_FILE, "utf8");
+  const pin = readPin(source);
+  const live = await fetchBeacon();
+  const inputs = {
+    pin,
     override,
     record: JSON.parse(readFileSync(RECORD_FILE, "utf8")),
-    live: await fetchBeacon(),
+    live,
     repoUrl,
-  });
+  };
+  let report = buildReport(inputs);
   console.log(report.summary);
   // In Actions the report goes only to the run summary: vendor text on stdout could carry
   // workflow commands (::error:: and the like).
@@ -317,6 +372,39 @@ async function main() {
       repository: GITHUB_REPOSITORY,
       api: process.env.GITHUB_API_URL,
     });
+    const base = process.env.GITHUB_REF_NAME;
+    if (!report.matches && report.liveIntegrity !== pin) {
+      // The checked-out pin differs from the live file: prepare the pull request that fixes it.
+      let fix;
+      try {
+        const record = reviewRecord(live.bytes);
+        const changes = {
+          [PIN_FILE]: pinSource(source, { ...record, lastModified: live.lastModified }),
+          [RECORD_FILE]: recordJson(record),
+        };
+        const prepared = await prepareFix({
+          git: client,
+          base,
+          baseSha: process.env.GITHUB_SHA,
+          changes,
+          report,
+          repoUrl,
+          override,
+        });
+        console.log(
+          `Fix: ${prepared.pull ? `#${prepared.pull}` : prepared.branch}${prepared.pushed ? " (pushed, PR Checks dispatched)" : " (up to date)"}.`,
+        );
+        fix = prepared.line;
+      } catch (error) {
+        console.error(`::warning::Preparing the fix failed: ${error.message}`);
+        fix = `**Prepared fix:** failed (${error.message}). Update the pin by hand (runbook step 3).`;
+      }
+      report = buildReport({ ...inputs, fix });
+    } else if (report.matches && !override) {
+      console.log(
+        `Fix: ${await dropFix({ git: client, base, liveIntegrity: report.liveIntegrity })}.`,
+      );
+    }
     const outcome = await reconcile({ client, report, override });
     console.log(`Issue: ${outcome}.`);
     if (stepSummary) appendFileSync(stepSummary, `\nIssue: ${outcome}.\n`);
