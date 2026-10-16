@@ -1304,3 +1304,29 @@ test("every API PostgreSQL step belongs to exactly one shard or runs in all of t
   }
   for (const shard of shards) assert.ok(perShard[shard] > 0, `${shard} has no steps`);
 });
+
+// The release precheck runs some suites alone in a new database (VAY-2245). A step whose URL named
+// another database would run them in a shared one without failing.
+test("every API PostgreSQL step that creates its test database runs its suites there", () => {
+  const workflow = parse(WORKFLOW);
+  const isolated = workflow.jobs.api_postgres.steps.filter((step) => {
+    const created = [...(step.run ?? "").matchAll(/CREATE DATABASE (\w+)/g)].map((m) => m[1]);
+    return created.length === 1 && step.env?.TEST_DATABASE_URL;
+  });
+  assert.ok(isolated.length >= 10, "expected the precheck's isolated database steps");
+  for (const step of isolated) {
+    const [, database] = /CREATE DATABASE (\w+)/.exec(step.run);
+    assert.match(database, /_test$/, `${step.name}: Channex suites require a *_test database`);
+    for (const name of ["TEST_DATABASE_URL", "TARGET_DATABASE_URL"]) {
+      if (!step.env[name]) continue;
+      assert.equal(new URL(step.env[name]).pathname, `/${database}`, `${step.name}: ${name}`);
+    }
+    if (step.run.includes("--workspace vayada-api run test")) {
+      const migrate = step.run.indexOf("run target:migrate");
+      assert.ok(
+        migrate >= 0 && migrate < step.run.indexOf("--workspace vayada-api run test"),
+        `${step.name}: migrates ${database} before its suites`,
+      );
+    }
+  }
+});
