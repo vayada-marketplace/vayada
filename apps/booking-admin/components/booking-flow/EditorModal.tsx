@@ -26,6 +26,7 @@ export function EditorModal({
   submitLabel,
   onClose,
   onSubmit,
+  noValidate,
   children,
 }: {
   idPrefix: string;
@@ -42,11 +43,15 @@ export function EditorModal({
   submitLabel: string;
   onClose: () => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  /** Skip the browser's own validation bubbles when the caller validates and shows the error. */
+  noValidate?: boolean;
   children: ReactNode;
 }) {
   const { t } = useTranslation();
   const dialogRef = useRef<HTMLFormElement | null>(null);
   const onCloseRef = useRef(onClose);
+  // Read once: the setup below must not re-run (and bounce focus) while the form changes.
+  const initialFocusRef = useRef(initialFocusId);
   useEffect(() => {
     onCloseRef.current = onClose;
   }, [onClose]);
@@ -54,7 +59,7 @@ export function EditorModal({
   useEffect(() => {
     const previousFocus =
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    dialogRef.current?.querySelector<HTMLElement>(`#${initialFocusId}`)?.focus();
+    dialogRef.current?.querySelector<HTMLElement>(`#${initialFocusRef.current}`)?.focus();
     const previousBodyOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
 
@@ -87,7 +92,7 @@ export function EditorModal({
       document.body.style.overflow = previousBodyOverflow;
       if (previousFocus?.isConnected) previousFocus.focus();
     };
-  }, [initialFocusId]);
+  }, []);
 
   return createPortal(
     <div
@@ -104,6 +109,7 @@ export function EditorModal({
         aria-labelledby={`${idPrefix}-title`}
         aria-describedby={`${idPrefix}-description${error ? ` ${idPrefix}-error` : ""}`}
         onSubmit={onSubmit}
+        noValidate={noValidate}
         className="flex h-[100dvh] w-full max-w-[920px] flex-col overflow-hidden bg-white shadow-2xl sm:h-auto sm:max-h-[92dvh] sm:rounded-2xl"
       >
         <div className="flex shrink-0 items-start justify-between gap-4 border-b border-gray-200 px-5 py-5 sm:px-7">
@@ -188,5 +194,64 @@ export function EditorModal({
       </form>
     </div>,
     document.body,
+  );
+}
+
+/** Card title inside the editor body: tinted icon and a small heading. */
+export function EditorSectionHeading({
+  id,
+  icon: Icon,
+  children,
+}: {
+  id: string;
+  icon: ComponentType<{ className?: string }>;
+  children: ReactNode;
+}) {
+  return (
+    <div className="flex items-center gap-2.5 border-b border-gray-100 pb-4">
+      <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary-50 text-primary-700">
+        <Icon className="h-4 w-4" />
+      </span>
+      <h3 id={id} className="text-sm font-semibold text-gray-950">
+        {children}
+      </h3>
+    </div>
+  );
+}
+
+/** A radio card as tall as an input: the choice on the left, its unit on the right. */
+export function ChoiceCard({
+  name,
+  value,
+  describedBy,
+  checked,
+  onChange,
+  label,
+  unit,
+}: {
+  name: string;
+  value: string;
+  describedBy: string;
+  checked: boolean;
+  onChange: () => void;
+  label: string;
+  unit: string;
+}) {
+  return (
+    <label
+      className={`flex h-11 cursor-pointer items-center justify-between gap-2 rounded-lg border px-3 transition-colors focus-within:outline-none focus-within:ring-2 focus-within:ring-primary-500 focus-within:ring-offset-2 ${checked ? "border-primary-600 bg-primary-50/60 ring-1 ring-inset ring-primary-600" : "border-gray-200 hover:border-gray-300"}`}
+    >
+      <input
+        className="sr-only"
+        type="radio"
+        name={name}
+        value={value}
+        aria-describedby={describedBy}
+        checked={checked}
+        onChange={onChange}
+      />
+      <span className="truncate text-sm font-medium text-gray-900">{label}</span>
+      <span className="shrink-0 text-[13px] text-gray-600">{unit}</span>
+    </label>
   );
 }

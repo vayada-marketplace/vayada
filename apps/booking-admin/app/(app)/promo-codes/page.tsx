@@ -170,7 +170,9 @@ export default function PromoCodesPage() {
         onDeletePromoCode={deletePromo}
         onTogglePromoCode={togglePromo}
       />
-      {hotelId && <Promotions hotelId={hotelId} roomTypes={roomTypes} />}
+      {hotelId && (
+        <Promotions hotelId={hotelId} roomTypes={roomTypes} propertyCurrency={propertyCurrency} />
+      )}
     </PageLayout>
   );
 }
