@@ -15,16 +15,20 @@ preserved. Accepting again after withdrawal starts fresh measurement on the next
 full page load; an old beacon cannot replay activity from the withdrawn period.
 Other origins and account consent are independent.
 
-The reviewed 2026-10-05 beacon uses XHR and navigator.sendBeacon. Guards cover its
+The pinned beacon (version and review date next to `integrity` in
+`cloudflareAnalytics.ts`) uses XHR and navigator.sendBeacon. Guards cover its
 Cloudflare and same-origin `/cdn-cgi/rum` destinations only. SRI pins the reviewed
 bytes. A vendor update fails closed instead of introducing an unguarded transport.
-To update, download the official script, review all network transports, update
-both implementation/test SHA-384 digests, and rerun the actual-beacon browser
-suite. Do not merely replace the digest after a test failure.
+The daily Cloudflare Beacon Drift workflow opens an issue when the live file
+changes. To update, follow `engineering/cloudflare-beacon-pin-runbook.md`: review
+all network transports, then change the digest and the committed copy together.
+Do not merely replace the digest.
 
 PR Checks builds with a dummy public token and runs all Landing browser tests.
-The analytics suite downloads the vendor script and verifies the pinned digest;
-all measurement requests are intercepted and never reach Cloudflare. For local
+The analytics suite serves the committed copy
+`tests/e2e/landing/fixtures/cloudflare-beacon.min.js` after checking it against the
+pinned digest, so a Cloudflare release cannot fail PRs. All measurement requests
+are intercepted and never reach Cloudflare. For local
 runs, build with NEXT_PUBLIC_CLOUDFLARE_ANALYTICS_TOKEN set to 32 zeroes, start
 Landing through portless, and run:
 
@@ -33,7 +37,7 @@ E2E_LANDING_BASE_URL=https://landing.localhost \
 E2E_LANDING_ANALYTICS=1 npm run e2e:landing
 ```
 
-`E2E_CLOUDFLARE_BEACON_FILE` can supply already-downloaded vendor bytes for offline
-runs; the same digest verification still applies. Live rollout verification must
+`E2E_CLOUDFLARE_BEACON_FILE` replaces the committed copy, for example to try a new
+beacon before re-pinning; the same digest verification applies. Live rollout verification must
 separately inspect actual requests before choice, after rejection, acceptance,
 withdrawal, reload, and navigation, and confirm edge injection remains off.
