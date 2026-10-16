@@ -15,10 +15,27 @@ commit Cloudflare's file, only its hash and the reviewed record below.
   `scripts/ci/cloudflare-beacon-reviewed.json`, the issue lists the versions, the new hash,
   endpoint and transport counts (⚠️ marks a change) and how many statements changed. It never
   quotes Cloudflare's code.
+- The same run prepares the fix (`scripts/ci/cloudflare-beacon-fix.mjs`), and the issue links it:
+  - the branch `automation/cloudflare-beacon-pin-main` holds one commit that sets the new hash in
+    `cloudflareAnalytics.ts` and regenerates the reviewed record;
+  - PR Checks run on that branch. Pushes and pull requests made with the workflow's
+    `GITHUB_TOKEN` start no workflows, so the job starts PR Checks with `workflow_dispatch`, an
+    event that token may still trigger. The checks land on the branch's head commit;
+  - one pull request from that branch. The workflow opens it only if the repository allows
+    "GitHub Actions to create and approve pull requests" (Settings → Actions → General). If not,
+    the issue links the page that opens it. The commit message becomes its description. From a
+    terminal: `gh pr create --base main --head automation/cloudflare-beacon-pin-main --fill`.
+  - When the live file matches the pin again (the fix merged, or Cloudflare went back), the next
+    run closes the issue, closes the pull request if still open, and deletes the branch.
 - PR checks keep passing. The landing consent spec runs offline against a stub beacon it
   generates, so it never depends on Cloudflare's file.
 
 ## Update the pin
+
+Normally: review the prepared pull request (step 2), then merge it (step 4). **Merging it deploys
+the landing site.** Then do steps 5 and 6. Its commit sets the pin comment to "Merging confirmed
+the review", so merge only after step 2. Use steps 1 and 3 when no pull request was prepared, or
+when the fix needs more than a new hash (for example, new guards).
 
 1. **Download the new file** and check that its hash matches the issue's "New pin":
 
