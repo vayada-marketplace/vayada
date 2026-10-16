@@ -269,15 +269,28 @@ export function verifyRequiredChecks(needs) {
   return problems;
 }
 
-// On pull_request events HEAD is GitHub's merge commit, so HEAD^1 is the base branch tip and
-// `git diff HEAD^1 HEAD` is exactly the PR's "Files changed" view. Needs fetch-depth >= 2.
-function changedFiles() {
+// The changed files and the pr-checks.yml job-block change, diffed from one base commit per event:
+//   pull_request: HEAD is GitHub's merge commit, so HEAD^1 is the base branch tip and diffing from
+//     it is exactly the PR's "Files changed" view. Needs fetch-depth >= 2.
+//   merge_group: HEAD is the queue's commit for this entry, stacked on the entries ahead of it
+//     (merge_group.base_sha is the entry ahead, not main). Diffing from the merge-base with the
+//     base branch (`base`, fetched by the workflow) covers this entry and every entry ahead that
+//     has not landed yet: a superset of each queued PR's own diff.
+// Any git failure throws, and the caller runs every job.
+export function changedFiles({ event = "pull_request", base, cwd } = {}) {
   const git = (args) =>
-    execFileSync("git", args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
-  const parents = git(["rev-list", "--parents", "-n", "1", "HEAD"]).trim().split(/\s+/).length - 1;
-  if (parents !== 2)
-    throw new Error(`HEAD has ${parents} parent(s); expected a pull request merge commit`);
-  const files = git(["diff", "--name-only", "--no-renames", "-z", "HEAD^1", "HEAD"])
+    execFileSync("git", args, { cwd, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  let from = "HEAD^1";
+  if (event === "merge_group") {
+    if (!base) throw new Error("merge_group selection needs the fetched base branch ref");
+    from = git(["merge-base", base, "HEAD"]).trim();
+  } else {
+    const parents =
+      git(["rev-list", "--parents", "-n", "1", "HEAD"]).trim().split(/\s+/).length - 1;
+    if (parents !== 2)
+      throw new Error(`HEAD has ${parents} parent(s); expected a pull request merge commit`);
+  }
+  const files = git(["diff", "--name-only", "--no-renames", "-z", from, "HEAD"])
     .split("\0")
     .filter(Boolean);
   let workflowJobs = null;
@@ -289,8 +302,8 @@ function changedFiles() {
         return null; // added or deleted: workflowChangeJobs runs every job
       }
     };
-    const diff = git(["diff", "--no-ext-diff", "-U0", "HEAD^1", "HEAD", "--", WORKFLOW_FILE]);
-    workflowJobs = workflowChangeJobs(show("HEAD^1"), show("HEAD"), diff);
+    const diff = git(["diff", "--no-ext-diff", "-U0", from, "HEAD", "--", WORKFLOW_FILE]);
+    workflowJobs = workflowChangeJobs(show(from), show("HEAD"), diff);
   }
   return { files, workflowJobs };
 }
@@ -302,14 +315,14 @@ function emit(line) {
 
 function runSelect() {
   let changes = { files: null };
-  // Only a pull_request merge commit has a meaningful HEAD^1 diff. Any other event (a merge
-  // queue's merge_group, a push, a manual run) runs every job.
-  const event = process.env.GITHUB_EVENT_NAME;
-  if (event && event !== "pull_request") {
+  // Only a pull_request merge commit and a merge queue entry have a meaningful diff (see
+  // changedFiles). Any other event (a manual run, or a trigger added later) runs every job.
+  const event = process.env.GITHUB_EVENT_NAME || "pull_request";
+  if (event !== "pull_request" && event !== "merge_group") {
     console.error(`${event} event: running every job`);
   } else {
     try {
-      changes = changedFiles();
+      changes = changedFiles({ event, base: process.env.MERGE_GROUP_BASE });
     } catch (error) {
       console.error(
         `::warning::Could not determine changed files, running every job: ${error.message}`,

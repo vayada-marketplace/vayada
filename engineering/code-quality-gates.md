@@ -102,7 +102,7 @@ Currently the PR workflow runs `npm run check:architecture-boundaries`, root fro
 
 ### Which PR checks run
 
-`.github/workflows/pr-checks.yml` runs for PRs into `main` and into any `fm/**`, `fix/**` or `flamurmaliqi2811/**` branch, so a stacked PR gets checks without editing the trigger list. It has one required status, **Required Checks**. A `changes` job diffs the PR merge commit against the base branch and `scripts/ci/pr-checks.mjs select` maps each changed file to the jobs that cover it. The first matching rule wins per file and the PR runs the union:
+`.github/workflows/pr-checks.yml` runs for PRs into `main` and into any `fm/**`, `fix/**` or `flamurmaliqi2811/**` branch, so a stacked PR gets checks without editing the trigger list. It also runs for every merge queue entry on `main` (`merge_group`) and on demand (`workflow_dispatch`). It has one required status, **Required Checks**. A `changes` job diffs the PR merge commit against the base branch and `scripts/ci/pr-checks.mjs select` maps each changed file to the jobs that cover it. The first matching rule wins per file and the PR runs the union:
 
 | Changed path                                                                                                | Jobs                                                                                                                                                                                          |
 | ----------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -132,7 +132,7 @@ Currently the PR workflow runs `npm run check:architecture-boundaries`, root fro
 
 The six packages above are the ones no API code depends on; `scripts/ci/pr-checks.test.mjs` recomputes their jobs from every `package.json` and fails when anything else starts to reach them, read workflow files or run Playwright.
 
-Only `pull_request` runs are narrowed: any other event (a merge queue's `merge_group`, a push, a manual run) runs every job.
+`pull_request` runs and merge queue entries are narrowed. A merge queue entry is diffed from its merge-base with `main` (fetched by the `changes` job), which covers that PR and every queued PR ahead of it that has not landed yet, with the same rules; if git cannot find that base, it runs every job. A manual run (`workflow_dispatch`) runs every job.
 
 The API and package unit-suite job runs `npm run test:unit-suites` (the full `vayada-api` suite and the backend package suites, no database); `.github/workflows/main-unit-suites.yml` repeats it on every push to `main` and nightly.
 
