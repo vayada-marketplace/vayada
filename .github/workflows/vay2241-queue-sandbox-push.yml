@@ -1,0 +1,28 @@
+name: VAY-2241 queue sandbox push observer
+
+# Sandbox only (never merged): shows whether a merge queue merge into the sandbox branch triggers
+# an ordinary push workflow, and which actor and sha it reports.
+on:
+  push:
+    branches:
+      - fm/vay-2241-queue-sandbox
+
+permissions:
+  contents: read
+
+jobs:
+  observe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Report the push
+        env:
+          ACTOR: ${{ github.actor }}
+          TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+          SHA: ${{ github.sha }}
+          BEFORE: ${{ github.event.before }}
+          HEAD_COMMIT: ${{ github.event.head_commit.message }}
+        run: |
+          echo "actor=$ACTOR triggering_actor=$TRIGGERING_ACTOR"
+          echo "before=$BEFORE sha=$SHA"
+          echo "head commit: $HEAD_COMMIT"

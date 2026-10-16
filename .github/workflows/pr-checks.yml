@@ -15,6 +15,8 @@ on:
     types: [checks_requested]
     branches:
       - main
+      # VAY-2241 sandbox only: this branch is never merged.
+      - fm/vay-2241-queue-sandbox
   # A full run of every job on any branch, e.g. as the release precheck on the main tip.
   workflow_dispatch:
 
@@ -1370,4 +1372,6 @@ jobs:
         if: github.event_name == 'merge_group'
         env:
           GH_TOKEN: ${{ github.token }}
+          # VAY-2241 sandbox only: a short deadline so the timeout path finishes during the test.
+          HOLD_MAX_WAIT_MINUTES: "6"
         run: node scripts/ci/pr-checks.mjs hold

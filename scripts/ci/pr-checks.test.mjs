@@ -1230,7 +1230,10 @@ test("pr-checks.yml wires every job through the change detector and the aggregat
 
 test("pr-checks.yml reports Required Checks to the merge queue with the base branch fetched", () => {
   const workflow = parse(WORKFLOW);
-  assert.deepEqual(workflow.on.merge_group, { types: ["checks_requested"], branches: ["main"] });
+  assert.deepEqual(workflow.on.merge_group, {
+    types: ["checks_requested"],
+    branches: ["main", "fm/vay-2241-queue-sandbox"],
+  });
   assert.ok("workflow_dispatch" in workflow.on);
   const steps = workflow.jobs.changes.steps;
   const fetch = steps.find((step) => step.name === "Fetch the merge queue's base branch");
