@@ -141,7 +141,14 @@ function RoomTypeCard({
       await individualRoomsService.delete(rooms.find((room) => room.id === confirmDelete)!);
       onRoomsChange();
     } catch (err: any) {
-      setActionError(err.message || t("rooms.cannotDeleteRoom"));
+      // The calendar needs every room type to keep a room; Delete on the room type removes it (VAY-2132).
+      const blockers =
+        err instanceof ApiErrorResponse ? (err.data as { blockers?: unknown }).blockers : undefined;
+      setActionError(
+        Array.isArray(blockers) && blockers.includes("operating_calendar")
+          ? t("rooms.lastUnitDelete")
+          : err.message || t("rooms.cannotDeleteRoom"),
+      );
     }
   };
 
