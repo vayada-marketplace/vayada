@@ -1068,6 +1068,7 @@ jobs:
           src/stripeWebhookReceiptRetention.integration.test.ts
           src/bookingWebEventsMigration.integration.test.ts
           src/bookingWebEventsLogBlanking.integration.test.ts
+          src/bookingAddonLeadTimeMigration.integration.test.ts
           src/productionMediaMigration.integration.test.ts
           src/productionCatalogWriters.integration.test.ts
           src/productionBookingWriters.integration.test.ts
