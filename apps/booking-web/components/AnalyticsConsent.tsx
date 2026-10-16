@@ -2,15 +2,19 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
-import { useSlug } from "@/contexts/HotelContext";
+import { useHotel, useSlug } from "@/contexts/HotelContext";
 import {
   analyticsChoice,
   clearAnalyticsSession,
   saveAnalyticsChoice,
 } from "@/services/api/analyticsConsent";
 
+// The guest section of Vayada's privacy policy (English only).
+const PRIVACY_NOTICE_URL = "https://vayada.com/privacy#booking-guests";
+
 export default function AnalyticsConsent() {
   const { slug } = useSlug();
+  const { hotel } = useHotel();
   const t = useTranslations("analyticsConsent");
   const [open, setOpen] = useState(false);
   const [choice, setChoice] = useState<boolean | null>(null);
@@ -82,7 +86,22 @@ export default function AnalyticsConsent() {
           <h2 id="booking-analytics-title" className="font-semibold">
             {t("title")}
           </h2>
-          <p className="my-3 text-sm">{t("description")}</p>
+          <p className="mt-3 text-sm">{t("description")}</p>
+          <p className="mb-3 mt-2 text-sm">
+            {t.rich("controller", {
+              hotel: hotel?.name ?? "",
+              policy: (chunks) => (
+                <a
+                  href={PRIVACY_NOTICE_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline"
+                >
+                  {chunks}
+                </a>
+              ),
+            })}
+          </p>
           {choice !== null && <p className="mb-3 text-sm">{t(choice ? "enabled" : "disabled")}</p>}
           {error && (
             <p role="alert" className="mb-3 text-sm text-red-700">

@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { mockBookingApis, SEEDED_BOOKING_SLUG } from "../support/bookingMocks";
+import { BOOKING_WEB_ANALYTICS_CONSENT_VERSION as CONSENT } from "@vayada/domain-booking/conversion-funnel";
 
 test("removes an unhandled affiliate reference before the hotel page renders", async ({ page }) => {
   await mockBookingApis(page);
@@ -17,12 +18,15 @@ test("removes an unhandled affiliate reference before the hotel page renders", a
 
 for (const navigation of ["history", "document"] as const) {
   test(`retains A → B → A in one session across ${navigation} navigation`, async ({ page }) => {
-    await page.addInitScript((slug) => {
-      localStorage.setItem(
-        `vayada_booking_analytics:${slug}`,
-        JSON.stringify({ version: 1, analytics: true }),
-      );
-    }, SEEDED_BOOKING_SLUG);
+    await page.addInitScript(
+      ({ slug, version }) => {
+        localStorage.setItem(
+          `vayada_booking_analytics:${slug}`,
+          JSON.stringify({ version, analytics: true }),
+        );
+      },
+      { slug: SEEDED_BOOKING_SLUG, version: CONSENT },
+    );
     const sessions = new Set<string>();
     await mockBookingApis(page);
     const clicks = new Map<string, string>();

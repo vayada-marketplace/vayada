@@ -2,7 +2,8 @@
   "analyticsConsent": {
     "settings": "Datenschutzeinstellungen",
     "title": "Optionale Analyse",
-    "description": "Wir nutzen optionale Analysen, um Besuche und Buchungsschritte zu verstehen. Buchungen funktionieren auch ohne Analyse. Ihre Auswahl gilt nur für die Buchungsseite dieses Hotels.",
+    "description": "Wir nutzen optionale Analysen, um Besuche und Buchungsschritte zu verstehen. Buchungen funktionieren auch ohne Analyse. Ihre Auswahl gilt nur für unsere Buchungsseite.",
+    "controller": "Verantwortlich für diese Daten sind wir, {hotel}. Vayada betreibt unsere Buchungsseite und verarbeitet die Daten in unserem Auftrag. <policy>Datenschutzhinweise</policy>",
     "enabled": "Analyse ist aktiviert.",
     "disabled": "Analyse ist deaktiviert.",
     "saveError": "Ihre Auswahl konnte nicht gespeichert werden. Analyse bleibt deaktiviert.",

@@ -2,7 +2,8 @@
   "analyticsConsent": {
     "settings": "Pilihan privasi",
     "title": "Analitik opsional",
-    "description": "Kami menggunakan analitik opsional untuk memahami kunjungan dan langkah pemesanan. Pemesanan tetap berfungsi tanpa analitik. Pilihan Anda hanya berlaku untuk situs pemesanan hotel ini.",
+    "description": "Kami menggunakan analitik opsional untuk memahami kunjungan dan langkah pemesanan. Pemesanan tetap berfungsi tanpa analitik. Pilihan Anda hanya berlaku untuk situs pemesanan kami.",
+    "controller": "Kami, {hotel}, bertanggung jawab atas data ini. Vayada mengelola situs pemesanan kami dan memproses data atas nama kami. <policy>Pemberitahuan privasi</policy>",
     "enabled": "Analitik aktif.",
     "disabled": "Analitik nonaktif.",
     "saveError": "Pilihan Anda tidak dapat disimpan. Analitik tetap nonaktif.",

@@ -1,4 +1,5 @@
 import { externalBookingChanges } from "../integrations/externalBookingChanges.js";
+import { BOOKING_WEB_ANALYTICS_CONSENT_VERSION as CONSENT } from "@vayada/domain-booking";
 import {
   buildPublicBookabilityQuoteProjection,
   findForbiddenPublicBookabilityKeys,
@@ -363,9 +364,11 @@ describe("Booking Web public bootstrap parity", () => {
 
     for (const consent of [
       {},
-      { analyticsConsent: false, consentVersion: 1 },
-      { analyticsConsent: "true", consentVersion: 1 },
-      { analyticsConsent: true, consentVersion: 2 },
+      { analyticsConsent: false, consentVersion: CONSENT },
+      { analyticsConsent: "true", consentVersion: CONSENT },
+      // A choice under the earlier consent text (VAY-2213 asks everyone again) or a future one.
+      { analyticsConsent: true, consentVersion: 1 },
+      { analyticsConsent: true, consentVersion: CONSENT + 1 },
     ]) {
       const denied = await app.inject({
         method: "POST",
@@ -384,7 +387,7 @@ describe("Booking Web public bootstrap parity", () => {
         url: "/api/booking-web/events",
         payload: {
           analyticsConsent: true,
-          consentVersion: 1,
+          consentVersion: CONSENT,
           hotelSlug: "hotel-alpenrose",
           eventType,
           eventId: randomUUID(),
@@ -473,7 +476,7 @@ describe("Booking Web public bootstrap parity", () => {
       remoteAddress: "203.0.113.7",
       payload: {
         analyticsConsent: true,
-        consentVersion: 1,
+        consentVersion: CONSENT,
         hotelSlug: "hotel-alpenrose",
         eventType: "page_visit",
         eventId: randomUUID(),
@@ -506,7 +509,7 @@ describe("Booking Web public bootstrap parity", () => {
       url: "/api/booking-web/events",
       payload: {
         analyticsConsent: true,
-        consentVersion: 1,
+        consentVersion: CONSENT,
         hotelSlug: "unknown-hotel",
         eventType: "page_visit",
         eventId: randomUUID(),

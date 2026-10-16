@@ -30,8 +30,9 @@ export const FUNNEL_PAYMENT_METHODS = [
 ] as const;
 export type FunnelPaymentMethod = (typeof FUNNEL_PAYMENT_METHODS)[number];
 /** The analytics consent the booking page asks for. Booking Web sends it with every event and
- * the public endpoint stores nothing under another version, so a new consent text bumps it. */
-export const BOOKING_WEB_ANALYTICS_CONSENT_VERSION = 1;
+ * the public endpoint stores nothing under another version, so a new consent text bumps it.
+ * 2 (VAY-2213): the text names the hotel as responsible and links the privacy notice. */
+export const BOOKING_WEB_ANALYTICS_CONSENT_VERSION = 2;
 /** The /book steps (VAY-2195). */
 export const FUNNEL_STEPS = ["rooms", "extras", "details", "payment"] as const;
 export type FunnelStep = (typeof FUNNEL_STEPS)[number];
