@@ -111,7 +111,66 @@ export const RULES = [
   { name: "typescript", test: /^(apps\/api|packages)\//, jobs: TYPESCRIPT_JOBS },
 ];
 
-export function selectJobs(files) {
+export const WORKFLOW_FILE = ".github/workflows/pr-checks.yml";
+
+// GitHub Actions accepts YAML anchors, aliases and merge keys. A block shared that way would let
+// an edit inside one job change another, so any of them in either version runs every job.
+const YAML_ANCHOR = /(^|\s)[&*][A-Za-z_][\w-]*(\s|$)|<<\s*:/m;
+
+// Maps each line (index = 1-based line number) of pr-checks.yml to the job whose block it is in.
+// Everything that is not inside one job maps to null: lines before `jobs:`, other top-level
+// keys, job key lines, and anything indented less than a job's own keys. Comment lines at indent
+// 0-2 under `jobs:` map to "#": YAML cannot nest them inside a job, so they change nothing.
+export function workflowLineJobs(text) {
+  const lines = [undefined];
+  let inJobs = false;
+  let job = null;
+  for (const line of text.split("\n")) {
+    if (inJobs && /^ {0,2}#/.test(line)) {
+      lines.push("#");
+    } else if (/^\S/.test(line)) {
+      inJobs = /^jobs:\s*$/.test(line);
+      job = null;
+      lines.push(null);
+    } else if (inJobs && /^ {2}[A-Za-z_][\w-]*\s*:/.test(line)) {
+      job = /^ {2}([A-Za-z_][\w-]*)/.exec(line)[1];
+      lines.push(null);
+    } else if (/^\s*$/.test(line)) {
+      lines.push(inJobs ? job : null);
+    } else {
+      lines.push(inJobs && /^ {4}/.test(line) ? job : null);
+    }
+  }
+  return lines;
+}
+
+// The jobs an edit to pr-checks.yml can affect, from the file before and after and their -U0
+// diff, or null when the edit is not confined to selectable job blocks (run every job). Jobs only
+// interact through needs/outputs, which live in the "changes" and "required" blocks, and through
+// YAML anchors; both fall back to every job. Frontend always runs because its pr-checks contract
+// tests parse this file.
+export function workflowChangeJobs(before, after, diff) {
+  if (typeof before !== "string" || typeof after !== "string" || typeof diff !== "string") {
+    return null;
+  }
+  if (YAML_ANCHOR.test(before) || YAML_ANCHOR.test(after)) return null;
+  const hunks = [...diff.matchAll(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/gm)];
+  if (hunks.length === 0) return null;
+  const oldLines = workflowLineJobs(before);
+  const newLines = workflowLineJobs(after);
+  const touched = new Set();
+  for (const [, oldStart, oldCount = "1", newStart, newCount = "1"] of hunks) {
+    for (let line = +oldStart; line < +oldStart + +oldCount; line++) touched.add(oldLines[line]);
+    for (let line = +newStart; line < +newStart + +newCount; line++) touched.add(newLines[line]);
+  }
+  touched.delete("#");
+  if (![...touched].every((job) => SELECTABLE_JOBS.includes(job))) return null;
+  return SELECTABLE_JOBS.filter((job) => job === "frontend" || touched.has(job));
+}
+
+// `workflowJobs` is workflowChangeJobs() for this change; without it a pr-checks.yml edit runs
+// every job.
+export function selectJobs(files, { workflowJobs = null } = {}) {
   const selected = new Set();
   const reasons = [];
   if (!files || files.length === 0) {
@@ -119,6 +178,15 @@ export function selectJobs(files) {
     return { jobs: [...SELECTABLE_JOBS], reasons };
   }
   for (const file of files) {
+    if (file === WORKFLOW_FILE) {
+      for (const job of workflowJobs ?? SELECTABLE_JOBS) selected.add(job);
+      reasons.push(
+        workflowJobs
+          ? `${file}: only job blocks changed (${workflowJobs.join(", ")})`
+          : `${file}: changed outside job blocks (runs every job)`,
+      );
+      continue;
+    }
     const rule = RULES.find((candidate) => candidate.test.test(file));
     for (const job of rule ? rule.jobs : SELECTABLE_JOBS) selected.add(job);
     reasons.push(`${file}: ${rule ? rule.name : "unclassified (runs every job)"}`);
@@ -158,9 +226,22 @@ function changedFiles() {
   const parents = git(["rev-list", "--parents", "-n", "1", "HEAD"]).trim().split(/\s+/).length - 1;
   if (parents !== 2)
     throw new Error(`HEAD has ${parents} parent(s); expected a pull request merge commit`);
-  return git(["diff", "--name-only", "--no-renames", "-z", "HEAD^1", "HEAD"])
+  const files = git(["diff", "--name-only", "--no-renames", "-z", "HEAD^1", "HEAD"])
     .split("\0")
     .filter(Boolean);
+  let workflowJobs = null;
+  if (files.includes(WORKFLOW_FILE)) {
+    const show = (rev) => {
+      try {
+        return git(["show", `${rev}:${WORKFLOW_FILE}`]);
+      } catch {
+        return null; // added or deleted: workflowChangeJobs runs every job
+      }
+    };
+    const diff = git(["diff", "--no-ext-diff", "-U0", "HEAD^1", "HEAD", "--", WORKFLOW_FILE]);
+    workflowJobs = workflowChangeJobs(show("HEAD^1"), show("HEAD"), diff);
+  }
+  return { files, workflowJobs };
 }
 
 function emit(line) {
@@ -169,15 +250,22 @@ function emit(line) {
 }
 
 function runSelect() {
-  let files = null;
-  try {
-    files = changedFiles();
-  } catch (error) {
-    console.error(
-      `::warning::Could not determine changed files, running every job: ${error.message}`,
-    );
+  let changes = { files: null };
+  // Only a pull_request merge commit has a meaningful HEAD^1 diff. Any other event (a merge
+  // queue's merge_group, a push, a manual run) runs every job.
+  const event = process.env.GITHUB_EVENT_NAME;
+  if (event && event !== "pull_request") {
+    console.error(`${event} event: running every job`);
+  } else {
+    try {
+      changes = changedFiles();
+    } catch (error) {
+      console.error(
+        `::warning::Could not determine changed files, running every job: ${error.message}`,
+      );
+    }
   }
-  const { jobs, reasons } = selectJobs(files);
+  const { jobs, reasons } = selectJobs(changes.files, changes);
   for (const line of [...reasons, `selected jobs: ${jobs.join(", ") || "none"}`])
     console.error(line);
   for (const job of SELECTABLE_JOBS) emit(`run_${job}=${jobs.includes(job)}`);
