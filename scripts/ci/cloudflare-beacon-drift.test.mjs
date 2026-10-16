@@ -16,6 +16,7 @@ import {
   reconcile,
   statementDiff,
   surface,
+  touchesIssues,
 } from "./cloudflare-beacon-drift.mjs";
 
 const OLD = Buffer.from(
@@ -45,6 +46,7 @@ test("readPin rejects a source without a sha384 integrity constant", () => {
 test("beaconVersion reads the js version and falls back to unknown", () => {
   assert.equal(beaconVersion(OLD.toString()), "2026.10.0");
   assert.equal(beaconVersion("no version here"), "unknown");
+  assert.equal(beaconVersion('js:"1.0\n| **x**"'), "unknown");
 });
 
 test("statementDiff lists statements only one side has, counting duplicates", () => {
@@ -66,6 +68,8 @@ test("surface counts transports and lists endpoints", () => {
   assert.equal(Object.fromEntries(counts)["fetch()"], 1);
   assert.equal(Object.fromEntries(counts)["navigator.sendBeacon"], 1);
   assert.deepEqual(surface('x("/cdn-cgi/rum")').urls, ["/cdn-cgi/rum"]);
+  const pixel = Object.fromEntries(surface("new Image();new Worker(u);document.write(x)").counts);
+  assert.equal(pixel["new Image / workers / document.write"], 3);
 });
 
 test("a matching live file produces no report body", () => {
@@ -81,10 +85,7 @@ test("a matching live file produces no report body", () => {
 });
 
 test("a drifted live file reports versions, the new hash and what changed", () => {
-  const report = drift({
-    repoUrl: "https://github.com/o/r",
-    runUrl: "https://github.com/o/r/actions/runs/1",
-  });
+  const report = drift({ repoUrl: "https://github.com/o/r" });
   assert.equal(report.matches, false);
   assert.ok(report.body.startsWith(`${MARKER}\n<!-- live: ${integrityOf(NEW)} -->\n`));
   assert.match(report.body, /\| version \(`js:`\) \| 2026\.10\.0 \| 2026\.10\.1 \|/);
@@ -103,25 +104,20 @@ test("a drifted live file reports versions, the new hash and what changed", () =
   );
   assert.match(
     report.body,
-    /\[this workflow run\]\(https:\/\/github\.com\/o\/r\/actions\/runs\/1\)/,
+    /\[Cloudflare Beacon Drift\]\(https:\/\/github\.com\/o\/r\/actions\/workflows\/cloudflare-beacon-drift\.yml\)/,
   );
-  assert.doesNotMatch(report.body, /Test run|does not match the pin\. The comparison/);
-  assert.equal(
-    drift({ repoUrl: "https://github.com/o/r", runUrl: "https://github.com/o/r/actions/runs/1" })
-      .body,
-    report.body,
-  );
+  assert.doesNotMatch(report.body, /Test run/);
+  // Nothing run-specific: tomorrow's run must produce the same body for the same live file.
+  assert.equal(drift({ repoUrl: "https://github.com/o/r" }).body, report.body);
 });
 
-test("an override run is labelled as a test, and a stale copy is called out", () => {
+test("an override run is labelled as a test", () => {
   const override = `sha384-${"A".repeat(64)}`;
   const report = buildReport({ pin: integrityOf(NEW), override, fixture: NEW, live: live(NEW) });
   assert.equal(report.matches, false);
   assert.match(report.body, /\*\*Test run\.\*\*/);
   assert.match(report.body, new RegExp(`Expected \\(workflow_dispatch input\\): \`${override}\``));
   assert.match(report.body, /No statement differs from the committed copy\./);
-  const stale = drift({ pin: `sha384-${"B".repeat(64)}` });
-  assert.match(stale.body, /does not match the pin\. The comparison/);
 });
 
 test("long statement lists are capped", () => {
@@ -206,10 +202,19 @@ test("reconcile closes the bot's issues once the live file matches the pin", asy
   });
   const client = fakeClient([issue(4, MARKER), issue(6, MARKER, "someone"), issue(9, "unrelated")]);
   assert.equal(await reconcile({ client, report, override: "" }), "closed #4");
-  assert.deepEqual(client.calls, [
-    ["comment", 4, `The live beacon matches the pin again (\`${integrityOf(NEW)}\`). Closing.`],
-    ["update", 4, { state: "closed", state_reason: "completed" }],
-  ]);
+  assert.deepEqual(
+    client.calls.map((c) => c.slice(0, 2)),
+    [
+      ["comment", 4],
+      ["update", 4],
+    ],
+  );
+  assert.match(
+    client.calls[0][2],
+    new RegExp(`matches the pin on main again .*${"runbook step 5"}`),
+  );
+  assert.ok(client.calls[0][2].includes(integrityOf(NEW)));
+  assert.deepEqual(client.calls[1][2], { state: "closed", state_reason: "completed" });
   const none = fakeClient([]);
   assert.equal(await reconcile({ client: none, report, override: "" }), "no open drift issue");
 });
@@ -264,4 +269,13 @@ test("githubClient pages through open issues, skips pull requests and fails loud
     fetchImpl: async () => response(403, "no"),
   });
   await assert.rejects(failing.createIssue("t", "b"), /POST \/issues: HTTP 403/);
+});
+
+test("only main runs and test runs touch issues; dry runs never do", () => {
+  const override = `sha384-${"A".repeat(64)}`;
+  assert.equal(touchesIssues({ dryRun: false, ref: "refs/heads/main", override: "" }), true);
+  assert.equal(touchesIssues({ dryRun: false, ref: "refs/heads/fm/pin", override: "" }), false);
+  assert.equal(touchesIssues({ dryRun: false, ref: undefined, override: "" }), false);
+  assert.equal(touchesIssues({ dryRun: false, ref: "refs/heads/fm/pin", override }), true);
+  assert.equal(touchesIssues({ dryRun: true, ref: "refs/heads/main", override }), false);
 });

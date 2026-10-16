@@ -29,6 +29,10 @@ export const SURFACE = [
   ["XMLHttpRequest", /XMLHttpRequest/g],
   ["fetch()", /\bfetch\s*\(/g],
   ["WebSocket / EventSource", /\b(?:WebSocket|EventSource)\b/g],
+  [
+    "new Image / workers / document.write",
+    /\bnew\s+Image\b|\b(?:Shared)?Worker\b|\bserviceWorker\b|\bdocument\.write/g,
+  ],
   ["eval / Function()", /\beval\s*\(|\bFunction\s*\(/g],
   ["createElement / importScripts", /\bcreateElement\s*\(|\bimportScripts\b/g],
   ["cookies / storage", /document\.cookie|\blocalStorage\b|\bsessionStorage\b|\bindexedDB\b/g],
@@ -47,9 +51,10 @@ export function integrityOf(bytes) {
   return `sha384-${createHash("sha384").update(bytes).digest("base64")}`;
 }
 
-// The beacon reports its version as `versions:{js:"2026.10.1"}`; the ETag carries it too.
+// The beacon reports its version as `versions:{js:"2026.10.1"}`; the ETag carries it too. Only
+// a plain version string is accepted: it goes into markdown and log lines unescaped.
 export function beaconVersion(text) {
-  return /\bjs:"([^"]+)"/.exec(text)?.[1] ?? "unknown";
+  return /\bjs:"([\w.+-]{1,40})"/.exec(text)?.[1] ?? "unknown";
 }
 
 export function surface(text) {
@@ -99,7 +104,7 @@ function statementList(summary, statements) {
 
 // Everything the report says, from the pin, the committed copy and the live response. The body is
 // deterministic for a given live file, so a daily rerun leaves an up-to-date issue untouched.
-export function buildReport({ pin, override, fixture, live, repoUrl, runUrl }) {
+export function buildReport({ pin, override, fixture, live, repoUrl }) {
   const expected = override || pin;
   const liveIntegrity = integrityOf(live.bytes);
   const matches = liveIntegrity === expected;
@@ -126,29 +131,20 @@ export function buildReport({ pin, override, fixture, live, repoUrl, runUrl }) {
       return `| \`${url.replaceAll("|", "\\|")}\` | ${before} | ${after}${flag(before, after)} |`;
     })
     .join("\n");
-  const notes = [];
-  if (override) {
-    notes.push(
-      "> [!NOTE]\n> **Test run.** The expected hash came from the workflow_dispatch input `expected_integrity`, not from the pin. A run without the input compares with the pin again.",
-    );
-  }
-  const fixtureIntegrity = integrityOf(fixture);
-  if (fixtureIntegrity !== pin) {
-    notes.push(
-      `> [!WARNING]\n> The committed copy \`${FIXTURE_FILE}\` does not match the pin. The comparison below uses it anyway.`,
-    );
-  }
+  const note = override
+    ? "\n> [!NOTE]\n> **Test run.** The expected hash came from the workflow_dispatch input `expected_integrity`, not from the pin. A run without the input compares with the pin again.\n"
+    : "";
   const body = `${MARKER}
 <!-- live: ${liveIntegrity} -->
 Cloudflare's live Web Analytics beacon no longer matches the SRI pin in \`${PIN_FILE}\`. Browsers refuse to run it, so Cloudflare analytics on vayada.com is off for visitors who accepted it until the pin is updated. It fails closed: nothing is sent. PR checks are unaffected because they use the committed copy.
 
 **Next step:** follow [\`${RUNBOOK}\`](${repoUrl ?? ".."}/blob/main/${RUNBOOK}). Review the change before copying the hash.
-${notes.length ? `\n${notes.join("\n\n")}\n` : ""}
+${note}
 | | committed copy | live |
 |---|---|---|
 | version (\`js:\`) | ${beaconVersion(fixtureText)} | ${liveVersion} |
 | size | ${bytes(fixture.length)} | ${bytes(live.bytes.length)} |
-| sha384 | \`${fixtureIntegrity}\` | \`${liveIntegrity}\` |
+| sha384 | \`${integrityOf(fixture)}\` | \`${liveIntegrity}\` |
 
 Expected ${override ? "(workflow_dispatch input)" : `(pin in \`${PIN_FILE}\`)`}: \`${expected}\`. Live response: ETag \`${live.etag ?? "none"}\`, Last-Modified \`${live.lastModified ?? "none"}\`.
 
@@ -171,7 +167,7 @@ ${counts}
 ${urls}
 
 ${[statementList("Removed statements", diff.removed), statementList("Added statements", diff.added)].join("")}
-Checked by ${runUrl ? `[this workflow run](${runUrl})` : "a local run"}.
+Checked daily by [Cloudflare Beacon Drift](${repoUrl ?? ".."}/actions/workflows/cloudflare-beacon-drift.yml).
 `;
   return { matches, summary, liveIntegrity, liveVersion, body };
 }
@@ -244,7 +240,7 @@ export async function reconcile({ client, report, override }) {
     for (const issue of open) {
       await client.comment(
         issue.number,
-        `The live beacon matches the pin again (\`${report.liveIntegrity}\`). Closing.`,
+        `The live beacon matches the pin on main again (\`${report.liveIntegrity}\`). Closing. Check that Deploy Landing finished and vayada.com loads the beacon (runbook step 5).`,
       );
       await client.updateIssue(issue.number, { state: "closed", state_reason: "completed" });
     }
@@ -265,13 +261,19 @@ export async function reconcile({ client, report, override }) {
   return `updated #${issue.number}`;
 }
 
+// Only main's pin is the real one. Elsewhere only a test run (EXPECTED_INTEGRITY) touches issues,
+// so checking a pin-update branch cannot close the real issue before the fix ships.
+export function touchesIssues({ dryRun, ref, override }) {
+  return !dryRun && (ref === "refs/heads/main" || Boolean(override));
+}
+
 async function main() {
   const dryRun = process.argv.includes("--dry-run");
   const override = process.env.EXPECTED_INTEGRITY?.trim() ?? "";
   if (override && !INTEGRITY.test(override)) {
     throw new Error("EXPECTED_INTEGRITY must be sha384-<base64>");
   }
-  const { GITHUB_SERVER_URL, GITHUB_REPOSITORY, GITHUB_RUN_ID, GITHUB_TOKEN } = process.env;
+  const { GITHUB_SERVER_URL, GITHUB_REPOSITORY, GITHUB_REF, GITHUB_TOKEN } = process.env;
   const repoUrl =
     GITHUB_REPOSITORY && `${GITHUB_SERVER_URL || "https://github.com"}/${GITHUB_REPOSITORY}`;
   const report = buildReport({
@@ -280,13 +282,19 @@ async function main() {
     fixture: readFileSync(FIXTURE_FILE),
     live: await fetchBeacon(),
     repoUrl,
-    runUrl: GITHUB_RUN_ID && repoUrl && `${repoUrl}/actions/runs/${GITHUB_RUN_ID}`,
   });
   console.log(report.summary);
-  if (report.body) console.log(`\n${report.body}`);
+  // In Actions the report goes only to the run summary: vendor text on stdout could carry
+  // workflow commands (::error:: and the like).
   const stepSummary = process.env.GITHUB_STEP_SUMMARY;
-  if (stepSummary) appendFileSync(stepSummary, `${report.summary}\n\n${report.body ?? ""}`);
-  if (!dryRun) {
+  if (stepSummary) {
+    appendFileSync(stepSummary, `${report.summary}\n\n${report.body ?? ""}`);
+  } else if (report.body) {
+    console.log(`\n${report.body}`);
+  }
+  if (!touchesIssues({ dryRun, ref: GITHUB_REF, override })) {
+    console.log("Issue: none changed (dry run, or not main without expected_integrity).");
+  } else {
     if (!GITHUB_TOKEN || !GITHUB_REPOSITORY) {
       throw new Error("needs GITHUB_TOKEN and GITHUB_REPOSITORY");
     }
