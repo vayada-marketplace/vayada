@@ -156,11 +156,17 @@ test("shows the empty state and a keyboard-friendly type menu styled like New pr
   test.skip(process.env.E2E_BOOKING_ADMIN_PROD !== "1", "Requires production booking-admin build.");
   const healthy = watchPageHealth(page, testInfo);
   await mockBookingAdminBookingFlow(page);
-  await page.route(`**${BOOKING_ADMIN_LAST_MINUTE_SETTINGS_PATH}*`, (route) =>
-    route.fulfill({
-      json: { enabled: false, stackWithPromo: false, tiers: [], updatedAt: "2026-09-05T10:00:00Z" },
-    }),
-  );
+  let settings: Record<string, any> = {
+    enabled: false,
+    stackWithPromo: false,
+    tiers: [],
+    updatedAt: "2026-09-05T10:00:00Z",
+  };
+  await page.route(`**${BOOKING_ADMIN_LAST_MINUTE_SETTINGS_PATH}*`, async (route) => {
+    if (route.request().method() === "PUT")
+      settings = { ...route.request().postDataJSON(), updatedAt: settings.updatedAt };
+    await route.fulfill({ json: settings });
+  });
   await page.goto("/promo-codes");
   await expect(page.getByRole("heading", { name: "No promotions yet" })).toBeVisible();
 
@@ -209,11 +215,63 @@ test("shows the empty state and a keyboard-friendly type menu styled like New pr
   await expect(dialog).toHaveCount(0);
   await expect(button).toBeFocused();
 
+  // Active lives in the footer; turning it off before creating saves a paused promotion.
+  await button.click();
+  await page.getByRole("menuitem", { name: "Last minute", exact: true }).click();
+  await dialog.getByRole("switch", { name: "Active" }).click();
+  await dialog.getByRole("button", { name: "Create promotion", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.locator("article")).toContainText("Paused");
+  expect(settings.promotions).toEqual([
+    expect.objectContaining({ type: "LAST_MINUTE", active: false, threshold: 5 }),
+  ]);
+
   await page.getByRole("button", { name: "Collapse", exact: true }).click();
   await page.setViewportSize({ width: 390, height: 844 });
   await button.click();
   const menu = await page.getByRole("menu").boundingBox();
   expect(menu!.x).toBeGreaterThanOrEqual(0);
   expect(menu!.x + menu!.width).toBeLessThanOrEqual(390);
+  await healthy();
+});
+
+test("keeps a saved lead time that is not one of the chips", async ({ page }, testInfo) => {
+  test.skip(process.env.E2E_BOOKING_ADMIN_PROD !== "1", "Requires production booking-admin build.");
+  const healthy = watchPageHealth(page, testInfo);
+  await mockBookingAdminBookingFlow(page);
+  let settings: Record<string, any> = {
+    enabled: false,
+    stackWithPromo: false,
+    tiers: [],
+    promotions: [
+      {
+        type: "EARLY_BIRD",
+        active: true,
+        roomTypeIds: [],
+        discountPercent: 12,
+        threshold: 45,
+        freeNights: 0,
+        weekdays: [],
+        tiers: [],
+      },
+    ],
+    updatedAt: "2026-09-05T10:00:00Z",
+  };
+  await page.route(`**${BOOKING_ADMIN_LAST_MINUTE_SETTINGS_PATH}*`, async (route) => {
+    if (route.request().method() === "PUT")
+      settings = { ...route.request().postDataJSON(), updatedAt: settings.updatedAt };
+    await route.fulfill({ json: settings });
+  });
+  await page.goto("/promo-codes");
+  await page.getByRole("button", { name: "Edit Early bird" }).click();
+  const editor = page.getByRole("dialog", { name: "Edit early bird promotion" });
+  const saved = editor.getByRole("radio", { name: "45+ days", exact: true });
+  await expect(saved).toBeChecked();
+  await editor.getByRole("radio", { name: "30+ days", exact: true }).locator("..").click();
+  await expect(saved).not.toBeChecked();
+  await saved.locator("..").click();
+  await editor.getByRole("button", { name: "Save changes", exact: true }).click();
+  await expect(editor).toHaveCount(0);
+  expect(settings.promotions[0]).toMatchObject({ threshold: 45, discountPercent: 12 });
   await healthy();
 });

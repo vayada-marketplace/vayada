@@ -187,8 +187,8 @@ export default function Promotions({
     };
   }, [hotelId]);
 
-  /** Saves the whole list; resolves false when the save failed. */
-  async function save(next: BookingPromotion[]) {
+  /** Saves the whole list; resolves false when it failed. The editor shows its own error. */
+  async function save(next: BookingPromotion[], fromEditor = false) {
     if (!settings || busy) return false;
     setBusy(true);
     setError("");
@@ -207,8 +207,7 @@ export default function Promotions({
       setDraft(null);
       return true;
     } catch {
-      // The editor shows its own error; the section shows errors from toggles and deletes.
-      if (!draft) setError("admin.couldNotSavePromotions");
+      if (!fromEditor) setError("admin.couldNotSavePromotions");
       return false;
     } finally {
       setBusy(false);
@@ -360,7 +359,7 @@ export default function Promotions({
           roomTypes={roomTypes}
           propertyCurrency={propertyCurrency}
           busy={busy}
-          save={save}
+          save={(next) => save(next, true)}
           onCancel={() => setDraft(null)}
         />
       )}

@@ -14,7 +14,7 @@ import {
 import { Input } from "@/components/ui";
 import { PageHeader } from "@/components/layout/PageLayout";
 import type { BookingPromoCode } from "@/services/api/bookingPromoCodesClient";
-import { EditorModal, EditorSectionHeading } from "./EditorModal";
+import { ChoiceCard, EditorModal, EditorSectionHeading } from "./EditorModal";
 
 export interface PromoRoomType {
   roomTypeId: string;
@@ -526,26 +526,16 @@ export default function PromoCodesTab({
                 </legend>
                 <div className="mt-2 grid grid-cols-2 gap-3">
                   {(["percentage", "fixed"] as const).map((type) => (
-                    <label
+                    <ChoiceCard
                       key={type}
-                      className={`flex h-11 cursor-pointer items-center justify-between gap-2 rounded-lg border px-3 transition-colors focus-within:outline-none focus-within:ring-2 focus-within:ring-primary-500 focus-within:ring-offset-2 ${draft.discountType === type ? "border-primary-600 bg-primary-50/60 ring-1 ring-inset ring-primary-600" : "border-gray-200 hover:border-gray-300"}`}
-                    >
-                      <input
-                        className="sr-only"
-                        type="radio"
-                        name="discountType"
-                        value={type}
-                        aria-describedby="promo-discount-type-helper"
-                        checked={draft.discountType === type}
-                        onChange={() => setDraft((current) => ({ ...current, discountType: type }))}
-                      />
-                      <span className="truncate text-sm font-medium text-gray-900">
-                        {type === "fixed" ? t("admin.fixedAmount") : t("admin.percentage")}
-                      </span>
-                      <span className="shrink-0 text-[13px] text-gray-600">
-                        {type === "fixed" ? propertyCurrency : "%"}
-                      </span>
-                    </label>
+                      name="discountType"
+                      value={type}
+                      describedBy="promo-discount-type-helper"
+                      checked={draft.discountType === type}
+                      onChange={() => setDraft((current) => ({ ...current, discountType: type }))}
+                      label={type === "fixed" ? t("admin.fixedAmount") : t("admin.percentage")}
+                      unit={type === "fixed" ? propertyCurrency : "%"}
+                    />
                   ))}
                 </div>
                 <p id="promo-discount-type-helper" className="mt-2 text-xs text-gray-600">

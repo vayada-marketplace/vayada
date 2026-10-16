@@ -12,7 +12,7 @@ import {
 import type { BookingPromotion } from "@/services/api/bookingLastMinuteSettingsClient";
 import { Input } from "@/components/ui";
 import type { PromoRoomType } from "./PromoCodesTab";
-import { EditorModal, EditorSectionHeading } from "./EditorModal";
+import { ChoiceCard, EditorModal, EditorSectionHeading } from "./EditorModal";
 
 type PromotionType = BookingPromotion["type"];
 type Translate = ReturnType<typeof useTranslation>["t"];
@@ -60,7 +60,7 @@ export const fresh = (type: PromotionType): BookingPromotion => ({
   tiers: [],
 });
 
-export function weekdayLabels(locale: string) {
+function weekdayLabels(locale: string) {
   return Array.from({ length: 7 }, (_, day) =>
     new Intl.DateTimeFormat(locale, { weekday: "short", timeZone: "UTC" }).format(
       new Date(Date.UTC(2026, 0, 4 + day)),
@@ -119,7 +119,7 @@ function validate(draft: BookingPromotion, free: boolean, t: Translate) {
       ? { field: "tiers" as const, message: t("admin.checkTheTierDaysAndDiscounts") }
       : null;
   }
-  if (free && !whole(draft.freeNights, 1, draft.threshold - 1))
+  if (free && !whole(draft.freeNights, 1, Math.min(365, draft.threshold - 1)))
     return {
       field: "discount" as const,
       message: t("admin.freeNightsMustBeFewerThanMinimumNights"),
@@ -258,10 +258,11 @@ export default function PromotionForm({
   const patch = (value: Partial<BookingPromotion>) => setDraft((p) => ({ ...p, ...value }));
   const Icon = promotionIcons[draft.type];
   const days = weekdayLabels(locale);
+  // A saved value outside the chips stays available as its own chip while editing.
   const choices = (options: number[]) =>
-    options.includes(draft.threshold)
+    options.includes(initial.threshold)
       ? options
-      : [...options, draft.threshold].sort((a, b) => a - b);
+      : [...options, initial.threshold].sort((a, b) => a - b);
   const invalid = (field: ErrorField) => error?.field === field;
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
@@ -279,13 +280,17 @@ export default function PromotionForm({
   };
 
   const firstControl =
-    draft.tiers.length > 0
+    initial.tiers.length > 0
       ? "promotion-tier-0-daysBeforeMin"
-      : draft.type === "LAST_MINUTE" || draft.type === "EARLY_BIRD"
-        ? `promotion-threshold-${draft.threshold}`
-        : draft.type === "EXTENDED_STAY"
+      : initial.type === "LAST_MINUTE" || initial.type === "EARLY_BIRD"
+        ? `promotion-threshold-${initial.threshold}`
+        : initial.type === "EXTENDED_STAY"
           ? "promotion-min-nights"
           : "promotion-day-0";
+  // While a number field is empty the guest line would read "NaN% off"; hide it until it's filled.
+  const previewable = ![draft.threshold, draft.discountPercent, draft.freeNights].some(
+    Number.isNaN,
+  );
 
   let rule: ReactNode = null;
   if (draft.tiers.length) {
@@ -378,32 +383,23 @@ export default function PromotionForm({
           <legend className="text-sm font-medium text-gray-800">{t("admin.discountType")}</legend>
           <div className="mt-2 grid grid-cols-2 gap-3">
             {[false, true].map((option) => (
-              <label
+              <ChoiceCard
                 key={String(option)}
-                className={`flex h-11 cursor-pointer items-center justify-between gap-2 rounded-lg border px-3 transition-colors focus-within:outline-none focus-within:ring-2 focus-within:ring-primary-500 focus-within:ring-offset-2 ${free === option ? "border-primary-600 bg-primary-50/60 ring-1 ring-inset ring-primary-600" : "border-gray-200 hover:border-gray-300"}`}
-              >
-                <input
-                  className="sr-only"
-                  type="radio"
-                  name="promotion-discount-format"
-                  aria-describedby="promotion-discount-format-helper"
-                  checked={free === option}
-                  onChange={() => {
-                    setFree(option);
-                    patch(
-                      option
-                        ? { freeNights: 1, discountPercent: 0 }
-                        : { freeNights: 0, discountPercent: 10 },
-                    );
-                  }}
-                />
-                <span className="truncate text-sm font-medium text-gray-900">
-                  {option ? t("admin.freeNights") : t("admin.percentage")}
-                </span>
-                <span className="shrink-0 text-[13px] text-gray-600">
-                  {option ? t("admin.nights") : "%"}
-                </span>
-              </label>
+                name="promotion-discount-format"
+                value={option ? "free" : "percentage"}
+                describedBy="promotion-discount-format-helper"
+                checked={free === option}
+                onChange={() => {
+                  setFree(option);
+                  patch(
+                    option
+                      ? { freeNights: 1, discountPercent: 0 }
+                      : { freeNights: 0, discountPercent: 10 },
+                  );
+                }}
+                label={option ? t("admin.freeNights") : t("admin.percentage")}
+                unit={option ? t("admin.nights") : "%"}
+              />
             ))}
           </div>
           <p id="promotion-discount-format-helper" className="mt-2 text-xs text-gray-600">
@@ -535,11 +531,13 @@ export default function PromotionForm({
           </Group>
         </section>
       </div>
-      <p className="mt-4 rounded-xl border border-primary-100 bg-primary-50/50 px-4 py-3 text-[13px] text-gray-600">
-        {t("admin.guestsWillSee")}{" "}
-        <span className="font-semibold text-gray-900">{t(names[draft.type])}</span> —{" "}
-        {promotionDiscount(draft, t)} · {promotionSummary(draft, t, locale)}
-      </p>
+      {previewable && (
+        <p className="mt-4 rounded-xl border border-primary-100 bg-primary-50/50 px-4 py-3 text-[13px] text-gray-600">
+          {t("admin.guestsWillSee")}{" "}
+          <span className="font-semibold text-gray-900">{t(names[draft.type])}</span> —{" "}
+          {promotionDiscount(draft, t)} · {promotionSummary(draft, t, locale)}
+        </p>
+      )}
     </EditorModal>
   );
 }

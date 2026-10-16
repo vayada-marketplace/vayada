@@ -50,6 +50,8 @@ export function EditorModal({
   const { t } = useTranslation();
   const dialogRef = useRef<HTMLFormElement | null>(null);
   const onCloseRef = useRef(onClose);
+  // Read once: the setup below must not re-run (and bounce focus) while the form changes.
+  const initialFocusRef = useRef(initialFocusId);
   useEffect(() => {
     onCloseRef.current = onClose;
   }, [onClose]);
@@ -57,7 +59,7 @@ export function EditorModal({
   useEffect(() => {
     const previousFocus =
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    dialogRef.current?.querySelector<HTMLElement>(`#${initialFocusId}`)?.focus();
+    dialogRef.current?.querySelector<HTMLElement>(`#${initialFocusRef.current}`)?.focus();
     const previousBodyOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
 
@@ -90,7 +92,7 @@ export function EditorModal({
       document.body.style.overflow = previousBodyOverflow;
       if (previousFocus?.isConnected) previousFocus.focus();
     };
-  }, [initialFocusId]);
+  }, []);
 
   return createPortal(
     <div
@@ -214,5 +216,42 @@ export function EditorSectionHeading({
         {children}
       </h3>
     </div>
+  );
+}
+
+/** A radio card as tall as an input: the choice on the left, its unit on the right. */
+export function ChoiceCard({
+  name,
+  value,
+  describedBy,
+  checked,
+  onChange,
+  label,
+  unit,
+}: {
+  name: string;
+  value: string;
+  describedBy: string;
+  checked: boolean;
+  onChange: () => void;
+  label: string;
+  unit: string;
+}) {
+  return (
+    <label
+      className={`flex h-11 cursor-pointer items-center justify-between gap-2 rounded-lg border px-3 transition-colors focus-within:outline-none focus-within:ring-2 focus-within:ring-primary-500 focus-within:ring-offset-2 ${checked ? "border-primary-600 bg-primary-50/60 ring-1 ring-inset ring-primary-600" : "border-gray-200 hover:border-gray-300"}`}
+    >
+      <input
+        className="sr-only"
+        type="radio"
+        name={name}
+        value={value}
+        aria-describedby={describedBy}
+        checked={checked}
+        onChange={onChange}
+      />
+      <span className="truncate text-sm font-medium text-gray-900">{label}</span>
+      <span className="shrink-0 text-[13px] text-gray-600">{unit}</span>
+    </label>
   );
 }

@@ -79,12 +79,17 @@ export async function runPromotionAcceptance(input: {
     await expect(page.getByRole("heading", { name: "Promos", exact: true })).toBeVisible();
     await page.getByRole("button", { name: "New promotion", exact: true }).click();
     await page.getByRole("menuitem", { name: "Early bird", exact: true }).click();
-    await page.getByLabel("Minimum days ahead").fill("1");
-    await page.getByRole("button", { name: "Save promotion", exact: true }).click();
+    const editor = page.getByRole("dialog", { name: "New early bird promotion" });
+    // The smoke stay starts 60 days out, so the 30+ days chip still applies to it.
+    await editor.getByRole("radio", { name: "30+ days", exact: true }).locator("..").click();
+    await editor.getByRole("button", { name: "Create promotion", exact: true }).click();
+    await expect(editor).toHaveCount(0);
     await expect(card).toContainText("10% off");
     await card.getByRole("button", { name: "Edit Early bird", exact: true }).click();
-    await page.getByLabel("Discount percentage").fill("20");
-    await page.getByRole("button", { name: "Save promotion", exact: true }).click();
+    const edit = page.getByRole("dialog", { name: "Edit early bird promotion" });
+    await edit.getByRole("spinbutton", { name: "Discount", exact: true }).fill("20");
+    await edit.getByRole("button", { name: "Save changes", exact: true }).click();
+    await expect(edit).toHaveCount(0);
     await expect(card).toContainText("20% off");
     await card.getByRole("switch").click();
     await expect(card).toContainText("Paused");
@@ -96,7 +101,7 @@ export async function runPromotionAcceptance(input: {
         type: "EARLY_BIRD",
         active: false,
         discountPercent: 20,
-        threshold: 1,
+        threshold: 30,
       }),
     ]);
   });
