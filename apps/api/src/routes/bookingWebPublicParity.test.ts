@@ -1270,11 +1270,16 @@ describe("Booking Web public bootstrap parity", () => {
       message: "Too many booking lookup attempts. Please try again later.",
     });
 
-    // Behind a trusted proxy the forwarded client address has its own bucket.
-    expect((await injectLookup("10.0.0.1", "198.51.100.1, 203.0.113.9", "VAY-7")).statusCode).toBe(
-      200,
+    // Behind a trusted proxy each forwarded client has its own bucket, not the proxy's.
+    for (let attempt = 7; attempt <= 11; attempt += 1)
+      expect(
+        (await injectLookup("10.0.0.1", "198.51.100.1, 203.0.113.9", `VAY-${attempt}`)).statusCode,
+      ).toBe(200);
+    expect((await injectLookup("10.0.0.1", "203.0.113.9", "VAY-12")).statusCode).toBe(429);
+    expect((await injectLookup("10.0.0.1", "203.0.113.10", "VAY-13")).statusCode).toBe(200);
+    expect(lookups).toEqual(
+      [1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 13].map((attempt) => `VAY-${attempt}`),
     );
-    expect(lookups).toEqual(["VAY-1", "VAY-2", "VAY-3", "VAY-4", "VAY-5", "VAY-7"]);
     await app.close();
   });
 
