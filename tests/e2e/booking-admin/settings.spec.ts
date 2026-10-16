@@ -1585,6 +1585,76 @@ test("keeps setup's plain Pay at Hotel when it is saved untouched", async ({ pag
   await assertHealthy();
 });
 
+// VAY-2235: "Cash & Card accepted" sat beside the Cash/Card buttons and spilled out of the card into
+// Bank Transfer. It now sits on its own line below the buttons, inside the card, at every width.
+test("keeps the Pay at Hotel choice inside its card at every width", async ({ page }, testInfo) => {
+  const assertHealthy = watchPageHealth(page, testInfo);
+  await mockPaymentWrites(page, ["pay_at_property", "cash", "manual_card"]);
+  await page.goto("/settings/payments");
+  const methods = page.locator('fieldset[aria-labelledby="payment-methods-heading"]');
+  await expect(methods).toHaveAttribute("aria-disabled", "false");
+  // The card that holds the Cash/Card choice (PayPal is a <div> card too).
+  const card = methods
+    .locator(":scope > div")
+    .filter({ has: page.getByRole("button", { name: "Cash", exact: true }) });
+  const cash = card.getByRole("button", { name: "Cash", exact: true });
+  const cardChoice = card.getByRole("button", { name: "Card", exact: true });
+  const states = [
+    ["Cash & Card accepted", async () => {}],
+    ["Cash only", () => cardChoice.click()],
+    [
+      "Card only",
+      async () => {
+        await cardChoice.click();
+        await cash.click();
+      },
+    ],
+  ] as const;
+  for (const [status, choose] of states) {
+    await choose();
+    for (const [width, height] of [
+      [1440, 900],
+      [1280, 800],
+      [1024, 768],
+      [640, 900],
+      [390, 844],
+    ] as const) {
+      await page.setViewportSize({ width, height });
+      const text = card.getByText(status, { exact: true });
+      await expect(text).toBeVisible();
+      const where = `${status} at ${width}px`;
+      // Nothing in the card is wider than the card.
+      expect(
+        await card.evaluate((element) => element.scrollWidth <= element.clientWidth),
+        where,
+      ).toBe(true);
+      const cardBox = (await card.boundingBox())!;
+      const buttonBox = (await cash.boundingBox())!;
+      // The rendered text itself, not its block, which is always as wide as the card.
+      const textBox = await text.evaluate((element) => {
+        const range = document.createRange();
+        range.selectNodeContents(element);
+        const box = range.getBoundingClientRect();
+        return { left: box.left, right: box.right, top: box.top };
+      });
+      expect(textBox.left, where).toBeGreaterThanOrEqual(cardBox.x);
+      expect(textBox.right, where).toBeLessThanOrEqual(cardBox.x + cardBox.width);
+      expect(textBox.top, `${where}: below the buttons`).toBeGreaterThanOrEqual(
+        buttonBox.y + buttonBox.height,
+      );
+      expect(Math.round(textBox.left), `${where}: left-aligned with Cash`).toBe(
+        Math.round(buttonBox.x),
+      );
+      if (status === "Cash & Card accepted" && (width === 1440 || width === 390)) {
+        await methods.screenshot({
+          path: testInfo.outputPath(`vay2235-pay-at-hotel-${width}.png`),
+        });
+      }
+    }
+  }
+  await assertHealthy();
+});
+
 test("re-sends Cash and Card once when Finance needs the Pay at Hotel choice", async ({ page }) => {
   const writes = await mockPaymentWrites(
     page,

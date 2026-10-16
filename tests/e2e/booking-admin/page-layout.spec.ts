@@ -169,6 +169,46 @@ test("the title stays put while clicking through the sidebar", async ({ page }) 
   }
 });
 
+// VAY-2229: "+ New add-on" and "+ New promo code" had different heights and text sizes. Both are
+// now the shared header action button, so it keeps its size when switching pages.
+test("the + New buttons on Add-ons and Promos are the same size", async ({ page }, testInfo) => {
+  test.setTimeout(90_000);
+  await mockPages(page);
+  for (const [width, height] of [
+    [1440, 900],
+    [390, 844],
+  ] as const) {
+    await page.setViewportSize({ width, height });
+    const sizes = [];
+    for (const [route, name] of [
+      ["/add-ons", "New add-on"],
+      ["/promo-codes", "New promo code"],
+    ] as const) {
+      await page.goto(route);
+      const header = page.locator(".page-header");
+      const button = header.getByRole("button", { name, exact: true });
+      await expect(button).toBeVisible();
+      sizes.push(
+        await button.evaluate((element) => {
+          const style = getComputedStyle(element);
+          return {
+            height: element.getBoundingClientRect().height,
+            padding: `${style.paddingLeft} ${style.paddingRight}`,
+            font: `${style.fontSize}/${style.fontWeight}`,
+            radius: style.borderRadius,
+            icon: element.querySelector("svg")?.getBoundingClientRect().width,
+          };
+        }),
+      );
+      await header.screenshot({
+        path: testInfo.outputPath(`vay2229-${route.slice(1)}-header-${width}.png`),
+      });
+    }
+    expect(sizes[0], `${width}px`).toEqual(sizes[1]);
+    expect(sizes[0]!.height, `${width}px`).toBe(40);
+  }
+});
+
 test("a save message appears under the header without moving the title", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await mockPages(page);

@@ -3,6 +3,7 @@ import { useTranslation } from "@/lib/i18n";
 
 import { useState, type DragEvent } from "react";
 import {
+  ADDON_CATEGORIES,
   AddonEditor,
   emptyAddonValues,
   type AddonEditorValues,
@@ -14,19 +15,15 @@ import {
   MagnifyingGlassIcon,
   PencilIcon,
   PhotoIcon,
-  PlusIcon,
   TrashIcon,
 } from "@heroicons/react/24/outline";
-import { ToggleSwitch } from "@/components/ui";
+import { PrimaryActionButton, ToggleSwitch } from "@/components/ui";
 import type { AddonItem, AddonSettings } from "@/services/settings";
 import { cn, formatCurrency } from "@/lib/utils";
 import { PageHeader } from "@/components/layout/PageLayout";
 
 const MARKETPLACE_FRONTEND_URL =
   process.env.NEXT_PUBLIC_MARKETPLACE_URL || "https://app.vayada.com";
-
-// The redesign's filter chips; "other" appears only when an add-on uses it.
-const FILTER_CATEGORIES = ["dining", "transport", "wellness", "experience"];
 
 const PRICING_MODEL_LABELS: Record<string, string> = {
   "false:false": "addons.editor.flatFee",
@@ -136,10 +133,6 @@ export default function AddonsTab({
   const [itemError, setItemError] = useState<string | null>(null);
   const [draggingAddonId, setDraggingAddonId] = useState<string | null>(null);
   const orderedAddons = orderAddons(addons);
-  const categories = [
-    ...FILTER_CATEGORIES,
-    ...(addons.some((addon) => addon.category === "other") ? ["other"] : []),
-  ];
   const query = search.trim().toLocaleLowerCase();
   const filteredAddons = orderedAddons.filter(
     (addon) =>
@@ -292,14 +285,12 @@ export default function AddonsTab({
               })
         }
         actions={
-          <button
+          <PrimaryActionButton
             onClick={openCreateEditor}
             disabled={addonLimitReached || currencyMissing}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-primary-600 px-4 py-2 text-[13px] font-medium text-white hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            <PlusIcon className="h-4 w-4" />
             {t("addons.list.new")}
-          </button>
+          </PrimaryActionButton>
         }
       />
       {banner}
@@ -371,7 +362,8 @@ export default function AddonsTab({
           >
             {t("addons.list.all")}
           </button>
-          {categories.map((category) => (
+          {/* Every category the editor offers can be filtered to, "Other" included (VAY-2230). */}
+          {ADDON_CATEGORIES.map((category) => (
             <button
               key={category}
               type="button"

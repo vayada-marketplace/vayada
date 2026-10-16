@@ -5,7 +5,6 @@ const rejectUnexpectedCall = (method: keyof BookingWebCheckoutAdapter) => (): ne
 };
 
 export const unusedBookingWebCheckoutAdapter = {
-  consumeLookupAttempt: rejectUnexpectedCall("consumeLookupAttempt"),
   getCheckoutConfig: rejectUnexpectedCall("getCheckoutConfig"),
   quoteBooking: rejectUnexpectedCall("quoteBooking"),
   createBooking: rejectUnexpectedCall("createBooking"),

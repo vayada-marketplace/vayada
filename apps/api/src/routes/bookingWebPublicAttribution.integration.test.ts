@@ -2,6 +2,7 @@ import { externalBookingChanges } from "../integrations/externalBookingChanges.j
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { buildApp } from "../app.js";
 import { readBookingAffiliateCreationEvidence } from "../domains/bookingAffiliateCreationEvidence.js";
 import { createTargetPmsInventoryReservationPort } from "../domains/pmsInventoryReservation.js";
 import type { DirectBookingInventoryReservationPort } from "../platform/inventoryReservation.js";
@@ -244,6 +245,46 @@ describe.skipIf(!TEST_DATABASE_URL)(
         await settings.end();
         await checkout.end();
       }
+    });
+
+    it("limits Find my booking in memory and stores nothing about the caller (VAY-2222)", async () => {
+      const auditRows = async () =>
+        (
+          await admin.query<{ all: number; lookups: number }>(
+            `SELECT count(*)::int AS all,
+               count(*) FILTER (WHERE action = 'booking.guest_lookup.attempt')::int AS lookups
+             FROM platform.product_audit_events`,
+          )
+        ).rows[0];
+      const before = await auditRows();
+      const app = buildApp({
+        logger: false,
+        // A fixed clock, so the six tries can't straddle the limit's one-minute window.
+        bookingWebPublicNow: () => occurredAt,
+        publicHotelProfileRepository: { findProfileBySlug: async () => null },
+        bookingWebCheckoutAdapter: createAdapter(checkoutPool),
+      });
+      try {
+        const statuses: number[] = [];
+        for (let attempt = 1; attempt <= 6; attempt += 1)
+          statuses.push(
+            (
+              await app.inject({
+                method: "POST",
+                url: "/api/booking-web/hotels/vay-1188-hotel/bookings/lookup",
+                remoteAddress: "198.51.100.22",
+                payload: {
+                  bookingReference: `VAY-2222-${attempt}`,
+                  guestEmail: "guest@example.test",
+                },
+              })
+            ).statusCode,
+          );
+        expect(statuses).toEqual([404, 404, 404, 404, 404, 429]);
+      } finally {
+        await app.close();
+      }
+      expect(await auditRows()).toEqual(before);
     });
 
     function createAdapter(pool: pg.Pool) {
