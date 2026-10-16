@@ -96,17 +96,6 @@ async function claim(
   connectionOnly: boolean,
 ): Promise<ChannexManagementJob | null> {
   return transaction(pool, async (client) => {
-    if (ariSyncMutating && !connectionOnly)
-      await client.query(
-        `SELECT pms.enqueue_restriction_ari(connection.property_id,
-         'full:'||(now() AT TIME ZONE location.timezone)::date)
-       FROM pms.channel_connections connection
-       JOIN hotel_catalog.property_locations location ON location.property_id=connection.property_id
-       WHERE connection.provider='channex' AND location.timezone IS NOT NULL
-         AND connection.connection_status IN ('connected','degraded')
-         AND ($1::uuid IS NULL OR connection.property_id = $1::uuid)`,
-        [stagingRestrictionsPropertyId],
-      );
     const result = await client.query<JobRow>(
       `SELECT id::text AS "jobId", property_id::text AS "propertyId",
          correlation_id AS "correlationId", status, attempts_count AS "attemptsCount",

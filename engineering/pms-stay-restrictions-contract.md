@@ -48,22 +48,18 @@ record unavailable capabilities, and restore bounded synthetic configuration.
 
 ## Configuration and delivery
 
-`GET /api/pms/properties/:propertyId/channex/stay-restrictions` lists canonical
-rules. `PUT` accepts `{commandId, idempotencyKey, restrictions: {roomTypeId,
-ratePlanId, rules}}`. Each rule supplies `startsOn`, `endsOn`, `daysOfWeek`,
-nullable `minStayNights`/`maxStayNights`, and boolean `closedToArrival`,
-`closedToDeparture`, `stopSell`, `enabled`. This replaces the scoped
-`stay_restriction` rows; an empty list deletes them. Seasonal and other rule
-sources remain owned by their current configuration flows. Ranges are at most
-731 days and the command accepts at most 100 rules. Scope and overlap validation,
-idempotency reservation, rule persistence, audit and queueing commit atomically.
+**Retired (VAY-2208, 2026-10-15).** Restriction-only ARI has had no sender since
+the old pricing was removed (#1764): every restriction-only `sync_ari` job ends in
+`PRICING_UNAVAILABLE`. The `GET`/`PUT /api/pms/properties/:propertyId/channex/stay-restrictions`
+route, its command input and the worker's daily restriction refresh are removed.
+The `pms.rate_rules` and operating-calendar triggers that still queue
+restriction-only jobs are dropped in a follow-up migration. Booking quotes keep
+enforcing `pms.rate_rules` (imported rules) through `pms.effective_stay_restrictions`.
 
-Rule changes and inventory ARI outbox events enqueue snapshot-free management
-jobs in the same transaction. Multiple row edits coalesce by property and
-transaction. The management worker also schedules one full restriction sync per property-local
-day, retains existing failure/dead-letter reporting and excludes ARI work when
-`ariSync` is observe-only. Same-property management jobs are serialized. Manual
-sync, automatic sync and retries all use the same current-state planner.
+Hotels now edit stay rules in pricing-v2 (room Prices › Stay rules/dates). The
+published-offer Channex path sends those values only on closed initial uploads
+(`stop_sell` forced true) and has no post-activation restriction delivery yet;
+that is tracked separately, not here.
 
 ## Isolated deployed staging verification (VAY-1528)
 
@@ -71,7 +67,8 @@ The shared canary keeps API_BACKGROUND_WORKERS_ENABLED=false. A separate
 PMS_CHANNEX_STAGING_RESTRICTIONS_PROPERTY_ID enables only the Channex management
 loop for that property. Startup requires the exact staging provider URL, a UUID,
 and ARI as the only mutating capability. Both daily restriction refresh and job
-claim are scoped; claims accept only sync_ari with restrictionsOnly=true. Full
+claim are scoped (the daily refresh was removed in VAY-2208); claims accept only
+sync_ari with restrictionsOnly=true. Full
 ARI, provisioning, connection lifecycle, booking, and message jobs remain untouched.
 The existing property-scoped sandbox key is injected by ECS. Bind and map the
 existing sandbox through an audited, bounded fixture repair before testing; do
