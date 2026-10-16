@@ -26,13 +26,17 @@ describe.skipIf(!connectionString)("target Booking funnel PostgreSQL scope", () 
         [id],
       );
     }
-    for (const [id, session, at, metadata, traffic, stage] of [
+    // Sessions are the browser's random UUIDs; test traffic is its own class and bots are never
+    // stored (VAY-2212).
+    const sessions = new Map<string, string>();
+    const session = (name: string) =>
+      sessions.get(name) ?? sessions.set(name, randomUUID()).get(name)!;
+    for (const [id, name, at, metadata, traffic, stage] of [
       [propertyId, "human", "2026-03-08T05:00:00Z", {}, "human", "page_visit"],
       [propertyId, "last", "2026-03-09T03:59:59Z", {}, "human", "page_visit"],
       [propertyId, "before", "2026-03-08T04:59:59Z", {}, "human", "page_visit"],
       [propertyId, "after", "2026-03-09T04:00:00Z", {}, "human", "page_visit"],
-      [propertyId, "test", "2026-03-08T12:00:00Z", { isTestData: true }, "human", "page_visit"],
-      [propertyId, "bot", "2026-03-08T12:00:00Z", {}, "bot", "page_visit"],
+      [propertyId, "test", "2026-03-08T12:00:00Z", {}, "test", "page_visit"],
       [otherId, "other", "2026-03-08T12:00:00Z", {}, "human", "page_visit"],
       // A room-detail view is tracked but neither required nor counted as a stage (VAY-2074).
       [propertyId, "human", "2026-03-08T05:01:00Z", { funnelSequence: 2 }, "human", "room_viewed"],
@@ -47,21 +51,17 @@ describe.skipIf(!connectionString)("target Booking funnel PostgreSQL scope", () 
       [propertyId, "last", "2026-03-09T03:59:59Z", { funnelSequence: 2 }, "human", "rate_selected"],
     ] as const) {
       await pool.query(
-        `INSERT INTO platform.domain_events
-        (source_system, event_key, event_type, occurred_at, tenant_scope, property_id,
-         resource_product, resource_type, resource_id, payload, event_metadata)
-        VALUES ('distribution', $1, $6, $2, 'property', $3,
-          'distribution', 'booking_web_hotel', 'funnel-test', $4, $5)`,
+        `INSERT INTO distribution.booking_web_events
+        (property_id, event_type, event_id, session_id, metadata, traffic_class, occurred_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)`,
         [
-          randomUUID(),
-          at,
           id,
-          JSON.stringify({
-            sessionId: session,
-            metadata: { funnelVersion: 1, funnelSequence: 1, ...metadata },
-          }),
-          JSON.stringify({ trafficClass: traffic }),
-          `booking_web.${stage}`,
+          stage,
+          randomUUID(),
+          session(name),
+          JSON.stringify({ funnelVersion: 1, funnelSequence: 1, ...metadata }),
+          traffic,
+          at,
         ],
       );
     }
@@ -71,7 +71,7 @@ describe.skipIf(!connectionString)("target Booking funnel PostgreSQL scope", () 
     await pool.end();
   });
 
-  it("uses the IANA timezone across DST, excludes bot/test evidence and other properties", async () => {
+  it("uses the IANA timezone across DST, excludes test traffic and other properties", async () => {
     const funnel = await readPort.getConversionFunnel({
       propertyId,
       windowStart: "2026-03-08",
@@ -87,6 +87,24 @@ describe.skipIf(!connectionString)("target Booking funnel PostgreSQL scope", () 
       windowEnd: "2026-03-01",
     });
     expect(empty?.steps.every((step) => step.count === 0)).toBe(true);
+  });
+
+  it("counts human page visits per local day across DST, without test traffic or other hotels", async () => {
+    const timeline = await readPort.getPageViewTimeline({
+      propertyId,
+      windowStart: "2026-03-08",
+      windowEnd: "2026-03-09",
+    });
+    // New York: "before" is 7 March, "human" and "last" are 8 March, "after" is 9 March.
+    expect(timeline).toMatchObject({
+      timeZone: "America/New_York",
+      total: 3,
+      previousTotal: 1,
+      buckets: [
+        { date: "2026-03-08", count: 2 },
+        { date: "2026-03-09", count: 1 },
+      ],
+    });
   });
 
   it("shows add-ons only when public active definitions and the property flag both allow them", async () => {
