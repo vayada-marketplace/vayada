@@ -3380,13 +3380,7 @@ async function retireRoomTypeWithCleanup(
   const checked = roomTypeDeleteImpact(impact, plan);
   if (!checked.canRetire) {
     await client.query("ROLLBACK");
-    return {
-      ...roomTypeRetireConflict(
-        "room_type_retirement_blocked",
-        "Resolve the reported room type dependencies before retirement.",
-      ),
-      impact: checked,
-    };
+    return roomTypeRetireBlocked(checked);
   }
   if (
     !(await recordRoomTypeCommandIdempotency(
@@ -7982,6 +7976,18 @@ function roomTypeRetireConflict(
   message: string,
 ): Exclude<PmsRoomTypeRetireCommandResult, { ok: true }> {
   return { ok: false, statusCode: 409, code, message };
+}
+
+function roomTypeRetireBlocked(
+  impact: PmsRoomTypeRetirementImpact,
+): Exclude<PmsRoomTypeRetireCommandResult, { ok: true }> {
+  return {
+    ok: false,
+    statusCode: 409,
+    code: "room_type_retirement_blocked",
+    message: "Resolve the reported room type dependencies before retirement.",
+    impact,
+  };
 }
 
 function roomTypeRetireNotFound(
