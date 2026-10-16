@@ -2,8 +2,8 @@
 // Daily drift check for the Cloudflare Web Analytics beacon that apps/landing pins with SRI, run
 // by .github/workflows/cloudflare-beacon-drift.yml. Cloudflare cannot version-pin the beacon, so
 // every Cloudflare release makes browsers refuse it on vayada.com until the pin is updated. On a
-// mismatch this prints a report for the reviewer and exits 1, so the scheduled run fails. It
-// never changes the pin: see engineering/cloudflare-beacon-pin-runbook.md.
+// mismatch this writes a report for the reviewer to the run summary and exits 1, so the
+// scheduled run fails. It never changes the pin: see engineering/cloudflare-beacon-pin-runbook.md.
 //
 //   node scripts/ci/cloudflare-beacon-drift.mjs
 //
@@ -26,6 +26,10 @@ export const SURFACE = [
   ["XMLHttpRequest", /XMLHttpRequest/g],
   ["fetch()", /\bfetch\s*\(/g],
   ["WebSocket / EventSource", /\b(?:WebSocket|EventSource)\b/g],
+  [
+    "new Image / workers / document.write",
+    /\bnew\s+Image\b|\b(?:Shared)?Worker\b|\bserviceWorker\b|\bdocument\.write/g,
+  ],
   ["eval / Function()", /\beval\s*\(|\bFunction\s*\(/g],
   ["createElement / importScripts", /\bcreateElement\s*\(|\bimportScripts\b/g],
   ["cookies / storage", /document\.cookie|\blocalStorage\b|\bsessionStorage\b|\bindexedDB\b/g],
@@ -44,9 +48,10 @@ export function integrityOf(bytes) {
   return `sha384-${createHash("sha384").update(bytes).digest("base64")}`;
 }
 
-// The beacon reports its version as `versions:{js:"2026.10.1"}`; the ETag carries it too.
+// The beacon reports its version as `versions:{js:"2026.10.1"}`; the ETag carries it too. Only
+// a plain version string is accepted: it goes into markdown and log lines unescaped.
 export function beaconVersion(text) {
-  return /\bjs:"([^"]+)"/.exec(text)?.[1] ?? "unknown";
+  return /\bjs:"([\w.+-]{1,40})"/.exec(text)?.[1] ?? "unknown";
 }
 
 export function surface(text) {
@@ -96,7 +101,7 @@ function statementList(summary, statements) {
 
 // Everything the report says, from the pin, the committed copy and the live response. The body is
 // deterministic for a given live file.
-export function buildReport({ pin, override, fixture, live, repoUrl, runUrl }) {
+export function buildReport({ pin, override, fixture, live, repoUrl }) {
   const expected = override || pin;
   const liveIntegrity = integrityOf(live.bytes);
   const matches = liveIntegrity === expected;
@@ -123,29 +128,20 @@ export function buildReport({ pin, override, fixture, live, repoUrl, runUrl }) {
       return `| \`${url.replaceAll("|", "\\|")}\` | ${before} | ${after}${flag(before, after)} |`;
     })
     .join("\n");
-  const notes = [];
-  if (override) {
-    notes.push(
-      "> [!NOTE]\n> **Test run.** The expected hash came from the workflow_dispatch input `expected_integrity`, not from the pin. A run without the input compares with the pin again.",
-    );
-  }
-  const fixtureIntegrity = integrityOf(fixture);
-  if (fixtureIntegrity !== pin) {
-    notes.push(
-      `> [!WARNING]\n> The committed copy \`${FIXTURE_FILE}\` does not match the pin. The comparison below uses it anyway.`,
-    );
-  }
+  const note = override
+    ? "\n> [!NOTE]\n> **Test run.** The expected hash came from the workflow_dispatch input `expected_integrity`, not from the pin. A run without the input compares with the pin again.\n"
+    : "";
   const body = `${MARKER}
 <!-- live: ${liveIntegrity} -->
 Cloudflare's live Web Analytics beacon no longer matches the SRI pin in \`${PIN_FILE}\`. Browsers refuse to run it, so Cloudflare analytics on vayada.com is off for visitors who accepted it until the pin is updated. It fails closed: nothing is sent. PR checks are unaffected because they use the committed copy.
 
 **Next step:** follow [\`${RUNBOOK}\`](${repoUrl ?? ".."}/blob/main/${RUNBOOK}). Review the change before copying the hash.
-${notes.length ? `\n${notes.join("\n\n")}\n` : ""}
+${note}
 | | committed copy | live |
 |---|---|---|
 | version (\`js:\`) | ${beaconVersion(fixtureText)} | ${liveVersion} |
 | size | ${bytes(fixture.length)} | ${bytes(live.bytes.length)} |
-| sha384 | \`${fixtureIntegrity}\` | \`${liveIntegrity}\` |
+| sha384 | \`${integrityOf(fixture)}\` | \`${liveIntegrity}\` |
 
 Expected ${override ? "(workflow_dispatch input)" : `(pin in \`${PIN_FILE}\`)`}: \`${expected}\`. Live response: ETag \`${live.etag ?? "none"}\`, Last-Modified \`${live.lastModified ?? "none"}\`.
 
@@ -168,7 +164,7 @@ ${counts}
 ${urls}
 
 ${[statementList("Removed statements", diff.removed), statementList("Added statements", diff.added)].join("")}
-Checked by ${runUrl ? `[this workflow run](${runUrl})` : "a local run"}.
+Checked daily by [Cloudflare Beacon Drift](${repoUrl ?? ".."}/actions/workflows/cloudflare-beacon-drift.yml).
 `;
   return { matches, summary, liveIntegrity, liveVersion, body };
 }
@@ -195,7 +191,7 @@ async function main() {
   if (override && !INTEGRITY.test(override)) {
     throw new Error("EXPECTED_INTEGRITY must be sha384-<base64>");
   }
-  const { GITHUB_SERVER_URL, GITHUB_REPOSITORY, GITHUB_RUN_ID } = process.env;
+  const { GITHUB_SERVER_URL, GITHUB_REPOSITORY } = process.env;
   const repoUrl =
     GITHUB_REPOSITORY && `${GITHUB_SERVER_URL || "https://github.com"}/${GITHUB_REPOSITORY}`;
   const report = buildReport({
@@ -204,12 +200,14 @@ async function main() {
     fixture: readFileSync(FIXTURE_FILE),
     live: await fetchBeacon(),
     repoUrl,
-    runUrl: GITHUB_RUN_ID && repoUrl && `${repoUrl}/actions/runs/${GITHUB_RUN_ID}`,
   });
   console.log(report.summary);
-  if (report.body) console.log(`\n${report.body}`);
+  // In Actions the report goes only to the run summary: vendor text on stdout could carry
+  // workflow commands (::error:: and the like).
   if (process.env.GITHUB_STEP_SUMMARY) {
     appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${report.summary}\n\n${report.body ?? ""}`);
+  } else if (report.body) {
+    console.log(`\n${report.body}`);
   }
   if (!report.matches) {
     console.error(`::error::${report.summary} See ${RUNBOOK}.`);
