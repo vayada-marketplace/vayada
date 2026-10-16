@@ -8,37 +8,7 @@ import { Hotel, Addon } from "@/lib/types";
 import { hotelService } from "@/services/api/hotel";
 import { ApiError } from "@/services/api/client";
 import { generateColorPalette } from "@/lib/utils/colors";
-
-const FONT_PAIRINGS: Record<string, { heading: string; body: string; googleFamilies: string[] }> = {
-  "high-end-serif": {
-    heading: "'Playfair Display', serif",
-    body: "'Source Sans Pro', sans-serif",
-    googleFamilies: [
-      "Playfair+Display:ital,wght@0,400;0,700;1,400",
-      "Source+Sans+Pro:wght@300;400;600;700",
-    ],
-  },
-  "modern-minimalist": {
-    heading: "'Inter', sans-serif",
-    body: "'Inter', sans-serif",
-    googleFamilies: ["Inter:wght@300;400;500;600;700"],
-  },
-  "grand-classic": {
-    heading: "'Lora', serif",
-    body: "'Source Sans Pro', sans-serif",
-    googleFamilies: ["Lora:ital,wght@0,400;0,700;1,400", "Source+Sans+Pro:wght@300;400;600;700"],
-  },
-  "imperial-serif": {
-    heading: "'Cinzel', serif",
-    body: "'Source Sans Pro', sans-serif",
-    googleFamilies: ["Cinzel:wght@400;600;700", "Source+Sans+Pro:wght@300;400;600;700"],
-  },
-  "italiana-serif": {
-    heading: "'Italiana', serif",
-    body: "'Source Sans Pro', sans-serif",
-    googleFamilies: ["Italiana", "Source+Sans+Pro:wght@300;400;600;700"],
-  },
-};
+import { brandFontPairing } from "@/lib/brandFonts";
 
 // Rooms, availability and prices are served by the room-and-price page (/book); this
 // provider only carries the hotel profile and its add-on catalogue.
@@ -194,26 +164,13 @@ export function HotelProvider({
     }
   }, [hotel?.branding?.accentColor]);
 
-  // Apply branding font pairing as CSS variables + load Google Fonts
+  // Apply the branding font pairing (self-hosted, see lib/brandFonts) as CSS variables
   useEffect(() => {
-    const pairingId = hotel?.branding?.fontPairing;
-    if (pairingId && FONT_PAIRINGS[pairingId]) {
-      const { heading, body, googleFamilies } = FONT_PAIRINGS[pairingId];
+    const pairing = brandFontPairing(hotel?.branding?.fontPairing);
+    if (pairing) {
       const root = document.documentElement;
-      root.style.setProperty("--font-heading", heading);
-      root.style.setProperty("--font-body", body);
-
-      // Load Google Fonts
-      const linkId = "branding-fonts";
-      let link = document.getElementById(linkId) as HTMLLinkElement | null;
-      if (!link) {
-        link = document.createElement("link");
-        link.id = linkId;
-        link.rel = "stylesheet";
-        document.head.appendChild(link);
-      }
-      const families = googleFamilies.join("&family=");
-      link.href = `https://fonts.googleapis.com/css2?family=${families}&display=swap`;
+      root.style.setProperty("--font-heading", pairing.heading);
+      root.style.setProperty("--font-body", pairing.body);
     }
   }, [hotel?.branding?.fontPairing]);
 

@@ -26,6 +26,7 @@ import {
   voidPricingCardPayment,
 } from "../domains/pricingCardPaymentCompletion.js";
 import { admitAffiliateArrivalForCurrentHost } from "../domains/bookingAffiliateArrivalHost.js";
+import { affiliateTrafficSource } from "../domains/marketplaceAffiliateClickOccurrence.js";
 import { readBookingAffiliateContextForQuote } from "../domains/bookingAffiliateContextForQuote.js";
 import {
   bindLiveAffiliateOriginal,
@@ -39,12 +40,13 @@ import type { ExternalChangePresentationPort } from "../domains/booking/external
 import { pmsRoomStayRestrictionReason } from "../domains/pmsRoomSelectionConflicts.js";
 import {
   bestBookingPromotion,
+  BOOKING_WEB_ANALYTICS_CONSENT_VERSION,
   evaluateSameDayBooking,
-  FUNNEL_EVENT_TYPES,
-  FUNNEL_PAYMENT_METHODS,
+  isFunnelId,
   isManualPricingPaymentMethod,
   parseBookingFlexibleCancellationTerms,
   parseBookingRoomSelection,
+  parseFunnelEventMetadata,
   SAME_DAY_BOOKING_POLICY_DEFAULTS,
   type AddonEconomicTerms,
   type BookedCancellationOutcome,
@@ -199,10 +201,7 @@ type BookingWebAttributionClickRequest = {
   referral_code?: string;
   sessionId?: string;
   session_id?: string;
-  landingUrl?: string;
-  landing_url?: string;
   referrer?: string;
-  metadata?: Record<string, unknown>;
 };
 type BookingWebTelemetryEventRequest = {
   analyticsConsent?: boolean;
@@ -213,8 +212,6 @@ type BookingWebTelemetryEventRequest = {
   event_type?: string;
   eventId?: string;
   event_id?: string;
-  idempotencyKey?: string;
-  idempotency_key?: string;
   sessionId?: string;
   session_id?: string;
   metadata?: Record<string, unknown>;
@@ -234,25 +231,21 @@ export type BookingWebAffiliateClickEvent = {
   slug: string;
   referralCode: string;
   sessionId?: string;
-  landingUrl?: string;
-  referrer?: string;
-  requestId: string;
+  referrerSource: ReturnType<typeof affiliateTrafficSource>;
   occurredAt: Date;
   userAgent?: string;
-  ipAddress?: string;
-  metadata: Record<string, unknown>;
 };
 
+/** No request id or IP address: neither leads back to the guest (VAY-2197). */
 export type BookingWebTelemetryEvent = {
   propertyId: string;
   hotelSlug: string;
   eventType: string;
-  eventId?: string;
-  sessionId?: string;
-  requestId: string;
+  eventId: string;
+  sessionId: string;
   occurredAt: Date;
+  /** Only to tell bots apart; not stored. */
   userAgent?: string;
-  ipAddress?: string;
   metadata: Record<string, unknown>;
 };
 
@@ -1123,19 +1116,21 @@ export async function registerBookingWebPublicRoutes(
       ) {
         throw createHttpError(400, "Invalid click ID.");
       }
+      // Booking Web sends a random analytics session id; anything else is not stored.
+      const sessionId = firstString(request.body?.sessionId, request.body?.session_id);
       if (options.attributionSink) {
         await options.attributionSink.recordAffiliateClick({
           clickId,
           slug: request.params.slug,
           referralCode,
-          sessionId: firstString(request.body?.sessionId, request.body?.session_id),
-          landingUrl: firstString(request.body?.landingUrl, request.body?.landing_url),
-          referrer: firstString(request.body?.referrer, request.headers.referer),
-          requestId: String(request.id),
+          sessionId: sessionId && /^[A-Za-z0-9_-]{1,128}$/.test(sessionId) ? sessionId : undefined,
+          // Attribution needs no page address (VAY-2215): booking-web URLs can carry a guest's
+          // email, booking reference or access token. Older browsers still send landingUrl,
+          // the full referrer and metadata; only the referrer's site is kept. The Referer
+          // header is never read: it is the booking page itself.
+          referrerSource: affiliateTrafficSource(request.body?.referrer),
           occurredAt: now(),
           userAgent: request.headers["user-agent"],
-          ipAddress: request.ip,
-          metadata: recordBody(request.body?.metadata),
         });
       }
       reply.header("Cache-Control", "no-store");
@@ -1144,59 +1139,50 @@ export async function registerBookingWebPublicRoutes(
     },
   );
 
-  app.post<{ Body: BookingWebTelemetryEventRequest }>("/events", async (request, reply) => {
-    if (request.body?.analyticsConsent !== true || request.body?.consentVersion !== 1) {
-      return reply.header("Cache-Control", "no-store").status(204).send();
-    }
-    const hotelSlug = firstString(request.body?.hotelSlug, request.body?.hotel_slug);
-    const eventType = firstString(request.body?.eventType, request.body?.event_type);
-    if (!hotelSlug || !eventType) {
-      throw createHttpError(400, "Hotel slug and event type are required.");
-    }
-    const metadata = recordBody(request.body?.metadata);
-    if (metadata["funnelVersion"] === 1) {
-      const sequence = metadata["funnelSequence"];
-      const method = metadata["paymentMethod"];
+  // Funnel events only (VAY-2197): each type's own allowlisted properties and random ids, so
+  // nothing a guest typed can be stored. Events are a few hundred bytes.
+  app.post<{ Body: BookingWebTelemetryEventRequest }>(
+    "/events",
+    { bodyLimit: 2048 },
+    async (request, reply) => {
       if (
-        !(FUNNEL_EVENT_TYPES as readonly string[]).includes(eventType) ||
-        !firstString(request.body?.sessionId, request.body?.session_id) ||
-        !Number.isSafeInteger(sequence) ||
-        Number(sequence) < 1 ||
-        (["complete_booking_clicked", "payment_authorized", "booking_completed"].includes(
-          eventType,
-        ) &&
-          !(FUNNEL_PAYMENT_METHODS as readonly unknown[]).includes(method))
+        request.body?.analyticsConsent !== true ||
+        request.body?.consentVersion !== BOOKING_WEB_ANALYTICS_CONSENT_VERSION
       ) {
+        return reply.header("Cache-Control", "no-store").status(204).send();
+      }
+      const hotelSlug = firstString(request.body?.hotelSlug, request.body?.hotel_slug);
+      const eventType = firstString(request.body?.eventType, request.body?.event_type);
+      if (!hotelSlug || !eventType) {
+        throw createHttpError(400, "Hotel slug and event type are required.");
+      }
+      const metadata = parseFunnelEventMetadata(eventType, request.body?.metadata);
+      const eventId = firstString(request.body?.eventId, request.body?.event_id);
+      const sessionId = firstString(request.body?.sessionId, request.body?.session_id);
+      if (!metadata || !isFunnelId(eventId) || !isFunnelId(sessionId)) {
         throw createHttpError(400, "Invalid booking funnel event.");
       }
-    }
-    if (options.attributionSink) {
-      const profile = await options.profileRepository.findProfileBySlug(hotelSlug);
-      if (!profile) {
-        throw createHttpError(404, "Hotel not found.");
+      if (options.attributionSink) {
+        const profile = await options.profileRepository.findProfileBySlug(hotelSlug);
+        if (!profile) {
+          throw createHttpError(404, "Hotel not found.");
+        }
+        await options.attributionSink.recordTelemetryEvent({
+          propertyId: profile.hotel.propertyId,
+          hotelSlug,
+          eventType,
+          eventId,
+          sessionId,
+          occurredAt: now(),
+          userAgent: request.headers["user-agent"],
+          metadata,
+        });
       }
-      await options.attributionSink.recordTelemetryEvent({
-        propertyId: profile.hotel.propertyId,
-        hotelSlug,
-        eventType,
-        eventId: firstString(
-          request.body?.eventId,
-          request.body?.event_id,
-          request.body?.idempotencyKey,
-          request.body?.idempotency_key,
-        ),
-        sessionId: firstString(request.body?.sessionId, request.body?.session_id),
-        requestId: String(request.id),
-        occurredAt: now(),
-        userAgent: request.headers["user-agent"],
-        ipAddress: request.ip,
-        metadata: recordBody(request.body?.metadata),
-      });
-    }
-    reply.header("Cache-Control", "no-store");
-    reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-telemetry");
-    return reply.status(204).send();
-  });
+      reply.header("Cache-Control", "no-store");
+      reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-telemetry");
+      return reply.status(204).send();
+    },
+  );
 
   if (options.affiliateRepository) {
     await registerBookingWebAffiliateRoutes(app, {
