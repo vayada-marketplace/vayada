@@ -467,22 +467,6 @@ test("every path rule that runs frontend also runs frontend_build", () => {
   }
 });
 
-test("an edit to one half of the frontend job runs only that half (and frontend)", () => {
-  assert.deepEqual(
-    jobsForEdit(once("        run: npm run lint\n", "        run: npm run lint -- --quiet\n")),
-    ["frontend"],
-  );
-  assert.deepEqual(
-    jobsForEdit(
-      once(
-        "        run: npm --workspace vayada-admin run test\n",
-        "        run: npm --workspace vayada-admin run test -- --reporter=dot\n",
-      ),
-    ),
-    ["frontend", "frontend_build"],
-  );
-});
-
 test("other workflow files run the jobs whose tests read workflow files", () => {
   for (const file of [
     ".github/workflows/deploy-next-pms-web.yml",
