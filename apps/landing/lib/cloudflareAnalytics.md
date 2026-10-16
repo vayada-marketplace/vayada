@@ -37,7 +37,5 @@ E2E_LANDING_BASE_URL=https://landing.localhost \
 E2E_LANDING_ANALYTICS=1 npm run e2e:landing
 ```
 
-`E2E_CLOUDFLARE_BEACON_FILE` replaces the committed copy, for example to try a new
-beacon before re-pinning; the same digest verification applies. Live rollout verification must
-separately inspect actual requests before choice, after rejection, acceptance,
+Live rollout verification must separately inspect actual requests before choice, after rejection, acceptance,
 withdrawal, reload, and navigation, and confirm edge injection remains off.
