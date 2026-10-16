@@ -39,6 +39,7 @@ export default function ImageUpload({
   const { t } = useTranslation();
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
+  const [skipNotice, setSkipNotice] = useState("");
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [overIndex, setOverIndex] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -55,20 +56,30 @@ export default function ImageUpload({
       if (!files || files.length === 0) return;
 
       setError("");
+      setSkipNotice("");
 
-      const fileArray = Array.from(files);
-
-      // Validate count
       if (maxImages === null) {
         setError(t("images.limitLoadingError"));
         e.target.value = "";
         return;
       }
-      if (validImages.length + fileArray.length > maxImages) {
-        setError(photoLimitMessage(t, plan, validImages.length, maxImages));
+      // A pick bigger than the free slots adds the first photos that fit and skips the rest.
+      const { accepted: fileArray, skipped } = fitPhotoPick(
+        Array.from(files),
+        validImages.length,
+        maxImages,
+      );
+      if (fileArray.length === 0) {
         e.target.value = "";
         return;
       }
+      const notice = skipped
+        ? t("images.skippedPhotos", {
+            added: fileArray.length,
+            picked: files.length,
+            max: maxImages,
+          })
+        : "";
 
       // Validate each file
       for (const file of fileArray) {
@@ -94,6 +105,7 @@ export default function ImageUpload({
               pendingFile: file,
             })),
           ]);
+          setSkipNotice(notice);
           return;
         }
         const result = await uploadService.uploadImages(fileArray, mediaResource);
@@ -102,6 +114,7 @@ export default function ImageUpload({
           platformMediaObjectId: img.platformMediaObjectId,
         }));
         onChange([...validImages, ...newImages]);
+        setSkipNotice(notice);
       } catch (err: any) {
         setError(err.message || t("images.uploadError"));
       } finally {
@@ -109,7 +122,7 @@ export default function ImageUpload({
         e.target.value = "";
       }
     },
-    [validImages, onChange, maxImages, maxSizeMB, mediaResource, plan, t],
+    [validImages, onChange, maxImages, maxSizeMB, mediaResource, t],
   );
 
   const removeImage = useCallback(
@@ -119,6 +132,7 @@ export default function ImageUpload({
         URL.revokeObjectURL(removed.url);
       }
       const updated = validImages.filter((_, i) => i !== index);
+      setSkipNotice("");
       onChange(updated);
     },
     [validImages, onChange],
@@ -266,21 +280,23 @@ export default function ImageUpload({
         </div>
       )}
 
-      {isAtLimit && maxImages !== null && (
+      {(skipNotice || isAtLimit) && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs leading-5 text-amber-950">
-          <p>{photoLimitMessage(t, plan, validImages.length, maxImages)}</p>
-          {plan === "commission" && (
-            <a className="font-semibold text-primary-700 hover:underline" href={upgradeUrl}>
-              {t("images.upgrade")}
-            </a>
+          {skipNotice && <p>{skipNotice}</p>}
+          {isAtLimit && maxImages !== null && (
+            <p>
+              {photoLimitMessage(t, plan, validImages.length, maxImages)}
+              {plan === "commission" && (
+                <>
+                  {" "}
+                  <a className="font-semibold text-primary-700 hover:underline" href={upgradeUrl}>
+                    {t("images.upgradeForMore")}
+                  </a>
+                </>
+              )}
+            </p>
           )}
         </div>
-      )}
-
-      {!isAtLimit && plan === "commission" && (
-        <a className="block text-xs font-medium text-primary-700 hover:underline" href={upgradeUrl}>
-          {t("images.upgrade")}
-        </a>
       )}
 
       {error && (
@@ -290,8 +306,20 @@ export default function ImageUpload({
   );
 }
 
+type Translate = (key: string, params?: Record<string, string | number>) => string;
+
+/** Keeps the first picked files that fit in the room's free photo slots. */
+export function fitPhotoPick<T>(
+  picked: T[],
+  currentCount: number,
+  maxImages: number,
+): { accepted: T[]; skipped: number } {
+  const accepted = picked.slice(0, Math.max(0, maxImages - currentCount));
+  return { accepted, skipped: picked.length - accepted.length };
+}
+
 function photoLimitMessage(
-  t: (key: string) => string,
+  t: Translate,
   plan: "commission" | "fixed" | null,
   currentCount: number,
   maxImages: number,
@@ -299,5 +327,7 @@ function photoLimitMessage(
   if (currentCount > maxImages) {
     return plan === "commission" ? t("images.overCommissionLimit") : t("images.overPaidLimit");
   }
-  return plan === "commission" ? t("images.commissionLimit") : t("images.paidLimit");
+  return plan === "commission"
+    ? t("images.limitReached", { max: maxImages })
+    : t("images.paidLimit");
 }
