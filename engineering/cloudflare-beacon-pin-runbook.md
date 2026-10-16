@@ -13,7 +13,8 @@ commit Cloudflare's file, only its hash and the reviewed record below.
   opens the issue "Cloudflare beacon changed: review and update the landing SRI pin" (label
   `monitoring`) and fails. Compared with the reviewed record
   `scripts/ci/cloudflare-beacon-reviewed.json`, the issue lists the versions, the new hash,
-  endpoint and transport counts (⚠️ marks a change) and the statements that are new.
+  endpoint and transport counts (⚠️ marks a change) and how many statements changed. It never
+  quotes Cloudflare's code.
 - PR checks keep passing. The landing consent spec runs offline against a stub beacon it
   generates, so it never depends on Cloudflare's file.
 
@@ -27,7 +28,7 @@ commit Cloudflare's file, only its hash and the reviewed record below.
    printf 'sha384-%s\n' "$(openssl dgst -sha384 -binary new-beacon.min.js | base64)"
    ```
 
-2. **Review the change.** Start from the issue's tables and new statements. For a full diff, get
+2. **Review the change.** Start from the issue's tables. For the full diff, get
    the reviewed version from the Wayback Machine (a snapshot from before the change) and check
    that its hash equals the old pin. The minified file is one line, so diff it statement by
    statement. Keep both files outside the repository:
