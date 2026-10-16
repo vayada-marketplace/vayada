@@ -159,6 +159,18 @@ test("an override run is labelled as a test", () => {
   assert.match(report.body, /\*\*Test run\.\*\*/);
   assert.match(report.body, new RegExp(`Expected \\(workflow_dispatch input\\): \`${override}\``));
   assert.match(report.body, /No statement differs from the reviewed version\./);
+  // The live file still matches the real pin: no outage claim and no new pin to copy.
+  assert.match(report.body, /still matches the SRI pin .*nothing is broken/);
+  assert.doesNotMatch(report.body, /Browsers refuse|New pin|Next step/);
+  // A test run on a branch whose pin really differs keeps the outage text.
+  const real = buildReport({
+    pin: integrityOf(OLD),
+    override,
+    record: reviewRecord(NEW),
+    live: live(NEW),
+  });
+  assert.match(real.body, /Browsers refuse to run it/);
+  assert.match(real.body, /New pin, only after review/);
 });
 
 test("a transport the record has no count for is flagged only when the live file uses it", () => {
