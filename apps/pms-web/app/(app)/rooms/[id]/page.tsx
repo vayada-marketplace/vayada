@@ -200,6 +200,7 @@ export default function EditRoomPage({ params }: { params: Promise<{ id: string 
         <button
           onClick={() => void openDelete()}
           disabled={deleting || checkingDelete}
+          aria-label={t("common.delete")}
           className="inline-flex items-center gap-1.5 px-3 py-2 text-sm text-red-600 border border-red-200 rounded-lg hover:bg-red-50 disabled:opacity-50 shrink-0"
         >
           <TrashIcon className="w-4 h-4" />
