@@ -390,7 +390,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL room type Delete with cleanup", 
     );
     expect(
       await rooms.retireRoomType(deleteCommand(roomTypeA, "room-type-facts-v3")),
-    ).toMatchObject({ ok: false, statusCode: 403, code: "missing_permission" });
+    ).toMatchObject({ ok: false, statusCode: 403, code: "room_type_delete_not_allowed" });
     cleanupEnabled = false;
     const impact = await rooms.inspectRoomTypeRetirement(propertyId, roomTypeA);
     expect(impact).not.toHaveProperty("cleanup");
@@ -401,6 +401,85 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL room type Delete with cleanup", 
     ).toMatchObject({ ok: false, code: "room_type_retirement_blocked" });
     expect((await snapshot()).room).toMatchObject({ active: true });
   });
+
+  it("retires the units of a room type the calendar doesn't hold yet", async () => {
+    const roomTypeD = await seedRoomOutsideCalendar(1);
+    // The unbound room keeps the calendar out of date for the others until it is gone.
+    expect(await rooms.inspectRoomTypeRetirement(propertyId, roomTypeA)).toMatchObject({
+      canRetire: false,
+      blockers: [expect.objectContaining({ code: "calendar_not_current" })],
+    });
+    expect(await rooms.inspectRoomTypeRetirement(propertyId, roomTypeD)).toMatchObject({
+      canRetire: true,
+      blockers: [],
+      cleanup: { physicalUnits: 1, futureNights: 0, roomBlocks: 0, linkedGroups: 0 },
+    });
+    expect(
+      await rooms.retireRoomType(deleteCommand(roomTypeD, "room-type-facts-v1")),
+    ).toMatchObject({ ok: true, impact: { cleanup: { physicalUnits: 1, futureNights: 0 } } });
+    expect((await snapshot(roomTypeD)).unitStatuses).toEqual(["retired"]);
+    expect((await snapshot(roomTypeD)).receipts).toBe(0);
+    expect(
+      await rooms.retireRoomType(deleteCommand(roomTypeA, "room-type-facts-v3")),
+    ).toMatchObject({ ok: true, impact: { cleanup: { physicalUnits: 2, futureNights: 3 } } });
+  });
+
+  it("retires a room type with nothing to clean up exactly as today, also for front desk", async () => {
+    const roomTypeE = await seedRoomOutsideCalendar(0);
+    await admin.query(
+      `UPDATE identity.organization_resource_links SET relationship='front_desk'
+       WHERE organization_id=$1 AND resource_id=$2::text`,
+      [organizationId, propertyId],
+    );
+    const impact = await rooms.inspectRoomTypeRetirement(propertyId, roomTypeE);
+    expect(impact).toMatchObject({ canRetire: true, blockers: [] });
+    expect(impact).not.toHaveProperty("cleanup");
+    const retired = await rooms.retireRoomType(deleteCommand(roomTypeE, "room-type-facts-v1"));
+    expect(retired).toMatchObject({ ok: true, impact: { version: "room-type-facts-v2" } });
+    expect(retired.ok && retired.impact).not.toHaveProperty("cleanup");
+  });
+
+  it("closes the nights from the property's local date", async () => {
+    // 23:30 UTC is already the next day in Berlin: that night is the first one closed.
+    const lateRooms = createTargetPmsOperationsCommandRepository({
+      connectionString,
+      readRepository,
+      now: () => new Date("2026-08-04T23:30:00.000Z"),
+      roomTypeDeleteCleanup: () => true,
+    });
+    try {
+      expect(
+        await lateRooms.retireRoomType(deleteCommand(roomTypeA, "room-type-facts-v3")),
+      ).toMatchObject({ ok: true, impact: { cleanup: { futureNights: 2 } } });
+    } finally {
+      await lateRooms.close?.();
+    }
+    expect((await snapshot()).nights.map((night: { status: string }) => night.status)).toEqual([
+      "open",
+      "closed",
+      "closed",
+    ]);
+  });
+
+  async function seedRoomOutsideCalendar(unitCount: number): Promise<string> {
+    const roomTypeId = randomUUID();
+    await admin.query(
+      `INSERT INTO pms.room_types (
+         id, property_id, name, description, occupancy_limits, room_attributes,
+         active, room_facts_revision, room_units_revision
+       ) VALUES ($1::uuid, $2::uuid, 'Added later', '', '{"total":2,"adults":2,"children":0}'::jsonb,
+        '{"beds":[{"type":"double","quantity":1}],"bedrooms":1,"bathrooms":1,
+          "bathroomType":"private","size":{"value":18,"unit":"sqm"}}'::jsonb, TRUE, 1, 1)`,
+      [roomTypeId, propertyId],
+    );
+    for (let unit = 0; unit < unitCount; unit += 1)
+      await admin.query(
+        `INSERT INTO pms.rooms (id, property_id, room_type_id, room_number, status, operational_label_status)
+         VALUES ($1::uuid, $2::uuid, $3::uuid, $4, 'available', 'verified')`,
+        [randomUUID(), propertyId, roomTypeId, `D-40${unit}`],
+      );
+    return roomTypeId;
+  }
 
   function deleteCommand(roomTypeId: string, expectedVersion: string): PmsRoomTypeRetireCommand {
     const commandId = randomUUID();

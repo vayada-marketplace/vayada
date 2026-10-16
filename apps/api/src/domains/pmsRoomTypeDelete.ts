@@ -21,14 +21,22 @@ import {
 import { reconcilePmsLinkedInventory } from "./pmsLinkedInventoryReconciler.js";
 import { enqueuePmsLinkedInventorySideEffects } from "./pmsLinkedInventorySideEffects.js";
 
-/** One Delete for a room type (VAY-2132): what it would clean up and what still stops it. */
+/**
+ * One Delete for a room type (VAY-2132): what it would clean up and what still stops it. A room the
+ * operating calendar holds is closed ("closure"); one it doesn't hold yet (added after the calendar was
+ * saved, or before there is one) has no nights, so only its units are retired ("retire_units").
+ */
 export type PmsRoomTypeDeletePlan = {
+  mode: "closure" | "retire_units";
+  cutoffDate: string;
   closure: PmsRoomClosureState;
   blockers: PmsRoomTypeRetirementBlocker[];
   cleanup: PmsRoomTypeDeleteCleanup;
 };
 
 type CountsRow = {
+  bound: boolean;
+  futureNights: number;
   reservations: number;
   mappings: number;
   roomBlocks: number;
@@ -44,9 +52,16 @@ export async function readPmsRoomTypeDeletePlan(
 ): Promise<PmsRoomTypeDeletePlan | null> {
   const closure = await readPmsRoomClosureState(client, scope, at);
   if (!closure) return null;
+  const cutoffDate = closure.cutoffDate ?? at.toISOString().slice(0, 10);
   const counts = (
     await client.query<CountsRow>(
       `SELECT
+        EXISTS(SELECT 1 FROM pms.operating_calendar_room_bindings binding
+          WHERE binding.property_id=$1::uuid AND binding.room_type_id=$2::uuid
+            AND binding.calendar_revision=(SELECT max(calendar_revision)
+              FROM pms.operating_calendar_revisions WHERE property_id=$1::uuid)) AS bound,
+        (SELECT count(*)::int FROM pms.inventory_days day WHERE day.property_id=$1::uuid
+          AND day.room_type_id=$2::uuid AND day.stay_date>=$3::date) AS "futureNights",
         ((SELECT count(*) FROM pms.operational_booking_assignments assignment
           WHERE assignment.property_id=$1::uuid AND assignment.room_type_id=$2::uuid
             AND assignment.assignment_status NOT IN ('checked_out','canceled','released'))
@@ -69,9 +84,10 @@ export async function readPmsRoomTypeDeletePlan(
             OR day.channel_sellable_limit_count IS NOT NULL OR day.closure_source_revision<>0)) AS "protectedNights",
         (SELECT count(*)::int FROM pms.rooms unit WHERE unit.property_id=$1::uuid
           AND unit.room_type_id=$2::uuid AND unit.status NOT IN ('available','retired')) AS "unavailableUnits"`,
-      [scope.propertyId, scope.roomTypeId, closure.cutoffDate ?? at.toISOString().slice(0, 10)],
+      [scope.propertyId, scope.roomTypeId, cutoffDate],
     )
   ).rows[0]!;
+  const mode = counts.bound ? "closure" : "retire_units";
   const linked = closure.blockers.includes("linked_inventory") ? 1 : 0;
   const blockers: PmsRoomTypeRetirementBlocker[] = [];
   const add = (
@@ -97,7 +113,7 @@ export async function readPmsRoomTypeDeletePlan(
   add(
     "inventory",
     "last_room_type",
-    closure.blockers.includes("last_operating_room") ? 1 : 0,
+    mode === "closure" && closure.blockers.includes("last_operating_room") ? 1 : 0,
     "Add another room type before deleting this one.",
   );
   // Every closure blocker the host can't fix on this room type (a stale calendar, missing coverage,
@@ -111,7 +127,11 @@ export async function readPmsRoomTypeDeletePlan(
     ...(counts.roomBlocks ? ["active_blocks", "protected_inventory"] : []),
     ...(linked ? ["linked_inventory", "active_blocks", "protected_inventory"] : []),
   ]);
-  const calendarStale = closure.blockers.some((code) => !explained.has(code));
+  // A room outside the calendar is fine to retire as long as it has no nights of its own.
+  const calendarStale =
+    mode === "closure"
+      ? closure.blockers.some((code) => !explained.has(code))
+      : counts.futureNights > 0;
   add(
     "inventory",
     "calendar_not_current",
@@ -131,15 +151,38 @@ export async function readPmsRoomTypeDeletePlan(
     "Set this room type's rooms back to available first.",
   );
   return {
+    mode,
+    cutoffDate,
     closure,
     blockers,
     cleanup: {
       physicalUnits: closure.physicalUnitIds.length,
-      futureNights: closure.futureInventoryDays,
+      futureNights: mode === "closure" ? closure.futureInventoryDays : 0,
       roomBlocks: counts.roomBlocks,
       linkedGroups: linked,
     },
   };
+}
+
+/** Retires the units of a room the operating calendar doesn't hold; it has no nights to close. */
+export async function retireUnboundRoomTypeUnits(
+  client: Client,
+  scope: { propertyId: string; roomTypeId: string },
+  acceptedAt: string,
+): Promise<PmsRoomTypeDeleteCleanup> {
+  const retired = await client.query(
+    `UPDATE pms.rooms SET status='retired', updated_at=GREATEST(updated_at,$3::timestamptz)
+     WHERE property_id=$1::uuid AND room_type_id=$2::uuid AND status='available'
+     RETURNING id`,
+    [scope.propertyId, scope.roomTypeId, acceptedAt],
+  );
+  if (retired.rowCount)
+    await client.query(
+      `UPDATE pms.room_types SET room_units_revision=room_units_revision+1
+       WHERE property_id=$1::uuid AND id=$2::uuid`,
+      [scope.propertyId, scope.roomTypeId],
+    );
+  return { physicalUnits: retired.rowCount ?? 0, futureNights: 0, roomBlocks: 0, linkedGroups: 0 };
 }
 
 /**

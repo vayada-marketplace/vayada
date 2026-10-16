@@ -17,6 +17,7 @@ import {
   closeRoomTypeForDelete,
   readPmsRoomTypeDeletePlan,
   releaseRoomTypeForDelete,
+  retireUnboundRoomTypeUnits,
   type PmsRoomTypeDeletePlan,
 } from "./pmsRoomTypeDelete.js";
 
@@ -688,7 +689,9 @@ export function createTargetPmsOperationsCommandRepository(
       const client = await pool.connect();
       try {
         const impact = await inspectRoomTypeRetirement(client, propertyId, roomTypeId);
-        if (!impact || config.roomTypeDeleteCleanup?.(propertyId) !== true) return impact;
+        // A room today's Delete can retire needs no cleanup.
+        if (!impact || impact.canRetire || config.roomTypeDeleteCleanup?.(propertyId) !== true)
+          return impact;
         const plan = await readPmsRoomTypeDeletePlan(client, { propertyId, roomTypeId }, now());
         return plan ? roomTypeDeleteImpact(impact, plan) : null;
       } finally {
@@ -700,20 +703,9 @@ export function createTargetPmsOperationsCommandRepository(
       const client = await pool.connect();
       const at = now();
       const acceptedAt = at.toISOString();
-      const actor = command.audit.actor;
-      // VAY-2132: for these properties Delete also retires the units, closes the future nights and
-      // takes the room out of the operating calendar, in this transaction.
-      const closureScope =
-        config.roomTypeDeleteCleanup?.(command.propertyId) === true
-          ? actor.kind === "user"
-            ? {
-                organizationId: actor.organizationId,
-                propertyId: command.propertyId,
-                roomTypeId: command.roomTypeId,
-                actorUserId: actor.userId,
-              }
-            : false
-          : null;
+      // VAY-2132: for these properties a Delete that today's checks would block also retires the units,
+      // closes the future nights and takes the room out of the operating calendar, in this transaction.
+      const cleanupEnabled = config.roomTypeDeleteCleanup?.(command.propertyId) === true;
       const keyHash = sha256(command.idempotencyKey);
       const requestFingerprintHash = sha256(stableJson(roomTypeCommandFingerprint(command)));
       const commandMeta: PmsCommandMeta = {
@@ -723,6 +715,7 @@ export function createTargetPmsOperationsCommandRepository(
         acceptedAt,
         sideEffects: ["ari_changed", "distribution_refresh", "audit_event"],
       };
+      const ids = { keyHash, requestFingerprintHash, commandMeta };
       try {
         await client.query("BEGIN");
         const replay = await findRoomTypeRetireReplay(
@@ -735,19 +728,8 @@ export function createTargetPmsOperationsCommandRepository(
           await client.query("ROLLBACK");
           return replay;
         }
-        if (closureScope !== null) {
-          // The closure's owner/operator check and lock order, before any row lock.
-          if (!closureScope || !(await lockPmsManageScope(client, closureScope, at))) {
-            await client.query("ROLLBACK");
-            return {
-              ok: false,
-              statusCode: 403,
-              code: "missing_permission",
-              message: "Only the property's owner or operator can delete a room type.",
-            };
-          }
-          await lockPmsRoomClosureScope(client, command.propertyId);
-        }
+        // The closure's lock order (inventory, room facts, units, publication) comes before any row lock.
+        if (cleanupEnabled) await lockPmsRoomClosureScope(client, command.propertyId);
         const source = await lockActiveRoomTypeForLifecycle(client, command);
         if (!source) {
           await client.query("ROLLBACK");
@@ -757,6 +739,15 @@ export function createTargetPmsOperationsCommandRepository(
           await client.query("ROLLBACK");
           return roomTypeRetireConflict("version_conflict", "Room type version is stale.");
         }
+        if (cleanupEnabled) {
+          const blocked = await inspectRoomTypeRetirement(
+            client,
+            command.propertyId,
+            command.roomTypeId,
+          );
+          if (blocked && !blocked.canRetire)
+            return await retireRoomTypeWithCleanup(client, command, at, ids, blocked);
+        }
 
         await lockRoomTypeRetirementDependencies(client);
         const impact = await inspectRoomTypeRetirement(
@@ -764,20 +755,18 @@ export function createTargetPmsOperationsCommandRepository(
           command.propertyId,
           command.roomTypeId,
         );
-        const plan = closureScope ? await readPmsRoomTypeDeletePlan(client, command, at) : null;
-        if (!impact || (closureScope && !plan)) {
+        if (!impact) {
           await client.query("ROLLBACK");
           return roomTypeRetireNotFound(command.roomTypeId);
         }
-        const checked = plan ? roomTypeDeleteImpact(impact, plan) : impact;
-        if (!checked.canRetire) {
+        if (!impact.canRetire) {
           await client.query("ROLLBACK");
           return {
             ...roomTypeRetireConflict(
               "room_type_retirement_blocked",
               "Resolve the reported room type dependencies before retirement.",
             ),
-            impact: checked,
+            impact,
           };
         }
 
@@ -796,106 +785,9 @@ export function createTargetPmsOperationsCommandRepository(
             "Room type retirement idempotency key could not be reserved.",
           );
         }
-        let cleanup: PmsRoomTypeDeleteCleanup | undefined;
-        if (plan && closureScope) {
-          const released =
-            plan.cleanup.roomBlocks || plan.cleanup.linkedGroups
-              ? await releaseRoomTypeForDelete(client, command, plan.closure.cutoffDate!, {
-                  commandId: command.commandId,
-                  keyHash,
-                  acceptedAt,
-                  audit: command.audit,
-                })
-              : { roomBlocks: 0, linkedGroups: 0 };
-          // What the released blocks and links held is rechecked under the same locks.
-          const closing =
-            released.roomBlocks || released.linkedGroups
-              ? await readPmsRoomTypeDeletePlan(client, command, at)
-              : plan;
-          if (!closing || closing.blockers.length) {
-            await client.query("ROLLBACK");
-            return {
-              ...roomTypeRetireConflict(
-                "room_type_retirement_blocked",
-                "Resolve the reported room type dependencies before retirement.",
-              ),
-              impact: closing ? roomTypeDeleteImpact(impact, closing) : checked,
-            };
-          }
-          cleanup = {
-            ...(await closeRoomTypeForDelete(
-              client,
-              closureScope,
-              closing.closure,
-              {
-                keyHash,
-                requestFingerprintHash,
-                requestId: command.audit.requestId,
-                correlationId: command.audit.correlationId,
-              },
-              at,
-            )),
-            ...released,
-          };
-        }
-        if (
-          cleanup &&
-          !(await inspectRoomTypeRetirement(client, command.propertyId, command.roomTypeId))
-            ?.canRetire
-        )
-          throw new Error("Room type delete left retirement dependencies");
-
-        // Canonical pricing remains historical source evidence; its schema requires
-        // active = TRUE. The owning room type's active flag gates its availability.
-        await client.query(
-          `UPDATE pms.rate_plans
-           SET active = FALSE, updated_at = $3::timestamptz
-           WHERE property_id = $1::uuid AND room_type_id = $2::uuid AND active
-             AND pricing_contract_version IS NULL`,
-          [command.propertyId, command.roomTypeId, acceptedAt],
-        );
-        const retired = await client.query<{ roomFactsRevision: number | string }>(
-          `UPDATE pms.room_types
-           SET active = FALSE,
-               room_facts_revision = room_facts_revision + 1,
-               updated_at = $3::timestamptz
-           WHERE property_id = $1::uuid AND id = $2::uuid AND active
-           RETURNING room_facts_revision AS "roomFactsRevision"`,
-          [command.propertyId, command.roomTypeId, acceptedAt],
-        );
-        if (retired.rowCount !== 1) throw new Error("Room type retirement lost its locked row");
-        const retiredImpact: PmsRoomTypeRetirementImpact = {
-          ...(cleanup ? { ...impact, blockers: [], cleanup } : impact),
-          version: roomTypeVersion(retired.rows[0]!.roomFactsRevision),
-          canRetire: false,
-        };
-        await enqueueInventoryChangedSideEffects(
-          client,
-          command,
-          lifecycleInventoryResource(command, command.roomTypeId, acceptedAt),
-          commandMeta,
-          keyHash,
-          acceptedAt,
-        );
-        await insertRoomTypeLifecycleAuditEvent(
-          client,
-          command,
-          "pms.room_type.retired",
-          command.roomTypeId,
-          commandMeta,
-          keyHash,
-          cleanup ? { dependencyImpact: checked, cleanup } : { dependencyImpact: impact },
-        );
-        await completeRoomTypeRetireIdempotency(
-          client,
-          command,
-          keyHash,
-          commandMeta,
-          acceptedAt,
-          retiredImpact,
-        );
-        await client.query("COMMIT");
-        return { ok: true, impact: retiredImpact, commandMeta };
+        return await finishRoomTypeRetirement(client, command, ids, acceptedAt, impact, {
+          dependencyImpact: impact,
+        });
       } catch (error) {
         await rollbackQuietly(client);
         throw error;
@@ -3438,6 +3330,192 @@ async function inspectRoomTypeRetirement(
     canRetire: blockers.length === 0,
     blockers,
   };
+}
+
+type RoomTypeRetireIds = {
+  keyHash: string;
+  requestFingerprintHash: string;
+  commandMeta: PmsCommandMeta;
+};
+
+/**
+ * VAY-2132: today's checks block the Delete, so it cleans up first: the room's units, future nights and
+ * calendar place (or, for a room the calendar doesn't hold yet, just its units), then retires the room as
+ * usual. Only the property's owner or operator may. The caller holds the closure lock order and the
+ * room's row lock; this neither takes the table-wide retirement locks nor shortens the timeouts.
+ */
+async function retireRoomTypeWithCleanup(
+  client: PmsOperationsCommandClient,
+  command: PmsRoomTypeRetireCommand,
+  at: Date,
+  ids: RoomTypeRetireIds,
+  impact: PmsRoomTypeRetirementImpact,
+): Promise<PmsRoomTypeRetireCommandResult> {
+  const acceptedAt = at.toISOString();
+  const actor = command.audit.actor;
+  const scope =
+    actor.kind === "user"
+      ? {
+          organizationId: actor.organizationId,
+          propertyId: command.propertyId,
+          roomTypeId: command.roomTypeId,
+          actorUserId: actor.userId,
+        }
+      : null;
+  if (!scope || !(await lockPmsManageScope(client, scope, at))) {
+    await client.query("ROLLBACK");
+    return {
+      ok: false,
+      statusCode: 403,
+      code: "room_type_delete_not_allowed",
+      message: "Only the property's owner or operator can delete a room type.",
+    };
+  }
+  const plan = await readPmsRoomTypeDeletePlan(client, command, at);
+  if (!plan) {
+    await client.query("ROLLBACK");
+    return roomTypeRetireNotFound(command.roomTypeId);
+  }
+  const checked = roomTypeDeleteImpact(impact, plan);
+  if (!checked.canRetire) {
+    await client.query("ROLLBACK");
+    return {
+      ...roomTypeRetireConflict(
+        "room_type_retirement_blocked",
+        "Resolve the reported room type dependencies before retirement.",
+      ),
+      impact: checked,
+    };
+  }
+  if (
+    !(await recordRoomTypeCommandIdempotency(
+      client,
+      "room_type_retire",
+      command,
+      ids.keyHash,
+      ids.requestFingerprintHash,
+      acceptedAt,
+    ))
+  ) {
+    await client.query("ROLLBACK");
+    return roomTypeRetireConflict(
+      "idempotency_conflict",
+      "Room type retirement idempotency key could not be reserved.",
+    );
+  }
+  const released =
+    plan.cleanup.roomBlocks || plan.cleanup.linkedGroups
+      ? await releaseRoomTypeForDelete(client, command, plan.cutoffDate, {
+          commandId: command.commandId,
+          keyHash: ids.keyHash,
+          acceptedAt,
+          audit: command.audit,
+        })
+      : { roomBlocks: 0, linkedGroups: 0 };
+  // What the released blocks and links held is rechecked under the same locks.
+  const closing =
+    released.roomBlocks || released.linkedGroups
+      ? await readPmsRoomTypeDeletePlan(client, command, at)
+      : plan;
+  if (!closing || closing.blockers.length) {
+    await client.query("ROLLBACK");
+    return {
+      ...roomTypeRetireConflict(
+        "room_type_retirement_blocked",
+        "Resolve the reported room type dependencies before retirement.",
+      ),
+      impact: closing ? roomTypeDeleteImpact(impact, closing) : checked,
+    };
+  }
+  const cleanup: PmsRoomTypeDeleteCleanup = {
+    ...(closing.mode === "closure"
+      ? await closeRoomTypeForDelete(
+          client,
+          scope,
+          closing.closure,
+          {
+            keyHash: ids.keyHash,
+            requestFingerprintHash: ids.requestFingerprintHash,
+            requestId: command.audit.requestId,
+            correlationId: command.audit.correlationId,
+          },
+          at,
+        )
+      : await retireUnboundRoomTypeUnits(client, command, acceptedAt)),
+    ...released,
+  };
+  if (!(await inspectRoomTypeRetirement(client, command.propertyId, command.roomTypeId))?.canRetire)
+    throw new Error("Room type delete left retirement dependencies");
+  return finishRoomTypeRetirement(
+    client,
+    command,
+    ids,
+    acceptedAt,
+    { ...impact, blockers: [], cleanup },
+    { dependencyImpact: checked, cleanup },
+  );
+}
+
+/** Retires the room type once nothing depends on it, and commits. */
+async function finishRoomTypeRetirement(
+  client: PmsOperationsCommandClient,
+  command: PmsRoomTypeRetireCommand,
+  ids: RoomTypeRetireIds,
+  acceptedAt: string,
+  impact: PmsRoomTypeRetirementImpact,
+  auditDetails: Record<string, unknown>,
+): Promise<PmsRoomTypeRetireCommandResult> {
+  // Canonical pricing remains historical source evidence; its schema requires
+  // active = TRUE. The owning room type's active flag gates its availability.
+  await client.query(
+    `UPDATE pms.rate_plans
+     SET active = FALSE, updated_at = $3::timestamptz
+     WHERE property_id = $1::uuid AND room_type_id = $2::uuid AND active
+       AND pricing_contract_version IS NULL`,
+    [command.propertyId, command.roomTypeId, acceptedAt],
+  );
+  const retired = await client.query<{ roomFactsRevision: number | string }>(
+    `UPDATE pms.room_types
+     SET active = FALSE,
+         room_facts_revision = room_facts_revision + 1,
+         updated_at = $3::timestamptz
+     WHERE property_id = $1::uuid AND id = $2::uuid AND active
+     RETURNING room_facts_revision AS "roomFactsRevision"`,
+    [command.propertyId, command.roomTypeId, acceptedAt],
+  );
+  if (retired.rowCount !== 1) throw new Error("Room type retirement lost its locked row");
+  const retiredImpact: PmsRoomTypeRetirementImpact = {
+    ...impact,
+    version: roomTypeVersion(retired.rows[0]!.roomFactsRevision),
+    canRetire: false,
+  };
+  await enqueueInventoryChangedSideEffects(
+    client,
+    command,
+    lifecycleInventoryResource(command, command.roomTypeId, acceptedAt),
+    ids.commandMeta,
+    ids.keyHash,
+    acceptedAt,
+  );
+  await insertRoomTypeLifecycleAuditEvent(
+    client,
+    command,
+    "pms.room_type.retired",
+    command.roomTypeId,
+    ids.commandMeta,
+    ids.keyHash,
+    auditDetails,
+  );
+  await completeRoomTypeRetireIdempotency(
+    client,
+    command,
+    ids.keyHash,
+    ids.commandMeta,
+    acceptedAt,
+    retiredImpact,
+  );
+  await client.query("COMMIT");
+  return { ok: true, impact: retiredImpact, commandMeta: ids.commandMeta };
 }
 
 /** The impact a Delete that does the cleanup reports: only what still stops it, and what it cleans up. */
