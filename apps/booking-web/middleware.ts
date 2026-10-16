@@ -199,24 +199,13 @@ export default async function middleware(request: NextRequest) {
     slug = hostResolution?.slug || knownSlug;
   }
 
-  if (slug) {
-    const canonicalRedirect = hostResolution
-      ? resolveCanonicalRedirect(request, hostname, slug, hostResolution)
-      : null;
+  if (slug && hostResolution) {
+    const canonicalRedirect = resolveCanonicalRedirect(request, hostname, slug, hostResolution);
     if (canonicalRedirect) return canonicalRedirect;
-    response.cookies.set("hotel-slug", slug, { path: "/" });
   }
 
-  // Capture referral code from ?ref= query param → 30-day cookie
-  const refCode = request.nextUrl.searchParams.get("ref");
-  if (refCode) {
-    response.cookies.set("ref", refCode, {
-      path: "/",
-      maxAge: 60 * 60 * 24 * 30, // 30 days
-      sameSite: "lax",
-    });
-  }
-
+  // No cookies before the guest's privacy choice (VAY-2223): the referral code travels in the
+  // URL (AffiliateClickTracker reads ?ref=), and the hotel comes from the host.
   return response;
 }
 

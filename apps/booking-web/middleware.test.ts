@@ -283,6 +283,37 @@ describe("Booking Web affiliate reference prelaunch guard", () => {
   });
 });
 
+describe("Booking Web cookies before the privacy choice", () => {
+  beforeEach(() => vi.resetAllMocks());
+
+  // VAY-2223: nothing read the old hotel-slug and 30-day ref cookies; none is set any more.
+  it("sets no cookie on a hotel page, with or without a referral code", async () => {
+    const host = "hotel-alpenrose.next-booking.vayada.com";
+    vi.mocked(bookingWebPublicApi.resolveHost).mockResolvedValue({
+      slug: "hotel-alpenrose",
+      canonicalUrl: `https://${host}/en`,
+      bookingBaseUrl: `https://${host}`,
+      customDomainUrl: null,
+      shouldRedirect: false,
+      redirectUrl: null,
+      redirectStatus: null,
+      hotel: {
+        slug: "hotel-alpenrose",
+        name: "Hotel Alpenrose",
+        defaultLocale: "en",
+        supportedLocales: ["en"],
+      },
+    });
+    for (const path of ["/", "/?ref=FRIEND&checkIn=2026-11-12", "/en/book?ref=FRIEND"]) {
+      const response = await middleware(
+        new NextRequest(`https://${host}${path}`, { headers: { host } }),
+      );
+      expect(response.headers.get("location")).toBeNull();
+      expect(response.headers.get("set-cookie")).toBeNull();
+    }
+  });
+});
+
 describe("Booking Web retired booking pages", () => {
   beforeEach(() => vi.resetAllMocks());
 
