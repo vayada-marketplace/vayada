@@ -112,6 +112,7 @@ export default function BookPageClient() {
 
 function RoomQuoteForm({ slug }: { slug: string }) {
   const t = useTranslations("home");
+  const tAddons = useTranslations("addons");
   const { hotel } = useHotel();
   const [termsAcknowledgement, setTermsAcknowledgement] =
     useState<QuoteTermsAcknowledgement | null>(null);
@@ -485,6 +486,13 @@ function RoomQuoteForm({ slug }: { slug: string }) {
       else setExtras(null);
       return;
     }
+    // VAY-2232: an extra's notice ran out while the page was open. Price without the extras and
+    // load them again, so it shows as needing notice.
+    if (errorCode === "ADDON_NEEDS_NOTICE") {
+      setExtras(null);
+      setAddonReload((value) => value + 1);
+      return;
+    }
     // A way to pay picked on Payment can only change there: before it, a refused one goes back
     // to the hotel's own order, starting with another way to pay.
     if (payment && step !== "payment") {
@@ -508,6 +516,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
       !quote &&
       (errorCode === "PROMO_CODES_UNAVAILABLE" ||
         errorCode === "ADDONS_UNAVAILABLE" ||
+        errorCode === "ADDON_NEEDS_NOTICE" ||
         (payment ? step !== "payment" : fallback + 1 < defaultMethods.length));
     if (recovers) return;
     trackEvent(slug, "booking_error", {
@@ -928,6 +937,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                   priceFailed={priceFailed}
                   formatMoney={money}
                   formatDay={formatDay}
+                  formatNotice={(hours) => tAddons("needsNotice", { hours })}
                 />
               )
             )}

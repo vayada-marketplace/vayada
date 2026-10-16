@@ -168,6 +168,7 @@
     "subtitle": "Trouvez votre refuge alpin idéal"
   },
   "addons": {
+    "needsNotice": "{hours, plural, =48 {À réserver au moins 2 jours à l’avance} =72 {À réserver au moins 3 jours à l’avance} =168 {À réserver au moins une semaine à l’avance} other {À réserver au moins # heures à l’avance}}",
     "title": "Améliorez votre séjour",
     "subtitle": "Personnalisez votre expérience avec nos services et activités haut de gamme.",
     "allServices": "Tous les services",

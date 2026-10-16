@@ -5,6 +5,7 @@ import { useState, type DragEvent } from "react";
 import {
   ADDON_CATEGORIES,
   AddonEditor,
+  addonLeadTimeNoticeKey,
   emptyAddonValues,
   type AddonEditorValues,
 } from "@vayada/product-onboarding/AddonEditor";
@@ -60,7 +61,10 @@ function toDraft(addon: AddonItem, currency: string): AddonItemFormValues {
     duration: addon.duration ?? "",
     location: addon.location ?? "",
     maxGuests: addon.maxGuests ?? "",
-    leadTime: addon.leadTime ?? "",
+    leadTimeHours: addon.leadTimeHours
+      ? (String(addon.leadTimeHours) as AddonEditorValues["leadTimeHours"])
+      : "",
+    legacyLeadTime: addon.leadTime ?? "",
     maxQuantity: String(addon.maxQuantity ?? 1),
     perPerson: addon.perPerson === true,
     perNight: addon.perNight === true,
@@ -396,6 +400,7 @@ export default function AddonsTab({
           {filteredAddons.map((addon) => {
             const photoCount = addon.photos?.length ?? (addon.image ? 1 : 0);
             const live = addon.live !== false;
+            const notice = addonLeadTimeNoticeKey(addon.leadTimeHours);
             return (
               <li
                 key={addon.id}
@@ -487,7 +492,8 @@ export default function AddonsTab({
                         <li>{t("addons.list.maxPerBooking", { count: addon.maxQuantity })}</li>
                       )}
                       {addon.duration && <li>{addon.duration}</li>}
-                      {addon.leadTime && <li>{addon.leadTime}</li>}
+                      {/* Text typed before VAY-2232 shows as it is until it is converted. */}
+                      {notice ? <li>{t(notice)}</li> : addon.leadTime && <li>{addon.leadTime}</li>}
                       {addon.ownershipKind === "partner" && (
                         <li>
                           {t("admin.partnerRate", { rate: addon.partnerCommissionRate ?? "" })}

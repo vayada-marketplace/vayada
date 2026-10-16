@@ -57,6 +57,7 @@ function toSettingsAddonItem(item: BookingAddonItem): AddonItem {
     location: item.location ?? undefined,
     maxGuests: item.maxGuests == null ? undefined : String(item.maxGuests),
     maxQuantity: item.maxQuantity,
+    leadTimeHours: item.leadTimeHours ?? undefined,
     leadTime: item.leadTime ?? undefined,
     duration: item.duration ?? undefined,
     perPerson: item.pricingModel === "per_guest" || item.pricingModel === "per_guest_night",
@@ -75,7 +76,23 @@ function toAddonPricingModel(addon: { perPerson?: boolean; perNight?: boolean })
   return "per_stay";
 }
 
-function toAddonWritableFields(values: AddonItemFormValues) {
+/**
+ * VAY-2232: the lead time only when the host picked one, so other saves work on an API without
+ * the field and leave text typed before the fixed choices for the data migration. A copy of an
+ * add-on keeps that text.
+ */
+function toAddonLeadTime(values: AddonItemFormValues, saved?: AddonItem) {
+  const hours = values.leadTimeHours ? Number(values.leadTimeHours) : null;
+  if (saved)
+    return hours === (saved.leadTimeHours ?? null) &&
+      values.legacyLeadTime === (saved.leadTime ?? "")
+      ? {}
+      : { leadTimeHours: hours };
+  if (hours !== null) return { leadTimeHours: hours };
+  return values.legacyLeadTime ? { leadTime: values.legacyLeadTime } : {};
+}
+
+function toAddonWritableFields(values: AddonItemFormValues, saved?: AddonItem) {
   const fields = {
     name: values.name,
     description: values.description,
@@ -86,7 +103,7 @@ function toAddonWritableFields(values: AddonItemFormValues) {
     location: values.location || null,
     maxGuests: values.maxGuests ? Number(values.maxGuests) : null,
     maxQuantity: Number(values.maxQuantity),
-    leadTime: values.leadTime || null,
+    ...toAddonLeadTime(values, saved),
     pricingModel: toAddonPricingModel(values) as BookingAddonPricingModel,
   };
   return values.ownershipKind === "partner"
@@ -287,7 +304,10 @@ export default function AddonsPage() {
         hotelId,
         addonItemId: addonId,
         body: {
-          ...toAddonWritableFields(values),
+          ...toAddonWritableFields(
+            values,
+            addons.find((addon) => addon.id === addonId),
+          ),
           photos: await addonPhotos(values, hotelId),
         },
       });
