@@ -191,7 +191,7 @@
   "dashboard.conversionFunnel.noData": "この期間の予約データはありません",
   "dashboard.conversionFunnel.subtitle": "訪問者から予約済みゲストまで",
   "dashboard.conversionFunnel.infoLabel": "コンバージョンファネルについて",
-  "dashboard.conversionFunnel.info": "この期間の予約サイトのセッションを、順番に到達した各ステップで集計しています。赤い数字は前のステップから離脱した数を示します。カード払いには追加の承認ステップがあり、最後のステップは承認済みカードとその他の支払い方法の合計と比較されます。",
+  "dashboard.conversionFunnel.info": "この期間の予約サイトのセッションを、順番に到達した各ステップで集計しています。赤い数字は前のステップから離脱した数を示します。カード払いには追加の承認ステップがあり、最後のステップは承認済みカードとその他の支払い方法の合計と比較されます。予約完了には、ホテルがまだ承認していない予約リクエストと、支払い待ちの銀行振込またはPayPalの予約も含まれます。",
   "dashboard.conversionFunnel.options": "ファネルのオプション",
   "dashboard.conversionFunnel.timeRange": "期間",
   "dashboard.conversionFunnel.exportCsv": "CSVをエクスポート",

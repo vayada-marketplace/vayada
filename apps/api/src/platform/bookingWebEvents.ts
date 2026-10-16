@@ -63,7 +63,7 @@ export function createPgBookingWebEventSink(
     },
     async recordTelemetryEvent(event) {
       const normalizedType = event.eventType.replace(/[^a-zA-Z0-9_.:-]/g, "_").slice(0, 80);
-      const occurrenceKey = event.eventId ?? event.requestId;
+      const occurrenceKey = event.eventId;
       await insertDomainEventWithAudit(pool, {
         propertyId: event.propertyId,
         sourceSystem: "distribution",
@@ -80,7 +80,7 @@ export function createPgBookingWebEventSink(
         resourceProduct: "distribution",
         resourceType: "booking_web_hotel",
         resourceId: event.hotelSlug,
-        correlationId: event.sessionId ?? event.requestId,
+        correlationId: event.sessionId,
         idempotencyKeyHash: hashKey(
           event.propertyId,
           event.hotelSlug,
@@ -90,11 +90,16 @@ export function createPgBookingWebEventSink(
         payload: {
           hotelSlug: event.hotelSlug,
           eventType: normalizedType,
-          eventId: event.eventId ?? null,
-          sessionId: event.sessionId ?? null,
+          eventId: event.eventId,
+          sessionId: event.sessionId,
           metadata: event.metadata,
         },
-        eventMetadata: requestMetadata(event.requestId, event.userAgent, event.ipAddress),
+        // VAY-2197: no request id (it joins the access log's IP address) and no IP or user-agent
+        // hashes (an unsalted IP hash can be reversed); only what the dashboards filter on.
+        eventMetadata: {
+          source: "apps/api-booking-web-public",
+          trafficClass: classifyBookingWebTraffic(event.userAgent),
+        },
         auditProduct: "distribution",
         auditAction: "booking_web.telemetry.recorded",
         auditTargetProduct: "distribution",

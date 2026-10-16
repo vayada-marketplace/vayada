@@ -191,7 +191,7 @@
   "dashboard.conversionFunnel.noData": "Nessun dato sulle prenotazioni per questo periodo",
   "dashboard.conversionFunnel.subtitle": "Dai visitatori agli ospiti prenotati",
   "dashboard.conversionFunnel.infoLabel": "Informazioni sul funnel di conversione",
-  "dashboard.conversionFunnel.info": "Sessioni del sito di prenotazione in questo periodo, contate a ogni passaggio raggiunto in ordine. I numeri in rosso mostrano quante hanno abbandonato rispetto al passaggio precedente. I pagamenti con carta aggiungono un passaggio di autorizzazione; l'ultimo passaggio è confrontato con le carte autorizzate più gli altri metodi di pagamento.",
+  "dashboard.conversionFunnel.info": "Sessioni del sito di prenotazione in questo periodo, contate a ogni passaggio raggiunto in ordine. I numeri in rosso mostrano quante hanno abbandonato rispetto al passaggio precedente. I pagamenti con carta aggiungono un passaggio di autorizzazione; l'ultimo passaggio è confrontato con le carte autorizzate più gli altri metodi di pagamento. Le prenotazioni completate includono anche le richieste di prenotazione che l'hotel deve ancora accettare e le prenotazioni con bonifico bancario o PayPal ancora in attesa di pagamento.",
   "dashboard.conversionFunnel.options": "Opzioni del funnel",
   "dashboard.conversionFunnel.timeRange": "Periodo",
   "dashboard.conversionFunnel.exportCsv": "Esporta CSV",
