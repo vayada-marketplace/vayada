@@ -25,7 +25,6 @@ import {
   PricingCardPaymentError,
   voidPricingCardPayment,
 } from "../domains/pricingCardPaymentCompletion.js";
-import { referrerTrafficSource } from "../platform/referrerTrafficSource.js";
 import {
   createReplacementBookingQuoteIssuer,
   requirePublicQuoteKey,
@@ -183,14 +182,6 @@ type BookingWebPromoValidationRequest = {
   roomTypeId?: string;
   bookingTotal?: number;
 };
-type BookingWebAttributionClickRequest = {
-  clickId?: string;
-  referralCode?: string;
-  referral_code?: string;
-  sessionId?: string;
-  session_id?: string;
-  referrer?: string;
-};
 type BookingWebTelemetryEventRequest = {
   analyticsConsent?: boolean;
   consentVersion?: number;
@@ -206,18 +197,7 @@ type BookingWebTelemetryEventRequest = {
 };
 
 export type BookingWebAttributionSink = {
-  recordAffiliateClick(event: BookingWebAffiliateClickEvent): Promise<void>;
   recordTelemetryEvent(event: BookingWebTelemetryEvent): Promise<void>;
-};
-
-export type BookingWebAffiliateClickEvent = {
-  clickId?: string;
-  slug: string;
-  referralCode: string;
-  sessionId?: string;
-  referrerSource: ReturnType<typeof referrerTrafficSource>;
-  occurredAt: Date;
-  userAgent?: string;
 };
 
 /** No request id or IP address: neither leads back to the guest (VAY-2197). */
@@ -1018,43 +998,6 @@ export async function registerBookingWebPublicRoutes(
       reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-promo-validate");
       reply.header("X-Robots-Tag", "noindex");
       return response;
-    },
-  );
-
-  app.post<{ Params: BookingWebHotelParams; Body: BookingWebAttributionClickRequest }>(
-    "/hotels/:slug/attribution/clicks",
-    async (request, reply) => {
-      const referralCode = firstString(request.body?.referralCode, request.body?.referral_code);
-      if (!referralCode) {
-        throw createHttpError(400, "Referral code is required.");
-      }
-      const clickId = request.body?.clickId;
-      if (
-        clickId !== undefined &&
-        (typeof clickId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(clickId))
-      ) {
-        throw createHttpError(400, "Invalid click ID.");
-      }
-      // Booking Web sends a random analytics session id; anything else is not stored.
-      const sessionId = firstString(request.body?.sessionId, request.body?.session_id);
-      if (options.attributionSink) {
-        await options.attributionSink.recordAffiliateClick({
-          clickId,
-          slug: request.params.slug,
-          referralCode,
-          sessionId: sessionId && /^[A-Za-z0-9_-]{1,128}$/.test(sessionId) ? sessionId : undefined,
-          // Attribution needs no page address (VAY-2215): booking-web URLs can carry a guest's
-          // email, booking reference or access token. Older browsers still send landingUrl,
-          // the full referrer and metadata; only the referrer's site is kept. The Referer
-          // header is never read: it is the booking page itself.
-          referrerSource: referrerTrafficSource(request.body?.referrer),
-          occurredAt: now(),
-          userAgent: request.headers["user-agent"],
-        });
-      }
-      reply.header("Cache-Control", "no-store");
-      reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-attribution-click");
-      return reply.status(204).send();
     },
   );
 

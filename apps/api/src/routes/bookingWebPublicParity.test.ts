@@ -203,143 +203,6 @@ describe("Booking Web public bootstrap parity", () => {
     expect(checkoutAdapter.close).toBeUndefined();
   });
 
-  it("records affiliate click attribution through the configured sink", async () => {
-    const events: unknown[] = [];
-    const app = buildApp({
-      logger: false,
-      publicHotelProfileRepository: createProfileRepository(legacyHotel, {}),
-      bookingWebCheckoutAdapter: unusedBookingWebCheckoutAdapter,
-      bookingWebPublicNow: () => new Date("2026-06-06T11:00:00.000Z"),
-      bookingWebAttributionSink: {
-        async recordAffiliateClick(event) {
-          events.push(event);
-        },
-        async recordTelemetryEvent() {},
-      },
-    });
-
-    const response = await app.inject({
-      method: "POST",
-      url: "/api/booking-web/hotels/hotel-alpenrose/attribution/clicks",
-      payload: {
-        referralCode: "REF-123",
-        clickId: "click-123",
-        sessionId: "sid_123",
-        referrer: "https://www.instagram.com",
-      },
-    });
-
-    expect(response.statusCode).toBe(204);
-    expect(events).toEqual([
-      {
-        slug: "hotel-alpenrose",
-        referralCode: "REF-123",
-        clickId: "click-123",
-        sessionId: "sid_123",
-        referrerSource: "instagram",
-        occurredAt: new Date("2026-06-06T11:00:00.000Z"),
-        userAgent: "lightMyRequest",
-      },
-    ]);
-    await app.close();
-  });
-
-  it("keeps only the referrer's site and a token session ID from callers that send guest details", async () => {
-    const events: Record<string, unknown>[] = [];
-    const app = buildApp({
-      logger: false,
-      publicHotelProfileRepository: createProfileRepository(legacyHotel, {}),
-      bookingWebCheckoutAdapter: unusedBookingWebCheckoutAdapter,
-      bookingWebAttributionSink: {
-        async recordAffiliateClick(event) {
-          events.push(event);
-        },
-        async recordTelemetryEvent() {},
-      },
-    });
-    const guestPage =
-      "https://hotel.booking.localhost/en/confirmation?booking=VAY-1&email=guest%40example.test&token=secret&ref=A";
-    try {
-      for (const [body, referer, source] of [
-        [
-          { landingUrl: guestPage, referrer: "https://l.instagram.com/?u=x&e=guest" },
-          guestPage,
-          "instagram",
-        ],
-        [
-          {
-            landing_url: guestPage,
-            referrer: "",
-            metadata: { email: "guest@example.test" },
-            session_id: "guest@example.test",
-          },
-          "https://www.tiktok.com/@creator",
-          "unknown",
-        ],
-        [{ referrer: guestPage }, undefined, "unknown"],
-      ] as const) {
-        const response = await app.inject({
-          method: "POST",
-          url: "/api/booking-web/hotels/hotel/attribution/clicks",
-          headers: referer ? { referer } : {},
-          payload: { referralCode: "A", ...body },
-        });
-        expect(response.statusCode).toBe(204);
-        expect(events.at(-1)?.referrerSource).toBe(source);
-      }
-      expect(events).toHaveLength(3);
-      for (const event of events) {
-        expect(Object.keys(event).sort()).toEqual([
-          "clickId",
-          "occurredAt",
-          "referralCode",
-          "referrerSource",
-          "sessionId",
-          "slug",
-          "userAgent",
-        ]);
-        expect(JSON.stringify(event)).not.toMatch(/guest|secret|VAY-1|confirmation|\?/);
-      }
-    } finally {
-      await app.close();
-    }
-  });
-
-  it("rejects malformed click IDs before intake and accepts older callers without one", async () => {
-    const events: unknown[] = [];
-    const app = buildApp({
-      logger: false,
-      publicHotelProfileRepository: createProfileRepository(legacyHotel, {}),
-      bookingWebCheckoutAdapter: unusedBookingWebCheckoutAdapter,
-      bookingWebAttributionSink: {
-        async recordAffiliateClick(event) {
-          events.push(event);
-        },
-        async recordTelemetryEvent() {},
-      },
-    });
-    try {
-      for (const clickId of [null, 12, {}, "", "a b", "a".repeat(129)]) {
-        const response = await app.inject({
-          method: "POST",
-          url: "/api/booking-web/hotels/hotel/attribution/clicks",
-          payload: { referralCode: "A", clickId },
-        });
-        expect(response.statusCode).toBe(400);
-      }
-      expect(events).toEqual([]);
-      const response = await app.inject({
-        method: "POST",
-        url: "/api/booking-web/hotels/hotel/attribution/clicks",
-        payload: { referral_code: "A", session_id: "old-session" },
-      });
-      expect(response.statusCode).toBe(204);
-      expect(events).toMatchObject([{ referralCode: "A", sessionId: "old-session" }]);
-    } finally {
-      await app.close();
-    }
-  });
-
   it("records booking-web telemetry through the configured sink without legacy forwarding", async () => {
     const events: unknown[] = [];
     const app = buildApp({
@@ -348,7 +211,6 @@ describe("Booking Web public bootstrap parity", () => {
       bookingWebCheckoutAdapter: unusedBookingWebCheckoutAdapter,
       bookingWebPublicNow: () => new Date("2026-06-06T11:00:00.000Z"),
       bookingWebAttributionSink: {
-        async recordAffiliateClick() {},
         async recordTelemetryEvent(event) {
           events.push(event);
         },
@@ -459,7 +321,6 @@ describe("Booking Web public bootstrap parity", () => {
       publicHotelProfileRepository: createProfileRepository(legacyHotel, {}),
       bookingWebCheckoutAdapter: unusedBookingWebCheckoutAdapter,
       bookingWebAttributionSink: {
-        async recordAffiliateClick() {},
         async recordTelemetryEvent() {},
       },
     });
@@ -503,7 +364,6 @@ describe("Booking Web public bootstrap parity", () => {
         bookingWebCheckoutAdapter: unusedBookingWebCheckoutAdapter,
         bookingWebPublicNow: () => new Date("2026-10-15T12:00:00.000Z"),
         bookingWebAttributionSink: {
-          async recordAffiliateClick() {},
           async recordTelemetryEvent(event) {
             events.push(event);
           },
@@ -629,7 +489,6 @@ describe("Booking Web public bootstrap parity", () => {
       publicHotelProfileRepository: createProfileRepository(legacyHotel, {}),
       bookingWebCheckoutAdapter: unusedBookingWebCheckoutAdapter,
       bookingWebAttributionSink: {
-        async recordAffiliateClick() {},
         async recordTelemetryEvent() {
           throw new Error("storage unavailable");
         },
@@ -661,7 +520,6 @@ describe("Booking Web public bootstrap parity", () => {
       publicHotelProfileRepository: createProfileRepository(legacyHotel, {}),
       bookingWebCheckoutAdapter: unusedBookingWebCheckoutAdapter,
       bookingWebAttributionSink: {
-        async recordAffiliateClick() {},
         async recordTelemetryEvent(event) {
           events.push(event);
         },

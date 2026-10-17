@@ -1,17 +1,10 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { AuthorizationError, type PropertyAccessRepository } from "@vayada/backend-authorization";
+import { bookingCustomDomainLockKey } from "@vayada/domain-booking";
 import pg from "pg";
 import type { QueryResult, QueryResultRow } from "pg";
 
 import { enforcePropertyRoutePolicy, enforceRoutePolicy } from "./policy.js";
-
-/**
- * Advisory lock key for a property's custom-domain writes. The name is historical (it was shared
- * with the retired affiliate destination writes); it stays so lock behaviour does not change.
- */
-export function bookingCustomDomainLockKey(propertyId: string): string {
-  return `booking-affiliate-destination-safety:${propertyId.toLowerCase()}`;
-}
 
 export type BookingCustomDomainStatus = "not_configured" | "pending" | "verified" | "failed";
 export type BookingCustomDomainSslStatus = "not_configured" | "pending" | "active" | "failed";

@@ -182,10 +182,10 @@ describe("production Booking publication owner sources", () => {
             supportedLanguages: ["en", "de"],
             headerLogoUrl: "https://cdn.test/logo.webp",
             showContactButton: false,
-            showReferAGuestButton: true,
+            showReferAGuestButton: false,
             showLanguageSelector: false,
             showCurrencySelector: true,
-            referAGuestModuleEnabled: true,
+            referAGuestModuleEnabled: false,
             heroSubtext: "Book direct.",
             hasActivePromos: true,
             updatedAt: now,
@@ -193,7 +193,12 @@ describe("production Booking publication owner sources", () => {
         ],
       })),
     };
-    const rules = { ...scope, sourceRevision: `guest-choices:${propertyId}`, confirmedAt: now, choices: { ...choices, checkInUntil: "23:00", checkOutFrom: "07:00" } };
+    const rules = {
+      ...scope,
+      sourceRevision: `guest-choices:${propertyId}`,
+      confirmedAt: now,
+      choices: { ...choices, checkInUntil: "23:00", checkOutFrom: "07:00" },
+    };
     const getCurrentGuestRules = vi.fn().mockResolvedValue(rules);
     const source = createBookingBookingPublicationSource({
       connectionString: "postgres://unused",
@@ -207,8 +212,9 @@ describe("production Booking publication owner sources", () => {
     if (evidence.outcome !== "evidence") throw new Error("Expected Booking evidence");
     expect(isBookingLaunchOwnerEvidenceValid(evidence, scope, "booking")).toBe(true);
     expect(evidence.entities).toHaveLength(2);
-    expect(evidence.entities[0]?.bindings?.map(({ expectedSource }) => expectedSource))
-      .toEqual(designResult.snapshot.sourceBindings.filter(({ ownerDomain }) => ownerDomain !== "booking"));
+    expect(evidence.entities[0]?.bindings?.map(({ expectedSource }) => expectedSource)).toEqual(
+      designResult.snapshot.sourceBindings.filter(({ ownerDomain }) => ownerDomain !== "booking"),
+    );
     expect(evidence.sources).toContainEqual(designResult.designSource);
     expect(evidence.entities.flatMap(({ blockers }) => blockers)).toEqual([]);
 
@@ -218,26 +224,47 @@ describe("production Booking publication owner sources", () => {
         branding: {
           logoUrl: "https://cdn.test/logo.webp",
           showContactButton: false,
-          showReferAGuestButton: true,
+          showReferAGuestButton: false,
           showLanguageSelector: false,
           showCurrencySelector: true,
           heroImage: "https://cdn.test/cover.webp",
           heroSubtext: "Book direct.",
         },
-        policies: { checkInFrom: choices.checkInTime, checkOutUntil: choices.checkOutTime, checkInUntil: "23:00", checkOutFrom: "07:00" },
-        capabilities: { instantBook: true, promoCodes: true, referralCodes: true },
+        policies: {
+          checkInFrom: choices.checkInTime,
+          checkOutUntil: choices.checkOutTime,
+          checkInUntil: "23:00",
+          checkOutFrom: "07:00",
+        },
+        capabilities: { instantBook: true, promoCodes: true, referralCodes: false },
         supportedQuoteParameters: { childrenSupported: true, adultAgeThreshold: 18 },
       },
     });
 
     expect(evidence.entities[1]?.bindings).toBeUndefined();
-    getCurrentGuestRules.mockResolvedValue({ ...rules, sourceRevision: `guest-choices:${organizationId}` });
-    await expect(source.getSnapshot(manifestRequest(evidence.sources))).resolves.toEqual({ outcome: "unavailable", owner: "booking" });
+    getCurrentGuestRules.mockResolvedValue({
+      ...rules,
+      sourceRevision: `guest-choices:${organizationId}`,
+    });
+    await expect(source.getSnapshot(manifestRequest(evidence.sources))).resolves.toEqual({
+      outcome: "unavailable",
+      owner: "booking",
+    });
     getCurrentGuestRules.mockResolvedValue(null);
-    expect(await source.getBookingLaunchEvidence(scope)).toMatchObject({ outcome: "evidence", entities: [ {}, { blockers: [{ code: "guest_policy_not_configured" }] } ] });
-    for (const invalid of [{ ...rules, organizationId: propertyId }, { ...rules, choices: {} }, { ...rules, sourceRevision: "guest-policy:1" }, { ...rules, confirmedAt: "invalid" }]) {
+    expect(await source.getBookingLaunchEvidence(scope)).toMatchObject({
+      outcome: "evidence",
+      entities: [{}, { blockers: [{ code: "guest_policy_not_configured" }] }],
+    });
+    for (const invalid of [
+      { ...rules, organizationId: propertyId },
+      { ...rules, choices: {} },
+      { ...rules, sourceRevision: "guest-policy:1" },
+      { ...rules, confirmedAt: "invalid" },
+    ]) {
       getCurrentGuestRules.mockResolvedValue(invalid);
-      expect(await source.getBookingLaunchEvidence(scope)).toMatchObject({ outcome: "unavailable" });
+      expect(await source.getBookingLaunchEvidence(scope)).toMatchObject({
+        outcome: "unavailable",
+      });
     }
   });
 
@@ -255,8 +282,17 @@ describe("production Booking publication owner sources", () => {
         ],
       },
     ];
-    const rate = { ratePlanId: `pricing-offer.v2:${"a".repeat(64)}`, currency: "EUR", pricing: { kind: "quote_required", publicationRevision: 1, termsRevision: propertyId }, mealPlan: "room_only" };
-    const offers = { scope, sourceRevision: `booking.pms.publication.v2:${"b".repeat(64)}`, rooms: [{ roomTypeId, offers: [rate] }] };
+    const rate = {
+      ratePlanId: `pricing-offer.v2:${"a".repeat(64)}`,
+      currency: "EUR",
+      pricing: { kind: "quote_required", publicationRevision: 1, termsRevision: propertyId },
+      mealPlan: "room_only",
+    };
+    const offers = {
+      scope,
+      sourceRevision: `booking.pms.publication.v2:${"b".repeat(64)}`,
+      rooms: [{ roomTypeId, offers: [rate] }],
+    };
     const getCurrentPricingOffers = vi.fn().mockResolvedValue(offers);
     const diagnoseMissingPricing = vi.fn().mockResolvedValue([]);
     let calendarConfigured = true;
@@ -341,19 +377,38 @@ describe("production Booking publication owner sources", () => {
       },
     });
     expect(isBookingLaunchOwnerEvidenceValid(evidence, scope, "pms")).toBe(true);
-    expect(evidence.sources.some(source => source.entityType === "pms_pricing_publication.v2")).toBe(true);
+    expect(
+      evidence.sources.some((source) => source.entityType === "pms_pricing_publication.v2"),
+    ).toBe(true);
     // Finance binds payment methods to this exact source (VAY-2134).
-    expect(evidence.sources).toContainEqual({ ownerDomain: "pms", entityType: "pms_property_pricing_currency.v1", entityId: propertyId, revision: "7" });
-    const unavailable = () => expect(source.getSnapshot(manifestRequest(evidence.sources))).resolves.toEqual({ outcome: "unavailable", owner: "pms" });
+    expect(evidence.sources).toContainEqual({
+      ownerDomain: "pms",
+      entityType: "pms_property_pricing_currency.v1",
+      entityId: propertyId,
+      revision: "7",
+    });
+    const unavailable = () =>
+      expect(source.getSnapshot(manifestRequest(evidence.sources))).resolves.toEqual({
+        outcome: "unavailable",
+        owner: "pms",
+      });
     getCurrentPricingOffers.mockResolvedValue(null);
     await unavailable();
     getCurrentPricingOffers.mockResolvedValue({ ...offers, sourceRevision: "changed" });
     await unavailable(); // Previous manifest cannot bind a newer publication.
-    getCurrentPricingOffers.mockResolvedValue(offers).mockResolvedValueOnce(offers).mockResolvedValueOnce(null);
+    getCurrentPricingOffers
+      .mockResolvedValue(offers)
+      .mockResolvedValueOnce(offers)
+      .mockResolvedValueOnce(null);
     await unavailable(); // Revocation while other ports are being read.
-    getCurrentPricingOffers.mockResolvedValueOnce(offers).mockResolvedValueOnce({ ...offers, sourceRevision: "changed" });
+    getCurrentPricingOffers
+      .mockResolvedValueOnce(offers)
+      .mockResolvedValueOnce({ ...offers, sourceRevision: "changed" });
     await unavailable();
-    getCurrentPricingOffers.mockResolvedValue({ ...offers, scope: { ...scope, organizationId: propertyId } });
+    getCurrentPricingOffers.mockResolvedValue({
+      ...offers,
+      scope: { ...scope, organizationId: propertyId },
+    });
     await unavailable();
     getCurrentPricingOffers.mockResolvedValue({ ...offers, rooms: [] });
     await unavailable();
@@ -367,7 +422,10 @@ describe("production Booking publication owner sources", () => {
     inventoryRooms = [];
     await unavailable();
     inventoryRooms = [roomTypeId];
-    roomPublication.blockers.push({ code: "room_media_missing", affectedEntity: { entityType: "property", entityId: propertyId } });
+    roomPublication.blockers.push({
+      code: "room_media_missing",
+      affectedEntity: { entityType: "property", entityId: propertyId },
+    });
     await unavailable();
     roomPublication.blockers = [];
     // VAY-2134: prices the hotel can save again and a calendar it hasn't opened are blockers.

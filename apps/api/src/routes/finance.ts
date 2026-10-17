@@ -306,7 +306,6 @@ type StripeProviderAccountOwnershipRow = FinanceProviderAccountRow & {
   accountScope: string;
   propertyId: string | null;
   organizationId: string | null;
-  affiliateId: string | null;
 };
 
 type ConfiguredStripeProviderAccountRow = StripeProviderAccountReconciliationState & {
@@ -3255,18 +3254,10 @@ async function loadConfiguredStripeProviderAccount(
 function financeProviderAccountOwner(
   command: CreateStripeProviderAccountCommand | IssueStripeOnboardingLinkCommand,
 ): Parameters<FinanceStripeConnectProvider["createAccount"]>[0]["owner"] {
-  if ("propertyId" in command) {
-    return {
-      ownerScope: "property",
-      propertyId: command.propertyId,
-      organizationId:
-        command.audit.actor.kind === "user" ? command.audit.actor.organizationId : null,
-    };
-  }
   return {
-    ownerScope: "affiliate",
-    affiliateId: command.affiliateId,
-    organizationId: command.organizationId,
+    ownerScope: "property",
+    propertyId: command.propertyId,
+    organizationId: command.audit.actor.kind === "user" ? command.audit.actor.organizationId : null,
   };
 }
 
@@ -3275,27 +3266,6 @@ async function loadStripeProviderAccountByOwner(
   owner: Parameters<FinanceStripeConnectProvider["createAccount"]>[0]["owner"],
   forUpdate = false,
 ): Promise<FinanceProviderAccountRow | null> {
-  if (owner.ownerScope === "property") {
-    const result = await client.query<FinanceProviderAccountRow>(
-      `SELECT
-         id::text AS "providerAccountId",
-         provider_account_id AS "providerAccountRef",
-         status,
-         onboarding_status AS "onboardingStatus",
-         account_metadata ->> 'onboardingUrl' AS "onboardingUrl"
-       FROM finance.payment_provider_accounts
-       WHERE account_scope = 'property'
-         AND provider = 'stripe'
-         AND property_id = $1::uuid
-         AND provider_account_id NOT LIKE 'settings-choice:%'
-       ORDER BY created_at ASC
-       LIMIT 1
-       ${forUpdate ? "FOR UPDATE" : ""}`,
-      [owner.propertyId],
-    );
-    return result.rows[0] ?? null;
-  }
-
   const result = await client.query<FinanceProviderAccountRow>(
     `SELECT
        id::text AS "providerAccountId",
@@ -3304,14 +3274,14 @@ async function loadStripeProviderAccountByOwner(
        onboarding_status AS "onboardingStatus",
        account_metadata ->> 'onboardingUrl' AS "onboardingUrl"
      FROM finance.payment_provider_accounts
-     WHERE account_scope = 'organization'
+     WHERE account_scope = 'property'
        AND provider = 'stripe'
-       AND organization_id = $1::uuid
-       AND account_metadata ->> 'affiliateId' = $2
+       AND property_id = $1::uuid
+       AND provider_account_id NOT LIKE 'settings-choice:%'
      ORDER BY created_at ASC
      LIMIT 1
      ${forUpdate ? "FOR UPDATE" : ""}`,
-    [owner.organizationId, owner.affiliateId],
+    [owner.propertyId],
   );
   return result.rows[0] ?? null;
 }
@@ -3341,17 +3311,10 @@ async function insertStripeProviderAccount(
   ) {
     throw new StripeProviderAccountQuarantinedError();
   }
-  const accountMetadata =
-    owner.ownerScope === "affiliate"
-      ? {
-          affiliateId: owner.affiliateId,
-          commandId: command.commandId,
-          onboardingUrl: providerAccount.onboardingUrl,
-        }
-      : {
-          commandId: command.commandId,
-          onboardingUrl: providerAccount.onboardingUrl,
-        };
+  const accountMetadata = {
+    commandId: command.commandId,
+    onboardingUrl: providerAccount.onboardingUrl,
+  };
   const result = await client.query<FinanceProviderAccountRow>(
     `WITH inserted AS (
        INSERT INTO finance.payment_provider_accounts (
@@ -3397,9 +3360,9 @@ async function insertStripeProviderAccount(
      )
      SELECT * FROM inserted`,
     [
-      owner.ownerScope === "property" ? owner.propertyId : null,
-      owner.ownerScope === "affiliate" ? owner.organizationId : null,
-      owner.ownerScope === "property" ? "property" : "organization",
+      owner.propertyId,
+      null,
+      "property",
       providerAccount.providerAccountRef,
       command.payload.country,
       JSON.stringify(accountMetadata),
@@ -3428,8 +3391,7 @@ async function loadStripeProviderAccountByRef(
             account_metadata ->> 'onboardingUrl' AS "onboardingUrl",
             account_scope AS "accountScope",
             property_id::text AS "propertyId",
-            organization_id::text AS "organizationId",
-            account_metadata ->> 'affiliateId' AS "affiliateId"
+            organization_id::text AS "organizationId"
      FROM finance.payment_provider_accounts
      WHERE provider = 'stripe' AND provider_account_id = $1
      LIMIT 1`,
@@ -3477,19 +3439,10 @@ class StripeProviderAccountOwnerConflictError extends Error {}
 class StripeProviderAccountQuarantinedError extends Error {}
 
 function stripeProviderAccountOwnerMatches(
-  account: {
-    accountScope: string;
-    propertyId: string | null;
-    organizationId: string | null;
-    affiliateId: string | null;
-  },
+  account: { accountScope: string; propertyId: string | null },
   owner: Parameters<FinanceStripeConnectProvider["createAccount"]>[0]["owner"],
 ): boolean {
-  return owner.ownerScope === "property"
-    ? account.accountScope === "property" && account.propertyId === owner.propertyId
-    : account.accountScope === "organization" &&
-        account.organizationId === owner.organizationId &&
-        account.affiliateId === owner.affiliateId;
+  return account.accountScope === "property" && account.propertyId === owner.propertyId;
 }
 
 async function relinkPaymentSettingsProviderAccount(
@@ -3527,18 +3480,14 @@ async function updateStripeProviderAccountOnboardingUrl(
      WHERE id = $1::uuid
        AND provider = 'stripe'
        AND provider_account_id = $3
-       AND (($4 = 'property' AND account_scope = 'property' AND property_id = $5::uuid)
-         OR ($4 = 'affiliate' AND account_scope = 'organization'
-           AND organization_id = $6::uuid AND account_metadata ->> 'affiliateId' = $7))
+       AND account_scope = 'property'
+       AND property_id = $4::uuid
      RETURNING id`,
     [
       account.providerAccountId,
       JSON.stringify({ onboardingUrl }),
       account.providerAccountRef,
-      owner.ownerScope,
-      owner.ownerScope === "property" ? owner.propertyId : null,
-      owner.ownerScope === "affiliate" ? owner.organizationId : null,
-      owner.ownerScope === "affiliate" ? owner.affiliateId : null,
+      owner.propertyId,
     ],
   );
   if (updated.rowCount !== 1) throw new StripeProviderAccountOwnerConflictError();
@@ -3565,13 +3514,7 @@ async function loadProviderAccountIdempotency(
        AND (($3 = 'property' AND property_id = $4::uuid)
          OR ($3 = 'organization' AND organization_id = $5::uuid))
      LIMIT 1`,
-    [
-      operation,
-      keyHash,
-      owner.ownerScope === "property" ? "property" : "organization",
-      owner.ownerScope === "property" ? owner.propertyId : null,
-      owner.ownerScope === "affiliate" ? owner.organizationId : null,
-    ],
+    [operation, keyHash, "property", owner.propertyId, null],
   );
   return result.rows[0] ?? null;
 }
@@ -3642,9 +3585,9 @@ async function reserveProviderAccountIdempotency(
       operation,
       keyHash,
       fingerprint,
-      owner.ownerScope === "property" ? "property" : "organization",
-      owner.ownerScope === "affiliate" ? owner.organizationId : null,
-      owner.ownerScope === "property" ? owner.propertyId : null,
+      "property",
+      null,
+      owner.propertyId,
       command.audit.correlationId ?? command.audit.requestId,
       command.audit.requestedAt,
       JSON.stringify({
@@ -3700,9 +3643,9 @@ async function completeProviderAccountIdempotency(
       }),
       operation,
       keyHash,
-      owner.ownerScope === "property" ? "property" : "organization",
-      owner.ownerScope === "property" ? owner.propertyId : null,
-      owner.ownerScope === "affiliate" ? owner.organizationId : null,
+      "property",
+      owner.propertyId,
+      null,
     ],
   );
 }
@@ -3741,9 +3684,9 @@ async function markProviderAccountIdempotencyFailed(
       }),
       operation,
       keyHash,
-      owner.ownerScope === "property" ? "property" : "organization",
-      owner.ownerScope === "property" ? owner.propertyId : null,
-      owner.ownerScope === "affiliate" ? owner.organizationId : null,
+      "property",
+      owner.propertyId,
+      null,
     ],
   );
 }
@@ -3755,10 +3698,7 @@ async function enqueueStripeAccountCompensation(
   keyHash: string,
   providerAccountRef: string,
 ): Promise<string> {
-  const ownerKey =
-    owner.ownerScope === "property"
-      ? `property.${owner.propertyId}`
-      : `affiliate.${owner.affiliateId}.organization.${owner.organizationId}`;
+  const ownerKey = `property.${owner.propertyId}`;
   const jobKey = `finance.stripe-account-compensation.${ownerKey}.key.${keyHash}.v1`;
   const result = await client.query<{ jobKey: string }>(
     `INSERT INTO platform.jobs (
@@ -3788,9 +3728,9 @@ async function enqueueStripeAccountCompensation(
       jobKey,
       FINANCE_STRIPE_ACCOUNT_COMPENSATION_QUEUE,
       FINANCE_STRIPE_ACCOUNT_COMPENSATION_JOB_TYPE,
-      owner.ownerScope === "property" ? "property" : "organization",
-      owner.ownerScope === "affiliate" ? owner.organizationId : null,
-      owner.ownerScope === "property" ? owner.propertyId : null,
+      "property",
+      null,
+      owner.propertyId,
       sha256(providerAccountRef),
       command.audit.correlationId ?? command.audit.requestId,
       keyHash,
@@ -3820,7 +3760,7 @@ function buildProviderAccountCommandMeta(
     jobs: [
       {
         jobType: "pms.projection-refresh",
-        idempotencyKey: `finance.reconcile-provider-account:${owner.ownerScope}:${owner.ownerScope === "property" ? owner.propertyId : owner.affiliateId}:stripe:${keyHash}:v1`,
+        idempotencyKey: `finance.reconcile-provider-account:property:${owner.propertyId}:stripe:${keyHash}:v1`,
         status: "queued",
       },
     ],
@@ -4006,10 +3946,7 @@ function stripeProviderIdempotencyKey(
   keyHash: string,
   purpose: "account" | "onboarding-link" | "compensate",
 ): string {
-  const ownerKey =
-    owner.ownerScope === "property"
-      ? `property:${owner.propertyId}`
-      : `affiliate:${owner.affiliateId}:organization:${owner.organizationId}`;
+  const ownerKey = `property:${owner.propertyId}`;
   return `finance.stripe-connect.${purpose}:${ownerKey}:key:${keyHash}:v1`;
 }
 

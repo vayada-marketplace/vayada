@@ -1,4 +1,3 @@
-export * from "./affiliateEarning.js";
 /**
  * domain-finance — Finance domain contracts.
  *
@@ -23,7 +22,6 @@ export * from "./affiliateEarning.js";
  *   through permissioned finance services.
  */
 
-import type { FinancePlatformAffiliatePayoutRepository } from "./platformAffiliatePayouts.js";
 import {
   FINANCE_ONLINE_CARD_EXECUTION_EVIDENCE_CONTRACT_VERSION,
   type FinanceRoutePaymentMethod,
@@ -34,9 +32,6 @@ export * from "./paymentReadinessParsing.js";
 export * from "./paymentReadinessSnapshot.js";
 export * from "./manualBookingSettlement.js";
 export * from "./subscriptions.js";
-export * from "./platformAffiliatePayouts.js";
-export * from "./affiliateCommission.js";
-export * from "./affiliatePercentagePolicy.js";
 export * from "./otaCommissionRules.js";
 export * from "./financialExpenses.js";
 export * from "./financialFolios.js";
@@ -51,7 +46,6 @@ export * from "./generatedExpenses.js";
 // ---------------------------------------------------------------------------
 
 export type FinancePropertyId = string;
-export type FinanceAffiliateId = string;
 export type FinanceUtcDateTime = string;
 export type FinanceCurrencyCode = string;
 export type FinanceContractVersion = "finance-route-contracts.v1";
@@ -197,37 +191,6 @@ export type FinanceProviderAccountReadModel = {
   chargesEnabled: boolean;
   payoutsEnabled: boolean;
   capabilities: string[];
-};
-
-export type FinanceAffiliatePayoutProvider = "stripe" | "manual" | "bank_transfer";
-export type FinanceAffiliatePayoutSchedule = "manual" | "monthly" | "threshold";
-
-export type FinanceAffiliatePayoutSettingsReadModel = {
-  affiliateId: FinanceAffiliateId;
-  marketplaceOrganizationId: string | null;
-  payoutsEnabled: boolean;
-  payoutProvider: FinanceAffiliatePayoutProvider;
-  payoutCurrency: FinanceCurrencyCode;
-  payoutSchedule: FinanceAffiliatePayoutSchedule;
-  payoutThresholdAmount: FinanceDecimalAmount | null;
-  providerAccount: Pick<
-    FinanceProviderAccountReadModel,
-    "providerAccountId" | "status" | "onboardingStatus" | "payoutsEnabled"
-  > & {
-    provider: FinanceAffiliatePayoutProvider | null;
-  };
-  sourceFreshness: FinanceJsonPolicy;
-  updatedAt: FinanceUtcDateTime;
-};
-
-export type FinanceAffiliatePayoutSettingsResponse = {
-  contractVersion: FinanceContractVersion;
-  affiliateId: FinanceAffiliateId;
-  marketplaceOrganizationId: string | null;
-  payoutSettings: Omit<
-    FinanceAffiliatePayoutSettingsReadModel,
-    "affiliateId" | "marketplaceOrganizationId" | "updatedAt"
-  >;
 };
 
 export type FinancePaymentSettingsReadModel = {
@@ -415,35 +378,6 @@ export type FinancePayoutListResponse = {
   sourceFreshness: FinanceJsonObject;
 };
 
-export type FinanceAffiliatePayoutListResponse = {
-  contractVersion: FinanceContractVersion;
-  affiliateId: FinanceAffiliateId;
-  payouts: FinancePayout[];
-  total: number;
-  limit: number;
-  offset: number;
-  sourceFreshness: FinanceJsonObject;
-};
-
-export type FinanceAffiliatePayoutAllocation = {
-  earningEntryId: string;
-  propertyId: string;
-  bookingReference: string;
-  agreementId: string;
-  recordedAt: FinanceUtcDateTime;
-  currency: FinanceCurrencyCode;
-  currencyMinorUnit: number;
-  commissionMinor: string;
-  adjustmentMinor: string;
-  appliedMinor: string;
-};
-
-export type FinanceAffiliatePayoutDetail = FinancePayout & {
-  maskedDestination: string | null;
-  maskedProviderReference: string | null;
-  includedEarnings: FinanceAffiliatePayoutAllocation[];
-};
-
 export type FinanceReconciliationItem = {
   subjectId: string;
   subjectType: FinanceReconciliationSubjectType;
@@ -505,20 +439,10 @@ export type FinanceDispatchPropertyPayoutJob = {
   status: "queued" | "idempotent_replay";
 };
 
-export type FinanceDispatchAffiliatePayoutJob = {
-  jobType: "finance.dispatch-affiliate-payout";
-  payoutId: string;
-  affiliateId: FinanceAffiliateId;
-  provider: FinanceAffiliatePayoutProvider;
-  idempotencyKey: string;
-  status: "queued" | "idempotent_replay";
-};
-
 export type FinanceCommandJob =
   | FinanceProviderAccountRefreshJob
   | FinanceReconcilePayoutJob
-  | FinanceDispatchPropertyPayoutJob
-  | FinanceDispatchAffiliatePayoutJob;
+  | FinanceDispatchPropertyPayoutJob;
 
 export type FinanceCommandMeta = {
   commandId: string;
@@ -532,19 +456,13 @@ export type FinanceProviderAccountCommandMeta = Omit<FinanceCommandMeta, "sideEf
   sideEffects: FinanceProviderAccountCommandSideEffect[];
 };
 
-export type FinanceProviderAccountOwnerScope = "property" | "affiliate";
+export type FinanceProviderAccountOwnerScope = "property";
 
-export type FinanceProviderAccountOwner =
-  | {
-      ownerScope: "property";
-      propertyId: FinancePropertyId;
-      organizationId: string | null;
-    }
-  | {
-      ownerScope: "affiliate";
-      affiliateId: string;
-      organizationId: string;
-    };
+export type FinanceProviderAccountOwner = {
+  ownerScope: "property";
+  propertyId: FinancePropertyId;
+  organizationId: string | null;
+};
 
 /**
  * Where Stripe sends the hotel back after Connect onboarding: the hotel setup wizard on the
@@ -563,17 +481,7 @@ export type CreateStripePropertyAccountCommand = FinanceCommandBase<
   CreateStripeProviderAccountPayload
 >;
 
-export type CreateStripeAffiliateAccountCommand = Omit<
-  FinanceCommandBase<"finance.provider_account.stripe.create", CreateStripeProviderAccountPayload>,
-  "propertyId"
-> & {
-  affiliateId: string;
-  organizationId: string;
-};
-
-export type CreateStripeProviderAccountCommand =
-  | CreateStripePropertyAccountCommand
-  | CreateStripeAffiliateAccountCommand;
+export type CreateStripeProviderAccountCommand = CreateStripePropertyAccountCommand;
 
 export type IssueStripeOnboardingLinkPayload = {
   providerAccountId: string;
@@ -585,20 +493,7 @@ export type IssueStripePropertyOnboardingLinkCommand = FinanceCommandBase<
   IssueStripeOnboardingLinkPayload
 >;
 
-export type IssueStripeAffiliateOnboardingLinkCommand = Omit<
-  FinanceCommandBase<
-    "finance.provider_account.stripe.onboarding_link.issue",
-    IssueStripeOnboardingLinkPayload
-  >,
-  "propertyId"
-> & {
-  affiliateId: string;
-  organizationId: string;
-};
-
-export type IssueStripeOnboardingLinkCommand =
-  | IssueStripePropertyOnboardingLinkCommand
-  | IssueStripeAffiliateOnboardingLinkCommand;
+export type IssueStripeOnboardingLinkCommand = IssueStripePropertyOnboardingLinkCommand;
 
 export type ReconcileStripePropertyAccountCommand = FinanceCommandBase<
   "finance.provider_account.stripe.reconcile",
@@ -898,41 +793,6 @@ export type FinancePropertyPayoutDispatchResponse = {
   commandMeta: FinanceCommandMeta;
 };
 
-export type FinanceAffiliatePayoutSettingsPatchPayload = {
-  payoutsEnabled?: boolean;
-  payoutProvider?: FinanceAffiliatePayoutProvider;
-  payoutCurrency?: FinanceCurrencyCode;
-  payoutSchedule?: FinanceAffiliatePayoutSchedule;
-  payoutThresholdAmount?: FinanceDecimalAmount | null;
-};
-
-export type FinanceAffiliatePayoutSettingsPatchCommand = {
-  commandType: "finance.affiliate_payout_settings.update";
-  commandId: string;
-  idempotencyKey: string;
-  affiliateId: FinanceAffiliateId;
-  audit: FinanceCommandAudit;
-  payload: FinanceAffiliatePayoutSettingsPatchPayload;
-};
-
-export type FinanceAffiliatePayoutSettingsPatchResult =
-  | {
-      ok: true;
-      status: "updated" | "idempotent_replay";
-      settings: FinanceAffiliatePayoutSettingsReadModel;
-      commandMeta: FinanceCommandMeta;
-    }
-  | {
-      ok: false;
-      statusCode: 400 | 404 | 409 | 500;
-      code:
-        | "invalid_command"
-        | "affiliate_not_found"
-        | "idempotency_conflict"
-        | "write_unavailable";
-      message: string;
-    };
-
 // ---------------------------------------------------------------------------
 // Billing config read model
 //
@@ -1137,36 +997,10 @@ export type FinancePropertyCommandRepository = {
   enqueuePropertyPayoutDispatch(
     command: FinancePropertyPayoutDispatchCommand,
   ): Promise<FinancePropertyPayoutDispatchResult>;
-
-  updateAffiliatePayoutSettings(
-    command: FinanceAffiliatePayoutSettingsPatchCommand,
-  ): Promise<FinanceAffiliatePayoutSettingsPatchResult>;
-};
-
-export type FinanceAffiliateRepository = {
-  getAffiliatePayoutSettings(
-    affiliateId: FinanceAffiliateId,
-    organizationId: string,
-  ): Promise<FinanceAffiliatePayoutSettingsReadModel | null>;
-
-  listAffiliatePayouts(
-    affiliateId: FinanceAffiliateId,
-    query: FinancePayoutListQuery,
-    organizationId: string,
-  ): Promise<Omit<FinanceAffiliatePayoutListResponse, "contractVersion" | "affiliateId"> | null>;
-
-  getAffiliatePayoutDetail?(
-    affiliateId: FinanceAffiliateId,
-    organizationId: string,
-    payoutId: string,
-    currency: FinanceCurrencyCode,
-  ): Promise<FinanceAffiliatePayoutDetail | null>;
 };
 
 export type FinancePropertyReadRepository = FinancePropertySettingsReadRepository &
   Partial<FinancePropertyOperationsReadRepository> &
-  Partial<FinanceAffiliateRepository> &
-  Partial<FinancePlatformAffiliatePayoutRepository> &
   Partial<FinancePlatformOnlineCardExecutionEvidenceRepository> &
   Partial<FinancePropertyCommandRepository>;
 
@@ -1213,32 +1047,6 @@ export function setupIncompletePaymentSettings(
     sourceFreshness: {
       status: "setup_incomplete",
     },
-    updatedAt,
-  };
-}
-
-export function setupIncompleteAffiliatePayoutSettings(
-  affiliateId: FinanceAffiliateId,
-  updatedAt: FinanceUtcDateTime,
-  marketplaceOrganizationId: string | null = null,
-  defaultCurrency: FinanceCurrencyCode = "EUR",
-): FinanceAffiliatePayoutSettingsReadModel {
-  return {
-    affiliateId,
-    marketplaceOrganizationId,
-    payoutsEnabled: false,
-    payoutProvider: "manual",
-    payoutCurrency: defaultCurrency,
-    payoutSchedule: "monthly",
-    payoutThresholdAmount: null,
-    providerAccount: {
-      providerAccountId: null,
-      provider: null,
-      status: "setup_incomplete",
-      onboardingStatus: "not_started",
-      payoutsEnabled: false,
-    },
-    sourceFreshness: {},
     updatedAt,
   };
 }
@@ -1490,7 +1298,6 @@ export type FinanceCommand =
   | CreateStripeProviderAccountCommand
   | IssueStripeOnboardingLinkCommand
   | FinancePropertyPayoutDispatchCommand
-  | FinanceAffiliatePayoutSettingsPatchCommand
   | SettleManualCheckoutChargeCommand;
 
 export const financeCommandTypes = [
@@ -1501,7 +1308,6 @@ export const financeCommandTypes = [
   "finance.provider_account.stripe.create",
   "finance.provider_account.stripe.onboarding_link.issue",
   "finance.property_payout.dispatch",
-  "finance.affiliate_payout_settings.update",
   "finance.checkout_charge.settle_manual",
 ] as const satisfies readonly FinanceCommand["commandType"][];
 

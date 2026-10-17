@@ -35,7 +35,7 @@ export * from "./bookingGuestPolicyReadiness.js";
 export * from "./bookingGuestPolicyProjection.js";
 export * from "./manualBookingPaymentIntent.js";
 export * from "./bookingAttribution.js";
-export * from "./affiliateArrivalTransport.js";
+export * from "./bookingCustomDomainLock.js";
 export * from "./bookingAddonEconomics.js";
 export * from "./sameDayBookingPolicy.js";
 export * from "./bookedCancellationOutcome.js";
@@ -676,4 +676,5 @@ export * from "./pricingOfferNames.js";
 export * from "./publicPricingSelection.js";
 
 export * from "./storedPricingQuote.js";
+// Marketplace hotel profile editor (apps/marketplace-web) still reads this; it goes in step 3b.
 export * from "./affiliateBookingDestination.js";
