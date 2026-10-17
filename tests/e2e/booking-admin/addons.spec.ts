@@ -629,8 +629,10 @@ test("asks for the hotel currency before add-ons can be created", async ({ page 
     .getByRole("status")
     .filter({ hasText: "Set your hotel's currency before adding add-ons." });
   await expect(notice).toBeVisible();
+  // The link is relative since Booking Admin hosts /setup itself (VAY-2261).
   const href = new URL(
     (await notice.getByRole("link", { name: "Set currency" }).getAttribute("href")) ?? "",
+    page.url(),
   );
   expect(href.pathname).toBe("/setup");
   expect(Object.fromEntries(href.searchParams)).toMatchObject({
