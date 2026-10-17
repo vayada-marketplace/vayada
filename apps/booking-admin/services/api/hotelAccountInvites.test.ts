@@ -4,6 +4,7 @@ import {
   captureHotelAccountInviteCode,
   clearPendingHotelAccountInvite,
   HOTEL_ACCOUNT_INVITE_STORAGE_KEY,
+  hasPendingHotelAccountInvite,
   hotelAccountInviteEntryProduct,
   hotelAccountInviteSetupPath,
   pendingHotelAccountInviteCode,
@@ -51,7 +52,9 @@ describe("hotel account invites", () => {
 
     expect(storeHotelAccountInviteCode("  not a code ")).toBeNull();
     expect(storeHotelAccountInviteCode(" VAY-typed-code-77 ")).toBe("VAY-typed-code-77");
+    expect(hasPendingHotelAccountInvite()).toBe(true);
     clearPendingHotelAccountInvite();
     expect(pendingHotelAccountInviteCode()).toBeNull();
+    expect(hasPendingHotelAccountInvite()).toBe(false);
   });
 });

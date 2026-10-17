@@ -83,6 +83,10 @@ export function pendingHotelAccountInviteCode(): string | null {
   return normalizeInviteCode(window.sessionStorage.getItem(HOTEL_ACCOUNT_INVITE_STORAGE_KEY));
 }
 
+export function hasPendingHotelAccountInvite(): boolean {
+  return Boolean(pendingHotelAccountInviteCode());
+}
+
 export function clearPendingHotelAccountInvite(): void {
   if (typeof window === "undefined") return;
   window.sessionStorage.removeItem(HOTEL_ACCOUNT_INVITE_STORAGE_KEY);
