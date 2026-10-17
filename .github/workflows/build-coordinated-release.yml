@@ -363,7 +363,7 @@ jobs:
           path: release-work/images
           merge-multiple: true
 
-      - name: Assemble complete six-service manifest
+      - name: Assemble complete five-service manifest
         run: |
           set -euo pipefail
           mkdir -p release-work/images release-work/candidate
