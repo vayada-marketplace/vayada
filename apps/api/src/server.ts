@@ -629,9 +629,9 @@ const stripeConnectProvider = config.stripeSubscriptions.secretKey
   ? createStripeConnectProvider({
       secretKey: config.stripeSubscriptions.secretKey,
       returnBaseUrls: {
-        // VAY-2262: hotel setup (and its Stripe return, /setup?…&step=payments&stripe=…) lives in
-        // Booking Admin now; the "marketplace" key is the setup surface until it is renamed.
-        marketplace: config.stripeSubscriptions.bookingAdminBaseUrl,
+        marketplace:
+          config.authSession?.authSurfaceOrigins["marketplace-web"] ??
+          config.stripeSubscriptions.bookingAdminBaseUrl,
         bookingAdmin: config.stripeSubscriptions.bookingAdminBaseUrl,
       },
     })

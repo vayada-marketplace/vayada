@@ -518,6 +518,27 @@ describe("finance route contracts", () => {
     expect(commands[0]!.payload).not.toHaveProperty("propertyId");
     expect(commands[0]!.payload).not.toHaveProperty("returnUrl");
 
+    // VAY-2262: the setup wizard in Booking Admin asks for its own return surface; unknown values
+    // fall back to the provider default.
+    for (const [returnSurface, expected] of [
+      ["booking_admin_setup", "booking_admin_setup"],
+      ["marketplace-web", undefined],
+    ] as const) {
+      const answered = await injectJson<Record<string, unknown>>(app, {
+        method: "POST",
+        url: `/api/finance/properties/${propertyId}/provider-accounts/${providerAccountId}/onboarding-link`,
+        payload: {
+          commandId: `cmd-stripe-${returnSurface}-return`,
+          idempotencyKey: `key-stripe-${returnSurface}-return`,
+          returnSurface,
+        },
+        headers: { authorization: "Bearer valid-token" },
+      });
+      expect(answered.statusCode).toBe(200);
+      expect(commands.at(-1)!.payload.returnSurface).toBe(expected);
+    }
+    expect(commands).toHaveLength(3);
+
     await app.close();
     app = buildFinanceApp({
       permissions: financeManagePermissions(),
@@ -547,7 +568,7 @@ describe("finance route contracts", () => {
     expect(denied.statusCode).toBe(403);
     expect(denied.body.code).toBe("missing_resource_access");
     expect(JSON.stringify(denied.body)).not.toContain(foreignPropertyId);
-    expect(commands).toHaveLength(1);
+    expect(commands).toHaveLength(3);
   });
 
   it("preserves the VAY-774 affiliate onboarding-link facade shape", async () => {
