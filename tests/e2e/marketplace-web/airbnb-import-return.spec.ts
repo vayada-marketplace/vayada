@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { corsHeaders, fulfillCorsPreflight } from "./utils/cors";
+import { corsHeaders, fulfillCorsPreflight } from "../support/cors";
 
 const propertyId = "10090000-0000-4000-8000-000000000001";
 const sourceId = "10090000-0000-4000-8000-000000000002";

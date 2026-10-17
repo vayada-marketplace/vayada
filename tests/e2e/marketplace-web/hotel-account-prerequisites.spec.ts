@@ -5,7 +5,7 @@ import {
   mockPropertySetupRoute,
 } from "../support/propertySetupRouteMocks";
 import { createAdaptiveHotelSetupStatusMock } from "../support/sharedHotelSetupMocks";
-import { corsHeaders, fulfillCorsPreflight } from "./utils/cors";
+import { corsHeaders, fulfillCorsPreflight } from "../support/cors";
 
 const organizationId = "11111111-1111-4111-8111-111111111111";
 const propertyId = "22222222-2222-4222-8222-222222222222";

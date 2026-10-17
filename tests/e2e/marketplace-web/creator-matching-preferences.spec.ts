@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { corsHeaders, fulfillCorsPreflight } from "./utils/cors";
+import { corsHeaders, fulfillCorsPreflight } from "../support/cors";
 
 test("creator updates matching preferences and retries a failed save", async ({ page }) => {
   await primeCreatorSession(page);

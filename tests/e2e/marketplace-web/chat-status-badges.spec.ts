@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { corsHeaders, fulfillCorsPreflight } from "./utils/cors";
+import { corsHeaders, fulfillCorsPreflight } from "../support/cors";
 
 // VAY-2153: the collaboration status colours live in lib/constants/colors.ts. When
 // Tailwind did not scan lib/, they were never generated and the chat status badges

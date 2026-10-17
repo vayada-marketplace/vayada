@@ -1,6 +1,6 @@
 import { expect, test, type Page, type APIRequestContext } from "@playwright/test";
 import { createAdaptiveHotelSetupStatusMock } from "../../tests/e2e/support/sharedHotelSetupMocks";
-import { corsHeaders, fulfillCorsPreflight } from "../../tests/e2e/marketplace-web/utils/cors";
+import { corsHeaders, fulfillCorsPreflight } from "../../tests/e2e/support/cors";
 const database = "https://pms.localhost:1380";
 const organizationId = "10090000-0000-4000-8000-000000000002";
 
