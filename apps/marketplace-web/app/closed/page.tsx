@@ -32,7 +32,14 @@ export default function MarketplaceClosedPage() {
   return (
     <div className="flex min-h-screen flex-col bg-[#fbfbfa] text-gray-950">
       <header className="flex items-center justify-center px-5 py-4 sm:py-6">
-        <Image src="/vayada-logo.png" alt="vayada" width={120} height={32} priority />
+        <Image
+          src="/vayada-logo.png"
+          alt="vayada"
+          width={120}
+          height={107}
+          className="h-8 w-auto"
+          priority
+        />
       </header>
       <main className="flex flex-1 flex-col items-center justify-center px-5 pb-16 sm:pb-24">
         <div className="flex w-full max-w-3xl flex-col items-center gap-8 text-center sm:gap-10">

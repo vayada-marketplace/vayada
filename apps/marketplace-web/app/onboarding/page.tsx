@@ -414,7 +414,7 @@ function PathChoice({
     <div
       role="radiogroup"
       aria-label="Choose onboarding path"
-      className="grid gap-4 sm:grid-cols-2"
+      className="mx-auto grid max-w-md gap-4"
     >
       {options.map((option, index) => {
         if (hotelInvite && option.type !== "hotel") return null;

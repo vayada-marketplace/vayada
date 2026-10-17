@@ -56,11 +56,6 @@ export default function AuthenticatedNavigation() {
           return;
         }
         const currentUserType = authService.getUserType();
-        if (currentUserType === "creator") {
-          // VAY-2260: the creator Marketplace is closed.
-          router.replace(ROUTES.CLOSED);
-          return;
-        }
         if (currentUserType === "hotel") {
           const returnTo =
             typeof window === "undefined"
