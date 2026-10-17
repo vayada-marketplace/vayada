@@ -115,6 +115,7 @@ import { createPgIdentityLifecycleCommandBus } from "./platform/identityLifecycl
 import { createTargetPublicBookabilityPublicationCommandPort } from "./platform/publicBookabilityPublication.js";
 import { createPgProductAuditSink } from "./platform/productAudit.js";
 import { createPgAuthSessionHandoffRepository } from "./platform/authSessionHandoffs.js";
+import type { AuthSurfacePolicy } from "./routes/authSession.js";
 import { createTargetBookingReservationsReadRepository } from "./platform/bookingReservations.js";
 import { createPgProviderWebhookStore } from "./platform/providerWebhooks.js";
 import { composePlatformMediaRuntime } from "./platform/platformMediaRuntime.js";
@@ -1616,32 +1617,43 @@ const app = buildApp({
                 resourceType: "pms_property",
               },
             },
-            "affiliate-dashboard": {
-              requiredOrganizationKind: "affiliate_partner",
-              logoutReturnUrl:
-                config.authSession.authAffiliateDashboardLogoutUrl ??
-                config.authSession.authLogoutUrl,
-              legacyJwtSecret:
-                config.authSession.authLegacyAffiliatePmsJwtSecret ??
-                config.authSession.authLegacyPmsJwtSecret,
-              legacyJwtUserType: "affiliate",
-              publicOrigin: config.authSession.authSurfaceOrigins["affiliate-dashboard"],
-              firstPartySession:
-                config.authSession.authFirstPartySurfaces.includes("affiliate-dashboard"),
-              requiredResourceLink: {
-                product: "affiliate",
-                resourceType: "affiliate",
-              },
-            },
-            "marketplace-web": {
-              requiredOrganizationKind: ["creator_workspace", "hotel_group"],
-              allowMissingOrganization: true,
-              logoutReturnUrl:
-                config.authSession.authMarketplaceWebLogoutUrl ?? config.authSession.authLogoutUrl,
-              publicOrigin: config.authSession.authSurfaceOrigins["marketplace-web"],
-              firstPartySession:
-                config.authSession.authFirstPartySurfaces.includes("marketplace-web"),
-            },
+            // VAY-2271: the retired portals keep a login policy only while the platform
+            // still configures their addresses.
+            ...(config.authSession.authSurfaceOrigins["affiliate-dashboard"]
+              ? {
+                  "affiliate-dashboard": {
+                    requiredOrganizationKind: "affiliate_partner",
+                    logoutReturnUrl:
+                      config.authSession.authAffiliateDashboardLogoutUrl ??
+                      config.authSession.authLogoutUrl,
+                    legacyJwtSecret:
+                      config.authSession.authLegacyAffiliatePmsJwtSecret ??
+                      config.authSession.authLegacyPmsJwtSecret,
+                    legacyJwtUserType: "affiliate",
+                    publicOrigin: config.authSession.authSurfaceOrigins["affiliate-dashboard"],
+                    firstPartySession:
+                      config.authSession.authFirstPartySurfaces.includes("affiliate-dashboard"),
+                    requiredResourceLink: {
+                      product: "affiliate",
+                      resourceType: "affiliate",
+                    },
+                  } satisfies AuthSurfacePolicy,
+                }
+              : {}),
+            ...(config.authSession.authSurfaceOrigins["marketplace-web"]
+              ? {
+                  "marketplace-web": {
+                    requiredOrganizationKind: ["creator_workspace", "hotel_group"],
+                    allowMissingOrganization: true,
+                    logoutReturnUrl:
+                      config.authSession.authMarketplaceWebLogoutUrl ??
+                      config.authSession.authLogoutUrl,
+                    publicOrigin: config.authSession.authSurfaceOrigins["marketplace-web"],
+                    firstPartySession:
+                      config.authSession.authFirstPartySurfaces.includes("marketplace-web"),
+                  } satisfies AuthSurfacePolicy,
+                }
+              : {}),
           },
           cookieSecure: config.authSession.authCookieSecure,
           cookieDomain: config.authSession.authCookieDomain,
