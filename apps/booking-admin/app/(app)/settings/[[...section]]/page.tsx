@@ -1,6 +1,8 @@
 import { notFound } from "next/navigation";
 import { BookDirectBenefitsPage } from "@/components/settings/BookDirectBenefitsPage";
 import { GuestFormPage } from "@/components/settings/GuestFormPage";
+import { DataExportPage } from "@/components/settings/DataExportPage";
+import { DeleteAccountPage } from "@/components/settings/DeleteAccountPage";
 import { PrivacyPage } from "@/components/settings/PrivacyPage";
 import { RoomFiltersPage } from "@/components/settings/RoomFiltersPage";
 import { SettingsIndex } from "@/components/settings/SettingsIndex";
@@ -21,6 +23,8 @@ export default async function SettingsRoute({
   if (page === "room-filters") return <RoomFiltersPage />;
   if (page === "guest-form") return <GuestFormPage />;
   if (page === "privacy") return <PrivacyPage />;
+  if (page === "data-export") return <DataExportPage />;
+  if (page === "delete-account") return <DeleteAccountPage />;
   if (!isSettingsPage(page)) notFound();
   return <SettingsSectionPage section={page} />;
 }
