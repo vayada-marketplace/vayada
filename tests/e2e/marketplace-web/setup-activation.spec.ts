@@ -431,7 +431,9 @@ test.describe("marketplace-web shared setup activation", () => {
 
     await streetAddress.fill("Marienplatz 1");
     await expect(
-      locationActionBar.getByText("Needed for your booking page’s map. Click your property on the map."),
+      locationActionBar.getByText(
+        "Needed for your booking page’s map. Click your property on the map.",
+      ),
     ).toBeVisible();
     await findOnMap.click();
     await expect(map).toHaveAttribute("data-marker", "48.1373932,11.5754485");
