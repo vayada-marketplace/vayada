@@ -10,6 +10,11 @@ const marketingUrl = (process.env.NEXT_PUBLIC_MARKETING_URL || "https://vayada.c
   "",
 );
 
+// Next adds the root slash to a bare origin ("https://vayada.com" → "https://vayada.com/").
+function normalized(url: string | undefined): string {
+  return url ? new URL(url).toString() : "";
+}
+
 test.describe("marketplace-web redirect stub", () => {
   test("health answers for the load balancer", async ({ request }) => {
     const response = await request.get("/api/health");
@@ -40,14 +45,14 @@ test.describe("marketplace-web redirect stub", () => {
     test(`${path} forwards to ${destination}`, async ({ request }) => {
       const response = await request.get(path, { maxRedirects: 0 });
       expect([302, 307, 308]).toContain(response.status());
-      expect(response.headers()["location"]).toBe(destination);
+      expect(normalized(response.headers()["location"])).toBe(normalized(destination));
     });
   }
 
   test("an unknown old route forwards to the marketing site", async ({ request }) => {
     const response = await request.get("/some-forgotten-page", { maxRedirects: 0 });
     expect([302, 307, 308]).toContain(response.status());
-    expect(response.headers()["location"]).toBe(marketingUrl);
+    expect(normalized(response.headers()["location"])).toBe(normalized(marketingUrl));
   });
 
   test("the health check and the login gateway are not forwarded", async ({ request }) => {
