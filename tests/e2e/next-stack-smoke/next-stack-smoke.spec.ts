@@ -609,7 +609,7 @@ async function runHotelFlow(
     await login(page, user, environment.password);
     await acceptNecessaryCookies(page);
     await expect(
-      page.getByRole("heading", { name: "Welcome to vayada — what brings you here?" }),
+      page.getByRole("heading", { name: "Welcome to vayada", exact: true }),
     ).toBeVisible();
     await page.getByRole("radio", { name: /i manage a hotel/i }).click();
     await page.getByRole("button", { name: "Continue", exact: true }).click();
