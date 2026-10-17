@@ -15,14 +15,6 @@ import {
   registerAirbnbImportRoutes,
   type AirbnbImportRoutesOptions,
 } from "./routes/airbnbImports.js";
-import {
-  registerMarketplacePublicHotelRoutes,
-  type MarketplacePublicHotelRoutesOptions,
-} from "./routes/marketplacePublicHotel.js";
-import {
-  registerMarketplaceSubmissionRoutes,
-  type MarketplaceSubmissionRoutesOptions,
-} from "./routes/marketplaceSubmission.js";
 import type { PmsRoomClosureRepository } from "./domains/pmsRoomClosureCommandRepository.js";
 import { registerPreparedHotelImportRoutes } from "./routes/preparedHotelImports.js";
 import type { PreparedImportRepository } from "./domains/preparedHotelImportRepository.js";
@@ -96,14 +88,6 @@ import {
   registerHotelAccountInviteRoutes,
   type HotelAccountInviteRoutesOptions,
 } from "./routes/hotelAccountInvites.js";
-import {
-  registerMarketplaceHotelProfileStatusRoutes,
-  type MarketplaceHotelProfileStatusRepository,
-} from "./routes/marketplaceHotelProfileStatus.js";
-import {
-  registerMarketplaceHotelSelfServiceRoutes,
-  type MarketplaceHotelSelfServiceRepository,
-} from "./routes/marketplaceHotelSelfService.js";
 import { registerPropertyNearbyRoutes } from "./routes/propertyNearby.js";
 import type { PropertyNearbyRepository } from "./domains/propertyNearbyRepository.js";
 import {
@@ -113,10 +97,6 @@ import {
 } from "./routes/sharedHotelSetupStatus.js";
 import { registerPropertyMediaRoutes } from "./routes/propertyMedia.js";
 import { registerHotelCatalogStep1Routes } from "./routes/hotelCatalogStep1.js";
-import {
-  registerMarketplaceHotelCollaborationPreferencesRoutes,
-  type MarketplaceHotelCollaborationPreferencesRoutesOptions,
-} from "./routes/marketplaceHotelCollaborationPreferences.js";
 import {
   registerBookingDesignRoutes,
   type BookingDesignRoutesOptions,
@@ -379,8 +359,6 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   marketplaceAdminRepository?: MarketplaceAdminRepository;
   marketplaceAdminLegacySuperadminFallbackEnabled?: MarketplaceAdminRoutesOptions["legacySuperadminFallbackEnabled"];
   hotelAccountInvites?: Omit<HotelAccountInviteRoutesOptions, "trackCommandRepository">;
-  marketplaceHotelProfileStatusRepository?: MarketplaceHotelProfileStatusRepository;
-  marketplaceHotelSelfServiceRepository?: MarketplaceHotelSelfServiceRepository;
   /** Approved public profile images for the auth session (platform media). */
   profileImageMediaRepository?: ApprovedPublicProfileImageRepository;
   airbnbImports?: Omit<AirbnbImportRoutesOptions, "propertyAccessRepository" | "review"> & {
@@ -398,9 +376,6 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
     repository: HotelCatalogStep1Repository;
     mediaCommands: Pick<PropertyMediaCommandRepository, "replacePresentation">;
   };
-  marketplaceSubmission?: MarketplaceSubmissionRoutesOptions;
-  marketplacePublicHotel?: MarketplacePublicHotelRoutesOptions;
-  marketplaceHotelCollaborationPreferences?: MarketplaceHotelCollaborationPreferencesRoutesOptions;
   bookingDesign?: BookingDesignRoutesOptions;
   bookingDesignReadiness?: BookingDesignReadinessRoutesOptions;
   propertySetupDraftCommandRepository?: PropertySetupDraftCommandRepository;
@@ -561,19 +536,6 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       trackCommandRepository: options.hotelSetupTrackCommandRepository,
     });
   }
-  if (options.marketplaceHotelProfileStatusRepository) {
-    app.register(registerMarketplaceHotelProfileStatusRoutes, {
-      prefix: "/api/marketplace",
-      repository: options.marketplaceHotelProfileStatusRepository,
-    });
-  }
-  if (options.marketplaceHotelSelfServiceRepository && options.identityLifecycleCommandBus) {
-    app.register(registerMarketplaceHotelSelfServiceRoutes, {
-      prefix: "/api/marketplace",
-      repository: options.marketplaceHotelSelfServiceRepository,
-      lifecycleCommandBus: options.identityLifecycleCommandBus,
-    });
-  }
   if (options.propertyNearbyRepository) {
     if (!options.auth?.propertyAccessRepository) {
       throw new Error("Nearby routes require property access resolution");
@@ -657,24 +619,6 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     app.register(registerHotelCatalogStep1Routes, {
       prefix: "/api/hotel-setup",
       ...options.hotelCatalogStep1,
-    });
-  }
-  if (options.marketplacePublicHotel) {
-    app.register(registerMarketplacePublicHotelRoutes, {
-      prefix: "/api/marketplace",
-      ...options.marketplacePublicHotel,
-    });
-  }
-  if (options.marketplaceSubmission) {
-    app.register(registerMarketplaceSubmissionRoutes, {
-      prefix: "/api/marketplace",
-      ...options.marketplaceSubmission,
-    });
-  }
-  if (options.marketplaceHotelCollaborationPreferences) {
-    app.register(registerMarketplaceHotelCollaborationPreferencesRoutes, {
-      prefix: "/api/marketplace",
-      ...options.marketplaceHotelCollaborationPreferences,
     });
   }
   if (options.bookingDesign) {

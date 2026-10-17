@@ -15,8 +15,6 @@ import { createReplacementPricingCommands } from "./domains/replacementPricingCo
 import { externalBookingChanges } from "./integrations/externalBookingChanges.js";
 import { createAirbnbAlterationRuntime } from "./airbnbAlterationRuntime.js";
 import { createAirbnbImportRuntime } from "./airbnbImportRuntime.js";
-import { createPgMarketplaceSubmissionRepository } from "./domains/marketplaceSubmissionRepository.js";
-import { marketplaceSubmissionTransactionSources } from "./platform/marketplaceSubmissionTransactionSources.js";
 import { createPgPmsRoomClosureRepository } from "./domains/pmsRoomClosureCommandRepository.js";
 import { createPgPreparedImportRepository } from "./domains/preparedHotelImportRepository.js";
 import {
@@ -306,8 +304,6 @@ import { createChannexReviewReplies } from "./integrations/channexReviewReplies.
 import { createPgPmsReviewRepository } from "./routes/pmsReviews.js";
 import { createPgMarketplaceAdminRepository } from "./routes/marketplaceAdmin.js";
 import { createPgHotelAccountInviteRepository } from "./routes/hotelAccountInvites.js";
-import { createPgMarketplaceHotelProfileStatusRepository } from "./routes/marketplaceHotelProfileStatus.js";
-import { createPgMarketplaceHotelSelfServiceRepository } from "./routes/marketplaceHotelSelfService.js";
 import { createPgSharedHotelSetupStatusRepository } from "./platform/sharedHotelSetupStatusReadModel.js";
 import { createPgPropertyNearbyDiscoveryRepository } from "./domains/propertyNearbyDiscoveryRepository.js";
 import { createPgPropertyNearbyRepository } from "./domains/propertyNearbyRepository.js";
@@ -903,10 +899,6 @@ const channexUploadReconciliationPool =
 
 const hotelCatalogStep1Repository = createPgHotelCatalogStep1Repository({
   connectionString: targetDatabaseUrl,
-});
-const marketplaceSubmissionRepository = createPgMarketplaceSubmissionRepository({
-  connectionString: targetDatabaseUrl,
-  sources: marketplaceSubmissionTransactionSources,
 });
 const marketplaceHotelCollaborationPreferencesRepository =
   createPgMarketplaceHotelCollaborationPreferencesRepository({
@@ -1971,12 +1963,6 @@ const app = buildApp({
     config.marketplaceAdminLegacySuperadminFallbackEnabled,
   hotelAccountInvites: { repository: hotelAccountInviteRepository },
   preparedImportRepository: createPgPreparedImportRepository(targetDatabaseUrl),
-  marketplaceHotelProfileStatusRepository: createPgMarketplaceHotelProfileStatusRepository({
-    connectionString: targetDatabaseUrl,
-  }),
-  marketplaceHotelSelfServiceRepository: createPgMarketplaceHotelSelfServiceRepository({
-    connectionString: targetDatabaseUrl,
-  }),
   profileImageMediaRepository: platformMediaRuntime?.profileMediaRepository,
   sharedHotelSetupStatusRepository,
   propertyNearbyRepository: config.auth
@@ -2012,20 +1998,6 @@ const app = buildApp({
         mediaCommands: platformMediaRuntime.propertyMediaCommands,
       }
     : undefined,
-  marketplaceSubmission: { repository: marketplaceSubmissionRepository },
-  marketplacePublicHotel: {
-    read: async (propertyId) => {
-      if (!bookingDesignMediaAdapter) throw new Error("Public media resolver unavailable");
-      return marketplaceSubmissionRepository.getPublicHotel(
-        propertyId,
-        createHotelMediaResolutionPort(bookingDesignMediaAdapter),
-      );
-    },
-  },
-  marketplaceHotelCollaborationPreferences: {
-    commandPort: marketplaceHotelCollaborationPreferencesRepository,
-    readPort: marketplaceHotelCollaborationPreferencesRepository,
-  },
   bookingDesign: {
     commandPort: bookingDesignRepository,
     propertyAccessRepository: bookingPropertyAccessRepository,
@@ -2168,7 +2140,6 @@ app.addHook("onClose", async () => {
   await bookingPublicationWorker?.close();
   await bookingPublicationRuntime?.close();
   await Promise.all([
-    marketplaceSubmissionRepository.close(),
     marketplaceHotelCollaborationPreferencesRepository.close(),
     bookingDesignRepository.close(),
     bookingDesignCatalogEvidenceRepository?.close(),
