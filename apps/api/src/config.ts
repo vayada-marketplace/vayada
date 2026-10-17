@@ -207,7 +207,6 @@ export type ApiConfig = {
   financeFolioRecipientKms?: FinanceFolioRecipientKmsConfig;
   financeBankTransferKms?: { currentKeyArn: string; allowedKeyArns: string[]; region: string };
   marketplaceDiscoveryAllowedOrigins: string[];
-  affiliatePublicSource?: "target";
   pmsOperationsAllowedOrigins: string[];
   financialsActivationPropertyIds: string[];
   bookingWebEventSink: BookingWebEventSink;
@@ -603,20 +602,6 @@ function readSourceEnv<T extends string>(
   const value = readOptionalEnv(env, key) ?? defaultValue;
   if ((allowed as readonly string[]).includes(value)) return value as T;
   throw new Error(`${key} must be one of: ${allowed.join(", ")}`);
-}
-
-function loadAffiliatePublicSource(env: NodeJS.ProcessEnv): "target" | undefined {
-  const value = readOptionalEnv(env, "AFFILIATE_PUBLIC_SOURCE");
-  if (!value) {
-    return undefined;
-  }
-  if (value !== "target") {
-    throw new Error("Unsupported AFFILIATE_PUBLIC_SOURCE; expected target");
-  }
-  if (!readOptionalEnv(env, "TARGET_DATABASE_URL")) {
-    throw new Error("AFFILIATE_PUBLIC_SOURCE=target requires TARGET_DATABASE_URL");
-  }
-  return "target";
 }
 
 function loadAuthSessionConfig(env: NodeJS.ProcessEnv): ApiAuthSessionConfig | undefined {
@@ -1318,7 +1303,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       env,
       "MARKETPLACE_DISCOVERY_ALLOWED_ORIGINS",
     ),
-    affiliatePublicSource: loadAffiliatePublicSource(env),
     pmsOperationsAllowedOrigins: readOptionalCsvEnv(env, "PMS_OPERATIONS_ALLOWED_ORIGINS", [
       "https://pms.localhost",
       "https://admin.booking.localhost",

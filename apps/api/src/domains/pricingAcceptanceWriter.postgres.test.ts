@@ -13,7 +13,6 @@ import {
 } from "./pricingCardPaymentCompletion.js";
 import { settleStripeBookingPayment } from "./stripeBookingSettlement.js";
 import { createStripeBookingPaymentProvider } from "./stripeBookingPayments.js";
-import { readBookingAffiliateContextForQuote } from "./bookingAffiliateContextForQuote.js";
 import { lockPublicPricingAuthority } from "./publicPricingAuthority.js";
 import { reserveRevalidatedQuoteInventory } from "./currentQuoteInventory.js";
 import { calculateReplacementFixedCharges } from "./replacementFixedCharges.js";
@@ -63,17 +62,6 @@ describe.skipIf(!url)("pricing acceptance writer transaction (PostgreSQL)", () =
 
   it("keeps every staged effect invisible until commit and replays without new writes", async () => {
     const fixture = await setupFixture();
-    const affiliateContextId = randomUUID();
-    await fixture.observer.query(
-      "INSERT INTO booking.affiliate_click_contexts(id,property_id,synthetic) VALUES($1,$2,TRUE)",
-      [affiliateContextId, fixture.propertyId],
-    );
-    await fixture.observer.query(
-      `INSERT INTO booking.affiliate_click_admissions
-         (context_id,property_id,click_id,history_position) VALUES($1,$2,$3,1)`,
-      [affiliateContextId, fixture.propertyId, randomUUID()],
-    );
-    const internal = { syntheticAffiliateContextId: affiliateContextId };
     let staged!: () => void, release!: () => void;
     const stagedPromise = new Promise<void>((resolve) => (staged = resolve));
     const releasePromise = new Promise<void>((resolve) => (release = resolve));
@@ -89,9 +77,9 @@ describe.skipIf(!url)("pricing acceptance writer transaction (PostgreSQL)", () =
       return new Date().toISOString();
     });
 
-    const write = writePricingAcceptance(fixture.pool, fixture.input, internal);
+    const write = writePricingAcceptance(fixture.pool, fixture.input);
     await stagedPromise;
-    const replay = writePricingAcceptance(fixture.pool, fixture.input, internal);
+    const replay = writePricingAcceptance(fixture.pool, fixture.input);
     const secondPid = await waitForSecondWriter(fixture);
     await expect(isBlocked(fixture.observer, secondPid)).resolves.toBe(true);
     await expect(snapshot(fixture.observer, fixture)).resolves.toEqual({
@@ -118,34 +106,6 @@ describe.skipIf(!url)("pricing acceptance writer transaction (PostgreSQL)", () =
       available: 2,
       assigned: 1,
     });
-    expect(
-      (
-        await fixture.observer.query(
-          "SELECT context_id,history_cutoff FROM booking.affiliate_original_booking_bindings WHERE booking_id=$1",
-          [accepted.bookingId],
-        )
-      ).rows[0],
-    ).toEqual({ context_id: affiliateContextId, history_cutoff: "1" });
-    await fixture.observer.query(
-      `INSERT INTO booking.affiliate_click_admissions
-         (context_id,property_id,click_id,history_position) VALUES($1,$2,$3,2)`,
-      [affiliateContextId, fixture.propertyId, randomUUID()],
-    );
-
-    await expect(
-      writePricingAcceptance(fixture.pool, fixture.input, internal),
-    ).resolves.toMatchObject({
-      kind: "replayed",
-      bookingId: accepted.bookingId,
-    });
-    expect(
-      (
-        await fixture.observer.query(
-          "SELECT history_cutoff FROM booking.affiliate_original_booking_bindings WHERE booking_id=$1",
-          [accepted.bookingId],
-        )
-      ).rows[0].history_cutoff,
-    ).toBe("1");
     expect(await snapshot(fixture.observer, fixture)).toEqual(committed);
     await fixture.close();
   });
@@ -166,133 +126,6 @@ describe.skipIf(!url)("pricing acceptance writer transaction (PostgreSQL)", () =
       available: 3,
       assigned: 0,
     });
-    await fixture.close();
-  });
-
-  it("binds a live click admitted while acceptance waits for the context lock", async () => {
-    const fixture = await setupFixture();
-    const contextId = randomUUID();
-    await fixture.observer.query(
-      "INSERT INTO booking.affiliate_click_contexts(id,property_id,synthetic) VALUES($1,$2,FALSE)",
-      [contextId, fixture.propertyId],
-    );
-    await fixture.observer.query("BEGIN");
-    await fixture.observer.query(
-      "SELECT id FROM booking.affiliate_click_contexts WHERE id=$1 FOR UPDATE",
-      [contextId],
-    );
-    await fixture.observer.query(
-      `INSERT INTO booking.affiliate_click_admissions
-         (context_id,property_id,click_id,history_position) VALUES($1,$2,$3,1)`,
-      [contextId, fixture.propertyId, randomUUID()],
-    );
-    mockOwners(fixture);
-    vi.mocked(finishCurrentQuoteAcceptanceTime).mockImplementation(async (client) => {
-      await client.query(
-        "UPDATE platform.jobs SET run_after=clock_timestamp()+interval '1 day' WHERE queue_name='pms-reservation-handoff' AND property_id=$1",
-        [fixture.propertyId],
-      );
-      return new Date().toISOString();
-    });
-    const writing = writePricingAcceptance(fixture.pool, fixture.input, {
-      affiliateContextId: contextId,
-    });
-    let blocked = false;
-    for (let attempt = 0; attempt < 100; attempt++) {
-      if (fixture.writerPids[0]) {
-        blocked = await isBlocked(fixture.observer, fixture.writerPids[0]);
-        break;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-    await fixture.observer.query("COMMIT");
-    const result = await writing;
-    expect(blocked).toBe(true);
-    expect(result).toMatchObject({ kind: "accepted" });
-    expect(
-      (
-        await fixture.observer.query(
-          "SELECT context_id,history_cutoff,synthetic FROM booking.affiliate_original_booking_bindings WHERE booking_id=$1",
-          [result.bookingId],
-        )
-      ).rows[0],
-    ).toEqual({ context_id: contextId, history_cutoff: "1", synthetic: false });
-    await fixture.close();
-  }, 20_000);
-
-  it("does not create a booking binding from an empty live context", async () => {
-    const fixture = await setupFixture();
-    const contextId = randomUUID();
-    await fixture.observer.query(
-      "INSERT INTO booking.affiliate_click_contexts(id,property_id,synthetic) VALUES($1,$2,FALSE)",
-      [contextId, fixture.propertyId],
-    );
-    mockOwners(fixture);
-    await expect(
-      writePricingAcceptance(fixture.pool, fixture.input, { affiliateContextId: contextId }),
-    ).rejects.toMatchObject({ code: "conflict" });
-    expect(await snapshot(fixture.observer, fixture)).toMatchObject({
-      bookings: 0,
-      acceptances: 0,
-    });
-    await fixture.close();
-  });
-
-  it("ignores an expired live context after the booking writer locks it", async () => {
-    const fixture = await setupFixture();
-    const staleContextId = randomUUID();
-    const freshContextId = randomUUID();
-    await fixture.observer.query(
-      `INSERT INTO hotel_catalog.property_slugs(property_id,slug,purpose,status)
-       VALUES($1,'writer-test','canonical','active')`,
-      [fixture.propertyId],
-    );
-    for (const contextId of [staleContextId, freshContextId]) {
-      await fixture.observer.query(
-        "INSERT INTO booking.affiliate_click_contexts(id,property_id,synthetic) VALUES($1,$2,FALSE)",
-        [contextId, fixture.propertyId],
-      );
-    }
-    await fixture.observer.query(
-      `INSERT INTO booking.affiliate_click_admissions
-         (context_id,property_id,click_id,history_position,admitted_at)
-       VALUES($1,$2,$3,1,clock_timestamp()-interval '91 days')`,
-      [staleContextId, fixture.propertyId, randomUUID()],
-    );
-    await fixture.observer.query(
-      `INSERT INTO booking.affiliate_click_admissions
-         (context_id,property_id,click_id,history_position) VALUES($1,$2,$3,1)`,
-      [freshContextId, fixture.propertyId, randomUUID()],
-    );
-    await expect(
-      readBookingAffiliateContextForQuote(fixture.observer, "writer-test", staleContextId),
-    ).resolves.toBeNull();
-    await expect(
-      readBookingAffiliateContextForQuote(fixture.observer, "other-hotel", freshContextId),
-    ).resolves.toBeNull();
-    await expect(
-      readBookingAffiliateContextForQuote(fixture.observer, "writer-test", freshContextId),
-    ).resolves.toBe(freshContextId);
-    mockOwners(fixture);
-    vi.mocked(finishCurrentQuoteAcceptanceTime).mockImplementation(async (client) => {
-      await client.query(
-        "UPDATE platform.jobs SET run_after=clock_timestamp()+interval '1 day' WHERE queue_name='pms-reservation-handoff' AND property_id=$1",
-        [fixture.propertyId],
-      );
-      return new Date().toISOString();
-    });
-    const result = await writePricingAcceptance(fixture.pool, fixture.input, {
-      affiliateContextId: staleContextId,
-    });
-    expect(result).toMatchObject({ kind: "accepted" });
-    expect(
-      (
-        await fixture.observer.query(
-          "SELECT 1 FROM booking.affiliate_original_booking_bindings WHERE booking_id=$1",
-          [result.bookingId],
-        )
-      ).rowCount,
-    ).toBe(0);
     await fixture.close();
   });
 });
@@ -372,16 +205,10 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
     );
     try {
       await expect(
-        writePricingAcceptance(fixture.pool, fixture.input, undefined, { provider }),
+        writePricingAcceptance(fixture.pool, fixture.input, { provider }),
       ).rejects.toMatchObject({ code: "request_unavailable" });
       expect(createPaymentIntent).not.toHaveBeenCalled();
-      const result = await writePricingAcceptance(
-        fixture.pool,
-        fixture.input,
-        undefined,
-        { provider },
-        true,
-      );
+      const result = await writePricingAcceptance(fixture.pool, fixture.input, { provider }, true);
       expect(result).toMatchObject({ kind: "payment_required" });
       expect(createPaymentIntent).toHaveBeenCalledWith(
         expect.objectContaining({ captureMethod: "manual" }),
@@ -428,7 +255,7 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
       });
       expect(createPaymentIntent).not.toHaveBeenCalled();
 
-      const result = await writePricingAcceptance(fixture.pool, fixture.input, undefined, {
+      const result = await writePricingAcceptance(fixture.pool, fixture.input, {
         provider,
       });
       expect(result).toMatchObject({
@@ -486,7 +313,7 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
       ]);
       createPaymentIntent.mockClear();
       await expect(
-        writePricingAcceptance(fixture.pool, fixture.input, undefined, { provider }),
+        writePricingAcceptance(fixture.pool, fixture.input, { provider }),
       ).resolves.toMatchObject({
         kind: "payment_required",
         replayed: true,
@@ -595,7 +422,7 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
       const { fixture } = await cardFixture(stripeAccount!, stripeCurrency);
       const provider = createStripeBookingPaymentProvider({ secretKey: stripeKey! });
       try {
-        const required = (await writePricingAcceptance(fixture.pool, fixture.input, undefined, {
+        const required = (await writePricingAcceptance(fixture.pool, fixture.input, {
           provider,
         })) as {
           kind: string;
@@ -630,7 +457,7 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
         await expect(complete()).rejects.toMatchObject({ code: "pending" });
         // A retried acceptance returns the same open payment, not a second one.
         await expect(
-          writePricingAcceptance(fixture.pool, fixture.input, undefined, { provider }),
+          writePricingAcceptance(fixture.pool, fixture.input, { provider }),
         ).resolves.toMatchObject({
           kind: "payment_required",
           payment: { paymentIntentId: required.payment.paymentIntentId },
@@ -669,7 +496,7 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
       const { fixture } = await cardFixture(stripeAccount!, stripeCurrency);
       const provider = createStripeBookingPaymentProvider({ secretKey: stripeKey! });
       try {
-        const required = (await writePricingAcceptance(fixture.pool, fixture.input, undefined, {
+        const required = (await writePricingAcceptance(fixture.pool, fixture.input, {
           provider,
         })) as { bookingId: string; payment: { paymentIntentId: string } };
         const releaseRooms = vi.fn(async () => undefined);
@@ -717,7 +544,6 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
       const result = (await writePricingAcceptance(
         fixture.pool,
         fixture.input,
-        undefined,
         { provider },
         true,
       )) as { bookingId: string; bookingReference: string };
@@ -786,7 +612,7 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
         hostResponseDeadlineAt: authorized.hostResponseDeadlineAt,
       });
       await expect(
-        writePricingAcceptance(fixture.pool, fixture.input, undefined, { provider }, true),
+        writePricingAcceptance(fixture.pool, fixture.input, { provider }, true),
       ).resolves.toMatchObject({ kind: "replayed", bookingId: result.bookingId });
     } finally {
       await fixture.close();
@@ -803,7 +629,6 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
       const accepted = (await writePricingAcceptance(
         fixture.pool,
         fixture.input,
-        undefined,
         { provider },
         true,
       )) as { bookingId: string; bookingReference: string };
@@ -814,7 +639,7 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
         status: "requires_capture",
       });
       await expect(
-        writePricingAcceptance(fixture.pool, fixture.input, undefined, { provider }, true),
+        writePricingAcceptance(fixture.pool, fixture.input, { provider }, true),
       ).resolves.toMatchObject({ kind: "replayed", bookingId: accepted.bookingId });
       const state = (
         await fixture.observer.query(
@@ -828,7 +653,7 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
       ]);
       // The next retry is a plain replay too, and records nothing twice.
       await expect(
-        writePricingAcceptance(fixture.pool, fixture.input, undefined, { provider }, true),
+        writePricingAcceptance(fixture.pool, fixture.input, { provider }, true),
       ).resolves.toMatchObject({ kind: "replayed" });
       expect(
         (
@@ -885,7 +710,6 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
       const accepted = (await writePricingAcceptance(
         fixture.pool,
         fixture.input,
-        undefined,
         { provider },
         true,
       )) as { bookingId: string; bookingReference: string };
@@ -992,7 +816,6 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
     const accepted = (await writePricingAcceptance(
       card.fixture.pool,
       card.fixture.input,
-      undefined,
       { provider },
       true,
     )) as { bookingId: string; bookingReference: string };
@@ -1302,7 +1125,7 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
         "INSERT INTO hotel_catalog.property_locations(property_id,timezone) VALUES($1,'Europe/Rome')",
         [fixture.propertyId],
       );
-      const accepted = (await writePricingAcceptance(fixture.pool, fixture.input, undefined, {
+      const accepted = (await writePricingAcceptance(fixture.pool, fixture.input, {
         provider,
       })) as { bookingId: string; bookingReference: string };
       const intent = {
@@ -1370,7 +1193,6 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
       const accepted = (await writePricingAcceptance(
         fixture.pool,
         fixture.input,
-        undefined,
         { provider },
         true,
       )) as { bookingId: string; bookingReference: string };
@@ -1422,7 +1244,7 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
   it("expires an unpaid card booking at its deadline, releases the rooms and never replays it as accepted", async () => {
     const { fixture, provider, retrievePaymentIntent, cancelPaymentIntent } = await cardFixture();
     try {
-      const accepted = (await writePricingAcceptance(fixture.pool, fixture.input, undefined, {
+      const accepted = (await writePricingAcceptance(fixture.pool, fixture.input, {
         provider,
       })) as { bookingId: string; bookingReference: string };
       const intent = await retrievePaymentIntent();
@@ -1464,7 +1286,7 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
       ).rows[0];
       expect(state).toEqual({ lifecycle_status: "expired", payment: "canceled", jobs: 0 });
       await expect(
-        writePricingAcceptance(fixture.pool, fixture.input, undefined, { provider }),
+        writePricingAcceptance(fixture.pool, fixture.input, { provider }),
       ).rejects.toMatchObject({ code: "conflict" });
       await expect(writePricingAcceptance(fixture.pool, fixture.input)).rejects.toMatchObject({
         code: "conflict",
@@ -1477,7 +1299,7 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
   it("settles a card acceptance through the legacy Stripe settlement without the legacy PMS job", async () => {
     const { fixture, provider } = await cardFixture();
     try {
-      await writePricingAcceptance(fixture.pool, fixture.input, undefined, { provider });
+      await writePricingAcceptance(fixture.pool, fixture.input, { provider });
       const client = await fixture.pool.connect();
       try {
         await client.query("BEGIN");
@@ -1542,13 +1364,7 @@ describe.skipIf(!url)("pricing acceptance writer requests (PostgreSQL)", () => {
         assigned: 0,
       });
 
-      const requested = await writePricingAcceptance(
-        fixture.pool,
-        fixture.input,
-        undefined,
-        undefined,
-        true,
-      );
+      const requested = await writePricingAcceptance(fixture.pool, fixture.input, undefined, true);
       if (requested.kind !== "requested") throw new Error(`unexpected ${requested.kind}`);
       expect(requested.bookingReference).toMatch(/^VAY-[A-Z0-9]{32}$/);
       const window =
@@ -1601,7 +1417,7 @@ describe.skipIf(!url)("pricing acceptance writer requests (PostgreSQL)", () => {
       expect(jobs.map((job) => job.job_type)).not.toContain("email.booking-final-confirmation");
 
       await expect(
-        writePricingAcceptance(fixture.pool, fixture.input, undefined, undefined, true),
+        writePricingAcceptance(fixture.pool, fixture.input, undefined, true),
       ).resolves.toMatchObject({ kind: "replayed", bookingId: requested.bookingId });
       await expect(snapshot(fixture.observer, fixture)).resolves.toMatchObject({
         bookings: 1,
@@ -1644,13 +1460,7 @@ describe.skipIf(!url)("pricing acceptance writer requests (PostgreSQL)", () => {
       vi.mocked(finishCurrentQuoteAcceptanceTime).mockImplementation(async () =>
         new Date().toISOString(),
       );
-      const requested = await writePricingAcceptance(
-        fixture.pool,
-        fixture.input,
-        undefined,
-        undefined,
-        true,
-      );
+      const requested = await writePricingAcceptance(fixture.pool, fixture.input, undefined, true);
       // After the deadline the request is no longer the hotel's to accept.
       await fixture.observer.query(
         `UPDATE booking.guest_bookings SET booking_metadata=jsonb_set(booking_metadata,
@@ -1745,13 +1555,7 @@ describe.skipIf(!url)("pricing acceptance writer requests (PostgreSQL)", () => {
       vi.mocked(finishCurrentQuoteAcceptanceTime).mockImplementation(async () =>
         new Date().toISOString(),
       );
-      const requested = await writePricingAcceptance(
-        fixture.pool,
-        fixture.input,
-        undefined,
-        undefined,
-        true,
-      );
+      const requested = await writePricingAcceptance(fixture.pool, fixture.input, undefined, true);
       await fixture.observer.query(
         "INSERT INTO identity.users (id,email,status) VALUES ($1,$2,'active')",
         [actorUserId, `${actorUserId}@example.test`],
@@ -1799,13 +1603,7 @@ describe.skipIf(!url)("pricing acceptance writer requests (PostgreSQL)", () => {
         "INSERT INTO hotel_catalog.property_locations(property_id,timezone) VALUES($1,'Europe/Rome')",
         [fixture.propertyId],
       );
-      const requested = await writePricingAcceptance(
-        fixture.pool,
-        fixture.input,
-        undefined,
-        undefined,
-        true,
-      );
+      const requested = await writePricingAcceptance(fixture.pool, fixture.input, undefined, true);
       const { released } = await withdrawAsGuest(fixture, slug, requested.bookingId);
       expect(released).toEqual([
         parsePmsInventoryReservationBundle(acceptanceFixture().inventory_reservation_bundle),
@@ -1860,13 +1658,7 @@ describe.skipIf(!url)("pricing acceptance writer requests (PostgreSQL)", () => {
         "INSERT INTO hotel_catalog.property_locations(property_id,timezone) VALUES($1,'Europe/Rome')",
         [fixture.propertyId],
       );
-      const requested = await writePricingAcceptance(
-        fixture.pool,
-        fixture.input,
-        undefined,
-        undefined,
-        true,
-      );
+      const requested = await writePricingAcceptance(fixture.pool, fixture.input, undefined, true);
       if (requested.kind !== "requested") throw new Error(`unexpected ${requested.kind}`);
       const deadline = new Date(requested.hostResponseDeadlineAt!);
       const sweep = (now: Date) =>
@@ -2049,8 +1841,8 @@ describe.skipIf(!url)("pricing acceptance writer bank transfer and PayPal (Postg
         new Date().toISOString(),
       );
       await finance(fixture, "bank_transfer");
-      const accept = (manual?: Parameters<typeof writePricingAcceptance>[5]) =>
-        writePricingAcceptance(fixture.pool, fixture.input, undefined, undefined, false, manual);
+      const accept = (manual?: Parameters<typeof writePricingAcceptance>[4]) =>
+        writePricingAcceptance(fixture.pool, fixture.input, undefined, false, manual);
       // Off, or on without the bank-details binding: unavailable, nothing written.
       for (const manual of [undefined, {}])
         await expect(accept(manual)).rejects.toMatchObject({ code: "manual_unavailable" });
@@ -2151,7 +1943,7 @@ describe.skipIf(!url)("pricing acceptance writer bank transfer and PayPal (Postg
       );
       await finance(fixture, "paypal", { paypalEmail: "not an email" });
       const accept = () =>
-        writePricingAcceptance(fixture.pool, fixture.input, undefined, undefined, false, {});
+        writePricingAcceptance(fixture.pool, fixture.input, undefined, false, {});
       // The hotel's PayPal email went bad after the quote: a conflict, nothing written.
       await expect(accept()).rejects.toMatchObject({ code: "conflict" });
       await expect(snapshot(fixture.observer, fixture)).resolves.toMatchObject({ bookings: 0 });
@@ -2195,7 +1987,7 @@ describe.skipIf(!url)("pricing acceptance writer bank transfer and PayPal (Postg
       );
       await finance(bankFixture, "bank_transfer");
       await expect(
-        writePricingAcceptance(bankFixture.pool, bankFixture.input, undefined, undefined, false, {
+        writePricingAcceptance(bankFixture.pool, bankFixture.input, undefined, false, {
           bankTransfers: bankOperations(),
         }),
       ).rejects.toMatchObject({ code: "manual_unavailable" });
@@ -2219,7 +2011,6 @@ describe.skipIf(!url)("pricing acceptance writer bank transfer and PayPal (Postg
       const pending = await writePricingAcceptance(
         paypalFixture.pool,
         paypalFixture.input,
-        undefined,
         undefined,
         false,
         {},
@@ -2294,14 +2085,9 @@ describe.skipIf(!url)("pricing acceptance writer bank transfer and PayPal (Postg
       );
       await finance(fixture, "bank_transfer");
       // The sweep dates revenue corrections in the hotel's timezone (Europe/Rome, from the fixture).
-      const pending = await writePricingAcceptance(
-        fixture.pool,
-        fixture.input,
-        undefined,
-        undefined,
-        false,
-        { bankTransfers: bank },
-      );
+      const pending = await writePricingAcceptance(fixture.pool, fixture.input, undefined, false, {
+        bankTransfers: bank,
+      });
       if (pending.kind !== "payment_pending" || !("acceptedAt" in pending))
         throw new Error(`unexpected ${pending.kind}`);
       const deadline = Date.parse(pending.payment.deadlineAt);
@@ -2334,7 +2120,7 @@ describe.skipIf(!url)("pricing acceptance writer bank transfer and PayPal (Postg
       expect(emails).toEqual(["email.booking-expired", "email.booking-host-payment-expired"]);
       // A retry of the guest's booking now is a conflict, not a confirmation.
       await expect(
-        writePricingAcceptance(fixture.pool, fixture.input, undefined, undefined, false, {
+        writePricingAcceptance(fixture.pool, fixture.input, undefined, false, {
           bankTransfers: bank,
         }),
       ).rejects.toMatchObject({ code: "conflict" });
@@ -2383,7 +2169,6 @@ describe.skipIf(!url)("pricing acceptance writer bank transfer and PayPal (Postg
       const pending = await writePricingAcceptance(
         fixture.pool,
         fixture.input,
-        undefined,
         undefined,
         false,
         {},
@@ -2490,14 +2275,9 @@ describe.skipIf(!url)("pricing acceptance writer bank transfer and PayPal (Postg
         new Date().toISOString(),
       );
       await finance(fixture, "bank_transfer");
-      const pending = await writePricingAcceptance(
-        fixture.pool,
-        fixture.input,
-        undefined,
-        undefined,
-        false,
-        { bankTransfers: bank },
-      );
+      const pending = await writePricingAcceptance(fixture.pool, fixture.input, undefined, false, {
+        bankTransfers: bank,
+      });
       const token = await issueTargetBookingConfirmationToken(
         fixture.observer,
         { guestBookingId: pending.bookingId, propertyId: fixture.propertyId },
@@ -2584,7 +2364,6 @@ describe.skipIf(!url)("pricing acceptance writer bank transfer and PayPal (Postg
         fixture.pool,
         fixture.input,
         undefined,
-        undefined,
         false,
         {},
       );
@@ -2608,7 +2387,7 @@ describe.skipIf(!url)("pricing acceptance writer bank transfer and PayPal (Postg
       expect(jobs.filter((job) => job.startsWith("pms."))).toEqual([]);
       // A retry of the guest's booking is now a conflict, not a confirmation.
       await expect(
-        writePricingAcceptance(fixture.pool, fixture.input, undefined, undefined, false, {}),
+        writePricingAcceptance(fixture.pool, fixture.input, undefined, false, {}),
       ).rejects.toMatchObject({ code: "conflict" });
     } finally {
       await actions.close();

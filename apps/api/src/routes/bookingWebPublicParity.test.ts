@@ -10,7 +10,6 @@ import {
 } from "@vayada/domain-distribution";
 import { BOOKING_WEB_ANALYTICS_CONSENT_VERSION } from "@vayada/domain-booking";
 import { randomUUID } from "node:crypto";
-import type { QueryResultRow } from "pg";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { buildApp } from "../app.js";
@@ -21,12 +20,6 @@ import {
   type BookingHotelProfileRow,
   type PublicHotelProfileRepository,
 } from "./aiHotels.js";
-import type {
-  BookingWebAffiliateRepository,
-  BookingWebAffiliateHotelResolverPool,
-  BookingWebAffiliateStripeConnectRequest,
-} from "./bookingWebAffiliate.js";
-import { createPgBookingWebAffiliateHotelResolver } from "./bookingWebAffiliate.js";
 import {
   createTargetBookingWebCheckoutAdapter,
   recordTargetCheckoutCommand,
@@ -694,26 +687,6 @@ describe("Booking Web public bootstrap parity", () => {
     await app.close();
   });
 
-  it("returns retired for public affiliate registration without a target repository", async () => {
-    const app = buildApp({
-      logger: false,
-      publicHotelProfileRepository: createProfileRepository(legacyHotel, {}),
-      bookingWebCheckoutAdapter: unusedBookingWebCheckoutAdapter,
-    });
-
-    const response = await app.inject({
-      method: "POST",
-      url: "/api/booking-web/hotels/hotel-alpenrose/affiliates",
-      payload: { email: "guest@example.com", fullName: "Guest Example" },
-    });
-
-    expect(response.statusCode).toBe(410);
-    expect(response.json()).toMatchObject({
-      code: "affiliate_enrollment_retired",
-    });
-    await app.close();
-  });
-
   it("preserves hotel page bootstrap fields across the target adapter", async () => {
     const app = buildParityApp({
       hotel: legacyHotel,
@@ -834,168 +807,6 @@ describe("Booking Web public bootstrap parity", () => {
       compareCalendarParity("calendar-unavailable-dates", legacyUnavailableDates, target),
     ).toEqual([]);
     expect(findForbiddenPublicBookabilityKeys(target)).toEqual([]);
-    await app.close();
-  });
-
-  it("retires public enrolment without writes while retaining existing Connect scope checks", async () => {
-    const affiliateRepository = new InMemoryAffiliateRepository();
-    const connect = vi.spyOn(affiliateRepository, "createStripeConnectLink");
-    const app = buildApp({
-      logger: false,
-      publicHotelProfileRepository: createProfileRepository(legacyHotel, {}),
-      bookingWebCheckoutAdapter: unusedBookingWebCheckoutAdapter,
-      bookingWebAffiliateRepository: affiliateRepository,
-    });
-
-    for (const request of [
-      {
-        method: "GET" as const,
-        url: "/api/booking-web/hotels/hotel-alpenrose/affiliates/check-email?email=creator@example.com",
-      },
-      {
-        method: "POST" as const,
-        url: "/api/booking-web/hotels/hotel-alpenrose/affiliates",
-        payload: { fullName: "Creator Example", email: "creator@example.com" },
-      },
-    ]) {
-      const response = await app.inject(request);
-      expect(response.statusCode).toBe(410);
-      expect(response.json()).toMatchObject({ code: "affiliate_enrollment_retired" });
-      expect(response.headers["cache-control"]).toBe("no-store");
-    }
-    expect(connect).not.toHaveBeenCalled();
-    expect(affiliateRepository.identityCount).toBe(0);
-
-    // Seed a pre-existing identity directly; public enrolment is no longer a fixture factory.
-    const affiliate = { id: "aff_existing", email: "creator@example.com", slug: "hotel-alpenrose" };
-    affiliateRepository.seedExisting(affiliate);
-    const firstConnect = await app.inject({
-      method: "POST",
-      url: `/api/booking-web/hotels/hotel-alpenrose/affiliates/${affiliate.id}/stripe/connect`,
-      payload: { email: "creator@example.com" },
-    });
-    const wrongEmailConnect = await app.inject({
-      method: "POST",
-      url: `/api/booking-web/hotels/hotel-alpenrose/affiliates/${affiliate.id}/stripe/connect`,
-      payload: { email: "other@example.com" },
-    });
-    const wrongSlugConnect = await app.inject({
-      method: "POST",
-      url: `/api/booking-web/hotels/legacy-alpenrose/affiliates/${affiliate.id}/stripe/connect`,
-      payload: { email: "creator@example.com" },
-    });
-    const secondConnect = await app.inject({
-      method: "POST",
-      url: `/api/booking-web/hotels/hotel-alpenrose/affiliates/${affiliate.id}/stripe/connect`,
-      payload: { email: "creator@example.com" },
-    });
-
-    expect(wrongEmailConnect.statusCode).toBe(404);
-    expect(wrongSlugConnect.statusCode).toBe(404);
-    expect(firstConnect.statusCode).toBe(503);
-    expect(secondConnect.statusCode).toBe(503);
-    expect(firstConnect.json()).toEqual(secondConnect.json());
-    expect(firstConnect.json()).toEqual({
-      error: "Service Unavailable",
-      message: "Stripe Connect onboarding is not configured.",
-      statusCode: 503,
-    });
-    expect(affiliateRepository.identityCount).toBe(1);
-    expect(affiliateRepository.stripeAccountCount).toBe(0);
-    await app.close();
-  });
-
-  it("mounts target-owned affiliate routes with an explicit target hotel resolver", async () => {
-    const app = buildApp({
-      logger: false,
-      bookingWebAffiliateRepository: new InMemoryAffiliateRepository(),
-      bookingWebAffiliateHotelResolver: createProfileRepository(legacyHotel, {}),
-    });
-
-    const response = await app.inject({
-      method: "GET",
-      url: "/api/booking-web/hotels/hotel-alpenrose/affiliates/check-email?email=creator%40example.com",
-    });
-
-    expect(response.statusCode).toBe(410);
-    expect(response.json()).toMatchObject({ code: "affiliate_enrollment_retired" });
-    await app.close();
-  });
-
-  it("fails public affiliate registration closed when the property module is inactive", async () => {
-    const affiliateRepository = new InMemoryAffiliateRepository();
-    const app = buildApp({
-      logger: false,
-      bookingWebAffiliateRepository: affiliateRepository,
-      bookingWebAffiliateHotelResolver: {
-        async findProfileBySlug() {
-          return { hotel: { capabilities: { referralCodes: false } } };
-        },
-      },
-    });
-
-    const response = await app.inject({
-      method: "POST",
-      url: "/api/booking-web/hotels/hotel-alpenrose/affiliates",
-      payload: { fullName: "Creator Example", email: "creator@example.com" },
-    });
-
-    expect(response.statusCode).toBe(410);
-    expect(affiliateRepository.identityCount).toBe(0);
-    await app.close();
-  });
-
-  it.each([
-    { name: "PMS ownership only", pms: true, booking: false, expected: false },
-    { name: "Booking ownership only", pms: false, booking: true, expected: false },
-    { name: "both ownership links", pms: true, booking: true, expected: true },
-  ])("requires both ownership links in the direct PG resolver: $name", async (ownership) => {
-    let sql = "";
-    const pool: BookingWebAffiliateHotelResolverPool = {
-      async query<Row extends QueryResultRow>(text: string) {
-        sql = text;
-        return {
-          rows: [
-            {
-              referralCodes: ownership.pms && ownership.booking,
-            } as unknown as Row,
-          ],
-        };
-      },
-      async end() {},
-    };
-    const resolver = createPgBookingWebAffiliateHotelResolver({
-      connectionString: "postgresql://unused",
-      pool,
-    });
-
-    await expect(resolver.findProfileBySlug("hotel-alpenrose")).resolves.toEqual({
-      hotel: { capabilities: { referralCodes: ownership.expected } },
-    });
-    expect(sql).toContain("FROM identity.organization_resource_links pms_resource");
-    expect(sql).toContain("pms_resource.product = 'pms'");
-    expect(sql).toContain("pms_resource.resource_type = 'pms_property'");
-    expect(sql).toContain("FROM identity.organization_resource_links booking_resource");
-    expect(sql).toContain("booking_resource.product = 'booking'");
-    expect(sql).toContain("booking_resource.resource_type = 'booking_hotel'");
-  });
-
-  it("fails closed for target-owned affiliate routes without a hotel resolver", async () => {
-    const app = buildApp({
-      logger: false,
-      bookingWebAffiliateRepository: new InMemoryAffiliateRepository(),
-    });
-
-    const response = await app.inject({
-      method: "POST",
-      url: "/api/booking-web/hotels/hotel-alpenrose/affiliates",
-      payload: {
-        fullName: "Creator Example",
-        email: "creator@example.com",
-      },
-    });
-
-    expect(response.statusCode).toBe(404);
     await app.close();
   });
 
@@ -1471,12 +1282,10 @@ describe("Booking Web public bootstrap parity", () => {
           fingerprint: "c".repeat(64),
           occurredAt: new Date("2026-09-01T10:00:00.000Z"),
         },
-        "aa29a9d9-9ca4-4931-9ef5-4d41e9a9cc41",
       ),
     ).resolves.toEqual(replayBody);
     expect(calls.some((text) => text.includes("FROM booking.quote_sessions"))).toBe(false);
     expect(calls.some((text) => text.includes("INSERT INTO booking.guest_bookings"))).toBe(false);
-    expect(calls.some((text) => text.includes("booking.affiliate_click_contexts"))).toBe(false);
     expect(calls.some((text) => text.includes("INSERT INTO platform.jobs"))).toBe(false);
   });
 
@@ -2210,59 +2019,6 @@ function buildParityApp(config: {
     bookingWebCheckoutAdapter: unusedBookingWebCheckoutAdapter,
     bookingWebPublicNow: () => new Date("2026-06-06T11:00:00.000Z"),
   });
-}
-
-class InMemoryAffiliateRepository implements BookingWebAffiliateRepository {
-  private readonly affiliates = new Map<
-    string,
-    {
-      id: string;
-      referralCode: string;
-      email: string;
-      slug: string;
-      stripeAccountId?: string;
-      onboardingUrl?: string;
-    }
-  >();
-
-  get identityCount(): number {
-    return this.affiliates.size;
-  }
-
-  get stripeAccountCount(): number {
-    return Array.from(this.affiliates.values()).filter((affiliate) => affiliate.stripeAccountId)
-      .length;
-  }
-
-  seedExisting(affiliate: { id: string; email: string; slug: string }): void {
-    this.affiliates.set(this.key(affiliate.slug, affiliate.email), {
-      ...affiliate,
-      referralCode: "EXISTING-REFERRAL",
-    });
-  }
-
-  async createStripeConnectLink(
-    slug: string,
-    affiliateId: string,
-    request: BookingWebAffiliateStripeConnectRequest,
-  ): Promise<{ onboardingUrl: string }> {
-    const email = request.email?.toLowerCase() ?? "";
-    const affiliate = Array.from(this.affiliates.values()).find(
-      (item) => item.id === affiliateId && item.email === email && item.slug === slug.toLowerCase(),
-    );
-    if (!affiliate || !email) {
-      throw Object.assign(new Error("Affiliate not found for this hotel and email."), {
-        statusCode: 404,
-      });
-    }
-    throw Object.assign(new Error("Stripe Connect onboarding is not configured."), {
-      statusCode: 503,
-    });
-  }
-
-  private key(slug: string, email: string): string {
-    return `${slug.toLowerCase()}:${email.toLowerCase()}`;
-  }
 }
 
 function changeRequestPayload(): Record<string, unknown> {

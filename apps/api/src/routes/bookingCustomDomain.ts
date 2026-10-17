@@ -3,8 +3,15 @@ import { AuthorizationError, type PropertyAccessRepository } from "@vayada/backe
 import pg from "pg";
 import type { QueryResult, QueryResultRow } from "pg";
 
-import { affiliateDestinationSafetyLockKey } from "../domains/bookingAffiliateDestinationSafetyLock.js";
 import { enforcePropertyRoutePolicy, enforceRoutePolicy } from "./policy.js";
+
+/**
+ * Advisory lock key for a property's custom-domain writes. The name is historical (it was shared
+ * with the retired affiliate destination writes); it stays so lock behaviour does not change.
+ */
+export function bookingCustomDomainLockKey(propertyId: string): string {
+  return `booking-affiliate-destination-safety:${propertyId.toLowerCase()}`;
+}
 
 export type BookingCustomDomainStatus = "not_configured" | "pending" | "verified" | "failed";
 export type BookingCustomDomainSslStatus = "not_configured" | "pending" | "active" | "failed";
@@ -222,7 +229,7 @@ export function createTargetBookingCustomDomainRepository(config: {
            verification_status AS "verificationStatus",
            verified_at AS "verifiedAt",
            updated_at AS "updatedAt"`,
-        [propertyId, normalizedDomain, affiliateDestinationSafetyLockKey(propertyId)],
+        [propertyId, normalizedDomain, bookingCustomDomainLockKey(propertyId)],
       );
 
       if (!result.rows[0]) {
@@ -253,7 +260,7 @@ export function createTargetBookingCustomDomainRepository(config: {
          )
          SELECT scoped_property.property_id::text AS "propertyId"
          FROM scoped_property, safety_lock`,
-        [propertyId, affiliateDestinationSafetyLockKey(propertyId)],
+        [propertyId, bookingCustomDomainLockKey(propertyId)],
       );
 
       return Boolean(result.rows[0]);

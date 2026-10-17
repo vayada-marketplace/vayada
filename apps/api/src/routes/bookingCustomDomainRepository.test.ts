@@ -1,7 +1,7 @@
 import type { QueryResultRow } from "pg";
 import { describe, expect, it } from "vitest";
-import { affiliateDestinationSafetyLockKey } from "../domains/bookingAffiliateDestinationSafetyLock.js";
 import {
+  bookingCustomDomainLockKey,
   createTargetBookingCustomDomainRepository,
   type BookingCustomDomainPool,
 } from "./bookingCustomDomain.js";
@@ -9,7 +9,7 @@ import {
 const propertyId = "15060000-0000-4000-8000-000000000001";
 
 describe("target booking custom-domain repository", () => {
-  it("serializes domain upsert and deletion with affiliate destination approval", async () => {
+  it("serializes domain upsert and deletion under the property's custom-domain lock", async () => {
     const queries: Array<{ text: string; values?: readonly unknown[] }> = [];
     const pool: BookingCustomDomainPool = {
       async query<T extends QueryResultRow = QueryResultRow>(
@@ -42,7 +42,7 @@ describe("target booking custom-domain repository", () => {
     await repository.upsertForPropertyId(propertyId, "book.hotel.example");
     await repository.deleteForPropertyId(propertyId);
 
-    const lockKey = affiliateDestinationSafetyLockKey(propertyId);
+    const lockKey = bookingCustomDomainLockKey(propertyId);
     expect(queries[2]!.text).toContain("pg_advisory_xact_lock(hashtextextended($3,0))");
     expect(queries[2]!.values).toEqual([propertyId, "book.hotel.example", lockKey]);
     expect(queries[3]!.text).toContain("pg_advisory_xact_lock(hashtextextended($2,0))");

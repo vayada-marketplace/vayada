@@ -292,10 +292,6 @@ import {
   startBookingWebEventRetentionWorker,
 } from "./jobs/bookingWebEventRetention.js";
 import { createTargetPublicHotelProfileRepository } from "./routes/aiHotels.js";
-import {
-  createPgBookingWebAffiliateHotelResolver,
-  createPgBookingWebAffiliateRepository,
-} from "./routes/bookingWebAffiliate.js";
 import { createPgTargetBookingAddonItemsRepository } from "./routes/bookingAddonItems.js";
 import { createPgTargetBookingPromoCodesRepository } from "./routes/bookingPromoCodes.js";
 import { promotePulledChannexBookingRevision } from "./routes/providerWebhooks.js";
@@ -931,19 +927,6 @@ const channexUploadReconciliationPool =
         connectionString: channexManagementDatabase.reconciliation,
         max: 2,
         connectionTimeoutMillis: 5_000,
-      })
-    : undefined;
-const bookingWebAffiliateRepository =
-  config.affiliatePublicSource === "target"
-    ? createPgBookingWebAffiliateRepository({
-        connectionString: targetDatabaseUrl,
-      })
-    : undefined;
-
-const bookingWebAffiliateHotelResolver =
-  config.affiliatePublicSource === "target"
-    ? createPgBookingWebAffiliateHotelResolver({
-        connectionString: targetDatabaseUrl,
       })
     : undefined;
 
@@ -2213,8 +2196,6 @@ const app = buildApp({
           connectionString: targetDatabaseUrl,
         })
       : undefined,
-  bookingWebAffiliateHotelResolver,
-  bookingWebAffiliateRepository,
   platformMedia: platformMediaRuntime
     ? {
         ...platformMediaRuntime.routes,

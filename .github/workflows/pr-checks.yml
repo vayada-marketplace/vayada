@@ -792,36 +792,6 @@ jobs:
           npm --workspace vayada-api run test --
           --no-file-parallelism
           src/marketplaceCollaborations.test.ts
-          src/domains/affiliateDiscrepancyRepository.integration.test.ts
-          src/domains/bookingAffiliateDestinationSave.integration.test.ts
-          src/domains/bookingAffiliateReferralTransportCertificationStorage.integration.test.ts
-          src/domains/bookingAffiliateReferralTransportCertification.integration.test.ts
-          src/domains/bookingAffiliateReferralProductionPreflightStorage.integration.test.ts
-          src/domains/bookingAffiliateReferralProductionPreflight.integration.test.ts
-          src/domains/bookingAffiliateReferralReadiness.integration.test.ts
-          src/domains/bookingAffiliateDestinationTrackingReadiness.integration.test.ts
-          src/domains/bookingAffiliateNativeDestinationSafety.integration.test.ts
-          src/domains/bookingAffiliateSourceCapabilityEvidenceStorage.integration.test.ts
-          src/domains/bookingAffiliateSourceCapabilityCertification.integration.test.ts
-          src/domains/bookingAffiliateSourceCapabilityProductionPreflight.integration.test.ts
-          src/domains/marketplaceAffiliateDraftCommand.integration.test.ts
-          src/domains/marketplaceAffiliatePublicationPrerequisites.test.ts
-          src/domains/marketplaceAffiliatePublication.integration.test.ts
-          src/domains/marketplaceAffiliatePublicationStorage.integration.test.ts
-          src/domains/marketplaceAffiliateAssentStorage.integration.test.ts
-          src/domains/marketplaceAffiliateAgreementActivationStorage.integration.test.ts
-          src/domains/marketplaceAffiliateLinkStorage.integration.test.ts
-          src/domains/marketplaceAffiliateLinkCreation.integration.test.ts
-          src/domains/marketplaceAffiliateAgreementActivation.integration.test.ts
-          src/domains/marketplaceAffiliateAgreementLifecycleCommand.integration.test.ts
-          src/domains/marketplaceAffiliateAssentCommand.integration.test.ts
-          src/domains/marketplaceAffiliateAssentRead.integration.test.ts
-          src/domains/marketplaceAffiliateCollaborationRead.integration.test.ts
-          src/domains/pmsAffiliateCompletionEvidence.integration.test.ts
-          src/domains/financeAffiliatePercentagePolicySave.integration.test.ts
-          src/domains/financeAffiliateEarningJournalStorage.integration.test.ts
-          src/domains/financeAffiliateEarningJournal.integration.test.ts
-          src/domains/financeAffiliatePercentagePolicyResolver.test.ts
           src/domains/pmsLinkedInventoryGroupRepository.integration.test.ts
           src/domains/pmsRoomFactsCommandRepository.integration.test.ts
           src/domains/pmsRoomOperatingEligibility.integration.test.ts

@@ -188,11 +188,6 @@ import {
 } from "./routes/bookingWebExchangeRates.js";
 import type { BookingHotelChangeRequestRepository } from "./routes/bookingChangeRequests.js";
 import {
-  registerBookingWebAffiliateRoutes,
-  type BookingWebAffiliateHotelResolver,
-  type BookingWebAffiliateRepository,
-} from "./routes/bookingWebAffiliate.js";
-import {
   registerFinanceRoutes,
   registerPmsFinanceCompatibilityRoutes,
   type FinancePublicHotelPropertyResolver,
@@ -471,11 +466,6 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   identityPrivacyAllowedOrigins?: string[];
   bookingWebCalendarRepository?: BookingWebCalendarRepository;
   bookingWebCheckoutAdapter?: BookingWebCheckoutAdapter;
-  bookingWebAffiliateHotelResolver?: BookingWebAffiliateHotelResolver;
-  bookingWebAffiliateRepository?: BookingWebAffiliateRepository;
-  bookingWebAffiliateArrival?: BookingWebPublicRoutesOptions["affiliateArrival"];
-  /** Separate release gate: the Booking writer credential must be proven first. */
-  bookingWebAffiliateContextBindingEnabled?: boolean;
   bookingWebAttributionSink?: BookingWebAttributionSink;
   bookingWebPublicNow?: BookingWebPublicRoutesOptions["now"];
   bookingWebDisplayRates?: BookingWebDisplayRates;
@@ -590,11 +580,6 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       quoteRepository: options.publicHotelQuoteRepository,
       calendarRepository: options.bookingWebCalendarRepository,
       checkoutAdapter: bookingWebCheckoutAdapter,
-      affiliateContextBindingEnabled: options.bookingWebAffiliateContextBindingEnabled,
-      affiliateArrival: options.bookingWebAffiliateArrival,
-      affiliateHotelResolver:
-        options.bookingWebAffiliateHotelResolver ?? options.publicHotelProfileRepository,
-      affiliateRepository: options.bookingWebAffiliateRepository,
       attributionSink: options.bookingWebAttributionSink,
       now: options.bookingWebPublicNow,
     });
@@ -605,12 +590,6 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
         displayRates: options.bookingWebDisplayRates,
       });
     }
-  } else if (options.bookingWebAffiliateRepository && options.bookingWebAffiliateHotelResolver) {
-    app.register(registerBookingWebAffiliateRoutes, {
-      prefix: "/api/booking-web",
-      hotelResolver: options.bookingWebAffiliateHotelResolver,
-      repository: options.bookingWebAffiliateRepository,
-    });
   }
   if (options.marketplaceDiscoveryRepository) {
     app.register(registerMarketplaceDiscoveryRoutes, {
