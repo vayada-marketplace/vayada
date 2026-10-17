@@ -15,7 +15,6 @@ import {
 } from "./aiHotels.js";
 
 type CurrentPublicGatesRow = QueryResultRow & {
-  referralEnabled: boolean;
   promoCodes: boolean;
   latitude: number | null;
   longitude: number | null;
@@ -132,43 +131,10 @@ async function currentActiveProfile(
          WHEN geo_public AND map_display_mode='approximate' THEN round(longitude,2) END::double precision
          FROM hotel_catalog.property_locations WHERE property_id=$1::uuid
            AND latitude IS NOT NULL AND longitude IS NOT NULL) AS longitude,
-       EXISTS (
-         SELECT 1
-         FROM identity.product_entitlements entitlement
-         WHERE entitlement.product = 'pms'
-           AND entitlement.entitlement_key = 'module:affiliates'
-           AND entitlement.status = 'active'
-           AND entitlement.resource_product = 'pms'
-           AND entitlement.resource_type = 'pms_property'
-           AND entitlement.resource_id = $1::text
-           AND (entitlement.starts_at IS NULL OR entitlement.starts_at <= now())
-           AND (entitlement.expires_at IS NULL OR entitlement.expires_at > now())
-           AND EXISTS (
-             SELECT 1
-             FROM identity.organization_resource_links pms_resource
-             WHERE pms_resource.organization_id = entitlement.organization_id
-               AND pms_resource.product = 'pms'
-               AND pms_resource.resource_type = 'pms_property'
-               AND pms_resource.resource_id = $1::text
-               AND pms_resource.relationship IN ('owner', 'operator')
-               AND pms_resource.status = 'active'
-           )
-           AND EXISTS (
-             SELECT 1
-             FROM identity.organization_resource_links booking_resource
-             WHERE booking_resource.organization_id = entitlement.organization_id
-               AND booking_resource.product = 'booking'
-               AND booking_resource.resource_type = 'booking_hotel'
-               AND booking_resource.resource_id = $1::text
-               AND booking_resource.relationship IN ('owner', 'operator')
-               AND booking_resource.status = 'active'
-           )
-       ) AS "referralEnabled",
        ${LIVE_PROMO_CODES_SQL("$1::uuid")} AS "promoCodes"`,
     [row.propertyId],
   );
   const gates = result.rows[0];
-  const referralEnabled = gates?.referralEnabled === true;
   const branding = profile.hotel.branding;
   return {
     ...profile,
@@ -181,7 +147,7 @@ async function currentActiveProfile(
       },
       capabilities: {
         ...profile.hotel.capabilities,
-        referralCodes: profile.hotel.capabilities.referralCodes && referralEnabled,
+        referralCodes: false,
         // Live, not from the publication: the Promos switch (VAY-2200) and codes made later.
         promoCodes: gates?.promoCodes === true,
       },
@@ -189,7 +155,7 @@ async function currentActiveProfile(
         ? {
             branding: {
               ...branding,
-              showReferAGuestButton: branding.showReferAGuestButton === true && referralEnabled,
+              showReferAGuestButton: false,
             },
           }
         : {}),

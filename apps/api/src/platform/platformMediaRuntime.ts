@@ -1,12 +1,10 @@
-import type { MarketplaceCreatorProfileMediaRepository } from "../routes/marketplaceCreatorSelfService.js";
 import { syncPropertyOfferReadModels } from "../routes/marketplaceAdmin.js";
-import type { PlatformMediaRoutesOptions } from "../routes/platformMedia.js";
+import type {
+  ApprovedPublicProfileImageRepository,
+  PlatformMediaRoutesOptions,
+} from "../routes/platformMedia.js";
 import { createPgPlatformMediaCleanupStore } from "../jobs/platformMediaCleanup.js";
 import { createPgS3PropertyMediaCommandRepository } from "../domains/propertyMediaCommandRepository.js";
-import {
-  createPgS3MarketplaceOfferMediaPromotion,
-  type MarketplaceOfferMediaPromotionPort,
-} from "./marketplaceOfferMediaPromotion.js";
 import type { PlatformMediaServingConfig } from "./mediaServing.js";
 import { createPgPlatformMediaRepository } from "./platformMediaRepository.js";
 import {
@@ -27,14 +25,12 @@ export type PlatformMediaRuntimeInput = {
 export type PlatformMediaRuntimeFactories = {
   createRepository: typeof createPgPlatformMediaRepository;
   createAdapter: typeof createS3PlatformMediaAdapter;
-  createOfferMediaPromotion: typeof createPgS3MarketplaceOfferMediaPromotion;
   createCleanupStore: typeof createPgPlatformMediaCleanupStore;
   createPropertyMediaCommands: typeof createPgS3PropertyMediaCommandRepository;
 };
 
 export type PlatformMediaRuntime = {
-  profileMediaRepository: MarketplaceCreatorProfileMediaRepository;
-  offerMediaPromotion: MarketplaceOfferMediaPromotionPort;
+  profileMediaRepository: ApprovedPublicProfileImageRepository;
   collaborationAttachments: {
     repository: ReturnType<typeof createPgPlatformMediaRepository>;
     signer: PlatformMediaPrivateDownloadSigner;
@@ -54,7 +50,6 @@ export type PlatformMediaRuntime = {
 const productionFactories: PlatformMediaRuntimeFactories = {
   createRepository: createPgPlatformMediaRepository,
   createAdapter: createS3PlatformMediaAdapter,
-  createOfferMediaPromotion: createPgS3MarketplaceOfferMediaPromotion,
   createCleanupStore: createPgPlatformMediaCleanupStore,
   createPropertyMediaCommands: createPgS3PropertyMediaCommandRepository,
 };
@@ -75,10 +70,6 @@ export function composePlatformMediaRuntime(
     cdnBaseUrl: input.platformMediaServing.cdnBaseUrl,
     publicPathPrefix: input.platformMediaServing.publicPathPrefix,
     publicCacheControl: input.platformMediaServing.publicCacheControl,
-  });
-  const offerMediaPromotion = factories.createOfferMediaPromotion({
-    connectionString: input.targetDatabaseUrl,
-    serving: input.platformMediaServing,
   });
   const cleanupStore = factories.createCleanupStore({
     connectionString: input.targetDatabaseUrl,
@@ -106,7 +97,6 @@ export function composePlatformMediaRuntime(
 
   return {
     profileMediaRepository: repository,
-    offerMediaPromotion,
     collaborationAttachments: {
       repository,
       signer: adapter,
