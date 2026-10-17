@@ -53,6 +53,9 @@ export interface ApiError {
       }>;
   message?: string;
   details?: string[];
+  error?: string;
+  code?: string;
+  category?: string;
 }
 
 export class ApiErrorResponse extends Error {
