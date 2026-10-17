@@ -1,6 +1,6 @@
 import { createAdaptiveHotelSetupStatusMock } from "../support/sharedHotelSetupMocks";
 import { expect, test } from "@playwright/test";
-import { corsHeaders, fulfillCorsPreflight } from "./utils/cors";
+import { corsHeaders, fulfillCorsPreflight } from "../support/cors";
 const propertyId = "10090000-0000-4000-8000-000000000001";
 const path = `/setup/airbnb-connect/${propertyId}`;
 test.skip(process.env.E2E_AIRBNB_IMPORT_CALLBACK !== "1", "Airbnb preview is opt-in");

@@ -3529,13 +3529,84 @@ describe("AuthKit session routes", () => {
         origin: "https://marketplace.localhost",
         "x-vayada-csrf": "csrf-token",
       },
-      payload: { type: "creator", surface: "marketplace-web" },
+      payload: { type: "hotel", surface: "marketplace-web" },
     });
 
     expect(response.statusCode).toBe(200);
     expect(String(response.headers["set-cookie"])).toContain(
       "vayada_workos_session=creator-onboarding-refreshed-session",
     );
+  });
+
+  // VAY-2260: the Marketplace is closing. No surface accepts a creator sign-up any more.
+  it("refuses creator onboarding on the marketplace-web surface", async () => {
+    const createOrganization = vi.fn();
+    app = buildAuthSessionApp({
+      allowedOrigins: ["https://marketplace.localhost"],
+      authKitClient: createAuthKitClient({
+        async authenticateSession() {
+          return { ...session, organizationId: undefined };
+        },
+        createSignupOrganization: createOrganization,
+      }),
+      surfacePolicies: {
+        "marketplace-web": {
+          requiredOrganizationKind: ["creator_workspace", "hotel_group"],
+          allowMissingOrganization: true,
+        },
+      },
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/auth/onboarding",
+      headers: {
+        cookie: "vayada_workos_session=sealed-session; vayada_auth_csrf=csrf-token",
+        origin: "https://marketplace.localhost",
+        "x-vayada-csrf": "csrf-token",
+      },
+      payload: { type: "creator", surface: "marketplace-web" },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({
+      state: "auth_failed",
+      message: "Creator sign-ups are closed. The vayada Marketplace is no longer available.",
+    });
+    expect(createOrganization).not.toHaveBeenCalled();
+  });
+
+  it("refuses a creator Google sign-up on every surface", async () => {
+    const getAuthorizationUrl = vi.fn(() => "https://auth.workos.test/google");
+    for (const [surface, publicOrigin] of [
+      ["marketplace-web", "https://marketplace.localhost"],
+      ["booking-admin", "https://admin.booking.localhost"],
+      ["pms-web", "https://pms.localhost"],
+    ] as const) {
+      app = buildAuthSessionApp({
+        allowedOrigins: [publicOrigin],
+        authKitClient: createAuthKitClient({ getAuthorizationUrl }),
+        surfacePolicies: {
+          [surface]: { requiredOrganizationKind: "hotel_group", allowMissingOrganization: true },
+        },
+      });
+
+      const response = await app.inject({
+        method: "GET",
+        url:
+          `/auth/oauth/google/start?surface=${surface}&flow=signup&type=creator` +
+          `&return_to=${encodeURIComponent(`${publicOrigin}/login?auth=callback`)}`,
+        headers: { host: "api.localhost", "x-forwarded-proto": "https" },
+      });
+
+      expect(response.statusCode, surface).toBe(400);
+      expect(response.json()).toEqual({
+        error: "invalid_signup",
+        message: "Unsupported Google signup request.",
+      });
+      await app.close();
+    }
+    expect(getAuthorizationUrl).not.toHaveBeenCalled();
   });
 
   it("updates account details and profile media only for the signed-in user", async () => {

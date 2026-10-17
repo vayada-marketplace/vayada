@@ -8,7 +8,6 @@ import EasterEgg from "./EasterEgg";
 const NAV_LINKS = [
   { label: "Booking Engine", href: "/booking-engine" },
   { label: "PMS", href: "/pms" },
-  { label: "Hotel-Creator-Network", href: "/hotel-creator-network" },
   { label: "Pricing", href: "/pricing" },
   { label: "Partner Program", href: "/partner-program" },
 ];

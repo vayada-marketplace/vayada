@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { isPmsSetupExitPath, pmsSetupExitPath, pmsSetupExitPropertyId } from "./setupExit";
+import {
+  isPmsSetupExitPath,
+  isSetupExitPath,
+  pmsSetupExitPath,
+  pmsSetupExitPropertyId,
+  setupExitPath,
+  setupExitPropertyId,
+} from "./setupExit";
 
 describe("PMS setup exit routing", () => {
   it("lands a selected property on the dashboard", () => {
@@ -41,5 +48,13 @@ describe("PMS setup exit routing", () => {
         "https://attacker.example/dashboard?setup=incomplete&propertyId=property-1",
       ),
     ).toBeNull();
+  });
+
+  it("offers the same marker under product-neutral names for the Booking Admin host", () => {
+    expect(setupExitPath("property-1")).toBe(pmsSetupExitPath("property-1"));
+    expect(isSetupExitPath("/dashboard?setup=incomplete&propertyId=property-1")).toBe(true);
+    expect(setupExitPropertyId("/dashboard?setup=incomplete&propertyId=property-1")).toBe(
+      "property-1",
+    );
   });
 });
