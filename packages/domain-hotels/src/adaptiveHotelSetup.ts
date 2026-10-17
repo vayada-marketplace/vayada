@@ -7,6 +7,17 @@ export const SETUP_TRACK_COMPONENT_PRODUCTS = Object.freeze({
   creator_marketplace: Object.freeze(["marketplace"] as const),
 }) satisfies Record<SetupTrack, readonly string[]>;
 
+/**
+ * Tracks a hotel can still choose. The Creator Marketplace track is retired (VAY-2270): rows that
+ * still carry it are read as if it were absent until the data migration rewrites them.
+ */
+export const OFFERED_SETUP_TRACKS = Object.freeze(["hotel_operations"] as const);
+
+/** Reads stored track selections, dropping retired and unknown values in canonical order. */
+export function normalizeStoredSetupTracks(values: readonly unknown[]): SetupTrack[] {
+  return OFFERED_SETUP_TRACKS.filter((track) => values.includes(track));
+}
+
 export type UpdateTracksRequest = {
   selectedTracks: SetupTrack[];
   expectedRevision: number;

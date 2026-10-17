@@ -2,9 +2,11 @@ import { createHash } from "node:crypto";
 
 import type { RequestAuditMetadata } from "@vayada/backend-auth";
 import {
+  OFFERED_SETUP_TRACKS,
   SETUP_TRACKS,
   SETUP_TRACK_COMPONENT_PRODUCTS,
   isSetupTrack,
+  normalizeStoredSetupTracks,
   type SetupCommandError,
   type SetupComponentProduct,
   type SetupTrack,
@@ -13,11 +15,6 @@ import {
   type UpdateTracksResponse,
 } from "@vayada/domain-hotels";
 import pg, { type PoolClient } from "pg";
-
-import {
-  requireAuthorizedPlatformActor,
-  PlatformPropertyLifecycleError,
-} from "./platformPropertyLifecycleCommandRepository.js";
 
 import { hotelSetupTrackRequestFingerprint } from "./hotelSetupTrackCommandFingerprint.js";
 
@@ -30,7 +27,6 @@ export type HotelSetupTrackCommand = UpdateTracksRequest & {
   idempotencyKey: string;
   actorUserId: string;
   audit: RequestAuditMetadata;
-  adminActivation?: { platformOrganizationId: string; accountUserId: string; actorUserId: string };
 };
 
 export type HotelSetupTrackCommandResult =
@@ -83,7 +79,6 @@ type ComponentAccess = TrackStatus["components"][number]["access"];
 type ProvisioningState = {
   access: Record<SetupComponentProduct, ComponentAccess>;
   links: ProductLink[];
-  marketplaceProfileConflict: boolean;
 };
 
 const OPERATION = "hotel_setup.tracks.update";
@@ -114,35 +109,6 @@ export function createPgHotelSetupTrackCommandRepository(config: {
 
       try {
         await client.query("BEGIN");
-        if (command.adminActivation) {
-          await requireAuthorizedPlatformActor(
-            client,
-            {
-              actorUserId: command.actorUserId,
-              organizationId: command.adminActivation.platformOrganizationId,
-              requestId: command.audit.requestId,
-              correlationId: command.audit.correlationId ?? command.audit.requestId,
-              requestedAt: command.audit.receivedAt,
-            },
-            { lockRows: false },
-          );
-          const account = await client.query(
-            `SELECT membership.id FROM identity.organization_memberships membership
-             JOIN identity.users account ON account.id = membership.user_id AND account.status = 'active'
-             JOIN identity.organizations organization ON organization.id = membership.organization_id
-               AND organization.kind = 'hotel_group' AND organization.status = 'active'
-             WHERE membership.user_id = $1::uuid AND membership.organization_id = $2::uuid
-               AND membership.status = 'active'`,
-            [command.adminActivation.accountUserId, command.organizationId],
-          );
-          if (
-            account.rows.length !== 1 ||
-            command.adminActivation.actorUserId !== command.actorUserId
-          ) {
-            throw new PlatformPropertyLifecycleError("invalid_platform_scope");
-          }
-        }
-
         const replay = await findReplay(client, command, keyHash, fingerprint);
         if (replay) {
           await client.query("ROLLBACK");
@@ -223,6 +189,14 @@ async function executeCommand(
   now: Date,
 ): Promise<HotelSetupTrackCommandResult> {
   const currentRevision = previous?.revision ?? 0;
+  // The Creator Marketplace track is retired (VAY-2270); the route refuses it first.
+  if (
+    command.selectedTracks.some(
+      (track) => !(OFFERED_SETUP_TRACKS as readonly SetupTrack[]).includes(track),
+    )
+  ) {
+    return conflict("invalid_setup_request", currentRevision);
+  }
   if (command.expectedRevision !== currentRevision) {
     return conflict("track_revision_conflict", currentRevision);
   }
@@ -230,20 +204,11 @@ async function executeCommand(
     return conflict("track_removal_requires_service_management", currentRevision);
   }
 
-  if (
-    command.adminActivation &&
-    (!command.selectedTracks.includes("creator_marketplace") ||
-      command.selectedTracks.includes("hotel_operations") !==
-        (previous?.selectedTracks.includes("hotel_operations") ?? false))
-  )
-    throw new PlatformPropertyLifecycleError("invalid_platform_scope");
-
   const trackRevision = await persistIntent(client, command, previous);
   const catalogLinks = await loadCatalogLinks(client, command.organizationId);
   let state = await loadProvisioningState(client, command.organizationId, catalogLinks, now);
 
   for (const track of command.selectedTracks) {
-    if (command.adminActivation && track !== "creator_marketplace") continue;
     if (trackIsBlocked(track, state, catalogLinks)) continue;
     const missingEntitlements = SETUP_TRACK_COMPONENT_PRODUCTS[track].filter(
       (product) => state.access[product] === "absent",
@@ -258,13 +223,7 @@ async function executeCommand(
   const activeTracks = command.selectedTracks.filter((track) =>
     trackIsActive(track, state, catalogLinks),
   );
-  await initializeProductRecords(
-    client,
-    command.organizationId,
-    command.adminActivation
-      ? activeTracks.filter((track) => track === "creator_marketplace")
-      : activeTracks,
-  );
+  await initializeProductRecords(client, command.organizationId, activeTracks);
   const response = trackStatusResponse(
     { selectedTracks: command.selectedTracks, revision: trackRevision },
     state,
@@ -313,7 +272,9 @@ async function loadIntent(
      ${forUpdate ? "FOR UPDATE" : ""}`,
     [organizationId],
   );
-  return result.rows[0] ?? null;
+  const row = result.rows[0];
+  // Stored selections may still name the retired Creator Marketplace track (VAY-2270).
+  return row ? { ...row, selectedTracks: normalizeStoredSetupTracks(row.selectedTracks) } : null;
 }
 
 async function persistIntent(
@@ -429,15 +390,6 @@ async function loadProvisioningState(
      ${forUpdate ? "FOR UPDATE" : ""}`,
     [organizationId, COMPONENT_PRODUCTS],
   );
-  const marketplaceProfileConflicts = await client.query(
-    `SELECT profile.property_id
-     FROM marketplace.marketplace_hotel_profiles profile
-     WHERE profile.property_id = ANY($2::uuid[])
-       AND profile.organization_id <> $1::uuid
-     ${forUpdate ? "FOR UPDATE" : ""}`,
-    [organizationId, catalogLinks.map((link) => link.propertyId)],
-  );
-
   const access = Object.fromEntries(
     COMPONENT_PRODUCTS.map((product) => [
       product,
@@ -452,7 +404,6 @@ async function loadProvisioningState(
           catalog.propertyId === link.propertyId && catalog.relationship === link.relationship,
       ),
     ),
-    marketplaceProfileConflict: (marketplaceProfileConflicts.rowCount ?? 0) > 0,
   };
 }
 
@@ -506,14 +457,11 @@ function trackIsBlocked(
   state: ProvisioningState,
   catalogLinks: CatalogLink[],
 ): boolean {
-  return (
-    (track === "creator_marketplace" && state.marketplaceProfileConflict) ||
-    SETUP_TRACK_COMPONENT_PRODUCTS[track].some(
-      (product) =>
-        state.access[product] === "suspended" ||
-        state.access[product] === "unavailable" ||
-        hasBlockedLink(product, state.links, catalogLinks),
-    )
+  return SETUP_TRACK_COMPONENT_PRODUCTS[track].some(
+    (product) =>
+      state.access[product] === "suspended" ||
+      state.access[product] === "unavailable" ||
+      hasBlockedLink(product, state.links, catalogLinks),
   );
 }
 
@@ -673,61 +621,6 @@ async function initializeProductRecords(
        ON CONFLICT (property_id) DO NOTHING`,
       [organizationId],
     );
-  }
-  if (tracks.includes("creator_marketplace")) {
-    await client.query(
-      `INSERT INTO marketplace.marketplace_hotel_profiles (
-         property_id, organization_id, source_system, source_hotel_profile_id
-       )
-       SELECT link.resource_id::uuid, $1::uuid, 'marketplace', link.resource_id
-       FROM identity.organization_resource_links link
-       WHERE link.organization_id = $1::uuid
-         AND link.product = 'marketplace'
-         AND link.resource_type = 'hotel_profile'
-         AND link.status = 'active'
-         AND EXISTS (
-           SELECT 1
-           FROM identity.organization_resource_links catalog
-           WHERE catalog.organization_id = link.organization_id
-             AND catalog.product = 'hotel_catalog'
-             AND catalog.resource_type = 'property'
-             AND catalog.resource_id = link.resource_id
-             AND catalog.relationship = link.relationship
-             AND catalog.status = 'active'
-         )
-       ON CONFLICT (property_id) DO NOTHING`,
-      [organizationId],
-    );
-    const ownership = await client.query<{ complete: boolean }>(
-      `SELECT NOT EXISTS (
-         SELECT 1
-         FROM identity.organization_resource_links link
-         WHERE link.organization_id = $1::uuid
-           AND link.product = 'marketplace'
-           AND link.resource_type = 'hotel_profile'
-           AND link.status = 'active'
-           AND EXISTS (
-             SELECT 1
-             FROM identity.organization_resource_links catalog
-             WHERE catalog.organization_id = link.organization_id
-               AND catalog.product = 'hotel_catalog'
-               AND catalog.resource_type = 'property'
-               AND catalog.resource_id = link.resource_id
-               AND catalog.relationship = link.relationship
-               AND catalog.status = 'active'
-           )
-           AND NOT EXISTS (
-             SELECT 1
-             FROM marketplace.marketplace_hotel_profiles profile
-             WHERE profile.property_id = link.resource_id::uuid
-               AND profile.organization_id = link.organization_id
-           )
-       ) AS complete`,
-      [organizationId],
-    );
-    if (!ownership.rows[0]?.complete) {
-      throw new Error("Marketplace profile ownership initialization failed");
-    }
   }
 }
 
@@ -960,9 +853,6 @@ async function recordAudit(
       }),
       JSON.stringify({
         source: input.command.audit.source,
-        ...(input.command.adminActivation
-          ? { adminActivation: input.command.adminActivation }
-          : {}),
         requestId: input.command.audit.requestId,
       }),
     ],
