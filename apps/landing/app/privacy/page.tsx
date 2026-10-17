@@ -475,6 +475,7 @@ export default function PrivacyPage() {
               </div>
             </section>
 
+            <section id="booking-guests" className="mt-12 scroll-mt-24">
               <h2 className="text-2xl font-bold text-primary-800 mb-4">
                 9. Guests of Hotel Booking Sites
               </h2>
