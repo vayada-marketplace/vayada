@@ -16,7 +16,6 @@ const TOP_LEVEL = [
   "/settings",
   "/settings/feature-hub",
   "/reservations",
-  "/affiliates",
 ];
 // Sub-pages put a breadcrumb above the title: same left edge, and one shared (lower) top.
 const SUB_PAGES = [
