@@ -396,6 +396,69 @@ jobs:
             ${{ runner.temp }}/*-dev.log
           retention-days: 7
 
+  # The mocked booking-web Playwright project against a plain-port dev server on the seeded
+  # hotel-alpenrose tenant host. The project runs with one worker (playwright.config.ts).
+  booking_web_e2e:
+    name: Booking Web Browser Specs
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [changes]
+    if: needs.changes.outputs.run_booking_web_e2e == 'true'
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build the packages booking-web imports
+        run: npm --workspace vayada-api run build:backend-packages
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run the booking-web browser specs
+        run: |
+          npm run dev:booking-web > "$RUNNER_TEMP/booking-web-dev.log" 2>&1 &
+          dev_pid=$!
+          trap 'kill "$dev_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 120); do
+            kill -0 "$dev_pid" 2>/dev/null || break
+            if curl --silent --fail --max-time 5 http://127.0.0.1:3002/api/health >/dev/null; then break; fi
+            sleep 2
+          done
+          curl --silent --fail --max-time 10 http://127.0.0.1:3002/api/health >/dev/null || { tail -50 "$RUNNER_TEMP/booking-web-dev.log"; exit 1; }
+          npm run e2e:booking-web -- --retries=1
+        env:
+          # See pms_web_e2e: "false" keeps playwright.config.ts from starting every webServer.
+          CI: "false"
+          PLAYWRIGHT_HTML_OPEN: never
+          E2E_START_SERVERS: "0"
+          PORT: "3002"
+          E2E_BOOKING_BASE_URL: http://hotel-alpenrose.booking.localhost:3002
+
+      - name: Upload the Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: booking-web-playwright-report
+          path: |
+            playwright-report
+            test-results
+            ${{ runner.temp }}/*-dev.log
+          retention-days: 7
+
   # The mocked booking-admin Playwright project against a plain-port dev server (VAY-2261: Booking
   # Admin hosts the hotel setup wizard). Every API call is mocked in the specs and tests/e2e/support.
   booking_admin_e2e:
@@ -465,69 +528,6 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: booking-admin-playwright-report
-          path: |
-            playwright-report
-            test-results
-            ${{ runner.temp }}/*-dev.log
-          retention-days: 7
-
-  # The mocked booking-web Playwright project against a plain-port dev server on the seeded
-  # hotel-alpenrose tenant host. The project runs with one worker (playwright.config.ts).
-  booking_web_e2e:
-    name: Booking Web Browser Specs
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    needs: [changes]
-    if: needs.changes.outputs.run_booking_web_e2e == 'true'
-    permissions:
-      contents: read
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          persist-credentials: false
-
-      - name: Set up Node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build the packages booking-web imports
-        run: npm --workspace vayada-api run build:backend-packages
-
-      - name: Install Chromium
-        run: npx playwright install --with-deps chromium
-
-      - name: Run the booking-web browser specs
-        run: |
-          npm run dev:booking-web > "$RUNNER_TEMP/booking-web-dev.log" 2>&1 &
-          dev_pid=$!
-          trap 'kill "$dev_pid" 2>/dev/null || true' EXIT
-          for attempt in $(seq 1 120); do
-            kill -0 "$dev_pid" 2>/dev/null || break
-            if curl --silent --fail --max-time 5 http://127.0.0.1:3002/api/health >/dev/null; then break; fi
-            sleep 2
-          done
-          curl --silent --fail --max-time 10 http://127.0.0.1:3002/api/health >/dev/null || { tail -50 "$RUNNER_TEMP/booking-web-dev.log"; exit 1; }
-          npm run e2e:booking-web -- --retries=1
-        env:
-          # See pms_web_e2e: "false" keeps playwright.config.ts from starting every webServer.
-          CI: "false"
-          PLAYWRIGHT_HTML_OPEN: never
-          E2E_START_SERVERS: "0"
-          PORT: "3002"
-          E2E_BOOKING_BASE_URL: http://hotel-alpenrose.booking.localhost:3002
-
-      - name: Upload the Playwright report
-        if: failure()
-        uses: actions/upload-artifact@v6
-        with:
-          name: booking-web-playwright-report
           path: |
             playwright-report
             test-results
