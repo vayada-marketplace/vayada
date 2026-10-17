@@ -651,54 +651,6 @@ test.describe("booking-admin settings no-legacy guard", () => {
     await assertHealthy();
   });
 
-  test("keeps Refer a Guest off even with a legacy affiliate activation (VAY-2143)", async ({
-    page,
-  }, testInfo) => {
-    test.skip(
-      !PROD,
-      "Requires a production booking-admin build so the authenticated shell hydrates.",
-    );
-
-    const assertHealthy = watchPageHealth(page, testInfo);
-    await mockBookingAdminAuthenticatedSession(page);
-    await mockBookingAdminShellRoutes(page);
-    await mockBookingAdminDesignSettings(page);
-    await page.route("**/api/pms/properties/*/module-activations", (route) =>
-      route.fulfill({
-        json: {
-          hotelId: BOOKING_ADMIN_PROPERTY_ID,
-          canManage: true,
-          supportedModules: ["affiliates"],
-          activeModules: ["affiliates"],
-          activations: [
-            {
-              moduleId: "affiliates",
-              isActive: true,
-              activatedAt: "2026-06-22T10:00:00.000Z",
-              deactivatedAt: null,
-              updatedAt: "2026-06-22T10:00:00.000Z",
-            },
-          ],
-        },
-      }),
-    );
-
-    await page.goto("/design-studio");
-    // The old referral product is retired: the switch says so instead of pointing to Feature Hub.
-    const referToggle = page.getByRole("switch", { name: "Refer a Guest button" });
-    await expect(referToggle).toBeDisabled();
-    await expect(referToggle).not.toBeChecked();
-    await expect(
-      page.getByText("This feature is currently unavailable.", { exact: true }),
-    ).toBeVisible();
-    await expect(page.getByText("Enable Refer a Guest in Feature Hub first.")).toHaveCount(0);
-    await page.setViewportSize({ width: 375, height: 812 });
-    await page.getByRole("button", { name: "Preview" }).click();
-
-    await expect(page.getByTestId("booking-preview-refer")).toHaveCount(0);
-    await assertHealthy();
-  });
-
   test("opens settings pages from the card grid and redirects legacy section links", async ({
     page,
   }, testInfo) => {

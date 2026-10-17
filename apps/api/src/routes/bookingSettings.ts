@@ -226,7 +226,6 @@ export type BookingDesignSettingsReadModel = {
   headerLogo?: string | null;
   headerLogoMediaObjectId?: string | null;
   showContactButton?: boolean | null;
-  showReferAGuestButton?: boolean | null;
   showLanguageSelector?: boolean | null;
   showCurrencySelector?: boolean | null;
   heroImage?: string | null;
@@ -319,7 +318,6 @@ export type BookingDesignSettingsResponse = {
   headerLogo: string;
   headerLogoMediaObjectId: string | null;
   showContactButton: boolean;
-  showReferAGuestButton: boolean;
   showLanguageSelector: boolean;
   showCurrencySelector: boolean;
   heroImage: string;
@@ -864,7 +862,6 @@ type TargetBookingSettingsRow = {
   header_logo_media_object_id: string | null;
   header_logo_url: string | null;
   show_contact_button: boolean | null;
-  show_refer_a_guest_button: boolean | null;
   show_language_selector: boolean | null;
   show_currency_selector: boolean | null;
   hero_image_url: string | null;
@@ -1076,7 +1073,6 @@ const TARGET_BOOKING_PROPERTY_SETTINGS_SELECT = `
     END AS header_logo_media_object_id,
     booking_header_logo.public_cdn_url AS header_logo_url,
     settings.show_contact_button,
-    settings.show_refer_a_guest_button,
     settings.show_language_selector,
     settings.show_currency_selector,
     settings.hero_image_url,
@@ -1199,7 +1195,6 @@ const TARGET_BOOKING_SETTINGS_SELECT = `
     END AS header_logo_media_object_id,
     booking_header_logo.public_cdn_url AS header_logo_url,
     settings.show_contact_button,
-    settings.show_refer_a_guest_button,
     settings.show_language_selector,
     settings.show_currency_selector,
     settings.hero_image_url,
@@ -1261,11 +1256,6 @@ const TARGET_BOOKING_DESIGN_SETTINGS_UPDATE = `
             THEN ($2::jsonb ->> 'showContactButton')::boolean
           ELSE settings.show_contact_button
         END,
-        show_refer_a_guest_button = CASE
-          WHEN $2::jsonb ? 'showReferAGuestButton'
-            THEN ($2::jsonb ->> 'showReferAGuestButton')::boolean
-          ELSE settings.show_refer_a_guest_button
-        END,
         show_language_selector = CASE
           WHEN $2::jsonb ? 'showLanguageSelector'
             THEN ($2::jsonb ->> 'showLanguageSelector')::boolean
@@ -1324,7 +1314,6 @@ const TARGET_BOOKING_DESIGN_SETTINGS_UPDATE = `
       settings.filter_rooms,
       settings.header_logo_media_object_id,
       settings.show_contact_button,
-      settings.show_refer_a_guest_button,
       settings.show_language_selector,
       settings.show_currency_selector,
       settings.hero_image_url,
@@ -1361,7 +1350,6 @@ const TARGET_BOOKING_DESIGN_SETTINGS_UPDATE = `
     END AS header_logo_media_object_id,
     booking_header_logo.public_cdn_url AS header_logo_url,
     updated_settings.show_contact_button,
-    updated_settings.show_refer_a_guest_button,
     updated_settings.show_language_selector,
     updated_settings.show_currency_selector,
     updated_settings.hero_image_url,
@@ -1625,7 +1613,6 @@ function toTargetDesignSettings(row: TargetBookingSettingsRow): BookingDesignSet
     headerLogo: row.header_logo_url,
     headerLogoMediaObjectId: row.header_logo_media_object_id,
     showContactButton: row.show_contact_button,
-    showReferAGuestButton: row.show_refer_a_guest_button,
     showLanguageSelector: row.show_language_selector,
     showCurrencySelector: row.show_currency_selector,
     heroImage: row.hero_image_url,
@@ -1869,7 +1856,6 @@ export function createPgTargetBookingSettingsRepository(config: {
           settings.filter_rooms,
           settings.header_logo_media_object_id,
           settings.show_contact_button,
-          settings.show_refer_a_guest_button,
           settings.show_language_selector,
           settings.show_currency_selector,
           settings.hero_image_url,
@@ -1905,7 +1891,6 @@ export function createPgTargetBookingSettingsRepository(config: {
           END AS header_logo_media_object_id,
           booking_header_logo.public_cdn_url AS header_logo_url,
           updated_settings.show_contact_button,
-          updated_settings.show_refer_a_guest_button,
           updated_settings.show_language_selector,
           updated_settings.show_currency_selector,
           updated_settings.hero_image_url,
@@ -3500,7 +3485,6 @@ function parseDesignSettingsWriteBody(
   const allowedKeys = new Set([
     "headerLogoMediaObjectId",
     "showContactButton",
-    "showReferAGuestButton",
     "showLanguageSelector",
     "showCurrencySelector",
     "heroImage",
@@ -3535,8 +3519,6 @@ function parseDesignSettingsWriteBody(
   }
   const showContactButton = expectOptionalBoolean(body, "showContactButton", details);
   if (showContactButton !== undefined) value.showContactButton = showContactButton;
-  const showReferAGuestButton = expectOptionalBoolean(body, "showReferAGuestButton", details);
-  if (showReferAGuestButton !== undefined) value.showReferAGuestButton = showReferAGuestButton;
   const showLanguageSelector = expectOptionalBoolean(body, "showLanguageSelector", details);
   if (showLanguageSelector !== undefined) value.showLanguageSelector = showLanguageSelector;
   const showCurrencySelector = expectOptionalBoolean(body, "showCurrencySelector", details);
@@ -3687,7 +3669,6 @@ export function toDesignSettingsResponse(
       ? (settings.headerLogoMediaObjectId ?? null)
       : null,
     showContactButton: settings.showContactButton ?? true,
-    showReferAGuestButton: settings.showReferAGuestButton ?? false,
     showLanguageSelector: settings.showLanguageSelector ?? true,
     showCurrencySelector: settings.showCurrencySelector ?? true,
     heroImage: settings.heroImage ?? "",
@@ -3774,7 +3755,6 @@ export function toPropertySettingsResponse(
     special_requests_enabled: guestForm.specialRequestsEnabled,
     arrival_time_enabled: guestForm.arrivalTimeEnabled,
     guest_count_enabled: guestForm.guestCountEnabled,
-    refer_a_guest_enabled: false,
     map_view_enabled: false,
     free_cancellation_days: 7,
     email_notifications: true,

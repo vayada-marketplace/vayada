@@ -14,6 +14,7 @@ import {
   FunnelIcon,
   GiftIcon,
   ReceiptPercentIcon,
+  ShieldCheckIcon,
   UserCircleIcon,
 } from "@heroicons/react/24/outline";
 import { useTranslation } from "@/lib/i18n";
@@ -85,6 +86,12 @@ const CARDS: SettingsCardLink[] = [
     description: "settings.cards.billing.description",
     icon: ReceiptPercentIcon,
     href: "/settings/billing",
+  },
+  {
+    title: "settings.cards.privacy.title",
+    description: "settings.cards.privacy.description",
+    icon: ShieldCheckIcon,
+    href: "/settings/privacy",
   },
   {
     title: "settings.cards.account.title",

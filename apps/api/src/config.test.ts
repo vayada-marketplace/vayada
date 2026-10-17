@@ -13,10 +13,6 @@ const completeCreatorMarketplaceEnv = {
   PLATFORM_MEDIA_CDN_ORIGIN_HOST: "vayada-media-staging.s3.us-east-1.amazonaws.com",
 };
 
-const completeCreatorPlatformConnectionEnv = {
-  ...completeCreatorMarketplaceEnv,
-};
-
 const completeAuthSessionEnv = {
   WORKOS_CLIENT_ID: "client",
   WORKOS_API_KEY: "sk_test",
@@ -66,129 +62,6 @@ describe("api config", () => {
         .pmsRoomTypeDeleteCleanupPropertyIds,
     ).toEqual(["1dee5712-6074-4fb0-8b1d-ec3601943526"]);
     expect(() => loadConfig({ [key]: "sri-journeys" })).toThrow(key);
-  });
-
-  it("keeps affiliate capture closed unless its isolated runtime is complete", () => {
-    expect(loadConfig(completeCreatorMarketplaceEnv).affiliateCapture).toBeUndefined();
-    expect(
-      loadConfig({
-        ...completeCreatorMarketplaceEnv,
-        AFFILIATE_CAPTURE_ENABLED: "true",
-        AFFILIATE_CAPTURE_DATABASE_URL: "postgresql://vayada_next_affiliate_capture@target-db/app",
-        BOOKING_WEB_AFFILIATE_ARRIVAL_INTERNAL_TOKEN: "x".repeat(32),
-      }).affiliateCapture,
-    ).toEqual({
-      databaseUrl: "postgresql://vayada_next_affiliate_capture@target-db/app",
-      internalToken: "x".repeat(32),
-    });
-    expect(() =>
-      loadConfig({ ...completeCreatorMarketplaceEnv, AFFILIATE_CAPTURE_ENABLED: "true" }),
-    ).toThrow("AFFILIATE_CAPTURE_ENABLED requires");
-    expect(() =>
-      loadConfig({
-        ...completeCreatorMarketplaceEnv,
-        AFFILIATE_CAPTURE_ENABLED: "true",
-        AFFILIATE_CAPTURE_DATABASE_URL: "postgresql://api_runtime@target-db/app",
-        BOOKING_WEB_AFFILIATE_ARRIVAL_INTERNAL_TOKEN: "x".repeat(32),
-      }),
-    ).toThrow("exact vayada_next_affiliate_capture PostgreSQL login");
-    for (const conflictingDatabaseUrl of [
-      {
-        TARGET_DATABASE_URL:
-          "postgresql://api_runtime@target-db/app?user=vayada_next_affiliate_capture",
-      },
-      {
-        AUTH_DATABASE_URL:
-          "postgresql://auth_runtime@auth-db/app?user=vayada_next_affiliate_capture",
-      },
-    ]) {
-      expect(() =>
-        loadConfig({
-          ...completeCreatorMarketplaceEnv,
-          ...conflictingDatabaseUrl,
-          AFFILIATE_CAPTURE_ENABLED: "true",
-          AFFILIATE_CAPTURE_DATABASE_URL:
-            "postgresql://vayada_next_affiliate_capture@target-db/app",
-          BOOKING_WEB_AFFILIATE_ARRIVAL_INTERNAL_TOKEN: "x".repeat(32),
-        }),
-      ).toThrow("AFFILIATE_CAPTURE_DATABASE_URL must use a distinct PostgreSQL user");
-    }
-    expect(() =>
-      loadConfig({
-        ...completeCreatorMarketplaceEnv,
-        AFFILIATE_CAPTURE_ENABLED: "true",
-        AFFILIATE_CAPTURE_DATABASE_URL:
-          "postgresql://vayada_next_affiliate_capture@target-db/app?user=api_runtime",
-        BOOKING_WEB_AFFILIATE_ARRIVAL_INTERNAL_TOKEN: "x".repeat(32),
-      }),
-    ).toThrow("exact vayada_next_affiliate_capture PostgreSQL login");
-    expect(() =>
-      loadConfig({
-        ...completeCreatorMarketplaceEnv,
-        AFFILIATE_CAPTURE_ENABLED: "true",
-        AFFILIATE_CAPTURE_DATABASE_URL: "postgresql://vayada_next_affiliate_capture@target-db/app",
-        BOOKING_WEB_AFFILIATE_ARRIVAL_INTERNAL_TOKEN: "short",
-      }),
-    ).toThrow("must be at least 32 bytes");
-  });
-
-  it("keeps live booking binding behind capture and target runtime gates", () => {
-    expect(loadConfig(completeCreatorMarketplaceEnv).affiliateBookingBindingEnabled).toBe(false);
-    expect(() =>
-      loadConfig({
-        ...completeCreatorMarketplaceEnv,
-        AFFILIATE_BOOKING_BINDING_ENABLED: "true",
-      }),
-    ).toThrow("requires affiliate capture and TARGET_DATABASE_URL");
-    expect(
-      loadConfig({
-        ...completeCreatorMarketplaceEnv,
-        AFFILIATE_CAPTURE_ENABLED: "true",
-        AFFILIATE_CAPTURE_DATABASE_URL: "postgresql://vayada_next_affiliate_capture@target-db/app",
-        BOOKING_WEB_AFFILIATE_ARRIVAL_INTERNAL_TOKEN: "x".repeat(32),
-        AFFILIATE_BOOKING_BINDING_ENABLED: "true",
-      }).affiliateBookingBindingEnabled,
-    ).toBe(true);
-  });
-
-  it("keeps the public affiliate redirect behind the complete capture runtime", () => {
-    expect(loadConfig(completeCreatorMarketplaceEnv).affiliatePublicRedirectEnabled).toBe(false);
-    expect(() =>
-      loadConfig({
-        ...completeCreatorMarketplaceEnv,
-        AFFILIATE_PUBLIC_REDIRECT_ENABLED: "true",
-      }),
-    ).toThrow("AFFILIATE_PUBLIC_REDIRECT_ENABLED requires affiliate capture");
-    expect(
-      loadConfig({
-        ...completeCreatorMarketplaceEnv,
-        AFFILIATE_CAPTURE_ENABLED: "true",
-        AFFILIATE_CAPTURE_DATABASE_URL: "postgresql://vayada_next_affiliate_capture@target-db/app",
-        BOOKING_WEB_AFFILIATE_ARRIVAL_INTERNAL_TOKEN: "x".repeat(32),
-        AFFILIATE_PUBLIC_REDIRECT_ENABLED: "true",
-      }).affiliatePublicRedirectEnabled,
-    ).toBe(true);
-  });
-
-  it("loads complete Marketplace unsubscribe rotation keys and rejects partial config", () => {
-    const keys = {
-      "key-1": Buffer.alloc(32, 1).toString("base64url"),
-      "key-2": Buffer.alloc(32, 2).toString("base64url"),
-    };
-    const config = (current = "key-2", encoded = JSON.stringify(keys)) =>
-      loadConfig({
-        MARKETPLACE_COMMUNICATION_UNSUBSCRIBE_CURRENT_KEY_VERSION: current,
-        MARKETPLACE_COMMUNICATION_UNSUBSCRIBE_KEYS_JSON: encoded,
-      });
-    expect(config().marketplaceCommunicationUnsubscribe).toEqual({
-      currentKeyVersion: "key-2",
-      keys,
-    });
-    expect(() =>
-      loadConfig({ MARKETPLACE_COMMUNICATION_UNSUBSCRIBE_CURRENT_KEY_VERSION: "key-2" }),
-    ).toThrow("Incomplete Marketplace communication unsubscribe signing config");
-    expect(() => config("missing")).toThrow("signing keys are invalid");
-    expect(() => config("key-2", "not-json")).toThrow("must be valid JSON");
   });
 
   it("parses a review-only webhook override without changing other intake modes", () => {
@@ -730,58 +603,6 @@ describe("api config", () => {
     ).toThrow("AUTH_COOKIE_SECURE must be true for HTTPS first-party surfaces: marketplace-web");
   });
 
-  it("loads independently configured creator platform providers", () => {
-    expect(
-      loadConfig({
-        ...completeCreatorPlatformConnectionEnv,
-        NODE_ENV: "test",
-        CREATOR_PLATFORM_CALLBACK_BASE_URL: "https://creator.api.localhost:1356",
-        CREATOR_PLATFORM_WEB_RETURN_URL: "https://marketplace.localhost:1356/profile/complete",
-        CREATOR_PLATFORM_CREDENTIAL_VAULT: "memory",
-        CREATOR_PLATFORM_SECRET_PREFIX: "vayada/test/creator-platforms",
-        TIKTOK_CLIENT_KEY: "client-key",
-        TIKTOK_CLIENT_SECRET: "client-secret",
-      }).creatorPlatformConnections,
-    ).toEqual({
-      callbackBaseUrl: "https://creator.api.localhost:1356",
-      webReturnUrl: "https://marketplace.localhost:1356/profile/complete",
-      sync: {
-        enabled: true,
-        pollIntervalMs: 60_000,
-        recurringIntervalMs: 86_400_000,
-        batchSize: 10,
-        maxAttempts: 5,
-        minimumSpacingMs: { meta: 1_000, tiktok: 2_000, google: 1_000 },
-      },
-      credentialVault: {
-        provider: "memory",
-        secretPrefix: "vayada/test/creator-platforms",
-      },
-      tiktok: { clientKey: "client-key", clientSecret: "client-secret" },
-    });
-  });
-
-  it("rejects partial creator platform provider config", () => {
-    expect(() => loadConfig({ INSTAGRAM_CLIENT_ID: "instagram-client" })).toThrow(
-      "Incomplete Instagram creator platform config; missing INSTAGRAM_CLIENT_SECRET, INSTAGRAM_API_VERSION",
-    );
-  });
-
-  it("rejects the in-memory creator credential vault in production", () => {
-    expect(() =>
-      loadConfig({
-        ...completeCreatorPlatformConnectionEnv,
-        NODE_ENV: "production",
-        CREATOR_PLATFORM_CALLBACK_BASE_URL: "https://api.example.com",
-        CREATOR_PLATFORM_WEB_RETURN_URL: "https://marketplace.example.com/profile/complete",
-        CREATOR_PLATFORM_CREDENTIAL_VAULT: "memory",
-        CREATOR_PLATFORM_SECRET_PREFIX: "vayada/production/creator-platforms",
-        TIKTOK_CLIENT_KEY: "client-key",
-        TIKTOK_CLIENT_SECRET: "client-secret",
-      }),
-    ).toThrow("CREATOR_PLATFORM_CREDENTIAL_VAULT=memory is not allowed in production");
-  });
-
   it("loads target public hotel profile config", () => {
     expect(
       loadConfig({
@@ -1207,35 +1028,6 @@ describe("api config", () => {
         FINANCE_SOURCE: "preview",
       }),
     ).toThrow("FINANCE_SOURCE must be one of: legacy, target");
-  });
-
-  it("loads target-owned affiliate public route config", () => {
-    expect(
-      loadConfig({
-        TARGET_DATABASE_URL: "postgresql://target-db",
-        AFFILIATE_PUBLIC_SOURCE: "target",
-      }),
-    ).toMatchObject({
-      targetDatabaseUrl: "postgresql://target-db",
-      affiliatePublicSource: "target",
-    });
-  });
-
-  it("requires a target database for target-owned affiliate public routes", () => {
-    expect(() =>
-      loadConfig({
-        AFFILIATE_PUBLIC_SOURCE: "target",
-      }),
-    ).toThrow("AFFILIATE_PUBLIC_SOURCE=target requires TARGET_DATABASE_URL");
-  });
-
-  it("rejects unsupported affiliate public route sources", () => {
-    expect(() =>
-      loadConfig({
-        TARGET_DATABASE_URL: "postgresql://target-db",
-        AFFILIATE_PUBLIC_SOURCE: "pms",
-      }),
-    ).toThrow("Unsupported AFFILIATE_PUBLIC_SOURCE");
   });
 
   it("loads marketplace discovery allowed origins from comma-separated config", () => {

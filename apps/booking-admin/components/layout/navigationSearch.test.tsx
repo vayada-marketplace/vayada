@@ -28,7 +28,7 @@ vi.mock("@/services/api/financeSubscriptionsClient", () => ({
 
 beforeEach(() => {
   for (const read of Object.values(reads)) read.mockReset().mockResolvedValue({});
-  reads.modules.mockResolvedValue({ activations: [{ moduleId: "affiliates", isActive: true }] });
+  reads.modules.mockResolvedValue({ activations: [] });
 });
 
 it("matches partial labels, case, accents and one mistyped character", () => {
@@ -50,11 +50,6 @@ it("hides inaccessible destinations independently and fails closed on read error
   expect(visible.some((entry) => entry[2] === "Settings")).toBe(false);
   expect(reads.settings).toHaveBeenCalledWith("hotel-1");
   expect(reads.payments).toHaveBeenCalledWith({ propertyId: "property-1" });
-});
-
-it("does not offer retired affiliate management even when activated", async () => {
-  expect((await loadSearchAccess("hotel-1")).has("affiliates")).toBe(false);
-  expect(SEARCH_ENTRIES.map((entry) => entry[1])).not.toContain("/affiliates");
 });
 
 it("leaves Add-ons or Promo Codes out once Feature Hub says they are off (VAY-2200)", async () => {

@@ -62,81 +62,16 @@ describe("getMarketplacePostLoginRedirect", () => {
     expect(storage.getItem("selectedSharedPropertyId")).toBe("stale-property");
   });
 
-  it("uses the creator profile guard and persists completion state", async () => {
-    vi.mocked(checkProfileStatus).mockResolvedValue({
-      profile_complete: false,
-      profile_photo_required: false,
-      missing_fields: ["profilePicture"],
-      missing_platforms: false,
-      completion_steps: [],
-    });
+  it("sends creators to the closed page without profile guards", async () => {
+    // VAY-2260: the creator Marketplace is closed.
     const storage = memoryStorage({ [STORAGE_KEYS.USER_TYPE]: "creator" });
 
     await expect(getMarketplacePostLoginRedirect(ROUTES.MARKETPLACE, storage)).resolves.toBe(
-      ROUTES.PROFILE_COMPLETE,
+      ROUTES.CLOSED,
     );
-    expect(storage.getItem(STORAGE_KEYS.PROFILE_COMPLETE)).toBe("false");
-  });
-
-  it("returns creators with missing required contact details to onboarding", async () => {
-    vi.mocked(authService.getSessionUser).mockReturnValue({
-      id: "creator-user",
-      email: "creator@example.test",
-      name: "Creator User",
-      phone: null,
-      status: "active",
-    });
-    vi.mocked(checkProfileStatus).mockResolvedValue({
-      profile_complete: true,
-      profile_photo_required: false,
-      missing_fields: [],
-      missing_platforms: false,
-      completion_steps: [],
-    });
-    const storage = memoryStorage({ [STORAGE_KEYS.USER_TYPE]: "creator" });
-
-    await expect(getMarketplacePostLoginRedirect(ROUTES.MARKETPLACE, storage)).resolves.toBe(
-      ROUTES.ONBOARDING,
-    );
-    expect(storage.getItem(STORAGE_KEYS.PROFILE_COMPLETE)).toBe("false");
-  });
-
-  it("returns creators with a missing photo to account details", async () => {
-    vi.mocked(creatorService.getMyProfile).mockResolvedValue({
-      ...completeCreatorProfile(),
-      profilePicture: null,
-      profilePictureMediaObjectId: null,
-    });
-    vi.mocked(checkProfileStatus).mockResolvedValue({
-      profile_complete: true,
-      profile_photo_required: false,
-      missing_fields: [],
-      missing_platforms: false,
-      completion_steps: [],
-    });
-    const storage = memoryStorage({ [STORAGE_KEYS.USER_TYPE]: "creator" });
-
-    await expect(getMarketplacePostLoginRedirect(ROUTES.MARKETPLACE, storage)).resolves.toBe(
-      ROUTES.ONBOARDING,
-    );
-    expect(storage.getItem(STORAGE_KEYS.PROFILE_COMPLETE)).toBe("false");
-  });
-
-  it("treats a failed creator profile fetch as incomplete account details", async () => {
-    vi.mocked(creatorService.getMyProfile).mockRejectedValue(new Error("profile unavailable"));
-    vi.mocked(checkProfileStatus).mockResolvedValue({
-      profile_complete: true,
-      profile_photo_required: false,
-      missing_fields: [],
-      missing_platforms: false,
-      completion_steps: [],
-    });
-    const storage = memoryStorage({ [STORAGE_KEYS.USER_TYPE]: "creator" });
-
-    await expect(getMarketplacePostLoginRedirect(ROUTES.MARKETPLACE, storage)).resolves.toBe(
-      ROUTES.ONBOARDING,
-    );
-    expect(storage.getItem(STORAGE_KEYS.PROFILE_COMPLETE)).toBe("false");
+    expect(checkProfileStatus).not.toHaveBeenCalled();
+    expect(creatorService.getMyProfile).not.toHaveBeenCalled();
+    expect(resolveMarketplaceSetupGuard).not.toHaveBeenCalled();
   });
 
   it("uses the marketplace setup guard for hotel users", async () => {

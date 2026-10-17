@@ -23,7 +23,6 @@ import {
 } from "./pmsRoomTypeDelete.js";
 
 import { enqueueBookingTransitionNotifications } from "../jobs/bookingEmails.js";
-import { publishAffiliateReservationLifecycle } from "./bookingAffiliateReservationLifecycle.js";
 import { acceptPricingRequest } from "./pricingRequestAcceptance.js";
 import { confirmPricingManualPayment } from "./pricingManualPaymentConfirmation.js";
 import {
@@ -1931,27 +1930,6 @@ async function executeCheckOutCommand(
       });
     }
     await insertCheckOutAuditEvent(client, command, checkout, commandMeta, keyHash);
-    if (checkout.assignmentId)
-      await publishAffiliateReservationLifecycle(client, {
-        source: "pms",
-        eventKey: `pms.affiliate-reservation.completed.${checkout.checkoutRecordId}.v1`,
-        eventType: "pms.affiliate_reservation.completed",
-        occurredAt: commandMeta.acceptedAt,
-        propertyId: command.propertyId,
-        bookingId: command.guestBookingId,
-        actorType: "user",
-        actorUserId: checkout.completedByUserId ?? undefined,
-        correlationId: command.audit.correlationId ?? command.audit.requestId,
-        causationId: command.commandId,
-        idempotencyKeyHash: keyHash,
-        evidence: {
-          checkoutRecordId: checkout.checkoutRecordId,
-          stayItemId: checkout.assignmentId,
-          assertion: "authenticated_hotel_checkout",
-          actualDepartureAt: null,
-          hasPendingFlags: checkout.pendingFlags.length > 0,
-        },
-      });
     await completeCheckOutCommandIdempotency(
       client,
       command,

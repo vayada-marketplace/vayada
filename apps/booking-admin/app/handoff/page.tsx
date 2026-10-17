@@ -1,10 +1,11 @@
 "use client";
 import { useTranslation } from "@/lib/i18n";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { authService } from "@/services/auth";
 import { isAuthOrganizationSelectionResponse } from "@/services/auth/sessionStore";
-import { settingsService, type HotelSummary } from "@/services/settings";
+import { settingsService } from "@/services/settings";
+import { resolveHandoffRouting, type HandoffRoutingInput } from "./routeAfterHandoff";
 import {
   isSafeRelativeReturnTo,
   missingOrganizationHandoffLoginPath,
@@ -20,6 +21,33 @@ export default function HandoffPage() {
   const { t } = useTranslation();
   const [retryable, setRetryable] = useState(false);
   const beginRedemption = useSingleFlightGuard();
+  // Set once the session is in place: Retry re-runs the routing instead of reloading, so a
+  // redeemed handoff keeps its target when the hotel list is temporarily unavailable.
+  const pendingRouting = useRef<HandoffRoutingInput | null>(null);
+
+  const routeWithHotels = useCallback(async (input: HandoffRoutingInput) => {
+    const outcome = await resolveHandoffRouting(input, {
+      listHotels: () => settingsService.listHotels(),
+      storage: localStorage,
+    });
+    if (outcome.kind === "retry") {
+      pendingRouting.current = input;
+      setRetryable(true);
+      return;
+    }
+    pendingRouting.current = null;
+    window.location.href = outcome.href;
+  }, []);
+
+  const retry = () => {
+    const input = pendingRouting.current;
+    if (!input) {
+      window.location.reload();
+      return;
+    }
+    setRetryable(false);
+    void routeWithHotels(input).catch(() => setRetryable(true));
+  };
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -170,86 +198,15 @@ export default function HandoffPage() {
         }
       }
 
-      let hotels: HotelSummary[];
-      try {
-        hotels = await settingsService.listHotels();
-      } catch {
-        localStorage.setItem("setupComplete", "false");
-        const explicitId = propertyId?.trim() || handoffHotelId?.trim();
-        window.location.href = explicitId
-          ? `/setup?entryProduct=booking&propertyId=${encodeURIComponent(explicitId)}`
-          : "/setup";
-        return;
-      }
-
-      const storedPropertyId = localStorage.getItem("selectedSharedPropertyId")?.trim();
-      const storedHotelId = localStorage.getItem("selectedHotelId")?.trim();
-      const requestedPropertyId = propertyId?.trim();
-      const requestedHotelId = handoffHotelId?.trim();
-      const explicitSelectionRequested = Boolean(requestedPropertyId || requestedHotelId);
-      let selected = requestedPropertyId
-        ? (hotels.find(
-            (hotel) => hotel.propertyId === requestedPropertyId || hotel.id === requestedPropertyId,
-          ) ?? null)
-        : requestedHotelId
-          ? (hotels.find((hotel) => hotel.id === requestedHotelId) ?? null)
-          : storedPropertyId
-            ? (hotels.find(
-                (hotel) => hotel.propertyId === storedPropertyId || hotel.id === storedPropertyId,
-              ) ?? null)
-            : storedHotelId
-              ? (hotels.find((hotel) => hotel.id === storedHotelId) ?? null)
-              : null;
-      const explicitSelectionMissing = explicitSelectionRequested && !selected;
-
-      if (
-        (requestedPropertyId || requestedHotelId || storedPropertyId || storedHotelId) &&
-        !selected
-      ) {
-        localStorage.removeItem("selectedSharedPropertyId");
-        localStorage.removeItem("selectedHotelId");
-      }
-      if (!explicitSelectionRequested && !selected && hotels.length === 1) {
-        selected = hotels[0]!;
-      }
-      if (selected) {
-        localStorage.setItem("selectedSharedPropertyId", selected.propertyId ?? selected.id);
-        localStorage.setItem("selectedHotelId", selected.id);
-      }
-
-      if (safeRedirect && !explicitSelectionMissing) {
-        localStorage.setItem("setupComplete", "true");
-        window.location.href = safeRedirect;
-        return;
-      }
-      if (explicitSelectionMissing) {
-        localStorage.setItem("setupComplete", "false");
-        if (requestedPropertyId) {
-          window.location.href = `/setup?entryProduct=booking&propertyId=${encodeURIComponent(requestedPropertyId)}`;
-        } else if (hotels.length > 1) {
-          window.location.href = "/choose-property";
-        } else {
-          window.location.href = "/setup";
-        }
-        return;
-      }
-      if (hotels.length === 0) {
-        localStorage.setItem("setupComplete", "false");
-        window.location.href = "/setup";
-        return;
-      }
-      if (!selected && hotels.length > 1) {
-        localStorage.setItem("setupComplete", "true");
-        window.location.href = "/choose-property";
-        return;
-      }
-
-      localStorage.setItem("setupComplete", "true");
-      window.location.href = "/dashboard";
+      await routeWithHotels({
+        safeRedirect,
+        propertyId: propertyId?.trim() || null,
+        handoffHotelId: handoffHotelId?.trim() || null,
+      });
     })().catch(() => {
       window.location.href = organizationSelectionPath;
     });
-  }, [beginRedemption, t]);
+  }, [beginRedemption, routeWithHotels, t]);
 
   if (retryable) {
     return (
@@ -262,7 +219,7 @@ export default function HandoffPage() {
         </p>
         <button
           type="button"
-          onClick={() => window.location.reload()}
+          onClick={retry}
           className="rounded-full bg-primary-600 px-5 py-2 text-sm font-semibold text-white"
         >
           {t("dashboard.pageViewsModal.retry")}

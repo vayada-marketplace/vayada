@@ -10,10 +10,10 @@ test.describe("booking-web tenant smoke", () => {
     }) => {
       await page.setViewportSize({ width, height: 900 });
       await mockBookingApis(page, { headerSettings: { showReferAGuestButton: true } });
-      await page.goto("/?ref=RETAINED-REFERRAL");
+      await page.goto("/");
       await expect(page.getByRole("heading", { name: "Hotel Alpenrose", level: 1 })).toBeVisible();
       await expect(page.locator("nav").getByRole("button", { name: /refer/i })).toHaveCount(0);
-      // VAY-2223: the referral is read from the URL; no cookie before the privacy choice.
+      // VAY-2223: no cookie before the privacy choice.
       expect(await context.cookies()).toEqual([]);
     });
   }
