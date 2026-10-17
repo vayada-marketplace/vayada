@@ -1021,13 +1021,25 @@ describe("api config", () => {
     ).toThrow("FINANCE_SOURCE must be one of: legacy, target");
   });
 
-  it("loads marketplace discovery allowed origins from comma-separated config", () => {
+  it("loads identity privacy allowed origins from either setting name", () => {
     expect(
       loadConfig({
-        MARKETPLACE_DISCOVERY_ALLOWED_ORIGINS:
-          "https://marketplace.localhost, https://admin.localhost,",
-      }).marketplaceDiscoveryAllowedOrigins,
-    ).toEqual(["https://marketplace.localhost", "https://admin.localhost"]);
+        IDENTITY_PRIVACY_ALLOWED_ORIGINS:
+          "https://admin.booking.localhost, https://admin.localhost,",
+      }).identityPrivacyAllowedOrigins,
+    ).toEqual(["https://admin.booking.localhost", "https://admin.localhost"]);
+    // The old Terraform variable name still works until the platform renames it (VAY-2270).
+    expect(
+      loadConfig({
+        MARKETPLACE_DISCOVERY_ALLOWED_ORIGINS: "https://admin.localhost",
+      }).identityPrivacyAllowedOrigins,
+    ).toEqual(["https://admin.localhost"]);
+    expect(
+      loadConfig({
+        IDENTITY_PRIVACY_ALLOWED_ORIGINS: "https://admin.booking.localhost",
+        MARKETPLACE_DISCOVERY_ALLOWED_ORIGINS: "https://admin.localhost",
+      }).identityPrivacyAllowedOrigins,
+    ).toEqual(["https://admin.booking.localhost"]);
   });
 
   it("requires booking email delivery for checkout in production", () => {
