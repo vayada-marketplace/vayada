@@ -7,6 +7,10 @@ import {
 import { sharedHotelSetupApi } from "@/services/api/sharedHotelSetupClient";
 
 type HotelSelectionStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
+type BookingSetupGuardOptions = {
+  /** The property named by a setup-exit marker; it wins over the stored selection. */
+  propertyId?: string | null;
+};
 
 export const SELECTED_SHARED_PROPERTY_ID_KEY = "selectedSharedPropertyId";
 const MARKETPLACE_FRONTEND_URL =
@@ -17,14 +21,17 @@ export async function resolveBookingSetupGuard(
   api: Pick<SharedHotelSetupApi, "getStatus"> = sharedHotelSetupApi,
   storage: HotelSelectionStorage | null = browserStorage(),
   setupBaseUrl = MARKETPLACE_FRONTEND_URL,
+  options: BookingSetupGuardOptions = {},
 ): Promise<SharedHotelSetupGuardDecision> {
+  const explicitPropertyId = options.propertyId?.trim() || null;
   const decision = await resolveSharedHotelSetupGuard(api, {
     entryProduct: "booking",
     returnProduct: "booking",
     returnTo,
     setupBaseUrl,
-    propertyId: readSelectedSharedPropertyId(storage),
+    propertyId: explicitPropertyId ?? readSelectedSharedPropertyId(storage),
     onInvalidPropertyId: () => storage?.removeItem(SELECTED_SHARED_PROPERTY_ID_KEY),
+    fallbackOnInvalidPropertyId: !explicitPropertyId,
   });
   persistEnteredSharedProperty(decision, storage);
   return decision;

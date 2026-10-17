@@ -25,7 +25,9 @@ env:
   AWS_ACCOUNT_ID: 269416271598
   ECR_REPOSITORY: vayada-landing
   CONTACT_API_URL: https://api.vayada.com
-  MARKETPLACE_API_URL: https://next-api.vayada.com
+  # VAY-2260: the Marketplace discovery check is gone; the TypeScript API base stays for
+  # the shared public API client until the landing site no longer imports it.
+  NEXT_API_URL: https://next-api.vayada.com
   # Public Web Analytics site identifier; automatic edge injection must stay off.
   CLOUDFLARE_ANALYTICS_TOKEN: 15ff9d551bd749d5930214d99f0eae70
 
@@ -37,15 +39,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Verify marketplace API contract
-        run: |
-          curl --fail --silent --show-error --retry 3 \
-            "${MARKETPLACE_API_URL}/api/marketplace/offers?limit=1&offset=0" \
-            | jq --exit-status '.items | type == "array"' >/dev/null
-          curl --fail --silent --show-error --retry 3 \
-            "${MARKETPLACE_API_URL}/api/marketplace/creators?limit=1&offset=0" \
-            | jq --exit-status '.items | type == "array"' >/dev/null
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -68,7 +61,7 @@ jobs:
           push: true
           build-args: |
             NEXT_PUBLIC_API_URL=${{ env.CONTACT_API_URL }}
-            NEXT_PUBLIC_VAYADA_API_URL=${{ env.MARKETPLACE_API_URL }}
+            NEXT_PUBLIC_VAYADA_API_URL=${{ env.NEXT_API_URL }}
             NEXT_PUBLIC_CLOUDFLARE_ANALYTICS_TOKEN=${{ env.CLOUDFLARE_ANALYTICS_TOKEN }}
           tags: |
             ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:latest

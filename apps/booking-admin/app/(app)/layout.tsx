@@ -7,6 +7,8 @@ import { useNearbyHistoryGuard } from "@vayada/product-onboarding/useNearbyNavig
 import Header from "@/components/layout/Header";
 import Sidebar from "@/components/layout/Sidebar";
 import { authService } from "@/services/auth";
+import { setupExitPropertyId } from "@vayada/product-onboarding";
+
 import { resolveBookingSetupGuard } from "@/lib/utils/sharedSetupGuard";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
@@ -43,9 +45,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         typeof window === "undefined"
           ? "/dashboard"
           : `${window.location.pathname}${window.location.search}`;
+      // "Exit setup" lands on /dashboard?setup=incomplete&propertyId=…: verify that property.
+      const exitPropertyId = setupExitPropertyId(returnTo);
       let decision: Awaited<ReturnType<typeof resolveBookingSetupGuard>>;
       try {
-        decision = await resolveBookingSetupGuard(returnTo);
+        decision = await resolveBookingSetupGuard(returnTo, undefined, undefined, undefined, {
+          propertyId: exitPropertyId,
+        });
       } catch (error) {
         console.error("Failed to verify booking setup:", error);
         if (!cancelled) {

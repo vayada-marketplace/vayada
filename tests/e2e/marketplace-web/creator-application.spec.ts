@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { corsHeaders, fulfillCorsPreflight } from "./utils/cors";
+import { corsHeaders, fulfillCorsPreflight } from "../support/cors";
 
 test.use({ timezoneId: "America/Los_Angeles" });
 
