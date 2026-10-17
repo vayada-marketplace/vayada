@@ -464,10 +464,16 @@ export type FinanceProviderAccountOwner = {
   organizationId: string | null;
 };
 
+/**
+ * Where Stripe sends the hotel back after Connect onboarding: the hotel setup wizard on the
+ * Marketplace host, Booking Admin's payment settings, or (VAY-2262) the setup wizard in Booking Admin.
+ */
+export type StripeConnectReturnSurface = "marketplace" | "booking_admin" | "booking_admin_setup";
+
 export type CreateStripeProviderAccountPayload = {
   email: string;
   country: string;
-  returnSurface?: "marketplace" | "booking_admin";
+  returnSurface?: StripeConnectReturnSurface;
 };
 
 export type CreateStripePropertyAccountCommand = FinanceCommandBase<
@@ -479,7 +485,7 @@ export type CreateStripeProviderAccountCommand = CreateStripePropertyAccountComm
 
 export type IssueStripeOnboardingLinkPayload = {
   providerAccountId: string;
-  returnSurface?: "marketplace" | "booking_admin";
+  returnSurface?: StripeConnectReturnSurface;
 };
 
 export type IssueStripePropertyOnboardingLinkCommand = FinanceCommandBase<
@@ -620,14 +626,14 @@ export type StripeConnectAccountCreateRequest = {
   email: string;
   country: string;
   idempotencyKey: string;
-  returnSurface?: "marketplace" | "booking_admin";
+  returnSurface?: StripeConnectReturnSurface;
 };
 
 export type StripeConnectOnboardingLinkRequest = {
   owner: FinanceProviderAccountOwner;
   providerAccountRef: string;
   idempotencyKey: string;
-  returnSurface?: "marketplace" | "booking_admin";
+  returnSurface?: StripeConnectReturnSurface;
 };
 
 export type StripeConnectCompensationRequest = {
