@@ -32,9 +32,11 @@ type SettingsRow = QueryResultRow & {
   supportedLanguages: string[];
   headerLogoUrl: string | null;
   showContactButton: boolean;
+  /** Retired (VAY-2263): selected as FALSE so the settings source hash keeps its shape. */
   showReferAGuestButton: boolean;
   showLanguageSelector: boolean;
   showCurrencySelector: boolean;
+  /** Retired (VAY-2263): selected as FALSE so the settings source hash keeps its shape. */
   referAGuestModuleEnabled: boolean;
   heroSubtext: string | null;
   hasActivePromos: boolean;
@@ -212,7 +214,7 @@ async function load(
     branding: {
       logoUrl: settings.headerLogoUrl,
       showContactButton: settings.showContactButton,
-      showReferAGuestButton: settings.referAGuestModuleEnabled && settings.showReferAGuestButton,
+      showReferAGuestButton: false,
       showLanguageSelector: settings.showLanguageSelector,
       showCurrencySelector: settings.showCurrencySelector,
       heroImage: hero,
@@ -232,7 +234,7 @@ async function load(
     capabilities: {
       instantBook: settings.acceptanceMode === "instant",
       promoCodes: settings.hasActivePromos,
-      referralCodes: settings.referAGuestModuleEnabled,
+      referralCodes: false,
     },
     supportedQuoteParameters: {
       minRooms: 1,
@@ -266,22 +268,10 @@ SELECT settings.acceptance_mode AS "acceptanceMode",
        settings.supported_languages AS "supportedLanguages",
        header_logo.public_cdn_url AS "headerLogoUrl",
        settings.show_contact_button AS "showContactButton",
-       settings.show_refer_a_guest_button AS "showReferAGuestButton",
+       FALSE AS "showReferAGuestButton",
        settings.show_language_selector AS "showLanguageSelector",
        settings.show_currency_selector AS "showCurrencySelector",
-       EXISTS (
-         SELECT 1
-         FROM identity.product_entitlements entitlement
-         WHERE entitlement.organization_id = $1::uuid
-           AND entitlement.product = 'pms'
-           AND entitlement.entitlement_key = 'module:affiliates'
-           AND entitlement.status = 'active'
-           AND entitlement.resource_product = 'pms'
-           AND entitlement.resource_type = 'pms_property'
-           AND entitlement.resource_id = settings.property_id::text
-           AND (entitlement.starts_at IS NULL OR entitlement.starts_at <= now())
-           AND (entitlement.expires_at IS NULL OR entitlement.expires_at > now())
-       ) AS "referAGuestModuleEnabled",
+       FALSE AS "referAGuestModuleEnabled",
        NULLIF(BTRIM(settings.hero_subtext), '') AS "heroSubtext",
        settings.updated_at AS "updatedAt",
        EXISTS (SELECT 1 FROM booking.promo_definitions promo

@@ -14,7 +14,7 @@ import { HotelSetupFinancialsUnavailableError } from "../hotelSetupFeatureHubOrd
 
 const MODULE_ENTITLEMENT_PREFIX = "module:";
 const MODULE_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-const PMS_MODULE_IDS = ["affiliates", "financials"] as const;
+const PMS_MODULE_IDS = ["financials"] as const;
 const PMS_MODULE_ID_SET = new Set<string>(PMS_MODULE_IDS);
 
 export type PmsModuleActivation = {
@@ -172,14 +172,6 @@ export async function registerPmsModuleActivationRoutes(
       const parsed = parseModuleActivationUpdateBody(moduleId, body);
       if (!parsed.ok) return reply.status(400).send(parsed.error);
 
-      if (moduleId === "affiliates") {
-        enforceModuleActivationManagePolicy(request, propertyId);
-        return reply.header("Cache-Control", "no-store").code(410).send({
-          code: "affiliate_module_activation_retired",
-          message: "Legacy affiliate module changes are no longer available.",
-        });
-      }
-
       const context = await enforceFinancialsManagePolicy(
         request,
         propertyId,
@@ -258,30 +250,6 @@ function enforceModuleActivationReadPolicy(
       resourceType: "pms_property",
       resourceId: propertyId,
       allowedRelationships: ["owner", "operator", "front_desk"],
-    },
-  });
-}
-
-function enforceModuleActivationManagePolicy(
-  request: FastifyRequest,
-  propertyId: string,
-): RequestContext {
-  return enforceRoutePolicy(request, {
-    permission: "pms.operations.manage",
-    entitlement: {
-      product: "pms",
-      key: "property-management",
-      resource: {
-        product: "pms",
-        resourceType: "pms_property",
-        resourceId: propertyId,
-      },
-    },
-    resource: {
-      product: "pms",
-      resourceType: "pms_property",
-      resourceId: propertyId,
-      allowedRelationships: ["owner", "operator"],
     },
   });
 }
@@ -383,21 +351,14 @@ function moduleActivationsResponse(
   financialsVisible: boolean,
   financialsActive: boolean,
 ): PmsModuleActivationsResponse {
-  const supportedActivations = activations.filter(
-    (activation) =>
-      activation.moduleId === "affiliates" ||
-      (financialsVisible && activation.moduleId === "financials"),
-  );
+  const supportedActivations = financialsVisible
+    ? activations.filter((activation) => activation.moduleId === "financials")
+    : [];
   return {
     hotelId: propertyId,
     canManage,
     supportedModules: financialsVisible ? ["financials"] : [],
-    activeModules: [
-      ...supportedActivations
-        .filter((activation) => activation.moduleId === "affiliates" && activation.isActive)
-        .map((activation) => activation.moduleId),
-      ...(financialsVisible && financialsActive ? ["financials"] : []),
-    ],
+    activeModules: financialsVisible && financialsActive ? ["financials"] : [],
     activations: supportedActivations,
   };
 }

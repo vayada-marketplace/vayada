@@ -764,7 +764,6 @@ const bookingSettingsWriteRepository: BookingSettingsWriteRepository = {
           ? bookingHeaderLogoMediaObjectId
           : settings.headerLogoMediaObjectId,
       showContactButton: settings.showContactButton ?? true,
-      showReferAGuestButton: settings.showReferAGuestButton ?? false,
       showLanguageSelector: settings.showLanguageSelector ?? true,
       showCurrencySelector: settings.showCurrencySelector ?? true,
       heroImage: settings.heroImage ?? "https://cdn.vayada.example/alpenrose/booking-hero.jpg",
@@ -4804,7 +4803,6 @@ describe("vayada-api", () => {
       headerLogo: "https://cdn.vayada.example/alpenrose/header-logo.webp",
       headerLogoMediaObjectId: bookingHeaderLogoMediaObjectId,
       showContactButton: true,
-      showReferAGuestButton: false,
       showLanguageSelector: true,
       showCurrencySelector: true,
       heroImage: "https://cdn.vayada.example/alpenrose/booking-hero.jpg",
@@ -4821,7 +4819,6 @@ describe("vayada-api", () => {
       payload: {
         headerLogoMediaObjectId: bookingHeaderLogoMediaObjectId,
         showContactButton: false,
-        showReferAGuestButton: true,
         showLanguageSelector: false,
         showCurrencySelector: true,
         heroHeading: "Book the mountain directly",
@@ -4834,7 +4831,6 @@ describe("vayada-api", () => {
       headerLogo: "https://cdn.vayada.example/alpenrose/new-logo.webp",
       headerLogoMediaObjectId: bookingHeaderLogoMediaObjectId,
       showContactButton: false,
-      showReferAGuestButton: true,
       showLanguageSelector: false,
       showCurrencySelector: true,
       heroImage: "https://cdn.vayada.example/alpenrose/booking-hero.jpg",
@@ -7455,7 +7451,7 @@ describe("vayada-api", () => {
         branding: {
           logoUrl: "https://cdn.vayada.example/hotels/distribution-alpenrose/header-logo.webp",
           showContactButton: false,
-          showReferAGuestButton: true,
+          showReferAGuestButton: false,
           showLanguageSelector: false,
           showCurrencySelector: true,
           heroImage: "https://cdn.vayada.example/hotels/distribution-alpenrose/booking.jpg",
@@ -7496,17 +7492,6 @@ describe("vayada-api", () => {
     expect(queries[0]?.text).toContain(
       'booking_branding.show_contact_button AS "bookingShowContactButton"',
     );
-    expect(queries[0]?.text).toContain("entitlement.entitlement_key = 'module:affiliates'");
-    expect(queries[0]?.text).toContain(
-      "pms_resource.organization_id = entitlement.organization_id",
-    );
-    expect(queries[0]?.text).toContain("pms_resource.product = 'pms'");
-    expect(queries[0]?.text).toContain("pms_resource.resource_type = 'pms_property'");
-    expect(queries[0]?.text).toContain(
-      "booking_resource.organization_id = entitlement.organization_id",
-    );
-    expect(queries[0]?.text).toContain("booking_resource.product = 'booking'");
-    expect(queries[0]?.text).toContain("booking_resource.resource_type = 'booking_hotel'");
     expect(queries[0]?.text).toContain("booking_branding.header_logo_media_object_id");
     expect(queries[0]?.text).toContain("media.purpose = 'booking.header_logo'");
     expect(queries[0]?.text).toContain('booking_branding.hero_image_url AS "bookingHeroImage"');
@@ -7517,7 +7502,7 @@ describe("vayada-api", () => {
     expect(serializePublicHotelProfileProjection(profile!).hotel.branding).toEqual({
       logoUrl: "https://cdn.vayada.example/hotels/distribution-alpenrose/header-logo.webp",
       showContactButton: false,
-      showReferAGuestButton: true,
+      showReferAGuestButton: false,
       showLanguageSelector: false,
       showCurrencySelector: true,
       heroImage: "https://cdn.vayada.example/hotels/distribution-alpenrose/booking.jpg",
@@ -8130,7 +8115,6 @@ describe("vayada-api", () => {
       payload: {
         headerLogoMediaObjectId: bookingHeaderLogoMediaObjectId,
         showContactButton: false,
-        showReferAGuestButton: true,
         showLanguageSelector: false,
         showCurrencySelector: true,
         heroHeading: "Book the mountain directly",
@@ -8143,7 +8127,6 @@ describe("vayada-api", () => {
       headerLogo: "https://cdn.vayada.example/alpenrose/new-logo.webp",
       headerLogoMediaObjectId: bookingHeaderLogoMediaObjectId,
       showContactButton: false,
-      showReferAGuestButton: true,
       showLanguageSelector: false,
       showCurrencySelector: true,
       heroImage: "https://cdn.vayada.example/alpenrose/booking-hero.jpg",
@@ -8177,7 +8160,6 @@ describe("vayada-api", () => {
       JSON.stringify({
         headerLogoMediaObjectId: bookingHeaderLogoMediaObjectId,
         showContactButton: false,
-        showReferAGuestButton: true,
         showLanguageSelector: false,
         showCurrencySelector: true,
         heroHeading: "Book the mountain directly",
@@ -8233,7 +8215,6 @@ describe("vayada-api", () => {
       headerLogo: "https://cdn.vayada.example/alpenrose/new-logo.webp",
       headerLogoMediaObjectId: bookingHeaderLogoMediaObjectId,
       showContactButton: false,
-      showReferAGuestButton: true,
       showLanguageSelector: false,
       showCurrencySelector: true,
       heroImage: "https://cdn.vayada.example/alpenrose/booking-hero.jpg",
