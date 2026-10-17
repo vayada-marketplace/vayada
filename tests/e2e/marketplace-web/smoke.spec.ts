@@ -2,7 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { watchNoLegacyCalls } from "../support/noLegacyCalls";
 import { watchPageHealth } from "../support/pageHealth";
 import { createAdaptiveHotelSetupStatusMock } from "../support/sharedHotelSetupMocks";
-import { corsHeaders, fulfillCorsPreflight } from "./utils/cors";
+import { corsHeaders, fulfillCorsPreflight } from "../support/cors";
 
 test.describe("marketplace-web smoke", () => {
   test("login page renders the custom auth form", async ({ page }) => {
