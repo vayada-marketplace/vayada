@@ -1,0 +1,108 @@
+"use client";
+import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "@/lib/i18n";
+import { sharedSetupClient } from "@/services/api/sharedHotelSetupClient";
+
+import {
+  describeAirbnbStartError,
+  prepareAirbnbHotel,
+  type AirbnbStartErrorKey,
+} from "./prepareAirbnbHotel";
+
+// Moved from marketplace-web (VAY-2262): starts the Channex Airbnb connection for a property.
+export function AirbnbImportStart({ propertyId }: { propertyId: string }) {
+  const { t } = useTranslation();
+  const busy = useRef(false);
+  const controller = useRef<AbortController | null>(null);
+  const [preparing, setPreparing] = useState(false);
+  useEffect(() => () => controller.current?.abort(), []);
+  const [connecting, setConnecting] = useState(false);
+  const [error, setError] = useState<AirbnbStartErrorKey | null>(null);
+  async function connect() {
+    if (busy.current) return;
+    busy.current = true;
+    setConnecting(true);
+    setError(null);
+    controller.current = new AbortController();
+    const signal = controller.current.signal;
+    try {
+      const start = () =>
+        sharedSetupClient.post<{ url: string; sourceId: string }>(
+          `/api/hotel-setup/properties/${propertyId}/airbnb-import/start`,
+          {},
+          { signal },
+        );
+      let result;
+      try {
+        result = await start();
+      } catch (cause) {
+        if (
+          !(
+            cause &&
+            typeof cause === "object" &&
+            "status" in cause &&
+            cause.status === 409 &&
+            "data" in cause &&
+            (cause.data as { code?: string })?.code === "channex_binding_required"
+          )
+        )
+          throw cause;
+        setPreparing(true);
+        const key = `airbnb-prepare:${propertyId}`;
+        const commandId = sessionStorage.getItem(key) ?? crypto.randomUUID();
+        sessionStorage.setItem(key, commandId);
+        await prepareAirbnbHotel(sharedSetupClient, propertyId, commandId, signal);
+        setPreparing(false);
+        result = await start();
+      }
+      signal.throwIfAborted();
+      const url = new URL(result.url);
+      if (
+        url.protocol !== "https:" ||
+        !["airbnb.com", "www.airbnb.com"].includes(url.hostname) ||
+        url.username ||
+        url.password ||
+        url.port ||
+        url.hash
+      )
+        throw new Error("Invalid connection destination");
+      window.location.assign(url.href);
+    } catch (cause) {
+      if (signal.aborted) return;
+      setPreparing(false);
+      setError(describeAirbnbStartError(cause));
+      busy.current = false;
+      setConnecting(false);
+    }
+  }
+  return (
+    <main className="mx-auto max-w-xl px-6 py-16">
+      <h1 className="text-2xl font-semibold text-gray-950">{t("airbnb.connect.title")}</h1>
+      <p className="mt-3 text-gray-600">{t("airbnb.connect.description")}</p>
+      <p className="mt-3 text-sm text-gray-600">{t("airbnb.connect.keepSetupOpen")}</p>
+      {error && (
+        <p role="alert" className="mt-4 text-sm text-red-700">
+          {t(error)}
+        </p>
+      )}
+      <button
+        type="button"
+        disabled={connecting}
+        onClick={() => void connect()}
+        className="mt-6 rounded-lg bg-primary-600 px-5 py-3 font-semibold text-white disabled:opacity-50"
+      >
+        {preparing
+          ? t("airbnb.connect.preparing")
+          : connecting
+            ? t("airbnb.connect.connecting")
+            : t("airbnb.connect.continue")}
+      </button>
+      <a
+        className="mt-5 block text-sm underline"
+        href={`/setup?propertyId=${encodeURIComponent(propertyId)}`}
+      >
+        {t("airbnb.connect.manual")}
+      </a>
+    </main>
+  );
+}
