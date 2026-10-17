@@ -150,3 +150,30 @@ function createMemoryStorage(): Storage {
     setItem: (key, value) => values.set(key, value),
   };
 }
+
+describe("ApiClient aborted requests", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("does not log an aborted request as an API failure", async () => {
+    const controller = new AbortController();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((_url: string, init?: RequestInit) => {
+        return new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () =>
+            reject(new DOMException("The operation was aborted.", "AbortError")),
+          );
+        });
+      }),
+    );
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const client = new ApiClient("https://api.example.test", null);
+    const request = client.get("/api/hotel-setup/status", { signal: controller.signal });
+    controller.abort();
+    await expect(request).rejects.toMatchObject({ name: "AbortError" });
+    expect(error).not.toHaveBeenCalled();
+  });
+});
