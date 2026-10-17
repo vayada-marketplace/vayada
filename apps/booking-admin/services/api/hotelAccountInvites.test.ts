@@ -4,6 +4,7 @@ import {
   captureHotelAccountInviteCode,
   clearPendingHotelAccountInvite,
   HOTEL_ACCOUNT_INVITE_STORAGE_KEY,
+  hotelAccountInviteEntryProduct,
   hotelAccountInviteSetupPath,
   pendingHotelAccountInviteCode,
   storeHotelAccountInviteCode,
@@ -15,6 +16,10 @@ describe("hotel account invites", () => {
   });
 
   it("enters PMS setup for PMS-only invitations and booking setup otherwise", () => {
+    expect(hotelAccountInviteEntryProduct(["hotel_operations"])).toBe("pms");
+    expect(hotelAccountInviteEntryProduct(["hotel_operations", "creator_marketplace"])).toBe(
+      "booking",
+    );
     expect(hotelAccountInviteSetupPath(["hotel_operations"])).toBe(
       "/setup?entryProduct=pms&returnProduct=pms",
     );

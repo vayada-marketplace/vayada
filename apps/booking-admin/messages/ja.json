@@ -115,6 +115,7 @@
   "invite.error.incomplete": "招待コードをすべて入力してください。",
   "invite.error.unavailable": "この招待は無効、期限切れ、取り消し済み、または使用済みです。",
   "invite.error.redeemFailed": "招待を受け入れられませんでした。招待されたホテルオーナーのアカウントであることを確認して、もう一度お試しください。",
+  "invite.error.lookupFailed": "招待を読み込めませんでした。もう一度お試しください。",
   "invite.eyebrow": "ホテルアカウントへの招待",
   "invite.details.title": "招待の詳細",
   "invite.details.invitedAccount": "招待されたアカウント",

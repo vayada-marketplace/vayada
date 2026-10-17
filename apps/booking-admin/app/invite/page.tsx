@@ -13,6 +13,7 @@ import { useTranslation } from "@/lib/i18n";
 import {
   captureHotelAccountInviteCode,
   clearPendingHotelAccountInvite,
+  hotelAccountInviteEntryProduct,
   hotelAccountInviteSetupPath,
   hotelAccountInvitesService,
   storeHotelAccountInviteCode,
@@ -50,6 +51,7 @@ export default function HotelAccountInvitePage() {
         }
         setState({ phase: "ready", code, invite, authenticated });
       } catch (error) {
+        let failure: unknown = error;
         if (error instanceof ApiErrorResponse && error.status === 404) {
           // A redeemed code no longer looks up; replay the redemption for the account that owns it.
           try {
@@ -58,12 +60,19 @@ export default function HotelAccountInvitePage() {
               finishRedemption(redemption);
               return;
             }
-          } catch {
-            // The replay path intentionally falls through to the same unavailable state.
+          } catch (replayError) {
+            failure = replayError;
           }
         }
-        clearPendingHotelAccountInvite();
-        setState({ phase: "missing", message: t("invite.error.unavailable") });
+        // A definite answer (4xx) ends the invitation; a network or server failure keeps the
+        // stored code so the owner can simply try again.
+        const definitive =
+          failure instanceof ApiErrorResponse && failure.status >= 400 && failure.status < 500;
+        if (definitive) clearPendingHotelAccountInvite();
+        setState({
+          phase: "missing",
+          message: definitive ? t("invite.error.unavailable") : t("invite.error.lookupFailed"),
+        });
       }
     },
     [t],
@@ -183,7 +192,7 @@ export default function HotelAccountInvitePage() {
             <InviteDetail
               label={t("invite.details.setupRoute")}
               value={
-                invite.selectedTracks.includes("hotel_operations")
+                hotelAccountInviteEntryProduct(invite.selectedTracks) === "pms"
                   ? t("invite.tracks.hotelOperations")
                   : t("invite.tracks.bookingEngine")
               }

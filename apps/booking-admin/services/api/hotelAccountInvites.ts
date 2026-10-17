@@ -88,9 +88,14 @@ export function clearPendingHotelAccountInvite(): void {
   window.sessionStorage.removeItem(HOTEL_ACCOUNT_INVITE_STORAGE_KEY);
 }
 
-/** The setup entry for a redeemed invitation: PMS-only invitations keep entering through the PMS flow. */
+/** PMS-only invitations enter through the PMS flow; every other mix enters the booking flow. */
+export function hotelAccountInviteEntryProduct(tracks: readonly string[]): "pms" | "booking" {
+  return tracks.length === 1 && tracks[0] === "hotel_operations" ? "pms" : "booking";
+}
+
+/** The setup entry for a redeemed invitation. */
 export function hotelAccountInviteSetupPath(tracks: readonly string[]): string {
-  const entryProduct = tracks.length === 1 && tracks[0] === "hotel_operations" ? "pms" : "booking";
+  const entryProduct = hotelAccountInviteEntryProduct(tracks);
   return `/setup?entryProduct=${entryProduct}&returnProduct=${entryProduct}`;
 }
 

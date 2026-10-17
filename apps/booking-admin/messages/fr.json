@@ -115,6 +115,7 @@
   "invite.error.incomplete": "Saisissez le code d’invitation complet.",
   "invite.error.unavailable": "Cette invitation est invalide, expirée, révoquée ou déjà utilisée.",
   "invite.error.redeemFailed": "L’invitation n’a pas pu être acceptée. Vérifiez qu’il s’agit du compte de propriétaire d’hôtel invité, puis réessayez.",
+  "invite.error.lookupFailed": "L’invitation n’a pas pu être chargée. Veuillez réessayer.",
   "invite.eyebrow": "Invitation à un compte hôtel",
   "invite.details.title": "Détails de l’invitation",
   "invite.details.invitedAccount": "Compte invité",

@@ -115,6 +115,7 @@
   "invite.error.incomplete": "Masukkan kode undangan secara lengkap.",
   "invite.error.unavailable": "Undangan itu tidak valid, kedaluwarsa, dicabut, atau sudah digunakan.",
   "invite.error.redeemFailed": "Undangan tidak dapat diterima. Pastikan ini adalah akun pemilik hotel yang diundang, lalu coba lagi.",
+  "invite.error.lookupFailed": "Undangan tidak dapat dimuat. Silakan coba lagi.",
   "invite.eyebrow": "Undangan akun hotel",
   "invite.details.title": "Detail undangan",
   "invite.details.invitedAccount": "Akun yang diundang",

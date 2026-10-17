@@ -115,6 +115,7 @@
   "invite.error.incomplete": "Geben Sie den vollständigen Einladungscode ein.",
   "invite.error.unavailable": "Diese Einladung ist ungültig, abgelaufen, widerrufen oder bereits verwendet.",
   "invite.error.redeemFailed": "Die Einladung konnte nicht angenommen werden. Prüfen Sie, ob dies das eingeladene Hotelinhaber-Konto ist, und versuchen Sie es erneut.",
+  "invite.error.lookupFailed": "Die Einladung konnte nicht geladen werden. Versuchen Sie es erneut.",
   "invite.eyebrow": "Einladung für ein Hotelkonto",
   "invite.details.title": "Details zur Einladung",
   "invite.details.invitedAccount": "Eingeladenes Konto",

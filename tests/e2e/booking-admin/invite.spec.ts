@@ -179,3 +179,56 @@ test("an unknown code shows the manual entry form and checks a typed code", asyn
     .toBe(2);
   expect(requests[1]?.body).toEqual({ code: "VAY-typed-code-77" });
 });
+
+test("a new owner who signs up from the invitation comes back to it", async ({ page }) => {
+  const requests: InviteRequest[] = [];
+  await mockInviteApi(page, requests);
+  let signedUp = false;
+  await page.route(/\/auth\/session(?:\/refresh)?(?:\?|$)/, (route) =>
+    signedUp
+      ? route.fulfill({ json: hotelSession })
+      : route.fulfill({ status: 401, json: { error: "missing_session" } }),
+  );
+  await page.route("**/auth/password/signup", (route) => {
+    signedUp = true;
+    return route.fulfill({ json: hotelSession });
+  });
+
+  await page.goto(`/invite#code=${inviteCode}`);
+  await page.getByRole("link", { name: "Create hotel account" }).click();
+  await expect(page).toHaveURL(/\/signup$/);
+  await page.getByLabel("Email address", { exact: true }).fill("owner@example.test");
+  await page.getByLabel("Password", { exact: true }).fill("correct-password");
+  await page.getByRole("button", { name: /create account/i }).click();
+
+  await expect(page).toHaveURL(/\/invite$/);
+  await expect(page.getByRole("heading", { name: "Hotel Alpenrose" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Accept and continue to setup" })).toBeVisible();
+});
+
+test("a server failure while loading keeps the invitation code for a retry", async ({ page }) => {
+  let lookups = 0;
+  await page.route(/\/api\/marketplace\/hotel-account-invites\/lookup$/, async (route) => {
+    if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
+    lookups++;
+    return route.fulfill({
+      status: lookups === 1 ? 502 : 200,
+      headers: corsHeaders(route),
+      json: lookups === 1 ? { detail: "bad gateway" } : lookup,
+    });
+  });
+  await page.route(/\/auth\/session(?:\?|$)/, (route) =>
+    route.fulfill({ status: 401, json: { error: "missing_session" } }),
+  );
+
+  await page.goto(`/invite#code=${inviteCode}`);
+  await expect(page.getByRole("main").getByRole("alert")).toContainText(
+    "The invitation could not be loaded",
+  );
+  expect(await page.evaluate(() => sessionStorage.getItem("vayada.hotel-account-invite.v1"))).toBe(
+    inviteCode,
+  );
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Hotel Alpenrose" })).toBeVisible();
+  expect(lookups).toBe(2);
+});

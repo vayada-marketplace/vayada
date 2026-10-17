@@ -114,6 +114,7 @@
   "invite.error.incomplete": "Enter the complete invitation code.",
   "invite.error.unavailable": "That invitation is invalid, expired, revoked, or already used.",
   "invite.error.redeemFailed": "The invitation could not be accepted. Confirm this is the invited hotel-owner account and try again.",
+  "invite.error.lookupFailed": "The invitation could not be loaded. Please try again.",
   "invite.eyebrow": "Hotel account invitation",
   "invite.details.title": "Invitation details",
   "invite.details.invitedAccount": "Invited account",

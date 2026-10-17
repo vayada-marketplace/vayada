@@ -115,6 +115,7 @@
   "invite.error.incomplete": "Voer de volledige uitnodigingscode in.",
   "invite.error.unavailable": "Die uitnodiging is ongeldig, verlopen, ingetrokken of al gebruikt.",
   "invite.error.redeemFailed": "De uitnodiging kon niet worden geaccepteerd. Controleer of dit het uitgenodigde hoteleigenaarsaccount is en probeer het opnieuw.",
+  "invite.error.lookupFailed": "De uitnodiging kon niet worden geladen. Probeer het opnieuw.",
   "invite.eyebrow": "Uitnodiging voor een hotelaccount",
   "invite.details.title": "Details van de uitnodiging",
   "invite.details.invitedAccount": "Uitgenodigd account",

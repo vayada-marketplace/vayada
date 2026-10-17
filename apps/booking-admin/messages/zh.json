@@ -115,6 +115,7 @@
   "invite.error.incomplete": "请输入完整的邀请码。",
   "invite.error.unavailable": "该邀请无效、已过期、已撤销或已被使用。",
   "invite.error.redeemFailed": "无法接受邀请。请确认这是受邀的酒店业主账户，然后重试。",
+  "invite.error.lookupFailed": "无法加载邀请。请重试。",
   "invite.eyebrow": "酒店账户邀请",
   "invite.details.title": "邀请详情",
   "invite.details.invitedAccount": "受邀账户",
