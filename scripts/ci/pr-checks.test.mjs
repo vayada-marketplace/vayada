@@ -64,7 +64,7 @@ test("TypeScript API, backend packages and migrations run the unit suites and fu
   }
 });
 
-const BROWSER_E2E = ["pms_web_e2e", "marketplace_web_e2e", "booking_web_e2e"];
+const BROWSER_E2E = ["pms_web_e2e", "marketplace_web_e2e", "booking_web_e2e", "booking_admin_e2e"];
 
 test("packages the apps build on also run the mocked browser projects", () => {
   for (const file of [
@@ -91,6 +91,10 @@ test("each app and its own browser specs run only that app's browser project", (
       ["apps/booking-web/app/layout.tsx", "tests/e2e/booking-web/tenant-smoke.spec.ts"],
       "booking_web_e2e",
     ],
+    [
+      ["apps/booking-admin/app/page.tsx", "tests/e2e/booking-admin/setup.spec.ts"],
+      "booking_admin_e2e",
+    ],
   ]) {
     for (const file of files) {
       assert.deepEqual(selectJobs([file]).jobs, [...FRONTEND, "first_party_auth", job], file);
@@ -112,7 +116,7 @@ test("shared e2e mocks and helpers run every mocked browser project", () => {
     "tests/e2e/support/pmsWebMocks.ts",
     "tests/e2e/support/adaptiveSetupOwnerReads.ts",
     "tests/e2e/helpers/cookie-settings.ts",
-    "tests/e2e/marketplace-web/utils/cors.ts",
+    "tests/e2e/support/cors.ts",
   ]) {
     assert.deepEqual(
       selectJobs([file]).jobs,
@@ -123,7 +127,7 @@ test("shared e2e mocks and helpers run every mocked browser project", () => {
 });
 
 test("frontend-only changes skip the PostgreSQL and Python jobs", () => {
-  assert.deepEqual(selectJobs(["apps/booking-admin/app/page.tsx"]).jobs, [
+  assert.deepEqual(selectJobs(["apps/vayada-admin/app/page.tsx"]).jobs, [
     ...FRONTEND,
     "first_party_auth",
   ]);
@@ -614,12 +618,14 @@ test("frontend-only packages run only the jobs of the apps that use them", () =>
     ...FRONTEND,
     "first_party_auth",
     "pms_web_e2e",
+    "booking_admin_e2e",
   ]);
   assert.deepEqual(selectJobs(["packages/settings-ui/package.json"]).jobs, [
     ...FRONTEND,
     "first_party_auth",
     "pms_web_e2e",
     "marketplace_web_e2e",
+    "booking_admin_e2e",
     "api_unit",
   ]);
   assert.deepEqual(selectJobs(["packages/pms-vayada-adapter/src/index.ts"]).jobs, [
@@ -718,6 +724,7 @@ const APP_BROWSER_JOB = {
   "apps/pms-web": "pms_web_e2e",
   "apps/marketplace-web": "marketplace_web_e2e",
   "apps/booking-web": "booking_web_e2e",
+  "apps/booking-admin": "booking_admin_e2e",
 };
 const ROOT_SCRIPTS = JSON.parse(read("package.json")).scripts;
 const API_SCRIPTS = WORKSPACES.find((ws) => ws.dir === "apps/api").scripts;
@@ -887,6 +894,7 @@ test("only the Playwright jobs run Playwright, and nothing imports the root conf
   }
   // The unrun projects are allowed to name frontend-only packages (PACKAGE_REFERENCE_ALLOWED).
   assert.deepEqual([...projects].sort(), [
+    "booking-admin",
     "booking-web",
     "first-party-auth",
     "landing",

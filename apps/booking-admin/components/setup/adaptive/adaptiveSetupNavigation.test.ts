@@ -122,20 +122,20 @@ describe("omitMarketplaceSetupSteps", () => {
   it("drops the Marketplace preferences step and renumbers the rest", () => {
     const route = {
       steps: [
-        { stepId: "present_hotel", position: 1 },
-        { stepId: "marketplace_preferences", position: 2 },
-        { stepId: "booking_design", position: 3 },
-        { stepId: "review", position: 4 },
+        { stepId: "present_hotel", position: 1, state: "complete" },
+        { stepId: "marketplace_preferences", position: 2, state: "complete" },
+        { stepId: "booking_design", position: 3, state: "not_started" },
+        { stepId: "review", position: 4, state: "not_started" },
       ],
-      progress: { complete: 0, total: 4 },
+      progress: { complete: 2, total: 4 },
     };
     expect(omitMarketplaceSetupSteps(route)).toEqual({
       steps: [
-        { stepId: "present_hotel", position: 1 },
-        { stepId: "booking_design", position: 2 },
-        { stepId: "review", position: 3 },
+        { stepId: "present_hotel", position: 1, state: "complete" },
+        { stepId: "booking_design", position: 2, state: "not_started" },
+        { stepId: "review", position: 3, state: "not_started" },
       ],
-      progress: { complete: 0, total: 4 },
+      progress: { complete: 1, total: 3 },
     });
   });
 
