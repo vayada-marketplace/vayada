@@ -75,13 +75,83 @@ test.describe("pms-web canonical setup redirect", () => {
     ]);
   });
 
-  test("sends a signed-out visitor through Booking Admin's login with the setup path", async ({
-    page,
-  }) => {
+  test("sends a signed-out visitor to the PMS login and back to the alias", async ({ page }) => {
     await page.route("**/auth/session?surface=pms-web", (route) =>
       route.fulfill({ status: 401, json: { error: "missing_session" } }),
     );
     const handoffs = await mockSetupHandoff(page);
+
+    await page.goto("/setup?mode=add");
+
+    await expect(page).toHaveURL(/\/login\?returnTo=%2Fsetup%3Fmode%3Dadd$/);
+    await expect(page.getByRole("heading", { name: "Sign in to vayada" })).toBeVisible();
+    expect(handoffs).toEqual([]);
+  });
+
+  test("sends a pending workspace choice to the PMS login's picker, not another app", async ({
+    page,
+  }) => {
+    await mockPmsWebTargetRoutes(page);
+    await page.route("**/auth/session?surface=pms-web", (route) =>
+      route.fulfill({
+        json: {
+          organizationSelectionRequired: true,
+          csrfToken: "e2e-pms-csrf-token",
+          organizations: [
+            {
+              organizationId: "org_a",
+              workosOrganizationId: "org_workos_a",
+              displayName: "Hotel Group A",
+              kind: "hotel_group",
+            },
+            {
+              organizationId: "org_b",
+              workosOrganizationId: "org_workos_b",
+              displayName: "Hotel Group B",
+              kind: "hotel_group",
+            },
+          ],
+          user: { id: "user_pms_owner", email: "owner@example.com", name: "PMS Owner" },
+        },
+      }),
+    );
+    const handoffs = await mockSetupHandoff(page);
+
+    await page.goto("/setup?mode=add");
+
+    await expect(page).toHaveURL(/\/login\?auth=callback&returnTo=%2Fsetup%3Fmode%3Dadd$/);
+    await expect(page.getByRole("heading", { name: "Choose hotel group" })).toBeVisible();
+    expect(handoffs).toEqual([]);
+  });
+
+  test("offers a retry when the session read is temporarily unavailable", async ({ page }) => {
+    await mockPmsWebTargetRoutes(page);
+    let sessionReads = 0;
+    await page.route("**/auth/session?surface=pms-web", (route) => {
+      sessionReads += 1;
+      if (sessionReads === 1) return route.fulfill({ status: 503, json: { error: "down" } });
+      return route.fallback();
+    });
+    const handoffs = await mockSetupHandoff(page);
+
+    await page.goto("/setup?mode=add");
+
+    await expect(page.getByText("Your session transfer is temporarily unavailable.")).toBeVisible();
+    expect(new URL(page.url()).pathname).toBe("/setup");
+    expect(handoffs).toEqual([]);
+    await page.getByRole("button", { name: "Retry" }).click();
+
+    await expect.poll(() => page.url()).toBe(handoffDestination());
+    expect(handoffs).toHaveLength(1);
+  });
+
+  test("sends a signed-in visitor through Booking Admin's login after a terminal handoff failure", async ({
+    page,
+  }) => {
+    await mockPmsWebTargetRoutes(page);
+    await page.route("**/auth/handoff/create", (route) =>
+      route.fulfill({ status: 409, json: { error: "handoff_not_enabled" } }),
+    );
     const loginUrl = new URL("/login", bookingAdminOrigin());
     loginUrl.searchParams.set(
       "returnTo",
@@ -99,7 +169,7 @@ test.describe("pms-web canonical setup redirect", () => {
     await page.goto("/setup?mode=add");
 
     await expect.poll(() => page.url()).toBe(loginUrl.toString());
-    expect(handoffs).toEqual([]);
+    await expect(page.getByRole("heading", { name: "Booking Admin login" })).toBeVisible();
   });
 
   test("offers a retry when the handoff is temporarily unavailable", async ({ page }) => {
@@ -111,14 +181,7 @@ test.describe("pms-web canonical setup redirect", () => {
         return route.fulfill({ status: 503, json: { error: "handoff_retryable" } });
       return route.fulfill({ json: { destination: handoffDestination() } });
     });
-    await page.route(
-      (url) => url.toString() === handoffDestination(),
-      (route) =>
-        route.fulfill({
-          contentType: "text/html",
-          body: "<!doctype html><title>Booking Admin handoff</title><h1>Booking Admin handoff</h1>",
-        }),
-    );
+    await mockHandoffLanding(page);
 
     await page.goto("/setup?mode=add");
 
@@ -139,15 +202,20 @@ async function mockSetupHandoff(page: Page) {
     handoffs.push(route.request().postDataJSON());
     return route.fulfill({ json: { destination: handoffDestination() } });
   });
+  await mockHandoffLanding(page);
+  return handoffs;
+}
+
+// A document request carries no fragment, so the landing route matches origin and path only.
+async function mockHandoffLanding(page: Page) {
   await page.route(
-    (url) => url.toString() === handoffDestination(),
+    (url) => url.origin === bookingAdminOrigin() && url.pathname === "/handoff",
     (route) =>
       route.fulfill({
         contentType: "text/html",
         body: "<!doctype html><title>Booking Admin handoff</title><h1>Booking Admin handoff</h1>",
       }),
   );
-  return handoffs;
 }
 
 // The pms-web dev server points at Booking Admin through NEXT_PUBLIC_BOOKING_ADMIN_URL

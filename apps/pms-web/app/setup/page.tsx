@@ -7,9 +7,20 @@ import {
   parseSharedHotelSetupEntryProduct,
   safeSharedHotelSetupReturnTo,
 } from "@vayada/product-onboarding";
+import { organizationSelectionLoginPath } from "@vayada/product-onboarding/returnTo";
 import { authService } from "@/services/auth";
-import { getAuthCsrfToken } from "@/services/auth/sessionStore";
-import { resolveSharedHotelSetupHandoff } from "@/lib/utils/setupHandoff";
+import {
+  getAuthCsrfToken,
+  hasAuthenticatedSession,
+  hasHotelAccessMarker,
+  isAuthKitLoginEnabled,
+  isAuthOrganizationSelectionResponse,
+} from "@/services/auth/sessionStore";
+import {
+  classifyPmsSessionFailure,
+  pmsLoginUrlForSetup,
+  resolveSharedHotelSetupHandoff,
+} from "@/lib/utils/setupHandoff";
 import { useTranslation } from "@/lib/i18n";
 
 export default function PmsSetupPage() {
@@ -20,10 +31,27 @@ export default function PmsSetupPage() {
   );
 }
 
+type PmsSessionState = "signed_in" | "signed_out" | "organization_selection" | "unavailable";
+
+// A direct visit has no session in memory yet; the session read also yields the CSRF token.
+async function readPmsSession(): Promise<PmsSessionState> {
+  if (!isAuthKitLoginEnabled()) {
+    return (await authService.ensureSession()) ? "signed_in" : "signed_out";
+  }
+  if (hasAuthenticatedSession() && hasHotelAccessMarker()) return "signed_in";
+  try {
+    const session = await authService.refreshSession();
+    return isAuthOrganizationSelectionResponse(session) ? "organization_selection" : "signed_in";
+  } catch (error) {
+    return classifyPmsSessionFailure(error);
+  }
+}
+
 /**
  * The PMS's local setup alias. Booking Admin hosts the wizard (VAY-2261); the alias keeps the
  * entry product, the return path and the add-property mode, and moves the browser there with the
- * one-time session handoff so the user stays signed in (VAY-2266).
+ * one-time session handoff so the user stays signed in (VAY-2266). Without a PMS session the
+ * user signs in here first and comes back to the alias.
  */
 function CanonicalSetupRedirect() {
   const searchParams = useSearchParams();
@@ -43,25 +71,43 @@ function CanonicalSetupRedirect() {
   );
 
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
     setRetryable(false);
     void (async () => {
-      // A direct visit has no session in memory yet; the session read also yields the CSRF token.
-      const signedIn = await authService.ensureSession();
+      const aliasPath = `${window.location.pathname}${window.location.search}`;
+      const session = await readPmsSession();
+      if (controller.signal.aborted) return;
+      if (session === "signed_out") {
+        window.location.replace(pmsLoginUrlForSetup(aliasPath));
+        return;
+      }
+      if (session === "organization_selection") {
+        window.location.replace(
+          organizationSelectionLoginPath(window.location.pathname, window.location.search, ""),
+        );
+        return;
+      }
+      if (session === "unavailable") {
+        setRetryable(true);
+        return;
+      }
       const handoff = await resolveSharedHotelSetupHandoff({
         targetPath,
-        csrfToken: signedIn ? getAuthCsrfToken() : null,
+        csrfToken: getAuthCsrfToken(),
+        signal: controller.signal,
       });
-      if (cancelled) return;
+      if (controller.signal.aborted) return;
       if (handoff.kind === "retryable") {
         setRetryable(true);
         return;
       }
       window.location.replace(handoff.destination);
-    })();
-    return () => {
-      cancelled = true;
-    };
+    })().catch((error) => {
+      if (controller.signal.aborted) return;
+      console.error("Unable to open the hotel setup:", error);
+      setRetryable(true);
+    });
+    return () => controller.abort();
   }, [attempt, targetPath]);
 
   if (retryable) {
