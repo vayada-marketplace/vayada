@@ -3,6 +3,20 @@ import { corsHeaders, fulfillCorsPreflight } from "../support/cors";
 const propertyId = "10090000-0000-4000-8000-000000000001";
 const path = `/setup/airbnb-connect/${propertyId}`;
 test.skip(process.env.E2E_AIRBNB_IMPORT_CALLBACK !== "1", "Airbnb preview is opt-in");
+// A signed-in hotel owner; the expired-session test below overrides this route.
+test.beforeEach(async ({ page }) => {
+  await page.route(/\/auth\/session(?:\/refresh)?(?:\?|$)/, (route) =>
+    route.fulfill({
+      headers: corsHeaders(route),
+      json: {
+        accessToken: "synthetic-access-token",
+        organizationId: "10090000-0000-4000-8000-000000000099",
+        organizationKind: "hotel_group",
+        user: { id: propertyId, email: "owner@example.test", status: "active" },
+      },
+    }),
+  );
+});
 for (const scenario of ["success", "not-ready", "failure", "unsafe-url", "retry"] as const) {
   test(`Airbnb start: ${scenario}`, async ({ page }) => {
     let posts = 0;

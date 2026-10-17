@@ -78,9 +78,7 @@ async function finish(
   if (keys.some((key) => query.getAll(key).length > 1)) return "unavailable";
   if (query.get("success") === "false") return "cancelled";
   const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-  // Without a session the API client would sign out and leave for /login, and the single-use
-  // callback token (already scrubbed) would be lost; show "could not confirm" instead, as before.
-  if (!(await authService.ensureSession())) return "unavailable";
+  let callback: { state: string; channelId: string } | null = null;
   if (query.has("success") || query.has("token") || query.has("channel_id")) {
     const state = query.get("token") ?? "";
     const channelId = query.get("channel_id") ?? "";
@@ -90,6 +88,13 @@ async function finish(
       !uuid.test(channelId)
     )
       return "unavailable";
+    callback = { state, channelId };
+  }
+  // Without a session the API client would sign out and leave for /login, and the single-use
+  // callback token (already scrubbed) would be lost; show "could not confirm" instead, as before.
+  if (!(await authService.ensureSession())) return "unavailable";
+  if (callback) {
+    const { state, channelId } = callback;
     try {
       const completed = await sharedSetupClient.post<{ sourceId: string }>(
         `${path}/complete`,
