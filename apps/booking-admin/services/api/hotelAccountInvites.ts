@@ -33,7 +33,13 @@ export const hotelAccountInvitesService = {
       body: JSON.stringify({ code }),
     });
     const text = await response.text();
-    const body = text ? (JSON.parse(text) as unknown) : null;
+    let body: unknown = null;
+    try {
+      body = text ? (JSON.parse(text) as unknown) : null;
+    } catch {
+      // A non-JSON error page (e.g. from the load balancer) keeps the status-based handling below.
+      body = null;
+    }
     if (!response.ok) {
       throw new ApiErrorResponse(
         response.status,
