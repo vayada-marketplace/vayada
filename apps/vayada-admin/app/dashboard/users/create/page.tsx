@@ -112,7 +112,7 @@ export default function CreateUserPage() {
       <div className="px-4 sm:px-6 lg:px-8 py-8">
         <div className="max-w-4xl mx-auto">
           <div className="bg-white shadow rounded-lg overflow-hidden">
-            <form onSubmit={handleSubmit} className="px-6 py-6 space-y-6">
+            <form method="post" onSubmit={handleSubmit} className="px-6 py-6 space-y-6">
               {error && (
                 <div className="bg-red-50 border border-red-200 rounded-lg p-4">
                   <p className="text-sm text-red-800">{error}</p>
