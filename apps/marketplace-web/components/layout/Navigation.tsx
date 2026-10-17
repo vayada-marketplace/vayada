@@ -8,7 +8,6 @@ import { ArrowRightIcon } from "@heroicons/react/24/outline";
 const NAV_LINKS = [
   { label: "Booking Engine", href: `${MARKETING_BASE_URL}/booking-engine` },
   { label: "PMS", href: `${MARKETING_BASE_URL}/pms` },
-  { label: "Hotel-Creator-Network", href: `${MARKETING_BASE_URL}/hotel-creator-network` },
   { label: "Pricing", href: `${MARKETING_BASE_URL}/pricing` },
   { label: "Partner Program", href: `${MARKETING_BASE_URL}/partner-program` },
 ];
