@@ -677,9 +677,11 @@ describe.skipIf(!TEST_DATABASE_URL)("property setup draft save repository", () =
         "marketplace.collaboration_preferences": "preferences:1",
       },
     });
+    // VAY-2270 (0493): no role holds the retired step's permission, so the scope check refuses it
+    // before the track check would.
     await expect(repository.saveStepDraft(marketplace)).resolves.toEqual({
       ok: false,
-      error: { code: "inactive_setup_step", currentTrackRevision: 1 },
+      error: { code: "setup_scope_unavailable" },
     });
 
     const initial = command(fixture, {
