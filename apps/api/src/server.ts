@@ -114,7 +114,6 @@ import { createTargetBookingDashboardMetricsReadPort } from "./platform/bookingD
 import { createTargetBookingGuestPiiPort } from "./platform/bookingGuestPii.js";
 import { createS3FinanceFolioExportArtifactWriter } from "./platform/financeFolioExportArtifacts.js";
 import { createPgIdentityLifecycleCommandBus } from "./platform/identityLifecycle.js";
-import { createPgMarketplaceOfferIdentityAccessCommandPort } from "./platform/marketplaceOfferIdentityAccess.js";
 import { createTargetPublicBookabilityPublicationCommandPort } from "./platform/publicBookabilityPublication.js";
 import { createPgProductAuditSink } from "./platform/productAudit.js";
 import { createPgAuthSessionHandoffRepository } from "./platform/authSessionHandoffs.js";
@@ -1966,11 +1965,7 @@ const app = buildApp({
   bookingCustomDomainRepository,
   marketplaceAdminRepository:
     config.marketplaceAdminSource === "target"
-      ? createPgMarketplaceAdminRepository({
-          connectionString: targetDatabaseUrl,
-          identityAccess: createPgMarketplaceOfferIdentityAccessCommandPort(),
-          offerMediaPromotion: platformMediaRuntime?.offerMediaPromotion,
-        })
+      ? createPgMarketplaceAdminRepository({ connectionString: targetDatabaseUrl })
       : undefined,
   marketplaceAdminLegacySuperadminFallbackEnabled:
     config.marketplaceAdminLegacySuperadminFallbackEnabled,
