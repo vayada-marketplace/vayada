@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   params: new URLSearchParams(),
   replace: vi.fn(),
   authenticated: true,
+  superAdmin: false,
   accountComplete: true,
   prepared: null as unknown,
   wizard: vi.fn((props: unknown) => {
@@ -30,6 +31,7 @@ vi.mock("@/services/auth", () => ({
   authService: {
     ensureSession: async () => mocks.authenticated,
     isHotelAdmin: () => true,
+    isSuperAdmin: () => mocks.superAdmin,
   },
 }));
 vi.mock("@/services/auth/sessionStore", () => ({
@@ -62,6 +64,7 @@ describe("invitation setup entry", () => {
     vi.clearAllMocks();
     mocks.params = new URLSearchParams("entryProduct=pms&returnProduct=pms");
     mocks.authenticated = true;
+    mocks.superAdmin = false;
     mocks.accountComplete = true;
     mocks.prepared = null;
     vi.stubGlobal("localStorage", { getItem: () => null, setItem: vi.fn() });
@@ -199,6 +202,13 @@ describe("invitation setup entry", () => {
         "/handoff?redirect=/dashboard?setup=incomplete&propertyId=property-1",
       );
     });
+  });
+
+  it("keeps a super admin out of hotel setup", async () => {
+    mocks.superAdmin = true;
+    await render();
+    expect(mocks.replace).toHaveBeenCalledWith("/login");
+    expect(mocks.wizard).not.toHaveBeenCalled();
   });
 
   it("redirects an unauthenticated visitor before showing property setup", async () => {
