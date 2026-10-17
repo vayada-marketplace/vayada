@@ -11,7 +11,7 @@ const uiFont = { fontFamily: uiFontFamily, "--font-sans": uiFontFamily } as CSSP
 export const metadata: Metadata = {
   title: "Vayada - Direct distribution for independent hotels",
   description:
-    "Booking engine, PMS, creator network and AI distribution intelligence, built for independent hospitality.",
+    "Booking engine, PMS, channel manager and AI distribution intelligence, built for independent hospitality.",
   icons: {
     icon: [
       { url: "/vayada-logo.png" },

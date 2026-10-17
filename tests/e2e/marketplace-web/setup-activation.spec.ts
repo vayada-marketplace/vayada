@@ -5,7 +5,7 @@ import {
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import type { AdaptiveHotelSetupStatus, SetupTaskId } from "@vayada/domain-hotels";
 import { createAdaptiveHotelSetupStatusMock } from "../support/sharedHotelSetupMocks";
-import { corsHeaders, fulfillCorsPreflight } from "./utils/cors";
+import { corsHeaders, fulfillCorsPreflight } from "../support/cors";
 
 const propertyId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 

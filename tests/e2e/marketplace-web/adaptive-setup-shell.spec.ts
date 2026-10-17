@@ -20,7 +20,7 @@ import {
   mockPropertySetupRoute,
 } from "../support/propertySetupRouteMocks";
 import { watchPageHealth } from "../support/pageHealth";
-import { corsHeaders, fulfillCorsPreflight } from "./utils/cors";
+import { corsHeaders, fulfillCorsPreflight } from "../support/cors";
 
 const propertyId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 

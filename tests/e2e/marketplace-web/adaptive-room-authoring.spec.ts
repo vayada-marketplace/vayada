@@ -8,7 +8,7 @@ import type { PropertySetupRouteReadModel, PropertySetupStepDraft } from "@vayad
 
 import { createPropertySetupRouteMock } from "../support/propertySetupRouteMocks";
 import { watchPageHealth } from "../support/pageHealth";
-import { corsHeaders, fulfillCorsPreflight } from "./utils/cors";
+import { corsHeaders, fulfillCorsPreflight } from "../support/cors";
 
 const organizationId = "11111111-1111-4111-8111-111111111111";
 const propertyId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";

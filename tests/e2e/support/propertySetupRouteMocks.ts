@@ -6,7 +6,7 @@ import type {
   SetupTrack,
 } from "@vayada/domain-hotels";
 import { PROPERTY_SETUP_STEP_DEFINITIONS } from "@vayada/domain-hotels";
-import { corsHeaders, fulfillCorsPreflight } from "../marketplace-web/utils/cors";
+import { corsHeaders, fulfillCorsPreflight } from "./cors";
 
 const organizationId = "11111111-1111-4111-8111-111111111111";
 const sessionId = "22222222-2222-4222-8222-222222222222";
