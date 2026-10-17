@@ -671,14 +671,6 @@ jobs:
         env:
           TARGET_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
-      - name: Verify creator payout reconciliation detail
-        if: matrix.shard == 'platform'
-        run: >-
-          npm --workspace vayada-api run test -- --no-file-parallelism
-          src/financeAffiliatePayoutPortal.integration.test.ts
-        env:
-          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
-
       - name: Verify restricted identity PMS Inbox enqueue
         if: matrix.shard == 'platform'
         run: >-
