@@ -40,10 +40,9 @@ const publicBookabilityFixture = PUBLIC_BOOKABILITY_FIXTURES.find(
 
 const publicHotelProfilePool: PublicHotelProfileReadPool = {
   async query<T extends QueryResultRow>(text: string, values?: readonly unknown[]) {
-    if (text.includes('AS "referralEnabled"')) {
-      expect(text).toContain("identity.product_entitlements");
+    if (text.includes('AS "promoCodes"')) {
       return {
-        rows: [{ referralEnabled: false, latitude: null, longitude: null }] as unknown as T[],
+        rows: [{ promoCodes: false, latitude: null, longitude: null }] as unknown as T[],
       };
     }
     // The custom domain must still be verified for the current property (VAY-2134 shared gate).

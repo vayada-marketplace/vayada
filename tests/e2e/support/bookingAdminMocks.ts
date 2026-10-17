@@ -125,7 +125,6 @@ export interface BookingAdminDesignSettingsFixture {
   headerLogo: string;
   headerLogoMediaObjectId: string | null;
   showContactButton: boolean;
-  showReferAGuestButton: boolean;
   showLanguageSelector: boolean;
   showCurrencySelector: boolean;
   heroImage: string;
@@ -321,7 +320,6 @@ export const defaultBookingAdminDesignSettings: BookingAdminDesignSettingsFixtur
   headerLogo: "",
   headerLogoMediaObjectId: null,
   showContactButton: true,
-  showReferAGuestButton: false,
   showLanguageSelector: true,
   showCurrencySelector: true,
   heroImage: "/hotel-hero.JPG",
@@ -398,7 +396,7 @@ export async function mockBookingAdminShellRoutes(
       json: {
         hotelId: BOOKING_ADMIN_PROPERTY_ID,
         canManage: true,
-        supportedModules: ["affiliates"],
+        supportedModules: [],
         activeModules: [],
         activations: [],
       },
