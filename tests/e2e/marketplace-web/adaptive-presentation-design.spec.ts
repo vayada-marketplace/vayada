@@ -73,9 +73,6 @@ test.describe("adaptive presentation, Marketplace preferences, and Booking desig
     await expect(
       page.getByText("Save these choices to prepare the private preview."),
     ).toBeVisible();
-    await page.evaluate(() => document.fonts.ready);
-    expect(api.fontStylesheetRequest).toContain("family=Inter");
-    expect(await page.evaluate(() => document.fonts.check("16px Inter"))).toBe(true);
     const computedFontFamilies = await Promise.all(
       [
         "High-end Serif",
@@ -90,6 +87,20 @@ test.describe("adaptive presentation, Marketplace preferences, and Booking desig
       ),
     );
     expect(new Set(computedFontFamilies).size).toBe(5);
+    // VAY-2225: the pairing fonts load from marketplace-web itself, never from Google.
+    const interFamily = computedFontFamilies[1]!.split(",")[0]!.trim().replace(/['"]/g, "");
+    await expect
+      .poll(() =>
+        page.evaluate(async (family) => {
+          await document.fonts.ready;
+          return [...document.fonts].some(
+            (face) => face.family.replace(/['"]/g, "") === family && face.status === "loaded",
+          );
+        }, interFamily),
+      )
+      .toBe(true);
+    expect(api.fontRequests.length).toBeGreaterThan(0);
+    expect(new Set(api.fontRequests)).toEqual(new Set([new URL(page.url()).origin]));
     await expectNoSeriousAccessibilityViolations(page);
     const assertDesignHealthy = watchPageHealth(page, testInfo);
     const oceanBlue = page.getByRole("radio", { name: "Ocean blue" });
@@ -230,7 +241,7 @@ async function mockAdaptiveApis(page: Page, options: { designConfigured?: boolea
   const uploadResources: string[] = [];
   const legacyCalls: string[] = [];
   let readinessReads = 0;
-  let fontStylesheetRequest: string | null = null;
+  const fontRequests: string[] = [];
   let failNextDraft: DraftFailure = null;
 
   await page.route("https://media.example/**", async (route) => {
@@ -240,22 +251,11 @@ async function mockAdaptiveApis(page: Page, options: { designConfigured?: boolea
       body: Buffer.from("safe-booking-preview"),
     });
   });
-  await page.route("https://fonts.googleapis.com/**", async (route) => {
-    fontStylesheetRequest = route.request().url();
-    await route.fulfill({
-      status: 200,
-      contentType: "text/css",
-      body: `@font-face {
-        font-family: "Inter";
-        font-style: normal;
-        font-weight: 300 700;
-        src: local("Arial"), local("DejaVu Sans");
-      }`,
-    });
-  });
-
   page.on("request", (request) => {
-    const pathname = new URL(request.url()).pathname;
+    const url = new URL(request.url());
+    if (request.resourceType() === "font" || /^fonts\.(googleapis|gstatic)\.com$/.test(url.host))
+      fontRequests.push(url.origin);
+    const pathname = url.pathname;
     if (
       /^\/api\/hotel-setup\/(?:tracks|handoffs)(?:\/|$)/.test(pathname) ||
       /^\/api\/hotel-setup\/properties\/[^/]+\/(?:profile|public-profile)(?:\/|$)/.test(pathname)
@@ -580,9 +580,7 @@ async function mockAdaptiveApis(page: Page, options: { designConfigured?: boolea
     get readinessReads() {
       return readinessReads;
     },
-    get fontStylesheetRequest() {
-      return fontStylesheetRequest;
-    },
+    fontRequests,
     get failNextDraft() {
       return failNextDraft;
     },

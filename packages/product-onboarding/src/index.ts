@@ -2,7 +2,6 @@ export { BookingPagePreview } from "./BookingPagePreview";
 export {
   BOOKING_PAGE_COLOR_PRESETS,
   BOOKING_PAGE_FONT_PAIRINGS,
-  BOOKING_PAGE_FONT_STYLESHEET_URL,
   type ColorPreset,
   type FontPairing,
 } from "./bookingPageBranding";

@@ -36,3 +36,9 @@ upstream version), and check the screenshots of the affected pages.
 
 All families are under the SIL Open Font License 1.1, which allows bundling and redistributing
 them with software. Each family's licence, with its copyright notice, is in `licences/`.
+
+## Unit tests
+
+`next/font/local` only works inside Next's compiler. An app whose Vitest tests import a component
+that uses these fonts aliases `next/font/local` to `src/vitestNextFontLocal.ts` (see
+apps/marketplace-web/vitest.config.ts).

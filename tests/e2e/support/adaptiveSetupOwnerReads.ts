@@ -188,9 +188,6 @@ export async function mockAdaptiveSetupOwnerReads(page: Page) {
       });
     },
   );
-  await page.route("https://fonts.googleapis.com/**", (route) =>
-    route.fulfill({ status: 200, contentType: "text/css", body: "" }),
-  );
 }
 
 function pricingCurrency() {

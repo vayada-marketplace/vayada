@@ -3,8 +3,6 @@
 import { CalendarDaysIcon, CheckIcon, UserGroupIcon } from "@heroicons/react/24/outline";
 import type { ReactNode } from "react";
 
-import type { FontPairing } from "./bookingPageBranding";
-
 export function BookingPagePreview({
   translate,
   bookingUrl = "yourhotel.vayada.com",
@@ -30,7 +28,8 @@ export function BookingPagePreview({
   className?: string;
   currency: string;
   defaultLanguage: string;
-  font: Pick<FontPairing, "headingFamily" | "bodyFamily">;
+  /** CSS font-family values, e.g. from @vayada/fonts/brand. */
+  font: { headingFamily: string; bodyFamily: string };
   headerLogo?: string;
   heroHeading: string;
   heroImage: string;
