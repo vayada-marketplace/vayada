@@ -63,6 +63,7 @@ import {
   type FinanceXenditPayoutReconciliationCommand,
   type FinanceXenditPayoutReconciliationResult,
   type FinanceXenditPayoutReconciliationResponse,
+  type StripeConnectReturnSurface,
 } from "@vayada/domain-finance";
 import { requireAuthContext } from "@vayada/backend-auth";
 import {
@@ -5551,7 +5552,7 @@ function parseStripeProviderAccountBody(body: StripeProviderAccountBody):
       idempotencyKey: string;
       email: string;
       country: string;
-      returnSurface?: "marketplace" | "booking_admin";
+      returnSurface?: StripeConnectReturnSurface;
     }
   | FinanceValidationError {
   const commandId = nonEmptyString(body.commandId);
@@ -5573,8 +5574,10 @@ function parseStripeProviderAccountBody(body: StripeProviderAccountBody):
   };
 }
 
-function parseStripeReturnSurface(value: unknown): "marketplace" | "booking_admin" | undefined {
-  return value === "marketplace" || value === "booking_admin" ? value : undefined;
+function parseStripeReturnSurface(value: unknown): StripeConnectReturnSurface | undefined {
+  return value === "marketplace" || value === "booking_admin" || value === "booking_admin_setup"
+    ? value
+    : undefined;
 }
 
 function financeCommandAudit(request: FastifyRequest, reason: string): FinanceCommandAudit {
