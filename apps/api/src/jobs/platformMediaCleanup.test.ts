@@ -164,10 +164,10 @@ describe("platform media cleanup jobs", () => {
     const store = new MemoryPlatformMediaCleanupStore([
       {
         mediaObjectId,
-        resourceProduct: "marketplace",
-        resourceType: "collaboration",
-        resourceId: "collaboration_expired",
-        purpose: "marketplace.collaboration_chat.attachment",
+        resourceProduct: "pms",
+        resourceType: "message_thread",
+        resourceId: "thread_expired",
+        purpose: "pms.messaging.attachment",
         visibility: "private",
         lifecycleStatus: "active",
         bucket: "vayada-media-local",
@@ -191,13 +191,13 @@ describe("platform media cleanup jobs", () => {
     ]);
   });
 
-  it("rechecks retention under lock before deleting a selected chat attachment", async () => {
+  it("rechecks retention under lock before deleting a selected private attachment", async () => {
     const retainedUntil = "2026-06-20T00:00:00.000Z";
     const query = vi.fn(async (statement: string) => {
       if (statement === "BEGIN" || statement === "COMMIT") return { rows: [] };
       if (statement.includes("FOR UPDATE")) {
         expect(statement).toContain("media.retained_until <= $2::timestamptz");
-        expect(statement).toContain("marketplace.collaboration_chat.attachment");
+        expect(statement).toContain("pms.messaging.attachment");
         return { rows: [] };
       }
       throw new Error(`Unexpected cleanup query: ${statement}`);
@@ -218,10 +218,10 @@ describe("platform media cleanup jobs", () => {
       const result = await store.applyCleanupMutation(
         {
           mediaObjectId: "00000000-0000-0000-0000-000000000304",
-          resourceProduct: "marketplace",
-          resourceType: "collaboration",
-          resourceId: "collaboration_claimed_during_cleanup",
-          purpose: "marketplace.collaboration_chat.attachment",
+          resourceProduct: "pms",
+          resourceType: "message_thread",
+          resourceId: "thread_claimed_during_cleanup",
+          purpose: "pms.messaging.attachment",
           visibility: "private",
           lifecycleStatus: "active",
           bucket: "vayada-media-local",
@@ -445,10 +445,10 @@ describe("platform media cleanup jobs", () => {
     });
     const candidate: PlatformMediaCleanupCandidate = {
       mediaObjectId,
-      resourceProduct: "marketplace",
-      resourceType: "collaboration",
-      resourceId: "collaboration_failing_cleanup",
-      purpose: "marketplace.collaboration_chat.attachment",
+      resourceProduct: "pms",
+      resourceType: "message_thread",
+      resourceId: "thread_failing_cleanup",
+      purpose: "pms.messaging.attachment",
       visibility: "private",
       lifecycleStatus: "active",
       bucket: "vayada-media-local",
@@ -638,7 +638,7 @@ class MemoryPlatformMediaCleanupStore implements PlatformMediaCleanupStore {
       .filter(
         (resource) =>
           resource.visibility === "private" &&
-          ["marketplace.collaboration_chat.attachment", "pms.messaging.attachment"].includes(
+          ["pms.messaging.attachment", "finance.expense.receipt"].includes(
             resource.purpose ?? "",
           ) &&
           ["active", "retained", "delete_requested"].includes(resource.lifecycleStatus) &&

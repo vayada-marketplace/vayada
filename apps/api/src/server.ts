@@ -1874,8 +1874,8 @@ const app = buildApp({
           ? {
               receiptMedia: {
                 read: financeExpenseRuntime.routes.expenses,
-                signer: platformMediaRuntime.collaborationAttachments.signer,
-                serving: platformMediaRuntime.collaborationAttachments.serving,
+                signer: platformMediaRuntime.privateDownloads.signer,
+                serving: platformMediaRuntime.privateDownloads.serving,
               },
             }
           : {}),
