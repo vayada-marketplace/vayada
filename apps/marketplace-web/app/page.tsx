@@ -1,9 +1,15 @@
-import { redirect } from "next/navigation";
+import { bookingAdminUrl, marketingUrl } from "@/redirectTargets";
 
-// This app is the authenticated creator marketplace, served at app.vayada.com.
-// The public marketing site is a separate deployment at vayada.com
-// (the `vayada-landing` repo). Hitting the bare app domain just sends
-// visitors to sign in; marketing lives on its own host.
+// VAY-2270: the Marketplace app is a redirect stub; next.config.js forwards every route. This page
+// is only reached when a redirect is bypassed (for example a HEAD probe), so it names the targets.
 export default function Home() {
-  redirect("/login");
+  return (
+    <main style={{ fontFamily: "system-ui, sans-serif", padding: "3rem 1.5rem", maxWidth: 560 }}>
+      <h1 style={{ fontSize: "1.5rem", margin: 0 }}>This address has moved.</h1>
+      <p>
+        Hotels continue in <a href={`${bookingAdminUrl}/login`}>Booking Admin</a>. Everything else
+        is on <a href={marketingUrl}>vayada.com</a>.
+      </p>
+    </main>
+  );
 }
