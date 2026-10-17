@@ -719,3 +719,59 @@ describe("hasMapCoordinates", () => {
     expect(hasMapCoordinates({ latitude: 0, longitude: 180.1 })).toBe(false);
   });
 });
+
+describe("availableTracks", () => {
+  it.each([
+    [undefined, ["Hotel Operations", "Creator Marketplace"]],
+    [["hotel_operations"] as const, ["Hotel Operations"]],
+  ])("offers %j on the track screen", async (availableTracks, labels) => {
+    vi.stubGlobal("document", { addEventListener: vi.fn(), removeEventListener: vi.fn() });
+    vi.stubGlobal("requestAnimationFrame", vi.fn());
+    let renderer: ReactTestRenderer | undefined;
+    try {
+      const api = {
+        getStatus: vi.fn().mockResolvedValue({
+          contractVersion: "adaptive-hotel-setup.v1",
+          organization: {
+            organizationId: "organization-1",
+            displayName: "Group",
+            websiteUrl: null,
+            selectedTracks: [],
+            trackRevision: 0,
+            canManageTracks: true,
+            tracks: [],
+          },
+          propertySelection: {
+            state: "no_property",
+            selectedPropertyId: null,
+            availableProperties: [],
+          },
+          setupPlan: null,
+          entryDecision: null,
+          updatedAt: "2026-10-17T00:00:00Z",
+        }),
+        getPropertyTypes: vi
+          .fn()
+          .mockResolvedValue({ propertyTypes: [{ value: "hotel", label: "Hotel" }] }),
+      };
+      await act(async () => {
+        renderer = create(
+          createElement(Wizard, {
+            api: api as unknown as SharedHotelSetupApi,
+            entryProduct: "booking",
+            renderAfterHotelDetails: () => null,
+            ...(availableTracks ? { availableTracks } : {}),
+          }),
+        );
+      });
+      const trackInputs = renderer!.root
+        .findAllByType("input")
+        .filter((input) => input.props.type === "checkbox")
+        .map((input) => input.props["aria-label"]);
+      expect(trackInputs).toEqual(labels);
+    } finally {
+      act(() => renderer?.unmount());
+      vi.unstubAllGlobals();
+    }
+  });
+});

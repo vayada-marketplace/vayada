@@ -1,6 +1,6 @@
 import path from "node:path";
 import { expect, test } from "@playwright/test";
-import { corsHeaders, fulfillCorsPreflight } from "./utils/cors";
+import { corsHeaders, fulfillCorsPreflight } from "../support/cors";
 import { watchPageHealth } from "../support/pageHealth";
 
 const propertyId = "e1943000-0000-4000-8000-000000000003";

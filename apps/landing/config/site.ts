@@ -1,12 +1,12 @@
 import { ROUTES } from "@/lib/constants/routes";
 
-// Signup lives in the app (app.vayada.com), not on this marketing site.
+// Sign-up lives in Booking Admin, not on this marketing site.
 const SIGNUP_URL = ROUTES.SIGNUP;
 
 export const siteConfig = {
   name: "vayada",
   description:
-    "A transparent marketplace connecting hotels with verified travel influencers for authentic collaborations.",
+    "Booking Engine, PMS and Channel Manager for independent hotels that want direct bookings.",
   url: "https://vayada.com",
   ogImage: "/og-image.jpg",
   links: {
@@ -18,33 +18,14 @@ export const siteConfig = {
   },
   // Note: Colors are now centralized in tailwind.config.js
   // Use Tailwind classes: primary-500, success-500, warning-500, error-500, info-500
-  hero: {
-    title: "Where hotels and creators connect",
-    subtitle:
-      "A transparent marketplace that replaces agencies and middlemen. Hotels and creators collaborate directly, building authentic partnerships that drive real results.",
-    cta: {
-      hotel: {
-        text: "I'm a Hotel",
-        href: SIGNUP_URL,
-      },
-      creator: {
-        text: "I'm a Creator",
-        href: SIGNUP_URL,
-      },
-    },
-  },
   footer: {
-    description: "Connecting hotels with travel creators for authentic collaborations.",
+    description: "Direct booking tools for independent hotels.",
     links: {
       hotels: [
-        { label: "How It Works", href: "#hotels" },
+        { label: "Booking Engine", href: "/booking-engine" },
+        { label: "PMS", href: "/pms" },
+        { label: "Pricing", href: "/pricing" },
         { label: "Sign Up", href: SIGNUP_URL },
-        { label: "Benefits", href: "/pricing" },
-      ],
-      creators: [
-        { label: "How It Works", href: "#creators" },
-        { label: "Sign Up", href: SIGNUP_URL },
-        { label: "Benefits", href: "/creator-benefits" },
       ],
       company: [
         { label: "About", href: "/about" },

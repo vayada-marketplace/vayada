@@ -2,7 +2,7 @@ import { expect, test, type Page, type Route } from "@playwright/test";
 
 import { createAdaptiveHotelSetupStatusMock } from "../support/sharedHotelSetupMocks";
 import { watchNoLegacyCalls } from "../support/noLegacyCalls";
-import { corsHeaders, fulfillCorsPreflight } from "./utils/cors";
+import { corsHeaders, fulfillCorsPreflight } from "../support/cors";
 
 const organizationId = "11111111-1111-4111-8111-111111111111";
 const propertyId = "22222222-2222-4222-8222-222222222222";

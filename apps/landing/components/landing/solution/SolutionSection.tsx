@@ -7,7 +7,7 @@ const POINTS = [
   {
     n: "02",
     title: "Trust becomes distribution",
-    body: "Travel decisions increasingly start with friends, family, creators and communities. Guests trust referrals more than any ad.",
+    body: "Travel decisions increasingly start with friends, family and communities. Guests trust referrals more than any ad.",
   },
   {
     n: "03",

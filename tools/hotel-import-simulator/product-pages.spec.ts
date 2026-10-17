@@ -1,6 +1,6 @@
 import { expect, test, type Page, type APIRequestContext } from "@playwright/test";
 import { createAdaptiveHotelSetupStatusMock } from "../../tests/e2e/support/sharedHotelSetupMocks";
-import { corsHeaders, fulfillCorsPreflight } from "../../tests/e2e/marketplace-web/utils/cors";
+import { corsHeaders, fulfillCorsPreflight } from "../../tests/e2e/support/cors";
 const database = "https://pms.localhost:1380";
 const organizationId = "10090000-0000-4000-8000-000000000002";
 
@@ -120,7 +120,7 @@ test("import from actual onboarding appears in actual PMS room settings", async 
   ).toHaveLength(0);
   await prepare(page, request, propertyId);
   await page.goto(
-    `https://marketplace.localhost:1382/setup?entryProduct=pms&propertyId=${propertyId}`,
+    `https://admin.booking.localhost:1382/setup?entryProduct=pms&propertyId=${propertyId}`,
   );
   await page.getByRole("button", { name: "Review prepared hotel data" }).click();
   const loft = page
