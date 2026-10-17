@@ -5,7 +5,10 @@ import type { PropertyProfileResponse, PreparedHotelImport } from "@vayada/domai
 import { registerPreparedHotelImportRoutes } from "./routes/preparedHotelImports.js";
 import type { PreparedImportSource } from "./domains/preparedHotelImportRepository.js";
 import type { PmsRoomFactsRoutesOptions } from "./routes/pmsRoomFacts.js";
-import { parseHotelAccountInviteCreateRequest } from "./routes/marketplaceAdmin.js";
+import {
+  parseHotelAccountInviteCreateRequest,
+  storedHotelAccountInviteTracks,
+} from "./routes/marketplaceAdmin.js";
 const room = {
   id: "suite",
   name: "Suite",
@@ -306,20 +309,23 @@ describe("invite preparation contract", () => {
     identity: { email: "owner@example.test" },
     organization: { displayName: "Group" },
     property: { displayName: "Hotel" },
-    selectedTracks: ["creator_marketplace"],
+    selectedTracks: ["hotel_operations"],
   };
   it("keeps old invitations valid", () =>
     expect(typeof parseHotelAccountInviteCreateRequest(invite)).toBe("object"));
-  it("rejects rooms on marketplace-only invites", () =>
-    expect(parseHotelAccountInviteCreateRequest({ ...invite, preparedData: data })).toBe(
-      "rooms_require_hotel_operations",
-    ));
-  it("accepts prepared operations invites", () =>
+  it("reads a stored Creator Marketplace invite as Hotel Operations (VAY-2270)", () =>
     expect(
-      typeof parseHotelAccountInviteCreateRequest({
+      parseHotelAccountInviteCreateRequest({
         ...invite,
-        selectedTracks: ["hotel_operations"],
-        preparedData: data,
+        selectedTracks: storedHotelAccountInviteTracks(["creator_marketplace"]),
       }),
-    ).toBe("object"));
+    ).toMatchObject({ selectedTracks: ["hotel_operations"] }));
+  it("rejects the retired Creator Marketplace track on new invites", () =>
+    expect(
+      parseHotelAccountInviteCreateRequest({ ...invite, selectedTracks: ["creator_marketplace"] }),
+    ).toBe("invalid_selected_tracks"));
+  it("accepts prepared operations invites", () =>
+    expect(typeof parseHotelAccountInviteCreateRequest({ ...invite, preparedData: data })).toBe(
+      "object",
+    ));
 });

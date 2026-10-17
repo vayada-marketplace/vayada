@@ -16,6 +16,7 @@ import {
   mapOfferRow,
   syncPropertyOfferReadModels,
   validateMergedOfferUpdate,
+  storedHotelAccountInviteTracks,
 } from "./routes/marketplaceAdmin.js";
 import type {
   MarketplaceAdminCreateOfferRequest,
@@ -100,14 +101,7 @@ describe("marketplace admin routes", () => {
     const routeCases: Array<{
       label: string;
       selectedTracks: MarketplaceAdminHotelAccountInviteCreateRequest["selectedTracks"];
-    }> = [
-      { label: "Marketplace", selectedTracks: ["creator_marketplace"] },
-      { label: "Hotel Operations", selectedTracks: ["hotel_operations"] },
-      {
-        label: "combined",
-        selectedTracks: ["hotel_operations", "creator_marketplace"],
-      },
-    ];
+    }> = [{ label: "Hotel Operations", selectedTracks: ["hotel_operations"] }];
 
     for (const routeCase of routeCases) {
       const payload = hotelInviteRequest(routeCase.selectedTracks);
@@ -129,12 +123,12 @@ describe("marketplace admin routes", () => {
       });
     }
 
-    expect(repository.calls.createInviteCode).toHaveLength(3);
-    expect(repository.calls.createInviteCode[2]).toMatchObject({
+    expect(repository.calls.createInviteCode).toHaveLength(1);
+    expect(repository.calls.createInviteCode[0]).toMatchObject({
       createdByUserId: "user_platform",
       invite: {
         contractVersion: "hotel-account-invite.v1",
-        selectedTracks: ["hotel_operations", "creator_marketplace"],
+        selectedTracks: ["hotel_operations"],
         handoffPath: "/setup",
       },
     });
@@ -176,13 +170,38 @@ describe("marketplace admin routes", () => {
     });
     expect(invalidTrack.statusCode).toBe(422);
     expect(invalidTrack.body).toMatchObject({ code: "invalid_selected_tracks" });
+
+    // The Creator Marketplace track is retired (VAY-2270): new invites cannot name it.
+    for (const selectedTracks of [
+      ["creator_marketplace"],
+      ["hotel_operations", "creator_marketplace"],
+    ]) {
+      const retiredTrack = await injectJson(app, {
+        method: "POST",
+        url: "/api/marketplace/admin/invite-codes",
+        headers: { authorization: "Bearer platform-token" },
+        payload: { ...hotelInviteRequest(["hotel_operations"]), selectedTracks },
+      });
+      expect(retiredTrack.statusCode, selectedTracks.join("+")).toBe(422);
+      expect(retiredTrack.body).toMatchObject({ code: "invalid_selected_tracks" });
+    }
     expect(repository.calls.createInviteCode).toHaveLength(0);
+  });
+
+  it("reads stored invites that still name the retired Creator Marketplace track as Hotel Operations", () => {
+    expect(storedHotelAccountInviteTracks(["creator_marketplace"])).toEqual(["hotel_operations"]);
+    expect(storedHotelAccountInviteTracks(["hotel_operations", "creator_marketplace"])).toEqual([
+      "hotel_operations",
+    ]);
+    expect(storedHotelAccountInviteTracks(["hotel_operations"])).toEqual(["hotel_operations"]);
+    // Anything that is not an array is left for the parser to reject.
+    expect(storedHotelAccountInviteTracks("hotel_operations")).toBe("hotel_operations");
   });
 
   it("requires platform authorization before creating a hotel invite", async () => {
     const repository = createMemoryMarketplaceAdminRepository();
     app = buildMarketplaceAdminApp(repository);
-    const payload = hotelInviteRequest(["creator_marketplace"]);
+    const payload = hotelInviteRequest(["hotel_operations"]);
 
     const unauthenticated = await injectJson(app, {
       method: "POST",
@@ -566,7 +585,7 @@ function inviteCodeResponse(
   id = "invite_801",
   code = "VAY-INVITE",
   invite: MarketplaceAdminHotelAccountInviteCreateRequest = hotelInviteRequest([
-    "creator_marketplace",
+    "hotel_operations",
   ]),
 ): MarketplaceAdminInviteCode {
   return {

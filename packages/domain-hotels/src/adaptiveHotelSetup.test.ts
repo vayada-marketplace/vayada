@@ -3,9 +3,11 @@ import { describe, expect, it } from "vitest";
 import {
   ADAPTIVE_HOTEL_SETUP_CONTRACT_VERSION,
   SETUP_TRACK_COMPONENT_PRODUCTS,
+  OFFERED_SETUP_TRACKS,
   SETUP_TRACKS,
   isSetupTrack,
   isSetupTaskLaunchable,
+  normalizeStoredSetupTracks,
   parseAdaptiveHotelSetupStatus,
   parseUpdateTracksRequest,
   type AdaptiveHotelSetupStatus,
@@ -18,6 +20,18 @@ describe("adaptive hotel setup contracts", () => {
     expect(SETUP_TRACKS).toEqual(["hotel_operations", "creator_marketplace"]);
     expect(isSetupTrack("hotel_operations")).toBe(true);
     expect(isSetupTrack("creator_marketplace")).toBe(true);
+  });
+
+  it("offers Hotel Operations only and reads the retired Creator Marketplace track as absent", () => {
+    expect(OFFERED_SETUP_TRACKS).toEqual(["hotel_operations"]);
+    expect(normalizeStoredSetupTracks(["hotel_operations", "creator_marketplace"])).toEqual([
+      "hotel_operations",
+    ]);
+    expect(normalizeStoredSetupTracks(["creator_marketplace"])).toEqual([]);
+    expect(normalizeStoredSetupTracks(["creator_marketplace", "hotel_operations", "pms"])).toEqual([
+      "hotel_operations",
+    ]);
+    expect(normalizeStoredSetupTracks([])).toEqual([]);
   });
 
   it.each(["pms", "booking", "marketplace", "unknown", null, undefined])(

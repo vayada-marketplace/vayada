@@ -199,7 +199,6 @@ import { createPgFinanceSubscriptionStore } from "./domains/financeSubscriptionS
 import { createStripeFinanceSubscriptionProvider } from "./domains/stripeFinanceSubscriptions.js";
 import { createStripeBookingPaymentProvider } from "./domains/stripeBookingPayments.js";
 import { createStripeConnectProvider } from "./domains/stripeConnect.js";
-import { createPgMarketplaceSetupLifecycleStatusRepository } from "./domains/marketplaceSetupLifecycleStatusRepository.js";
 import { createPgBookingSetupLifecycleStatusRepository } from "./domains/bookingSetupLifecycleStatusRepository.js";
 import {
   createPropertySetupHotelCatalogStateProvider,
@@ -985,9 +984,6 @@ const pmsInboxEmailDelivery = config.bookingEmailDelivery
   ? createResendPmsInboxDelivery({ apiKey: config.bookingEmailDelivery.apiKey })
   : undefined;
 
-const marketplaceSetupLifecycleStatusRepository = createPgMarketplaceSetupLifecycleStatusRepository(
-  { connectionString: targetDatabaseUrl },
-);
 const bookingSetupLifecycleStatusRepository = createPgBookingSetupLifecycleStatusRepository({
   connectionString: targetDatabaseUrl,
 });
@@ -1449,7 +1445,6 @@ const propertySetupRouteStateReadPort = createPropertySetupRouteStateReadPort({
       }),
     }),
     review_lifecycle: createPropertySetupReviewLifecycleStateProvider({
-      marketplace: marketplaceSetupLifecycleStatusRepository,
       booking: bookingSetupLifecycleStatusRepository,
     }),
   },
@@ -2277,7 +2272,6 @@ app.addHook("onClose", async () => {
     pmsPricingReadModel.close(),
     financePaymentReadinessReadModel.close(),
     financePaymentSetupRuntime.close(),
-    marketplaceSetupLifecycleStatusRepository.close(),
     bookingSetupLifecycleStatusRepository.close(),
     bookingGuestPolicyRepository.close(),
     propertySetupOwnerPool.end(),

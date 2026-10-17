@@ -949,7 +949,6 @@ describe("shared hotel setup status route", () => {
   it.each([
     ["booking", "hotel_operations", "booking", "booking_hotel"],
     ["pms", "hotel_operations", "pms", "pms_property"],
-    ["marketplace", "creator_marketplace", "marketplace", "hotel_profile"],
   ] as const)(
     "does not enter %s with only an active entitlement and resource link",
     async (entryProduct, selectedTrack, product, resourceType) => {
@@ -976,53 +975,23 @@ describe("shared hotel setup status route", () => {
     },
   );
 
-  it("sends a blocked track to service management instead of an unresolvable setup loop", async () => {
+  it("rejects the retired marketplace entry product before any data read", async () => {
     app = buildSharedSetupApp({
       linkedResources: [propertyLink(propertyId)],
       repository: repositoryWith([adaptiveProperty(propertyId)]),
-      trackCommandRepository: {
-        async updateTracks() {
-          throw new Error("setup track writes are not used by this test");
-        },
-        async getTrackStatus() {
-          return {
-            trackRevision: 1,
-            selectedTracks: ["creator_marketplace"],
-            tracks: [
-              {
-                track: "hotel_operations",
-                provisioning: "not_selected",
-                components: [
-                  { product: "pms", access: "absent" },
-                  { product: "booking", access: "absent" },
-                ],
-                allowedActions: ["add"],
-              },
-              {
-                track: "creator_marketplace",
-                provisioning: "blocked",
-                components: [{ product: "marketplace", access: "absent" }],
-                allowedActions: ["manage_service"],
-              },
-            ],
-          };
-        },
-        async close() {},
-      },
+      trackCommandRepository: unusedTrackCommandRepository(),
     });
 
-    const response = await injectJson<AdaptiveHotelSetupStatus>(app, {
+    const response = await injectJson<{ code: string; detail: string }>(app, {
       method: "GET",
       url: "/api/hotel-setup/status?entryProduct=marketplace",
       headers: { authorization: "Bearer valid-token" },
     });
 
-    expect(response.body.entryDecision).toEqual({
-      requestedProduct: "marketplace",
-      propertyId,
-      decision: "unavailable",
-      destinationRouteKey: null,
-      reasonCode: "service_management_required",
+    expect(response.statusCode).toBe(422);
+    expect(response.body).toEqual({
+      code: "invalid_entry_product",
+      detail: "entryProduct must be booking or pms.",
     });
   });
 
@@ -1081,7 +1050,7 @@ describe("shared hotel setup status route", () => {
     const calls: HotelSetupTrackCommand[] = [];
     const responseBody: UpdateTracksResponse = {
       trackRevision: 3,
-      selectedTracks: ["hotel_operations", "creator_marketplace"],
+      selectedTracks: ["hotel_operations"],
       tracks: [
         {
           track: "hotel_operations",
@@ -1094,8 +1063,8 @@ describe("shared hotel setup status route", () => {
         },
         {
           track: "creator_marketplace",
-          provisioning: "active",
-          components: [{ product: "marketplace", access: "active" }],
+          provisioning: "not_selected",
+          components: [{ product: "marketplace", access: "absent" }],
           allowedActions: [],
         },
       ],
@@ -1121,7 +1090,7 @@ describe("shared hotel setup status route", () => {
         "idempotency-key": "  setup-tracks-001  ",
       },
       payload: {
-        selectedTracks: ["creator_marketplace", "hotel_operations"],
+        selectedTracks: ["hotel_operations"],
         expectedRevision: 2,
       },
     });
@@ -1130,7 +1099,7 @@ describe("shared hotel setup status route", () => {
     expect(response.body).toEqual(responseBody);
     expect(calls).toEqual([
       {
-        selectedTracks: ["hotel_operations", "creator_marketplace"],
+        selectedTracks: ["hotel_operations"],
         expectedRevision: 2,
         idempotencyKey: "setup-tracks-001",
         actorUserId: "user_hotel_owner",
@@ -1168,6 +1137,18 @@ describe("shared hotel setup status route", () => {
           "idempotency-key": "invalid-payload",
         },
         payload: { selectedTracks: ["booking"], expectedRevision: 0 },
+      },
+      {
+        // The Creator Marketplace track is retired (VAY-2270).
+        name: "retired track",
+        headers: {
+          authorization: "Bearer valid-token",
+          "idempotency-key": "retired-track",
+        },
+        payload: {
+          selectedTracks: ["hotel_operations", "creator_marketplace"],
+          expectedRevision: 0,
+        },
       },
       {
         name: "missing key",

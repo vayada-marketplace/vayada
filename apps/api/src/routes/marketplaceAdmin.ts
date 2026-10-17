@@ -2,7 +2,11 @@ import { parsePreparedHotelImport, type PreparedHotelImport } from "@vayada/doma
 import { createHash, randomBytes } from "node:crypto";
 
 import { requireAuthContext, type PermissionKey, type RequestContext } from "@vayada/backend-auth";
-import { isSetupTrack, type SetupTrack } from "@vayada/domain-hotels";
+import {
+  OFFERED_SETUP_TRACKS,
+  normalizeStoredSetupTracks,
+  type SetupTrack,
+} from "@vayada/domain-hotels";
 import {
   parseMarketplaceOfferMatchingCriteria,
   parseMarketplaceOfferMatchingCriteriaWrite,
@@ -456,8 +460,10 @@ export function parseHotelAccountInviteCreateRequest(
   if (
     !Array.isArray(body.selectedTracks) ||
     body.selectedTracks.length === 0 ||
-    body.selectedTracks.length > 2 ||
-    body.selectedTracks.some((track) => !isSetupTrack(track))
+    body.selectedTracks.length > OFFERED_SETUP_TRACKS.length ||
+    body.selectedTracks.some(
+      (track) => !(OFFERED_SETUP_TRACKS as readonly unknown[]).includes(track),
+    )
   ) {
     return "invalid_selected_tracks";
   }
@@ -471,7 +477,6 @@ export function parseHotelAccountInviteCreateRequest(
   if (uniqueTracks.size !== body.selectedTracks.length) return "invalid_selected_tracks";
   const selectedTracks: SetupTrack[] = [];
   if (uniqueTracks.has("hotel_operations")) selectedTracks.push("hotel_operations");
-  if (uniqueTracks.has("creator_marketplace")) selectedTracks.push("creator_marketplace");
 
   return {
     ...(preparedData ? { preparedData } : {}),
@@ -480,6 +485,16 @@ export function parseHotelAccountInviteCreateRequest(
     property: { displayName: propertyName },
     selectedTracks,
   };
+}
+
+/**
+ * Stored invites may still name the retired Creator Marketplace track (VAY-2270). They are read as
+ * Hotel Operations invites: that is the only track a hotel can set up now.
+ */
+export function storedHotelAccountInviteTracks(value: unknown): unknown {
+  if (!Array.isArray(value)) return value;
+  const tracks = normalizeStoredSetupTracks(value);
+  return tracks.length > 0 ? tracks : ["hotel_operations"];
 }
 
 function parseStoredHotelAccountInvite(
@@ -519,7 +534,7 @@ function parseStoredHotelAccountInvite(
     identity: value.identity,
     organization: value.organization,
     property: value.property,
-    selectedTracks: value.selectedTracks,
+    selectedTracks: storedHotelAccountInviteTracks(value.selectedTracks),
     ...(Object.hasOwn(value, "preparedData") ? { preparedData: value.preparedData } : {}),
   });
   if (typeof parsed === "string") return null;

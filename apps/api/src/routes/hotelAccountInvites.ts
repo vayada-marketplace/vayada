@@ -14,6 +14,7 @@ import {
   hotelAccountInviteOrganizationExternalId,
   hotelAccountInviteTrackCorrelationId,
   parseHotelAccountInviteCreateRequest,
+  storedHotelAccountInviteTracks,
   type MarketplaceAdminHotelAccountInviteCreateRequest,
 } from "./marketplaceAdmin.js";
 import { enforceRoutePolicy } from "./policy.js";
@@ -506,7 +507,7 @@ function parsePayload(value: unknown): HotelAccountInvitePayload | null {
     identity: value.identity,
     organization: value.organization,
     property: value.property,
-    selectedTracks: value.selectedTracks,
+    selectedTracks: storedHotelAccountInviteTracks(value.selectedTracks),
     ...(Object.hasOwn(value, "preparedData") ? { preparedData: value.preparedData } : {}),
   });
   if (typeof parsed === "string") return null;
