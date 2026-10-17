@@ -31,9 +31,10 @@ export const successBanner =
   "p-3 bg-green-50 border border-green-200 rounded-lg text-[11px] text-green-700 font-medium";
 export const warningBanner =
   "p-3 bg-amber-50 border border-amber-200 rounded-lg text-[11px] text-amber-800 font-medium";
-/** The Save/Cancel bar at the bottom of Room Details: sticky on mobile, inline on desktop. */
+/** The Save/Cancel bar at the bottom of the room tabs: sticky, with its own background so the page scrolls under it
+ * rather than through it (VAY-2184). */
 export const actionBar =
-  "mt-6 flex items-center justify-end gap-3 sticky bottom-0 -mx-4 md:mx-0 px-4 md:px-0 py-3 md:py-0 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:pb-0 bg-gray-50/95 md:bg-transparent backdrop-blur md:backdrop-blur-none border-t border-gray-200 md:border-t-0 z-10";
+  "mt-6 flex items-center justify-end gap-3 sticky bottom-0 -mx-4 md:mx-0 px-4 md:px-0 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-gray-50/95 backdrop-blur border-t border-gray-200 z-10";
 export const actionBarButton =
   "flex-1 md:flex-initial text-center px-4 py-2.5 md:py-2 text-[13px] md:text-[12px] font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 bg-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed";
 export const actionBarPrimary =

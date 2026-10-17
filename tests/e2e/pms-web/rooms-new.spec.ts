@@ -473,3 +473,40 @@ test("finishes onboarding with the first room and its prices saved", async ({ pa
   expect(publishedRooms(pricing).map((room) => room.roomTypeId)).toEqual([DELUXE, CREATED]);
   await assertHealthy();
 });
+
+// VAY-2184: with a price error showing, Cancel and Create Room Type stay side by side in a sticky bar on screen,
+// with its own background so the page scrolls under the bar rather than through it.
+for (const viewport of [
+  { width: 1440, height: 900 },
+  { width: 390, height: 844 },
+])
+  test(`keeps the Prices tab's buttons side by side in a solid bar at ${viewport.width}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(viewport);
+    await mockRooms(page);
+    await mockPricing(page);
+    await fillRoomAndPrices(page);
+    await main(page).getByLabel("Room price per night").fill("12,5");
+    const create = main(page).getByRole("button", { name: "Create Room Type" });
+    await create.click();
+    await expect(
+      main(page).getByText("Enter a valid price using a decimal point.", { exact: true }).first(),
+    ).toBeVisible();
+
+    const cancel = (await main(page)
+      .getByRole("link", { name: "Cancel", exact: true })
+      .boundingBox())!;
+    const submit = (await create.boundingBox())!;
+    expect(cancel.x + cancel.width).toBeLessThanOrEqual(submit.x);
+    expect(Math.abs(cancel.y + cancel.height / 2 - (submit.y + submit.height / 2))).toBeLessThan(2);
+    const bar = create.locator("xpath=..");
+    expect(await bar.evaluate((node) => getComputedStyle(node).position)).toBe("sticky");
+    expect(await bar.evaluate((node) => getComputedStyle(node).backgroundColor)).not.toBe(
+      "rgba(0, 0, 0, 0)",
+    );
+    // The page is taller than the screen, so the form really scrolls under the bar.
+    expect(await main(page).evaluate((node) => node.scrollHeight > node.clientHeight)).toBe(true);
+    const box = (await bar.boundingBox())!;
+    expect(box.y + box.height).toBeLessThanOrEqual(viewport.height + 1);
+  });
