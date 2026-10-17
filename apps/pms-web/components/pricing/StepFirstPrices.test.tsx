@@ -240,3 +240,38 @@ it("waits for Payment settings before saving, and names a discount it can't use"
     adjustment: { kind: "percentage", basisPoints: -1250 },
   });
 });
+
+// A keystroke handled by the render from before Payment settings arrived (the price typed just as they load) used to
+// write back that render's empty ways to pay, so Create Room Type then asked for How guests pay.
+it("keeps the ways to pay that arrive while a price is being typed", async () => {
+  const pending = createRef<(() => FirstPrices) | null>() as React.MutableRefObject<
+    (() => FirstPrices) | null
+  >;
+  const { onCreate, onDirty } = await mount({ defaultMethods: undefined, pending });
+  const typedBeforeTheyArrived = field("Room price per night").props.onChange;
+  await act(async () =>
+    view.update(
+      <StepFirstPrices
+        propertyId={id}
+        rooms={[room]}
+        fixedCurrency="EUR"
+        disabled={false}
+        defaultMethods={["pay_at_property", "card"]}
+        onCreate={onCreate}
+        onDirty={onDirty}
+        pending={pending}
+      />,
+    ),
+  );
+  await act(async () => typedBeforeTheyArrived({ target: { value: "120" } }));
+  expect(view.root.findByType(AcceptedPaymentMethods).props.methods).toEqual([
+    "pay_at_property",
+    "card",
+  ]);
+  const expected = plain();
+  expect(pending.current!()).toEqual({
+    configuration: expected.configuration,
+    terms: [expected.terms],
+  });
+  expect(missing()).toEqual([]);
+});
