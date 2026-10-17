@@ -309,7 +309,6 @@ function makeImpact(activeBookings: number): PlatformPropertyRetirementImpact {
     },
     media: { objects: 2 },
     publicExposure: {
-      marketplaceActive: true,
       distributionStatus: "public",
       bookingRevisionActive: true,
     },

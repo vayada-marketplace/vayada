@@ -87,7 +87,8 @@ export async function lockHotelSetupOwnerAuthority(
   return result.rows[0]?.allowed === true;
 }
 
-const PROFILE_PERMISSIONS = ["hotel_catalog.setup.manage", "marketplace.profile.manage"];
+// VAY-2270: the Marketplace profile grant is retired; setup-manage alone authorises the Owner.
+const PROFILE_PERMISSIONS = ["hotel_catalog.setup.manage"];
 
 async function profileRow(client: Client, propertyId: string) {
   const result = await client.query<{ value: SharedPropertyProfileRow }>(PROFILE_ROW, [propertyId]);

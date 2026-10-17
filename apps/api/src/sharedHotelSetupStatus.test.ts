@@ -1803,7 +1803,7 @@ describe("shared hotel setup status route", () => {
       permissions: [
         "hotel_catalog.setup.read",
         "hotel_catalog.setup.manage",
-        "marketplace.profile.manage",
+        "booking.settings.manage",
       ],
       repository: profileRepository(profiles),
     });
@@ -2040,7 +2040,7 @@ describe("shared hotel setup status route", () => {
       permissions: [
         "hotel_catalog.setup.read",
         "hotel_catalog.setup.manage",
-        "marketplace.profile.manage",
+        "booking.settings.manage",
       ],
       repository: {
         ...unusedStatusMethods(),
@@ -2089,7 +2089,7 @@ describe("shared hotel setup status route", () => {
       permissions: [
         "hotel_catalog.setup.read",
         "hotel_catalog.setup.manage",
-        "marketplace.profile.manage",
+        "booking.settings.manage",
       ],
       repository: {
         ...unusedStatusMethods(),
@@ -2148,7 +2148,7 @@ describe("shared hotel setup status route", () => {
       permissions: [
         "hotel_catalog.setup.read",
         "hotel_catalog.setup.manage",
-        "marketplace.profile.manage",
+        "booking.settings.manage",
       ],
       repository: {
         ...unusedStatusMethods(),
@@ -2202,7 +2202,7 @@ describe("shared hotel setup status route", () => {
       permissions: [
         "hotel_catalog.setup.read",
         "hotel_catalog.setup.manage",
-        "marketplace.profile.manage",
+        "booking.settings.manage",
       ],
       repository: {
         ...unusedStatusMethods(),
@@ -2462,7 +2462,7 @@ describe("shared hotel setup status route", () => {
     };
     const owner = () =>
       buildSharedSetupApp({
-        permissions: ["hotel_catalog.setup.manage", "marketplace.profile.manage"],
+        permissions: ["hotel_catalog.setup.manage", "booking.settings.manage"],
         linkedResources: [propertyLink(propertyId)],
         repository: ordinary,
         profileCommand: command,
@@ -2488,7 +2488,7 @@ describe("shared hotel setup status route", () => {
     for (const denied of [
       {
         roleKey: "hotel_manager",
-        permissions: ["hotel_catalog.setup.manage", "marketplace.profile.manage"],
+        permissions: ["hotel_catalog.setup.manage", "booking.settings.manage"],
       },
       { roleKey: "hotel_owner", permissions: ["hotel_catalog.setup.read"] },
     ] as const) {

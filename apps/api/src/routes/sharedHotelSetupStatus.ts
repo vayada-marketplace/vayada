@@ -738,12 +738,7 @@ function ensurePublicPropertyPublicationPermission(
   context: ReturnType<typeof enforceRoutePolicy>,
   reply: FastifyReply,
 ): boolean {
-  if (
-    hasPermission(context, "marketplace.profile.manage") ||
-    hasPermission(context, "booking.settings.manage")
-  ) {
-    return true;
-  }
+  if (hasPermission(context, "booking.settings.manage")) return true;
   reply.status(403).send({
     code: "missing_permission",
     detail: "Public profile and location publication require hotel-owner access.",
@@ -980,7 +975,6 @@ export function hotelSetupPropertyProfileUpdateHandler(
     if (
       !context.actor.providerIdentity.sessionId ||
       context.membership.roleKey !== "hotel_owner" ||
-      !hasPermission(context, "marketplace.profile.manage") ||
       !context.linkedResources.some(
         (link) =>
           link.product === "hotel_catalog" &&
