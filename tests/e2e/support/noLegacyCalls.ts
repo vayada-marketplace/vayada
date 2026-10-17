@@ -25,15 +25,6 @@ const surfaceRules = {
     legacyLocalServiceRule(),
     pathRule("/api/marketplace/listings", "retired Marketplace listings route"),
   ],
-  "vayada-admin-marketplace-preview": [
-    legacyProductionHostRule(),
-    legacyLocalServiceRule(),
-    pathRule("/admin", "legacy root admin route"),
-    pathPrefixRule("/admin/", "legacy root admin route"),
-    pathRule("/super-admin", "legacy PMS super-admin route"),
-    pathPrefixRule("/super-admin/", "legacy PMS super-admin route"),
-    headerRule("x-hotel-id", "legacy X-Hotel-Id routing header"),
-  ],
   "vayada-admin-hotel-invites": [
     legacyProductionHostRule(),
     legacyLocalServiceRule(),
