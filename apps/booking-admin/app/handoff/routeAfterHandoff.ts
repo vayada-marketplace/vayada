@@ -1,3 +1,4 @@
+import { ApiErrorResponse } from "@/services/api/client";
 import type { HotelSummary } from "@/services/settings";
 
 export type HandoffRoutingInput = {
@@ -11,10 +12,21 @@ export type HandoffRoutingOutcome = { kind: "navigate"; href: string } | { kind:
 
 type HotelSelectionStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
+/** A hotel list failure worth retrying: an outage or a network error, not a rejected request. */
+export function isTransientHotelListFailure(error: unknown): boolean {
+  if (error instanceof ApiErrorResponse) {
+    return error.status === 408 || error.status === 429 || error.status >= 500;
+  }
+  // Network and timeout failures surface as TypeError / DOMException; a malformed status answer
+  // is a plain Error and would fail the same way on every retry.
+  return error instanceof TypeError || error instanceof DOMException;
+}
+
 /**
- * Picks the hotel the handoff names (or the stored one) and where to go next. A failed hotel list
- * never drops a handoff target: the caller shows Retry and runs this again (VAY-2266), so a PMS
- * hotel still lands on the setup path it was handed, e.g. `/setup?…&mode=add&returnProduct=pms`.
+ * Picks the hotel the handoff names (or the stored one) and where to go next. A temporarily
+ * failed hotel list never drops a handoff target: the caller shows Retry and runs this again
+ * (VAY-2266), so a PMS hotel still lands on the setup path it was handed, e.g.
+ * `/setup?…&mode=add&returnProduct=pms`. A rejected request keeps the previous setup fallback.
  */
 export async function resolveHandoffRouting(
   input: HandoffRoutingInput,
@@ -24,8 +36,8 @@ export async function resolveHandoffRouting(
   let hotels: HotelSummary[];
   try {
     hotels = await deps.listHotels();
-  } catch {
-    if (input.safeRedirect) return { kind: "retry" };
+  } catch (error) {
+    if (input.safeRedirect && isTransientHotelListFailure(error)) return { kind: "retry" };
     storage.setItem("setupComplete", "false");
     const explicitId = input.propertyId || input.handoffHotelId;
     return {

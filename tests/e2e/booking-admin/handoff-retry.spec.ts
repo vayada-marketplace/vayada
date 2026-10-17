@@ -47,9 +47,16 @@ test("a failed hotel list after redemption offers a retry and keeps the handoff 
   });
   let statusReads = 0;
   await page.route("**/api/hotel-setup/status**", (route) => {
+    if (route.request().method() === "OPTIONS") return route.fallback();
     statusReads += 1;
     if (statusReads === 1) return route.fulfill({ status: 503, json: { detail: "down" } });
     return route.fallback();
+  });
+  // Retry must re-run the routing in place: a reload would have no code left to redeem.
+  const handoffLoads: string[] = [];
+  page.on("framenavigated", (frame) => {
+    if (frame === page.mainFrame() && new URL(frame.url()).pathname === "/handoff")
+      handoffLoads.push(frame.url());
   });
 
   await page.goto(`/handoff#code=${"a".repeat(40)}`);
@@ -65,6 +72,8 @@ test("a failed hotel list after redemption offers a retry and keeps the handoff 
       return `${url.pathname}${url.search}`;
     })
     .toBe(ADD_PROPERTY);
-  // The one-time code was not redeemed a second time: the retry only re-read the hotel list.
+  // The retry only re-read the hotel list: one document load of /handoff, one redemption.
+  expect(statusReads).toBeGreaterThanOrEqual(2);
+  expect(handoffLoads).toHaveLength(1);
   expect(redemptions).toHaveLength(1);
 });

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
+import { ApiErrorResponse } from "@/services/api/client";
 import type { HotelSummary } from "@/services/settings";
-import { resolveHandoffRouting } from "./routeAfterHandoff";
+import { isTransientHotelListFailure, resolveHandoffRouting } from "./routeAfterHandoff";
 
 const ADD_PROPERTY = "/setup?entryProduct=pms&returnProduct=pms&returnTo=%2Fdashboard&mode=add";
 const alpenrose: HotelSummary = {
@@ -30,16 +31,49 @@ function memoryStorage(initial: Record<string, string> = {}) {
   };
 }
 
+describe("isTransientHotelListFailure", () => {
+  it.each([
+    [new ApiErrorResponse(503, { detail: "down" }), true],
+    [new ApiErrorResponse(429, { detail: "slow down" }), true],
+    [new TypeError("fetch failed"), true],
+    [new ApiErrorResponse(403, { detail: "forbidden" }), false],
+    [new ApiErrorResponse(422, { detail: "invalid" }), false],
+    [new Error("Hotel setup data is invalid. Refresh the page and try again."), false],
+  ])("classifies %s as transient=%s", (error, transient) => {
+    expect(isTransientHotelListFailure(error)).toBe(transient);
+  });
+});
+
 describe("resolveHandoffRouting", () => {
-  it("keeps the handoff target and asks for a retry when the hotel list fails", async () => {
+  it("keeps the handoff target and asks for a retry when the hotel list is down", async () => {
     const storage = memoryStorage({ selectedHotelId: "stale" });
     await expect(
       resolveHandoffRouting(
         { safeRedirect: ADD_PROPERTY, propertyId: null, handoffHotelId: null },
-        { listHotels: vi.fn().mockRejectedValue(new Error("503")), storage },
+        {
+          listHotels: vi.fn().mockRejectedValue(new ApiErrorResponse(503, { detail: "down" })),
+          storage,
+        },
       ),
     ).resolves.toEqual({ kind: "retry" });
     expect(storage.snapshot()).toEqual({ selectedHotelId: "stale" });
+  });
+
+  it("keeps the previous setup fallback when the hotel list is rejected for good", async () => {
+    const storage = memoryStorage();
+    await expect(
+      resolveHandoffRouting(
+        { safeRedirect: ADD_PROPERTY, propertyId: "property-1", handoffHotelId: null },
+        {
+          listHotels: vi.fn().mockRejectedValue(new ApiErrorResponse(403, { detail: "forbidden" })),
+          storage,
+        },
+      ),
+    ).resolves.toEqual({
+      kind: "navigate",
+      href: "/setup?entryProduct=booking&propertyId=property-1",
+    });
+    expect(storage.getItem("setupComplete")).toBe("false");
   });
 
   it("falls back to setup for the named property when the list fails without a target", async () => {
