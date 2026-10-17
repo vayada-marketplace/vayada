@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { AuthStateError, authService } from "./index";
+import {
+  AuthStateError,
+  authService,
+  clearPendingEmailVerification,
+  getPendingEmailVerification,
+  storePendingEmailVerification,
+} from "./index";
 import {
   clearAuthData,
   getAuthBearerToken,
@@ -275,7 +281,141 @@ describe("booking admin auth service", () => {
       }),
     );
   });
+
+  it("preserves verification-required auth state for the verification page", async () => {
+    const fetchMock = vi.fn(async () =>
+      jsonResponse(
+        {
+          state: "email_verification_required",
+          message: "Verify your email address to continue.",
+          pendingAuthenticationToken: "pending-email-token",
+          email: "owner@example.test",
+          emailVerificationId: "email_verification_123",
+        },
+        403,
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    let thrown: unknown;
+    try {
+      await authService.signup({ email: "owner@example.test", password: "correct-password" });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(AuthStateError);
+    expect(thrown).toMatchObject({
+      state: "email_verification_required",
+      pendingAuthenticationToken: "pending-email-token",
+      email: "owner@example.test",
+      emailVerificationId: "email_verification_123",
+    });
+  });
+
+  it("uses pending verification state to confirm email and store the AuthKit session", async () => {
+    vi.stubEnv("NEXT_PUBLIC_AUTHKIT_COMPATIBILITY_TOKEN_ENABLED", "false");
+    mockBrowserStorage();
+    expect(
+      storePendingEmailVerification({
+        pendingAuthenticationToken: "pending-email-token",
+        email: "owner@example.test",
+        emailVerificationId: "email_verification_123",
+        flow: "signup",
+        intent: "hotel",
+      }),
+    ).toBe(true);
+    expect(getPendingEmailVerification()).toMatchObject({
+      pendingAuthenticationToken: "pending-email-token",
+      flow: "signup",
+      intent: "hotel",
+    });
+
+    const fetchMock = vi.fn(async () =>
+      jsonResponse({
+        accessToken: "verified-workos-access-token",
+        csrfToken: "verified-csrf-token",
+        organizationId: "org_hotel_group",
+        user: { id: "user_hotel", email: "owner@example.test", status: "active" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(authService.confirmEmailVerification("123456")).resolves.toMatchObject({
+      accessToken: "verified-workos-access-token",
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/auth/email-verification/confirm",
+      expect.objectContaining({
+        method: "POST",
+        credentials: "include",
+        body: JSON.stringify({
+          pendingAuthenticationToken: "pending-email-token",
+          code: "123456",
+          flow: "signup",
+          intent: "hotel",
+          surface: "booking-admin",
+        }),
+      }),
+    );
+    expect(getAuthBearerToken()).toBe("verified-workos-access-token");
+    expect(getPendingEmailVerification()).toBeNull();
+  });
+
+  it("resends verification through same-origin auth", async () => {
+    mockBrowserStorage();
+    expect(
+      storePendingEmailVerification({
+        pendingAuthenticationToken: "pending-email-token",
+        emailVerificationId: "email_verification_123",
+      }),
+    ).toBe(true);
+    const fetchMock = vi.fn(async () => jsonResponse({ message: "Verification code resent." }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(authService.resendEmailVerification()).resolves.toEqual({
+      message: "Verification code resent.",
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/auth/email-verification/resend",
+      expect.objectContaining({
+        method: "POST",
+        credentials: "include",
+        body: JSON.stringify({ emailVerificationId: "email_verification_123" }),
+      }),
+    );
+  });
+
+  it("rejects confirmation and resend without a pending verification", async () => {
+    mockBrowserStorage();
+    await expect(authService.confirmEmailVerification("123456")).rejects.toThrow(
+      "Verification has expired",
+    );
+    await expect(authService.resendEmailVerification()).rejects.toThrow("sign in again");
+  });
 });
+
+function mockBrowserStorage(): void {
+  const storage = memoryStorage();
+  vi.stubGlobal("localStorage", storage);
+  vi.stubGlobal("sessionStorage", storage);
+  vi.stubGlobal("window", { localStorage: storage, sessionStorage: storage });
+  clearPendingEmailVerification();
+}
+
+function memoryStorage(): Storage {
+  const values = new Map<string, string>();
+  return {
+    get length() {
+      return values.size;
+    },
+    clear: () => values.clear(),
+    getItem: (key) => values.get(key) ?? null,
+    key: (index) => Array.from(values.keys())[index] ?? null,
+    removeItem: (key) => values.delete(key),
+    setItem: (key, value) => values.set(key, value),
+  };
+}
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {

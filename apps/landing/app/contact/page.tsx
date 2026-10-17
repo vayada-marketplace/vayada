@@ -95,8 +95,7 @@ export default function ContactPage() {
               <div>
                 <h1 className="text-5xl font-bold text-gray-900 mb-4">Get in touch with vayada</h1>
                 <p className="text-lg text-gray-600">
-                  Tell us a little about your property or creator profile, and we'll get back to you
-                  shortly.
+                  Tell us a little about your property, and we'll get back to you shortly.
                 </p>
               </div>
 
@@ -115,7 +114,7 @@ export default function ContactPage() {
                     <CheckIcon className="w-6 h-6 text-primary-600" />
                   </div>
                   <p className="text-gray-700 text-lg">
-                    We connect you with creators who inspire real travelers
+                    We help you run rooms, rates and reservations in one place
                   </p>
                 </div>
                 <div className="flex items-start gap-3">
@@ -258,7 +257,6 @@ export default function ContactPage() {
                   >
                     <option value="">Select...</option>
                     <option value="hotel">Hotel Owner/Manager</option>
-                    <option value="creator">Content Creator</option>
                     <option value="other">Other</option>
                   </select>
                 </div>
@@ -272,7 +270,7 @@ export default function ContactPage() {
                     onChange={handleChange}
                     required
                     rows={5}
-                    placeholder="Tell us about your property or creator profile..."
+                    placeholder="Tell us about your property..."
                   />
                 </div>
 

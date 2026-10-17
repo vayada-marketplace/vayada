@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import SharedSignupPage from "@vayada/product-onboarding/SharedSignupPage";
 import { useTranslation } from "@/lib/i18n";
 import { resolveBookingSetupGuard } from "@/lib/utils/sharedSetupGuard";
-import { authService } from "@/services/auth";
+import { AuthStateError, authService, storePendingEmailVerification } from "@/services/auth";
 
 export default function SignupPage() {
   const { t } = useTranslation();
@@ -29,7 +29,15 @@ export default function SignupPage() {
         return;
       }
       router.push("/dashboard");
-    } catch {
+    } catch (error) {
+      if (
+        error instanceof AuthStateError &&
+        error.state === "email_verification_required" &&
+        storePendingEmailVerification({ ...error, flow: "signup", intent: "hotel" })
+      ) {
+        router.push("/verify-email");
+        return;
+      }
       setSubmitError(t("auth.register.errorUnexpected"));
     } finally {
       setIsSubmitting(false);
