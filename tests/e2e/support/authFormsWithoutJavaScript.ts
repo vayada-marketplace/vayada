@@ -1,18 +1,28 @@
 import { expect, type Page } from "@playwright/test";
 
-// Before a page hydrates, a click submits the plain HTML form, which is what these checks do with JavaScript off.
+// Before a page hydrates, a click submits the plain HTML form, which is what the JavaScript-off checks do.
 // A GET would put the email and password in the URL, the browser history and request logs (VAY-2271).
 
-/** Every form the server renders on the page submits with POST. */
-export async function expectEveryFormPosts(page: Page, path: string) {
+/** The page server-renders at least one form, and every one of them submits with POST. */
+export async function expectServerRenderedFormsPost(page: Page, path: string) {
   await page.goto(path);
-  const methods = await page
-    .locator("form")
-    .evaluateAll((forms) => forms.map((form) => (form as HTMLFormElement).method));
+  const forms = page.locator("form");
+  await expect(forms, `${path} renders no form before hydration`).not.toHaveCount(0);
+  const methods = await forms.evaluateAll((all) =>
+    all.map((form) => (form as HTMLFormElement).method),
+  );
   expect(
     methods.filter((method) => method !== "post"),
     `${path} forms: ${methods}`,
   ).toEqual([]);
+}
+
+/** A form the page renders only after hydration (reset password reads its token in the browser) also posts. */
+export async function expectHydratedFormPosts(page: Page, path: string) {
+  await page.goto(path);
+  const form = page.locator("form");
+  await expect(form).toHaveCount(1);
+  await expect(form).toHaveAttribute("method", "post");
 }
 
 /** Signing in before the page is interactive posts the form and keeps the email and password out of the URL. */
