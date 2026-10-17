@@ -4,7 +4,6 @@ import {
   CubeIcon,
   StarIcon,
   TicketIcon,
-  UsersIcon,
 } from "@heroicons/react/24/outline";
 import type { CoreNavItem, FeatureModule, FeatureProduct } from "./types";
 
@@ -56,15 +55,6 @@ export const FEATURE_MODULES: FeatureModule[] = [
     points: 3,
     offNote: true,
   },
-  // The old referral product was retired (VAY-1499); the card says so until it returns.
-  {
-    id: "affiliates",
-    category: "Revenue",
-    product: "booking_engine",
-    icon: UsersIcon,
-    unavailable: true,
-    points: 0,
-  },
 ];
 
 export const CORE_NAV_ITEMS: Record<FeatureProduct, CoreNavItem[]> = {
@@ -113,7 +103,6 @@ export function visibleNavModules(
     (module) =>
       module.product === product &&
       module.navItem &&
-      !module.unavailable &&
       (!supported.has(module.id) || active.has(module.id)),
   );
 }

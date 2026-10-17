@@ -45,7 +45,6 @@ describe("BookingPagePreview", () => {
         showContactButton={false}
         showLanguageSelector={false}
         showCurrencySelector
-        showReferAGuestButton
       />,
     );
     const text = renderer.root
@@ -58,13 +57,10 @@ describe("BookingPagePreview", () => {
         node.props.className.includes("border-white/60") &&
         (node.children.includes("DE") || node.children.includes("CHF")),
     );
-    const refer = renderer.root.findByProps({ "data-testid": "booking-preview-refer" });
 
     expect(text).not.toContain("Contact");
     expect(headerSelectors).toHaveLength(1);
     expect(headerSelectors[0]?.children).toContain("CHF");
-    expect(text).toContain("Refer a Guest");
-    expect(refer.props.className).not.toContain("hidden");
   });
 
   it("auto-hides header selectors when only one option is configured", () => {
