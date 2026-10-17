@@ -15,11 +15,11 @@ import {
   hotelAccountInviteTrackCorrelationId,
   parseHotelAccountInviteCreateRequest,
   storedHotelAccountInviteTracks,
-  type MarketplaceAdminHotelAccountInviteCreateRequest,
-} from "./marketplaceAdmin.js";
+  type HotelAccountInviteCreateRequest,
+} from "./hotelAccountInviteCodes.js";
 import { enforceRoutePolicy } from "./policy.js";
 
-type HotelAccountInvitePayload = MarketplaceAdminHotelAccountInviteCreateRequest & {
+type HotelAccountInvitePayload = HotelAccountInviteCreateRequest & {
   contractVersion: typeof HOTEL_ACCOUNT_INVITE_CONTRACT_VERSION;
   handoffPath: typeof HOTEL_ACCOUNT_INVITE_HANDOFF_PATH;
 };

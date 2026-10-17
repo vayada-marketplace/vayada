@@ -2679,206 +2679,6 @@ describe("shared hotel setup status route", () => {
     ]);
   });
 
-  it("merges canonical profile completeness and Marketplace lifecycle into one public-profile fact", async () => {
-    for (const [marketplaceProfileStatus, readiness, ownerProgress, reasonCodes] of [
-      [null, "actionable", "in_progress", ["marketplace_profile_not_started"]],
-      ["pending", "pending_review", "owner_complete", ["marketplace_profile_pending"]],
-      ["rejected", "rejected", "in_progress", ["marketplace_profile_rejected"]],
-      ["suspended", "blocked", "in_progress", ["marketplace_profile_suspended"]],
-      ["verified", "complete", "owner_complete", []],
-    ] as const) {
-      const query = vi.fn(async (text: string) => {
-        if (text.includes("FROM identity.organizations")) {
-          return { rows: [{ displayName: "Alpenrose Hotel Group", websiteUrl: null }] };
-        }
-        return {
-          rows: [
-            adaptiveStatusRow({
-              marketplaceProfileStatus,
-              marketplaceProfileComplete: marketplaceProfileStatus !== null,
-              marketplaceProfileDescriptionInSync: marketplaceProfileStatus !== null,
-            }),
-          ],
-        };
-      });
-      const repository = createPgSharedHotelSetupStatusRepository({
-        connectionString: "postgresql://target-db",
-        pool: {
-          query: async <T extends QueryResultRow = QueryResultRow>(text: string) => {
-            const result = await query(text);
-            return { rows: result.rows as unknown as T[] };
-          },
-          end: vi.fn(async () => undefined),
-        },
-      });
-
-      const status = await repository.getHotelSetupStatus({
-        organizationId,
-        propertyIds: [propertyId],
-      });
-      expect(status.properties[0]!.taskFacts.public_profile).toMatchObject({
-        readiness,
-        ownerProgress,
-        reasonCodes,
-      });
-      expect(query.mock.calls[1]![0]).not.toMatch(/legacy_/i);
-    }
-  });
-
-  it("reopens a complete public profile when the Catalog description changes before Marketplace syncs", async () => {
-    let catalogDescriptionUpdatedAt = "2026-07-26T12:00:00.000Z";
-    let marketplaceProfileDescriptionInSync = true;
-    const query = vi.fn(async (text: string) => {
-      if (text.includes("FROM identity.organizations")) {
-        return { rows: [{ displayName: "Alpenrose Hotel Group", websiteUrl: null }] };
-      }
-      return {
-        rows: [
-          adaptiveStatusRow({
-            profileUpdatedAt: catalogDescriptionUpdatedAt,
-            marketplaceProfileStatus: "verified",
-            marketplaceProfileComplete: true,
-            marketplaceProfileDescriptionInSync,
-            marketplaceProfileUpdatedAt: "2026-07-26T12:00:00.000Z",
-          }),
-        ],
-      };
-    });
-    const repository = createPgSharedHotelSetupStatusRepository({
-      connectionString: "postgresql://target-db",
-      pool: {
-        query: async <T extends QueryResultRow = QueryResultRow>(text: string) => {
-          const result = await query(text);
-          return { rows: result.rows as unknown as T[] };
-        },
-        end: vi.fn(async () => undefined),
-      },
-    });
-
-    const complete = (
-      await repository.getHotelSetupStatus({ organizationId, propertyIds: [propertyId] })
-    ).properties[0]!.taskFacts.public_profile;
-    expect(complete).toMatchObject({
-      readiness: "complete",
-      ownerProgress: "owner_complete",
-      reasonCodes: [],
-    });
-
-    catalogDescriptionUpdatedAt = "2026-07-27T12:00:00.000Z";
-    marketplaceProfileDescriptionInSync = false;
-    const outOfSync = (
-      await repository.getHotelSetupStatus({ organizationId, propertyIds: [propertyId] })
-    ).properties[0]!.taskFacts.public_profile;
-
-    expect(outOfSync).toMatchObject({
-      readiness: "actionable",
-      ownerProgress: "in_progress",
-      reasonCodes: ["marketplace_profile_description_out_of_sync"],
-      sourceRevision: JSON.stringify(["2026-07-27T12:00:00.000Z", "verified", true, [], false]),
-    });
-    expect(outOfSync.sourceRevision).not.toBe(complete.sourceRevision);
-
-    const factsSql = query.mock.calls[3]![0];
-    expect(factsSql).toContain("public_profile.normalized_description");
-    expect(factsSql).toContain("BTRIM(profile.short_description)");
-    expect(factsSql).toContain("BTRIM(profile.long_description)");
-    expect(factsSql).toContain("BTRIM(marketplace_profile.host_summary)");
-  });
-
-  it("requires a fresh creator projection, supported checkout method, and ready booking setup", async () => {
-    const query = vi.fn(async (text: string, _values?: readonly unknown[]) => {
-      if (text.includes("FROM identity.organizations")) {
-        return { rows: [{ displayName: "Alpenrose Hotel Group", websiteUrl: null }] };
-      }
-      return {
-        rows: [
-          adaptiveStatusRow({
-            marketplaceOfferStatus: "verified",
-            marketplaceOfferHasTitle: true,
-            marketplaceOfferHasDeliverable: true,
-            marketplaceOfferHasCompensation: true,
-            marketplaceOfferHasRequirement: true,
-            marketplaceOfferPublic: true,
-            marketplaceOfferProjectionFresh: false,
-            hasAcceptedPaymentMethod: true,
-            hasEffectivePaymentMethod: false,
-            bookabilitySetupReady: false,
-            bookabilityMissingEmpty: false,
-          }),
-        ],
-      };
-    });
-    const repository = createPgSharedHotelSetupStatusRepository({
-      connectionString: "postgresql://target-db",
-      pool: {
-        query: async <T extends QueryResultRow = QueryResultRow>(
-          text: string,
-          values?: readonly unknown[],
-        ) => {
-          const result = await query(text, values);
-          return { rows: result.rows as unknown as T[] };
-        },
-        end: vi.fn(async () => undefined),
-      },
-    });
-
-    const facts = (
-      await repository.getHotelSetupStatus({ organizationId, propertyIds: [propertyId] })
-    ).properties[0]!.taskFacts;
-    expect(facts.creator_offer).toMatchObject({ readiness: "pending_sync", freshness: "stale" });
-    expect(facts.payment).toMatchObject({
-      readiness: "actionable",
-      reasonCodes: ["no_supported_checkout_payment_method"],
-    });
-    const factsSql = query.mock.calls.find(([text]) =>
-      text.includes("hasEffectivePaymentMethod"),
-    )?.[0];
-    expect(factsSql).toContain("FROM finance.bank_transfer_destinations destination");
-    expect(factsSql).toContain(
-      "destination.property_id=payment.property_id AND destination.enabled",
-    );
-    expect(factsSql).toContain("payment.deposit_policy ->> 'paypalEmail'");
-    expect(facts.direct_booking_publication).toMatchObject({
-      readiness: "actionable",
-      ownerProgress: "in_progress",
-    });
-  });
-
-  it("blocks a verified creator offer whose projection is private", async () => {
-    const repository = createPgSharedHotelSetupStatusRepository({
-      connectionString: "postgresql://target-db",
-      pool: {
-        async query<T extends QueryResultRow = QueryResultRow>(text: string) {
-          const rows = text.includes("FROM identity.organizations")
-            ? [{ displayName: "Alpenrose Hotel Group", websiteUrl: null }]
-            : [
-                adaptiveStatusRow({
-                  marketplaceOfferStatus: "verified",
-                  marketplaceOfferHasTitle: true,
-                  marketplaceOfferHasDeliverable: true,
-                  marketplaceOfferHasCompensation: true,
-                  marketplaceOfferHasRequirement: true,
-                  marketplaceOfferPublic: false,
-                  marketplaceOfferProjectionFresh: false,
-                }),
-              ];
-          return { rows: rows as unknown as T[] };
-        },
-        end: vi.fn(async () => undefined),
-      },
-    });
-
-    const fact = (
-      await repository.getHotelSetupStatus({ organizationId, propertyIds: [propertyId] })
-    ).properties[0]!.taskFacts.creator_offer;
-
-    expect(fact).toMatchObject({
-      readiness: "blocked",
-      reasonCodes: ["creator_offer_not_public"],
-      freshness: "stale",
-    });
-  });
-
   it("makes publication actionable before its first distribution projection exists", async () => {
     const query = vi.fn(async (text: string, _values?: readonly unknown[]) => {
       if (text.includes("FROM identity.organizations")) {
@@ -2986,7 +2786,7 @@ describe("shared hotel setup status route", () => {
     const sql = query.mock.calls[1]![0];
     expect(sql).toContain("FROM unnest($2::uuid[])");
     expect(sql).toContain("hotel_catalog.properties");
-    expect(sql).toContain("marketplace.marketplace_hotel_profiles");
+    expect(sql).not.toContain("marketplace.");
     expect(sql).toContain("pms.room_types");
     expect(sql).toContain("finance.payment_settings");
     expect(sql).toContain("finance.payment_provider_accounts");
@@ -3003,19 +2803,6 @@ describe("shared hotel setup status route", () => {
     expect(sql).toContain("distribution.public_hotel_bookability_profiles");
     expect(sql).not.toContain("identity.product_entitlements");
     expect(sql).toContain("property_public_profile_read_model");
-    expect(sql).toContain("catalog_public_profile.projected_at");
-    expect(sql).toContain("offer.offer_status <> 'archived'");
-    expect(sql).toContain("AND candidate.is_public");
-    expect(sql).toContain("AND candidate.projection_fresh");
-    expect(sql).toContain("WHEN candidate.offer_status = 'pending'");
-    expect(sql).toContain("WHEN candidate.offer_status = 'rejected'");
-    expect(sql).toContain("candidate.updated_at DESC");
-    expect(sql.indexOf("THEN 0")).toBeLessThan(sql.indexOf("THEN 1"));
-    expect(sql.indexOf("THEN 1")).toBeLessThan(sql.indexOf("THEN 2"));
-    expect(sql.indexOf("THEN 2")).toBeLessThan(sql.indexOf("THEN 3"));
-    expect(sql.indexOf("THEN 3")).toBeLessThan(sql.indexOf("THEN 4"));
-    expect(sql.indexOf("THEN 4")).toBeLessThan(sql.indexOf("THEN 5"));
-    expect(sql.indexOf("THEN 5")).toBeLessThan(sql.indexOf("ELSE 6"));
     expect(query.mock.calls[1]![1]).toEqual([organizationId, [propertyId]]);
   });
 
@@ -3057,43 +2844,6 @@ describe("shared hotel setup status route", () => {
     expect(sql).not.toContain(") rooms ON TRUE");
     expect(sql).not.toContain(") rate_plans ON TRUE");
     expect(sql).not.toContain(") inventory ON TRUE");
-  });
-
-  it("requires explicit locality consent before public-profile readiness completes", async () => {
-    let localityPublic = false;
-    const repository = createPgSharedHotelSetupStatusRepository({
-      connectionString: "postgresql://target-db",
-      pool: {
-        async query<T extends QueryResultRow = QueryResultRow>(text: string) {
-          const rows = text.includes("FROM identity.organizations")
-            ? [{ displayName: "Alpenrose Hotel Group", websiteUrl: null }]
-            : [
-                adaptiveStatusRow({
-                  localityPublic,
-                  marketplaceProfileStatus: "verified",
-                  marketplaceProfileComplete: true,
-                  marketplaceProfileDescriptionInSync: true,
-                }),
-              ];
-          return { rows: rows as unknown as T[] };
-        },
-        end: vi.fn(async () => undefined),
-      },
-    });
-
-    const privateFacts = (
-      await repository.getHotelSetupStatus({ organizationId, propertyIds: [propertyId] })
-    ).properties[0]!.taskFacts.public_profile;
-    expect(privateFacts).toMatchObject({
-      readiness: "actionable",
-      reasonCodes: ["missing_public_locality_consent"],
-    });
-
-    localityPublic = true;
-    const publicFacts = (
-      await repository.getHotelSetupStatus({ organizationId, propertyIds: [propertyId] })
-    ).properties[0]!.taskFacts.public_profile;
-    expect(publicFacts).toMatchObject({ readiness: "complete", reasonCodes: [] });
   });
 
   it("reads the nested canonical profile revision and explicit contact metadata", async () => {
@@ -3357,7 +3107,7 @@ describe("shared hotel setup status route", () => {
         text.includes("enabled_products"),
     );
     const defaultsIndex = query.mock.calls.findIndex(([text]) =>
-      text.includes("INSERT INTO marketplace.marketplace_hotel_profiles"),
+      text.includes("INSERT INTO booking.booking_settings (property_id"),
     );
     expect(createIndex).toBeGreaterThanOrEqual(0);
     expect(catalogIndex).toBeGreaterThan(createIndex);
@@ -3369,12 +3119,11 @@ describe("shared hotel setup status route", () => {
     expect(createSql).not.toContain("INSERT INTO identity.organization_resource_links");
     expect(linkSql).toContain("WHEN 'booking' THEN 'booking_hotel'");
     expect(linkSql).toContain("WHEN 'pms' THEN 'pms_property'");
-    expect(linkSql).toContain("WHEN 'marketplace' THEN 'hotel_profile'");
-    expect(linkSql).not.toContain("INSERT INTO marketplace.marketplace_hotel_profiles");
+    expect(linkSql).not.toContain("marketplace");
     expect(linkSql).not.toContain("INSERT INTO booking.booking_settings");
     const [defaultsSql, defaultsValues] = query.mock.calls[defaultsIndex]!;
     expect(defaultsSql).toContain("FROM identity.organization_resource_links");
-    expect(defaultsSql).toContain("INSERT INTO marketplace.marketplace_hotel_profiles");
+    expect(defaultsSql).not.toContain("marketplace");
     expect(defaultsSql).toContain("INSERT INTO booking.booking_settings (property_id)");
     expect(defaultsValues).toEqual([organizationId, propertyId]);
     expect(linkSql).toContain("contact_input.purpose");
@@ -3833,20 +3582,6 @@ function adaptiveStatusRow(overrides: Record<string, unknown> = {}): Record<stri
     localityPublic: true,
     profileUpdatedAt: "2026-07-26T12:00:00.000Z",
     mediaUpdatedAt: "2026-07-26T12:00:00.000Z",
-    marketplaceProfileStatus: null,
-    marketplaceProfileComplete: false,
-    marketplaceProfileDescriptionInSync: false,
-    marketplaceProfileUpdatedAt: null,
-    marketplaceOfferStatus: null,
-    marketplaceOfferHasTitle: false,
-    marketplaceOfferHasDeliverable: false,
-    marketplaceOfferHasCompensation: false,
-    marketplaceOfferHasRequirement: false,
-    marketplaceOfferPublic: false,
-    marketplaceOfferProjectionFresh: true,
-    marketplaceOfferUpdatedAt: null,
-    marketplaceOfferChildrenUpdatedAt: null,
-    marketplaceOfferProjectedAt: null,
     hasActiveRoomType: true,
     hasNonRetiredRoom: true,
     hasActiveRatePlan: true,

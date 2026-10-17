@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { AuthorizationError } from "@vayada/backend-authorization";
 import type pg from "pg";
-import { syncPropertyOfferReadModels } from "../routes/marketplaceAdmin.js";
+import { projectPropertyPublicProfile } from "./propertyPublicProfileProjection.js";
 import type {
   HotelSetupPropertyProfileCommand,
   HotelSetupPropertyProfileResult,
@@ -203,7 +203,7 @@ export async function writeOrdinaryHotelSetupPropertyProfile(
          is_public=EXCLUDED.is_public, source_system=EXCLUDED.source_system, updated_at=now()`,
       [scope.propertyId, payload],
     );
-    await syncPropertyOfferReadModels(client, { propertyId: scope.propertyId });
+    await projectPropertyPublicProfile(client, { propertyId: scope.propertyId });
     const after = await profileRow(client, scope.propertyId);
     const changed = Object.keys(after)
       .filter((key) => key !== "propertyId" && key !== "profileRevision")

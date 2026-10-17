@@ -1,4 +1,4 @@
-import { syncPropertyOfferReadModels } from "../routes/marketplaceAdmin.js";
+import { projectPropertyPublicProfile } from "./propertyPublicProfileProjection.js";
 import type {
   ApprovedPublicProfileImageRepository,
   PlatformMediaRoutesOptions,
@@ -78,7 +78,7 @@ export function composePlatformMediaRuntime(
   const propertyMediaCommands = factories.createPropertyMediaCommands({
     connectionString: input.targetDatabaseUrl,
     serving: input.platformMediaServing,
-    syncReadModels: syncPropertyOfferReadModels,
+    syncReadModels: projectPropertyPublicProfile,
   });
   const enabledPurposes: PlatformMediaRoutesOptions["enabledPurposes"] = [
     "identity.user.profile_image",

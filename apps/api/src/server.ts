@@ -301,7 +301,7 @@ import { createChannexGuestReviews } from "./integrations/channexGuestReviews.js
 import { createPgReviewReplyCommands } from "./domains/pmsReviewReplies.js";
 import { createChannexReviewReplies } from "./integrations/channexReviewReplies.js";
 import { createPgPmsReviewRepository } from "./routes/pmsReviews.js";
-import { createPgMarketplaceAdminRepository } from "./routes/marketplaceAdmin.js";
+import { createPgHotelAccountInviteCodeRepository } from "./routes/hotelAccountInviteCodes.js";
 import { createPgHotelAccountInviteRepository } from "./routes/hotelAccountInvites.js";
 import { createPgSharedHotelSetupStatusRepository } from "./platform/sharedHotelSetupStatusReadModel.js";
 import { createPgPropertyNearbyDiscoveryRepository } from "./domains/propertyNearbyDiscoveryRepository.js";
@@ -1950,12 +1950,9 @@ const app = buildApp({
       ? { refresh: bookingPublicationRuntime.refresh.bind(bookingPublicationRuntime) }
       : undefined,
   bookingCustomDomainRepository,
-  marketplaceAdminRepository:
-    config.marketplaceAdminSource === "target"
-      ? createPgMarketplaceAdminRepository({ connectionString: targetDatabaseUrl })
-      : undefined,
-  marketplaceAdminLegacySuperadminFallbackEnabled:
-    config.marketplaceAdminLegacySuperadminFallbackEnabled,
+  hotelAccountInviteCodeRepository: createPgHotelAccountInviteCodeRepository({
+    connectionString: targetDatabaseUrl,
+  }),
   hotelAccountInvites: { repository: hotelAccountInviteRepository },
   preparedImportRepository: createPgPreparedImportRepository(targetDatabaseUrl),
   profileImageMediaRepository: platformMediaRuntime?.profileMediaRepository,

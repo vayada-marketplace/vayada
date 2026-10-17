@@ -46,7 +46,6 @@ export type ApiAuthSessionConfig = {
 };
 
 export type PublicHotelProfileSource = "target" | "active_publication";
-export type MarketplaceAdminSource = "disabled" | "target";
 export type PmsOperationsSource = "disabled" | "target";
 export type FinanceSource = "legacy" | "target";
 export type FinanceFolioRecipientKmsConfig = {
@@ -150,8 +149,6 @@ export type ApiConfig = {
   authSession?: ApiAuthSessionConfig;
   targetDatabaseUrl?: string;
   publicHotelProfileSource: PublicHotelProfileSource;
-  marketplaceAdminSource: MarketplaceAdminSource;
-  marketplaceAdminLegacySuperadminFallbackEnabled: boolean;
   pmsOperationsSource: PmsOperationsSource;
   pmsRoomClosureEnabled: boolean;
   /** Properties whose room type Delete also does the cleanup (VAY-2132); [] is off, "all" every property. */
@@ -875,12 +872,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     ["target", "active_publication"],
     "target",
   );
-  const marketplaceAdminSource = readSourceEnv(
-    env,
-    "MARKETPLACE_ADMIN_SOURCE",
-    ["disabled", "target"],
-    "disabled",
-  );
   const pmsOperationsSource = readSourceEnv(
     env,
     "PMS_OPERATIONS_SOURCE",
@@ -910,12 +901,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     pmsOperationsSource,
     financeSource,
   });
-  if (marketplaceAdminSource === "target" && !targetDatabaseUrl) {
-    throw new Error("TARGET_DATABASE_URL is required when MARKETPLACE_ADMIN_SOURCE=target");
-  }
-  if (marketplaceAdminSource === "target" && !auth) {
-    throw new Error("MARKETPLACE_ADMIN_SOURCE=target requires complete auth config");
-  }
   if (pmsOperationsSource === "target" && !targetDatabaseUrl) {
     throw new Error("TARGET_DATABASE_URL is required when PMS_OPERATIONS_SOURCE=target");
   }
@@ -927,7 +912,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
   }
   if (targetDatabaseUrl && auth && !platformMediaServing) {
     throw new Error(
-      "Target Marketplace with complete auth requires complete PLATFORM_MEDIA_* config because creator profile photos are required",
+      "Target database with complete auth requires complete PLATFORM_MEDIA_* config because hotel profile photos are required",
     );
   }
   if (env.NODE_ENV === "production" && !bookingEmailDelivery) {
@@ -1109,11 +1094,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     authSession,
     targetDatabaseUrl,
     publicHotelProfileSource,
-    marketplaceAdminSource,
-    marketplaceAdminLegacySuperadminFallbackEnabled: readBooleanEnv(
-      env,
-      "MARKETPLACE_ADMIN_LEGACY_SUPERADMIN_FALLBACK_ENABLED",
-    ),
     pmsOperationsSource,
     financeSource,
     financeExpenseWorker,

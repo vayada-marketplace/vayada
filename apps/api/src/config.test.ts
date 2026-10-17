@@ -936,16 +936,7 @@ describe("api config", () => {
     ).toThrow("BOOKING_WEB_EVENT_SINK must be one of: disabled, target");
   });
 
-  it("keeps marketplace admin legacy superadmin fallback disabled by default", () => {
-    expect(loadConfig({}).marketplaceAdminLegacySuperadminFallbackEnabled).toBe(false);
-    expect(
-      loadConfig({
-        MARKETPLACE_ADMIN_LEGACY_SUPERADMIN_FALLBACK_ENABLED: "true",
-      }).marketplaceAdminLegacySuperadminFallbackEnabled,
-    ).toBe(true);
-  });
-
-  it("requires durable media whenever target Marketplace and auth make the server creator-capable", () => {
+  it("requires durable media whenever the target database and auth make the server hotel-capable", () => {
     expect(loadConfig(completeCreatorMarketplaceEnv).platformMediaServing).toBeDefined();
     expect(() =>
       loadConfig({
@@ -955,7 +946,7 @@ describe("api config", () => {
         PLATFORM_MEDIA_CDN_ORIGIN_HOST: undefined,
       }),
     ).toThrow(
-      "Target Marketplace with complete auth requires complete PLATFORM_MEDIA_* config because creator profile photos are required",
+      "Target database with complete auth requires complete PLATFORM_MEDIA_* config because hotel profile photos are required",
     );
   });
 

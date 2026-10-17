@@ -23,7 +23,7 @@ import type {
   SharedPublicPropertyProfile,
   UpdatePublicPropertyProfileResult,
 } from "../routes/sharedHotelSetupStatus.js";
-import { syncPropertyOfferReadModels } from "../routes/marketplaceAdmin.js";
+import { projectPropertyPublicProfile } from "./propertyPublicProfileProjection.js";
 import {
   ACTIVE_PROPERTY_MEDIA_PUBLICATION_PREDICATE,
   APPROVED_PUBLIC_PROPERTY_MEDIA_OBJECT_PREDICATE,
@@ -63,20 +63,6 @@ type AdaptiveHotelSetupFactsRow = {
   localityPublic: boolean;
   profileUpdatedAt: unknown;
   mediaUpdatedAt: unknown;
-  marketplaceProfileStatus: string | null;
-  marketplaceProfileComplete: boolean;
-  marketplaceProfileDescriptionInSync: boolean;
-  marketplaceProfileUpdatedAt: unknown;
-  marketplaceOfferStatus: string | null;
-  marketplaceOfferHasTitle: boolean;
-  marketplaceOfferHasDeliverable: boolean;
-  marketplaceOfferHasCompensation: boolean;
-  marketplaceOfferHasRequirement: boolean;
-  marketplaceOfferPublic: boolean;
-  marketplaceOfferUpdatedAt: unknown;
-  marketplaceOfferChildrenUpdatedAt: unknown;
-  marketplaceOfferProjectedAt: unknown;
-  marketplaceOfferProjectionFresh: boolean;
   hasActiveRoomType: boolean;
   hasNonRetiredRoom: boolean;
   hasActiveRatePlan: boolean;
@@ -440,7 +426,7 @@ async function writePublicPropertyProfile(
     }
 
     await advancePublicProfileRevision(client, input.propertyId);
-    await syncPropertyOfferReadModels(client, {
+    await projectPropertyPublicProfile(client, {
       propertyId: input.propertyId,
     });
     const updated = await loadPublicPropertyProfile(client, input.organizationId, input.propertyId);
@@ -847,7 +833,7 @@ async function writePropertyProfile(
       ]);
       const propertyId = result.rows[0]?.propertyId ?? null;
       if (propertyId) {
-        await syncPropertyOfferReadModels(client, {
+        await projectPropertyPublicProfile(client, {
           propertyId,
         });
       }
@@ -1123,11 +1109,6 @@ function toAdaptivePropertySetupFacts(row: AdaptiveHotelSetupFactsRow): Adaptive
     !row.hasEmail && "missing_email_contact",
     !row.hasPhone && "missing_phone_contact",
   ].filter(isReasonCode);
-  const publicProfileReasons = [
-    !row.hasDescription && "missing_default_locale_description",
-    !row.hasApprovedMedia && "missing_public_media",
-    !row.localityPublic && "missing_public_locality_consent",
-  ].filter(isReasonCode);
   const roomReasons = [
     !row.hasActiveRoomType && "missing_active_room_type",
     !row.hasNonRetiredRoom && "missing_non_retired_room",
@@ -1153,8 +1134,9 @@ function toAdaptivePropertySetupFacts(row: AdaptiveHotelSetupFactsRow): Adaptive
         Boolean(nonEmpty(row.displayName)),
         latest(row.propertyUpdatedAt, row.locationUpdatedAt, row.contactUpdatedAt),
       ),
-      public_profile: publicProfileFact(row, publicProfileReasons),
-      creator_offer: creatorOfferFact(row),
+      // Creator Marketplace tasks are retired (VAY-2270); the ids leave the contract with it.
+      public_profile: retiredTaskFact("public_profile"),
+      creator_offer: retiredTaskFact("creator_offer"),
       rooms_rates_availability: basicTaskFact(
         "rooms_rates_availability",
         roomReasons,
@@ -1204,140 +1186,14 @@ function basicTaskFact(
   };
 }
 
-function publicProfileFact(
-  row: AdaptiveHotelSetupFactsRow,
-  canonicalReasons: string[],
-): AdaptiveSetupTaskFact {
-  const status = row.marketplaceProfileStatus;
-  const marketplaceComplete = row.marketplaceProfileComplete === true;
-  const marketplaceDescriptionInSync = row.marketplaceProfileDescriptionInSync === true;
-  const canonicalComplete = canonicalReasons.length === 0;
-  const canonicalStarted = row.hasDescription || row.hasApprovedMedia || row.localityPublic;
-  const readiness =
-    status === "rejected"
-      ? "rejected"
-      : status === "suspended" || status === "archived"
-        ? "blocked"
-        : status === "pending" &&
-            marketplaceComplete &&
-            marketplaceDescriptionInSync &&
-            canonicalComplete
-          ? "pending_review"
-          : status === "verified" &&
-              marketplaceComplete &&
-              marketplaceDescriptionInSync &&
-              canonicalComplete
-            ? "complete"
-            : "actionable";
-  const actionableReasons = [
-    ...canonicalReasons,
-    !status && "marketplace_profile_not_started",
-    status !== null &&
-      (!marketplaceComplete || (status !== "pending" && status !== "verified")) &&
-      "marketplace_profile_incomplete",
-    row.hasDescription &&
-      marketplaceComplete &&
-      !marketplaceDescriptionInSync &&
-      "marketplace_profile_description_out_of_sync",
-  ].filter(isReasonCode);
+function retiredTaskFact(taskId: "public_profile" | "creator_offer"): AdaptiveSetupTaskFact {
   return {
-    taskId: "public_profile",
-    ownerProgress:
-      readiness === "complete" || readiness === "pending_review"
-        ? "owner_complete"
-        : canonicalStarted || status !== null
-          ? "in_progress"
-          : "not_started",
-    readiness,
-    reasonCodes:
-      readiness === "complete"
-        ? []
-        : readiness === "actionable"
-          ? actionableReasons
-          : [...canonicalReasons, `marketplace_profile_${status}`],
-    sourceRevision: taskRevision(
-      latest(
-        row.profileUpdatedAt,
-        row.mediaUpdatedAt,
-        row.locationUpdatedAt,
-        row.marketplaceProfileUpdatedAt,
-      ),
-      status,
-      marketplaceComplete,
-      canonicalReasons,
-      marketplaceDescriptionInSync,
-    ),
+    taskId,
+    ownerProgress: "not_started",
+    readiness: "blocked",
+    reasonCodes: ["track_retired"],
+    sourceRevision: taskRevision("retired"),
     freshness: "fresh",
-  };
-}
-
-function creatorOfferFact(row: AdaptiveHotelSetupFactsRow): AdaptiveSetupTaskFact {
-  const status = row.marketplaceOfferStatus;
-  const structuralReasons = [
-    !row.marketplaceOfferHasTitle && "missing_offer_title",
-    !row.marketplaceOfferHasDeliverable && "missing_offer_deliverable",
-    !row.marketplaceOfferHasCompensation && "missing_offer_compensation",
-    !row.marketplaceOfferHasRequirement && "missing_offer_requirement",
-  ].filter(isReasonCode);
-  if (!status) {
-    return basicTaskFact(
-      "creator_offer",
-      ["creator_offer_not_started"],
-      false,
-      latest(row.marketplaceOfferUpdatedAt, row.marketplaceOfferChildrenUpdatedAt),
-    );
-  }
-  const structurallyComplete = structuralReasons.length === 0;
-  const projectionReady =
-    row.marketplaceOfferPublic === true && row.marketplaceOfferProjectionFresh === true;
-  const readiness =
-    status === "rejected"
-      ? "rejected"
-      : status === "suspended" || status === "archived"
-        ? "blocked"
-        : status === "pending" && structurallyComplete
-          ? "pending_review"
-          : status === "verified" && structurallyComplete && projectionReady
-            ? "complete"
-            : status === "verified" && structurallyComplete && row.marketplaceOfferPublic !== true
-              ? "blocked"
-              : status === "verified" &&
-                  structurallyComplete &&
-                  !row.marketplaceOfferProjectionFresh
-                ? "pending_sync"
-                : "actionable";
-  return {
-    taskId: "creator_offer",
-    ownerProgress:
-      structurallyComplete && (status === "pending" || status === "verified")
-        ? "owner_complete"
-        : "in_progress",
-    readiness,
-    reasonCodes:
-      readiness === "complete"
-        ? []
-        : readiness === "actionable"
-          ? structuralReasons.length > 0
-            ? structuralReasons
-            : ["creator_offer_not_submitted"]
-          : readiness === "blocked" && status === "verified"
-            ? ["creator_offer_not_public"]
-            : [`creator_offer_${readiness}`],
-    sourceRevision: taskRevision(
-      latest(
-        row.marketplaceOfferUpdatedAt,
-        row.marketplaceOfferChildrenUpdatedAt,
-        row.marketplaceOfferProjectedAt,
-      ),
-      status,
-      structuralReasons,
-      row.marketplaceOfferPublic,
-      row.marketplaceOfferProjectionFresh,
-    ),
-    freshness:
-      status === "verified" && structurallyComplete && !row.marketplaceOfferProjectionFresh
-        ? "stale"
-        : "fresh",
   };
 }
 
@@ -1606,7 +1462,7 @@ function createPropertyProductDefaultsSql(initialSettings = false): string {
     SELECT product, resource_id FROM identity.organization_resource_links
     WHERE organization_id=$1::uuid AND resource_id=$2::uuid::text
       AND relationship='owner' AND status='active'
-      AND (product, resource_type) IN (('booking', 'booking_hotel'), ('marketplace', 'hotel_profile'), ('pms', 'pms_property'))
+      AND (product, resource_type) IN (('booking', 'booking_hotel'), ('pms', 'pms_property'))
   ),
     initialized_pending_financials AS (
       INSERT INTO identity.product_entitlements (
@@ -1619,19 +1475,6 @@ function createPropertyProductDefaultsSql(initialSettings = false): string {
       FROM linked_product_properties WHERE product = 'pms'
       ON CONFLICT DO NOTHING
       RETURNING resource_id
-    ),
-    initialized_marketplace_profile AS (
-      INSERT INTO marketplace.marketplace_hotel_profiles (
-        property_id,
-        organization_id,
-        source_system,
-        source_hotel_profile_id
-      )
-      SELECT resource_id::uuid, $1::uuid, 'marketplace', resource_id
-      FROM linked_product_properties
-      WHERE product = 'marketplace'
-      ON CONFLICT (property_id) DO NOTHING
-      RETURNING property_id
     ),
     initialized_booking_settings AS (
       INSERT INTO booking.booking_settings (property_id${initialSettings ? ", default_currency, supported_currencies, default_language, supported_languages" : ""})
@@ -1677,8 +1520,7 @@ function createPropertyProfileSql(): string {
     setup_product_keys(product, entitlement_key) AS (
       VALUES
         ('booking'::text, 'booking-engine'::text),
-        ('pms'::text, 'property-management'::text),
-        ('marketplace'::text, 'marketplace-hotel-profile'::text)
+        ('pms'::text, 'property-management'::text)
     ),
     effective_products AS (
       SELECT candidate.product
@@ -1743,16 +1585,10 @@ function createPropertyProfileSql(): string {
       FROM effective_products effective
       JOIN hotel_catalog.organization_setup_track_intents intent
         ON intent.organization_id = $1::uuid
-      WHERE (
-        effective.product = 'marketplace'
-        AND 'creator_marketplace' = ANY(intent.selected_tracks)
-      )
-      OR (
-        effective.product IN ('booking', 'pms')
+      WHERE effective.product IN ('booking', 'pms')
         AND 'hotel_operations' = ANY(intent.selected_tracks)
         AND EXISTS (SELECT 1 FROM effective_products WHERE product = 'booking')
         AND EXISTS (SELECT 1 FROM effective_products WHERE product = 'pms')
-      )
     ),
     linked_product_properties AS (
       INSERT INTO identity.organization_resource_links (
@@ -1769,7 +1605,6 @@ function createPropertyProfileSql(): string {
         CASE entitlement.product
           WHEN 'booking' THEN 'booking_hotel'
           WHEN 'pms' THEN 'pms_property'
-          WHEN 'marketplace' THEN 'hotel_profile'
         END,
         created_property.property_id::text,
         'owner',
@@ -1994,27 +1829,6 @@ function adaptiveHotelSetupFactsSql(): string {
       COALESCE(location.address_public, FALSE) AS "localityPublic",
       public_profile.updated_at AS "profileUpdatedAt",
       public_media.updated_at AS "mediaUpdatedAt",
-      marketplace_profile.marketplace_profile_status AS "marketplaceProfileStatus",
-      COALESCE(marketplace_profile.profile_complete, FALSE) AS "marketplaceProfileComplete",
-      COALESCE(
-        public_profile.normalized_description =
-          NULLIF(BTRIM(marketplace_profile.host_summary), ''),
-        FALSE
-      ) AS "marketplaceProfileDescriptionInSync",
-      marketplace_profile.updated_at AS "marketplaceProfileUpdatedAt",
-      marketplace_offer.offer_status AS "marketplaceOfferStatus",
-      COALESCE(marketplace_offer.has_title, FALSE) AS "marketplaceOfferHasTitle",
-      COALESCE(marketplace_offer.has_deliverable, FALSE) AS "marketplaceOfferHasDeliverable",
-      COALESCE(marketplace_offer.has_compensation, FALSE) AS "marketplaceOfferHasCompensation",
-      COALESCE(marketplace_offer.has_requirement, FALSE) AS "marketplaceOfferHasRequirement",
-      COALESCE(marketplace_offer.is_public, FALSE) AS "marketplaceOfferPublic",
-      marketplace_offer.updated_at AS "marketplaceOfferUpdatedAt",
-      marketplace_offer.children_updated_at AS "marketplaceOfferChildrenUpdatedAt",
-      marketplace_offer.projected_at AS "marketplaceOfferProjectedAt",
-      COALESCE(
-        marketplace_offer.projection_fresh,
-        FALSE
-      ) AS "marketplaceOfferProjectionFresh",
       COALESCE(room_readiness.has_active_room_type, FALSE) AS "hasActiveRoomType",
       COALESCE(room_readiness.has_non_retired_room, FALSE) AS "hasNonRetiredRoom",
       COALESCE(room_readiness.has_active_rate_plan, FALSE) AS "hasActiveRatePlan",
@@ -2137,134 +1951,6 @@ function adaptiveHotelSetupFactsSql(): string {
         AND media.public_approved = TRUE
         AND media.source_system = 'platform'
     ) public_media ON TRUE
-    LEFT JOIN marketplace.marketplace_hotel_profiles marketplace_profile
-      ON marketplace_profile.property_id = property.id
-     AND marketplace_profile.organization_id = $1::uuid
-    LEFT JOIN LATERAL (
-      SELECT
-        candidate.offer_status,
-        candidate.has_title,
-        candidate.has_deliverable,
-        candidate.has_compensation,
-        candidate.has_requirement,
-        candidate.is_public,
-        candidate.updated_at,
-        candidate.children_updated_at,
-        candidate.projected_at,
-        candidate.projection_fresh
-      FROM (
-        SELECT
-          facts.*,
-          COALESCE(
-            catalog_public_profile.projected_at IS NOT NULL
-            AND facts.projected_at >= GREATEST(
-                facts.updated_at,
-                facts.children_updated_at,
-                catalog_public_profile.projected_at
-              ),
-            FALSE
-          ) AS projection_fresh
-        FROM (
-          SELECT
-            offer.id AS offer_id,
-            offer.offer_status,
-            NULLIF(offer.title, '') IS NOT NULL AS has_title,
-            EXISTS (
-              SELECT 1
-              FROM marketplace.offer_deliverables deliverable
-              WHERE deliverable.offer_id = offer.id
-                AND deliverable.property_id = offer.property_id
-                AND deliverable.organization_id = offer.organization_id
-            ) AS has_deliverable,
-            EXISTS (
-              SELECT 1
-              FROM marketplace.offer_compensation_options compensation
-              WHERE compensation.offer_id = offer.id
-                AND compensation.property_id = offer.property_id
-                AND compensation.organization_id = offer.organization_id
-            ) AS has_compensation,
-            EXISTS (
-              SELECT 1
-              FROM marketplace.offer_creator_requirements requirement
-              WHERE requirement.offer_id = offer.id
-                AND requirement.property_id = offer.property_id
-                AND requirement.organization_id = offer.organization_id
-            ) AS has_requirement,
-            projection.visibility_status = 'public' AS is_public,
-            offer.updated_at,
-            GREATEST(
-              (
-                SELECT max(deliverable.updated_at)
-                FROM marketplace.offer_deliverables deliverable
-                WHERE deliverable.offer_id = offer.id
-                  AND deliverable.property_id = offer.property_id
-                  AND deliverable.organization_id = offer.organization_id
-              ),
-              (
-                SELECT max(compensation.updated_at)
-                FROM marketplace.offer_compensation_options compensation
-                WHERE compensation.offer_id = offer.id
-                  AND compensation.property_id = offer.property_id
-                  AND compensation.organization_id = offer.organization_id
-              ),
-              (
-                SELECT max(requirement.updated_at)
-                FROM marketplace.offer_creator_requirements requirement
-                WHERE requirement.offer_id = offer.id
-                  AND requirement.property_id = offer.property_id
-                  AND requirement.organization_id = offer.organization_id
-              )
-            ) AS children_updated_at,
-            projection.projected_at
-          FROM marketplace.marketplace_offers offer
-          LEFT JOIN marketplace.marketplace_offer_read_model projection
-            ON projection.offer_id = offer.id
-           AND projection.property_id = offer.property_id
-          WHERE offer.property_id = property.id
-            AND offer.organization_id = $1::uuid
-            AND offer.offer_status <> 'archived'
-        ) facts
-      ) candidate
-      ORDER BY
-        CASE
-          WHEN candidate.offer_status = 'verified'
-            AND candidate.has_title
-            AND candidate.has_deliverable
-            AND candidate.has_compensation
-            AND candidate.has_requirement
-            AND candidate.is_public
-            AND candidate.projection_fresh
-            THEN 0
-          WHEN candidate.offer_status = 'verified'
-            AND candidate.has_title
-            AND candidate.has_deliverable
-            AND candidate.has_compensation
-            AND candidate.has_requirement
-            AND candidate.is_public
-            AND NOT candidate.projection_fresh
-            THEN 1
-          WHEN candidate.offer_status = 'pending'
-            AND candidate.has_title
-            AND candidate.has_deliverable
-            AND candidate.has_compensation
-            AND candidate.has_requirement
-            THEN 2
-          WHEN candidate.offer_status = 'verified'
-            AND candidate.has_title
-            AND candidate.has_deliverable
-            AND candidate.has_compensation
-            AND candidate.has_requirement
-            THEN 3
-          WHEN candidate.offer_status IN ('draft', 'pending', 'verified')
-            THEN 4
-          WHEN candidate.offer_status = 'rejected'
-            THEN 5
-          ELSE 6
-        END,
-        candidate.updated_at DESC,
-        candidate.offer_id DESC
-      LIMIT 1
-    ) marketplace_offer ON TRUE
     LEFT JOIN LATERAL (
       SELECT
         count(*) > 0 AS has_active_room_type,

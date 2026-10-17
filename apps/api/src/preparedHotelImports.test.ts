@@ -8,7 +8,7 @@ import type { PmsRoomFactsRoutesOptions } from "./routes/pmsRoomFacts.js";
 import {
   parseHotelAccountInviteCreateRequest,
   storedHotelAccountInviteTracks,
-} from "./routes/marketplaceAdmin.js";
+} from "./routes/hotelAccountInviteCodes.js";
 const room = {
   id: "suite",
   name: "Suite",
