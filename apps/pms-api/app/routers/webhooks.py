@@ -28,9 +28,9 @@ def _webhook_receipt_id(provider: str, payload: bytes) -> str:
 
 
 async def _proxy_provider_webhook_to_target(
-    provider: str, request: Request, payload: bytes
+    provider: str, request: Request, payload: bytes, *, stripe_connect: bool = False
 ) -> dict:
-    target_url = settings.provider_webhook_target_url(provider)
+    target_url = settings.provider_webhook_target_url(provider, stripe_connect=stripe_connect)
     if not target_url:
         logger.error(
             "Legacy provider webhook proxy requested without target URL provider=%s",
@@ -78,6 +78,7 @@ async def _non_mutating_webhook_response(
     payload: bytes,
     *,
     receipt_id: str | None = None,
+    stripe_connect: bool = False,
 ) -> dict | None:
     if mode == "mutating":
         return None
@@ -98,7 +99,9 @@ async def _non_mutating_webhook_response(
             "receipt": receipt_id,
         }
 
-    result = await _proxy_provider_webhook_to_target(provider, request, payload)
+    result = await _proxy_provider_webhook_to_target(
+        provider, request, payload, stripe_connect=stripe_connect
+    )
     result["receipt"] = receipt_id
     return result
 
@@ -243,10 +246,14 @@ async def stripe_connect_webhook(request: Request):
     """Handle events emitted by direct charges on connected accounts."""
     if not settings.STRIPE_CONNECT_WEBHOOK_SECRET:
         raise HTTPException(status_code=503, detail="Connect webhook is not configured")
-    return await _handle_stripe_webhook(request, settings.STRIPE_CONNECT_WEBHOOK_SECRET)
+    return await _handle_stripe_webhook(
+        request, settings.STRIPE_CONNECT_WEBHOOK_SECRET, stripe_connect=True
+    )
 
 
-async def _handle_stripe_webhook(request: Request, webhook_secret: str):
+async def _handle_stripe_webhook(
+    request: Request, webhook_secret: str, *, stripe_connect: bool = False
+):
     payload = await request.body()
     sig = request.headers.get("stripe-signature")
 
@@ -282,6 +289,7 @@ async def _handle_stripe_webhook(request: Request, webhook_secret: str):
         mode,
         request,
         payload,
+        stripe_connect=stripe_connect,
     )
     if non_mutating_response is not None:
         return non_mutating_response
