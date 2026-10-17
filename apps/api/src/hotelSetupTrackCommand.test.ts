@@ -1,5 +1,3 @@
-import { createPgMarketplaceAdminRepository } from "./routes/marketplaceAdmin.js";
-import { createPgMarketplaceOfferIdentityAccessCommandPort } from "./platform/marketplaceOfferIdentityAccess.js";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 
@@ -1092,75 +1090,6 @@ describe.skipIf(!TEST_DATABASE_URL)("hotel setup track command repository", () =
     );
     expect(audit.rows).toHaveLength(1);
     expect(audit.rows[0].audit_metadata.adminActivation.accountUserId).toBe(hotel.actorUserId);
-    const offers = createPgMarketplaceAdminRepository({
-      connectionString: TEST_DATABASE_URL!,
-      identityAccess: createPgMarketplaceOfferIdentityAccessCommandPort(),
-    });
-    try {
-      const scope = {
-        hotelUserId: hotel.actorUserId,
-        authorizationMode: "platform_organization_membership" as const,
-      };
-      await expect(offers.readHotelReviewForUser(scope)).rejects.toMatchObject({ statusCode: 409 });
-      const input = {
-        ...scope,
-        propertyId: hotel.propertyId,
-        idempotencyKey: "draft-retry",
-        request: {
-          title: "Private draft",
-          deliverables: [],
-          compensationOptions: [],
-          creatorRequirements: {
-            platforms: [],
-            targetCountries: [],
-            targetAgeMin: null,
-            targetAgeMax: null,
-            targetAgeGroups: [],
-            creatorTypes: [],
-          },
-        },
-        audit: {
-          actorUserId: adminId,
-          actorOrganizationId: platformOrganizationId,
-          requestId: "draft-test",
-          correlationId: null,
-          source: "web" as const,
-          occurredAt,
-        },
-      };
-      const [draft, retried] = await Promise.all([
-        offers.createOfferForUser(input),
-        offers.createOfferForUser(input),
-      ]);
-      expect(draft?.offerStatus).toBe("draft");
-      expect(retried?.offerId).toBe(draft?.offerId);
-      await expect(
-        offers.createOfferForUser({ ...input, request: { ...input.request, title: "Changed" } }),
-      ).rejects.toMatchObject({ statusCode: 409 });
-      const review = await offers.readHotelReviewForUser({
-        ...scope,
-        propertyId: hotel.propertyId,
-      });
-      expect(review.offers).toHaveLength(1);
-      const discovery = await client.query(
-        `SELECT offer_id FROM marketplace.marketplace_offer_read_model WHERE property_id = $1 AND visibility_status = 'public'`,
-        [hotel.propertyId],
-      );
-      expect(discovery.rows).toHaveLength(0);
-      await expect(
-        offers.verifyOfferForUser({
-          ...scope,
-          propertyId: hotel.propertyId,
-          offerId: draft!.offerId,
-        }),
-      ).rejects.toMatchObject({ statusCode: 422 });
-      const other = await createFixture();
-      expect(
-        await offers.createOfferForUser({ ...input, propertyId: other.propertyId }),
-      ).toBeNull();
-    } finally {
-      await offers.close?.();
-    }
     // Revoked target membership must deny even an otherwise valid replay.
     await client.query(
       `UPDATE identity.organization_memberships SET status = 'suspended' WHERE organization_id = $1`,

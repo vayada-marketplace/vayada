@@ -130,11 +130,6 @@ export type BookingEmailDeliveryConfig = {
   from: string;
 };
 
-export type MarketplaceCommunicationUnsubscribeConfig = {
-  currentKeyVersion: string;
-  keys: Readonly<Record<string, string>>;
-};
-
 export function stripeSubscriptionRuntimeEnabled(
   config: Pick<ApiConfig, "financeSource" | "providerWebhooks" | "stripeSubscriptions">,
 ): boolean {
@@ -145,40 +140,6 @@ export function stripeSubscriptionRuntimeEnabled(
     config.providerWebhooks.stripeMode === "mutating"
   );
 }
-
-export type CreatorPlatformConnectionsConfig = {
-  callbackBaseUrl: string;
-  webReturnUrl: string;
-  sync: {
-    enabled: boolean;
-    pollIntervalMs: number;
-    recurringIntervalMs: number;
-    batchSize: number;
-    maxAttempts: number;
-    minimumSpacingMs: { meta: number; tiktok: number; google: number };
-  };
-  credentialVault:
-    | { provider: "aws-secrets-manager"; secretPrefix: string; region?: string }
-    | { provider: "memory"; secretPrefix: string };
-  instagram?: {
-    clientId: string;
-    clientSecret: string;
-    apiVersion: string;
-  };
-  facebook?: {
-    clientId: string;
-    clientSecret: string;
-    apiVersion: string;
-  };
-  tiktok?: {
-    clientKey: string;
-    clientSecret: string;
-  };
-  youtube?: {
-    clientId: string;
-    clientSecret: string;
-  };
-};
 
 export type ApiConfig = {
   host: string;
@@ -207,7 +168,6 @@ export type ApiConfig = {
   financeFolioRecipientKms?: FinanceFolioRecipientKmsConfig;
   financeBankTransferKms?: { currentKeyArn: string; allowedKeyArns: string[]; region: string };
   marketplaceDiscoveryAllowedOrigins: string[];
-  affiliatePublicSource?: "target";
   pmsOperationsAllowedOrigins: string[];
   financialsActivationPropertyIds: string[];
   bookingWebEventSink: BookingWebEventSink;
@@ -245,14 +205,12 @@ export type ApiConfig = {
   pricingPublicationFreshnessIntervalMs: number;
   /** Recipient of the at-most-daily stale-pricing email; unset sends none (log line only). */
   pricingPublicationFreshnessAlertEmail?: string;
-  creatorPlatformConnections?: CreatorPlatformConnectionsConfig;
   providerWebhooks: ProviderWebhookConfig;
   airbnbImport?: ReturnType<typeof loadAirbnbImportConfig>;
   airbnbAlterations?: { propertyIds: readonly string[] };
   channexManagement: ChannexManagementConfig;
   stripeSubscriptions: StripeSubscriptionConfig;
   bookingEmailDelivery?: BookingEmailDeliveryConfig;
-  marketplaceCommunicationUnsubscribe?: MarketplaceCommunicationUnsubscribeConfig;
   xenditSecretKey?: string;
 };
 
@@ -391,38 +349,6 @@ function readPropertyIdAllowlistEnv(env: NodeJS.ProcessEnv, key: string): string
     throw new Error(`${key} requires up to 100 property UUIDs`);
   }
   return ids;
-}
-
-function loadMarketplaceCommunicationUnsubscribeConfig(
-  env: NodeJS.ProcessEnv,
-): MarketplaceCommunicationUnsubscribeConfig | undefined {
-  const currentKeyVersion = readOptionalEnv(
-    env,
-    "MARKETPLACE_COMMUNICATION_UNSUBSCRIBE_CURRENT_KEY_VERSION",
-  );
-  const encodedKeys = readOptionalEnv(env, "MARKETPLACE_COMMUNICATION_UNSUBSCRIBE_KEYS_JSON");
-  if (!currentKeyVersion && !encodedKeys) return undefined;
-  if (!currentKeyVersion || !encodedKeys) {
-    throw new Error("Incomplete Marketplace communication unsubscribe signing config");
-  }
-  let value: unknown;
-  try {
-    value = JSON.parse(encodedKeys);
-  } catch {
-    throw new Error("Marketplace communication unsubscribe signing keys must be valid JSON");
-  }
-  if (
-    !value ||
-    typeof value !== "object" ||
-    Array.isArray(value) ||
-    Object.getPrototypeOf(value) !== Object.prototype ||
-    Object.keys(value).length === 0 ||
-    Object.values(value).some((key) => typeof key !== "string") ||
-    !Object.hasOwn(value, currentKeyVersion)
-  ) {
-    throw new Error("Marketplace communication unsubscribe signing keys are invalid");
-  }
-  return { currentKeyVersion, keys: value as Record<string, string> };
 }
 
 const KMS_KEY_ARN =
@@ -603,20 +529,6 @@ function readSourceEnv<T extends string>(
   const value = readOptionalEnv(env, key) ?? defaultValue;
   if ((allowed as readonly string[]).includes(value)) return value as T;
   throw new Error(`${key} must be one of: ${allowed.join(", ")}`);
-}
-
-function loadAffiliatePublicSource(env: NodeJS.ProcessEnv): "target" | undefined {
-  const value = readOptionalEnv(env, "AFFILIATE_PUBLIC_SOURCE");
-  if (!value) {
-    return undefined;
-  }
-  if (value !== "target") {
-    throw new Error("Unsupported AFFILIATE_PUBLIC_SOURCE; expected target");
-  }
-  if (!readOptionalEnv(env, "TARGET_DATABASE_URL")) {
-    throw new Error("AFFILIATE_PUBLIC_SOURCE=target requires TARGET_DATABASE_URL");
-  }
-  return "target";
 }
 
 function loadAuthSessionConfig(env: NodeJS.ProcessEnv): ApiAuthSessionConfig | undefined {
@@ -919,86 +831,6 @@ function loadStripeSubscriptionConfig(env: NodeJS.ProcessEnv): StripeSubscriptio
   };
 }
 
-function loadCreatorPlatformConnectionsConfig(
-  env: NodeJS.ProcessEnv,
-): CreatorPlatformConnectionsConfig | undefined {
-  const instagram = readCompleteConfigGroup(env, "Instagram creator platform", {
-    clientId: "INSTAGRAM_CLIENT_ID",
-    clientSecret: "INSTAGRAM_CLIENT_SECRET",
-    apiVersion: "INSTAGRAM_API_VERSION",
-  });
-  const facebook = readCompleteConfigGroup(env, "Facebook creator platform", {
-    clientId: "FACEBOOK_CLIENT_ID",
-    clientSecret: "FACEBOOK_CLIENT_SECRET",
-    apiVersion: "FACEBOOK_GRAPH_API_VERSION",
-  });
-  const tiktok = readCompleteConfigGroup(env, "TikTok creator platform", {
-    clientKey: "TIKTOK_CLIENT_KEY",
-    clientSecret: "TIKTOK_CLIENT_SECRET",
-  });
-  const youtube = readCompleteConfigGroup(env, "YouTube creator platform", {
-    clientId: "GOOGLE_YOUTUBE_CLIENT_ID",
-    clientSecret: "GOOGLE_YOUTUBE_CLIENT_SECRET",
-  });
-
-  if (!instagram && !facebook && !tiktok && !youtube) return undefined;
-
-  const callbackBaseUrl = readOptionalEnv(env, "CREATOR_PLATFORM_CALLBACK_BASE_URL");
-  const webReturnUrl = readOptionalEnv(env, "CREATOR_PLATFORM_WEB_RETURN_URL");
-  const secretPrefix = readOptionalEnv(env, "CREATOR_PLATFORM_SECRET_PREFIX");
-  const vaultProvider =
-    readOptionalEnv(env, "CREATOR_PLATFORM_CREDENTIAL_VAULT") ?? "aws-secrets-manager";
-  const missing = [
-    !callbackBaseUrl && "CREATOR_PLATFORM_CALLBACK_BASE_URL",
-    !webReturnUrl && "CREATOR_PLATFORM_WEB_RETURN_URL",
-    !secretPrefix && "CREATOR_PLATFORM_SECRET_PREFIX",
-  ].filter(Boolean);
-  if (missing.length > 0) {
-    throw new Error(`Incomplete creator platform connection config; missing ${missing.join(", ")}`);
-  }
-  assertOAuthUrl(callbackBaseUrl!, "CREATOR_PLATFORM_CALLBACK_BASE_URL", env);
-  assertOAuthUrl(webReturnUrl!, "CREATOR_PLATFORM_WEB_RETURN_URL", env);
-  if (vaultProvider !== "aws-secrets-manager" && vaultProvider !== "memory") {
-    throw new Error("CREATOR_PLATFORM_CREDENTIAL_VAULT must be aws-secrets-manager or memory");
-  }
-  if (vaultProvider === "memory" && env.NODE_ENV === "production") {
-    throw new Error("CREATOR_PLATFORM_CREDENTIAL_VAULT=memory is not allowed in production");
-  }
-
-  return {
-    callbackBaseUrl: callbackBaseUrl!.replace(/\/$/, ""),
-    webReturnUrl: webReturnUrl!,
-    sync: {
-      enabled: readBooleanEnv(env, "CREATOR_PLATFORM_SYNC_ENABLED", true),
-      pollIntervalMs: readTimerIntervalEnv(env, "CREATOR_PLATFORM_SYNC_POLL_INTERVAL_MS", 60_000),
-      recurringIntervalMs: readPositiveIntegerEnv(
-        env,
-        "CREATOR_PLATFORM_SYNC_INTERVAL_MS",
-        24 * 60 * 60_000,
-      ),
-      batchSize: readPositiveIntegerEnv(env, "CREATOR_PLATFORM_SYNC_BATCH_SIZE", 10),
-      maxAttempts: readPositiveIntegerEnv(env, "CREATOR_PLATFORM_SYNC_MAX_ATTEMPTS", 5),
-      minimumSpacingMs: {
-        meta: readTimerIntervalEnv(env, "CREATOR_PLATFORM_META_MINIMUM_SPACING_MS", 1_000),
-        tiktok: readTimerIntervalEnv(env, "CREATOR_PLATFORM_TIKTOK_MINIMUM_SPACING_MS", 2_000),
-        google: readTimerIntervalEnv(env, "CREATOR_PLATFORM_GOOGLE_MINIMUM_SPACING_MS", 1_000),
-      },
-    },
-    credentialVault:
-      vaultProvider === "memory"
-        ? { provider: "memory", secretPrefix: secretPrefix! }
-        : {
-            provider: "aws-secrets-manager",
-            secretPrefix: secretPrefix!,
-            region: readOptionalEnv(env, "AWS_REGION"),
-          },
-    ...(instagram ? { instagram } : {}),
-    ...(facebook ? { facebook } : {}),
-    ...(tiktok ? { tiktok } : {}),
-    ...(youtube ? { youtube } : {}),
-  };
-}
-
 function loadBookingEmailDeliveryConfig(
   env: NodeJS.ProcessEnv,
 ): BookingEmailDeliveryConfig | undefined {
@@ -1026,20 +858,6 @@ function readCompleteConfigGroup<T extends Record<string, string>>(
   return Object.fromEntries(entries.map(([property, value]) => [property, value!])) as {
     [K in keyof T]: string;
   };
-}
-
-function assertOAuthUrl(value: string, key: string, env: NodeJS.ProcessEnv): void {
-  let url: URL;
-  try {
-    url = new URL(value);
-  } catch {
-    throw new Error(`${key} must be an absolute URL`);
-  }
-  const localHttp =
-    url.protocol === "http:" && ["localhost", "127.0.0.1", "::1"].includes(url.hostname);
-  if (url.protocol !== "https:" && !(env.NODE_ENV !== "production" && localHttp)) {
-    throw new Error(`${key} must use HTTPS`);
-  }
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
@@ -1082,7 +900,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
   );
   const auth = loadAuthConfig(env);
   const authSession = loadAuthSessionConfig(env);
-  const creatorPlatformConnections = loadCreatorPlatformConnectionsConfig(env);
   const bookingEmailDelivery = loadBookingEmailDeliveryConfig(env);
   const platformMediaServing = loadPlatformMediaServingConfig(env, {
     incomplete: targetDatabaseUrl && auth ? "error" : "disabled",
@@ -1111,11 +928,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
   if (targetDatabaseUrl && auth && !platformMediaServing) {
     throw new Error(
       "Target Marketplace with complete auth requires complete PLATFORM_MEDIA_* config because creator profile photos are required",
-    );
-  }
-  if (creatorPlatformConnections && (!targetDatabaseUrl || !auth)) {
-    throw new Error(
-      "Creator platform connections require TARGET_DATABASE_URL and complete auth config",
     );
   }
   if (env.NODE_ENV === "production" && !bookingEmailDelivery) {
@@ -1318,7 +1130,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       env,
       "MARKETPLACE_DISCOVERY_ALLOWED_ORIGINS",
     ),
-    affiliatePublicSource: loadAffiliatePublicSource(env),
     pmsOperationsAllowedOrigins: readOptionalCsvEnv(env, "PMS_OPERATIONS_ALLOWED_ORIGINS", [
       "https://pms.localhost",
       "https://admin.booking.localhost",
@@ -1410,14 +1221,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       env,
       Boolean(bookingEmailDelivery),
     ),
-    creatorPlatformConnections,
     providerWebhooks: prospectiveConfig.providerWebhooks,
     channexManagement,
     airbnbImport: loadAirbnbImportConfig(env),
     airbnbAlterations,
     stripeSubscriptions: prospectiveConfig.stripeSubscriptions,
     bookingEmailDelivery,
-    marketplaceCommunicationUnsubscribe: loadMarketplaceCommunicationUnsubscribeConfig(env),
     xenditSecretKey: readOptionalEnv(env, "XENDIT_SECRET_KEY"),
   };
 }

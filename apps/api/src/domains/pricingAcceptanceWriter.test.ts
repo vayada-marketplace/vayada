@@ -107,9 +107,7 @@ describe("pricing acceptance writer", () => {
       ...lifecycle,
       hostResponseDeadlineAt: "deadline",
     } as never);
-    await expect(
-      writePricingAcceptance(pool as never, input, undefined, undefined, true),
-    ).resolves.toEqual({
+    await expect(writePricingAcceptance(pool as never, input, undefined, true)).resolves.toEqual({
       kind: "requested",
       ...accepted,
       bookingReference: expect.stringMatching(/^VAY-[A-Z0-9]{32}$/),
@@ -207,26 +205,5 @@ describe("pricing acceptance writer", () => {
     const pending = { kind: "payment_required", bookingId: "existing" };
     vi.mocked(readPricingCardReplay).mockResolvedValueOnce(pending as never);
     await expect(writePricingAcceptance(pool as never, input)).resolves.toBe(pending);
-  });
-
-  it("passes a server-owned synthetic context only for a fresh booking", async () => {
-    await writePricingAcceptance(pool as never, input, {
-      syntheticAffiliateContextId: "trusted-fixture-context",
-    });
-    expect(stagePricingBookingDraft).toHaveBeenCalledWith(
-      client,
-      input.slug,
-      expect.objectContaining({ syntheticAffiliateContextId: "trusted-fixture-context" }),
-    );
-  });
-  it("passes a server-owned live context only for a fresh booking", async () => {
-    await writePricingAcceptance(pool as never, input, {
-      affiliateContextId: "trusted-live-context",
-    });
-    expect(stagePricingBookingDraft).toHaveBeenCalledWith(
-      client,
-      input.slug,
-      expect.objectContaining({ affiliateContextId: "trusted-live-context" }),
-    );
   });
 });

@@ -71,7 +71,7 @@ export function createStripeConnectProvider(config: {
       const url = new URL(returnPath, returnBase);
       if (returnSurface === "booking_admin") {
         url.searchParams.set("section", "payments");
-      } else if (owner.ownerScope === "property") {
+      } else {
         url.searchParams.set("propertyId", owner.propertyId);
         url.searchParams.set("step", "payments");
       }
@@ -96,8 +96,7 @@ export function createStripeConnectProvider(config: {
 
   return {
     async createAccount(input) {
-      const ownerId =
-        input.owner.ownerScope === "property" ? input.owner.propertyId : input.owner.affiliateId;
+      const ownerId = input.owner.propertyId;
       const account = await request(
         "POST",
         "/accounts",

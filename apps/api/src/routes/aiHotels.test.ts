@@ -64,10 +64,8 @@ function targetProfileRow(overrides: Record<string, unknown> = {}): QueryResultR
     bookingPrimaryColor: null,
     bookingFontPairing: null,
     bookingShowContactButton: true,
-    bookingShowReferAGuestButton: false,
     bookingShowLanguageSelector: true,
     bookingShowCurrencySelector: true,
-    bookingReferAGuestModuleEnabled: false,
     bookingPromoCodes: false,
     publicSetupCompleteness: { status: "ready", missing: [] },
     sourceFreshness: {

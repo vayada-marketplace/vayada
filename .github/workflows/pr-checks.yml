@@ -867,37 +867,6 @@ jobs:
         run: >-
           npm --workspace vayada-api run test --
           --no-file-parallelism
-          src/marketplaceCollaborations.test.ts
-          src/domains/affiliateDiscrepancyRepository.integration.test.ts
-          src/domains/bookingAffiliateDestinationSave.integration.test.ts
-          src/domains/bookingAffiliateReferralTransportCertificationStorage.integration.test.ts
-          src/domains/bookingAffiliateReferralTransportCertification.integration.test.ts
-          src/domains/bookingAffiliateReferralProductionPreflightStorage.integration.test.ts
-          src/domains/bookingAffiliateReferralProductionPreflight.integration.test.ts
-          src/domains/bookingAffiliateReferralReadiness.integration.test.ts
-          src/domains/bookingAffiliateDestinationTrackingReadiness.integration.test.ts
-          src/domains/bookingAffiliateNativeDestinationSafety.integration.test.ts
-          src/domains/bookingAffiliateSourceCapabilityEvidenceStorage.integration.test.ts
-          src/domains/bookingAffiliateSourceCapabilityCertification.integration.test.ts
-          src/domains/bookingAffiliateSourceCapabilityProductionPreflight.integration.test.ts
-          src/domains/marketplaceAffiliateDraftCommand.integration.test.ts
-          src/domains/marketplaceAffiliatePublicationPrerequisites.test.ts
-          src/domains/marketplaceAffiliatePublication.integration.test.ts
-          src/domains/marketplaceAffiliatePublicationStorage.integration.test.ts
-          src/domains/marketplaceAffiliateAssentStorage.integration.test.ts
-          src/domains/marketplaceAffiliateAgreementActivationStorage.integration.test.ts
-          src/domains/marketplaceAffiliateLinkStorage.integration.test.ts
-          src/domains/marketplaceAffiliateLinkCreation.integration.test.ts
-          src/domains/marketplaceAffiliateAgreementActivation.integration.test.ts
-          src/domains/marketplaceAffiliateAgreementLifecycleCommand.integration.test.ts
-          src/domains/marketplaceAffiliateAssentCommand.integration.test.ts
-          src/domains/marketplaceAffiliateAssentRead.integration.test.ts
-          src/domains/marketplaceAffiliateCollaborationRead.integration.test.ts
-          src/domains/pmsAffiliateCompletionEvidence.integration.test.ts
-          src/domains/financeAffiliatePercentagePolicySave.integration.test.ts
-          src/domains/financeAffiliateEarningJournalStorage.integration.test.ts
-          src/domains/financeAffiliateEarningJournal.integration.test.ts
-          src/domains/financeAffiliatePercentagePolicyResolver.test.ts
           src/domains/pmsLinkedInventoryGroupRepository.integration.test.ts
           src/domains/pmsRoomFactsCommandRepository.integration.test.ts
           src/domains/pmsRoomOperatingEligibility.integration.test.ts
@@ -957,7 +926,6 @@ jobs:
           src/jobs/channexStagingImport.integration.test.ts
           src/domains/channexStagingAlertRecovery.integration.test.ts
           src/routes/bookingWebPublicAttribution.integration.test.ts
-          src/platform/bookingWebEvents.integration.test.ts
           src/jobs/financeSubscriptions.integration.test.ts
           src/financeBillingPlanOrdinary.integration.test.ts
           src/financeBillingPlanParity.integration.test.ts
@@ -1102,8 +1070,6 @@ jobs:
         run: >-
           npm --workspace vayada-api run test -- --no-file-parallelism
           src/domains/marketplaceSubmissionRepository.integration.test.ts
-          src/domains/marketplaceHotelSubmissionModerationRepository.integration.test.ts
-          src/marketplaceHotelSubmissionApproval.integration.test.ts
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
@@ -1341,21 +1307,6 @@ jobs:
           '
           npm --workspace @vayada/backend-migration run target:migrate -- --env local
           npm --workspace vayada-api run test -- --no-file-parallelism src/domains/bookingGuestTermsStore.integration.test.ts
-
-      - name: Verify Marketplace hotel approval in an isolated database
-        if: matrix.shard == 'hotel-setup'
-        env:
-          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vayada_mkt_approval_test
-          TARGET_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vayada_mkt_approval_test
-        run: |
-          node --input-type=module -e '
-            import pg from "pg";
-            const url = new URL(process.env.TEST_DATABASE_URL); url.pathname = "/postgres";
-            const client = new pg.Client({ connectionString: url.href }); await client.connect();
-            await client.query("CREATE DATABASE vayada_mkt_approval_test"); await client.end();
-          '
-          npm --workspace @vayada/backend-migration run target:migrate -- --env local
-          npm --workspace vayada-api run test -- --no-file-parallelism src/domains/marketplaceHotelSubmissionModerationRepository.integration.test.ts src/marketplaceHotelSubmissionApproval.integration.test.ts
 
   setup_draft_reset_postgres:
     name: Setup Draft Reset PostgreSQL ${{ matrix.postgres }} Integration
