@@ -53,10 +53,15 @@ test("a failed hotel list after redemption offers a retry and keeps the handoff 
     return route.fallback();
   });
   // Retry must re-run the routing in place: a reload would have no code left to redeem.
+  // Only document requests count (framenavigated also fires for the hash rewrite).
   const handoffLoads: string[] = [];
-  page.on("framenavigated", (frame) => {
-    if (frame === page.mainFrame() && new URL(frame.url()).pathname === "/handoff")
-      handoffLoads.push(frame.url());
+  page.on("request", (request) => {
+    if (
+      request.isNavigationRequest() &&
+      request.frame() === page.mainFrame() &&
+      new URL(request.url()).pathname === "/handoff"
+    )
+      handoffLoads.push(request.url());
   });
 
   await page.goto(`/handoff#code=${"a".repeat(40)}`);
