@@ -170,7 +170,8 @@ export type ApiConfig = {
   };
   financeFolioRecipientKms?: FinanceFolioRecipientKmsConfig;
   financeBankTransferKms?: { currentKeyArn: string; allowedKeyArns: string[]; region: string };
-  marketplaceDiscoveryAllowedOrigins: string[];
+  /** Browser origins allowed on the identity privacy and contact intake routes. */
+  identityPrivacyAllowedOrigins: string[];
   pmsOperationsAllowedOrigins: string[];
   financialsActivationPropertyIds: string[];
   bookingWebEventSink: BookingWebEventSink;
@@ -1138,14 +1139,16 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
         : readPropertyIdAllowlistEnv(env, "PMS_ROOM_TYPE_DELETE_CLEANUP_PROPERTY_IDS"),
     pmsInboxSendingEnabled: readBooleanEnv(env, "PMS_INBOX_SENDING_ENABLED", true),
     financeBankTransferKms: loadBankTransferKms(env),
-    marketplaceDiscoveryAllowedOrigins: readOptionalCsvEnv(
+    // VAY-2270: the list has its own name; the old Terraform variable is still read until the
+    // platform renames it.
+    identityPrivacyAllowedOrigins: readOptionalCsvEnv(
       env,
-      "MARKETPLACE_DISCOVERY_ALLOWED_ORIGINS",
+      "IDENTITY_PRIVACY_ALLOWED_ORIGINS",
+      readOptionalCsvEnv(env, "MARKETPLACE_DISCOVERY_ALLOWED_ORIGINS"),
     ),
     pmsOperationsAllowedOrigins: readOptionalCsvEnv(env, "PMS_OPERATIONS_ALLOWED_ORIGINS", [
       "https://pms.localhost",
       "https://admin.booking.localhost",
-      "https://marketplace.localhost",
     ]),
     financialsActivationPropertyIds: readPropertyIdAllowlistEnv(
       env,
