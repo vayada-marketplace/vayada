@@ -3424,6 +3424,57 @@ describe("AuthKit session routes", () => {
     },
   );
 
+  // VAY-2262: the invite page moves to Booking Admin, so its surface may redeem invite-bound onboarding.
+  it.each([
+    ["booking-admin", "https://admin.booking.localhost", 403],
+    ["pms-web", "https://pms.localhost", 400],
+  ] as const)(
+    "accepts invite-bound hotel onboarding from %s only where the invite page lives",
+    async (surface, origin, expectedStatus) => {
+      const resolveForOnboarding = vi.fn(async () => null);
+      const noOrgSession = { ...session, organizationId: undefined };
+      app = buildAuthSessionApp({
+        allowedOrigins: [origin],
+        authKitClient: createAuthKitClient({
+          async authenticateSession() {
+            return noOrgSession;
+          },
+        }),
+        identityRepository: createIdentityRepository({
+          userByProviderUserId: async () => user,
+        }),
+        hotelAccountInviteOnboarding: { resolveForOnboarding },
+        surfacePolicies: {
+          [surface]: { requiredOrganizationKind: "hotel_group", allowMissingOrganization: true },
+        },
+      });
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/auth/onboarding",
+        headers: {
+          cookie: "vayada_workos_session=sealed-session; vayada_auth_csrf=csrf-token",
+          origin,
+          "x-vayada-csrf": "csrf-token",
+        },
+        payload: { type: "hotel", surface, inviteCode: "VAY-secret-invite-code" },
+      });
+
+      expect(response.statusCode).toBe(expectedStatus);
+      if (expectedStatus === 400) {
+        expect(response.json()).toEqual({
+          state: "auth_failed",
+          message: "Unsupported onboarding.",
+        });
+        expect(resolveForOnboarding).not.toHaveBeenCalled();
+      } else {
+        expect(resolveForOnboarding).toHaveBeenCalledWith(
+          expect.objectContaining({ code: "VAY-secret-invite-code" }),
+        );
+      }
+    },
+  );
+
   it("persists a refreshed WorkOS session when onboarding is already complete", async () => {
     const existingCreatorSession: AuthKitSession = {
       ...session,
