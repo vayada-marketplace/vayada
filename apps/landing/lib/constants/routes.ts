@@ -1,21 +1,21 @@
 /**
  * Application routes
  *
- * This is the marketing site (vayada.com). The authenticated creator
- * marketplace app lives on its own host (app.vayada.com), so every route
- * that belongs to the app is an absolute URL into APP_BASE_URL. Pure
- * marketing pages (home, product pages, legal) stay relative — they are
- * served by this site.
+ * This is the marketing site (vayada.com). Sign-up and log-in live in Booking
+ * Admin on its own host, so every route that belongs to the app is an absolute
+ * URL into APP_BASE_URL. Pure marketing pages (home, product pages, legal) stay
+ * relative — they are served by this site.
  */
 
 /**
- * The authenticated app (login, signup, marketplace, dashboards, …) is a
- * separate deployment on its own domain. Configurable per environment;
- * defaults to the production host. In local dev set
- * NEXT_PUBLIC_APP_URL=https://marketplace.localhost (portless) or
- * http://localhost:3000 (plain-port).
+ * The authenticated app (login, signup) is Booking Admin, a separate deployment
+ * on its own domain (VAY-2260: it replaced the Marketplace app). Configurable
+ * per environment; defaults to the production host. In local dev set
+ * NEXT_PUBLIC_APP_URL=https://admin.booking.localhost (portless) or
+ * http://localhost:3003 (plain-port).
  */
-export const APP_BASE_URL = process.env.NEXT_PUBLIC_APP_URL || "https://app.vayada.com";
+export const APP_BASE_URL =
+  process.env.NEXT_PUBLIC_APP_URL || "https://next-booking-admin.vayada.com";
 
 const app = (path: string) => `${APP_BASE_URL}${path}`;
 
