@@ -199,7 +199,7 @@ test.describe("marketplace-web shared setup activation", () => {
     await expect(locationActionBar.getByText("Add your map pin")).toBeVisible();
     await expect(
       locationActionBar.getByText(
-        "Needed for the Marketplace. Zoom in and click your property; drag the pin to adjust.",
+        "Needed for your booking page’s map. Zoom in and click your property; drag the pin to adjust.",
       ),
     ).toBeVisible();
     await expect(map).toHaveAttribute("data-zoom-control", "true");
@@ -351,7 +351,7 @@ test.describe("marketplace-web shared setup activation", () => {
     await expect(page.getByText("Map unavailable")).toBeVisible();
     await expect(
       locationActionBar.getByText(
-        "Needed for the Marketplace. Enter your property’s coordinates above.",
+        "Needed for your booking page’s map. Enter your property’s coordinates above.",
       ),
     ).toBeVisible();
 
@@ -431,7 +431,9 @@ test.describe("marketplace-web shared setup activation", () => {
 
     await streetAddress.fill("Marienplatz 1");
     await expect(
-      locationActionBar.getByText("Needed for the Marketplace. Click your property on the map."),
+      locationActionBar.getByText(
+        "Needed for your booking page’s map. Click your property on the map.",
+      ),
     ).toBeVisible();
     await findOnMap.click();
     await expect(map).toHaveAttribute("data-marker", "48.1373932,11.5754485");

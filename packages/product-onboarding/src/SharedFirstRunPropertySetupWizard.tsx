@@ -1756,7 +1756,7 @@ function ProfileForm({
             <div className="mt-6 rounded-2xl border border-gray-100 p-4 sm:p-5">
               <h4 className="text-base font-semibold text-gray-950">Social media</h4>
               <p className="mt-1 text-sm text-gray-500">
-                Optional links help guests and creators discover your hotel.
+                Optional links help guests discover your hotel.
               </p>
               <div className="mt-4 grid gap-4 md:grid-cols-2">
                 {(
@@ -2120,14 +2120,14 @@ function ProfileForm({
                               .filter(Boolean)
                               .join(" · ")
                           : mapUnavailable
-                            ? "Needed for the Marketplace. Enter your property’s coordinates above."
+                            ? "Needed for your booking page’s map. Enter your property’s coordinates above."
                             : lookupForAddress === "not_found"
                               ? "We couldn’t find this address on the map. Click your property on the map instead."
                               : lookupForAddress === "area"
                                 ? "Google found the area, not the exact address. Click your property on the map."
                                 : addressSearchUnavailable
-                                  ? "Needed for the Marketplace. Zoom in and click your property; drag the pin to adjust."
-                                  : "Needed for the Marketplace. Click your property on the map."}
+                                  ? "Needed for your booking page’s map. Zoom in and click your property; drag the pin to adjust."
+                                  : "Needed for your booking page’s map. Click your property on the map."}
                       </p>
                     </div>
                   </div>
