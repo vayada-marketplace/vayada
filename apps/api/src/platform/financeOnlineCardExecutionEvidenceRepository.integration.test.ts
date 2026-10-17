@@ -675,7 +675,7 @@ describe.skipIf(!TEST_DATABASE_URL)("Online-card execution evidence PostgreSQL",
         payload: {
           email: "compensation-retry@example.test",
           country: "DE",
-          returnSurface: "marketplace",
+          returnSurface: "booking_admin_setup",
         },
       });
 
@@ -757,7 +757,7 @@ describe.skipIf(!TEST_DATABASE_URL)("Online-card execution evidence PostgreSQL",
       payload: {
         email: "foreign-ref@example.test",
         country: "DE",
-        returnSurface: "marketplace",
+        returnSurface: "booking_admin_setup",
       },
     });
 
@@ -827,7 +827,7 @@ describe.skipIf(!TEST_DATABASE_URL)("Online-card execution evidence PostgreSQL",
       payload: {
         email: `concurrent-${suffix}@example.test`,
         country: "DE",
-        returnSurface: "marketplace" as const,
+        returnSurface: "booking_admin_setup" as const,
       },
     });
 

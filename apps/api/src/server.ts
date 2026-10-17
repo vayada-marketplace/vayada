@@ -592,9 +592,6 @@ const stripeConnectProvider = config.stripeSubscriptions.secretKey
   ? createStripeConnectProvider({
       secretKey: config.stripeSubscriptions.secretKey,
       returnBaseUrls: {
-        marketplace:
-          config.authSession?.authSurfaceOrigins["marketplace-web"] ??
-          config.stripeSubscriptions.bookingAdminBaseUrl,
         bookingAdmin: config.stripeSubscriptions.bookingAdminBaseUrl,
       },
     })
@@ -1886,8 +1883,8 @@ const app = buildApp({
           ? {
               receiptMedia: {
                 read: financeExpenseRuntime.routes.expenses,
-                signer: platformMediaRuntime.collaborationAttachments.signer,
-                serving: platformMediaRuntime.collaborationAttachments.serving,
+                signer: platformMediaRuntime.privateDownloads.signer,
+                serving: platformMediaRuntime.privateDownloads.serving,
               },
             }
           : {}),
@@ -1930,7 +1927,7 @@ const app = buildApp({
     repository: createPgPlatformContactIntakeRepository({
       connectionString: targetDatabaseUrl,
     }),
-    allowedOrigins: config.marketplaceDiscoveryAllowedOrigins,
+    allowedOrigins: config.identityPrivacyAllowedOrigins,
   },
   platformAdminDashboardRepository,
   platformAdminSmokeRecovery:
@@ -2036,7 +2033,7 @@ const app = buildApp({
       })
     : undefined,
   staffInvitations: staffInvitationRuntime,
-  identityPrivacyAllowedOrigins: config.marketplaceDiscoveryAllowedOrigins,
+  identityPrivacyAllowedOrigins: config.identityPrivacyAllowedOrigins,
   publicHotelProfileRepository,
   publicHotelQuoteRepository,
   bookingWebCalendarRepository,

@@ -11,7 +11,7 @@ type StripeObject = Record<string, unknown>;
 
 export function createStripeConnectProvider(config: {
   secretKey: string;
-  returnBaseUrls: { marketplace: string; bookingAdmin: string };
+  returnBaseUrls: { bookingAdmin: string };
   endpoint?: string;
   fetch?: typeof globalThis.fetch;
   requestTimeoutMs?: number;
@@ -19,10 +19,7 @@ export function createStripeConnectProvider(config: {
   const endpoint = config.endpoint ?? "https://api.stripe.com/v1";
   const fetchImpl = config.fetch ?? globalThis.fetch;
   const requestTimeoutMs = config.requestTimeoutMs ?? 10_000;
-  const returnBaseUrls = {
-    marketplace: new URL(config.returnBaseUrls.marketplace).origin,
-    booking_admin: new URL(config.returnBaseUrls.bookingAdmin).origin,
-  } as const;
+  const returnBase = new URL(config.returnBaseUrls.bookingAdmin).origin;
 
   const request = async (
     method: "GET" | "POST" | "DELETE",
@@ -61,12 +58,10 @@ export function createStripeConnectProvider(config: {
     owner: FinanceProviderAccountOwner,
     account: string,
     idempotencyKey: string,
-    returnSurface: StripeConnectReturnSurface = "marketplace",
+    returnSurface: StripeConnectReturnSurface = "booking_admin_setup",
   ): Promise<string> => {
+    // Booking Admin hosts both return pages: its payment settings and the setup wizard (VAY-2262).
     const returnPath = returnSurface === "booking_admin" ? "/settings" : "/setup";
-    // VAY-2262: the setup wizard also runs in Booking Admin; it returns to that host's /setup.
-    const returnBase =
-      returnSurface === "marketplace" ? returnBaseUrls.marketplace : returnBaseUrls.booking_admin;
     const returnUrl = (stripe: "refresh" | "return") => {
       const url = new URL(returnPath, returnBase);
       if (returnSurface === "booking_admin") {
