@@ -15,7 +15,7 @@ export default function PrivacyPage() {
           <div className="mb-8">
             <h1 className="text-4xl md:text-5xl font-bold text-primary-800 mb-4">Privacy Policy</h1>
             <p className="text-gray-600">
-              <strong>Effective Date:</strong> [to be set on approval]
+              <strong>Effective Date:</strong> October 17, 2026
             </p>
           </div>
 
@@ -183,8 +183,7 @@ export default function PrivacyPage() {
                         </td>
                         <td className={TD}>
                           To keep the Services secure and working and to troubleshoot errors
-                          (Article 6(1) lit. f GDPR). Logs are kept for a limited period, then
-                          deleted.
+                          (Article 6(1) lit. f GDPR). Logs are kept for 30 days, then deleted.
                         </td>
                       </tr>
                       <tr className="bg-gray-50">

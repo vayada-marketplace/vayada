@@ -14,7 +14,7 @@ export default function TermsPage() {
               Terms of Service (AGB)
             </h1>
             <p className="text-gray-600">
-              <strong>Effective Date:</strong> [to be set on approval]
+              <strong>Effective Date:</strong> October 17, 2026
             </p>
           </div>
 
@@ -237,8 +237,7 @@ export default function TermsPage() {
                 <p>
                   For Guest data and other personal data you enter into the Services, you are the
                   controller and vayada processes that data on your behalf and on your instructions
-                  (Article 28 GDPR). A data processing agreement forms part of these Terms; the
-                  current version is available from us on request.
+                  (Article 28 GDPR).
                 </p>
               </div>
             </section>
