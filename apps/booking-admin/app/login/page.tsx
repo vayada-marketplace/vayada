@@ -13,8 +13,6 @@ import { resolveBookingSetupGuard } from "@/lib/utils/sharedSetupGuard";
 import { hasPendingHotelAccountInvite } from "@/services/api/hotelAccountInvites";
 import { useTranslation } from "@/lib/i18n";
 
-const MARKETPLACE_URL = process.env.NEXT_PUBLIC_MARKETPLACE_URL || "https://app.vayada.com";
-
 function LoginContent() {
   const { t } = useTranslation();
   const router = useRouter();
@@ -37,7 +35,9 @@ function LoginContent() {
   const returnTo = safeRelativeReturnTo(searchParams.get("returnTo"), "/dashboard");
 
   const redirectAfterLogin = useCallback(async () => {
-    if (new URL(returnTo, "https://vayada.local").pathname === "/handoff") {
+    // /handoff and /setup carry their own context (entry product, step, PMS return); the
+    // setup page checks access itself, so the booking guard must not rewrite them.
+    if (["/handoff", "/setup"].includes(new URL(returnTo, "https://vayada.local").pathname)) {
       router.replace(returnTo);
       return;
     }
@@ -177,11 +177,6 @@ function LoginContent() {
       password={password}
       isSubmitting={isSubmitting}
       submitError={hotelSetupRequired ? t("auth.login.hotelWorkspaceRequired") : submitError}
-      submitErrorAction={
-        hotelSetupRequired
-          ? { label: t("auth.login.setUpHotel"), href: `${MARKETPLACE_URL}/login` }
-          : undefined
-      }
       organizations={workspaceOptions ?? null}
       forgotPasswordHref="/forgot-password"
       onEmailChange={setEmail}

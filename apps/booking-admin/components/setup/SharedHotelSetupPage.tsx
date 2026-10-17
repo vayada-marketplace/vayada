@@ -82,8 +82,8 @@ export function SharedHotelSetupPage({
       .ensureSession()
       .then((ok) => {
         if (cancelled) return;
-        if (!ok || !authService.isHotelAdmin()) {
-          router.replace(ROUTES.LOGIN);
+        if (!ok || !authService.isHotelAdmin() || authService.isSuperAdmin()) {
+          router.replace(loginPathForSetup());
           return;
         }
         const user = getAuthSessionUser();
@@ -95,7 +95,7 @@ export function SharedHotelSetupPage({
         setAuthorized(true);
       })
       .catch(() => {
-        if (!cancelled) router.replace(ROUTES.LOGIN);
+        if (!cancelled) router.replace(loginPathForSetup());
       })
       .finally(() => {
         if (!cancelled) setCheckingAuth(false);
@@ -352,6 +352,13 @@ function AdaptiveSetupHandoff({
       onExit={onExit}
     />
   );
+}
+
+/** Login keeps the setup context (entry/return product, step, recovery) for a hotel without a session here. */
+function loginPathForSetup(): string {
+  if (typeof window === "undefined") return ROUTES.LOGIN;
+  const returnTo = `${window.location.pathname}${window.location.search}`;
+  return `${ROUTES.LOGIN}?returnTo=${encodeURIComponent(returnTo)}`;
 }
 
 export function setupPathForSelectedProperty(query: string, propertyId: string): string {

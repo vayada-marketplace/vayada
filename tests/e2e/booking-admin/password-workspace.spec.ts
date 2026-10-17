@@ -44,7 +44,11 @@ test("password login lets a hotel user choose a workspace", async ({ page }) => 
 
 const NO_HOTEL_MESSAGE = "No active hotel_group organization is available for this surface";
 
-test("password login without a hotel workspace offers hotel setup", async ({ page }) => {
+// Booking Admin hosts hotel setup itself (VAY-2261): the login page explains the missing
+// workspace and no longer links to the Marketplace login (plan G8).
+test("password login without a hotel workspace explains it without a Marketplace link", async ({
+  page,
+}) => {
   await page.route("**/auth/password/login", (route) =>
     route.fulfill({
       status: 403,
@@ -62,16 +66,55 @@ test("password login without a hotel workspace offers hotel setup", async ({ pag
   await page.getByRole("button", { name: "Sign In", exact: true }).click();
   await expect(page.getByText(/isn't connected to a hotel yet/)).toBeVisible();
   await expect(page.getByText(NO_HOTEL_MESSAGE)).toHaveCount(0);
-  await expect(page.getByRole("link", { name: "Set up your hotel" })).toHaveAttribute(
-    "href",
-    /^https?:\/\/[^/]+\/login$/,
-  );
+  await expect(page.getByRole("link", { name: "Set up your hotel" })).toHaveCount(0);
 });
 
-test("Google login without a hotel workspace offers hotel setup", async ({ page }) => {
+test("Google login without a hotel workspace explains it without a Marketplace link", async ({
+  page,
+}) => {
   await page.goto(
     `/login?auth_error=${encodeURIComponent(NO_HOTEL_MESSAGE)}&auth_error_code=hotel_workspace_required`,
   );
   await expect(page.getByText(/isn't connected to a hotel yet/)).toBeVisible();
-  await expect(page.getByRole("link", { name: "Set up your hotel" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Set up your hotel" })).toHaveCount(0);
+});
+
+// A PMS hotel sent to Booking Admin's setup without a session arrives at
+// /login?returnTo=/setup?… (VAY-2261). After login the setup URL is honoured as is: the booking
+// guard must not rewrite it, or mode=add / returnProduct=pms would be lost.
+test("password login returns to a /setup returnTo untouched", async ({ page }) => {
+  const setupReturnTo = "/setup?entryProduct=pms&returnProduct=pms&mode=add";
+  await page.route("**/auth/password/login", (route) =>
+    route.fulfill({
+      status: 200,
+      json: {
+        accessToken: "test-access-token",
+        csrfToken: "test-csrf-token",
+        organizationId: "11111111-1111-4111-8111-111111111111",
+        workosOrganizationId: "org_workos_hotel_group",
+        user: {
+          id: "user-hotel-owner",
+          email: "owner@example.test",
+          name: "Hotel Owner",
+          phone: "+49 89 123456",
+          status: "active",
+        },
+      },
+    }),
+  );
+  const guardReads: string[] = [];
+  await page.route(/\/api\/hotel-setup\//, (route) => {
+    guardReads.push(new URL(route.request().url()).pathname);
+    return route.fulfill({ status: 200, json: {} });
+  });
+
+  await page.goto(`/login?returnTo=${encodeURIComponent(setupReturnTo)}`);
+  await page.getByLabel("Email address", { exact: true }).fill("owner@example.test");
+  await page.getByLabel("Password", { exact: true }).fill("test-password");
+  await page.getByRole("button", { name: "Sign In", exact: true }).click();
+
+  await expect(page).toHaveURL(new RegExp(`${setupReturnTo.replace(/[?+]/g, "\\$&")}$`));
+  // The login page itself asked the setup API for nothing; only the setup page reads it later.
+  expect(guardReads.filter((path) => path.endsWith("/status") && page.url().includes("/login")))
+    .toEqual([]);
 });

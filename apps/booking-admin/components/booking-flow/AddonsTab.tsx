@@ -23,8 +23,6 @@ import type { AddonItem, AddonSettings } from "@/services/settings";
 import { cn, formatCurrency } from "@/lib/utils";
 import { PageHeader } from "@/components/layout/PageLayout";
 
-const MARKETPLACE_FRONTEND_URL =
-  process.env.NEXT_PUBLIC_MARKETPLACE_URL || "https://app.vayada.com";
 
 const PRICING_MODEL_LABELS: Record<string, string> = {
   "false:false": "addons.editor.flatFee",
@@ -312,7 +310,6 @@ export default function AddonsTab({
                 returnProduct: "booking",
                 returnTo: "/add-ons",
                 propertyId: propertyPlan.propertyId,
-                setupBaseUrl: MARKETPLACE_FRONTEND_URL,
                 step: "pricing",
               })}
               className="mt-1 inline-block font-semibold underline underline-offset-2"

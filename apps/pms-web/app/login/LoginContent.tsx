@@ -12,7 +12,9 @@ import {
 import { resolvePmsSetupGuard } from "@/lib/utils/sharedSetupGuard";
 import { useTranslation } from "@/lib/i18n";
 
-const MARKETPLACE_URL = process.env.NEXT_PUBLIC_MARKETPLACE_URL || "https://app.vayada.com";
+// Booking Admin hosts hotel sign-up and setup (VAY-2261).
+const BOOKING_ADMIN_URL =
+  process.env.NEXT_PUBLIC_BOOKING_ADMIN_URL || "https://admin.booking.vayada.com";
 
 type LoginContentProps = {
   returnTo?: string;
@@ -44,8 +46,15 @@ export function LoginContent({
   >([]);
 
   const redirectAfterLogin = useCallback(async () => {
-    if (new URL(returnTo, "https://vayada.local").pathname === "/handoff") {
+    const returnPath = new URL(returnTo, "https://vayada.local").pathname;
+    if (returnPath === "/handoff") {
       window.location.replace(returnTo);
+      return;
+    }
+    // The setup alias (VAY-2266) runs its own session check and handoff; the guard would only
+    // nest the alias into another setup path.
+    if (returnPath === "/setup") {
+      router.push(returnTo);
       return;
     }
     const decision = await resolvePmsSetupGuard(returnTo);
@@ -191,7 +200,7 @@ export function LoginContent({
       }
       submitErrorAction={
         hotelSetupRequired
-          ? { label: t("auth.login.setUpHotel"), href: `${MARKETPLACE_URL}/login` }
+          ? { label: t("auth.login.setUpHotel"), href: `${BOOKING_ADMIN_URL}/login` }
           : undefined
       }
       organizations={workspaceOptions ?? null}
