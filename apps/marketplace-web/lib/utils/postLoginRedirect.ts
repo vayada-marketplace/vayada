@@ -3,12 +3,7 @@ import { isSafeRelativeReturnTo } from "@vayada/product-onboarding/returnTo";
 
 import { ROUTES, STORAGE_KEYS } from "@/lib/constants";
 import type { UserType } from "@/lib/types";
-import { creatorService } from "@/services/api/creators";
-import { authService } from "@/services/auth";
 
-import { hasRequiredCreatorAccountDetails } from "./creatorAccountRequirements";
-import { getPostLoginProfileRedirect } from "./profileRedirect";
-import { checkProfileStatus } from "./profileStatus";
 import { resolveMarketplaceSetupGuard } from "./sharedSetupGuard";
 
 type ProfileStorage = Pick<Storage, "getItem" | "setItem"> & Partial<Pick<Storage, "removeItem">>;
@@ -44,19 +39,8 @@ export async function getMarketplacePostLoginRedirect(
   }
 
   if (userType === "creator") {
-    const [profileStatus, profile] = await Promise.all([
-      checkProfileStatus(userType),
-      creatorService.getMyProfile().catch(() => null),
-    ]);
-    if (!profile || !hasRequiredCreatorAccountDetails(authService.getSessionUser(), profile)) {
-      storage?.setItem(STORAGE_KEYS.PROFILE_COMPLETE, "false");
-      return ROUTES.ONBOARDING;
-    }
-    const decision = getPostLoginProfileRedirect(userType, profileStatus);
-    if (decision.profileComplete !== null) {
-      storage?.setItem(STORAGE_KEYS.PROFILE_COMPLETE, String(decision.profileComplete));
-    }
-    return decision.redirectPath;
+    // VAY-2260: the creator Marketplace is closed.
+    return ROUTES.CLOSED;
   }
 
   return ROUTES.ONBOARDING;

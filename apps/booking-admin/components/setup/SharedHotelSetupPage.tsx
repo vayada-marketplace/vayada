@@ -45,6 +45,8 @@ export { productHandoffReturnTo };
 // Booking Admin hosts the wizard: a hotel that arrived from the PMS (returnProduct or entryProduct
 // "pms") still hands off to pms-web on exit; every other hotel exits to this app's dashboard.
 const PMS_FRONTEND_URL = process.env.NEXT_PUBLIC_PMS_FRONTEND_URL || "https://pms.vayada.com";
+// Booking Admin offers the Hotel Operations track only (the Creator Marketplace is being removed).
+const BOOKING_ADMIN_SETUP_TRACKS = ["hotel_operations"] as const;
 const PROPERTY_LAUNCH_SETTINGS_API = {
   get: (propertyId: string, options?: RequestInit) =>
     hotelOperationsSetupApi.getPropertyLaunchSettings(propertyId, options?.signal ?? undefined),
@@ -281,6 +283,7 @@ export function SharedHotelSetupPage({
             : undefined
         }
         api={sharedHotelSetupApi}
+        availableTracks={BOOKING_ADMIN_SETUP_TRACKS}
         entryProduct={entryProduct}
         initialPropertyId={initialPropertyId}
         initialAddProperty={initialAddProperty}

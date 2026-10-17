@@ -800,8 +800,6 @@ jobs:
           npm --workspace vayada-api run test --
           --no-file-parallelism
           src/marketplaceCollaborations.test.ts
-          src/marketplaceAffiliateDestinationRoutes.test.ts
-          src/marketplaceAffiliateDiscrepancyRoutes.test.ts
           src/domains/affiliateDiscrepancyRepository.integration.test.ts
           src/domains/bookingAffiliateDestinationSave.integration.test.ts
           src/domains/bookingAffiliateReferralTransportCertificationStorage.integration.test.ts
@@ -832,7 +830,6 @@ jobs:
           src/domains/financeAffiliateEarningJournalStorage.integration.test.ts
           src/domains/financeAffiliateEarningJournal.integration.test.ts
           src/domains/financeAffiliatePercentagePolicyResolver.test.ts
-          src/marketplaceAffiliatePolicyRoutes.test.ts
           src/domains/pmsLinkedInventoryGroupRepository.integration.test.ts
           src/domains/pmsRoomFactsCommandRepository.integration.test.ts
           src/domains/pmsRoomOperatingEligibility.integration.test.ts

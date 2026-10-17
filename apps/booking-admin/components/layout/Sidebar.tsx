@@ -121,7 +121,9 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                   .filter((component) => component.access === "active")
                   .map((component) => component.product)
                   // VAY-2260: the Marketplace is gone; only the two hotel products switch.
-                  .filter((product): product is Product => product === "booking" || product === "pms"),
+                  .filter(
+                    (product): product is Product => product === "booking" || product === "pms",
+                  ),
               ),
             ]),
           );
