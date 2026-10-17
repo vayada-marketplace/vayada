@@ -13,12 +13,8 @@ import {
   marketplaceGuardRedirectPath,
   resolveMarketplaceSetupGuard,
 } from "@/lib/utils/sharedSetupGuard";
-import { HotelIcon, ProfileIcon, CalendarIcon, MessageIcon } from "@/components/ui";
-import {
-  ArrowRightOnRectangleIcon,
-  ChartBarIcon,
-  ViewColumnsIcon,
-} from "@heroicons/react/24/outline";
+import { HotelIcon } from "@/components/ui";
+import { ArrowRightOnRectangleIcon, ViewColumnsIcon } from "@heroicons/react/24/outline";
 import { AppSwitcher } from "./AppSwitcher";
 import { HotelSelector } from "./HotelSelector";
 import type { UserType } from "@/lib/types";
@@ -116,33 +112,8 @@ export default function AuthenticatedNavigation() {
 
   const isActive = (path: string) => pathname === path;
 
-  const navLinks = [
-    {
-      href: ROUTES.MARKETPLACE,
-      label: "vayada Marketplace",
-      icon: HotelIcon,
-    },
-    {
-      href: ROUTES.CALENDAR,
-      label: "Calendar",
-      icon: CalendarIcon,
-    },
-    {
-      href: ROUTES.CHAT,
-      label: "Messages",
-      icon: MessageIcon,
-    },
-    {
-      href: ROUTES.EARNINGS,
-      label: "Results & earnings",
-      icon: ChartBarIcon,
-    },
-    {
-      href: ROUTES.PROFILE,
-      label: "My Profile",
-      icon: ProfileIcon,
-    },
-  ];
+  // VAY-2260: the Marketplace is closing; hotels no longer see its navigation.
+  const navLinks: Array<{ href: string; label: string; icon: typeof HotelIcon }> = [];
 
   return (
     <SidebarContext.Provider value={{ isCollapsed, toggleSidebar }}>

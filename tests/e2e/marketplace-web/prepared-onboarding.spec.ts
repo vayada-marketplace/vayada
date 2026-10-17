@@ -1,6 +1,6 @@
 import { expect, test, type Route } from "@playwright/test";
 import { createAdaptiveHotelSetupStatusMock } from "../support/sharedHotelSetupMocks";
-import { corsHeaders, fulfillCorsPreflight } from "./utils/cors";
+import { corsHeaders, fulfillCorsPreflight } from "../support/cors";
 async function json(route: Route, body: unknown) {
   if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
   await route.fulfill({ headers: corsHeaders(route), json: body });

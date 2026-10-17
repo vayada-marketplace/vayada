@@ -24,8 +24,7 @@ export default function Hero() {
 
           <p className="mx-auto mt-6 max-w-xl text-lg text-gray-500 md:text-xl">
             vayada offers an AI &amp; trust-based distribution stack for independent hotels to end
-            your OTA dependency with a Booking Engine, PMS, Channel Manager &amp;
-            Hotel-Creator-Network.
+            your OTA dependency with a Booking Engine, PMS &amp; Channel Manager.
           </p>
 
           <div className="mt-10 flex flex-col sm:flex-row items-center justify-center gap-3">

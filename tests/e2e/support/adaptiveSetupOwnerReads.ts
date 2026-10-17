@@ -9,7 +9,7 @@ import {
   createPmsOperatingCalendarSourceRevision,
   parsePmsCanonicalIanaTimeZone,
 } from "@vayada/domain-pms";
-import { corsHeaders, fulfillCorsPreflight } from "../marketplace-web/utils/cors";
+import { corsHeaders, fulfillCorsPreflight } from "./cors";
 
 const propertyId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const organizationId = "11111111-1111-4111-8111-111111111111";
