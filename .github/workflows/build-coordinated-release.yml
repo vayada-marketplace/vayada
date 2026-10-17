@@ -194,7 +194,7 @@ jobs:
           # anonymous ECR Public and Docker Hub pulls fail with "toomanyrequests" on shared runners.
           # It and the Dockerfile base images are pinned to the upstream digest, so a republished
           # mirror tag cannot change what we build; bump the digests by hand after a mirror refresh.
-          # Buildx falls back to this local copy if its own pull fails.
+          # Retried here because a registry can still throttle; setup-buildx below pulls it once more.
           for attempt in 1 2 3 4 5 6; do
             docker pull --quiet ghcr.io/vayada-marketplace/ci-buildkit:buildx-stable-1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea >/dev/null && exit 0
             echo "BuildKit pull failed (attempt ${attempt}); retrying" >&2
