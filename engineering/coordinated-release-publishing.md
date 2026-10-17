@@ -2,7 +2,7 @@
 
 Status: implementation-ready and activation-gated by VAY-2029.
 
-This repository produces complete immutable release manifests for the six
+This repository produces complete immutable release manifests for the five
 managed `next-*` services. The platform repository consumes those manifests;
 publication never mutates ECS. The executable v1 schemas and cross-repository
 fixtures live in [`deployment-contract`](deployment-contract/).
@@ -10,12 +10,12 @@ fixtures live in [`deployment-contract`](deployment-contract/).
 ## Activation boundary
 
 Both coordinated workflows require the repository variable
-`COORDINATED_RELEASES_ENABLED=true`. The six legacy `deploy-next-*` automatic jobs skip when that variable is true;
+`COORDINATED_RELEASES_ENABLED=true`. The five legacy `deploy-next-*` automatic jobs skip when that variable is true;
 their explicit `workflow_dispatch` build entrypoints remain available. Setting
-the variable switches all six automatic builders together. It does not grant
+the variable switches all five automatic builders together. It does not grant
 platform mutation ownership, resolve holds, or drain previously started jobs. VAY-2029 installs and
 validates the platform receiver first, inventories and drains old events, then
-switches all six automatic lanes together. Existing per-service
+switches all five automatic lanes together. Existing per-service
 `workflow_dispatch` entrypoints remain available during preparation.
 
 Once activated, `Build coordinated next release` is the only automatic builder
@@ -30,14 +30,13 @@ replaced requests remain included in the cumulative diff.
 The allowlist is executable at
 [`deployment/coordinated-release/services.json`](../deployment/coordinated-release/services.json).
 
-| Service key                 | Application            | ECR repository                       |
-| --------------------------- | ---------------------- | ------------------------------------ |
-| `next-target-backend`       | `apps/api`             | `vayada-next-api`                    |
-| `next-pms-frontend`         | `apps/pms-web`         | `vayada-next-pms-frontend`           |
-| `next-booking-frontend`     | `apps/booking-web`     | `vayada-next-booking-frontend`       |
-| `next-booking-admin`        | `apps/booking-admin`   | `vayada-next-booking-admin-frontend` |
-| `next-marketplace-frontend` | `apps/marketplace-web` | `vayada-next-marketplace-frontend`   |
-| `next-marketplace-admin`    | `apps/vayada-admin`    | `vayada-next-admin-frontend`         |
+| Service key              | Application          | ECR repository                       |
+| ------------------------ | -------------------- | ------------------------------------ |
+| `next-target-backend`    | `apps/api`           | `vayada-next-api`                    |
+| `next-pms-frontend`      | `apps/pms-web`       | `vayada-next-pms-frontend`           |
+| `next-booking-frontend`  | `apps/booking-web`   | `vayada-next-booking-frontend`       |
+| `next-booking-admin`     | `apps/booking-admin` | `vayada-next-booking-admin-frontend` |
+| `next-marketplace-admin` | `apps/vayada-admin`  | `vayada-next-admin-frontend`         |
 
 The build preserves each current Dockerfile, build argument, production flag,
 and per-service cache scope. It continues to write convenience `next-latest`
@@ -49,7 +48,7 @@ tags, but manifests and platform reconciliation use only verified
 Selection compares the pinned source with the ancestry-newest, non-expired,
 hash-valid complete published manifest. Candidate ordering is by Git ancestry,
 not artifact timestamps. A baseline that is missing, expired, malformed,
-divergent, or unavailable locally causes all six services to rebuild.
+divergent, or unavailable locally causes all five services to rebuild.
 
 The selector evaluates workspace dependencies at both revisions. This preserves
 the old consumer when a dependency is removed and adds the new consumer when a
@@ -69,7 +68,7 @@ that nothing is affected.
 - prior complete manifest ID and source SHA, or both `null` for bootstrap;
 - the v1 ordinary compatibility declaration;
 - inherited typed barriers;
-- exactly six service entries with approved ECR repository, digest, and the
+- exactly five service entries with approved ECR repository, digest, and the
   source SHA that built that image.
 
 `manifestId` is
@@ -80,7 +79,7 @@ source SHA from the baseline.
 
 The build uploads
 `next-release-candidate-v1-<runId>-<runAttempt>` for 14 days only after all
-affected image builds and the full six-service ECR verification succeed. Each
+affected image builds and the full five-service ECR verification succeed. Each
 `next-<imageSourceSha>` tag must still resolve to its recorded digest. Failed or
 partial matrix runs therefore have no complete candidate and cannot advance the
 baseline.
@@ -160,7 +159,7 @@ gh workflow run publish-coordinated-release.yml \
 ```
 
 The recovery run verifies artifact metadata, both hashes, expiry, publisher
-provenance, all six ECR digest/source-tag bindings, and then sends the same
+provenance, all five ECR digest/source-tag bindings, and then sends the same
 manifest ID and idempotency key. It cannot substitute a rerun's candidate
 artifact. Source validation, redispatch, and baseline discovery fetch the exact
 recorded run attempt; a later rerun does not invalidate historical provenance.
@@ -174,7 +173,7 @@ send a platform dispatch; enabling delivery remains a separate approved action.
 
 If the durable record expired or its contents cannot be verified, run the
 manual build entrypoint at current `main`; the missing baseline deliberately
-rebuilds all six services:
+rebuilds all five services:
 
 ```bash
 gh workflow run build-coordinated-release.yml \
