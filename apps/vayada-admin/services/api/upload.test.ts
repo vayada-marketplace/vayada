@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const uploadPlatformMedia = vi.hoisted(() => vi.fn());
 
-vi.mock("@vayada/marketplace-shared/api/platformMedia", () => ({ uploadPlatformMedia }));
+vi.mock("./platformMedia", () => ({ uploadPlatformMedia }));
 
 import { uploadService } from "./upload";
 

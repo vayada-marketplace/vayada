@@ -1,7 +1,4 @@
-import {
-  setApiBearerTokenProvider,
-  setVayadaApiBearerTokenProvider,
-} from "@vayada/marketplace-shared/api/client";
+import { setVayadaApiBearerTokenProvider } from "../api/vayadaApiClient";
 
 export type AuthUser = {
   id: string;
@@ -27,7 +24,6 @@ let legacyCompatibilityToken: { token: string; expiresAt: number } | null = null
 // Refreshes may only commit to the login/logout state they started against.
 let authStateGeneration = 0;
 
-setApiBearerTokenProvider(() => getAuthBearerToken());
 setVayadaApiBearerTokenProvider((signal, forceRefresh) =>
   getOrRefreshAuthKitAccessToken(signal, forceRefresh),
 );
