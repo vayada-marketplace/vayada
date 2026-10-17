@@ -8,18 +8,18 @@ This file is the **canonical, tool-neutral agent guide**. Claude Code, Codex, an
 
 ## App map
 
-| Path                       | Stack      | Port | Local URL                           |
-| -------------------------- | ---------- | ---- | ----------------------------------- |
-| `apps/api`                 | Node/TS    | 8003 | `https://api.localhost`             |
-| `apps/marketplace-api`     | FastAPI    | 8000 | `https://api.marketplace.localhost` |
-| `apps/marketplace-web`     | Next.js 14 | 3000 | `https://marketplace.localhost`     |
-| `apps/vayada-admin`        | Next.js 14 | 3001 | `https://admin.localhost`           |
-| `apps/booking-api`         | FastAPI    | 8001 | `https://api.booking.localhost`     |
-| `apps/booking-web`         | Next.js 14 | 3002 | `https://booking.localhost`         |
-| `apps/booking-admin`       | Next.js 14 | 3003 | `https://admin.booking.localhost`   |
-| `apps/pms-api`             | FastAPI    | 8002 | `https://api.pms.localhost`         |
-| `apps/pms-web`             | Next.js 14 | 3004 | `https://pms.localhost`             |
-| `apps/landing`             | Next.js 14 | 3006 | `https://landing.localhost`         |
+| Path                   | Stack      | Port | Local URL                           |
+| ---------------------- | ---------- | ---- | ----------------------------------- |
+| `apps/api`             | Node/TS    | 8003 | `https://api.localhost`             |
+| `apps/marketplace-api` | FastAPI    | 8000 | `https://api.marketplace.localhost` |
+| `apps/marketplace-web` | Next.js 14 | 3000 | `https://marketplace.localhost`     |
+| `apps/vayada-admin`    | Next.js 14 | 3001 | `https://admin.localhost`           |
+| `apps/booking-api`     | FastAPI    | 8001 | `https://api.booking.localhost`     |
+| `apps/booking-web`     | Next.js 14 | 3002 | `https://booking.localhost`         |
+| `apps/booking-admin`   | Next.js 14 | 3003 | `https://admin.booking.localhost`   |
+| `apps/pms-api`         | FastAPI    | 8002 | `https://api.pms.localhost`         |
+| `apps/pms-web`         | Next.js 14 | 3004 | `https://pms.localhost`             |
+| `apps/landing`         | Next.js 14 | 3006 | `https://landing.localhost`         |
 
 Local URLs are the recommended way to reach each app — see [Local dev — portless](#local-dev--portless). Plain `localhost:PORT` still works for contributors not on portless.
 
@@ -160,14 +160,13 @@ Before claiming a change is complete:
 
 **Playwright surface-to-command mapping:**
 
-| Surface                    | Command                           | portless URL                                |
-| -------------------------- | --------------------------------- | ------------------------------------------- |
-| `apps/landing`             | `npm run e2e:landing`             | `https://landing.localhost`                 |
-| `apps/booking-web`         | `npm run e2e:booking-web`         | `https://hotel-alpenrose.booking.localhost` |
-| `apps/booking-admin`       | `npm run e2e:booking-admin`       | `https://admin.booking.localhost`           |
-| `apps/marketplace-web`     | `npm run e2e:marketplace-web`     | `https://marketplace.localhost`             |
-| `apps/pms-web`             | `npm run e2e:pms-web`             | `https://pms.localhost`                     |
-| `apps/vayada-admin`        | `npm run e2e:vayada-admin`        | `https://admin.localhost`                   |
+| Surface              | Command                     | portless URL                                |
+| -------------------- | --------------------------- | ------------------------------------------- |
+| `apps/landing`       | `npm run e2e:landing`       | `https://landing.localhost`                 |
+| `apps/booking-web`   | `npm run e2e:booking-web`   | `https://hotel-alpenrose.booking.localhost` |
+| `apps/booking-admin` | `npm run e2e:booking-admin` | `https://admin.booking.localhost`           |
+| `apps/pms-web`       | `npm run e2e:pms-web`       | `https://pms.localhost`                     |
+| `apps/vayada-admin`  | `npm run e2e:vayada-admin`  | `https://admin.localhost`                   |
 
 `npm run e2e` runs all of the above. URL overrides and debugging are documented in `tests/e2e/README.md`.
 
