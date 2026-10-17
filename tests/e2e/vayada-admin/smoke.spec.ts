@@ -115,7 +115,7 @@ test.describe("vayada-admin smoke", () => {
       await page.getByRole("button", { name: "Back to invitations" }).click();
     }
 
-    expect(requests).toHaveLength(3);
+    expect(requests).toHaveLength(routeCases.length);
     expect(requests.map((request) => request.selectedTracks)).toEqual(
       routeCases.map((routeCase) => routeCase.expected),
     );
