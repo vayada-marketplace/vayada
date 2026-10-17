@@ -17,7 +17,12 @@ import { createPgAirbnbImportSourceRepository } from "../../apps/api/src/domains
 import { createPgAirbnbImportApplicationRepository } from "../../apps/api/src/domains/airbnbImportApplicationRepository.js";
 import { listings } from "./client.js";
 
-const importOrigins = ["https://pms.localhost:1380", "https://admin.booking.localhost:1382"];
+// The Marketplace origin stays until the Airbnb database spec moves with the Airbnb pages (VAY-2262).
+const importOrigins = [
+  "https://pms.localhost:1380",
+  "https://admin.booking.localhost:1382",
+  "https://marketplace.localhost:1382",
+];
 
 async function main() {
   // Deliberately fixed isolated endpoint; never accepts a production DSN or provider key.
