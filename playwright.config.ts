@@ -23,10 +23,6 @@ const bookingAdminBaseURL =
   process.env.E2E_BOOKING_ADMIN_BASE_URL ||
   (startServers ? "http://127.0.0.1:3003" : "https://admin.booking.localhost");
 
-const marketplaceWebBaseURL =
-  process.env.E2E_MARKETPLACE_BASE_URL ||
-  (startServers ? "http://127.0.0.1:3000" : "https://marketplace.localhost");
-
 const pmsWebBaseURL =
   process.env.E2E_PMS_BASE_URL ||
   (startServers ? "http://127.0.0.1:3004" : "https://pms.localhost");
@@ -36,13 +32,6 @@ const vayadaAdminBaseURL =
   (startServers ? "http://127.0.0.1:3001" : "https://admin.localhost");
 
 const firstPartyAuthServers = [
-  {
-    command:
-      "AUTH_PUBLIC_ORIGIN=http://marketplace.localhost:3100 AUTH_GATEWAY_UPSTREAM_ORIGIN=http://127.0.0.1:8003 NEXT_PUBLIC_AUTHKIT_LOGIN_ENABLED=true PORT=3100 npm run dev:marketplace-web",
-    url: "http://127.0.0.1:3100/login",
-    reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
-  },
   {
     command:
       "AUTH_PUBLIC_ORIGIN=http://admin.booking.localhost:3103 AUTH_GATEWAY_UPSTREAM_ORIGIN=http://127.0.0.1:8003 NEXT_PUBLIC_AUTHKIT_LOGIN_ENABLED=true NEXT_PUBLIC_AUTHKIT_COMPATIBILITY_TOKEN_ENABLED=false PORT=3103 npm run dev:booking-admin",
@@ -108,13 +97,6 @@ export default defineConfig({
           },
           {
             command:
-              "NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=e2e-google-places NEXT_PUBLIC_BOOKING_ADMIN_URL=http://admin.booking.localhost:3003 NEXT_PUBLIC_PMS_URL=http://pms.localhost:3004 PORT=3000 npm run dev:marketplace-web",
-            url: "http://127.0.0.1:3000/login?auth=callback",
-            reuseExistingServer: !process.env.CI,
-            timeout: 120_000,
-          },
-          {
-            command:
               "NEXT_PUBLIC_BOOKING_ADMIN_URL=http://admin.booking.localhost:3003 NEXT_PUBLIC_MARKETPLACE_URL=http://marketplace.localhost:3000 PORT=3004 npm run dev:pms-web",
             url: "http://127.0.0.1:3004",
             reuseExistingServer: !process.env.CI,
@@ -152,14 +134,6 @@ export default defineConfig({
       use: {
         ...devices["Desktop Chrome"],
         baseURL: bookingAdminBaseURL,
-      },
-    },
-    {
-      name: "marketplace-web-chromium",
-      testMatch: /marketplace-web\/.*\.spec\.ts/,
-      use: {
-        ...devices["Desktop Chrome"],
-        baseURL: marketplaceWebBaseURL,
       },
     },
     {

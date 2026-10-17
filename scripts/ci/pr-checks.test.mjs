@@ -64,7 +64,7 @@ test("TypeScript API, backend packages and migrations run the unit suites and fu
   }
 });
 
-const BROWSER_E2E = ["pms_web_e2e", "marketplace_web_e2e", "booking_web_e2e", "booking_admin_e2e"];
+const BROWSER_E2E = ["pms_web_e2e", "booking_web_e2e", "booking_admin_e2e"];
 
 test("packages the apps build on also run the mocked browser projects", () => {
   for (const file of [
@@ -84,10 +84,6 @@ test("each app and its own browser specs run only that app's browser project", (
   for (const [files, job] of [
     [["apps/pms-web/app/(app)/layout.tsx", "tests/e2e/pms-web/smoke.spec.ts"], "pms_web_e2e"],
     [
-      ["apps/marketplace-web/app/page.tsx", "tests/e2e/marketplace-web/setup-activation.spec.ts"],
-      "marketplace_web_e2e",
-    ],
-    [
       ["apps/booking-web/app/layout.tsx", "tests/e2e/booking-web/tenant-smoke.spec.ts"],
       "booking_web_e2e",
     ],
@@ -100,15 +96,6 @@ test("each app and its own browser specs run only that app's browser project", (
       assert.deepEqual(selectJobs([file]).jobs, [...FRONTEND, "first_party_auth", job], file);
     }
   }
-});
-
-test("the apps/api read model a marketplace-web spec imports also runs that project", () => {
-  assert.deepEqual(selectJobs(["apps/api/src/domains/pmsRoomFactsReadModel.ts"]).jobs, [
-    ...FRONTEND,
-    "first_party_auth",
-    "marketplace_web_e2e",
-    ...TYPESCRIPT.slice(3),
-  ]);
 });
 
 test("shared e2e mocks and helpers run every mocked browser project", () => {
@@ -128,6 +115,12 @@ test("shared e2e mocks and helpers run every mocked browser project", () => {
 
 test("frontend-only changes skip the PostgreSQL and Python jobs", () => {
   assert.deepEqual(selectJobs(["apps/vayada-admin/app/page.tsx"]).jobs, [
+    ...FRONTEND,
+    "first_party_auth",
+  ]);
+  // The marketplace-web redirect stub has no browser project; frontend runs its unit tests and
+  // first_party_auth its auth gateway test.
+  assert.deepEqual(selectJobs(["apps/marketplace-web/next.config.js"]).jobs, [
     ...FRONTEND,
     "first_party_auth",
   ]);
@@ -624,7 +617,6 @@ test("frontend-only packages run only the jobs of the apps that use them", () =>
     ...FRONTEND,
     "first_party_auth",
     "pms_web_e2e",
-    "marketplace_web_e2e",
     "booking_admin_e2e",
     "api_unit",
   ]);
@@ -722,7 +714,6 @@ const jobsOf = (file) => selectJobs([file]).jobs;
 
 const APP_BROWSER_JOB = {
   "apps/pms-web": "pms_web_e2e",
-  "apps/marketplace-web": "marketplace_web_e2e",
   "apps/booking-web": "booking_web_e2e",
   "apps/booking-admin": "booking_admin_e2e",
 };
@@ -898,7 +889,6 @@ test("only the Playwright jobs run Playwright, and nothing imports the root conf
     "booking-web",
     "first-party-auth",
     "landing",
-    "marketplace-web",
     "pms-web",
   ]);
   // Project patterns are unanchored (/booking-web\/.*\.spec\.ts/): a spec anywhere whose path
