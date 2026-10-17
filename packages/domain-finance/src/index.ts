@@ -465,10 +465,10 @@ export type FinanceProviderAccountOwner = {
 };
 
 /**
- * Where Stripe sends the hotel back after Connect onboarding: the hotel setup wizard on the
- * Marketplace host, Booking Admin's payment settings, or (VAY-2262) the setup wizard in Booking Admin.
+ * Where Stripe sends the hotel back after Connect onboarding: Booking Admin's payment settings or
+ * the setup wizard in Booking Admin (VAY-2262). The Marketplace host surface is retired (VAY-2270).
  */
-export type StripeConnectReturnSurface = "marketplace" | "booking_admin" | "booking_admin_setup";
+export type StripeConnectReturnSurface = "booking_admin" | "booking_admin_setup";
 
 export type CreateStripeProviderAccountPayload = {
   email: string;

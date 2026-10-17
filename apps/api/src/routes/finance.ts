@@ -5512,9 +5512,7 @@ function parseStripeProviderAccountBody(body: StripeProviderAccountBody):
 }
 
 function parseStripeReturnSurface(value: unknown): StripeConnectReturnSurface | undefined {
-  return value === "marketplace" || value === "booking_admin" || value === "booking_admin_setup"
-    ? value
-    : undefined;
+  return value === "booking_admin" || value === "booking_admin_setup" ? value : undefined;
 }
 
 function financeCommandAudit(request: FastifyRequest, reason: string): FinanceCommandAudit {
