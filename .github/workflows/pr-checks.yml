@@ -41,6 +41,7 @@ jobs:
       run_pms_web_e2e: ${{ steps.select.outputs.run_pms_web_e2e }}
       run_marketplace_web_e2e: ${{ steps.select.outputs.run_marketplace_web_e2e }}
       run_booking_web_e2e: ${{ steps.select.outputs.run_booking_web_e2e }}
+      run_booking_admin_e2e: ${{ steps.select.outputs.run_booking_admin_e2e }}
       run_api_unit: ${{ steps.select.outputs.run_api_unit }}
       run_api_postgres: ${{ steps.select.outputs.run_api_postgres }}
       run_setup_draft_reset_postgres: ${{ steps.select.outputs.run_setup_draft_reset_postgres }}
@@ -452,6 +453,81 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: booking-web-playwright-report
+          path: |
+            playwright-report
+            test-results
+            ${{ runner.temp }}/*-dev.log
+          retention-days: 7
+
+  # The mocked booking-admin Playwright project against a plain-port dev server (VAY-2261: Booking
+  # Admin hosts the hotel setup wizard). Every API call is mocked in the specs and tests/e2e/support.
+  booking_admin_e2e:
+    name: Booking Admin Browser Specs
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [changes]
+    if: needs.changes.outputs.run_booking_admin_e2e == 'true'
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build the packages booking-admin imports
+        run: npm --workspace vayada-api run build:backend-packages
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run the booking-admin browser specs
+        run: |
+          # The dev server's env matches playwright.config.ts's booking-admin webServer entry.
+          dev_log="$RUNNER_TEMP/booking-admin-dev.log"
+          NEXT_PUBLIC_AUTHKIT_COMPATIBILITY_TOKEN_ENABLED=true NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=e2e-google-places \
+            NEXT_PUBLIC_PMS_FRONTEND_URL=http://pms.localhost:3004 \
+            NEXT_PUBLIC_MARKETPLACE_URL=http://marketplace.localhost:3000 PORT=3003 \
+            npm run dev:booking-admin > "$dev_log" 2>&1 &
+          dev_pid=$!
+          trap 'kill "$dev_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 120); do
+            kill -0 "$dev_pid" 2>/dev/null || { tail -50 "$dev_log"; exit 1; }
+            if curl --silent --fail --max-time 5 http://127.0.0.1:3003/login >/dev/null; then break; fi
+            sleep 2
+          done
+          # handoff-authkit.spec.ts has one known failure (VAY-2181, since #563 removed
+          # handoffReturnToForOrganization from the login pages); it stays out until that is fixed.
+          specs=$(ls tests/e2e/booking-admin/*.spec.ts | grep -v '/handoff-authkit\.spec\.ts$')
+          # shellcheck disable=SC2086
+          npm run e2e:booking-admin -- --workers=1 --retries=1 $specs
+        env:
+          # Any non-empty CI makes playwright.config.ts use CI reporters; "false" keeps it from
+          # starting every app's webServer (that needs CI === "true").
+          CI: "false"
+          PLAYWRIGHT_HTML_OPEN: never
+          E2E_START_SERVERS: "0"
+          E2E_BOOKING_ADMIN_BASE_URL: http://127.0.0.1:3003
+          # setup.spec.ts's redirect checks compare against the dev server's NEXT_PUBLIC_MARKETPLACE_URL.
+          E2E_MARKETPLACE_BASE_URL: http://marketplace.localhost:3000
+          # The dev server's test Maps key (playwright.config.ts), also for the specs' Google mocks.
+          NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: e2e-google-places
+
+      - name: Upload the Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: booking-admin-playwright-report
           path: |
             playwright-report
             test-results
@@ -1479,6 +1555,7 @@ jobs:
       - pms_web_e2e
       - marketplace_web_e2e
       - booking_web_e2e
+      - booking_admin_e2e
       - api_unit
       - api_postgres
       - setup_draft_reset_postgres

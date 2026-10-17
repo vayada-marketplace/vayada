@@ -78,6 +78,17 @@ export class ApiErrorResponse extends Error {
   }
 }
 
+function wasRequestAborted(error: unknown, signal?: AbortSignal | null): boolean {
+  return (
+    signal?.aborted === true &&
+    (error === signal.reason ||
+      (typeof error === "object" &&
+        error !== null &&
+        "name" in error &&
+        error.name === "AbortError"))
+  );
+}
+
 export class ApiClient {
   private baseURL: string;
   private sessionRecoveryHandlers: ApiSessionRecoveryHandlers | null;
@@ -208,7 +219,9 @@ export class ApiClient {
       if (error instanceof SyntaxError && error.message.includes("JSON")) {
         return undefined as T;
       }
-      console.error("API request failed:", error);
+      if (!wasRequestAborted(error, options.signal)) {
+        console.error("API request failed:", error);
+      }
       throw error;
     }
   }
