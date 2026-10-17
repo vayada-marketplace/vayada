@@ -99,20 +99,6 @@ function serverBookingWebApiUrl(path: string): string {
 }
 
 export const bookingWebPublicApi = {
-  async admitAffiliateArrival(
-    input: { host: string; referenceToken: string; contextId?: string },
-    internalToken: string,
-  ): Promise<{ status: "admitted"; contextId: string } | { status: "unavailable" }> {
-    return bookingWebPublic.post(
-      serverBookingWebApiUrl("/api/booking-web/affiliate/arrivals"),
-      input,
-      {
-        headers: { "X-Vayada-Affiliate-Arrival-Token": internalToken },
-        cache: "no-store",
-      },
-    );
-  },
-
   async resolveHost(host: string, init?: ApiRequestInit): Promise<BookingWebPublicHostResponse> {
     const path = `/api/booking-web/hosts/${encodeURIComponent(host)}`;
     return bookingWebPublic.get<BookingWebPublicHostResponse>(

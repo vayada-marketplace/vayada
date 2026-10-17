@@ -1,7 +1,7 @@
 import type { QueryResultRow } from "pg";
 import { describe, expect, it } from "vitest";
+import { bookingCustomDomainLockKey } from "@vayada/domain-booking";
 import {
-  bookingCustomDomainLockKey,
   createTargetBookingCustomDomainRepository,
   type BookingCustomDomainPool,
 } from "./bookingCustomDomain.js";

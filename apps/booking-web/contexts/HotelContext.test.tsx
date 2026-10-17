@@ -13,7 +13,6 @@ const { getHotel, getAddons } = vi.hoisted(() => ({
 }));
 
 vi.mock("next/navigation", () => ({ usePathname: () => "/" }));
-vi.mock("@/components/AffiliateClickTracker", () => ({ AffiliateClickTracker: () => null }));
 vi.mock("@/services/api/hotel", () => ({ hotelService: { getHotel, getAddons } }));
 // next/font only runs inside Next's compiler; the pairing map has its own test.
 vi.mock("@vayada/fonts/brand", () => ({

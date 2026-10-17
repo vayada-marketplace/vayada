@@ -3110,7 +3110,6 @@ function targetStripeProviderAccountPool(
                 accountScope: "property",
                 propertyId,
                 organizationId: null,
-                affiliateId: null,
               } as unknown as T,
             ]
           : [];
@@ -3857,7 +3856,7 @@ function stripeProviderAccountRepository(): FinancePropertyReadRepository & {
     ...financeRepository,
     providerCreateCount: 0,
     async createStripeProviderAccount(command) {
-      const ownerKey = "propertyId" in command ? "property" : "affiliate";
+      const ownerKey = "property";
       const existing = accounts.get(ownerKey);
       if (existing) {
         return {
@@ -3879,7 +3878,7 @@ function stripeProviderAccountRepository(): FinancePropertyReadRepository & {
       return result;
     },
     async issueStripeOnboardingLink(command) {
-      const ownerKey = "propertyId" in command ? "property" : "affiliate";
+      const ownerKey = "property";
       const existing = accounts.get(ownerKey);
       if (!existing || existing.response.providerAccountId !== command.payload.providerAccountId) {
         return {
@@ -3940,7 +3939,7 @@ function stripeProviderAccountResult(
   command: CreateStripeProviderAccountCommand,
   providerAccountId: string,
 ): FinanceProviderAccountCommandResult & { ok: true } {
-  const providerAccountRef = "propertyId" in command ? "acct_property_686" : "acct_affiliate_686";
+  const providerAccountRef = "acct_property_686";
   return {
     ok: true,
     status: "created",
