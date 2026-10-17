@@ -452,7 +452,6 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       // VAY-2197: an access log line (with the IP address) would pair up with the stored funnel
       // event by its time.
       request.url.startsWith("/api/booking-web/events") ||
-      request.url.startsWith("/api/marketplace/creator-platform-oauth/") ||
       (request.url.startsWith("/api/pms/properties/") &&
         request.url.split("?", 1)[0]?.endsWith("/messaging/threads") === true),
   });
