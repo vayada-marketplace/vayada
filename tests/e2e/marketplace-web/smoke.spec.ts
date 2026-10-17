@@ -485,9 +485,7 @@ test.describe("marketplace-web smoke", () => {
     await expect(page.getByRole("button", { name: "Continue", exact: true })).toHaveCount(0);
 
     await page.getByRole("button", { name: "Retry session" }).click();
-    await expect(
-      page.getByRole("heading", { name: "Welcome to vayada — what brings you here?" }),
-    ).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Welcome to vayada", exact: true })).toBeVisible();
   });
 
   test("redirects to login and blocks onboarding actions when the session check fails", async ({
