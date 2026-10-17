@@ -4,6 +4,7 @@ import { PreparedHotelImportPanel } from "@vayada/product-onboarding/PreparedHot
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "@/lib/i18n";
 import { sharedSetupClient } from "@/services/api/sharedHotelSetupClient";
+import { authService } from "@/services/auth";
 
 // Moved from marketplace-web (VAY-2262): the page Channex sends the owner back to after Airbnb.
 type Result = "ready" | "cancelled" | "unavailable";
@@ -77,6 +78,9 @@ async function finish(
   if (keys.some((key) => query.getAll(key).length > 1)) return "unavailable";
   if (query.get("success") === "false") return "cancelled";
   const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  // Without a session the API client would sign out and leave for /login, and the single-use
+  // callback token (already scrubbed) would be lost; show "could not confirm" instead, as before.
+  if (!(await authService.ensureSession())) return "unavailable";
   if (query.has("success") || query.has("token") || query.has("channel_id")) {
     const state = query.get("token") ?? "";
     const channelId = query.get("channel_id") ?? "";

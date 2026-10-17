@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "@/lib/i18n";
 import { sharedSetupClient } from "@/services/api/sharedHotelSetupClient";
+import { authService } from "@/services/auth";
 
 import {
   describeAirbnbStartError,
@@ -26,6 +27,14 @@ export function AirbnbImportStart({ propertyId }: { propertyId: string }) {
     controller.current = new AbortController();
     const signal = controller.current.signal;
     try {
+      // An expired session goes to login and comes back here; the API client would otherwise
+      // sign out without a return path.
+      if (!(await authService.ensureSession())) {
+        window.location.assign(
+          `/login?returnTo=${encodeURIComponent(`/setup/airbnb-connect/${propertyId}`)}`,
+        );
+        return;
+      }
       const start = () =>
         sharedSetupClient.post<{ url: string; sourceId: string }>(
           `/api/hotel-setup/properties/${propertyId}/airbnb-import/start`,

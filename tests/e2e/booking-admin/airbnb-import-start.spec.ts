@@ -124,3 +124,23 @@ for (const outcome of ["succeeded", "failed", "existing"] as const) {
     expect(starts).toBe(outcome === "succeeded" ? 2 : 1);
   });
 }
+
+test("Airbnb start: an expired session goes to login and comes back here", async ({ page }) => {
+  let starts = 0;
+  await page.route(/\/auth\/session(?:\?|$)/, (route) =>
+    route.fulfill({ status: 401, headers: corsHeaders(route), json: { error: "missing_session" } }),
+  );
+  await page.route(/\/api\/hotel-setup\/properties\/.*\/airbnb-import\/start$/, async (route) => {
+    if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
+    starts++;
+    await route.fulfill({ status: 401, headers: corsHeaders(route), json: {} });
+  });
+  await page.goto(path);
+  await page.getByRole("button", { name: "Continue to Airbnb" }).click();
+  await expect(page).toHaveURL(
+    new RegExp(
+      `/login\\?returnTo=${encodeURIComponent(path).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`,
+    ),
+  );
+  expect(starts).toBe(0);
+});

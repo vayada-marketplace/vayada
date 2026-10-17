@@ -293,3 +293,22 @@ for (const scenario of [
     }
   });
 }
+
+test("Airbnb return: an expired session shows 'could not confirm' and stays on the page", async ({
+  page,
+}) => {
+  let imports = 0;
+  await page.route(/\/auth\/session(?:\?|$)/, (route) =>
+    route.fulfill({ status: 401, headers: corsHeaders(route), json: { error: "missing_session" } }),
+  );
+  await page.route(/\/api\/hotel-setup\/properties\/.*\/airbnb-import\//, async (route) => {
+    if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
+    imports++;
+    await route.fulfill({ status: 401, headers: corsHeaders(route), json: {} });
+  });
+  await page.goto(`${path}${success}`);
+  await expect(page.getByRole("status").first()).toContainText("could not confirm");
+  await expect(page).toHaveURL(new RegExp(`${path}$`));
+  await expect(page.getByRole("link", { name: "Return to hotel setup" })).toBeVisible();
+  expect(imports).toBe(0);
+});
