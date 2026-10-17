@@ -1,6 +1,11 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { PMS_WEB_PROPERTY_ID, mockPmsWebTargetRoutes } from "../support/pmsWebMocks";
+import {
+  PMS_WEB_PROPERTY_ID,
+  mockPmsWebAuthenticatedSession,
+  mockPmsWebTargetRoutes,
+} from "../support/pmsWebMocks";
+import { createAdaptiveHotelSetupStatusMock } from "../support/sharedHotelSetupMocks";
 
 // Booking Admin hosts the shared setup wizard (VAY-2261). The PMS alias never navigates there
 // directly: it mints a one-time session handoff (VAY-2266) and lands on Booking Admin's /handoff,
@@ -68,6 +73,110 @@ test.describe("pms-web canonical setup redirect", () => {
     const handoffs = await mockSetupHandoff(page);
 
     await page.goto("/setup?mode=add");
+
+    await expect.poll(() => page.url()).toBe(handoffDestination());
+    expect(handoffs.map((handoff) => handoff.targetPath)).toEqual([
+      canonicalSetupPath({ entryProduct: "pms", returnTo: "/dashboard", mode: "add" }),
+    ]);
+  });
+
+  test("a setup-required guard decision reaches Booking Admin through the alias", async ({
+    page,
+  }) => {
+    await mockPmsWebAuthenticatedSession(page);
+    await mockPmsWebTargetRoutes(page);
+    await page.route("**/api/hotel-setup/status**", (route) =>
+      route.fulfill({
+        json: createAdaptiveHotelSetupStatusMock({
+          entryProduct: "pms",
+          organizationId: "org_pms_owner",
+          organizationDisplayName: "PMS Owner Group",
+          propertyId: PMS_WEB_PROPERTY_ID,
+          entryDecision: { decision: "setup_required", reasonCode: "product_access_pending" },
+        }),
+      }),
+    );
+    const handoffs = await mockSetupHandoff(page);
+
+    await page.goto("/");
+
+    await expect.poll(() => page.url()).toBe(handoffDestination());
+    expect(handoffs.map((handoff) => handoff.targetPath)).toEqual([
+      canonicalSetupPath({
+        entryProduct: "pms",
+        returnTo: "/dashboard",
+        propertyId: PMS_WEB_PROPERTY_ID,
+      }),
+    ]);
+  });
+
+  test("the PMS login returns a signed-out visitor to the alias without nesting the guard", async ({
+    page,
+  }) => {
+    await mockPmsWebTargetRoutes(page);
+    let sessionReads = 0;
+    await page.route("**/auth/session?surface=pms-web", (route) => {
+      sessionReads += 1;
+      if (sessionReads === 1) {
+        return route.fulfill({ status: 401, json: { error: "missing_session" } });
+      }
+      return route.fallback();
+    });
+    await page.route("**/auth/password/login", (route) =>
+      route.fulfill({
+        json: {
+          accessToken: "e2e-pms-token",
+          csrfToken: "e2e-pms-csrf-token",
+          organizationId: "org_pms_owner",
+          workosOrganizationId: "org_workos_pms_owner",
+          resources: { "pms:pms_property": [PMS_WEB_PROPERTY_ID] },
+          user: {
+            id: "user_pms_owner",
+            email: "owner@example.com",
+            name: "PMS Owner",
+            status: "active",
+            workosUserId: "workos_user_pms_owner",
+          },
+        },
+      }),
+    );
+    const handoffs = await mockSetupHandoff(page);
+
+    await page.goto("/setup?mode=add");
+    await expect(page).toHaveURL(/\/login\?returnTo=%2Fsetup%3Fmode%3Dadd$/);
+    await page.getByLabel("Email address", { exact: true }).fill("owner@example.com");
+    await page.getByLabel("Password", { exact: true }).fill("test-password");
+    await page.getByRole("button", { name: "Sign In", exact: true }).click();
+
+    await expect.poll(() => page.url()).toBe(handoffDestination());
+    expect(handoffs.map((handoff) => handoff.targetPath)).toEqual([
+      canonicalSetupPath({ entryProduct: "pms", returnTo: "/dashboard", mode: "add" }),
+    ]);
+  });
+
+  test("forwards a calendar recovery step and marker to Booking Admin", async ({ page }) => {
+    await mockPmsWebTargetRoutes(page);
+    const handoffs = await mockSetupHandoff(page);
+
+    await page.goto(
+      `/setup?entryProduct=pms&returnTo=${encodeURIComponent("/settings#calendar")}&propertyId=${PMS_WEB_PROPERTY_ID}&recovery=pms-calendar&step=calendar`,
+    );
+
+    await expect.poll(() => page.url()).toBe(handoffDestination());
+    expect(handoffs.map((handoff) => handoff.targetPath)).toEqual([
+      `${canonicalSetupPath({
+        entryProduct: "pms",
+        returnTo: "/settings#calendar",
+        propertyId: PMS_WEB_PROPERTY_ID,
+      })}&step=calendar&recovery=pms-calendar`,
+    ]);
+  });
+
+  test("drops an unknown step but keeps the rest of the path", async ({ page }) => {
+    await mockPmsWebTargetRoutes(page);
+    const handoffs = await mockSetupHandoff(page);
+
+    await page.goto("/setup?mode=add&step=not-a-step");
 
     await expect.poll(() => page.url()).toBe(handoffDestination());
     expect(handoffs.map((handoff) => handoff.targetPath)).toEqual([
@@ -195,11 +304,11 @@ test.describe("pms-web canonical setup redirect", () => {
 });
 
 async function mockSetupHandoff(page: Page) {
-  const handoffs: unknown[] = [];
+  const handoffs: { targetPath: string }[] = [];
   await page.route("**/auth/handoff/create", (route) => {
     expect(route.request().method()).toBe("POST");
     expect(route.request().headers()["x-vayada-csrf"]).toBe("e2e-pms-csrf-token");
-    handoffs.push(route.request().postDataJSON());
+    handoffs.push(route.request().postDataJSON() as { targetPath: string });
     return route.fulfill({ json: { destination: handoffDestination() } });
   });
   await mockHandoffLanding(page);
