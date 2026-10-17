@@ -256,7 +256,7 @@ export type ApiConfig = {
   creatorPlatformConnections?: CreatorPlatformConnectionsConfig;
   providerWebhooks: ProviderWebhookConfig;
   airbnbImport?: ReturnType<typeof loadAirbnbImportConfig>;
-  airbnbAlterations?: { propertyIds: readonly string[] };
+  airbnbAlterations?: { propertyIds?: readonly string[] };
   channexManagement: ChannexManagementConfig;
   stripeSubscriptions: StripeSubscriptionConfig;
   bookingEmailDelivery?: BookingEmailDeliveryConfig;
@@ -1311,6 +1311,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
   }
   let airbnbAlterations: ApiConfig["airbnbAlterations"];
   if (readBooleanEnv(env, "AIRBNB_ALTERATIONS_ENABLED", false)) {
+    const allProperties = readOptionalEnv(env, "AIRBNB_ALTERATION_PROPERTY_IDS") === "*";
     const propertyIds = [
       ...new Set(
         (readOptionalEnv(env, "AIRBNB_ALTERATION_PROPERTY_IDS") ?? "")
@@ -1318,8 +1319,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
           .map((id) => id.trim().toLowerCase()),
       ),
     ];
-    if (propertyIds.length > 100 || propertyIds.some((id) => !z.uuid().safeParse(id).success)) {
-      throw new Error("AIRBNB_ALTERATION_PROPERTY_IDS requires 1 to 100 property UUIDs");
+    if (
+      !allProperties &&
+      (propertyIds.length > 100 || propertyIds.some((id) => !z.uuid().safeParse(id).success))
+    ) {
+      throw new Error("AIRBNB_ALTERATION_PROPERTY_IDS requires 1 to 100 property UUIDs or *");
     }
     if (
       !backgroundWorkersEnabled ||
@@ -1345,7 +1349,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     ) {
       throw new Error("AIRBNB_ALTERATIONS_ENABLED requires an approved Channex API URL");
     }
-    airbnbAlterations = { propertyIds };
+    airbnbAlterations = { propertyIds: allProperties ? undefined : propertyIds };
   }
 
   return {
