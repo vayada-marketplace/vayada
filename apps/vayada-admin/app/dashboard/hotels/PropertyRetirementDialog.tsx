@@ -79,7 +79,6 @@ export function PropertyRetirementDialog({ propertyId, propertyName, onCancel, o
                 <Impact
                   label="Public surfaces"
                   value={
-                    Number(impact.publicExposure.marketplaceActive) +
                     Number(impact.publicExposure.bookingRevisionActive) +
                     Number(impact.publicExposure.distributionStatus === "public")
                   }

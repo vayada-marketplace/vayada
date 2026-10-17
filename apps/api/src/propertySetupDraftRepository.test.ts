@@ -249,6 +249,8 @@ describe.skipIf(!TEST_DATABASE_URL)("property setup draft PostgreSQL repository"
   });
 
   it("does not disclose active-track state outside the caller's authorized steps", async () => {
+    // The stored row still names the retired Creator Marketplace track (VAY-2270); it reads as
+    // Hotel Operations and its Marketplace drafts stay hidden.
     await insertSession(["hotel_operations", "creator_marketplace"], "2026-09-30T12:00:00.000Z");
     await insertDraft({
       stepId: "marketplace_preferences",
@@ -275,10 +277,16 @@ describe.skipIf(!TEST_DATABASE_URL)("property setup draft PostgreSQL repository"
         authorizedStepIds: ["present_hotel"],
       }),
     ).resolves.toMatchObject({
+      selectedTracks: ["hotel_operations"],
       resumeStepId: null,
       completedStepIds: [],
       drafts: [],
     });
+  });
+
+  it("treats a session that only selected the retired Creator Marketplace track as absent", async () => {
+    await insertSession(["creator_marketplace"], "2026-09-30T12:00:00.000Z");
+    await expect(repository.getActiveSession(scope)).resolves.toBeNull();
   });
 
   it("excludes retired guest drafts and resume markers while keeping other setup drafts", async () => {
@@ -323,14 +331,12 @@ describe.skipIf(!TEST_DATABASE_URL)("property setup draft PostgreSQL repository"
   });
 
   it("never derives access from a stored session or draft", async () => {
-    await insertSession(["creator_marketplace"], "2026-09-30T12:00:00.000Z");
+    await insertSession(["hotel_operations"], "2026-09-30T12:00:00.000Z");
     await insertDraft({
-      stepId: "marketplace_preferences",
-      payload: {},
-      dirtyFields: [],
-      baseRevisions: {
-        "marketplace.collaboration_preferences": "preferences:1",
-      },
+      stepId: "present_hotel",
+      payload: { "profile.default_locale": "de-DE" },
+      dirtyFields: ["profile.default_locale"],
+      baseRevisions: { "hotel_catalog.profile": "profile:1", "hotel_catalog.media": "profile:1" },
       revision: 1,
     });
 

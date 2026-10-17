@@ -84,7 +84,7 @@ import {
   createTargetBookingWebCheckoutAdapter,
   registerBookingWebPublicRoutes,
 } from "./routes/bookingWebPublic.js";
-import { syncPropertyOfferReadModels } from "./routes/marketplaceAdmin.js";
+import { projectPropertyPublicProfile } from "./platform/propertyPublicProfileProjection.js";
 import { createTargetFinancePropertySettingsRepository } from "./routes/finance.js";
 
 const url = process.env["TEST_DATABASE_URL"];
@@ -354,7 +354,7 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
         createPgS3PropertyMediaCommandRepository({
           connectionString: cs,
           serving,
-          syncReadModels: syncPropertyOfferReadModels,
+          syncReadModels: projectPropertyPublicProfile,
           publisher: { copyToPublic: async () => {}, deletePublic: async () => {} },
         }),
       );

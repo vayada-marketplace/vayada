@@ -148,6 +148,7 @@ test.describe("pms-web canonical setup redirect", () => {
 
     await page.goto("/setup?mode=add");
     await expect(page).toHaveURL(/\/login\?returnTo=%2Fsetup%3Fmode%3Dadd$/);
+    await waitForLoginFormHydration(page);
     await page.getByLabel("Email address", { exact: true }).fill("owner@example.com");
     await page.getByLabel("Password", { exact: true }).fill("test-password");
     await page.getByRole("button", { name: "Sign In", exact: true }).click();
@@ -358,4 +359,19 @@ function canonicalSetupPath(input: {
   if (input.propertyId) query.set("propertyId", input.propertyId);
   if (input.mode) query.set("mode", input.mode);
   return `/setup?${query.toString()}`;
+}
+
+// The guard reaches /login by a full page load, so the server-rendered form shows before React owns it. Typing then
+// is lost when hydration resets the controlled email field, and an early click submits the bare HTML form. The
+// password toggle only switches the field once React handles the form.
+async function waitForLoginFormHydration(page: Page) {
+  const password = page.getByLabel("Password", { exact: true });
+  await expect(async () => {
+    await page
+      .getByRole("button", { name: "Show password", exact: true })
+      .click({ timeout: 1_000 });
+    await expect(password).toHaveAttribute("type", "text", { timeout: 1_000 });
+  }).toPass();
+  await page.getByRole("button", { name: "Hide password", exact: true }).click();
+  await expect(password).toHaveAttribute("type", "password");
 }
