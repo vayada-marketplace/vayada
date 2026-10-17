@@ -20,11 +20,11 @@ it("is hidden by default", () => {
 });
 it("opens authentication with the selected property as its return destination", () => {
   vi.stubEnv("NEXT_PUBLIC_AIRBNB_IMPORT_ENABLED", "true");
-  vi.stubEnv("NEXT_PUBLIC_MARKETPLACE_URL", "https://marketplace.localhost:1382");
+  vi.stubEnv("NEXT_PUBLIC_BOOKING_ADMIN_URL", "https://admin.booking.localhost:1382");
   render();
   const link = view.root.findByType("a");
   const url = new URL(link.props.href);
-  expect(url.origin).toBe("https://marketplace.localhost:1382");
+  expect(url.origin).toBe("https://admin.booking.localhost:1382");
   expect(url.pathname).toBe("/login");
   expect(url.searchParams.get("returnTo")).toBe(`/setup/airbnb-connect/${id}`);
   expect(link.props.target).toBe("_blank");
@@ -34,7 +34,7 @@ it.each(["http://other.test", "javascript:alert(1)", "invalid", "https://user:pa
   "hides invalid configuration %s",
   (origin) => {
     vi.stubEnv("NEXT_PUBLIC_AIRBNB_IMPORT_ENABLED", "true");
-    vi.stubEnv("NEXT_PUBLIC_MARKETPLACE_URL", origin);
+    vi.stubEnv("NEXT_PUBLIC_BOOKING_ADMIN_URL", origin);
     render();
     expect(view.toJSON()).toBeNull();
   },
@@ -46,10 +46,10 @@ it("does not build a link without a canonical property", () => {
 });
 
 it.each([undefined, ""])(
-  "hides the entry without a configured Marketplace origin: %s",
+  "hides the entry without a configured Booking Admin origin: %s",
   (origin) => {
     vi.stubEnv("NEXT_PUBLIC_AIRBNB_IMPORT_ENABLED", "true");
-    vi.stubEnv("NEXT_PUBLIC_MARKETPLACE_URL", origin);
+    vi.stubEnv("NEXT_PUBLIC_BOOKING_ADMIN_URL", origin);
     render();
     expect(view.toJSON()).toBeNull();
   },

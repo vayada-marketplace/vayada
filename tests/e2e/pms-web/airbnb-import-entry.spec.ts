@@ -11,20 +11,20 @@ test("room settings opens sign-in for the selected hotel's Airbnb import", async
 }) => {
   await mockPmsWebAuthenticatedSession(page);
   await mockPmsWebTargetRoutes(page);
-  await context.route("https://marketplace.localhost:1382/login?**", (route) =>
-    route.fulfill({ contentType: "text/html", body: "<h1>Simulated Marketplace sign-in</h1>" }),
+  await context.route("https://admin.booking.localhost:1382/login?**", (route) =>
+    route.fulfill({ contentType: "text/html", body: "<h1>Simulated Booking Admin sign-in</h1>" }),
   );
   await page.goto("/rooms");
   const link = page.getByRole("link", { name: "Import rooms from Airbnb (opens in a new tab)" });
   await expect(link).toBeVisible();
   const href = new URL((await link.getAttribute("href"))!);
-  expect(href.origin).toBe("https://marketplace.localhost:1382");
+  expect(href.origin).toBe("https://admin.booking.localhost:1382");
   expect(href.pathname).toBe("/login");
   expect(href.searchParams.get("returnTo")).toBe(`/setup/airbnb-connect/${PMS_WEB_PROPERTY_ID}`);
   const popupPromise = page.waitForEvent("popup");
   await link.click();
   const popup = await popupPromise;
-  await expect(popup.getByRole("heading", { name: "Simulated Marketplace sign-in" })).toBeVisible();
+  await expect(popup.getByRole("heading", { name: "Simulated Booking Admin sign-in" })).toBeVisible();
   expect(new URL(page.url()).pathname).toBe("/rooms");
   await popup.close();
 });

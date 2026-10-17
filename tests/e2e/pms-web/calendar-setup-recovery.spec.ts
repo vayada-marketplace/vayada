@@ -54,10 +54,11 @@ for (const { enabled, save } of [
     const link = page.getByRole("link", { name: "Complete room and calendar setup" });
     await expect(link).toBeVisible();
     expect(patches).toBe(save ? 1 : 0);
-    const login = new URL((await link.getAttribute("href"))!);
-    expect(login.pathname).toBe("/login");
-    const destination = new URL(login.searchParams.get("returnTo")!, login.origin);
-    expect(destination.pathname).toBe("/setup");
+    // The PMS's own /setup alias hands the session to Booking Admin (VAY-2266).
+    const href = (await link.getAttribute("href"))!;
+    expect(href.startsWith("/setup?")).toBe(true);
+    const destination = new URL(href, page.url());
+    expect(destination.origin).toBe(new URL(page.url()).origin);
     expect(Object.fromEntries(destination.searchParams)).toEqual({
       entryProduct: "pms",
       returnProduct: "pms",
