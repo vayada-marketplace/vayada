@@ -17,6 +17,7 @@ export const SELECTABLE_JOBS = [
   "pms_web_e2e",
   "marketplace_web_e2e",
   "booking_web_e2e",
+  "booking_admin_e2e",
   "api_unit",
   "api_postgres",
   "setup_draft_reset_postgres",
@@ -36,7 +37,12 @@ const TYPESCRIPT_JOBS = [
 ];
 
 // The mocked Playwright projects that gate PRs (one dev server each, no backend).
-export const BROWSER_E2E_JOBS = ["pms_web_e2e", "marketplace_web_e2e", "booking_web_e2e"];
+export const BROWSER_E2E_JOBS = [
+  "pms_web_e2e",
+  "marketplace_web_e2e",
+  "booking_web_e2e",
+  "booking_admin_e2e",
+];
 
 // Packages that neither apps/api nor any backend package depends on, with the extra jobs their
 // changes need: the browser projects of the apps that use them, and api_unit when
@@ -47,9 +53,9 @@ export const FRONTEND_ONLY_PACKAGES = {
   // booking-admin, booking-web, marketplace-web, pms-web, vayada-admin
   "product-onboarding": BROWSER_E2E_JOBS,
   // booking-admin, pms-web
-  "feature-hub": ["pms_web_e2e"],
+  "feature-hub": ["pms_web_e2e", "booking_admin_e2e"],
   // booking-admin, marketplace-web, pms-web; its tests are in test:unit-suites
-  "settings-ui": ["pms_web_e2e", "marketplace_web_e2e", "api_unit"],
+  "settings-ui": ["pms_web_e2e", "marketplace_web_e2e", "booking_admin_e2e", "api_unit"],
   // landing, marketplace-web, vayada-admin
   "marketplace-shared": ["marketplace_web_e2e"],
   // booking-web, pms-web
@@ -99,13 +105,18 @@ export const RULES = [
     jobs: [...FRONTEND_JOBS, "first_party_auth", "marketplace_web_e2e"],
   },
   {
+    name: "booking-admin",
+    test: /^apps\/booking-admin\//,
+    jobs: [...FRONTEND_JOBS, "first_party_auth", "booking_admin_e2e"],
+  },
+  {
     name: "booking-web",
     test: /^apps\/booking-web\//,
     jobs: [...FRONTEND_JOBS, "first_party_auth", "booking_web_e2e"],
   },
   {
     name: "frontend",
-    test: /^apps\/(vayada-admin|booking-admin|landing)\//,
+    test: /^apps\/(vayada-admin|landing)\//,
     jobs: [...FRONTEND_JOBS, "first_party_auth"],
   },
   {
@@ -129,11 +140,16 @@ export const RULES = [
     test: /^tests\/e2e\/booking-web\//,
     jobs: [...FRONTEND_JOBS, "first_party_auth", "booking_web_e2e"],
   },
+  {
+    name: "booking-admin-e2e",
+    test: /^tests\/e2e\/booking-admin\//,
+    jobs: [...FRONTEND_JOBS, "first_party_auth", "booking_admin_e2e"],
+  },
   // frontend_build runs the landing Playwright suite; first_party_auth runs the auth suite. The
   // other projects here are not PR-gated. A new folder under tests/e2e/ matches no rule (every job).
   {
     name: "e2e",
-    test: /^tests\/e2e\/(landing|first-party-auth|booking-admin|vayada-admin|next-stack-smoke|booking-public-canary)\//,
+    test: /^tests\/e2e\/(landing|first-party-auth|vayada-admin|next-stack-smoke|booking-public-canary)\//,
     jobs: [...FRONTEND_JOBS, "first_party_auth"],
   },
   ...Object.entries(FRONTEND_ONLY_PACKAGES).map(([name, jobs]) => ({
