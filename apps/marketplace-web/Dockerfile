@@ -3,7 +3,7 @@
 # Workspace package @vayada/marketplace-shared is resolved from packages/.
 
 # Stage 1: Builder
-FROM public.ecr.aws/docker/library/node:20-alpine AS builder
+FROM ghcr.io/vayada-marketplace/ci-node:20-alpine AS builder
 RUN apk add --no-cache libc6-compat
 WORKDIR /app
 
@@ -36,7 +36,7 @@ WORKDIR /app/apps/marketplace-web
 RUN npm run build
 
 # Stage 2: Runner — Next.js standalone output
-FROM public.ecr.aws/docker/library/node:20-alpine AS runner
+FROM ghcr.io/vayada-marketplace/ci-node:20-alpine AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production

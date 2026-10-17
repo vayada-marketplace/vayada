@@ -1,5 +1,5 @@
 # Stage 1: Builder
-FROM public.ecr.aws/docker/library/node:20-alpine AS builder
+FROM ghcr.io/vayada-marketplace/ci-node:20-alpine AS builder
 RUN apk add --no-cache libc6-compat
 WORKDIR /app
 
@@ -24,7 +24,7 @@ WORKDIR /app/apps/booking-web
 RUN npm run build
 
 # Stage 2: Runner
-FROM public.ecr.aws/docker/library/node:20-alpine AS runner
+FROM ghcr.io/vayada-marketplace/ci-node:20-alpine AS runner
 WORKDIR /app
 
 ARG BOOKING_WEB_BUILD_SHA

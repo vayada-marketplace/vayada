@@ -1,6 +1,6 @@
-# syntax=docker/dockerfile:1
+# syntax=ghcr.io/vayada-marketplace/ci-dockerfile:1
 
-FROM public.ecr.aws/docker/library/node:24-slim AS build
+FROM ghcr.io/vayada-marketplace/ci-node:24-slim AS build
 
 ENV HUSKY=0
 
@@ -18,7 +18,7 @@ COPY engineering/fixtures/c1-staging-rehearsal-replay ./engineering/fixtures/c1-
 COPY scripts/c1-rehearsal-replay-fixtures.mjs ./scripts/c1-rehearsal-replay-fixtures.mjs
 COPY scripts/start-next-api.sh ./scripts/start-next-api.sh
 
-FROM public.ecr.aws/docker/library/node:24-slim AS runtime
+FROM ghcr.io/vayada-marketplace/ci-node:24-slim AS runtime
 
 ARG API_RUNTIME=
 ARG APPLICATION_RELEASE=unversioned
