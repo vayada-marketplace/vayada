@@ -23,7 +23,9 @@ import {
 import { parsePreparedHotelImport } from "@vayada/domain-hotels";
 
 type InviteView = "list" | "create";
-type SetupRoute = "marketplace" | "operations" | "combined";
+// The Creator Marketplace is being removed (VAY-2259); new invites get the Hotel Operations
+// track only. Existing invites keep their stored tracks (see formatSetupRoute).
+type SetupRoute = "operations";
 
 const SETUP_ROUTE_OPTIONS: Array<{
   id: SetupRoute;
@@ -33,25 +35,11 @@ const SETUP_ROUTE_OPTIONS: Array<{
   selectedTracks: HotelSetupTrack[];
 }> = [
   {
-    id: "marketplace",
-    label: "Creator Marketplace",
-    description: "For hotels that only want creator collaborations.",
-    steps: "Hotel details → Marketplace setup",
-    selectedTracks: ["creator_marketplace"],
-  },
-  {
     id: "operations",
     label: "Hotel Operations",
     description: "For hotels using Booking Engine and PMS.",
     steps: "Hotel details → Booking and PMS setup",
     selectedTracks: ["hotel_operations"],
-  },
-  {
-    id: "combined",
-    label: "Marketplace + Hotel Operations",
-    description: "For hotels using the complete Vayada product suite.",
-    steps: "Hotel details → Combined setup",
-    selectedTracks: ["hotel_operations", "creator_marketplace"],
   },
 ];
 
@@ -65,7 +53,7 @@ export default function InviteCodesPage() {
   const [inviteeEmail, setInviteeEmail] = useState("");
   const [organizationName, setOrganizationName] = useState("");
   const [propertyName, setPropertyName] = useState("");
-  const [setupRoute, setSetupRoute] = useState<SetupRoute>("marketplace");
+  const [setupRoute, setSetupRoute] = useState<SetupRoute>("operations");
   const [prepareData, setPrepareData] = useState(false);
   const [preparedData, setPreparedData] = useState(emptyPreparedData);
   const [saving, setSaving] = useState(false);
@@ -112,11 +100,7 @@ export default function InviteCodesPage() {
   async function handleCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const selectedRoute = SETUP_ROUTE_OPTIONS.find((option) => option.id === setupRoute)!;
-    if (
-      prepareData &&
-      (!parsePreparedHotelImport(preparedData) ||
-        (preparedData.rooms.length > 0 && setupRoute === "marketplace"))
-    ) {
+    if (prepareData && !parsePreparedHotelImport(preparedData)) {
       setCreateError(
         "Check the prepared details. Each room needs a name and Hotel Operations access.",
       );
@@ -147,7 +131,7 @@ export default function InviteCodesPage() {
     setInviteeEmail("");
     setOrganizationName("");
     setPropertyName("");
-    setSetupRoute("marketplace");
+    setSetupRoute("operations");
     setPrepareData(false);
     setPreparedData(emptyPreparedData());
     setCreateError("");
@@ -312,7 +296,7 @@ export default function InviteCodesPage() {
                   <PreparedHotelEditor
                     value={preparedData}
                     onChange={setPreparedData}
-                    allowRooms={setupRoute !== "marketplace"}
+                    allowRooms
                   />
                 </div>
               )}

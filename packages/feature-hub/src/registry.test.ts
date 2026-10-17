@@ -12,17 +12,14 @@ const inbox = FEATURE_MODULES.find(({ id }) => id === "inbox")!;
 const financials = FEATURE_MODULES.find(({ id }) => id === "financials")!;
 
 describe("Feature Hub modules (VAY-2200)", () => {
-  it("lists five switchable modules and the unavailable Affiliate Tracking card", () => {
-    expect(FEATURE_MODULES.filter((m) => !m.unavailable).map(({ id }) => id)).toEqual([
+  it("lists five switchable modules", () => {
+    expect(FEATURE_MODULES.map(({ id }) => id)).toEqual([
       "inbox",
       "reviews",
       "financials",
       "add-ons",
       "promos",
     ]);
-    const affiliates = FEATURE_MODULES.find(({ id }) => id === "affiliates")!;
-    expect(affiliates).toMatchObject({ unavailable: true });
-    expect(affiliates.navItem).toBeUndefined();
   });
 
   it("marks a module NEW for 30 days after it joins Feature Hub", () => {

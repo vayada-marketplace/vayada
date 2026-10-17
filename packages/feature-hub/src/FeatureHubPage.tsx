@@ -67,15 +67,10 @@ export function FeatureHubPage({ translate, activationClient }: FeatureHubPagePr
     manageableModuleSet ? manageableModuleSet.has(moduleId) : canManage;
   const now = useMemo(() => new Date(), []);
 
-  // A store that could not be read leaves its modules out; unavailable modules always show.
-  const { listed, switchable } = useMemo(() => {
+  // A store that could not be read leaves its modules out.
+  const switchable = useMemo(() => {
     const supported = new Set(supportedModuleIds);
-    return {
-      listed: FEATURE_MODULES.filter((module) => module.unavailable || supported.has(module.id)),
-      switchable: FEATURE_MODULES.filter(
-        (module) => !module.unavailable && supported.has(module.id),
-      ),
-    };
+    return FEATURE_MODULES.filter((module) => supported.has(module.id));
   }, [supportedModuleIds]);
   const activeCount = switchable.filter((module) => activeModuleIds.includes(module.id)).length;
   const waitingForInventory = loading && switchable.length === 0;
@@ -170,20 +165,16 @@ export function FeatureHubPage({ translate, activationClient }: FeatureHubPagePr
             </div>
           ) : inventoryFailed ? null : (
             <div className="grid gap-4 md:grid-cols-2">
-              {listed.map((module) =>
-                module.unavailable ? (
-                  <UnavailableCard key={module.id} t={t} module={module} />
-                ) : (
-                  <ModuleCard
-                    key={module.id}
-                    t={t}
-                    module={module}
-                    isNew={isModuleNew(module, now)}
-                    onOpen={() => setSelectedModule(module)}
-                    {...switchProps(module)}
-                  />
-                ),
-              )}
+              {switchable.map((module) => (
+                <ModuleCard
+                  key={module.id}
+                  t={t}
+                  module={module}
+                  isNew={isModuleNew(module, now)}
+                  onOpen={() => setSelectedModule(module)}
+                  {...switchProps(module)}
+                />
+              ))}
             </div>
           )}
           <p className="mt-4 text-[13px] leading-5 text-gray-500">
@@ -278,32 +269,6 @@ function ModuleCard({
   );
 }
 
-function UnavailableCard({ t, module }: { t: Translate; module: FeatureModule }) {
-  return (
-    <article className="flex items-start gap-3.5 rounded-xl border border-dashed border-gray-300 bg-gray-50 p-5">
-      <ModuleIcon module={module} active={false} muted />
-      <div className="min-w-0 flex-1">
-        <div className="flex min-h-6 flex-wrap items-center gap-2">
-          <h2 className="text-[15px] font-semibold text-gray-600">
-            {t(`featureHub.modules.${module.id}.name`)}
-          </h2>
-          <span className="rounded-md bg-gray-200 px-1.5 py-0.5 text-[10px] font-semibold text-gray-600">
-            {t("featureHub.copy.unavailable")}
-          </span>
-        </div>
-        <p className="mt-1 text-[13px] leading-5 text-gray-500">
-          {t(`featureHub.modules.${module.id}.description`)}
-        </p>
-        <p className="mt-2 flex items-center gap-1.5 text-xs font-medium text-gray-500">
-          <InformationCircleIcon className="h-3.5 w-3.5 shrink-0" />
-          {t("featureHub.copy.currentlyUnavailable")}
-        </p>
-        <CategoryTag t={t} module={module} className="mt-2.5" />
-      </div>
-    </article>
-  );
-}
-
 function NewBadge({ t }: { t: Translate }) {
   return (
     <span className="shrink-0 rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700">
@@ -367,15 +332,7 @@ function ToggleSwitch({
   );
 }
 
-function ModuleIcon({
-  module,
-  active,
-  muted = false,
-}: {
-  module: FeatureModule;
-  active: boolean;
-  muted?: boolean;
-}) {
+function ModuleIcon({ module, active }: { module: FeatureModule; active: boolean }) {
   const Icon = module.icon;
   return (
     <div
@@ -383,7 +340,7 @@ function ModuleIcon({
         "flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border",
         active
           ? "border-primary-200 bg-primary-50 text-primary-700"
-          : cx("border-gray-200 bg-gray-50", muted ? "text-gray-400" : "text-gray-600"),
+          : "border-gray-200 bg-gray-50 text-gray-600",
       )}
     >
       <Icon className="h-5 w-5" />
@@ -641,8 +598,6 @@ export const featureHubMessages = {
   "featureHub.copy.ofTotalActive": "/ {total} active",
   "featureHub.copy.disabledModulesStayHidden":
     "Disabled modules stay hidden from the sidebar. Their data is preserved and reappears when you reactivate them.",
-  "featureHub.copy.unavailable": "Unavailable",
-  "featureHub.copy.currentlyUnavailable": "This feature is currently unavailable.",
   "featureHub.copy.navigation": "Navigation",
   "featureHub.copy.items": "items",
   "featureHub.copy.fromModules": "from modules",
@@ -709,9 +664,6 @@ export const featureHubMessages = {
   "featureHub.modules.promos.point.2": "Room and stay-date targeting",
   "featureHub.modules.promos.offNote":
     "Turning Promos off hides the promo code field from guests and the Promos page from the menu. Last-minute discounts keep running: switch them off on the Promos page first if you don't want them.",
-  "featureHub.modules.affiliates.name": "Affiliate Tracking",
-  "featureHub.modules.affiliates.description":
-    "Track referrals and partner bookings, including the Refer a Guest button.",
 };
 
 function defaultTranslate(key: string, params?: Record<string, string | number>): string {

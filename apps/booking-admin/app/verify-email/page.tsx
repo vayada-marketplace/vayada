@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { CheckCircleIcon, XCircleIcon } from "@heroicons/react/24/outline";
 import { resolveBookingSetupGuard } from "@/lib/utils/sharedSetupGuard";
+import { hasPendingHotelAccountInvite } from "@/services/api/hotelAccountInvites";
 import {
   authService,
   clearPendingEmailVerification,
@@ -38,11 +39,17 @@ export default function VerifyEmailPage() {
   }, []);
 
   async function redirectAfterVerifiedSession() {
-    const decision = await resolveBookingSetupGuard("/dashboard");
+    // An owner who came from /invite finishes the invitation before any setup redirect.
+    const pendingInvite = hasPendingHotelAccountInvite();
+    const decision = pendingInvite ? null : await resolveBookingSetupGuard("/dashboard");
     clearPendingEmailVerification();
     setVerified(true);
     setTimeout(() => {
-      if (decision.action === "redirect_to_setup") {
+      if (pendingInvite) {
+        router.push("/invite");
+        return;
+      }
+      if (decision?.action === "redirect_to_setup") {
         window.location.replace(decision.redirectPath);
         return;
       }

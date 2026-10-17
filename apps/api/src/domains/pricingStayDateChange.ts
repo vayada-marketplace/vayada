@@ -244,15 +244,6 @@ export async function quotePricingStayDateChange(
   if (booked.stay.addons.length)
     return refuse("Bookings with add-ons can't change dates here yet.");
   if (discounted(booked)) return refuse("Discounted bookings can't change dates here yet.");
-  if (
-    (
-      await client.query(
-        "SELECT 1 FROM booking.affiliate_original_booking_bindings WHERE booking_id=$1",
-        [booking.guestBookingId],
-      )
-    ).rowCount
-  )
-    return refuse("Bookings that came through an affiliate can't change dates here yet.");
   // The PMS must have adopted the stay: its assignments carry the holds that move.
   const adopted = (
     await client.query<{ rooms: number }>(

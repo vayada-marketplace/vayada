@@ -12,16 +12,11 @@ import {
   createTargetBookingWebCalendarRepository,
   type BookingWebCalendarReadPool,
 } from "./routes/bookingWebPublic.js";
-import {
-  createPgMarketplaceDiscoveryReadRepository,
-  type MarketplaceDiscoveryReadPool,
-} from "./routes/marketplaceDiscovery.js";
 
 export type PublicRuntimePools = {
   publicHotelProfilePool?: PublicHotelProfileReadPool;
   publicHotelQuotePool?: PublicHotelQuoteReadPool;
   bookingWebCalendarPool?: BookingWebCalendarReadPool;
-  marketplaceDiscoveryPool?: MarketplaceDiscoveryReadPool;
 };
 
 export function createPublicRuntimeRepositories(config: ApiConfig, pools: PublicRuntimePools = {}) {
@@ -49,16 +44,10 @@ export function createPublicRuntimeRepositories(config: ApiConfig, pools: Public
     pool: pools.bookingWebCalendarPool,
   });
 
-  const marketplaceDiscoveryRepository = createPgMarketplaceDiscoveryReadRepository({
-    connectionString: requireTargetDatabaseUrl(config),
-    pool: pools.marketplaceDiscoveryPool,
-  });
-
   return {
     publicHotelProfileRepository,
     publicHotelQuoteRepository,
     bookingWebCalendarRepository,
-    marketplaceDiscoveryRepository,
   };
 }
 

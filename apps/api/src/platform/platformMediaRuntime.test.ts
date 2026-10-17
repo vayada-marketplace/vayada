@@ -3,7 +3,6 @@ import { describe, expect, it, vi } from "vitest";
 import { createPgPlatformMediaCleanupStore } from "../jobs/platformMediaCleanup.js";
 import { createPgS3PropertyMediaCommandRepository } from "../domains/propertyMediaCommandRepository.js";
 import type { PlatformMediaServingConfig } from "./mediaServing.js";
-import { createPgS3MarketplaceOfferMediaPromotion } from "./marketplaceOfferMediaPromotion.js";
 import { createPgPlatformMediaRepository } from "./platformMediaRepository.js";
 import {
   composePlatformMediaRuntime,
@@ -40,21 +39,13 @@ describe("platform media runtime composition", () => {
       ).toBeUndefined();
       expect(factories.createRepository).not.toHaveBeenCalled();
       expect(factories.createAdapter).not.toHaveBeenCalled();
-      expect(factories.createOfferMediaPromotion).not.toHaveBeenCalled();
       expect(factories.createCleanupStore).not.toHaveBeenCalled();
       expect(factories.createPropertyMediaCommands).not.toHaveBeenCalled();
     }
   });
 
   it("shares production resources across profile validation and the restricted routes", () => {
-    const {
-      repository,
-      adapter,
-      offerMediaPromotion,
-      cleanupStore,
-      propertyMediaCommands,
-      factories,
-    } = fakeFactories();
+    const { repository, adapter, cleanupStore, propertyMediaCommands, factories } = fakeFactories();
     const runtime = composePlatformMediaRuntime(completeInput, factories);
     if (!runtime) throw new Error("Expected complete media configuration to compose a runtime");
 
@@ -71,11 +62,6 @@ describe("platform media runtime composition", () => {
       publicPathPrefix: "profile-media",
       publicCacheControl: "public, max-age=31536000, immutable",
     });
-    expect(factories.createOfferMediaPromotion).toHaveBeenCalledOnce();
-    expect(factories.createOfferMediaPromotion).toHaveBeenCalledWith({
-      connectionString: "postgresql://target-db",
-      serving: platformMediaServing,
-    });
     expect(factories.createCleanupStore).toHaveBeenCalledOnce();
     expect(factories.createCleanupStore).toHaveBeenCalledWith({
       connectionString: "postgresql://target-db",
@@ -88,7 +74,6 @@ describe("platform media runtime composition", () => {
     });
 
     expect(runtime.profileMediaRepository).toBe(repository);
-    expect(runtime.offerMediaPromotion).toBe(offerMediaPromotion);
     expect(runtime.cleanupStore).toBe(cleanupStore);
     expect(runtime.propertyMediaCommands).toBe(propertyMediaCommands);
     expect(runtime.routes.mediaPathPrefix).toBe("profile-media");
@@ -139,20 +124,17 @@ describe("platform media runtime composition", () => {
 function fakeFactories() {
   const repository = {} as ReturnType<typeof createPgPlatformMediaRepository>;
   const adapter = {} as ReturnType<typeof createS3PlatformMediaAdapter>;
-  const offerMediaPromotion = {} as ReturnType<typeof createPgS3MarketplaceOfferMediaPromotion>;
   const cleanupStore = {} as ReturnType<typeof createPgPlatformMediaCleanupStore>;
   const propertyMediaCommands = {} as ReturnType<typeof createPgS3PropertyMediaCommandRepository>;
   const factories: PlatformMediaRuntimeFactories = {
     createRepository: vi.fn(() => repository),
     createAdapter: vi.fn(() => adapter),
-    createOfferMediaPromotion: vi.fn(() => offerMediaPromotion),
     createCleanupStore: vi.fn(() => cleanupStore),
     createPropertyMediaCommands: vi.fn(() => propertyMediaCommands),
   };
   return {
     repository,
     adapter,
-    offerMediaPromotion,
     cleanupStore,
     propertyMediaCommands,
     factories,

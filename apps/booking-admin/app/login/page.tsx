@@ -10,6 +10,7 @@ import {
   type AuthOrganizationSelectionResponse,
 } from "@/services/auth/sessionStore";
 import { resolveBookingSetupGuard } from "@/lib/utils/sharedSetupGuard";
+import { hasPendingHotelAccountInvite } from "@/services/api/hotelAccountInvites";
 import { useTranslation } from "@/lib/i18n";
 
 function LoginContent() {
@@ -38,6 +39,11 @@ function LoginContent() {
     // setup page checks access itself, so the booking guard must not rewrite them.
     if (["/handoff", "/setup"].includes(new URL(returnTo, "https://vayada.local").pathname)) {
       router.replace(returnTo);
+      return;
+    }
+    // An owner who came from /invite (incl. Google sign-up) finishes the invitation first.
+    if (hasPendingHotelAccountInvite()) {
+      router.replace("/invite");
       return;
     }
     const decision = await resolveBookingSetupGuard(returnTo);

@@ -460,17 +460,6 @@ export default function MediaTab({
             onChange={() => setShowContactButton(!showContactButton)}
             label={t("admin.contactButton")}
           />
-          {/* The old referral product is retired (VAY-1499); the switch stays off and says so,
-              instead of sending hosts to Feature Hub (VAY-2143). */}
-          <div title={t("featureHub.copy.currentlyUnavailable")}>
-            <ToggleSwitch
-              enabled={false}
-              onChange={() => {}}
-              label={t("admin.referAGuestButton")}
-              description={t("featureHub.copy.currentlyUnavailable")}
-              disabled
-            />
-          </div>
           <ToggleSwitch
             enabled={languageSelectorAvailable && showLanguageSelector}
             onChange={() => setShowLanguageSelector(!showLanguageSelector)}

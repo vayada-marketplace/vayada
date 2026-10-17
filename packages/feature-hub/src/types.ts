@@ -18,8 +18,6 @@ export interface FeatureModule {
   icon: ComponentType<{ className?: string }>;
   /** ISO date the module joined Feature Hub; it is marked NEW for 30 days after. */
   launchedOn?: string;
-  /** Listed as currently unavailable: no switch, not counted as active. */
-  unavailable?: boolean;
   navItem?: FeatureNavItem;
   /** Number of feature points in the detail window. */
   points: number;

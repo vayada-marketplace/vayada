@@ -149,8 +149,6 @@ function HotelsIcon({ className }: { className?: string }) {
   );
 }
 
-
-
 function InviteCodesIcon({ className }: { className?: string }) {
   return (
     <svg
@@ -205,7 +203,6 @@ function BookingsIcon({ className }: { className?: string }) {
     </svg>
   );
 }
-
 
 function SettingsIcon({ className }: { className?: string }) {
   return (

@@ -133,16 +133,3 @@ describe("MediaTab hero image", () => {
     expect(markup).toContain('accept="image/jpeg,image/png,image/webp"');
   });
 });
-
-describe("MediaTab Refer a Guest button (VAY-2143)", () => {
-  it("stays off and says the feature is unavailable instead of pointing to Feature Hub", () => {
-    const markup = renderMediaTab([]);
-    const refer = switchTag(markup, "Refer a Guest button");
-
-    expect(markup).toContain('title="This feature is currently unavailable."');
-    expect(refer).toContain('aria-checked="false"');
-    expect(refer).toContain('disabled=""');
-    expect(markup).not.toContain("Enable Refer a Guest in Feature Hub first.");
-    expect(markup).not.toContain("Tied to Feature Hub activation.");
-  });
-});

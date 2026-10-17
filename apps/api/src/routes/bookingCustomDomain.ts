@@ -1,9 +1,9 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { AuthorizationError, type PropertyAccessRepository } from "@vayada/backend-authorization";
+import { bookingCustomDomainLockKey } from "@vayada/domain-booking";
 import pg from "pg";
 import type { QueryResult, QueryResultRow } from "pg";
 
-import { affiliateDestinationSafetyLockKey } from "../domains/bookingAffiliateDestinationSafetyLock.js";
 import { enforcePropertyRoutePolicy, enforceRoutePolicy } from "./policy.js";
 
 export type BookingCustomDomainStatus = "not_configured" | "pending" | "verified" | "failed";
@@ -222,7 +222,7 @@ export function createTargetBookingCustomDomainRepository(config: {
            verification_status AS "verificationStatus",
            verified_at AS "verifiedAt",
            updated_at AS "updatedAt"`,
-        [propertyId, normalizedDomain, affiliateDestinationSafetyLockKey(propertyId)],
+        [propertyId, normalizedDomain, bookingCustomDomainLockKey(propertyId)],
       );
 
       if (!result.rows[0]) {
@@ -253,7 +253,7 @@ export function createTargetBookingCustomDomainRepository(config: {
          )
          SELECT scoped_property.property_id::text AS "propertyId"
          FROM scoped_property, safety_lock`,
-        [propertyId, affiliateDestinationSafetyLockKey(propertyId)],
+        [propertyId, bookingCustomDomainLockKey(propertyId)],
       );
 
       return Boolean(result.rows[0]);

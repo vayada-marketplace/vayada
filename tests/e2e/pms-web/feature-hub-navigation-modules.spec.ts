@@ -7,7 +7,7 @@ import {
 
 type Write = { store: string; moduleId: string; isActive: boolean };
 
-// VAY-2200: five switchable modules from three stores, plus the unavailable Affiliate Tracking.
+// VAY-2200: five switchable modules from three stores.
 async function setup(page: Page) {
   await mockPmsWebAuthenticatedSession(page);
   await mockPmsWebTargetRoutes(page);
@@ -84,9 +84,9 @@ test("lists every module in one grid and previews both menus as they switch", as
   await page.goto("/settings/feature-hub");
 
   const cards = page.locator("article");
-  for (const name of ["Inbox", "Reviews", "Financials", "Add-ons", "Promos", "Affiliate Tracking"])
+  for (const name of ["Inbox", "Reviews", "Financials", "Add-ons", "Promos"])
     await expect(cards.getByRole("heading", { level: 2, name, exact: true })).toBeVisible();
-  await expect(cards).toHaveCount(6);
+  await expect(cards).toHaveCount(5);
   await expect(page.getByText("/ 5 active", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "All", exact: true })).toHaveCount(0);
   await expect(page.getByPlaceholder("Search modules...")).toHaveCount(0);
@@ -96,7 +96,6 @@ test("lists every module in one grid and previews both menus as they switch", as
   await expect(preview(page).getByText("10 items", { exact: true })).toBeVisible();
   await expect(preview(page).getByText("1 from modules", { exact: true })).toBeVisible();
   await expect(page.getByRole("switch", { name: "Activate Financials" })).toBeDisabled();
-  await expect(cards.filter({ hasText: "Affiliate Tracking" }).getByRole("switch")).toHaveCount(0);
   await page.screenshot({ path: testInfo.outputPath("feature-hub-1440.png") });
 
   await page.getByRole("switch", { name: "Activate Inbox" }).click();

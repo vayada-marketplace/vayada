@@ -12,32 +12,18 @@ import { prepareNextChannexRoomAvailabilityDispatch } from "./domains/channexRoo
 import { reconcilePendingChannexRoomAvailability } from "./domains/channexPendingRoomAvailabilityReconciliation.js";
 import { readChannexOfferPreview } from "./domains/channexOfferPreviewReader.js";
 import { createReplacementPricingCommands } from "./domains/replacementPricingCommands.js";
-import { createPgMarketplaceAffiliateAssentRepository } from "./domains/marketplaceAffiliateAssentRepository.js";
-import { createAffiliateAgreementActivationReadiness } from "./domains/marketplaceAffiliateAgreementActivationReadiness.js";
-import { readMarketplaceAffiliateLinkCreationReadiness } from "./domains/marketplaceAffiliateLinkCreationReadiness.js";
 import { externalBookingChanges } from "./integrations/externalBookingChanges.js";
 import { createAirbnbAlterationRuntime } from "./airbnbAlterationRuntime.js";
 import { createAirbnbImportRuntime } from "./airbnbImportRuntime.js";
 import { createPgMarketplaceSubmissionRepository } from "./domains/marketplaceSubmissionRepository.js";
-import { createPgMarketplaceHotelSubmissionModerationRepository } from "./domains/marketplaceHotelSubmissionModerationRepository.js";
 import { marketplaceSubmissionTransactionSources } from "./platform/marketplaceSubmissionTransactionSources.js";
 import { createPgPmsRoomClosureRepository } from "./domains/pmsRoomClosureCommandRepository.js";
 import { createPgPreparedImportRepository } from "./domains/preparedHotelImportRepository.js";
-import { createPgPmsAffiliateCompletionRepository } from "./domains/pmsAffiliateCompletionRepository.js";
-import { createPgBookingAffiliateDestinationRepository } from "./domains/bookingAffiliateDestinationRepository.js";
-import { readAffiliateDestinationTrackingConfiguration } from "./domains/bookingAffiliateDestinationTrackingReadiness.js";
-import { readFinanceAffiliateCommercialConditions } from "./domains/financeAffiliateCommercialConditions.js";
-import { publishMarketplaceAffiliateTerms } from "./domains/marketplaceAffiliatePublication.js";
 import {
   createPricingPublicationFreshnessAlert,
   readPricingPublicationFreshness,
   summarizePricingPublicationFreshness,
 } from "./domains/pricingPublicationFreshness.js";
-import { createAffiliatePublicationPrerequisites } from "./domains/marketplaceAffiliatePublicationPrerequisites.js";
-import { assertAffiliateCaptureRoleHasVisitReadCapabilities } from "./domains/affiliateCaptureRoleBoundary.js";
-import { createMarketplaceAffiliateVisit } from "./domains/marketplaceAffiliateVisit.js";
-import { createMarketplaceAffiliatePublicLinkQuota } from "./domains/marketplaceAffiliatePublicLinkQuota.js";
-import { assertAffiliateBookingBindingCapabilities } from "./domains/affiliateBookingBindingRoleBoundary.js";
 import { createNoShowReportingStore } from "./domains/pmsNoShowReporting.js";
 import { runNoShowReport } from "./jobs/pmsNoShowReporting.js";
 import { withPmsHostDateCredit } from "./domains/pmsHostDateAmendment.js";
@@ -46,7 +32,6 @@ import { createBookingHostActions } from "./domains/bookingHostActions.js";
 import { targetBookingHostActionGuards } from "./domains/bookingHostActionGuards.js";
 import { createPmsConfirmationEmails } from "./domains/pmsConfirmationEmails.js";
 import { createBankTransferBookingOperations } from "./domains/financeBankTransferBooking.js";
-import { createPgPlatformMarketplaceAccountsRepository } from "./domains/platformMarketplaceAccountsRepository.js";
 import {
   createPgIdentityRepository,
   createPgStaffInvitationAcceptanceRepository,
@@ -96,14 +81,7 @@ import { createBookingGuestPolicyProductionApplication } from "./domains/booking
 import { createPgBookingGuestPolicyScopeAuthorizationPort } from "./domains/bookingGuestPolicyScopeAuthorization.js";
 import { createPgHotelCatalogCurrentOwnerEvidencePorts } from "./domains/hotelCatalogCurrentOwnerEvidence.js";
 import { createPgHotelCatalogStep1Repository } from "./domains/hotelCatalogStep1Repository.js";
-import { createPgAffiliatePerformanceReadModel } from "./domains/affiliatePerformanceReadModel.js";
-import { createPgFinanceAffiliatePercentagePolicyRepository } from "./domains/financeAffiliatePercentagePolicyRepository.js";
-import { createPgMarketplaceAffiliateDraftRepository } from "./domains/marketplaceAffiliateDraftRepository.js";
-import { createPgAffiliateDiscrepancyRepository } from "./domains/affiliateDiscrepancyRepository.js";
 import { createPgMarketplaceHotelCollaborationPreferencesRepository } from "./domains/marketplaceHotelCollaborationPreferencesRepository.js";
-import { createPgMarketplaceCommunicationPreferencesRepository } from "./domains/marketplaceCommunicationPreferencesRepository.js";
-import { createMarketplaceCommunicationUnsubscribeTokenService } from "./domains/marketplaceCommunicationUnsubscribeToken.js";
-import { MARKETPLACE_COMMUNICATIONS_INITIAL_POLICY } from "@vayada/domain-marketplace";
 import { createPgFinanceOtaCommissionRuleRepository } from "./domains/financeOtaCommissionRuleRepository.js";
 import { createBankTransferCodec } from "./domains/financeBankTransferCodec.js";
 import { createBankTransferRepository } from "./domains/financeBankTransferRepository.js";
@@ -136,7 +114,6 @@ import { createTargetBookingDashboardMetricsReadPort } from "./platform/bookingD
 import { createTargetBookingGuestPiiPort } from "./platform/bookingGuestPii.js";
 import { createS3FinanceFolioExportArtifactWriter } from "./platform/financeFolioExportArtifacts.js";
 import { createPgIdentityLifecycleCommandBus } from "./platform/identityLifecycle.js";
-import { createPgMarketplaceOfferIdentityAccessCommandPort } from "./platform/marketplaceOfferIdentityAccess.js";
 import { createTargetPublicBookabilityPublicationCommandPort } from "./platform/publicBookabilityPublication.js";
 import { createPgProductAuditSink } from "./platform/productAudit.js";
 import { createPgAuthSessionHandoffRepository } from "./platform/authSessionHandoffs.js";
@@ -261,8 +238,6 @@ import {
   createResendBookingEmailDelivery,
   runBookingEmailDeliveryJobs,
 } from "./jobs/bookingEmailDelivery.js";
-import { startCreatorPlatformSyncWorker } from "./jobs/creatorPlatformSync.js";
-import { createPgCreatorPlatformSyncStore } from "./jobs/creatorPlatformSyncStore.js";
 import { runChannexReviewJobs } from "./jobs/channexReviews.js";
 import { runChannexBookingJobs } from "./jobs/channexBookings.js";
 import { runChannexMessageJobs } from "./jobs/channexMessages.js";
@@ -298,7 +273,6 @@ import {
   FINANCE_EXPORT_WORKER_ROLE,
 } from "./jobs/financeExportWorkerBoundary.js";
 import { runFinanceExpenseGenerationCycle } from "./jobs/financeExpenseGeneration.js";
-import { runAffiliateEarningReconciliationCycle } from "./jobs/financeAffiliateEarningReconciliation.js";
 import { runFinanceFolioExportJobs } from "./jobs/financeFolioExport.js";
 import { runFinanceStripeAccountCompensationJobs } from "./jobs/financeStripeAccountCompensation.js";
 import {
@@ -310,10 +284,6 @@ import {
   startBookingWebEventRetentionWorker,
 } from "./jobs/bookingWebEventRetention.js";
 import { createTargetPublicHotelProfileRepository } from "./routes/aiHotels.js";
-import {
-  createPgBookingWebAffiliateHotelResolver,
-  createPgBookingWebAffiliateRepository,
-} from "./routes/bookingWebAffiliate.js";
 import { createPgTargetBookingAddonItemsRepository } from "./routes/bookingAddonItems.js";
 import { createPgTargetBookingPromoCodesRepository } from "./routes/bookingPromoCodes.js";
 import { promotePulledChannexBookingRevision } from "./routes/providerWebhooks.js";
@@ -334,15 +304,10 @@ import { createChannexGuestReviews } from "./integrations/channexGuestReviews.js
 import { createPgReviewReplyCommands } from "./domains/pmsReviewReplies.js";
 import { createChannexReviewReplies } from "./integrations/channexReviewReplies.js";
 import { createPgPmsReviewRepository } from "./routes/pmsReviews.js";
-import { createPgMarketplaceCollaborationReadRepository } from "./routes/marketplaceCollaborations.js";
-import { createPgMarketplaceTripRepository } from "./routes/marketplaceTrips.js";
 import { createPgMarketplaceAdminRepository } from "./routes/marketplaceAdmin.js";
 import { createPgHotelAccountInviteRepository } from "./routes/hotelAccountInvites.js";
 import { createPgMarketplaceHotelProfileStatusRepository } from "./routes/marketplaceHotelProfileStatus.js";
 import { createPgMarketplaceHotelSelfServiceRepository } from "./routes/marketplaceHotelSelfService.js";
-import { createPgMarketplaceAffiliateAdminRepository } from "./domains/marketplaceAffiliateAdminRepository.js";
-import { createPgFinanceAffiliateCommissionRepository } from "./domains/financeAffiliateCommissionRepository.js";
-import { createPgMarketplaceCreatorSelfServiceRepository } from "./routes/marketplaceCreatorSelfService.js";
 import { createPgSharedHotelSetupStatusRepository } from "./platform/sharedHotelSetupStatusReadModel.js";
 import { createPgPropertyNearbyDiscoveryRepository } from "./domains/propertyNearbyDiscoveryRepository.js";
 import { createPgPropertyNearbyRepository } from "./domains/propertyNearbyRepository.js";
@@ -350,25 +315,11 @@ import { createPgPublicNearbyRepository } from "./domains/publicNearbyRepository
 import { configureActiveBookingPublicationGate } from "./domains/activeBookingPublicationGate.js";
 import { createPgIdentityAdminUsersReadRepository } from "./routes/identityAdminUsers.js";
 import { createPgIdentityPrivacyRepository } from "./routes/identityPrivacy.js";
-import { createPgMarketplaceCreatorPlatformConnectionRepository } from "./routes/marketplaceCreatorPlatformConnections.js";
 import { createTargetPlatformAdminDashboardRepository } from "./routes/platform/admin/dashboard/bookingCompatible.js";
 import { createPgPlatformPropertyLifecycleCommandRepository } from "./domains/platformPropertyLifecycleCommandRepository.js";
 import { createPgPlatformPropertyLifecycleImpactRepository } from "./domains/platformPropertyLifecycleImpactRepository.js";
 import { createPgPlatformPropertyProvisioningRepository } from "./domains/platformPropertyProvisioningRepository.js";
 import { createPgPlatformContactIntakeRepository } from "./routes/platformContactIntake.js";
-import {
-  createCreatorPlatformAdapterRegistry,
-  createFacebookCreatorPlatformAdapter,
-  createInstagramCreatorPlatformAdapter,
-  createTikTokCreatorPlatformAdapter,
-  createYouTubeCreatorPlatformAdapter,
-  type CreatorPlatformAdapter,
-} from "./integrations/creatorPlatforms/index.js";
-import {
-  createMemoryProviderCredentialVault,
-  createSecretsManagerProviderCredentialVault,
-  createUnavailableProviderCredentialVault,
-} from "./platform/providerCredentialVault.js";
 
 const postgresRuntime = installPostgresPoolRuntime(pg);
 const config = loadConfig();
@@ -406,12 +357,8 @@ if (!targetDatabaseUrl) {
   throw new Error("TARGET_DATABASE_URL is required because Marketplace is always enabled");
 }
 
-const {
-  publicHotelProfileRepository,
-  publicHotelQuoteRepository,
-  bookingWebCalendarRepository,
-  marketplaceDiscoveryRepository,
-} = createPublicRuntimeRepositories(config);
+const { publicHotelProfileRepository, publicHotelQuoteRepository, bookingWebCalendarRepository } =
+  createPublicRuntimeRepositories(config);
 
 const bookingSettingsRepository = createPgTargetBookingSettingsRepository({
   connectionString: targetDatabaseUrl,
@@ -524,15 +471,6 @@ const airbnbAlterationRuntime = createAirbnbAlterationRuntime({
   config,
   connectionString: targetDatabaseUrl,
 });
-if (config.affiliateBookingBindingEnabled) {
-  const client = new pg.Client({ connectionString: targetDatabaseUrl });
-  try {
-    await client.connect();
-    await assertAffiliateBookingBindingCapabilities(client);
-  } finally {
-    await client.end();
-  }
-}
 const bookingWebCheckoutAdapter = createTargetBookingWebCheckoutAdapter({
   airbnbAlterations: airbnbAlterationRuntime?.adapter,
   mediaServing: config.platformMediaServing,
@@ -962,19 +900,6 @@ const channexUploadReconciliationPool =
         connectionTimeoutMillis: 5_000,
       })
     : undefined;
-const bookingWebAffiliateRepository =
-  config.affiliatePublicSource === "target"
-    ? createPgBookingWebAffiliateRepository({
-        connectionString: targetDatabaseUrl,
-      })
-    : undefined;
-
-const bookingWebAffiliateHotelResolver =
-  config.affiliatePublicSource === "target"
-    ? createPgBookingWebAffiliateHotelResolver({
-        connectionString: targetDatabaseUrl,
-      })
-    : undefined;
 
 const hotelCatalogStep1Repository = createPgHotelCatalogStep1Repository({
   connectionString: targetDatabaseUrl,
@@ -983,22 +908,10 @@ const marketplaceSubmissionRepository = createPgMarketplaceSubmissionRepository(
   connectionString: targetDatabaseUrl,
   sources: marketplaceSubmissionTransactionSources,
 });
-const marketplaceHotelSubmissionModerationRepository =
-  createPgMarketplaceHotelSubmissionModerationRepository({ connectionString: targetDatabaseUrl });
 const marketplaceHotelCollaborationPreferencesRepository =
   createPgMarketplaceHotelCollaborationPreferencesRepository({
     connectionString: targetDatabaseUrl,
   });
-const marketplaceCommunicationPreferencesRepository =
-  createPgMarketplaceCommunicationPreferencesRepository({
-    connectionString: targetDatabaseUrl,
-    policy: MARKETPLACE_COMMUNICATIONS_INITIAL_POLICY,
-  });
-const marketplaceCommunicationUnsubscribeTokenService = config.marketplaceCommunicationUnsubscribe
-  ? createMarketplaceCommunicationUnsubscribeTokenService(
-      config.marketplaceCommunicationUnsubscribe,
-    )
-  : undefined;
 const bookingDesignRepository = createPgBookingDesignRepository({
   connectionString: targetDatabaseUrl,
 });
@@ -1550,54 +1463,6 @@ const propertySetupRouteStateReadPort = createPropertySetupRouteStateReadPort({
   },
 });
 
-const marketplaceCreatorSelfServiceRepository = createPgMarketplaceCreatorSelfServiceRepository({
-  connectionString: targetDatabaseUrl,
-});
-
-const marketplaceAffiliateAdminRepository = createPgMarketplaceAffiliateAdminRepository({
-  connectionString: targetDatabaseUrl,
-});
-
-const financeAffiliateCommissionRepository = createPgFinanceAffiliateCommissionRepository({
-  connectionString: targetDatabaseUrl,
-});
-
-const creatorPlatformConnectionRuntime = (() => {
-  const connectionConfig = config.creatorPlatformConnections;
-  const adapters: CreatorPlatformAdapter[] = [];
-  if (connectionConfig?.instagram) {
-    adapters.push(createInstagramCreatorPlatformAdapter(connectionConfig.instagram));
-  }
-  if (connectionConfig?.facebook) {
-    adapters.push(createFacebookCreatorPlatformAdapter(connectionConfig.facebook));
-  }
-  if (connectionConfig?.tiktok) {
-    adapters.push(createTikTokCreatorPlatformAdapter(connectionConfig.tiktok));
-  }
-  if (connectionConfig?.youtube) {
-    adapters.push(createYouTubeCreatorPlatformAdapter(connectionConfig.youtube));
-  }
-  const credentialVault = !connectionConfig
-    ? createUnavailableProviderCredentialVault()
-    : connectionConfig.credentialVault.provider === "memory"
-      ? createMemoryProviderCredentialVault()
-      : createSecretsManagerProviderCredentialVault({
-          region: connectionConfig.credentialVault.region,
-        });
-  return {
-    repository: createPgMarketplaceCreatorPlatformConnectionRepository({
-      connectionString: targetDatabaseUrl,
-    }),
-    credentialVault,
-    adapters: createCreatorPlatformAdapterRegistry(adapters),
-    callbackBaseUrl: connectionConfig?.callbackBaseUrl ?? "https://creator.api.localhost",
-    webReturnUrl:
-      connectionConfig?.webReturnUrl ?? "https://marketplace.localhost/profile/complete",
-    credentialSecretPrefix:
-      connectionConfig?.credentialVault.secretPrefix ?? "vayada/unconfigured/creator-platforms",
-  };
-})();
-
 const authSessionHandoffRepository =
   config.auth && config.authSession
     ? createPgAuthSessionHandoffRepository({ connectionString: config.auth.databaseUrl })
@@ -1689,23 +1554,6 @@ const airbnbImportRuntime = config.airbnbImport
       connectionString: targetDatabaseUrl,
       allowedOrigins: config.authSession!.authAllowedOrigins,
     })
-  : undefined;
-const affiliateCaptureConfig = config.affiliateCapture;
-const affiliateCaptureRuntime = affiliateCaptureConfig
-  ? await (async (affiliateCapture) => {
-      const pool = new pg.Pool({ connectionString: affiliateCapture.databaseUrl, max: 5 });
-      try {
-        await assertAffiliateCaptureRoleHasVisitReadCapabilities(
-          pool,
-          undefined,
-          config.affiliatePublicRedirectEnabled,
-        );
-        return { pool, internalToken: affiliateCapture.internalToken };
-      } catch (error) {
-        await pool.end();
-        throw error;
-      }
-    })(affiliateCaptureConfig)
   : undefined;
 const app = buildApp({
   airbnbImports: airbnbImportRuntime?.routes,
@@ -2093,13 +1941,6 @@ const app = buildApp({
           receiptSecret: config.authSession.workosApiKey,
         }
       : undefined,
-  platformMarketplaceActivation: {
-    accounts: createPgPlatformMarketplaceAccountsRepository({
-      connectionString: targetDatabaseUrl,
-      tracks: hotelSetupTrackCommandRepository,
-    }),
-    tracks: hotelSetupTrackCommandRepository,
-  },
   platformPropertyLifecycle: {
     impactRepository: createPgPlatformPropertyLifecycleImpactRepository({
       connectionString: targetDatabaseUrl,
@@ -2122,24 +1963,9 @@ const app = buildApp({
       ? { refresh: bookingPublicationRuntime.refresh.bind(bookingPublicationRuntime) }
       : undefined,
   bookingCustomDomainRepository,
-  marketplaceDiscoveryRepository,
-  marketplaceCollaborationRepository: createPgMarketplaceCollaborationReadRepository({
-    connectionString: targetDatabaseUrl,
-    attachmentMedia: platformMediaRuntime?.collaborationAttachments,
-  }),
-  marketplaceAffiliatePerformance: {
-    repository: createPgAffiliatePerformanceReadModel(targetDatabaseUrl),
-  },
-  marketplaceTripRepository: createPgMarketplaceTripRepository({
-    connectionString: targetDatabaseUrl,
-  }),
   marketplaceAdminRepository:
     config.marketplaceAdminSource === "target"
-      ? createPgMarketplaceAdminRepository({
-          connectionString: targetDatabaseUrl,
-          identityAccess: createPgMarketplaceOfferIdentityAccessCommandPort(),
-          offerMediaPromotion: platformMediaRuntime?.offerMediaPromotion,
-        })
+      ? createPgMarketplaceAdminRepository({ connectionString: targetDatabaseUrl })
       : undefined,
   marketplaceAdminLegacySuperadminFallbackEnabled:
     config.marketplaceAdminLegacySuperadminFallbackEnabled,
@@ -2151,51 +1977,7 @@ const app = buildApp({
   marketplaceHotelSelfServiceRepository: createPgMarketplaceHotelSelfServiceRepository({
     connectionString: targetDatabaseUrl,
   }),
-  marketplaceAffiliateAdminRepository,
-  marketplaceAffiliateAssentRepository: createPgMarketplaceAffiliateAssentRepository(
-    targetDatabaseUrl,
-    createAffiliateAgreementActivationReadiness(
-      createAffiliatePublicationPrerequisites({
-        commercialConditions: readFinanceAffiliateCommercialConditions,
-        trackingConfiguration: readAffiliateDestinationTrackingConfiguration,
-      }),
-    ),
-    readMarketplaceAffiliateLinkCreationReadiness,
-  ),
-  marketplaceAffiliateDraftRepository:
-    createPgMarketplaceAffiliateDraftRepository(targetDatabaseUrl),
-  marketplaceAffiliateDiscrepancyRepository:
-    createPgAffiliateDiscrepancyRepository(targetDatabaseUrl),
-  marketplaceAffiliatePublication: (() => {
-    const pool = new pg.Pool({ connectionString: targetDatabaseUrl, max: 3 });
-    const prerequisites = createAffiliatePublicationPrerequisites({
-      commercialConditions: readFinanceAffiliateCommercialConditions,
-      trackingConfiguration: readAffiliateDestinationTrackingConfiguration,
-    });
-    return {
-      publish: (input) => publishMarketplaceAffiliateTerms(pool, input, prerequisites),
-      close: () => pool.end(),
-    };
-  })(),
-  marketplaceAffiliatePolicyRepository:
-    createPgFinanceAffiliatePercentagePolicyRepository(targetDatabaseUrl),
-  marketplaceAffiliateDestinationRepository: createPgBookingAffiliateDestinationRepository(
-    targetDatabaseUrl,
-    {
-      configuration: readAffiliateDestinationTrackingConfiguration,
-    },
-  ),
-  marketplaceAffiliateCompletionRepository:
-    createPgPmsAffiliateCompletionRepository(targetDatabaseUrl),
-  financeAffiliateCommissions: {
-    repository: financeAffiliateCommissionRepository,
-  },
-  marketplaceCreatorSelfServiceRepository,
-  marketplaceCreatorPlatformConnections: {
-    ...creatorPlatformConnectionRuntime,
-    credentialCleanupEnabled: config.backgroundWorkersEnabled,
-  },
-  marketplaceCreatorProfileMediaRepository: platformMediaRuntime?.profileMediaRepository,
+  profileImageMediaRepository: platformMediaRuntime?.profileMediaRepository,
   sharedHotelSetupStatusRepository,
   propertyNearbyRepository: config.auth
     ? createPgPropertyNearbyRepository(targetDatabaseUrl)
@@ -2231,11 +2013,6 @@ const app = buildApp({
       }
     : undefined,
   marketplaceSubmission: { repository: marketplaceSubmissionRepository },
-  marketplaceHotelSubmissionModeration: {
-    repository: marketplaceHotelSubmissionModerationRepository,
-    mediaResolver: () =>
-      bookingDesignMediaAdapter ? createHotelMediaResolutionPort(bookingDesignMediaAdapter) : null,
-  },
   marketplacePublicHotel: {
     read: async (propertyId) => {
       if (!bookingDesignMediaAdapter) throw new Error("Public media resolver unavailable");
@@ -2248,19 +2025,6 @@ const app = buildApp({
   marketplaceHotelCollaborationPreferences: {
     commandPort: marketplaceHotelCollaborationPreferencesRepository,
     readPort: marketplaceHotelCollaborationPreferencesRepository,
-  },
-  marketplaceCommunicationPreferences: {
-    commandPort: marketplaceCommunicationPreferencesRepository,
-    readPort: marketplaceCommunicationPreferencesRepository,
-    policy: MARKETPLACE_COMMUNICATIONS_INITIAL_POLICY,
-    ...(marketplaceCommunicationUnsubscribeTokenService
-      ? {
-          unsubscribe: {
-            commandPort: marketplaceCommunicationPreferencesRepository,
-            tokenPort: marketplaceCommunicationUnsubscribeTokenService,
-          },
-        }
-      : {}),
   },
   bookingDesign: {
     commandPort: bookingDesignRepository,
@@ -2280,7 +2044,6 @@ const app = buildApp({
         publicSiteServesPublications: config.publicHotelProfileSource === "active_publication",
       }
     : undefined,
-  marketplaceDiscoveryAllowedOrigins: config.marketplaceDiscoveryAllowedOrigins,
   identityPrivacyRepository: config.auth
     ? createPgIdentityPrivacyRepository({
         connectionString: config.auth.databaseUrl,
@@ -2303,26 +2066,12 @@ const app = buildApp({
   bookingWebCalendarRepository,
   bookingWebCheckoutAdapter,
   bookingWebDisplayRates: createBookingWebDisplayRates(),
-  bookingWebAffiliateArrival: affiliateCaptureRuntime,
-  marketplaceAffiliatePublicLink:
-    config.affiliatePublicRedirectEnabled && affiliateCaptureRuntime
-      ? {
-          visit: (input) => createMarketplaceAffiliateVisit(affiliateCaptureRuntime.pool, input),
-          consumeQuota: createMarketplaceAffiliatePublicLinkQuota(
-            affiliateCaptureRuntime.pool,
-            affiliateCaptureConfig!.internalToken,
-          ),
-        }
-      : undefined,
-  bookingWebAffiliateContextBindingEnabled: config.affiliateBookingBindingEnabled,
   bookingWebAttributionSink:
     config.bookingWebEventSink === "target" && config.auth
       ? createPgBookingWebEventSink({
           connectionString: targetDatabaseUrl,
         })
       : undefined,
-  bookingWebAffiliateHotelResolver,
-  bookingWebAffiliateRepository,
   platformMedia: platformMediaRuntime
     ? {
         ...platformMediaRuntime.routes,
@@ -2330,30 +2079,6 @@ const app = buildApp({
       }
     : undefined,
 });
-app.addHook("onClose", async () => {
-  await affiliateCaptureRuntime?.pool.end();
-});
-
-const creatorPlatformSyncConfig = config.creatorPlatformConnections?.sync;
-const creatorPlatformSyncWorker =
-  config.backgroundWorkersEnabled && creatorPlatformSyncConfig?.enabled
-    ? startCreatorPlatformSyncWorker({
-        store: createPgCreatorPlatformSyncStore({ connectionString: targetDatabaseUrl }),
-        repository: createPgMarketplaceCreatorPlatformConnectionRepository({
-          connectionString: targetDatabaseUrl,
-        }),
-        credentialVault: creatorPlatformConnectionRuntime.credentialVault,
-        adapters: creatorPlatformConnectionRuntime.adapters,
-        credentialSecretPrefix: creatorPlatformConnectionRuntime.credentialSecretPrefix,
-        workerId: `creator-platform-sync:${process.pid}`,
-        pollIntervalMs: creatorPlatformSyncConfig.pollIntervalMs,
-        syncIntervalMs: creatorPlatformSyncConfig.recurringIntervalMs,
-        batchSize: creatorPlatformSyncConfig.batchSize,
-        maxAttempts: creatorPlatformSyncConfig.maxAttempts,
-        minimumSpacingMs: creatorPlatformSyncConfig.minimumSpacingMs,
-        warn: (details, message) => app.log.warn(details, message),
-      })
-    : undefined;
 
 const adminRoleWorker =
   config.backgroundWorkersEnabled && config.auth && config.authSession
@@ -2436,7 +2161,6 @@ const bookingGuestPolicyProjectionWorker =
     : undefined;
 
 app.addHook("onClose", async () => {
-  await creatorPlatformSyncWorker?.close();
   await adminRoleWorker?.close();
   await staffRemovalWorker?.close();
   await pmsInboxAssignmentReconciliationWorker?.close();
@@ -2445,9 +2169,7 @@ app.addHook("onClose", async () => {
   await bookingPublicationRuntime?.close();
   await Promise.all([
     marketplaceSubmissionRepository.close(),
-    marketplaceHotelSubmissionModerationRepository.close(),
     marketplaceHotelCollaborationPreferencesRepository.close(),
-    marketplaceCommunicationPreferencesRepository.close(),
     bookingDesignRepository.close(),
     bookingDesignCatalogEvidenceRepository?.close(),
     bookingPropertyAccessRepository.close?.(),
@@ -3010,40 +2732,6 @@ app.addHook("onClose", async () => {
   if (financeExpenseGenerationTimer) clearInterval(financeExpenseGenerationTimer);
   await activeFinanceExpenseGeneration;
   await financeExpenseGenerationPool?.end();
-});
-
-const affiliateEarningPool =
-  config.backgroundWorkersEnabled &&
-  config.financeSource === "target" &&
-  config.pmsOperationsSource === "target"
-    ? new pg.Pool({ connectionString: targetDatabaseUrl, max: 2 })
-    : undefined;
-let activeAffiliateEarningReconciliation: Promise<void> | undefined;
-const runAffiliateEarningReconciliation = () => {
-  if (!affiliateEarningPool || activeAffiliateEarningReconciliation) return;
-  activeAffiliateEarningReconciliation = runAffiliateEarningReconciliationCycle(
-    affiliateEarningPool,
-  )
-    .then((result) => {
-      if (result.eligible || result.ineligible)
-        app.log.info(result, "Affiliate earning reconciliation completed");
-    })
-    .catch((error: unknown) =>
-      app.log.warn({ err: error }, "Affiliate earning reconciliation failed"),
-    )
-    .finally(() => {
-      activeAffiliateEarningReconciliation = undefined;
-    });
-};
-const affiliateEarningTimer = affiliateEarningPool
-  ? setInterval(runAffiliateEarningReconciliation, 60_000)
-  : undefined;
-affiliateEarningTimer?.unref();
-if (affiliateEarningPool) runAffiliateEarningReconciliation();
-app.addHook("onClose", async () => {
-  if (affiliateEarningTimer) clearInterval(affiliateEarningTimer);
-  await activeAffiliateEarningReconciliation;
-  await affiliateEarningPool?.end();
 });
 
 if (financeFolioExportWorker) {

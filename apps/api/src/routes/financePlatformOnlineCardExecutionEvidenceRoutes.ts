@@ -6,7 +6,7 @@ import type {
 import type { RequestContext } from "@vayada/backend-auth";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
-import { authorizePlatformFinance } from "./financePlatformAffiliatePayoutRoutes.js";
+import { authorizePlatformFinance } from "./financePlatformAuthorization.js";
 
 type PropertyParams = { propertyId: string };
 type EvidenceParams = PropertyParams & { evidenceId: string };

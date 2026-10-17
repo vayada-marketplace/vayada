@@ -1,9 +1,8 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState, ReactNode, Suspense } from "react";
+import { createContext, useContext, useEffect, useState, ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { AffiliateClickTracker } from "@/components/AffiliateClickTracker";
 import { Hotel, Addon } from "@/lib/types";
 import { hotelService } from "@/services/api/hotel";
 import { ApiError } from "@/services/api/client";
@@ -237,11 +236,6 @@ export function HotelProvider({
       }}
     >
       {children}
-      {slugResolved && slug && (
-        <Suspense fallback={null}>
-          <AffiliateClickTracker slug={slug} />
-        </Suspense>
-      )}
     </HotelContext.Provider>
   );
 }

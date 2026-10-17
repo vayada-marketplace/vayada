@@ -109,16 +109,6 @@ function createActivationRepository(includeFinancials = true): PmsModuleActivati
         updatedAt: now,
       },
     ],
-    [
-      "affiliates",
-      {
-        moduleId: "affiliates",
-        isActive: true,
-        activatedAt: now,
-        deactivatedAt: null,
-        updatedAt: now,
-      },
-    ],
   ]);
   if (!includeFinancials) activations.delete("financials");
   return {
@@ -228,11 +218,9 @@ describe("PMS module activation routes", () => {
       hotelId: propertyId,
       canManage: false,
       supportedModules: [],
-      activeModules: ["affiliates"],
+      activeModules: [],
     });
-    expect(response.body.activations).toEqual([
-      expect.objectContaining({ moduleId: "affiliates", isActive: true }),
-    ]);
+    expect(response.body.activations).toEqual([]);
   });
 
   it("reports read-only activation capability without weakening write authorization", async () => {
@@ -248,7 +236,7 @@ describe("PMS module activation routes", () => {
     expect(response.body.canManage).toBe(false);
     const write = await app.inject({
       method: "PATCH",
-      url: `/api/pms/properties/${propertyId}/module-activations/affiliates`,
+      url: `/api/pms/properties/${propertyId}/module-activations/financials`,
       headers: { authorization: "Bearer valid-token" },
       payload: { isActive: true },
     });
@@ -284,7 +272,7 @@ describe("PMS module activation routes", () => {
       headers,
     });
     expect(list.body.supportedModules).toEqual([]);
-    expect(list.body.activeModules).toEqual(["affiliates"]);
+    expect(list.body.activeModules).toEqual([]);
     const update = await app.inject({
       method: "PATCH",
       url: `/api/pms/properties/${propertyId}/module-activations/financials`,
@@ -438,7 +426,7 @@ describe("PMS module activation routes", () => {
     expect(list.body).toMatchObject({
       canManage: true,
       supportedModules: ["financials"],
-      activeModules: ["affiliates", "financials"],
+      activeModules: ["financials"],
     });
     const disabled = await app.inject({
       method: "PATCH",
@@ -469,7 +457,7 @@ describe("PMS module activation routes", () => {
       headers,
     });
     expect(list.body.supportedModules).toEqual(["financials"]);
-    expect(list.body.activeModules).toEqual(["affiliates"]);
+    expect(list.body.activeModules).toEqual([]);
     expect(list.body.canManage).toBe(false);
     const update = await app.inject({
       method: "PATCH",
@@ -504,7 +492,7 @@ describe("PMS module activation routes", () => {
       headers: { authorization: "Bearer valid-token" },
     });
     expect(list.body.supportedModules).toEqual(["financials"]);
-    expect(list.body.activeModules).toEqual(["affiliates"]);
+    expect(list.body.activeModules).toEqual([]);
   });
 
   it("does not expose or allow Financials for an operator or front desk member", async () => {
@@ -567,52 +555,6 @@ describe("PMS module activation routes", () => {
     expect(update.statusCode).toBe(403);
   });
 
-  it.each([false, true])(
-    "retires affiliate module updates without writes or publication refresh (active: %s)",
-    async (isActive) => {
-      const repository = createActivationRepository();
-      const refreshes: Parameters<BookingPublicationRefreshPort["refresh"]>[0][] = [];
-      app = buildAuthenticatedApp({
-        repository,
-        bookingPublicationRefresh: {
-          async refresh(input) {
-            refreshes.push(input);
-            return {
-              operationId: "a1000000-0000-4000-8000-000000001299",
-              propertyId: input.propertyId,
-              status: "succeeded",
-              expectedActiveContentRevisionId: null,
-              resultContentRevisionId: "a1000000-0000-4000-8000-000000001300",
-              failureCode: null,
-              requestedAt: "2026-09-03T01:00:00.000Z",
-              updatedAt: "2026-09-03T01:00:01.000Z",
-              completedAt: "2026-09-03T01:00:01.000Z",
-            };
-          },
-        },
-      });
-
-      const response = await app.inject({
-        method: "PATCH",
-        url: `/api/pms/properties/${propertyId}/module-activations/affiliates`,
-        headers: { authorization: "Bearer valid-token" },
-        payload: { moduleId: "affiliates", isActive },
-      });
-
-      expect(response.statusCode).toBe(410);
-      expect(response.json()).toMatchObject({ code: "affiliate_module_activation_retired" });
-      expect(response.headers["cache-control"]).toBe("no-store");
-
-      expect(refreshes).toHaveLength(0);
-      const after = await injectJson<PmsModuleActivationsResponse>(app, {
-        method: "GET",
-        url: `/api/pms/properties/${propertyId}/module-activations`,
-        headers: { authorization: "Bearer valid-token" },
-      });
-      expect(after.body.activeModules).toEqual(["affiliates"]);
-    },
-  );
-
   it("rejects malformed module activation updates before writing", async () => {
     const repository = createActivationRepository();
     app = buildAuthenticatedApp({ repository });
@@ -627,7 +569,7 @@ describe("PMS module activation routes", () => {
     expect(response.statusCode).toBe(400);
   });
 
-  it.each(["inbox", "lodgify", "stripe", "paypal", "xendit", "future-module"])(
+  it.each(["inbox", "affiliates", "lodgify", "stripe", "paypal", "xendit", "future-module"])(
     "rejects unsupported %s activation updates before writing",
     async (moduleId) => {
       const repository = createActivationRepository();
@@ -650,9 +592,9 @@ describe("PMS module activation routes", () => {
 
     const response = await injectJson(app, {
       method: "PATCH",
-      url: `/api/pms/properties/${propertyId}/module-activations/affiliates`,
+      url: `/api/pms/properties/${propertyId}/module-activations/financials`,
       headers: { authorization: "Bearer valid-token" },
-      payload: { moduleId: "affiliates", isActive: true },
+      payload: { moduleId: "financials", isActive: true },
     });
 
     expect(response.statusCode).toBe(403);
@@ -663,7 +605,7 @@ describe("PMS module activation routes", () => {
 
     const response = await app.inject({
       method: "OPTIONS",
-      url: `/api/pms/properties/${propertyId}/module-activations/affiliates`,
+      url: `/api/pms/properties/${propertyId}/module-activations/financials`,
       headers: {
         origin: "https://next-pms.vayada.com",
         "access-control-request-method": "PATCH",
@@ -680,7 +622,7 @@ describe("PMS module activation routes", () => {
 
     const response = await app.inject({
       method: "OPTIONS",
-      url: `/api/pms/properties/${propertyId}/module-activations/affiliates`,
+      url: `/api/pms/properties/${propertyId}/module-activations/financials`,
       headers: {
         origin: "https://other.example.com",
         "access-control-request-method": "PATCH",
@@ -741,7 +683,7 @@ describe("PMS module activation routes", () => {
       expect(response.statusCode).toBe(expectedStatus);
       const write = await injectJson(app, {
         method: "PATCH",
-        url: `/api/pms/properties/${propertyId}/module-activations/affiliates`,
+        url: `/api/pms/properties/${propertyId}/module-activations/financials`,
         headers,
         payload: { isActive: true },
       });
@@ -1019,7 +961,7 @@ describe("PG PMS module activation repository", () => {
           rowCount: 1,
           rows: [
             {
-              entitlementKey: "module:affiliates",
+              entitlementKey: "module:financials",
               status: "active",
               startsAt: "2026-06-29T08:00:00.000Z",
               expiresAt: null,
@@ -1038,7 +980,7 @@ describe("PG PMS module activation repository", () => {
 
     expect(activations).toEqual([
       {
-        moduleId: "affiliates",
+        moduleId: "financials",
         isActive: true,
         activatedAt: "2026-06-29T08:00:00.000Z",
         deactivatedAt: null,
@@ -1049,10 +991,6 @@ describe("PG PMS module activation repository", () => {
     expect(queries[0].text).toContain("FROM identity.product_entitlements");
     expect(queries[0].text).toContain("entitlement_key = ANY($3::text[])");
     expect(queries[0].text).toContain("starts_at IS NULL OR starts_at <= now()");
-    expect(queries[0].values).toEqual([
-      organizationId,
-      propertyId,
-      ["module:affiliates", "module:financials"],
-    ]);
+    expect(queries[0].values).toEqual([organizationId, propertyId, ["module:financials"]]);
   });
 });
