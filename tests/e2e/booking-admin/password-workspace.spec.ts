@@ -44,7 +44,11 @@ test("password login lets a hotel user choose a workspace", async ({ page }) => 
 
 const NO_HOTEL_MESSAGE = "No active hotel_group organization is available for this surface";
 
-test("password login without a hotel workspace offers hotel setup", async ({ page }) => {
+// Booking Admin hosts hotel setup itself (VAY-2261): the login page explains the missing
+// workspace and no longer links to the Marketplace login (plan G8).
+test("password login without a hotel workspace explains it without a Marketplace link", async ({
+  page,
+}) => {
   await page.route("**/auth/password/login", (route) =>
     route.fulfill({
       status: 403,
@@ -62,16 +66,15 @@ test("password login without a hotel workspace offers hotel setup", async ({ pag
   await page.getByRole("button", { name: "Sign In", exact: true }).click();
   await expect(page.getByText(/isn't connected to a hotel yet/)).toBeVisible();
   await expect(page.getByText(NO_HOTEL_MESSAGE)).toHaveCount(0);
-  await expect(page.getByRole("link", { name: "Set up your hotel" })).toHaveAttribute(
-    "href",
-    /^https?:\/\/[^/]+\/login$/,
-  );
+  await expect(page.getByRole("link", { name: "Set up your hotel" })).toHaveCount(0);
 });
 
-test("Google login without a hotel workspace offers hotel setup", async ({ page }) => {
+test("Google login without a hotel workspace explains it without a Marketplace link", async ({
+  page,
+}) => {
   await page.goto(
     `/login?auth_error=${encodeURIComponent(NO_HOTEL_MESSAGE)}&auth_error_code=hotel_workspace_required`,
   );
   await expect(page.getByText(/isn't connected to a hotel yet/)).toBeVisible();
-  await expect(page.getByRole("link", { name: "Set up your hotel" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Set up your hotel" })).toHaveCount(0);
 });
