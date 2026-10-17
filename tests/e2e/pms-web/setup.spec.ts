@@ -92,7 +92,11 @@ test.describe("pms-web canonical setup redirect", () => {
           organizationId: "org_pms_owner",
           organizationDisplayName: "PMS Owner Group",
           propertyId: PMS_WEB_PROPERTY_ID,
-          entryDecision: { decision: "setup_required", reasonCode: "product_access_pending" },
+          entryDecision: {
+            decision: "setup_required",
+            destinationRouteKey: "hotel_setup",
+            reasonCode: "product_access_pending",
+          },
         }),
       }),
     );
