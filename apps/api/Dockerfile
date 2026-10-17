@@ -1,6 +1,6 @@
-# syntax=ghcr.io/vayada-marketplace/ci-dockerfile:1
+# syntax=ghcr.io/vayada-marketplace/ci-dockerfile:1@sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e
 
-FROM ghcr.io/vayada-marketplace/ci-node:24-slim AS build
+FROM ghcr.io/vayada-marketplace/ci-node:24-slim@sha256:a5f4366e834695d5f363b920c104953a535d3a9864d1bdf74566a0ebe01daee5 AS build
 
 ENV HUSKY=0
 
@@ -18,7 +18,7 @@ COPY engineering/fixtures/c1-staging-rehearsal-replay ./engineering/fixtures/c1-
 COPY scripts/c1-rehearsal-replay-fixtures.mjs ./scripts/c1-rehearsal-replay-fixtures.mjs
 COPY scripts/start-next-api.sh ./scripts/start-next-api.sh
 
-FROM ghcr.io/vayada-marketplace/ci-node:24-slim AS runtime
+FROM ghcr.io/vayada-marketplace/ci-node:24-slim@sha256:a5f4366e834695d5f363b920c104953a535d3a9864d1bdf74566a0ebe01daee5 AS runtime
 
 ARG API_RUNTIME=
 ARG APPLICATION_RELEASE=unversioned
