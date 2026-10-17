@@ -12,7 +12,6 @@ import {
 import { resolveBookingSetupGuard } from "@/lib/utils/sharedSetupGuard";
 import { useTranslation } from "@/lib/i18n";
 
-
 function LoginContent() {
   const { t } = useTranslation();
   const router = useRouter();
@@ -35,7 +34,9 @@ function LoginContent() {
   const returnTo = safeRelativeReturnTo(searchParams.get("returnTo"), "/dashboard");
 
   const redirectAfterLogin = useCallback(async () => {
-    if (new URL(returnTo, "https://vayada.local").pathname === "/handoff") {
+    // /handoff and /setup carry their own context (entry product, step, PMS return); the
+    // setup page checks access itself, so the booking guard must not rewrite them.
+    if (["/handoff", "/setup"].includes(new URL(returnTo, "https://vayada.local").pathname)) {
       router.replace(returnTo);
       return;
     }
