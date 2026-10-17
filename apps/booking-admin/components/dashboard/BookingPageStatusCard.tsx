@@ -27,8 +27,6 @@ import {
   SELECTED_HOTEL_CHANGED_EVENT,
 } from "@/services/api/bookingHotelScope";
 
-const MARKETPLACE_FRONTEND_URL =
-  process.env.NEXT_PUBLIC_MARKETPLACE_URL || "https://app.vayada.com";
 const POLL_INTERVAL_MS = 2000;
 const POLL_LIMIT = 15;
 
@@ -471,7 +469,6 @@ function MissingItems({
                 returnProduct: "booking",
                 returnTo: "/dashboard",
                 propertyId,
-                setupBaseUrl: MARKETPLACE_FRONTEND_URL,
                 step: item.step,
               })}
               className="inline-flex shrink-0 items-center gap-1.5 font-medium text-primary-600 hover:underline sm:w-40 sm:justify-end"

@@ -36,6 +36,21 @@ describe("resolveBookingSetupGuard", () => {
     });
   });
 
+  it("redirects to this app's own /setup when no base URL is given", async () => {
+    const api = {
+      getStatus: vi.fn(async () =>
+        status({ decision: "setup_required", reasonCode: "product_access_pending" }),
+      ),
+    };
+
+    await expect(
+      resolveBookingSetupGuard("/dashboard", api, memoryStorage()),
+    ).resolves.toMatchObject({
+      action: "redirect_to_setup",
+      redirectPath: "/setup?entryProduct=booking&returnProduct=booking&returnTo=%2Fdashboard&propertyId=property-1",
+    });
+  });
+
   it("enters Booking solely from the server entry decision, regardless of launch tasks", async () => {
     const api = {
       getStatus: vi.fn(async () =>

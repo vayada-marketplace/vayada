@@ -12,7 +12,6 @@ import {
 import { resolveBookingSetupGuard } from "@/lib/utils/sharedSetupGuard";
 import { useTranslation } from "@/lib/i18n";
 
-const MARKETPLACE_URL = process.env.NEXT_PUBLIC_MARKETPLACE_URL || "https://app.vayada.com";
 
 function LoginContent() {
   const { t } = useTranslation();
@@ -171,11 +170,6 @@ function LoginContent() {
       password={password}
       isSubmitting={isSubmitting}
       submitError={hotelSetupRequired ? t("auth.login.hotelWorkspaceRequired") : submitError}
-      submitErrorAction={
-        hotelSetupRequired
-          ? { label: t("auth.login.setUpHotel"), href: `${MARKETPLACE_URL}/login` }
-          : undefined
-      }
       organizations={workspaceOptions ?? null}
       forgotPasswordHref="/forgot-password"
       onEmailChange={setEmail}

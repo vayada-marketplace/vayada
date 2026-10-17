@@ -92,7 +92,8 @@ describe("BookingPageStatusView", () => {
     expect(markup).toContain("Open your calendar and confirm your starting availability.");
     const links = Array.from(
       markup.matchAll(/href="([^"]+)"[^>]*>Fix in setup/g),
-      ([, href]) => new URL(href!.replaceAll("&amp;", "&")),
+      // Links are relative since Booking Admin hosts /setup itself (VAY-2261).
+      ([, href]) => new URL(href!.replaceAll("&amp;", "&"), "http://booking-admin.test"),
     );
     expect(links.map((url) => url.searchParams.get("step"))).toEqual(["calendar", "payments"]);
     expect(links[0]!.pathname).toBe("/setup");

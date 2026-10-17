@@ -17,7 +17,7 @@ import { useTranslation } from "@/lib/i18n";
  * drives target route resource selection on subsequent API calls.
  *
  * Edge cases handled inline:
- *   - 0 hotels → send through /setup to the canonical Marketplace wizard
+ *   - 0 hotels → send through /setup to the shared hotel setup wizard (hosted here)
  *   - 1 hotel  → auto-select and bounce to /dashboard (no modal spam)
  *   - 2+ hotels → render the picker
  *   - Not logged in → /login
