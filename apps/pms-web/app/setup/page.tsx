@@ -23,6 +23,8 @@ import {
 } from "@/lib/utils/setupHandoff";
 import { useTranslation } from "@/lib/i18n";
 
+type SetupRedirectInput = Parameters<typeof buildSharedHotelSetupRedirectPath>[0];
+
 export default function PmsSetupPage() {
   return (
     <Suspense fallback={<SetupLoading />}>
@@ -66,7 +68,9 @@ function CanonicalSetupRedirect() {
         returnTo: safeSharedHotelSetupReturnTo(searchParams.get("returnTo"), "/dashboard"),
         propertyId: searchParams.get("propertyId"),
         mode: searchParams.get("mode") === "add" ? "add" : undefined,
-      }),
+        // Only a known step id survives the builder; a calendar recovery link also names itself.
+        step: (searchParams.get("step") ?? undefined) as SetupRedirectInput["step"],
+      }) + (searchParams.get("recovery") === "pms-calendar" ? "&recovery=pms-calendar" : ""),
     [searchParams],
   );
 

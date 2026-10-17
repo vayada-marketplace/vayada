@@ -185,9 +185,9 @@ describe("calendar auto-open editor", () => {
       view = create(createElement(CalendarAutoOpenEditor));
     });
     const link = view.root.findByType("a");
-    const login = new URL(link.props.href);
-    expect(login.pathname).toBe("/login");
-    const url = new URL(login.searchParams.get("returnTo")!, login.origin);
+    // The PMS's own /setup alias hands the session to Booking Admin (VAY-2266).
+    expect(link.props.href.startsWith("/setup?")).toBe(true);
+    const url = new URL(link.props.href, "https://pms.vayada.local");
     expect(url.pathname).toBe("/setup");
     expect(Object.fromEntries(url.searchParams)).toEqual({
       entryProduct: "pms",
@@ -222,8 +222,9 @@ describe("calendar auto-open editor", () => {
     act(() => view.root.findByProps({ "aria-label": "Auto-open future calendar" }).props.onClick());
     await act(async () => view.root.findByProps({ children: "Save auto-open" }).props.onClick());
 
-    const login = new URL(view.root.findByType("a").props.href);
-    const setup = new URL(login.searchParams.get("returnTo")!, login.origin);
+    const href: string = view.root.findByType("a").props.href;
+    expect(href.startsWith("/setup?")).toBe(true);
+    const setup = new URL(href, "https://pms.vayada.local");
     expect(setup.searchParams.get("step")).toBe(step);
     expect(setup.searchParams.get("propertyId")).toBe("property-1");
     expect(view.root.findAllByProps({ role: "status" })).toHaveLength(0);

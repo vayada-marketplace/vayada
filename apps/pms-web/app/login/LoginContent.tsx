@@ -46,8 +46,15 @@ export function LoginContent({
   >([]);
 
   const redirectAfterLogin = useCallback(async () => {
-    if (new URL(returnTo, "https://vayada.local").pathname === "/handoff") {
+    const returnPath = new URL(returnTo, "https://vayada.local").pathname;
+    if (returnPath === "/handoff") {
       window.location.replace(returnTo);
+      return;
+    }
+    // The setup alias (VAY-2266) runs its own session check and handoff; the guard would only
+    // nest the alias into another setup path.
+    if (returnPath === "/setup") {
+      router.push(returnTo);
       return;
     }
     const decision = await resolvePmsSetupGuard(returnTo);
