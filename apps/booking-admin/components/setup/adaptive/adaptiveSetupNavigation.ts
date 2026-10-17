@@ -23,7 +23,7 @@ export const ADAPTIVE_SETUP_STEP_COPY: Readonly<
 > = {
   present_hotel: {
     title: "Present your hotel",
-    subtitle: "Give guests and creators a clear first impression.",
+    subtitle: "Give guests a clear first impression.",
   },
   marketplace_preferences: {
     title: "Tell creators what you are open to",

@@ -80,7 +80,6 @@ test("reviews impact and retires a property without destructive deletion", async
         },
         media: { objects: 6 },
         publicExposure: {
-          marketplaceActive: true,
           distributionStatus: "public",
           bookingRevisionActive: true,
         },
