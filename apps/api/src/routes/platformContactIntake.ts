@@ -120,7 +120,7 @@ export function registerPlatformContactIntakeRoutes(
         page.length > 500 ||
         !/^\/(?!\/)[^?#\\\s]*$/.test(page) ||
         typeof product !== "string" ||
-        !["marketplace", "booking", "pms", "affiliate"].includes(product)
+        !["booking", "pms"].includes(product)
       ) {
         return sendContactIntakeError(reply, 400, {
           code: "invalid_request",

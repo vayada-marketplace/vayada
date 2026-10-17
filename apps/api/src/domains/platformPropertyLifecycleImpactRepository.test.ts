@@ -30,7 +30,6 @@ describe("platform property retirement impact", () => {
                 openPayouts: "0",
                 billingEntitlements: "2",
                 mediaObjects: "6",
-                marketplaceActive: true,
                 distributionStatus: "public",
                 bookingRevisionActive: true,
                 connectedChannels: "1",
@@ -60,7 +59,6 @@ describe("platform property retirement impact", () => {
       },
       media: { objects: 6 },
       publicExposure: {
-        marketplaceActive: true,
         distributionStatus: "public",
         bookingRevisionActive: true,
       },

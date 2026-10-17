@@ -10,6 +10,7 @@ import {
 import {
   ADAPTIVE_HOTEL_SETUP_CONTRACT_VERSION,
   isSetupTaskLaunchable,
+  OFFERED_SETUP_TRACKS,
   parseUpdateTracksRequest,
   PROPERTY_PROFILE_CHANNEL_TYPES,
   PROPERTY_PROFILE_CONTACT_PURPOSES,
@@ -164,7 +165,8 @@ type SharedHotelSetupTrackAccessError = {
   message: string;
 };
 
-const ENTRY_PRODUCTS: readonly SharedHotelSetupEntryProduct[] = ["booking", "pms", "marketplace"];
+// The Marketplace entry product is retired (VAY-2270); Booking Admin maps old links to booking.
+const ENTRY_PRODUCTS: readonly SharedHotelSetupEntryProduct[] = ["booking", "pms"];
 const SHARED_PROPERTY_TYPE_VALUES = new Set<string>(
   SHARED_PROPERTY_TYPE_OPTIONS.map(({ value }) => value),
 );
@@ -545,6 +547,16 @@ export async function registerSharedHotelSetupStatusRoutes(
           "Request must include valid selectedTracks and expectedRevision.",
         );
       }
+      if (
+        update.selectedTracks.some(
+          (track) => !(OFFERED_SETUP_TRACKS as readonly string[]).includes(track),
+        )
+      ) {
+        return invalidSetupRequest(
+          reply,
+          "selectedTracks may only contain hotel_operations; the Creator Marketplace track is retired.",
+        );
+      }
 
       const idempotencyKey = parseIdempotencyKey(request, reply);
       if (!idempotencyKey) return reply;
@@ -726,12 +738,7 @@ function ensurePublicPropertyPublicationPermission(
   context: ReturnType<typeof enforceRoutePolicy>,
   reply: FastifyReply,
 ): boolean {
-  if (
-    hasPermission(context, "marketplace.profile.manage") ||
-    hasPermission(context, "booking.settings.manage")
-  ) {
-    return true;
-  }
+  if (hasPermission(context, "booking.settings.manage")) return true;
   reply.status(403).send({
     code: "missing_permission",
     detail: "Public profile and location publication require hotel-owner access.",
@@ -968,7 +975,6 @@ export function hotelSetupPropertyProfileUpdateHandler(
     if (
       !context.actor.providerIdentity.sessionId ||
       context.membership.roleKey !== "hotel_owner" ||
-      !hasPermission(context, "marketplace.profile.manage") ||
       !context.linkedResources.some(
         (link) =>
           link.product === "hotel_catalog" &&
@@ -1226,7 +1232,7 @@ function parseEntryProduct(
   }
   reply.status(422).send({
     code: "invalid_entry_product",
-    detail: "entryProduct must be booking, pms, or marketplace.",
+    detail: "entryProduct must be booking or pms.",
   });
   return false;
 }
@@ -1980,7 +1986,7 @@ function entryDecision(input: {
 }): ProductEntryDecision | null {
   const { context, entryProduct, propertyId, selectedTracks, tracks } = input;
   if (!entryProduct) return null;
-  const track = entryProduct === "marketplace" ? "creator_marketplace" : "hotel_operations";
+  const track = "hotel_operations";
   if (!propertyId) {
     return {
       requestedProduct: entryProduct,

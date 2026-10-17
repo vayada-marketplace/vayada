@@ -13,7 +13,7 @@ import {
 } from "../domains/bookingAcceptanceSettings.js";
 import type { SameDayBookingSettingsPort } from "../domains/sameDayBookingSettings.js";
 import type { BookingPublicationRefreshPort } from "../domains/bookingPublicationProductionRuntime.js";
-import { syncPropertyOfferReadModels } from "./marketplaceAdmin.js";
+import { projectPropertyPublicProfile } from "../platform/propertyPublicProfileProjection.js";
 import { enforceRoutePolicy } from "./policy.js";
 
 export const BOOKING_ADDON_SETTINGS_CONTRACT = {
@@ -2001,7 +2001,7 @@ export function createPgTargetBookingSettingsRepository(config: {
           return null;
         }
 
-        await syncPropertyOfferReadModels(transaction, {
+        await projectPropertyPublicProfile(transaction, {
           propertyId: row.propertyId,
         });
         await transaction.query("COMMIT");

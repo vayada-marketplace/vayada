@@ -10,6 +10,7 @@ import {
   PROPERTY_SETUP_DRAFT_RESET_CONTRACT_VERSION,
   PROPERTY_SETUP_STEP_DEFINITIONS,
   SETUP_TRACKS,
+  normalizeStoredSetupTracks,
   type ResetPropertySetupDraftError,
   type ResetPropertySetupDraftReceipt,
   type ResetPropertySetupDraftRequest,
@@ -549,7 +550,9 @@ async function lockTrackIntent(
      FOR SHARE`,
     [organizationId],
   );
-  return result.rows[0] ?? null;
+  const row = result.rows[0];
+  // Stored selections may still name the retired Creator Marketplace track (VAY-2270).
+  return row ? { ...row, selectedTracks: normalizeStoredSetupTracks(row.selectedTracks) } : null;
 }
 
 function validateTrack(
