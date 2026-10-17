@@ -2,8 +2,9 @@ import {
   BrowserAuthHandoffError,
   createBrowserAuthHandoff,
   crossAppReauthenticationUrl,
-  isSafeRelativeReturnTo,
 } from "@vayada/product-onboarding";
+import { ApiErrorResponse } from "@/services/api/client";
+import { AuthStateError } from "@/services/auth";
 
 // Booking Admin hosts the shared hotel setup wizard (VAY-2261). Sessions are host-only cookies,
 // so the PMS never navigates there directly: it hands the session over with a one-time code
@@ -16,26 +17,16 @@ export type SharedHotelSetupHandoff =
   | { kind: "reauthenticate"; destination: string }
   | { kind: "retryable" };
 
-/**
- * The relative setup path for a guard decision or alias target: either a safe relative path, or
- * an absolute URL on the Booking Admin origin (as the setup guard builds). Anything else is null.
- */
-export function sharedHotelSetupTargetPath(
-  pathOrUrl: string,
-  baseUrl: string = BOOKING_ADMIN_URL,
-): string | null {
-  if (isSafeRelativeReturnTo(pathOrUrl)) return pathOrUrl;
-  let url: URL;
-  let base: URL;
-  try {
-    url = new URL(pathOrUrl);
-    base = new URL(baseUrl);
-  } catch {
-    return null;
-  }
-  if (url.origin !== base.origin || url.hash) return null;
-  const path = `${url.pathname}${url.search}`;
-  return isSafeRelativeReturnTo(path) ? path : null;
+/** A failed PMS session read is either a missing session or a temporary outage. */
+export function classifyPmsSessionFailure(error: unknown): "signed_out" | "unavailable" {
+  if (error instanceof AuthStateError) return "signed_out";
+  if (error instanceof ApiErrorResponse && error.status < 500) return "signed_out";
+  return "unavailable";
+}
+
+/** The PMS's own login, returning to the setup alias so the handoff runs after sign-in. */
+export function pmsLoginUrlForSetup(aliasPath: string): string {
+  return `/login?${new URLSearchParams({ returnTo: aliasPath }).toString()}`;
 }
 
 /**
@@ -47,6 +38,7 @@ export async function resolveSharedHotelSetupHandoff(input: {
   targetPath: string;
   csrfToken: string | null;
   baseUrl?: string;
+  signal?: AbortSignal;
   create?: typeof createBrowserAuthHandoff;
 }): Promise<SharedHotelSetupHandoff> {
   const baseUrl = input.baseUrl ?? BOOKING_ADMIN_URL;
@@ -58,10 +50,14 @@ export async function resolveSharedHotelSetupHandoff(input: {
         sourceSurface: "pms-web",
         targetPath: input.targetPath,
         targetSurface: "booking-admin",
+        ...(input.signal
+          ? { fetcher: (url, init) => fetch(url, { ...init, signal: input.signal }) }
+          : {}),
       });
       return { kind: "handoff", destination };
     } catch (error) {
-      if (error instanceof BrowserAuthHandoffError && error.retryable) return { kind: "retryable" };
+      if (!(error instanceof BrowserAuthHandoffError)) throw error;
+      if (error.retryable) return { kind: "retryable" };
       // A terminal failure (expired session, handoff disabled) means signing in at the target.
     }
   }
@@ -70,7 +66,8 @@ export async function resolveSharedHotelSetupHandoff(input: {
       kind: "reauthenticate",
       destination: crossAppReauthenticationUrl(baseUrl, input.targetPath),
     };
-  } catch {
+  } catch (error) {
+    console.error("Booking Admin origin is not configured for the setup handoff:", error);
     return { kind: "retryable" };
   }
 }

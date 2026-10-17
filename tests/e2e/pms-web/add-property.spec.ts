@@ -19,8 +19,9 @@ test("the header's Add Property hands the session to Booking Admin's setup in ad
     handoffs.push(route.request().postDataJSON());
     return route.fulfill({ json: { destination } });
   });
+  // A document request carries no fragment, so the landing route matches origin and path only.
   await page.route(
-    (url) => url.toString() === destination,
+    (url) => url.origin === bookingAdminOrigin() && url.pathname === "/handoff",
     (route) =>
       route.fulfill({
         contentType: "text/html",

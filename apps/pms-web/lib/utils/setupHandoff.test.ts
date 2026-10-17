@@ -1,27 +1,42 @@
 import { describe, expect, it, vi } from "vitest";
 import { BrowserAuthHandoffError } from "@vayada/product-onboarding";
-import { resolveSharedHotelSetupHandoff, sharedHotelSetupTargetPath } from "./setupHandoff";
+import { ApiErrorResponse } from "@/services/api/client";
+import { AuthStateError } from "@/services/auth";
+import {
+  classifyPmsSessionFailure,
+  pmsLoginUrlForSetup,
+  resolveSharedHotelSetupHandoff,
+} from "./setupHandoff";
 
 const BASE = "https://admin.booking.example";
 const TARGET = "/setup?entryProduct=pms&returnProduct=pms&returnTo=%2Fdashboard&mode=add";
 
-describe("sharedHotelSetupTargetPath", () => {
-  it("keeps a safe relative path", () => {
-    expect(sharedHotelSetupTargetPath(TARGET, BASE)).toBe(TARGET);
+describe("classifyPmsSessionFailure", () => {
+  it.each([401, 403, 404])("treats a %s session read as signed out", (status) => {
+    expect(classifyPmsSessionFailure(new ApiErrorResponse(status, { detail: "no" }))).toBe(
+      "signed_out",
+    );
   });
 
-  it("strips the Booking Admin origin from a guard decision", () => {
-    expect(sharedHotelSetupTargetPath(`${BASE}${TARGET}`, BASE)).toBe(TARGET);
+  it("treats an auth state answer as signed out", () => {
+    expect(
+      classifyPmsSessionFailure(
+        new AuthStateError(409, { state: "email_verification_required", message: "verify" }),
+      ),
+    ).toBe("signed_out");
   });
 
-  it.each([
-    "https://attacker.example/setup?entryProduct=pms",
-    "//attacker.example/setup",
-    `${BASE}/setup#code=abc`,
-    "javascript:alert(1)",
-    "",
-  ])("rejects %s", (value) => {
-    expect(sharedHotelSetupTargetPath(value, BASE)).toBeNull();
+  it.each([new ApiErrorResponse(503, { detail: "down" }), new TypeError("fetch failed"), "boom"])(
+    "treats %s as temporarily unavailable",
+    (error) => {
+      expect(classifyPmsSessionFailure(error)).toBe("unavailable");
+    },
+  );
+});
+
+describe("pmsLoginUrlForSetup", () => {
+  it("returns to the alias after sign-in", () => {
+    expect(pmsLoginUrlForSetup("/setup?mode=add")).toBe("/login?returnTo=%2Fsetup%3Fmode%3Dadd");
   });
 });
 
@@ -42,6 +57,19 @@ describe("resolveSharedHotelSetupHandoff", () => {
       targetPath: TARGET,
       targetSurface: "booking-admin",
     });
+  });
+
+  it("passes an abort signal to the handoff request", async () => {
+    const create = vi.fn().mockResolvedValue(`${BASE}/handoff#code=${"a".repeat(40)}`);
+    const controller = new AbortController();
+    await resolveSharedHotelSetupHandoff({
+      targetPath: TARGET,
+      csrfToken: "csrf",
+      baseUrl: BASE,
+      signal: controller.signal,
+      create,
+    });
+    expect(create.mock.calls[0]?.[0]).toHaveProperty("fetcher");
   });
 
   it("sends the user through Booking Admin's login without a CSRF token", async () => {
@@ -87,9 +115,24 @@ describe("resolveSharedHotelSetupHandoff", () => {
     ).resolves.toEqual({ kind: "retryable" });
   });
 
-  it("asks for a retry when the Booking Admin origin is not configured", async () => {
+  it("surfaces an unexpected handoff error instead of redirecting", async () => {
+    const create = vi.fn().mockRejectedValue(new TypeError("bug"));
+    await expect(
+      resolveSharedHotelSetupHandoff({
+        targetPath: TARGET,
+        csrfToken: "csrf",
+        baseUrl: BASE,
+        create,
+      }),
+    ).rejects.toThrow("bug");
+  });
+
+  it("asks for a retry and logs when the Booking Admin origin is not configured", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
     await expect(
       resolveSharedHotelSetupHandoff({ targetPath: TARGET, csrfToken: null, baseUrl: "not a url" }),
     ).resolves.toEqual({ kind: "retryable" });
+    expect(error).toHaveBeenCalledTimes(1);
+    error.mockRestore();
   });
 });
