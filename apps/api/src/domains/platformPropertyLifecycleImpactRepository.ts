@@ -34,7 +34,6 @@ type ImpactRow = {
   openPayouts: number | string;
   billingEntitlements: number | string;
   mediaObjects: number | string;
-  marketplaceActive: boolean;
   distributionStatus: string | null;
   bookingRevisionActive: boolean;
   connectedChannels: number | string;
@@ -119,7 +118,6 @@ export async function readPlatformPropertyRetirementImpact(
     },
     media: { objects: counts.mediaObjects },
     publicExposure: {
-      marketplaceActive: row.marketplaceActive,
       distributionStatus: row.distributionStatus,
       bookingRevisionActive: row.bookingRevisionActive,
     },
@@ -197,11 +195,6 @@ function impactSql(lock: boolean): string {
       (SELECT count(*) FROM platform.media_objects media
        WHERE media.property_id = property.id AND media.lifecycle_status <> 'deleted')
         AS "mediaObjects",
-      EXISTS (SELECT 1 FROM marketplace.active_hotel_submission_revisions marketplace
-       WHERE marketplace.property_id = property.id AND marketplace.activation_status = 'active')
-      OR EXISTS (SELECT 1 FROM marketplace.marketplace_offer_read_model offer
-       WHERE offer.property_id = property.id AND offer.visibility_status = 'public')
-        AS "marketplaceActive",
       (SELECT profile.profile_status FROM distribution.public_hotel_bookability_profiles profile
        WHERE profile.property_id = property.id) AS "distributionStatus",
       EXISTS (SELECT 1 FROM distribution.active_public_booking_revision booking_revision

@@ -2,21 +2,15 @@ import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createPgBookingSetupLifecycleStatusRepository } from "./domains/bookingSetupLifecycleStatusRepository.js";
-import { createPgMarketplaceSetupLifecycleStatusRepository } from "./domains/marketplaceSetupLifecycleStatusRepository.js";
 
 const TEST_DATABASE_URL = process.env["TEST_DATABASE_URL"];
 const organizationId = "14900000-0000-4000-8000-000000000001";
 const propertyId = "14900000-0000-4000-8000-000000000002";
 const actorUserId = "14900000-0000-4000-8000-000000000003";
-const submissionRevisionId = "14900000-0000-4000-8000-000000000004";
 const bookingRevisionId = "14900000-0000-4000-8000-000000000005";
 
 describe.skipIf(!TEST_DATABASE_URL)("Review lifecycle PostgreSQL adapters", () => {
   const client = new pg.Client({ connectionString: TEST_DATABASE_URL });
-  const marketplace = createPgMarketplaceSetupLifecycleStatusRepository({
-    connectionString: TEST_DATABASE_URL ?? "postgresql://integration-test-disabled",
-    pool: client,
-  });
   const booking = createPgBookingSetupLifecycleStatusRepository({
     connectionString: TEST_DATABASE_URL ?? "postgresql://integration-test-disabled",
     pool: client,
@@ -50,17 +44,9 @@ describe.skipIf(!TEST_DATABASE_URL)("Review lifecycle PostgreSQL adapters", () =
       [propertyId],
     );
     await client.query(
-      `INSERT INTO marketplace.marketplace_hotel_profiles (
-         property_id, organization_id, marketplace_profile_status, profile_complete
-       ) VALUES ($1::uuid, $2::uuid, 'verified', TRUE)`,
-      [propertyId, organizationId],
-    );
-    await client.query(
       `INSERT INTO identity.organization_resource_links (
          organization_id, product, resource_type, resource_id, relationship, status
        ) VALUES
-         ($1::uuid, 'marketplace', 'hotel_profile', $2::text, 'owner', 'active'),
-         ($1::uuid, 'marketplace', 'hotel_profile', $2::text, 'operator', 'active'),
          ($1::uuid, 'booking', 'booking_hotel', $2::text, 'owner', 'active'),
          ($1::uuid, 'booking', 'booking_hotel', $2::text, 'operator', 'active')`,
       [organizationId, propertyId],
@@ -70,8 +56,6 @@ describe.skipIf(!TEST_DATABASE_URL)("Review lifecycle PostgreSQL adapters", () =
          organization_id, product, entitlement_key, status,
          resource_product, resource_type, resource_id
        ) VALUES
-         ($1::uuid, 'marketplace', 'marketplace-hotel-profile', 'active',
-          'marketplace', 'hotel_profile', $2::text),
          ($1::uuid, 'booking', 'booking-engine', 'active',
           'booking', 'booking_hotel', $2::text)`,
       [organizationId, propertyId],
@@ -84,65 +68,11 @@ describe.skipIf(!TEST_DATABASE_URL)("Review lifecycle PostgreSQL adapters", () =
   });
 
   it("reads authorized not-started lifecycle state without setup or readiness proxies", async () => {
-    await expect(marketplace.getMarketplaceSetupLifecycleStatus(scope)).resolves.toMatchObject({
-      ...scope,
-      product: "marketplace",
-      phase: "not_started",
-    });
     await expect(booking.getBookingSetupLifecycleStatus(scope)).resolves.toMatchObject({
       ...scope,
       product: "booking",
       phase: "not_started",
     });
-  });
-
-  it("reads Marketplace moderation and activation from its lifecycle tables", async () => {
-    await client.query(
-      `INSERT INTO marketplace.hotel_submission_revisions (
-         id, property_id, organization_id, revision_number,
-         readiness_contract_version, source_manifest, source_manifest_hash,
-         readiness_hash, readiness_product, readiness_status,
-         submission_snapshot, submitted_by_user_id
-       ) VALUES (
-         $1::uuid, $2::uuid, $3::uuid, 1,
-         'onboarding-product-readiness.v1', $4::jsonb, $5, $5,
-         'marketplace', 'ready', '{}'::jsonb, $6::uuid
-       )`,
-      [
-        submissionRevisionId,
-        propertyId,
-        organizationId,
-        sourceManifest(),
-        `sha256:${"1".repeat(64)}`,
-        actorUserId,
-      ],
-    );
-    await client.query(
-      `INSERT INTO marketplace.hotel_submission_moderation (
-         submission_revision_id, property_id, status
-       ) VALUES ($1::uuid, $2::uuid, 'pending')`,
-      [submissionRevisionId, propertyId],
-    );
-    const pending = await marketplace.getMarketplaceSetupLifecycleStatus(scope);
-    expect(pending).toMatchObject({ phase: "pending_review" });
-
-    await client.query(
-      `UPDATE marketplace.hotel_submission_moderation
-       SET status = 'approved', decided_by_user_id = $3::uuid,
-           decided_at = clock_timestamp(), updated_at = clock_timestamp()
-       WHERE submission_revision_id = $1::uuid AND property_id = $2::uuid`,
-      [submissionRevisionId, propertyId, actorUserId],
-    );
-    await client.query(
-      `INSERT INTO marketplace.active_hotel_submission_revisions (
-         property_id, submission_revision_id, activated_by_user_id,
-         status_changed_by_user_id
-       ) VALUES ($1::uuid, $2::uuid, $3::uuid, $3::uuid)`,
-      [propertyId, submissionRevisionId, actorUserId],
-    );
-    const published = await marketplace.getMarketplaceSetupLifecycleStatus(scope);
-    expect(published).toMatchObject({ phase: "published" });
-    expect(published.sourceRevision).not.toBe(pending.sourceRevision);
   });
 
   it("reads Booking publication only from the active Distribution pointer", async () => {
@@ -171,27 +101,12 @@ describe.skipIf(!TEST_DATABASE_URL)("Review lifecycle PostgreSQL adapters", () =
 
   it("rejects an actor without the authorized membership boundary", async () => {
     const unauthorized = { ...scope, actorUserId: "14900000-0000-4000-8000-000000000099" };
-    await expect(marketplace.getMarketplaceSetupLifecycleStatus(unauthorized)).rejects.toThrow(
-      "scope is unavailable",
-    );
     await expect(booking.getBookingSetupLifecycleStatus(unauthorized)).rejects.toThrow(
       "scope is unavailable",
     );
   });
 
-  it("rejects suspended entitlements and inactive resource relationships", async () => {
-    await client.query(
-      `UPDATE identity.product_entitlements
-       SET status = 'suspended'
-       WHERE organization_id = $1::uuid
-         AND product = 'marketplace'
-         AND entitlement_key = 'marketplace-hotel-profile'`,
-      [organizationId],
-    );
-    await expect(marketplace.getMarketplaceSetupLifecycleStatus(scope)).rejects.toThrow(
-      "scope is unavailable",
-    );
-
+  it("rejects inactive resource relationships", async () => {
     await client.query(
       `UPDATE identity.organization_resource_links
        SET status = 'suspended'

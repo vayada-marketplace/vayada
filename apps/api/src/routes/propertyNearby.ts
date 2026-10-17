@@ -38,9 +38,7 @@ export async function registerPropertyNearbyRoutes(
     const access = await resolveEffectivePropertyAccess(context, options.propertyAccessRepository);
     if (
       !access?.propertyIds.includes(propertyId) ||
-      (write &&
-        !hasPermission(context, "booking.settings.manage") &&
-        !hasPermission(context, "marketplace.profile.manage"))
+      (write && !hasPermission(context, "booking.settings.manage"))
     ) {
       throw Object.assign(new Error("Missing property publication access"), { statusCode: 403 });
     }
