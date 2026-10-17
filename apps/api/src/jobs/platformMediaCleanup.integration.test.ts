@@ -89,8 +89,8 @@ describe.skipIf(!URL)("PostgreSQL platform media cleanup", () => {
          (id, bucket, storage_key, visibility, purpose, resource_product, resource_type, resource_id,
           lifecycle_status, retained_until)
        VALUES ($1::uuid, 'test-private', 'private/chat/' || $1 || '.webp', 'private',
-               'marketplace.collaboration_chat.attachment', 'marketplace', 'collaboration',
-               'collaboration-vay2082', 'active', $2::timestamptz)`,
+               'pms.messaging.attachment', 'pms', 'message_thread',
+               'thread-vay2082', 'active', $2::timestamptz)`,
       [MEDIA, EXPIRES_AT],
     );
     const denied = Object.assign(new Error("not authorized to perform s3:DeleteObject"), {
@@ -133,9 +133,9 @@ describe.skipIf(!URL)("PostgreSQL platform media cleanup", () => {
           const late = await failing.recordCleanupFailure(
             {
               mediaObjectId: MEDIA,
-              resourceProduct: "marketplace",
-              resourceType: "collaboration",
-              resourceId: "collaboration-vay2082",
+              resourceProduct: "pms",
+              resourceType: "message_thread",
+              resourceId: "thread-vay2082",
               lifecycleStatus: "active",
               retainedUntil: EXPIRES_AT,
             },

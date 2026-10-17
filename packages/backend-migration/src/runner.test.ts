@@ -1842,18 +1842,8 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
          ORDER BY catalog.key`,
       );
 
-      expect(marketplaceTripGrants).toEqual([
-        {
-          key: "marketplace.trip.manage",
-          organization_kind: "creator_workspace",
-          role_key: "creator_owner",
-        },
-        {
-          key: "marketplace.trip.read",
-          organization_kind: "creator_workspace",
-          role_key: "creator_owner",
-        },
-      ]);
+      // VAY-2270 (0493): Marketplace grants are retired; the catalog keys stay until step 5.
+      expect(marketplaceTripGrants).toEqual([]);
 
       const { rows: creatorEngagementColumns } = await verifyClient.query<{
         table_name: string;

@@ -516,7 +516,7 @@ async function selectPrivateAttachmentsPastRetention(
        NULL::text AS "replacedByMediaObjectId"
      FROM platform.media_objects
      WHERE visibility = 'private'
-       AND purpose IN ('marketplace.collaboration_chat.attachment', 'pms.messaging.attachment', 'finance.expense.receipt', 'finance.financials_export')
+       AND purpose IN ('pms.messaging.attachment', 'finance.expense.receipt', 'finance.financials_export')
        AND (lifecycle_status IN ('staged', 'active', 'retained', 'delete_requested')
          OR (purpose = 'finance.financials_export' AND lifecycle_status = 'upload_pending'))
        AND retained_until IS NOT NULL
@@ -750,7 +750,7 @@ function mediaCleanupEligibilitySql(
        AND COALESCE(media.source_metadata ->> 'replacementReason', '') = 'replaced'`;
     case "delete-private-attachment-after-retention":
       return `media.visibility = 'private'
-       AND media.purpose IN ('marketplace.collaboration_chat.attachment', 'pms.messaging.attachment', 'finance.expense.receipt')
+       AND media.purpose IN ('pms.messaging.attachment', 'finance.expense.receipt')
        AND media.lifecycle_status IN ('staged', 'active', 'retained', 'delete_requested')
        AND media.retained_until IS NOT NULL
        AND media.retained_until <= $2::timestamptz`;

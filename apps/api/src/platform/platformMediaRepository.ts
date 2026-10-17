@@ -51,7 +51,6 @@ type SessionRow = {
 };
 type MediaObjectRow = { record: PlatformMediaObjectRecord };
 type PropertyTargetRow = { propertyId: string };
-type CollaborationTargetRow = { collaborationId: string; propertyId: string };
 type AdminMediaTargetRow = {
   resourceId: string;
   ownerOrganizationId: string;
@@ -65,9 +64,6 @@ const supportedPurposes = new Set([
   "property.hero_image",
   "property.gallery_image",
   "property.logo",
-  "marketplace.creator.profile_image",
-  "marketplace.offer.media",
-  "marketplace.collaboration_chat.attachment",
   "pms.room_type.media",
   "pms.messaging.attachment",
   "finance.expense.receipt",
@@ -353,56 +349,10 @@ async function resolveTarget(
 ): ReturnType<PlatformMediaTargetResolver["resolveTarget"]> {
   if (
     input.context.selectedOrganization?.kind === "platform" &&
-    [
-      "property.hero_image",
-      "marketplace.offer.media",
-      "marketplace.creator.profile_image",
-    ].includes(input.request.purpose)
+    input.request.purpose === "property.hero_image"
   ) {
     return resolvePlatformAdminMediaTarget(queryable, input);
   }
-  if (input.request.purpose === "marketplace.collaboration_chat.attachment") {
-    const targetResourceId = input.request.resource.targetResourceId?.trim();
-    if (!targetResourceId) {
-      return {
-        ok: false,
-        statusCode: 403,
-        code: "media_target_forbidden",
-        message: "Chat attachments require a collaboration target.",
-      };
-    }
-
-    const sourceColumn =
-      input.request.resource.resourceType === "creator_profile" ? "creator_profile_id" : "offer_id";
-    const result = await queryable.query<CollaborationTargetRow>(
-      `SELECT collaboration.id::text AS "collaborationId",
-              collaboration.property_id::text AS "propertyId"
-       FROM marketplace.collaborations collaboration
-       WHERE collaboration.source_collaboration_id = $1
-         AND collaboration.${sourceColumn}::text = $2
-       LIMIT 1`,
-      [targetResourceId, input.request.resource.resourceId],
-    );
-    const collaboration = result.rows[0];
-    if (!collaboration) {
-      return {
-        ok: false,
-        statusCode: 403,
-        code: "media_target_forbidden",
-        message: "Chat attachment source is not linked to this collaboration.",
-      };
-    }
-    return {
-      ok: true,
-      target: {
-        resourceProduct: "marketplace",
-        resourceType: "collaboration",
-        resourceId: collaboration.collaborationId,
-        propertyId: collaboration.propertyId,
-      },
-    };
-  }
-
   if (input.request.purpose === "pms.messaging.attachment") {
     const propertyId = input.request.resource.resourceId.trim();
     const threadId = input.request.resource.targetResourceId?.trim() ?? "";
@@ -534,42 +484,11 @@ async function resolvePlatformAdminMediaTarget(
   const resourceId = input.request.resource.resourceId;
   if (!CANONICAL_UUID.test(resourceId)) return platformAdminMediaTargetNotFound();
 
-  let result: Pick<QueryResult<AdminMediaTargetRow>, "rows">;
-  if (input.request.purpose === "marketplace.creator.profile_image") {
-    result = await queryable.query<AdminMediaTargetRow>(
-      `SELECT profile.id::text AS "resourceId",
-              profile.organization_id::text AS "ownerOrganizationId"
-         FROM marketplace.creator_profiles profile
-         JOIN identity.organization_memberships membership
-           ON membership.organization_id = profile.organization_id
-          AND membership.user_id = $1::uuid
-          AND membership.status = 'active'
-         JOIN identity.organizations organization
-           ON organization.id = profile.organization_id
-          AND organization.kind = 'creator_workspace'
-          AND organization.status = 'active'
-        WHERE profile.profile_status <> 'archived'
-        FOR SHARE OF profile, membership, organization`,
-      [resourceId],
-    );
-  } else if (input.request.purpose === "marketplace.offer.media") {
-    result = await queryable.query<AdminMediaTargetRow>(
-      `SELECT offer.id::text AS "resourceId",
-              offer.organization_id::text AS "ownerOrganizationId",
-              offer.property_id::text AS "propertyId"
-         FROM marketplace.marketplace_offers offer
-         JOIN identity.organizations organization
-           ON organization.id = offer.organization_id
-          AND organization.kind = 'hotel_group'
-          AND organization.status = 'active'
-        WHERE offer.id = $1::uuid
-          AND offer.offer_status <> 'archived'
-        FOR SHARE OF offer, organization`,
-      [resourceId],
-    );
-  } else {
-    result = await queryable.query<AdminMediaTargetRow>(
-      `SELECT property.id::text AS "resourceId",
+  const result: Pick<
+    QueryResult<AdminMediaTargetRow>,
+    "rows"
+  > = await queryable.query<AdminMediaTargetRow>(
+    `SELECT property.id::text AS "resourceId",
               owner.organization_id::text AS "ownerOrganizationId",
               property.id::text AS "propertyId"
          FROM hotel_catalog.properties property
@@ -586,9 +505,8 @@ async function resolvePlatformAdminMediaTarget(
         WHERE property.id = $1::uuid
           AND property.lifecycle_status <> 'retired'
         FOR SHARE OF property, owner, organization`,
-      [resourceId],
-    );
-  }
+    [resourceId],
+  );
 
   const target = result.rows.length === 1 ? result.rows[0] : undefined;
   if (!target) return platformAdminMediaTargetNotFound();
@@ -896,10 +814,7 @@ function mediaObjectFor(
       : session.requestedVisibility === "public"
         ? "pending_domain_approval"
         : "private",
-    lifecycleStatus:
-      autoApproved || session.purpose === "marketplace.collaboration_chat.attachment"
-        ? "active"
-        : "staged",
+    lifecycleStatus: autoApproved ? "active" : "staged",
     storageKind: "vayada_managed",
     bucket: bucketName,
     storageKey: originalSafe.storageKey,
@@ -916,7 +831,6 @@ function mediaObjectFor(
     checksumSha256: originalSafe.checksumSha256,
     originalFilename: file.sessionFile.filename,
     retainedUntil:
-      session.purpose === "marketplace.collaboration_chat.attachment" ||
       session.purpose === "finance.expense.receipt" ||
       session.purpose === "pms.messaging.attachment"
         ? new Date(Date.parse(now) + 60 * 60 * 1000).toISOString()
@@ -1000,8 +914,7 @@ async function insertMediaObject(
 ): Promise<void> {
   const sourceMetadata = {
     requestedVisibility: mediaObject.requestedVisibility,
-    ...(mediaObject.purpose === "marketplace.collaboration_chat.attachment" ||
-    mediaObject.purpose === "finance.expense.receipt" ||
+    ...(mediaObject.purpose === "finance.expense.receipt" ||
     mediaObject.purpose === "pms.messaging.attachment"
       ? { attachmentState: "orphan" }
       : {}),
@@ -1018,8 +931,7 @@ async function insertMediaObject(
         $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18::jsonb,
         $19,
         CASE
-          WHEN $5 IN ('marketplace.collaboration_chat.attachment', 'finance.expense.receipt',
-                      'pms.messaging.attachment')
+          WHEN $5 IN ('finance.expense.receipt', 'pms.messaging.attachment')
             THEN $21::timestamptz + interval '1 hour'
           ELSE NULL
         END,

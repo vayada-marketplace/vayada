@@ -1,4 +1,5 @@
 import {
+  normalizeStoredSetupTracks,
   type JsonValue,
   type PropertySetupSession,
   type PropertySetupStepDraft,
@@ -110,8 +111,13 @@ export function createPgPropertySetupDraftRepository(config: {
            LIMIT 1`,
           [scope.organizationId, scope.propertyId, scope.actorUserId, readAt.toISOString()],
         );
-        const row = session.rows[0];
-        if (!row) {
+        const stored = session.rows[0];
+        // Stored selections may still name the retired Creator Marketplace track (VAY-2270); a
+        // session that selected nothing else no longer exists for the route.
+        const row = stored
+          ? { ...stored, selectedTracks: normalizeStoredSetupTracks(stored.selectedTracks) }
+          : undefined;
+        if (!row || row.selectedTracks.length === 0) {
           await client.query("COMMIT");
           return null;
         }
