@@ -149,6 +149,10 @@ export type AuthSurface =
 
 export type AuthSignupIntent = "admin" | "hotel" | "creator";
 
+// VAY-2260: creator sign-ups are closed on every surface while the Marketplace is removed.
+export const CREATOR_SIGNUP_CLOSED_MESSAGE =
+  "Creator sign-ups are closed. The vayada Marketplace is no longer available.";
+
 export type RequiredResourceLink = {
   product: Product;
   resourceType: ResourceType;
@@ -2541,10 +2545,13 @@ function parseOnboardingBody(
       typeof input.surface === "string" ? input.surface : "marketplace-web",
     );
     const rawIntent = typeof input.type === "string" ? input.type : input.intent;
-    if (rawIntent !== "creator" && rawIntent !== "hotel") {
+    if (rawIntent === "creator") {
+      return { ok: false, error: { state: "auth_failed", message: CREATOR_SIGNUP_CLOSED_MESSAGE } };
+    }
+    if (rawIntent !== "hotel") {
       return {
         ok: false,
-        error: { state: "auth_failed", message: "Choose creator or hotel to continue." },
+        error: { state: "auth_failed", message: "Choose hotel to continue." },
       };
     }
     const intent = parseSignupIntent(surface, rawIntent);
@@ -2858,9 +2865,9 @@ function signupIntentsForSurface(surface: AuthSurface): readonly AuthSignupInten
       return [];
     case "booking-admin":
     case "pms-web":
-      return ["hotel"];
+    // VAY-2260: the Marketplace is closing; creator sign-ups are refused on every surface.
     case "marketplace-web":
-      return ["creator", "hotel"];
+      return ["hotel"];
     case "affiliate-dashboard":
       return [];
   }

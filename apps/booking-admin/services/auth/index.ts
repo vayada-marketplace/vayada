@@ -46,12 +46,18 @@ export type AuthStateResponse = {
     | "hotel_workspace_required"
     | "auth_failed";
   message: string;
+  pendingAuthenticationToken?: string;
+  email?: string;
+  emailVerificationId?: string;
 };
 
 export class AuthStateError extends Error {
   organizations?: { id: string; name?: string | null }[];
   status: number;
   state: AuthStateResponse["state"];
+  pendingAuthenticationToken?: string;
+  email?: string;
+  emailVerificationId?: string;
 
   constructor(status: number, response: AuthStateResponse) {
     super(response.message);
@@ -59,8 +65,22 @@ export class AuthStateError extends Error {
     this.status = status;
     this.state = response.state;
     this.organizations = response.organizations;
+    this.pendingAuthenticationToken = response.pendingAuthenticationToken;
+    this.email = response.email;
+    this.emailVerificationId = response.emailVerificationId;
   }
 }
+
+/** A password sign-up that still needs the e-mail code (same flow as pms-web, VAY-2262). */
+export type PendingEmailVerification = {
+  pendingAuthenticationToken: string;
+  email?: string;
+  emailVerificationId?: string;
+  flow?: "login" | "signup";
+  intent?: "hotel";
+};
+
+const PENDING_EMAIL_VERIFICATION_KEY = "vayada_pending_email_verification";
 
 async function authFetch<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(`${AUTH_BROWSER_BASE_PATH}${endpoint}`, {
@@ -97,6 +117,56 @@ function isAuthStateResponse(value: unknown): value is AuthStateResponse {
     typeof (value as { state?: unknown }).state === "string" &&
     typeof (value as { message?: unknown }).message === "string"
   );
+}
+
+export function storePendingEmailVerification(
+  input: Omit<PendingEmailVerification, "pendingAuthenticationToken"> & {
+    pendingAuthenticationToken?: string;
+  },
+): boolean {
+  if (typeof window === "undefined" || !input.pendingAuthenticationToken) return false;
+  const pending: PendingEmailVerification = {
+    pendingAuthenticationToken: input.pendingAuthenticationToken,
+    email: input.email,
+    emailVerificationId: input.emailVerificationId,
+    flow: input.flow,
+    intent: input.intent,
+  };
+  try {
+    window.sessionStorage.setItem(PENDING_EMAIL_VERIFICATION_KEY, JSON.stringify(pending));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function getPendingEmailVerification(): PendingEmailVerification | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(PENDING_EMAIL_VERIFICATION_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<PendingEmailVerification>;
+    if (typeof parsed.pendingAuthenticationToken !== "string") return null;
+    return {
+      pendingAuthenticationToken: parsed.pendingAuthenticationToken,
+      email: typeof parsed.email === "string" ? parsed.email : undefined,
+      emailVerificationId:
+        typeof parsed.emailVerificationId === "string" ? parsed.emailVerificationId : undefined,
+      flow: parsed.flow === "signup" ? "signup" : "login",
+      intent: parsed.intent === "hotel" ? "hotel" : undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function clearPendingEmailVerification(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.removeItem(PENDING_EMAIL_VERIFICATION_KEY);
+  } catch {
+    return;
+  }
 }
 
 async function storeAuthSessionResponse(
@@ -224,6 +294,43 @@ export const authService = {
       body: JSON.stringify({ ...data, surface: AUTH_SURFACE }),
     });
     await authService.refreshSession();
+  },
+
+  confirmEmailVerification: async (code: string): Promise<AuthSessionResponse> => {
+    const pending = getPendingEmailVerification();
+    if (!pending) {
+      throw new Error("Verification has expired. Please sign in again.");
+    }
+
+    const response = await authFetch<AuthSessionResponse>("/email-verification/confirm", {
+      method: "POST",
+      body: JSON.stringify({
+        pendingAuthenticationToken: pending.pendingAuthenticationToken,
+        code,
+        flow: pending.flow,
+        intent: pending.intent,
+        surface: AUTH_SURFACE,
+      }),
+    });
+    const stored = await storeAuthSessionResponse(response);
+    if (!isAuthOrganizationSelectionResponse(response)) {
+      clearPendingEmailVerification();
+    }
+    return stored;
+  },
+
+  resendEmailVerification: async (): Promise<{ message: string }> => {
+    const pending = getPendingEmailVerification();
+    if (!pending?.emailVerificationId) {
+      throw new Error("Please sign in again to request a new verification code.");
+    }
+
+    return authFetch<{ message: string }>("/email-verification/resend", {
+      method: "POST",
+      body: JSON.stringify({
+        emailVerificationId: pending.emailVerificationId,
+      }),
+    });
   },
 
   /**
