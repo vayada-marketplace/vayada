@@ -108,7 +108,7 @@ export default function SharedSignupPage({
               </>
             )}
 
-            <form onSubmit={handleSubmit} className="space-y-5" noValidate>
+            <form method="post" onSubmit={handleSubmit} className="space-y-5" noValidate>
               <div>
                 <label htmlFor="email" className="mb-1.5 block text-sm font-medium text-gray-700">
                   {t("signup.emailAddress")}
