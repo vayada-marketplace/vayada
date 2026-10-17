@@ -18,6 +18,7 @@ import {
   resolveSupportedInterfaceLocale,
   type AdaptiveSetupStepId,
   type SupportedInterfaceLocale,
+  omitMarketplaceSetupSteps,
 } from "./adaptiveSetupNavigation";
 
 const routeClient = createPropertySetupRouteClient(targetApiClient);
@@ -125,10 +126,12 @@ export function AdaptiveHotelSetupController({
       retryNavigation.current = null;
 
       try {
-        const nextRoute = await routeClient.getRoute(propertyId, {
-          signal,
-          cache: "no-store",
-        });
+        const nextRoute = omitMarketplaceSetupSteps(
+          await routeClient.getRoute(propertyId, {
+            signal,
+            cache: "no-store",
+          }),
+        );
         setRoute(nextRoute);
         setStaleDraftMessage(null);
         return nextRoute;
