@@ -1,7 +1,6 @@
 import { loadAirbnbImportConfig } from "./airbnbImportRuntime.js";
 import { loadServerConfig } from "@vayada/backend-config";
 import { createHmac } from "node:crypto";
-import pg from "pg";
 import { z } from "zod";
 
 import {
@@ -57,10 +56,6 @@ export type FinanceFolioRecipientKmsConfig = {
   region: string;
 };
 export type BookingWebEventSink = "disabled" | "target";
-export type AffiliateCaptureConfig = {
-  databaseUrl: string;
-  internalToken: string;
-};
 export type ProviderWebhookIntakeMode = "observe_only" | "mutating" | "ack_only_with_receipt";
 export type ApiRuntime = "legacy" | "next";
 
@@ -213,9 +208,6 @@ export type ApiConfig = {
   financeBankTransferKms?: { currentKeyArn: string; allowedKeyArns: string[]; region: string };
   marketplaceDiscoveryAllowedOrigins: string[];
   affiliatePublicSource?: "target";
-  affiliateCapture?: AffiliateCaptureConfig;
-  affiliatePublicRedirectEnabled: boolean;
-  affiliateBookingBindingEnabled: boolean;
   pmsOperationsAllowedOrigins: string[];
   financialsActivationPropertyIds: string[];
   bookingWebEventSink: BookingWebEventSink;
@@ -625,38 +617,6 @@ function loadAffiliatePublicSource(env: NodeJS.ProcessEnv): "target" | undefined
     throw new Error("AFFILIATE_PUBLIC_SOURCE=target requires TARGET_DATABASE_URL");
   }
   return "target";
-}
-
-function loadAffiliateCaptureConfig(
-  env: NodeJS.ProcessEnv,
-  otherDatabaseUrls: readonly (string | undefined)[],
-): AffiliateCaptureConfig | undefined {
-  const enabled = readBooleanEnv(env, "AFFILIATE_CAPTURE_ENABLED", false);
-  if (!enabled) return undefined;
-  const databaseUrl = readOptionalPgConnectionEnv(env, "AFFILIATE_CAPTURE_DATABASE_URL");
-  const internalToken = readOptionalEnv(env, "BOOKING_WEB_AFFILIATE_ARRIVAL_INTERNAL_TOKEN");
-  if (!databaseUrl || !internalToken) {
-    throw new Error(
-      "AFFILIATE_CAPTURE_ENABLED requires AFFILIATE_CAPTURE_DATABASE_URL and BOOKING_WEB_AFFILIATE_ARRIVAL_INTERNAL_TOKEN",
-    );
-  }
-  if (Buffer.byteLength(internalToken, "utf8") < 32) {
-    throw new Error("BOOKING_WEB_AFFILIATE_ARRIVAL_INTERNAL_TOKEN must be at least 32 bytes");
-  }
-  const identity = pgConnectionIdentity(databaseUrl);
-  if (!identity || identity.username !== "vayada_next_affiliate_capture") {
-    throw new Error(
-      "AFFILIATE_CAPTURE_DATABASE_URL must use the exact vayada_next_affiliate_capture PostgreSQL login",
-    );
-  }
-  if (
-    otherDatabaseUrls.some(
-      (other) => other && new pg.Client({ connectionString: other }).user === identity.username,
-    )
-  ) {
-    throw new Error("AFFILIATE_CAPTURE_DATABASE_URL must use a distinct PostgreSQL user");
-  }
-  return { databaseUrl, internalToken };
 }
 
 function loadAuthSessionConfig(env: NodeJS.ProcessEnv): ApiAuthSessionConfig | undefined {
@@ -1121,25 +1081,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     "disabled",
   );
   const auth = loadAuthConfig(env);
-  const affiliateCapture = loadAffiliateCaptureConfig(env, [targetDatabaseUrl, auth?.databaseUrl]);
-  const affiliatePublicRedirectEnabled = readBooleanEnv(
-    env,
-    "AFFILIATE_PUBLIC_REDIRECT_ENABLED",
-    false,
-  );
-  if (affiliatePublicRedirectEnabled && !affiliateCapture) {
-    throw new Error("AFFILIATE_PUBLIC_REDIRECT_ENABLED requires affiliate capture");
-  }
-  const affiliateBookingBindingEnabled = readBooleanEnv(
-    env,
-    "AFFILIATE_BOOKING_BINDING_ENABLED",
-    false,
-  );
-  if (affiliateBookingBindingEnabled && (!affiliateCapture || !targetDatabaseUrl)) {
-    throw new Error(
-      "AFFILIATE_BOOKING_BINDING_ENABLED requires affiliate capture and TARGET_DATABASE_URL",
-    );
-  }
   const authSession = loadAuthSessionConfig(env);
   const creatorPlatformConnections = loadCreatorPlatformConnectionsConfig(env);
   const bookingEmailDelivery = loadBookingEmailDeliveryConfig(env);
@@ -1378,9 +1319,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       "MARKETPLACE_DISCOVERY_ALLOWED_ORIGINS",
     ),
     affiliatePublicSource: loadAffiliatePublicSource(env),
-    affiliateCapture,
-    affiliatePublicRedirectEnabled,
-    affiliateBookingBindingEnabled,
     pmsOperationsAllowedOrigins: readOptionalCsvEnv(env, "PMS_OPERATIONS_ALLOWED_ORIGINS", [
       "https://pms.localhost",
       "https://admin.booking.localhost",
