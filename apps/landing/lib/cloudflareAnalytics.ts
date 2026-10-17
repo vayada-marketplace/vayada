@@ -1,4 +1,4 @@
-import { readConsent } from "@vayada/marketplace-shared/consent/preferences";
+import { readConsent } from "@/lib/consent/preferences";
 
 const consentKey = "vayada_cookie_consent";
 // Public site identifier, not a credential. Configured only for the Landing build.

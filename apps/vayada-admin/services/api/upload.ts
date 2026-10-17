@@ -2,7 +2,7 @@
  * Upload API service
  */
 
-import { uploadPlatformMedia } from "@vayada/marketplace-shared/api/platformMedia";
+import { uploadPlatformMedia } from "./platformMedia";
 
 export interface UploadMediaObjectResponse {
   mediaObjectId: string;
