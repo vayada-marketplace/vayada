@@ -1,3 +1,4 @@
+import { authService } from "@/services/auth";
 import { getAuthBearerToken } from "@/services/auth/sessionStore";
 
 import { ApiClient, ApiErrorResponse } from "./client";
@@ -117,19 +118,25 @@ export const identityPrivacyService = {
     );
   },
 
-  /** The export file itself; the API client only speaks JSON, so this is a plain fetch. */
+  /**
+   * The export file itself; the API client only speaks JSON, so this is a plain fetch with one
+   * session refresh on 401, like the client's own recovery.
+   */
   async downloadExport(token: string): Promise<Blob> {
-    const bearer = getAuthBearerToken();
-    const response = await fetch(
-      `${IDENTITY_PRIVACY_API_BASE_URL}${identityPrivacyEndpoints.gdprExportDownload(token)}`,
-      {
+    const url = `${IDENTITY_PRIVACY_API_BASE_URL}${identityPrivacyEndpoints.gdprExportDownload(token)}`;
+    const request = (bearer: string | null) =>
+      fetch(url, {
         headers: {
           Accept: "application/octet-stream",
           ...(bearer ? { Authorization: `Bearer ${bearer}` } : {}),
         },
         signal: AbortSignal.timeout(30_000),
-      },
-    );
+      });
+    let response = await request(getAuthBearerToken());
+    if (response.status === 401) {
+      await authService.refreshSession();
+      response = await request(getAuthBearerToken());
+    }
     if (!response.ok) {
       const text = await response.text();
       throw new ApiErrorResponse(response.status, {
