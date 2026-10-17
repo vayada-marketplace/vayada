@@ -22,6 +22,11 @@ export type ApiAuthSurface =
   | "affiliate-dashboard"
   | "marketplace-web";
 
+// VAY-2271: the Marketplace and affiliate portals are being switched off. Their login
+// addresses are optional so the platform can drop them before the surface types go.
+export type ApiRetiredAuthSurface = "affiliate-dashboard" | "marketplace-web";
+export type ApiActiveAuthSurface = Exclude<ApiAuthSurface, ApiRetiredAuthSurface>;
+
 export type ApiAuthSessionConfig = {
   workosClientId: string;
   workosApiKey: string;
@@ -31,7 +36,8 @@ export type ApiAuthSessionConfig = {
   authLogoutUrl: string;
   authAllowedOrigins: string[];
   authCompatibilityCallbackOrigin: string;
-  authSurfaceOrigins: Record<ApiAuthSurface, string>;
+  authSurfaceOrigins: Record<ApiActiveAuthSurface, string> &
+    Partial<Record<ApiRetiredAuthSurface, string>>;
   authFirstPartySurfaces: ApiAuthSurface[];
   authCookieSecure: boolean;
   authCookieDomain?: string;
@@ -427,6 +433,14 @@ const AUTH_SURFACE_ORIGIN_KEYS = {
 } as const satisfies Record<ApiAuthSurface, string>;
 
 const AUTH_SURFACES = Object.keys(AUTH_SURFACE_ORIGIN_KEYS) as ApiAuthSurface[];
+const RETIRED_AUTH_SURFACES: readonly ApiRetiredAuthSurface[] = [
+  "affiliate-dashboard",
+  "marketplace-web",
+];
+const ACTIVE_AUTH_SURFACES = AUTH_SURFACES.filter(
+  (surface): surface is ApiActiveAuthSurface =>
+    !(RETIRED_AUTH_SURFACES as readonly ApiAuthSurface[]).includes(surface),
+);
 
 function normalizeAuthOrigin(value: string, key: string): string {
   let url: URL;
@@ -537,12 +551,20 @@ function loadAuthSessionConfig(env: NodeJS.ProcessEnv): ApiAuthSessionConfig | u
     "AUTH_LOGOUT_URL",
     "AUTH_ALLOWED_ORIGINS",
     "AUTH_COMPATIBILITY_CALLBACK_ORIGIN",
-    ...Object.values(AUTH_SURFACE_ORIGIN_KEYS),
+    ...ACTIVE_AUTH_SURFACES.map((surface) => AUTH_SURFACE_ORIGIN_KEYS[surface]),
   ] as const;
-  const values = Object.fromEntries(authSessionKeys.map((key) => [key, readOptionalEnv(env, key)]));
+  const retiredSurfaceKeys = RETIRED_AUTH_SURFACES.map(
+    (surface) => AUTH_SURFACE_ORIGIN_KEYS[surface],
+  );
+  const values = Object.fromEntries(
+    [...authSessionKeys, ...retiredSurfaceKeys].map((key) => [key, readOptionalEnv(env, key)]),
+  );
   const configuredKeys = authSessionKeys.filter((key) => values[key]);
 
   if (configuredKeys.length === 0) {
+    if (retiredSurfaceKeys.some((key) => values[key])) {
+      throw new Error(`Incomplete auth session config; missing ${authSessionKeys.join(", ")}`);
+    }
     return undefined;
   }
 
@@ -559,11 +581,13 @@ function loadAuthSessionConfig(env: NodeJS.ProcessEnv): ApiAuthSessionConfig | u
     "AUTH_COMPATIBILITY_CALLBACK_ORIGIN",
   );
   const authSurfaceOrigins = Object.fromEntries(
-    AUTH_SURFACES.map((surface) => {
+    AUTH_SURFACES.flatMap((surface) => {
       const key = AUTH_SURFACE_ORIGIN_KEYS[surface];
-      return [surface, normalizeAuthOrigin(values[key]!, key)];
+      const value = values[key];
+      if (!value) return [];
+      return [[surface, normalizeAuthOrigin(value, key)]];
     }),
-  ) as Record<ApiAuthSurface, string>;
+  ) as ApiAuthSessionConfig["authSurfaceOrigins"];
   const callbackOrigins = [authCompatibilityCallbackOrigin, ...Object.values(authSurfaceOrigins)];
   const untrustedCallbackOrigins = callbackOrigins.filter(
     (origin) => !authAllowedOrigins.includes(origin),
@@ -576,9 +600,17 @@ function loadAuthSessionConfig(env: NodeJS.ProcessEnv): ApiAuthSessionConfig | u
     );
   }
   const authFirstPartySurfaces = readAuthSurfaceList(env);
+  const unconfiguredFirstPartySurfaces = authFirstPartySurfaces.filter(
+    (surface) => !authSurfaceOrigins[surface],
+  );
+  if (unconfiguredFirstPartySurfaces.length > 0) {
+    throw new Error(
+      `AUTH_FIRST_PARTY_SURFACES contains surfaces without a login origin: ${unconfiguredFirstPartySurfaces.join(", ")}`,
+    );
+  }
   const authCookieSecure = readOptionalEnv(env, "AUTH_COOKIE_SECURE") !== "false";
   const insecureHttpsSurfaces = authFirstPartySurfaces.filter(
-    (surface) => authSurfaceOrigins[surface].startsWith("https://") && !authCookieSecure,
+    (surface) => authSurfaceOrigins[surface]?.startsWith("https://") && !authCookieSecure,
   );
   if (insecureHttpsSurfaces.length > 0) {
     throw new Error(
