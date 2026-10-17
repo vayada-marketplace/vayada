@@ -14,10 +14,6 @@ import {
 } from "./services/api/bookingWebPublic";
 
 const intlMiddleware = createMiddleware(routing);
-const affiliateContextCookie = "__Host-vayada_affiliate_context";
-const affiliateContextMaxAge = 90 * 24 * 60 * 60;
-const validClickReference = /^vc_[A-Za-z0-9_-]{22}$/;
-const validContext = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function normalizeHost(hostname: string): string {
   const normalized = hostname.trim().toLowerCase();
@@ -116,63 +112,6 @@ async function admittedPublicOrigin(request: NextRequest): Promise<PublicOrigin 
 }
 
 export default async function middleware(request: NextRequest) {
-  // Until first-party admission is live, never forward an opaque click reference
-  // through a cached or changed canonical-host redirect.
-  if (request.nextUrl.searchParams.has("vref")) {
-    const cleanUrl = request.nextUrl.clone();
-    cleanUrl.searchParams.delete("vref");
-    const origin = await admittedPublicOrigin(request);
-    if (!origin) {
-      return new Response(null, { status: 400, headers: { "Cache-Control": "no-store" } });
-    }
-    const { hostname: publicHostname, protocol: publicProtocol } = origin;
-    const publicUrl = new URL(
-      `${cleanUrl.pathname}${cleanUrl.search}${cleanUrl.hash}`,
-      `${publicProtocol}//${origin.host}`,
-    );
-    const redirect = NextResponse.redirect(publicUrl, 307);
-    redirect.headers.set("Cache-Control", "no-store");
-    redirect.headers.set("Referrer-Policy", "no-referrer");
-    const internalToken = process.env.BOOKING_WEB_AFFILIATE_ARRIVAL_INTERNAL_TOKEN;
-    const references = request.nextUrl.searchParams.getAll("vref");
-    if (
-      process.env.BOOKING_WEB_AFFILIATE_ARRIVAL_ENABLED === "true" &&
-      internalToken &&
-      publicProtocol === "https:" &&
-      references.length === 1 &&
-      validClickReference.test(references[0]!)
-    ) {
-      try {
-        // A cached canonical-host result may outlive a custom-domain change.
-        // Recheck the final browser host before requesting admission.
-        const resolution = await fetchHostResolution(publicHostname, true);
-        if (resolution && new URL(resolution.bookingBaseUrl).hostname === publicHostname) {
-          const existing = request.cookies.get(affiliateContextCookie)?.value;
-          const admission = await bookingWebPublicApi.admitAffiliateArrival(
-            {
-              host: publicHostname,
-              referenceToken: references[0]!,
-              ...(existing && validContext.test(existing) ? { contextId: existing } : {}),
-            },
-            internalToken,
-          );
-          if (admission.status === "admitted" && validContext.test(admission.contextId)) {
-            redirect.cookies.set(affiliateContextCookie, admission.contextId, {
-              path: "/",
-              httpOnly: true,
-              secure: true,
-              sameSite: "lax",
-              maxAge: affiliateContextMaxAge,
-            });
-          }
-        }
-      } catch {
-        // A failed admission must not block the guest's booking page.
-      }
-    }
-    return redirect;
-  }
-
   const retiredPageRedirect = await retiredBookingPageRedirect(request);
   if (retiredPageRedirect) return retiredPageRedirect;
 
@@ -204,8 +143,7 @@ export default async function middleware(request: NextRequest) {
     if (canonicalRedirect) return canonicalRedirect;
   }
 
-  // No cookies before the guest's privacy choice (VAY-2223): the referral code travels in the
-  // URL (AffiliateClickTracker reads ?ref=), and the hotel comes from the host.
+  // No cookies before the guest's privacy choice (VAY-2223); the hotel comes from the host.
   return response;
 }
 

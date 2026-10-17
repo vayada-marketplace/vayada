@@ -1,6 +1,6 @@
 import { createHmac, randomBytes } from "node:crypto";
 
-import { sourcePrefix } from "../domains/marketplaceAffiliatePublicLinkQuota.js";
+import { sourcePrefix } from "./ipSourcePrefix.js";
 
 /**
  * Per-minute limits for Booking Web's funnel events (VAY-2214). A guest's whole booking sends

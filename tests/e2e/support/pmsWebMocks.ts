@@ -497,7 +497,7 @@ export async function mockPmsWebTargetRoutes(page: Page): Promise<void> {
       json: {
         hotelId: PMS_WEB_PROPERTY_ID,
         canManage: true,
-        supportedModules: ["affiliates"],
+        supportedModules: [],
         activeModules: [],
         activations: [],
       },

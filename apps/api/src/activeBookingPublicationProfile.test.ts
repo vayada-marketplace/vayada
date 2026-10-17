@@ -7,13 +7,18 @@ import { createActiveBookingPublicationProfileRepository } from "./routes/active
 import type { PublicHotelProfileReadPool } from "./routes/aiHotels.js";
 
 const profile = PUBLIC_BOOKABILITY_FIXTURES.find(({ caseId }) => caseId === "bookable")!.profile;
+/** Refer a Guest is retired (VAY-2263): the live read reports it off whatever the publication says. */
+const retiredReferral = (value: typeof profile) => ({
+  ...value,
+  hotel: { ...value.hotel, capabilities: { ...value.hotel.capabilities, referralCodes: false } },
+});
 
 describe("active immutable Booking publication profile reads", () => {
   it("does not return old published coordinates when current location is hidden", async () => {
     const repository = createActiveBookingPublicationProfileRepository({
       connectionString: "postgresql://unused",
       pool: pool(async (text) =>
-        text.includes("identity.product_entitlements")
+        text.includes('AS "promoCodes"')
           ? [{ domainVerified: true, referralEnabled: true, latitude: null, longitude: null }]
           : [{ propertyId: profile.hotel.propertyId, publicContent: content(profile) }],
       ),
@@ -47,7 +52,7 @@ describe("active immutable Booking publication profile reads", () => {
       createActiveBookingPublicationProfileRepository({
         connectionString: "postgresql://unused",
         pool: pool(async (text) =>
-          text.includes("identity.product_entitlements")
+          text.includes('AS "promoCodes"')
             ? [{ domainVerified: true, referralEnabled: true, latitude: null, longitude: null }]
             : text.includes("FROM finance.payment_settings settings")
               ? [
@@ -81,7 +86,7 @@ describe("active immutable Booking publication profile reads", () => {
       connectionString: "postgresql://unused",
       pool: pool(async (text, values) => {
         calls.push({ text, values });
-        if (text.includes("identity.product_entitlements")) {
+        if (text.includes('AS "promoCodes"')) {
           return [
             {
               domainVerified: true,
@@ -98,15 +103,11 @@ describe("active immutable Booking publication profile reads", () => {
 
     await expect(
       repository.findProfileBySlug(` ${profile.hotel.slug.toUpperCase()} `),
-    ).resolves.toEqual(profile);
+    ).resolves.toEqual(retiredReferral(profile));
     expect(calls[0]?.text).toContain("distribution.active_public_booking_revision");
     expect(calls[0]?.text).toContain("distribution.public_booking_content_revisions");
     expect(calls[0]?.values).toEqual([profile.hotel.slug]);
-    expect(calls[1]?.text).toContain("identity.product_entitlements");
-    expect(calls[1]?.text).toContain("pms_resource.product = 'pms'");
-    expect(calls[1]?.text).toContain("pms_resource.resource_type = 'pms_property'");
-    expect(calls[1]?.text).toContain("booking_resource.product = 'booking'");
-    expect(calls[1]?.text).toContain("booking_resource.resource_type = 'booking_hotel'");
+    expect(calls[1]?.text).toContain('AS "promoCodes"');
     expect(calls[1]?.values).toEqual([profile.hotel.propertyId]);
   });
 
@@ -142,7 +143,7 @@ describe("active immutable Booking publication profile reads", () => {
       connectionString: "postgresql://unused",
       pool: pool(async (text, values) => {
         calls.push([text, values]);
-        if (text.includes("identity.product_entitlements")) {
+        if (text.includes('AS "promoCodes"')) {
           return [
             {
               domainVerified: true,
@@ -161,7 +162,7 @@ describe("active immutable Booking publication profile reads", () => {
 
     await expect(
       repository.findProfileByCustomDomain?.("HTTPS://Book.Example.test/path"),
-    ).resolves.toEqual(domainProfile);
+    ).resolves.toEqual(retiredReferral(domainProfile));
     expect(calls[0]?.[0]).toContain("hotel_catalog.property_domains");
     expect(calls[0]?.[0]).toContain("verification_status = 'verified'");
     expect(calls[0]?.[1]).toEqual(["book.example.test"]);
@@ -176,7 +177,7 @@ describe("active immutable Booking publication profile reads", () => {
     const repository = createActiveBookingPublicationProfileRepository({
       connectionString: "postgresql://unused",
       pool: pool(async (text) => {
-        if (text.includes("identity.product_entitlements"))
+        if (text.includes('AS "promoCodes"'))
           return [{ referralEnabled: false, latitude: null, longitude: null }];
         if (!text.includes("distribution.active_public_booking_revision")) return [];
         return [
@@ -202,7 +203,7 @@ describe("active immutable Booking publication profile reads", () => {
     const repository = createActiveBookingPublicationProfileRepository({
       connectionString: "postgresql://unused",
       pool: pool(async (text) =>
-        text.includes("identity.product_entitlements")
+        text.includes('AS "promoCodes"')
           ? [{ domainVerified: true, referralEnabled: false }]
           : [{ propertyId: staleProfile.hotel.propertyId, publicContent: content(staleProfile) }],
       ),
@@ -221,7 +222,7 @@ describe("active immutable Booking publication profile reads", () => {
       createActiveBookingPublicationProfileRepository({
         connectionString: "postgresql://unused",
         pool: pool(async (text) =>
-          text.includes("identity.product_entitlements")
+          text.includes('AS "promoCodes"')
             ? [{ domainVerified: true, referralEnabled: true, promoCodes }]
             : [{ propertyId: published.hotel.propertyId, publicContent: content(published) }],
         ),

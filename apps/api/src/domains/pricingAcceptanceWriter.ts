@@ -58,9 +58,6 @@ export async function writePricingAcceptance(
     slug: unknown;
     command: unknown;
   },
-  internal?:
-    | { syntheticAffiliateContextId: string; affiliateContextId?: never }
-    | { affiliateContextId: string; syntheticAffiliateContextId?: never },
   /** Card quotes are accepted only with a payment provider (REPLACEMENT_PRICING_CARD_ACCEPTANCE_ENABLED). */
   cardPayments?: { provider: StripeBookingPaymentProvider },
   /** Request-mode pay-at-property quotes (REPLACEMENT_PRICING_REQUEST_ACCEPTANCE_ENABLED). */
@@ -138,8 +135,6 @@ export async function writePricingAcceptance(
       ...prepared,
       bookingId,
       publicReference,
-      syntheticAffiliateContextId: internal?.syntheticAffiliateContextId,
-      affiliateContextId: internal?.affiliateContextId,
     });
     const lifecycle = await stagePricingBookingLifecycle(
       client,

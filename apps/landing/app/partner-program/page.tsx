@@ -60,11 +60,6 @@ const revenueShare = [
 
 const audiences = [
   {
-    icon: MegaphoneIcon,
-    title: "Hospitality creators",
-    body: "Creators with hotel, villa, travel or destination audiences who can introduce properties to modern direct booking tools.",
-  },
-  {
     icon: GlobeAltIcon,
     title: "Website & marketing agencies",
     body: "Agencies building websites, branding, SEO, paid ads or social media for hospitality clients.",
@@ -283,7 +278,7 @@ export default function PartnerProgramPage() {
       <section className="relative py-20 md:py-28">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <SectionHeading eyebrow="Who it's for" title="Who the program is for" />
-          <div className="mx-auto mt-14 grid max-w-4xl gap-6 md:grid-cols-2">
+          <div className="mx-auto mt-14 grid max-w-5xl gap-6 md:grid-cols-3">
             {audiences.map((item) => (
               <IconCard key={item.title} {...item} />
             ))}

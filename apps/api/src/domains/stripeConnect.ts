@@ -4,6 +4,7 @@ import {
   StripeConnectAccountNotFoundError,
   type FinanceProviderAccountOwner,
   type FinanceStripeConnectProvider,
+  type StripeConnectReturnSurface,
 } from "@vayada/domain-finance";
 
 type StripeObject = Record<string, unknown>;
@@ -60,14 +61,17 @@ export function createStripeConnectProvider(config: {
     owner: FinanceProviderAccountOwner,
     account: string,
     idempotencyKey: string,
-    returnSurface: "marketplace" | "booking_admin" = "marketplace",
+    returnSurface: StripeConnectReturnSurface = "marketplace",
   ): Promise<string> => {
     const returnPath = returnSurface === "booking_admin" ? "/settings" : "/setup";
+    // VAY-2262: the setup wizard also runs in Booking Admin; it returns to that host's /setup.
+    const returnBase =
+      returnSurface === "marketplace" ? returnBaseUrls.marketplace : returnBaseUrls.booking_admin;
     const returnUrl = (stripe: "refresh" | "return") => {
-      const url = new URL(returnPath, returnBaseUrls[returnSurface]);
+      const url = new URL(returnPath, returnBase);
       if (returnSurface === "booking_admin") {
         url.searchParams.set("section", "payments");
-      } else if (owner.ownerScope === "property") {
+      } else {
         url.searchParams.set("propertyId", owner.propertyId);
         url.searchParams.set("step", "payments");
       }
@@ -92,8 +96,7 @@ export function createStripeConnectProvider(config: {
 
   return {
     async createAccount(input) {
-      const ownerId =
-        input.owner.ownerScope === "property" ? input.owner.propertyId : input.owner.affiliateId;
+      const ownerId = input.owner.propertyId;
       const account = await request(
         "POST",
         "/accounts",

@@ -362,13 +362,6 @@ export async function mockBookingApis(page: Page, options: MockBookingApisOption
     },
   );
 
-  await page.route(
-    `**/api/booking-web/hotels/${SEEDED_BOOKING_SLUG}/attribution/clicks`,
-    async (route) => {
-      await route.fulfill({ status: 204, body: "" });
-    },
-  );
-
   for (const retired of ["offers", "calendar"]) {
     await page.route(`**/api/booking-web/hotels/${SEEDED_BOOKING_SLUG}/${retired}**`, (route) =>
       route.fulfill(PRICING_RETIRED),
