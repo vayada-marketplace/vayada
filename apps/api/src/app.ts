@@ -488,7 +488,6 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       // event by its time.
       request.url.startsWith("/api/booking-web/events") ||
       request.url.startsWith("/api/marketplace/communication-unsubscribe") ||
-      request.url.startsWith("/api/marketplace/creator-platform-oauth/") ||
       (request.url.startsWith("/api/pms/properties/") &&
         request.url.split("?", 1)[0]?.endsWith("/messaging/threads") === true),
   });
