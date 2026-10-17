@@ -20,7 +20,7 @@ PORTLESS_STATE_DIR=/tmp/vay1009-real-import-1380 PORTLESS_PORT=1380 PORTLESS_SYN
 
 Reuse the container when it already exists. Open
 [the database demo](https://pms.localhost:1380/database.html). The API binds loopback,
-requires an ephemeral token held by Vite, and accepts only the fixed PMS and Marketplace browser origins at the
+requires an ephemeral token held by Vite, and accepts only the fixed PMS and Booking Admin browser origins at the
 proxy. This is test authentication, not WorkOS evidence. Do not expose the proxy.
 
 ```sh

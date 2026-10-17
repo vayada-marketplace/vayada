@@ -83,8 +83,10 @@ test("landing production APIs are explicit and consent remains local", async ({}
   ]);
 
   expect(workflowSource).toContain("CONTACT_API_URL: https://api.vayada.com");
-  expect(workflowSource).toContain("MARKETPLACE_API_URL: https://next-api.vayada.com");
-  expect(workflowSource).toContain("NEXT_PUBLIC_VAYADA_API_URL=${{ env.MARKETPLACE_API_URL }}");
+  expect(workflowSource).toContain("NEXT_API_URL: https://next-api.vayada.com");
+  expect(workflowSource).toContain("NEXT_PUBLIC_VAYADA_API_URL=${{ env.NEXT_API_URL }}");
+  // VAY-2260: the landing deploy no longer probes the Marketplace discovery API.
+  expect(workflowSource).not.toContain("/api/marketplace/");
   expect(workflowSource).not.toMatch(/NEXT_PUBLIC_[A-Z_]+=.*(?:localhost|127\.0\.0\.1)/);
   expect(consentSource).not.toContain("@/services/api/consent");
 });

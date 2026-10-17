@@ -78,9 +78,9 @@ export default function AboutPage() {
               </p>
 
               <p className="text-gray-700 text-lg leading-relaxed">
-                vayada is a platform that connects properties, travelers, and creators in one
-                thriving, modern ecosystem, empowering each of them through transparency, fairness,
-                and technology.
+                vayada is a platform that gives independent properties direct control over their
+                bookings, guests and data, empowering them through transparency, fairness, and
+                technology.
               </p>
             </div>
           </div>
@@ -120,8 +120,7 @@ export default function AboutPage() {
                     </p>
                     <p>
                       We believe in a transparent, performance-driven ecosystem where properties
-                      thrive through direct connections with travelers, supported by a global
-                      network of trusted creators.
+                      thrive through direct connections with travelers.
                     </p>
                   </div>
                 </div>
@@ -168,7 +167,7 @@ export default function AboutPage() {
               <p className="text-gray-700 text-lg leading-relaxed max-w-3xl mx-auto mb-12">
                 With over 300,000 followers, @glorioushotels has collaborated with 20+ boutique
                 hotels and villas worldwide. These collaborations inspire vayada's mission to
-                connect hotels, travelers, and creators in one powerful ecosystem.
+                connect hotels and travelers directly.
               </p>
 
               {/* Partners Grid */}

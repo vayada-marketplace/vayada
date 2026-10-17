@@ -26,6 +26,8 @@ export const ROUTES = {
   RESET_PASSWORD: "/reset-password",
   VERIFY_EMAIL: "/verify-email",
   ONBOARDING: "/onboarding",
+  // VAY-2260: where creators land now that the Marketplace is closed.
+  CLOSED: "/closed",
   PROFILE: "/profile",
   PROFILE_COMPLETE: "/profile/complete",
   SETUP: "/setup",

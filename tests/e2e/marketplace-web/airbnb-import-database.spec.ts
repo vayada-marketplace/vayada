@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { createPgPmsRoomFactsReadModel } from "../../../apps/api/src/domains/pmsRoomFactsReadModel.js";
 import { expect, test } from "@playwright/test";
-import { corsHeaders, fulfillCorsPreflight } from "./utils/cors";
+import { corsHeaders, fulfillCorsPreflight } from "../support/cors";
 
 // Fixed isolated fixture only; never accepts a remote DSN or provider credentials.
 const fixtureOrigin = "https://pms.localhost:1380";

@@ -1,4 +1,4 @@
-import { expect, test, type Route } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import {
   authRequests,
   authSession,
@@ -9,7 +9,7 @@ import {
 
 const marketplace = firstPartyAuthSurfaces.find(({ key }) => key === "marketplace")!;
 
-test("Marketplace signup reaches creator onboarding without csrf_rejected", async ({ page }) => {
+test("Marketplace signup reaches hotel onboarding without csrf_rejected", async ({ page }) => {
   const guestSession = {
     accessToken: "access-marketplace-guest",
     csrfToken: "csrf-marketplace",
@@ -33,7 +33,7 @@ test("Marketplace signup reaches creator onboarding without csrf_rejected", asyn
       return true;
     }
     if (pathname === "/auth/onboarding") {
-      const session = authSession(marketplace, "creator");
+      const session = authSession(marketplace, "hotel");
       await route.fulfill({
         status: 200,
         json: {
@@ -45,58 +45,25 @@ test("Marketplace signup reaches creator onboarding without csrf_rejected", asyn
     }
     return false;
   });
-  await page.route("**/api/marketplace/creators/me**", async (route) => {
-    const url = new URL(route.request().url());
-    if (route.request().method() === "OPTIONS") {
-      await fulfillCors(route);
-      return;
-    }
-    if (url.pathname.endsWith("/platform-connections")) {
-      await route.fulfill({ headers: corsHeaders(route), json: { connections: [] } });
-      return;
-    }
-    await route.fulfill({
-      headers: corsHeaders(route),
-      json: {
-        audienceSize: 0,
-        createdAt: "2026-08-11T08:00:00.000Z",
-        creatorProfileId: "creator-profile-auth-regression",
-        creatorType: "travel",
-        displayName: null,
-        locationText: null,
-        phone: null,
-        platforms: [],
-        portfolioUrl: null,
-        profileComplete: false,
-        profilePictureMediaObjectId: null,
-        profilePictureUrl: null,
-        profileStatus: "pending",
-        rating: { averageRating: 0, totalReviews: 0 },
-        shortDescription: null,
-        updatedAt: "2026-08-11T08:00:00.000Z",
-      },
-    });
-  });
-
   await page.goto(`${marketplace.baseURL}/signup`);
   await page.getByLabel(/email address/i).fill("marketplace-signup@example.test");
   await page.getByLabel(/^password$/i).fill("Regression123!");
   await page.getByRole("button", { name: /create account/i }).click();
 
-  await expect(
-    page.getByRole("heading", { name: "Welcome to Vayada — what brings you here?" }),
-  ).toBeVisible();
-  await page.getByRole("radio", { name: /i’m a creator/i }).click();
+  // VAY-2260: the creator Marketplace is closed; sign-up offers only the hotel path.
+  await expect(page.getByRole("heading", { name: "Welcome to vayada", exact: true })).toBeVisible();
+  await expect(page.getByRole("radio", { name: /i’m a creator/i })).toHaveCount(0);
+  await expect(page.getByRole("radio", { name: /i manage a hotel/i })).toBeChecked();
   await page.getByRole("button", { name: "Continue", exact: true }).click();
 
   await expect.poll(() => authRequests(records, "/auth/onboarding").length).toBe(1);
   const onboarding = authRequests(records, "/auth/onboarding")[0]!;
-  expect(onboarding.body).toEqual({ surface: "marketplace-web", type: "creator" });
+  expect(onboarding.body).toEqual({ surface: "marketplace-web", type: "hotel" });
   expect(onboarding.csrf).toBe("csrf-marketplace");
   expect(onboarding.cookie).toContain(`${sessionCookieName(marketplace)}=sealed-marketplace`);
   await expect(page.getByText("csrf_rejected", { exact: true })).toHaveCount(0);
   await expect(page.getByLabel("Email address")).toHaveValue("marketplace-signup@example.test");
-  await expect(page.getByRole("button", { name: "Upload profile photo" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Continue to hotel setup" })).toBeVisible();
   for (const request of records) expect(new URL(request.url).origin).toBe(marketplace.baseURL);
 });
 
@@ -181,22 +148,4 @@ for (const flow of ["login", "signup"] as const) {
   });
 }
 
-function corsHeaders(route: Route): Record<string, string> {
-  return {
-    "access-control-allow-credentials": "true",
-    "access-control-allow-origin": route.request().headers().origin ?? "*",
-    "content-type": "application/json",
-  };
-}
 
-async function fulfillCors(route: Route): Promise<void> {
-  await route.fulfill({
-    status: 204,
-    headers: {
-      "access-control-allow-credentials": "true",
-      "access-control-allow-headers": "authorization, content-type",
-      "access-control-allow-methods": "GET, POST, PUT, OPTIONS",
-      "access-control-allow-origin": route.request().headers().origin ?? "*",
-    },
-  });
-}
