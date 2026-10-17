@@ -12,7 +12,8 @@ import {
   XCircleIcon,
 } from "@heroicons/react/24/outline";
 import { SettingsCard } from "@vayada/settings-ui";
-import { SettingsSubPage } from "@/components/settings/SettingsSubPage";
+import { PageHeader, PageLayout } from "@/components/layout/PageLayout";
+import { SettingsBreadcrumb } from "@/components/settings/SettingsSubPage";
 import { FeedbackAlert } from "@/components/ui";
 import { useTranslation } from "@/lib/i18n";
 import {
@@ -30,7 +31,7 @@ export function PrivacyPage() {
   const [consentHistory, setConsentHistory] = useState<ConsentHistoryItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isUpdating, setIsUpdating] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [errorKey, setErrorKey] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   const formatDate = useCallback(
@@ -60,7 +61,8 @@ export function PrivacyPage() {
         setConsentStatus(status);
         setConsentHistory(history.history);
       } catch {
-        if (!disposed) setError(t("settings.privacy.loadFailed"));
+        // Keyed, not translated here: `t` changes when the catalog loads and must not re-run this.
+        if (!disposed) setErrorKey("settings.privacy.loadFailed");
       } finally {
         if (!disposed) setIsLoading(false);
       }
@@ -68,13 +70,13 @@ export function PrivacyPage() {
     return () => {
       disposed = true;
     };
-  }, [t]);
+  }, []);
 
   async function toggleMarketingConsent() {
     if (!consentStatus || isUpdating) return;
     try {
       setIsUpdating(true);
-      setError(null);
+      setErrorKey(null);
       setSuccessMessage(null);
       const result = await identityPrivacyService.updateMarketingConsent(
         !consentStatus.marketing_consent,
@@ -88,7 +90,7 @@ export function PrivacyPage() {
       const history = await identityPrivacyService.getConsentHistory(10);
       setConsentHistory(history.history);
     } catch {
-      setError(t("settings.privacy.updateFailed"));
+      setErrorKey("settings.privacy.updateFailed");
     } finally {
       setIsUpdating(false);
     }
@@ -102,166 +104,172 @@ export function PrivacyPage() {
   }
 
   return (
-    <SettingsSubPage title={t("settings.cards.privacy.title")}>
-      <p className="-mt-4 mb-6 text-[13px] text-gray-500">{t("settings.privacy.subtitle")}</p>
-      <div className="space-y-4">
-        {error && <FeedbackAlert type="error" message={error} />}
-        {successMessage && <FeedbackAlert type="success" message={successMessage} />}
+    <PageLayout>
+      <div className="max-w-3xl">
+        <PageHeader
+          breadcrumb={<SettingsBreadcrumb current={t("settings.cards.privacy.title")} />}
+          title={t("settings.cards.privacy.title")}
+          subtitle={t("settings.privacy.subtitle")}
+        />
+        <div className="space-y-4">
+          {errorKey && <FeedbackAlert type="error" message={t(errorKey)} />}
+          {successMessage && <FeedbackAlert type="success" message={successMessage} />}
 
-        {isLoading ? (
-          <div className="space-y-4" aria-busy="true">
-            {[1, 2].map((item) => (
-              <div
-                key={item}
-                className="animate-pulse rounded-lg border border-gray-200 bg-white p-5"
-              >
-                <div className="mb-4 h-5 w-1/3 rounded bg-gray-200" />
-                <div className="h-4 w-2/3 rounded bg-gray-200" />
-              </div>
-            ))}
-          </div>
-        ) : (
-          <>
-            <SettingsCard title={t("settings.privacy.consentStatus")} contentClassName="p-0">
-              <ul className="divide-y divide-gray-100">
-                <ConsentRow
-                  icon={<DocumentTextIcon className="h-5 w-5 text-gray-400" />}
-                  title={t("settings.privacy.terms")}
-                  description={acceptance(
-                    consentStatus?.terms_accepted ?? false,
-                    consentStatus?.terms_accepted_at ?? null,
-                  )}
-                  trailing={<AcceptanceIcon accepted={consentStatus?.terms_accepted} />}
-                />
-                <ConsentRow
-                  icon={<ShieldCheckIcon className="h-5 w-5 text-gray-400" />}
-                  title={t("settings.privacy.privacyPolicy")}
-                  description={acceptance(
-                    consentStatus?.privacy_accepted ?? false,
-                    consentStatus?.privacy_accepted_at ?? null,
-                  )}
-                  trailing={<AcceptanceIcon accepted={consentStatus?.privacy_accepted} />}
-                />
-                <ConsentRow
-                  icon={<EnvelopeIcon className="h-5 w-5 text-gray-400" />}
-                  title={t("settings.privacy.marketing")}
-                  description={t("settings.privacy.marketingDescription")}
-                  trailing={
-                    consentStatus ? (
-                      <button
-                        type="button"
-                        role="switch"
-                        aria-label={t("settings.privacy.marketing")}
-                        aria-checked={consentStatus.marketing_consent}
-                        onClick={() => void toggleMarketingConsent()}
-                        disabled={isUpdating}
-                        className={`relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 ${
-                          consentStatus.marketing_consent ? "bg-primary-600" : "bg-gray-200"
-                        } ${isUpdating ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}
-                      >
-                        <span
-                          className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition ${
-                            consentStatus.marketing_consent ? "translate-x-5" : "translate-x-0"
-                          }`}
-                        />
-                      </button>
-                    ) : (
-                      <span className="text-[13px] text-gray-500">
-                        {t("settings.privacy.unavailable")}
-                      </span>
-                    )
-                  }
-                />
-              </ul>
-            </SettingsCard>
-
-            <SettingsCard
-              title={t("settings.privacy.dataRights")}
-              description={t("settings.privacy.dataRightsDescription")}
-              contentClassName="p-0"
-            >
-              <ul className="divide-y divide-gray-100">
-                <li>
-                  <Link
-                    href="/settings/data-export"
-                    className="flex items-center justify-between gap-4 px-4 py-4 transition-colors hover:bg-gray-50 md:px-5"
-                  >
-                    <span className="flex items-center gap-4">
-                      <ArrowDownTrayIcon className="h-5 w-5 text-gray-400" />
-                      <span>
-                        <span className="block text-[14px] font-medium text-gray-900">
-                          {t("settings.privacy.exportTitle")}
-                        </span>
-                        <span className="block text-[13px] text-gray-500">
-                          {t("settings.privacy.exportDescription")}
-                        </span>
-                      </span>
-                    </span>
-                    <span className="text-gray-400" aria-hidden="true">
-                      →
-                    </span>
-                  </Link>
-                </li>
-                <li>
-                  <Link
-                    href="/settings/delete-account"
-                    className="flex items-center justify-between gap-4 px-4 py-4 transition-colors hover:bg-gray-50 md:px-5"
-                  >
-                    <span className="flex items-center gap-4">
-                      <TrashIcon className="h-5 w-5 text-red-400" />
-                      <span>
-                        <span className="block text-[14px] font-medium text-gray-900">
-                          {t("settings.privacy.deleteTitle")}
-                        </span>
-                        <span className="block text-[13px] text-gray-500">
-                          {t("settings.privacy.deleteDescription")}
-                        </span>
-                      </span>
-                    </span>
-                    <span className="text-gray-400" aria-hidden="true">
-                      →
-                    </span>
-                  </Link>
-                </li>
-              </ul>
-            </SettingsCard>
-
-            {consentHistory.length > 0 && (
-              <SettingsCard title={t("settings.privacy.history")} contentClassName="p-0">
+          {isLoading ? (
+            <div className="space-y-4" aria-busy="true">
+              {[1, 2].map((item) => (
+                <div
+                  key={item}
+                  className="animate-pulse rounded-lg border border-gray-200 bg-white p-5"
+                >
+                  <div className="mb-4 h-5 w-1/3 rounded bg-gray-200" />
+                  <div className="h-4 w-2/3 rounded bg-gray-200" />
+                </div>
+              ))}
+            </div>
+          ) : (
+            <>
+              <SettingsCard title={t("settings.privacy.consentStatus")} contentClassName="p-0">
                 <ul className="divide-y divide-gray-100">
-                  {consentHistory.slice(0, 5).map((item) => (
-                    <li
-                      key={item.id}
-                      className="flex items-center justify-between gap-4 px-4 py-3 md:px-5"
-                    >
-                      <span>
-                        <span className="block text-[14px] font-medium capitalize text-gray-900">
-                          {item.consent_type.replace("_", " ")}
+                  <ConsentRow
+                    icon={<DocumentTextIcon className="h-5 w-5 text-gray-400" />}
+                    title={t("settings.privacy.terms")}
+                    description={acceptance(
+                      consentStatus?.terms_accepted ?? false,
+                      consentStatus?.terms_accepted_at ?? null,
+                    )}
+                    trailing={<AcceptanceIcon accepted={consentStatus?.terms_accepted} />}
+                  />
+                  <ConsentRow
+                    icon={<ShieldCheckIcon className="h-5 w-5 text-gray-400" />}
+                    title={t("settings.privacy.privacyPolicy")}
+                    description={acceptance(
+                      consentStatus?.privacy_accepted ?? false,
+                      consentStatus?.privacy_accepted_at ?? null,
+                    )}
+                    trailing={<AcceptanceIcon accepted={consentStatus?.privacy_accepted} />}
+                  />
+                  <ConsentRow
+                    icon={<EnvelopeIcon className="h-5 w-5 text-gray-400" />}
+                    title={t("settings.privacy.marketing")}
+                    description={t("settings.privacy.marketingDescription")}
+                    trailing={
+                      consentStatus ? (
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-label={t("settings.privacy.marketing")}
+                          aria-checked={consentStatus.marketing_consent}
+                          onClick={() => void toggleMarketingConsent()}
+                          disabled={isUpdating}
+                          className={`relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 ${
+                            consentStatus.marketing_consent ? "bg-primary-600" : "bg-gray-200"
+                          } ${isUpdating ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}
+                        >
+                          <span
+                            className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition ${
+                              consentStatus.marketing_consent ? "translate-x-5" : "translate-x-0"
+                            }`}
+                          />
+                        </button>
+                      ) : (
+                        <span className="text-[13px] text-gray-500">
+                          {t("settings.privacy.unavailable")}
                         </span>
-                        <span className="block text-[12px] text-gray-500">
-                          {formatDate(item.created_at)}
-                        </span>
-                      </span>
-                      <span
-                        className={`rounded px-2 py-1 text-[12px] font-medium ${
-                          item.consent_given
-                            ? "bg-green-100 text-green-800"
-                            : "bg-red-100 text-red-800"
-                        }`}
-                      >
-                        {item.consent_given
-                          ? t("settings.privacy.given")
-                          : t("settings.privacy.withdrawn")}
-                      </span>
-                    </li>
-                  ))}
+                      )
+                    }
+                  />
                 </ul>
               </SettingsCard>
-            )}
-          </>
-        )}
+
+              <SettingsCard
+                title={t("settings.privacy.dataRights")}
+                description={t("settings.privacy.dataRightsDescription")}
+                contentClassName="p-0"
+              >
+                <ul className="divide-y divide-gray-100">
+                  <li>
+                    <Link
+                      href="/settings/data-export"
+                      className="flex items-center justify-between gap-4 px-4 py-4 transition-colors hover:bg-gray-50 md:px-5"
+                    >
+                      <span className="flex items-center gap-4">
+                        <ArrowDownTrayIcon className="h-5 w-5 text-gray-400" />
+                        <span>
+                          <span className="block text-[14px] font-medium text-gray-900">
+                            {t("settings.privacy.exportTitle")}
+                          </span>
+                          <span className="block text-[13px] text-gray-500">
+                            {t("settings.privacy.exportDescription")}
+                          </span>
+                        </span>
+                      </span>
+                      <span className="text-gray-400" aria-hidden="true">
+                        →
+                      </span>
+                    </Link>
+                  </li>
+                  <li>
+                    <Link
+                      href="/settings/delete-account"
+                      className="flex items-center justify-between gap-4 px-4 py-4 transition-colors hover:bg-gray-50 md:px-5"
+                    >
+                      <span className="flex items-center gap-4">
+                        <TrashIcon className="h-5 w-5 text-red-400" />
+                        <span>
+                          <span className="block text-[14px] font-medium text-gray-900">
+                            {t("settings.privacy.deleteTitle")}
+                          </span>
+                          <span className="block text-[13px] text-gray-500">
+                            {t("settings.privacy.deleteDescription")}
+                          </span>
+                        </span>
+                      </span>
+                      <span className="text-gray-400" aria-hidden="true">
+                        →
+                      </span>
+                    </Link>
+                  </li>
+                </ul>
+              </SettingsCard>
+
+              {consentHistory.length > 0 && (
+                <SettingsCard title={t("settings.privacy.history")} contentClassName="p-0">
+                  <ul className="divide-y divide-gray-100">
+                    {consentHistory.slice(0, 5).map((item) => (
+                      <li
+                        key={item.id}
+                        className="flex items-center justify-between gap-4 px-4 py-3 md:px-5"
+                      >
+                        <span>
+                          <span className="block text-[14px] font-medium capitalize text-gray-900">
+                            {item.consent_type.replace("_", " ")}
+                          </span>
+                          <span className="block text-[12px] text-gray-500">
+                            {formatDate(item.created_at)}
+                          </span>
+                        </span>
+                        <span
+                          className={`rounded px-2 py-1 text-[12px] font-medium ${
+                            item.consent_given
+                              ? "bg-green-100 text-green-800"
+                              : "bg-red-100 text-red-800"
+                          }`}
+                        >
+                          {item.consent_given
+                            ? t("settings.privacy.given")
+                            : t("settings.privacy.withdrawn")}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </SettingsCard>
+              )}
+            </>
+          )}
+        </div>
       </div>
-    </SettingsSubPage>
+    </PageLayout>
   );
 }
 
