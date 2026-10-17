@@ -369,11 +369,6 @@ jobs:
           trap 'stop_dev_server || true' EXIT
           start_dev_server marketplace-web
           npm run e2e:marketplace-web -- --workers=1 --retries=1
-          stop_dev_server
-          start_dev_server marketplace-web-airbnb AIRBNB_IMPORT_CALLBACK_ENABLED=true
-          E2E_AIRBNB_IMPORT_CALLBACK=1 npm run e2e:marketplace-web -- --workers=1 --retries=1 \
-            tests/e2e/marketplace-web/airbnb-import-start.spec.ts \
-            tests/e2e/marketplace-web/airbnb-import-return.spec.ts
         env:
           # Any non-empty CI makes playwright.config.ts use CI reporters; "false" keeps it from
           # starting every app's webServer (that needs CI === "true").

@@ -3,7 +3,6 @@ import { dirname, resolve } from "node:path";
 import { expect, test, type TestInfo } from "@playwright/test";
 
 const apps = [
-  { app: "marketplace-web", auth: "services/auth/auth.ts", workflow: "marketplace-web" },
   { app: "booking-admin", auth: "services/auth/index.ts", workflow: "booking-admin" },
   { app: "pms-web", auth: "services/auth/index.ts", workflow: "pms-web" },
   { app: "vayada-admin", auth: "services/auth/auth.ts", workflow: "vayada-admin" },
@@ -32,12 +31,6 @@ test("production auth stays on /auth and gateway upstreams remain server-only", 
 test("ordinary product API clients retain configured service origins", async ({}, testInfo) => {
   const root = repositoryRoot(testInfo);
   const productClients = [
-    {
-      client: "packages/marketplace-shared/src/api/client.ts",
-      env: "NEXT_PUBLIC_API_URL",
-      fallback: "https://api.marketplace.localhost",
-      workflow: ".github/workflows/deploy-next-marketplace-web.yml",
-    },
     {
       client: "apps/booking-admin/services/api/client.ts",
       env: "NEXT_PUBLIC_API_URL",

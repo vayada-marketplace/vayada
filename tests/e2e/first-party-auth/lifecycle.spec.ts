@@ -88,7 +88,7 @@ for (const surface of firstPartyAuthSurfaces) {
 }
 
 for (const surface of firstPartyAuthSurfaces.filter(({ key }) =>
-  ["marketplace", "bookingAdmin", "pms"].includes(key),
+  ["bookingAdmin", "pms"].includes(key),
 )) {
   test(`${surface.label} keeps signup and recovery endpoints first-party`, async ({ page }) => {
     const records = await mockFirstPartyAuth(page, surface);
@@ -138,14 +138,10 @@ for (const surface of firstPartyAuthSurfaces.filter(({ key }) =>
       email: `${surface.key}-signup@example.test`,
       surface: surface.surface,
     });
-    if (surface.key === "marketplace") {
-      await expect(page.locator('[data-signup-e2e="complete"]')).toBeVisible();
-    } else {
-      await expect(page.getByRole("button", { name: /create account/i })).toBeEnabled();
-    }
+    await expect(page.getByRole("button", { name: /create account/i })).toBeEnabled();
 
     const endpoints = ["/auth/password/reset/request", "/auth/password/reset/confirm"];
-    if (surface.key === "marketplace" || surface.key === "pms") {
+    if (surface.key === "pms") {
       endpoints.push("/auth/email-verification/confirm", "/auth/email-verification/resend");
     }
     const statuses = await page.evaluate(

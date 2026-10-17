@@ -20,11 +20,6 @@ const legacyLocalHosts = new Set([
 const legacyLocalPorts = new Set(["8000", "8001", "8002"]);
 
 const surfaceRules = {
-  "marketplace-web-offer-discovery": [
-    legacyProductionHostRule(),
-    legacyLocalServiceRule(),
-    pathRule("/api/marketplace/listings", "retired Marketplace listings route"),
-  ],
   "vayada-admin-hotel-invites": [
     legacyProductionHostRule(),
     legacyLocalServiceRule(),
@@ -39,12 +34,6 @@ const surfaceRules = {
     pathRule("/super-admin", "legacy PMS super-admin route"),
     pathPrefixRule("/super-admin/", "legacy PMS super-admin route"),
     pathRule("/admin/hotels", "legacy Booking hotel management route"),
-  ],
-  "marketplace-web-hotel-invites": [
-    legacyProductionHostRule(),
-    legacyLocalServiceRule(),
-    pathPrefixRule("/admin/invite-codes", "legacy Marketplace Admin invite route"),
-    pathPrefixRule("/api/invite-codes", "legacy hotel invite lookup and redeem route"),
   ],
   "booking-admin-benefits-settings": [
     legacyProductionHostRule(),

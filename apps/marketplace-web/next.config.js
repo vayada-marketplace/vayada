@@ -1,69 +1,60 @@
 /** @type {import('next').NextConfig} */
 const path = require("path");
-const isDevelopment = process.env.NODE_ENV === "development";
-const authPublicHostname = (() => {
-  try {
-    return process.env.AUTH_PUBLIC_ORIGIN ? new URL(process.env.AUTH_PUBLIC_ORIGIN).hostname : null;
-  } catch {
-    return null;
-  }
-})();
+const { bookingAdminUrl, marketingUrl } = require("./redirectTargets");
+
+// VAY-2270: the Marketplace app is a redirect stub until its service is removed (step 4). Every
+// former route forwards, temporarily (the address is kept for three months), to Booking Admin for
+// hotel pages or to vayada.com for everything else. /api/health and /auth/[...path] stay for the
+// release build and the login gateway contract.
+const bookingAdminPaths = [
+  "/setup",
+  "/setup/:path*",
+  "/invite",
+  "/login",
+  "/signup",
+  "/forgot-password",
+  "/reset-password",
+  "/verify-email",
+];
+const marketingPaths = [
+  "/",
+  "/closed",
+  "/creators",
+  "/properties",
+  "/marketplace",
+  "/chat",
+  "/earnings",
+  "/calendar",
+  "/profile",
+  "/profile/:path*",
+  "/hotels/:path*",
+];
+
 const nextConfig = {
   reactStrictMode: true,
-  // Provider callback queries contain a single-use correlation token.
-  logging: { incomingRequests: { ignore: [/^\/setup\/airbnb-return(?:\/|\?|$)/] } },
-  // VAY-2260: the public creator teaser pages forward to the closed page.
-  async redirects() {
-    return ["/creators", "/properties"].map((source) => ({
-      source,
-      destination: "/closed",
-      permanent: false,
-    }));
-  },
-  async headers() {
-    return [
-      {
-        source: "/setup/airbnb-return/:path*",
-        headers: [
-          { key: "Referrer-Policy", value: "no-referrer" },
-          { key: "Cache-Control", value: "private, no-store" },
-        ],
-      },
-    ];
-  },
   output: "standalone",
-  allowedDevOrigins: ["127.0.0.1", ...(authPublicHostname ? [authPublicHostname] : [])],
   turbopack: {
     root: path.join(__dirname, "../.."),
   },
-  images: {
-    dangerouslyAllowLocalIP: isDevelopment,
-    remotePatterns: [
+  async redirects() {
+    return [
+      ...bookingAdminPaths.map((source) => ({
+        source,
+        destination: `${bookingAdminUrl}${source}`,
+        permanent: false,
+      })),
+      // The privacy, data export and delete-account pages live in Booking Admin's settings.
+      { source: "/settings", destination: `${bookingAdminUrl}/settings/privacy`, permanent: false },
       {
-        protocol: "https",
-        hostname: "api.vayada.com",
+        source: "/settings/:path*",
+        destination: `${bookingAdminUrl}/settings/privacy`,
+        permanent: false,
       },
-      {
-        protocol: "https",
-        hostname: "**.amazonaws.com",
-      },
-      {
-        protocol: "https",
-        hostname: "images.unsplash.com",
-      },
-      ...(isDevelopment
-        ? [
-            {
-              protocol: "http",
-              hostname: "localhost",
-            },
-            {
-              protocol: "https",
-              hostname: "media.localhost",
-            },
-          ]
-        : []),
-    ],
+      // Hand-off codes were issued for this surface; a fresh sign-in is the honest answer.
+      { source: "/handoff", destination: `${bookingAdminUrl}/login`, permanent: false },
+      { source: "/onboarding", destination: `${bookingAdminUrl}/signup`, permanent: false },
+      ...marketingPaths.map((source) => ({ source, destination: marketingUrl, permanent: false })),
+    ];
   },
 };
 
