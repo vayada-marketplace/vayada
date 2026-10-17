@@ -157,7 +157,11 @@ export type PropertySetupPlan = {
   launchReadiness: {
     operationsUse: (typeof SETUP_LAUNCH_READINESS_STATES)[number];
     directBookingPublish: (typeof SETUP_LAUNCH_READINESS_STATES)[number];
-    marketplacePublish: (typeof SETUP_LAUNCH_READINESS_STATES)[number];
+    /**
+     * Retired with the Creator Marketplace (VAY-2270): always "not_applicable" while the API still
+     * sends it, then absent.
+     */
+    marketplacePublish?: (typeof SETUP_LAUNCH_READINESS_STATES)[number];
   };
 };
 
@@ -288,9 +292,9 @@ function isAdaptiveHotelSetupStatus(value: unknown): value is AdaptiveHotelSetup
       selectedTracks,
       SETUP_TRACKS.filter((track) => selectedTracks.includes(track)),
     ) ||
-    !sameOrder(
+    !hasExpectedTrackEntries(
       tracks.map(({ track }) => track),
-      SETUP_TRACKS,
+      selectedTracks,
     ) ||
     tracks.some(({ track, provisioning }) =>
       selectedTracks.includes(track)
@@ -316,6 +320,19 @@ function isAdaptiveHotelSetupStatus(value: unknown): value is AdaptiveHotelSetup
   }
 
   return true;
+}
+
+// The API lists every track, the retired Creator Marketplace one included, until it stops sending
+// it (VAY-2270); afterwards it lists the offered tracks only. Both shapes are accepted.
+function hasExpectedTrackEntries(
+  trackIds: readonly SetupTrack[],
+  selectedTracks: readonly SetupTrack[],
+): boolean {
+  return (
+    sameOrder(trackIds, SETUP_TRACKS) ||
+    (sameOrder(trackIds, OFFERED_SETUP_TRACKS) &&
+      selectedTracks.every((track) => trackIds.includes(track)))
+  );
 }
 
 function isTrackStatus(value: unknown): value is TrackStatus {
@@ -461,7 +478,8 @@ function isPropertySetupPlan(
       hasOnlyKeys(launch, ["operationsUse", "directBookingPublish", "marketplacePublish"]) &&
       isOneOf(launch["operationsUse"], SETUP_LAUNCH_READINESS_STATES) &&
       isOneOf(launch["directBookingPublish"], SETUP_LAUNCH_READINESS_STATES) &&
-      isOneOf(launch["marketplacePublish"], SETUP_LAUNCH_READINESS_STATES)
+      (launch["marketplacePublish"] === undefined ||
+        isOneOf(launch["marketplacePublish"], SETUP_LAUNCH_READINESS_STATES))
     )
   ) {
     return false;
@@ -494,9 +512,11 @@ function isPropertySetupPlan(
         launch["directBookingPublish"] !== "not_applicable"
       : launch["operationsUse"] === "not_applicable" &&
         launch["directBookingPublish"] === "not_applicable") &&
-    (marketplaceSelected
-      ? launch["marketplacePublish"] !== "not_applicable"
-      : launch["marketplacePublish"] === "not_applicable") &&
+    (launch["marketplacePublish"] === undefined
+      ? !marketplaceSelected
+      : marketplaceSelected
+        ? launch["marketplacePublish"] !== "not_applicable"
+        : launch["marketplacePublish"] === "not_applicable") &&
     (recommendedTaskId === null || isSetupTaskLaunchable(recommendedTask)) &&
     launchReadinessMatchesTasks(value as unknown as PropertySetupPlan, selectedTracks)
   );
@@ -578,8 +598,9 @@ function launchReadinessMatchesTasks(
         "payment",
         "direct_booking_publication",
       ]) &&
-    plan.launchReadiness.marketplacePublish ===
-      expected("creator_marketplace", ["shared_identity", "public_profile", "creator_offer"])
+    (plan.launchReadiness.marketplacePublish === undefined ||
+      plan.launchReadiness.marketplacePublish ===
+        expected("creator_marketplace", ["shared_identity", "public_profile", "creator_offer"]))
   );
 }
 

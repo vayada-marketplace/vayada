@@ -8,7 +8,6 @@ import {
   resolvePreviousAdaptiveSetupStep,
   resolveSupportedInterfaceLocale,
   type AdaptiveSetupNavigationStep,
-  omitMarketplaceSetupSteps,
 } from "./adaptiveSetupNavigation";
 
 const combinedSteps: AdaptiveSetupNavigationStep[] = [
@@ -115,32 +114,5 @@ describe("resolveSupportedInterfaceLocale", () => {
     expect(resolveSupportedInterfaceLocale("en-US")).toBe("en");
     expect(resolveSupportedInterfaceLocale("de-DE")).toBe("en");
     expect(resolveSupportedInterfaceLocale(null)).toBe("en");
-  });
-});
-
-describe("omitMarketplaceSetupSteps", () => {
-  it("drops the Marketplace preferences step and renumbers the rest", () => {
-    const route = {
-      steps: [
-        { stepId: "present_hotel", position: 1, state: "complete" },
-        { stepId: "marketplace_preferences", position: 2, state: "complete" },
-        { stepId: "booking_design", position: 3, state: "not_started" },
-        { stepId: "review", position: 4, state: "not_started" },
-      ],
-      progress: { complete: 2, total: 4 },
-    };
-    expect(omitMarketplaceSetupSteps(route)).toEqual({
-      steps: [
-        { stepId: "present_hotel", position: 1, state: "complete" },
-        { stepId: "booking_design", position: 2, state: "not_started" },
-        { stepId: "review", position: 3, state: "not_started" },
-      ],
-      progress: { complete: 1, total: 3 },
-    });
-  });
-
-  it("returns the same route when no Marketplace step is present", () => {
-    const route = { steps: [{ stepId: "present_hotel", position: 1 }] };
-    expect(omitMarketplaceSetupSteps(route)).toBe(route);
   });
 });
