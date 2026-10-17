@@ -1111,7 +1111,6 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
             publicHotelProfilePool: pool,
             publicHotelQuotePool: pool,
             bookingWebCalendarPool: pool,
-            marketplaceDiscoveryPool: pool,
           },
         );
         await site.register(registerBookingWebPublicRoutes, {

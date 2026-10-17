@@ -23,10 +23,6 @@ import {
   registerMarketplaceSubmissionRoutes,
   type MarketplaceSubmissionRoutesOptions,
 } from "./routes/marketplaceSubmission.js";
-import {
-  registerMarketplaceHotelSubmissionModerationRoutes,
-  type MarketplaceHotelSubmissionModerationRoutesOptions,
-} from "./routes/marketplaceHotelSubmissionModeration.js";
 import type { PmsRoomClosureRepository } from "./domains/pmsRoomClosureCommandRepository.js";
 import { registerPreparedHotelImportRoutes } from "./routes/preparedHotelImports.js";
 import type { PreparedImportRepository } from "./domains/preparedHotelImportRepository.js";
@@ -34,10 +30,6 @@ import { registerBookingHostActionRoutes } from "./routes/bookingHostActions.js"
 import type { BookingHostActions } from "./domains/bookingHostActions.js";
 import { registerPmsConfirmationEmailRoutes } from "./routes/pmsConfirmationEmails.js";
 import type { PmsConfirmationEmails } from "./domains/pmsConfirmationEmails.js";
-import {
-  registerPlatformMarketplaceActivationRoutes,
-  type PlatformMarketplaceActivationOptions,
-} from "./routes/platform/admin/marketplaceActivation.js";
 import { backendAuthPlugin, type BackendAuthPluginOptions } from "@vayada/backend-auth";
 import type { IdentityLifecycleCommandBus } from "@vayada/backend-auth";
 import type { BookingGuestPiiPort } from "@vayada/domain-booking";
@@ -96,18 +88,6 @@ import {
 import { registerRouteGroups } from "./routes/groups.js";
 import { registerHealthRoutes } from "./routes/health.js";
 import {
-  registerMarketplaceDiscoveryRoutes,
-  type MarketplaceDiscoveryReadRepository,
-} from "./routes/marketplaceDiscovery.js";
-import {
-  registerMarketplaceCollaborationRoutes,
-  type MarketplaceCollaborationReadRepository,
-} from "./routes/marketplaceCollaborations.js";
-import {
-  registerMarketplaceTripRoutes,
-  type MarketplaceTripReadRepository,
-} from "./routes/marketplaceTrips.js";
-import {
   registerMarketplaceAdminRoutes,
   type MarketplaceAdminRepository,
   type MarketplaceAdminRoutesOptions,
@@ -124,11 +104,6 @@ import {
   registerMarketplaceHotelSelfServiceRoutes,
   type MarketplaceHotelSelfServiceRepository,
 } from "./routes/marketplaceHotelSelfService.js";
-import {
-  registerMarketplaceCreatorSelfServiceRoutes,
-  type MarketplaceCreatorProfileMediaRepository,
-  type MarketplaceCreatorSelfServiceRepository,
-} from "./routes/marketplaceCreatorSelfService.js";
 import { registerPropertyNearbyRoutes } from "./routes/propertyNearby.js";
 import type { PropertyNearbyRepository } from "./domains/propertyNearbyRepository.js";
 import {
@@ -142,10 +117,6 @@ import {
   registerMarketplaceHotelCollaborationPreferencesRoutes,
   type MarketplaceHotelCollaborationPreferencesRoutesOptions,
 } from "./routes/marketplaceHotelCollaborationPreferences.js";
-import {
-  registerMarketplaceCommunicationPreferencesRoutes,
-  type MarketplaceCommunicationPreferencesRoutesOptions,
-} from "./routes/marketplaceCommunicationPreferences.js";
 import {
   registerBookingDesignRoutes,
   type BookingDesignRoutesOptions,
@@ -200,6 +171,7 @@ import { registerFinanceRevenueRoutes } from "./routes/financeRevenue.js";
 import { registerFinanceBankTransferRoutes } from "./routes/financeBankTransfer.js";
 import {
   registerPlatformMediaRoutes,
+  type ApprovedPublicProfileImageRepository,
   type PlatformMediaRoutesOptions,
 } from "./routes/platformMedia.js";
 import {
@@ -404,16 +376,13 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   bookingCustomDomainRepository?: BookingCustomDomainRepository;
   publicHotelProfileRepository?: PublicHotelProfileRepository;
   publicHotelQuoteRepository?: PublicHotelQuoteRepository;
-  marketplaceDiscoveryRepository?: MarketplaceDiscoveryReadRepository;
-  marketplaceCollaborationRepository?: MarketplaceCollaborationReadRepository;
-  marketplaceTripRepository?: MarketplaceTripReadRepository;
   marketplaceAdminRepository?: MarketplaceAdminRepository;
   marketplaceAdminLegacySuperadminFallbackEnabled?: MarketplaceAdminRoutesOptions["legacySuperadminFallbackEnabled"];
   hotelAccountInvites?: Omit<HotelAccountInviteRoutesOptions, "trackCommandRepository">;
   marketplaceHotelProfileStatusRepository?: MarketplaceHotelProfileStatusRepository;
   marketplaceHotelSelfServiceRepository?: MarketplaceHotelSelfServiceRepository;
-  marketplaceCreatorSelfServiceRepository?: MarketplaceCreatorSelfServiceRepository;
-  marketplaceCreatorProfileMediaRepository?: MarketplaceCreatorProfileMediaRepository;
+  /** Approved public profile images for the auth session (platform media). */
+  profileImageMediaRepository?: ApprovedPublicProfileImageRepository;
   airbnbImports?: Omit<AirbnbImportRoutesOptions, "propertyAccessRepository" | "review"> & {
     applications: NonNullable<AirbnbImportRoutesOptions["review"]>["applications"];
   };
@@ -430,10 +399,8 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
     mediaCommands: Pick<PropertyMediaCommandRepository, "replacePresentation">;
   };
   marketplaceSubmission?: MarketplaceSubmissionRoutesOptions;
-  marketplaceHotelSubmissionModeration?: MarketplaceHotelSubmissionModerationRoutesOptions;
   marketplacePublicHotel?: MarketplacePublicHotelRoutesOptions;
   marketplaceHotelCollaborationPreferences?: MarketplaceHotelCollaborationPreferencesRoutesOptions;
-  marketplaceCommunicationPreferences?: MarketplaceCommunicationPreferencesRoutesOptions;
   bookingDesign?: BookingDesignRoutesOptions;
   bookingDesignReadiness?: BookingDesignReadinessRoutesOptions;
   propertySetupDraftCommandRepository?: PropertySetupDraftCommandRepository;
@@ -452,9 +419,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   platformContactIntake?: PlatformContactIntakeRoutesOptions;
   platformAdminDashboardRepository?: PlatformAdminDashboardRepository;
   platformAdminSmokeRecovery?: PlatformAdminDashboardRoutesOptions["smokeRecovery"];
-  platformMarketplaceActivation?: PlatformMarketplaceActivationOptions;
   platformPropertyLifecycle?: PlatformPropertyLifecycleRoutesOptions;
-  marketplaceDiscoveryAllowedOrigins?: string[];
   identityPrivacyAllowedOrigins?: string[];
   bookingWebCalendarRepository?: BookingWebCalendarRepository;
   bookingWebCheckoutAdapter?: BookingWebCheckoutAdapter;
@@ -487,7 +452,6 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       // VAY-2197: an access log line (with the IP address) would pair up with the stored funnel
       // event by its time.
       request.url.startsWith("/api/booking-web/events") ||
-      request.url.startsWith("/api/marketplace/communication-unsubscribe") ||
       (request.url.startsWith("/api/pms/properties/") &&
         request.url.split("?", 1)[0]?.endsWith("/messaging/threads") === true),
   });
@@ -530,8 +494,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       propertyAccessRepository:
         options.authSession.propertyAccessRepository ?? options.auth?.propertyAccessRepository,
       profileImageMediaRepository:
-        options.authSession.profileImageMediaRepository ??
-        options.marketplaceCreatorProfileMediaRepository,
+        options.authSession.profileImageMediaRepository ?? options.profileImageMediaRepository,
       hotelAccountInviteOnboarding:
         options.hotelAccountInvites?.repository ?? options.authSession.hotelAccountInviteOnboarding,
     });
@@ -581,25 +544,6 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       });
     }
   }
-  if (options.marketplaceDiscoveryRepository) {
-    app.register(registerMarketplaceDiscoveryRoutes, {
-      prefix: "/api/marketplace",
-      repository: options.marketplaceDiscoveryRepository,
-      allowedOrigins: options.marketplaceDiscoveryAllowedOrigins,
-    });
-  }
-  if (options.marketplaceCollaborationRepository) {
-    app.register(registerMarketplaceCollaborationRoutes, {
-      prefix: "/api/marketplace",
-      repository: options.marketplaceCollaborationRepository,
-    });
-  }
-  if (options.marketplaceTripRepository) {
-    app.register(registerMarketplaceTripRoutes, {
-      prefix: "/api/marketplace",
-      repository: options.marketplaceTripRepository,
-    });
-  }
   if (options.marketplaceAdminRepository) {
     app.register(registerMarketplaceAdminRoutes, {
       prefix: "/api/marketplace",
@@ -628,14 +572,6 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       prefix: "/api/marketplace",
       repository: options.marketplaceHotelSelfServiceRepository,
       lifecycleCommandBus: options.identityLifecycleCommandBus,
-    });
-  }
-  if (options.marketplaceCreatorSelfServiceRepository && options.identityLifecycleCommandBus) {
-    app.register(registerMarketplaceCreatorSelfServiceRoutes, {
-      prefix: "/api/marketplace",
-      repository: options.marketplaceCreatorSelfServiceRepository,
-      lifecycleCommandBus: options.identityLifecycleCommandBus,
-      mediaRepository: options.marketplaceCreatorProfileMediaRepository,
     });
   }
   if (options.propertyNearbyRepository) {
@@ -735,22 +671,10 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       ...options.marketplaceSubmission,
     });
   }
-  if (options.marketplaceHotelSubmissionModeration) {
-    app.register(registerMarketplaceHotelSubmissionModerationRoutes, {
-      prefix: "/api/marketplace",
-      ...options.marketplaceHotelSubmissionModeration,
-    });
-  }
   if (options.marketplaceHotelCollaborationPreferences) {
     app.register(registerMarketplaceHotelCollaborationPreferencesRoutes, {
       prefix: "/api/marketplace",
       ...options.marketplaceHotelCollaborationPreferences,
-    });
-  }
-  if (options.marketplaceCommunicationPreferences) {
-    app.register(registerMarketplaceCommunicationPreferencesRoutes, {
-      prefix: "/api/marketplace",
-      ...options.marketplaceCommunicationPreferences,
     });
   }
   if (options.bookingDesign) {
@@ -1128,12 +1052,6 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     repository: options.platformAdminDashboardRepository,
     smokeRecovery: options.platformAdminSmokeRecovery,
   });
-  if (options.platformMarketplaceActivation) {
-    app.register(registerPlatformMarketplaceActivationRoutes, {
-      prefix: "/api/platform/admin",
-      ...options.platformMarketplaceActivation,
-    });
-  }
   if (options.platformPropertyLifecycle) {
     app.register(registerPlatformPropertyLifecycleRoutes, {
       prefix: "/api/platform/admin",
