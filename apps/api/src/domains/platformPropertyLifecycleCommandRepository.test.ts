@@ -34,9 +34,7 @@ describe("platform property lifecycle commands", () => {
       lifecycleStatus: "suspended",
       lifecycleRevision: 5,
     });
-    expect(target.sql()).toContain("UPDATE marketplace.active_hotel_submission_revisions");
-    expect(target.sql()).toContain("UPDATE marketplace.marketplace_hotel_profiles");
-    expect(target.sql()).toContain("UPDATE marketplace.marketplace_offer_read_model");
+    expect(target.sql()).not.toContain("marketplace.");
     expect(target.sql()).toContain("DELETE FROM distribution.active_public_booking_revision");
     expect(target.sql()).toContain("pg_advisory_xact_lock");
     expect(target.sql().indexOf("pg_advisory_xact_lock")).toBeLessThan(
@@ -267,7 +265,6 @@ function impactRow(options: { activeBookings?: number; lifecycleStatus?: string 
     openPayouts: 0,
     billingEntitlements: 0,
     mediaObjects: 2,
-    marketplaceActive: true,
     distributionStatus: "public",
     bookingRevisionActive: true,
     connectedChannels: 0,

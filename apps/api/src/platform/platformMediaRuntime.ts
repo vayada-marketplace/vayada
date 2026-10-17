@@ -1,4 +1,4 @@
-import { syncPropertyOfferReadModels } from "../routes/marketplaceAdmin.js";
+import { projectPropertyPublicProfile } from "./propertyPublicProfileProjection.js";
 import type {
   ApprovedPublicProfileImageRepository,
   PlatformMediaRoutesOptions,
@@ -31,11 +31,6 @@ export type PlatformMediaRuntimeFactories = {
 
 export type PlatformMediaRuntime = {
   profileMediaRepository: ApprovedPublicProfileImageRepository;
-  collaborationAttachments: {
-    repository: ReturnType<typeof createPgPlatformMediaRepository>;
-    signer: PlatformMediaPrivateDownloadSigner;
-    serving: PlatformMediaServingConfig;
-  };
   privateDownloads: {
     signer: PlatformMediaPrivateDownloadSigner;
     reader: PlatformMediaPrivateObjectReader;
@@ -78,7 +73,7 @@ export function composePlatformMediaRuntime(
   const propertyMediaCommands = factories.createPropertyMediaCommands({
     connectionString: input.targetDatabaseUrl,
     serving: input.platformMediaServing,
-    syncReadModels: syncPropertyOfferReadModels,
+    syncReadModels: projectPropertyPublicProfile,
   });
   const enabledPurposes: PlatformMediaRoutesOptions["enabledPurposes"] = [
     "identity.user.profile_image",
@@ -86,9 +81,6 @@ export function composePlatformMediaRuntime(
     "booking.addon.image",
     "property.hero_image",
     "property.gallery_image",
-    "marketplace.creator.profile_image",
-    "marketplace.offer.media",
-    "marketplace.collaboration_chat.attachment",
     "property.logo",
     "pms.room_type.media",
     "finance.expense.receipt",
@@ -97,11 +89,6 @@ export function composePlatformMediaRuntime(
 
   return {
     profileMediaRepository: repository,
-    collaborationAttachments: {
-      repository,
-      signer: adapter,
-      serving: input.platformMediaServing,
-    },
     privateDownloads: { signer: adapter, reader: adapter, serving: input.platformMediaServing },
     inboundAttachments: adapter,
     cleanupStore,

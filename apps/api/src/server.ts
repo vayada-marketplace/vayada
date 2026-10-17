@@ -200,7 +200,6 @@ import { createPgFinanceSubscriptionStore } from "./domains/financeSubscriptionS
 import { createStripeFinanceSubscriptionProvider } from "./domains/stripeFinanceSubscriptions.js";
 import { createStripeBookingPaymentProvider } from "./domains/stripeBookingPayments.js";
 import { createStripeConnectProvider } from "./domains/stripeConnect.js";
-import { createPgMarketplaceSetupLifecycleStatusRepository } from "./domains/marketplaceSetupLifecycleStatusRepository.js";
 import { createPgBookingSetupLifecycleStatusRepository } from "./domains/bookingSetupLifecycleStatusRepository.js";
 import {
   createPropertySetupHotelCatalogStateProvider,
@@ -303,7 +302,7 @@ import { createChannexGuestReviews } from "./integrations/channexGuestReviews.js
 import { createPgReviewReplyCommands } from "./domains/pmsReviewReplies.js";
 import { createChannexReviewReplies } from "./integrations/channexReviewReplies.js";
 import { createPgPmsReviewRepository } from "./routes/pmsReviews.js";
-import { createPgMarketplaceAdminRepository } from "./routes/marketplaceAdmin.js";
+import { createPgHotelAccountInviteCodeRepository } from "./routes/hotelAccountInviteCodes.js";
 import { createPgHotelAccountInviteRepository } from "./routes/hotelAccountInvites.js";
 import { createPgSharedHotelSetupStatusRepository } from "./platform/sharedHotelSetupStatusReadModel.js";
 import { createPgPropertyNearbyDiscoveryRepository } from "./domains/propertyNearbyDiscoveryRepository.js";
@@ -593,9 +592,6 @@ const stripeConnectProvider = config.stripeSubscriptions.secretKey
   ? createStripeConnectProvider({
       secretKey: config.stripeSubscriptions.secretKey,
       returnBaseUrls: {
-        marketplace:
-          config.authSession?.authSurfaceOrigins["marketplace-web"] ??
-          config.stripeSubscriptions.bookingAdminBaseUrl,
         bookingAdmin: config.stripeSubscriptions.bookingAdminBaseUrl,
       },
     })
@@ -986,9 +982,6 @@ const pmsInboxEmailDelivery = config.bookingEmailDelivery
   ? createResendPmsInboxDelivery({ apiKey: config.bookingEmailDelivery.apiKey })
   : undefined;
 
-const marketplaceSetupLifecycleStatusRepository = createPgMarketplaceSetupLifecycleStatusRepository(
-  { connectionString: targetDatabaseUrl },
-);
 const bookingSetupLifecycleStatusRepository = createPgBookingSetupLifecycleStatusRepository({
   connectionString: targetDatabaseUrl,
 });
@@ -1450,7 +1443,6 @@ const propertySetupRouteStateReadPort = createPropertySetupRouteStateReadPort({
       }),
     }),
     review_lifecycle: createPropertySetupReviewLifecycleStateProvider({
-      marketplace: marketplaceSetupLifecycleStatusRepository,
       booking: bookingSetupLifecycleStatusRepository,
     }),
   },
@@ -1891,8 +1883,8 @@ const app = buildApp({
           ? {
               receiptMedia: {
                 read: financeExpenseRuntime.routes.expenses,
-                signer: platformMediaRuntime.collaborationAttachments.signer,
-                serving: platformMediaRuntime.collaborationAttachments.serving,
+                signer: platformMediaRuntime.privateDownloads.signer,
+                serving: platformMediaRuntime.privateDownloads.serving,
               },
             }
           : {}),
@@ -1935,7 +1927,7 @@ const app = buildApp({
     repository: createPgPlatformContactIntakeRepository({
       connectionString: targetDatabaseUrl,
     }),
-    allowedOrigins: config.marketplaceDiscoveryAllowedOrigins,
+    allowedOrigins: config.identityPrivacyAllowedOrigins,
   },
   platformAdminDashboardRepository,
   platformAdminSmokeRecovery:
@@ -1967,12 +1959,9 @@ const app = buildApp({
       ? { refresh: bookingPublicationRuntime.refresh.bind(bookingPublicationRuntime) }
       : undefined,
   bookingCustomDomainRepository,
-  marketplaceAdminRepository:
-    config.marketplaceAdminSource === "target"
-      ? createPgMarketplaceAdminRepository({ connectionString: targetDatabaseUrl })
-      : undefined,
-  marketplaceAdminLegacySuperadminFallbackEnabled:
-    config.marketplaceAdminLegacySuperadminFallbackEnabled,
+  hotelAccountInviteCodeRepository: createPgHotelAccountInviteCodeRepository({
+    connectionString: targetDatabaseUrl,
+  }),
   hotelAccountInvites: { repository: hotelAccountInviteRepository },
   preparedImportRepository: createPgPreparedImportRepository(targetDatabaseUrl),
   profileImageMediaRepository: platformMediaRuntime?.profileMediaRepository,
@@ -2044,7 +2033,7 @@ const app = buildApp({
       })
     : undefined,
   staffInvitations: staffInvitationRuntime,
-  identityPrivacyAllowedOrigins: config.marketplaceDiscoveryAllowedOrigins,
+  identityPrivacyAllowedOrigins: config.identityPrivacyAllowedOrigins,
   publicHotelProfileRepository,
   publicHotelQuoteRepository,
   bookingWebCalendarRepository,
@@ -2289,7 +2278,6 @@ app.addHook("onClose", async () => {
     pmsPricingReadModel.close(),
     financePaymentReadinessReadModel.close(),
     financePaymentSetupRuntime.close(),
-    marketplaceSetupLifecycleStatusRepository.close(),
     bookingSetupLifecycleStatusRepository.close(),
     bookingGuestPolicyRepository.close(),
     propertySetupOwnerPool.end(),

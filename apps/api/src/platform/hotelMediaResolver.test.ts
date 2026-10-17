@@ -315,7 +315,9 @@ describe("persistent hotel media resolver", () => {
       error: { code: "media_not_found", mediaObjectIds: [firstMediaId] },
     });
 
-    const unsupported = harness([validMedia(firstMediaId, { purpose: "marketplace.offer.media" })]);
+    const unsupported = harness([
+      validMedia(firstMediaId, { purpose: "pms.messaging.attachment" }),
+    ]);
     await expect(
       unsupported.resolver.loadPublicMedia({
         ownerOrganizationId: organizationId,

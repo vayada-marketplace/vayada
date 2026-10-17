@@ -80,10 +80,9 @@ import {
 import { registerRouteGroups } from "./routes/groups.js";
 import { registerHealthRoutes } from "./routes/health.js";
 import {
-  registerMarketplaceAdminRoutes,
-  type MarketplaceAdminRepository,
-  type MarketplaceAdminRoutesOptions,
-} from "./routes/marketplaceAdmin.js";
+  registerHotelAccountInviteCodeRoutes,
+  type HotelAccountInviteCodeRepository,
+} from "./routes/hotelAccountInviteCodes.js";
 import {
   registerHotelAccountInviteRoutes,
   type HotelAccountInviteRoutesOptions,
@@ -356,8 +355,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   bookingCustomDomainRepository?: BookingCustomDomainRepository;
   publicHotelProfileRepository?: PublicHotelProfileRepository;
   publicHotelQuoteRepository?: PublicHotelQuoteRepository;
-  marketplaceAdminRepository?: MarketplaceAdminRepository;
-  marketplaceAdminLegacySuperadminFallbackEnabled?: MarketplaceAdminRoutesOptions["legacySuperadminFallbackEnabled"];
+  hotelAccountInviteCodeRepository?: HotelAccountInviteCodeRepository;
   hotelAccountInvites?: Omit<HotelAccountInviteRoutesOptions, "trackCommandRepository">;
   /** Approved public profile images for the auth session (platform media). */
   profileImageMediaRepository?: ApprovedPublicProfileImageRepository;
@@ -519,11 +517,11 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       });
     }
   }
-  if (options.marketplaceAdminRepository) {
-    app.register(registerMarketplaceAdminRoutes, {
+  if (options.hotelAccountInviteCodeRepository) {
+    // Vayada Admin still calls /api/marketplace/admin/invite-codes (VAY-2270).
+    app.register(registerHotelAccountInviteCodeRoutes, {
       prefix: "/api/marketplace",
-      repository: options.marketplaceAdminRepository,
-      legacySuperadminFallbackEnabled: options.marketplaceAdminLegacySuperadminFallbackEnabled,
+      repository: options.hotelAccountInviteCodeRepository,
     });
   }
   if (options.hotelAccountInvites) {

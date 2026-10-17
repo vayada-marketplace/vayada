@@ -1027,7 +1027,7 @@ describe.skipIf(!TEST_DATABASE_URL)("property setup draft save repository", () =
   });
 
   it("resets only the CAS-matched draft and exactly replays without rebasing history", async () => {
-    const fixture = await createFixture(["hotel_operations", "creator_marketplace"]);
+    const fixture = await createFixture(["hotel_operations"]);
     const canonicalBefore = await canonicalStep1State(fixture.propertyId);
     const present = await repository.saveStepDraft(
       command(fixture, {
@@ -1042,24 +1042,10 @@ describe.skipIf(!TEST_DATABASE_URL)("property setup draft save repository", () =
       (
         await repository.saveStepDraft(
           command(fixture, {
-            idempotencyKey: "reset-preserve-marketplace",
-            stepId: "marketplace_preferences",
-            expectedBaseRevisions: {
-              "marketplace.collaboration_preferences": "preferences:3",
-            },
-            expectedSessionRevision: 1,
-          }),
-        )
-      ).ok,
-    ).toBe(true);
-    expect(
-      (
-        await repository.saveStepDraft(
-          command(fixture, {
             idempotencyKey: "reset-target-rooms",
             stepId: "rooms",
             expectedBaseRevisions: ROOM_BASE,
-            expectedSessionRevision: 2,
+            expectedSessionRevision: 1,
           }),
         )
       ).ok,
@@ -1076,7 +1062,7 @@ describe.skipIf(!TEST_DATABASE_URL)("property setup draft save repository", () =
       sessionId,
       stepId: "rooms",
       expectedTrackRevision: 2,
-      expectedSessionRevision: 3,
+      expectedSessionRevision: 2,
       expectedDraftRevision: 1,
       expectedBaseRevisions: ROOM_BASE,
     });
@@ -1099,7 +1085,7 @@ describe.skipIf(!TEST_DATABASE_URL)("property setup draft save repository", () =
         sessionId,
         stepId: "rooms",
         trackRevision: 2,
-        sessionRevision: 4,
+        sessionRevision: 3,
         discardedDraftRevision: 1,
         resetAt: occurredAt,
         nextRead: {
@@ -1108,9 +1094,11 @@ describe.skipIf(!TEST_DATABASE_URL)("property setup draft save repository", () =
         },
       },
     });
+    // A stored selection that still names the retired Creator Marketplace track (VAY-2270) reads
+    // as Hotel Operations; the exact replay still returns the stored receipt.
     await client.query(
       `UPDATE hotel_catalog.organization_setup_track_intents
-       SET selected_tracks = ARRAY['creator_marketplace']::text[], revision = 3
+       SET selected_tracks = ARRAY['hotel_operations', 'creator_marketplace']::text[], revision = 3
        WHERE organization_id = $1::uuid`,
       [fixture.organizationId],
     );
@@ -1166,12 +1154,12 @@ describe.skipIf(!TEST_DATABASE_URL)("property setup draft save repository", () =
     );
     expect(state.rows).toEqual([
       {
-        revision: 4,
-        selectedTracks: ["hotel_operations", "creator_marketplace"],
+        revision: 3,
+        selectedTracks: ["hotel_operations"],
         trackRevision: 1,
         resumeStepId: "rooms",
         completedStepIds: [],
-        stepIds: ["marketplace_preferences", "present_hotel"],
+        stepIds: ["present_hotel"],
       },
     ]);
     await expect(
@@ -1182,7 +1170,7 @@ describe.skipIf(!TEST_DATABASE_URL)("property setup draft save repository", () =
         [fixture.organizationId],
       ),
     ).resolves.toMatchObject({
-      rows: [{ selectedTracks: ["creator_marketplace"], revision: 3 }],
+      rows: [{ selectedTracks: ["hotel_operations", "creator_marketplace"], revision: 3 }],
     });
     await expect(canonicalStep1State(fixture.propertyId)).resolves.toEqual(canonicalBefore);
 

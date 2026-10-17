@@ -976,16 +976,7 @@ describe("api config", () => {
     ).toThrow("BOOKING_WEB_EVENT_SINK must be one of: disabled, target");
   });
 
-  it("keeps marketplace admin legacy superadmin fallback disabled by default", () => {
-    expect(loadConfig({}).marketplaceAdminLegacySuperadminFallbackEnabled).toBe(false);
-    expect(
-      loadConfig({
-        MARKETPLACE_ADMIN_LEGACY_SUPERADMIN_FALLBACK_ENABLED: "true",
-      }).marketplaceAdminLegacySuperadminFallbackEnabled,
-    ).toBe(true);
-  });
-
-  it("requires durable media whenever target Marketplace and auth make the server creator-capable", () => {
+  it("requires durable media whenever the target database and auth make the server hotel-capable", () => {
     expect(loadConfig(completeCreatorMarketplaceEnv).platformMediaServing).toBeDefined();
     expect(() =>
       loadConfig({
@@ -995,7 +986,7 @@ describe("api config", () => {
         PLATFORM_MEDIA_CDN_ORIGIN_HOST: undefined,
       }),
     ).toThrow(
-      "Target Marketplace with complete auth requires complete PLATFORM_MEDIA_* config because creator profile photos are required",
+      "Target database with complete auth requires complete PLATFORM_MEDIA_* config because hotel profile photos are required",
     );
   });
 
@@ -1013,7 +1004,6 @@ describe("api config", () => {
     expect(config.pmsOperationsAllowedOrigins).toEqual([
       "https://pms.localhost",
       "https://admin.booking.localhost",
-      "https://marketplace.localhost",
     ]);
   });
 
@@ -1070,13 +1060,25 @@ describe("api config", () => {
     ).toThrow("FINANCE_SOURCE must be one of: legacy, target");
   });
 
-  it("loads marketplace discovery allowed origins from comma-separated config", () => {
+  it("loads identity privacy allowed origins from either setting name", () => {
     expect(
       loadConfig({
-        MARKETPLACE_DISCOVERY_ALLOWED_ORIGINS:
-          "https://marketplace.localhost, https://admin.localhost,",
-      }).marketplaceDiscoveryAllowedOrigins,
-    ).toEqual(["https://marketplace.localhost", "https://admin.localhost"]);
+        IDENTITY_PRIVACY_ALLOWED_ORIGINS:
+          "https://admin.booking.localhost, https://admin.localhost,",
+      }).identityPrivacyAllowedOrigins,
+    ).toEqual(["https://admin.booking.localhost", "https://admin.localhost"]);
+    // The old Terraform variable name still works until the platform renames it (VAY-2270).
+    expect(
+      loadConfig({
+        MARKETPLACE_DISCOVERY_ALLOWED_ORIGINS: "https://admin.localhost",
+      }).identityPrivacyAllowedOrigins,
+    ).toEqual(["https://admin.localhost"]);
+    expect(
+      loadConfig({
+        IDENTITY_PRIVACY_ALLOWED_ORIGINS: "https://admin.booking.localhost",
+        MARKETPLACE_DISCOVERY_ALLOWED_ORIGINS: "https://admin.localhost",
+      }).identityPrivacyAllowedOrigins,
+    ).toEqual(["https://admin.booking.localhost"]);
   });
 
   it("requires booking email delivery for checkout in production", () => {
