@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import {
   BOOKING_ADMIN_HOTEL_ID,
+  BOOKING_ADMIN_ORGANIZATION_ID,
   BOOKING_ADMIN_PUBLIC_PROPERTY_PROFILE_PATH,
   BOOKING_ADMIN_PROPERTY_ID,
   defaultBookingAdminDesignSettings,
@@ -8,68 +9,87 @@ import {
   mockBookingAdminDesignSettings,
   mockBookingAdminShellRoutes,
 } from "../support/bookingAdminMocks";
+import { corsHeaders as sharedCorsHeaders, fulfillCorsPreflight } from "../support/cors";
+import {
+  createAdaptiveHotelSetupStatusMock,
+  mockHotelSetupPrerequisites,
+} from "../support/sharedHotelSetupMocks";
 
 const CANONICAL_PUBLIC_DESCRIPTION =
   "A Marketplace-authored description that must remain canonical for every public surface.";
 
 test.describe("booking-admin adaptive setup", () => {
-  test("replaces local setup with the canonical Marketplace wizard and preserves context", async ({
+  // Booking Admin hosts the shared hotel setup wizard itself (VAY-2261); /setup used to redirect
+  // to the Marketplace app. The detailed wizard flows live in setup-*.spec.ts of this project.
+  test("hosts the hotel setup wizard locally and keeps the setup context in its own URL", async ({
     page,
+    baseURL,
   }) => {
-    const expectedUrl = canonicalMarketplaceSetupUrl({
-      entryProduct: "pms",
-      returnTo: "/settings?section=booking",
-      propertyId: BOOKING_ADMIN_PROPERTY_ID,
-      mode: "add",
+    await mockSetupOwnerSession(page);
+    await page.route(/\/api\/hotel-setup\/imports\/prepared(?:\?|$)/, async (route) => {
+      if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
+      await route.fulfill({ status: 200, headers: sharedCorsHeaders(route), json: { import: null } });
     });
-    await page.route("**/__before-local-setup", (route) =>
-      route.fulfill({
-        contentType: "text/html",
-        body: "<!doctype html><title>Before local setup</title><h1>Before local setup</h1>",
+    // The page asks for the entry product in its URL (pms here); the status must answer for it.
+    await mockHotelSetupPrerequisites(
+      page,
+      createAdaptiveHotelSetupStatusMock({
+        entryProduct: "pms",
+        organizationId: BOOKING_ADMIN_ORGANIZATION_ID,
+        organizationDisplayName: "Alpenrose Hotel Group",
+        selectedTracks: ["hotel_operations"],
+        propertyId: null,
       }),
     );
-    await page.route(
-      (url) => url.toString() === expectedUrl,
-      (route) =>
-        route.fulfill({
-          contentType: "text/html",
-          body: "<!doctype html><title>Canonical setup</title><h1>Canonical setup</h1>",
-        }),
-    );
+    const foreignNavigations: string[] = [];
+    page.on("framenavigated", (frame) => {
+      if (frame !== page.mainFrame() || frame.url() === "about:blank") return;
+      if (new URL(frame.url()).origin !== new URL(baseURL!).origin)
+        foreignNavigations.push(frame.url());
+    });
 
-    await page.goto("/__before-local-setup");
     await page.goto(
-      `/setup?entryProduct=pms&returnTo=${encodeURIComponent("/settings?section=booking")}&propertyId=${BOOKING_ADMIN_PROPERTY_ID}&mode=add`,
+      `/setup?entryProduct=pms&returnTo=${encodeURIComponent("/settings?section=booking")}&mode=add`,
     );
 
-    await expect.poll(() => page.url()).toBe(expectedUrl);
-    await expect(page.getByRole("heading", { name: "Canonical setup" })).toBeVisible();
-    await page.goBack();
-    await expect(page.getByRole("heading", { name: "Before local setup" })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Let’s get to know your hotel", level: 1 }),
+    ).toBeVisible();
+    expect(new URL(page.url()).pathname).toBe("/setup");
+    expect(new URL(page.url()).searchParams.get("entryProduct")).toBe("pms");
+    expect(foreignNavigations).toEqual([]);
   });
 
-  test("defaults invalid local setup parameters before redirecting to Marketplace", async ({
-    page,
-  }) => {
-    const expectedUrl = canonicalMarketplaceSetupUrl({
-      entryProduct: "booking",
-      returnTo: "/dashboard",
-      propertyId: BOOKING_ADMIN_PROPERTY_ID,
+  test("treats an old Marketplace entry link as booking setup", async ({ page }) => {
+    await mockSetupOwnerSession(page);
+    await page.route(/\/api\/hotel-setup\/imports\/prepared(?:\?|$)/, async (route) => {
+      if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
+      await route.fulfill({ status: 200, headers: sharedCorsHeaders(route), json: { import: null } });
     });
-    await page.route(
-      (url) => url.toString() === expectedUrl,
-      (route) =>
-        route.fulfill({
-          contentType: "text/html",
-          body: "<!doctype html><title>Canonical setup</title><h1>Canonical setup</h1>",
+    const statusRequests: string[] = [];
+    await page.route(/\/api\/hotel-setup\/status(?:\?|$)/, async (route) => {
+      if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
+      statusRequests.push(new URL(route.request().url()).searchParams.get("entryProduct") ?? "");
+      await route.fulfill({
+        status: 200,
+        headers: sharedCorsHeaders(route),
+        json: createAdaptiveHotelSetupStatusMock({
+          entryProduct: "booking",
+          organizationId: BOOKING_ADMIN_ORGANIZATION_ID,
+          organizationDisplayName: "Alpenrose Hotel Group",
+          selectedTracks: ["hotel_operations"],
+          propertyId: null,
         }),
-    );
+      });
+    });
 
-    await page.goto(
-      `/setup?entryProduct=unknown&returnTo=${encodeURIComponent("https://attacker.example/dashboard")}&propertyId=${BOOKING_ADMIN_PROPERTY_ID}`,
-    );
+    await page.goto("/setup?entryProduct=marketplace&returnTo=%2Fmarketplace");
 
-    await expect.poll(() => page.url()).toBe(expectedUrl);
+    await expect(
+      page.getByRole("heading", { name: "Let’s get to know your hotel", level: 1 }),
+    ).toBeVisible();
+    await expect.poll(() => statusRequests.length).toBeGreaterThan(0);
+    expect(statusRequests.every((entryProduct) => entryProduct === "booking")).toBe(true);
   });
 
   test("uploads and replaces the hero as the canonical cover, with retry after failures", async ({
@@ -342,28 +362,31 @@ function corsHeaders(): Record<string, string> {
   };
 }
 
-function canonicalMarketplaceSetupUrl(input: {
-  entryProduct: "booking" | "marketplace" | "pms";
-  returnTo: string;
-  propertyId?: string;
-  mode?: "add";
-}): string {
-  const url = new URL("/setup", marketplaceOrigin());
-  url.searchParams.set("entryProduct", input.entryProduct);
-  url.searchParams.set("returnProduct", "booking");
-  url.searchParams.set("returnTo", input.returnTo);
-  if (input.propertyId) url.searchParams.set("propertyId", input.propertyId);
-  if (input.mode) url.searchParams.set("mode", input.mode);
-  return url.toString();
-}
-
-function marketplaceOrigin(): string {
-  return (
-    process.env.E2E_MARKETPLACE_BASE_URL ||
-    (process.env.CI === "true" || process.env.E2E_START_SERVERS === "1"
-      ? "http://marketplace.localhost:3000"
-      : "https://marketplace.localhost")
-  );
+// The setup page needs an AuthKit session whose user has a name, phone and photo; otherwise it
+// shows the account-details gate first. The legacy-token mock alone gives no session user.
+async function mockSetupOwnerSession(page: Page) {
+  await page.route(/\/auth\/session(?:\?|$)/, async (route) => {
+    if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
+    await route.fulfill({
+      status: 200,
+      headers: sharedCorsHeaders(route),
+      json: {
+        accessToken: "test-access-token",
+        csrfToken: "test-csrf-token",
+        organizationId: BOOKING_ADMIN_ORGANIZATION_ID,
+        workosOrganizationId: "org_workos_hotel_group",
+        user: {
+          id: "user-hotel-owner",
+          email: "owner@alpenrose.example",
+          name: "Hotel Owner",
+          phone: "+49 89 123456",
+          profilePictureUrl: "https://media.example/owner.png",
+          profilePictureMediaObjectId: "a1000000-0000-4000-8000-000000000777",
+          status: "active",
+        },
+      },
+    });
+  });
 }
 
 const HERO_PNG = Buffer.from(

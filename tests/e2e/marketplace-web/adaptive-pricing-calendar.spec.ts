@@ -29,7 +29,7 @@ import {
 
 import { watchPageHealth } from "../support/pageHealth";
 import { createPropertySetupRouteMock } from "../support/propertySetupRouteMocks";
-import { corsHeaders, fulfillCorsPreflight } from "./utils/cors";
+import { corsHeaders, fulfillCorsPreflight } from "../support/cors";
 
 const organizationId = "11111111-1111-4111-8111-111111111111";
 const sessionId = "22222222-2222-4222-8222-222222222222";

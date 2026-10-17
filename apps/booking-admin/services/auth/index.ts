@@ -296,6 +296,43 @@ export const authService = {
     await authService.refreshSession();
   },
 
+  confirmEmailVerification: async (code: string): Promise<AuthSessionResponse> => {
+    const pending = getPendingEmailVerification();
+    if (!pending) {
+      throw new Error("Verification has expired. Please sign in again.");
+    }
+
+    const response = await authFetch<AuthSessionResponse>("/email-verification/confirm", {
+      method: "POST",
+      body: JSON.stringify({
+        pendingAuthenticationToken: pending.pendingAuthenticationToken,
+        code,
+        flow: pending.flow,
+        intent: pending.intent,
+        surface: AUTH_SURFACE,
+      }),
+    });
+    const stored = await storeAuthSessionResponse(response);
+    if (!isAuthOrganizationSelectionResponse(response)) {
+      clearPendingEmailVerification();
+    }
+    return stored;
+  },
+
+  resendEmailVerification: async (): Promise<{ message: string }> => {
+    const pending = getPendingEmailVerification();
+    if (!pending?.emailVerificationId) {
+      throw new Error("Please sign in again to request a new verification code.");
+    }
+
+    return authFetch<{ message: string }>("/email-verification/resend", {
+      method: "POST",
+      body: JSON.stringify({
+        emailVerificationId: pending.emailVerificationId,
+      }),
+    });
+  },
+
   /**
    * Binds the signed-in account to the hotel organization an invitation names (VAY-2262). The
    * server creates that organization from the invitation and switches the session to it.

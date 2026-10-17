@@ -3,7 +3,7 @@ import { expect, test, type Page, type Route, type TestInfo } from "@playwright/
 import { createAdaptiveHotelSetupStatusMock } from "../support/sharedHotelSetupMocks";
 import { watchNoLegacyCalls } from "../support/noLegacyCalls";
 import { watchPageHealth } from "../support/pageHealth";
-import { corsHeaders, fulfillCorsPreflight } from "./utils/cors";
+import { corsHeaders, fulfillCorsPreflight } from "../support/cors";
 
 test.beforeEach(async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });

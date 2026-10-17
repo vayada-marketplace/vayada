@@ -1,5 +1,5 @@
 import { expect, type Page } from "@playwright/test";
-import { corsHeaders, fulfillCorsPreflight } from "../marketplace-web/utils/cors";
+import { corsHeaders, fulfillCorsPreflight } from "./cors";
 
 export async function mockSetupExitHandoff(
   page: Page,

@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { createAdaptiveHotelSetupStatusMock } from "../support/sharedHotelSetupMocks";
-import { corsHeaders, fulfillCorsPreflight } from "./utils/cors";
+import { corsHeaders, fulfillCorsPreflight } from "../support/cors";
 
 test("hotel website validates and saves normalized canonical contacts", async ({ page }) => {
   const propertyId = "22222222-2222-4222-8222-222222222222";
