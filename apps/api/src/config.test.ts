@@ -567,6 +567,46 @@ describe("api config", () => {
         WORKOS_CLIENT_ID: "client",
       }),
     ).toThrow("Incomplete auth session config");
+    expect(() =>
+      loadConfig({
+        AUTH_MARKETPLACE_WEB_ORIGIN: "https://marketplace.localhost",
+      }),
+    ).toThrow("Incomplete auth session config");
+  });
+
+  // VAY-2271: the Marketplace and affiliate portals are switched off; their login
+  // addresses may disappear from the platform before the surface types go.
+  it("loads the AuthKit session config without the retired portal origins", () => {
+    const activeSurfacesOnly: Partial<typeof completeAuthSessionEnv> = {
+      ...completeAuthSessionEnv,
+    };
+    delete activeSurfacesOnly.AUTH_AFFILIATE_DASHBOARD_ORIGIN;
+    delete activeSurfacesOnly.AUTH_MARKETPLACE_WEB_ORIGIN;
+    const authSession = loadConfig({
+      ...activeSurfacesOnly,
+      AUTH_FIRST_PARTY_SURFACES: "pms-web,booking-admin",
+    }).authSession;
+    expect(authSession?.authSurfaceOrigins).toEqual({
+      "platform-admin": "https://admin.localhost",
+      "booking-admin": "https://admin.booking.localhost",
+      "pms-web": "https://pms.localhost",
+    });
+    expect(authSession?.authFirstPartySurfaces).toEqual(["pms-web", "booking-admin"]);
+  });
+
+  it("rejects first-party surfaces whose login origin is not configured", () => {
+    const withoutMarketplace: Partial<typeof completeAuthSessionEnv> = {
+      ...completeAuthSessionEnv,
+    };
+    delete withoutMarketplace.AUTH_MARKETPLACE_WEB_ORIGIN;
+    expect(() =>
+      loadConfig({
+        ...withoutMarketplace,
+        AUTH_FIRST_PARTY_SURFACES: "marketplace-web,pms-web",
+      }),
+    ).toThrow(
+      "AUTH_FIRST_PARTY_SURFACES contains surfaces without a login origin: marketplace-web",
+    );
   });
 
   it("rejects auth callback origins outside the exact allowlist", () => {
