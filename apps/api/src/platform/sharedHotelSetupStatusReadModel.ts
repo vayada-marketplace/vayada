@@ -707,7 +707,6 @@ async function writePropertyProfile(
         if (
           !permissions ||
           (hasPublishedPropertySurface(input.profile) &&
-            !permissions.includes("marketplace.profile.manage") &&
             !permissions.includes("booking.settings.manage"))
         )
           throw new AuthorizationError();
