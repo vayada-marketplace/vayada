@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { BookDirectBenefitsPage } from "@/components/settings/BookDirectBenefitsPage";
 import { GuestFormPage } from "@/components/settings/GuestFormPage";
+import { PrivacyPage } from "@/components/settings/PrivacyPage";
 import { RoomFiltersPage } from "@/components/settings/RoomFiltersPage";
 import { SettingsIndex } from "@/components/settings/SettingsIndex";
 import SettingsSectionPage from "@/components/settings/SettingsSectionPage";
@@ -19,6 +20,7 @@ export default async function SettingsRoute({
   if (page === "book-direct-benefits") return <BookDirectBenefitsPage />;
   if (page === "room-filters") return <RoomFiltersPage />;
   if (page === "guest-form") return <GuestFormPage />;
+  if (page === "privacy") return <PrivacyPage />;
   if (!isSettingsPage(page)) notFound();
   return <SettingsSectionPage section={page} />;
 }
