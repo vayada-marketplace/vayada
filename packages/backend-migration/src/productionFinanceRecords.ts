@@ -62,14 +62,17 @@ export function buildFinanceRecords(context: FinanceBuildContext): FinanceTarget
       safeId(row),
       "Checkout charge cannot become immutable folio evidence without its encrypted recipient revision",
     );
+  // VAY-1362: legacy billing webhook claims are bookkeeping of the frozen legacy
+  // billing path. They have no target owner and must not block the run; each
+  // row is accounted for as a hash-only omission (engineering/legacy-fixed-plan-billing-handover.md §5).
   for (const row of sourceRows(context, "pms", "stripe_billing_webhook_events"))
-    block(
-      context,
-      "UNOWNED_PROVIDER_EVENT",
-      "pms.stripe_billing_webhook_events",
-      safeId(row, "event_id"),
-      "Legacy billing webhook has no property or subscription owner and cannot be attributed safely",
-    );
+    disposition(context, row, {
+      sourceId: safeId(row, "event_id"),
+      sourceField: "*",
+      sourceValue: row.data,
+      reasonCode: "LEGACY_BILLING_PROVIDER_REFERENCE_QUARANTINED",
+      disposition: "omitted_row",
+    });
   validateFinanceReferentialClosure(context, records);
   return records;
 }

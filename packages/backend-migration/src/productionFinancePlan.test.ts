@@ -222,6 +222,35 @@ describe("production Finance plan", () => {
     expect(plan.blockers.map((row) => row.code)).toContain("FINANCE_REFERENTIAL_CLOSURE_FAILED");
   });
 
+  it("omits legacy billing webhook claims as hash-only dispositions instead of blocking", () => {
+    const rows = sourceRows();
+    rows.push(
+      source("pms", "stripe_billing_webhook_events", {
+        event_id: "evt_legacy_billing",
+        event_type: "invoice.paid",
+        status: "completed",
+        created_at: AT,
+      }),
+    );
+    const plan = buildProductionFinancePlan({
+      sourceRunId: RUN,
+      completedAt: "2026-08-30T00:00:00.000Z",
+      rows,
+      target: target(),
+    });
+    expect(plan.blockers).toEqual([]);
+    expect(plan.counts.omittedSourceRows).toBe(1);
+    expect(plan.dispositions).toContainEqual(
+      expect.objectContaining({
+        sourceTable: "stripe_billing_webhook_events",
+        sourceId: "evt_legacy_billing",
+        reasonCode: "LEGACY_BILLING_PROVIDER_REFERENCE_QUARANTINED",
+        disposition: "omitted_row",
+      }),
+    );
+    expect(JSON.stringify(plan.dispositions)).not.toContain('evt_legacy_billing","event_type');
+  });
+
   it("binds historical transactions to their provider and never re-enables suspended owners", () => {
     const rows = sourceRows().filter((row) => row.sourceTable !== "payouts");
     const settings = rows.find((row) => row.sourceTable === "hotel_payment_settings")!;

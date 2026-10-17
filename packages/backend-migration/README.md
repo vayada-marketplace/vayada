@@ -542,7 +542,12 @@ remain unbound, and disagreeing payment flags cannot enable a method.
 Legacy fixed-plan subscriptions and noncanonical pricing are preserved only as
 immutable review evidence on a suspended, provider-free Commission baseline;
 the migration does not activate a corrected price or expose a legacy billing
-reference to runtime provider commands. Every child reference must resolve to a
+reference to runtime provider commands. After the import, before reopen, the
+`finance:legacy-subscription:adopt` command in `apps/api` turns a live legacy
+subscription into the target's `fixed` plan in place
+(`engineering/legacy-fixed-plan-billing-handover.md`). Legacy billing webhook
+claims (`pms.stripe_billing_webhook_events`) are omitted as hash-only
+dispositions rather than blocking the run. Every child reference must resolve to a
 parent that will actually exist after target reconciliation. Missing or
 deliberately deleted parents either leave the child unbound/setup-incomplete or
 block before SQL. Resolve every remaining blocker and rerun the same immutable
