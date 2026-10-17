@@ -75,6 +75,36 @@ test.describe("pms-web canonical setup redirect", () => {
     ]);
   });
 
+  test("forwards a calendar recovery step and marker to Booking Admin", async ({ page }) => {
+    await mockPmsWebTargetRoutes(page);
+    const handoffs = await mockSetupHandoff(page);
+
+    await page.goto(
+      `/setup?entryProduct=pms&returnTo=${encodeURIComponent("/settings#calendar")}&propertyId=${PMS_WEB_PROPERTY_ID}&recovery=pms-calendar&step=calendar`,
+    );
+
+    await expect.poll(() => page.url()).toBe(handoffDestination());
+    expect(handoffs.map((handoff) => handoff.targetPath)).toEqual([
+      `${canonicalSetupPath({
+        entryProduct: "pms",
+        returnTo: "/settings#calendar",
+        propertyId: PMS_WEB_PROPERTY_ID,
+      })}&step=calendar&recovery=pms-calendar`,
+    ]);
+  });
+
+  test("drops an unknown step but keeps the rest of the path", async ({ page }) => {
+    await mockPmsWebTargetRoutes(page);
+    const handoffs = await mockSetupHandoff(page);
+
+    await page.goto("/setup?mode=add&step=not-a-step");
+
+    await expect.poll(() => page.url()).toBe(handoffDestination());
+    expect(handoffs.map((handoff) => handoff.targetPath)).toEqual([
+      canonicalSetupPath({ entryProduct: "pms", returnTo: "/dashboard", mode: "add" }),
+    ]);
+  });
+
   test("sends a signed-out visitor through Booking Admin's login with the setup path", async ({
     page,
   }) => {
@@ -132,11 +162,11 @@ test.describe("pms-web canonical setup redirect", () => {
 });
 
 async function mockSetupHandoff(page: Page) {
-  const handoffs: unknown[] = [];
+  const handoffs: { targetPath: string }[] = [];
   await page.route("**/auth/handoff/create", (route) => {
     expect(route.request().method()).toBe("POST");
     expect(route.request().headers()["x-vayada-csrf"]).toBe("e2e-pms-csrf-token");
-    handoffs.push(route.request().postDataJSON());
+    handoffs.push(route.request().postDataJSON() as { targetPath: string });
     return route.fulfill({ json: { destination: handoffDestination() } });
   });
   await page.route(
