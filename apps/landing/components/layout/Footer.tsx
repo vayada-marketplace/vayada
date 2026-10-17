@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { siteConfig } from "@/config/site";
 import { ROUTES } from "@/lib/constants/routes";
-import { SECTIONS } from "@/lib/constants/sections";
 
 export default function Footer() {
   const socialLinks = [
