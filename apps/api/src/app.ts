@@ -129,10 +129,6 @@ import {
   type MarketplaceCreatorProfileMediaRepository,
   type MarketplaceCreatorSelfServiceRepository,
 } from "./routes/marketplaceCreatorSelfService.js";
-import {
-  registerMarketplaceCreatorPlatformConnectionRoutes,
-  type MarketplaceCreatorPlatformConnectionRoutesOptions,
-} from "./routes/marketplaceCreatorPlatformConnections.js";
 import { registerPropertyNearbyRoutes } from "./routes/propertyNearby.js";
 import type { PropertyNearbyRepository } from "./domains/propertyNearbyRepository.js";
 import {
@@ -417,10 +413,6 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   marketplaceHotelProfileStatusRepository?: MarketplaceHotelProfileStatusRepository;
   marketplaceHotelSelfServiceRepository?: MarketplaceHotelSelfServiceRepository;
   marketplaceCreatorSelfServiceRepository?: MarketplaceCreatorSelfServiceRepository;
-  marketplaceCreatorPlatformConnections?: Omit<
-    MarketplaceCreatorPlatformConnectionRoutesOptions,
-    "profileRepository" | "lifecycleCommandBus"
-  >;
   marketplaceCreatorProfileMediaRepository?: MarketplaceCreatorProfileMediaRepository;
   airbnbImports?: Omit<AirbnbImportRoutesOptions, "propertyAccessRepository" | "review"> & {
     applications: NonNullable<AirbnbImportRoutesOptions["review"]>["applications"];
@@ -645,18 +637,6 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       repository: options.marketplaceCreatorSelfServiceRepository,
       lifecycleCommandBus: options.identityLifecycleCommandBus,
       mediaRepository: options.marketplaceCreatorProfileMediaRepository,
-    });
-  }
-  if (
-    options.marketplaceCreatorPlatformConnections &&
-    options.marketplaceCreatorSelfServiceRepository &&
-    options.identityLifecycleCommandBus
-  ) {
-    app.register(registerMarketplaceCreatorPlatformConnectionRoutes, {
-      prefix: "/api/marketplace",
-      ...options.marketplaceCreatorPlatformConnections,
-      profileRepository: options.marketplaceCreatorSelfServiceRepository,
-      lifecycleCommandBus: options.identityLifecycleCommandBus,
     });
   }
   if (options.propertyNearbyRepository) {

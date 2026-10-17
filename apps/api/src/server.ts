@@ -244,8 +244,6 @@ import {
   createResendBookingEmailDelivery,
   runBookingEmailDeliveryJobs,
 } from "./jobs/bookingEmailDelivery.js";
-import { startCreatorPlatformSyncWorker } from "./jobs/creatorPlatformSync.js";
-import { createPgCreatorPlatformSyncStore } from "./jobs/creatorPlatformSyncStore.js";
 import { runChannexReviewJobs } from "./jobs/channexReviews.js";
 import { runChannexBookingJobs } from "./jobs/channexBookings.js";
 import { runChannexMessageJobs } from "./jobs/channexMessages.js";
@@ -326,25 +324,11 @@ import { createPgPublicNearbyRepository } from "./domains/publicNearbyRepository
 import { configureActiveBookingPublicationGate } from "./domains/activeBookingPublicationGate.js";
 import { createPgIdentityAdminUsersReadRepository } from "./routes/identityAdminUsers.js";
 import { createPgIdentityPrivacyRepository } from "./routes/identityPrivacy.js";
-import { createPgMarketplaceCreatorPlatformConnectionRepository } from "./routes/marketplaceCreatorPlatformConnections.js";
 import { createTargetPlatformAdminDashboardRepository } from "./routes/platform/admin/dashboard/bookingCompatible.js";
 import { createPgPlatformPropertyLifecycleCommandRepository } from "./domains/platformPropertyLifecycleCommandRepository.js";
 import { createPgPlatformPropertyLifecycleImpactRepository } from "./domains/platformPropertyLifecycleImpactRepository.js";
 import { createPgPlatformPropertyProvisioningRepository } from "./domains/platformPropertyProvisioningRepository.js";
 import { createPgPlatformContactIntakeRepository } from "./routes/platformContactIntake.js";
-import {
-  createCreatorPlatformAdapterRegistry,
-  createFacebookCreatorPlatformAdapter,
-  createInstagramCreatorPlatformAdapter,
-  createTikTokCreatorPlatformAdapter,
-  createYouTubeCreatorPlatformAdapter,
-  type CreatorPlatformAdapter,
-} from "./integrations/creatorPlatforms/index.js";
-import {
-  createMemoryProviderCredentialVault,
-  createSecretsManagerProviderCredentialVault,
-  createUnavailableProviderCredentialVault,
-} from "./platform/providerCredentialVault.js";
 
 const postgresRuntime = installPostgresPoolRuntime(pg);
 const config = loadConfig();
@@ -1508,42 +1492,6 @@ const marketplaceCreatorSelfServiceRepository = createPgMarketplaceCreatorSelfSe
   connectionString: targetDatabaseUrl,
 });
 
-const creatorPlatformConnectionRuntime = (() => {
-  const connectionConfig = config.creatorPlatformConnections;
-  const adapters: CreatorPlatformAdapter[] = [];
-  if (connectionConfig?.instagram) {
-    adapters.push(createInstagramCreatorPlatformAdapter(connectionConfig.instagram));
-  }
-  if (connectionConfig?.facebook) {
-    adapters.push(createFacebookCreatorPlatformAdapter(connectionConfig.facebook));
-  }
-  if (connectionConfig?.tiktok) {
-    adapters.push(createTikTokCreatorPlatformAdapter(connectionConfig.tiktok));
-  }
-  if (connectionConfig?.youtube) {
-    adapters.push(createYouTubeCreatorPlatformAdapter(connectionConfig.youtube));
-  }
-  const credentialVault = !connectionConfig
-    ? createUnavailableProviderCredentialVault()
-    : connectionConfig.credentialVault.provider === "memory"
-      ? createMemoryProviderCredentialVault()
-      : createSecretsManagerProviderCredentialVault({
-          region: connectionConfig.credentialVault.region,
-        });
-  return {
-    repository: createPgMarketplaceCreatorPlatformConnectionRepository({
-      connectionString: targetDatabaseUrl,
-    }),
-    credentialVault,
-    adapters: createCreatorPlatformAdapterRegistry(adapters),
-    callbackBaseUrl: connectionConfig?.callbackBaseUrl ?? "https://creator.api.localhost",
-    webReturnUrl:
-      connectionConfig?.webReturnUrl ?? "https://marketplace.localhost/profile/complete",
-    credentialSecretPrefix:
-      connectionConfig?.credentialVault.secretPrefix ?? "vayada/unconfigured/creator-platforms",
-  };
-})();
-
 const authSessionHandoffRepository =
   config.auth && config.authSession
     ? createPgAuthSessionHandoffRepository({ connectionString: config.auth.databaseUrl })
@@ -2078,10 +2026,6 @@ const app = buildApp({
     connectionString: targetDatabaseUrl,
   }),
   marketplaceCreatorSelfServiceRepository,
-  marketplaceCreatorPlatformConnections: {
-    ...creatorPlatformConnectionRuntime,
-    credentialCleanupEnabled: config.backgroundWorkersEnabled,
-  },
   marketplaceCreatorProfileMediaRepository: platformMediaRuntime?.profileMediaRepository,
   sharedHotelSetupStatusRepository,
   propertyNearbyRepository: config.auth
@@ -2204,27 +2148,6 @@ const app = buildApp({
     : undefined,
 });
 
-const creatorPlatformSyncConfig = config.creatorPlatformConnections?.sync;
-const creatorPlatformSyncWorker =
-  config.backgroundWorkersEnabled && creatorPlatformSyncConfig?.enabled
-    ? startCreatorPlatformSyncWorker({
-        store: createPgCreatorPlatformSyncStore({ connectionString: targetDatabaseUrl }),
-        repository: createPgMarketplaceCreatorPlatformConnectionRepository({
-          connectionString: targetDatabaseUrl,
-        }),
-        credentialVault: creatorPlatformConnectionRuntime.credentialVault,
-        adapters: creatorPlatformConnectionRuntime.adapters,
-        credentialSecretPrefix: creatorPlatformConnectionRuntime.credentialSecretPrefix,
-        workerId: `creator-platform-sync:${process.pid}`,
-        pollIntervalMs: creatorPlatformSyncConfig.pollIntervalMs,
-        syncIntervalMs: creatorPlatformSyncConfig.recurringIntervalMs,
-        batchSize: creatorPlatformSyncConfig.batchSize,
-        maxAttempts: creatorPlatformSyncConfig.maxAttempts,
-        minimumSpacingMs: creatorPlatformSyncConfig.minimumSpacingMs,
-        warn: (details, message) => app.log.warn(details, message),
-      })
-    : undefined;
-
 const adminRoleWorker =
   config.backgroundWorkersEnabled && config.auth && config.authSession
     ? startAdminRoleWorker({
@@ -2306,7 +2229,6 @@ const bookingGuestPolicyProjectionWorker =
     : undefined;
 
 app.addHook("onClose", async () => {
-  await creatorPlatformSyncWorker?.close();
   await adminRoleWorker?.close();
   await staffRemovalWorker?.close();
   await pmsInboxAssignmentReconciliationWorker?.close();

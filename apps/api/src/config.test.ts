@@ -13,10 +13,6 @@ const completeCreatorMarketplaceEnv = {
   PLATFORM_MEDIA_CDN_ORIGIN_HOST: "vayada-media-staging.s3.us-east-1.amazonaws.com",
 };
 
-const completeCreatorPlatformConnectionEnv = {
-  ...completeCreatorMarketplaceEnv,
-};
-
 const completeAuthSessionEnv = {
   WORKOS_CLIENT_ID: "client",
   WORKOS_API_KEY: "sk_test",
@@ -626,58 +622,6 @@ describe("api config", () => {
         AUTH_FIRST_PARTY_SURFACES: "marketplace-web",
       }),
     ).toThrow("AUTH_COOKIE_SECURE must be true for HTTPS first-party surfaces: marketplace-web");
-  });
-
-  it("loads independently configured creator platform providers", () => {
-    expect(
-      loadConfig({
-        ...completeCreatorPlatformConnectionEnv,
-        NODE_ENV: "test",
-        CREATOR_PLATFORM_CALLBACK_BASE_URL: "https://creator.api.localhost:1356",
-        CREATOR_PLATFORM_WEB_RETURN_URL: "https://marketplace.localhost:1356/profile/complete",
-        CREATOR_PLATFORM_CREDENTIAL_VAULT: "memory",
-        CREATOR_PLATFORM_SECRET_PREFIX: "vayada/test/creator-platforms",
-        TIKTOK_CLIENT_KEY: "client-key",
-        TIKTOK_CLIENT_SECRET: "client-secret",
-      }).creatorPlatformConnections,
-    ).toEqual({
-      callbackBaseUrl: "https://creator.api.localhost:1356",
-      webReturnUrl: "https://marketplace.localhost:1356/profile/complete",
-      sync: {
-        enabled: true,
-        pollIntervalMs: 60_000,
-        recurringIntervalMs: 86_400_000,
-        batchSize: 10,
-        maxAttempts: 5,
-        minimumSpacingMs: { meta: 1_000, tiktok: 2_000, google: 1_000 },
-      },
-      credentialVault: {
-        provider: "memory",
-        secretPrefix: "vayada/test/creator-platforms",
-      },
-      tiktok: { clientKey: "client-key", clientSecret: "client-secret" },
-    });
-  });
-
-  it("rejects partial creator platform provider config", () => {
-    expect(() => loadConfig({ INSTAGRAM_CLIENT_ID: "instagram-client" })).toThrow(
-      "Incomplete Instagram creator platform config; missing INSTAGRAM_CLIENT_SECRET, INSTAGRAM_API_VERSION",
-    );
-  });
-
-  it("rejects the in-memory creator credential vault in production", () => {
-    expect(() =>
-      loadConfig({
-        ...completeCreatorPlatformConnectionEnv,
-        NODE_ENV: "production",
-        CREATOR_PLATFORM_CALLBACK_BASE_URL: "https://api.example.com",
-        CREATOR_PLATFORM_WEB_RETURN_URL: "https://marketplace.example.com/profile/complete",
-        CREATOR_PLATFORM_CREDENTIAL_VAULT: "memory",
-        CREATOR_PLATFORM_SECRET_PREFIX: "vayada/production/creator-platforms",
-        TIKTOK_CLIENT_KEY: "client-key",
-        TIKTOK_CLIENT_SECRET: "client-secret",
-      }),
-    ).toThrow("CREATOR_PLATFORM_CREDENTIAL_VAULT=memory is not allowed in production");
   });
 
   it("loads target public hotel profile config", () => {
