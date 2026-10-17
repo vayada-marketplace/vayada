@@ -93,18 +93,12 @@ test.describe("vayada-admin smoke", () => {
     await page.goto(new URL("/dashboard/invite-codes", adminBaseURL).toString());
     await expect(page.getByRole("heading", { name: "Hotel invitations" })).toBeVisible();
 
+    // Only the Hotel Operations route is offered since VAY-2261 (Creator Marketplace removal).
+    await expect(page.getByRole("radio", { name: /^Creator Marketplace/ })).toHaveCount(0);
     const routeCases = [
-      {
-        radio: /^Creator Marketplace/,
-        expected: ["creator_marketplace"],
-      },
       {
         radio: /^Hotel Operations/,
         expected: ["hotel_operations"],
-      },
-      {
-        radio: /^Marketplace \+ Hotel Operations/,
-        expected: ["hotel_operations", "creator_marketplace"],
       },
     ];
 
