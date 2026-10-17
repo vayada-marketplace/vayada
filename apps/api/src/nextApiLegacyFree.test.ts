@@ -12,7 +12,6 @@ import type { PublicHotelQuoteReadPool } from "./routes/aiHotelQuotes.js";
 import type { PublicHotelProfileReadPool } from "./routes/aiHotels.js";
 import type { BookingWebCalendarReadPool } from "./routes/bookingWebPublic.js";
 import { unusedBookingWebCheckoutAdapter } from "./routes/bookingWebPublic.fixtures.js";
-import type { MarketplaceDiscoveryReadPool } from "./routes/marketplaceDiscovery.js";
 
 const legacyRuntimeEnvKeys = [
   "BOOKING_PUBLIC_API_URL",
@@ -106,17 +105,6 @@ const bookingWebCalendarPool: BookingWebCalendarReadPool = {
   async end() {},
 };
 
-const marketplaceDiscoveryPool: MarketplaceDiscoveryReadPool = {
-  async query<T extends QueryResultRow>(text: string) {
-    expect(text).toContain("marketplace.");
-
-    return {
-      rows: text.includes("COUNT(*)") ? ([{ total: "0" }] as unknown as T[]) : ([] as T[]),
-    };
-  },
-  async end() {},
-};
-
 describe("next-api legacy-free runtime check", () => {
   let app: FastifyInstance | null = null;
 
@@ -142,7 +130,6 @@ describe("next-api legacy-free runtime check", () => {
       publicHotelProfilePool,
       publicHotelQuotePool,
       bookingWebCalendarPool,
-      marketplaceDiscoveryPool,
     });
 
     app = buildApp({
@@ -156,8 +143,6 @@ describe("next-api legacy-free runtime check", () => {
       "/api/ai/hotels/hotel-alpenrose",
       "/api/booking-web/hosts/book.alpenrose.example",
       "/api/booking-web/hotels/hotel-alpenrose",
-      "/api/marketplace/offers",
-      "/api/marketplace/creators",
     ];
 
     for (const url of routes) {

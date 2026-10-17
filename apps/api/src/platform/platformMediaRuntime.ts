@@ -1,6 +1,8 @@
-import type { MarketplaceCreatorProfileMediaRepository } from "../routes/marketplaceCreatorSelfService.js";
 import { syncPropertyOfferReadModels } from "../routes/marketplaceAdmin.js";
-import type { PlatformMediaRoutesOptions } from "../routes/platformMedia.js";
+import type {
+  ApprovedPublicProfileImageRepository,
+  PlatformMediaRoutesOptions,
+} from "../routes/platformMedia.js";
 import { createPgPlatformMediaCleanupStore } from "../jobs/platformMediaCleanup.js";
 import { createPgS3PropertyMediaCommandRepository } from "../domains/propertyMediaCommandRepository.js";
 import {
@@ -33,7 +35,7 @@ export type PlatformMediaRuntimeFactories = {
 };
 
 export type PlatformMediaRuntime = {
-  profileMediaRepository: MarketplaceCreatorProfileMediaRepository;
+  profileMediaRepository: ApprovedPublicProfileImageRepository;
   offerMediaPromotion: MarketplaceOfferMediaPromotionPort;
   collaborationAttachments: {
     repository: ReturnType<typeof createPgPlatformMediaRepository>;

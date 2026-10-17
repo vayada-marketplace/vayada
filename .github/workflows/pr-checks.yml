@@ -791,7 +791,6 @@ jobs:
         run: >-
           npm --workspace vayada-api run test --
           --no-file-parallelism
-          src/marketplaceCollaborations.test.ts
           src/domains/pmsLinkedInventoryGroupRepository.integration.test.ts
           src/domains/pmsRoomFactsCommandRepository.integration.test.ts
           src/domains/pmsRoomOperatingEligibility.integration.test.ts
@@ -995,8 +994,6 @@ jobs:
         run: >-
           npm --workspace vayada-api run test -- --no-file-parallelism
           src/domains/marketplaceSubmissionRepository.integration.test.ts
-          src/domains/marketplaceHotelSubmissionModerationRepository.integration.test.ts
-          src/marketplaceHotelSubmissionApproval.integration.test.ts
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
@@ -1234,21 +1231,6 @@ jobs:
           '
           npm --workspace @vayada/backend-migration run target:migrate -- --env local
           npm --workspace vayada-api run test -- --no-file-parallelism src/domains/bookingGuestTermsStore.integration.test.ts
-
-      - name: Verify Marketplace hotel approval in an isolated database
-        if: matrix.shard == 'hotel-setup'
-        env:
-          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vayada_mkt_approval_test
-          TARGET_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vayada_mkt_approval_test
-        run: |
-          node --input-type=module -e '
-            import pg from "pg";
-            const url = new URL(process.env.TEST_DATABASE_URL); url.pathname = "/postgres";
-            const client = new pg.Client({ connectionString: url.href }); await client.connect();
-            await client.query("CREATE DATABASE vayada_mkt_approval_test"); await client.end();
-          '
-          npm --workspace @vayada/backend-migration run target:migrate -- --env local
-          npm --workspace vayada-api run test -- --no-file-parallelism src/domains/marketplaceHotelSubmissionModerationRepository.integration.test.ts src/marketplaceHotelSubmissionApproval.integration.test.ts
 
   setup_draft_reset_postgres:
     name: Setup Draft Reset PostgreSQL ${{ matrix.postgres }} Integration
