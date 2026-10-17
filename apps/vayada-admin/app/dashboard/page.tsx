@@ -336,7 +336,6 @@ function DashboardContent() {
               >
                 <option value="all">All Types</option>
                 <option value="hotel">Hotels</option>
-                <option value="creator">Creators</option>
                 <option value="admin">Admins</option>
               </select>
               <select
@@ -595,14 +594,6 @@ function DashboardContent() {
                     User account: <strong>{deleteConfirmUser.name}</strong> (
                     {deleteConfirmUser.email})
                   </li>
-                  {deleteConfirmUser.type === "creator" && (
-                    <li>Creator profile and all social media platforms</li>
-                  )}
-                  {deleteConfirmUser.type === "hotel" && (
-                    <li>
-                      Hotel profile and all collaboration offers with compensation and requirements
-                    </li>
-                  )}
                   <li>All associated S3 images (profile pictures, media, thumbnails)</li>
                   <li>All related records</li>
                 </ul>
