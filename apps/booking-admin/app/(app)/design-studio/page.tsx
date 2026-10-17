@@ -941,7 +941,6 @@ export default function DesignStudioPage() {
             font={currentFont}
             headerLogo={headerLogo}
             showContactButton={showContactButton}
-            showReferAGuestButton={false}
             showLanguageSelector={showLanguageSelector && languageSelectorAvailable}
             showCurrencySelector={showCurrencySelector && currencySelectorAvailable}
             supportedLanguages={supportedLanguages ?? undefined}

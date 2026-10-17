@@ -19,7 +19,6 @@ export function BookingPagePreview({
   showContactButton = true,
   showLanguageSelector = true,
   showCurrencySelector = true,
-  showReferAGuestButton = false,
   supportedLanguages,
   supportedCurrencies,
 }: {
@@ -39,7 +38,6 @@ export function BookingPagePreview({
   showContactButton?: boolean;
   showLanguageSelector?: boolean;
   showCurrencySelector?: boolean;
-  showReferAGuestButton?: boolean;
   supportedLanguages?: readonly string[];
   supportedCurrencies?: readonly string[];
 }) {
@@ -106,15 +104,6 @@ export function BookingPagePreview({
                   style={{ backgroundColor: accent }}
                 >
                   {t("bookingPreview.contact")}
-                </span>
-              )}
-              {showReferAGuestButton && (
-                <span
-                  data-testid="booking-preview-refer"
-                  className="rounded-full border border-white/60 px-2.5 py-1 text-[9px] font-semibold text-white"
-                >
-                  <span className="sm:hidden">{t("bookingPreview.refer")}</span>
-                  <span className="hidden sm:inline">{t("bookingPreview.referAGuest")}</span>
                 </span>
               )}
               {showLanguageSelector && languageCount > 1 && (
@@ -264,8 +253,6 @@ export const bookingPreviewMessages = {
   "bookingPreview.bookingPageHeroPreview": "Booking page hero preview",
   "bookingPreview.yourHotel": "Your Hotel",
   "bookingPreview.contact": "Contact",
-  "bookingPreview.refer": "Refer",
-  "bookingPreview.referAGuest": "Refer a Guest",
   "bookingPreview.yourHotelName": "Your Hotel Name",
   "bookingPreview.yourHotelTaglineWillAppearHere": "Your hotel tagline will appear here.",
   "bookingPreview.yourStay": "Your stay",

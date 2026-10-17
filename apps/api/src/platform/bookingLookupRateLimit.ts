@@ -1,6 +1,6 @@
 import { createHmac, randomBytes } from "node:crypto";
 
-import { sourcePrefix } from "../domains/marketplaceAffiliatePublicLinkQuota.js";
+import { sourcePrefix } from "./ipSourcePrefix.js";
 
 /** "Find my booking" tries per address per minute. */
 export const BOOKING_LOOKUP_LIMIT = 5;

@@ -1365,10 +1365,6 @@ const PRECHECK_ISOLATED_BLOCKS = {
   ],
   vayada_pub_cmd_test: ["src/domains/bookingPublicationCommandRepository.integration.test.ts"],
   vayada_guest_terms_test: ["src/domains/bookingGuestTermsStore.integration.test.ts"],
-  vayada_mkt_approval_test: [
-    "src/domains/marketplaceHotelSubmissionModerationRepository.integration.test.ts",
-    "src/marketplaceHotelSubmissionApproval.integration.test.ts",
-  ],
 };
 
 test("the release precheck's isolated database blocks keep their database, env and files", () => {

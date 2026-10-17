@@ -334,6 +334,23 @@ export const authService = {
   },
 
   /**
+   * Binds the signed-in account to the hotel organization an invitation names (VAY-2262). The
+   * server creates that organization from the invitation and switches the session to it.
+   */
+  completeHotelInviteOnboarding: async (inviteCode: string): Promise<AuthSessionResponse> => {
+    const csrfToken = getAuthCsrfToken();
+    if (!csrfToken) {
+      throw new Error("Your session has expired. Please sign in again.");
+    }
+    const response = await authFetch<AuthSessionResponse>("/onboarding", {
+      method: "POST",
+      headers: { "x-vayada-csrf": csrfToken },
+      body: JSON.stringify({ type: "hotel", surface: AUTH_SURFACE, inviteCode }),
+    });
+    return storeAuthSessionResponse(response);
+  },
+
+  /**
    * Logout user
    */
   logout: async (): Promise<void> => {

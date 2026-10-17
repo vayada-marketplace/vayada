@@ -25,13 +25,6 @@ import {
   PricingCardPaymentError,
   voidPricingCardPayment,
 } from "../domains/pricingCardPaymentCompletion.js";
-import { admitAffiliateArrivalForCurrentHost } from "../domains/bookingAffiliateArrivalHost.js";
-import { affiliateTrafficSource } from "../domains/marketplaceAffiliateClickOccurrence.js";
-import { readBookingAffiliateContextForQuote } from "../domains/bookingAffiliateContextForQuote.js";
-import {
-  bindLiveAffiliateOriginal,
-  lockLiveAffiliateContextForOriginal,
-} from "../domains/bookingAffiliateLiveOriginalBinding.js";
 import {
   createReplacementBookingQuoteIssuer,
   requirePublicQuoteKey,
@@ -65,14 +58,13 @@ import {
 import type { BillingConfigReadModel, BillingConfigReadPort } from "@vayada/domain-finance";
 import { normalizeNationalityCode } from "@vayada/locale-constants";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import pg, { type QueryResult, type QueryResultRow } from "pg";
 import {
   bookedMealDescription,
   projectBookingRoomSelection,
 } from "../domains/bookingRoomSelectionProjection.js";
 import { appendMissingAddonRevenueEvidence } from "../domains/bookingAddonRevenueEvidence.js";
-import { publishAffiliateReservationLifecycle } from "../domains/bookingAffiliateReservationLifecycle.js";
 import type { BankTransferBookingOperations } from "../domains/financeBankTransferBooking.js";
 import { lockPmsInventoryMutationScope } from "../domains/pmsInventoryMutationLock.js";
 import { releaseAbandonedBookingEdits } from "../jobs/pendingBookingEditCleanup.js";
@@ -126,13 +118,6 @@ import {
   serializePublicHotelProfileProjection,
   type PublicHotelProfileRepository,
 } from "./aiHotels.js";
-import {
-  registerBookingWebAffiliateRoutes,
-  registerRetiredAffiliateEnrollmentRoutes,
-  type BookingWebAffiliateHotelResolver,
-  type BookingWebAffiliateRepository,
-} from "./bookingWebAffiliate.js";
-
 type BookingWebHostParams = {
   host: string;
 };
@@ -197,14 +182,6 @@ type BookingWebPromoValidationRequest = {
   roomTypeId?: string;
   bookingTotal?: number;
 };
-type BookingWebAttributionClickRequest = {
-  clickId?: string;
-  referralCode?: string;
-  referral_code?: string;
-  sessionId?: string;
-  session_id?: string;
-  referrer?: string;
-};
 type BookingWebTelemetryEventRequest = {
   analyticsConsent?: boolean;
   consentVersion?: number;
@@ -218,24 +195,9 @@ type BookingWebTelemetryEventRequest = {
   session_id?: string;
   metadata?: Record<string, unknown>;
 };
-type BookingWebAffiliateRequest = Record<string, unknown>;
-type BookingWebAffiliateParams = BookingWebHotelParams & {
-  affiliateId: string;
-};
 
 export type BookingWebAttributionSink = {
-  recordAffiliateClick(event: BookingWebAffiliateClickEvent): Promise<void>;
   recordTelemetryEvent(event: BookingWebTelemetryEvent): Promise<void>;
-};
-
-export type BookingWebAffiliateClickEvent = {
-  clickId?: string;
-  slug: string;
-  referralCode: string;
-  sessionId?: string;
-  referrerSource: ReturnType<typeof affiliateTrafficSource>;
-  occurredAt: Date;
-  userAgent?: string;
 };
 
 /** No request id or IP address: neither leads back to the guest (VAY-2197). */
@@ -279,11 +241,7 @@ export type BookingWebCheckoutAdapter = {
   getPricingStayPrices?(slug: string, query: unknown): Promise<unknown>;
   getPricingAddons?(slug: string): Promise<unknown>;
   getQuoteGuestDisclosure?(slug: string, quoteId: string): Promise<unknown>;
-  acceptPricingQuote?(
-    slug: string,
-    request: BookingWebCheckoutRequest,
-    affiliateContextCookie?: string,
-  ): Promise<unknown>;
+  acceptPricingQuote?(slug: string, request: BookingWebCheckoutRequest): Promise<unknown>;
   completePricingCardPayment?(slug: string, quoteId: string, requestId: string): Promise<unknown>;
   getCheckoutConfig(slug: string, context?: BookingWebCheckoutCommandContext): Promise<unknown>;
   quoteBooking(
@@ -302,7 +260,6 @@ export type BookingWebCheckoutAdapter = {
     slug: string,
     request: BookingWebCheckoutRequest,
     context?: BookingWebCheckoutCommandContext,
-    affiliateContextCookie?: string,
   ): Promise<unknown>;
   confirmAuthorization(
     slug: string,
@@ -422,14 +379,6 @@ export type BookingHotelChangeRequestRepository = {
   close?(): Promise<void>;
 };
 
-export type BookingWebAffiliateAdapter = {
-  createStripeConnectLink(
-    slug: string,
-    affiliateId: string,
-    request: BookingWebAffiliateRequest,
-  ): Promise<unknown>;
-};
-
 export type BookingWebHostResolution = {
   contractVersion: typeof PUBLIC_BOOKABILITY_CONTRACT_VERSION;
   publicVisibility: typeof PUBLIC_BOOKABILITY_VISIBILITY;
@@ -492,12 +441,6 @@ export type BookingWebPublicRoutesOptions = {
   quoteRepository?: PublicHotelQuoteRepository;
   calendarRepository?: BookingWebCalendarRepository;
   checkoutAdapter: BookingWebCheckoutAdapter;
-  /** Dormant until destination storage, runtime grants, and HTTPS transport are approved. */
-  affiliateContextBindingEnabled?: boolean;
-  affiliateArrival?: { pool: pg.Pool; internalToken: string };
-  affiliateHotelResolver?: BookingWebAffiliateHotelResolver;
-  affiliateRepository?: BookingWebAffiliateRepository;
-  affiliateAdapter?: BookingWebAffiliateAdapter;
   attributionSink?: BookingWebAttributionSink;
   now?: () => Date;
 };
@@ -510,8 +453,6 @@ export async function registerBookingWebPublicRoutes(
   const eventRateLimit = createBookingWebEventRateLimit({ now: () => now().getTime() });
   const lookupRateLimit = createBookingLookupRateLimit({ now: () => now().getTime() });
   const checkoutAdapter = options.checkoutAdapter;
-  const affiliateAdapter =
-    options.affiliateAdapter ?? createUnavailableBookingWebAffiliateAdapter();
 
   app.addHook("onRequest", async (request, reply) => {
     writeBookingWebCorsHeaders(request, reply);
@@ -553,29 +494,6 @@ export async function registerBookingWebPublicRoutes(
     reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-host-read");
     return response;
   });
-
-  if (options.affiliateArrival) {
-    const { pool, internalToken } = options.affiliateArrival;
-    if (!internalToken) throw new Error("Booking affiliate arrival internal token is required");
-    app.post<{
-      Body: { host?: unknown; referenceToken?: unknown; contextId?: unknown };
-    }>("/affiliate/arrivals", { bodyLimit: 1024 }, async (request, reply) => {
-      reply.header("Cache-Control", "no-store");
-      const supplied = request.headers["x-vayada-affiliate-arrival-token"];
-      const expected = Buffer.from(internalToken);
-      const actual = typeof supplied === "string" ? Buffer.from(supplied) : Buffer.alloc(0);
-      if (actual.length !== expected.length || !timingSafeEqual(actual, expected))
-        throw createHttpError(404, "Booking Web arrival unavailable.");
-      const result = await admitBookingWebAffiliateArrival(pool, {
-        host: request.body?.host,
-        referenceToken: request.body?.referenceToken,
-        contextId: request.body?.contextId,
-      });
-      return result.status === "admitted"
-        ? { status: "admitted" as const, contextId: result.contextId }
-        : { status: "unavailable" as const };
-    });
-  }
 
   app.get<{ Params: BookingWebHotelParams }>("/hotels/:slug", async (request, reply) => {
     const profile = await options.profileRepository.findProfileBySlug(request.params.slug);
@@ -658,16 +576,7 @@ export async function registerBookingWebPublicRoutes(
         body.requestId !== request.headers["idempotency-key"]
       )
         throw createHttpError(400, "Invalid quote acceptance request.");
-      const affiliateContextCookie = options.affiliateContextBindingEnabled
-        ? readAffiliateContextCookie(request.headers.cookie)
-        : null;
-      const response = affiliateContextCookie
-        ? await checkoutAdapter.acceptPricingQuote(
-            request.params.slug,
-            body,
-            affiliateContextCookie,
-          )
-        : await checkoutAdapter.acceptPricingQuote(request.params.slug, body);
+      const response = await checkoutAdapter.acceptPricingQuote(request.params.slug, body);
       reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-quote-acceptance");
       return response;
     },
@@ -805,9 +714,6 @@ export async function registerBookingWebPublicRoutes(
         request.params.slug,
         body,
         checkoutCommandContext(request, "booking-create", request.params.slug, body, now),
-        options.affiliateContextBindingEnabled
-          ? (readAffiliateContextCookie(request.headers.cookie) ?? undefined)
-          : undefined,
       );
       reply.header("Cache-Control", "no-store");
       reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-booking-create");
@@ -1095,43 +1001,6 @@ export async function registerBookingWebPublicRoutes(
     },
   );
 
-  app.post<{ Params: BookingWebHotelParams; Body: BookingWebAttributionClickRequest }>(
-    "/hotels/:slug/attribution/clicks",
-    async (request, reply) => {
-      const referralCode = firstString(request.body?.referralCode, request.body?.referral_code);
-      if (!referralCode) {
-        throw createHttpError(400, "Referral code is required.");
-      }
-      const clickId = request.body?.clickId;
-      if (
-        clickId !== undefined &&
-        (typeof clickId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(clickId))
-      ) {
-        throw createHttpError(400, "Invalid click ID.");
-      }
-      // Booking Web sends a random analytics session id; anything else is not stored.
-      const sessionId = firstString(request.body?.sessionId, request.body?.session_id);
-      if (options.attributionSink) {
-        await options.attributionSink.recordAffiliateClick({
-          clickId,
-          slug: request.params.slug,
-          referralCode,
-          sessionId: sessionId && /^[A-Za-z0-9_-]{1,128}$/.test(sessionId) ? sessionId : undefined,
-          // Attribution needs no page address (VAY-2215): booking-web URLs can carry a guest's
-          // email, booking reference or access token. Older browsers still send landingUrl,
-          // the full referrer and metadata; only the referrer's site is kept. The Referer
-          // header is never read: it is the booking page itself.
-          referrerSource: affiliateTrafficSource(request.body?.referrer),
-          occurredAt: now(),
-          userAgent: request.headers["user-agent"],
-        });
-      }
-      reply.header("Cache-Control", "no-store");
-      reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-attribution-click");
-      return reply.status(204).send();
-    },
-  );
-
   // Funnel events only (VAY-2197): each type's own allowlisted properties and random ids, so
   // nothing a guest typed can be stored. Events are a few hundred bytes.
   app.post<{ Body: BookingWebTelemetryEventRequest }>(
@@ -1201,32 +1070,6 @@ export async function registerBookingWebPublicRoutes(
       return reply.status(204).send();
     },
   );
-
-  if (options.affiliateRepository) {
-    await registerBookingWebAffiliateRoutes(app, {
-      hotelResolver: options.affiliateHotelResolver ?? {
-        findProfileBySlug: (slug) => options.profileRepository.findProfileBySlug(slug),
-      },
-      repository: options.affiliateRepository,
-    });
-  } else {
-    registerRetiredAffiliateEnrollmentRoutes(app);
-
-    app.post<{ Params: BookingWebAffiliateParams; Body: BookingWebAffiliateRequest }>(
-      "/hotels/:slug/affiliates/:affiliateId/stripe/connect",
-      async (request, reply) => {
-        const response = await affiliateAdapter.createStripeConnectLink(
-          request.params.slug,
-          request.params.affiliateId,
-          request.body ?? {},
-        );
-        reply.header("Cache-Control", "no-store");
-        reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-affiliate-stripe-connect");
-        reply.header("X-Robots-Tag", "noindex");
-        return response;
-      },
-    );
-  }
 }
 
 function writeBookingWebCorsHeaders(request: FastifyRequest, reply: FastifyReply): void {
@@ -1972,7 +1815,7 @@ export function createTargetBookingWebCheckoutAdapter(
     async editRequest(slug, bookingId, action, request, context) {
       return pendingBookingEdit(pool, config, slug, bookingId, action, request, context);
     },
-    async createBooking(slug, request, context, affiliateContextCookie) {
+    async createBooking(slug, request, context) {
       if (!context) {
         throw createHttpError(400, "Checkout command context is required.");
       }
@@ -2018,11 +1861,6 @@ export function createTargetBookingWebCheckoutAdapter(
         assertTargetCheckoutConfigMatchesQuote(checkoutConfig, quote);
         resolveTargetCheckoutAmountSnapshot(request, quote);
         assertTargetSameDayBookingOpen(property, quote.checkIn, config.now?.() ?? new Date());
-        const affiliateContextLocked = await lockLiveAffiliateContextForOriginal(
-          client,
-          property.propertyId,
-          affiliateContextCookie,
-        );
         const booking = await createTargetGuestBooking(
           client,
           config.inventoryReservationPort,
@@ -2034,11 +1872,6 @@ export function createTargetBookingWebCheckoutAdapter(
           billingConfig,
           checkoutConfig,
         );
-        if (affiliateContextLocked && affiliateContextCookie)
-          await bindLiveAffiliateOriginal(client, {
-            id: booking.guestBookingId,
-            contextId: affiliateContextCookie,
-          });
         if (quote.paymentMethod === "bank_transfer") {
           if (!config.bankTransfers) throw createHttpError(503, "Bank transfer is not configured.");
           await config.bankTransfers.bind(client, property.propertyId, booking.guestBookingId);
@@ -2133,22 +1966,10 @@ export function createTargetBookingWebCheckoutAdapter(
       if (!disclosure) throw createHttpError(404, "Guest rules unavailable.");
       return disclosure;
     },
-    async acceptPricingQuote(slug, request, affiliateContextCookie) {
+    async acceptPricingQuote(slug, request) {
       if (!config.replacementPricingAcceptanceEnabled)
         throw createHttpError(404, "Quote acceptance unavailable.");
       try {
-        let contextId: string | null = null;
-        if (affiliateContextCookie) {
-          try {
-            contextId = await readBookingAffiliateContextForQuote(
-              pool,
-              slug,
-              affiliateContextCookie,
-            );
-          } catch {
-            // Context lookup must not block an otherwise valid booking.
-          }
-        }
         const cardPayments =
           config.replacementPricingCardAcceptanceEnabled && config.stripePaymentProvider
             ? { provider: config.stripePaymentProvider }
@@ -2156,7 +1977,6 @@ export function createTargetBookingWebCheckoutAdapter(
         const result = await writePricingAcceptance(
           pool,
           { slug, command: request },
-          contextId ? { affiliateContextId: contextId } : undefined,
           cardPayments,
           config.replacementPricingRequestAcceptanceEnabled === true,
           config.replacementPricingManualPaymentAcceptanceEnabled
@@ -4216,19 +4036,6 @@ async function withGuestLifecycleMutation(
     if (!updated) {
       throw createHttpError(409, "Booking status changed. Please refresh and try again.");
     }
-    await publishAffiliateReservationLifecycle(client, {
-      source: "booking",
-      eventKey: `booking.affiliate-reservation.${mutation.action}.${updated.guestBookingId}.${context.fingerprint}.v1`,
-      eventType: "booking.affiliate_reservation.canceled",
-      occurredAt: context.occurredAt.toISOString(),
-      propertyId: updated.propertyId,
-      bookingId: updated.guestBookingId,
-      actorType: "user",
-      correlationId: context.correlationId,
-      causationId: context.requestId,
-      idempotencyKeyHash: sha256Hex(context.idempotencyKey),
-      evidence: { sourceEventType: mutation.eventType, lifecycleStatus: updated.lifecycleStatus },
-    });
     await reverseTargetPromoRedemption(
       client,
       updated.propertyId,
@@ -5230,26 +5037,6 @@ async function applyAcceptedTargetDateChange(
   );
   const updated = result.rows[0];
   if (!updated) throw createHttpError(409, "Booking change request status changed.");
-  await publishAffiliateReservationLifecycle(pool, {
-    source: "booking",
-    eventKey: `booking.affiliate-reservation.amended.${input.changeRequest.id}.v1`,
-    eventType: "booking.affiliate_reservation.amended",
-    occurredAt: input.context.occurredAt.toISOString(),
-    propertyId: updated.propertyId,
-    bookingId: updated.guestBookingId,
-    actorType: "user",
-    actorUserId: input.context.actorUserId,
-    correlationId: input.context.correlationId,
-    causationId: input.changeRequest.id,
-    idempotencyKeyHash: sha256Hex(input.context.idempotencyKey),
-    evidence: {
-      changeRequestId: input.changeRequest.id,
-      oldCheckIn: input.preview.oldCheckIn,
-      oldCheckOut: input.preview.oldCheckOut,
-      checkIn: input.preview.requestedCheckIn,
-      checkOut: input.preview.requestedCheckOut,
-    },
-  });
   return updated;
 }
 
@@ -6041,14 +5828,6 @@ export function resolveTargetCheckoutAmountSnapshot(
   };
 }
 
-export function createUnavailableBookingWebAffiliateAdapter(): BookingWebAffiliateAdapter {
-  return {
-    async createStripeConnectLink() {
-      throw createHttpError(404, "Booking Web affiliate adapter is not configured.");
-    },
-  };
-}
-
 function normalizeGuestActionRequest(request: BookingWebGuestActionRequest): {
   guest_email: string | undefined;
   expected_cancellation_fee_minor?: string;
@@ -6090,12 +5869,6 @@ async function findProfileForHost(config: {
  * The transport route and privacy gate must be added before invoking this
  * with live traffic.
  */
-export async function admitBookingWebAffiliateArrival(
-  pool: pg.Pool,
-  input: { host: unknown; referenceToken: unknown; contextId?: unknown },
-) {
-  return admitAffiliateArrivalForCurrentHost(pool, input);
-}
 
 function serializeHostResolution(
   host: string,
@@ -6237,21 +6010,6 @@ function normalizeHost(value: string): string {
     return decoded.replace(/^\[([^\]]+)\](?::\d+)?$/, "$1");
   }
   return decoded.replace(/:\d+$/, "").replace(/^\.+|\.+$/g, "");
-}
-
-function readAffiliateContextCookie(header: string | undefined): string | null {
-  if (!header) return null;
-  const values = header
-    .split(";")
-    .map((part) => part.trim())
-    .filter((part) => part.startsWith("__Host-vayada_affiliate_context="))
-    .map((part) => part.slice("__Host-vayada_affiliate_context=".length));
-  if (
-    values.length !== 1 ||
-    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(values[0]!)
-  )
-    return null;
-  return values[0]!.toLowerCase();
 }
 
 function slugFromKnownBookingHost(host: string): string | null {

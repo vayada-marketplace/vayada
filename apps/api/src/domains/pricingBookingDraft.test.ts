@@ -103,20 +103,6 @@ it("propagates insert failures and late authorization loss for caller rollback",
   expect(query.mock.calls.some(([sql]) => sql === "COMMIT")).toBe(false);
 });
 
-it("rejects an unavailable internal affiliate context before inserting a draft", async () => {
-  input.syntheticAffiliateContextId = "unavailable-synthetic-context";
-  const original = query.getMockImplementation()!;
-  query.mockImplementation(async (sql, values) => {
-    if (sql === "SHOW transaction_isolation")
-      return { rows: [{ transaction_isolation: "read committed" }], rowCount: 1 };
-    if (sql.startsWith("SELECT id FROM booking.affiliate_click_contexts"))
-      return { rows: [], rowCount: 0 };
-    return original(sql, values);
-  });
-  await expect(stagePricingBookingDraft(client, "hotel", input)).rejects.toThrow("unavailable");
-  expect(query.mock.calls.some(([sql]) => sql.startsWith("WITH draft"))).toBe(false);
-});
-
 it.each([
   ["JPY", "36000", "36000.00"],
   ["KWD", "36000", "36.00"],

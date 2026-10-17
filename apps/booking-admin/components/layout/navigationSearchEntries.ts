@@ -29,6 +29,7 @@ export const SEARCH_ENTRIES = [
   ["Policies", "/settings/policies", "Settings", "settings", "settings.cards.policies.title"],
   ["Billing", "/settings/billing", "Settings", "billing", "settings.tabs.billing"],
   ["Payment Settings", "/settings/payments", "Settings", "payments", "admin.paymentSettings"],
+  ["Privacy & data", "/settings/privacy", "Settings", "settings", "settings.cards.privacy.title"],
   [
     "Domain Settings",
     "/design-studio?tab=domain",

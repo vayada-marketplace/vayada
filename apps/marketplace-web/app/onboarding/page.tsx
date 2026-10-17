@@ -39,18 +39,13 @@ const options: Array<{
     description: "Set up one hotel or manage several from the same account.",
     image: "/hotel-hero.JPG",
   },
-  {
-    type: "creator",
-    title: "I’m a creator",
-    description: "Build a profile hotels can review before working with you.",
-    image: "/creator-hero.jpg",
-  },
 ];
 
 export default function OnboardingPage() {
   const router = useRouter();
   const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
-  const [selectedType, setSelectedType] = useState<AccountType | null>(null);
+  // VAY-2260: the creator Marketplace is closed; only the hotel path is offered.
+  const [selectedType, setSelectedType] = useState<AccountType | null>("hotel");
   const [pendingHotelInvite, setPendingHotelInvite] = useState(false);
   const [provisionedType, setProvisionedType] = useState<AccountType | null>(null);
   const [setupHandoffType, setSetupHandoffType] = useState<AccountType | null>(null);
@@ -99,7 +94,11 @@ export default function OnboardingPage() {
           return;
         }
         const userType = authService.getUserType();
-        if (userType === "creator" || userType === "hotel") {
+        if (userType === "creator") {
+          router.replace(ROUTES.CLOSED);
+          return;
+        }
+        if (userType === "hotel") {
           setProvisionedType(userType);
           let accountDetailsStatus;
           try {
@@ -342,14 +341,14 @@ export default function OnboardingPage() {
           ? "Getting things ready"
           : pendingHotelInvite
             ? "Create your invited hotel account"
-            : "Welcome to vayada — what brings you here?"
+            : "Welcome to vayada"
       }
       description={
         loading
           ? "Loading your account details."
           : pendingHotelInvite
             ? "Your invitation already selected the hotel path."
-            : "Choose your role so we can tailor your setup."
+            : "Let’s set up your hotel account."
       }
       showProgress={false}
     >
@@ -415,7 +414,7 @@ function PathChoice({
     <div
       role="radiogroup"
       aria-label="Choose onboarding path"
-      className="grid gap-4 sm:grid-cols-2"
+      className="mx-auto grid max-w-md gap-4"
     >
       {options.map((option, index) => {
         if (hotelInvite && option.type !== "hotel") return null;

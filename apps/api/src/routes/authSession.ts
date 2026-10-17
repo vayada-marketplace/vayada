@@ -2523,6 +2523,8 @@ function parsePasswordSignupBody(body: unknown):
   }
 }
 
+const INVITE_ONBOARDING_SURFACES: readonly AuthSurface[] = ["marketplace-web", "booking-admin"];
+
 function parseOnboardingBody(
   body: unknown,
 ):
@@ -2557,8 +2559,9 @@ function parseOnboardingBody(
     const intent = parseSignupIntent(surface, rawIntent);
     const hasInviteCode = Object.prototype.hasOwnProperty.call(input, "inviteCode");
     if (!hasInviteCode) return { ok: true, surface, intent };
+    // VAY-2262: Booking Admin hosts the hotel invite page; marketplace-web keeps working until it is retired.
     if (
-      surface !== "marketplace-web" ||
+      !INVITE_ONBOARDING_SURFACES.includes(surface) ||
       intent !== "hotel" ||
       typeof input.inviteCode !== "string" ||
       Object.keys(input).some((key) => !["surface", "type", "intent", "inviteCode"].includes(key))
