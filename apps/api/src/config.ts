@@ -15,17 +15,7 @@ export type ApiAuthConfig = {
   workosAudience: string;
 };
 
-export type ApiAuthSurface =
-  | "platform-admin"
-  | "booking-admin"
-  | "pms-web"
-  | "affiliate-dashboard"
-  | "marketplace-web";
-
-// VAY-2271: the Marketplace and affiliate portals are being switched off. Their login
-// addresses are optional so the platform can drop them before the surface types go.
-export type ApiRetiredAuthSurface = "affiliate-dashboard" | "marketplace-web";
-export type ApiActiveAuthSurface = Exclude<ApiAuthSurface, ApiRetiredAuthSurface>;
+export type ApiAuthSurface = "platform-admin" | "booking-admin" | "pms-web";
 
 export type ApiAuthSessionConfig = {
   workosClientId: string;
@@ -36,8 +26,7 @@ export type ApiAuthSessionConfig = {
   authLogoutUrl: string;
   authAllowedOrigins: string[];
   authCompatibilityCallbackOrigin: string;
-  authSurfaceOrigins: Record<ApiActiveAuthSurface, string> &
-    Partial<Record<ApiRetiredAuthSurface, string>>;
+  authSurfaceOrigins: Record<ApiAuthSurface, string>;
   authFirstPartySurfaces: ApiAuthSurface[];
   authCookieSecure: boolean;
   authCookieDomain?: string;
@@ -46,9 +35,6 @@ export type ApiAuthSessionConfig = {
   authLegacyBookingJwtSecret?: string;
   authPmsWebLogoutUrl?: string;
   authLegacyPmsJwtSecret?: string;
-  authAffiliateDashboardLogoutUrl?: string;
-  authLegacyAffiliatePmsJwtSecret?: string;
-  authMarketplaceWebLogoutUrl?: string;
 };
 
 export type PublicHotelProfileSource = "target" | "active_publication";
@@ -428,19 +414,9 @@ const AUTH_SURFACE_ORIGIN_KEYS = {
   "platform-admin": "AUTH_PLATFORM_ADMIN_ORIGIN",
   "booking-admin": "AUTH_BOOKING_ADMIN_ORIGIN",
   "pms-web": "AUTH_PMS_WEB_ORIGIN",
-  "affiliate-dashboard": "AUTH_AFFILIATE_DASHBOARD_ORIGIN",
-  "marketplace-web": "AUTH_MARKETPLACE_WEB_ORIGIN",
 } as const satisfies Record<ApiAuthSurface, string>;
 
 const AUTH_SURFACES = Object.keys(AUTH_SURFACE_ORIGIN_KEYS) as ApiAuthSurface[];
-const RETIRED_AUTH_SURFACES: readonly ApiRetiredAuthSurface[] = [
-  "affiliate-dashboard",
-  "marketplace-web",
-];
-const ACTIVE_AUTH_SURFACES = AUTH_SURFACES.filter(
-  (surface): surface is ApiActiveAuthSurface =>
-    !(RETIRED_AUTH_SURFACES as readonly ApiAuthSurface[]).includes(surface),
-);
 
 function normalizeAuthOrigin(value: string, key: string): string {
   let url: URL;
@@ -551,20 +527,12 @@ function loadAuthSessionConfig(env: NodeJS.ProcessEnv): ApiAuthSessionConfig | u
     "AUTH_LOGOUT_URL",
     "AUTH_ALLOWED_ORIGINS",
     "AUTH_COMPATIBILITY_CALLBACK_ORIGIN",
-    ...ACTIVE_AUTH_SURFACES.map((surface) => AUTH_SURFACE_ORIGIN_KEYS[surface]),
+    ...Object.values(AUTH_SURFACE_ORIGIN_KEYS),
   ] as const;
-  const retiredSurfaceKeys = RETIRED_AUTH_SURFACES.map(
-    (surface) => AUTH_SURFACE_ORIGIN_KEYS[surface],
-  );
-  const values = Object.fromEntries(
-    [...authSessionKeys, ...retiredSurfaceKeys].map((key) => [key, readOptionalEnv(env, key)]),
-  );
+  const values = Object.fromEntries(authSessionKeys.map((key) => [key, readOptionalEnv(env, key)]));
   const configuredKeys = authSessionKeys.filter((key) => values[key]);
 
   if (configuredKeys.length === 0) {
-    if (retiredSurfaceKeys.some((key) => values[key])) {
-      throw new Error(`Incomplete auth session config; missing ${authSessionKeys.join(", ")}`);
-    }
     return undefined;
   }
 
@@ -581,13 +549,11 @@ function loadAuthSessionConfig(env: NodeJS.ProcessEnv): ApiAuthSessionConfig | u
     "AUTH_COMPATIBILITY_CALLBACK_ORIGIN",
   );
   const authSurfaceOrigins = Object.fromEntries(
-    AUTH_SURFACES.flatMap((surface) => {
+    AUTH_SURFACES.map((surface) => {
       const key = AUTH_SURFACE_ORIGIN_KEYS[surface];
-      const value = values[key];
-      if (!value) return [];
-      return [[surface, normalizeAuthOrigin(value, key)]];
+      return [surface, normalizeAuthOrigin(values[key]!, key)];
     }),
-  ) as ApiAuthSessionConfig["authSurfaceOrigins"];
+  ) as Record<ApiAuthSurface, string>;
   const callbackOrigins = [authCompatibilityCallbackOrigin, ...Object.values(authSurfaceOrigins)];
   const untrustedCallbackOrigins = callbackOrigins.filter(
     (origin) => !authAllowedOrigins.includes(origin),
@@ -600,17 +566,9 @@ function loadAuthSessionConfig(env: NodeJS.ProcessEnv): ApiAuthSessionConfig | u
     );
   }
   const authFirstPartySurfaces = readAuthSurfaceList(env);
-  const unconfiguredFirstPartySurfaces = authFirstPartySurfaces.filter(
-    (surface) => !authSurfaceOrigins[surface],
-  );
-  if (unconfiguredFirstPartySurfaces.length > 0) {
-    throw new Error(
-      `AUTH_FIRST_PARTY_SURFACES contains surfaces without a login origin: ${unconfiguredFirstPartySurfaces.join(", ")}`,
-    );
-  }
   const authCookieSecure = readOptionalEnv(env, "AUTH_COOKIE_SECURE") !== "false";
   const insecureHttpsSurfaces = authFirstPartySurfaces.filter(
-    (surface) => authSurfaceOrigins[surface]?.startsWith("https://") && !authCookieSecure,
+    (surface) => authSurfaceOrigins[surface].startsWith("https://") && !authCookieSecure,
   );
   if (insecureHttpsSurfaces.length > 0) {
     throw new Error(
@@ -638,9 +596,6 @@ function loadAuthSessionConfig(env: NodeJS.ProcessEnv): ApiAuthSessionConfig | u
     authLegacyBookingJwtSecret: readOptionalEnv(env, "AUTH_LEGACY_BOOKING_JWT_SECRET"),
     authPmsWebLogoutUrl: readOptionalEnv(env, "AUTH_PMS_WEB_LOGOUT_URL"),
     authLegacyPmsJwtSecret: readOptionalEnv(env, "AUTH_LEGACY_PMS_JWT_SECRET"),
-    authAffiliateDashboardLogoutUrl: readOptionalEnv(env, "AUTH_AFFILIATE_DASHBOARD_LOGOUT_URL"),
-    authLegacyAffiliatePmsJwtSecret: readOptionalEnv(env, "AUTH_LEGACY_AFFILIATE_PMS_JWT_SECRET"),
-    authMarketplaceWebLogoutUrl: readOptionalEnv(env, "AUTH_MARKETPLACE_WEB_LOGOUT_URL"),
   };
 }
 

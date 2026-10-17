@@ -319,7 +319,7 @@ describe("AuthKit session routes", () => {
       },
     };
     app = buildAuthSessionApp({
-      allowedOrigins: ["https://marketplace.localhost"],
+      allowedOrigins: ["https://admin.booking.localhost"],
       cookieSecure: true,
       authKitClient: createAuthKitClient({
         async authenticateWithPassword(input) {
@@ -353,9 +353,9 @@ describe("AuthKit session routes", () => {
         }),
       }),
       surfacePolicies: {
-        "marketplace-web": {
+        "booking-admin": {
           requiredOrganizationKind: ["creator_workspace", "hotel_group"],
-          publicOrigin: "https://marketplace.localhost",
+          publicOrigin: "https://admin.booking.localhost",
           firstPartySession: true,
         },
       },
@@ -370,13 +370,13 @@ describe("AuthKit session routes", () => {
       method: "POST",
       url: "/auth/password/login",
       headers: {
-        origin: "https://marketplace.localhost",
+        origin: "https://admin.booking.localhost",
         "user-agent": "vitest",
       },
       payload: {
         email: " creator@example.test ",
         password: "correct-password",
-        surface: "marketplace-web",
+        surface: "booking-admin",
       },
     });
 
@@ -417,7 +417,7 @@ describe("AuthKit session routes", () => {
         authFlow: "login",
         actorUserId: "user_creator",
         organizationId: "org_creator",
-        surface: "marketplace-web",
+        surface: "booking-admin",
         workosUserId: "user_workos_creator",
       }),
     ]);
@@ -520,12 +520,12 @@ describe("AuthKit session routes", () => {
       organizationId: scenario === "mismatched_session" ? "org_other" : "org_hotel",
     }));
     app = buildAuthSessionApp({
-      allowedOrigins: ["https://marketplace.localhost"],
+      allowedOrigins: ["https://admin.booking.localhost"],
       surfacePolicies: {
-        "marketplace-web": {
+        "booking-admin": {
           requiredOrganizationKind: "hotel_group",
           firstPartySession: true,
-          publicOrigin: "https://marketplace.localhost",
+          publicOrigin: "https://admin.booking.localhost",
         },
       },
       identityRepository: createIdentityRepository({
@@ -566,11 +566,11 @@ describe("AuthKit session routes", () => {
     const response = await app.inject({
       method: "POST",
       url: "/auth/password/login",
-      headers: { origin: "https://marketplace.localhost" },
+      headers: { origin: "https://admin.booking.localhost" },
       payload: {
         email: "owner@example.test",
         password: "password",
-        surface: "marketplace-web",
+        surface: "booking-admin",
         organizationId: scenario === "unoffered" ? "org_unoffered" : "org_hotel",
       },
     });
@@ -586,9 +586,9 @@ describe("AuthKit session routes", () => {
   it("starts Google OAuth with a signed callback state", async () => {
     let authorizationInput: Parameters<AuthKitClient["getAuthorizationUrl"]>[0] | undefined;
     app = buildAuthSessionApp({
-      allowedOrigins: ["https://marketplace.localhost"],
+      allowedOrigins: ["https://admin.booking.localhost"],
       surfacePolicies: {
-        "marketplace-web": {
+        "booking-admin": {
           requiredOrganizationKind: ["creator_workspace", "hotel_group"],
         },
       },
@@ -603,9 +603,9 @@ describe("AuthKit session routes", () => {
     const response = await app.inject({
       method: "GET",
       url:
-        "/auth/oauth/google/start?surface=marketplace-web&flow=login" +
-        "&return_to=https%3A%2F%2Fmarketplace.localhost%2Flogin%3Fauth%3Dcallback" +
-        "&error_return_to=https%3A%2F%2Fmarketplace.localhost%2Flogin",
+        "/auth/oauth/google/start?surface=booking-admin&flow=login" +
+        "&return_to=https%3A%2F%2Fadmin.booking.localhost%2Flogin%3Fauth%3Dcallback" +
+        "&error_return_to=https%3A%2F%2Fadmin.booking.localhost%2Flogin",
       headers: { host: "api.localhost", "x-forwarded-proto": "https" },
     });
 
@@ -620,10 +620,8 @@ describe("AuthKit session routes", () => {
 
   it.each([
     ["platform-admin", "https://admin.localhost"],
-    ["marketplace-web", "https://marketplace.localhost"],
     ["booking-admin", "https://admin.booking.localhost"],
     ["pms-web", "https://pms.localhost"],
-    ["affiliate-dashboard", "https://affiliate.localhost"],
   ] as const)("uses the configured first-party callback for %s", async (surface, publicOrigin) => {
     let authorizationInput: Parameters<AuthKitClient["getAuthorizationUrl"]>[0] | undefined;
     app = buildAuthSessionApp({
@@ -676,12 +674,12 @@ describe("AuthKit session routes", () => {
   ])("rejects untrusted forwarded callback origin $host/$proto", async ({ host, proto }) => {
     const getAuthorizationUrl = vi.fn(() => "https://auth.workos.test/google");
     app = buildAuthSessionApp({
-      allowedOrigins: ["https://marketplace.localhost"],
+      allowedOrigins: ["https://admin.booking.localhost"],
       authKitClient: createAuthKitClient({ getAuthorizationUrl }),
       surfacePolicies: {
-        "marketplace-web": {
+        "booking-admin": {
           requiredOrganizationKind: ["creator_workspace", "hotel_group"],
-          publicOrigin: "https://marketplace.localhost",
+          publicOrigin: "https://admin.booking.localhost",
           firstPartySession: true,
         },
       },
@@ -690,9 +688,9 @@ describe("AuthKit session routes", () => {
     const response = await app.inject({
       method: "GET",
       url:
-        "/auth/oauth/google/start?surface=marketplace-web&flow=login" +
-        "&return_to=https%3A%2F%2Fmarketplace.localhost%2Flogin" +
-        "&error_return_to=https%3A%2F%2Fmarketplace.localhost%2Flogin",
+        "/auth/oauth/google/start?surface=booking-admin&flow=login" +
+        "&return_to=https%3A%2F%2Fadmin.booking.localhost%2Flogin" +
+        "&error_return_to=https%3A%2F%2Fadmin.booking.localhost%2Flogin",
       headers: { "x-forwarded-host": host, "x-forwarded-proto": proto },
     });
 
@@ -705,7 +703,7 @@ describe("AuthKit session routes", () => {
     let state = "";
     const authenticateWithCode = vi.fn(async () => session);
     app = buildAuthSessionApp({
-      allowedOrigins: ["https://marketplace.localhost"],
+      allowedOrigins: ["https://admin.booking.localhost"],
       authKitClient: createAuthKitClient({
         getAuthorizationUrl(input) {
           state = input.state;
@@ -714,9 +712,9 @@ describe("AuthKit session routes", () => {
         authenticateWithCode,
       }),
       surfacePolicies: {
-        "marketplace-web": {
+        "booking-admin": {
           requiredOrganizationKind: ["creator_workspace", "hotel_group"],
-          publicOrigin: "https://marketplace.localhost",
+          publicOrigin: "https://admin.booking.localhost",
           firstPartySession: true,
         },
       },
@@ -724,11 +722,11 @@ describe("AuthKit session routes", () => {
     const start = await app.inject({
       method: "GET",
       url:
-        "/auth/oauth/google/start?surface=marketplace-web&flow=login" +
-        "&return_to=https%3A%2F%2Fmarketplace.localhost%2Flogin" +
-        "&error_return_to=https%3A%2F%2Fmarketplace.localhost%2Flogin",
+        "/auth/oauth/google/start?surface=booking-admin&flow=login" +
+        "&return_to=https%3A%2F%2Fadmin.booking.localhost%2Flogin" +
+        "&error_return_to=https%3A%2F%2Fadmin.booking.localhost%2Flogin",
       headers: {
-        "x-forwarded-host": "marketplace.localhost",
+        "x-forwarded-host": "admin.booking.localhost",
         "x-forwarded-proto": "https",
       },
     });
@@ -1013,7 +1011,7 @@ describe("AuthKit session routes", () => {
     let state = "";
     const authenticateWithCode = vi.fn(async () => session);
     app = buildAuthSessionApp({
-      allowedOrigins: ["https://marketplace.localhost"],
+      allowedOrigins: ["https://admin.booking.localhost"],
       cookieSecure: true,
       authKitClient: createAuthKitClient({
         getAuthorizationUrl(input) {
@@ -1023,23 +1021,23 @@ describe("AuthKit session routes", () => {
         authenticateWithCode,
       }),
       surfacePolicies: {
-        "marketplace-web": {
+        "booking-admin": {
           requiredOrganizationKind: ["creator_workspace", "hotel_group"],
-          publicOrigin: "https://marketplace.localhost",
+          publicOrigin: "https://admin.booking.localhost",
           firstPartySession: true,
         },
       },
     });
     const forwardedHeaders = {
-      "x-forwarded-host": "marketplace.localhost",
+      "x-forwarded-host": "admin.booking.localhost",
       "x-forwarded-proto": "https",
     };
     const start = await app.inject({
       method: "GET",
       url:
-        "/auth/oauth/google/start?surface=marketplace-web&flow=login" +
-        "&return_to=https%3A%2F%2Fmarketplace.localhost%2Flogin" +
-        "&error_return_to=https%3A%2F%2Fmarketplace.localhost%2Flogin",
+        "/auth/oauth/google/start?surface=booking-admin&flow=login" +
+        "&return_to=https%3A%2F%2Fadmin.booking.localhost%2Flogin" +
+        "&error_return_to=https%3A%2F%2Fadmin.booking.localhost%2Flogin",
       headers: forwardedHeaders,
     });
     const stateCookie = cookieHeader(start, "vayada_fp_oauth_state");
@@ -1071,7 +1069,7 @@ describe("AuthKit session routes", () => {
       },
     };
     app = buildAuthSessionApp({
-      allowedOrigins: ["https://marketplace.localhost"],
+      allowedOrigins: ["https://admin.booking.localhost"],
       cookieSecure: true,
       cookieDomain: ".localhost",
       authKitClient: createAuthKitClient({
@@ -1106,9 +1104,9 @@ describe("AuthKit session routes", () => {
         }),
       }),
       surfacePolicies: {
-        "marketplace-web": {
+        "booking-admin": {
           requiredOrganizationKind: ["creator_workspace", "hotel_group"],
-          publicOrigin: "https://marketplace.localhost",
+          publicOrigin: "https://admin.booking.localhost",
           firstPartySession: true,
         },
       },
@@ -1117,11 +1115,11 @@ describe("AuthKit session routes", () => {
     const start = await app.inject({
       method: "GET",
       url:
-        "/auth/oauth/google/start?surface=marketplace-web&flow=login" +
-        "&return_to=https%3A%2F%2Fmarketplace.localhost%2Flogin%3Fauth%3Dcallback" +
-        "&error_return_to=https%3A%2F%2Fmarketplace.localhost%2Flogin",
+        "/auth/oauth/google/start?surface=booking-admin&flow=login" +
+        "&return_to=https%3A%2F%2Fadmin.booking.localhost%2Flogin%3Fauth%3Dcallback" +
+        "&error_return_to=https%3A%2F%2Fadmin.booking.localhost%2Flogin",
       headers: {
-        "x-forwarded-host": "marketplace.localhost",
+        "x-forwarded-host": "admin.booking.localhost",
         "x-forwarded-proto": "https",
       },
     });
@@ -1135,13 +1133,13 @@ describe("AuthKit session routes", () => {
       url: `/auth/oauth/google/callback?code=google-code&state=${encodeURIComponent(state)}`,
       headers: {
         cookie: cookieHeader(start, "vayada_fp_oauth_state"),
-        "x-forwarded-host": "marketplace.localhost",
+        "x-forwarded-host": "admin.booking.localhost",
         "x-forwarded-proto": "https",
       },
     });
 
     expect(callback.statusCode).toBe(302);
-    expect(callback.headers.location).toBe("https://marketplace.localhost/login?auth=callback");
+    expect(callback.headers.location).toBe("https://admin.booking.localhost/login?auth=callback");
     expect(callback.headers["set-cookie"]).toEqual(
       expect.arrayContaining([
         expect.stringContaining("vayada_fp_workos_session=google-sealed-session"),
@@ -1150,13 +1148,13 @@ describe("AuthKit session routes", () => {
     );
     const restored = await app.inject({
       method: "GET",
-      url: "/auth/session?surface=marketplace-web",
+      url: "/auth/session?surface=booking-admin",
       headers: {
         cookie: [
           cookieHeader(callback, "vayada_fp_workos_session"),
           cookieHeader(callback, "vayada_fp_auth_csrf"),
         ].join("; "),
-        origin: "https://marketplace.localhost",
+        origin: "https://admin.booking.localhost",
       },
     });
     expect(restored.statusCode).toBe(200);
@@ -1468,9 +1466,9 @@ describe("AuthKit session routes", () => {
     const warn = vi.fn();
     let state = "";
     app = buildAuthSessionApp({
-      allowedOrigins: ["https://marketplace.localhost"],
+      allowedOrigins: ["https://admin.booking.localhost"],
       surfacePolicies: {
-        "marketplace-web": { requiredOrganizationKind: ["creator_workspace", "hotel_group"] },
+        "booking-admin": { requiredOrganizationKind: ["creator_workspace", "hotel_group"] },
       },
       authKitClient: createAuthKitClient({
         getAuthorizationUrl(input) {
@@ -1493,7 +1491,7 @@ describe("AuthKit session routes", () => {
     });
     const start = await app.inject({
       method: "GET",
-      url: "/auth/oauth/google/start?surface=marketplace-web&flow=signup&return_to=https%3A%2F%2Fmarketplace.localhost%2Flogin&error_return_to=https%3A%2F%2Fmarketplace.localhost%2Fsignup",
+      url: "/auth/oauth/google/start?surface=booking-admin&flow=signup&type=hotel&return_to=https%3A%2F%2Fadmin.booking.localhost%2Flogin&error_return_to=https%3A%2F%2Fadmin.booking.localhost%2Fsignup",
       headers: { host: "api.localhost", "x-forwarded-proto": "https" },
     });
     const response = await app.inject({
@@ -1503,115 +1501,17 @@ describe("AuthKit session routes", () => {
     });
     expect(response.statusCode).toBe(302);
     const target = new URL(response.headers.location!);
-    expect(target.origin + target.pathname).toBe("https://marketplace.localhost/signup");
+    expect(target.origin + target.pathname).toBe("https://admin.booking.localhost/signup");
     expect(target.searchParams.get("auth_error")).toBe("Google sign-in failed. Please try again.");
     expect(warn.mock.calls).toEqual([
       [
         {
           workos: { code: "invalid_grant", status: 400, requestId: "req_oauth_123" },
-          surface: "marketplace-web",
+          surface: "booking-admin",
         },
         "WorkOS Google code exchange failed",
       ],
     ]);
-  });
-
-  it("signs up a Google account and redirects to onboarding without product provisioning", async () => {
-    const commands: IdentityLifecycleCommand[] = [];
-    const workosCalls: string[] = [];
-    let state = "";
-    const googleSession: AuthKitSession = {
-      ...session,
-      accessToken: "google-signup-access-token",
-      sealedSession: "google-signup-sealed-session",
-      organizationId: undefined,
-      user: {
-        ...session.user,
-        id: "user_workos_google_signup",
-        email: "creator-google@example.test",
-      },
-    };
-    app = buildAuthSessionApp({
-      allowedOrigins: ["https://marketplace.localhost"],
-      authKitClient: createAuthKitClient({
-        getAuthorizationUrl(input) {
-          state = input.state;
-          return `https://auth.workos.test/google?state=${encodeURIComponent(input.state)}`;
-        },
-        async authenticateWithCode() {
-          workosCalls.push("code");
-          return googleSession;
-        },
-        async createSignupOrganization() {
-          throw new Error("Product organization should be created by onboarding");
-        },
-        async ensureSignupOrganizationMembership() {
-          throw new Error("Product membership should be created by onboarding");
-        },
-        async refreshSession() {
-          throw new Error("Signup callback should not select a product organization");
-        },
-      }),
-      identityRepository: createIdentityRepository({
-        userByProviderUserId: async () => null,
-      }),
-      lifecycleCommandBus: {
-        async execute(command) {
-          commands.push(command);
-          return {
-            status: "accepted",
-            commandId: command.commandId,
-            idempotencyKey: command.idempotencyKey,
-            userId: "user_creator_google",
-            events: [],
-          };
-        },
-      },
-      surfacePolicies: {
-        "marketplace-web": {
-          requiredOrganizationKind: ["creator_workspace", "hotel_group"],
-          allowMissingOrganization: true,
-        },
-      },
-    });
-
-    const start = await app.inject({
-      method: "GET",
-      url:
-        "/auth/oauth/google/start?surface=marketplace-web&flow=signup" +
-        "&return_to=https%3A%2F%2Fmarketplace.localhost%2Flogin%3Fauth%3Dcallback%26returnTo%3D%252Fonboarding" +
-        "&error_return_to=https%3A%2F%2Fmarketplace.localhost%2Fsignup",
-      headers: { host: "api.localhost", "x-forwarded-proto": "https" },
-    });
-    const callback = await app.inject({
-      method: "GET",
-      url: `/auth/oauth/google/callback?code=google-code&state=${encodeURIComponent(state)}`,
-      headers: { cookie: cookieHeader(start, "vayada_oauth_state") },
-    });
-
-    expect(callback.statusCode).toBe(302);
-    expect(callback.headers.location).toBe(
-      "https://marketplace.localhost/login?auth=callback&returnTo=%2Fonboarding",
-    );
-    expect(callback.headers["set-cookie"]).toEqual(
-      expect.arrayContaining([
-        expect.stringContaining("vayada_workos_session=google-signup-sealed-session"),
-      ]),
-    );
-    expect(workosCalls).toEqual(["code"]);
-    expect(commands).toEqual([
-      expect.objectContaining({
-        commandType: "identity.user.create",
-        payload: expect.objectContaining({
-          providerIdentity: expect.objectContaining({
-            providerUserId: "user_workos_google_signup",
-          }),
-        }),
-      }),
-    ]);
-    expect(commands[0]?.payload).not.toHaveProperty("legacyUserType");
-    expect(commands[0]?.payload).not.toHaveProperty("organization");
-    expect(commands[0]?.payload).not.toHaveProperty("membership");
   });
 
   it("signs up a hotel account through Google OAuth and provisions the hotel organization", async () => {
@@ -1846,7 +1746,7 @@ describe("AuthKit session routes", () => {
   ])("returns shared auth state for password login: $name", async ({ error, statusCode, body }) => {
     const auditEvents: ProductAuditEvent[] = [];
     app = buildAuthSessionApp({
-      allowedOrigins: ["https://marketplace.localhost"],
+      allowedOrigins: ["https://admin.booking.localhost"],
       identityRepository: createIdentityRepository({
         organizationByWorkosOrgId: async (id) => ({
           organizationId: id,
@@ -1862,7 +1762,7 @@ describe("AuthKit session routes", () => {
         },
       }),
       surfacePolicies: {
-        "marketplace-web": {
+        "booking-admin": {
           requiredOrganizationKind: ["creator_workspace", "hotel_group"],
         },
       },
@@ -1876,11 +1776,11 @@ describe("AuthKit session routes", () => {
     const response = await app.inject({
       method: "POST",
       url: "/auth/password/login",
-      headers: { origin: "https://marketplace.localhost" },
+      headers: { origin: "https://admin.booking.localhost" },
       payload: {
         email: "creator@example.test",
         password: "wrong-password",
-        surface: "marketplace-web",
+        surface: "booking-admin",
       },
     });
 
@@ -1891,7 +1791,7 @@ describe("AuthKit session routes", () => {
         action: "auth.login.failed",
         authFlow: "login",
         failureReason: body.state,
-        surface: "marketplace-web",
+        surface: "booking-admin",
       }),
     );
   });
@@ -1899,7 +1799,7 @@ describe("AuthKit session routes", () => {
   it("returns WorkOS' existing password-login verification challenge without replacing it", async () => {
     let resendCalled = false;
     app = buildAuthSessionApp({
-      allowedOrigins: ["https://marketplace.localhost"],
+      allowedOrigins: ["https://admin.booking.localhost"],
       authKitClient: createAuthKitClient({
         async authenticateWithPassword() {
           throw {
@@ -1915,7 +1815,7 @@ describe("AuthKit session routes", () => {
         },
       }),
       surfacePolicies: {
-        "marketplace-web": {
+        "booking-admin": {
           requiredOrganizationKind: ["creator_workspace", "hotel_group"],
         },
       },
@@ -1924,11 +1824,11 @@ describe("AuthKit session routes", () => {
     const response = await app.inject({
       method: "POST",
       url: "/auth/password/login",
-      headers: { origin: "https://marketplace.localhost" },
+      headers: { origin: "https://admin.booking.localhost" },
       payload: {
         email: "creator@example.test",
         password: "correct-password",
-        surface: "marketplace-web",
+        surface: "booking-admin",
       },
     });
 
@@ -1953,7 +1853,7 @@ describe("AuthKit session routes", () => {
       },
     };
     app = buildAuthSessionApp({
-      allowedOrigins: ["https://marketplace.localhost"],
+      allowedOrigins: ["https://admin.booking.localhost"],
       authKitClient: createAuthKitClient({
         async authenticateWithPassword() {
           return marketplaceSession;
@@ -1968,7 +1868,7 @@ describe("AuthKit session routes", () => {
         organizationByWorkosOrgId: async () => null,
       }),
       surfacePolicies: {
-        "marketplace-web": {
+        "booking-admin": {
           requiredOrganizationKind: ["creator_workspace", "hotel_group"],
         },
       },
@@ -1982,11 +1882,11 @@ describe("AuthKit session routes", () => {
     const response = await app.inject({
       method: "POST",
       url: "/auth/password/login",
-      headers: { origin: "https://marketplace.localhost" },
+      headers: { origin: "https://admin.booking.localhost" },
       payload: {
         email: "creator@example.test",
         password: "correct-password",
-        surface: "marketplace-web",
+        surface: "booking-admin",
       },
     });
 
@@ -1996,7 +1896,7 @@ describe("AuthKit session routes", () => {
         action: "auth.login.failed",
         authFlow: "login",
         failureReason: "identity_resolution",
-        surface: "marketplace-web",
+        surface: "booking-admin",
         workosUserId: "user_workos_creator",
         workosOrgId: "org_workos_missing",
         workosSessionId: "session_workos",
@@ -2007,7 +1907,7 @@ describe("AuthKit session routes", () => {
   it("requests a WorkOS password reset and returns a generic response", async () => {
     let resetEmail: string | undefined;
     app = buildAuthSessionApp({
-      allowedOrigins: ["https://marketplace.localhost"],
+      allowedOrigins: ["https://admin.booking.localhost"],
       authKitClient: createAuthKitClient({
         async createPasswordReset(input) {
           resetEmail = input.email;
@@ -2018,7 +1918,7 @@ describe("AuthKit session routes", () => {
     const response = await app.inject({
       method: "POST",
       url: "/auth/password/reset/request",
-      headers: { origin: "https://marketplace.localhost" },
+      headers: { origin: "https://admin.booking.localhost" },
       payload: {
         email: " creator@example.test ",
       },
@@ -2034,7 +1934,7 @@ describe("AuthKit session routes", () => {
   it("throttles repeated WorkOS password reset requests by email", async () => {
     let resetCount = 0;
     app = buildAuthSessionApp({
-      allowedOrigins: ["https://marketplace.localhost"],
+      allowedOrigins: ["https://admin.booking.localhost"],
       authKitClient: createAuthKitClient({
         async createPasswordReset() {
           resetCount += 1;
@@ -2045,13 +1945,13 @@ describe("AuthKit session routes", () => {
     const firstResponse = await app.inject({
       method: "POST",
       url: "/auth/password/reset/request",
-      headers: { origin: "https://marketplace.localhost" },
+      headers: { origin: "https://admin.booking.localhost" },
       payload: { email: "creator@example.test" },
     });
     const secondResponse = await app.inject({
       method: "POST",
       url: "/auth/password/reset/request",
-      headers: { origin: "https://marketplace.localhost" },
+      headers: { origin: "https://admin.booking.localhost" },
       payload: { email: "creator@example.test" },
     });
 
@@ -2067,7 +1967,7 @@ describe("AuthKit session routes", () => {
   it("resets a WorkOS password with a valid reset token", async () => {
     let resetInput: Parameters<AuthKitClient["resetPassword"]>[0] | undefined;
     app = buildAuthSessionApp({
-      allowedOrigins: ["https://marketplace.localhost"],
+      allowedOrigins: ["https://admin.booking.localhost"],
       authKitClient: createAuthKitClient({
         async resetPassword(input) {
           resetInput = input;
@@ -2079,7 +1979,7 @@ describe("AuthKit session routes", () => {
     const response = await app.inject({
       method: "POST",
       url: "/auth/password/reset/confirm",
-      headers: { origin: "https://marketplace.localhost" },
+      headers: { origin: "https://admin.booking.localhost" },
       payload: {
         token: "password-reset-token",
         newPassword: "new-secure-password",
@@ -2098,7 +1998,7 @@ describe("AuthKit session routes", () => {
 
   it("returns a controlled error for invalid WorkOS reset tokens", async () => {
     app = buildAuthSessionApp({
-      allowedOrigins: ["https://marketplace.localhost"],
+      allowedOrigins: ["https://admin.booking.localhost"],
       authKitClient: createAuthKitClient({
         async resetPassword() {
           throw { status: 404 };
@@ -2109,7 +2009,7 @@ describe("AuthKit session routes", () => {
     const response = await app.inject({
       method: "POST",
       url: "/auth/password/reset/confirm",
-      headers: { origin: "https://marketplace.localhost" },
+      headers: { origin: "https://admin.booking.localhost" },
       payload: {
         token: "expired-reset-token",
         newPassword: "new-secure-password",
@@ -2121,122 +2021,6 @@ describe("AuthKit session routes", () => {
       state: "auth_failed",
       message: "Invalid or expired reset token. Please request a new password reset link.",
     });
-  });
-
-  it("completes account signup after WorkOS email verification without product provisioning", async () => {
-    const commands: IdentityLifecycleCommand[] = [];
-    const workosCalls: string[] = [];
-    const verifiedSession: AuthKitSession = {
-      ...session,
-      organizationId: undefined,
-      sealedSession: "verified-unselected-session",
-      user: {
-        id: "user_workos_verified_creator",
-        email: "verified-creator@example.test",
-        emailVerified: true,
-        name: "Verified Creator",
-      },
-    };
-    app = buildAuthSessionApp({
-      allowedOrigins: ["https://marketplace.localhost"],
-      authKitClient: createAuthKitClient({
-        async createUser() {
-          return { ...verifiedSession.user, emailVerified: false };
-        },
-        async authenticateWithPassword() {
-          throw {
-            code: "email_verification_required",
-            pending_authentication_token: "pending-creator-signup",
-          };
-        },
-        async authenticateWithEmailVerification(input) {
-          workosCalls.push("verify");
-          expect(input).toMatchObject({
-            pendingAuthenticationToken: "pending-creator-signup",
-            code: "123456",
-            userAgent: "vitest",
-            ipAddress: expect.any(String),
-          });
-          return verifiedSession;
-        },
-        async createSignupOrganization() {
-          throw new Error("Product organization should be created by onboarding");
-        },
-        async ensureSignupOrganizationMembership() {
-          throw new Error("Product membership should be created by onboarding");
-        },
-        async refreshSession() {
-          throw new Error("Email verification should not select a product organization");
-        },
-      }),
-      identityRepository: createIdentityRepository({
-        userByProviderUserId: async () => null,
-      }),
-      lifecycleCommandBus: {
-        async execute(command) {
-          commands.push(command);
-          return {
-            status: "accepted",
-            commandId: command.commandId,
-            idempotencyKey: command.idempotencyKey,
-            userId: "user_verified_creator",
-            events: [],
-          };
-        },
-      },
-      surfacePolicies: {
-        "marketplace-web": {
-          requiredOrganizationKind: ["creator_workspace", "hotel_group"],
-          allowMissingOrganization: true,
-        },
-      },
-    });
-
-    const pendingAuthenticationToken = await beginPasswordSignup(app, {
-      email: verifiedSession.user.email,
-      surface: "marketplace-web",
-    });
-
-    const response = await app.inject({
-      method: "POST",
-      url: "/auth/email-verification/confirm",
-      headers: {
-        origin: "https://marketplace.localhost",
-        "user-agent": "vitest",
-      },
-      payload: {
-        pendingAuthenticationToken,
-        code: "123456",
-        flow: "signup",
-        surface: "marketplace-web",
-      },
-    });
-
-    expect(response.statusCode).toBe(200);
-    expect(response.json()).toMatchObject({
-      accessToken: verifiedSession.accessToken,
-      csrfToken: expect.any(String),
-      user: {
-        id: "user_verified_creator",
-        email: "verified-creator@example.test",
-        workosUserId: "user_workos_verified_creator",
-      },
-    });
-    expect(commands).toEqual([
-      expect.objectContaining({
-        commandType: "identity.user.create",
-        payload: expect.objectContaining({
-          providerIdentity: expect.objectContaining({
-            providerUserId: "user_workos_verified_creator",
-            providerEmailVerified: true,
-          }),
-        }),
-      }),
-    ]);
-    expect(commands[0]?.payload).not.toHaveProperty("legacyUserType");
-    expect(commands[0]?.payload).not.toHaveProperty("organization");
-    expect(commands[0]?.payload).not.toHaveProperty("membership");
-    expect(workosCalls).toEqual(["verify"]);
   });
 
   it("completes PMS signup when the WorkOS user webhook arrives before verification", async () => {
@@ -2464,14 +2248,14 @@ describe("AuthKit session routes", () => {
 
   it("returns a controlled error for invalid WorkOS verification state", async () => {
     app = buildAuthSessionApp({
-      allowedOrigins: ["https://marketplace.localhost"],
+      allowedOrigins: ["https://admin.booking.localhost"],
       authKitClient: createAuthKitClient({
         async authenticateWithEmailVerification() {
           throw { code: "invalid_grant" };
         },
       }),
       surfacePolicies: {
-        "marketplace-web": {
+        "booking-admin": {
           requiredOrganizationKind: ["creator_workspace", "hotel_group"],
         },
       },
@@ -2480,11 +2264,11 @@ describe("AuthKit session routes", () => {
     const response = await app.inject({
       method: "POST",
       url: "/auth/email-verification/confirm",
-      headers: { origin: "https://marketplace.localhost" },
+      headers: { origin: "https://admin.booking.localhost" },
       payload: {
         pendingAuthenticationToken: "expired-email-token",
         code: "123456",
-        surface: "marketplace-web",
+        surface: "booking-admin",
       },
     });
 
@@ -2498,7 +2282,7 @@ describe("AuthKit session routes", () => {
   it("resends a WorkOS verification code from the verification state id", async () => {
     let emailVerificationId: string | undefined;
     app = buildAuthSessionApp({
-      allowedOrigins: ["https://marketplace.localhost"],
+      allowedOrigins: ["https://admin.booking.localhost"],
       authKitClient: createAuthKitClient({
         async resendVerificationEmail(input) {
           emailVerificationId = input.emailVerificationId;
@@ -2510,7 +2294,7 @@ describe("AuthKit session routes", () => {
     const response = await app.inject({
       method: "POST",
       url: "/auth/email-verification/resend",
-      headers: { origin: "https://marketplace.localhost" },
+      headers: { origin: "https://admin.booking.localhost" },
       payload: {
         emailVerificationId: "email_verification_123",
       },
@@ -2526,7 +2310,7 @@ describe("AuthKit session routes", () => {
   it("throttles repeated WorkOS verification resends by verification state", async () => {
     let resendCount = 0;
     app = buildAuthSessionApp({
-      allowedOrigins: ["https://marketplace.localhost"],
+      allowedOrigins: ["https://admin.booking.localhost"],
       authKitClient: createAuthKitClient({
         async resendVerificationEmail() {
           resendCount += 1;
@@ -2538,13 +2322,13 @@ describe("AuthKit session routes", () => {
     const firstResponse = await app.inject({
       method: "POST",
       url: "/auth/email-verification/resend",
-      headers: { origin: "https://marketplace.localhost" },
+      headers: { origin: "https://admin.booking.localhost" },
       payload: { emailVerificationId: "email_verification_123" },
     });
     const secondResponse = await app.inject({
       method: "POST",
       url: "/auth/email-verification/resend",
-      headers: { origin: "https://marketplace.localhost" },
+      headers: { origin: "https://admin.booking.localhost" },
       payload: { emailVerificationId: "email_verification_123" },
     });
 
@@ -2555,133 +2339,6 @@ describe("AuthKit session routes", () => {
       message: "Please wait before requesting another email.",
     });
     expect(resendCount).toBe(1);
-  });
-
-  it("signs up an account through custom password signup before product onboarding", async () => {
-    const commands: IdentityLifecycleCommand[] = [];
-    const auditEvents: ProductAuditEvent[] = [];
-    const workosCalls: string[] = [];
-    const email = "account-signup@example.test";
-    const unsignedSession: AuthKitSession = {
-      ...session,
-      organizationId: undefined,
-      sealedSession: "sealed_account_signup",
-      user: {
-        id: "user_workos_account_signup",
-        email,
-        emailVerified: true,
-        name: "Signup Example",
-      },
-    };
-    app = buildAuthSessionApp({
-      allowedOrigins: ["https://marketplace.localhost"],
-      authKitClient: createAuthKitClient({
-        async createUser(input) {
-          workosCalls.push("user");
-          expect(input).toMatchObject({
-            email,
-            password: "correct-password",
-            metadata: {
-              auth_flow: "signup",
-              surface: "marketplace-web",
-            },
-          });
-          expect(input.metadata).not.toHaveProperty("signup_intent");
-          return unsignedSession.user;
-        },
-        async authenticateWithPassword(input) {
-          workosCalls.push("password");
-          expect(input).toMatchObject({
-            email,
-            password: "correct-password",
-          });
-          return unsignedSession;
-        },
-        async createSignupOrganization() {
-          throw new Error("Product organization should be created by onboarding");
-        },
-        async ensureSignupOrganizationMembership() {
-          throw new Error("Product membership should be created by onboarding");
-        },
-        async refreshSession() {
-          throw new Error("Signup should not select a product organization");
-        },
-      }),
-      identityRepository: createIdentityRepository({
-        userByProviderUserId: async () => null,
-      }),
-      lifecycleCommandBus: {
-        async execute(command) {
-          commands.push(command);
-          return {
-            status: "accepted",
-            commandId: command.commandId,
-            idempotencyKey: command.idempotencyKey,
-            userId: "user_signup",
-            events: [],
-          };
-        },
-      },
-      surfacePolicies: {
-        "marketplace-web": {
-          requiredOrganizationKind: ["creator_workspace", "hotel_group"],
-          allowMissingOrganization: true,
-        },
-      },
-      productAuditSink: {
-        async record(event) {
-          auditEvents.push(event);
-        },
-      },
-    });
-
-    const response = await app.inject({
-      method: "POST",
-      url: "/auth/password/signup",
-      headers: {
-        origin: "https://marketplace.localhost",
-      },
-      payload: {
-        email: ` ${email} `,
-        password: "correct-password",
-        surface: "marketplace-web",
-      },
-    });
-
-    expect(response.statusCode).toBe(200);
-    expect(response.json()).toMatchObject({
-      accessToken: unsignedSession.accessToken,
-      csrfToken: expect.any(String),
-      user: {
-        id: "user_signup",
-        email,
-        workosUserId: "user_workos_account_signup",
-      },
-    });
-    expect(response.json().organizationId).toBeUndefined();
-    expect(response.json().organizationKind).toBeUndefined();
-    expect(commands).toEqual([
-      expect.objectContaining({
-        commandType: "identity.user.create",
-        payload: expect.objectContaining({
-          email,
-          providerIdentity: expect.objectContaining({
-            providerUserId: "user_workos_account_signup",
-          }),
-        }),
-      }),
-    ]);
-    expect(commands[0]?.payload).not.toHaveProperty("legacyUserType");
-    expect(commands[0]?.payload).not.toHaveProperty("organization");
-    expect(commands[0]?.payload).not.toHaveProperty("membership");
-    expect(auditEvents).toEqual([
-      expect.objectContaining({
-        action: "auth.login",
-        authFlow: "signup",
-        surface: "marketplace-web",
-      }),
-    ]);
-    expect(workosCalls).toEqual(["user", "password"]);
   });
 
   it.each([
@@ -2893,7 +2550,7 @@ describe("AuthKit session routes", () => {
     const warn = vi.fn();
     app = buildAuthSessionApp({
       surfacePolicies: {
-        "marketplace-web": { requiredOrganizationKind: ["creator_workspace", "hotel_group"] },
+        "booking-admin": { requiredOrganizationKind: ["creator_workspace", "hotel_group"] },
       },
       authKitClient: createAuthKitClient({
         async createUser() {
@@ -2916,7 +2573,8 @@ describe("AuthKit session routes", () => {
       payload: {
         email: "private@example.test",
         password: "secret-password",
-        surface: "marketplace-web",
+        surface: "booking-admin",
+        type: "hotel",
       },
     });
     expect(response.statusCode, response.body).toBe(400);
@@ -2928,7 +2586,7 @@ describe("AuthKit session routes", () => {
       [
         {
           workos: { code, status: 422, requestId: "req_workos_123" },
-          surface: "marketplace-web",
+          surface: "booking-admin",
         },
         "WorkOS password signup failed",
       ],
@@ -2939,7 +2597,7 @@ describe("AuthKit session routes", () => {
     let authenticateCalled = false;
     let organizationCalled = false;
     app = buildAuthSessionApp({
-      allowedOrigins: ["https://marketplace.localhost"],
+      allowedOrigins: ["https://admin.booking.localhost"],
       authKitClient: createAuthKitClient({
         async createUser() {
           throw { status: 409, name: "ConflictException" };
@@ -2954,7 +2612,7 @@ describe("AuthKit session routes", () => {
         },
       }),
       surfacePolicies: {
-        "marketplace-web": {
+        "booking-admin": {
           requiredOrganizationKind: ["creator_workspace", "hotel_group"],
         },
       },
@@ -2963,11 +2621,12 @@ describe("AuthKit session routes", () => {
     const response = await app.inject({
       method: "POST",
       url: "/auth/password/signup",
-      headers: { origin: "https://marketplace.localhost" },
+      headers: { origin: "https://admin.booking.localhost" },
       payload: {
         email: "existing@example.test",
         password: "correct-password",
-        surface: "marketplace-web",
+        surface: "booking-admin",
+        type: "hotel",
       },
     });
 
@@ -2984,7 +2643,7 @@ describe("AuthKit session routes", () => {
     const commands: IdentityLifecycleCommand[] = [];
     let resendCalled = false;
     app = buildAuthSessionApp({
-      allowedOrigins: ["https://marketplace.localhost"],
+      allowedOrigins: ["https://admin.booking.localhost"],
       authKitClient: createAuthKitClient({
         async createUser() {
           return {
@@ -3021,7 +2680,7 @@ describe("AuthKit session routes", () => {
         },
       },
       surfacePolicies: {
-        "marketplace-web": {
+        "booking-admin": {
           requiredOrganizationKind: ["creator_workspace", "hotel_group"],
         },
       },
@@ -3030,11 +2689,12 @@ describe("AuthKit session routes", () => {
     const response = await app.inject({
       method: "POST",
       url: "/auth/password/signup",
-      headers: { origin: "https://marketplace.localhost" },
+      headers: { origin: "https://admin.booking.localhost" },
       payload: {
         email: "unverified@example.test",
         password: "correct-password",
-        surface: "marketplace-web",
+        surface: "booking-admin",
+        type: "hotel",
       },
     });
 
@@ -3069,7 +2729,7 @@ describe("AuthKit session routes", () => {
       sealedSession: "hotel-selected-session",
     };
     app = buildAuthSessionApp({
-      allowedOrigins: ["https://marketplace.localhost"],
+      allowedOrigins: ["https://admin.booking.localhost"],
       authKitClient: createAuthKitClient({
         async authenticateSession() {
           return noOrgSession;
@@ -3078,10 +2738,10 @@ describe("AuthKit session routes", () => {
           workosCalls.push("organization");
           expect(input).toMatchObject({
             name: "Account Signup Hotel Group",
-            externalId: "vayada-signup:marketplace-web:hotel:user_workos_account_signup",
+            externalId: "vayada-signup:booking-admin:hotel:user_workos_account_signup",
             metadata: {
               auth_flow: "signup",
-              surface: "marketplace-web",
+              surface: "booking-admin",
               signup_intent: "hotel",
               organization_kind: "hotel_group",
               role_key: "hotel_owner",
@@ -3145,7 +2805,7 @@ describe("AuthKit session routes", () => {
         },
       },
       surfacePolicies: {
-        "marketplace-web": {
+        "booking-admin": {
           requiredOrganizationKind: ["creator_workspace", "hotel_group"],
           allowMissingOrganization: true,
         },
@@ -3158,12 +2818,12 @@ describe("AuthKit session routes", () => {
       headers: {
         cookie:
           "vayada_workos_session=sealed-session; vayada_auth_csrf=stale-token; vayada_auth_csrf=csrf-token",
-        origin: "https://marketplace.localhost",
+        origin: "https://admin.booking.localhost",
         "x-vayada-csrf": "csrf-token",
       },
       payload: {
         type: "hotel",
-        surface: "marketplace-web",
+        surface: "booking-admin",
       },
     });
 
@@ -3209,7 +2869,7 @@ describe("AuthKit session routes", () => {
   it("selects the server-validated invite-bound hotel organization for an existing multi-org user", async () => {
     const inviteCode = "VAY-secret-invite-code";
     const inviteId = "77777777-7777-4777-8777-777777777777";
-    const inviteExternalId = `vayada-signup:marketplace-web:hotel:invite:${inviteId}`;
+    const inviteExternalId = `vayada-signup:booking-admin:hotel:invite:${inviteId}`;
     const commands: IdentityLifecycleCommand[] = [];
     const onboardingInputs: unknown[] = [];
     const existingCreatorSession: AuthKitSession = {
@@ -3230,7 +2890,7 @@ describe("AuthKit session routes", () => {
     };
 
     app = buildAuthSessionApp({
-      allowedOrigins: ["https://marketplace.localhost"],
+      allowedOrigins: ["https://admin.booking.localhost"],
       authKitClient: createAuthKitClient({
         async authenticateSession() {
           return existingCreatorSession;
@@ -3318,7 +2978,7 @@ describe("AuthKit session routes", () => {
         },
       },
       surfacePolicies: {
-        "marketplace-web": {
+        "booking-admin": {
           requiredOrganizationKind: ["creator_workspace", "hotel_group"],
         },
       },
@@ -3329,10 +2989,10 @@ describe("AuthKit session routes", () => {
       url: "/auth/onboarding",
       headers: {
         cookie: "vayada_workos_session=sealed-session; vayada_auth_csrf=csrf-token",
-        origin: "https://marketplace.localhost",
+        origin: "https://admin.booking.localhost",
         "x-vayada-csrf": "csrf-token",
       },
-      payload: { type: "hotel", surface: "marketplace-web", inviteCode },
+      payload: { type: "hotel", surface: "booking-admin", inviteCode },
     });
 
     expect(response.statusCode).toBe(200);
@@ -3376,7 +3036,7 @@ describe("AuthKit session routes", () => {
       const resolveForOnboarding = vi.fn(async () => null);
       const noOrgSession = { ...session, organizationId: undefined };
       app = buildAuthSessionApp({
-        allowedOrigins: ["https://marketplace.localhost"],
+        allowedOrigins: ["https://admin.booking.localhost"],
         authKitClient: createAuthKitClient({
           async authenticateSession() {
             return noOrgSession;
@@ -3390,7 +3050,7 @@ describe("AuthKit session routes", () => {
           resolveForOnboarding,
         },
         surfacePolicies: {
-          "marketplace-web": {
+          "booking-admin": {
             requiredOrganizationKind: ["creator_workspace", "hotel_group"],
             allowMissingOrganization: true,
           },
@@ -3402,12 +3062,12 @@ describe("AuthKit session routes", () => {
         url: "/auth/onboarding",
         headers: {
           cookie: "vayada_workos_session=sealed-session; vayada_auth_csrf=csrf-token",
-          origin: "https://marketplace.localhost",
+          origin: "https://admin.booking.localhost",
           "x-vayada-csrf": "csrf-token",
         },
         payload: {
           type: "hotel",
-          surface: "marketplace-web",
+          surface: "booking-admin",
           inviteCode,
         },
       });
@@ -3487,7 +3147,7 @@ describe("AuthKit session routes", () => {
       },
     };
     app = buildAuthSessionApp({
-      allowedOrigins: ["https://marketplace.localhost"],
+      allowedOrigins: ["https://admin.booking.localhost"],
       authKitClient: createAuthKitClient({
         async authenticateSession() {
           return existingCreatorSession;
@@ -3515,7 +3175,7 @@ describe("AuthKit session routes", () => {
         }),
       }),
       surfacePolicies: {
-        "marketplace-web": {
+        "booking-admin": {
           requiredOrganizationKind: ["creator_workspace", "hotel_group"],
         },
       },
@@ -3526,10 +3186,10 @@ describe("AuthKit session routes", () => {
       url: "/auth/onboarding",
       headers: {
         cookie: "vayada_workos_session=sealed-session; vayada_auth_csrf=csrf-token",
-        origin: "https://marketplace.localhost",
+        origin: "https://admin.booking.localhost",
         "x-vayada-csrf": "csrf-token",
       },
-      payload: { type: "hotel", surface: "marketplace-web" },
+      payload: { type: "hotel", surface: "booking-admin" },
     });
 
     expect(response.statusCode).toBe(200);
@@ -3539,10 +3199,27 @@ describe("AuthKit session routes", () => {
   });
 
   // VAY-2260: the Marketplace is closing. No surface accepts a creator sign-up any more.
-  it("refuses creator onboarding on the marketplace-web surface", async () => {
+  // VAY-2271: the Marketplace and affiliate surfaces are gone; naming one is a client error.
+  it("answers 400 for a retired or unknown auth surface", async () => {
+    app = buildAuthSessionApp({ allowedOrigins: ["https://admin.booking.localhost"] });
+    for (const surface of ["marketplace-web", "affiliate-dashboard", "nope"]) {
+      const response = await app.inject({
+        method: "GET",
+        url: `/auth/session?surface=${surface}`,
+        headers: { origin: "https://admin.booking.localhost" },
+      });
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).toEqual({
+        error: "invalid_surface",
+        message: "Unsupported auth surface.",
+      });
+    }
+  });
+
+  it("refuses creator onboarding on the booking-admin surface", async () => {
     const createOrganization = vi.fn();
     app = buildAuthSessionApp({
-      allowedOrigins: ["https://marketplace.localhost"],
+      allowedOrigins: ["https://admin.booking.localhost"],
       authKitClient: createAuthKitClient({
         async authenticateSession() {
           return { ...session, organizationId: undefined };
@@ -3550,7 +3227,7 @@ describe("AuthKit session routes", () => {
         createSignupOrganization: createOrganization,
       }),
       surfacePolicies: {
-        "marketplace-web": {
+        "booking-admin": {
           requiredOrganizationKind: ["creator_workspace", "hotel_group"],
           allowMissingOrganization: true,
         },
@@ -3562,10 +3239,10 @@ describe("AuthKit session routes", () => {
       url: "/auth/onboarding",
       headers: {
         cookie: "vayada_workos_session=sealed-session; vayada_auth_csrf=csrf-token",
-        origin: "https://marketplace.localhost",
+        origin: "https://admin.booking.localhost",
         "x-vayada-csrf": "csrf-token",
       },
-      payload: { type: "creator", surface: "marketplace-web" },
+      payload: { type: "creator", surface: "booking-admin" },
     });
 
     expect(response.statusCode).toBe(400);
@@ -3579,7 +3256,6 @@ describe("AuthKit session routes", () => {
   it("refuses a creator Google sign-up on every surface", async () => {
     const getAuthorizationUrl = vi.fn(() => "https://auth.workos.test/google");
     for (const [surface, publicOrigin] of [
-      ["marketplace-web", "https://marketplace.localhost"],
       ["booking-admin", "https://admin.booking.localhost"],
       ["pms-web", "https://pms.localhost"],
     ] as const) {
@@ -3628,7 +3304,7 @@ describe("AuthKit session routes", () => {
       },
     };
     app = buildAuthSessionApp({
-      allowedOrigins: ["https://marketplace.localhost"],
+      allowedOrigins: ["https://admin.booking.localhost"],
       authKitClient: createAuthKitClient({
         async authenticateSession() {
           return hotelSession;
@@ -3671,7 +3347,7 @@ describe("AuthKit session routes", () => {
         },
       },
       surfacePolicies: {
-        "marketplace-web": {
+        "booking-admin": {
           requiredOrganizationKind: ["creator_workspace", "hotel_group"],
         },
       },
@@ -3686,11 +3362,11 @@ describe("AuthKit session routes", () => {
       url: "/auth/profile",
       headers: {
         cookie: "vayada_workos_session=sealed-session; vayada_auth_csrf=csrf-token",
-        origin: "https://marketplace.localhost",
+        origin: "https://admin.booking.localhost",
         "x-vayada-csrf": "csrf-token",
       },
       payload: {
-        surface: "marketplace-web",
+        surface: "booking-admin",
         firstName: "Mary Jane",
         lastName: "Watson",
         phone: "+49 89 987654",
@@ -3728,11 +3404,11 @@ describe("AuthKit session routes", () => {
       url: "/auth/profile",
       headers: {
         cookie: "vayada_workos_session=sealed-session; vayada_auth_csrf=csrf-token",
-        origin: "https://marketplace.localhost",
+        origin: "https://admin.booking.localhost",
         "x-vayada-csrf": "csrf-token",
       },
       payload: {
-        surface: "marketplace-web",
+        surface: "booking-admin",
         phone: "sdfdsfsfsdfdsf",
       },
     });
@@ -3745,11 +3421,11 @@ describe("AuthKit session routes", () => {
       url: "/auth/profile",
       headers: {
         cookie: "vayada_workos_session=sealed-session; vayada_auth_csrf=csrf-token",
-        origin: "https://marketplace.localhost",
+        origin: "https://admin.booking.localhost",
         "x-vayada-csrf": "csrf-token",
       },
       payload: {
-        surface: "marketplace-web",
+        surface: "booking-admin",
         phone: "",
       },
     });
@@ -3768,11 +3444,11 @@ describe("AuthKit session routes", () => {
       url: "/auth/profile",
       headers: {
         cookie: "vayada_workos_session=sealed-session; vayada_auth_csrf=csrf-token",
-        origin: "https://marketplace.localhost",
+        origin: "https://admin.booking.localhost",
         "x-vayada-csrf": "csrf-token",
       },
       payload: {
-        surface: "marketplace-web",
+        surface: "booking-admin",
         profilePictureUrl: "",
         profilePictureMediaObjectId: "",
       },
@@ -3795,11 +3471,11 @@ describe("AuthKit session routes", () => {
       url: "/auth/profile",
       headers: {
         cookie: "vayada_workos_session=sealed-session; vayada_auth_csrf=csrf-token",
-        origin: "https://marketplace.localhost",
+        origin: "https://admin.booking.localhost",
         "x-vayada-csrf": "csrf-token",
       },
       payload: {
-        surface: "marketplace-web",
+        surface: "booking-admin",
         userId: "user_someone_else",
         profilePictureUrl: "https://media.example/other.webp",
       },
@@ -3814,11 +3490,11 @@ describe("AuthKit session routes", () => {
       url: "/auth/profile",
       headers: {
         cookie: "vayada_workos_session=sealed-session; vayada_auth_csrf=csrf-token",
-        origin: "https://marketplace.localhost",
+        origin: "https://admin.booking.localhost",
         "x-vayada-csrf": "csrf-token",
       },
       payload: {
-        surface: "marketplace-web",
+        surface: "booking-admin",
         firstName: "Mary",
         lastName: "Watson",
       },
@@ -5133,178 +4809,6 @@ describe("AuthKit session routes", () => {
     });
   });
 
-  it("mints an affiliate-scoped compatibility token for an affiliate-partner session", async () => {
-    const auditEvents: ProductAuditEvent[] = [];
-    const affiliateSession: AuthKitSession = {
-      ...session,
-      organizationId: "org_workos_affiliate_partner",
-      user: {
-        ...session.user,
-        id: "user_workos_affiliate",
-        email: "affiliate@example.com",
-      },
-    };
-    app = buildAuthSessionApp({
-      allowedOrigins: ["https://affiliate.localhost"],
-      authKitClient: createAuthKitClient({
-        async authenticateSession() {
-          return affiliateSession;
-        },
-      }),
-      tokenVerifier: createTokenVerifier(affiliateSession),
-      identityRepository: createIdentityRepository({
-        userByProviderUserId: async () => ({
-          userId: "user_affiliate",
-          email: "affiliate@example.com",
-          status: "active",
-        }),
-        organizationByWorkosOrgId: async () => ({
-          organizationId: "org_affiliate_partner",
-          workosOrgId: "org_workos_affiliate_partner",
-          name: "Vayada Affiliate Partner",
-          kind: "affiliate_partner",
-          status: "active",
-        }),
-        activeMembership: async () => ({
-          membershipId: "membership_affiliate",
-          status: "active",
-          roleKey: "affiliate_owner",
-          workosMembershipId: "om_affiliate",
-          workosRoleSlugs: ["affiliate_owner"],
-        }),
-        linkedResources: async () => [
-          {
-            product: "affiliate",
-            resourceType: "affiliate",
-            resourceId: "affiliate_partner_bali",
-            relationship: "owner",
-            status: "active",
-          },
-        ],
-      }),
-      surfacePolicies: {
-        "affiliate-dashboard": {
-          requiredOrganizationKind: "affiliate_partner",
-          logoutReturnUrl: "https://affiliate.localhost/login",
-          legacyJwtSecret: "legacy-affiliate-pms-secret",
-          legacyJwtUserType: "affiliate",
-          requiredResourceLink: { product: "affiliate", resourceType: "affiliate" },
-        },
-      },
-      productAuditSink: {
-        async record(event) {
-          auditEvents.push(event);
-        },
-      },
-    });
-
-    const response = await app.inject({
-      method: "POST",
-      url: "/auth/compat/affiliate-dashboard-token",
-      headers: {
-        cookie: "vayada_workos_session=sealed-session; vayada_auth_csrf=csrf-token",
-        origin: "https://affiliate.localhost",
-        "x-vayada-csrf": "csrf-token",
-      },
-    });
-
-    expect(response.statusCode).toBe(200);
-    expect(readJwtPayload(response.json().accessToken)).toMatchObject({
-      sub: "user_affiliate",
-      email: "affiliate@example.com",
-      type: "affiliate",
-      org: "org_affiliate_partner",
-      surface: "affiliate-dashboard",
-      resources: {
-        "affiliate:affiliate": ["affiliate_partner_bali"],
-      },
-    });
-    expect(auditEvents).toContainEqual(
-      expect.objectContaining({
-        action: "auth.compatibility_token.issued",
-        actorUserId: "user_affiliate",
-        organizationId: "org_affiliate_partner",
-        surface: "affiliate-dashboard",
-        resourceScope: {
-          "affiliate:affiliate": ["affiliate_partner_bali"],
-        },
-      }),
-    );
-  });
-
-  it("returns a marketplace session for creator workspace organizations", async () => {
-    const marketplaceSession: AuthKitSession = {
-      ...session,
-      sealedSession: "refreshed-marketplace-session",
-      organizationId: "org_workos_creator_workspace",
-      user: {
-        ...session.user,
-        id: "user_workos_creator",
-        email: "creator@example.com",
-      },
-    };
-    app = buildAuthSessionApp({
-      allowedOrigins: ["https://marketplace.localhost"],
-      authKitClient: createAuthKitClient({
-        async authenticateSession() {
-          return marketplaceSession;
-        },
-      }),
-      tokenVerifier: createTokenVerifier(marketplaceSession),
-      identityRepository: createIdentityRepository({
-        userByProviderUserId: async () => ({
-          userId: "user_creator",
-          email: "creator@example.com",
-          status: "active",
-        }),
-        organizationByWorkosOrgId: async () => ({
-          organizationId: "org_creator_workspace",
-          workosOrgId: "org_workos_creator_workspace",
-          name: "Creator Workspace",
-          kind: "creator_workspace",
-          status: "active",
-        }),
-        activeMembership: async () => ({
-          membershipId: "membership_creator",
-          status: "active",
-          roleKey: "creator_owner",
-          workosMembershipId: "om_creator",
-          workosRoleSlugs: ["creator_owner"],
-        }),
-      }),
-      surfacePolicies: {
-        "marketplace-web": {
-          requiredOrganizationKind: ["creator_workspace", "hotel_group"],
-          logoutReturnUrl: "https://marketplace.localhost/login",
-        },
-      },
-    });
-
-    const response = await app.inject({
-      method: "GET",
-      url: "/auth/session?surface=marketplace-web",
-      headers: {
-        cookie: "vayada_workos_session=sealed-session; vayada_auth_csrf=csrf-token",
-        origin: "https://marketplace.localhost",
-      },
-    });
-
-    expect(response.statusCode).toBe(200);
-    expect(response.json()).toMatchObject({
-      accessToken: "workos-access-token",
-      organizationId: "org_creator_workspace",
-      workosOrganizationId: "org_workos_creator_workspace",
-      organizationKind: "creator_workspace",
-      user: {
-        id: "user_creator",
-        email: "creator@example.com",
-      },
-    });
-    expect(String(response.headers["set-cookie"])).toContain(
-      "vayada_workos_session=refreshed-marketplace-session",
-    );
-  });
-
   it("clears the sealed session and returns the WorkOS logout URL", async () => {
     const auditEvents: ProductAuditEvent[] = [];
     app = buildAuthSessionApp({
@@ -5342,9 +4846,9 @@ describe("AuthKit session routes", () => {
 
   it("uses a validated logout return_to for product surfaces", async () => {
     app = buildAuthSessionApp({
-      allowedOrigins: ["https://marketplace.localhost"],
+      allowedOrigins: ["https://admin.booking.localhost"],
       surfacePolicies: {
-        "marketplace-web": {
+        "booking-admin": {
           requiredOrganizationKind: ["creator_workspace", "hotel_group"],
         },
       },
@@ -5355,19 +4859,19 @@ describe("AuthKit session routes", () => {
       url: "/auth/logout",
       headers: {
         cookie: "vayada_workos_session=sealed-session; vayada_auth_csrf=csrf-token",
-        origin: "https://marketplace.localhost",
+        origin: "https://admin.booking.localhost",
         "x-vayada-csrf": "csrf-token",
       },
       payload: {
-        surface: "marketplace-web",
-        return_to: "https://marketplace.localhost/login",
+        surface: "booking-admin",
+        return_to: "https://admin.booking.localhost/login",
       },
     });
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({
       logoutUrl:
-        "https://auth.workos.test/logout?return_to=https%3A%2F%2Fmarketplace.localhost%2Flogin",
+        "https://auth.workos.test/logout?return_to=https%3A%2F%2Fadmin.booking.localhost%2Flogin",
     });
   });
 
@@ -5582,11 +5086,11 @@ describe("AuthKit session routes", () => {
       url: "/auth/handoff/create",
       headers: {
         cookie: "vayada_fp_workos_session=source-sealed-session; vayada_fp_auth_csrf=source-csrf",
-        origin: "https://marketplace.localhost",
+        origin: "https://pms.localhost",
         "x-vayada-csrf": "source-csrf",
       },
       payload: {
-        sourceSurface: "marketplace-web",
+        sourceSurface: "pms-web",
         targetPath: "/dashboard",
         targetSurface: "booking-admin",
       },
@@ -5600,7 +5104,7 @@ describe("AuthKit session routes", () => {
       ...baseRequest,
       headers: {
         ...baseRequest.headers,
-        "x-forwarded-host": "marketplace.localhost",
+        "x-forwarded-host": "pms.localhost",
         "x-forwarded-proto": "https",
       },
       payload: { ...baseRequest.payload, targetPath: "//evil.example/steal" },
@@ -5665,9 +5169,9 @@ describe("AuthKit session routes", () => {
     const response = await app.inject({
       method: "POST",
       url: "/auth/handoff/create",
-      headers: { origin: "https://marketplace.localhost" },
+      headers: { origin: "https://pms.localhost" },
       payload: {
-        sourceSurface: "affiliate-dashboard",
+        sourceSurface: "platform-admin",
         targetPath: "/dashboard",
         targetSurface: "booking-admin",
       },
@@ -5772,11 +5276,7 @@ function handoffAuthOptions(
   }),
 ) {
   return {
-    allowedOrigins: [
-      "https://marketplace.localhost",
-      "https://admin.booking.localhost",
-      "https://pms.localhost",
-    ],
+    allowedOrigins: ["https://admin.booking.localhost", "https://pms.localhost"],
     authKitClient,
     cookieSecure: true,
     handoffRepository,
@@ -5818,11 +5318,6 @@ function handoffAuthOptions(
       ],
     }),
     surfacePolicies: {
-      "marketplace-web": {
-        requiredOrganizationKind: ["creator_workspace", "hotel_group"],
-        publicOrigin: "https://marketplace.localhost",
-        firstPartySession: true,
-      },
       "booking-admin": {
         requiredOrganizationKind: "hotel_group",
         publicOrigin: "https://admin.booking.localhost",
@@ -5846,14 +5341,14 @@ function createBookingHandoff(app: ReturnType<typeof buildApp>) {
     url: "/auth/handoff/create",
     headers: {
       cookie: "vayada_fp_workos_session=source-sealed-session; vayada_fp_auth_csrf=source-csrf",
-      origin: "https://marketplace.localhost",
-      "x-forwarded-host": "marketplace.localhost",
+      origin: "https://pms.localhost",
+      "x-forwarded-host": "pms.localhost",
       "x-forwarded-proto": "https",
       "x-vayada-csrf": "source-csrf",
     },
     payload: {
       routingHints: { propertyId: "property_alpenrose" },
-      sourceSurface: "marketplace-web",
+      sourceSurface: "pms-web",
       targetPath: "/dashboard?from=marketplace",
       targetSurface: "booking-admin",
     },
@@ -5978,10 +5473,7 @@ function buildAuthSessionApp(
     cookieSecure?: boolean;
     cookieDomain?: string;
     surfacePolicies?: Partial<
-      Record<
-        "platform-admin" | "booking-admin" | "pms-web" | "affiliate-dashboard" | "marketplace-web",
-        AuthSurfacePolicy
-      >
+      Record<"platform-admin" | "booking-admin" | "pms-web", AuthSurfacePolicy>
     >;
     profileImageMediaRepository?: ApprovedPublicProfileImageRepository;
     hotelAccountInviteOnboarding?: Pick<HotelAccountInviteRepository, "resolveForOnboarding">;
