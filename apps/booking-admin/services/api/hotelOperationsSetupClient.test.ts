@@ -84,7 +84,7 @@ describe("hotel operations setup client", () => {
     expect(mocks.post).toHaveBeenNthCalledWith(
       1,
       "/api/finance/properties/property-1/provider-accounts/provider-account-1/onboarding-link",
-      expect.objectContaining({ returnSurface: "marketplace" }),
+      expect.objectContaining({ returnSurface: "booking_admin_setup" }),
     );
     expect(bodies[0]).not.toHaveProperty("propertyId");
     expect(bodies[0]).not.toHaveProperty("returnUrl");
