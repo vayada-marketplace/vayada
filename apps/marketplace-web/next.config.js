@@ -54,6 +54,12 @@ const nextConfig = {
       { source: "/handoff", destination: `${bookingAdminUrl}/login`, permanent: false },
       { source: "/onboarding", destination: `${bookingAdminUrl}/signup`, permanent: false },
       ...marketingPaths.map((source) => ({ source, destination: marketingUrl, permanent: false })),
+      // Anything else that is not the health check, the login gateway or a Next asset.
+      {
+        source: "/:path((?!api/health|auth/|_next/).*)",
+        destination: marketingUrl,
+        permanent: false,
+      },
     ];
   },
 };

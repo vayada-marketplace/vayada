@@ -1,8 +1,6 @@
-import { redirect } from "next/navigation";
+import Home from "./page";
 
-import { marketingUrl } from "@/redirectTargets";
-
-// Every old Marketplace route that next.config.js does not name ends up here and forwards.
+// Unknown routes are forwarded by next.config.js; this only renders when that is bypassed.
 export default function NotFound() {
-  redirect(marketingUrl);
+  return <Home />;
 }

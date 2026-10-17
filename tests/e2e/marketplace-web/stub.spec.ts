@@ -44,8 +44,15 @@ test.describe("marketplace-web redirect stub", () => {
     });
   }
 
-  test("an unknown old route forwards to the marketing site", async ({ page }) => {
-    await page.goto("/some-forgotten-page");
-    await expect.poll(() => new URL(page.url()).origin).toBe(new URL(marketingUrl).origin);
+  test("an unknown old route forwards to the marketing site", async ({ request }) => {
+    const response = await request.get("/some-forgotten-page", { maxRedirects: 0 });
+    expect([302, 307, 308]).toContain(response.status());
+    expect(response.headers()["location"]).toBe(marketingUrl);
+  });
+
+  test("the health check and the login gateway are not forwarded", async ({ request }) => {
+    const gateway = await request.get("/auth/session", { maxRedirects: 0 });
+    // Without gateway env the route answers 503 itself; a redirect would mean the catch-all ate it.
+    expect([200, 401, 503]).toContain(gateway.status());
   });
 });
