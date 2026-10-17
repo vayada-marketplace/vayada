@@ -8,8 +8,9 @@ import {
   safeSharedHotelSetupReturnTo,
 } from "@vayada/product-onboarding";
 
-const MARKETPLACE_FRONTEND_URL =
-  process.env.NEXT_PUBLIC_MARKETPLACE_URL || "https://app.vayada.com";
+// Booking Admin hosts the shared hotel setup wizard (VAY-2261).
+const BOOKING_ADMIN_URL =
+  process.env.NEXT_PUBLIC_BOOKING_ADMIN_URL || "https://admin.booking.vayada.com";
 
 export default function PmsSetupPage() {
   return (
@@ -28,7 +29,7 @@ function CanonicalSetupRedirect() {
         returnProduct: "pms",
         returnTo: safeSharedHotelSetupReturnTo(searchParams.get("returnTo"), "/dashboard"),
         propertyId: searchParams.get("propertyId"),
-        setupBaseUrl: MARKETPLACE_FRONTEND_URL,
+        setupBaseUrl: BOOKING_ADMIN_URL,
         mode: searchParams.get("mode") === "add" ? "add" : undefined,
       }),
     [searchParams],

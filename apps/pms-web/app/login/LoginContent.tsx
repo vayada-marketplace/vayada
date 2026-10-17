@@ -12,7 +12,9 @@ import {
 import { resolvePmsSetupGuard } from "@/lib/utils/sharedSetupGuard";
 import { useTranslation } from "@/lib/i18n";
 
-const MARKETPLACE_URL = process.env.NEXT_PUBLIC_MARKETPLACE_URL || "https://app.vayada.com";
+// Booking Admin hosts hotel sign-up and setup (VAY-2261).
+const BOOKING_ADMIN_URL =
+  process.env.NEXT_PUBLIC_BOOKING_ADMIN_URL || "https://admin.booking.vayada.com";
 
 type LoginContentProps = {
   returnTo?: string;
@@ -191,7 +193,7 @@ export function LoginContent({
       }
       submitErrorAction={
         hotelSetupRequired
-          ? { label: t("auth.login.setUpHotel"), href: `${MARKETPLACE_URL}/login` }
+          ? { label: t("auth.login.setUpHotel"), href: `${BOOKING_ADMIN_URL}/login` }
           : undefined
       }
       organizations={workspaceOptions ?? null}

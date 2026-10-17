@@ -16,8 +16,9 @@ import {
 import { ApiErrorResponse } from "@/services/api/client";
 import { useTranslation } from "@/lib/i18n";
 
-const MARKETPLACE_FRONTEND_URL =
-  process.env.NEXT_PUBLIC_MARKETPLACE_URL || "https://app.vayada.com";
+// Booking Admin hosts the shared hotel setup wizard (VAY-2261).
+const BOOKING_ADMIN_URL =
+  process.env.NEXT_PUBLIC_BOOKING_ADMIN_URL || "https://admin.booking.vayada.com";
 
 const ROLLING_MONTHS = [12, 18, 24] as const;
 const inputClass =
@@ -276,7 +277,7 @@ export function CalendarAutoOpenEditor() {
           <p>{setupErrorMessage(read.setupError.code, t)}</p>
           <a
             href={crossAppReauthenticationUrl(
-              MARKETPLACE_FRONTEND_URL,
+              BOOKING_ADMIN_URL,
               `${buildSharedHotelSetupRedirectPath({
                 entryProduct: "pms",
                 returnProduct: "pms",

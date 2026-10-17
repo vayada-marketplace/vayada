@@ -162,17 +162,19 @@ E2E_VAYADA_ADMIN_BASE_URL=http://localhost:3001 npm run e2e:vayada-admin
 
 When you start booking-admin yourself (dev or production build), give it the env from its
 `webServer` entry in `playwright.config.ts`. `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=e2e-google-places` lets
-the nearby cards reach the specs' mocked Google SDK. `NEXT_PUBLIC_MARKETPLACE_URL` must equal the
-`E2E_MARKETPLACE_BASE_URL` you pass to Playwright, because `setup.spec.ts` intercepts the Marketplace
-redirect at that origin:
+the nearby cards reach the specs' mocked Google SDK. Booking Admin hosts the hotel setup wizard
+itself (VAY-2261): `setup.spec.ts` and the `setup-*.spec.ts` files render it on this origin with
+mocked APIs, so no Marketplace server or `E2E_MARKETPLACE_BASE_URL` is needed:
 
 ```bash
 NEXT_PUBLIC_AUTHKIT_COMPATIBILITY_TOKEN_ENABLED=true NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=e2e-google-places \
-  NEXT_PUBLIC_PMS_FRONTEND_URL=http://pms.localhost:3004 \
-  NEXT_PUBLIC_MARKETPLACE_URL=http://marketplace.localhost:3000 PORT=3003 npm run dev:booking-admin &
-E2E_BOOKING_ADMIN_BASE_URL=http://127.0.0.1:3003 \
-  E2E_MARKETPLACE_BASE_URL=http://marketplace.localhost:3000 npm run e2e:booking-admin
+  NEXT_PUBLIC_PMS_FRONTEND_URL=http://pms.localhost:3004 PORT=3003 npm run dev:booking-admin &
+E2E_BOOKING_ADMIN_BASE_URL=http://127.0.0.1:3003 npm run e2e:booking-admin
 ```
+
+The pms-web project's `setup.spec.ts` expects its `/setup` redirect to land on the Booking Admin
+origin the pms-web dev server was started with (`NEXT_PUBLIC_BOOKING_ADMIN_URL`); pass the same value
+to Playwright, or `E2E_SETUP_HOST_BASE_URL`.
 
 ## Booking Tenant Smoke
 
@@ -297,9 +299,10 @@ automated.
 
 The focused setup-entry smoke lives in `tests/e2e/pms-web/setup.spec.ts`. PMS
 no longer hosts setup: the smoke enters at `/setup` and verifies PMS hands off
-to the canonical Marketplace setup with the entry product and a safe return path
-preserved (defaulting to PMS and `/dashboard`). The Marketplace setup flow itself
-is covered by `tests/e2e/marketplace-web/adaptive-*.spec.ts`,
+to the Booking Admin setup wizard with the entry product and a safe return path
+preserved (defaulting to PMS and `/dashboard`). The setup wizard itself
+is covered by `tests/e2e/booking-admin/setup-adaptive-*.spec.ts` (the marketplace-web
+copies stay until that app's spec folder is deleted),
 `setup-activation.spec.ts`, and `hotel-account-prerequisites.spec.ts`.
 
 Run just that coverage from the repo root:

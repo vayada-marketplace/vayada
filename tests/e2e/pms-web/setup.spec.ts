@@ -3,10 +3,10 @@ import { expect, test } from "@playwright/test";
 import { PMS_WEB_PROPERTY_ID } from "../support/pmsWebMocks";
 
 test.describe("pms-web canonical setup redirect", () => {
-  test("replaces local setup with Marketplace and preserves the exact product return path", async ({
+  test("replaces local setup with the Booking Admin wizard and preserves the exact product return path", async ({
     page,
   }) => {
-    const expectedUrl = canonicalMarketplaceSetupUrl({
+    const expectedUrl = canonicalSetupUrl({
       entryProduct: "pms",
       returnTo: "/reservations?view=arrivals",
       propertyId: PMS_WEB_PROPERTY_ID,
@@ -40,7 +40,7 @@ test.describe("pms-web canonical setup redirect", () => {
   test("preserves another valid entry product while defaulting an unsafe return path", async ({
     page,
   }) => {
-    const expectedUrl = canonicalMarketplaceSetupUrl({
+    const expectedUrl = canonicalSetupUrl({
       entryProduct: "marketplace",
       returnTo: "/dashboard",
       propertyId: PMS_WEB_PROPERTY_ID,
@@ -62,7 +62,7 @@ test.describe("pms-web canonical setup redirect", () => {
   });
 
   test("defaults a missing entry product to PMS", async ({ page }) => {
-    const expectedUrl = canonicalMarketplaceSetupUrl({
+    const expectedUrl = canonicalSetupUrl({
       entryProduct: "pms",
       returnTo: "/dashboard",
       mode: "add",
@@ -82,17 +82,20 @@ test.describe("pms-web canonical setup redirect", () => {
   });
 });
 
-function canonicalMarketplaceSetupUrl(input: {
+// Booking Admin hosts the shared setup wizard (VAY-2261); the pms-web dev server points at it
+// through NEXT_PUBLIC_BOOKING_ADMIN_URL (playwright.config.ts, PR Checks).
+function canonicalSetupUrl(input: {
   entryProduct: "booking" | "marketplace" | "pms";
   returnTo: string;
   propertyId?: string;
   mode?: "add";
 }): string {
   const origin =
-    process.env.E2E_MARKETPLACE_BASE_URL ||
+    process.env.E2E_SETUP_HOST_BASE_URL ||
+    process.env.NEXT_PUBLIC_BOOKING_ADMIN_URL ||
     (process.env.CI === "true" || process.env.E2E_START_SERVERS === "1"
-      ? "http://marketplace.localhost:3000"
-      : "https://marketplace.localhost");
+      ? "http://admin.booking.localhost:3003"
+      : "https://admin.booking.localhost");
   const url = new URL("/setup", origin);
   url.searchParams.set("entryProduct", input.entryProduct);
   url.searchParams.set("returnProduct", "pms");

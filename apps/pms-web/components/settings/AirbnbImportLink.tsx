@@ -9,7 +9,8 @@ export function AirbnbImportLink({ propertyId }: { propertyId: string }) {
     return null;
   let href: string;
   try {
-    const base = new URL(process.env.NEXT_PUBLIC_MARKETPLACE_URL || "");
+    // Booking Admin hosts the Airbnb connect page with the setup wizard (VAY-2261).
+    const base = new URL(process.env.NEXT_PUBLIC_BOOKING_ADMIN_URL || "");
     if (base.protocol !== "https:" || base.username || base.password) return null;
     href = crossAppReauthenticationUrl(base.origin, `/setup/airbnb-connect/${propertyId}`);
   } catch {
