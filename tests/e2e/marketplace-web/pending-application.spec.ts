@@ -2,7 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { watchNoLegacyCalls } from "../support/noLegacyCalls";
 import { watchPageHealth } from "../support/pageHealth";
 import { createAdaptiveHotelSetupStatusMock } from "../support/sharedHotelSetupMocks";
-import { corsHeaders, fulfillCorsPreflight } from "./utils/cors";
+import { corsHeaders, fulfillCorsPreflight } from "../support/cors";
 
 test("creator edits a pending request, retries failures, and cancels it", async ({ page }) => {
   await primeCreatorSession(page);

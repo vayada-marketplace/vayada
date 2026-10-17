@@ -17,7 +17,7 @@ Docker stack. In that case, leave that stack alone and run these isolated fronte
 from the repository root in separate terminals:
 
 ```sh
-PORTLESS_STATE_DIR=/tmp/vay1009-product-pages-1382 PORTLESS_PORT=1382 PORTLESS_SYNC_HOSTS=0 AUTH_PUBLIC_ORIGIN=https://marketplace.localhost:1382 NEXT_PUBLIC_AUTH_API_URL=https://api.localhost:1382 NEXT_PUBLIC_AUTHKIT_LOGIN_ENABLED=true portless marketplace npm run dev --workspace=apps/marketplace-web
+PORTLESS_STATE_DIR=/tmp/vay1009-product-pages-1382 PORTLESS_PORT=1382 PORTLESS_SYNC_HOSTS=0 AUTH_PUBLIC_ORIGIN=https://admin.booking.localhost:1382 NEXT_PUBLIC_API_URL=https://api.localhost:1382 NEXT_PUBLIC_AUTH_API_URL=https://api.localhost:1382 NEXT_PUBLIC_AUTHKIT_LOGIN_ENABLED=true portless admin.booking npm run dev --workspace=apps/booking-admin
 PORTLESS_STATE_DIR=/tmp/vay1009-product-pages-1382 PORTLESS_PORT=1382 PORTLESS_SYNC_HOSTS=0 AUTH_PUBLIC_ORIGIN=https://pms.localhost:1382 NEXT_PUBLIC_AUTH_API_URL=https://api.localhost:1382 NEXT_PUBLIC_PMS_OPERATIONS_API_URL=https://api.localhost:1382 NEXT_PUBLIC_AUTHKIT_LOGIN_ENABLED=true NEXT_PUBLIC_AUTHKIT_COMPATIBILITY_TOKEN_ENABLED=false portless pms npm run dev --workspace=apps/pms-web
 npx playwright test --config tools/hotel-import-simulator/product-pages-playwright.config.ts
 ```
@@ -29,7 +29,7 @@ explicit test error; they never fall through to remote or shared services.
 Consequently opening these frontend URLs outside Playwright still requires login;
 use the port-1380 database demo for the interactive simulated journey.
 
-The test opens Marketplace `/setup`, edits the missing-facts loft, checks that the
+The test opens Booking Admin `/setup` (the hotel setup wizard moved there in VAY-2261), edits the missing-facts loft, checks that the
 validation message includes beds, supplies those facts, and saves. It then opens
 PMS `/rooms`, verifies the imported loft, imports the garden suite there, and
 reloads to verify both names remain. Screenshots are saved in test-results.

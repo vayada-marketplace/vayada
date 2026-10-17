@@ -22,7 +22,7 @@ const PRODUCTS: Product[] = [
     body: "Launch a branded booking flow that converts demand, captures guest data and increases revenue per stay.",
     bullets: [
       "Branded checkout",
-      "Affiliate & referral tracking",
+      "Referral tracking",
       "Upsell experiences & transport",
     ],
     image: {
@@ -46,23 +46,6 @@ const PRODUCTS: Product[] = [
     ctaLabel: "Learn more about the PMS",
     ctaHref: "/pms",
     reverse: true,
-  },
-  {
-    id: "hcn",
-    eyebrow: "Hotel-Creator-Network",
-    title: "Trust becomes distribution with vetted creators",
-    body: "Join the free marketplace where you discover, vet, and manage creator partnerships in one centralized hub.",
-    bullets: [
-      "Vetted creator matching",
-      "Centralized collaboration workflow",
-      "Pay only on completed stays",
-    ],
-    image: {
-      src: "/hcn-network-mock.png",
-      alt: "Vayada Hotel-Creator-Network dashboard with verified creator profiles",
-    },
-    ctaLabel: "Learn more about the Hotel-Creator-Network",
-    ctaHref: "/hotel-creator-network",
   },
 ];
 

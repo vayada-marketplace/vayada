@@ -12,6 +12,14 @@ const nextConfig = {
   reactStrictMode: true,
   // Provider callback queries contain a single-use correlation token.
   logging: { incomingRequests: { ignore: [/^\/setup\/airbnb-return(?:\/|\?|$)/] } },
+  // VAY-2260: the public creator teaser pages forward to the closed page.
+  async redirects() {
+    return ["/creators", "/properties"].map((source) => ({
+      source,
+      destination: "/closed",
+      permanent: false,
+    }));
+  },
   async headers() {
     return [
       {

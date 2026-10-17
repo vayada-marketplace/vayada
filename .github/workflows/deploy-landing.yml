@@ -25,7 +25,9 @@ env:
   AWS_ACCOUNT_ID: 269416271598
   ECR_REPOSITORY: vayada-landing
   CONTACT_API_URL: https://api.vayada.com
-  MARKETPLACE_API_URL: https://next-api.vayada.com
+  # VAY-2260: the Marketplace discovery check is gone; the TypeScript API base stays for
+  # the shared public API client until the landing site no longer imports it.
+  NEXT_API_URL: https://next-api.vayada.com
   # Public Web Analytics site identifier; automatic edge injection must stay off.
   CLOUDFLARE_ANALYTICS_TOKEN: 15ff9d551bd749d5930214d99f0eae70
 
@@ -38,15 +40,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Verify marketplace API contract
-        run: |
-          curl --fail --silent --show-error --retry 3 \
-            "${MARKETPLACE_API_URL}/api/marketplace/offers?limit=1&offset=0" \
-            | jq --exit-status '.items | type == "array"' >/dev/null
-          curl --fail --silent --show-error --retry 3 \
-            "${MARKETPLACE_API_URL}/api/marketplace/creators?limit=1&offset=0" \
-            | jq --exit-status '.items | type == "array"' >/dev/null
-
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -56,8 +49,24 @@ jobs:
       - name: Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
 
+      - name: Pull the BuildKit image with retries
+        run: |
+          # Our public GHCR copy of moby/buildkit (vayada-platform "Mirror CI images", VAY-2258/VAY-2265):
+          # anonymous ECR Public and Docker Hub pulls fail with "toomanyrequests" on shared runners.
+          # Pinned to the upstream digest like build-coordinated-release.yml; bump it by hand after a
+          # mirror refresh. Retried because a registry can still throttle; setup-buildx pulls it once more.
+          for attempt in 1 2 3 4 5 6; do
+            docker pull --quiet ghcr.io/vayada-marketplace/ci-buildkit:buildx-stable-1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea >/dev/null && exit 0
+            echo "BuildKit pull failed (attempt ${attempt}); retrying" >&2
+            sleep $((attempt * 10))
+          done
+          exit 1
+
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
+        with:
+          # The GHCR copy pulled above; Docker Hub and ECR Public rate-limit the BuildKit image.
+          driver-opts: image=ghcr.io/vayada-marketplace/ci-buildkit:buildx-stable-1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
@@ -68,7 +77,7 @@ jobs:
           push: true
           build-args: |
             NEXT_PUBLIC_API_URL=${{ env.CONTACT_API_URL }}
-            NEXT_PUBLIC_VAYADA_API_URL=${{ env.MARKETPLACE_API_URL }}
+            NEXT_PUBLIC_VAYADA_API_URL=${{ env.NEXT_API_URL }}
             NEXT_PUBLIC_CLOUDFLARE_ANALYTICS_TOKEN=${{ env.CLOUDFLARE_ANALYTICS_TOKEN }}
           tags: |
             ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:latest

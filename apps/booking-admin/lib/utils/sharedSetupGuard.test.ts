@@ -58,6 +58,31 @@ describe("resolveBookingSetupGuard", () => {
     expect(storage.getItem("selectedSharedPropertyId")).toBe("property-2");
   });
 
+  it("verifies the property named by a setup-exit marker instead of the stored one", async () => {
+    const api = {
+      getStatus: vi.fn(async () =>
+        status({
+          propertyId: "property-3",
+          decision: "enter",
+          destinationRouteKey: "booking.workspace",
+        }),
+      ),
+    };
+    const storage = memoryStorage({ selectedSharedPropertyId: "property-1" });
+
+    await expect(
+      resolveBookingSetupGuard(
+        "/dashboard?setup=incomplete&propertyId=property-3",
+        api,
+        storage,
+        undefined,
+        { propertyId: "property-3" },
+      ),
+    ).resolves.toMatchObject({ action: "enter_product", propertyId: "property-3" });
+    expect(api.getStatus).toHaveBeenCalledWith({ entryProduct: "booking", propertyId: "property-3" });
+    expect(storage.getItem("selectedSharedPropertyId")).toBe("property-3");
+  });
+
   it("does not enter Booking when the server marks it unavailable", async () => {
     const api = {
       getStatus: vi.fn(async () =>

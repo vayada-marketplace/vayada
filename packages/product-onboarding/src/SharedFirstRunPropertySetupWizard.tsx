@@ -103,6 +103,11 @@ export type SharedFirstRunPropertySetupWizardProps = {
   /** Renders the step-by-step setup once the selected hotel's basics are saved. */
   renderAfterHotelDetails: (propertyId: string, onEditHotelDetails: () => void) => ReactNode;
   renderSetupActions?: (propertyId: string) => ReactNode;
+  /**
+   * The tracks a new hotel can choose from. Booking Admin offers Hotel Operations only (the
+   * Creator Marketplace is being removed, VAY-2259); a track selected earlier stays selected.
+   */
+  availableTracks?: readonly SetupTrack[];
 };
 
 type ProfileDraft = {
@@ -195,6 +200,8 @@ export function hasMapCoordinates(location: Pick<ProfileDraft, "latitude" | "lon
   );
 }
 
+const ALL_SETUP_TRACKS: readonly SetupTrack[] = ["hotel_operations", "creator_marketplace"];
+
 const TRACK_CONTENT: Record<
   SetupTrack,
   { title: string; subtitle: string | null; description: string; icon: IconComponent }
@@ -274,6 +281,7 @@ export default function SharedFirstRunPropertySetupWizard({
   renderSetupActions,
   initialProfileSuggestions,
   propertyCreateIdempotencyKey,
+  availableTracks = ALL_SETUP_TRACKS,
 }: SharedFirstRunPropertySetupWizardProps) {
   const [status, setStatus] = useState<AdaptiveHotelSetupStatus | null>(null);
   const [loading, setLoading] = useState(true);
@@ -792,6 +800,7 @@ export default function SharedFirstRunPropertySetupWizard({
 
       {view.screen === "track_selection" && (
         <TrackSelection
+          availableTracks={availableTracks}
           selectedTracks={selectedTracks}
           canManageTracks={status.organization.canManageTracks}
           saving={saving}
@@ -2163,12 +2172,14 @@ function ProfileForm({
 }
 
 function TrackSelection({
+  availableTracks,
   selectedTracks,
   canManageTracks,
   saving,
   onToggle,
   onSave,
 }: {
+  availableTracks: readonly SetupTrack[];
   selectedTracks: SetupTrack[];
   canManageTracks: boolean;
   saving: boolean;
@@ -2180,7 +2191,7 @@ function TrackSelection({
   return (
     <section className="mx-auto max-w-5xl">
       <div className="grid gap-5 md:grid-cols-2">
-        {(["hotel_operations", "creator_marketplace"] as const).map((track) => {
+        {availableTracks.map((track) => {
           const content = TRACK_CONTENT[track];
           const checked = selectedTracks.includes(track);
           const disabled = !canManageTracks;
