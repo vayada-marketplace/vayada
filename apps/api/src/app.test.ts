@@ -8582,6 +8582,7 @@ describe("vayada-api", () => {
           imageUrl: null,
           photos: [],
           location: null,
+          leadTimeHours: null,
           leadTime: null,
           maxGuests: null,
           maxQuantity: 1,

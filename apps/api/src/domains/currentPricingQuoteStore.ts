@@ -8,6 +8,7 @@ import {
 import { pricingKeys, pricingObject } from "@vayada/domain-pms";
 import type { Pool } from "pg";
 import { lockCurrentPricingQuote } from "./currentPricingQuote.js";
+import { selectedAddonLeadTimesAllow } from "./addonLeadTime.js";
 import { lockPricingManualPaymentTerms } from "./pricingManualPayment.js";
 import { pricingManualLeadTimeAllows } from "./pricingManualPaymentLead.js";
 import { lockPublicPricingAuthority } from "./publicPricingAuthority.js";
@@ -98,7 +99,21 @@ export function createCurrentPricingQuoteStore(pool: Pool, lifetimeSeconds: numb
           method,
           lifetimeSeconds,
         );
-        if (!record || record.quote.stay.propertyId !== scope.propertyId) return fail("denied");
+        if (!record) {
+          // VAY-2232: an extra needs more notice than this stay gives (the guest page may have
+          // listed it before its notice ran out). Other refusals stay unnamed.
+          if (
+            !(await selectedAddonLeadTimesAllow(
+              client,
+              scope.propertyId,
+              selection.addons.map((addon) => addon.id),
+              selection.checkIn,
+            ))
+          )
+            throw new PricingStorageError("denied", "addon_lead_time");
+          return fail("denied");
+        }
+        if (record.quote.stay.propertyId !== scope.propertyId) return fail("denied");
         if (isManualPricingPaymentMethod(method)) {
           // VAY-2145: the payment deadline must fall before check-in.
           const terms = await lockPricingManualPaymentTerms(client, scope.propertyId, method);

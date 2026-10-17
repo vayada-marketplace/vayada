@@ -28,6 +28,12 @@ function fixture(rows = [definition()], show = true, module = true) {
     if (sql.includes("SELECT id FROM booking.addon_definitions"))
       return { rows: rows.map(({ id }) => ({ id })), rowCount: rows.length };
     if (sql.includes("FROM booking.addon_definitions a")) return { rows, rowCount: rows.length };
+    // 15:30 in Colombo on 2026-10-17; check-in is at 14:00.
+    if (sql.includes('location.timezone AS "timeZone"'))
+      return {
+        rows: [{ timeZone: "Asia/Colombo", checkInTime: "14:00", now: "2026-10-17T10:00:00Z" }],
+        rowCount: 1,
+      };
     return { rows: [{ id: propertyId }], rowCount: 1 };
   });
   const release = vi.fn();
@@ -55,9 +61,13 @@ it("projects only current public selection metadata through the real add-on owne
         pricingModel: "per_guest_night",
         maxQuantity: 99,
         maxGuests: 4,
+        leadTimeHours: null,
+        bookableFrom: null,
       },
     ],
   });
+  // No add-on asks for notice, so the hotel's check-in time isn't read.
+  expect(f.query.mock.calls.some(([sql]) => sql.includes("location.timezone"))).toBe(false);
   const discovery = f.query.mock.calls.findIndex(([sql]) =>
     sql.includes("SELECT id FROM booking.addon_definitions"),
   );
@@ -71,7 +81,7 @@ it("projects only current public selection metadata through the real add-on owne
   expect(f.query.mock.calls.at(-1)?.[0]).toBe("ROLLBACK");
   expect(f.release).toHaveBeenCalledOnce();
 });
-it("honors the current Booking visibility switch and excludes unsupported lead-time rules", async () => {
+it("honors the current Booking visibility switch and excludes unconverted lead-time text", async () => {
   const hidden = fixture(undefined, false);
   expect((await hidden.read())?.addons).toEqual([]);
   expect(
@@ -85,6 +95,27 @@ it("honors the current Booking visibility switch and excludes unsupported lead-t
   const row = definition();
   Object.assign(row.metadata, { leadTime: "24 hours" });
   expect((await fixture([row]).read())?.addons).toEqual([]);
+});
+it("lists an add-on with a lead time and the first check-in date it can be added for (VAY-2232)", async () => {
+  const row = definition();
+  Object.assign(row.metadata, { leadTimeHours: 24, leadTime: "old text" });
+  expect((await fixture([row]).read())?.addons).toMatchObject([
+    { id, leadTimeHours: 24, bookableFrom: "2026-10-19" },
+  ]);
+  Object.assign(row.metadata, { leadTimeHours: 168 });
+  expect((await fixture([row]).read())?.addons).toMatchObject([
+    { leadTimeHours: 168, bookableFrom: "2026-10-25" },
+  ]);
+  // Without the hotel's time zone no date can be named, and the quote refuses it too.
+  const noZone = fixture([row]);
+  const base = noZone.query.getMockImplementation()!;
+  noZone.query.mockImplementation(async (sql: string) =>
+    sql.includes("location.timezone") ? { rows: [], rowCount: 0 } : base(sql),
+  );
+  expect((await noZone.read())?.addons).toMatchObject([{ leadTimeHours: 168, bookableFrom: null }]);
+  // Not one of the editor's choices: the stored definition is invalid.
+  const invalid = { ...row, metadata: { leadTimeHours: 36 } };
+  expect(await fixture([invalid as unknown as typeof row]).read()).toBeNull();
 });
 it("offers no extras while the Feature Hub Add-ons module is off (VAY-2200)", async () => {
   const off = fixture(undefined, true, false);
@@ -139,8 +170,10 @@ it("validates a catalogue larger than one quote selection without truncating or 
   expect(result?.addons.map((addon) => addon.id)).toEqual(rows.map((row) => row.id));
   for (const addon of result!.addons)
     expect(Object.keys(addon).sort()).toEqual([
+      "bookableFrom",
       "currency",
       "id",
+      "leadTimeHours",
       "maxGuests",
       "maxQuantity",
       "name",

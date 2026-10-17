@@ -3,7 +3,9 @@ import { useTranslation } from "@/lib/i18n";
 
 import { useState, type DragEvent } from "react";
 import {
+  ADDON_CATEGORIES,
   AddonEditor,
+  addonLeadTimeNoticeKey,
   emptyAddonValues,
   type AddonEditorValues,
 } from "@vayada/product-onboarding/AddonEditor";
@@ -14,19 +16,15 @@ import {
   MagnifyingGlassIcon,
   PencilIcon,
   PhotoIcon,
-  PlusIcon,
   TrashIcon,
 } from "@heroicons/react/24/outline";
-import { ToggleSwitch } from "@/components/ui";
+import { PrimaryActionButton, ToggleSwitch } from "@/components/ui";
 import type { AddonItem, AddonSettings } from "@/services/settings";
 import { cn, formatCurrency } from "@/lib/utils";
 import { PageHeader } from "@/components/layout/PageLayout";
 
 const MARKETPLACE_FRONTEND_URL =
   process.env.NEXT_PUBLIC_MARKETPLACE_URL || "https://app.vayada.com";
-
-// The redesign's filter chips; "other" appears only when an add-on uses it.
-const FILTER_CATEGORIES = ["dining", "transport", "wellness", "experience"];
 
 const PRICING_MODEL_LABELS: Record<string, string> = {
   "false:false": "addons.editor.flatFee",
@@ -63,7 +61,10 @@ function toDraft(addon: AddonItem, currency: string): AddonItemFormValues {
     duration: addon.duration ?? "",
     location: addon.location ?? "",
     maxGuests: addon.maxGuests ?? "",
-    leadTime: addon.leadTime ?? "",
+    leadTimeHours: addon.leadTimeHours
+      ? (String(addon.leadTimeHours) as AddonEditorValues["leadTimeHours"])
+      : "",
+    legacyLeadTime: addon.leadTime ?? "",
     maxQuantity: String(addon.maxQuantity ?? 1),
     perPerson: addon.perPerson === true,
     perNight: addon.perNight === true,
@@ -136,10 +137,6 @@ export default function AddonsTab({
   const [itemError, setItemError] = useState<string | null>(null);
   const [draggingAddonId, setDraggingAddonId] = useState<string | null>(null);
   const orderedAddons = orderAddons(addons);
-  const categories = [
-    ...FILTER_CATEGORIES,
-    ...(addons.some((addon) => addon.category === "other") ? ["other"] : []),
-  ];
   const query = search.trim().toLocaleLowerCase();
   const filteredAddons = orderedAddons.filter(
     (addon) =>
@@ -292,14 +289,12 @@ export default function AddonsTab({
               })
         }
         actions={
-          <button
+          <PrimaryActionButton
             onClick={openCreateEditor}
             disabled={addonLimitReached || currencyMissing}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-primary-600 px-4 py-2 text-[13px] font-medium text-white hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            <PlusIcon className="h-4 w-4" />
             {t("addons.list.new")}
-          </button>
+          </PrimaryActionButton>
         }
       />
       {banner}
@@ -371,7 +366,8 @@ export default function AddonsTab({
           >
             {t("addons.list.all")}
           </button>
-          {categories.map((category) => (
+          {/* Every category the editor offers can be filtered to, "Other" included (VAY-2230). */}
+          {ADDON_CATEGORIES.map((category) => (
             <button
               key={category}
               type="button"
@@ -404,6 +400,7 @@ export default function AddonsTab({
           {filteredAddons.map((addon) => {
             const photoCount = addon.photos?.length ?? (addon.image ? 1 : 0);
             const live = addon.live !== false;
+            const notice = addonLeadTimeNoticeKey(addon.leadTimeHours);
             return (
               <li
                 key={addon.id}
@@ -495,7 +492,8 @@ export default function AddonsTab({
                         <li>{t("addons.list.maxPerBooking", { count: addon.maxQuantity })}</li>
                       )}
                       {addon.duration && <li>{addon.duration}</li>}
-                      {addon.leadTime && <li>{addon.leadTime}</li>}
+                      {/* Text typed before VAY-2232 shows as it is until it is converted. */}
+                      {notice ? <li>{t(notice)}</li> : addon.leadTime && <li>{addon.leadTime}</li>}
                       {addon.ownershipKind === "partner" && (
                         <li>
                           {t("admin.partnerRate", { rate: addon.partnerCommissionRate ?? "" })}

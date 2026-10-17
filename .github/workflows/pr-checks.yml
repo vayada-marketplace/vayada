@@ -495,6 +495,7 @@ jobs:
   #   pricing     - pricing on the ordinary login in its own database (split from pms, VAY-2238)
   #   hotel-setup - hotel setup on the ordinary API login, shared setup profile, logo media and
   #                 nearby places
+  # platform and hotel-setup also run the release precheck's isolated database blocks (VAY-2245).
   # Steps without a `matrix.shard` condition run in every shard.
   api_postgres:
     name: TypeScript API PostgreSQL Integration (PG${{ matrix.postgres }}, ${{ matrix.shard }})
@@ -836,6 +837,7 @@ jobs:
           src/domains/pmsRoomFactsCommandRepository.integration.test.ts
           src/domains/pmsRoomOperatingEligibility.integration.test.ts
           src/domains/pmsCalendarClosure.integration.test.ts
+          src/domains/pmsRoomTypeDelete.integration.test.ts
           src/domains/pmsPhysicalRoomUnitReconcileRepository.integration.test.ts
           src/domains/pmsPhysicalRoomManagementRepository.integration.test.ts
           src/domains/pmsRoomPublicationCommandRepository.integration.test.ts
@@ -897,6 +899,7 @@ jobs:
           src/financePaymentSettingsOrdinary.integration.test.ts
           src/domains/financePaymentWriters.integration.test.ts
           src/bookingAddonCurrencyOrdinary.integration.test.ts
+          src/bookingAddonLeadTimeOrdinary.integration.test.ts
           src/platform/postgresRuntime.integration.test.ts
           src/platform/workosWebhooks.integration.test.ts
         env:
@@ -941,7 +944,8 @@ jobs:
             src/domains/pricingInventoryAdoption.postgres.test.ts \
             src/domains/pricingRevenueClear.postgres.test.ts \
             src/domains/bookingHostActionLocks.postgres.test.ts \
-            src/domains/bookingHostActions.integration.test.ts
+            src/domains/bookingHostActions.integration.test.ts \
+            src/domains/replacementAddons.integration.test.ts
           npm --workspace @vayada/backend-migration run test -- \
             src/bookingPricingAuthorityDrop.integration.test.ts \
             src/bookingPricingAcceptanceAmendments.integration.test.ts
@@ -978,6 +982,15 @@ jobs:
         run: >-
           npm --workspace @vayada/backend-migration run test --
           src/hotelSetupNativeRetirementMigration.integration.test.ts
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+
+      # Runs 0482 again inside a rolled-back transaction on the migrated shared database.
+      - name: Verify the complete-hotel activation backfill
+        if: matrix.shard == 'hotel-setup'
+        run: >-
+          npm --workspace @vayada/backend-migration run test -- --no-file-parallelism
+          src/hotelCatalogActivateCompleteHotels.integration.test.ts
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
@@ -1057,6 +1070,8 @@ jobs:
           src/stripeWebhookReceiptRetention.integration.test.ts
           src/bookingWebEventsMigration.integration.test.ts
           src/bookingWebEventsLogBlanking.integration.test.ts
+          src/bookingLookupAttemptLogBlanking.integration.test.ts
+          src/bookingAddonLeadTimeMigration.integration.test.ts
           src/productionMediaMigration.integration.test.ts
           src/productionCatalogWriters.integration.test.ts
           src/productionBookingWriters.integration.test.ts
@@ -1116,6 +1131,166 @@ jobs:
         run: >-
           npm --workspace vayada-api run test -- --no-file-parallelism
           src/pricingReset.test.ts src/integrations/channexManagementPlans.test.ts
+
+      # The release precheck's isolated blocks (VAY-2245). A workflow_dispatch of this workflow is
+      # the release precheck, so each block runs as it did there: its own new database, migrated,
+      # with TEST_DATABASE_URL and TARGET_DATABASE_URL on it and nothing else run in it. Some of
+      # these suites also run in a shard's shared database above; both ways must pass. They sit
+      # at the end of the shorter platform and hotel-setup shards, not in pms.
+      - name: Verify PMS dashboard role access in an isolated database
+        if: matrix.shard == 'platform'
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vayada_role_test
+          TARGET_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vayada_role_test
+        run: |
+          node --input-type=module -e '
+            import pg from "pg";
+            const url = new URL(process.env.TEST_DATABASE_URL); url.pathname = "/postgres";
+            const client = new pg.Client({ connectionString: url.href }); await client.connect();
+            await client.query("CREATE DATABASE vayada_role_test"); await client.end();
+          '
+          npm --workspace @vayada/backend-migration run target:migrate -- --env local
+          npm --workspace vayada-api run test -- --no-file-parallelism src/pmsDashboardRoleAccess.integration.test.ts
+
+      - name: Verify payment settings and add-on currency in an isolated database
+        if: matrix.shard == 'platform'
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vayada_pay_settings_test
+          TARGET_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vayada_pay_settings_test
+        run: |
+          node --input-type=module -e '
+            import pg from "pg";
+            const url = new URL(process.env.TEST_DATABASE_URL); url.pathname = "/postgres";
+            const client = new pg.Client({ connectionString: url.href }); await client.connect();
+            await client.query("CREATE DATABASE vayada_pay_settings_test"); await client.end();
+          '
+          npm --workspace @vayada/backend-migration run target:migrate -- --env local
+          npm --workspace vayada-api run test -- --no-file-parallelism src/financePaymentSettingsOrdinary.integration.test.ts src/bookingAddonCurrencyOrdinary.integration.test.ts
+
+      - name: Verify PMS confirmation emails in an isolated database
+        if: matrix.shard == 'platform'
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vayada_conf_emails_test
+          TARGET_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vayada_conf_emails_test
+        run: |
+          node --input-type=module -e '
+            import pg from "pg";
+            const url = new URL(process.env.TEST_DATABASE_URL); url.pathname = "/postgres";
+            const client = new pg.Client({ connectionString: url.href }); await client.connect();
+            await client.query("CREATE DATABASE vayada_conf_emails_test"); await client.end();
+          '
+          npm --workspace @vayada/backend-migration run target:migrate -- --env local
+          npm --workspace vayada-api run test -- --no-file-parallelism src/domains/pmsConfirmationEmails.integration.test.ts
+
+      - name: Verify the billing plan in an isolated database
+        if: matrix.shard == 'platform'
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vayada_fin_plan_test
+          TARGET_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vayada_fin_plan_test
+        run: |
+          node --input-type=module -e '
+            import pg from "pg";
+            const url = new URL(process.env.TEST_DATABASE_URL); url.pathname = "/postgres";
+            const client = new pg.Client({ connectionString: url.href }); await client.connect();
+            await client.query("CREATE DATABASE vayada_fin_plan_test"); await client.end();
+          '
+          npm --workspace @vayada/backend-migration run target:migrate -- --env local
+          npm --workspace vayada-api run test -- --no-file-parallelism src/financeBillingPlanOrdinary.integration.test.ts src/financeBillingPlanParity.integration.test.ts
+
+      - name: Verify Finance payment writers and subscriptions in an isolated database
+        if: matrix.shard == 'platform'
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vayada_fin_writers_test
+          TARGET_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vayada_fin_writers_test
+        run: |
+          node --input-type=module -e '
+            import pg from "pg";
+            const url = new URL(process.env.TEST_DATABASE_URL); url.pathname = "/postgres";
+            const client = new pg.Client({ connectionString: url.href }); await client.connect();
+            await client.query("CREATE DATABASE vayada_fin_writers_test"); await client.end();
+          '
+          npm --workspace @vayada/backend-migration run target:migrate -- --env local
+          npm --workspace vayada-api run test -- --no-file-parallelism src/domains/financePaymentWriters.integration.test.ts src/jobs/financeSubscriptions.integration.test.ts
+
+      - name: Verify public booking pages in an isolated database
+        if: matrix.shard == 'hotel-setup'
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vayada_public_profile_test
+          TARGET_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vayada_public_profile_test
+        run: |
+          node --input-type=module -e '
+            import pg from "pg";
+            const url = new URL(process.env.TEST_DATABASE_URL); url.pathname = "/postgres";
+            const client = new pg.Client({ connectionString: url.href }); await client.connect();
+            await client.query("CREATE DATABASE vayada_public_profile_test"); await client.end();
+          '
+          npm --workspace @vayada/backend-migration run target:migrate -- --env local
+          npm --workspace vayada-api run test -- --no-file-parallelism src/activeBookingPublicationProfile.integration.test.ts
+
+      - name: Verify Feature Hub modules, promo codes, add-ons and mixed inventory in an isolated database
+        if: matrix.shard == 'hotel-setup'
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vayada_feature_hub_test
+          TARGET_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vayada_feature_hub_test
+        run: |
+          node --input-type=module -e '
+            import pg from "pg";
+            const url = new URL(process.env.TEST_DATABASE_URL); url.pathname = "/postgres";
+            const client = new pg.Client({ connectionString: url.href }); await client.connect();
+            await client.query("CREATE DATABASE vayada_feature_hub_test"); await client.end();
+          '
+          npm --workspace @vayada/backend-migration run target:migrate -- --env local
+          npm --workspace vayada-api run test -- --no-file-parallelism \
+            src/pmsBookingModules.integration.test.ts \
+            src/domains/replacementPromoCode.integration.test.ts \
+            src/domains/replacementAddons.integration.test.ts \
+            src/domains/pmsInventoryBundle.integration.test.ts \
+            src/platform/bookingFunnel.integration.test.ts
+
+      - name: Verify Booking publication commands in an isolated database
+        if: matrix.shard == 'hotel-setup'
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vayada_pub_cmd_test
+          TARGET_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vayada_pub_cmd_test
+        run: |
+          node --input-type=module -e '
+            import pg from "pg";
+            const url = new URL(process.env.TEST_DATABASE_URL); url.pathname = "/postgres";
+            const client = new pg.Client({ connectionString: url.href }); await client.connect();
+            await client.query("CREATE DATABASE vayada_pub_cmd_test"); await client.end();
+          '
+          npm --workspace @vayada/backend-migration run target:migrate -- --env local
+          npm --workspace vayada-api run test -- --no-file-parallelism src/domains/bookingPublicationCommandRepository.integration.test.ts
+
+      - name: Verify guest terms in an isolated database
+        if: matrix.shard == 'hotel-setup'
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vayada_guest_terms_test
+          TARGET_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vayada_guest_terms_test
+        run: |
+          node --input-type=module -e '
+            import pg from "pg";
+            const url = new URL(process.env.TEST_DATABASE_URL); url.pathname = "/postgres";
+            const client = new pg.Client({ connectionString: url.href }); await client.connect();
+            await client.query("CREATE DATABASE vayada_guest_terms_test"); await client.end();
+          '
+          npm --workspace @vayada/backend-migration run target:migrate -- --env local
+          npm --workspace vayada-api run test -- --no-file-parallelism src/domains/bookingGuestTermsStore.integration.test.ts
+
+      - name: Verify Marketplace hotel approval in an isolated database
+        if: matrix.shard == 'hotel-setup'
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vayada_mkt_approval_test
+          TARGET_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vayada_mkt_approval_test
+        run: |
+          node --input-type=module -e '
+            import pg from "pg";
+            const url = new URL(process.env.TEST_DATABASE_URL); url.pathname = "/postgres";
+            const client = new pg.Client({ connectionString: url.href }); await client.connect();
+            await client.query("CREATE DATABASE vayada_mkt_approval_test"); await client.end();
+          '
+          npm --workspace @vayada/backend-migration run target:migrate -- --env local
+          npm --workspace vayada-api run test -- --no-file-parallelism src/domains/marketplaceHotelSubmissionModerationRepository.integration.test.ts src/marketplaceHotelSubmissionApproval.integration.test.ts
 
   setup_draft_reset_postgres:
     name: Setup Draft Reset PostgreSQL ${{ matrix.postgres }} Integration

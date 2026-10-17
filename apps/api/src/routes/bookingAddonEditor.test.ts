@@ -58,11 +58,21 @@ describe("add-on editor payload", () => {
     { maxGuests: -1 },
     { price: "" },
     { pricingModel: "flat" },
+    // VAY-2232: only the editor's fixed choices.
+    { leadTimeHours: 10 },
+    { leadTimeHours: 0 },
+    { leadTimeHours: "24" },
+    { leadTimeHours: 24.5 },
     { photos: [{ imageUrl: "https://arbitrary.test/image", isCover: true }] },
   ])("rejects invalid editor values before persistence: %j", async (invalid) => {
     const { response, create } = await request({ ...body, ...invalid });
     expect(response.statusCode).toBe(422);
     expect(create).not.toHaveBeenCalled();
+  });
+  it.each([12, 24, 48, 72, 168, null])("accepts the lead time choice %j", async (hours) => {
+    const { response, create } = await request({ ...body, leadTimeHours: hours });
+    expect(response.statusCode).toBe(201);
+    expect(create.mock.calls[0][1]).toMatchObject({ leadTimeHours: hours });
   });
   it("allows removing the complete gallery", async () => {
     expect((await request({ ...body, photos: [] })).response.statusCode).toBe(201);

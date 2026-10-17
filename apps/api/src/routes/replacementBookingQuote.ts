@@ -122,6 +122,11 @@ export function createReplacementBookingQuoteIssuer(
           httpError(422, "This payment method isn't available this close to check-in."),
           { code: "MANUAL_PAYMENT_TOO_SOON" },
         );
+      // VAY-2232: an extra needs more notice than this stay gives.
+      if (error.code === "denied" && error.reason === "addon_lead_time")
+        throw Object.assign(httpError(422, "An extra needs more notice than this stay gives."), {
+          code: "ADDON_NEEDS_NOTICE",
+        });
       if (error.code === "idempotency_conflict")
         throw httpError(409, "Quote request changed. Use a new Idempotency-Key.");
       if (error.code === "stale")

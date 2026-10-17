@@ -938,6 +938,13 @@ export type PmsRoomTypeRetireCommandResult =
       code: "idempotency_conflict" | "version_conflict" | "room_type_retirement_blocked";
       message: string;
       impact?: PmsRoomTypeRetirementImpact;
+    }
+  | {
+      // A Delete that does the cleanup is for the property's owner or operator (VAY-2132).
+      ok: false;
+      statusCode: 403;
+      code: "room_type_delete_not_allowed";
+      message: string;
     };
 
 export type PmsRoomBlockCommandResult =
@@ -4650,7 +4657,12 @@ function sendPmsRoomTypeRetireCommandError(
   return reply.status(result.statusCode).send({
     statusCode: result.statusCode,
     code: result.code,
-    category: result.statusCode === 404 ? "not_found" : "conflict",
+    category:
+      result.statusCode === 404
+        ? "not_found"
+        : result.statusCode === 403
+          ? "authorization"
+          : "conflict",
     message: result.message,
     ...("impact" in result && result.impact ? { impact: result.impact } : {}),
   });

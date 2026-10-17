@@ -31,10 +31,10 @@ export default function DomainNotConfigured({ hostname }: { hostname?: string })
           {hostname ? (
             <>
               <span className="font-mono">{hostname}</span> isn&apos;t connected to a property on
-              Vayada yet.
+              vayada yet.
             </>
           ) : (
-            <>This domain isn&apos;t connected to a property on Vayada yet.</>
+            <>This domain isn&apos;t connected to a property on vayada yet.</>
           )}
         </p>
         <p className="text-sm text-gray-600 mt-3">

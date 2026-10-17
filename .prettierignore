@@ -20,6 +20,8 @@ infra/.terraform/**
 
 # Tests / coverage
 coverage
+# Written by scripts/ci/cloudflare-beacon-drift.mjs (--record and the prepared pull request)
+scripts/ci/cloudflare-beacon-reviewed.json
 
 # Python (formatted by Ruff)
 **/*.py

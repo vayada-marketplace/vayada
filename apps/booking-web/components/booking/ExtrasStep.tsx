@@ -9,6 +9,7 @@ import type {
 import type { PricingAddon } from "@/services/api/replacementAddons";
 import type { ExtraDisplay } from "@/services/api/bookingPagePaymentMethods";
 import {
+  addonNeedsNotice,
   addonPerNight,
   addonPerPerson,
   replacementExtraDates,
@@ -72,6 +73,7 @@ export default function ExtrasStep({
   priceFailed = false,
   formatMoney,
   formatDay,
+  formatNotice,
   showCategories = true,
 }: {
   catalogue: PricingAddon[];
@@ -85,6 +87,8 @@ export default function ExtrasStep({
   priceFailed?: boolean;
   formatMoney: (minor: string, currency: string) => string;
   formatDay: (date: string) => { weekday: string; day: string };
+  /** "Needs 24 hours’ notice", in the page's language. */
+  formatNotice: (hours: number) => string;
   /** The hotel's "group add-ons by category" setting. */
   showCategories?: boolean;
 }) {
@@ -155,6 +159,7 @@ export default function ExtrasStep({
             const facts = display[addon.id];
             const item = items.find((current) => current.id === addon.id);
             const fits = extraFitsParty(addon, selection);
+            const tooSoon = addonNeedsNotice(addon, selection.checkIn);
             const limit = extraCountLimit(addon, selection);
             const count = item ? extraCount(addon, item) : 0;
             const days = replacementExtraDates(selection, addonPerNight(addon));
@@ -237,8 +242,9 @@ export default function ExtrasStep({
                     ) : (
                       <button
                         type="button"
-                        disabled={!fits || items.length >= 99}
+                        disabled={!fits || tooSoon || items.length >= 99}
                         aria-label={`Add ${addon.name}`}
+                        aria-describedby={tooSoon ? `extra-notice-${addon.id}` : undefined}
                         onClick={() => set([...items, newExtraItem(addon, selection)])}
                         className="px-5 py-1.5 rounded-full text-sm font-semibold border-2 transition-colors bg-white text-gray-700 border-gray-300 hover:border-gray-400 disabled:opacity-40"
                       >
@@ -249,6 +255,11 @@ export default function ExtrasStep({
                   {!fits && (
                     <p className="mt-2 text-xs text-gray-500">
                       For groups of up to {addon.maxGuests} guests.
+                    </p>
+                  )}
+                  {tooSoon && addon.leadTimeHours !== null && (
+                    <p id={`extra-notice-${addon.id}`} className="mt-2 text-xs text-gray-500">
+                      {formatNotice(addon.leadTimeHours)}
                     </p>
                   )}
                   {item && (

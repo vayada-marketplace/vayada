@@ -35,6 +35,8 @@ const addon = (pricingModel: PricingAddon["pricingModel"], more: Partial<Pricing
     pricingModel,
     maxQuantity: 3,
     maxGuests: null,
+    leadTimeHours: null,
+    bookableFrom: null,
     ...more,
   }) as PricingAddon;
 

@@ -11,8 +11,12 @@ remain authoritative. The four toggle combinations already map to `per_stay`,
 pricing conversion. This change does not touch legacy databases or APIs.
 
 The existing metadata object gains `photos` (ordered, maximum five, exactly one
-cover unless empty), `location`, `leadTime` (descriptive text), `maxGuests`
-(optional positive integer), and `maxQuantity` (positive integer, default one).
+cover unless empty), `location`, `leadTimeHours` (VAY-2232: null, 12, 24, 48, 72
+or 168), `maxGuests` (optional positive integer), and `maxQuantity` (positive
+integer, default one). Saving `leadTimeHours` removes the free-text `leadTime`
+older editors wrote; the API returns that text only while no choice is saved.
+Text an older editor still writes replaces a saved choice, so that add-on stays off
+the booking page until a choice is saved again.
 The single `imageUrl`/`mediaObjectId` fields mirror the cover for compatibility.
 Existing single images are projected as a one-photo gallery on read, so no
 schema or destructive data migration is needed. Existing highlights and included
@@ -33,8 +37,11 @@ all adults; dates default to the stay and may be selected individually. A EUR 15
 per-person-per-night breakfast for two adults and four nights costs EUR 120.
 An optional `addonPackageQuantities` map carries package counts independently
 of guests and dates through the quote and booking request. Max quantity limits
-packages for all four models; existing requests default to one package. Lead time is descriptive copy,
-not an availability cutoff rule.
+packages for all four models; existing requests default to one package. Lead time is a cutoff
+(VAY-2232): guests can add the add-on only when check-in, at the hotel's check-in time in the
+property's time zone, is at least that many hours away (the VAY-2145 bank-transfer rule). The
+pricing-addons catalog names each add-on's first allowed check-in date (`bookableFrom`); the quote
+and its acceptance check the rule against the database clock. Unconverted free text stays hidden.
 
 The shared AddonEditor is used by Booking Flow settings. The unused onboarding
 AddonsStep was deleted in VAY-2174; restoring an onboarding navigation step is a
