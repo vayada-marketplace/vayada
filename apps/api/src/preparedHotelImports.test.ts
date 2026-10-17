@@ -8,7 +8,7 @@ import type { PmsRoomFactsRoutesOptions } from "./routes/pmsRoomFacts.js";
 import {
   parseHotelAccountInviteCreateRequest,
   storedHotelAccountInviteTracks,
-} from "./routes/marketplaceAdmin.js";
+} from "./routes/hotelAccountInviteCodes.js";
 const room = {
   id: "suite",
   name: "Suite",
@@ -97,7 +97,7 @@ async function fixture(
         status: "active",
         permissions: overrides.permissions ?? [
           "hotel_catalog.setup.manage",
-          "marketplace.profile.manage",
+          "booking.settings.manage",
           "pms.operations.manage",
         ],
       },
@@ -252,7 +252,7 @@ describe("prepared import routes", () => {
     expect((await f.post()).statusCode).toBe(403);
     expect(f.apply).not.toHaveBeenCalled();
   });
-  it("allows marketplace hotel fields without PMS access", async () => {
+  it("allows hotel profile fields without PMS access", async () => {
     const f = await fixture({ pms: false });
     expect(
       (await f.post({ ...data, rooms: [] }))

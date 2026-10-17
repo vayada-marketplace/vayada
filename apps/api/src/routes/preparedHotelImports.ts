@@ -291,10 +291,7 @@ export function mergeImportProperty(
 }
 
 function profileAccess(context: RequestContext) {
-  return (
-    hasPermission(context, "marketplace.profile.manage") ||
-    hasPermission(context, "booking.settings.manage")
-  );
+  return hasPermission(context, "booking.settings.manage");
 }
 function roomAccess(context: RequestContext, propertyId: string) {
   const resource = {

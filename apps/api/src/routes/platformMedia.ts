@@ -8,10 +8,6 @@ import {
   type ResourceType,
 } from "@vayada/backend-auth";
 import {
-  MARKETPLACE_COLLABORATION_CREATOR_WRITE_POLICY,
-  MARKETPLACE_COLLABORATION_HOTEL_WRITE_POLICY,
-} from "@vayada/domain-marketplace";
-import {
   PROPERTY_MEDIA_AUTHORIZATION,
   PROPERTY_MEDIA_PUBLIC_VARIANTS,
   PROPERTY_MEDIA_UPLOAD_PURPOSES,
@@ -40,9 +36,6 @@ export type PlatformMediaPurpose =
   | "property.hero_image"
   | "property.gallery_image"
   | "property.logo"
-  | "marketplace.offer.media"
-  | "marketplace.creator.profile_image"
-  | "marketplace.collaboration_chat.attachment"
   | "pms.room_type.media"
   | "pms.messaging.attachment"
   | "pms.import.source_image"
@@ -351,7 +344,7 @@ export type ApprovedPublicProfileImageRepository = {
 };
 
 export type ApprovedPublicProfileImageTarget = {
-  purpose: "identity.user.profile_image" | "marketplace.creator.profile_image";
+  purpose: "identity.user.profile_image";
   resourceProduct: PlatformMediaResourceProduct;
   resourceType: string;
   resourceId: string;
@@ -524,18 +517,13 @@ const heicConversionMessage =
 const publicImageVariants = ["original_safe", "large", "thumbnail", "blur_preview"] as const;
 const providerOriginalVariant = ["provider_original"] as const;
 const defaultMaxImagePixels = 60_000_000;
-const platformAdminMediaPurposes = new Set<PlatformMediaPurpose>([
-  "property.hero_image",
-  "marketplace.offer.media",
-  "marketplace.creator.profile_image",
-]);
+const platformAdminMediaPurposes = new Set<PlatformMediaPurpose>(["property.hero_image"]);
 
 export function isAutoApprovedPublicMediaPurpose(purpose: PlatformMediaPurpose): boolean {
   return (
     purpose === "identity.user.profile_image" ||
     purpose === "booking.header_logo" ||
     purpose === "booking.addon.image" ||
-    purpose === "marketplace.creator.profile_image" ||
     purpose === "pms.room_type.media"
   );
 }
@@ -648,57 +636,6 @@ const targetPurposePolicies: Record<PlatformMediaPurpose, PlatformMediaPurposePo
     targetResourceProduct: "hotel_catalog",
     targetResourceType: "property",
     requiredVariants: publicImageVariants,
-  },
-  "marketplace.offer.media": {
-    purpose: "marketplace.offer.media",
-    permission: "marketplace.profile.manage",
-    allowedRelationships: ["owner", "operator"],
-    allowedResources: [{ product: "marketplace", resourceType: "marketplace_offer" }],
-    allowedContentTypes: imageContentTypes,
-    allowedExtensions: imageExtensions,
-    maxFileSizeBytes: 10 * 1024 * 1024,
-    maxFileCount: 12,
-    maxImagePixels: defaultMaxImagePixels,
-    privateOnly: false,
-    targetResourceProduct: "marketplace",
-    targetResourceType: "marketplace_offer",
-    requiredVariants: publicImageVariants,
-  },
-  "marketplace.creator.profile_image": {
-    purpose: "marketplace.creator.profile_image",
-    permission: "marketplace.profile.manage",
-    allowedRelationships: ["owner"],
-    allowedResources: [{ product: "marketplace", resourceType: "creator_profile" }],
-    allowedContentTypes: imageContentTypes,
-    allowedExtensions: imageExtensions,
-    maxFileSizeBytes: 5 * 1024 * 1024,
-    maxFileCount: 1,
-    maxImagePixels: defaultMaxImagePixels,
-    autoApprovePublicOnFinalize: isAutoApprovedPublicMediaPurpose(
-      "marketplace.creator.profile_image",
-    ),
-    privateOnly: false,
-    targetResourceProduct: "marketplace",
-    targetResourceType: "creator_profile",
-    requiredVariants: publicImageVariants,
-  },
-  "marketplace.collaboration_chat.attachment": {
-    purpose: "marketplace.collaboration_chat.attachment",
-    permission: "marketplace.collaboration.write",
-    allowedRelationships: ["owner", "operator"],
-    allowedResources: [
-      { product: "marketplace", resourceType: "marketplace_offer" },
-      { product: "marketplace", resourceType: "creator_profile" },
-    ],
-    allowedContentTypes: ["image/jpeg", "image/png", "image/webp", "image/gif"],
-    allowedExtensions: [".jpg", ".jpeg", ".png", ".webp", ".gif"],
-    maxFileSizeBytes: 20 * 1024 * 1024,
-    maxFileCount: 1,
-    maxImagePixels: defaultMaxImagePixels,
-    privateOnly: true,
-    targetResourceProduct: "marketplace",
-    targetResourceType: "collaboration",
-    requiredVariants: providerOriginalVariant,
   },
   "pms.room_type.media": {
     purpose: "pms.room_type.media",
@@ -1862,10 +1799,7 @@ export function createInMemoryPlatformMediaRepository(): PlatformMediaRepository
             : input.session.requestedVisibility === "public"
               ? "pending_domain_approval"
               : "private",
-          lifecycleStatus:
-            autoApproved || input.session.purpose === "marketplace.collaboration_chat.attachment"
-              ? "active"
-              : "staged",
+          lifecycleStatus: autoApproved ? "active" : "staged",
           storageKind: "vayada_managed",
           bucket: input.bucketName,
           storageKey: canonicalVariant.storageKey,
@@ -1882,7 +1816,6 @@ export function createInMemoryPlatformMediaRepository(): PlatformMediaRepository
           heightPx: canonicalVariant.heightPx,
           originalFilename: sessionFile.filename,
           retainedUntil:
-            input.session.purpose === "marketplace.collaboration_chat.attachment" ||
             input.session.purpose === "finance.expense.receipt" ||
             input.session.purpose === "pms.messaging.attachment"
               ? new Date(Date.parse(input.now) + 60 * 60 * 1000).toISOString()
@@ -2118,70 +2051,18 @@ function authorizeMediaResource(
     }
     return { ok: true, context };
   }
-  if (policy.purpose !== "marketplace.collaboration_chat.attachment") {
-    return {
-      ok: true,
-      context: enforceRoutePolicy(request, {
-        permission: permissionForResource(policy),
-        resource: {
-          product: resource.product,
-          resourceType: resource.resourceType,
-          resourceId: resource.resourceId,
-          allowedRelationships: policy.allowedRelationships,
-        },
-      }),
-    };
-  }
-
-  const context = enforceRoutePolicy(request, {
-    permission: permissionForResource(policy),
-  });
-  const collaborationPolicy =
-    context.selectedOrganization.kind === "creator_workspace"
-      ? MARKETPLACE_COLLABORATION_CREATOR_WRITE_POLICY
-      : context.selectedOrganization.kind === "hotel_group"
-        ? MARKETPLACE_COLLABORATION_HOTEL_WRITE_POLICY
-        : null;
-  if (!collaborationPolicy) {
-    return { ok: false, message: "Selected organization cannot write marketplace chat." };
-  }
-
-  const expectedSource =
-    collaborationPolicy.side === "creator"
-      ? { resourceType: "creator_profile", relationship: "owner" }
-      : { resourceType: "marketplace_offer", relationship: "operator" };
-  const activeLinks = context.linkedResources.filter(
-    (linked) => linked.status === "active" && linked.product === "marketplace",
-  );
-  const sourceIsExact = activeLinks.some(
-    (linked) =>
-      resource.product === "marketplace" &&
-      resource.resourceType === expectedSource.resourceType &&
-      linked.resourceType === expectedSource.resourceType &&
-      linked.resourceId === resource.resourceId &&
-      linked.relationship === expectedSource.relationship,
-  );
-  const hasRequiredLinks = collaborationPolicy.requiredResources.every((required) =>
-    activeLinks.some(
-      (linked) =>
-        linked.resourceType === required.resourceType &&
-        linked.relationship === required.relationship,
-    ),
-  );
-  const creatorProfileLinks = activeLinks.filter(
-    (linked) => linked.resourceType === "creator_profile" && linked.relationship === "owner",
-  );
-  if (
-    !sourceIsExact ||
-    !hasRequiredLinks ||
-    (collaborationPolicy.side === "creator" && creatorProfileLinks.length !== 1)
-  ) {
-    return {
-      ok: false,
-      message: "Chat attachment source does not satisfy collaboration write access.",
-    };
-  }
-  return { ok: true, context };
+  return {
+    ok: true,
+    context: enforceRoutePolicy(request, {
+      permission: permissionForResource(policy),
+      resource: {
+        product: resource.product,
+        resourceType: resource.resourceType,
+        resourceId: resource.resourceId,
+        allowedRelationships: policy.allowedRelationships,
+      },
+    }),
+  };
 }
 
 function permissionForResource(policy: PlatformMediaPurposePolicy): PermissionKey {
@@ -2363,9 +2244,7 @@ function isHeicOrHeif(filename: string, contentType: string): boolean {
 }
 
 function isProfileImagePurpose(purpose: PlatformMediaPurpose): boolean {
-  return (
-    purpose === "identity.user.profile_image" || purpose === "marketplace.creator.profile_image"
-  );
+  return purpose === "identity.user.profile_image";
 }
 
 function normalizeUploadContentType(filename: string, contentType: string): string {

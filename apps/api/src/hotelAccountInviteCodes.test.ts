@@ -12,20 +12,14 @@ import { afterEach, describe, expect, it } from "vitest";
 import { buildApp } from "./app.js";
 import { agencyPropertyAccessRepository } from "./testAuthorization.js";
 import {
-  createPgMarketplaceAdminRepository,
-  mapOfferRow,
-  syncPropertyOfferReadModels,
-  validateMergedOfferUpdate,
+  createPgHotelAccountInviteCodeRepository,
   storedHotelAccountInviteTracks,
-} from "./routes/marketplaceAdmin.js";
+} from "./routes/hotelAccountInviteCodes.js";
 import type {
-  MarketplaceAdminCreateOfferRequest,
-  MarketplaceAdminHotelAccountInviteCreateRequest,
-  MarketplaceAdminOffer,
-  MarketplaceAdminInviteCode,
-  MarketplaceAdminRepository,
-  OfferRow,
-} from "./routes/marketplaceAdmin.js";
+  HotelAccountInviteCreateRequest,
+  HotelAccountInviteCode,
+  HotelAccountInviteCodeRepository,
+} from "./routes/hotelAccountInviteCodes.js";
 
 const platformSession: VerifiedSession = {
   workosUserId: "user_workos_platform",
@@ -41,36 +35,16 @@ const nonPlatformSession: VerifiedSession = {
   expiresAt: Math.floor(Date.now() / 1000) + 3600,
 };
 
-describe("marketplace admin routes", () => {
+describe("hotel account invite code routes", () => {
   let app: ReturnType<typeof buildApp> | undefined;
 
   afterEach(async () => {
     await app?.close();
   });
 
-  it("uses documented legacy superadmin fallback only when explicitly enabled", async () => {
-    const repository = createMemoryMarketplaceAdminRepository({
-      legacySuperadminUserIds: ["user_creator"],
-    });
-    app = buildMarketplaceAdminApp(repository, {
-      marketplaceAdminLegacySuperadminFallbackEnabled: true,
-    });
-
-    const response = await injectJson<MarketplaceAdminInviteCode[]>(app, {
-      method: "GET",
-      url: "/api/marketplace/admin/invite-codes",
-      headers: { authorization: "Bearer creator-token" },
-    });
-
-    expect(response.statusCode).toBe(200);
-    expect(response.body[0]).toMatchObject({ code: "VAY-INVITE" });
-  });
-
-  it("rejects authenticated users without platform membership or superadmin fallback", async () => {
-    const repository = createMemoryMarketplaceAdminRepository({
-      legacySuperadminUserIds: ["user_creator"],
-    });
-    app = buildMarketplaceAdminApp(repository);
+  it("rejects authenticated users without platform membership", async () => {
+    const repository = createMemoryHotelAccountInviteCodeRepository();
+    app = buildInviteCodeApp(repository);
 
     const response = await injectJson(app, {
       method: "GET",
@@ -81,11 +55,11 @@ describe("marketplace admin routes", () => {
     expect(response.statusCode).toBe(403);
   });
 
-  it("manages invite codes through marketplace admin target routes", async () => {
-    const repository = createMemoryMarketplaceAdminRepository();
-    app = buildMarketplaceAdminApp(repository);
+  it("manages invite codes through the platform admin routes", async () => {
+    const repository = createMemoryHotelAccountInviteCodeRepository();
+    app = buildInviteCodeApp(repository);
 
-    const list = await injectJson<MarketplaceAdminInviteCode[]>(app, {
+    const list = await injectJson<HotelAccountInviteCode[]>(app, {
       method: "GET",
       url: "/api/marketplace/admin/invite-codes",
       headers: { authorization: "Bearer platform-token" },
@@ -100,12 +74,12 @@ describe("marketplace admin routes", () => {
 
     const routeCases: Array<{
       label: string;
-      selectedTracks: MarketplaceAdminHotelAccountInviteCreateRequest["selectedTracks"];
+      selectedTracks: HotelAccountInviteCreateRequest["selectedTracks"];
     }> = [{ label: "Hotel Operations", selectedTracks: ["hotel_operations"] }];
 
     for (const routeCase of routeCases) {
       const payload = hotelInviteRequest(routeCase.selectedTracks);
-      const created = await injectJson<MarketplaceAdminInviteCode>(app, {
+      const created = await injectJson<HotelAccountInviteCode>(app, {
         method: "POST",
         url: "/api/marketplace/admin/invite-codes",
         headers: { authorization: "Bearer platform-token" },
@@ -144,8 +118,8 @@ describe("marketplace admin routes", () => {
   });
 
   it("rejects retired setup payloads and invalid setup tracks", async () => {
-    const repository = createMemoryMarketplaceAdminRepository();
-    app = buildMarketplaceAdminApp(repository);
+    const repository = createMemoryHotelAccountInviteCodeRepository();
+    app = buildInviteCodeApp(repository);
 
     const retiredPayload = await injectJson(app, {
       method: "POST",
@@ -199,8 +173,8 @@ describe("marketplace admin routes", () => {
   });
 
   it("requires platform authorization before creating a hotel invite", async () => {
-    const repository = createMemoryMarketplaceAdminRepository();
-    app = buildMarketplaceAdminApp(repository);
+    const repository = createMemoryHotelAccountInviteCodeRepository();
+    app = buildInviteCodeApp(repository);
     const payload = hotelInviteRequest(["hotel_operations"]);
 
     const unauthenticated = await injectJson(app, {
@@ -222,7 +196,7 @@ describe("marketplace admin routes", () => {
 
   it("scopes invite list and revoke queries to the hotel account contract", async () => {
     const sql: string[] = [];
-    const repository = createPgMarketplaceAdminRepository({
+    const repository = createPgHotelAccountInviteCodeRepository({
       connectionString: "postgresql://target-db",
       pool: createAdminPgPool(sql, { revokeInviteExists: true }) as never,
     });
@@ -248,7 +222,7 @@ describe("marketplace admin routes", () => {
 
   it("refuses revocation after canonical invite intent commits but before finalization recovers", async () => {
     const sql: string[] = [];
-    const repository = createPgMarketplaceAdminRepository({
+    const repository = createPgHotelAccountInviteCodeRepository({
       connectionString: "postgresql://target-db",
       pool: createAdminPgPool(sql, {
         revokeInviteExists: true,
@@ -261,133 +235,6 @@ describe("marketplace admin routes", () => {
     expect(sql.some((statement) => statement.includes("FOR UPDATE"))).toBe(true);
     expect(sql.some((statement) => statement.includes("SET status = 'revoked'"))).toBe(false);
     expect(sql).toContain("ROLLBACK");
-  });
-
-  it("refreshes every nonarchived offer projection for a canonical profile write", async () => {
-    const propertyId = "f8013000-0000-0000-0000-000000000001";
-    const offerIds = [
-      "f8015000-0000-0000-0000-000000000001",
-      "f8015000-0000-0000-0000-000000000002",
-    ];
-    const projectedOfferIds: string[] = [];
-    const statements: string[] = [];
-    const client = {
-      async query<T extends QueryResultRow = QueryResultRow>(
-        text: string,
-        values?: readonly unknown[],
-      ): Promise<{ rows: T[] }> {
-        statements.push(text);
-        let rows: unknown[] = [];
-        if (text.includes('offer.id::text AS "offerId"')) {
-          rows = offerIds.map((offerId) => ({ offerId }));
-        } else if (text.includes('offer.property_id::text AS "propertyId"')) {
-          rows = [{ propertyId }];
-        } else if (text.includes('property.display_name AS "displayName"')) {
-          rows = [
-            {
-              propertyId,
-              publicId: "prop_alpenrose",
-              displayName: "Hotel Alpenrose",
-              defaultLocale: "en",
-              canonicalSlug: "hotel-alpenrose",
-            },
-          ];
-        } else if (text.includes("INSERT INTO marketplace.marketplace_offer_read_model")) {
-          projectedOfferIds.push(String(values?.[0]));
-        }
-        return { rows: rows as T[] };
-      },
-    };
-
-    await syncPropertyOfferReadModels(client, {
-      propertyId,
-    });
-
-    expect(projectedOfferIds).toEqual(offerIds);
-    expect(
-      statements.find((statement) => statement.includes('offer.id::text AS "offerId"')),
-    ).toContain("offer.offer_status <> 'archived'");
-    expect(
-      statements.find((statement) => statement.includes('offer.id::text AS "offerId"')),
-    ).not.toContain("offer.organization_id");
-  });
-
-  it("retains pending offer media metadata for the owner without publishing a URL", () => {
-    const offer = mapOfferRow(
-      {
-        ...adminOfferRow("offer_801", "property_801"),
-        offerStatus: "pending",
-        media: [
-          {
-            mediaObjectId: "media_801",
-            url: null,
-            approvalStatus: "pending_domain_approval",
-            lifecycleStatus: "staged",
-          },
-        ],
-      },
-      "platform_organization_membership",
-    );
-
-    expect(offer.media).toEqual([
-      {
-        mediaObjectId: "media_801",
-        url: null,
-        approvalStatus: "pending_domain_approval",
-        lifecycleStatus: "staged",
-      },
-    ]);
-    expect(offer.matchingCriteria).toBeNull();
-  });
-
-  it("maps explicit matching criteria and requirement levels on offer reads", () => {
-    const offer = mapOfferRow(
-      {
-        ...adminOfferRow("offer_801", "property_801"),
-        deliverables: [
-          {
-            deliverableId: "deliverable_801",
-            platform: "instagram",
-            deliverableType: "reel",
-            quantity: 1,
-            timingGuidance: null,
-            requirementLevel: "required",
-          },
-        ],
-        matchingCriteria: matchingCriteriaDocument(),
-      },
-      "platform_organization_membership",
-    );
-
-    expect(offer.deliverables[0]?.requirementLevel).toBe("required");
-    expect(offer.matchingCriteria).toMatchObject({
-      contractVersion: "marketplace-offer-matching-criteria.v1",
-      revision: 1,
-      primaryCampaignGoal: "ugc_asset_creation",
-    });
-  });
-
-  it("validates one-sided updates against the persisted matching inputs", () => {
-    const current = { ...offerResponse("platform_organization_membership") };
-    current.matchingCriteria = matchingCriteriaDocument();
-
-    expect(
-      validateMergedOfferUpdate(current, {
-        creatorRequirements: {
-          ...current.creatorRequirements!,
-          platforms: ["tiktok"],
-          platformRequirementLevel: "required",
-        },
-      }),
-    ).toBe("inconsistent_requirement_platforms");
-    expect(
-      validateMergedOfferUpdate(current, {
-        matchingCriteria: {
-          ...matchingCriteriaWrite(),
-          expectedCompensationValue: { amount: "900.00", currency: "USD" },
-        },
-      }),
-    ).toBe("inconsistent_compensation_currency");
   });
 });
 
@@ -428,26 +275,9 @@ function createAdminPgPool(
   };
 }
 
-function adminOfferRow(offerId: string, propertyId: string): OfferRow {
-  return {
-    offerId,
-    propertyId,
-    offerStatus: "verified",
-    title: "Creator suite",
-    offerSummary: "A suite for creator stays.",
-    media: [],
-    deliverables: [],
-    compensationOptions: [],
-    creatorRequirements: {},
-    createdAt: "2026-06-13T10:00:00.000Z",
-    updatedAt: "2026-06-13T10:00:00.000Z",
-  };
-}
-
-function buildMarketplaceAdminApp(
-  repository: MarketplaceAdminRepository,
+function buildInviteCodeApp(
+  repository: HotelAccountInviteCodeRepository,
   options: {
-    marketplaceAdminLegacySuperadminFallbackEnabled?: boolean;
     permissions?: readonly PermissionKey[];
     entitlements?: readonly ProductEntitlement[];
     platformLink?: boolean;
@@ -512,9 +342,7 @@ function buildMarketplaceAdminApp(
 
   return buildApp({
     logger: false,
-    marketplaceAdminRepository: repository,
-    marketplaceAdminLegacySuperadminFallbackEnabled:
-      options.marketplaceAdminLegacySuperadminFallbackEnabled,
+    hotelAccountInviteCodeRepository: repository,
     auth: {
       verifier: createFakeVerifier(
         new Map([
@@ -540,17 +368,12 @@ function buildMarketplaceAdminApp(
   });
 }
 
-function createMemoryMarketplaceAdminRepository(
-  options: {
-    legacySuperadminUserIds?: string[];
-  } = {},
-) {
-  const legacySuperadminUserIds = new Set(options.legacySuperadminUserIds ?? []);
+function createMemoryHotelAccountInviteCodeRepository() {
   const calls = {
     createInviteCode: [] as unknown[],
     revokeInviteCode: [] as unknown[],
   };
-  const repository: MarketplaceAdminRepository & { calls: typeof calls } = {
+  const repository: HotelAccountInviteCodeRepository & { calls: typeof calls } = {
     calls,
     async listInviteCodes() {
       return [inviteCodeResponse()];
@@ -562,9 +385,6 @@ function createMemoryMarketplaceAdminRepository(
     async revokeInviteCode(inviteCodeId) {
       calls.revokeInviteCode.push(inviteCodeId);
       return inviteCodeId === "invite_801";
-    },
-    async isLegacySuperadmin(userId) {
-      return legacySuperadminUserIds.has(userId);
     },
   };
   return repository;
@@ -584,10 +404,8 @@ function platformAdminEntitlement(
 function inviteCodeResponse(
   id = "invite_801",
   code = "VAY-INVITE",
-  invite: MarketplaceAdminHotelAccountInviteCreateRequest = hotelInviteRequest([
-    "hotel_operations",
-  ]),
-): MarketplaceAdminInviteCode {
+  invite: HotelAccountInviteCreateRequest = hotelInviteRequest(["hotel_operations"]),
+): HotelAccountInviteCode {
   return {
     contractVersion: "hotel-account-invite.v1",
     id,
@@ -605,107 +423,12 @@ function inviteCodeResponse(
 }
 
 function hotelInviteRequest(
-  selectedTracks: MarketplaceAdminHotelAccountInviteCreateRequest["selectedTracks"],
-): MarketplaceAdminHotelAccountInviteCreateRequest {
+  selectedTracks: HotelAccountInviteCreateRequest["selectedTracks"],
+): HotelAccountInviteCreateRequest {
   return {
     identity: { email: "owner@example.test" },
     organization: { displayName: "Alpenrose Hospitality" },
     property: { displayName: "Hotel Alpenrose" },
     selectedTracks,
-  };
-}
-
-function matchingCriteriaDocument(): NonNullable<MarketplaceAdminOffer["matchingCriteria"]> {
-  return {
-    primaryCampaignGoal: "ugc_asset_creation",
-    availability: {
-      requirementLevel: "required",
-      flexibility: "flexible",
-      startsOn: "2026-10-01",
-      endsOn: "2026-10-31",
-      blackouts: [],
-    },
-    contentCategories: { requirementLevel: "required", values: ["travel"] },
-    contentStyles: { requirementLevel: "preferred", values: ["cinematic"] },
-    usageRights: {
-      channels: ["organic_social"],
-      duration: { mode: "fixed", days: 365 },
-    },
-    includedRevisionRounds: 2,
-    expectedEffortHours: { minimum: 6, maximum: 10 },
-    expectedCompensationValue: { amount: "900.00", currency: "EUR" },
-    applicationCapacity: { acceptingApplications: true, maximumActiveApplications: 20 },
-    contractVersion: "marketplace-offer-matching-criteria.v1",
-    revision: 1,
-    updatedAt: "2026-09-03T00:00:00.000Z",
-  };
-}
-
-function matchingCriteriaWrite(): NonNullable<
-  MarketplaceAdminCreateOfferRequest["matchingCriteria"]
-> {
-  const document = matchingCriteriaDocument();
-  return {
-    primaryCampaignGoal: document.primaryCampaignGoal,
-    availability: document.availability,
-    contentCategories: document.contentCategories,
-    contentStyles: document.contentStyles,
-    usageRights: document.usageRights,
-    includedRevisionRounds: document.includedRevisionRounds,
-    expectedEffortHours: document.expectedEffortHours,
-    expectedCompensationValue: document.expectedCompensationValue,
-    applicationCapacity: document.applicationCapacity,
-  };
-}
-
-function offerResponse(
-  authorizationMode: MarketplaceAdminOffer["authorizationMode"],
-  title = "Creator suite",
-): MarketplaceAdminOffer {
-  return {
-    contractVersion: "marketplace-admin.v1",
-    authorizationMode,
-    offerId: "offer_801",
-    propertyId: "property_801",
-    offerStatus: "verified",
-    title,
-    offerSummary: "A suite for creator stays.",
-    media: [],
-    deliverables: [
-      {
-        deliverableId: "deliverable_801",
-        platform: "instagram",
-        deliverableType: "reel",
-        quantity: 1,
-        timingGuidance: "During the stay",
-      },
-    ],
-    compensationOptions: [
-      {
-        compensationOptionId: "compensation_801",
-        compensationType: "free_stay",
-        availabilityMonths: ["June"],
-        platforms: ["instagram"],
-        freeStayMinNights: 2,
-        freeStayMaxNights: 4,
-        paidMaxAmount: null,
-        discountPercentage: null,
-        commissionPercentage: null,
-        minFollowers: 10000,
-        currency: "EUR",
-        termsSummary: null,
-      },
-    ],
-    creatorRequirements: {
-      platforms: ["instagram"],
-      targetCountries: ["AT"],
-      targetAgeMin: 18,
-      targetAgeMax: 45,
-      targetAgeGroups: ["18-24"],
-      creatorTypes: ["travel"],
-    },
-    matchingCriteria: null,
-    createdAt: "2026-06-13T10:00:00.000Z",
-    updatedAt: "2026-06-13T10:00:00.000Z",
   };
 }
