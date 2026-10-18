@@ -7,7 +7,10 @@ import {
   type PricingPaymentMethod,
   type StoredPaidWhenBooking,
 } from "@vayada/domain-booking/replacement-pricing";
-import type { PricingConfiguration } from "@vayada/domain-pms/replacement-pricing";
+import {
+  pricingOfferOnBookingPage,
+  type PricingConfiguration,
+} from "@vayada/domain-pms/replacement-pricing";
 import { useTranslation } from "@/lib/i18n";
 import { errorText } from "./pricingAmounts";
 import { usePricingCardReadiness, usePricingManualMethods } from "./pricingManualMethods";
@@ -18,6 +21,7 @@ import {
   defaultFreeDays,
   rateMethodEdits,
   setDiscount,
+  setOfferSale,
   switchOption,
   type SimpleRoom,
 } from "./simplePricing";
@@ -47,9 +51,10 @@ const discountOf = (offer: SimpleRoom["nonRefundable"]) =>
     ? -offer.price.adjustment.basisPoints
     : null;
 
-/** Step "Rates" (VAY-2282, approved board): how guests can book the room. The Flexible rate is the main option (always
- * on for now: switching it off waits for the API's sold-where setting) and the Non-refundable rate is the
- * non-refundable switch, side by side, each with its own cancellation, payment at booking and payment methods.
+/** Step "Rates" (VAY-2282, approved board): how guests can book the room. The Flexible rate is the main option (off:
+ * not sold, VAY-2285, its prices still set the Non-refundable rate's) and the Non-refundable rate is the
+ * non-refundable switch, side by side, each with its own cancellation, payment at booking and payment methods; one
+ * of them stays on.
  * "Paid when booking" is read from the rate's terms (VAY-2205); choosing it comes with card payments and deposits.
  * `children` is the "Other booking options" list (VAY-2283). */
 export function StepRates({
@@ -109,11 +114,13 @@ export function StepRates({
       ) : (
         <div className="grid items-stretch gap-3 lg:grid-cols-2">
           <FlexibleRate
+            room={room}
             simple={simple}
             terms={terms}
             disabled={disabled}
             onTerms={onTerms}
             onEditOwn={onEditOwn}
+            onChange={onChange}
           />
           <NonRefundableRate
             room={room}
@@ -139,17 +146,19 @@ function RateCard({
   name,
   sub,
   control,
+  off = false,
   children,
 }: {
   name: string;
   sub: string;
   control: ReactNode;
+  off?: boolean;
   children: ReactNode;
 }) {
   return (
     <section
       aria-label={name}
-      className="flex min-w-0 flex-col gap-3.5 rounded-xl border border-gray-200 bg-white p-4"
+      className={`flex min-w-0 flex-col gap-3.5 rounded-xl border border-gray-200 p-4 ${off ? "bg-gray-50" : "bg-white"}`}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
@@ -183,6 +192,94 @@ function Part({
 }
 
 function FlexibleRate({
+  room,
+  simple,
+  terms,
+  disabled,
+  onTerms,
+  onEditOwn,
+  onChange,
+}: {
+  room: PricingConfiguration;
+  simple: SimpleRoom;
+  terms: Terms;
+  disabled: boolean;
+  onTerms: (edits: Edits) => void;
+  onEditOwn: () => void;
+  onChange: (room: PricingConfiguration) => void;
+}) {
+  const { t } = useTranslation();
+  const [error, setError] = useState("");
+  const on = pricingOfferOnBookingPage(simple.main);
+  const otherRate = !!simple.nonRefundable && pricingOfferOnBookingPage(simple.nonRefundable);
+  // Off keeps the option and its terms (sale "not_sold"); on again drops the key (VAY-2285).
+  const toggle = () => {
+    if (disabled) return;
+    if (on && !otherRate) return setError(t("pricing.rates.keepOneFlexible"));
+    try {
+      onChange(setOfferSale(room, simple.main.id, on ? "not_sold" : null));
+      setError("");
+    } catch (cause) {
+      setError(errorText(cause, t, "pricing.rates.keepOne"));
+    }
+  };
+  const current = simple.cancellation;
+  const dayText = (count: number) =>
+    t(
+      count === 1
+        ? "pricing.simple.cancellation.days.one"
+        : "pricing.simple.cancellation.days.other",
+      { count },
+    );
+  const sub =
+    current.kind === "free"
+      ? t("pricing.rates.freeSub", { days: dayText(current.days) })
+      : current.kind === "own"
+        ? t("pricing.rates.partial")
+        : t("pricing.simple.cancellation.nonRefundable");
+  return (
+    <RateCard
+      name={t("pricing.rates.flexible")}
+      sub={sub}
+      off={!on}
+      control={
+        <button
+          type="button"
+          role="switch"
+          aria-checked={on}
+          aria-label={t("pricing.simple.extras.turnOn", { name: t("pricing.rates.flexible") })}
+          disabled={disabled}
+          onClick={toggle}
+          className={ui.switchTrack(on)}
+        >
+          <span aria-hidden="true" className="h-[18px] w-[18px] rounded-full bg-white shadow-sm" />
+        </button>
+      }
+    >
+      {error && (
+        <p role="alert" className={ui.errorText}>
+          {error}
+        </p>
+      )}
+      {!on ? (
+        <p className="text-[13px] text-gray-500">
+          {t(otherRate ? "pricing.rates.flexibleOff" : "pricing.rates.flexibleOffPlain")}
+        </p>
+      ) : (
+        <FlexibleParts
+          simple={simple}
+          terms={terms}
+          disabled={disabled}
+          onTerms={onTerms}
+          onEditOwn={onEditOwn}
+        />
+      )}
+    </RateCard>
+  );
+}
+
+/** The Flexible rate's cancellation, payment at booking and payment methods, while it is on. */
+function FlexibleParts({
   simple,
   terms,
   disabled,
@@ -210,22 +307,8 @@ function FlexibleRate({
     if (disabled || (current.kind === "free" && current.days === count)) return;
     onTerms(cancellationEdits(simple, terms, { kind: "free", days: count }));
   };
-  const sub =
-    current.kind === "free"
-      ? t("pricing.rates.freeSub", { days: dayText(current.days) })
-      : current.kind === "own"
-        ? t("pricing.rates.partial")
-        : t("pricing.simple.cancellation.nonRefundable");
   return (
-    <RateCard
-      name={t("pricing.rates.flexible")}
-      sub={sub}
-      control={
-        <span className="shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-[12px] font-medium text-gray-600">
-          {t("pricing.rates.alwaysOn")}
-        </span>
-      }
-    >
+    <>
       <Part label={t("pricing.simple.cancellation.title")} className="lg:min-h-[150px]">
         <div
           role="group"
@@ -304,7 +387,7 @@ function FlexibleRate({
         disabled={disabled}
         onChange={(methods) => onTerms(rateMethodEdits(simple, terms, "flexible", methods))}
       />
-    </RateCard>
+    </>
   );
 }
 
@@ -361,6 +444,8 @@ function NonRefundableRate({
   const pending = !!(error && offer) || blocked;
   useEffect(() => pendingRef.current(pending), [pending]);
   const available = simple.cancellation.kind === "free";
+  // With the Flexible rate off this is the rate guests book, so it stays on until Flexible is on again (VAY-2285).
+  const last = !!offer && !pricingOfferOnBookingPage(simple.main);
   const edit = (value: string) => {
     setTyped(value);
     if (!offer) return setError("");
@@ -377,7 +462,7 @@ function NonRefundableRate({
       edit(String(Math.min(99, Math.max(1, Math.round(current) + delta))));
   };
   const toggle = () => {
-    if (disabled || !available) return;
+    if (disabled || !available || last) return;
     if (offer) {
       setError("");
       if (saved !== null) setTyped(String(saved / 100));
@@ -424,7 +509,7 @@ function NonRefundableRate({
           aria-label={t("pricing.simple.extras.turnOn", {
             name: t("pricing.simple.extras.nonRefundable"),
           })}
-          disabled={disabled || !available}
+          disabled={disabled || !available || last}
           onClick={toggle}
           className={ui.switchTrack(!!offer)}
         >
@@ -480,6 +565,7 @@ function NonRefundableRate({
                 </span>
               )}
             </div>
+            {last && <p className={ui.errorText}>{t("pricing.rates.keepOneNonRefundable")}</p>}
           </Part>
           <PaidWhenBooking payment={terms[offer.id]?.payment ?? mainTerms.payment} />
           <RateMethods

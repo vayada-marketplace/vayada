@@ -2,7 +2,10 @@
 
 import type { ReactNode } from "react";
 import { ArrowPathIcon, LockClosedIcon, PlusIcon } from "@heroicons/react/24/outline";
-import type { PricingConfiguration } from "@vayada/domain-pms/replacement-pricing";
+import {
+  pricingOfferOnBookingPage,
+  type PricingConfiguration,
+} from "@vayada/domain-pms/replacement-pricing";
 import { useTranslation } from "@/lib/i18n";
 import { mainOffer, money, optionSummary, type OptionTerms } from "./stepPricing";
 import * as ui from "./pricingStyles";
@@ -37,7 +40,8 @@ const icon = (offer: Offer, terms: OptionTerms | undefined) => {
 
 /** More options' "Other booking options": the room's options the card's top doesn't cover (`offers`, every option
  * by default) as named cards with a summary, their normal night and Edit, then the add buttons. `prices` are
- * engine-evaluated (see `normalNight`); null shows a dash. */
+ * engine-evaluated (see `normalNight`); null shows a dash. With `onSale`, each card has a "Channels only" switch
+ * (VAY-2285); the room's last option on the booking page can't leave it. */
 export function StepOptions({
   room,
   offers = room.offers,
@@ -48,6 +52,7 @@ export function StepOptions({
   termsFailed = false,
   onRetryTerms,
   onEdit,
+  onSale,
   add,
 }: {
   room: PricingConfiguration;
@@ -60,18 +65,23 @@ export function StepOptions({
   termsFailed?: boolean;
   onRetryTerms?: () => void;
   onEdit: (offerId: string) => void;
+  /** Sells an option on channels only, or (null) on the booking page too. */
+  onSale?: (offerId: string, sale: "channels_only" | null) => void;
   /** The quick-add buttons. */
   add: ReactNode;
 }) {
   const { t } = useTranslation();
   const main = mainOffer(room);
+  const onPage = room.offers.filter(pricingOfferOnBookingPage);
   return (
     <div className="space-y-3">
       {offers.length > 0 && (
         <ul className="space-y-2.5">
           {offers.map((offer) => {
             const isMain = offer.id === main.id,
-              price = prices[offer.id];
+              price = prices[offer.id],
+              channelsOnly = offer.sale === "channels_only",
+              lastOnPage = onPage.length === 1 && onPage[0].id === offer.id;
             return (
               // Phones: name, price and Edit on one row, the summary under them at full width. From sm, the design's
               // four columns with the icon.
@@ -120,7 +130,29 @@ export function StepOptions({
                 </button>
                 <p className="col-span-3 text-[14px] leading-5 text-gray-500 sm:col-span-1 sm:col-start-2">
                   {optionSummary(room, offer, names, terms[offer.id], t)}
+                  {channelsOnly && ` · ${t("pricing.rates.notOnPage")}`}
                 </p>
+                {onSale && (
+                  <label className="col-span-3 flex items-center gap-2 sm:col-span-1 sm:col-start-2">
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={channelsOnly}
+                      aria-label={t("pricing.rates.channelsOnlyAria", { name: names[offer.id] })}
+                      disabled={disabled || lastOnPage}
+                      onClick={() => onSale(offer.id, channelsOnly ? null : "channels_only")}
+                      className={ui.switchTrack(channelsOnly)}
+                    >
+                      <span
+                        aria-hidden="true"
+                        className="h-[18px] w-[18px] rounded-full bg-white shadow-sm"
+                      />
+                    </button>
+                    <span className="text-[13px] font-medium text-gray-700">
+                      {t("pricing.rates.channelsOnly")}
+                    </span>
+                  </label>
+                )}
               </li>
             );
           })}

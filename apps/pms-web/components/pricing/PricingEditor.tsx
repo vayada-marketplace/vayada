@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useId, useRef, useState, type MutableRefObject, type ReactNode } from "react";
-import { pricingAmountStep, pricingCurrencyScale, parsePricingConfiguration } from "@vayada/domain-pms/replacement-pricing";
+import { pricingAmountStep, pricingCurrencyScale, parsePricingConfiguration, pricingOfferOnBookingPage } from "@vayada/domain-pms/replacement-pricing";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import { useTranslation } from "@/lib/i18n";
 import { ApiErrorResponse } from "@/services/api/client";
@@ -35,7 +35,7 @@ import { StepSeasons } from "./StepSeasons";
 import { StepWeekends } from "./StepWeekends";
 import { addDays, deleteBlocker, deleteOption, mainOffer, missingPresets, money, normalNight, optionNames, sampleAdults, sampleStay, type OptionTerms, type PresetKey } from "./stepPricing";
 import { lowestNightMinor, nightsWithoutPrice } from "./priceCalendarModel";
-import { simpleRoom } from "./simplePricing";
+import { setOfferSale, simpleRoom } from "./simplePricing";
 import { StepRates } from "./StepRates";
 import { StepExtras } from "./StepExtras";
 import { keptSettings, MoreGroup, simpleSummary } from "./SimpleMoreOptions";
@@ -321,11 +321,13 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
     return () => { live = false; };
   }, [firstTime, client]);
   const focusIndex = display ? display.rooms.findIndex((room) => room.roomTypeId === focus) : -1, editing = focusIndex >= 0;
-  // The Save bar's "Guests pay from" (VAY-2280): the focused room's lowest standard or season night this year, over its rates.
+  // The Save bar's "Guests pay from" (VAY-2280): the focused room's lowest standard or season night this year, over the
+  // rates guests can book (VAY-2285).
   let guestsFrom = "";
   if (display && editing) try {
     const shown = editedSnapshot(display, inputs).rooms[focusIndex]!, rate = simpleRoom(shown, optionTerms)?.nonRefundable;
-    const minor = lowestNightMinor(shown, [mainOffer(shown).id, ...(rate ? [rate.id] : [])], sampleAdults(shown), String(new Date().getFullYear()));
+    const booked = [mainOffer(shown), ...(rate ? [rate] : [])].filter(pricingOfferOnBookingPage).map((offer) => offer.id);
+    const minor = lowestNightMinor(shown, booked, sampleAdults(shown), String(new Date().getFullYear()));
     if (minor) guestsFrom = t("pricing.bar.from", { amount: money(minor, shown.currency) });
   } catch { guestsFrom = ""; }
   const shownRooms = (display?.rooms ?? []).map((room, ri) => [room, ri] as const).filter(([room]) => room.roomTypeId === focus);
@@ -384,12 +386,16 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
       const now = new Date(), today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
       const sample = sampleStay(edited ?? room, today), stayNights = Math.round((Date.parse(sample.checkOut) - Date.parse(sample.checkIn)) / 86400000);
       const stay = stayStart ? { checkIn: stayStart, checkOut: addDays(stayStart, stayNights) } : sample;
-      const previewId = previewOffer && room.offers.some((offer) => offer.id === previewOffer) ? previewOffer : main.id;
+      // Options off the booking page (VAY-2285) aren't in the guest card or the calendar's rates.
+      const firstShown = room.offers.find(pricingOfferOnBookingPage) ?? main;
+      const previewId = previewOffer && room.offers.some((offer) => offer.id === previewOffer && pricingOfferOnBookingPage(offer)) ? previewOffer : firstShown.id;
       const termsFailed = room.offers.some((offer) => !policyEdits[policyKey(focus, offer.id)] && savedTerms[termsKey(offer)] === null);
       const simple = simpleRoom(room, optionTerms), kept = keptSettings(room, simple);
       // VAY-2284: the calendar shows what guests pay for the rates, Flexible and Non-refundable; other options build on them.
-      const rates = [{ id: main.id, name: t("pricing.calendar.flexible") }, ...(simple?.nonRefundable ? [{ id: simple.nonRefundable.id, name: t("pricing.calendar.nonRefundable") }] : [])];
-      const calendarId = rates.some((rate) => rate.id === previewId) ? previewId : main.id;
+      const rates = [{ offer: main, name: t("pricing.calendar.flexible") }, ...(simple?.nonRefundable ? [{ offer: simple.nonRefundable, name: t("pricing.calendar.nonRefundable") }] : [])]
+        .filter(({ offer }) => pricingOfferOnBookingPage(offer)).map(({ offer, name }) => ({ id: offer.id, name }));
+      const calendarId = rates.some((rate) => rate.id === previewId) ? previewId : rates[0]?.id ?? main.id;
+      const others = simple ? simple.others : room.offers.filter((offer) => offer.id !== main.id);
       const gaps = edited ? nightsWithoutPrice(edited, main.id, sampleAdults(edited), today) : 0;
       // The approved layout (VAY-2280): "Prices by date" first, then the price rules beside "What guests see".
       return <div key={room.roomTypeId} className="space-y-6">
@@ -428,9 +434,13 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
             onRemove={(offerId) => { if (!disabled && !pendingBesidesExtras) setDeleting(offerId); }} onChange={changeRoom(ri)} onPending={pend(`rates:${ri}`)}
             edited={room.offers.filter((offer) => policyEdits[policyKey(focus, offer.id)]).map((offer) => offer.id)}>
             <div className="space-y-2">
-              <h4 className="text-[11px] font-semibold uppercase tracking-[0.06em] text-gray-500">{t("pricing.rates.others")}</h4>
-              <StepOptions room={room} offers={simple ? simple.others : room.offers.filter((offer) => offer.id !== main.id)} names={names} terms={optionTerms} prices={prices} disabled={disabled}
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <h4 className="text-[11px] font-semibold uppercase tracking-[0.06em] text-gray-500">{t("pricing.rates.others")}</h4>
+                {others.length > 0 && <p className="text-[12px] text-gray-500">{t("pricing.rates.othersHint")}</p>}
+              </div>
+              <StepOptions room={room} offers={others} names={names} terms={optionTerms} prices={prices} disabled={disabled}
                 termsFailed={termsFailed} onRetryTerms={retryTerms} onEdit={(offerId) => setOptionOpen(offerId)}
+                onSale={(offerId, sale) => { if (!disabled) try { changeRoom(ri)(setOfferSale(room, offerId, sale)); } catch { /* the room's last booking-page option keeps its place */ } }}
                 add={<>
                   {missingPresets(room, optionTerms).filter((key) => !(key === "non_refundable" && simple?.cancellation.kind === "free") && !(key === "breakfast" && simple && simple.cancellation.kind !== "own")).map((key) => <AddOptionButton key={key} label={t(`pricing.steps.preset.button.${key}`)} disabled={disabled || hasPendingEntries}
                     onClick={() => { if (!disabled && !hasPendingEntries) { setPreset(key); setError(null); } }} />)}
