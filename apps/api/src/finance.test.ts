@@ -943,13 +943,14 @@ describe("finance route contracts", () => {
     expect(provider.createAccountCount).toBe(0);
   });
 
-  it("keeps ONB-25A acceptance unreachable until a sanctioned attestation verifier exists", () => {
+  it("wires ONB-25A acceptance next to the revoke: a Vayada finance operator's attestation (VAY-2205 D3)", () => {
     const repository = createTargetFinancePropertySettingsRepository({
       connectionString: "postgresql://finance-target",
       pool: targetStripeProviderAccountPool().pool,
     });
 
-    expect(repository.acceptOnlineCardExecutionEvidence).toBeUndefined();
+    expect(repository.readOnlineCardExecutionState).toEqual(expect.any(Function));
+    expect(repository.acceptOnlineCardExecutionEvidence).toEqual(expect.any(Function));
     expect(repository.revokeOnlineCardExecutionEvidence).toEqual(expect.any(Function));
   });
 
