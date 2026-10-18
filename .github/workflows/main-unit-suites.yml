@@ -44,7 +44,3 @@ jobs:
       - name: Vayada Admin tests
         if: ${{ !cancelled() }}
         run: npm --workspace vayada-admin run test
-
-      - name: Marketplace Web tests
-        if: ${{ !cancelled() }}
-        run: npm --workspace vayada-creator-marketplace run test

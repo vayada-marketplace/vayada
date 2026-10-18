@@ -35,40 +35,4 @@ describe("AdaptiveHotelSetupShell", () => {
     expect(renderer?.root.findByProps({ role: "alert" })).toBeDefined();
     renderer?.unmount();
   });
-
-  it.each([
-    { bookingPage: true, text: "You can still finish setup and publish your booking page." },
-    { bookingPage: false, text: "You can still finish setup. To ask" },
-  ])(
-    "announces a suspended Marketplace profile with what the hotel can still do (VAY-2177)",
-    async ({ bookingPage, text }) => {
-      let renderer: ReactTestRenderer | undefined;
-      await act(async () => {
-        renderer = create(
-          AdaptiveHotelSetupShell({
-            brandMark: createElement("span", null, "Vayada"),
-            currentStep: 1,
-            totalSteps: 9,
-            title: "Present your hotel",
-            subtitle: "Give guests a clear first impression.",
-            onExit: () => undefined,
-            marketplaceSuspended: { bookingPage },
-            children: null,
-          }),
-        );
-      });
-      const notice = renderer!.root.findByProps({ role: "note" });
-      const content = JSON.stringify(notice.children.map((child) => renderToText(child)));
-      expect(content).toContain("Your Creator Marketplace profile is suspended");
-      expect(content.replace(/","/g, "")).toContain(text);
-      expect(renderer!.root.findByType("a").props.href).toBe("mailto:support@vayada.com");
-      renderer?.unmount();
-    },
-  );
 });
-
-function renderToText(node: unknown): string {
-  if (typeof node === "string") return node;
-  const instance = node as { children?: unknown[] };
-  return (instance.children ?? []).map(renderToText).join("");
-}

@@ -43,7 +43,6 @@ vi.mock("@/services/auth/sessionStore", () => ({
 vi.mock("@/services/api/sharedHotelSetupClient", () => ({
   sharedHotelSetupApi: {},
   sharedSetupClient: { get: vi.fn(async () => ({ import: mocks.prepared })) },
-  sharedAccountProfileImageUploader: vi.fn(),
 }));
 vi.mock("@/services/api/hotelOperationsSetupClient", () => ({
   hotelOperationsSetupApi: {
@@ -183,7 +182,9 @@ describe("invitation setup entry", () => {
           stored[key] = value;
         },
       });
-      await exitFromAdaptiveSetup("entryProduct=booking&returnProduct=booking&propertyId=property-1");
+      await exitFromAdaptiveSetup(
+        "entryProduct=booking&returnProduct=booking&propertyId=property-1",
+      );
       expect(location.assign).toHaveBeenCalledWith(
         "/dashboard?setup=incomplete&propertyId=property-1",
       );

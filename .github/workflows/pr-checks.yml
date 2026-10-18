@@ -166,9 +166,6 @@ jobs:
       - name: Vayada Admin tests
         run: npm --workspace vayada-admin run test
 
-      - name: Marketplace Web tests
-        run: npm --workspace vayada-creator-marketplace run test
-
       - name: Landing consent browser regressions
         run: |
           npx playwright install --with-deps chromium
@@ -222,7 +219,6 @@ jobs:
 
       - name: Verify frontend auth gateways
         run: |
-          npm --workspace vayada-creator-marketplace run test -- 'app/auth/[...path]/route.test.ts'
           npm --workspace vayada-booking-engine-frontend-admin run test -- 'app/auth/[...path]/route.test.ts'
           npm --workspace vayada-pms-frontend run test -- 'app/auth/[...path]/route.test.ts'
           npm --workspace vayada-admin run test -- 'app/auth/[...path]/route.test.ts'
@@ -919,12 +915,30 @@ jobs:
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
+      # 0492 (VAY-2270) in its own database: migrate to 0491, store retired rows, apply 0492.
+      - name: Verify the setup tracks Hotel Operations-only migration
+        if: matrix.shard == 'hotel-setup'
+        run: >-
+          npm --workspace @vayada/backend-migration run test --
+          src/setupTracksHotelOperationsOnlyMigration.integration.test.ts
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+
       # Runs 0482 again inside a rolled-back transaction on the migrated shared database.
       - name: Verify the complete-hotel activation backfill
         if: matrix.shard == 'hotel-setup'
         run: >-
           npm --workspace @vayada/backend-migration run test -- --no-file-parallelism
           src/hotelCatalogActivateCompleteHotels.integration.test.ts
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+
+      # 0493 (VAY-2270) in its own database: migrate up to 0493, add retired grants, apply 0493.
+      - name: Verify the Marketplace role grant retirement migration
+        if: matrix.shard == 'hotel-setup'
+        run: >-
+          npm --workspace @vayada/backend-migration run test --
+          src/retireMarketplaceRoleGrantsMigration.integration.test.ts
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 

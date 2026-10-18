@@ -129,33 +129,3 @@ function findActiveStep<TStep extends AdaptiveSetupNavigationStep>(
   if (!stepId) return null;
   return steps.find((step) => step.stepId === stepId) ?? null;
 }
-
-/**
- * Booking Admin has no Marketplace preferences form (VAY-2261). A hotel that picked the Creator
- * Marketplace track earlier still gets that step from the API; it is dropped here so the owner
- * walks the remaining steps with a continuous "Step x of y" count and never lands on an empty form.
- */
-export function omitMarketplaceSetupSteps<
-  TRoute extends {
-    steps: ReadonlyArray<{ stepId: string; position: number; state?: string }>;
-    progress?: { complete: number; total: number };
-  },
->(route: TRoute): TRoute {
-  const dropped = route.steps.filter(({ stepId }) => stepId === "marketplace_preferences");
-  if (dropped.length === 0) return route;
-  const progress = route.progress
-    ? {
-        ...route.progress,
-        complete:
-          route.progress.complete - dropped.filter(({ state }) => state === "complete").length,
-        total: route.progress.total - dropped.length,
-      }
-    : route.progress;
-  return {
-    ...route,
-    ...(progress ? { progress } : {}),
-    steps: route.steps
-      .filter(({ stepId }) => stepId !== "marketplace_preferences")
-      .map((step, index) => ({ ...step, position: index + 1 })),
-  };
-}

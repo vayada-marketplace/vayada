@@ -20,13 +20,11 @@ const completeAuthSessionEnv = {
   AUTH_LOGOUT_URL: "https://admin.localhost/login",
   AUTH_ALLOWED_ORIGINS:
     "https://admin.localhost, https://api.localhost, https://admin.booking.localhost, " +
-    "https://pms.localhost, https://affiliate.localhost, https://marketplace.localhost",
+    "https://pms.localhost",
   AUTH_COMPATIBILITY_CALLBACK_ORIGIN: "https://api.localhost",
   AUTH_PLATFORM_ADMIN_ORIGIN: "https://admin.localhost",
   AUTH_BOOKING_ADMIN_ORIGIN: "https://admin.booking.localhost",
   AUTH_PMS_WEB_ORIGIN: "https://pms.localhost",
-  AUTH_AFFILIATE_DASHBOARD_ORIGIN: "https://affiliate.localhost",
-  AUTH_MARKETPLACE_WEB_ORIGIN: "https://marketplace.localhost",
 };
 
 const financeFolioKmsEnv = {
@@ -521,13 +519,10 @@ describe("api config", () => {
       loadConfig({
         ...completeAuthSessionEnv,
         AUTH_OAUTH_STATE_SECRET: "oauth-state-secret",
-        AUTH_FIRST_PARTY_SURFACES: "marketplace-web,pms-web,marketplace-web",
+        AUTH_FIRST_PARTY_SURFACES: "booking-admin,pms-web,booking-admin",
         AUTH_COOKIE_SECURE: "true",
         AUTH_COOKIE_DOMAIN: "localhost",
         AUTH_LEGACY_MARKETPLACE_JWT_SECRET: "legacy-secret",
-        AUTH_AFFILIATE_DASHBOARD_LOGOUT_URL: "https://affiliate.localhost/login",
-        AUTH_LEGACY_AFFILIATE_PMS_JWT_SECRET: "affiliate-pms-secret",
-        AUTH_MARKETPLACE_WEB_LOGOUT_URL: "https://marketplace.localhost/login",
       }).authSession,
     ).toEqual({
       workosClientId: "client",
@@ -540,24 +535,17 @@ describe("api config", () => {
         "https://api.localhost",
         "https://admin.booking.localhost",
         "https://pms.localhost",
-        "https://affiliate.localhost",
-        "https://marketplace.localhost",
       ],
       authCompatibilityCallbackOrigin: "https://api.localhost",
       authSurfaceOrigins: {
         "platform-admin": "https://admin.localhost",
         "booking-admin": "https://admin.booking.localhost",
         "pms-web": "https://pms.localhost",
-        "affiliate-dashboard": "https://affiliate.localhost",
-        "marketplace-web": "https://marketplace.localhost",
       },
-      authFirstPartySurfaces: ["marketplace-web", "pms-web"],
+      authFirstPartySurfaces: ["booking-admin", "pms-web"],
       authCookieSecure: true,
       authCookieDomain: "localhost",
       authLegacyMarketplaceJwtSecret: "legacy-secret",
-      authAffiliateDashboardLogoutUrl: "https://affiliate.localhost/login",
-      authLegacyAffiliatePmsJwtSecret: "affiliate-pms-secret",
-      authMarketplaceWebLogoutUrl: "https://marketplace.localhost/login",
     });
   });
 
@@ -567,53 +555,34 @@ describe("api config", () => {
         WORKOS_CLIENT_ID: "client",
       }),
     ).toThrow("Incomplete auth session config");
-    expect(() =>
-      loadConfig({
-        AUTH_MARKETPLACE_WEB_ORIGIN: "https://marketplace.localhost",
-      }),
-    ).toThrow("Incomplete auth session config");
   });
 
-  // VAY-2271: the Marketplace and affiliate portals are switched off; their login
-  // addresses may disappear from the platform before the surface types go.
-  it("loads the AuthKit session config without the retired portal origins", () => {
-    const activeSurfacesOnly: Partial<typeof completeAuthSessionEnv> = {
-      ...completeAuthSessionEnv,
-    };
-    delete activeSurfacesOnly.AUTH_AFFILIATE_DASHBOARD_ORIGIN;
-    delete activeSurfacesOnly.AUTH_MARKETPLACE_WEB_ORIGIN;
-    const authSession = loadConfig({
-      ...activeSurfacesOnly,
-      AUTH_FIRST_PARTY_SURFACES: "pms-web,booking-admin",
-    }).authSession;
-    expect(authSession?.authSurfaceOrigins).toEqual({
+  // VAY-2271: the retired Marketplace and affiliate surfaces are unknown now.
+  it("rejects the retired Marketplace and affiliate login addresses and surfaces", () => {
+    expect(
+      loadConfig({
+        ...completeAuthSessionEnv,
+        AUTH_MARKETPLACE_WEB_ORIGIN: "https://marketplace.localhost",
+        AUTH_AFFILIATE_DASHBOARD_ORIGIN: "https://affiliate.localhost",
+      }).authSession?.authSurfaceOrigins,
+    ).toEqual({
       "platform-admin": "https://admin.localhost",
       "booking-admin": "https://admin.booking.localhost",
       "pms-web": "https://pms.localhost",
     });
-    expect(authSession?.authFirstPartySurfaces).toEqual(["pms-web", "booking-admin"]);
-  });
-
-  it("rejects first-party surfaces whose login origin is not configured", () => {
-    const withoutMarketplace: Partial<typeof completeAuthSessionEnv> = {
-      ...completeAuthSessionEnv,
-    };
-    delete withoutMarketplace.AUTH_MARKETPLACE_WEB_ORIGIN;
     expect(() =>
       loadConfig({
-        ...withoutMarketplace,
-        AUTH_FIRST_PARTY_SURFACES: "marketplace-web,pms-web",
+        ...completeAuthSessionEnv,
+        AUTH_FIRST_PARTY_SURFACES: "marketplace-web",
       }),
-    ).toThrow(
-      "AUTH_FIRST_PARTY_SURFACES contains surfaces without a login origin: marketplace-web",
-    );
+    ).toThrow("AUTH_FIRST_PARTY_SURFACES contains unsupported surfaces: marketplace-web");
   });
 
   it("rejects auth callback origins outside the exact allowlist", () => {
     expect(() =>
       loadConfig({
         ...completeAuthSessionEnv,
-        AUTH_MARKETPLACE_WEB_ORIGIN: "https://evil.example",
+        AUTH_PMS_WEB_ORIGIN: "https://evil.example",
       }),
     ).toThrow("Auth callback origins must be included in AUTH_ALLOWED_ORIGINS");
   });
@@ -628,7 +597,7 @@ describe("api config", () => {
     expect(() =>
       loadConfig({
         ...completeAuthSessionEnv,
-        AUTH_FIRST_PARTY_SURFACES: "marketplace-web,unknown-surface",
+        AUTH_FIRST_PARTY_SURFACES: "booking-admin,unknown-surface",
       }),
     ).toThrow("AUTH_FIRST_PARTY_SURFACES contains unsupported surfaces: unknown-surface");
   });
@@ -638,9 +607,9 @@ describe("api config", () => {
       loadConfig({
         ...completeAuthSessionEnv,
         AUTH_COOKIE_SECURE: "false",
-        AUTH_FIRST_PARTY_SURFACES: "marketplace-web",
+        AUTH_FIRST_PARTY_SURFACES: "booking-admin",
       }),
-    ).toThrow("AUTH_COOKIE_SECURE must be true for HTTPS first-party surfaces: marketplace-web");
+    ).toThrow("AUTH_COOKIE_SECURE must be true for HTTPS first-party surfaces: booking-admin");
   });
 
   it("loads target public hotel profile config", () => {

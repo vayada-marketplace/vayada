@@ -140,12 +140,7 @@ export type ProductAuditSink = {
   record(event: ProductAuditEvent): Promise<void>;
 };
 
-export type AuthSurface =
-  | "platform-admin"
-  | "booking-admin"
-  | "pms-web"
-  | "affiliate-dashboard"
-  | "marketplace-web";
+export type AuthSurface = "platform-admin" | "booking-admin" | "pms-web";
 
 export type AuthSignupIntent = "admin" | "hotel" | "creator";
 
@@ -417,7 +412,6 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
     "/compat/marketplace-admin-token",
     "/compat/booking-admin-token",
     "/compat/pms-web-token",
-    "/compat/affiliate-dashboard-token",
     "/profile",
   ]) {
     app.options(path, async (request, reply) => {
@@ -1185,7 +1179,9 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
 
   app.get("/session", async (request, reply) => {
     const query = request.query as { surface?: string };
-    const surfacePolicy = getSurfacePolicy(parseSurface(query.surface), options);
+    const surface = parseSurfaceOrNull(query.surface);
+    if (!surface) return sendUnsupportedSurface(reply);
+    const surfacePolicy = getSurfacePolicy(surface, options);
     if (!writeCorsHeaders(request, reply, options)) {
       return reply.code(403).send({ error: "origin_rejected" });
     }
@@ -1261,7 +1257,9 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
       return reply.code(403).send({ error: "origin_rejected" });
     }
     const body = request.body as { organizationId?: string; surface?: string } | undefined;
-    const surfacePolicy = getSurfacePolicy(parseSurface(body?.surface), options);
+    const surface = parseSurfaceOrNull(body?.surface);
+    if (!surface) return sendUnsupportedSurface(reply);
+    const surfacePolicy = getSurfacePolicy(surface, options);
     if (!passesCsrfCheck(request, options, surfacePolicy)) {
       return reply.code(403).send({ error: "csrf_rejected" });
     }
@@ -1865,7 +1863,9 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
       return reply.code(403).send({ error: "origin_rejected" });
     }
     const body = request.body as { surface?: string; return_to?: string } | undefined;
-    const surfacePolicy = getSurfacePolicy(parseSurface(body?.surface), options);
+    const surface = parseSurfaceOrNull(body?.surface);
+    if (!surface) return sendUnsupportedSurface(reply);
+    const surfacePolicy = getSurfacePolicy(surface, options);
     if (!passesCsrfCheck(request, options, surfacePolicy)) {
       return reply.code(403).send({ error: "csrf_rejected" });
     }
@@ -1936,11 +1936,6 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
     surface: "pms-web",
     userType: "hotel",
   });
-  registerCompatibilityTokenRoute(app, options, {
-    path: "/compat/affiliate-dashboard-token",
-    surface: "affiliate-dashboard",
-    userType: "affiliate",
-  });
 };
 
 function consumeEmailSendCooldown(
@@ -1966,16 +1961,33 @@ function sendEmailSendCooldownResponse(reply: FastifyReply, retryAfterSeconds: n
 
 function parseSurface(value: string | undefined): AuthSurface {
   if (!value) return DEFAULT_SURFACE;
-  if (
-    value === "platform-admin" ||
-    value === "booking-admin" ||
-    value === "pms-web" ||
-    value === "affiliate-dashboard" ||
-    value === "marketplace-web"
-  ) {
+  if (value === "platform-admin" || value === "booking-admin" || value === "pms-web") {
     return value;
   }
   throw new Error(`Unsupported AuthKit surface: ${value}`);
+}
+
+// VAY-2271: a retired surface (marketplace-web, affiliate-dashboard) or a typo is a client
+// error, not a server failure.
+function parseSurfaceOrNull(value: string | undefined): AuthSurface | null {
+  try {
+    return parseSurface(value);
+  } catch {
+    return null;
+  }
+}
+
+function sendUnsupportedSurface(reply: FastifyReply) {
+  return reply.code(400).send({ error: "invalid_surface", message: "Unsupported auth surface." });
+}
+
+// VAY-2271: every first-party client names its surface; the retired Marketplace app was the
+// only one that left it out.
+function parseRequiredSurface(value: unknown): AuthSurface {
+  if (typeof value !== "string" || !value) {
+    throw new Error("AuthKit surface is required");
+  }
+  return parseSurface(value);
 }
 
 function parseHandoffCreateBody(body: unknown):
@@ -2143,9 +2155,7 @@ function parseGoogleOAuthStartQuery(
   if (flow === "signup") {
     const rawIntent = typeof query.type === "string" ? query.type : query.intent;
     try {
-      if (surface !== "marketplace-web" || typeof rawIntent === "string") {
-        intent = parseSignupIntent(surface, typeof rawIntent === "string" ? rawIntent : undefined);
-      }
+      intent = parseSignupIntent(surface, typeof rawIntent === "string" ? rawIntent : undefined);
     } catch {
       return {
         ok: false,
@@ -2504,12 +2514,7 @@ function parsePasswordSignupBody(body: unknown):
     };
   }
   try {
-    const surface = parseSurface(
-      typeof input.surface === "string" ? input.surface : "marketplace-web",
-    );
-    if (surface === "marketplace-web") {
-      return { ok: true, email, password, surface };
-    }
+    const surface = parseRequiredSurface(input.surface);
     const rawIntent = typeof input.type === "string" ? input.type : input.intent;
     return {
       ok: true,
@@ -2523,7 +2528,7 @@ function parsePasswordSignupBody(body: unknown):
   }
 }
 
-const INVITE_ONBOARDING_SURFACES: readonly AuthSurface[] = ["marketplace-web", "booking-admin"];
+const INVITE_ONBOARDING_SURFACES: readonly AuthSurface[] = ["booking-admin"];
 
 function parseOnboardingBody(
   body: unknown,
@@ -2543,9 +2548,7 @@ function parseOnboardingBody(
     inviteCode?: unknown;
   };
   try {
-    const surface = parseSurface(
-      typeof input.surface === "string" ? input.surface : "marketplace-web",
-    );
+    const surface = parseRequiredSurface(input.surface);
     const rawIntent = typeof input.type === "string" ? input.type : input.intent;
     if (rawIntent === "creator") {
       return { ok: false, error: { state: "auth_failed", message: CREATOR_SIGNUP_CLOSED_MESSAGE } };
@@ -2559,7 +2562,7 @@ function parseOnboardingBody(
     const intent = parseSignupIntent(surface, rawIntent);
     const hasInviteCode = Object.prototype.hasOwnProperty.call(input, "inviteCode");
     if (!hasInviteCode) return { ok: true, surface, intent };
-    // VAY-2262: Booking Admin hosts the hotel invite page; marketplace-web keeps working until it is retired.
+    // VAY-2262: Booking Admin hosts the hotel invite page.
     if (
       !INVITE_ONBOARDING_SURFACES.includes(surface) ||
       intent !== "hotel" ||
@@ -2615,9 +2618,7 @@ function parseProfileBody(body: unknown):
     };
   }
   try {
-    const surface = parseSurface(
-      typeof input.surface === "string" ? input.surface : "marketplace-web",
-    );
+    const surface = parseRequiredSurface(input.surface);
     const hasFirstName = Object.prototype.hasOwnProperty.call(input, "firstName");
     const hasLastName = Object.prototype.hasOwnProperty.call(input, "lastName");
     const hasName = hasFirstName || hasLastName;
@@ -2742,9 +2743,7 @@ function parseEmailVerificationConfirmBody(body: unknown):
   }
 
   try {
-    const surface = parseSurface(
-      typeof input.surface === "string" ? input.surface : "marketplace-web",
-    );
+    const surface = parseRequiredSurface(input.surface);
     const flow = input.flow === "signup" ? "signup" : "login";
     const intent =
       flow === "signup" && typeof input.intent === "string"
@@ -2868,11 +2867,8 @@ function signupIntentsForSurface(surface: AuthSurface): readonly AuthSignupInten
       return [];
     case "booking-admin":
     case "pms-web":
-    // VAY-2260: the Marketplace is closing; creator sign-ups are refused on every surface.
-    case "marketplace-web":
+      // VAY-2260: the Marketplace is closing; creator sign-ups are refused on every surface.
       return ["hotel"];
-    case "affiliate-dashboard":
-      return [];
   }
 }
 
