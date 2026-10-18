@@ -79,6 +79,8 @@ export type StripeBookingPaymentProvider = {
   retrieveRefund(refundId: string, providerAccountRef: string): Promise<StripeBookingRefund>;
 };
 
+const REFUND_TIMEOUT_MS = 30_000;
+
 export function createStripeBookingPaymentProvider(config: {
   secretKey: string;
   endpoint?: string;
@@ -93,6 +95,8 @@ export function createStripeBookingPaymentProvider(config: {
     fields: ReadonlyArray<readonly [string, string]> = [],
     idempotencyKey?: string,
     providerAccountRef?: string | null,
+    /** Refund calls hold a refund row lock while they wait (VAY-2205): give up after this long. */
+    timeoutMs?: number,
   ): Promise<StripeObject> => {
     const form = new URLSearchParams(fields.map(([key, value]): [string, string] => [key, value]));
     const response = await fetchImpl(
@@ -106,6 +110,7 @@ export function createStripeBookingPaymentProvider(config: {
           ...(providerAccountRef ? { "Stripe-Account": providerAccountRef } : {}),
         },
         ...(method === "POST" ? { body: form.toString() } : {}),
+        ...(timeoutMs ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
       },
     );
     const payload = object(await response.json());
@@ -197,6 +202,7 @@ export function createStripeBookingPaymentProvider(config: {
           ],
           input.idempotencyKey,
           input.providerAccountRef,
+          REFUND_TIMEOUT_MS,
         ),
       );
       if (
@@ -218,6 +224,7 @@ export function createStripeBookingPaymentProvider(config: {
         ],
         undefined,
         providerAccountRef,
+        REFUND_TIMEOUT_MS,
       );
       if (!Array.isArray(list["data"]) || list["has_more"] === true)
         throw new Error("Stripe returned an incomplete refund list.");
@@ -232,6 +239,7 @@ export function createStripeBookingPaymentProvider(config: {
           [],
           undefined,
           providerAccountRef,
+          REFUND_TIMEOUT_MS,
         ),
       );
     },
