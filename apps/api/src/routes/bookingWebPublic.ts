@@ -32,6 +32,7 @@ import {
   stagePricingCardRefund,
   type StagedPricingCardRefund,
 } from "../domains/pricingCardRefund.js";
+import { recordPricingRetainedRevenue } from "../domains/pricingRetainedRevenue.js";
 import {
   createReplacementBookingQuoteIssuer,
   requirePublicQuoteKey,
@@ -3953,6 +3954,8 @@ async function withGuestLifecycleMutation(
       }
     }
     let bookedOutcome: BookedCancellationOutcome | null = null;
+    // A paid card stay's money: what was paid and what goes back (VAY-2205).
+    let cardMoney: { paidMinor: bigint; refundMinor: bigint } | null = null;
     if (mutation.action === "cancel") {
       let feeBooking = booking;
       if (objectValue(booking.bookingMetadata)["targetSource"] === "pricing_quote_draft") {
@@ -3998,6 +4001,11 @@ async function withGuestLifecycleMutation(
         // A paid card stay gets back what the terms don't keep; Stripe hears of it after commit.
         if (feeBooking.paymentStatus === "paid")
           try {
+            cardMoney = await previewPricingCardRefund(client, {
+              propertyId: property.propertyId,
+              guestBookingId: feeBooking.guestBookingId,
+              retainedMinor: bookedOutcome.retainedMinor,
+            });
             refund = await stagePricingCardRefund(client, {
               propertyId: property.propertyId,
               guestBookingId: feeBooking.guestBookingId,
@@ -4101,6 +4109,15 @@ async function withGuestLifecycleMutation(
         recognizedOn: targetPropertyDateOnly(property.timezone, context.occurredAt),
         required: true,
       });
+      // What the hotel keeps of a paid card stay stays revenue on its nights (VAY-2205).
+      if (cardMoney)
+        await recordPricingRetainedRevenue(client, {
+          propertyId: updated.propertyId,
+          guestBookingId: updated.guestBookingId,
+          fingerprint: context.fingerprint,
+          keptMinor: cardMoney.paidMinor - cardMoney.refundMinor,
+          paidMinor: cardMoney.paidMinor,
+        });
     }
     await appendMissingAddonRevenueEvidence(client, {
       propertyId: updated.propertyId,

@@ -3176,6 +3176,7 @@
   "hostActions.appliedReloadFailed": "Buchung aktualisiert, aber die neuesten Details konnten nicht geladen werden. Bitte Seite neu laden.",
   "hostActions.failed": "Die Aktion konnte nicht abgeschlossen werden.",
   "hostActions.voidImpact": "Die Kartenautorisierung wird aufgehoben, bevor die Anfrage abgelehnt und die Verfügbarkeit freigegeben wird. Es wird keine Zahlung eingezogen.",
+  "hostActions.cardRefundImpact": "Das Kontingent wird freigegeben. Der Gast hat {paid} online per Karte bezahlt; {refund} gehen beim Anwenden automatisch auf seine Karte zurück. Stripe behält seine Bearbeitungsgebühr.",
   "hostActions.nonRefundable": "Nicht erstattbarer Tarif",
   "hostActions.freeCancellationUntil": "Kostenlose Stornierung bis",
   "hostActions.policyPenalty": "Nach der Frist oder bei Nichtanreise wird der volle Buchungsbetrag berechnet.",

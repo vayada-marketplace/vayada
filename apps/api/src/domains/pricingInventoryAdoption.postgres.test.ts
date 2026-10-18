@@ -674,6 +674,63 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
         }
         await db.query("SET CONSTRAINTS ALL IMMEDIATE");
       };
+      // VAY-2205: room-night revenue as a paid card stay records it, three lines a night at uneven
+      // prices (330.01), so the kept share needs rounding. Returns the stay dates.
+      const roomLines = [types[0]!, types[1]!, types[0]!];
+      const seedRoomNights = async () => {
+        const stayDates: string[] = [];
+        for (
+          let day = Date.parse(`${quote.stay.checkIn}T00:00:00Z`);
+          day < Date.parse(`${quote.stay.checkOut}T00:00:00Z`);
+          day += 86_400_000
+        )
+          stayDates.push(new Date(day).toISOString().slice(0, 10));
+        for (const roomTypeId of new Set(roomLines))
+          await db.query(
+            "INSERT INTO booking.nightly_revenue_room_scopes(property_id,room_type_id) VALUES($1,$2) ON CONFLICT DO NOTHING",
+            [propertyId, roomTypeId],
+          );
+        for (const [night, stayDate] of stayDates.entries())
+          for (const [index, roomTypeId] of roomLines.entries())
+            await db.query(
+              `INSERT INTO booking.nightly_revenue_evidence
+                 (property_id,guest_booking_id,room_type_id,stay_date,recognized_on,currency,gross_room_amount,
+                  occupied_room_nights,economic_event,lifecycle_state,source_kind,evidence_quality,source_revision,
+                  line_position,corrects_evidence_id,command_key)
+               VALUES($1,$2,$3,$4::date,$4::date,'EUR',$5::numeric,1,'room_night','confirmed','direct','exact',1,$6,NULL,$7)`,
+              [
+                propertyId,
+                bookingId,
+                roomTypeId,
+                stayDate,
+                ["100.01", "133.33", "96.67"][index],
+                index + 1,
+                `test-night:${night}:${index}`,
+              ],
+            );
+        return stayDates;
+      };
+      // The hotel keeps 75% of what was paid, so the nights keep 75% of their room value as
+      // retained revenue, split by room price and adding up exactly, on each stay date.
+      const expectRetainedRevenue = async (stayDates: string[]) => {
+        const roomValue = 330_01n * BigInt(stayDates.length);
+        const retained = (
+          await db.query(
+            `SELECT stay_date::text AS "stayDate",recognized_on::text AS "recognizedOn",
+               (gross_room_amount*100)::bigint::text AS cents,occupied_room_nights AS occupied,lifecycle_state AS state
+             FROM booking.nightly_revenue_evidence WHERE guest_booking_id=$1 AND economic_event='retained_charge'`,
+            [bookingId],
+          )
+        ).rows;
+        expect(retained).toHaveLength(stayDates.length * roomLines.length);
+        expect(retained.reduce((sum, row) => sum + BigInt(row.cents), 0n)).toBe(
+          (roomValue * 81000n * 2n + 108000n) / (108000n * 2n),
+        );
+        expect(
+          retained.every((row) => row.recognizedOn === row.stayDate && row.occupied === 0),
+        ).toBe(true);
+        expect(new Set(retained.map((row) => row.state))).toEqual(new Set(["canceled"]));
+      };
       if (
         [
           "complete",
@@ -921,6 +978,7 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
              booking_metadata=booking_metadata || '{"paymentMethod":"card"}' WHERE id=$1`,
           [bookingId, paymentId],
         );
+        const stayDates = await seedRoomNights();
         // Each transaction (the cancel's, then the refund's after it) becomes a savepoint here.
         const savepointed = (name: string) => (text: string, values?: unknown[]) =>
           db.query(
@@ -1008,6 +1066,7 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
         ).toEqual([
           { status: "canceled", paid: "paid", payment: "partially_refunded", refunded: "270.00" },
         ]);
+        await expectRetainedRevenue(stayDates);
         // One refund for the replayed cancel, asked of Stripe once after the commit and settled.
         expect(createRefund).toHaveBeenCalledOnce();
         expect(createRefund.mock.calls[0]![0]).toMatchObject({ amountMinor: 27000 });
@@ -1114,6 +1173,7 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
              booking_metadata=booking_metadata || '{"paymentMethod":"card"}' WHERE id=$1`,
           [bookingId, paymentId],
         );
+        const stayDates = await seedRoomNights();
         await db.query("INSERT INTO identity.users(id,email,status) VALUES($1,$2,'active')", [
           actorUserId,
           `${actorUserId}@example.test`,
@@ -1208,6 +1268,19 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
           },
         ]);
         expect(createRefund).toHaveBeenCalledOnce();
+        await expectRetainedRevenue(stayDates);
+        // The reservation page reads the refund (VAY-2205).
+        const read = await createTargetPmsOperationsReadRepository({
+          connectionString: url!,
+          pool: db,
+        }).findReservationByGuestBookingId(propertyId, bookingId);
+        expect(read?.cardRefund).toMatchObject({
+          status: "succeeded",
+          amount: "270.00",
+          currency: "EUR",
+          requestedBy: "host",
+          failureReason: null,
+        });
       } else if (scenario === "repository-date-change") {
         // VAY-2110: PMS staff move an adopted v2 stay to new dates at its booked terms.
         expect(await adopt()).toMatchObject({ outcome: "adopted" });
