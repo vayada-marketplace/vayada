@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useState, type MutableRefObject } from "react";
+import { useEffect, useId, useState, type MutableRefObject, type ReactNode } from "react";
 import type { PricingConfiguration } from "@vayada/domain-pms/replacement-pricing";
 import { PlusIcon } from "@heroicons/react/24/outline";
 import { useTranslation } from "@/lib/i18n";
@@ -51,6 +51,7 @@ export function StepFirstPrices({
   onDirty,
   onCreate,
   pending,
+  calendar,
 }: {
   propertyId: string;
   /** The room page's room (the first; the page offers only its own room). */
@@ -65,6 +66,8 @@ export function StepFirstPrices({
   /** Filled with a builder for the answers as they stand, for the New room page, which saves them with the room. It
    * shows and throws what is missing. */
   pending?: MutableRefObject<(() => FirstPrices) | null>;
+  /** Shown under the first line, above the form: the empty calendar (VAY-2280). */
+  calendar?: ReactNode;
 }) {
   const { t } = useTranslation();
   const room = rooms[0]!;
@@ -318,6 +321,7 @@ export function StepFirstPrices({
           ? t("pricing.simple.first.newRoom")
           : t("pricing.simple.first.noPrice", { room: room.name })}
       </p>
+      {calendar}
       <div className={ui.pricesCard}>
         <StepCard title={t("pricing.steps.price.title")}>
           <div className="flex flex-wrap items-end gap-3">
