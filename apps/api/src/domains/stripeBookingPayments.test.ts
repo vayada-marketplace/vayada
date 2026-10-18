@@ -320,6 +320,19 @@ describe("Stripe booking payments", () => {
       ).rejects.toThrow("positive amount");
     });
 
+    it("gives up on a refund call after 30 seconds, so a row lock isn't held forever", async () => {
+      const signals: Array<AbortSignal | null | undefined> = [];
+      const provider = createStripeBookingPaymentProvider({
+        secretKey: "sk_test",
+        fetch: async (_input, init) => {
+          signals.push(init?.signal);
+          return new Response(JSON.stringify({ data: [], has_more: false }), { status: 200 });
+        },
+      });
+      await provider.listRefunds("pi_booking_1", "acct_1");
+      expect(signals[0]).toBeInstanceOf(AbortSignal);
+    });
+
     it("lists a payment's refunds and reads one, on the hotel's account", async () => {
       const list = recording({ data: [stripeRefund({ status: "succeeded" })], has_more: false });
       expect(await list.provider.listRefunds("pi_booking_1", "acct_1")).toMatchObject([
