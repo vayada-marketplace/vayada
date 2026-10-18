@@ -194,8 +194,16 @@ export function nightLabel(
 
 export type PriceRange = { lowMinor: string; highMinor: string };
 type LegendRanges = { standard: PriceRange | null; seasons: Record<string, PriceRange> };
-// The editor rebuilds the room on every render; the year's nights are worked out again only when it changes.
-let lastRanges: { key: string; ranges: LegendRanges } | null = null;
+// The editor rebuilds the room on every render; a year's nights are worked out again only when it changes. A few
+// recent answers are kept (the legend's, and the Save bar's for each rate).
+const cache = new Map<string, unknown>();
+function cached<T>(key: string, work: () => T): T {
+  if (cache.has(key)) return cache.get(key) as T;
+  const value = work();
+  cache.set(key, value);
+  if (cache.size > 6) cache.delete(cache.keys().next().value!);
+  return value;
+}
 /** The legend's prices (VAY-2284): the lowest and highest open night of `year` at the standard price and in each
  * season (by season key), for one option and number of adults. Own prices of single dates don't count. */
 export function legendRanges(
@@ -204,8 +212,11 @@ export function legendRanges(
   adults: number,
   year: string,
 ): LegendRanges {
-  const key = JSON.stringify([room, offerId, adults, year]);
-  if (lastRanges?.key === key) return lastRanges.ranges;
+  return cached(JSON.stringify(["ranges", room, offerId, adults, year]), () =>
+    yearRanges(room, offerId, adults, year),
+  );
+}
+function yearRanges(room: Room, offerId: string, adults: number, year: string): LegendRanges {
   const found: Record<string, { low: bigint; high: bigint }> = {};
   for (let month = 1; month <= 12; month++)
     for (const night of projectNights(
@@ -231,8 +242,7 @@ export function legendRanges(
     ]),
   );
   const { [""]: standard = null, ...seasons } = ranges;
-  lastRanges = { key, ranges: { standard, seasons } };
-  return lastRanges.ranges;
+  return { standard, seasons };
 }
 
 /** Adults the calendar can show prices for: every count when the price depends on the number of guests. */
@@ -241,4 +251,53 @@ export function calendarAdults(room: Room): number[] {
   const base = main.price.kind === "independent" ? main.price.calendar.base : null;
   const varies = !!base && base.mode !== "flat";
   return varies ? Array.from({ length: room.capacity.adults }, (_, index) => index + 1) : [];
+}
+
+const monthAfter = (month: string, delta: number) =>
+  new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)) - 1 + delta, 1))
+    .toISOString()
+    .slice(0, 7);
+/** Nights from `today` (YYYY-MM-DD) through the same date 12 months on that no price covers, so guests can't book them
+ * ("Price rules", VAY-2280). Past nights don't count. */
+export function nightsWithoutPrice(
+  room: Room,
+  offerId: string,
+  adults: number,
+  today: string,
+): number {
+  const end = new Date(
+    Date.UTC(
+      Number(today.slice(0, 4)) + 1,
+      Number(today.slice(5, 7)) - 1,
+      Number(today.slice(8, 10)),
+    ),
+  )
+    .toISOString()
+    .slice(0, 10);
+  return cached(
+    JSON.stringify(["gaps", room, offerId, adults, today]),
+    () =>
+      Array.from({ length: 13 }, (_, index) =>
+        projectNights(room, offerId, monthAfter(today.slice(0, 7), index), adults),
+      )
+        .flat()
+        .filter((night) => night.kind === "none" && night.date >= today && night.date <= end)
+        .length,
+  );
+}
+/** The lowest nightly price guests pay in `year` at the standard or a season price, for these rates and adults (the
+ * Save bar's "Guests pay from", VAY-2280); null without any. */
+export function lowestNightMinor(
+  room: Room,
+  offerIds: readonly string[],
+  adults: number,
+  year: string,
+): string | null {
+  const lows = offerIds.flatMap((offerId) => {
+    const { standard, seasons } = legendRanges(room, offerId, adults, year);
+    return [standard, ...Object.values(seasons)].flatMap((range) =>
+      range ? [BigInt(range.lowMinor)] : [],
+    );
+  });
+  return lows.length ? lows.reduce((low, value) => (value < low ? value : low)).toString() : null;
 }
