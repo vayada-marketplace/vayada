@@ -434,25 +434,6 @@ describe("shared hotel setup status route", () => {
         "direct_booking_publication",
       ],
     ],
-    [
-      "marketplace",
-      ["creator_marketplace"],
-      ["shared_identity", "public_profile", "creator_offer"],
-    ],
-    [
-      "both",
-      ["hotel_operations", "creator_marketplace"],
-      [
-        "shared_identity",
-        "public_profile",
-        "creator_offer",
-        "rooms_rates_availability",
-        "guest_settings_policies",
-        "billing_plan",
-        "payment",
-        "direct_booking_publication",
-      ],
-    ],
   ] as const)(
     "filters setup tasks for %s selected tracks",
     async (_name, selectedTracks, expectedTaskIds) => {
@@ -483,14 +464,14 @@ describe("shared hotel setup status route", () => {
               ownerProgress: "owner_complete",
               readiness: "complete",
             }),
-            creator_offer: taskFact("creator_offer", {
+            payment: taskFact("payment", {
               readiness: "pending_review",
               ownerProgress: "owner_complete",
             }),
           }),
         }),
       ]),
-      trackCommandRepository: trackRepository(["creator_marketplace"]),
+      trackCommandRepository: trackRepository(["hotel_operations"]),
     });
 
     const response = await injectJson<AdaptiveHotelSetupStatus>(app, {
@@ -502,58 +483,18 @@ describe("shared hotel setup status route", () => {
     expect(response.body.setupPlan?.tasks).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          taskId: "public_profile",
+          taskId: "rooms_rates_availability",
           callerCapability: "ask_owner",
-          actionableBy: "owner",
+          actionableBy: "operator",
         }),
         expect.objectContaining({
-          taskId: "creator_offer",
+          taskId: "payment",
           callerCapability: "waiting",
           actionableBy: "support",
         }),
       ]),
     );
     expect(response.body.setupPlan?.recommendedTaskId).toBeNull();
-  });
-
-  it("recommends a rejected Marketplace task for an allowed owner to correct", async () => {
-    app = buildSharedSetupApp({
-      permissions: [
-        "hotel_catalog.setup.read",
-        "hotel_catalog.setup.manage",
-        "marketplace.profile.manage",
-      ],
-      repository: repositoryWith([
-        adaptiveProperty(propertyId, {
-          taskFacts: taskFacts({
-            shared_identity: completedTaskFact("shared_identity"),
-            public_profile: taskFact("public_profile", {
-              ownerProgress: "in_progress",
-              readiness: "rejected",
-              reasonCodes: ["marketplace_profile_rejected"],
-            }),
-          }),
-        }),
-      ]),
-      trackCommandRepository: trackRepository(["creator_marketplace"]),
-    });
-
-    const response = await injectJson<AdaptiveHotelSetupStatus>(app, {
-      method: "GET",
-      url: "/api/hotel-setup/status",
-      headers: { authorization: "Bearer valid-token" },
-    });
-
-    expect(response.body.setupPlan?.recommendedTaskId).toBe("public_profile");
-    expect(
-      response.body.setupPlan?.tasks.find(({ taskId }) => taskId === "public_profile"),
-    ).toMatchObject({
-      callerCapability: "allowed",
-      ownerProgress: "in_progress",
-      readiness: "rejected",
-      actionableBy: "owner",
-      reasonCodes: ["marketplace_profile_rejected"],
-    });
   });
 
   it("keeps publication repair actionable only after its true dependencies are complete", async () => {
@@ -895,12 +836,6 @@ describe("shared hotel setup status route", () => {
               ],
               allowedActions: ["manage_service"],
             },
-            {
-              track: "creator_marketplace",
-              provisioning: "not_selected",
-              components: [{ product: "marketplace", access: "absent" }],
-              allowedActions: ["add"],
-            },
           ],
         };
       },
@@ -1042,7 +977,6 @@ describe("shared hotel setup status route", () => {
     expect(response.body.setupPlan?.launchReadiness).toEqual({
       operationsUse: "ready",
       directBookingPublish: "blocked",
-      marketplacePublish: "not_applicable",
     });
   });
 
@@ -1059,12 +993,6 @@ describe("shared hotel setup status route", () => {
             { product: "pms", access: "active" },
             { product: "booking", access: "active" },
           ],
-          allowedActions: [],
-        },
-        {
-          track: "creator_marketplace",
-          provisioning: "not_selected",
-          components: [{ product: "marketplace", access: "absent" }],
           allowedActions: [],
         },
       ],
@@ -2021,7 +1949,7 @@ describe("shared hotel setup status route", () => {
     });
   });
 
-  it("allows Marketplace owners to read and sparsely update the public property profile", async () => {
+  it("allows setup managers to read and sparsely update the public property profile", async () => {
     const current = publicProfileResponse(4);
     const updated = {
       ...current,
@@ -3686,8 +3614,6 @@ function taskFacts(
   const defaults = Object.fromEntries(
     [
       "shared_identity",
-      "public_profile",
-      "creator_offer",
       "rooms_rates_availability",
       "guest_settings_policies",
       "billing_plan",
@@ -3734,13 +3660,10 @@ function trackRepository(
   const tracks: TrackStatus[] = selectedTracks.map((track) => ({
     track,
     provisioning: "active",
-    components:
-      track === "hotel_operations"
-        ? [
-            { product: "pms", access: "active" },
-            { product: "booking", access: "active" },
-          ]
-        : [{ product: "marketplace", access: "active" }],
+    components: [
+      { product: "pms", access: "active" },
+      { product: "booking", access: "active" },
+    ],
     allowedActions: ["manage_service"],
   }));
   return {

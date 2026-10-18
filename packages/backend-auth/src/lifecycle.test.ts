@@ -373,7 +373,6 @@ describe("identity lifecycle command contract", () => {
         membership: {
           roleKey: "affiliate_owner",
           propertyAccessMode: "assigned",
-          permissionKeys: ["affiliate.payout.manage"],
         },
         affiliateResourceLink: {
           organizationId: "affiliate_org_001",

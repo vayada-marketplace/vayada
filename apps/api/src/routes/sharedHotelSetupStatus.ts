@@ -10,7 +10,6 @@ import {
 import {
   ADAPTIVE_HOTEL_SETUP_CONTRACT_VERSION,
   isSetupTaskLaunchable,
-  OFFERED_SETUP_TRACKS,
   parseUpdateTracksRequest,
   PROPERTY_PROFILE_CHANNEL_TYPES,
   PROPERTY_PROFILE_CONTACT_PURPOSES,
@@ -165,7 +164,6 @@ type SharedHotelSetupTrackAccessError = {
   message: string;
 };
 
-// The Marketplace entry product is retired (VAY-2270); Booking Admin maps old links to booking.
 const ENTRY_PRODUCTS: readonly SharedHotelSetupEntryProduct[] = ["booking", "pms"];
 const SHARED_PROPERTY_TYPE_VALUES = new Set<string>(
   SHARED_PROPERTY_TYPE_OPTIONS.map(({ value }) => value),
@@ -545,16 +543,6 @@ export async function registerSharedHotelSetupStatusRoutes(
         return invalidSetupRequest(
           reply,
           "Request must include valid selectedTracks and expectedRevision.",
-        );
-      }
-      if (
-        update.selectedTracks.some(
-          (track) => !(OFFERED_SETUP_TRACKS as readonly string[]).includes(track),
-        )
-      ) {
-        return invalidSetupRequest(
-          reply,
-          "selectedTracks may only contain hotel_operations; the Creator Marketplace track is retired.",
         );
       }
 
@@ -1888,22 +1876,6 @@ const SETUP_TASK_REGISTRY: readonly SetupTaskDefinition[] = [
     dependencies: [],
   },
   {
-    taskId: "public_profile",
-    track: "creator_marketplace",
-    requirementOwnerDomain: "hotel_catalog",
-    permissions: ["hotel_catalog.setup.manage", "marketplace.profile.manage"],
-    actionableBy: "owner",
-    dependencies: ["shared_identity"],
-  },
-  {
-    taskId: "creator_offer",
-    track: "creator_marketplace",
-    requirementOwnerDomain: "marketplace",
-    permissions: ["marketplace.profile.manage"],
-    actionableBy: "owner",
-    dependencies: ["shared_identity", "public_profile"],
-  },
-  {
     taskId: "rooms_rates_availability",
     track: "hotel_operations",
     requirementOwnerDomain: "pms",
@@ -1974,7 +1946,6 @@ const ENTRY_PRODUCT_WORKSPACE_PERMISSIONS: Record<
     "pms.finance.read",
     "pms.settings.read",
   ],
-  marketplace: ["marketplace.collaboration.read"],
 };
 
 function entryDecision(input: {
@@ -2158,11 +2129,6 @@ export function buildPropertySetupPlan(input: {
       "payment",
       "direct_booking_publication",
     ]),
-    marketplacePublish: launchReadiness(tasks, selectedTracks, "creator_marketplace", [
-      "shared_identity",
-      "public_profile",
-      "creator_offer",
-    ]),
   };
 
   return {
@@ -2216,7 +2182,6 @@ function propertySetupPlanRevision(input: {
     relevantProducts.add("pms");
     relevantProducts.add("booking");
   }
-  if (selectedTrackSet.has("creator_marketplace")) relevantProducts.add("marketplace");
 
   const revisionState = {
     revisionContract: "property-setup-plan-revision.v2",
@@ -2363,7 +2328,6 @@ function launchReadiness(
 }
 
 function setupTaskProduct(taskId: SetupTaskId): SharedHotelSetupEntryProduct | null {
-  if (taskId === "public_profile" || taskId === "creator_offer") return "marketplace";
   if (taskId === "rooms_rates_availability") return "pms";
   if (
     taskId === "guest_settings_policies" ||
@@ -2384,7 +2348,6 @@ function hasProductPropertyAccess(
   const resourceType = {
     booking: "booking_hotel",
     pms: "pms_property",
-    marketplace: "hotel_profile",
   } as const;
   return context.linkedResources.some(
     (resource) =>

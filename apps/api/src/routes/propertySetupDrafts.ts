@@ -27,11 +27,6 @@ type ProductAccess = {
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const PRODUCT_ACCESS_BY_PERMISSION: Partial<Record<PropertySetupStepPermission, ProductAccess>> = {
-  "marketplace.profile.manage": {
-    product: "marketplace",
-    key: "marketplace-hotel-profile",
-    resourceType: "hotel_profile",
-  },
   "booking.settings.manage": {
     product: "booking",
     key: "booking-engine",

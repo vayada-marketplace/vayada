@@ -35,7 +35,6 @@ type ProductAccess = {
 };
 
 const PRODUCT_ACCESS: readonly ProductAccess[] = [
-  { product: "marketplace", key: "marketplace-hotel-profile", resourceType: "hotel_profile" },
   { product: "booking", key: "booking-engine", resourceType: "booking_hotel" },
   { product: "pms", key: "property-management", resourceType: "pms_property" },
 ];

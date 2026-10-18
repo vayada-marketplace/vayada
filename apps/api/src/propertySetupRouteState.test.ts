@@ -24,7 +24,7 @@ import type {
 const organizationId = "11111111-1111-4111-8111-111111111111";
 const propertyId = "22222222-2222-4222-8222-222222222222";
 const actorUserId = "33333333-3333-4333-8333-333333333333";
-const selectedTracks = ["hotel_operations", "creator_marketplace"] as const;
+const selectedTracks = ["hotel_operations"] as const;
 
 describe("property setup route state composition", () => {
   it("preserves canonical progress separately from draft and launch-readiness state", async () => {
@@ -33,7 +33,6 @@ describe("property setup route state composition", () => {
     };
     const providers = makeProviders(selectedTracks, {
       present_hotel: "complete",
-      marketplace_preferences: "saved",
       booking_design: "not_started",
       rooms: "saved",
       guest_experience: "blocked",
@@ -53,7 +52,6 @@ describe("property setup route state composition", () => {
       session: { drafts: [{ stepId: "booking_design" }] },
       ownerFacts: [
         { stepId: "present_hotel", state: "complete" },
-        { stepId: "marketplace_preferences", state: "saved" },
         { stepId: "booking_design", state: "not_started" },
         { stepId: "rooms", state: "saved" },
         { stepId: "payments", state: "not_started" },
@@ -96,7 +94,6 @@ describe("property setup route state composition", () => {
       }).steps.map(({ stepId, state }) => [stepId, state]),
     ).toEqual([
       ["present_hotel", "complete"],
-      ["marketplace_preferences", "saved"],
       ["booking_design", "draft"],
       ["rooms", "saved"],
       ["payments", "not_started"],
@@ -107,30 +104,21 @@ describe("property setup route state composition", () => {
     ]);
   });
 
-  it("requests only owners needed by the selected route", async () => {
-    const providers = makeProviders(["creator_marketplace"]);
+  it("requests each owner of the route once", async () => {
+    const providers = makeProviders(selectedTracks);
     const port = createPropertySetupRouteStateReadPort({
       draftRepository: { getActiveSession: vi.fn(async () => null) },
-      trackRepository: trackRepository(["creator_marketplace"], 4),
+      trackRepository: trackRepository(selectedTracks, 4),
       ownerStateProviders: providers,
     });
 
-    const result = await port.getPropertySetupRouteState(input(["creator_marketplace"]));
+    const result = await port.getPropertySetupRouteState(input(selectedTracks));
 
-    expect(result).toMatchObject({
-      outcome: "found",
-      ownerFacts: [
-        { stepId: "present_hotel" },
-        { stepId: "marketplace_preferences" },
-        { stepId: "review" },
-      ],
-    });
-    expect(providers.hotel_catalog?.getOwnerState).toHaveBeenCalledTimes(1);
-    expect(providers.marketplace?.getOwnerState).toHaveBeenCalledTimes(1);
-    expect(providers.review_lifecycle?.getOwnerState).toHaveBeenCalledTimes(1);
-    expect(providers.booking).toBeUndefined();
-    expect(providers.pms).toBeUndefined();
-    expect(providers.finance).toBeUndefined();
+    expect(result).toMatchObject({ outcome: "found" });
+    expect(Object.keys(providers).sort()).toEqual([...PROPERTY_SETUP_STATE_PROVIDER_KEYS].sort());
+    for (const provider of Object.values(providers)) {
+      expect(provider?.getOwnerState).toHaveBeenCalledTimes(1);
+    }
   });
 
   it("fails closed when a required owner is missing or unavailable", async () => {
@@ -167,8 +155,8 @@ describe("property setup route state composition", () => {
     ];
 
     for (const mutate of invalidFacts) {
-      const providers = makeProviders(["creator_marketplace"]);
-      providers.marketplace = {
+      const providers = makeProviders(selectedTracks);
+      providers.hotel_catalog = {
         getOwnerState: vi.fn(async (request) => {
           const fact = ownerFact(request.stepIds[0]!);
           return {
@@ -179,13 +167,13 @@ describe("property setup route state composition", () => {
       };
       const port = createPropertySetupRouteStateReadPort({
         draftRepository: { getActiveSession: vi.fn(async () => null) },
-        trackRepository: trackRepository(["creator_marketplace"], 4),
+        trackRepository: trackRepository(selectedTracks, 4),
         ownerStateProviders: providers,
       });
 
-      await expect(
-        port.getPropertySetupRouteState(input(["creator_marketplace"])),
-      ).resolves.toEqual({ outcome: "provider_failure" });
+      await expect(port.getPropertySetupRouteState(input(selectedTracks))).resolves.toEqual({
+        outcome: "provider_failure",
+      });
     }
   });
 
@@ -324,34 +312,40 @@ describe("property setup route state composition", () => {
     historical.drafts = [];
     const preserved = createPropertySetupRouteStateReadPort({
       draftRepository: { getActiveSession: vi.fn(async () => historical) },
-      trackRepository: trackRepository(["creator_marketplace"], 4),
-      ownerStateProviders: makeProviders(["creator_marketplace"]),
+      trackRepository: trackRepository(selectedTracks, 4),
+      ownerStateProviders: makeProviders(selectedTracks),
     });
 
     await expect(
-      preserved.getPropertySetupRouteState(input(["creator_marketplace"])),
+      preserved.getPropertySetupRouteState(input(selectedTracks)),
     ).resolves.toMatchObject({
       outcome: "found",
       session: {
-        selectedTracks: ["hotel_operations", "creator_marketplace"],
+        selectedTracks: ["hotel_operations"],
         trackRevision: 3,
         completedStepIds: ["present_hotel"],
       },
     });
 
+    // Progress on a step the caller may not edit must not come back.
     historical.resumeStepId = "booking_design";
     const unauthorized = createPropertySetupRouteStateReadPort({
       draftRepository: { getActiveSession: vi.fn(async () => historical) },
-      trackRepository: trackRepository(["creator_marketplace"], 4),
-      ownerStateProviders: makeProviders(["creator_marketplace"]),
+      trackRepository: trackRepository(selectedTracks, 4),
+      ownerStateProviders: makeProviders(selectedTracks),
     });
     await expect(
-      unauthorized.getPropertySetupRouteState(input(["creator_marketplace"])),
+      unauthorized.getPropertySetupRouteState({
+        ...input(selectedTracks),
+        authorizedDraftStepIds: getActivePropertySetupStepIds(selectedTracks).filter(
+          (stepId) => stepId !== "booking_design",
+        ),
+      }),
     ).resolves.toEqual({ outcome: "provider_failure" });
   });
 
   it("returns not found when a canonical owner cannot find the property", async () => {
-    const providers = makeProviders(["creator_marketplace"]);
+    const providers = makeProviders(selectedTracks);
     providers.hotel_catalog = {
       getOwnerState: vi.fn(async () => ({
         outcome: "not_found" as const,
@@ -360,18 +354,18 @@ describe("property setup route state composition", () => {
     };
     const port = createPropertySetupRouteStateReadPort({
       draftRepository: { getActiveSession: vi.fn(async () => null) },
-      trackRepository: trackRepository(["creator_marketplace"], 4),
+      trackRepository: trackRepository(selectedTracks, 4),
       ownerStateProviders: providers,
     });
 
-    await expect(port.getPropertySetupRouteState(input(["creator_marketplace"]))).resolves.toEqual({
+    await expect(port.getPropertySetupRouteState(input(selectedTracks))).resolves.toEqual({
       outcome: "not_found",
     });
   });
 
   it("treats not-found from a product owner as provider failure", async () => {
-    const providers = makeProviders(["creator_marketplace"]);
-    providers.marketplace = {
+    const providers = makeProviders(selectedTracks);
+    providers.booking = {
       getOwnerState: vi.fn(async () => ({
         outcome: "not_found" as const,
         providerKey: "hotel_catalog" as const,
@@ -379,21 +373,21 @@ describe("property setup route state composition", () => {
     };
     const port = createPropertySetupRouteStateReadPort({
       draftRepository: { getActiveSession: vi.fn(async () => null) },
-      trackRepository: trackRepository(["creator_marketplace"], 4),
+      trackRepository: trackRepository(selectedTracks, 4),
       ownerStateProviders: providers,
     });
 
-    await expect(port.getPropertySetupRouteState(input(["creator_marketplace"]))).resolves.toEqual({
+    await expect(port.getPropertySetupRouteState(input(selectedTracks))).resolves.toEqual({
       outcome: "provider_failure",
     });
   });
 
   it("checks track revision after all owner snapshots have been composed", async () => {
     const events: string[] = [];
-    const providers = makeProviders(["creator_marketplace"], {}, events);
-    providers.marketplace = {
+    const providers = makeProviders(selectedTracks, {}, events);
+    providers.booking = {
       getOwnerState: vi.fn(() => {
-        events.push("marketplace_failure");
+        events.push("booking_failure");
         throw new Error("owner unavailable");
       }),
     };
@@ -409,7 +403,7 @@ describe("property setup route state composition", () => {
           events.push("track");
           return {
             trackRevision: 5,
-            selectedTracks: ["hotel_operations"] as SetupTrack[],
+            selectedTracks: [] as SetupTrack[],
             tracks: [],
           };
         }),
@@ -417,7 +411,7 @@ describe("property setup route state composition", () => {
       ownerStateProviders: providers,
     });
 
-    await expect(port.getPropertySetupRouteState(input(["creator_marketplace"]))).resolves.toEqual({
+    await expect(port.getPropertySetupRouteState(input(selectedTracks))).resolves.toEqual({
       outcome: "track_revision_conflict",
       currentRevision: 5,
     });
@@ -497,7 +491,6 @@ function ownerFact(
 
 function providerFor(stepId: PropertySetupStepId): PropertySetupStateProviderKey {
   if (stepId === "present_hotel") return "hotel_catalog";
-  if (stepId === "marketplace_preferences") return "marketplace";
   if (stepId === "booking_design" || stepId === "guest_experience") return "booking";
   if (stepId === "rooms" || stepId === "pricing" || stepId === "calendar") return "pms";
   if (stepId === "payments") return "finance";
@@ -507,9 +500,6 @@ function providerFor(stepId: PropertySetupStepId): PropertySetupStateProviderKey
 function ownerProvenance(
   stepId: PropertySetupStepId,
 ): Pick<PropertySetupRouteOwnerStepFact, "product" | "ownerDomain"> {
-  if (stepId === "marketplace_preferences") {
-    return { product: "marketplace", ownerDomain: "marketplace" };
-  }
   if (stepId === "booking_design" || stepId === "guest_experience") {
     return { product: "booking", ownerDomain: "booking" };
   }

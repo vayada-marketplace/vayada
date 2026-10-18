@@ -34,14 +34,14 @@ const settings = {
   youtube: "https://youtube.com/@owner-hotel",
 };
 
-function statusFor(existing = false, hotelOperations = true): AdaptiveHotelSetupStatus {
+function statusFor(existing = false): AdaptiveHotelSetupStatus {
   return {
     contractVersion: "adaptive-hotel-setup.v1",
     organization: {
       organizationId: "organization-1",
       displayName: "Hotel group",
       websiteUrl: null,
-      selectedTracks: hotelOperations ? ["hotel_operations"] : ["creator_marketplace"],
+      selectedTracks: ["hotel_operations"],
       trackRevision: 1,
       canManageTracks: true,
       tracks: [],
@@ -90,8 +90,8 @@ describe("atomic initial hotel settings", () => {
     renderer!.root.findAll(
       (node) => typeof node.props.onSave === "function" && node.props.draft,
     )[0];
-  async function mount(existing = false, hotelOperations = true) {
-    const status = statusFor(existing, hotelOperations);
+  async function mount(existing = false) {
+    const status = statusFor(existing);
     const saved: PropertyProfileResponse = {
       propertyId: "property-1",
       profileRevision: 1,
@@ -117,7 +117,7 @@ describe("atomic initial hotel settings", () => {
       renderer = create(
         <Wizard
           api={api as unknown as SharedHotelSetupApi}
-          entryProduct="marketplace"
+          entryProduct="booking"
           propertyLaunchSettingsApi={launchApi}
           renderAfterHotelDetails={() => null}
         />,
@@ -147,7 +147,7 @@ describe("atomic initial hotel settings", () => {
     await act(async () => form().props.onSave());
     expect(api.createPropertyProfile).toHaveBeenCalledTimes(1);
     expect(api.getStatus).toHaveBeenLastCalledWith({
-      entryProduct: "marketplace",
+      entryProduct: "booking",
       propertyId: "property-1",
     });
     expect(launchApi.update).not.toHaveBeenCalled();
@@ -190,7 +190,7 @@ describe("atomic initial hotel settings", () => {
   });
 
   it("retries an ambiguous hotel-detail edit with the same profile key", async () => {
-    const { api } = await mount(true, false);
+    const { api } = await mount(true);
     await act(async () => form().props.onChange({ ...draft, displayName: "Edited Hotel" }));
     api.updatePropertyProfile.mockRejectedValueOnce(new TypeError("Failed to fetch"));
     await act(async () => form().props.onSave());
@@ -203,7 +203,7 @@ describe("atomic initial hotel settings", () => {
   });
 
   it("starts a new profile key after a committed edit even when a later step fails", async () => {
-    const { api } = await mount(true, false);
+    const { api } = await mount(true);
     await act(async () => form().props.onChange({ ...draft, displayName: "Edited Hotel" }));
     api.getStatus.mockRejectedValueOnce(new Error("Reload failed"));
     await act(async () => form().props.onSave());
@@ -215,7 +215,7 @@ describe("atomic initial hotel settings", () => {
   });
 
   it("refreshes the profile and drops the key after an idempotency conflict", async () => {
-    const { api } = await mount(true, false);
+    const { api } = await mount(true);
     await act(async () => form().props.onChange({ ...draft, displayName: "Edited Hotel" }));
     api.updatePropertyProfile.mockRejectedValueOnce({
       status: 409,
@@ -258,26 +258,4 @@ describe("atomic initial hotel settings", () => {
     });
     expect(launchApi.update).not.toHaveBeenCalled();
   });
-
-  it.each([false, true])(
-    "hides and ignores launch settings for Creator-only setup (existing=%s)",
-    async (existing) => {
-      const { api, launchApi } = await mount(existing, false);
-      expect(form().props.launchSettings).toBeNull();
-      expect(launchApi.get).not.toHaveBeenCalled();
-      await act(async () =>
-        form().props.onLaunchSettingsChange({
-          ...settings,
-          defaultCurrency: "invalid",
-          instagram: "invalid",
-        }),
-      );
-      await act(async () => form().props.onSave());
-      expect(launchApi.update).not.toHaveBeenCalled();
-      if (!existing)
-        expect(api.createPropertyProfile.mock.calls[0][0]).not.toHaveProperty(
-          "initialLaunchSettings",
-        );
-    },
-  );
 });

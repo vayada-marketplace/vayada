@@ -528,6 +528,17 @@ export async function mockPmsWebTargetRoutes(page: Page): Promise<void> {
     .route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/pricing-v2/payment-methods`, (route) =>
       route.fulfill({ json: { acceptanceEnabled: false, readyMethods: [] } }),
     );
+  // Card isn't ready on the booking page, as in production today (VAY-2205).
+  await page
+    .context()
+    .route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/pricing-v2/card-readiness`, (route) =>
+      route.fulfill({
+        json: {
+          card: { ready: false, reason: "switch_off", charge: "at_booking" },
+          deposits: { ready: false },
+        },
+      }),
+    );
   await page.route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/plan-limits`, (route) =>
     route.fulfill({
       json: {

@@ -449,6 +449,31 @@ describe("option prices, presets and deleting", () => {
       price: { adjustment: { kind: "fixed", deltaMinor: "0" } },
     });
     expect(half.terms.cancellation).toEqual(flexibleTerms(3).cancellation);
+    // A non-refundable option is paid in advance: pay at property is left out, and alone it can't be (VAY-2280).
+    expect(
+      presetOption(
+        priced,
+        offerId,
+        "non_refundable_breakfast",
+        {
+          discount: "10",
+          mealAmount: "15",
+          mealBasis: "room",
+          methods: ["pay_at_property", "card"],
+        },
+        flexibleTerms(),
+      ).terms.payment.acceptedMethods,
+    ).toEqual(["card"]);
+    expect(() =>
+      presetOption(
+        priced,
+        offerId,
+        "non_refundable",
+        { discount: "10", mealAmount: "", mealBasis: "room", methods: ["pay_at_property"] },
+        flexibleTerms(),
+      ),
+    ).toThrow("Non-refundable stays are paid in advance.");
+    expect(half.terms.payment.acceptedMethods).toEqual(["card"]);
     for (const values of [
       { discount: "0", mealAmount: "", mealBasis: "room" as const, methods },
       { discount: "100", mealAmount: "", mealBasis: "room" as const, methods },

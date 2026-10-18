@@ -49,8 +49,6 @@ const session: VerifiedSession = {
 const allPermissions: PermissionKey[] = [
   "hotel_catalog.setup.read",
   "hotel_catalog.setup.manage",
-  "marketplace.collaboration.read",
-  "marketplace.profile.manage",
   "booking.settings.read",
   "booking.settings.manage",
   "pms.operations.read",
@@ -68,7 +66,7 @@ describe("property setup route", () => {
   it("returns the canonical property-scoped route with authorized active drafts", async () => {
     const calls: PropertySetupRouteStateReadInput[] = [];
     app = buildRouteApp({
-      selectedTracks: ["creator_marketplace", "hotel_operations"],
+      selectedTracks: ["hotel_operations"],
       routeStateReadPort: {
         async getPropertySetupRouteState(input) {
           calls.push(input);
@@ -77,7 +75,7 @@ describe("property setup route", () => {
             trackRevision: 4,
             session: makePropertySetupSession(),
             ownerFacts: makeOwnerFacts(
-              ["hotel_operations", "creator_marketplace"],
+              ["hotel_operations"],
               [
                 {
                   organizationId,
@@ -121,12 +119,12 @@ describe("property setup route", () => {
     expect(rawResponse.headers["cache-control"]).toBe("private, no-store");
     expect(response.body).toMatchObject({
       scope: { organizationId, propertyId },
-      selectedTracks: ["hotel_operations", "creator_marketplace"],
+      selectedTracks: ["hotel_operations"],
       trackRevision: 4,
-      progress: { complete: 0, total: 9 },
+      progress: { complete: 0, total: 8 },
     });
     expect(response.body.steps.find(({ stepId }) => stepId === "booking_design")).toMatchObject({
-      position: 3,
+      position: 2,
       state: "draft",
       draft: {
         stepId: "booking_design",
@@ -138,18 +136,17 @@ describe("property setup route", () => {
     });
     expect(response.body.steps.find(({ stepId }) => stepId === "review")).toMatchObject({
       state: "blocked",
-      blockers: [{ owningStepId: "booking_design", owningStepPosition: 3 }],
+      blockers: [{ owningStepId: "booking_design", owningStepPosition: 2 }],
     });
     expect(calls).toEqual([
       {
         organizationId,
         propertyId,
         actorUserId: userId,
-        selectedTracks: ["hotel_operations", "creator_marketplace"],
+        selectedTracks: ["hotel_operations"],
         expectedTrackRevision: 4,
         authorizedDraftStepIds: [
           "present_hotel",
-          "marketplace_preferences",
           "booking_design",
           "rooms",
           "payments",
@@ -162,52 +159,11 @@ describe("property setup route", () => {
     ]);
   });
 
-  it("does not expose retained drafts from a hidden track", async () => {
-    const readPort = {
-      getPropertySetupRouteState: vi.fn(async () => ({
-        outcome: "found" as const,
-        trackRevision: 4,
-        session: makePropertySetupSession(),
-        ownerFacts: makeOwnerFacts(["creator_marketplace"]),
-      })),
-    };
-    app = buildRouteApp({
-      selectedTracks: ["creator_marketplace"],
-      routeStateReadPort: readPort,
-    });
-
-    const response = await injectJson<PropertySetupRouteReadModel>(app, {
-      method: "GET",
-      url: `/api/hotel-setup/properties/${propertyId}/route`,
-      headers: { authorization: "Bearer valid-token" },
-    });
-
-    expect(response.statusCode).toBe(200);
-    expect(response.body.steps.map(({ stepId }) => stepId)).toEqual([
-      "present_hotel",
-      "marketplace_preferences",
-      "review",
-    ]);
-    expect(JSON.stringify(response.body)).not.toContain("booking.primary_color");
-    expect(readPort.getPropertySetupRouteState).toHaveBeenCalledWith(
-      expect.objectContaining({
-        authorizedDraftStepIds: ["present_hotel", "marketplace_preferences", "review"],
-      }),
-    );
-  });
-
   it.each([
     {
       name: "catalog property link",
       linkedResources: productLinks().filter((link) => link.product !== "hotel_catalog"),
       entitlements: productEntitlements(),
-    },
-    {
-      name: "Marketplace entitlement",
-      linkedResources: productLinks(),
-      entitlements: productEntitlements().filter(
-        (entitlement) => entitlement.product !== "marketplace",
-      ),
     },
     {
       name: "Booking property link",
@@ -219,15 +175,6 @@ describe("property setup route", () => {
       linkedResources: productLinks(),
       entitlements: productEntitlements(),
       permissions: allPermissions.filter((permission) => permission !== "pms.operations.read"),
-    },
-    {
-      name: "suspended Marketplace entitlement",
-      linkedResources: productLinks(),
-      entitlements: productEntitlements().map((entitlement) =>
-        entitlement.product === "marketplace"
-          ? { ...entitlement, status: "suspended" as const }
-          : entitlement,
-      ),
     },
     {
       name: "disallowed Booking relationship",
@@ -248,7 +195,7 @@ describe("property setup route", () => {
       getPropertySetupRouteState: vi.fn(async () => ({ outcome: "not_found" as const })),
     };
     app = buildRouteApp({
-      selectedTracks: ["hotel_operations", "creator_marketplace"],
+      selectedTracks: ["hotel_operations"],
       routeStateReadPort,
       ...access,
     });
@@ -310,7 +257,7 @@ describe("property setup route", () => {
   ])(
     "rejects a $name before reading route state",
     async ({ organization, expectedStatus, expectedCode }) => {
-      const trackRepository = makeTrackRepository(["creator_marketplace"]);
+      const trackRepository = makeTrackRepository(["hotel_operations"]);
       const routeStateReadPort = {
         getPropertySetupRouteState: vi.fn(async () => ({ outcome: "not_found" as const })),
       };
@@ -336,7 +283,7 @@ describe("property setup route", () => {
   );
 
   it("authenticates before validating property input and does not read state", async () => {
-    const trackRepository = makeTrackRepository(["creator_marketplace"]);
+    const trackRepository = makeTrackRepository(["hotel_operations"]);
     const routeStateReadPort = {
       getPropertySetupRouteState: vi.fn(async () => ({ outcome: "not_found" as const })),
     };
@@ -372,11 +319,11 @@ describe("property setup route", () => {
         outcome: "found" as const,
         trackRevision: 4,
         session: null,
-        ownerFacts: makeOwnerFacts(["creator_marketplace"]),
+        ownerFacts: makeOwnerFacts(["hotel_operations"]),
       })),
     };
     app = buildRouteApp({
-      selectedTracks: ["creator_marketplace"],
+      selectedTracks: ["hotel_operations"],
       routeStateReadPort,
     });
 
@@ -425,8 +372,8 @@ describe("property setup route", () => {
         trackRevision: 4,
         session: null,
         ownerFacts: [
-          ...makeOwnerFacts(["creator_marketplace"]),
-          ...makeOwnerFacts(["creator_marketplace"]).slice(0, 1),
+          ...makeOwnerFacts(["hotel_operations"]),
+          ...makeOwnerFacts(["hotel_operations"]).slice(0, 1),
         ],
       },
       expectedStatus: 503,
@@ -438,7 +385,7 @@ describe("property setup route", () => {
         outcome: "found",
         trackRevision: 3,
         session: null,
-        ownerFacts: makeOwnerFacts(["creator_marketplace"]),
+        ownerFacts: makeOwnerFacts(["hotel_operations"]),
       },
       expectedStatus: 503,
       expectedCode: "property_setup_route_unavailable",
@@ -453,7 +400,7 @@ describe("property setup route", () => {
     "maps $name without caching it",
     async ({ result, expectedStatus, expectedCode, expectedBody }) => {
       app = buildRouteApp({
-        selectedTracks: ["creator_marketplace"],
+        selectedTracks: ["hotel_operations"],
         routeStateReadPort: {
           async getPropertySetupRouteState() {
             return result;
@@ -477,14 +424,14 @@ describe("property setup route", () => {
 
   it("fails closed when the owner snapshot is incomplete or stale", async () => {
     app = buildRouteApp({
-      selectedTracks: ["creator_marketplace"],
+      selectedTracks: ["hotel_operations"],
       routeStateReadPort: {
         async getPropertySetupRouteState() {
           return {
             outcome: "found",
             trackRevision: 4,
             session: null,
-            ownerFacts: makeOwnerFacts(["creator_marketplace"]).slice(1),
+            ownerFacts: makeOwnerFacts(["hotel_operations"]).slice(1),
           };
         },
       },
@@ -503,7 +450,7 @@ describe("property setup route", () => {
   it("isolates authorization decisions from a mutating state adapter", async () => {
     let receivedFrozenInput = false;
     app = buildRouteApp({
-      selectedTracks: ["creator_marketplace"],
+      selectedTracks: ["hotel_operations"],
       routeStateReadPort: {
         async getPropertySetupRouteState(input) {
           receivedFrozenInput =
@@ -519,7 +466,7 @@ describe("property setup route", () => {
             outcome: "found",
             trackRevision: 4,
             session: makePropertySetupSession(),
-            ownerFacts: makeOwnerFacts(["creator_marketplace"]),
+            ownerFacts: makeOwnerFacts(["hotel_operations"]),
           };
         },
       },
@@ -533,19 +480,16 @@ describe("property setup route", () => {
 
     expect(receivedFrozenInput).toBe(true);
     expect(response.statusCode).toBe(200);
-    expect(response.body.selectedTracks).toEqual(["creator_marketplace"]);
-    expect(response.body.steps.map(({ stepId }) => stepId)).toEqual([
-      "present_hotel",
-      "marketplace_preferences",
-      "review",
-    ]);
-    expect(JSON.stringify(response.body)).not.toContain("booking.primary_color");
+    expect(response.body.selectedTracks).toEqual(["hotel_operations"]);
+    expect(response.body.steps.map(({ stepId }) => stepId)).toEqual(
+      getActivePropertySetupStepIds(["hotel_operations"]),
+    );
   });
 
   it("fails closed on a blocker from a product outside the selected tracks", async () => {
-    const forbiddenMessage = "Booking's internal readiness detail.";
+    const forbiddenMessage = "Marketplace's internal readiness detail.";
     app = buildRouteApp({
-      selectedTracks: ["creator_marketplace"],
+      selectedTracks: ["hotel_operations"],
       routeStateReadPort: {
         async getPropertySetupRouteState() {
           return {
@@ -553,7 +497,7 @@ describe("property setup route", () => {
             trackRevision: 4,
             session: null,
             ownerFacts: makeOwnerFacts(
-              ["creator_marketplace"],
+              ["hotel_operations"],
               [
                 {
                   organizationId,
@@ -566,9 +510,10 @@ describe("property setup route", () => {
                   currentBaseRevisions: {},
                   blockers: [
                     {
-                      code: "booking_not_ready",
-                      product: "booking",
-                      ownerDomain: "booking",
+                      // The retired Marketplace product is outside every selectable track.
+                      code: "marketplace_not_ready",
+                      product: "marketplace" as never,
+                      ownerDomain: "marketplace" as never,
                       owningStepId: "present_hotel",
                       message: forbiddenMessage,
                       kind: "system_error",
@@ -666,7 +611,7 @@ describe("property setup route", () => {
 
 function buildRouteApp(options: {
   routeStateReadPort: PropertySetupRouteStateReadPort;
-  selectedTracks?: Array<"hotel_operations" | "creator_marketplace">;
+  selectedTracks?: Array<"hotel_operations">;
   trackRepository?: HotelSetupTrackCommandRepository;
   permissions?: PermissionKey[];
   linkedResources?: LinkedResource[];
@@ -697,10 +642,7 @@ function buildRouteApp(options: {
 }
 
 function makeTrackRepository(
-  selectedTracks: Array<"hotel_operations" | "creator_marketplace"> = [
-    "hotel_operations",
-    "creator_marketplace",
-  ],
+  selectedTracks: Array<"hotel_operations"> = ["hotel_operations"],
 ): HotelSetupTrackCommandRepository {
   return {
     getTrackStatus: vi.fn(async () => ({
@@ -753,7 +695,6 @@ function identityRepository(
 function productLinks(): LinkedResource[] {
   return [
     resourceLink("hotel_catalog", "property"),
-    resourceLink("marketplace", "hotel_profile"),
     resourceLink("booking", "booking_hotel"),
     resourceLink("pms", "pms_property"),
   ];
@@ -774,7 +715,6 @@ function resourceLink(
 
 function productEntitlements(): ProductEntitlement[] {
   return [
-    { product: "marketplace", key: "marketplace-hotel-profile", status: "active" },
     { product: "booking", key: "booking-engine", status: "active" },
     { product: "pms", key: "property-management", status: "active" },
   ];
@@ -786,7 +726,7 @@ function makePropertySetupSession(): PropertySetupSession {
     sessionId: "55555555-5555-4555-8555-555555555555",
     organizationId,
     propertyId,
-    selectedTracks: ["hotel_operations", "creator_marketplace"],
+    selectedTracks: ["hotel_operations"],
     trackRevision: 4,
     revision: 6,
     resumeStepId: "booking_design",
@@ -839,9 +779,6 @@ function makeOwnerFacts(
 function ownerFactProvenance(
   stepId: PropertySetupRouteOwnerStepFact["stepId"],
 ): Pick<PropertySetupRouteOwnerStepFact, "product" | "ownerDomain"> {
-  if (stepId === "marketplace_preferences") {
-    return { product: "marketplace", ownerDomain: "marketplace" };
-  }
   if (stepId === "booking_design" || stepId === "guest_experience") {
     return { product: "booking", ownerDomain: "booking" };
   }
