@@ -141,10 +141,12 @@ test("turns card payments on as vayada's approval, then off, each time asking fo
   ).toHaveAttribute("href", /\/rooms$/);
   await expect(card.getByText("On", { exact: true })).toBeVisible();
   await expect(card.getByText(/Given .* by Mara Vogel\./)).toBeVisible();
-  expect(accepted).toMatchObject({
+  // The page names the revisions it showed; the server records the time and the fingerprint.
+  expect(accepted).toEqual({
+    commandId: expect.any(String),
+    idempotencyKey: expect.any(String),
     expectedCardCapabilityRevision: 3,
     expectedPropertyReadinessRevision: 7,
-    evidenceFingerprintHash: expect.stringMatching(/^[0-9a-f]{64}$/),
   });
   await page.screenshot({ path: testInfo.outputPath("payments-on.png"), fullPage: true });
 
