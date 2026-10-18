@@ -304,13 +304,18 @@ jobs:
   # The mocked booking-web Playwright project against a plain-port dev server on the seeded
   # hotel-alpenrose tenant host. The project runs with one worker (playwright.config.ts).
   booking_web_e2e:
-    name: Booking Web Browser Specs
+    name: Booking Web Browser Specs (${{ matrix.shard }}/2)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: [changes]
     if: needs.changes.outputs.run_booking_web_e2e == 'true'
     permissions:
       contents: read
+    # Two shards, each with its own dev server (VAY-2287, as pms_web_e2e).
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
 
     steps:
       - name: Checkout code
@@ -344,7 +349,7 @@ jobs:
             sleep 2
           done
           curl --silent --fail --max-time 10 http://127.0.0.1:3002/api/health >/dev/null || { tail -50 "$RUNNER_TEMP/booking-web-dev.log"; exit 1; }
-          npm run e2e:booking-web -- --retries=1
+          npm run e2e:booking-web -- --retries=1 --shard=${{ matrix.shard }}/2
         env:
           # See pms_web_e2e: "false" keeps playwright.config.ts from starting every webServer.
           CI: "false"
@@ -357,7 +362,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v6
         with:
-          name: booking-web-playwright-report
+          name: booking-web-playwright-report-${{ matrix.shard }}
           path: |
             playwright-report
             test-results
@@ -367,13 +372,18 @@ jobs:
   # The mocked booking-admin Playwright project against a plain-port dev server (VAY-2261: Booking
   # Admin hosts the hotel setup wizard). Every API call is mocked in the specs and tests/e2e/support.
   booking_admin_e2e:
-    name: Booking Admin Browser Specs
+    name: Booking Admin Browser Specs (${{ matrix.shard }}/2)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: [changes]
     if: needs.changes.outputs.run_booking_admin_e2e == 'true'
     permissions:
       contents: read
+    # Two shards, each with its own dev server (VAY-2287, as pms_web_e2e).
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
 
     steps:
       - name: Checkout code
@@ -415,7 +425,7 @@ jobs:
           # handoffReturnToForOrganization from the login pages); it stays out until that is fixed.
           specs=$(ls tests/e2e/booking-admin/*.spec.ts | grep -v '/handoff-authkit\.spec\.ts$')
           # shellcheck disable=SC2086
-          npm run e2e:booking-admin -- --workers=1 --retries=1 $specs
+          npm run e2e:booking-admin -- --workers=1 --retries=1 --shard=${{ matrix.shard }}/2 $specs
         env:
           # Any non-empty CI makes playwright.config.ts use CI reporters; "false" keeps it from
           # starting every app's webServer (that needs CI === "true").
@@ -430,7 +440,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v6
         with:
-          name: booking-admin-playwright-report
+          name: booking-admin-playwright-report-${{ matrix.shard }}
           path: |
             playwright-report
             test-results
