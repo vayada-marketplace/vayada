@@ -283,3 +283,17 @@ it("counts the nights no price covers and finds the lowest night guests pay (VAY
   expect(lowestNightMinor(room(), ["flex", "nonref"], 2, "2026")).toBe("9000");
   expect(lowestNightMinor(room(), ["flex"], 2, "2026")).toBe("10000");
 });
+
+it("shows a room without prices as nights waiting for one, with nothing to pick (VAY-2280)", () => {
+  mount({ room: null, empty: true, month: "2026-11" });
+  const cells = view.root.findAll((node) => node.type === "div" && node.props.role === "img");
+  expect(cells).toHaveLength(30);
+  expect(cells[0].props["aria-label"]).toBe("1 November 2026, no price");
+  expect(
+    view.root.findAll(
+      (node) => node.type === "button" && /^\d+ November/.test(node.props["aria-label"] ?? ""),
+    ),
+  ).toHaveLength(0);
+  expect(text()).toContain("No prices yet. Enter the price per night below to fill the calendar.");
+  expect(text()).not.toContain("Pick a night");
+});

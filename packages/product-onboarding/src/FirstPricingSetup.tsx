@@ -12,6 +12,7 @@ import type { Translate } from "./firstPricingSetupMessages";
 import { IncludedPricing, includedPrice, type IncludedInput } from "./IncludedPricing";
 import {
   AcceptedPaymentMethods,
+  paidInAdvance,
   type ManualPaymentMethod,
   type PaymentMethod,
 } from "./AcceptedPaymentMethods";
@@ -65,6 +66,10 @@ export function firstPricingInput(
   )
     throw new PricingError("pricing.setup.errorIncomplete");
   if (!values.methods.length) throw new PricingError("pricing.error.paymentMethodRequired");
+  // A non-refundable stay is paid in advance: pay at property is never sent with it (VAY-2280).
+  const methods =
+    values.cancellation === "non_refundable" ? paidInAdvance(values.methods) : values.methods;
+  if (!methods.length) throw new PricingError("pricing.error.nonRefundableNeedsAdvance");
   if (!["flat", "occupancy", "per_person", "included_guests"].includes(values.mode))
     throw new PricingError("pricing.setup.errorMode");
   if (values.mode === "occupancy" && values.occupancy.length !== room.capacity.adults)
@@ -103,7 +108,7 @@ export function firstPricingInput(
     offerId,
     expectedRevision: null,
     cancellation,
-    payment: { kind: "full", acceptedMethods: values.methods },
+    payment: { kind: "full", acceptedMethods: methods },
   };
   const configuration = parsePricingConfiguration({
     version: "pricing.v2",
@@ -378,6 +383,7 @@ export function FirstPricingSetup({
         methods={values.methods}
         disabled={disabled}
         manualMethods={manualMethods}
+        nonRefundable={values.cancellation === "non_refundable"}
         onChange={(methods) => {
           setValues({ ...values, methods });
           setError("");

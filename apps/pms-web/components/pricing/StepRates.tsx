@@ -65,6 +65,7 @@ export function StepRates({
   onRemove,
   onChange,
   onPending,
+  edited = [],
   children,
 }: {
   room: PricingConfiguration;
@@ -84,6 +85,8 @@ export function StepRates({
   onRemove: (offerId: string) => void;
   onChange: (room: PricingConfiguration) => void;
   onPending: (pending: boolean) => void;
+  /** Options whose terms have unsaved edits: they are written on Save. */
+  edited?: readonly string[];
   children?: ReactNode;
 }) {
   const { t } = useTranslation();
@@ -122,6 +125,7 @@ export function StepRates({
             onRemove={onRemove}
             onChange={onChange}
             onPending={onPending}
+            edited={edited}
           />
         </div>
       )}
@@ -314,6 +318,7 @@ function NonRefundableRate({
   onRemove,
   onChange,
   onPending,
+  edited,
 }: {
   room: PricingConfiguration;
   simple: SimpleRoom;
@@ -325,6 +330,7 @@ function NonRefundableRate({
   onRemove: (offerId: string) => void;
   onChange: (room: PricingConfiguration) => void;
   onPending: (pending: boolean) => void;
+  edited: readonly string[];
 }) {
   const { t } = useTranslation();
   const manual = usePricingManualMethods();
@@ -344,8 +350,14 @@ function NonRefundableRate({
   useEffect(() => {
     pendingRef.current = onPending;
   });
+  // Old terms that still accept pay at property can't be written again (VAY-2280): once the rate's terms are edited,
+  // Save waits until pay at property is unticked. Nothing is unticked for the hotel.
+  const blocked =
+    !!offer &&
+    edited.includes(offer.id) &&
+    !!terms[offer.id]?.payment.acceptedMethods?.includes("pay_at_property");
   // A discount that doesn't parse holds Save while the rate is on.
-  const pending = !!(error && offer);
+  const pending = !!(error && offer) || blocked;
   useEffect(() => pendingRef.current(pending), [pending]);
   const available = simple.cancellation.kind === "free";
   const edit = (value: string) => {
@@ -481,6 +493,11 @@ function NonRefundableRate({
             }
           />
         </>
+      )}
+      {blocked && (
+        <p role="alert" className={ui.errorText}>
+          {t("pricing.error.nonRefundablePayAtProperty")}
+        </p>
       )}
       {error && (
         <p role="alert" className={ui.errorText}>

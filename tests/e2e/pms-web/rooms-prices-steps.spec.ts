@@ -200,7 +200,11 @@ const publicationOf = (revision: number, rooms: Room[]) => ({
 });
 
 /** An in-memory pricing-v2 store: published rooms, terms per offer (saved through drafts), and every publish. */
-async function mockPricing(page: Page, initial: ReturnType<typeof publicationOf> | null) {
+async function mockPricing(
+  page: Page,
+  initial: ReturnType<typeof publicationOf> | null,
+  readyMethods: ("bank_transfer" | "paypal")[] = [],
+) {
   const terms = new Map<string, Record<string, unknown>>([
     ["flexible", { revision: TERMS, cancellation: flexible }],
     ["breakfast", { revision: TERMS, cancellation: flexible }],
@@ -219,9 +223,9 @@ async function mockPricing(page: Page, initial: ReturnType<typeof publicationOf>
     const method = request.method();
     const suffix = new URL(request.url()).pathname.split("/pricing-v2")[1] ?? "";
     const body = (method === "GET" ? {} : request.postDataJSON()) as Record<string, any>;
-    // Bank-transfer and PayPal acceptance is off, as in production today (VAY-2139).
+    // Bank-transfer and PayPal acceptance is off, as in production today (VAY-2139), unless a test makes them ready.
     if (suffix === "/payment-methods" && method === "GET")
-      return ok(route, { acceptanceEnabled: false, readyMethods: [] });
+      return ok(route, { acceptanceEnabled: readyMethods.length > 0, readyMethods });
     if (suffix === "" && method === "GET") {
       if (!state.publication) return route.fulfill({ status: 404, json: { code: "not_found" } });
       return ok(route, state.publication);
@@ -642,6 +646,13 @@ test("sets the first price of an unpriced room with one Save, next to the other 
   const assertHealthy = watchPageHealth(page, testInfo);
   await prices(page, LAKE);
   await expect(main(page).getByText("Lake Loft has no price yet", { exact: false })).toBeVisible();
+  // VAY-2280: the calendar shows the nights waiting for a price, beside "Start with one price".
+  await expect(main(page).getByRole("region", { name: "Start with one price" })).toBeVisible();
+  await expect(
+    main(page)
+      .getByRole("region", { name: "Prices by date" })
+      .getByRole("img", { name: /^1 \w+ \d{4}, no price$/ }),
+  ).toBeVisible();
   await expect(main(page).getByLabel("Room type")).toHaveCount(0);
   // Save without a price names what is missing; nothing else needs an answer.
   await main(page).getByRole("button", { name: "Save prices" }).click();
@@ -682,7 +693,8 @@ test("adds the switches and a season to a first price before saving it (VAY-2188
   page,
 }, testInfo) => {
   await openPms(page);
-  const pricing = await mockPricing(page, publicationOf(3, [designRoom(3)]));
+  // Non-refundable stays are paid in advance (VAY-2280): bank transfer is ready next to pay at the hotel.
+  const pricing = await mockPricing(page, publicationOf(3, [designRoom(3)]), ["bank_transfer"]);
   const assertHealthy = watchPageHealth(page, testInfo);
   await prices(page, LAKE);
   await main(page).getByLabel("Room price per night").fill("100");
@@ -720,6 +732,8 @@ test("adds the switches and a season to a first price before saving it (VAY-2188
     "non_refundable",
     "flexible",
   ]);
+  // The non-refundable option is never sent with pay at property.
+  expect(pricing.termsWrites[1].payment.acceptedMethods).toEqual(["bank_transfer"]);
   await assertHealthy();
 });
 
