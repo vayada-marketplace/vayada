@@ -94,13 +94,14 @@ const monthDay = (value: unknown): value is string =>
 const text = (value: unknown): value is string =>
   typeof value === "string" && value.trim().length > 0;
 const unique = (values: readonly unknown[]) => new Set(values).size === values.length;
-/** One line of plain text, trimmed: no line breaks or other control characters. */
+/** One line of plain text, trimmed: no control or unpaired surrogate characters (PostgreSQL
+ * refuses those in JSON), line separators or bidi overrides. */
 const mealDescription = (value: unknown): value is string =>
   typeof value === "string" &&
   value === value.trim() &&
   value.length > 0 &&
   value.length <= 200 &&
-  [...value].every((char) => char >= " " && char !== "\u007f");
+  !/[\p{Cc}\p{Cs}\u2028\u2029\u202A-\u202E\u2066-\u2069]/u.test(value);
 /** Guests can choose this offer on the direct booking page (VAY-2285). */
 export const pricingOfferOnBookingPage = (offer: Pick<PricingOffer, "sale">): boolean =>
   offer.sale === undefined;
