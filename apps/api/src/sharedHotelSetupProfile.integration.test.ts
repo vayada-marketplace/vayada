@@ -97,14 +97,8 @@ describe.skipIf(!TEST_DATABASE_URL)("canonical property profile repository", () 
          ($4::uuid, $2::uuid, $5::uuid, 'active', 'hotel_owner', 'agency')`,
       [membershipId, organizationId, actorUserId, secondMembershipId, secondActorUserId],
     );
-    await client.query(
-      `INSERT INTO hotel_catalog.organization_setup_track_intents (
-         organization_id,
-         selected_tracks
-       )
-       VALUES ($1::uuid, ARRAY['creator_marketplace']::text[])`,
-      [organizationId],
-    );
+    // No setup track is selected (VAY-2270: the retired Creator Marketplace-only selection this
+    // used to store reads the same way and cannot be stored any more).
   });
 
   it.each(["ordinary"] as const)(

@@ -99,17 +99,13 @@ describe.skipIf(!TEST_DATABASE_URL)("property setup draft PostgreSQL repository"
     await client.end();
   });
 
-  it("uses the current authorized route while retaining hidden-track drafts", async () => {
+  it("uses the current authorized route while retaining hidden step drafts", async () => {
     await insertSession(["hotel_operations"], "2026-09-30T12:00:00.000Z");
     await insertDraft({
-      stepId: "marketplace_preferences",
-      payload: {
-        "marketplace.preferences.content_types": ["short_form_video"],
-      },
-      dirtyFields: ["marketplace.preferences.content_types"],
-      baseRevisions: {
-        "marketplace.collaboration_preferences": "preferences:4",
-      },
+      stepId: "rooms",
+      payload: { "room.name": "Garden suite" },
+      dirtyFields: ["room.name"],
+      baseRevisions: { "pms.room_types": "room-types:4" },
       revision: 2,
     });
     await insertDraft({
@@ -130,7 +126,9 @@ describe.skipIf(!TEST_DATABASE_URL)("property setup draft PostgreSQL repository"
     await expect(
       repository.getActiveSession({
         ...scope,
-        authorizedStepIds: getActivePropertySetupStepIds(["hotel_operations"]),
+        authorizedStepIds: getActivePropertySetupStepIds(["hotel_operations"]).filter(
+          (stepId) => stepId !== "rooms",
+        ),
       }),
     ).resolves.toEqual({
       contractVersion: "property-setup-draft.v1",
@@ -169,24 +167,21 @@ describe.skipIf(!TEST_DATABASE_URL)("property setup draft PostgreSQL repository"
         `SELECT count(*)::text AS count
          FROM hotel_catalog.property_setup_step_drafts
          WHERE session_id = $1::uuid
-           AND step_id = 'marketplace_preferences'`,
+           AND step_id = 'rooms'`,
         [sessionId],
       ),
     ).resolves.toMatchObject({ rows: [{ count: "1" }] });
 
-    // Restoring Marketplace in the current route must reveal the retained
-    // draft even though the historical session still records Operations only.
+    // Authorizing the step again reveals the retained draft.
     await expect(repository.getActiveSession(scope)).resolves.toMatchObject({
       selectedTracks: ["hotel_operations"],
       trackRevision: 2,
       drafts: [
         { stepId: "present_hotel" },
         {
-          stepId: "marketplace_preferences",
-          payload: {
-            "marketplace.preferences.content_types": ["short_form_video"],
-          },
-          dirtyFields: ["marketplace.preferences.content_types"],
+          stepId: "rooms",
+          payload: { "room.name": "Garden suite" },
+          dirtyFields: ["room.name"],
           revision: 2,
         },
       ],
@@ -249,24 +244,18 @@ describe.skipIf(!TEST_DATABASE_URL)("property setup draft PostgreSQL repository"
   });
 
   it("does not disclose active-track state outside the caller's authorized steps", async () => {
-    // The stored row still names the retired Creator Marketplace track (VAY-2270); it reads as
-    // Hotel Operations and its Marketplace drafts stay hidden.
-    await insertSession(["hotel_operations", "creator_marketplace"], "2026-09-30T12:00:00.000Z");
+    await insertSession(["hotel_operations"], "2026-09-30T12:00:00.000Z");
     await insertDraft({
-      stepId: "marketplace_preferences",
-      payload: {
-        "marketplace.preferences.content_types": ["short_form_video"],
-      },
-      dirtyFields: ["marketplace.preferences.content_types"],
-      baseRevisions: {
-        "marketplace.collaboration_preferences": "preferences:4",
-      },
+      stepId: "rooms",
+      payload: { "room.name": "Garden suite" },
+      dirtyFields: ["room.name"],
+      baseRevisions: { "pms.room_types": "room-types:4" },
       revision: 2,
     });
     await client.query(
       `UPDATE hotel_catalog.property_setup_sessions
-       SET resume_step_id = 'marketplace_preferences',
-           completed_step_ids = ARRAY['marketplace_preferences']::text[]
+       SET resume_step_id = 'rooms',
+           completed_step_ids = ARRAY['rooms']::text[]
        WHERE id = $1::uuid`,
       [sessionId],
     );
@@ -282,11 +271,6 @@ describe.skipIf(!TEST_DATABASE_URL)("property setup draft PostgreSQL repository"
       completedStepIds: [],
       drafts: [],
     });
-  });
-
-  it("treats a session that only selected the retired Creator Marketplace track as absent", async () => {
-    await insertSession(["creator_marketplace"], "2026-09-30T12:00:00.000Z");
-    await expect(repository.getActiveSession(scope)).resolves.toBeNull();
   });
 
   it("excludes retired guest drafts and resume markers while keeping other setup drafts", async () => {
