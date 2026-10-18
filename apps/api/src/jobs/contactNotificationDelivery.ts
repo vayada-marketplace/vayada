@@ -28,13 +28,18 @@ type ContactNotificationPool = {
   end?(): Promise<void>;
 };
 
+/** Contact emails sent per hour at most, so a flood can't use up the provider's limits that
+ * booking emails share; the rest wait in the queue. */
+export const CONTACT_NOTIFICATION_HOURLY_CAP = 30;
 const USER_TYPES: Record<string, string> = { hotel: "Hotel owner or manager", other: "Other" };
-const EMAIL = /^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+$/;
+// Reply-To only for a plain ASCII address the provider accepts; others still appear in the text.
+const REPLY_TO = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$/;
+const PROVIDER_ERROR = /^Booking email provider returned HTTP \d{3}\.$/;
 
-/** "Vayada Bookings <bookings@vayada.com>" → "vayada.com contact form <bookings@vayada.com>". */
+/** "Vayada Bookings <bookings@vayada.com>" → "Vayada contact form <bookings@vayada.com>". */
 export function contactNotificationSender(from: string): string {
   const address = /<([^<>]+)>\s*$/.exec(from)?.[1] ?? from.trim();
-  return `vayada.com contact form <${address}>`;
+  return `Vayada contact form <${address}>`;
 }
 
 export function contactNotificationEmail(
@@ -65,40 +70,65 @@ export function contactNotificationEmail(
     "Message:",
     message,
     "",
-    EMAIL.test(email)
+    REPLY_TO.test(email)
       ? `Reply to this email to answer ${oneLine(name)} directly.`
-      : "The email address looks invalid, so replies go to the sender address.",
+      : "Reply-To is not set for this address: write to it directly.",
   ].join("\n");
   return {
     subject: `Contact form: ${oneLine(name).slice(0, 120)}`,
     text,
-    ...(EMAIL.test(email) ? { replyTo: email } : {}),
+    ...(REPLY_TO.test(email) ? { replyTo: email } : {}),
   };
 }
 
 export async function runContactNotificationJobs(
   connectionString: string,
   delivery: BookingEmailDelivery,
-  options: { recipient: string; workerId?: string; limit?: number; pool?: ContactNotificationPool },
-): Promise<{ processed: number; failed: number }> {
+  options: {
+    recipient: string;
+    workerId?: string;
+    limit?: number;
+    hourlyCap?: number;
+    pool?: ContactNotificationPool;
+  },
+): Promise<{ processed: number; failed: number; deadLettered: number; lastError?: string }> {
   const ownsPool = !options.pool;
   const pool = options.pool ?? new pg.Pool({ connectionString, max: 1 });
   let processed = 0;
   let failed = 0;
+  let deadLettered = 0;
+  let lastError: string | undefined;
   try {
-    for (let index = 0; index < (options.limit ?? 10); index += 1) {
+    const sentLastHour = await pool.query<{ sent: number }>(
+      `SELECT count(*)::integer AS sent FROM platform.jobs
+       WHERE queue_name = $1 AND job_type = $2 AND job_metadata ->> 'channel' = 'contact_form'
+         AND status = 'succeeded' AND finished_at > now() - interval '1 hour'`,
+      [CONTACT_NOTIFICATION_QUEUE, CONTACT_NOTIFICATION_JOB_TYPE],
+    );
+    const allowed = Math.min(
+      options.limit ?? 10,
+      (options.hourlyCap ?? CONTACT_NOTIFICATION_HOURLY_CAP) - (sentLastHour.rows[0]?.sent ?? 0),
+    );
+    for (let index = 0; index < allowed; index += 1) {
       const job = await claimContactJob(pool, options.workerId ?? `contact-email:${process.pid}`);
       if (!job) break;
       const startedAt = Date.now();
       try {
         const email = contactNotificationEmail(job.payload, job.createdAt);
         await delivery.send({ to: options.recipient, idempotencyKey: job.jobKey, ...email });
-        if (await finishContactJob(pool, job, startedAt, "succeeded")) processed += 1;
-      } catch {
-        if (await finishContactJob(pool, job, startedAt, "failed")) failed += 1;
+        if ((await finishContactJob(pool, job, startedAt, "succeeded")).recorded) processed += 1;
+      } catch (error) {
+        // Only the provider's status line is kept; never the message or the visitor's details.
+        const message = error instanceof Error ? error.message : "";
+        lastError = PROVIDER_ERROR.test(message)
+          ? message
+          : "Contact notification delivery failed.";
+        const result = await finishContactJob(pool, job, startedAt, "failed");
+        if (result.recorded) failed += 1;
+        if (result.deadLettered) deadLettered += 1;
       }
     }
-    return { processed, failed };
+    return { processed, failed, deadLettered, ...(lastError ? { lastError } : {}) };
   } finally {
     if (ownsPool) await pool.end?.();
   }
@@ -161,20 +191,28 @@ async function claimContactJob(
   return job;
 }
 
-/** Records the outcome in one statement; a failure retries after 30 seconds up to max_attempts. */
+/** Records the outcome in one statement. A failure retries after 1 min, 5 min, 30 min, then 2 h,
+ * up to max_attempts (5 by default, about 2.5 hours), then dead-letters. */
 async function finishContactJob(
   pool: ContactNotificationPool,
   job: ContactJob,
   startedAt: number,
   outcome: "succeeded" | "failed",
-): Promise<boolean> {
-  const result = await pool.query<{ id: string }>(
-    `WITH attempt AS (
+): Promise<{ recorded: boolean; deadLettered: boolean }> {
+  const result = await pool.query<{ id: string; deadLettered: boolean }>(
+    `WITH retry AS (
+       SELECT CASE $2::integer
+         WHEN 1 THEN interval '1 minute'
+         WHEN 2 THEN interval '5 minutes'
+         WHEN 3 THEN interval '30 minutes'
+         ELSE interval '2 hours'
+       END AS backoff
+     ), attempt AS (
        UPDATE platform.job_attempts
        SET status = $6, finished_at = now(), duration_ms = $3,
            error_type = CASE WHEN $6 = 'failed' THEN 'delivery_error' END,
            error_message = CASE WHEN $6 = 'failed' THEN 'Contact notification delivery failed.' END,
-           retry_after = CASE WHEN $6 = 'failed' THEN now() + interval '30 seconds' END
+           retry_after = CASE WHEN $6 = 'failed' THEN now() + (SELECT backoff FROM retry) END
        WHERE job_id = $1::uuid AND attempt_number = $2 AND status = 'running' AND worker_id = $5
        RETURNING id
      ), finished AS (
@@ -184,7 +222,7 @@ async function finishContactJob(
              WHEN attempts_count >= max_attempts THEN 'dead_lettered'
              ELSE 'pending'
            END,
-           run_after = CASE WHEN $6 = 'failed' THEN now() + interval '30 seconds' ELSE run_after END,
+           run_after = CASE WHEN $6 = 'failed' THEN now() + (SELECT backoff FROM retry) ELSE run_after END,
            finished_at = CASE
              WHEN $6 = 'succeeded' OR attempts_count >= max_attempts THEN now()
            END,
@@ -229,7 +267,7 @@ async function finishContactJob(
        'standard', 'internal'
      FROM finished job
      ON CONFLICT (product, audit_key) DO NOTHING
-     RETURNING id::text AS id`,
+     RETURNING id::text AS id, (audit_metadata ->> 'deadLettered')::boolean AS "deadLettered"`,
     [
       job.id,
       job.attemptsCount,
@@ -239,5 +277,6 @@ async function finishContactJob(
       outcome,
     ],
   );
-  return result.rows.length > 0;
+  const row = result.rows[0];
+  return { recorded: Boolean(row), deadLettered: row?.deadLettered === true };
 }

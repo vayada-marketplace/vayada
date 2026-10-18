@@ -44,7 +44,8 @@ export function createPgContactIntakeRetentionStore(config: {
         throw new Error("Contact intake retention limit must be a positive integer");
       }
       // One statement: a batch is emptied together with its audit row or not at all. A job a
-      // worker holds right now ('running') is left for the next run.
+      // worker holds right now is left for the next run; one whose worker died (lock older than
+      // an hour, e.g. a task replaced during its last attempt) is emptied and canceled too.
       const result = await pool.query(
         `WITH expired AS (
            SELECT id
@@ -53,15 +54,20 @@ export function createPgContactIntakeRetentionStore(config: {
               AND job_type = $6
               AND created_at < $1::timestamptz - $3::text::interval
               AND payload <> '{}'::jsonb
-              AND status <> 'running'
+              AND (status <> 'running' OR locked_at < $1::timestamptz - interval '1 hour')
             ORDER BY created_at ASC, id ASC
             LIMIT $2
             FOR UPDATE SKIP LOCKED
          ), purged AS (
            UPDATE platform.jobs AS job
               SET payload = '{}'::jsonb,
-                  status = CASE WHEN job.status = 'pending' THEN 'canceled' ELSE job.status END,
+                  status = CASE
+                    WHEN job.status IN ('pending', 'running') THEN 'canceled'
+                    ELSE job.status
+                  END,
                   finished_at = COALESCE(job.finished_at, $1::timestamptz),
+                  locked_at = NULL,
+                  locked_by = NULL,
                   job_metadata = job.job_metadata || jsonb_build_object('payloadPurgedAt', $1::text),
                   updated_at = now()
              FROM expired
