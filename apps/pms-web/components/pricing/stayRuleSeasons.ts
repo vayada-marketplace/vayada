@@ -20,7 +20,13 @@ function owner(room: Room): Offer & { restrictions: Restrictions } {
   return offer as Offer & { restrictions: Restrictions };
 }
 const same = (a: Range, b: Range) => a.from === b.from && a.through === b.through;
-function withSeasons(room: Room, seasons: Restrictions["seasons"], error: string): Room {
+/** Only the days: callers pass price seasons too, and a stay-rule season takes no other keys. */
+const days = ({ from, through }: Range): Range => ({ from, through });
+function withSeasons(
+  room: Room,
+  seasons: Restrictions["seasons"],
+  error: ConstructorParameters<typeof PricingError>[0],
+): Room {
   const offer = owner(room);
   const result = parsePricingConfiguration({
     ...room,
@@ -63,7 +69,7 @@ export function addClosedPeriod(room: Room, range: Range): Room {
     room,
     [
       ...offer.restrictions.seasons,
-      { ...range, rules: { ...offer.restrictions.rules, stopSell: true } },
+      { ...days(range), rules: { ...offer.restrictions.rules, stopSell: true } },
     ],
     "pricing.opening.errorOverlap",
   );
@@ -98,7 +104,7 @@ export function setRangeMinimum(room: Room, ranges: readonly Range[], nights: nu
     const current = seasons.find((season) => same(season, range) && !season.rules.stopSell);
     const rules = { ...(current?.rules ?? defaults), minArrivalNights: nights };
     seasons = seasons.filter((season) => season !== current);
-    if (!sameRules(rules, defaults)) seasons.push({ ...range, rules });
+    if (!sameRules(rules, defaults)) seasons.push({ ...days(range), rules });
   }
   return withSeasons(room, seasons, "pricing.seasonTable.minStayError");
 }
@@ -113,7 +119,7 @@ export function moveRangeRule(room: Room, from: Range, to: Range | null): Room {
   const rest = offer.restrictions.seasons.filter((season) => season !== rule);
   return withSeasons(
     room,
-    to ? [...rest, { ...to, rules: rule.rules }] : rest,
+    to ? [...rest, { ...days(to), rules: rule.rules }] : rest,
     "pricing.seasonTable.minStayError",
   );
 }
