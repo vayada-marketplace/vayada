@@ -5,10 +5,9 @@ _VAY-965 decision record._
 > **Update (VAY-2270, 2026-10):** the Creator Marketplace track is retired. Migration 0492
 > rewrote combined selections to Hotel Operations only, deleted Marketplace-only selections with
 > their sessions and drafts, removed `marketplace_preferences` drafts and markers, and makes the
-> database refuse `creator_marketplace`. The API offers only Hotel Operations, and the apps accept
-> a status without the Marketplace placeholders (#3421). The shared types and the API still carry
-> the retired track (placeholder tasks, the `marketplace_preferences` step) until #3427 removes
-> them. The Marketplace parts below are kept as design history.
+> database refuse `creator_marketplace`. The setup contract, the API and the apps then dropped the
+> track, its placeholder tasks and the `marketplace_preferences` step (#3421, #3427 with #3428):
+> Hotel Operations is the only setup track. The Marketplace parts below are kept as design history.
 
 ## Decision
 
