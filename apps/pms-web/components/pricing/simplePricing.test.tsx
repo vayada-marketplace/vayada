@@ -12,10 +12,12 @@ import {
   pricePerAdultCount,
   setBreakfastAmount,
   setDiscount,
+  setMealDescription,
   simpleCancellation,
   simpleRoom,
   switchOption,
 } from "./simplePricing";
+import { changeMealPlan } from "./PricingMealPlan";
 import type { OptionTerms } from "./stepPricing";
 
 const roomTypeId = "aaaaaaaa-0000-4000-8000-00000000000a";
@@ -454,5 +456,44 @@ describe("the simple card's edits", () => {
     expect(onePriceAgain(perCount)).toEqual(design);
     expect(onePriceAgain(complex)).toBe(null);
     expect(() => pricePerAdultCount(complex)).toThrow();
+  });
+});
+
+describe("what guests read about a meal (VAY-2281)", () => {
+  it("keeps one trimmed line, leaves the key out when empty, and survives price and meal changes", () => {
+    const text = "Buffet breakfast in the Stube, 7:00–10:30";
+    const read = setMealDescription(frozen(design), "breakfast", `  ${text} `);
+    expect(offer(read, "breakfast").meal).toEqual({
+      kind: "breakfast",
+      charge: { kind: "room", amountMinor: "1500" },
+      description: text,
+    });
+    expect(read.offers.filter((value) => value.id !== "breakfast")).toEqual(
+      design.offers.filter((value) => value.id !== "breakfast"),
+    );
+    expect(offer(setMealDescription(read, "breakfast", "  "), "breakfast").meal).not.toHaveProperty(
+      "description",
+    );
+    for (const bad of ["x".repeat(201), "Line one\u2028line two", "\u202Eevil", "bell\u0007"])
+      expect(() => setMealDescription(design, "breakfast", bad), bad).toThrow();
+    // A new price or another meal keeps the text; no meal drops it.
+    expect(offer(setBreakfastAmount(read, "breakfast", "18"), "breakfast").meal.description).toBe(
+      text,
+    );
+    const halfBoard = changeMealPlan(read, "breakfast", {
+      kind: "half_board",
+      basis: "room",
+      amounts: ["35"],
+    });
+    expect(offer(halfBoard, "breakfast").meal).toMatchObject({
+      kind: "half_board",
+      description: text,
+    });
+    const roomOnly = changeMealPlan(read, "breakfast", {
+      kind: "room_only",
+      basis: "room",
+      amounts: [],
+    });
+    expect(offer(roomOnly, "breakfast").meal).not.toHaveProperty("description");
   });
 });
