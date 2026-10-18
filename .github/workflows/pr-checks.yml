@@ -10,7 +10,8 @@ on:
       - "fix/**"
       - "flamurmaliqi2811/**"
   # The merge queue tests each queued PR on top of main and the entries ahead of it; the ruleset
-  # waits for the same "Required Checks" status there.
+  # waits for the same "Required Checks" status there. It runs every job (VAY-2287): main
+  # fast-forwards to the tested commit, so the release precheck reuses this run.
   merge_group:
     types: [checks_requested]
     branches:
@@ -50,23 +51,12 @@ jobs:
       - name: Checkout merge commit and its parents
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          # A queue entry sits on the entries ahead of it, so it needs enough history to reach main.
-          fetch-depth: ${{ github.event_name == 'merge_group' && 50 || 2 }}
+          fetch-depth: 2
           persist-credentials: false
-
-      - name: Fetch the merge queue's base branch
-        if: github.event_name == 'merge_group'
-        env:
-          BASE_REF: ${{ github.event.merge_group.base_ref }}
-        # Without the base the selector cannot find a merge-base and runs every job.
-        run: |
-          git fetch --no-tags --depth=50 origin "+${BASE_REF}:refs/remotes/origin/merge-queue-base" ||
-            echo "::warning::Could not fetch ${BASE_REF}; every job will run"
 
       - name: Select jobs from changed paths
         id: select
         env:
-          MERGE_GROUP_BASE: refs/remotes/origin/merge-queue-base
           # A pull request into another pull request's branch runs only the quick jobs unless it
           # carries this label (STACKED_PR_JOBS and FULL_CI_LABEL in pr-checks.mjs).
           PR_FULL_CI: ${{ contains(github.event.pull_request.labels.*.name, 'full-ci') }}

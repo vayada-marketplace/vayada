@@ -25,7 +25,6 @@ import {
   STACKED_PR_JOBS,
   WORKFLOW_FILE,
   YAML_ANCHOR,
-  changedFiles,
   openHolds,
   selectJobs,
   stackedSelection,
@@ -518,116 +517,12 @@ test("every path rule that runs frontend also runs frontend_build", () => {
   }
 });
 
-// A checkout of merge queue entry "pr-2" as actions/checkout leaves it: main, then each entry
-// ahead as a single-parent commit, then this entry. `ahead` and `entry` map paths to contents.
-function mergeQueueRepo({ ahead = [], entry }) {
-  const dir = mkdtempSync(join(tmpdir(), "pr-checks-queue-"));
-  const git = (...args) => {
-    const identity = ["-c", "user.name=ci", "-c", "user.email=ci@example.com"];
-    const result = spawnSync("git", [...identity, "-c", "commit.gpgsign=false", ...args], {
-      cwd: dir,
-      encoding: "utf8",
-    });
-    assert.equal(result.status, 0, result.stderr);
-    return result.stdout.trim();
-  };
-  const commit = (files, message) => {
-    for (const [file, text] of Object.entries(files)) {
-      mkdirSync(dirname(join(dir, file)), { recursive: true });
-      writeFileSync(join(dir, file), text);
-    }
-    git("add", "-A");
-    git("commit", "-q", "-m", message);
-    return git("rev-parse", "HEAD");
-  };
-  git("init", "-q", "-b", "main");
-  commit({ [WORKFLOW_FILE]: FIXTURE, "README.md": "main\n" }, "main");
-  git("checkout", "-q", "-b", "gh-readonly-queue/main/pr-2");
-  const aheadShas = ahead.map((files, index) => commit(files, `entry ahead ${index + 1}`));
-  commit(entry, "this entry");
-  return { dir, git, aheadShas };
-}
-
-const queued = (dir, base = "refs/heads/main") => {
-  const { files, workflowJobs } = changedFiles({ event: "merge_group", base, cwd: dir });
-  return selectJobs(files, { workflowJobs }).jobs;
-};
-
-test("a queued docs-only PR selects no PostgreSQL or browser jobs", () => {
-  const { dir } = mergeQueueRepo({ entry: { "docs/queue.md": "docs\n" } });
-  assert.deepEqual(queued(dir), []);
-  const jobs = runSelectCli(dir, "merge_group", { MERGE_GROUP_BASE: "refs/heads/main" });
-  assert.deepEqual(jobs, []);
-});
-
-test("a queued PR behind a backend PR also runs that backend PR's jobs until it lands", () => {
-  const backend = { "apps/api/src/server.ts": "// api\n", "apps/pms-api/app/main.py": "# pms\n" };
-  const { dir, git, aheadShas } = mergeQueueRepo({
-    ahead: [backend],
-    entry: { "docs/queue.md": "docs\n" },
-  });
-  const jobs = queued(dir);
-  assert.deepEqual(jobs, selectJobs(Object.keys(backend)).jobs);
-  for (const job of ["api_unit", "api_postgres", "setup_draft_reset_postgres", "backend"]) {
-    assert.ok(jobs.includes(job), job);
-  }
-  assert.deepEqual(runSelectCli(dir, "merge_group", { MERGE_GROUP_BASE: "refs/heads/main" }), jobs);
-  // Once the entry ahead lands, main is that commit and only this entry's own files count.
-  git("update-ref", "refs/heads/main", aheadShas[0]);
-  assert.deepEqual(queued(dir), []);
-});
-
-test("a pr-checks.yml edit by an entry ahead selects its job blocks for the entries behind", () => {
-  const { dir } = mergeQueueRepo({
-    ahead: [{ [WORKFLOW_FILE]: addSuite(FIXTURE) }],
-    entry: { "docs/queue.md": "docs\n" },
-  });
-  assert.deepEqual(queued(dir), ["frontend", "api_postgres"]);
-});
-
-test("a queue entry without a reachable base runs every job", () => {
-  const { dir } = mergeQueueRepo({ entry: { "docs/queue.md": "docs\n" } });
-  assert.throws(() => changedFiles({ event: "merge_group", cwd: dir }), /fetched base branch/);
-  assert.throws(() => queued(dir, "refs/remotes/origin/merge-queue-base"));
-  const jobs = runSelectCli(dir, "merge_group", {
-    MERGE_GROUP_BASE: "refs/remotes/origin/merge-queue-base",
-  });
-  assert.deepEqual(jobs, ALL);
-});
-
-test("a shallow queue checkout finds the merge-base when its history reaches main", () => {
-  const { dir } = mergeQueueRepo({
-    ahead: [{ "apps/pms-api/app/main.py": "# pms\n" }],
-    entry: { "docs/queue.md": "docs\n" },
-  });
-  const shallowClone = (depth) => {
-    const clone = mkdtempSync(join(tmpdir(), "pr-checks-shallow-"));
-    const run = (...args) => {
-      const result = spawnSync("git", args, { cwd: clone, encoding: "utf8" });
-      assert.equal(result.status, 0, result.stderr);
-    };
-    run(
-      "clone",
-      "-q",
-      `--depth=${depth}`,
-      "-b",
-      "gh-readonly-queue/main/pr-2",
-      `file://${dir}`,
-      ".",
-    );
-    run(
-      "fetch",
-      "-q",
-      "--no-tags",
-      `--depth=${depth}`,
-      "origin",
-      "+refs/heads/main:refs/remotes/origin/merge-queue-base",
-    );
-    return clone;
-  };
-  // Depth 3 reaches main's tip from the entry, so the answer matches a full clone. (CI fetches 50;
-  // when history does not reach a common commit, merge-base fails and every job runs.)
-  assert.deepEqual(queued(shallowClone(3), "refs/remotes/origin/merge-queue-base"), ["backend"]);
+// The merge queue runs every job (VAY-2287): main fast-forwards to the commit the queue tested, so
+// the release precheck reuses that run instead of dispatching its own on the same commit.
+test("a queued entry runs every job, whatever its pull request selected", () => {
+  const dir = pullRequestMergeRepo(addSuite);
+  assert.deepEqual(runSelectCli(dir, "pull_request"), ["frontend", "api_postgres"]);
+  assert.deepEqual(runSelectCli(dir, "merge_group"), ALL);
 });
 
 test("other workflow files run the jobs whose tests read workflow files", () => {
@@ -1322,24 +1217,15 @@ test("closing a pull request cancels its PR Checks run and reports nothing else"
   }
 });
 
-test("pr-checks.yml reports Required Checks to the merge queue with the base branch fetched", () => {
+test("pr-checks.yml reports Required Checks to the merge queue and selects from a 2-deep checkout", () => {
   const workflow = parse(WORKFLOW);
   assert.deepEqual(workflow.on.merge_group, { types: ["checks_requested"], branches: ["main"] });
   assert.ok("workflow_dispatch" in workflow.on);
   const steps = workflow.jobs.changes.steps;
-  const fetch = steps.find((step) => step.name === "Fetch the merge queue's base branch");
-  assert.equal(fetch.if, "github.event_name == 'merge_group'");
-  assert.equal(fetch.env.BASE_REF, "${{ github.event.merge_group.base_ref }}");
+  assert.equal(steps[0].with["fetch-depth"], 2, "HEAD^1 of the pull request merge commit");
   const select = steps.find((step) => step.id === "select");
-  assert.ok(
-    fetch.run.includes(`:${select.env.MERGE_GROUP_BASE}"`),
-    "fetch writes the ref select reads",
-  );
-  assert.ok(steps.indexOf(fetch) < steps.indexOf(select));
-  assert.equal(
-    steps[0].with["fetch-depth"],
-    "${{ github.event_name == 'merge_group' && 50 || 2 }}",
-  );
+  assert.ok(steps.indexOf(select) > 0);
+  assert.equal(select.env.MERGE_GROUP_BASE, undefined, "the queue no longer diffs");
 });
 
 test("Required Checks waits out a merge queue hold only after the jobs verified", () => {
