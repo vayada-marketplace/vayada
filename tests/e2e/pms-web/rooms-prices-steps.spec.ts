@@ -344,10 +344,13 @@ async function openPms(page: Page) {
 const main = (page: Page) => page.locator("main");
 const prices = async (page: Page, id: string) => {
   await page.goto(`/rooms/${id}?tab=prices`);
-  // An unpriced room shows "Set this room's prices"; a priced one the card's "Prices and seasons" (VAY-2280).
+  // An unpriced room shows the first price ("Set this room's prices", or "Price per night" for one room); a priced one
+  // "Prices and seasons" (VAY-2280).
   await expect(
     main(page)
-      .getByRole("heading", { name: /^Prices and seasons$|Set this room's prices/ })
+      .getByRole("heading", {
+        name: /^Prices and seasons$|^Price per night$|Set this room's prices/,
+      })
       .first(),
   ).toBeVisible();
 };
