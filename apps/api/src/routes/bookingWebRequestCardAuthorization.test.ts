@@ -99,6 +99,15 @@ describe("request-mode card checkout", () => {
         async capturePaymentIntent() {
           throw new Error("not used");
         },
+        async createRefund() {
+          throw new Error("not used");
+        },
+        async listRefunds() {
+          throw new Error("not used");
+        },
+        async retrieveRefund() {
+          throw new Error("not used");
+        },
         async cancelPaymentIntent() {
           throw new Error("not used");
         },

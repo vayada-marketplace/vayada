@@ -15,6 +15,16 @@ it("builds exact explicit configuration without borrowing old prices or policies
   for (const invalid of [{ base: "0" }, { base: "1.001" }, { adultAge: "19" }, { countChildren: "" }, { payment: "" }, { methods: [] }, { freeDays: "366" }, { minimum: "" }, { currency: "BAD" }])
     expect(() => firstPricingInput(id, room, id, { ...values, ...invalid })).toThrow();
 });
+it("writes a rate's Paid when booking choice from the ticked ways to pay (VAY-2205)", () => {
+  const both = { ...values, methods: ["pay_at_property", "card"] as ("card" | "pay_at_property")[] };
+  expect(firstPricingInput(id, room, id, { ...both, payment: "nothing" }).terms.payment).toEqual({ kind: "full", acceptedMethods: ["pay_at_property"] });
+  expect(firstPricingInput(id, room, id, { ...both, payment: "full_stay" }).terms.payment).toEqual({ kind: "full", acceptedMethods: ["card"] });
+  expect(firstPricingInput(id, room, id, { ...both, payment: "full" }).terms.payment).toEqual({ kind: "full", acceptedMethods: ["pay_at_property", "card"] });
+  expect(() => firstPricingInput(id, room, id, { ...values, payment: "full_stay" })).toThrow();
+  expect(() => firstPricingInput(id, room, id, { ...both, methods: ["card"], payment: "nothing" })).toThrow();
+  expect(() => firstPricingInput(id, room, id, { ...both, cancellation: "non_refundable", freeDays: "", payment: "nothing" })).toThrow();
+  expect(firstPricingInput(id, room, id, { ...both, cancellation: "non_refundable", freeDays: "", payment: "full_stay" }).terms.payment).toEqual({ kind: "full", acceptedMethods: ["card"] });
+});
 it("starts without policy defaults, requires input, and disables every control while pending", async () => {
   vi.stubGlobal("React", React); const onCreate = vi.fn(), onDirty = vi.fn(); let view!: ReactTestRenderer;
   const props = { propertyId: id, rooms: [room], disabled: false, onCreate, onDirty };

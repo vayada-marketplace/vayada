@@ -176,6 +176,9 @@ describe("booking lifecycle scheduler jobs", () => {
       cancelPaymentIntent: vi.fn().mockResolvedValue(stripeIntent("canceled")),
       createPaymentIntent: vi.fn(),
       capturePaymentIntent: vi.fn(),
+      createRefund: vi.fn(),
+      listRefunds: vi.fn(),
+      retrieveRefund: vi.fn(),
     };
     const store = createPgBookingLifecycleStore({
       connectionString: "postgres://unused",
@@ -207,6 +210,9 @@ describe("booking lifecycle scheduler jobs", () => {
       cancelPaymentIntent: vi.fn(),
       createPaymentIntent: vi.fn(),
       capturePaymentIntent: vi.fn(),
+      createRefund: vi.fn(),
+      listRefunds: vi.fn(),
+      retrieveRefund: vi.fn(),
     };
     const store = createPgBookingLifecycleStore({
       connectionString: "postgres://unused",
@@ -235,6 +241,9 @@ describe("booking lifecycle scheduler jobs", () => {
       cancelPaymentIntent: vi.fn().mockResolvedValue(stripeIntent("canceled")),
       createPaymentIntent: vi.fn(),
       capturePaymentIntent: vi.fn(),
+      createRefund: vi.fn(),
+      listRefunds: vi.fn(),
+      retrieveRefund: vi.fn(),
     };
     const store = createPgBookingLifecycleStore({
       connectionString: "postgres://unused",
@@ -269,6 +278,9 @@ describe("booking lifecycle scheduler jobs", () => {
       cancelPaymentIntent: vi.fn(),
       createPaymentIntent: vi.fn(),
       capturePaymentIntent: vi.fn(),
+      createRefund: vi.fn(),
+      listRefunds: vi.fn(),
+      retrieveRefund: vi.fn(),
     };
     const store = createPgBookingLifecycleStore({
       connectionString: "postgres://unused",
@@ -294,6 +306,9 @@ describe("booking lifecycle scheduler jobs", () => {
       cancelPaymentIntent: vi.fn(),
       createPaymentIntent: vi.fn(),
       capturePaymentIntent: vi.fn(),
+      createRefund: vi.fn(),
+      listRefunds: vi.fn(),
+      retrieveRefund: vi.fn(),
     };
     const store = createPgBookingLifecycleStore({
       connectionString: "postgres://unused",
@@ -320,6 +335,9 @@ describe("booking lifecycle scheduler jobs", () => {
       cancelPaymentIntent: vi.fn(),
       createPaymentIntent: vi.fn(),
       capturePaymentIntent: vi.fn(),
+      createRefund: vi.fn(),
+      listRefunds: vi.fn(),
+      retrieveRefund: vi.fn(),
     };
     const store = createPgBookingLifecycleStore({
       connectionString: "postgres://unused",
