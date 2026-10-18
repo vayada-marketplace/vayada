@@ -89,6 +89,19 @@ export function BookingPageStatusCard() {
     };
   }, [refresh]);
 
+  // Hotels fix items in setup, often in another tab: check again when they come back (VAY-2288).
+  useEffect(() => {
+    const onReturn = () => {
+      if (document.visibilityState === "visible") void refresh();
+    };
+    window.addEventListener("focus", onReturn);
+    document.addEventListener("visibilitychange", onReturn);
+    return () => {
+      window.removeEventListener("focus", onReturn);
+      document.removeEventListener("visibilitychange", onReturn);
+    };
+  }, [refresh]);
+
   const status = review ? bookingPageStatus(review) : null;
   const publishing = status?.kind === "publishing";
 
