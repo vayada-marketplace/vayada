@@ -642,6 +642,13 @@ test("sets the first price of an unpriced room with one Save, next to the other 
   const assertHealthy = watchPageHealth(page, testInfo);
   await prices(page, LAKE);
   await expect(main(page).getByText("Lake Loft has no price yet", { exact: false })).toBeVisible();
+  // VAY-2280: the calendar shows the nights waiting for a price, beside "Start with one price".
+  await expect(main(page).getByRole("region", { name: "Start with one price" })).toBeVisible();
+  await expect(
+    main(page)
+      .getByRole("region", { name: "Prices by date" })
+      .getByRole("img", { name: /^1 \w+ \d{4}, no price$/ }),
+  ).toBeVisible();
   await expect(main(page).getByLabel("Room type")).toHaveCount(0);
   // Save without a price names what is missing; nothing else needs an answer.
   await main(page).getByRole("button", { name: "Save prices" }).click();

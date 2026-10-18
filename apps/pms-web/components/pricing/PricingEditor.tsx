@@ -46,6 +46,7 @@ import { StepFirstPrices, type FirstPrices, type FirstThen } from "./StepFirstPr
 import { paymentSettingsMethods } from "./pricingPaymentDefaults";
 import type { PaymentMethod } from "./AcceptedPaymentMethods";
 import { GuestPreview } from "./GuestPreview";
+import { CalendarDaysIcon } from "@heroicons/react/24/outline";
 import { PriceCalendar } from "./PriceCalendar";
 import { NightPanel } from "./NightPanel";
 import { pickNight, type NightSelection } from "./nightActions";
@@ -349,6 +350,19 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
     {!loading && (display || empty) && !editing && <div className={setup && roomSetup.length ? "space-y-4" : ui.card}>
       {/* The first-price form says itself that the room has no price (VAY-2188). */}
       {!(setup && roomSetup.length) && <div className="flex items-center justify-between gap-3"><h2 className={ui.cardHeading}>{t("pricing.room.title")}</h2><span className={`text-[11px] font-medium ${newRoom ? "text-gray-500" : "text-amber-600"}`}>{t(newRoom ? "pricing.newRoom.optional" : "pricing.room.notConfigured")}</span></div>}
+      {/* No prices yet (VAY-2280): the calendar shows the nights waiting for one, beside "Start with one price". */}
+      {setup && roomSetup.length > 0 && (() => {
+        const now = new Date(), today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+        return <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+          <PriceCalendar room={null} empty options={[]} offerId="" onOffer={() => undefined} adults={null} onAdults={() => undefined}
+            month={shownMonth ?? today.slice(0, 7)} today={today} stay={{ checkIn: today, checkOut: today }} onMonth={setShownMonth} onPick={() => undefined} />
+          <section aria-label={t("pricing.calendar.emptyTitle")} className="space-y-2.5 rounded-2xl border border-gray-200 bg-white p-5 md:p-6">
+            <span className="flex h-10 w-10 items-center justify-center rounded-[10px] bg-gray-100"><CalendarDaysIcon aria-hidden="true" className="h-5 w-5 text-gray-500" /></span>
+            <h2 className="text-[16px] font-semibold text-gray-900">{t("pricing.calendar.emptyTitle")}</h2>
+            <p className="text-[14px] leading-5 text-gray-600">{t("pricing.calendar.emptyText")}</p>
+          </section>
+        </div>;
+      })()}
       {setup && roomSetup.length ? <StepFirstPrices propertyId={setup.propertyId} rooms={roomSetup} fixedCurrency={display?.currency} disabled={disabled} defaultMethods={defaultMethods} onDirty={() => setDirty(true)} onCreate={startFirst} pending={newRoom ? firstPrices : undefined} /> : <p className={ui.text}>{t(setup ? "pricing.room.notReady" : "pricing.editor.setupUnavailable")}</p>}
       {retry && <button disabled={busy} className={ui.secondaryButton} onClick={() => void run()}>{t("pricing.editor.retry")}</button>}</div>}
     {!loading && display && shownRooms.map(([room, ri]) => {
