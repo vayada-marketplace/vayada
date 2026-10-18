@@ -2116,8 +2116,8 @@ function ProfileForm({
                     </span>
                     <span className="mt-1 block text-xs leading-5 text-gray-600">
                       {mode === "update"
-                        ? "Existing location visibility is preserved. If you edit the location, street address, postal code, and map coordinates stay private."
-                        : "Street address, postal code, and map coordinates stay private."}
+                        ? "Guests see only your city and country on your booking page. Street address and postal code stay private, and saving a location change keeps your map pin private."
+                        : "Guests see only your city and country on your booking page. Street address, postal code, and map pin stay private."}
                     </span>
                     {localityHighlighted && (
                       <span className="mt-1 block text-xs font-medium leading-5 text-amber-800">
@@ -2995,7 +2995,9 @@ function newPropertyDraft(timezone = ""): ProfileDraft {
     contactEmail: "",
     phone: "",
     whatsapp: "",
-    localityPublic: false,
+    // A booking page needs a public city and country; street, postal code and pin stay private
+    // (VAY-2288). Existing hotels keep the choice they saved.
+    localityPublic: true,
     logoFile: null,
     logoMediaObjectId: null,
     logoPublicUrl: "",

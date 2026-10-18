@@ -158,8 +158,16 @@ test.describe("hotel account prerequisites", () => {
     const localityConsent = page.getByRole("checkbox", {
       name: "Show city and country publicly",
     });
-    await expect(localityConsent).not.toBeChecked();
+    // New hotels show their city and country by default (VAY-2288); the keyboard still toggles it.
+    await expect(localityConsent).toBeChecked();
+    await expect(
+      page.getByText(
+        "Guests see only your city and country on your booking page. Street address, postal code, and map pin stay private.",
+      ),
+    ).toBeVisible();
     await localityConsent.focus();
+    await page.keyboard.press("Space");
+    await expect(localityConsent).not.toBeChecked();
     await page.keyboard.press("Space");
     await expect(localityConsent).toBeChecked();
     expect(

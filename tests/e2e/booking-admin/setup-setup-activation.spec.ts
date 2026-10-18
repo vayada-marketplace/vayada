@@ -884,8 +884,8 @@ test.describe("shared setup activation", () => {
     const localityConsent = page.getByRole("checkbox", {
       name: "Show city and country publicly",
     });
-    await expect(localityConsent).not.toBeChecked();
-    await localityConsent.check();
+    // New hotels show their city and country by default (VAY-2288).
+    await expect(localityConsent).toBeChecked();
     await expect(locationContinueButton).toBeEnabled();
 
     if (searchFirst) {
