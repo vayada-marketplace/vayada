@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { vayadaApiClient } from "@vayada/marketplace-shared/api/client";
+import { VayadaApiClient } from "../api/vayadaApiClient";
 import { authService } from "./auth";
 import {
   clearAuthData,
@@ -50,12 +50,12 @@ describe("admin Vayada API authentication", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(
-      vayadaApiClient.get<{ ok: boolean }>("/api/marketplace/admin/test"),
+      new VayadaApiClient().get<{ ok: boolean }>("/api/platform/admin/test"),
     ).resolves.toEqual({ ok: true });
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
-      "https://api.localhost/api/marketplace/admin/test",
+      "https://api.localhost/api/platform/admin/test",
       expect.objectContaining({
         headers: expect.objectContaining({ Authorization: "Bearer stale-workos-token" }),
       }),
@@ -67,7 +67,7 @@ describe("admin Vayada API authentication", () => {
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       3,
-      "https://api.localhost/api/marketplace/admin/test",
+      "https://api.localhost/api/platform/admin/test",
       expect.objectContaining({
         headers: expect.objectContaining({ Authorization: "Bearer fresh-workos-token" }),
       }),
@@ -231,7 +231,7 @@ describe("admin Vayada API authentication", () => {
       .mockReturnValueOnce(refreshResponse);
     vi.stubGlobal("fetch", fetchMock);
 
-    const request = vayadaApiClient.post("/api/marketplace/admin/write", { name: "old write" });
+    const request = new VayadaApiClient().post("/api/platform/admin/write", { name: "old write" });
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     setAuthKitSession({
       accessToken: "new-workos-token",

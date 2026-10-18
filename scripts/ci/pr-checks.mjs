@@ -15,7 +15,6 @@ export const SELECTABLE_JOBS = [
   "frontend_build",
   "first_party_auth",
   "pms_web_e2e",
-  "marketplace_web_e2e",
   "booking_web_e2e",
   "booking_admin_e2e",
   "api_unit",
@@ -37,12 +36,7 @@ const TYPESCRIPT_JOBS = [
 ];
 
 // The mocked Playwright projects that gate PRs (one dev server each, no backend).
-export const BROWSER_E2E_JOBS = [
-  "pms_web_e2e",
-  "marketplace_web_e2e",
-  "booking_web_e2e",
-  "booking_admin_e2e",
-];
+export const BROWSER_E2E_JOBS = ["pms_web_e2e", "booking_web_e2e", "booking_admin_e2e"];
 
 // Packages that neither apps/api nor any backend package depends on, with the extra jobs their
 // changes need: the browser projects of the apps that use them, and api_unit when
@@ -55,9 +49,9 @@ export const FRONTEND_ONLY_PACKAGES = {
   // booking-admin, pms-web
   "feature-hub": ["pms_web_e2e", "booking_admin_e2e"],
   // booking-admin, marketplace-web, pms-web; its tests are in test:unit-suites
-  "settings-ui": ["pms_web_e2e", "marketplace_web_e2e", "booking_admin_e2e", "api_unit"],
+  "settings-ui": ["pms_web_e2e", "booking_admin_e2e", "api_unit"],
   // landing, marketplace-web, vayada-admin
-  "marketplace-shared": ["marketplace_web_e2e"],
+  "marketplace-shared": [],
   // booking-web, pms-web
   "locale-ui": ["pms_web_e2e", "booking_web_e2e"],
   // booking-admin, booking-web, landing, marketplace-web, pms-web, vayada-admin
@@ -93,16 +87,11 @@ export const RULES = [
     test: /^apps\/(marketplace-api|booking-api|pms-api)\//,
     jobs: ["backend"],
   },
-  // pms_web_e2e, marketplace_web_e2e and booking_web_e2e run each app's mocked Playwright project.
+  // pms_web_e2e, booking_web_e2e and booking_admin_e2e run each app's mocked Playwright project.
   {
     name: "pms-web",
     test: /^apps\/pms-web\//,
     jobs: [...FRONTEND_JOBS, "first_party_auth", "pms_web_e2e"],
-  },
-  {
-    name: "marketplace-web",
-    test: /^apps\/marketplace-web\//,
-    jobs: [...FRONTEND_JOBS, "first_party_auth", "marketplace_web_e2e"],
   },
   {
     name: "booking-admin",
@@ -116,7 +105,7 @@ export const RULES = [
   },
   {
     name: "frontend",
-    test: /^apps\/(vayada-admin|landing)\//,
+    test: /^apps\/(vayada-admin|landing|marketplace-web)\//,
     jobs: [...FRONTEND_JOBS, "first_party_auth"],
   },
   {
@@ -127,13 +116,8 @@ export const RULES = [
   // Shared mocks and helpers: every mocked browser project imports from these.
   {
     name: "browser-e2e-support",
-    test: /^tests\/e2e\/(support|helpers|marketplace-web\/utils)\//,
+    test: /^tests\/e2e\/(support|helpers)\//,
     jobs: [...FRONTEND_JOBS, "first_party_auth", ...BROWSER_E2E_JOBS],
-  },
-  {
-    name: "marketplace-web-e2e",
-    test: /^tests\/e2e\/marketplace-web\//,
-    jobs: [...FRONTEND_JOBS, "first_party_auth", "marketplace_web_e2e"],
   },
   {
     name: "booking-web-e2e",
@@ -162,13 +146,6 @@ export const RULES = [
     name: "frontend-packages",
     test: /^packages\/(?!backend-)/,
     jobs: [...TYPESCRIPT_JOBS, ...BROWSER_E2E_JOBS],
-  },
-  // The opt-in marketplace-web Airbnb database spec imports this read model at load time, so a
-  // change here can stop the whole marketplace-web project from loading.
-  {
-    name: "marketplace-web-e2e-import",
-    test: /^apps\/api\/src\/domains\/pmsRoomFactsReadModel\.ts$/,
-    jobs: [...TYPESCRIPT_JOBS, "marketplace_web_e2e"],
   },
   // apps/api, backend packages and packages/backend-migration/migrations: the full unit suites
   // plus PG16 + PG17 coverage.

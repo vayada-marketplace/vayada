@@ -212,7 +212,7 @@ function ScopedBookingReviewCard({
     <AdaptiveStepCard>
       <h2 className="text-xl font-semibold">Booking Engine</h2>
       <p className="mt-2 text-sm text-gray-600">
-        Publish your guest booking page independently of Marketplace review.
+        Publish your guest booking page when it is ready.
       </p>
       {error && <AdaptiveSaveError message={error} onRetry={() => void refresh()} />}
       {!review ? (

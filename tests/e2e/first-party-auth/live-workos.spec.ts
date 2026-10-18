@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { firstPartyAuthSurfaces } from "../support/firstPartyAuth";
 
-const marketplace = firstPartyAuthSurfaces.find(({ key }) => key === "marketplace")!;
+const bookingAdmin = firstPartyAuthSurfaces.find(({ key }) => key === "bookingAdmin")!;
 
 test("live WorkOS sandbox Google callback yields an app-local session", async ({ page }) => {
   test.skip(
@@ -12,18 +12,18 @@ test("live WorkOS sandbox Google callback yields an app-local session", async ({
 
   const callback = page.waitForRequest((request) => {
     const url = new URL(request.url());
-    return url.origin === marketplace.baseURL && url.pathname === "/auth/oauth/google/callback";
+    return url.origin === bookingAdmin.baseURL && url.pathname === "/auth/oauth/google/callback";
   });
-  await page.goto(`${marketplace.baseURL}/login?returnTo=/marketplace`);
+  await page.goto(`${bookingAdmin.baseURL}/login?returnTo=/dashboard`);
   await page.getByRole("button", { name: /continue with google/i }).click();
   const callbackRequest = await callback;
-  expect(new URL(callbackRequest.url()).origin).toBe(marketplace.baseURL);
+  expect(new URL(callbackRequest.url()).origin).toBe(bookingAdmin.baseURL);
   await page.waitForURL(
-    (url) => url.origin === marketplace.baseURL && url.pathname === "/marketplace",
+    (url) => url.origin === bookingAdmin.baseURL && url.pathname === "/dashboard",
   );
   const sessionStatus = await page.evaluate(
     async () =>
-      (await fetch("/auth/session?surface=marketplace-web", { credentials: "include" })).status,
+      (await fetch("/auth/session?surface=booking-admin", { credentials: "include" })).status,
   );
   expect(sessionStatus).toBe(200);
 });

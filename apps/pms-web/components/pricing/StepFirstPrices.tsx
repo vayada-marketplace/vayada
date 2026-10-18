@@ -108,7 +108,8 @@ export function StepFirstPrices({
     onDirty();
   };
   const change = (next: Partial<Values>) => {
-    setValues({ ...values, ...next });
+    // Merge into the latest answers: Payment settings' ways to pay can land between this render and the keystroke.
+    setValues((previous) => ({ ...previous, ...next }));
     touch();
   };
   const currency = fixedCurrency ?? values.currency.trim().toUpperCase();

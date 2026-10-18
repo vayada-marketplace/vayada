@@ -273,6 +273,11 @@ describe.skipIf(!TEST_DATABASE_URL)("property setup draft PostgreSQL repository"
     });
   });
 
+  it("treats a session that only selected the retired Creator Marketplace track as absent", async () => {
+    await insertSession(["creator_marketplace"], "2026-09-30T12:00:00.000Z");
+    await expect(repository.getActiveSession(scope)).resolves.toBeNull();
+  });
+
   it("excludes retired guest drafts and resume markers while keeping other setup drafts", async () => {
     await insertSession(["hotel_operations"], "2026-09-30T12:00:00.000Z");
     await insertDraft({

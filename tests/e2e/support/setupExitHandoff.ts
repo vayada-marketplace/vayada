@@ -6,10 +6,10 @@ export async function mockSetupExitHandoff(
   baseURL: string | undefined,
   propertyId: string,
   targetPath = `/dashboard?setup=incomplete&propertyId=${propertyId}`,
-  options: { sourceSurface?: "marketplace-web" | "booking-admin" } = {},
+  options: { sourceSurface?: "booking-admin" } = {},
 ) {
-  const sourceSurface = options.sourceSurface ?? "marketplace-web";
-  const destination = new URL(baseURL ?? "http://marketplace.localhost:3000");
+  const sourceSurface = options.sourceSurface ?? "booking-admin";
+  const destination = new URL(baseURL ?? "http://admin.booking.localhost:3003");
   destination.hostname = "pms.localhost";
   destination.pathname = "/handoff";
   destination.hash = `code=${"a".repeat(40)}`;
