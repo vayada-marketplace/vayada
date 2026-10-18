@@ -1,11 +1,13 @@
 import { publicOfferCancellation, type PublicOfferCancellation } from "@vayada/domain-booking";
 import type { BookingPublicQuotedOffer } from "@vayada/domain-distribution/booking-publication";
+import { pricingOfferOnBookingPage } from "@vayada/domain-pms";
 import type { lockCurrentPricingPublication } from "./currentPricingPublication.js";
 import { publicPricingOfferBindings } from "./publicPricingRoomStay.js";
 
 type Owner = NonNullable<Awaited<ReturnType<typeof lockCurrentPricingPublication>>>;
 
-/** Maps already validated owner evidence. No prices, availability or permission are inferred. */
+/** Maps already validated owner evidence. No prices, availability or permission are inferred.
+ * Only booking-page offers (VAY-2285); every room keeps at least one (configuration parser). */
 export function mapReplacementPublicOffers(owner: Owner):
   | readonly Readonly<{
       roomTypeId: string;
@@ -14,7 +16,7 @@ export function mapReplacementPublicOffers(owner: Owner):
   | null {
   const bindings = publicPricingOfferBindings(owner);
   const rooms = owner.publication.rooms.map((room) => {
-    const offers = room.offers.map((offer) => {
+    const offers = room.offers.filter(pricingOfferOnBookingPage).map((offer) => {
       const terms = owner.terms.filter(
         (t) =>
           t.roomTypeId === room.roomTypeId &&
@@ -42,6 +44,22 @@ export function mapReplacementPublicOffers(owner: Owner):
   return !rooms.length || rooms.some((room) => !room)
     ? null
     : (rooms as { roomTypeId: string; offers: BookingPublicQuotedOffer[] }[]);
+}
+
+/** Each offer's meal text in the hotel's own words (VAY-2281), by public offer key. Offers without one have no
+ * entry, so the booking page keeps its own wording for them. */
+export function publicOfferMealDescriptions(owner: Owner): ReadonlyMap<string, string> {
+  const bindings = publicPricingOfferBindings(owner);
+  const descriptions = new Map<string, string>();
+  for (const room of owner.publication.rooms)
+    for (const offer of room.offers) {
+      const binding = bindings.find(
+        (b) => b.roomTypeId === room.roomTypeId && b.offerId === offer.id,
+      );
+      if (binding && offer.meal.description)
+        descriptions.set(binding.publicOfferKey, offer.meal.description);
+    }
+  return descriptions;
 }
 
 /** Each offer's cancellation as guests may see it before a quote, by public offer key, so the booking page can name

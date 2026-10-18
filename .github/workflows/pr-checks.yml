@@ -875,7 +875,8 @@ jobs:
             src/domains/pricingRevenueClear.postgres.test.ts \
             src/domains/bookingHostActionLocks.postgres.test.ts \
             src/domains/bookingHostActions.integration.test.ts \
-            src/domains/replacementAddons.integration.test.ts
+            src/domains/replacementAddons.integration.test.ts \
+            src/domains/bookingPricingOfferTerms.integration.test.ts
           npm --workspace @vayada/backend-migration run test -- \
             src/bookingPricingAuthorityDrop.integration.test.ts \
             src/bookingPricingAcceptanceAmendments.integration.test.ts

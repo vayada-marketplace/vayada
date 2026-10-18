@@ -25,10 +25,6 @@ export const ADAPTIVE_SETUP_STEP_COPY: Readonly<
     title: "Present your hotel",
     subtitle: "Give guests a clear first impression.",
   },
-  marketplace_preferences: {
-    title: "Tell creators what you are open to",
-    subtitle: "Choose broad preferences. Agree specific terms together in chat.",
-  },
   booking_design: {
     title: "Style your booking page",
     subtitle: "Choose a color and typography. Change them anytime.",

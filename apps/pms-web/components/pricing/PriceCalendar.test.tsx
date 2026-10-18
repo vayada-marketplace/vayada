@@ -271,10 +271,29 @@ it("groups seasons stored with the same name and tier (VAY-2280)", () => {
 });
 
 it("counts the nights no price covers and finds the lowest night guests pay (VAY-2280)", () => {
-  expect(nightsWithoutPrice(room(), "flex", 2, "2026-09")).toBe(0);
-  // Without a standard price only Oktoberfest (16 nights) and the own price on 12 Sep are priced, over 365 nights.
-  expect(nightsWithoutPrice(room("none"), "flex", 2, "2026-09")).toBe(348);
+  expect(nightsWithoutPrice(room(), "flex", 2, "2026-09-01")).toBe(0);
+  // From today through the same date next year (366 nights here). Without a standard price only Oktoberfest
+  // (19 Sep – 4 Oct) and the own price on 12 Sep are priced.
+  expect(nightsWithoutPrice(room("none"), "flex", 2, "2026-09-01")).toBe(366 - 17);
+  // Past nights this month don't count: 1–14 Sep (and the own price on the 12th) are behind us.
+  expect(nightsWithoutPrice(room("none"), "flex", 2, "2026-09-15")).toBe(366 - 16);
+  // The window's end counts: 20 Sep 2026 – 20 Sep 2027 holds 15 Oktoberfest nights of 2026 and 19–20 Sep 2027.
+  expect(nightsWithoutPrice(room("none"), "flex", 2, "2026-09-20")).toBe(366 - 17);
   // The non-refundable rate's weekday standard night, 10% under €100.
   expect(lowestNightMinor(room(), ["flex", "nonref"], 2, "2026")).toBe("9000");
   expect(lowestNightMinor(room(), ["flex"], 2, "2026")).toBe("10000");
+});
+
+it("shows a room without prices as nights waiting for one, with nothing to pick (VAY-2280)", () => {
+  mount({ room: null, empty: true, month: "2026-11" });
+  const cells = view.root.findAll((node) => node.type === "div" && node.props.role === "img");
+  expect(cells).toHaveLength(30);
+  expect(cells[0].props["aria-label"]).toBe("1 November 2026, no price");
+  expect(
+    view.root.findAll(
+      (node) => node.type === "button" && /^\d+ November/.test(node.props["aria-label"] ?? ""),
+    ),
+  ).toHaveLength(0);
+  expect(text()).toContain("No prices yet. Enter the price per night below to fill the calendar.");
+  expect(text()).not.toContain("Pick a night");
 });

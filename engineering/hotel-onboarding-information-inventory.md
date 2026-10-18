@@ -1,5 +1,9 @@
 # Hotel Onboarding Information Inventory
 
+> **Update (VAY-2270, 2026-10):** the Creator Marketplace is retired (VAY-2259), and Hotel
+> Operations is the only setup track. The Creator Marketplace sections below are kept as design
+> history; the Marketplace-only and combined flows no longer exist.
+
 _Current V1 product-decision, adaptive-flow, and implementation-plan record.
 All active screen blueprints and dependency slices are drafted; contract
 implementation and product UI remain pending._

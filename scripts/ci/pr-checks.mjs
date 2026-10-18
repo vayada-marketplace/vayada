@@ -44,15 +44,15 @@ export const BROWSER_E2E_JOBS = ["pms_web_e2e", "booking_web_e2e", "booking_admi
 // tests in pr-checks.test.mjs recompute this from every package.json and fail when anything
 // else starts to reach one of these packages.
 export const FRONTEND_ONLY_PACKAGES = {
-  // booking-admin, booking-web, marketplace-web, pms-web, vayada-admin
+  // booking-admin, booking-web, pms-web, vayada-admin
   "product-onboarding": BROWSER_E2E_JOBS,
   // booking-admin, pms-web
   "feature-hub": ["pms_web_e2e", "booking_admin_e2e"],
-  // booking-admin, marketplace-web, pms-web; its tests are in test:unit-suites
+  // booking-admin, pms-web; its tests are in test:unit-suites
   "settings-ui": ["pms_web_e2e", "booking_admin_e2e", "api_unit"],
   // booking-web, pms-web
   "locale-ui": ["pms_web_e2e", "booking_web_e2e"],
-  // booking-admin, booking-web, landing, marketplace-web, pms-web, vayada-admin
+  // booking-admin, booking-web, landing, pms-web, vayada-admin
   fonts: BROWSER_E2E_JOBS,
   // no app; its tests are in test:unit-suites
   "pms-vayada-adapter": ["api_unit"],
@@ -103,7 +103,7 @@ export const RULES = [
   },
   {
     name: "frontend",
-    test: /^apps\/(vayada-admin|landing|marketplace-web)\//,
+    test: /^apps\/(vayada-admin|landing)\//,
     jobs: [...FRONTEND_JOBS, "first_party_auth"],
   },
   {

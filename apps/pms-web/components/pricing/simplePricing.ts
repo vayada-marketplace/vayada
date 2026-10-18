@@ -228,24 +228,6 @@ export function rateMethodEdits(
       };
     });
 }
-/** New terms for every option the card covers (main and both switches), accepting `methods`. */
-export function paymentEdits(
-  simple: SimpleRoom,
-  terms: Terms,
-  methods: readonly PricingPaymentMethod[],
-): { offerId: string; terms: OptionTerms }[] {
-  if (!methods.length) throw new PricingError("pricing.error.paymentMethodRequired");
-  return [simple.main, simple.nonRefundable, simple.breakfast]
-    .filter((offer): offer is Offer => !!offer)
-    .map((offer) => {
-      const current = terms[offer.id]!;
-      return {
-        offerId: offer.id,
-        terms: { ...current, payment: { ...current.payment, acceptedMethods: [...methods] } },
-      };
-    });
-}
-
 type Calendar = Extract<Offer["price"], { kind: "independent" }>["calendar"];
 type Price = NonNullable<Calendar["base"]>;
 /** Rewrites the main option's normal, monthly and season prices (one mode, as the engine requires) with `next`.

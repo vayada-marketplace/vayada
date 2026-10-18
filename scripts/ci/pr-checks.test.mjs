@@ -118,12 +118,6 @@ test("frontend-only changes skip the PostgreSQL and Python jobs", () => {
     ...FRONTEND,
     "first_party_auth",
   ]);
-  // The marketplace-web redirect stub has no browser project; frontend runs its unit tests and
-  // first_party_auth its auth gateway test.
-  assert.deepEqual(selectJobs(["apps/marketplace-web/next.config.js"]).jobs, [
-    ...FRONTEND,
-    "first_party_auth",
-  ]);
   assert.deepEqual(selectJobs(["tests/e2e/first-party-auth/login.spec.ts"]).jobs, [
     ...FRONTEND,
     "first_party_auth",

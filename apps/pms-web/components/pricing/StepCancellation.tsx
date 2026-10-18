@@ -1,92 +1,11 @@
 "use client";
 
-import { useState } from "react";
 import { useTranslation } from "@/lib/i18n";
-import {
-  cancellationDays,
-  cancellationEdits,
-  defaultFreeDays,
-  type SimpleCancellation,
-  type SimpleRoom,
-} from "./simplePricing";
-import type { OptionTerms } from "./stepPricing";
-import { StepCard } from "./StepCard";
+import { cancellationDays, defaultFreeDays, type SimpleCancellation } from "./simplePricing";
 import * as ui from "./pricingStyles";
 
-/** The card's cancellation: free until a number of days before arrival, or non-refundable. It sets the main option's
- * terms and the breakfast switch's, which follows them. The hotel's own terms (a partial refund or a text) stay as they
- * are; their Edit opens the main option's window. Non-refundable waits until the non-refundable switch is off, so
- * guests never see two non-refundable choices. */
-export function StepCancellation({
-  simple,
-  terms,
-  failed,
-  disabled,
-  onTerms,
-  onRetry,
-  onEditOwn,
-}: {
-  /** Null while the options' terms load (or failed). */
-  simple: SimpleRoom | null;
-  terms: Readonly<Record<string, OptionTerms | undefined>>;
-  failed: boolean;
-  disabled: boolean;
-  onTerms: (edits: ReturnType<typeof cancellationEdits>) => void;
-  onRetry: () => void;
-  onEditOwn: () => void;
-}) {
-  const { t } = useTranslation();
-  const title = t("pricing.simple.cancellation.title");
-  const current = simple?.cancellation;
-  const [blocked, setBlocked] = useState(false);
-  return (
-    <StepCard title={title}>
-      {!simple || !current ? (
-        failed ? (
-          <p role="status" className="text-[14px] text-amber-700">
-            {t("pricing.simple.cancellation.failed")}{" "}
-            <button type="button" onClick={onRetry} className={ui.stepLink}>
-              {t("pricing.steps.options.retry")}
-            </button>
-          </p>
-        ) : (
-          <p role="status" className={ui.stepHint}>
-            {t("pricing.simple.cancellation.loading")}
-          </p>
-        )
-      ) : current.kind === "own" ? (
-        <p className="text-[14px] text-gray-700">
-          {t("pricing.simple.cancellation.own")}{" "}
-          <button type="button" disabled={disabled} onClick={onEditOwn} className={ui.stepLink}>
-            {t("pricing.steps.options.edit")}
-          </button>
-        </p>
-      ) : (
-        <CancellationChoice
-          value={current}
-          disabled={disabled}
-          onChange={(choice) => {
-            if (!simple || JSON.stringify(choice) === JSON.stringify(current)) return;
-            setBlocked(choice.kind === "non_refundable" && !!simple.nonRefundable);
-            if (choice.kind !== "non_refundable" || !simple.nonRefundable)
-              onTerms(cancellationEdits(simple, terms, choice));
-          }}
-        />
-      )}
-      {simple?.breakfast && current && current.kind !== "own" && (
-        <p className={ui.stepHint}>{t("pricing.simple.cancellation.withBreakfast")}</p>
-      )}
-      {blocked && simple?.nonRefundable && (
-        <p role="alert" className={ui.errorText}>
-          {t("pricing.simple.cancellation.switchFirst")}
-        </p>
-      )}
-    </StepCard>
-  );
-}
-
-/** Free cancellation until a number of days before arrival, or non-refundable: the card's control, also used by the
- * first-price form. */
+/** Free cancellation until a number of days before arrival, or non-refundable: the first-price form's control (step
+ * "Rates" has its own, VAY-2282). */
 export function CancellationChoice({
   value,
   disabled,

@@ -137,11 +137,12 @@ trusted binding resolution, verified request-log token redaction at proxy/applic
 layers, and source review/application wiring. URL scrubbing cannot remove tokens
 from the initial incoming request logs. Do not enable this flag remotely yet.
 
-Focused browser check: start the isolated marketplace frontend with the callback
-flag, then run `E2E_AIRBNB_IMPORT_CALLBACK=1 E2E_MARKETPLACE_BASE_URL=<local-origin>
-npx playwright test tests/e2e/marketplace-web/airbnb-import-return.spec.ts
---project=marketplace-web-chromium`. The suite is opt-in because normal builds keep
-the callback disabled.
+Focused browser check: start Booking Admin with the callback flag, then run
+`E2E_AIRBNB_IMPORT_CALLBACK=1 E2E_BOOKING_ADMIN_BASE_URL=<local-origin>
+npx playwright test tests/e2e/booking-admin/airbnb-import-return.spec.ts
+--project=booking-admin-chromium`. The suite is opt-in because normal builds keep
+the callback disabled. (The Marketplace copy of this spec went with the Marketplace
+app, VAY-2270.)
 
 ## Application receipt prerequisite
 

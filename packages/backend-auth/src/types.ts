@@ -92,15 +92,7 @@ export type PermissionKey =
   | "pms.finance.manage"
   | "pms.settings.read"
   | "pms.settings.manage"
-  | "pms.guest_contact.read"
-  | "marketplace.collaboration.read"
-  | "marketplace.collaboration.write"
-  | "marketplace.collaboration.review"
-  | "marketplace.affiliate.manage"
-  | "marketplace.profile.manage"
-  | "marketplace.trip.read"
-  | "marketplace.trip.manage"
-  | "affiliate.payout.manage";
+  | "pms.guest_contact.read";
 
 export type EntitlementStatus = "active" | "suspended" | "expired";
 
