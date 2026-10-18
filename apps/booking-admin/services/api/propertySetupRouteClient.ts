@@ -32,7 +32,6 @@ const BLOCKER_KINDS: readonly PropertySetupBlockerKind[] = [
 ];
 const OWNER_DOMAINS: readonly PropertySetupOwnerDomain[] = [
   "hotel_catalog",
-  "marketplace",
   "booking",
   "pms",
   "finance",

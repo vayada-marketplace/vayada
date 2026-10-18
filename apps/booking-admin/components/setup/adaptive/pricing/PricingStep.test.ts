@@ -132,6 +132,68 @@ describe("PricingStep", () => {
     view.unmount();
   });
 
+  it("offers non-refundable only with a way to pay in advance, and never sends pay at property with it (VAY-2280)", async () => {
+    // Only pay at the hotel is ready: non-refundable stays (paid in advance) can't be offered.
+    const view = await render();
+    expect(button(view.root, "Non-refundable").props.disabled).toBe(true);
+    expect(text(view.root)).toContain("Non-refundable stays are paid in advance");
+    view.unmount();
+    mocks.readiness.mockResolvedValue({
+      methods: [
+        { method: "pay_at_property", selected: true, readiness: "ready" },
+        { method: "card", selected: true, readiness: "ready" },
+      ],
+    });
+    const next = await render();
+    await act(async () => button(next.root, "Non-refundable").props.onClick());
+    expect(text(next.root)).toContain(
+      "Pay at property: not offered, non-refundable stays are paid in advance",
+    );
+    await type(next.root, "120");
+    mocks.read.mockResolvedValue(publication());
+    await act(async () => button(next.root, "Publish prices and continue").props.onClick());
+    const [rate] = mocks.publish.mock.calls[0]![2] as { terms: Record<string, any> }[];
+    expect(rate!.terms).toMatchObject({
+      cancellation: { kind: "non_refundable" },
+      payment: { kind: "full", acceptedMethods: ["card"] },
+    });
+    next.unmount();
+  });
+
+  it("starts a flexible rate as paid at the property even when card is ready (VAY-2205)", async () => {
+    mocks.readiness.mockResolvedValue({
+      methods: [
+        { method: "pay_at_property", selected: true, readiness: "ready" },
+        { method: "card", selected: true, readiness: "ready" },
+      ],
+    });
+    const view = await render();
+    expect(text(view.root)).toContain("Guests pay at the property. Rates paid when booking");
+    await type(view.root, "120");
+    mocks.read.mockResolvedValue(publication());
+    await act(async () => button(view.root, "Publish prices and continue").props.onClick());
+    const [rate] = mocks.publish.mock.calls[0]![2] as { terms: Record<string, any> }[];
+    expect(rate!.terms).toMatchObject({
+      cancellation: { kind: "flexible" },
+      payment: { kind: "full", acceptedMethods: ["pay_at_property"] },
+    });
+    view.unmount();
+    // Card only: the flexible rate is paid in full when booking.
+    mocks.publish.mockClear();
+    mocks.read.mockResolvedValue(null);
+    mocks.readiness.mockResolvedValue({
+      methods: [{ method: "card", selected: true, readiness: "ready" }],
+    });
+    const cardOnly = await render();
+    expect(text(cardOnly.root)).not.toContain("Guests pay at the property.");
+    await type(cardOnly.root, "120");
+    mocks.read.mockResolvedValue(publication());
+    await act(async () => button(cardOnly.root, "Publish prices and continue").props.onClick());
+    const [paid] = mocks.publish.mock.calls[0]![2] as { terms: Record<string, any> }[];
+    expect(paid!.terms.payment).toEqual({ kind: "full", acceptedMethods: ["card"] });
+    cardOnly.unmount();
+  });
+
   it("sends the owner to Payments before any rate is entered", async () => {
     const context = props("not_started");
     const view = await render(context);

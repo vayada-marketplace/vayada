@@ -274,6 +274,9 @@ export async function readSourcePublishedFlexibleRatePlans(
 export type PublishedRatePlan = Readonly<{
   roomTypeId: string;
   ratePlanId: string;
+  /** False for an offer that isn't sold anywhere (VAY-2285): it keeps naming the bookings
+   * already on it but is not offered for new ones. A channels-only offer stays active. */
+  active: boolean;
   rateType: "flexible" | "non_refundable";
   mealPlan: string | null;
   /** Publication currency; room types from the room-facts flow carry none. */
@@ -299,6 +302,7 @@ export async function readPublishedRatePlans(
       {
         roomTypeId: row.roomTypeId,
         ratePlanId: offer.id,
+        active: offer.sale !== "not_sold",
         rateType,
         mealPlan: typeof offer.meal?.kind === "string" ? offer.meal.kind : null,
         currency: row.currency,

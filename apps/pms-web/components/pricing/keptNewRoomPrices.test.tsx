@@ -18,7 +18,7 @@ const input = firstPricingInput(
     mode: "flat",
     occupancy: [],
     included: { adults: "", adjustments: [] },
-    methods: ["pay_at_property"],
+    methods: ["card"], // Non-refundable is paid in advance (VAY-2280).
     room: created,
     currency: "EUR",
     base: "120",

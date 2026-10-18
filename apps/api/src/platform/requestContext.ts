@@ -34,7 +34,7 @@ export type ResourceAccessRequirement = {
 
 export type RequestContextFixtureCase = {
   name: string;
-  scope: "hotel" | "creator" | "affiliate" | "platform";
+  scope: "hotel" | "platform";
   context: RequestContext;
   requirement: ResourceAccessRequirement;
   expected: "allowed" | "denied";
