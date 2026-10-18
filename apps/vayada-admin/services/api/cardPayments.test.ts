@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }));
@@ -50,7 +49,14 @@ describe("hotel card payments (VAY-2205)", () => {
     };
     expect(hotelCardPaymentsView(state({ evidence: approval, cardReady: true }))).toMatchObject({
       on: true,
+      approvalOutOfDate: false,
       approval,
+      canTurnOn: false,
+    });
+    // An approval whose Stripe account changed since: not on, and only off-then-on renews it.
+    expect(hotelCardPaymentsView(state({ evidence: approval, cardReady: false }))).toMatchObject({
+      on: false,
+      approvalOutOfDate: true,
       canTurnOn: false,
     });
   });
@@ -63,32 +69,18 @@ describe("hotel card payments (VAY-2205)", () => {
     );
   });
 
-  it("sends Vayada's approval for the revisions it was shown, as an attestation", async () => {
+  it("sends Vayada's approval for the revisions it was shown; the server records the time", async () => {
     mocks.post.mockResolvedValue({});
-    await hotelCardPaymentsService.turnOn(state(), new Date("2026-10-18T19:40:05.000Z"));
-    const [endpoint, body] = mocks.post.mock.calls[0]!;
-    const executedAt = "2026-10-18T19:40:00.000Z";
-    expect(endpoint).toBe(
+    await hotelCardPaymentsService.turnOn(state());
+    expect(mocks.post).toHaveBeenCalledWith(
       `/api/finance/platform/properties/${propertyId}/online-card-execution-evidence`,
+      {
+        commandId: expect.stringMatching(/^[0-9a-f-]{36}$/),
+        idempotencyKey: expect.stringMatching(/^[0-9a-f-]{36}$/),
+        expectedCardCapabilityRevision: 3,
+        expectedPropertyReadinessRevision: 7,
+      },
     );
-    expect(body).toEqual({
-      commandId: expect.stringMatching(/^[0-9a-f-]{36}$/),
-      idempotencyKey: expect.stringMatching(/^[0-9a-f-]{36}$/),
-      expectedCardCapabilityRevision: 3,
-      expectedPropertyReadinessRevision: 7,
-      evidenceFingerprintHash: createHash("sha256")
-        .update(
-          [
-            "vayada-card-approval.v1",
-            propertyId,
-            "card-capability:3",
-            "property-readiness:7",
-            executedAt,
-          ].join("\n"),
-        )
-        .digest("hex"),
-      executedAt,
-    });
     await expect(hotelCardPaymentsService.turnOn(state({ providerAccount: null }))).rejects.toThrow(
       "isn't ready",
     );

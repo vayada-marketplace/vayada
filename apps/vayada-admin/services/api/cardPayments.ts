@@ -12,20 +12,24 @@ export type HotelCardPaymentsState = {
   cardReady: boolean;
 };
 
-/** What the Payments tab shows (VAY-2205 P2.2, approved by Flamur 2026-10-18). */
+/** What the Payments tab shows (VAY-2205 P2.2, approved by Flamur 2026-10-18). Card is on only
+ * while Finance says it is ready; an approval on file whose Stripe account changed since is out of
+ * date, and only turning card off and on again gives a new one. */
 export function hotelCardPaymentsView(state: HotelCardPaymentsState) {
   const linked = state.providerAccount !== null;
   const stripeReady = state.providerAccount?.ready === true;
-  const on = state.evidence !== null;
+  const approved = state.evidence !== null;
   return {
-    on,
+    on: approved && state.cardReady,
+    approvalOutOfDate: approved && !state.cardReady,
     linked,
     stripeReady,
     approval: state.evidence,
     // Vayada approves only a ready Stripe account, against the revisions it checked.
     canTurnOn:
-      !on &&
+      !approved &&
       stripeReady &&
+      !!state.providerAccount?.cardCapabilityRevision &&
       !!state.propertyReadinessRevision &&
       state.propertyReadinessRevision > 0,
   };
@@ -34,37 +38,19 @@ export function hotelCardPaymentsView(state: HotelCardPaymentsState) {
 const path = (propertyId: string) =>
   `/api/finance/platform/properties/${encodeURIComponent(propertyId)}/online-card-execution-evidence`;
 
-async function sha256Hex(text: string) {
-  const digest = await globalThis.crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
 export const hotelCardPaymentsService = {
   read: (propertyId: string) => apiClient.get<HotelCardPaymentsState>(path(propertyId)),
 
   /** Vayada's approval: the operator attests that they checked the hotel's Stripe account. The
-   * fingerprint binds that statement to the revisions it was given for. */
-  turnOn: async (state: HotelCardPaymentsState, now = new Date()) => {
+   * server records the time and fingerprints the attestation with the revisions it names. */
+  turnOn: async (state: HotelCardPaymentsState) => {
     if (!state.providerAccount || !state.propertyReadinessRevision)
       throw new Error("The hotel's Stripe account isn't ready.");
-    // A little before now, so the server never sees an attestation from its future.
-    const executedAt = new Date(now.getTime() - 5_000).toISOString();
-    const evidenceFingerprintHash = await sha256Hex(
-      [
-        "vayada-card-approval.v1",
-        state.propertyId,
-        `card-capability:${state.providerAccount.cardCapabilityRevision}`,
-        `property-readiness:${state.propertyReadinessRevision}`,
-        executedAt,
-      ].join("\n"),
-    );
     return apiClient.post<unknown>(path(state.propertyId), {
       commandId: globalThis.crypto.randomUUID(),
       idempotencyKey: globalThis.crypto.randomUUID(),
       expectedCardCapabilityRevision: state.providerAccount.cardCapabilityRevision,
       expectedPropertyReadinessRevision: state.propertyReadinessRevision,
-      evidenceFingerprintHash,
-      executedAt,
     });
   },
 

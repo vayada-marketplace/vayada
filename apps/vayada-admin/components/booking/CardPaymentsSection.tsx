@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowTopRightOnSquareIcon,
   CheckCircleIcon,
@@ -67,6 +67,11 @@ export default function CardPaymentsSection({
   const [confirm, setConfirm] = useState<"on" | "off" | null>(null);
   const [busy, setBusy] = useState(false);
   const [changed, setChanged] = useState<"on" | "off" | null>(null);
+  const dialog = useRef<HTMLDivElement>(null);
+  // The confirm takes focus, so Escape and the keyboard reach it at once.
+  useEffect(() => {
+    if (confirm) dialog.current?.focus();
+  }, [confirm]);
 
   const load = useCallback(async () => {
     try {
@@ -203,11 +208,15 @@ export default function CardPaymentsSection({
             }
           />
           <Item
-            state={view.approval ? "done" : "open"}
+            state={view.approvalOutOfDate ? "waiting" : view.approval ? "done" : "open"}
             title="vayada's approval"
             note={
               view.approval
-                ? `Given ${when(view.approval.acceptedAt)}${approver ? ` by ${approver}` : ""}.`
+                ? `Given ${when(view.approval.acceptedAt)}${approver ? ` by ${approver}` : ""}.${
+                    view.approvalOutOfDate
+                      ? " Out of date: the hotel's Stripe account changed since. Turn card payments off, then on, to approve it again."
+                      : ""
+                  }`
                 : changed === "off"
                   ? "Not given. Turning card payments on gives it again."
                   : "Not given. You give it by turning card payments on."
@@ -220,7 +229,7 @@ export default function CardPaymentsSection({
           </p>
         )}
         <div className="mt-4 flex flex-wrap items-center gap-3">
-          {view.on ? (
+          {view.approval ? (
             <>
               <button
                 type="button"
@@ -256,10 +265,15 @@ export default function CardPaymentsSection({
       {confirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div
+            ref={dialog}
             role="dialog"
             aria-modal="true"
             aria-label={`Turn ${confirm} card payments for ${hotelName}?`}
-            className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl"
+            tabIndex={-1}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") setConfirm(null);
+            }}
+            className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl outline-none"
           >
             <h3 className="text-lg font-semibold text-gray-900">
               Turn {confirm} card payments for {hotelName}?

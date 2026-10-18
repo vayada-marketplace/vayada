@@ -112,6 +112,10 @@ test("turns card payments on as vayada's approval, then off, each time asking fo
       await fulfillJson(route, origin, { ok: true }, 201);
     },
   );
+  // Escape closes the confirm without sending anything.
+  await card.getByRole("button", { name: "Turn on card payments" }).click();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
   await card.getByRole("button", { name: "Turn on card payments" }).click();
   const confirmOn = page.getByRole("dialog", {
     name: "Turn on card payments for Hotel Alpenrose Munich?",
@@ -185,4 +189,18 @@ test("can't turn card on before the hotel's Stripe account is ready", async ({
   await expect(card.getByRole("button", { name: "Turn on card payments" })).toBeDisabled();
   await expect(card.getByText("Possible once the hotel's Stripe account is ready.")).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("payments-not-ready.png"), fullPage: true });
+});
+
+test("an approval whose Stripe account changed since is out of date, and turning off clears it", async ({
+  page,
+  baseURL,
+}) => {
+  await openPayments(page, baseURL, () => ({ ...on, cardReady: false }));
+  const card = page.getByRole("region", { name: "Card payments" });
+  await expect(card.getByText("Off", { exact: true })).toBeVisible();
+  await expect(
+    card.getByText(/Out of date: the hotel's Stripe account changed since\./),
+  ).toBeVisible();
+  await expect(card.getByRole("button", { name: "Turn off card payments" })).toBeEnabled();
+  await expect(card.getByRole("button", { name: "Turn on card payments" })).toHaveCount(0);
 });
