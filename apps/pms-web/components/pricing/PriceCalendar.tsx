@@ -323,7 +323,7 @@ function Night({
           : undefined
       }
       onClick={() => onPick(night.date)}
-      className={`flex h-[52px] min-w-0 flex-col justify-between rounded-lg border p-1.5 text-left md:h-[72px] md:rounded-[10px] md:px-2.5 md:py-2 ${tone} ${
+      className={`flex h-[52px] min-w-0 flex-col justify-between rounded-lg border px-1 py-1.5 text-left md:h-[72px] md:rounded-[10px] md:px-2.5 md:py-2 ${tone} ${
         selected
           ? "ring-2 ring-inset ring-primary-600"
           : night.inStay
