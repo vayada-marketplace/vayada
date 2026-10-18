@@ -316,3 +316,45 @@ test("a guest-requested cancel previews and records the booked-terms fee (VAY-21
     page.getByText(/Recorded at cancellation, 10 days before check-in: 150\.00 EUR of 200\.00 EUR/),
   ).toBeVisible();
 });
+
+test("cancelling a paid card stay previews what goes back to the guest's card (VAY-2205)", async ({
+  page,
+}) => {
+  await mockPmsWebAuthenticatedSession(page);
+  await mockPmsWebTargetRoutes(page);
+  const base = `**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/reservations/${PMS_WEB_RESERVATION_ID}`;
+  await page.route(base, (route) =>
+    route.fulfill({ json: { item: { ...pmsWebReservation, paymentStatus: "paid" } } }),
+  );
+  for (const suffix of ["notes", "additional-guests"])
+    await page.route(`${base}/${suffix}`, (route) => route.fulfill({ json: { items: [] } }));
+  await page.route(`${base}/host-actions/preview`, (route) =>
+    route.fulfill({
+      json: {
+        previewId: "preview-card",
+        expiresAt: "2099-01-01T12:10:00Z",
+        impact: {
+          checkIn: "2026-10-12",
+          checkOut: "2026-10-14",
+          totalAmount: "200.00",
+          newTotalAmount: "200.00",
+          currency: "EUR",
+          inventory: "release",
+          payment: "card_refund",
+          cardRefund: { paidMinor: "20000", refundMinor: "20000", currency: "EUR" },
+        },
+      },
+    }),
+  );
+  await page.goto(`/bookings/${PMS_WEB_RESERVATION_ID}`);
+  const section = page.getByRole("region", { name: "Booking actions" });
+  await section.getByRole("button", { name: "Cancel booking", exact: true }).click();
+  await section.getByLabel("Internal reason (not sent to the guest)").fill("Overbooked");
+  await section.getByRole("button", { name: "Preview impact" }).click();
+  await expect(
+    section.getByText(
+      "Inventory will be released. The guest paid 200.00 EUR by card online; 200.00 EUR goes back to their card automatically when you apply. Stripe keeps its processing fee.",
+    ),
+  ).toBeVisible();
+  await expect(section.getByText(/does not issue a refund/)).toHaveCount(0);
+});
