@@ -43,6 +43,35 @@ export function pricingCardRefundMinor(paidMinor: bigint, retainedMinor: bigint,
   return rounded > paidMinor ? paidMinor : rounded;
 }
 
+/** The cancel preview's money for a paid card stay: what was paid and what the booked terms give
+ * back, by the same rule as `stagePricingCardRefund`. Null without a paid card payment. */
+export async function previewPricingCardRefund(
+  db: Pick<PoolClient, "query">,
+  input: { propertyId: string; guestBookingId: string; retainedMinor: string },
+): Promise<{ paidMinor: bigint; refundMinor: bigint; currency: string } | null> {
+  const payment = (
+    await db.query(
+      `SELECT payment.amount::text AS amount,trim(payment.currency) AS currency
+       FROM booking.guest_bookings booking
+       JOIN finance.payments payment
+         ON payment.id=booking.active_card_payment_id AND payment.property_id=booking.property_id
+       WHERE booking.property_id=$1::uuid AND booking.id=$2::uuid AND payment.payment_method='card'
+         AND payment.status='paid' AND payment.refunded_amount=0
+         AND payment.payment_metadata->>'chargeType'='direct' AND payment.currency=booking.currency
+         AND booking.payment_status='paid' AND booking.booking_metadata->>'targetSource'='pricing_quote_draft'
+         AND booking.booking_metadata->>'paymentMethod'='card'`,
+      [input.propertyId, input.guestBookingId],
+    )
+  ).rows[0];
+  const paid = payment && pricingMinor(payment.amount, payment.currency);
+  if (!paid || !/^(0|[1-9][0-9]*)$/.test(input.retainedMinor)) return null;
+  return {
+    paidMinor: paid,
+    refundMinor: pricingCardRefundMinor(paid, BigInt(input.retainedMinor), payment.currency),
+    currency: payment.currency,
+  };
+}
+
 /** Inside the caller's cancel transaction, after it locked the booking row and the property's
  * inventory: records the refund the booked terms owe on the stay's paid card payment, or nothing
  * when they keep it all. The refund reaches Stripe only after the caller commits
@@ -140,6 +169,71 @@ export async function stagePricingCardRefund(
     throw error;
   }
   return { commandId, amount, currency: payment.currency };
+}
+
+/** A failed refund asked again, for the same amount, inside the caller's transaction (VAY-2205).
+ * Only the stay's latest refund, and only once it failed: a pending or settled one is left alone.
+ * Replays of the same command return the same refund. */
+export async function retryPricingCardRefund(
+  client: Pick<PoolClient, "query">,
+  input: { propertyId: string; guestBookingId: string; commandKey: string; occurredAt: Date },
+): Promise<StagedPricingCardRefund> {
+  const key = `pricing-card-refund-retry:${input.propertyId}:${input.guestBookingId}:${createHash("sha256").update(input.commandKey).digest("hex")}`;
+  const commandId = uuidFrom(key);
+  // The card payment first, as a cancel takes it, so a retry can't race a settle of the same stay.
+  const payment = (
+    await client.query(
+      `SELECT payment.id FROM booking.guest_bookings booking
+       JOIN finance.payments payment
+         ON payment.id=booking.active_card_payment_id AND payment.property_id=booking.property_id
+       WHERE booking.property_id=$1::uuid AND booking.id=$2::uuid FOR UPDATE OF payment`,
+      [input.propertyId, input.guestBookingId],
+    )
+  ).rows[0];
+  const replay = (
+    await client.query(
+      `SELECT amount::text AS amount,trim(currency) AS currency FROM finance.card_refund_commands
+       WHERE idempotency_key=$1 AND guest_booking_id=$2`,
+      [key, input.guestBookingId],
+    )
+  ).rows[0];
+  if (replay) return { commandId, amount: replay.amount, currency: replay.currency };
+  const failed = (
+    await client.query(
+      `SELECT payment_id,amount::text AS amount,amount_minor,trim(currency) AS currency,provider_account_ref,
+         provider_payment_intent_id,status
+       FROM finance.card_refund_commands WHERE property_id=$1 AND guest_booking_id=$2
+       ORDER BY created_at DESC,id DESC LIMIT 1`,
+      [input.propertyId, input.guestBookingId],
+    )
+  ).rows[0];
+  if (!payment || !failed || failed.status !== "failed" || failed.payment_id !== payment.id)
+    throw new PricingCardRefundError("unavailable");
+  try {
+    await client.query(
+      `INSERT INTO finance.card_refund_commands
+         (id,property_id,guest_booking_id,payment_id,idempotency_key,requested_by,amount,amount_minor,currency,
+          provider_account_ref,provider_payment_intent_id,next_attempt_at,created_at,updated_at)
+       VALUES ($1,$2,$3,$4,$5,'host',$6::numeric,$7,$8,$9,$10,$11,$11,$11)`,
+      [
+        commandId,
+        input.propertyId,
+        input.guestBookingId,
+        payment.id,
+        key,
+        failed.amount,
+        failed.amount_minor,
+        failed.currency,
+        failed.provider_account_ref,
+        failed.provider_payment_intent_id,
+        input.occurredAt.toISOString(),
+      ],
+    );
+  } catch (error) {
+    if ((error as { code?: string }).code === "23505") throw new PricingCardRefundError("conflict");
+    throw error;
+  }
+  return { commandId, amount: failed.amount, currency: failed.currency };
 }
 
 type Command = {

@@ -14,6 +14,9 @@ export type StripeBookingPaymentIntent = {
   providerAccountRef: string | null;
   cardBrand?: string | null;
   cardLast4?: string | null;
+  /** From the expanded latest charge (retrieve/capture), for reconciliation (VAY-2205). */
+  amountRefundedMinor?: number | null;
+  disputed?: boolean;
   feeBreakdown?: {
     balanceTransactionId: string;
     chargeId: string;
@@ -311,6 +314,8 @@ function paymentIntent(
       requestProviderAccountRef ?? text(object(value["transfer_data"])["destination"]),
     cardBrand: text(card["brand"]),
     cardLast4: /^\d{4}$/.test(text(card["last4"]) ?? "") ? text(card["last4"]) : null,
+    amountRefundedMinor: chargeId ? integer(charge["amount_refunded"]) : null,
+    disputed: charge["disputed"] === true,
     feeBreakdown:
       balanceTransactionId &&
       chargeId &&

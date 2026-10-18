@@ -1525,7 +1525,9 @@ export type HostBookingActionPreview = {
     newTotalAmount: string;
     currency: string;
     inventory: "release" | "replace";
-    payment: "no_payment_received" | "authorization_void";
+    payment: "no_payment_received" | "authorization_void" | "card_refund";
+    /** A paid card stay's cancel (VAY-2205): paid and refunded to the card, in minor units. */
+    cardRefund?: { paidMinor: string; refundMinor: string; currency: string };
     cancellationOutcome?: BookingCancellationOutcome;
     cancellationPolicy: {
       type: "non_refundable" | "flexible" | "mixed_room";

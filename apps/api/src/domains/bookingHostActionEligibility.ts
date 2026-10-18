@@ -21,6 +21,9 @@ export type HostBookingActionState = {
   /** Booked on the pricing-v2 booking page; bank transfer and PayPal there wait for the hotel to
    * confirm the payment (VAY-2139). Optional for callers without it: false. */
   pricingQuoteBooking?: boolean;
+  /** Stripe refunds can run, so a paid pricing-v2 card stay can be cancelled (VAY-2205). Optional
+   * for callers without it: false. */
+  cardRefunds?: boolean;
 };
 
 /** Eligibility is deliberately independent of the PMS route or a guest email. */
@@ -50,8 +53,15 @@ export function hostBookingActionConflict(
     action === "reject" &&
     booking.paymentStatus === "authorized" &&
     booking.paymentMethod === "card";
+  const refundableCancel =
+    action === "cancel" &&
+    booking.cardRefunds === true &&
+    booking.pricingQuoteBooking === true &&
+    booking.paymentStatus === "paid" &&
+    booking.paymentMethod === "card";
   if (
     !voidableRequest &&
+    !refundableCancel &&
     (booking.paymentStatus !== "unpaid" ||
       !(
         ["pay_at_property", "cash", "bank_transfer"].includes(booking.paymentMethod ?? "") ||
