@@ -497,7 +497,8 @@ test("writes what guests read about breakfast and shows it in the guest card (VA
   const assertHealthy = watchPageHealth(page, testInfo);
   await prices(page, DELUXE);
   const text = "Buffet breakfast in the Stube, 7:00–10:30";
-  await main(page).getByLabel("What guests read").fill(`${text} `);
+  // Step "Meals" (each option's window has the same field, hidden until opened).
+  await main(page).getByRole("textbox", { name: "What guests read" }).fill(`${text} `);
   await expect(
     main(page)
       .getByRole("radiogroup", { name: "Options for this stay" })
@@ -529,7 +530,7 @@ test("writes what guests read about a half board option in its window (VAY-2281)
     .getByRole("button", { name: /^Edit Half board/ })
     .click();
   const text = "Three-course dinner from 18:30";
-  await dialog(page).getByLabel("What guests read").fill(text);
+  await dialog(page).getByRole("textbox", { name: "What guests read" }).fill(text);
   await dialog(page).getByRole("button", { name: "Close" }).click();
   await expect(
     main(page)
