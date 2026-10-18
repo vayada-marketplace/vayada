@@ -54,18 +54,20 @@ describe("contact notification email (VAY-2286)", () => {
   });
 
   it("drops Reply-To for an unusable address and refuses an emptied job", () => {
+    for (const email of ["ana at example", "jörg@münchen.de", 'a"b@example.com', "ana@example"])
+      expect(contactNotificationEmail({ ...payload, email }, new Date()).replyTo).toBeUndefined();
     expect(
-      contactNotificationEmail({ ...payload, email: "ana at example" }, new Date()).replyTo,
-    ).toBeUndefined();
+      contactNotificationEmail({ ...payload, email: "a.b+c@x-y.co.uk" }, new Date()).replyTo,
+    ).toBe("a.b+c@x-y.co.uk");
     expect(() => contactNotificationEmail({}, new Date())).toThrow("incomplete");
   });
 
   it("sends from the booking address under the contact form name", () => {
     expect(contactNotificationSender("Vayada Bookings <bookings@vayada.com>")).toBe(
-      "vayada.com contact form <bookings@vayada.com>",
+      "Vayada contact form <bookings@vayada.com>",
     );
     expect(contactNotificationSender("bookings@vayada.com")).toBe(
-      "vayada.com contact form <bookings@vayada.com>",
+      "Vayada contact form <bookings@vayada.com>",
     );
   });
 
@@ -73,7 +75,7 @@ describe("contact notification email (VAY-2286)", () => {
     const bodies: unknown[] = [];
     const delivery = createResendBookingEmailDelivery({
       apiKey: "re_test",
-      from: "vayada.com contact form <bookings@vayada.com>",
+      from: "Vayada contact form <bookings@vayada.com>",
       fetch: (async (_url: string, init: RequestInit) => {
         bodies.push(JSON.parse(String(init.body)));
         return new Response("{}", { status: 200 });
@@ -90,7 +92,7 @@ describe("contact notification email (VAY-2286)", () => {
 
     expect(bodies).toEqual([
       {
-        from: "vayada.com contact form <bookings@vayada.com>",
+        from: "Vayada contact form <bookings@vayada.com>",
         to: ["team@example.test"],
         subject: "Contact form: Ana Host",
         text: "Hello",

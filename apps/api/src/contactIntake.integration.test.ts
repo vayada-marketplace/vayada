@@ -133,8 +133,8 @@ describe.skipIf(!URL)("PostgreSQL contact intake storage, delivery and retention
 
   it("emails contact-form messages to the recipient with the visitor as Reply-To", async () => {
     await parkOtherContactJobs();
-    const marker = randomUUID().slice(0, 8);
-    const support = randomUUID().slice(0, 8);
+    const marker = newMarker();
+    const support = newMarker();
     const form = await submit(marker);
     const supportJob = await submit(support, "in_app_support");
     const sent: Parameters<BookingEmailDelivery["send"]>[0][] = [];
@@ -145,7 +145,7 @@ describe.skipIf(!URL)("PostgreSQL contact intake storage, delivery and retention
       { recipient: "team@example.test" },
     );
 
-    expect(result).toEqual({ processed: 1, failed: 0 });
+    expect(result).toEqual({ processed: 1, failed: 0, deadLettered: 0 });
     expect(sent).toHaveLength(1);
     expect(sent[0]).toMatchObject({
       to: "team@example.test",
@@ -184,7 +184,7 @@ describe.skipIf(!URL)("PostgreSQL contact intake storage, delivery and retention
 
   it("retries a failed send later and records no personal data about it", async () => {
     await parkOtherContactJobs();
-    const marker = randomUUID().slice(0, 8);
+    const marker = newMarker();
     const form = await submit(marker);
 
     const result = await runContactNotificationJobs(
@@ -197,9 +197,15 @@ describe.skipIf(!URL)("PostgreSQL contact intake storage, delivery and retention
       { recipient: "team@example.test" },
     );
 
-    expect(result).toEqual({ processed: 0, failed: 1 });
+    expect(result).toEqual({
+      processed: 0,
+      failed: 1,
+      deadLettered: 0,
+      lastError: "Contact notification delivery failed.",
+    });
     const job = await admin.query(
-      "SELECT status, attempts_count, run_after > now() AS later FROM platform.jobs WHERE id=$1::uuid",
+      `SELECT status, attempts_count, run_after > now() + interval '50 seconds' AS later
+       FROM platform.jobs WHERE id=$1::uuid`,
       [form.jobId],
     );
     expect(job.rows[0]).toEqual({ status: "pending", attempts_count: 1, later: true });
@@ -211,6 +217,64 @@ describe.skipIf(!URL)("PostgreSQL contact intake storage, delivery and retention
       { status: "failed", error_message: "Contact notification delivery failed." },
     ]);
     expect(await rowsMentioning(marker)).toEqual(["jobs"]);
+  });
+
+  it("dead-letters after the last attempt with the provider status and no personal data", async () => {
+    await parkOtherContactJobs();
+    const marker = newMarker();
+    const form = await submit(marker);
+    await admin.query("UPDATE platform.jobs SET max_attempts = 1 WHERE id=$1::uuid", [form.jobId]);
+
+    const result = await runContactNotificationJobs(
+      login.connectionString,
+      {
+        send: async () => {
+          throw new Error("Booking email provider returned HTTP 422.");
+        },
+      },
+      { recipient: "team@example.test" },
+    );
+
+    expect(result).toEqual({
+      processed: 0,
+      failed: 1,
+      deadLettered: 1,
+      lastError: "Booking email provider returned HTTP 422.",
+    });
+    const job = await admin.query("SELECT status FROM platform.jobs WHERE id=$1::uuid", [
+      form.jobId,
+    ]);
+    expect(job.rows[0]?.status).toBe("dead_lettered");
+    const dead = await admin.query(
+      "SELECT reason_code, failure_summary FROM platform.dead_letter_events WHERE job_id=$1::uuid",
+      [form.jobId],
+    );
+    expect(dead.rows).toEqual([
+      {
+        reason_code: "contact_notification_delivery_exhausted",
+        failure_summary: "Contact notification delivery failed.",
+      },
+    ]);
+    expect(await rowsMentioning(marker)).toEqual(["jobs"]);
+  });
+
+  it("holds messages beyond the hourly cap in the queue", async () => {
+    await parkOtherContactJobs();
+    const form = await submit(newMarker());
+    const sent: unknown[] = [];
+
+    const result = await runContactNotificationJobs(
+      login.connectionString,
+      { send: async (input) => void sent.push(input) },
+      { recipient: "team@example.test", hourlyCap: 0 },
+    );
+
+    expect(result).toEqual({ processed: 0, failed: 0, deadLettered: 0 });
+    expect(sent).toEqual([]);
+    const job = await admin.query("SELECT status FROM platform.jobs WHERE id=$1::uuid", [
+      form.jobId,
+    ]);
+    expect(job.rows[0]?.status).toBe("pending");
   });
 
   it("empties messages after 90 days, cancels unsent ones and keeps younger ones", async () => {

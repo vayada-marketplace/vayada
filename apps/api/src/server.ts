@@ -2971,8 +2971,16 @@ const runContactNotificationDelivery = () => {
     { recipient: contactNotificationRecipient },
   )
     .then((result) => {
-      if (result.failed > 0) {
-        app.log.warn({ failed: result.failed }, "Contact notification delivery had failures");
+      if (result.deadLettered > 0) {
+        app.log.error(
+          { deadLettered: result.deadLettered, lastError: result.lastError },
+          "Contact form messages could not be emailed after all retries",
+        );
+      } else if (result.failed > 0) {
+        app.log.warn(
+          { failed: result.failed, lastError: result.lastError },
+          "Contact notification delivery had failures",
+        );
       }
     })
     .catch((error: unknown) => app.log.warn({ err: error }, "Contact notification delivery failed"))
