@@ -1,5 +1,5 @@
 import { injectJson } from "@vayada/backend-test";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { buildApp } from "./app.js";
 import {
@@ -111,32 +111,62 @@ describe("platform contact intake routes", () => {
     expect(posted.headers["access-control-allow-origin"]).toBe("https://vayada.com");
   });
 
-  it("limits valid messages per address per minute without touching the store", async () => {
-    let stored = 0;
+  it("refuses an oversized body before writing intake", async () => {
     const app = buildContactIntakeApp({
       repository: {
         async submitContact() {
-          stored += 1;
-          return contactResponse();
+          throw new Error("repository should not be called");
         },
       },
     });
-    const post = (message: string) =>
-      injectJson(app, {
-        method: "POST",
-        url: "/api/contact",
-        payload: { name: "Ana Host", email: "ana@example.com", message },
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/contact",
+      payload: {
+        name: "Ana Host",
+        email: "ana@example.com",
+        message: "x",
+        company: "y".repeat(25_000),
+      },
+    });
+
+    expect(response.statusCode).toBe(413);
+  });
+
+  it("limits valid messages per address per minute without touching the store", async () => {
+    // A fixed clock keeps all six posts inside one counting minute.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-18T12:00:10.000Z"));
+    try {
+      let stored = 0;
+      const app = buildContactIntakeApp({
+        repository: {
+          async submitContact() {
+            stored += 1;
+            return contactResponse();
+          },
+        },
       });
+      const post = (message: string) =>
+        app.inject({
+          method: "POST",
+          url: "/api/contact",
+          payload: { name: "Ana Host", email: "ana@example.com", message },
+        });
 
-    for (let index = 0; index < CONTACT_INTAKE_LIMIT; index += 1) {
-      expect((await post(`Message ${index}`)).statusCode).toBe(200);
+      for (let index = 0; index < CONTACT_INTAKE_LIMIT; index += 1) {
+        expect((await post(`Message ${index}`)).statusCode).toBe(200);
+      }
+      const limited = await post("One too many");
+
+      expect(limited.statusCode).toBe(429);
+      expect(limited.headers["retry-after"]).toBe("50");
+      expect(limited.json()).toMatchObject({ code: "rate_limited", category: "rate_limit" });
+      expect(stored).toBe(CONTACT_INTAKE_LIMIT);
+    } finally {
+      vi.useRealTimers();
     }
-    const limited = await post("One too many");
-
-    expect(limited.statusCode).toBe(429);
-    expect(Number(limited.headers["retry-after"])).toBeGreaterThan(0);
-    expect(limited.body).toMatchObject({ code: "rate_limited", category: "rate_limit" });
-    expect(stored).toBe(CONTACT_INTAKE_LIMIT);
   });
 });
 

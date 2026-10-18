@@ -168,36 +168,43 @@ export function registerPlatformContactIntakeRoutes(
     },
   );
 
-  app.post<{ Body: PlatformContactIntakeRequest }>("/contact", async (request, reply) => {
-    const parsed = parseContactPayload(request.body);
-    if (!parsed.ok) return sendContactIntakeError(reply, 400, parsed.error);
-    // Counted in memory only for valid messages; next-api is reached directly (no proxy), so
-    // request.ip is the visitor's address.
-    const limit = contactRateLimit(request.ip || "unknown");
-    if (!limit.allowed) {
-      reply.header("Retry-After", String(limit.retryAfterSeconds));
-      return sendContactIntakeError(reply, 429, {
-        code: "rate_limited",
-        category: "rate_limit",
-        message: "Too many messages in a short time. Please wait a minute and try again.",
-      });
-    }
+  // VAY-2286: the public form's fields fit easily; a large body is refused before parsing.
+  app.post<{ Body: PlatformContactIntakeRequest }>(
+    "/contact",
+    { bodyLimit: 24_000 },
+    async (request, reply) => {
+      const parsed = parseContactPayload(request.body);
+      if (!parsed.ok) return sendContactIntakeError(reply, 400, parsed.error);
+      // Counted in memory only for valid messages. Browsers reach next-api through the ALB only
+      // (no Cloudflare, no app proxy) and trustProxy trusts just private addresses, so request.ip
+      // is the visitor's address.
+      const limit = contactRateLimit(request.ip || "unknown");
+      if (!limit.allowed) {
+        reply.header("Retry-After", String(limit.retryAfterSeconds));
+        return sendContactIntakeError(reply, 429, {
+          code: "rate_limited",
+          category: "rate_limit",
+          message: "Too many messages in a short time. Please wait a minute and try again.",
+        });
+      }
 
-    try {
-      return await options.repository.submitContact({
-        payload: parsed.value,
-        requestId: request.id,
-        receivedAt: new Date().toISOString(),
-      });
-    } catch (error) {
-      request.log.error({ err: error }, "Platform contact intake failed");
-      return sendContactIntakeError(reply, 500, {
-        code: "intake_unavailable",
-        category: "write_model",
-        message: "Contact intake is temporarily unavailable.",
-      });
-    }
-  });
+      try {
+        return await options.repository.submitContact({
+          payload: parsed.value,
+          requestId: request.id,
+          receivedAt: new Date().toISOString(),
+        });
+      } catch (error) {
+        request.log.error({ err: error }, "Platform contact intake failed");
+        return sendContactIntakeError(reply, 500, {
+          code: "intake_unavailable",
+          category: "write_model",
+          // Shown to visitors on vayada.com/contact (VAY-2286).
+          message: "We could not send your message. Please try again, or email hello@vayada.com.",
+        });
+      }
+    },
+  );
 }
 
 export function createPgPlatformContactIntakeRepository(config: {
