@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { parseBookingPricingOfferTerms, type ReplacementOfferTerms } from "@vayada/domain-booking/replacement-pricing";
 import { useTranslation } from "@/lib/i18n";
+import { paidInAdvance } from "@vayada/product-onboarding/AcceptedPaymentMethods";
 import { AcceptedPaymentMethods, type PaymentMethod } from "./AcceptedPaymentMethods";
 import * as ui from "./pricingStyles";
 import { decimalAmount, errorText, parseMinorInput, PricingError } from "./pricingAmounts";
@@ -23,14 +24,17 @@ export function PricingPolicyForm({ terms, disabled, onApply, onCancel }: { term
     if (disabled) return;
     try {
       if (!methods.length) throw new PricingError("pricing.error.paymentMethodRequired");
+      // A non-refundable stay is paid in advance: pay at property is never sent with it (VAY-2280).
+      const accepted = kind === "non_refundable" ? paidInAdvance(methods) : methods;
+      if (!accepted.length) throw new PricingError("pricing.error.nonRefundableNeedsAdvance");
       const cancellation = kind === "non_refundable" ? { kind } : { kind, terms: {
         type: "free_until_days_before_arrival", freeCancellationDeadlineDays: integer(values.deadline), afterDeadlinePenalty: "full_booking_amount", noShowPenalty: "full_booking_amount",
         ...(values.type ? { flexibleCancellationType: values.type } : {}), ...(values.window ? { partialRefundCancelWindowDays: integer(values.window) } : {}),
         ...(values.percent ? { partialRefundAmountPercent: integer(values.percent) } : {}), ...(values.text ? { text: values.text } : {}),
         ...(tiers.length || original?.partialRefundTiers !== undefined ? { partialRefundTiers: tiers.map((t) => ({ minDaysBeforeCheckIn: integer(t.days), refundPercent: integer(t.percent) })) } : {}),
       } };
-      const parsed = parseBookingPricingOfferTerms({ ...terms, cancellation, payment: payment === "full" ? { kind: payment, acceptedMethods: methods } : {
-        kind: payment, basisPoints: Number(parseMinorInput(values.deposit, 2)), balanceDaysBeforeArrival: integer(values.balance), acceptedMethods: methods,
+      const parsed = parseBookingPricingOfferTerms({ ...terms, cancellation, payment: payment === "full" ? { kind: payment, acceptedMethods: accepted } : {
+        kind: payment, basisPoints: Number(parseMinorInput(values.deposit, 2)), balanceDaysBeforeArrival: integer(values.balance), acceptedMethods: accepted,
       } });
       if (!parsed) throw new PricingError("pricing.policy.errorInvalid");
       onApply(parsed);
@@ -61,7 +65,7 @@ export function PricingPolicyForm({ terms, disabled, onApply, onCancel }: { term
       <option value="full">{t("pricing.fullPayment")}</option><option value="deposit">{t("pricing.policy.depositAndBalance")}</option></select></label>
     {payment === "deposit" && <>{field("deposit", t("pricing.policy.deposit"))}{field("balance", t("pricing.policy.balance"))}
       <p className="text-[11px] text-amber-700">{t("pricing.policy.depositUnavailable")}</p></>}
-    <AcceptedPaymentMethods methods={methods} disabled={disabled} onChange={setMethods} />
+    <AcceptedPaymentMethods methods={methods} disabled={disabled} nonRefundable={kind === "non_refundable"} onChange={setMethods} />
     {error && <p role="alert" className={ui.errorText}>{error}</p>}
     <p className={ui.text}>{t("pricing.policy.applyHint")}</p>
     <div className="flex gap-2"><button type="button" className={ui.primaryButton} onClick={apply}>{t("pricing.policy.apply")}</button>

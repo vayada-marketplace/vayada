@@ -90,10 +90,13 @@ export function StepCancellation({
 export function CancellationChoice({
   value,
   disabled,
+  noNonRefundable = false,
   onChange,
 }: {
   value: Exclude<SimpleCancellation, { kind: "own" }>;
   disabled: boolean;
+  /** Guests can only pay at the property, so non-refundable (paid in advance) can't be chosen (VAY-2280). */
+  noNonRefundable?: boolean;
   onChange: (choice: Exclude<SimpleCancellation, { kind: "own" }>) => void;
 }) {
   const { t } = useTranslation();
@@ -121,13 +124,16 @@ export function CancellationChoice({
         <button
           type="button"
           aria-pressed={value.kind === "non_refundable"}
-          disabled={disabled}
+          disabled={disabled || (noNonRefundable && value.kind !== "non_refundable")}
           onClick={() => choose({ kind: "non_refundable" })}
           className={ui.chip(value.kind === "non_refundable")}
         >
           {t("pricing.simple.cancellation.nonRefundable")}
         </button>
       </div>
+      {noNonRefundable && (
+        <p className="text-[13px] text-gray-500">{t("pricing.error.nonRefundableNeedsAdvance")}</p>
+      )}
       {value.kind === "free" && (
         <label className="flex flex-wrap items-center gap-2.5 text-[15px] text-gray-700">
           {t("pricing.simple.cancellation.until")}

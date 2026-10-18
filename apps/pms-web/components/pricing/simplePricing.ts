@@ -163,6 +163,7 @@ export function switchOption(
       discount: "percent" in value ? value.percent : defaultDiscount,
       mealAmount: "amount" in value ? value.amount : "",
       mealBasis: "basis" in value ? value.basis : "room",
+      // presetOption leaves pay at property out of a non-refundable option (VAY-2280).
       methods: [
         ...(("methods" in value && value.methods) || mainTerms.payment.acceptedMethods || []),
       ],

@@ -571,7 +571,7 @@ it.each([new Error("lost preparation response")])(
       mode: "flat",
       occupancy: [],
       included: { adults: "", adjustments: [] },
-      methods: ["pay_at_property"],
+      methods: ["card"],
       room: id,
       currency: "EUR",
       base: "130",
@@ -2314,7 +2314,7 @@ it("builds a linked room-only offer with explicit terms and rejects invalid sett
     cancellation: "non_refundable",
     deadline: "",
     payment: "full",
-    methods: ["pay_at_property"] as ("card" | "pay_at_property")[],
+    methods: ["card"] as ("card" | "pay_at_property")[],
   };
   const created = linkedOfferInput(room, id, values);
   expect(created.configuration.offers[0]).toEqual(room.offers[0]);
@@ -2334,7 +2334,7 @@ it("builds a linked room-only offer with explicit terms and rejects invalid sett
   expect(created.terms).toMatchObject({
     expectedRevision: null,
     cancellation: { kind: "non_refundable" },
-    payment: { kind: "full", acceptedMethods: ["pay_at_property"] },
+    payment: { kind: "full", acceptedMethods: ["card"] },
   });
   expect(
     linkedOfferInput(room, id, {
@@ -2389,7 +2389,7 @@ it("appends linked offers preserving prices, revisions and accepted-policy retry
     cancellation: "non_refundable",
     deadline: "",
     payment: "full",
-    methods: ["pay_at_property"],
+    methods: ["card"],
   });
   client.prepare.mockRejectedValueOnce(new Error("lost preparation"));
   await act(async () => view.root.findByType(NewLinkedOffer).props.onCreate(next));
@@ -2485,7 +2485,7 @@ it.each(["flat", "occupancy", "per_person", "included_guests"])(
           { kind: "fixed", value: "25" },
         ],
       },
-      methods: ["pay_at_property"] as ("card" | "pay_at_property")[],
+      methods: ["card"] as ("card" | "pay_at_property")[],
       room: id,
       currency: "EUR",
       base: "130",
@@ -2582,7 +2582,7 @@ it("creates an independent offer through fixed-room setup and retains policy ret
       mode: "flat",
       occupancy: [],
       included: { adults: "", adjustments: [] },
-      methods: ["pay_at_property"],
+      methods: ["card"],
       room: id,
       currency: "EUR",
       base: "200",
@@ -4125,7 +4125,7 @@ const roomEditor = (rooms: { roomTypeId: string; name: string; capacity: Pricing
 const mountRoom = async (rooms = [{ roomTypeId: "room", name: "Existing", capacity: snapshot.rooms[0].capacity }, familySetup], extra: RoomProps = {}) => {
   await act(async () => { view = create(roomEditor(rooms, extra)); });
 };
-const familyInput = (base: string) => firstPricingInput("property", familySetup, familyId, { mode: "flat", occupancy: [], included: { adults: "", adjustments: [] }, methods: ["pay_at_property"], room: familyId, currency: "EUR", base, adultAge: "12", childPrice: "0", countChildren: "yes", minimum: "1", maximum: "", cancellation: "non_refundable", freeDays: "", payment: "full" });
+const familyInput = (base: string) => firstPricingInput("property", familySetup, familyId, { mode: "flat", occupancy: [], included: { adults: "", adjustments: [] }, methods: ["card"], room: familyId, currency: "EUR", base, adultAge: "12", childPrice: "0", countChildren: "yes", minimum: "1", maximum: "", cancellation: "non_refundable", freeDays: "", payment: "full" });
 it("on a room page, edits only that room, publishes every other room exactly as read and continues from the new publication (VAY-2093)", async () => {
   client.read.mockResolvedValue(published()); await mountRoom();
   expect(view.root.findAllByProps({ inputMode: "decimal" }).filter((node) => node.type === "input" && !["How much cheaper, in percent", "Breakfast price"].includes(node.props["aria-label"]))).toHaveLength(1);

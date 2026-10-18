@@ -23,7 +23,9 @@ export class PricingStorageError extends Error {
       | "denied"
       | "stale"
       | "idempotency_conflict"
-      | "currency_conversion_required",
+      | "currency_conversion_required"
+      /** A non-refundable stay is paid in advance, so its terms can't accept pay at property (VAY-2280). */
+      | "non_refundable_pay_at_property",
     /** Owner readiness reason the caller may act on (Finance readiness on prepare). */
     readonly reason?: string,
   ) {

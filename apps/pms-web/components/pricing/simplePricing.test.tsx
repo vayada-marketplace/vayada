@@ -419,10 +419,11 @@ describe("the simple card's edits", () => {
       { percent: "15" },
       flexibleTerms(3),
     );
+    // Paid in advance: the main option's pay at property is left out (VAY-2280).
     expect(added.terms).toMatchObject({
       offerId: id,
       cancellation: { kind: "non_refundable" },
-      payment,
+      payment: { kind: "full", acceptedMethods: ["card"] },
     });
     const id2 = "cccccccc-0000-4000-8000-00000000000c";
     const both = switchOption(
