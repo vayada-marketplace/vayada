@@ -22,11 +22,6 @@ function snapshot(overrides = {}) {
     ["apps/pms-web", "pms", ["@vayada/domain-booking"]],
     ["apps/booking-web", "booking-web", ["@vayada/domain-hotels"]],
     ["apps/booking-admin", "booking-admin", ["@vayada/domain-booking"]],
-    [
-      "apps/marketplace-web",
-      "marketplace",
-      ["@vayada/domain-marketplace", "@vayada/domain-hotels"],
-    ],
     ["apps/vayada-admin", "admin", ["@vayada/domain-hotels"]],
     ["packages/backend-auth", "@vayada/backend-auth", []],
     ["packages/backend-migration", "@vayada/backend-migration", ["@vayada/domain-booking"]],
