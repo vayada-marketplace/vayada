@@ -309,10 +309,17 @@ async function settleRefund(client: PoolClient, command: Command, refund: Stripe
       }),
     ],
   );
+  const bookingStatus = status === "refunded" ? "refunded" : "paid";
   await client.query(
     `UPDATE booking.guest_bookings SET payment_status=$3,updated_at=clock_timestamp()
      WHERE id=$1 AND property_id=$2`,
-    [command.guest_booking_id, command.property_id, status === "refunded" ? "refunded" : "paid"],
+    [command.guest_booking_id, command.property_id, bookingStatus],
+  );
+  // PMS lists read the summary; a stay without one has nothing to update.
+  await client.query(
+    `UPDATE booking.direct_booking_summary_read_model SET payment_status=$2,projected_at=clock_timestamp()
+     WHERE guest_booking_id=$1`,
+    [command.guest_booking_id, bookingStatus],
   );
   await client.query(
     `UPDATE finance.card_refund_commands SET status='succeeded',provider_refund_id=$2,provider_status=$3,

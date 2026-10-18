@@ -67,6 +67,13 @@ describe.skipIf(!url)("pricing card refunds (VAY-2205)", () => {
       [guestBookingId, propertyId, `R-${guestBookingId.slice(0, 8)}`],
     );
     await pool.query(
+      `INSERT INTO booking.direct_booking_summary_read_model
+         (guest_booking_id,property_id,public_reference,lifecycle_status,payment_status,check_in,check_out)
+       SELECT id,property_id,public_reference,lifecycle_status,payment_status,check_in,check_out
+       FROM booking.guest_bookings WHERE id=$1`,
+      [guestBookingId],
+    );
+    await pool.query(
       `INSERT INTO finance.payment_provider_accounts(id,property_id,account_scope,provider,provider_account_id,status)
        VALUES($1,$2,'property','stripe',$3,'active')`,
       [accountId, propertyId, accountRef],
@@ -187,6 +194,14 @@ describe.skipIf(!url)("pricing card refunds (VAY-2205)", () => {
       payment: { status: "refunded", refunded: "100.00" },
       booking: "refunded",
     });
+    expect(
+      (
+        await pool.query(
+          "SELECT payment_status FROM booking.direct_booking_summary_read_model WHERE guest_booking_id=$1",
+          [all.guestBookingId],
+        )
+      ).rows,
+    ).toEqual([{ payment_status: "refunded" }]);
     const none = await paidCardStay();
     expect(await none.stage("10000")).toBeNull();
     expect(await none.stage("12000", "cancel-more")).toBeNull();
