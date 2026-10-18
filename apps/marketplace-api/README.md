@@ -1,8 +1,9 @@
 # vayada Creator Marketplace Backend API
 
 > **Status:** the Creator Marketplace is retired (VAY-2259) and its web app is gone (VAY-2270). This
-> legacy service still serves the landing site's contact form (`/api/contact`); the Marketplace
-> data stays until the Marketplace tables are dropped (VAY-2272).
+> legacy service (`api.vayada.com`) and the Marketplace data stay until the Marketplace tables are
+> dropped (VAY-2272). Its contact route is `POST /contact`; the platform contact intake at
+> `POST /api/contact` lives in `apps/api` (VAY-807).
 
 A FastAPI-based backend service for the vayada Creator Marketplace platform. This API provides authentication, user management, and marketplace functionality.
 

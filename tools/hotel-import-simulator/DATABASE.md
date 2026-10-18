@@ -56,7 +56,8 @@ This verifies the new table against local fixtures, not a full production migrat
 
 ## Airbnb source to canonical room smoke (retired)
 
-The browser smoke for this harness, `tests/e2e/marketplace-web/airbnb-import-database.spec.ts`,
-was deleted with the Marketplace app (VAY-2270, #3412). Booking Admin's
-`tests/e2e/booking-admin/airbnb-import-start.spec.ts` and `airbnb-import-return.spec.ts` cover
-the import flow against mocked responses; no browser spec drives this local database harness now.
+The Marketplace browser smoke for this harness,
+`tests/e2e/marketplace-web/airbnb-import-database.spec.ts`, was deleted with the Marketplace app
+(VAY-2270, #3412). The simulator's own `database.spec.ts` still drives `/database.html` against
+this harness. Booking Admin's `tests/e2e/booking-admin/airbnb-import-start.spec.ts` and
+`airbnb-import-return.spec.ts` cover the app's import flow against mocked responses.

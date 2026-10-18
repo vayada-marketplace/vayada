@@ -4,7 +4,8 @@ Updated: 2026-08-22
 
 ## Active delivery lanes
 
-The coordinated six-service next release builder and publisher are present but
+The coordinated five-service next release builder and publisher (six services until the
+Marketplace removal, VAY-2271) are present but
 remain gated by `COORDINATED_RELEASES_ENABLED` until VAY-2029 installs the
 platform receiver and switches all affected automatic lanes together. See
 [`coordinated-release-publishing.md`](coordinated-release-publishing.md).

@@ -214,11 +214,11 @@ There is no production fallback to an API origin, request host, or
 
 | Environment                 | Registration and configuration rule                                                                                                                                                         |
 | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Canonical local portless    | Register all five exact local callback URIs; use `127.0.0.1:8003` as the server-only upstream.                                                                                              |
+| Canonical local portless    | Register all three exact local callback URIs; use `127.0.0.1:8003` as the server-only upstream.                                                                                             |
 | Isolated review port        | Preserve the port in `AUTH_PUBLIC_ORIGIN` and register each exact callback URI for that port.                                                                                               |
 | Worktree-qualified portless | Resolve and register the exact generated frontend host; do not drop the worktree prefix.                                                                                                    |
 | Plain-port fallback         | Use each frontend's `http://localhost:<port>` origin, omit cookie `Secure`, and register the exact staging redirect URI.                                                                    |
-| Next stack                  | Set the five explicit next-stack origins and register their exact HTTPS callbacks before enabling a surface.                                                                                |
+| Next stack                  | Set the two explicit next-stack origins, resolve `platform-admin` from platform configuration, and register their exact HTTPS callbacks before enabling a surface.                          |
 | Production                  | Platform configuration supplies the canonical public origin per surface. Activation is blocked until the exact HTTPS callbacks and sign-out URIs are registered and VAY-1202/VAY-1203 pass. |
 
 ## Cross-app session handoff

@@ -22,7 +22,7 @@ This file is the **canonical, tool-neutral agent guide**. Claude Code, Codex, an
 
 Local URLs are the recommended way to reach each app — see [Local dev — portless](#local-dev--portless). Plain `localhost:PORT` still works for contributors not on portless.
 
-`apps/landing` is the **public marketing/landing site**: home, `/booking-engine`, `/pms`, `/partner-program`, `/pricing`, about/contact and the legal pages. Its contact form still posts to the legacy marketplace API (`NEXT_PUBLIC_API_URL`). `vayada.com` is the shared public landing surface and is served by the `vayada-landing` App Runner service; the authenticated apps and APIs remain on their separate hostnames.
+`apps/landing` is the **public marketing/landing site**: home, `/booking-engine`, `/pms`, `/partner-program`, `/pricing`, about/contact and the legal pages. Its contact form posts `/api/contact` to `NEXT_PUBLIC_API_URL`, which the landing deploy sets to `api.vayada.com`, the legacy marketplace API host. `vayada.com` is the shared public landing surface and is served by the `vayada-landing` App Runner service; the authenticated apps and APIs remain on their separate hostnames.
 
 ## Local dev — portless
 

@@ -358,6 +358,10 @@ behavior or store/verify Vayada-owned password hashes.
 
 ### Affiliates
 
+> Retired: the affiliate portal source was removed (VAY-1498) and its auth surface went with
+> VAY-2271 (#3422). `affiliate_partner` organizations stay readable until the Marketplace data is
+> dropped (VAY-2272). Kept as design history.
+
 Affiliate dashboard login should use WorkOS and an `affiliate_partner`
 organization. Public referral links, click attribution, and unauthenticated
 booking attribution remain public product flows. Payout settings and affiliate
