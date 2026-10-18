@@ -928,6 +928,15 @@ jobs:
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
+      # 0493 (VAY-2270) in its own database: migrate up to 0493, add retired grants, apply 0493.
+      - name: Verify the Marketplace role grant retirement migration
+        if: matrix.shard == 'hotel-setup'
+        run: >-
+          npm --workspace @vayada/backend-migration run test --
+          src/retireMarketplaceRoleGrantsMigration.integration.test.ts
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+
       - name: Verify hotel setup routes, currency and logo media
         if: matrix.shard == 'hotel-setup'
         run: >-
