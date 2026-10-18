@@ -200,7 +200,11 @@ const publicationOf = (revision: number, rooms: Room[]) => ({
 });
 
 /** An in-memory pricing-v2 store: published rooms, terms per offer (saved through drafts), and every publish. */
-async function mockPricing(page: Page, initial: ReturnType<typeof publicationOf> | null) {
+async function mockPricing(
+  page: Page,
+  initial: ReturnType<typeof publicationOf> | null,
+  readyMethods: ("bank_transfer" | "paypal")[] = [],
+) {
   const terms = new Map<string, Record<string, unknown>>([
     ["flexible", { revision: TERMS, cancellation: flexible }],
     ["breakfast", { revision: TERMS, cancellation: flexible }],
@@ -219,9 +223,9 @@ async function mockPricing(page: Page, initial: ReturnType<typeof publicationOf>
     const method = request.method();
     const suffix = new URL(request.url()).pathname.split("/pricing-v2")[1] ?? "";
     const body = (method === "GET" ? {} : request.postDataJSON()) as Record<string, any>;
-    // Bank-transfer and PayPal acceptance is off, as in production today (VAY-2139).
+    // Bank-transfer and PayPal acceptance is off, as in production today (VAY-2139), unless a test makes them ready.
     if (suffix === "/payment-methods" && method === "GET")
-      return ok(route, { acceptanceEnabled: false, readyMethods: [] });
+      return ok(route, { acceptanceEnabled: readyMethods.length > 0, readyMethods });
     if (suffix === "" && method === "GET") {
       if (!state.publication) return route.fulfill({ status: 404, json: { code: "not_found" } });
       return ok(route, state.publication);
@@ -344,10 +348,13 @@ async function openPms(page: Page) {
 const main = (page: Page) => page.locator("main");
 const prices = async (page: Page, id: string) => {
   await page.goto(`/rooms/${id}?tab=prices`);
-  // An unpriced room shows "Set this room's prices"; a priced one the card's "Price per night".
+  // An unpriced room shows the first price ("Set this room's prices", or "Price per night" for one room); a priced one
+  // "Prices and seasons" (VAY-2280).
   await expect(
     main(page)
-      .getByRole("heading", { name: /^Price per night$|Set this room's prices/ })
+      .getByRole("heading", {
+        name: /^Prices and seasons$|^Price per night$|Set this room's prices/,
+      })
       .first(),
   ).toBeVisible();
 };
@@ -356,15 +363,6 @@ const dialog = (page: Page) => page.locator('[role="dialog"]:visible');
 /** The card's switch for an extra choice (VAY-2188). */
 const extra = (page: Page, name: string) =>
   main(page).getByRole("switch", { name: `Offer “${name}”` });
-const openMoreOptions = async (page: Page) => {
-  // Editors inside keep their own <details>, so the row is found by its summary's first words.
-  const summary = main(page)
-    .locator("summary")
-    .filter({ hasText: /^More options/ })
-    .first();
-  if (!(await summary.evaluate((element) => (element.parentElement as HTMLDetailsElement).open)))
-    await summary.click();
-};
 
 test("edits a priced room on the simple card and publishes only what changed (VAY-2188)", async ({
   page,
@@ -373,7 +371,8 @@ test("edits a priced room on the simple card and publishes only what changed (VA
   const pricing = await mockPricing(page, publicationOf(3, [designRoom(3), complexRoom(3)]));
   const assertHealthy = watchPageHealth(page, testInfo);
   await prices(page, DELUXE);
-  for (const heading of ["Cancellation", "Extra choices for guests", "Busier dates"])
+  // "Price rules" (VAY-2280): opening times, prices and seasons, rates and meals.
+  for (const heading of ["Price rules", "Prices and seasons", "Rates", "Meals"])
     await expect(main(page).getByRole("heading", { name: heading })).toBeVisible();
   // "Prices by date" comes first (VAY-2280), showing the main option's nightly prices.
   const calendar = main(page).getByRole("region", { name: "Prices by date" });
@@ -389,7 +388,20 @@ test("edits a priced room on the simple card and publishes only what changed (VA
   await expect(
     main(page).getByRole("button", { name: "Free cancellation", exact: true }),
   ).toHaveAttribute("aria-pressed", "true");
-  await expect(main(page).getByLabel("Days before arrival")).toHaveValue("7");
+  // Step "Rates" (VAY-2282): the Flexible rate's free cancellation days, the Non-refundable rate beside it.
+  await expect(main(page).getByRole("button", { name: "7 days", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(main(page).getByRole("region", { name: "Flexible rate" })).toContainText(
+    "Always on",
+  );
+  // The Save bar: the lowest night is the Low season's €80, 10% less on the Non-refundable rate.
+  await expect(main(page).getByText("Guests pay from €72 a night", { exact: true })).toBeVisible();
+  // Non-refundable stays are paid in advance; the mock's old "pay at property" shows as not offered (VAY-2282).
+  await expect(main(page).getByRole("region", { name: "Non-refundable rate" })).toContainText(
+    "Not offered: non-refundable stays are paid in advance",
+  );
   await expect(extra(page, "Non-refundable")).toHaveAttribute("aria-checked", "true");
   await expect(main(page).getByLabel("How much cheaper, in percent")).toHaveValue("10");
   await expect(main(page).getByText("€90 a night", { exact: true })).toBeVisible();
@@ -417,8 +429,7 @@ test("edits a priced room on the simple card and publishes only what changed (VA
       .first(),
   ).toBeVisible();
 
-  // Other options live under More options.
-  await openMoreOptions(page);
+  // Other booking options sit at the bottom of Rates (VAY-2283).
   await main(page).getByRole("button", { name: "Half board", exact: true }).click();
   await dialog(page).getByLabel("Half board price").fill("25");
   await dialog(page).getByRole("button", { name: "Add option" }).click();
@@ -472,6 +483,128 @@ test("edits a priced room on the simple card and publishes only what changed (VA
   await assertHealthy();
 });
 
+test("closes a night and gives another its own price from the calendar (VAY-2280)", async ({
+  page,
+}, testInfo) => {
+  await openPms(page);
+  const pricing = await mockPricing(page, publicationOf(3, [designRoom(3), complexRoom(3)]));
+  const assertHealthy = watchPageHealth(page, testInfo);
+  await prices(page, DELUXE);
+  const calendar = main(page).getByRole("region", { name: "Prices by date" });
+  const panel = main(page).getByRole("region", { name: "Picked nights" });
+  await expect(panel.getByText("Click a date to change it")).toBeVisible();
+  // The 1st of the shown month: close it.
+  await calendar.getByRole("button", { name: /^1 \w+ \d{4}, €/ }).click();
+  await panel.getByRole("button", { name: "Close this night" }).click();
+  await expect(panel.getByRole("button", { name: "Open this night" })).toBeVisible();
+  await expect(calendar.getByRole("button", { name: /^1 \w+ \d{4}, €\d+, closed/ })).toBeVisible();
+  // The 3rd of July, in the High season: its own price keeps the season's colour and gets the dot (VAY-2284).
+  await panel.getByRole("button", { name: "Clear" }).click();
+  const months = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+  ];
+  const shown = (await calendar.getByText(/^[A-Z][a-z]+ \d{4}$/).textContent())!.split(" ")[0];
+  for (let step = (6 - months.indexOf(shown) + 12) % 12; step > 0; step--)
+    await calendar.getByRole("button", { name: "Next month" }).click();
+  await expect(calendar.getByText(/^July \d{4}$/)).toBeVisible();
+  await expect(calendar.getByRole("button", { name: /^3 July \d{4}, €/ })).toHaveClass(
+    /bg-amber-50/,
+  );
+  await calendar.getByRole("button", { name: /^3 July \d{4}, €/ }).click();
+  await panel.getByRole("button", { name: "Own price for this night" }).click();
+  await panel.getByLabel("Own price: Per room").fill("130");
+  await panel.getByRole("button", { name: "Apply" }).click();
+  const owned = calendar.getByRole("button", { name: /^3 July \d{4}, €130, own price/ });
+  await expect(owned).toHaveClass(/bg-amber-50/);
+  await expect(owned.locator("span.bg-gray-900")).toBeVisible();
+  // VAY-2284: picked days can join a season, or start a new one (opened and left here: it depends on the month).
+  await panel.getByRole("button", { name: "Add to a season" }).click();
+  await expect(panel.getByRole("radio", { name: "New season" })).toBeVisible();
+  await panel.getByRole("button", { name: "Cancel" }).click();
+
+  await main(page).getByRole("button", { name: "Save prices" }).click();
+  await expect(main(page).getByText("Prices saved.", { exact: false })).toBeVisible();
+  const deluxe = (pricing.publishes[0].snapshot.rooms as Room[]).find(
+    (value) => value.roomTypeId === DELUXE,
+  )!;
+  const [flexibleOffer] = deluxe.offers;
+  expect(flexibleOffer.restrictions.dates).toEqual([
+    { date: expect.stringMatching(/-01$/), rules: rules(2, { stopSell: true }) },
+  ]);
+  expect(flexibleOffer.price.calendar.dates).toEqual([
+    { date: expect.stringMatching(/-07-03$/), price: flat("13000") },
+  ]);
+  await assertHealthy();
+});
+
+test("edits a season's price in the table and adds dates to a season (VAY-2280)", async ({
+  page,
+}, testInfo) => {
+  await openPms(page);
+  const pricing = await mockPricing(page, publicationOf(3, [designRoom(3), complexRoom(3)]));
+  const assertHealthy = watchPageHealth(page, testInfo);
+  await prices(page, DELUXE);
+  const table = main(page).getByRole("table", { name: "Prices and seasons" });
+  await expect(table.getByLabel("Deluxe Double Room Offer 1 Per room")).toHaveValue("100.00");
+  // A season's price applies when the field is left.
+  await table.getByLabel("High price Per room").fill("150");
+  await table.getByLabel("High price Per room").press("Enter");
+  await expect(table.getByRole("button", { name: /^Edit season High · €150/ })).toBeVisible();
+  // "+ Dates" adds another range with the season's name and price.
+  await table.getByRole("button", { name: "Add dates to Low" }).click();
+  await expect(dialog(page).getByLabel("Season name")).toHaveValue("Low");
+  await dialog(page).getByLabel("Starts: day").fill("1");
+  await dialog(page).getByLabel("Starts: month").selectOption("11");
+  await dialog(page).getByLabel("Ends: day").fill("15");
+  await dialog(page).getByLabel("Ends: month").selectOption("11");
+  await dialog(page).getByRole("button", { name: "Save season" }).click();
+  await expect(
+    table.getByRole("button", { name: /^Edit season Low · €80, 1 Nov – 15 Nov/ }),
+  ).toBeVisible();
+  // A season's minimum stay goes on all its ranges; step 1 closes a period every year (VAY-2280 PR 4).
+  await table.getByRole("button", { name: "One night more for Low" }).click();
+  await expect(table.getByRole("group", { name: "Low minimum stay" })).toContainText("3 nights");
+  const opening = main(page).getByRole("region", { name: "When guests can book" });
+  await opening.getByRole("switch", { name: "Open all year" }).click();
+  await opening.getByLabel("From: day").fill("16");
+  await opening.getByLabel("From: month").selectOption("11");
+  await opening.getByLabel("Until: day").fill("30");
+  await opening.getByLabel("Until: month").selectOption("11");
+  await opening.getByRole("button", { name: "Close these days" }).click();
+  await expect(opening.getByText("350 nights a year open, 15 closed")).toBeVisible();
+
+  await main(page).getByRole("button", { name: "Save prices" }).click();
+  await expect(main(page).getByText("Prices saved.", { exact: false })).toBeVisible();
+  const deluxe = (pricing.publishes[0].snapshot.rooms as Room[]).find(
+    (value) => value.roomTypeId === DELUXE,
+  )!;
+  expect(deluxe.offers[0].price.calendar.seasons).toEqual([
+    { name: "Low", tier: "Low", from: "01-01", through: "03-31", price: flat("8000") },
+    { name: "High", tier: "High", from: "07-01", through: "08-31", price: flat("15000") },
+    { name: "Low", tier: "Low", from: "11-01", through: "11-15", price: flat("8000") },
+  ]);
+  expect(deluxe.offers[0].restrictions.seasons).toEqual(
+    expect.arrayContaining([
+      { from: "01-01", through: "03-31", rules: rules(3) },
+      { from: "11-01", through: "11-15", rules: rules(3) },
+      { from: "11-16", through: "11-30", rules: rules(2, { stopSell: true }) },
+    ]),
+  );
+  expect(deluxe.offers[0].restrictions.seasons).toHaveLength(3);
+  await assertHealthy();
+});
+
 test("keeps a setup the simple card can't show unchanged through a save", async ({
   page,
 }, testInfo) => {
@@ -513,6 +646,13 @@ test("sets the first price of an unpriced room with one Save, next to the other 
   const assertHealthy = watchPageHealth(page, testInfo);
   await prices(page, LAKE);
   await expect(main(page).getByText("Lake Loft has no price yet", { exact: false })).toBeVisible();
+  // VAY-2280: the calendar shows the nights waiting for a price, beside "Start with one price".
+  await expect(main(page).getByRole("region", { name: "Start with one price" })).toBeVisible();
+  await expect(
+    main(page)
+      .getByRole("region", { name: "Prices by date" })
+      .getByRole("img", { name: /^1 \w+ \d{4}, no price$/ }),
+  ).toBeVisible();
   await expect(main(page).getByLabel("Room type")).toHaveCount(0);
   // Save without a price names what is missing; nothing else needs an answer.
   await main(page).getByRole("button", { name: "Save prices" }).click();
@@ -553,7 +693,8 @@ test("adds the switches and a season to a first price before saving it (VAY-2188
   page,
 }, testInfo) => {
   await openPms(page);
-  const pricing = await mockPricing(page, publicationOf(3, [designRoom(3)]));
+  // Non-refundable stays are paid in advance (VAY-2280): bank transfer is ready next to pay at the hotel.
+  const pricing = await mockPricing(page, publicationOf(3, [designRoom(3)]), ["bank_transfer"]);
   const assertHealthy = watchPageHealth(page, testInfo);
   await prices(page, LAKE);
   await main(page).getByLabel("Room price per night").fill("100");
@@ -591,6 +732,8 @@ test("adds the switches and a season to a first price before saving it (VAY-2188
     "non_refundable",
     "flexible",
   ]);
+  // The non-refundable option is never sent with pay at property.
+  expect(pricing.termsWrites[1].payment.acceptedMethods).toEqual(["bank_transfer"]);
   await assertHealthy();
 });
 
@@ -614,7 +757,7 @@ test("shows one stale-prices warning, a plain Price-free main window and a retry
   failing = false;
   await main(page).getByRole("button", { name: "Retry" }).click();
   await expect(
-    main(page).getByRole("heading", { name: "Price per night", exact: true }),
+    main(page).getByRole("heading", { name: "Prices and seasons", exact: true }),
   ).toBeVisible();
   // The room page's banner, with its "Save prices again", is the only warning.
   await expect(main(page).getByRole("button", { name: "Save prices again" })).toBeVisible();
@@ -623,4 +766,72 @@ test("shows one stale-prices warning, a plain Price-free main window and a retry
   await main(page).getByRole("button", { name: "Edit what the price includes" }).click();
   await expect(dialog(page).getByRole("heading", { name: "Meals" })).toBeVisible();
   await expect(dialog(page).getByRole("heading", { name: "Price", exact: true })).toHaveCount(0);
+});
+
+test("shows the whole year and closes dates picked in the Year view (VAY-2284)", async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openPms(page);
+  const pricing = await mockPricing(page, publicationOf(3, [designRoom(3), complexRoom(3)]));
+  const assertHealthy = watchPageHealth(page, testInfo);
+  await prices(page, DELUXE);
+  const calendar = main(page).getByRole("region", { name: "Prices by date" });
+  const toggle = calendar.getByRole("group", { name: "Calendar view" });
+  await toggle.getByRole("button", { name: "Year" }).click();
+  await expect(toggle.getByRole("button", { name: "Year" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  // Next year, so every date is still ahead.
+  const title = calendar.locator('[aria-live="polite"]');
+  await expect(title).toHaveText(/^\d{4}$/);
+  const year = String(Number(await title.textContent()) + 1);
+  await calendar.getByRole("button", { name: "Next year" }).click();
+  await expect(title).toHaveText(year);
+  const months = calendar.getByRole("group", { name: new RegExp(`^\\w+ ${year}$`) });
+  await expect(months).toHaveCount(12);
+  // Each month's lowest and highest price: Low season €80 and €100 standard, Fri & Sat +15%; High season €140.
+  await expect(months.nth(0)).toContainText("€80 to €92");
+  await expect(months.nth(3)).toContainText("€100 to €115");
+  await expect(months.nth(6)).toContainText("€140 to €161");
+  // Four months in a row at 1440px (the approved board), inside the card.
+  const tops = await months.evaluateAll((nodes) =>
+    nodes.map((node) => Math.round(node.getBoundingClientRect().top)),
+  );
+  expect(new Set(tops.slice(0, 4)).size).toBe(1);
+  expect(tops[4]).toBeGreaterThan(tops[0]);
+  expect(await calendar.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
+
+  // Click a date, then a second one: the side panel closes everything in between.
+  await calendar.getByRole("button", { name: new RegExp(`^10 March ${year}, €`) }).click();
+  await calendar.getByRole("button", { name: new RegExp(`^12 March ${year}, €`) }).click();
+  const panel = main(page).getByRole("region", { name: "Picked nights" });
+  await expect(panel.getByText("3 nights selected")).toBeVisible();
+  await panel.getByRole("button", { name: "Close these nights" }).click();
+  for (const day of [10, 11, 12])
+    await expect(
+      calendar.getByRole("button", { name: new RegExp(`^${day} March ${year}, €\\d+, closed`) }),
+    ).toHaveAttribute("aria-pressed", "true");
+  await expect(calendar.getByText("Closed on this date")).toBeVisible();
+  await main(page).getByRole("button", { name: "Save prices" }).click();
+  await expect(main(page).getByText("Prices saved.", { exact: false })).toBeVisible();
+  const deluxe = (pricing.publishes[0].snapshot.rooms as Room[]).find(
+    (value) => value.roomTypeId === DELUXE,
+  )!;
+  expect(deluxe.offers[0].restrictions.dates).toEqual(
+    [10, 11, 12].map((day) => ({
+      date: `${year}-03-${day}`,
+      rules: rules(2, { stopSell: true }),
+    })),
+  );
+
+  // Phones get the month view only (the approved 390px board): the toggle hides and the picked month shows.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(toggle).toBeHidden();
+  await expect(title).toHaveText(`March ${year}`);
+  await expect(months).toHaveCount(0);
+  for (const element of [calendar, main(page)])
+    expect(await element.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
+  await assertHealthy();
 });

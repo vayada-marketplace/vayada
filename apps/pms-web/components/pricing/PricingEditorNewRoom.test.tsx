@@ -31,7 +31,7 @@ const existing = {
       mode: "flat",
       occupancy: [],
       included: { adults: "", adjustments: [] },
-      methods: ["pay_at_property"],
+      methods: ["card"], // Non-refundable is paid in advance (VAY-2280).
       room: existingId,
       currency: "EUR",
       base: "100",
@@ -103,14 +103,12 @@ const field = (label: string) => view.root.findByProps({ "aria-label": label });
 const fill = async (label: string, value: string) =>
   act(async () => field(label).props.onChange({ target: { value } }));
 const text = () => JSON.stringify(view.toJSON());
-/** The first-price form's answers for a €120 non-refundable room paid at the property (Payment settings can't be read
- * here, so the form asks how guests pay). */
+/** The first-price form's answers for a €120 non-refundable room paid by card (Payment settings can't be read here, so
+ * the form asks how guests pay; non-refundable stays are paid in advance, VAY-2280). */
 const answer = async () => {
   await fill("Room price per night", "120");
   await click("Non-refundable");
-  await act(async () =>
-    view.root.findByType(AcceptedPaymentMethods).props.onChange(["pay_at_property"]),
-  );
+  await act(async () => view.root.findByType(AcceptedPaymentMethods).props.onChange(["card"]));
 };
 
 beforeEach(() => {
@@ -239,7 +237,7 @@ const handedOver = (error: unknown, outcomeUnknown = false): KeptNewRoomPrices =
       mode: "flat",
       occupancy: [],
       included: { adults: "", adjustments: [] },
-      methods: ["pay_at_property"],
+      methods: ["card"], // Non-refundable is paid in advance (VAY-2280).
       room: created,
       currency: "EUR",
       base: "120",
