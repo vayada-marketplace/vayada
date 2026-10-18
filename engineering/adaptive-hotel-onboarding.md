@@ -2,6 +2,12 @@
 
 _VAY-965 decision record._
 
+> **Update (VAY-2270, 2026-10):** the Creator Marketplace track is retired. Migration 0492
+> rewrote stored selections to Hotel Operations only, and the database now refuses
+> `creator_marketplace`. The setup contract drops the track, its tasks and the
+> `marketplace_preferences` step (#3421, #3427). Hotel Operations is the only track. The
+> Marketplace parts below are kept as design history.
+
 ## Decision
 
 Hotel owners choose outcomes, not Vayada's internal product boundaries.
@@ -434,21 +440,20 @@ copy.
 
 ## Canonical Wizard
 
-`marketplace-web /setup` is the canonical wizard. Canonical setup links keep the requested
+Booking Admin's `/setup` is the canonical wizard (it moved there from marketplace-web in
+VAY-2261). Canonical setup links keep the requested
 `entryProduct` separate from the
 allowlisted `returnProduct`. The latter identifies the app that sent the owner
-into setup; `returnTo` remains a validated relative path. Booking, PMS, and
-Marketplace set their own return product rather than trusting query input, and
+into setup; `returnTo` remains a validated relative path. Booking and PMS set
+their own return product rather than trusting query input, and
 the canonical wizard resolves that pair against the configured product origin.
 This preserves exact product-local return paths without accepting an arbitrary
 redirect origin.
 
-Before launching a task, Marketplace stores the already validated entry and
-return context in tab-scoped session storage for that property. The server-issued
-task return remains the minimal canonical property URL; on the same-tab return,
-Marketplace restores the validated context before rendering the wizard. The
-context is cleared when the owner exits setup or enters a product, so completing
-one task does not silently change the original return app.
+When Marketplace hosted the wizard, it stored the already validated entry and
+return context in tab-scoped session storage before launching a task, and restored
+it on the same-tab return. Booking Admin's copy of the wizard (VAY-2261) keeps no
+such session storage.
 
 Every actionable task renders through a tested inline adapter in the canonical
 wizard. Each save independently rechecks the current session, organization

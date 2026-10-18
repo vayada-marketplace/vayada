@@ -1,11 +1,13 @@
 # vayada
 
-Vayada is a hospitality platform with three connected products:
+Vayada is a hospitality platform with two connected products:
 
-- **Creator Marketplace** — connects hotels with travel creators.
 - **Booking Engine** — powers direct, branded guest bookings.
 - **Property Management System (PMS)** — manages hotel operations, inventory,
   reservations, and channel connectivity.
+
+The Creator Marketplace is retired (VAY-2259). Its web app is gone; its legacy
+API and data stay until the Marketplace tables are dropped (VAY-2272).
 
 This repository is the product application monorepo. It contains every web app,
 the target TypeScript API, the legacy FastAPI services still used during
@@ -20,7 +22,7 @@ fully isolated product microservices.
 
 ```mermaid
 flowchart LR
-  WEB["Six Next.js applications"] --> API["apps/api<br/>TypeScript + Fastify"]
+  WEB["Five Next.js applications"] --> API["apps/api<br/>TypeScript + Fastify"]
   WEB --> LEGACY["Legacy FastAPI APIs"]
   API --> TARGET["Target PostgreSQL<br/>domain schemas"]
   LEGACY --> DBS["Legacy product and auth<br/>PostgreSQL databases"]
@@ -31,7 +33,7 @@ flowchart LR
 
 | Layer               | Current role                                                                                                                                                                                                                       |
 | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Web applications    | Six Next.js apps serve the marketplace, platform admin, booking storefront/admin, PMS, and public landing site.                                                                                             |
+| Web applications    | Five Next.js apps serve platform admin, the booking storefront and admin, PMS, and the public landing site.                                                                                                                        |
 | Target API          | `apps/api` is the modular TypeScript/Fastify backend for WorkOS/AuthKit, identity and authorization, migrated product routes, platform media, jobs, and target-domain APIs.                                                        |
 | Legacy APIs         | `apps/marketplace-api`, `apps/booking-api`, and `apps/pms-api` remain in service while routes and data move to the target backend.                                                                                                 |
 | Target data model   | `packages/backend-migration` owns reviewed SQL migrations and parity tooling for the schema-organized target PostgreSQL database. Runtime source flags select target, compatibility, or disabled implementations during migration. |
@@ -78,18 +80,17 @@ requirements files, and Dockerfiles.
 exposes HTTPS on port 443; the plain ports remain available when running
 processes directly.
 
-| Path                                                   | Role                          | Runtime | Portless URL                                | Plain port |
-| ------------------------------------------------------ | ----------------------------- | ------- | ------------------------------------------- | ---------: |
-| [`apps/api`](apps/api)                                 | Target cross-product API      | Fastify | `https://api.localhost`                     |       8003 |
-| [`apps/marketplace-api`](apps/marketplace-api)         | Legacy Marketplace API        | FastAPI | `https://api.marketplace.localhost`         |       8000 |
-| [`apps/marketplace-web`](apps/marketplace-web)         | Authenticated marketplace     | Next.js | `https://marketplace.localhost`             |       3000 |
-| [`apps/vayada-admin`](apps/vayada-admin)               | Platform administration       | Next.js | `https://admin.localhost`                   |       3001 |
-| [`apps/booking-api`](apps/booking-api)                 | Legacy Booking API            | FastAPI | `https://api.booking.localhost`             |       8001 |
-| [`apps/booking-web`](apps/booking-web)                 | Guest booking storefront      | Next.js | `https://hotel-alpenrose.booking.localhost` |       3002 |
-| [`apps/booking-admin`](apps/booking-admin)             | Booking Engine administration | Next.js | `https://admin.booking.localhost`           |       3003 |
-| [`apps/pms-api`](apps/pms-api)                         | Legacy PMS API                | FastAPI | `https://api.pms.localhost`                 |       8002 |
-| [`apps/pms-web`](apps/pms-web)                         | PMS operations                | Next.js | `https://pms.localhost`                     |       3004 |
-| [`apps/landing`](apps/landing)                         | Public marketing site         | Next.js | `https://landing.localhost`                 |       3006 |
+| Path                                           | Role                          | Runtime | Portless URL                                | Plain port |
+| ---------------------------------------------- | ----------------------------- | ------- | ------------------------------------------- | ---------: |
+| [`apps/api`](apps/api)                         | Target cross-product API      | Fastify | `https://api.localhost`                     |       8003 |
+| [`apps/marketplace-api`](apps/marketplace-api) | Legacy Marketplace API        | FastAPI | `https://api.marketplace.localhost`         |       8000 |
+| [`apps/vayada-admin`](apps/vayada-admin)       | Platform administration       | Next.js | `https://admin.localhost`                   |       3001 |
+| [`apps/booking-api`](apps/booking-api)         | Legacy Booking API            | FastAPI | `https://api.booking.localhost`             |       8001 |
+| [`apps/booking-web`](apps/booking-web)         | Guest booking storefront      | Next.js | `https://hotel-alpenrose.booking.localhost` |       3002 |
+| [`apps/booking-admin`](apps/booking-admin)     | Booking Engine administration | Next.js | `https://admin.booking.localhost`           |       3003 |
+| [`apps/pms-api`](apps/pms-api)                 | Legacy PMS API                | FastAPI | `https://api.pms.localhost`                 |       8002 |
+| [`apps/pms-web`](apps/pms-web)                 | PMS operations                | Next.js | `https://pms.localhost`                     |       3004 |
+| [`apps/landing`](apps/landing)                 | Public marketing site         | Next.js | `https://landing.localhost`                 |       3006 |
 
 FastAPI documentation is available at `/docs` on each legacy API origin.
 
@@ -217,11 +218,10 @@ set +a
 export TARGET_DATABASE_URL="${TARGET_DATABASE_URL:-$AUTH_DATABASE_URL}"
 export AUTH_COOKIE_SECRET=local-dev-auth-cookie-secret-0123456789abcdef
 export AUTH_LOGOUT_URL=http://localhost:3004/login
-export AUTH_ALLOWED_ORIGINS=http://localhost:8003,http://localhost:3000,http://localhost:3001,http://localhost:3003,http://localhost:3004
+export AUTH_ALLOWED_ORIGINS=http://localhost:8003,http://localhost:3001,http://localhost:3003,http://localhost:3004
 export AUTH_COOKIE_SECURE=false
 export AUTH_COMPATIBILITY_CALLBACK_ORIGIN=http://localhost:8003
 export AUTH_PLATFORM_ADMIN_ORIGIN=http://localhost:3001
-export AUTH_MARKETPLACE_WEB_ORIGIN=http://localhost:3000
 export AUTH_BOOKING_ADMIN_ORIGIN=http://localhost:3003
 export AUTH_PMS_WEB_ORIGIN=http://localhost:3004
 # Enable only after the PMS /auth gateway is present.

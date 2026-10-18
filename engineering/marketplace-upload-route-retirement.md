@@ -1,5 +1,9 @@
 # Marketplace Upload Route Retirement
 
+> **Status (VAY-2270, 2026-10):** the Creator Marketplace is retired (VAY-2259). Its web app and
+> hotel-side API routes are gone; the Marketplace data and legacy API stay until the tables are
+> dropped (VAY-2272). This record is kept as history.
+
 VAY-824 records the marketplace upload route disposition from
 `engineering/platform-media-decision.md` for the application cutover.
 

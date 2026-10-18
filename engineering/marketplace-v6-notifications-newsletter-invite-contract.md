@@ -1,5 +1,9 @@
 # Marketplace V6 notifications, retired newsletter, and invite-code contract
 
+> **Status (VAY-2270, 2026-10):** the Creator Marketplace is retired (VAY-2259). Its web app and
+> hotel-side API routes are gone; the Marketplace data and legacy API stay until the tables are
+> dropped (VAY-2272). This record is kept as history.
+
 This is the decision-first contract slice for marketplace vertical **V6** from
 [`marketplace-route-migration-inventory.md`](marketplace-route-migration-inventory.md).
 It covers:

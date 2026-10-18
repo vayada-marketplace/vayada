@@ -264,6 +264,10 @@ fallbacks while adding membership/resource-link checks.
 
 ### Marketplace hotel and creator flows
 
+> Retired with the Creator Marketplace (VAY-2259). The Marketplace app and its auth
+> surface are gone (VAY-2270, VAY-2271); creator workspaces and their data stay
+> readable until the Marketplace tables are dropped (VAY-2272). Kept as design history.
+
 Move registration from "create local user with password, then create profile" to
 "authenticate with WorkOS, then create or select internal organization and
 product profile." Existing `creators.user_id` and `hotel_profiles.user_id`
@@ -303,20 +307,19 @@ Custom signup must keep product intent explicit. The public frontend entrypoints
 are product-specific, for example:
 
 ```text
-/signup?type=creator
 /signup?type=hotel
 ```
 
 Missing or unsupported product intent must be rejected before creating a WorkOS
-user or Vayada organization.
+user or Vayada organization. Creator signup is closed since the Creator
+Marketplace was retired (VAY-2259): `type=creator` is refused with a closed message.
 
 Surface contract:
 
-| Surface           | Signup intent       | Post-signup destination owner                       |
-| ----------------- | ------------------- | --------------------------------------------------- |
-| `booking-admin`   | `hotel`             | Booking Admin setup/dashboard guard                 |
-| `pms-web`         | `hotel`             | PMS setup/dashboard guard                           |
-| `marketplace-web` | `creator` / `hotel` | Marketplace creator completion or hotel setup guard |
+| Surface         | Signup intent | Post-signup destination owner       |
+| --------------- | ------------- | ----------------------------------- |
+| `booking-admin` | `hotel`       | Booking Admin setup/dashboard guard |
+| `pms-web`       | `hotel`       | PMS setup/dashboard guard           |
 
 `platform-admin` is intentionally absent from public self-service signup.
 Platform administrators must be provisioned by an invitation or administrative
