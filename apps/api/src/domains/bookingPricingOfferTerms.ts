@@ -98,9 +98,6 @@ export function createBookingPricingOfferTermsStore(pool: Pool) {
       scope = { propertyId: scope.propertyId.toLowerCase(), organizationId: scope.organizationId.toLowerCase(), actorUserId: scope.actorUserId.toLowerCase() };
       const terms = parseBookingPricingOfferTerms({ ...input.terms, revision: randomUUID() });
       if (!terms) return fail("invalid");
-      // New writes only: stored terms that still accept it keep loading, and quotes and bookings are unchanged (VAY-2280).
-      if (terms.cancellation.kind === "non_refundable" && terms.payment.acceptedMethods?.includes("pay_at_property"))
-        throw new PricingStorageError("non_refundable_pay_at_property");
       const draft = candidate ? { ...candidate, draftId: candidate.draftId.toLowerCase() } : null;
       const requestId = input.requestId, expected = input.expectedRevision?.toLowerCase() ?? null;
       const hash = createHash("sha256").update(canonical({ scope, requestId, expected, ...(draft ? { draft } : {}), terms: { ...terms, revision: null } })).digest("hex");
@@ -108,6 +105,10 @@ export function createBookingPricingOfferTermsStore(pool: Pool) {
         if (!await lockPmsPricingRoomScope(client, scope.propertyId, terms.roomTypeId)) return fail("denied");
         const prior = (await client.query("SELECT terms,request_hash FROM booking.pricing_v2_offer_terms WHERE property_id=$1 AND request_id=$2", [scope.propertyId, requestId])).rows[0];
         if (prior) { if (prior.request_hash !== hash) return fail("idempotency_conflict"); return parseBookingPricingOfferTerms(prior.terms) ?? fail("invalid"); }
+        // New writes only: a replayed request returns what it stored, stored terms that still accept it keep loading,
+        // and quotes and bookings are unchanged (VAY-2280).
+        if (terms.cancellation.kind === "non_refundable" && terms.payment.acceptedMethods?.includes("pay_at_property"))
+          throw new PricingStorageError("non_refundable_pay_at_property");
         if (draft && !await lockPmsPricingBaseRevision(client, scope.propertyId, draft.baseRevision)) return fail("stale");
         const head = (await client.query("SELECT revision FROM booking.pricing_v2_offer_term_heads WHERE property_id=$1 AND room_type_id=$2 AND offer_id=$3 FOR UPDATE", [scope.propertyId, terms.roomTypeId, terms.offerId])).rows[0];
         if ((head?.revision ?? null) !== expected) return fail("stale");
