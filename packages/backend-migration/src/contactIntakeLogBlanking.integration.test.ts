@@ -10,7 +10,7 @@ import { assertSafeTestDatabase } from "./testUtils.js";
 const URL = process.env["TEST_DATABASE_URL"];
 const MIGRATIONS = join(import.meta.dirname, "../migrations");
 const DATABASE = "vayada_contact_log_blanking_test";
-const BLANKING = "0494_contact_intake_log_blanking.sql";
+const BLANKING = "0495_contact_intake_log_blanking.sql";
 
 const PERSONAL = {
   name: "Ana Host",
@@ -31,7 +31,7 @@ const OLD_REDACTED = {
 };
 
 // VAY-2286: contact and support messages written before the API kept them only in the job row.
-describe.skipIf(!URL)("contact intake log blanking 0494", () => {
+describe.skipIf(!URL)("contact intake log blanking 0495", () => {
   it("empties old contact rows in the append-only log, leaves the rest, triggers unchanged", async () => {
     assertSafeTestDatabase(URL!);
     const admin = new pg.Client({ connectionString: URL });
@@ -50,7 +50,7 @@ describe.skipIf(!URL)("contact intake log blanking 0494", () => {
       await admin.query(`DROP DATABASE IF EXISTS ${DATABASE} WITH (FORCE)`);
       await admin.query(`CREATE DATABASE ${DATABASE}`);
       for (const file of await readdir(MIGRATIONS))
-        if (/^\d{4}_/.test(file) && Number(file.slice(0, 4)) < 494)
+        if (/^\d{4}_/.test(file) && Number(file.slice(0, 4)) < 495)
           await cp(join(MIGRATIONS, file), join(before, file));
       expect((await run()).failed).toBeNull();
       target = new pg.Client({ connectionString: targetUrl.href });
@@ -130,13 +130,13 @@ describe.skipIf(!URL)("contact intake log blanking 0494", () => {
       // While the old API still logs messages with their fields, the migration refuses to run.
       const recent = await event(received, PERSONAL, metadata, "1 minute");
       await cp(join(MIGRATIONS, BLANKING), join(before, BLANKING));
-      expect((await run()).failed).toBe("0494");
+      expect((await run()).failed).toBe("0495");
       expect(await triggers()).toEqual(triggersBefore);
       await db.query("SET session_replication_role = replica");
       await db.query("DELETE FROM platform.domain_events WHERE id=$1", [recent]);
       await db.query("RESET session_replication_role");
 
-      expect((await run()).applied).toEqual(["0494"]);
+      expect((await run()).applied).toEqual(["0495"]);
 
       expect(await rows("platform.domain_events", oldEvents)).toEqual(
         eventsBefore.map((row) => ({
