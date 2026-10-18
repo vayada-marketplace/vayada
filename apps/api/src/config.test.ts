@@ -1058,6 +1058,22 @@ describe("api config", () => {
     ).toEqual(["https://admin.booking.localhost"]);
   });
 
+  it("keeps the contact form origins apart from the identity privacy origins", () => {
+    // VAY-2286: production sets CONTACT_INTAKE_ALLOWED_ORIGINS=https://vayada.com.
+    expect(
+      loadConfig({ CONTACT_INTAKE_ALLOWED_ORIGINS: "https://vayada.com, " })
+        .contactIntakeAllowedOrigins,
+    ).toEqual(["https://vayada.com"]);
+    expect(loadConfig({}).contactIntakeAllowedOrigins).toEqual([
+      "https://landing.localhost",
+      "http://localhost:3006",
+    ]);
+    expect(
+      loadConfig({ IDENTITY_PRIVACY_ALLOWED_ORIGINS: "https://admin.localhost" })
+        .contactIntakeAllowedOrigins,
+    ).not.toContain("https://admin.localhost");
+  });
+
   it("requires booking email delivery for checkout in production", () => {
     expect(() =>
       loadConfig({
@@ -1203,6 +1219,21 @@ describe("api config", () => {
       loadConfig({ PRICING_PUBLICATION_FRESHNESS_ALERT_EMAIL: "ops@example.test" }),
     ).toThrow(
       "PRICING_PUBLICATION_FRESHNESS_ALERT_EMAIL requires RESEND_API_KEY and BOOKING_EMAIL_FROM",
+    );
+  });
+
+  it("reads the contact notification recipient (VAY-2286)", () => {
+    const email = { RESEND_API_KEY: "test-key", BOOKING_EMAIL_FROM: "sender@example.test" };
+    expect(loadConfig(email).contactNotificationRecipient).toBeUndefined();
+    expect(
+      loadConfig({ ...email, CONTACT_NOTIFICATION_RECIPIENT: " team@example.test " })
+        .contactNotificationRecipient,
+    ).toBe("team@example.test");
+    expect(() =>
+      loadConfig({ ...email, CONTACT_NOTIFICATION_RECIPIENT: "Team <team@example.test>" }),
+    ).toThrow("CONTACT_NOTIFICATION_RECIPIENT must be one email address");
+    expect(() => loadConfig({ CONTACT_NOTIFICATION_RECIPIENT: "team@example.test" })).toThrow(
+      "CONTACT_NOTIFICATION_RECIPIENT requires RESEND_API_KEY and BOOKING_EMAIL_FROM",
     );
   });
 
