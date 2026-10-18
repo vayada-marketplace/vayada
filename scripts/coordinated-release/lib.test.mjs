@@ -22,11 +22,6 @@ function snapshot(overrides = {}) {
     ["apps/pms-web", "pms", ["@vayada/domain-booking"]],
     ["apps/booking-web", "booking-web", ["@vayada/domain-hotels"]],
     ["apps/booking-admin", "booking-admin", ["@vayada/domain-booking"]],
-    [
-      "apps/marketplace-web",
-      "marketplace",
-      ["@vayada/domain-marketplace", "@vayada/domain-hotels"],
-    ],
     ["apps/vayada-admin", "admin", ["@vayada/domain-hotels"]],
     ["packages/backend-auth", "@vayada/backend-auth", []],
     ["packages/backend-migration", "@vayada/backend-migration", ["@vayada/domain-booking"]],
@@ -110,7 +105,6 @@ test("transitive workspace inputs select every actual consumer", () => {
     "next-pms-frontend",
     "next-booking-frontend",
     "next-booking-admin",
-    "next-marketplace-frontend",
     "next-marketplace-admin",
   ]);
 });
@@ -126,13 +120,13 @@ test("old and new dependency graphs are both considered", () => {
   );
 
   const addedSnapshot = snapshot({
-    "apps/marketplace-web": ["@vayada/domain-marketplace", "@vayada/domain-hotels"],
+    "apps/vayada-admin": ["@vayada/domain-hotels", "@vayada/domain-booking"],
   });
   assert.ok(
-    select([{ status: "M", paths: ["packages/domain-hotels/package.json"] }], {
+    select([{ status: "M", paths: ["packages/domain-booking/package.json"] }], {
       oldSnapshot,
       newSnapshot: addedSnapshot,
-    }).includes("next-marketplace-frontend"),
+    }).includes("next-marketplace-admin"),
   );
 });
 
@@ -180,7 +174,7 @@ test("missing baseline triggers a complete rebuild", () => {
   assert.deepEqual(select([], { baselineAvailable: false }), SERVICE_KEYS);
 });
 
-test("assembly carries unchanged images into an exact six-service manifest", () => {
+test("assembly carries unchanged images into an exact five-service manifest", () => {
   const baseline = JSON.parse(
     readFileSync(new URL("engineering/deployment-contract/fixtures/manifest-v1.valid.json", ROOT)),
   );

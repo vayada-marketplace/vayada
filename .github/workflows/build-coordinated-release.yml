@@ -273,19 +273,6 @@ jobs:
                 --build-arg NEXT_PUBLIC_AIRBNB_IMPORT_ENABLED=true
               )
               ;;
-            next-marketplace-frontend)
-              build_args+=(
-                --build-arg "NEXT_PUBLIC_API_URL=${NEXT_API_URL}"
-                --build-arg "NEXT_PUBLIC_AUTH_API_URL=${NEXT_API_URL}"
-                --build-arg "NEXT_PUBLIC_VAYADA_API_URL=${NEXT_API_URL}"
-                --build-arg NEXT_PUBLIC_AUTHKIT_LOGIN_ENABLED=true
-                --build-arg "NEXT_PUBLIC_PLATFORM_MEDIA_API_URL=${NEXT_API_URL}"
-                --build-arg "NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY}"
-                --build-arg NEXT_PUBLIC_PMS_URL=https://next-pms.vayada.com
-                --build-arg NEXT_PUBLIC_BOOKING_ADMIN_URL=https://next-booking-admin.vayada.com
-                --build-arg NEXT_PUBLIC_MARKETPLACE_URL=https://next-marketplace.vayada.com
-              )
-              ;;
             next-marketplace-admin)
               test -n "$PLATFORM_WORKOS_ORG_ID"
               build_args+=(
@@ -376,7 +363,7 @@ jobs:
           path: release-work/images
           merge-multiple: true
 
-      - name: Assemble complete six-service manifest
+      - name: Assemble complete five-service manifest
         run: |
           set -euo pipefail
           mkdir -p release-work/images release-work/candidate

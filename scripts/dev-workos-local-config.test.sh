@@ -30,11 +30,11 @@ assert_invalid_origin() {
   fi
 }
 
-assert_marketplace_dev_origin() {
+assert_frontend_dev_origin() {
   local origin="$1"
   local expected_hostname="$2"
   AUTH_PUBLIC_ORIGIN="$origin" node - \
-    "$ROOT_DIR/apps/marketplace-web/next.config.js" \
+    "$ROOT_DIR/apps/pms-web/next.config.js" \
     "$expected_hostname" <<'NODE'
 const [configPath, expectedHostname] = process.argv.slice(2);
 const config = require(configPath);
@@ -62,8 +62,8 @@ assert_invalid_origin "https://marketplace.localhost/path" "expected an exact ht
 assert_invalid_origin "https://user@marketplace.localhost" "expected an exact http(s) origin"
 assert_invalid_origin "https://marketplace.localhost:65536" "port must be between 1 and 65535"
 
-assert_marketplace_dev_origin \
-  "https://vay-1197-route-marketplace-auth-through-its-own-origin.marketplace.localhost:1355" \
-  "vay-1197-route-marketplace-auth-through-its-own-origin.marketplace.localhost"
+assert_frontend_dev_origin \
+  "https://vay-1197-route-pms-auth-through-its-own-origin.pms.localhost:1355" \
+  "vay-1197-route-pms-auth-through-its-own-origin.pms.localhost"
 
 echo "WorkOS local auth origin checks passed."
