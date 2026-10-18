@@ -4,6 +4,7 @@ import { createResendBookingEmailDelivery } from "./bookingEmailDelivery.js";
 import {
   contactNotificationEmail,
   contactNotificationSender,
+  IncompleteNotificationError,
   supportNotificationEmail,
 } from "./contactNotificationDelivery.js";
 
@@ -93,7 +94,8 @@ describe("contact notification email (VAY-2286)", () => {
       [
         "New support request from Booking Admin.",
         "",
-        "Hotel account: Casa Ana",
+        "Hotel: -",
+        "Account: Casa Ana",
         "Name: Ben Owner",
         "Email: ben@example.com",
         "Page: /setup",
@@ -115,18 +117,28 @@ describe("contact notification email (VAY-2286)", () => {
       new Date(),
     );
     expect(bug.subject).toBe("Bug report · PMS · unnamed hotel account");
+    // Linked hotels name the request; more than three are counted.
+    expect(supportNotificationEmail(request, new Date(), ["Casa Ana"]).subject).toBe(
+      "Support request · Booking Admin · Casa Ana",
+    );
+    expect(supportNotificationEmail(request, new Date(), ["A", "B", "C", "D"]).subject).toBe(
+      "Support request · Booking Admin · A, B, C +1",
+    );
+    expect(
+      Array.from(supportNotificationEmail(request, new Date(), ["😀".repeat(200)]).subject).at(-1),
+    ).toBe("😀");
     for (const message of ["not json", "null", JSON.stringify({ kind: "bug" })])
       expect(() => supportNotificationEmail({ ...request, message }, new Date())).toThrow(
-        "incomplete",
+        IncompleteNotificationError,
       );
   });
 
   it("sends from the booking address under the contact form name", () => {
     expect(contactNotificationSender("Vayada Bookings <bookings@vayada.com>")).toBe(
-      "Vayada contact form <bookings@vayada.com>",
+      "Vayada contact and support <bookings@vayada.com>",
     );
     expect(contactNotificationSender("bookings@vayada.com")).toBe(
-      "Vayada contact form <bookings@vayada.com>",
+      "Vayada contact and support <bookings@vayada.com>",
     );
   });
 
@@ -134,7 +146,7 @@ describe("contact notification email (VAY-2286)", () => {
     const bodies: unknown[] = [];
     const delivery = createResendBookingEmailDelivery({
       apiKey: "re_test",
-      from: "Vayada contact form <bookings@vayada.com>",
+      from: "Vayada contact and support <bookings@vayada.com>",
       fetch: (async (_url: string, init: RequestInit) => {
         bodies.push(JSON.parse(String(init.body)));
         return new Response("{}", { status: 200 });
@@ -151,7 +163,7 @@ describe("contact notification email (VAY-2286)", () => {
 
     expect(bodies).toEqual([
       {
-        from: "Vayada contact form <bookings@vayada.com>",
+        from: "Vayada contact and support <bookings@vayada.com>",
         to: ["team@example.test"],
         subject: "Contact form: Ana Host",
         text: "Hello",
