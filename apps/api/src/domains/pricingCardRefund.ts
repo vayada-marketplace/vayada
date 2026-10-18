@@ -24,7 +24,8 @@ const uuidFrom = (seed: string): string => {
 };
 
 /** A stored two-decimal amount in the pricing currency's minor units; null if it doesn't fit. */
-function pricingMinor(amount: string, currency: string): bigint | null {
+/** A two-decimal amount in the currency's pricing minor units; null when it doesn't fit. */
+export function pricingMinor(amount: string, currency: string): bigint | null {
   const scale = pricingCurrencyScale(currency);
   const match = /^(\d{1,13})\.(\d{2})$/.exec(amount);
   if (scale === null || !match) return null;
@@ -58,7 +59,8 @@ export async function previewPricingCardRefund(
        WHERE booking.property_id=$1::uuid AND booking.id=$2::uuid AND payment.payment_method='card'
          AND payment.status='paid' AND payment.refunded_amount=0
          AND payment.payment_metadata->>'chargeType'='direct' AND payment.currency=booking.currency
-         AND booking.payment_status='paid' AND booking.booking_metadata->>'targetSource'='pricing_quote_draft'
+         AND booking.payment_status IN ('paid','partially_paid')
+         AND booking.booking_metadata->>'targetSource'='pricing_quote_draft'
          AND booking.booking_metadata->>'paymentMethod'='card'`,
       [input.propertyId, input.guestBookingId],
     )
@@ -128,7 +130,8 @@ export async function stagePricingCardRefund(
     // currency, of a paid pricing-v2 card stay.
     payment.chargeType !== "direct" ||
     payment.currency !== payment.bookingCurrency ||
-    payment.bookingPaid !== "paid" ||
+    // A card deposit leaves the rest to pay at the property (VAY-2205).
+    (payment.bookingPaid !== "paid" && payment.bookingPaid !== "partially_paid") ||
     payment.source !== "pricing_quote_draft" ||
     payment.bookedMethod !== "card" ||
     payment.refunded !== "0.00" ||
@@ -465,12 +468,15 @@ async function settleRefund(client: PoolClient, command: Command, refund: Stripe
       }),
     ],
   );
-  const bookingStatus = status === "refunded" ? "refunded" : "paid";
-  await client.query(
-    `UPDATE booking.guest_bookings SET payment_status=$3,updated_at=clock_timestamp()
-     WHERE id=$1 AND property_id=$2`,
-    [command.guest_booking_id, command.property_id, bookingStatus],
-  );
+  // A part refund leaves the stay paid, or partly paid when a deposit was taken (VAY-2205).
+  const bookingStatus = (
+    await client.query(
+      `UPDATE booking.guest_bookings
+       SET payment_status=CASE WHEN $3 THEN 'refunded' ELSE payment_status END,updated_at=clock_timestamp()
+       WHERE id=$1 AND property_id=$2 RETURNING payment_status`,
+      [command.guest_booking_id, command.property_id, status === "refunded"],
+    )
+  ).rows[0]?.payment_status;
   // PMS lists read the summary; a stay without one has nothing to update.
   await client.query(
     `UPDATE booking.direct_booking_summary_read_model SET payment_status=$2,projected_at=clock_timestamp()

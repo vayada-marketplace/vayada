@@ -2373,7 +2373,7 @@ export function createTargetBookingWebCheckoutAdapter(
           occurredAt,
         );
         const cardRefund =
-          booking.paymentStatus === "paid" && outcome
+          cardPaid(booking) && outcome
             ? await previewPricingCardRefund(pool, {
                 propertyId: property.propertyId,
                 guestBookingId: booking.guestBookingId,
@@ -2381,7 +2381,7 @@ export function createTargetBookingWebCheckoutAdapter(
               })
             : null;
         // A paid stay whose card can't be refunded here is refused, never shown as "nothing back".
-        if (booking.paymentStatus === "paid" && !cardRefund)
+        if (cardPaid(booking) && !cardRefund)
           throw createHttpError(
             409,
             "This booking's card payment can't be refunded online. Please contact the hotel.",
@@ -4005,7 +4005,7 @@ async function withGuestLifecycleMutation(
             "The cancellation fee has changed. Review it again before cancelling.",
           );
         // A paid card stay gets back what the terms don't keep; Stripe hears of it after commit.
-        if (feeBooking.paymentStatus === "paid")
+        if (cardPaid(feeBooking))
           try {
             cardMoney = await previewPricingCardRefund(client, {
               propertyId: property.propertyId,
@@ -6298,7 +6298,7 @@ function assertTargetInventoryReleasePaymentStateSupported(
   if (
     action === "cancel" &&
     cardRefunds &&
-    booking.paymentStatus === "paid" &&
+    cardPaid(booking) &&
     metadata["targetSource"] === "pricing_quote_draft" &&
     metadata["paymentMethod"] === "card"
   )
@@ -6310,6 +6310,10 @@ function assertTargetInventoryReleasePaymentStateSupported(
     );
   }
 }
+
+/** Paid by card when booking: in full, or a deposit with the rest due at the property (VAY-2205). */
+const cardPaid = (booking: Pick<TargetBookingRow, "paymentStatus">) =>
+  booking.paymentStatus === "paid" || booking.paymentStatus === "partially_paid";
 
 export function resolveTargetCancellationPreview(
   booking: TargetBookingRow,

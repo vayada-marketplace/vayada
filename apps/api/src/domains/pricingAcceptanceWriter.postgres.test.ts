@@ -584,6 +584,174 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
     }
   });
 
+  /** A confirmed instant stay that paid a 30% deposit by card (VAY-2205). */
+  async function paidDeposit(cancellation?: unknown) {
+    const card = await cardFixture(undefined, "EUR", "instant", (quote) => {
+      const total = BigInt(quote.evidence.totalMinor),
+        dueNow = (total * 3000n + 5000n) / 10000n;
+      Object.assign(quote.evidence, {
+        dueNowMinor: String(dueNow),
+        dueLaterMinor: String(total - dueNow),
+      });
+      Object.assign(quote.evidence.terms[0], {
+        payment: {
+          kind: "deposit",
+          basisPoints: 3000,
+          balanceDaysBeforeArrival: 0,
+          acceptedMethods: ["card"],
+        },
+        ...(cancellation ? { cancellation } : {}),
+      });
+    });
+    const { fixture, slug, provider, createPaymentIntent, retrievePaymentIntent } = card;
+    const result = (await writePricingAcceptance(fixture.pool, fixture.input, {
+      provider,
+      deposits: true,
+    })) as { bookingId: string; bookingReference: string };
+    const intent = await createPaymentIntent({
+      amountMinor: Number(fixture.f.current.quote.evidence.dueNowMinor),
+      currency: "EUR",
+    });
+    retrievePaymentIntent.mockResolvedValue({
+      ...intent,
+      bookingReference: result.bookingReference,
+      status: "succeeded",
+    });
+    await completePricingCardPayment(fixture.pool, provider, {
+      slug,
+      quoteId: fixture.f.current.quote.quoteId,
+      requestId: fixture.f.command.requestId,
+    });
+    const hotelUser = randomUUID();
+    await fixture.observer.query(
+      "INSERT INTO identity.users (id,email,status) VALUES ($1,$2,'active')",
+      [hotelUser, `${hotelUser}@example.test`],
+    );
+    const createRefund = vi.fn(
+      async (input: { amountMinor: number; commandId: string; paymentIntentId: string }) => ({
+        refundId: "re_deposit",
+        status: "succeeded",
+        amountMinor: input.amountMinor,
+        currency: "EUR",
+        paymentIntentId: input.paymentIntentId,
+        commandId: input.commandId,
+        failureReason: null,
+      }),
+    );
+    const stripe = {
+      ...(provider as object),
+      createRefund,
+      listRefunds: vi.fn(async () => []),
+      retrieveRefund: vi.fn(),
+    } as never;
+    const hostPool = new pg.Pool({ connectionString: url, max: 2 });
+    const actions = createBookingHostActions({
+      pool: hostPool,
+      guards: {
+        ...targetBookingHostActionGuards,
+        payment: createFinanceHostBookingPayments(stripe),
+      },
+      inventory: { reserve: async () => null, release: async () => undefined },
+      cardRefunds: stripe,
+    });
+    const scope = {
+      propertyId: fixture.propertyId,
+      bookingId: result.bookingId,
+      actorUserId: hotelUser,
+    };
+    const money = async () =>
+      (
+        await fixture.observer.query(
+          `SELECT b.lifecycle_status,b.payment_status,p.status AS payment,p.refunded_amount::text AS refunded,
+             (SELECT string_agg(c.status||':'||c.amount::text,',') FROM finance.card_refund_commands c
+              WHERE c.guest_booking_id=b.id) AS refunds
+           FROM booking.guest_bookings b JOIN finance.payments p ON p.id=b.active_card_payment_id
+           WHERE b.id=$1`,
+          [result.bookingId],
+        )
+      ).rows[0];
+    const close = async () => {
+      await actions.close();
+      await hostPool.end().catch(() => undefined);
+      await fixture.close();
+    };
+    return { fixture, actions, scope, createRefund, money, close };
+  }
+
+  it("refunds the whole deposit when the hotel cancels a deposit stay for its own reason (VAY-2205)", async () => {
+    const stay = await paidDeposit();
+    const deposit = (Number(stay.fixture.f.current.quote.evidence.dueNowMinor) / 100).toFixed(2);
+    try {
+      const preview = await stay.actions.preview(stay.scope, {
+        action: "cancel",
+        reason: "Overbooked",
+      });
+      expect(preview.impact).toMatchObject({
+        payment: "card_refund",
+        cardRefund: {
+          paidMinor: stay.fixture.f.current.quote.evidence.dueNowMinor,
+          refundMinor: stay.fixture.f.current.quote.evidence.dueNowMinor,
+        },
+      });
+      await stay.actions.apply(stay.scope, preview.previewId, "host-deposit");
+      await vi.waitFor(async () =>
+        expect(await stay.money()).toEqual({
+          lifecycle_status: "canceled",
+          payment_status: "refunded",
+          payment: "refunded",
+          refunded: deposit,
+          refunds: `succeeded:${deposit}`,
+        }),
+      );
+      expect(stay.createRefund).toHaveBeenCalledOnce();
+    } finally {
+      await stay.close();
+    }
+  });
+
+  it("keeps a non-refundable deposit as retained revenue, as its share of the stay (VAY-2205)", async () => {
+    const stay = await paidDeposit({ kind: "non_refundable" });
+    const { totalMinor, dueNowMinor } = stay.fixture.f.current.quote.evidence;
+    try {
+      const preview = await stay.actions.preview(stay.scope, {
+        action: "cancel",
+        reason: "Guest emailed",
+        cancellationKind: "guest_request",
+      });
+      expect(preview.impact).toMatchObject({
+        payment: "card_refund",
+        cardRefund: { paidMinor: dueNowMinor, refundMinor: "0" },
+      });
+      await stay.actions.apply(stay.scope, preview.previewId, "host-deposit-kept");
+      // Nothing goes back, and the rest is never charged: the stay stays partly paid.
+      expect(await stay.money()).toMatchObject({
+        lifecycle_status: "canceled",
+        payment_status: "partially_paid",
+        payment: "paid",
+        refunded: "0.00",
+      });
+      expect(stay.createRefund).not.toHaveBeenCalled();
+      // The deposit is 30% of the stay, so the nights keep 30% of their room value, not all of it.
+      const cents = async (event: string) =>
+        BigInt(
+          (
+            await stay.fixture.observer.query(
+              `SELECT COALESCE(SUM(gross_room_amount)*100,0)::bigint::text AS cents
+               FROM booking.nightly_revenue_evidence WHERE guest_booking_id=$1 AND economic_event=$2`,
+              [stay.scope.bookingId, event],
+            )
+          ).rows[0].cents,
+        );
+      const room = await cents("room_night");
+      expect(room).toBeGreaterThan(0n);
+      const total = BigInt(totalMinor),
+        kept = BigInt(dueNowMinor);
+      expect(await cents("retained_charge")).toBe((room * kept * 2n + total) / (total * 2n));
+    } finally {
+      await stay.close();
+    }
+  });
+
   // Stripe test mode (VAY-1543 K5). Runs only with STRIPE_TEST_SECRET_KEY (a test-mode key) and
   // STRIPE_TEST_CONNECTED_ACCOUNT; CI has neither, so it never calls Stripe there. Optional
   // STRIPE_TEST_CURRENCY (EUR, USD or IDR) prices the quote in that currency.
