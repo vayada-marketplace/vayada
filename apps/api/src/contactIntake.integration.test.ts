@@ -40,7 +40,10 @@ function contactPayload(marker: string): PlatformContactIntakePayload {
 }
 
 /** Shaped like POST /api/support's stored request (the message field is JSON). */
-function supportPayload(marker: string): PlatformContactIntakePayload {
+function supportPayload(
+  marker: string,
+  organizationId = "00000000-0000-4000-8000-000000000002",
+): PlatformContactIntakePayload {
   return {
     name: `Ben Owner ${marker}`,
     email: `ben.${marker}@example.com`,
@@ -54,7 +57,7 @@ function supportPayload(marker: string): PlatformContactIntakePayload {
       page: "/calendar",
       product: "pms",
       userId: "00000000-0000-4000-8000-000000000001",
-      organizationId: "00000000-0000-4000-8000-000000000002",
+      organizationId,
       organizationName: `Hotel ${marker}`,
     }),
   };
@@ -68,7 +71,7 @@ describe.skipIf(!URL)("PostgreSQL contact intake storage, delivery and retention
 
   const submit = (marker: string, channel: "contact_form" | "in_app_support" = "contact_form") =>
     repository.submitContact({
-      payload: contactPayload(marker),
+      payload: channel === "in_app_support" ? supportPayload(marker) : contactPayload(marker),
       channel,
       // Like Fastify's request ids: never personal, and kept apart from the marker search.
       requestId: `req-${randomUUID()}`,
@@ -99,7 +102,19 @@ describe.skipIf(!URL)("PostgreSQL contact intake storage, delivery and retention
     retention = createPgContactIntakeRetentionStore({ connectionString: login.connectionString });
   }, 60_000);
 
+  /** A hotel account with one linked hotel, for the support email's subject. */
+  const account = {
+    organization: randomUUID(),
+    property: randomUUID(),
+    hotel: `Villa ${newMarker()}`,
+  };
+
   afterAll(async () => {
+    await admin.query("DELETE FROM identity.organization_resource_links WHERE organization_id=$1", [
+      account.organization,
+    ]);
+    await admin.query("DELETE FROM hotel_catalog.properties WHERE id=$1", [account.property]);
+    await admin.query("DELETE FROM identity.organizations WHERE id=$1", [account.organization]);
     await repository?.close?.();
     await retention?.close();
     await login?.drop();
@@ -139,10 +154,18 @@ describe.skipIf(!URL)("PostgreSQL contact intake storage, delivery and retention
     ]);
     // The email is stored lower-case; that form doesn't reach the append-only tables either.
     expect(await rowsMentioning(`ana.${marker}@example.com`.toLowerCase())).toEqual(["jobs"]);
-    // Same for an in-app support request.
+    // Same for an in-app support request, which is queued ahead of public form messages.
     const support = newMarker();
-    await submit(support, "in_app_support");
+    const supportJob = await submit(support, "in_app_support");
     expect(await rowsMentioning(support)).toEqual(["jobs"]);
+    const priorities = await admin.query<{ id: string; priority: number }>(
+      "SELECT id::text, priority FROM platform.jobs WHERE id = ANY($1::uuid[])",
+      [[accepted.jobId, supportJob.jobId]],
+    );
+    expect(Object.fromEntries(priorities.rows.map((row) => [row.id, row.priority]))).toEqual({
+      [accepted.jobId]: 0,
+      [supportJob.jobId]: 1,
+    });
   });
 
   /** Earlier tests (and suites) may leave contact jobs queued; only this test's jobs may run. */
@@ -157,8 +180,20 @@ describe.skipIf(!URL)("PostgreSQL contact intake storage, delivery and retention
     const marker = newMarker();
     const support = newMarker();
     const form = await submit(marker);
+    await admin.query(
+      "INSERT INTO identity.organizations(id,kind,name,slug,status) VALUES($1::uuid,'hotel_group','Info Hotel Group',$1::text,'active')",
+      [account.organization],
+    );
+    await admin.query(
+      "INSERT INTO hotel_catalog.properties(id,public_id,display_name) VALUES($1::uuid,$1::text,$2)",
+      [account.property, account.hotel],
+    );
+    await admin.query(
+      "INSERT INTO identity.organization_resource_links(organization_id,product,resource_type,resource_id,relationship,status) VALUES($1,'hotel_catalog','property',$2,'owner','active')",
+      [account.organization, account.property],
+    );
     const supportJob = await repository.submitContact({
-      payload: supportPayload(support),
+      payload: supportPayload(support, account.organization),
       channel: "in_app_support",
       requestId: `req-${randomUUID()}`,
       receivedAt: new Date().toISOString(),
@@ -168,7 +203,8 @@ describe.skipIf(!URL)("PostgreSQL contact intake storage, delivery and retention
     const result = await runContactNotificationJobs(
       login.connectionString,
       { send: async (input) => void sent.push(input) },
-      { recipient: "team@example.test" },
+      // Reruns on the same database within an hour mustn't reach the hourly cap.
+      { recipient: "team@example.test", hourlyCap: 1_000 },
     );
 
     expect(result).toEqual({ processed: 2, failed: 0, deadLettered: 0 });
@@ -177,8 +213,10 @@ describe.skipIf(!URL)("PostgreSQL contact intake storage, delivery and retention
     expect(supportMail).toMatchObject({
       to: "team@example.test",
       replyTo: `ben.${support}@example.com`,
-      subject: `Bug report · PMS · Hotel ${support}`,
+      // The linked hotel's name, not the generated account name.
+      subject: `Bug report · PMS · ${account.hotel}`,
     });
+    expect(supportMail?.text).toContain(`Hotel: ${account.hotel}\nAccount: Hotel ${support}\n`);
     expect(supportMail?.text).toContain(`Calendar shows the wrong price ${support}`);
     expect(supportMail?.text).toContain("Page: /calendar");
     sent.splice(sent.indexOf(supportMail!), 1);
@@ -291,6 +329,32 @@ describe.skipIf(!URL)("PostgreSQL contact intake storage, delivery and retention
         failure_summary: "Contact notification delivery failed.",
       },
     ]);
+    expect(await rowsMentioning(marker)).toEqual(["jobs"]);
+  });
+
+  it("dead-letters a message it can never send on the first attempt", async () => {
+    await parkOtherContactJobs();
+    const marker = newMarker();
+    // A support request whose stored message isn't the support JSON.
+    const broken = await repository.submitContact({
+      payload: contactPayload(marker),
+      channel: "in_app_support",
+      requestId: `req-${randomUUID()}`,
+      receivedAt: new Date().toISOString(),
+    });
+
+    const result = await runContactNotificationJobs(
+      login.connectionString,
+      { send: async () => {} },
+      { recipient: "team@example.test", hourlyCap: 1_000 },
+    );
+
+    expect(result).toMatchObject({ processed: 0, failed: 1, deadLettered: 1 });
+    const job = await admin.query(
+      "SELECT status, attempts_count FROM platform.jobs WHERE id=$1::uuid",
+      [broken.jobId],
+    );
+    expect(job.rows[0]).toEqual({ status: "dead_lettered", attempts_count: 1 });
     expect(await rowsMentioning(marker)).toEqual(["jobs"]);
   });
 
