@@ -368,7 +368,7 @@ describe("property profile requests", () => {
               organizationId: "organization-1",
               displayName: "Group",
               websiteUrl: null,
-              selectedTracks: ["creator_marketplace"],
+              selectedTracks: ["hotel_operations"],
               trackRevision: 1,
               canManageTracks: true,
               tracks: [],
@@ -412,7 +412,7 @@ describe("property profile requests", () => {
           renderer = create(
             createElement(Wizard, {
               api: api as unknown as SharedHotelSetupApi,
-              entryProduct: "marketplace",
+              entryProduct: "booking",
               renderAfterHotelDetails: () => null,
             }),
           );
@@ -549,18 +549,18 @@ describe("property profile requests", () => {
 
 describe("mergeTrackSelectionAfterConflict", () => {
   it("preserves the owner’s intent while retaining tracks another session already added", () => {
-    expect(mergeTrackSelectionAfterConflict(["hotel_operations"], ["creator_marketplace"])).toEqual(
-      ["hotel_operations", "creator_marketplace"],
-    );
+    expect(mergeTrackSelectionAfterConflict([], ["hotel_operations"])).toEqual([
+      "hotel_operations",
+    ]);
+    expect(mergeTrackSelectionAfterConflict(["hotel_operations"], [])).toEqual([
+      "hotel_operations",
+    ]);
   });
 
   it("keeps canonical order and removes duplicates", () => {
-    expect(
-      mergeTrackSelectionAfterConflict(
-        ["creator_marketplace", "hotel_operations"],
-        ["hotel_operations"],
-      ),
-    ).toEqual(["hotel_operations", "creator_marketplace"]);
+    expect(mergeTrackSelectionAfterConflict(["hotel_operations"], ["hotel_operations"])).toEqual([
+      "hotel_operations",
+    ]);
   });
 });
 
@@ -722,7 +722,7 @@ describe("hasMapCoordinates", () => {
 
 describe("availableTracks", () => {
   it.each([
-    [undefined, ["Hotel Operations", "Creator Marketplace"]],
+    [undefined, ["Hotel Operations"]],
     [["hotel_operations"] as const, ["Hotel Operations"]],
   ])("offers %j on the track screen", async (availableTracks, labels) => {
     vi.stubGlobal("document", { addEventListener: vi.fn(), removeEventListener: vi.fn() });

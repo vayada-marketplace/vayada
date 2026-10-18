@@ -31,19 +31,22 @@ function monthDay({ day, month }: Day) {
 }
 
 /** Adds, edits or deletes one season of `offer` (step 2). The engine's `changeSeasonPrice` makes the change; this
- * window adds plain checks for the days first. Closing it drops what was typed. */
+ * window adds plain checks for the days first. Closing it drops what was typed. `prefill` starts a new season with a
+ * season's name, tier and price: another date range of that season (VAY-2280). */
 export function SeasonWindow({
   room,
   offer,
   label,
   index,
   disabled,
+  prefill,
   onChange,
   onClose,
 }: {
   room: PricingConfiguration;
   offer: Offer;
   label: string;
+  prefill?: { name: string; tier: string; values: string[] };
   /** The season to edit, or null to add one. */
   index: number | null;
   disabled: boolean;
@@ -55,12 +58,14 @@ export function SeasonWindow({
   const season = index === null ? null : (calendar?.seasons[index] ?? null);
   const template = season?.price ?? recurringTemplate(offer);
   const scale = pricingCurrencyScale(room.currency)!;
-  const [name, setName] = useState(season?.name ?? ""),
-    [tier, setTier] = useState(season?.tier ?? "");
+  const [name, setName] = useState(season?.name ?? prefill?.name ?? ""),
+    [tier, setTier] = useState(season?.tier ?? prefill?.tier ?? "");
   const [from, setFrom] = useState(split(season?.from)),
     [through, setThrough] = useState(split(season?.through));
   const [values, setValues] = useState<string[]>(
-    season ? baseAmounts(season.price).map(([, minor]) => decimalAmount(minor, scale)) : [],
+    season
+      ? baseAmounts(season.price).map(([, minor]) => decimalAmount(minor, scale))
+      : (prefill?.values ?? []),
   );
   const [included, setIncluded] = useState<IncludedInput | null>(
     template?.mode === "included_guests" ? includedInput(template, scale) : null,

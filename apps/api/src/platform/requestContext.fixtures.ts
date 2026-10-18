@@ -29,12 +29,7 @@ const hotelOwnerContext: RequestContext = {
     roleKey: "hotel_owner",
     workosMembershipId: "om_hotel_owner",
     workosRoleSlugs: ["hotel_owner"],
-    permissions: [
-      "booking.settings.manage",
-      "booking.reservation.read",
-      "pms.booking.update",
-      "marketplace.collaboration.read",
-    ],
+    permissions: ["booking.settings.manage", "booking.reservation.read", "pms.booking.update"],
   },
   linkedResources: [
     {
@@ -48,13 +43,6 @@ const hotelOwnerContext: RequestContext = {
       product: "pms",
       resourceType: "pms_hotel",
       resourceId: "pms_hotel_alpenrose",
-      relationship: "operator",
-      status: "active",
-    },
-    {
-      product: "marketplace",
-      resourceType: "marketplace_offer",
-      resourceId: "marketplace_offer_alpenrose",
       relationship: "operator",
       status: "active",
     },
@@ -76,94 +64,6 @@ const hotelOwnerContext: RequestContext = {
   audit: {
     ...baseAudit,
     requestId: "req_hotel_owner",
-  },
-};
-
-const creatorContext: RequestContext = {
-  actor: {
-    internalUserId: "user_creator",
-    providerIdentity: {
-      provider: "workos",
-      providerUserId: "user_workos_creator",
-      sessionId: "session_creator",
-      providerOrganizationId: "org_workos_creator",
-    },
-    email: "creator@example.com",
-    status: "active",
-  },
-  selectedOrganization: {
-    organizationId: "org_creator_workspace",
-    workosOrgId: "org_workos_creator",
-    kind: "creator_workspace",
-    status: "active",
-  },
-  membership: {
-    membershipId: "membership_creator",
-    status: "active",
-    roleKey: "creator_owner",
-    workosMembershipId: "om_creator",
-    workosRoleSlugs: ["creator_owner"],
-    permissions: ["marketplace.profile.manage", "marketplace.collaboration.read"],
-  },
-  linkedResources: [
-    {
-      product: "marketplace",
-      resourceType: "creator_profile",
-      resourceId: "creator_profile_lina",
-      relationship: "owner",
-      status: "active",
-    },
-  ],
-  entitlements: [],
-  locale: "en-US",
-  currency: "EUR",
-  audit: {
-    ...baseAudit,
-    requestId: "req_creator",
-  },
-};
-
-const affiliateContext: RequestContext = {
-  actor: {
-    internalUserId: "user_affiliate",
-    providerIdentity: {
-      provider: "workos",
-      providerUserId: "user_workos_affiliate",
-      sessionId: "session_affiliate",
-      providerOrganizationId: "org_workos_affiliate",
-    },
-    email: "affiliate@example.com",
-    status: "active",
-  },
-  selectedOrganization: {
-    organizationId: "org_affiliate_partner",
-    workosOrgId: "org_workos_affiliate",
-    kind: "affiliate_partner",
-    status: "active",
-  },
-  membership: {
-    membershipId: "membership_affiliate",
-    status: "active",
-    roleKey: "affiliate_owner",
-    workosMembershipId: "om_affiliate",
-    workosRoleSlugs: ["affiliate_owner"],
-    permissions: ["affiliate.payout.manage"],
-  },
-  linkedResources: [
-    {
-      product: "affiliate",
-      resourceType: "affiliate",
-      resourceId: "affiliate_partner_bali",
-      relationship: "owner",
-      status: "active",
-    },
-  ],
-  entitlements: [],
-  locale: "en-US",
-  currency: "USD",
-  audit: {
-    ...baseAudit,
-    requestId: "req_affiliate",
   },
 };
 
@@ -249,104 +149,6 @@ export const requestContextFixtureCases: RequestContextFixtureCase[] = [
     },
     expected: "denied",
     reason: "the permission alone is not enough without a linked resource",
-  },
-  {
-    name: "creator can manage own marketplace profile",
-    scope: "creator",
-    context: creatorContext,
-    requirement: {
-      permission: "marketplace.profile.manage",
-      resource: {
-        product: "marketplace",
-        resourceType: "creator_profile",
-        resourceId: "creator_profile_lina",
-        allowedRelationships: ["owner"],
-      },
-    },
-    expected: "allowed",
-    reason: "active creator workspace owns the requested creator profile",
-  },
-  {
-    name: "creator can read collaborations for own marketplace profile",
-    scope: "creator",
-    context: creatorContext,
-    requirement: {
-      permission: "marketplace.collaboration.read",
-      resource: {
-        product: "marketplace",
-        resourceType: "creator_profile",
-        resourceId: "creator_profile_lina",
-        allowedRelationships: ["owner"],
-      },
-    },
-    expected: "allowed",
-    reason:
-      "active creator workspace has marketplace collaboration read permission and owns the creator profile",
-  },
-  {
-    name: "hotel owner can read collaborations for linked marketplace listing",
-    scope: "hotel",
-    context: hotelOwnerContext,
-    requirement: {
-      permission: "marketplace.collaboration.read",
-      resource: {
-        product: "marketplace",
-        resourceType: "marketplace_offer",
-        resourceId: "marketplace_offer_alpenrose",
-        allowedRelationships: ["owner", "operator"],
-      },
-    },
-    expected: "allowed",
-    reason:
-      "active hotel-group membership has marketplace collaboration read permission and an operator link to the listing",
-  },
-  {
-    name: "creator cannot review hotel collaborations without permission",
-    scope: "creator",
-    context: creatorContext,
-    requirement: {
-      permission: "marketplace.collaboration.review",
-      resource: {
-        product: "marketplace",
-        resourceType: "marketplace_offer",
-        resourceId: "marketplace_offer_alpenrose",
-        allowedRelationships: ["owner"],
-      },
-    },
-    expected: "denied",
-    reason: "the creator workspace lacks both the hotel listing link and review permission",
-  },
-  {
-    name: "affiliate can manage linked payout account",
-    scope: "affiliate",
-    context: affiliateContext,
-    requirement: {
-      permission: "affiliate.payout.manage",
-      resource: {
-        product: "affiliate",
-        resourceType: "affiliate",
-        resourceId: "affiliate_partner_bali",
-        allowedRelationships: ["owner"],
-      },
-    },
-    expected: "allowed",
-    reason: "active affiliate-partner membership owns the affiliate resource",
-  },
-  {
-    name: "affiliate cannot read hotel finance without finance permission",
-    scope: "affiliate",
-    context: affiliateContext,
-    requirement: {
-      permission: "pms.finance.read",
-      resource: {
-        product: "pms",
-        resourceType: "pms_hotel",
-        resourceId: "pms_hotel_alpenrose",
-        allowedRelationships: ["owner", "operator"],
-      },
-    },
-    expected: "denied",
-    reason: "finance data needs a hotel resource link and explicit finance permission",
   },
   {
     name: "platform admin can read platform admin dashboards through platform scope",

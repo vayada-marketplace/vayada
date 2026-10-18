@@ -18,7 +18,7 @@ const answers = (mode: "flat" | "occupancy") =>
     mode,
     occupancy: mode === "occupancy" ? ["90", "120"] : [],
     included: { adults: "", adjustments: [] },
-    methods: ["pay_at_property"],
+    methods: ["card"], // Non-refundable is paid in advance (VAY-2280).
     room: temporary,
     currency: "EUR",
     base: "120",

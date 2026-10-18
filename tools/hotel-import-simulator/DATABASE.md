@@ -54,23 +54,10 @@ For the existing older demo migration ledger, validation applied only the new
 directory containing that file. No historical migration was changed or replayed.
 This verifies the new table against local fixtures, not a full production migration.
 
-## Airbnb source to canonical room smoke
+## Airbnb source to canonical room smoke (retired)
 
-With migrations 0179 and 0182 already applied, restart the database harness above.
-Start the isolated Marketplace frontend with `AIRBNB_IMPORT_CALLBACK_ENABLED=true`
-and the portless configuration in [PRODUCT-PAGES.md](PRODUCT-PAGES.md), then run:
-
-```sh
-E2E_AIRBNB_IMPORT_DATABASE=1 E2E_MARKETPLACE_BASE_URL=https://marketplace.localhost:1382 npx playwright test tests/e2e/marketplace-web/airbnb-import-database.spec.ts --project=marketplace-web-chromium --workers=1
-```
-
-The test drives the actual callback/review UI. Its browser interceptor forwards
-import requests to the token-protected local harness, preserving the browser Origin; it does not mock import
-responses. The provider link/listing ports and identity are synthetic. It verifies
-room persistence, a lost save response, reload, and concurrent replay after removing
-only that run's receipt. Real draft-room bindings recover the same room identity.
-
-Each run leaves one uniquely named synthetic room type and its source/receipt for
-inspection. Existing demo records remain intact; no physical rooms, rates or provider
-writes are requested. Restore the callback flag to false after the smoke. This is
-local database evidence, not real Airbnb authorization or deployed acceptance.
+The Marketplace browser smoke for this harness,
+`tests/e2e/marketplace-web/airbnb-import-database.spec.ts`, was deleted with the Marketplace app
+(VAY-2270, #3412). The simulator's own `database.spec.ts` still drives `/database.html` against
+this harness. Booking Admin's `tests/e2e/booking-admin/airbnb-import-start.spec.ts` and
+`airbnb-import-return.spec.ts` cover the app's import flow against mocked responses.

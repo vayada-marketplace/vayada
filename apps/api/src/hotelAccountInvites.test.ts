@@ -70,7 +70,7 @@ describe("hotel account invite routes", () => {
       identity: { emailHint: "o****@example.test" },
       organization: { displayName: "Alpenrose Hospitality" },
       property: { displayName: "Hotel Alpenrose" },
-      selectedTracks: ["creator_marketplace"],
+      selectedTracks: ["hotel_operations"],
       handoffPath: "/setup",
       expiresAt: "2026-08-20T12:00:00.000Z",
     });
@@ -178,11 +178,7 @@ describe("hotel account invite routes", () => {
     expect(tracks.calls).toHaveLength(0);
   });
 
-  it.each([
-    ["Marketplace", ["creator_marketplace"]],
-    ["Hotel Operations", ["hotel_operations"]],
-    ["combined", ["hotel_operations", "creator_marketplace"]],
-  ] as const)(
+  it.each([["Hotel Operations", ["hotel_operations"]]] as const)(
     "redeems the %s intent only after the canonical track command succeeds",
     async (_, selectedTracks) => {
       const repository = createMemoryInviteRepository({ selectedTracks: [...selectedTracks] });
@@ -253,26 +249,6 @@ describe("hotel account invite routes", () => {
     ]);
   });
 
-  it("does not consume the invitation when the canonical track command conflicts", async () => {
-    const repository = createMemoryInviteRepository({
-      selectedTracks: ["creator_marketplace"],
-    });
-    const tracks = createMemoryTrackCommands({ selectedTracks: ["hotel_operations"] });
-    app = buildInviteApp(repository, tracks.repository);
-
-    const response = await injectJson(app, {
-      method: "POST",
-      url: "/api/marketplace/hotel-account-invites/redeem",
-      headers: { authorization: "Bearer owner-token" },
-      payload: { code: INVITE_CODE },
-    });
-
-    expect(response.statusCode).toBe(409);
-    expect(response.body).toMatchObject({ code: "invite_track_conflict" });
-    expect(repository.status()).toBe("pending");
-    expect(tracks.calls).toHaveLength(0);
-  });
-
   it("rejects a selected hotel organization without the invite-derived durable binding", async () => {
     const repository = createMemoryInviteRepository({
       boundOrganizationId: SECOND_HOTEL_ORGANIZATION_ID,
@@ -306,7 +282,7 @@ describe("hotel account invite routes", () => {
     });
     expect(first.statusCode).toBe(503);
     expect(repository.status()).toBe("pending");
-    expect(tracks.selectedTracks()).toEqual(["creator_marketplace"]);
+    expect(tracks.selectedTracks()).toEqual(["hotel_operations"]);
     expect(tracks.calls).toHaveLength(1);
 
     const retry = await injectJson<HotelAccountInviteRedemptionResponse>(app, {
@@ -896,16 +872,16 @@ function setupStatus(selectedTracks: SetupTrack[], trackRevision: number): Updat
   return {
     trackRevision,
     selectedTracks: [...selectedTracks],
-    tracks: ["hotel_operations", "creator_marketplace"].map((track) => ({
-      track: track as SetupTrack,
-      provisioning: selectedTracks.includes(track as SetupTrack) ? "active" : "not_selected",
+    tracks: (["hotel_operations"] as const).map((track) => ({
+      track,
+      provisioning: selectedTracks.includes(track) ? "active" : "not_selected",
       components: [],
-      allowedActions: selectedTracks.includes(track as SetupTrack) ? ["manage_service"] : ["add"],
+      allowedActions: selectedTracks.includes(track) ? ["manage_service"] : ["add"],
     })),
   };
 }
 
-function inviteFixture(selectedTracks: SetupTrack[] = ["creator_marketplace"]): HotelAccountInvite {
+function inviteFixture(selectedTracks: SetupTrack[] = ["hotel_operations"]): HotelAccountInvite {
   return {
     id: "invite-1050",
     contractVersion: "hotel-account-invite.v1",

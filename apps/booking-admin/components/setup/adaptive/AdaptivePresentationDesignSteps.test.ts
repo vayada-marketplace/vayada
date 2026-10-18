@@ -700,7 +700,7 @@ function setupRoute(
   return {
     contractVersion: "property-setup-route.v2",
     scope: { organizationId, propertyId },
-    selectedTracks: ["hotel_operations", "creator_marketplace"],
+    selectedTracks: ["hotel_operations"],
     trackRevision: 2,
     sessionId,
     sessionRevision: 5,
@@ -711,8 +711,7 @@ function setupRoute(
         stepId,
         position: 1,
         state: "draft",
-        sourceRevision:
-          stepId === "present_hotel" ? "profile:7" : "design:0",
+        sourceRevision: stepId === "present_hotel" ? "profile:7" : "design:0",
         currentBaseRevisions: draft.baseRevisions,
         draft,
         blockers: [],
@@ -764,7 +763,7 @@ function receipt(stepId: PropertySetupStepDraft["stepId"]) {
     contractVersion: "property-setup-draft.v1",
     sessionId,
     stepId,
-    selectedTracks: ["hotel_operations", "creator_marketplace"],
+    selectedTracks: ["hotel_operations"],
     trackRevision: 2,
     sessionRevision: 6,
     draftRevision: 3,

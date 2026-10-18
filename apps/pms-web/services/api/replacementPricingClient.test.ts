@@ -47,6 +47,22 @@ describe("replacement pricing browser workflow", () => {
       await expect(client().paymentMethods()).rejects.toThrow();
     }
   });
+  it("reads whether rates can take card and deposits (VAY-2205)", async () => {
+    const ready = { card: { ready: true, reason: null, charge: "on_accept" }, deposits: { ready: false } };
+    http.get.mockResolvedValue(ready);
+    expect(await client().cardReadiness()).toEqual(ready);
+    expect(http.get.mock.calls[0][0]).toBe(`/api/pms/properties/${id}/pricing-v2/card-readiness`);
+    // An API without the read offers neither.
+    http.get.mockRejectedValue(new ApiErrorResponse(404, { code: "not_found" }));
+    expect(await client().cardReadiness()).toEqual({ card: { ready: false, reason: "switch_off", charge: "at_booking" }, deposits: { ready: false } });
+    for (const value of [{ ...ready, extra: 1 }, { ...ready, card: { ...ready.card, reason: "switch_off" } },
+      { ...ready, card: { ready: false, reason: null, charge: "at_booking" } }, { ...ready, card: { ...ready.card, charge: "later" } },
+      { card: { ready: false, reason: "unknown", charge: "at_booking" }, deposits: { ready: false } },
+      { card: { ready: false, reason: "not_approved", charge: "at_booking" }, deposits: { ready: true } }]) {
+      http.get.mockResolvedValue(value);
+      await expect(client().cardReadiness()).rejects.toThrow();
+    }
+  });
   it("reads exact saved data and only expected missing responses become null", async () => {
     const api = client(), stored = { snapshot, sources, revision: 1, baseRevision: 0, stale: false };
     http.get.mockResolvedValue(stored); expect(await api.readDraft(draftId)).toEqual(draft);

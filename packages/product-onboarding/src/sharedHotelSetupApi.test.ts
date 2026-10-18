@@ -327,12 +327,6 @@ function validStatus(): AdaptiveHotelSetupStatus {
           ],
           allowedActions: ["add"],
         },
-        {
-          track: "creator_marketplace",
-          provisioning: "not_selected",
-          components: [{ product: "marketplace", access: "absent" }],
-          allowedActions: ["add"],
-        },
       ],
     },
     propertySelection: {

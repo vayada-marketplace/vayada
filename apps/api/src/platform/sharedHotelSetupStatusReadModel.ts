@@ -1133,9 +1133,6 @@ function toAdaptivePropertySetupFacts(row: AdaptiveHotelSetupFactsRow): Adaptive
         Boolean(nonEmpty(row.displayName)),
         latest(row.propertyUpdatedAt, row.locationUpdatedAt, row.contactUpdatedAt),
       ),
-      // Creator Marketplace tasks are retired (VAY-2270); the ids leave the contract with it.
-      public_profile: retiredTaskFact("public_profile"),
-      creator_offer: retiredTaskFact("creator_offer"),
       rooms_rates_availability: basicTaskFact(
         "rooms_rates_availability",
         roomReasons,
@@ -1181,17 +1178,6 @@ function basicTaskFact(
     readiness: complete ? "complete" : "actionable",
     reasonCodes,
     sourceRevision: taskRevision(sourceRevision, reasonCodes),
-    freshness: "fresh",
-  };
-}
-
-function retiredTaskFact(taskId: "public_profile" | "creator_offer"): AdaptiveSetupTaskFact {
-  return {
-    taskId,
-    ownerProgress: "not_started",
-    readiness: "blocked",
-    reasonCodes: ["track_retired"],
-    sourceRevision: taskRevision("retired"),
     freshness: "fresh",
   };
 }

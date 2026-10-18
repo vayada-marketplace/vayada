@@ -70,13 +70,14 @@ production browser code must not construct auth URLs from
 `apps/api` receives an explicit surface-to-origin map rather than deriving a
 callback origin from arbitrary forwarded headers:
 
-| Surface               | Origin setting                    |
-| --------------------- | --------------------------------- |
-| `platform-admin`      | `AUTH_PLATFORM_ADMIN_ORIGIN`      |
-| `marketplace-web`     | `AUTH_MARKETPLACE_WEB_ORIGIN`     |
-| `booking-admin`       | `AUTH_BOOKING_ADMIN_ORIGIN`       |
-| `pms-web`             | `AUTH_PMS_WEB_ORIGIN`             |
-| `affiliate-dashboard` | `AUTH_AFFILIATE_DASHBOARD_ORIGIN` |
+| Surface          | Origin setting               |
+| ---------------- | ---------------------------- |
+| `platform-admin` | `AUTH_PLATFORM_ADMIN_ORIGIN` |
+| `booking-admin`  | `AUTH_BOOKING_ADMIN_ORIGIN`  |
+| `pms-web`        | `AUTH_PMS_WEB_ORIGIN`        |
+
+The `marketplace-web` and `affiliate-dashboard` surfaces are retired (VAY-2271, #3422): the API
+ignores `AUTH_MARKETPLACE_WEB_ORIGIN` and `AUTH_AFFILIATE_DASHBOARD_ORIGIN` now.
 
 `AUTH_FIRST_PARTY_SURFACES` is a comma-separated rollout list. A surface in
 that list uses the first-party callback and cookie policy. A surface outside it
@@ -198,28 +199,26 @@ frontend callbacks.
 
 ### Surface matrix
 
-| Surface               | Canonical local origin            | Next-stack origin                       | Callback path                 |
-| --------------------- | --------------------------------- | --------------------------------------- | ----------------------------- |
-| `platform-admin`      | `https://admin.localhost`         | Resolve from platform configuration     | `/auth/oauth/google/callback` |
-| `marketplace-web`     | `https://marketplace.localhost`   | `https://next-marketplace.vayada.com`   | `/auth/oauth/google/callback` |
-| `booking-admin`       | `https://admin.booking.localhost` | `https://next-booking-admin.vayada.com` | `/auth/oauth/google/callback` |
-| `pms-web`             | `https://pms.localhost`           | `https://next-pms.vayada.com`           | `/auth/oauth/google/callback` |
-| `affiliate-dashboard` | `https://affiliate.localhost`     | Resolve from platform configuration     | `/auth/oauth/google/callback` |
+| Surface          | Canonical local origin            | Next-stack origin                       | Callback path                 |
+| ---------------- | --------------------------------- | --------------------------------------- | ----------------------------- |
+| `platform-admin` | `https://admin.localhost`         | Resolve from platform configuration     | `/auth/oauth/google/callback` |
+| `booking-admin`  | `https://admin.booking.localhost` | `https://next-booking-admin.vayada.com` | `/auth/oauth/google/callback` |
+| `pms-web`        | `https://pms.localhost`           | `https://next-pms.vayada.com`           | `/auth/oauth/google/callback` |
 
-The table records repo-confirmed app origins and flags the two origins owned by
-the separate platform configuration. VAY-1200 and VAY-1201 must resolve those
-exact values before implementation. Each production service must set its exact
+The table records repo-confirmed app origins and flags the platform-admin origin,
+which the separate platform configuration owns. VAY-1201 had to resolve that exact
+value before implementation. Each production service must set its exact
 canonical `AUTH_PUBLIC_ORIGIN` and matching `apps/api` surface-origin setting.
 There is no production fallback to an API origin, request host, or
 `*.vayada.com` cookie domain.
 
 | Environment                 | Registration and configuration rule                                                                                                                                                         |
 | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Canonical local portless    | Register all five exact local callback URIs; use `127.0.0.1:8003` as the server-only upstream.                                                                                              |
+| Canonical local portless    | Register all three exact local callback URIs; use `127.0.0.1:8003` as the server-only upstream.                                                                                             |
 | Isolated review port        | Preserve the port in `AUTH_PUBLIC_ORIGIN` and register each exact callback URI for that port.                                                                                               |
 | Worktree-qualified portless | Resolve and register the exact generated frontend host; do not drop the worktree prefix.                                                                                                    |
 | Plain-port fallback         | Use each frontend's `http://localhost:<port>` origin, omit cookie `Secure`, and register the exact staging redirect URI.                                                                    |
-| Next stack                  | Set the five explicit next-stack origins and register their exact HTTPS callbacks before enabling a surface.                                                                                |
+| Next stack                  | Set the two explicit next-stack origins, resolve `platform-admin` from platform configuration, and register their exact HTTPS callbacks before enabling a surface.                          |
 | Production                  | Platform configuration supplies the canonical public origin per surface. Activation is blocked until the exact HTTPS callbacks and sign-out URIs are registered and VAY-1202/VAY-1203 pass. |
 
 ## Cross-app session handoff

@@ -235,9 +235,15 @@ async function mockPricing(page: Page) {
     const suffix = new URL(request.url()).pathname.split("/pricing-v2")[1] ?? "";
     const body = (method === "GET" ? {} : request.postDataJSON()) as Record<string, any>;
     if (method !== "GET") state.writes += 1;
-    // Bank-transfer and PayPal acceptance is off, as in production today (VAY-2139).
+    // Bank transfer is ready (VAY-2139): the new room's non-refundable first price is paid in advance (VAY-2280).
     if (suffix === "/payment-methods" && method === "GET")
-      return ok(route, { acceptanceEnabled: false, readyMethods: [] });
+      return ok(route, { acceptanceEnabled: true, readyMethods: ["bank_transfer"] });
+    // Card isn't ready on the booking page, as in production today (VAY-2205).
+    if (suffix === "/card-readiness" && method === "GET")
+      return ok(route, {
+        card: { ready: false, reason: "switch_off", charge: "at_booking" },
+        deposits: { ready: false },
+      });
     if (suffix === "" && method === "GET") return ok(route, state.publication);
     const step = suffix === "/prepare" ? "prepare" : suffix === "/publish" ? "publish" : null;
     if (step && state.refuse?.step === step) {
@@ -370,7 +376,11 @@ test("creates a room and its prices with one Create Room Type", async ({ page },
   expect(pricing.termsWrites).toEqual([
     expect.objectContaining({
       roomTypeId: CREATED,
-      body: expect.objectContaining({ cancellation: { kind: "non_refundable" } }),
+      body: expect.objectContaining({
+        cancellation: { kind: "non_refundable" },
+        // Paid in advance: pay at property is left out (VAY-2280).
+        payment: { kind: "full", acceptedMethods: ["bank_transfer"] },
+      }),
     }),
   ]);
   await assertHealthy();
