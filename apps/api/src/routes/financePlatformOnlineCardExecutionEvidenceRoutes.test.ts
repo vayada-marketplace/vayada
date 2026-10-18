@@ -171,6 +171,37 @@ describe("Platform Finance online-card execution evidence routes", () => {
     app = null;
   });
 
+  it("lets platform finance read a hotel's card state before switching it (VAY-2205)", async () => {
+    const state = {
+      propertyId: PROPERTY_ID,
+      providerAccount: { ready: true, cardCapabilityRevision: 7 },
+      propertyReadinessRevision: 1,
+      evidence: null,
+      cardReady: false,
+    };
+    const read = vi.fn(async (propertyId: string) => (propertyId === PROPERTY_ID ? state : null));
+    const url = `/finance/platform/properties/${PROPERTY_ID}/online-card-execution-evidence`;
+    const get = (path = url) =>
+      app!.inject({ method: "GET", url: path, headers: { authorization: "Bearer valid" } });
+    app = await testApp({ readOnlineCardExecutionState: read });
+    expect((await get()).json()).toEqual(state);
+    expect(read).toHaveBeenCalledWith(PROPERTY_ID);
+    expect(
+      (await get(`/finance/platform/properties/${EVIDENCE_ID}/online-card-execution-evidence`))
+        .statusCode,
+    ).toBe(404);
+    expect(
+      (await get("/finance/platform/properties/not-a-uuid/online-card-execution-evidence"))
+        .statusCode,
+    ).toBe(400);
+    await app.close();
+    app = await testApp({ readOnlineCardExecutionState: read }, { permissions: [] });
+    expect((await get()).statusCode).toBe(403);
+    await app.close();
+    app = await testApp({});
+    expect((await get()).statusCode).toBe(501);
+  });
+
   it("builds a platform-scoped accept command without accepting raw proof material", async () => {
     const repo = repository();
     app = await testApp(repo.value);

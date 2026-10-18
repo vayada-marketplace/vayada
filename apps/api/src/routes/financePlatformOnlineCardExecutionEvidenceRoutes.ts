@@ -24,6 +24,29 @@ export async function registerFinancePlatformOnlineCardExecutionEvidenceRoutes(
   app: FastifyInstance,
   options: { repository: Partial<FinancePlatformOnlineCardExecutionEvidenceRepository> },
 ): Promise<void> {
+  // VAY-2205: what an operator needs before turning card on or off for a hotel.
+  app.get<{ Params: PropertyParams }>(
+    "/finance/platform/properties/:propertyId/online-card-execution-evidence",
+    async (request, reply) => {
+      const context = authorizePlatformFinance(request, reply, "read");
+      if (!context) return reply;
+      if (!options.repository.readOnlineCardExecutionState) return unavailable(reply);
+      if (!uuid(request.params.propertyId)) return invalid(reply);
+      const state = await options.repository.readOnlineCardExecutionState(
+        request.params.propertyId.toLowerCase(),
+      );
+      return (
+        state ??
+        reply.code(404).send({
+          statusCode: 404,
+          code: "property_not_found",
+          category: "not_found",
+          message: "Property was not found.",
+        })
+      );
+    },
+  );
+
   app.post<{ Params: PropertyParams; Body: AcceptBody }>(
     "/finance/platform/properties/:propertyId/online-card-execution-evidence",
     async (request, reply) => {

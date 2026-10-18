@@ -150,6 +150,15 @@ describe.skipIf(!TEST_DATABASE_URL)("Online-card execution evidence PostgreSQL",
   });
 
   it("accepts exact-revision evidence, replays once, and never silently publishes card", async () => {
+    // VAY-2205: the operator's switch reads the revisions to accept against, and the approval.
+    expect(await repository.readOnlineCardExecutionState(propertyId)).toEqual({
+      propertyId,
+      providerAccount: { ready: true, cardCapabilityRevision: 7 },
+      propertyReadinessRevision: 1,
+      evidence: null,
+      cardReady: false,
+    });
+    expect(await repository.readOnlineCardExecutionState(randomUUID())).toBeNull();
     const accepted = await repository.acceptOnlineCardExecutionEvidence(acceptCommand());
     expect(accepted).toMatchObject({
       ok: true,
@@ -171,6 +180,10 @@ describe.skipIf(!TEST_DATABASE_URL)("Online-card execution evidence PostgreSQL",
 
     const replay = await repository.acceptOnlineCardExecutionEvidence(acceptCommand());
     expect(replay).toEqual({ ...accepted, status: "idempotent_replay" });
+    expect(await repository.readOnlineCardExecutionState(propertyId)).toMatchObject({
+      evidence: { evidenceId, acceptedAt: accepted.response.acceptedAt },
+      cardReady: true,
+    });
 
     await expect(publicPaymentMethods()).resolves.toEqual(["pay_at_property"]);
     const durable = await pool.query<{

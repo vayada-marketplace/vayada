@@ -1163,10 +1163,13 @@ export function createTargetFinancePropertySettingsRepository(config: {
         },
       })
     : null;
-  // Acceptance remains unreachable in deployed API wiring until the sanctioned
-  // ONB-25A runner and approval-attestation contract can be verified here.
+  // VAY-2205 (D3, approved 2026-10-18): a Vayada finance operator accepts the hotel's card
+  // approval as an attestation and revokes it to turn card off; both need platform finance rights.
   const onlineCardEvidenceWrites = onlineCardEvidenceRepository
     ? {
+        readOnlineCardExecutionState: onlineCardEvidenceRepository.readOnlineCardExecutionState,
+        acceptOnlineCardExecutionEvidence:
+          onlineCardEvidenceRepository.acceptOnlineCardExecutionEvidence,
         revokeOnlineCardExecutionEvidence:
           onlineCardEvidenceRepository.revokeOnlineCardExecutionEvidence,
       }
