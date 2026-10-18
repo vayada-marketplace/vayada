@@ -1,7 +1,7 @@
 "use client";
-import { CookieBanner as SharedCookieBanner } from "@vayada/marketplace-shared/consent/CookieBanner";
+import { CookieBanner as CookieBannerView } from "./CookieBannerView";
 import { useCookieConsent } from "@/context/CookieConsentContext";
 export function CookieBanner() {
-  return <SharedCookieBanner controls={useCookieConsent()} privacyHref="/privacy" />;
+  return <CookieBannerView controls={useCookieConsent()} privacyHref="/privacy" />;
 }
 export default CookieBanner;

@@ -1080,11 +1080,10 @@ describe.skipIf(!TEST_DATABASE_URL)("property setup draft save repository", () =
         },
       },
     });
-    // A stored selection that still names the retired Creator Marketplace track (VAY-2270) reads
-    // as Hotel Operations; the exact replay still returns the stored receipt.
+    // A later track revision does not change the exact replay's stored receipt.
     await client.query(
       `UPDATE hotel_catalog.organization_setup_track_intents
-       SET selected_tracks = ARRAY['hotel_operations', 'creator_marketplace']::text[], revision = 3
+       SET selected_tracks = ARRAY['hotel_operations']::text[], revision = 3
        WHERE organization_id = $1::uuid`,
       [fixture.organizationId],
     );
@@ -1156,7 +1155,7 @@ describe.skipIf(!TEST_DATABASE_URL)("property setup draft save repository", () =
         [fixture.organizationId],
       ),
     ).resolves.toMatchObject({
-      rows: [{ selectedTracks: ["hotel_operations", "creator_marketplace"], revision: 3 }],
+      rows: [{ selectedTracks: ["hotel_operations"], revision: 3 }],
     });
     await expect(canonicalStep1State(fixture.propertyId)).resolves.toEqual(canonicalBefore);
 

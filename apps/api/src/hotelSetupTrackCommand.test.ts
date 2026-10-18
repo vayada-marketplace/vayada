@@ -886,52 +886,6 @@ describe.skipIf(!TEST_DATABASE_URL)("hotel setup track command repository", () =
     ).toBe(0);
   });
 
-  it("reads a stored Creator Marketplace selection as Hotel Operations only", async () => {
-    const hotel = await createFixture();
-    await addProperty(hotel.organizationId);
-    const created = await repository.updateTracks(
-      command(hotel, {
-        selectedTracks: ["hotel_operations"],
-        expectedRevision: 0,
-        idempotencyKey: "legacy-initial-operations",
-      }),
-    );
-    expect(created).toMatchObject({ ok: true, response: { trackRevision: 1 } });
-    // A row written before VAY-2270 may still carry the retired track.
-    await client.query(
-      `UPDATE hotel_catalog.organization_setup_track_intents
-       SET selected_tracks = ARRAY['hotel_operations', 'creator_marketplace']::text[]
-       WHERE organization_id = $1::uuid`,
-      [hotel.organizationId],
-    );
-
-    expect(await repository.getTrackStatus({ organizationId: hotel.organizationId })).toMatchObject(
-      {
-        trackRevision: 1,
-        selectedTracks: ["hotel_operations"],
-        tracks: [{ track: "hotel_operations", provisioning: "active" }],
-      },
-    );
-
-    // Re-selecting Hotel Operations is not a track removal and bumps nothing.
-    const same = await repository.updateTracks(
-      command(hotel, {
-        selectedTracks: ["hotel_operations"],
-        expectedRevision: 1,
-        idempotencyKey: "legacy-same-operations",
-      }),
-    );
-    expect(same).toMatchObject({
-      ok: true,
-      response: { trackRevision: 1, selectedTracks: ["hotel_operations"] },
-    });
-    const profiles = await client.query(
-      `SELECT 1 FROM marketplace.marketplace_hotel_profiles WHERE organization_id = $1`,
-      [hotel.organizationId],
-    );
-    expect(profiles.rowCount).toBe(0);
-  });
-
   async function createFixture() {
     const organizationId = randomUUID();
     const propertyId = randomUUID();

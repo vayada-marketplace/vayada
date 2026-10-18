@@ -9,7 +9,6 @@ const WORKOS_ORIGIN = "https://api.workos.com";
 export const NEXT_STACK_ORIGINS = Object.freeze({
   api: "https://next-api.vayada.com",
   bookingAdmin: "https://next-booking-admin.vayada.com",
-  marketplace: "https://next-marketplace.vayada.com",
   pms: "https://next-pms.vayada.com",
   platformAdmin: "https://next-admin.vayada.com",
 });
@@ -29,7 +28,7 @@ export type AuthSession = {
   csrfToken: string;
   organizationId: string;
   workosOrganizationId: string;
-  organizationKind: "creator_workspace" | "hotel_group";
+  organizationKind: "hotel_group";
   resources?: Record<string, string[]>;
   user: { id: string; email: string; workosUserId?: string };
 };
@@ -39,7 +38,7 @@ export type SyntheticUser = {
   email: string;
   firstName: string;
   lastName: string;
-  role: "hotel" | "creator" | "staff";
+  role: "hotel" | "staff";
 };
 
 export type SyntheticPlatformAdmin = {
@@ -229,15 +228,95 @@ export function syntheticPlatformAdminEmail(
   return `qa-next-platform-${runId}@${environment.emailDomain}`;
 }
 
+function syntheticIdentity(
+  environment: SmokeEnvironment,
+  role: SyntheticUser["role"],
+  qualifier = "",
+): Pick<SyntheticUser, "email" | "firstName" | "lastName"> {
+  return {
+    firstName: role === "hotel" ? "Harper" : "Sam",
+    lastName: `Smoke ${environment.runId.slice(-8)}`,
+    email: `qa-next-${qualifier ? `${qualifier}-` : ""}${role}-${environment.runId}@${environment.emailDomain}`,
+  };
+}
+
+/**
+ * Signs a hotel owner up the way a new hotel does (VAY-2270): Booking Admin /signup, the email
+ * code (read from WorkOS, which sent it), then the account details step of /setup. The signup
+ * creates the owner's hotel group. Stops on the setup wizard's track choice.
+ */
+export async function signUpSyntheticHotelOwner(
+  page: Page,
+  request: APIRequestContext,
+  environment: SmokeEnvironment,
+  qualifier = "",
+  phone = "+49 30 5550102",
+): Promise<{ user: SyntheticUser; session: AuthSession }> {
+  const identity = syntheticIdentity(environment, "hotel", qualifier);
+  await page.goto(`${NEXT_STACK_ORIGINS.bookingAdmin}/signup`);
+  await page.getByLabel("Email address").fill(identity.email);
+  await fillSecret(page.getByLabel("Password", { exact: true }), environment.password);
+  const signupResponsePromise = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === "/auth/password/signup" &&
+      response.request().method() === "POST",
+    { timeout: 45_000 },
+  );
+  await page.getByRole("button", { name: "Create account", exact: true }).click();
+  const signupResponse = await signupResponsePromise;
+  const signupBody = await signupResponse.text();
+  let pending: Record<string, unknown>;
+  try {
+    pending = record(JSON.parse(signupBody));
+  } catch {
+    throw new Error(
+      `Booking Admin signup returned ${signupResponse.status()}: ${safeError(signupBody)}`,
+    );
+  }
+  // The body carries a pending authentication token, so errors name only the status and state.
+  if (pending.state !== "email_verification_required") {
+    throw new Error(
+      `Booking Admin signup returned ${signupResponse.status()} with state ${String(pending.state)}.`,
+    );
+  }
+  const verification = await workosApi(request, environment.workosApiKey).json<
+    Record<string, unknown>
+  >(
+    "GET",
+    `/user_management/email_verification/${encodeURIComponent(stringField(pending, "emailVerificationId"))}`,
+  );
+  await page.waitForURL(
+    (url) => url.origin === NEXT_STACK_ORIGINS.bookingAdmin && url.pathname === "/verify-email",
+    { timeout: 45_000 },
+  );
+  await fillSecret(page.getByLabel("Verification code"), stringField(verification, "code"));
+  await page.getByRole("button", { name: "Verify email", exact: true }).click();
+
+  await page.getByLabel("First name").fill(identity.firstName, { timeout: 60_000 });
+  await page.getByLabel("Last name").fill(identity.lastName);
+  await page.getByLabel("Phone number").fill(phone);
+  await page.getByRole("button", { name: "Continue to hotel setup" }).click();
+  await page
+    .getByRole("heading", { name: "Choose how you’ll use vayada" })
+    .waitFor({ timeout: 45_000 });
+
+  const session = await readAuthSession(page, "booking-admin");
+  const userIds = await workosUserIdsForEmail(request, environment.workosApiKey, identity.email);
+  if (userIds.length !== 1) {
+    throw new Error(
+      `Expected one WorkOS user for the synthetic hotel owner, found ${userIds.length}.`,
+    );
+  }
+  return { user: { ...identity, id: userIds[0]!, role: "hotel" }, session };
+}
+
 export async function createSyntheticUser(
   request: APIRequestContext,
   environment: SmokeEnvironment,
   role: SyntheticUser["role"],
   qualifier = "",
 ): Promise<SyntheticUser> {
-  const firstName = role === "hotel" ? "Harper" : role === "creator" ? "Casey" : "Sam";
-  const lastName = `Smoke ${environment.runId.slice(-8)}`;
-  const email = `qa-next-${qualifier ? `${qualifier}-` : ""}${role}-${environment.runId}@${environment.emailDomain}`;
+  const { firstName, lastName, email } = syntheticIdentity(environment, role, qualifier);
   const api = workosApi(request, environment.workosApiKey);
   const user = await api.json<Record<string, unknown>>("POST", "/user_management/users", {
     email,
@@ -326,34 +405,30 @@ export async function fillSecret(locator: Locator, value: string): Promise<void>
   }, value);
 }
 
-export async function login(page: Page, user: SyntheticUser, password: string): Promise<void> {
-  await page.goto(`${NEXT_STACK_ORIGINS.marketplace}/login?returnTo=/onboarding`);
-  await page.getByLabel("Email address").fill(user.email);
-  await fillSecret(page.getByLabel("Password"), password);
-  const loginResponsePromise = page.waitForResponse(
-    (response) =>
-      new URL(response.url()).pathname === "/auth/password/login" &&
-      response.request().method() === "POST",
-    { timeout: 45_000 },
-  );
-  await page.getByRole("button", { name: "Sign In", exact: true }).click();
-  const loginResponse = await loginResponsePromise;
-  if (!loginResponse.ok()) {
-    throw new Error(
-      `Marketplace password login returned ${loginResponse.status()}: ${safeError(await loginResponse.text())}`,
-    );
-  }
+/**
+ * Creates the Vayada identity of a user who has no hotel yet, so a staff invitation can activate
+ * it: a PMS password login creates the identity before it checks the workspace, then answers
+ * "hotel_workspace_required" (VAY-2270; the Marketplace login used to do this).
+ */
+export async function primeSyntheticIdentity(
+  request: APIRequestContext,
+  user: SyntheticUser,
+  password: string,
+): Promise<void> {
+  const response = await request.post(`${NEXT_STACK_ORIGINS.pms}/auth/password/login`, {
+    headers: { origin: NEXT_STACK_ORIGINS.pms },
+    data: { email: user.email, password, surface: "pms-web" },
+  });
+  const body = await response.text();
+  if (response.ok()) return;
+  let state: unknown;
   try {
-    await page.waitForURL(
-      (url) => url.origin === NEXT_STACK_ORIGINS.marketplace && url.pathname === "/onboarding",
-      { timeout: 45_000 },
-    );
+    state = record(JSON.parse(body)).state;
   } catch {
-    const messages = await page.getByRole("alert").allTextContents();
-    throw new Error(
-      `Marketplace login did not reach onboarding; current path ${new URL(page.url()).pathname}; alerts: ${messages.join(" | ") || "none"}.`,
-    );
+    state = undefined;
   }
+  if (response.status() === 403 && state === "hotel_workspace_required") return;
+  throw new Error(`PMS identity priming returned ${response.status()}: ${safeError(body)}`);
 }
 
 export async function loginPms(page: Page, user: SyntheticUser, password: string): Promise<void> {
@@ -379,7 +454,7 @@ export async function authenticateSyntheticPmsUser(
 
 export async function readAuthSession(
   page: Page,
-  surface: "marketplace-web" | "pms-web" = "marketplace-web",
+  surface: "booking-admin" | "pms-web",
 ): Promise<AuthSession> {
   const result = await page.evaluate(async (requestedSurface) => {
     const response = await fetch(`/auth/session?surface=${requestedSurface}`, {
@@ -397,12 +472,9 @@ export async function readAuthSession(
     "organizationId",
     "workosOrganizationId",
   ] as const) {
-    if (!session[field]) throw new Error(`Marketplace session is missing ${field}.`);
+    if (!session[field]) throw new Error(`${surface} session is missing ${field}.`);
   }
-  if (
-    session.organizationKind !== "hotel_group" &&
-    session.organizationKind !== "creator_workspace"
-  ) {
+  if (session.organizationKind !== "hotel_group") {
     throw new Error(`${surface} session has the wrong organization kind.`);
   }
   return session as AuthSession;
@@ -470,7 +542,7 @@ export async function uploadPropertyCover(
   runId: string,
 ): Promise<UploadedMedia> {
   const bytes = await readFile(
-    path.resolve("apps/marketplace-web/public/creator-category-travel.jpg"),
+    path.resolve("tests/e2e/next-stack-smoke/fixtures/property-cover.jpg"),
   );
   const created = await api.json<Record<string, unknown>>("POST", "/api/media/upload-sessions", {
     idempotencyKey: `next-smoke:${runId}:cover`,

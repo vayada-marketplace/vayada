@@ -7,7 +7,6 @@ on:
       - main
     paths:
       - "apps/landing/**"
-      - "packages/marketplace-shared/**"
       - "package.json"
       - "package-lock.json"
       - ".github/workflows/deploy-landing.yml"
