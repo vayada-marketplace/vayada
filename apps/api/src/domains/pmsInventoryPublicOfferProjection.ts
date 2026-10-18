@@ -4,7 +4,11 @@ import type {
   PmsInventoryPublicOfferProjectionPort,
   PmsInventoryPublicOfferProjectionResult,
 } from "@vayada/domain-distribution";
-import { pricingCurrencyScale, projectReplacementRoomNights } from "@vayada/domain-pms";
+import {
+  pricingCurrencyScale,
+  pricingOfferOnBookingPage,
+  projectReplacementRoomNights,
+} from "@vayada/domain-pms";
 import pg, { type QueryResult, type QueryResultRow } from "pg";
 
 import {
@@ -388,7 +392,8 @@ function pricedOfferDays(
   return pricing.rooms.flatMap((room) => {
     const roomDays = daysByRoom.get(room.roomTypeId) ?? [];
     const terms = Object.fromEntries(room.offers.map((offer) => [offer.id, offer.termsRevision]));
-    return room.offers.flatMap((offer) => {
+    // Offers off the booking page (VAY-2285) are not public; their old days close below.
+    return room.offers.filter(pricingOfferOnBookingPage).flatMap((offer) => {
       // The nightly price for one adult, as Channex sends it; quotes stay the price authority.
       const nights = projectReplacementRoomNights(
         room,
