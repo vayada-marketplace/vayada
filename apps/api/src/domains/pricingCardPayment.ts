@@ -51,7 +51,7 @@ export function pricingCardBookingId(propertyId: string, requestId: string): str
 }
 
 /** Pricing minor units → two-decimal amount string, as the booking draft stores totals. */
-function pricingMinorDecimal(minor: string, currency: string): string {
+export function pricingMinorDecimal(minor: string, currency: string): string {
   const scale = pricingCurrencyScale(currency);
   if (scale === null) return fail();
   const numerator = BigInt(minor) * 100n,
