@@ -222,7 +222,7 @@ it("passes the Stripe provider to the writer only when card acceptance is switch
     expect(writePricingAcceptance).toHaveBeenCalledWith(
       expect.anything(),
       { slug: "hotel", command: payload },
-      card ? { provider: stripeProvider } : undefined,
+      card ? { provider: stripeProvider, deposits: false } : undefined,
       false,
       undefined,
     );

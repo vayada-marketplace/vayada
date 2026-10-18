@@ -475,6 +475,7 @@ const bookingWebCheckoutAdapter = createTargetBookingWebCheckoutAdapter({
   mixedRoomSelectionsEnabled: true,
   replacementPricingAcceptanceEnabled: config.replacementPricingAcceptanceEnabled,
   replacementPricingCardAcceptanceEnabled: config.replacementPricingCardAcceptanceEnabled,
+  replacementPricingDepositAcceptanceEnabled: config.replacementPricingDepositAcceptanceEnabled,
   replacementPricingRequestAcceptanceEnabled: config.replacementPricingRequestAcceptanceEnabled,
   replacementPricingManualPaymentAcceptanceEnabled:
     config.replacementPricingManualPaymentAcceptanceEnabled,

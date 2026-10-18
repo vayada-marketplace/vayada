@@ -29,6 +29,9 @@ export function createReplacementBookingQuoteIssuer(
   manualMethods: readonly string[] = [],
   /** The hotel's Feature Hub Add-ons and Promos switches (VAY-2200). */
   guestModules?: (slug: string) => Promise<GuestModuleSwitches>,
+  /** Card quotes that leave the rest to pay at the property: deposits
+   * (REPLACEMENT_PRICING_DEPOSIT_ACCEPTANCE_ENABLED, VAY-2205). */
+  cardSplits = false,
 ) {
   return async (slug: string, input: unknown, requestId: unknown, signal?: AbortSignal) => {
     if (
@@ -78,6 +81,8 @@ export function createReplacementBookingQuoteIssuer(
       if (quote.acceptanceMode !== "instant" && quote.acceptanceMode !== "request")
         throw new PricingStorageError("stale");
       const evidence = quote.evidence;
+      if (quote.paymentMethod === "card" && evidence.dueLaterMinor !== "0" && !cardSplits)
+        throw new PricingStorageError("denied", "card_deposit_unavailable");
       return {
         version: "public-booking-quote.v1",
         quoteId: quote.quoteId,
@@ -121,6 +126,12 @@ export function createReplacementBookingQuoteIssuer(
         throw Object.assign(
           httpError(422, "This payment method isn't available this close to check-in."),
           { code: "MANUAL_PAYMENT_TOO_SOON" },
+        );
+      // VAY-2205: part now by card, the rest at the property, while deposits are switched off.
+      if (error.code === "denied" && error.reason === "card_deposit_unavailable")
+        throw Object.assign(
+          httpError(422, "Paying part now by card isn't available at this hotel yet."),
+          { code: "CARD_DEPOSIT_UNAVAILABLE" },
         );
       // VAY-2232: an extra needs more notice than this stay gives.
       if (error.code === "denied" && error.reason === "addon_lead_time")

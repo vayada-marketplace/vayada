@@ -144,10 +144,12 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
     accountRef = "acct_writer_test",
     currency?: string,
     acceptanceMode: "instant" | "request" = "instant",
+    changeQuote?: (quote: Fixture["f"]["current"]["quote"]) => void,
   ) {
     const fixture = await setupFixture((quote) => {
       cardQuote(quote);
       Object.assign(quote, { acceptanceMode });
+      changeQuote?.(quote);
     }, currency);
     const slug = `writer-${fixture.propertyId}`;
     fixture.input.slug = slug;
@@ -388,6 +390,196 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
         ).rows[0].n,
       ).toBe(1);
     } finally {
+      await fixture.close();
+    }
+  });
+
+  it("takes a deposit by card and leaves the rest to pay at the property, with deposits on (VAY-2205)", async () => {
+    const { fixture, slug, createPaymentIntent, retrievePaymentIntent, provider } =
+      await cardFixture(undefined, "EUR", "instant", (quote) => {
+        const total = BigInt(quote.evidence.totalMinor),
+          dueNow = (total * 3000n + 5000n) / 10000n;
+        Object.assign(quote.evidence, {
+          dueNowMinor: String(dueNow),
+          dueLaterMinor: String(total - dueNow),
+        });
+        Object.assign(quote.evidence.terms[0], {
+          payment: {
+            kind: "deposit",
+            basisPoints: 3000,
+            balanceDaysBeforeArrival: 0,
+            acceptedMethods: ["card"],
+          },
+        });
+      });
+    const { dueNowMinor, dueLaterMinor } = fixture.f.current.quote.evidence;
+    const decimal = (minor: string) => (Number(minor) / 100).toFixed(2);
+    try {
+      // With card on but deposits off, a deposit is unavailable, not a stale price.
+      await expect(
+        writePricingAcceptance(fixture.pool, fixture.input, { provider }),
+      ).rejects.toMatchObject({ code: "card_unavailable" });
+      expect(createPaymentIntent).not.toHaveBeenCalled();
+
+      const result = await writePricingAcceptance(fixture.pool, fixture.input, {
+        provider,
+        deposits: true,
+      });
+      expect(result).toMatchObject({ kind: "payment_required" });
+      // Only the deposit is charged now.
+      expect(createPaymentIntent).toHaveBeenCalledWith(
+        expect.objectContaining({ amountMinor: Number(dueNowMinor), captureMethod: "automatic" }),
+      );
+      expect(
+        (
+          await fixture.observer.query(
+            "SELECT payment_kind,amount::text AS amount FROM finance.payments WHERE property_id=$1",
+            [fixture.propertyId],
+          )
+        ).rows,
+      ).toEqual([{ payment_kind: "deposit", amount: decimal(dueNowMinor) }]);
+
+      const intent = await createPaymentIntent({
+        amountMinor: Number(dueNowMinor),
+        currency: "EUR",
+      });
+      retrievePaymentIntent.mockResolvedValue({
+        ...intent,
+        bookingReference: (result as { bookingReference: string }).bookingReference,
+        status: "succeeded",
+      });
+      await expect(
+        completePricingCardPayment(fixture.pool, provider, {
+          slug,
+          quoteId: fixture.f.current.quote.quoteId,
+          requestId: fixture.f.command.requestId,
+        }),
+      ).resolves.toMatchObject({ kind: "accepted", replayed: false });
+      // Confirmed with the deposit paid; the rest stays due at the property.
+      expect(
+        (
+          await fixture.observer.query(
+            `SELECT b.lifecycle_status,b.payment_status,b.total_amount::text AS total,b.balance_amount::text AS balance,
+               p.status AS payment
+             FROM booking.guest_bookings b JOIN finance.payments p ON p.id=b.active_card_payment_id
+             WHERE b.property_id=$1`,
+            [fixture.propertyId],
+          )
+        ).rows,
+      ).toEqual([
+        {
+          lifecycle_status: "confirmed",
+          payment_status: "partially_paid",
+          total: decimal(fixture.f.current.quote.evidence.totalMinor),
+          balance: decimal(dueLaterMinor),
+          payment: "paid",
+        },
+      ]);
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("holds only a request's deposit and captures it when the hotel accepts, leaving the rest due (VAY-2205)", async () => {
+    const { fixture, slug, createPaymentIntent, retrievePaymentIntent, cancelPaymentIntent } =
+      await cardFixture(undefined, "EUR", "request", (quote) => {
+        const total = BigInt(quote.evidence.totalMinor),
+          dueNow = (total * 3000n + 5000n) / 10000n;
+        Object.assign(quote.evidence, {
+          dueNowMinor: String(dueNow),
+          dueLaterMinor: String(total - dueNow),
+        });
+        Object.assign(quote.evidence.terms[0], {
+          payment: {
+            kind: "deposit",
+            basisPoints: 3000,
+            balanceDaysBeforeArrival: 0,
+            acceptedMethods: ["card"],
+          },
+        });
+      });
+    const { dueNowMinor, dueLaterMinor } = fixture.f.current.quote.evidence;
+    const decimal = (minor: string) => (Number(minor) / 100).toFixed(2);
+    const capturePaymentIntent = vi.fn();
+    const provider = {
+      createPaymentIntent,
+      retrievePaymentIntent,
+      cancelPaymentIntent,
+      capturePaymentIntent,
+    } as never;
+    const pmsPool = new pg.Pool({ connectionString: url, max: 2 });
+    const pms = createTargetPmsOperationsCommandRepository({
+      connectionString: url!,
+      pool: pmsPool,
+      stripePaymentProvider: provider,
+      readRepository: {
+        findReservationByGuestBookingId: async () => ({}),
+      } as unknown as PmsOperationsReadRepository,
+    });
+    const hotelUser = randomUUID();
+    try {
+      await fixture.observer.query(
+        "INSERT INTO identity.users (id,email,status) VALUES ($1,$2,'active')",
+        [hotelUser, `${hotelUser}@example.test`],
+      );
+      const accepted = (await writePricingAcceptance(
+        fixture.pool,
+        fixture.input,
+        { provider, deposits: true },
+        true,
+      )) as { bookingId: string; bookingReference: string };
+      // Only the deposit is held, to be captured when the hotel accepts.
+      expect(createPaymentIntent).toHaveBeenCalledWith(
+        expect.objectContaining({ amountMinor: Number(dueNowMinor), captureMethod: "manual" }),
+      );
+      const intent = {
+        ...(await createPaymentIntent({ amountMinor: Number(dueNowMinor), currency: "EUR" })),
+        bookingReference: accepted.bookingReference,
+      };
+      retrievePaymentIntent.mockResolvedValue({ ...intent, status: "requires_capture" });
+      await completePricingCardPayment(fixture.pool, provider, {
+        slug,
+        quoteId: fixture.f.current.quote.quoteId,
+        requestId: fixture.f.command.requestId,
+      });
+      capturePaymentIntent.mockResolvedValue({ ...intent, status: "succeeded" });
+      await expect(
+        pms.acceptBooking({
+          propertyId: fixture.propertyId,
+          guestBookingId: accepted.bookingId,
+          commandId: randomUUID(),
+          idempotencyKey: randomUUID(),
+          audit: {
+            actor: { kind: "user", userId: hotelUser, organizationId: fixture.organizationId },
+            requestId: randomUUID(),
+            reason: "Request accepted",
+            requestedAt: new Date().toISOString(),
+          },
+        }),
+      ).resolves.toMatchObject({ ok: true });
+      expect(capturePaymentIntent).toHaveBeenCalledOnce();
+      expect(
+        (
+          await fixture.observer.query(
+            `SELECT b.lifecycle_status,b.payment_status,b.balance_amount::text AS balance,p.status AS payment,
+               p.amount::text AS paid,p.payment_kind
+             FROM booking.guest_bookings b JOIN finance.payments p ON p.id=b.active_card_payment_id
+             WHERE b.id=$1`,
+            [accepted.bookingId],
+          )
+        ).rows,
+      ).toEqual([
+        {
+          lifecycle_status: "confirmed",
+          payment_status: "partially_paid",
+          balance: decimal(dueLaterMinor),
+          payment: "paid",
+          paid: decimal(dueNowMinor),
+          payment_kind: "deposit",
+        },
+      ]);
+    } finally {
+      await pmsPool.end();
       await fixture.close();
     }
   });

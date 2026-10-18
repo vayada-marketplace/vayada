@@ -1358,6 +1358,8 @@ export type PgTargetBookingWebCheckoutAdapterConfig = {
   replacementPricingAcceptanceEnabled?: boolean;
   /** Card quotes in acceptance; requires stripePaymentProvider. */
   replacementPricingCardAcceptanceEnabled?: boolean;
+  /** Card quotes that leave the rest to pay at the property: deposits (VAY-2205). */
+  replacementPricingDepositAcceptanceEnabled?: boolean;
   /** Request-mode pay-at-property quotes in acceptance; the hotel confirms each booking. */
   replacementPricingRequestAcceptanceEnabled?: boolean;
   /** Bank-transfer and PayPal quotes in acceptance; the hotel confirms each payment. */
@@ -1471,6 +1473,7 @@ export function createTargetBookingWebCheckoutAdapter(
       : [],
     async (slug) =>
       readGuestModuleSwitches(pool, (await resolveTargetCheckoutProperty(pool, slug)).propertyId),
+    config.replacementPricingDepositAcceptanceEnabled === true,
   );
   const serializeTargetChangeRequest = (row: TargetChangeRequestRow, enabled = false) =>
     serializeChangeRequest(
@@ -1980,7 +1983,10 @@ export function createTargetBookingWebCheckoutAdapter(
       try {
         const cardPayments =
           config.replacementPricingCardAcceptanceEnabled && config.stripePaymentProvider
-            ? { provider: config.stripePaymentProvider }
+            ? {
+                provider: config.stripePaymentProvider,
+                deposits: config.replacementPricingDepositAcceptanceEnabled === true,
+              }
             : undefined;
         const result = await writePricingAcceptance(
           pool,

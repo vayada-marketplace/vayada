@@ -71,6 +71,64 @@ describe("replacement booking quote issuer", () => {
     });
   });
 
+  it("quotes part now by card, the rest at the property, only with deposits on (VAY-2205)", async () => {
+    const deposit = {
+      kind: "deposit",
+      basisPoints: 3000,
+      balanceDaysBeforeArrival: 0,
+      acceptedMethods: ["card"],
+    };
+    const stored = (dueNowMinor: string, dueLaterMinor: string) => ({
+      quote: {
+        quoteId: "11111111-1111-4111-8111-111111111111",
+        paymentMethod: "card",
+        acceptanceMode: "instant",
+        stay: {
+          checkIn: selection.checkIn,
+          checkOut: selection.checkOut,
+          currency: "EUR",
+          rooms: [{ selectionId: "one", roomTypeId: "room", offerId: "flex" }],
+        },
+        evidence: {
+          issuedAt: "2026-09-01T08:00:00.000Z",
+          expiresAt: "2026-09-01T08:05:00.000Z",
+          totalMinor: "10000",
+          dueNowMinor,
+          dueLaterMinor,
+          lines: [{ kind: "room", selectionId: "one", amountMinor: "10000" }],
+          terms: [
+            {
+              roomTypeId: "room",
+              offerId: "flex",
+              cancellation: { kind: "non_refundable" },
+              payment: deposit,
+            },
+          ],
+        },
+        rooms: [{ selectionId: "one", mealPlan: "room_only" }],
+      },
+      replayed: false,
+    });
+    const issue = vi.fn().mockResolvedValue(stored("3000", "7000"));
+    const off = createReplacementBookingQuoteIssuer({ issue });
+    const on = createReplacementBookingQuoteIssuer({ issue }, [], undefined, true);
+    await expect(off("hotel", request("card"), "key")).rejects.toMatchObject({
+      statusCode: 422,
+      code: "CARD_DEPOSIT_UNAVAILABLE",
+    });
+    await expect(on("hotel", request("card"), "key")).resolves.toMatchObject({
+      totalMinor: "10000",
+      dueNowMinor: "3000",
+      dueLaterMinor: "7000",
+      rooms: [{ selectionId: "one", payment: deposit }],
+    });
+    // A card stay paid in full needs no switch.
+    issue.mockResolvedValue(stored("10000", "0"));
+    await expect(off("hotel", request("card"), "key")).resolves.toMatchObject({
+      dueNowMinor: "10000",
+    });
+  });
+
   it("tells the guest when an extra needs more notice than the stay gives (VAY-2232)", async () => {
     const issue = vi.fn().mockRejectedValue(new PricingStorageError("denied", "addon_lead_time"));
     const on = createReplacementBookingQuoteIssuer({ issue }, []);

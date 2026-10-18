@@ -58,8 +58,10 @@ export async function writePricingAcceptance(
     slug: unknown;
     command: unknown;
   },
-  /** Card quotes are accepted only with a payment provider (REPLACEMENT_PRICING_CARD_ACCEPTANCE_ENABLED). */
-  cardPayments?: { provider: StripeBookingPaymentProvider },
+  /** Card quotes are accepted only with a payment provider (REPLACEMENT_PRICING_CARD_ACCEPTANCE_ENABLED);
+   * those leaving the rest to pay at the property also need `deposits`
+   * (REPLACEMENT_PRICING_DEPOSIT_ACCEPTANCE_ENABLED, VAY-2205). */
+  cardPayments?: { provider: StripeBookingPaymentProvider; deposits?: boolean },
   /** Request-mode pay-at-property quotes (REPLACEMENT_PRICING_REQUEST_ACCEPTANCE_ENABLED). */
   requests = false,
   /** Bank-transfer and PayPal quotes (REPLACEMENT_PRICING_MANUAL_PAYMENT_ACCEPTANCE_ENABLED). Bank
@@ -76,6 +78,7 @@ export async function writePricingAcceptance(
     await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
     const prepared = await preparePricingAcceptance(client, input.slug, input.command, {
       card: cardPayments !== undefined,
+      deposits: cardPayments?.deposits === true,
       request: requests,
       ...(manualPayments ? { manual: true } : {}),
     });

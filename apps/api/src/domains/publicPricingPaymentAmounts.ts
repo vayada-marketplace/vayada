@@ -1,5 +1,9 @@
 import { createHash } from "node:crypto";
-import { isManualPricingPaymentMethod, isPricingPaymentMethod } from "@vayada/domain-booking";
+import {
+  isManualPricingPaymentMethod,
+  isPricingPaymentMethod,
+  pricingPaymentWriteProblem,
+} from "@vayada/domain-booking";
 import type { PoolClient } from "pg";
 import { lockPublicPricingChargeTotals } from "./publicPricingChargeTotals.js";
 import { composeReplacementSettlementAmounts } from "./replacementSettlementAmounts.js";
@@ -31,15 +35,27 @@ export async function lockPublicPricingPaymentAmounts(
       (terms) => terms.roomTypeId === room.roomTypeId && terms.offerId === room.offerId,
     ),
   );
+  // VAY-2205: a deposit is a share by card when booking, the rest at the property.
   if (
     selectedTerms.some(
       (terms) =>
-        !terms || terms.payment.kind !== "full" || !terms.payment.acceptedMethods?.includes(method),
+        !terms ||
+        !terms.payment.acceptedMethods?.includes(method) ||
+        (terms.payment.kind === "deposit"
+          ? method !== "card" || pricingPaymentWriteProblem(terms.payment) !== null
+          : terms.payment.kind !== "full"),
     )
   )
     return null;
   const terms = selectedTerms.map((t) => t!);
   if (new Set(terms.map((t) => canonical(t.cancellation))).size !== 1) return null;
+  // A stay is paid on one schedule: a deposit only when every room takes the same one.
+  const deposit = terms[0]!.payment.kind === "deposit" ? terms[0]!.payment : null;
+  if (
+    terms.some((t) => (t.payment.kind === "deposit") !== (deposit !== null)) ||
+    (deposit && new Set(terms.map((t) => canonical(t.payment))).size !== 1)
+  )
+    return null;
   const amounts = composeReplacementSettlementAmounts(
     {
       subtotalMinor: total.subtotalMinor,
@@ -52,8 +68,14 @@ export async function lockPublicPricingPaymentAmounts(
           basisEvidenceId,
         }),
       ),
-      // Card, bank transfer and PayPal are all paid before the stay; only pay at property is later.
-      payment: { kind: method === "pay_at_property" ? "pay_at_property" : "full" },
+      // Card, bank transfer and PayPal are all paid before the stay; only pay at property is later,
+      // and the rest of a deposit.
+      payment:
+        method === "pay_at_property"
+          ? { kind: "pay_at_property" }
+          : deposit?.kind === "deposit"
+            ? { kind: "deposit", basisPoints: deposit.basisPoints }
+            : { kind: "full" },
     },
     total.stay.currency,
   );
