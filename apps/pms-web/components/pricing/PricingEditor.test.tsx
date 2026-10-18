@@ -671,8 +671,8 @@ it("keeps included-adult adjustments when editing and reviewing the saved base p
   expect(saved.snapshot.rooms[0].offers[0].price).toMatchObject({
     calendar: { base: { baseMinor: "15000", baseGuests: 2, adjustments } },
   });
-  // VAY-2125: step 1 lists the other guest counts' adjustments.
-  expect(JSON.stringify(view.toJSON())).toContain("Price for 2 adults. Other guest counts: 1 adult −€30");
+  // VAY-2125: the guest-count row of "Prices and seasons" lists the other guest counts' adjustments (VAY-2280).
+  expect(JSON.stringify(view.toJSON())).toContain("This room is priced another way: 1 adult −€30 · 2 adults €");
   expect(button("Save prices").props.disabled).toBe(true);
 });
 it("labels every saved weekday using Monday-zero without changing its adjustment", async () => {
