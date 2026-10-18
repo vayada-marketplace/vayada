@@ -37,10 +37,10 @@ E2E_START_SERVERS=1 npm run e2e
 ## Deployed Next-stack Smoke
 
 `npm run e2e:next-stack-smoke` is the production-safe browser and API smoke for
-the deployed TypeScript stack. It creates unique synthetic WorkOS identities,
-completes fresh hotel and creator onboarding, verifies Marketplace-to-PMS and
-Marketplace-to-Booking-Admin handoffs, publishes a direct-booking property, and
-exercises both instant and request acceptance with a pay-at-property quote.
+the deployed TypeScript stack. It signs new hotel owners up in Booking Admin
+(the email code is read from WorkOS), creates unique synthetic WorkOS staff and
+platform-admin identities, publishes a direct-booking property, and exercises
+both instant and request acceptance with a pay-at-property quote.
 
 The command is guarded: it accepts only the fixed `next-*.vayada.com` origins
 and requires `NEXT_STACK_SMOKE_ENV=next`. The deployed next API shares the live

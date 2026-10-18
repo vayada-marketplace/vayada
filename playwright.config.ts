@@ -196,7 +196,7 @@ export default defineConfig({
       workers: 1,
       use: {
         ...devices["Desktop Chrome"],
-        baseURL: "https://next-marketplace.vayada.com",
+        baseURL: "https://next-booking-admin.vayada.com",
         screenshot: "off",
         trace: "off",
         video: "off",
