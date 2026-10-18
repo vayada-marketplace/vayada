@@ -45,6 +45,8 @@ export type PricingMeal = Readonly<{
   charge:
     | { kind: "room"; amountMinor: string }
     | { kind: "person"; adultMinor: string; childBandAmountsMinor: readonly string[] };
+  /** What guests read about the meal, in the hotel's own words (VAY-2281); not priced. */
+  description?: string;
 }>;
 /** Where an offer is sold (VAY-2285). Without the key: the booking page and channels. A "not_sold" offer stays in
  * the room as the price source of offers linked to it (e.g. Flexible off, Non-refundable still "season price −X%"). */
@@ -92,6 +94,13 @@ const monthDay = (value: unknown): value is string =>
 const text = (value: unknown): value is string =>
   typeof value === "string" && value.trim().length > 0;
 const unique = (values: readonly unknown[]) => new Set(values).size === values.length;
+/** One line of plain text, trimmed: no line breaks or other control characters. */
+const mealDescription = (value: unknown): value is string =>
+  typeof value === "string" &&
+  value === value.trim() &&
+  value.length > 0 &&
+  value.length <= 200 &&
+  [...value].every((char) => char >= " " && char !== "\u007f");
 /** Guests can choose this offer on the direct booking page (VAY-2285). */
 export const pricingOfferOnBookingPage = (offer: Pick<PricingOffer, "sale">): boolean =>
   offer.sale === undefined;
@@ -326,7 +335,12 @@ export function parsePricingConfiguration(value: unknown): PricingConfiguration 
       !text(offer.termsRevision) ||
       !validRestrictions(offer.restrictions) ||
       !pricingObject(offer.meal) ||
-      !pricingKeys(offer.meal, ["kind", "charge"]) ||
+      !pricingKeys(offer.meal, [
+        "kind",
+        "charge",
+        ...(Object.hasOwn(offer.meal, "description") ? ["description"] : []),
+      ]) ||
+      (Object.hasOwn(offer.meal, "description") && !mealDescription(offer.meal.description)) ||
       !["room_only", "breakfast", "half_board", "full_board", "all_inclusive"].includes(
         offer.meal.kind as string,
       ) ||

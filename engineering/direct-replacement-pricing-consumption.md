@@ -744,6 +744,11 @@ partial refund. It lets the room choice be named in plain words before a quote
 payment terms stay with the quote. A page that knows the stay dates words the
 deadline as a date, and a stay that starts inside it has no free cancellation.
 
+Since VAY-2281 an offer whose meal has the hotel's own guest text (`meal.description`,
+one trimmed line of up to 200 characters) also carries it as `mealDescription`; other
+offers have no such key and the booking page keeps its own meal wording. It is shown
+as written (not translated), is not priced and is not sent to channels.
+
 The browser room-selection step reads the unpriced catalogue, requires an explicit
 current offer for every physical room, and collects adults and each child's age
 at check-in. Blank ages cannot become zero. Mixed currencies cannot be combined.

@@ -6472,6 +6472,39 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     // Only what a guest may know before a quote: no penalties, revisions or payment terms.
     expect(JSON.stringify(read)).not.toMatch(/Penalty|termsRevision|acceptedMethods/);
   });
+  it("tells guests a meal in the hotel's own words only where it wrote one (VAY-2281)", async () => {
+    const text = "Buffet breakfast in the Stube, 7:00–10:30";
+    const f = await publicFixture(true, (snapshot) => ({
+      ...snapshot,
+      rooms: snapshot.rooms.map((room, index) => ({
+        ...room,
+        offers: room.offers.map((offer) =>
+          index === 0 && offer.id === "other"
+            ? {
+                ...offer,
+                meal: {
+                  kind: "breakfast",
+                  charge: { kind: "room", amountMinor: "0" },
+                  description: text,
+                },
+              }
+            : offer,
+        ),
+      })),
+    }));
+    await publishBookingPage(f.scope);
+    const read = await createPublicPricingOfferCatalog(pool).read(f.scope.propertyId);
+    const bindings = publicPricingOfferBindings((await f.readPublic())!);
+    const described = bindings.find(
+      (b) => b.roomTypeId === f.snapshot.rooms[0]!.roomTypeId && b.offerId === "other",
+    )!.publicOfferKey;
+    const offers = (read?.rooms ?? []).flatMap((room) => room.offers);
+    expect(offers).toHaveLength(bindings.length);
+    for (const offer of offers)
+      if (offer.publicOfferKey === described)
+        expect(offer).toMatchObject({ mealPlan: "breakfast", mealDescription: text });
+      else expect(offer).not.toHaveProperty("mealDescription");
+  });
   it("serves every saved change after go-live without republishing (VAY-2129)", async () => {
     const f = await publicFixture(),
       id = f.scope.propertyId,
