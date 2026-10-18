@@ -6,8 +6,9 @@ import {
   type PricingConfiguration,
 } from "@vayada/domain-pms/replacement-pricing";
 import { PricingCardReadinessProvider, PricingManualMethodsProvider } from "./pricingManualMethods";
-import { simpleRoom } from "./simplePricing";
+import { setOfferSale, simpleRoom } from "./simplePricing";
 import type { OptionTerms } from "./stepPricing";
+import { StepOptions } from "./StepOptions";
 import { StepRates } from "./StepRates";
 
 const rules = {
@@ -133,7 +134,7 @@ const checkbox = (rate: string, label: string) =>
 
 it("shows the Flexible rate always on beside the Non-refundable rate, with cancellation and how guests pay (VAY-2282)", () => {
   mount(room(), terms(["pay_at_property"], ["bank_transfer"]), ["bank_transfer"]);
-  expect(textOf(card("Flexible rate"))).toContain("Always on");
+  expect(card("Flexible rate").findByProps({ role: "switch" }).props["aria-checked"]).toBe(true);
   expect(textOf(card("Flexible rate"))).toContain("Free cancellation until 7 days before");
   // "Paid when booking" is read from the rate's terms (VAY-2205).
   expect(textOf(card("Flexible rate"))).toContain("Nothing");
@@ -289,4 +290,75 @@ it("names a deposit a rate already has (VAY-2205 keeps new ones for later)", () 
   );
   // A rate that already takes card keeps showing it, so it can be removed.
   expect(checkbox("Flexible rate", "Card online").props.checked).toBe(true);
+});
+
+it("turns the Flexible rate off only while the Non-refundable rate is on, and keeps one rate on (VAY-2285)", () => {
+  const value = room();
+  mount(value, terms(["pay_at_property"], ["bank_transfer"]), ["bank_transfer"]);
+  act(() => card("Flexible rate").findByProps({ role: "switch" }).props.onClick());
+  const off = handlers.onChange.mock.lastCall![0] as PricingConfiguration;
+  expect(off.offers[0]).toMatchObject({ id: "flexible", sale: "not_sold" });
+  expect(off.offers[1]).not.toHaveProperty("sale");
+  // Off: the rate says so, and Non-refundable can't be switched off until Flexible is on again.
+  mount(off, terms(["pay_at_property"], ["bank_transfer"]), ["bank_transfer"]);
+  expect(card("Flexible rate").findByProps({ role: "switch" }).props["aria-checked"]).toBe(false);
+  expect(textOf(card("Flexible rate"))).toContain(
+    "Off. Non-refundable is the only rate guests can book.",
+  );
+  expect(textOf(card("Non-refundable rate"))).toContain(
+    "Keep at least one rate on. Turn on the Flexible rate before you turn this one off.",
+  );
+  expect(card("Non-refundable rate").findByProps({ role: "switch" }).props.disabled).toBe(true);
+  handlers.onChange.mockReset();
+  act(() => card("Flexible rate").findByProps({ role: "switch" }).props.onClick());
+  expect(handlers.onChange.mock.lastCall![0].offers[0]).not.toHaveProperty("sale");
+  // Without the Non-refundable rate, Flexible stays on and says why.
+  handlers.onChange.mockReset();
+  mount(room(false), terms(["pay_at_property"]));
+  act(() => card("Flexible rate").findByProps({ role: "switch" }).props.onClick());
+  expect(handlers.onChange).not.toHaveBeenCalled();
+  expect(textOf(card("Flexible rate"))).toContain(
+    "Keep at least one rate on. Turn on the Non-refundable rate before you turn this one off.",
+  );
+});
+
+it("sells another option on channels only, but never the room's last booking-page option (VAY-2285)", () => {
+  const value = room(),
+    onSale = vi.fn();
+  const names = { flexible: "Flexible", nonrefundable: "Non-refundable" };
+  const options = (shown: PricingConfiguration) =>
+    act(() => {
+      view = create(
+        <StepOptions
+          room={shown}
+          offers={shown.offers.slice(1)}
+          names={names}
+          terms={terms(["pay_at_property"], ["bank_transfer"])}
+          prices={{}}
+          disabled={false}
+          onEdit={vi.fn()}
+          onSale={onSale}
+          add={null}
+        />,
+      );
+    });
+  options(value);
+  const channels = () =>
+    view.root.findByProps({ "aria-label": "Sell “Non-refundable” on channels only" });
+  expect(channels().props["aria-checked"]).toBe(false);
+  act(() => channels().props.onClick());
+  expect(onSale).toHaveBeenLastCalledWith("nonrefundable", "channels_only");
+  const sold = setOfferSale(value, "nonrefundable", "channels_only");
+  options(sold);
+  expect(channels().props["aria-checked"]).toBe(true);
+  expect(text()).toContain("not on your booking page");
+  act(() => channels().props.onClick());
+  expect(onSale).toHaveBeenLastCalledWith("nonrefundable", null);
+  expect(setOfferSale(sold, "nonrefundable", null).offers[1]).not.toHaveProperty("sale");
+  // With Flexible not sold, Non-refundable is the last option guests can book on the page.
+  options(setOfferSale(value, "flexible", "not_sold"));
+  expect(channels().props.disabled).toBe(true);
+  expect(() =>
+    setOfferSale(setOfferSale(value, "flexible", "not_sold"), "nonrefundable", "channels_only"),
+  ).toThrow();
 });

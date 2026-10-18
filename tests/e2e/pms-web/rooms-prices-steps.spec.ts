@@ -405,8 +405,9 @@ test("edits a priced room on the simple card and publishes only what changed (VA
     "aria-pressed",
     "true",
   );
-  await expect(main(page).getByRole("region", { name: "Flexible rate" })).toContainText(
-    "Always on",
+  await expect(main(page).getByRole("switch", { name: "Offer “Flexible rate”" })).toHaveAttribute(
+    "aria-checked",
+    "true",
   );
   // The Save bar: the lowest night is the Low season's €80, 10% less on the Non-refundable rate.
   await expect(main(page).getByText("Guests pay from €72 a night", { exact: true })).toBeVisible();
@@ -864,5 +865,51 @@ test("offers Card online on both rates once the booking page can take card (VAY-
     await expect(region.getByRole("checkbox", { name: "Card online" })).not.toBeChecked();
     await expect(region).toContainText("Charged at booking");
   }
+  await assertHealthy();
+});
+
+test("turns the Flexible rate off and sells an option on channels only, keeping one rate on (VAY-2285)", async ({
+  page,
+}, testInfo) => {
+  await openPms(page);
+  const pricing = await mockPricing(page, publicationOf(3, [designRoom(3), complexRoom(3)]));
+  const assertHealthy = watchPageHealth(page, testInfo);
+  await prices(page, DELUXE);
+  const flexibleOn = main(page).getByRole("switch", { name: "Offer “Flexible rate”" });
+  await flexibleOn.click();
+  await expect(flexibleOn).toHaveAttribute("aria-checked", "false");
+  await expect(main(page).getByRole("region", { name: "Flexible rate" })).toContainText(
+    "Off. Non-refundable is the only rate guests can book.",
+  );
+  // Non-refundable is now the rate guests book, so it stays on.
+  await expect(main(page).getByRole("region", { name: "Non-refundable rate" })).toContainText(
+    "Keep at least one rate on. Turn on the Flexible rate before you turn this one off.",
+  );
+  await expect(extra(page, "Non-refundable")).toBeDisabled();
+  // The calendar and the guest card show only what guests can book.
+  await expect(main(page).getByRole("button", { name: "Show prices for Flexible" })).toHaveCount(0);
+  const guests = main(page).getByRole("radiogroup", { name: "Options for this stay" });
+  await expect(guests.getByRole("radio")).toHaveCount(2);
+  await expect(guests.getByRole("radio", { checked: true })).toContainText("Non-refundable");
+  await main(page).getByRole("button", { name: "Save prices" }).click();
+  await expect(main(page).getByText("Prices saved.", { exact: false })).toBeVisible();
+  const deluxe = (pricing.publishes[0].snapshot.rooms as Room[]).find(
+    (value) => value.roomTypeId === DELUXE,
+  )!;
+  expect(deluxe.offers[0]).toMatchObject({ id: "flexible", sale: "not_sold" });
+  expect(deluxe.offers.slice(1).every((offer: Room) => !("sale" in offer))).toBe(true);
+
+  // Another room: an option sold on channels only says it isn't on the booking page.
+  await prices(page, GARDEN);
+  const channels = main(page).getByRole("switch", { name: /on channels only$/ });
+  await channels.first().click();
+  await expect(channels.first()).toHaveAttribute("aria-checked", "true");
+  await expect(main(page).getByText("not on your booking page", { exact: false })).toBeVisible();
+  await main(page).getByRole("button", { name: "Save prices" }).click();
+  await expect(main(page).getByText("Prices saved.", { exact: false })).toBeVisible();
+  const garden = (pricing.publishes[1].snapshot.rooms as Room[]).find(
+    (value) => value.roomTypeId === GARDEN,
+  )!;
+  expect(garden.offers.filter((offer: Room) => offer.sale === "channels_only")).toHaveLength(1);
   await assertHealthy();
 });
