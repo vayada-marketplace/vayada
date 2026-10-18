@@ -26,6 +26,7 @@ import { NewLinkedOffer } from "./NewLinkedOffer";
 import { PricingLinkedParent } from "./PricingLinkedParent";
 import { PricingMealPlan } from "./PricingMealPlan";
 import { PricingMealCharges } from "./PricingMealCharges";
+import { PricingMealText } from "./PricingMealText";
 import { PricingChildCharges } from "./PricingChildCharges";
 import { PricingLinkedAdjustment } from "./PricingLinkedAdjustment";
 import { PricingDates } from "./PricingDates";
@@ -380,7 +381,7 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
         if (!key.startsWith(`${ri}:${oi}:`)) return false;
         try { parseMinorInput(value, scale, false, pricingAmountStep(room.currency)); return false; } catch { return true; }
       });
-      const windowKeys = (oi: number) => (oi === mi ? ["policy", "included", "mealPlan", "meal"] : ["policy", "included", "date", "weekday", "month", "season", "mealPlan", "meal", "parent", "linked", "ownership", "stay", "stayDate", "staySeason"]).map((key) => `${key}:${ri}:${oi}`);
+      const windowKeys = (oi: number) => (oi === mi ? ["policy", "included", "mealPlan", "meal", "mealText"] : ["policy", "included", "date", "weekday", "month", "season", "mealPlan", "meal", "mealText", "parent", "linked", "ownership", "stay", "stayDate", "staySeason"]).map((key) => `${key}:${ri}:${oi}`);
       const cancelAdding = () => { if (!disabled) { setAddingOfferRoom(null); setError(null); } };
       const group = (title: string) => <h3 className={`pt-2 ${ui.cardHeading}`}>{title}</h3>;
       const now = new Date(), today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
@@ -503,6 +504,7 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
             <div className="space-y-2">
               <PricingMealPlan room={room} offer={offer} label={label} disabled={disabled} blocked={hasPendingEntries} onPending={pend(`mealPlan:${ri}:${oi}`)} onChange={changeRoom(ri)} />
               <PricingMealCharges room={room} offer={offer} label={label} disabled={disabled || exclusiveEditPending} onPending={pend(`meal:${ri}:${oi}`)} onChange={changeRoom(ri)} />
+              <PricingMealText room={room} offer={offer} disabled={disabled || exclusiveEditPending} onPending={pend(`mealText:${ri}:${oi}`)} onChange={changeRoom(ri)} />
             </div>
             {group(t("pricing.steps.option.terms"))}
             <PricingTerms propertyId={room.propertyId} client={client} roomTypeId={room.roomTypeId} offerId={offer.id} revision={offer.termsRevision}
