@@ -73,6 +73,7 @@ import { createHotelSetupOrdinaryLoginFixture } from "./hotelSetupOrdinaryLogin.
 import { registerFinanceSubscriptionRoutes } from "./routes/financeSubscriptions.js";
 import { externalBookingChanges } from "./integrations/externalBookingChanges.js";
 import { createPgHotelMediaResolutionPort } from "./platform/hotelMediaResolver.js";
+import { writeOrdinaryHotelSetupPropertyProfile } from "./platform/hotelSetupProfileWriter.js";
 import type { PlatformMediaServingConfig } from "./platform/mediaServing.js";
 import {
   advancePublicProfileRevision,
@@ -316,7 +317,7 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
             timezone: TIME_ZONE,
             latitude: null,
             longitude: null,
-            localityPublic: true,
+            localityPublic: false,
             geoPublic: false,
             mapDisplayMode: "hidden",
           },
@@ -344,6 +345,36 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
           "booking.pricing:pricing_not_published",
           "booking.rooms:publishable_room_required",
         ]),
+      );
+      // VAY-2288: a private city and country ask for "Show city and country publicly", and the
+      // setup profile save that ticks it clears the item.
+      expect(blockerCodes(fresh)).toContain("booking.hotel_profile:hotel_public_locality_hidden");
+      expect(blockerCodes(fresh)).not.toContain(
+        "booking.hotel_profile:hotel_public_locality_missing",
+      );
+      const localityRevision = Number(
+        (
+          await admin.query("SELECT profile_revision FROM hotel_catalog.properties WHERE id=$1", [
+            propertyId,
+          ])
+        ).rows[0]!.profile_revision,
+      );
+      const locality = await writeOrdinaryHotelSetupPropertyProfile(
+        pool,
+        { propertyId, organizationId, actorUserId: owner },
+        `locality-${suffix}`,
+        {
+          idempotencyKey: `locality-${suffix}`,
+          fingerprint: createHash("sha256").update(`locality-${suffix}`).digest("hex"),
+          merge: (existing) => ({
+            expectedProfileRevision: localityRevision,
+            profile: { ...existing, location: { ...existing.location, localityPublic: true } },
+          }),
+        },
+      );
+      expect(locality.status).toBe("updated");
+      expect(blockerCodes(await readiness())).not.toContain(
+        "booking.hotel_profile:hotel_public_locality_hidden",
       );
 
       // 2. Present your hotel: summary plus an uploaded cover photo (Step 1 route flow).

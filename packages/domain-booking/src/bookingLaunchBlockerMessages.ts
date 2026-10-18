@@ -5,6 +5,8 @@ export const BOOKING_LAUNCH_BLOCKER_MESSAGES: Readonly<Record<string, string>> =
   hotel_setup_in_progress: "Your hotel is being set up. Try again in a moment.",
   hotel_profile_incomplete: "Finish your hotel profile in Present your hotel.",
   hotel_public_locality_missing: "Add your hotel's city and country and show them to guests.",
+  hotel_public_locality_hidden:
+    "Turn on 'Show city and country publicly' so guests see where you are.",
   hotel_canonical_slug_missing: "Your hotel needs a booking page address.",
   hotel_timezone_missing: "Add your hotel's time zone in Present your hotel.",
   hotel_public_media_missing: "Add at least one hotel photo in Present your hotel.",
