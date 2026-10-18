@@ -41,7 +41,6 @@
     "e2e:landing": "playwright test --project=landing-chromium",
     "e2e:booking-web": "playwright test --project=booking-web-chromium",
     "e2e:booking-admin": "playwright test --project=booking-admin-chromium",
-    "e2e:marketplace-web": "playwright test --project=marketplace-web-chromium",
     "e2e:pms-web": "playwright test --project=pms-web-chromium",
     "e2e:vayada-admin": "playwright test --project=vayada-admin-chromium",
     "e2e:first-party-auth": "playwright test --project=first-party-auth-chromium",
