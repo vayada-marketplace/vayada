@@ -20,6 +20,8 @@ export type PricingOffer = {
   currency: string;
   mealPlan: keyof typeof mealLabels;
   cancellation?: OfferCancellation;
+  /** The meal in the hotel's own words (VAY-2281); absent when it wrote none or it's malformed. */
+  mealDescription?: string;
 };
 /** Room content for the booking page's room cards (VAY-2190). Each field is absent when the
  * API doesn't send it or sends it malformed; selection never depends on it. */
@@ -130,6 +132,8 @@ export async function getReplacementOffers(
           currency: offer.currency,
           mealPlan: offer.mealPlan as keyof typeof mealLabels,
           ...(cancellation && { cancellation }),
+          ...(text(offer.mealDescription) &&
+            offer.mealDescription.length <= 200 && { mealDescription: offer.mealDescription }),
         };
       }),
     };
