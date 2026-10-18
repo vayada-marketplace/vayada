@@ -77,7 +77,10 @@ test.describe("landing contact form", () => {
   });
 
   test("shows the intake's reason and keeps the draft when it refuses", async ({ page }) => {
-    // The 429 is the intended answer here, so page health (which fails on console errors) is off.
+    // The 429 is the intended answer here, so page health (which fails on console errors) is off;
+    // uncaught page errors still fail the test.
+    const pageErrors: string[] = [];
+    page.on("pageerror", (error) => pageErrors.push(error.message));
     await mockContactIntake(page, (route) =>
       route.fulfill({
         status: 429,
@@ -99,5 +102,6 @@ test.describe("landing contact form", () => {
     await expect(form.locator('textarea[name="message"]')).toHaveValue(
       "We have 12 rooms and want direct bookings.",
     );
+    expect(pageErrors).toEqual([]);
   });
 });
