@@ -160,6 +160,8 @@ export function registerPlatformContactIntakeRoutes(
               product,
               userId: context.actor.internalUserId,
               organizationId: context.selectedOrganization.organizationId,
+              // VAY-2286: names the hotel account in the team's email subject.
+              organizationName: context.selectedOrganization.name ?? null,
             }),
           },
         });
@@ -212,7 +214,8 @@ export function registerPlatformContactIntakeRoutes(
           code: "intake_unavailable",
           category: "write_model",
           // Shown to visitors on vayada.com/contact (VAY-2286).
-          message: "We could not send your message. Please try again, or email hello@vayada.com.",
+          message:
+            "We could not send your message. Please try again, or write to the email address on this page.",
         });
       }
     },
@@ -351,7 +354,8 @@ async function persistContactIntake(
          correlation_id,
          idempotency_key_hash,
          payload,
-         job_metadata
+         job_metadata,
+         priority
        )
        VALUES (
          $1,
@@ -365,7 +369,8 @@ async function persistContactIntake(
          $4,
          $5,
          $6::jsonb,
-         $7::jsonb
+         $7::jsonb,
+         $10
        )
        ON CONFLICT (queue_name, job_key) DO NOTHING
        RETURNING id::text AS "jobId"
@@ -387,6 +392,8 @@ async function persistContactIntake(
       JSON.stringify({ contractVersion: PL1_NON_MEDIA_CONTRACT_VERSION, channel }),
       CONTACT_NOTIFICATION_QUEUE,
       CONTACT_NOTIFICATION_JOB_TYPE,
+      // Hotels' support requests go out before public form messages (a flood can't hold them).
+      channel === "in_app_support" ? 1 : 0,
     ],
   );
   const jobId = job.rows[0]?.jobId;

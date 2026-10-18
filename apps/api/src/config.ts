@@ -197,6 +197,8 @@ export type ApiConfig = {
   pricingPublicationFreshnessIntervalMs: number;
   /** Recipient of the at-most-daily stale-pricing email; unset sends none (log line only). */
   pricingPublicationFreshnessAlertEmail?: string;
+  /** VAY-2286: vayada.com contact-form messages are emailed here (Reply-To: the visitor). */
+  contactNotificationRecipient?: string;
   providerWebhooks: ProviderWebhookConfig;
   airbnbImport?: ReturnType<typeof loadAirbnbImportConfig>;
   airbnbAlterations?: { propertyIds: readonly string[] };
@@ -488,11 +490,11 @@ function readCalendarAutoOpenSchedulerIntervalEnv(env: NodeJS.ProcessEnv): numbe
 }
 
 // One recipient; the email goes through the booking email provider and sender.
-function readPricingPublicationFreshnessAlertEmail(
+function readSingleRecipientEnv(
   env: NodeJS.ProcessEnv,
+  key: "PRICING_PUBLICATION_FRESHNESS_ALERT_EMAIL" | "CONTACT_NOTIFICATION_RECIPIENT",
   emailConfigured: boolean,
 ): string | undefined {
-  const key = "PRICING_PUBLICATION_FRESHNESS_ALERT_EMAIL";
   const value = readOptionalEnv(env, key);
   if (!value) return undefined;
   if (!/^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+$/.test(value)) {
@@ -1194,8 +1196,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       true,
     ),
     pricingPublicationFreshnessIntervalMs: readPricingPublicationFreshnessIntervalEnv(env),
-    pricingPublicationFreshnessAlertEmail: readPricingPublicationFreshnessAlertEmail(
+    pricingPublicationFreshnessAlertEmail: readSingleRecipientEnv(
       env,
+      "PRICING_PUBLICATION_FRESHNESS_ALERT_EMAIL",
+      Boolean(bookingEmailDelivery),
+    ),
+    contactNotificationRecipient: readSingleRecipientEnv(
+      env,
+      "CONTACT_NOTIFICATION_RECIPIENT",
       Boolean(bookingEmailDelivery),
     ),
     providerWebhooks: prospectiveConfig.providerWebhooks,

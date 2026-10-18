@@ -16,9 +16,10 @@ notification job and its audit record. Since VAY-2286 the private message, ident
 and context live only in the job row (`platform.jobs.payload`), which is emptied 90
 days after arrival; the append-only event and audit rows hold only the channel
 (`in_app_support`) and outcome.
-Success means stored, not email delivered. The existing notification job has no
-proven active delivery consumer; operators retrieve confidential submissions using
-the existing platform contact event/job records. No new recipient is configured.
+Success means stored, not email delivered. Since VAY-2286 the contact notification
+worker emails each request to `CONTACT_NOTIFICATION_RECIPIENT` (Reply-To: the
+requester; subject: kind, app and the organization's name, stored with the request
+as `organizationName`).
 Identical submissions reuse the existing hourly deduplication key; retry across
 an hour boundary can produce another request. Response: 201 `{status: "accepted",
 reference}`; 400 invalid input, 401 missing/invalid identity, 503 storage failure.
