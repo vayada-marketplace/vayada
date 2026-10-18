@@ -40,7 +40,7 @@ import { StepExtras } from "./StepExtras";
 import { keptSettings, MoreGroup, SimplePayment, simpleSummary } from "./SimpleMoreOptions";
 import { PresetWindow } from "./PresetWindow";
 import { AddOptionButton, StepOptions } from "./StepOptions";
-import { StepStayRules } from "./StepStayRules";
+import { StepOpening } from "./StepOpening";
 import { StepFirstPrices, type FirstPrices, type FirstThen } from "./StepFirstPrices";
 import { paymentSettingsMethods } from "./pricingPaymentDefaults";
 import type { PaymentMethod } from "./AcceptedPaymentMethods";
@@ -382,7 +382,8 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
         {kept && <p role="status" className={ui.infoBanner}>{t("pricing.simple.kept")}</p>}
         {/* The simple Prices card (VAY-2188): price, cancellation, the two switches and busier dates; everything else under More options. */}
         <div className={ui.pricesCard}>
-          <StepSeasons room={room} offer={main} roomIndex={ri} offerIndex={mi} label={mainLabel} inputs={inputs} disabled={disabled || exclusiveEditPending}
+          <StepOpening room={room} disabled={disabled || exclusiveEditPending} onChange={changeRoom(ri)} onPending={pend(`opening:${ri}`)} />
+          <StepSeasons room={room} offer={main} roomIndex={ri} offerIndex={mi} label={mainLabel} inputs={inputs} disabled={disabled || exclusiveEditPending} names={names}
             onInput={(key, value) => { setInputs((previous) => ({ ...previous, [key]: value })); setDirty(true); setNotice(""); }} onEditMeal={() => setOptionOpen(main.id)}
             onEditChildren={() => setChildrenOpen(true)} shown={edited}
             onPriceMode={(next) => { changeRoom(ri)(next); setInputs((previous) => Object.fromEntries(Object.entries(previous).filter(([key]) => !key.startsWith(`${ri}:`)))); }}
@@ -400,7 +401,6 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
           <MoreGroup title={t("pricing.simple.more.payment")} hint={t("pricing.simple.more.paymentHint")}>
             <SimplePayment simple={simple} terms={optionTerms} failed={termsFailed} disabled={disabled || hasPendingEntries} onTerms={applyTerms(room.roomTypeId)} />
           </MoreGroup>
-          <StepStayRules room={room} names={names} disabled={disabled || exclusiveEditPending} onChange={changeRoom(ri)} />
           <MoreGroup title={t("pricing.simple.more.dates")}>
             <div className="space-y-2">
               <PricingMonths room={room} offer={main} label={mainLabel} disabled={disabled || exclusiveEditPending} onPending={pend(`month:${ri}:${mi}`)} onChange={changeRoom(ri)} />

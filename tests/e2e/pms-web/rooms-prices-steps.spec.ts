@@ -536,6 +536,17 @@ test("edits a season's price in the table and adds dates to a season (VAY-2280)"
   await expect(
     table.getByRole("button", { name: /^Edit season Low · €80, 1 Nov – 15 Nov/ }),
   ).toBeVisible();
+  // A season's minimum stay goes on all its ranges; step 1 closes a period every year (VAY-2280 PR 4).
+  await table.getByRole("button", { name: "One night more for Low" }).click();
+  await expect(table.getByRole("group", { name: "Low minimum stay" })).toContainText("3 nights");
+  const opening = main(page).getByRole("region", { name: "When guests can book" });
+  await opening.getByRole("switch", { name: "Open all year" }).click();
+  await opening.getByLabel("From: day").fill("16");
+  await opening.getByLabel("From: month").selectOption("11");
+  await opening.getByLabel("Until: day").fill("30");
+  await opening.getByLabel("Until: month").selectOption("11");
+  await opening.getByRole("button", { name: "Close these days" }).click();
+  await expect(opening.getByText("350 nights a year open, 15 closed")).toBeVisible();
 
   await main(page).getByRole("button", { name: "Save prices" }).click();
   await expect(main(page).getByText("Prices saved.", { exact: false })).toBeVisible();
@@ -547,6 +558,14 @@ test("edits a season's price in the table and adds dates to a season (VAY-2280)"
     { name: "High", tier: "High", from: "07-01", through: "08-31", price: flat("15000") },
     { name: "Low", tier: "Low", from: "11-01", through: "11-15", price: flat("8000") },
   ]);
+  expect(deluxe.offers[0].restrictions.seasons).toEqual(
+    expect.arrayContaining([
+      { from: "01-01", through: "03-31", rules: rules(3) },
+      { from: "11-01", through: "11-15", rules: rules(3) },
+      { from: "11-16", through: "11-30", rules: rules(2, { stopSell: true }) },
+    ]),
+  );
+  expect(deluxe.offers[0].restrictions.seasons).toHaveLength(3);
   await assertHealthy();
 });
 

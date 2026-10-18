@@ -5,6 +5,8 @@ import type { PricingConfiguration } from "@vayada/domain-pms/replacement-pricin
 import ConfirmDialog from "@/components/ConfirmDialog";
 import { StepSeasons } from "./StepSeasons";
 import { SeasonWindow } from "./SeasonWindow";
+import { changeSeasonPrice } from "./PricingSeasons";
+import { setRangeMinimum } from "./stayRuleSeasons";
 
 const rules = {
   minArrivalNights: 1,
@@ -73,18 +75,19 @@ const handlers = {
   onChange: vi.fn(),
   onPending: vi.fn(),
 };
-const mount = () =>
+const mount = (value: PricingConfiguration = room) =>
   act(() => {
     view = create(
       <StepSeasons
-        room={room}
-        offer={room.offers[0]}
+        room={value}
+        offer={value.offers[0]}
         roomIndex={0}
         offerIndex={0}
         label="Alpine Suite Offer 1"
         inputs={{}}
         disabled={false}
-        shown={room}
+        shown={value}
+        names={{}}
         {...handlers}
       />,
     );
@@ -156,4 +159,45 @@ it("switches to a price per number of adults from the shown price (VAY-2280)", (
     mode: "occupancy",
     amountsMinor: ["10000", "10000"],
   });
+});
+
+const stay = (value: PricingConfiguration) => {
+  const offer = value.offers[0];
+  return offer.restrictions.kind === "own" ? offer.restrictions.seasons : [];
+};
+it("sets a season's minimum stay on all its ranges and keeps it with a range whose days change (VAY-2280)", () => {
+  mount();
+  act(() => field("One night more for Oktoberfest").props.onClick());
+  expect(stay(handlers.onChange.mock.lastCall![0])).toEqual([
+    { from: "09-19", through: "09-30", rules: { ...rules, minArrivalNights: 2 } },
+    { from: "10-01", through: "10-04", rules: { ...rules, minArrivalNights: 2 } },
+  ]);
+  // The standard price's minimum stay is the main option's default.
+  act(() => field("One night more").props.onClick());
+  const offer = (handlers.onChange.mock.lastCall![0] as PricingConfiguration).offers[0];
+  expect(offer.restrictions.kind === "own" && offer.restrictions.rules.minArrivalNights).toBe(2);
+  // Re-dating a range in the season window moves its rule along.
+  const withRules = setRangeMinimum(
+    room,
+    [
+      { from: "09-19", through: "09-30" },
+      { from: "10-01", through: "10-04" },
+    ],
+    3,
+  );
+  mount(withRules);
+  act(() => field("Edit season Oktoberfest · €180, 19 Sep – 30 Sep").props.onClick());
+  const original = { name: "Oktoberfest", tier: "", from: "09-19", through: "09-30" };
+  const redated = changeSeasonPrice(
+    withRules,
+    "flex",
+    { ...original, from: "09-20" },
+    ["180"],
+    original,
+  );
+  act(() => view.root.findByType(SeasonWindow).props.onChange(redated));
+  expect(stay(handlers.onChange.mock.lastCall![0])).toEqual([
+    { from: "10-01", through: "10-04", rules: { ...rules, minArrivalNights: 3 } },
+    { from: "09-20", through: "09-30", rules: { ...rules, minArrivalNights: 3 } },
+  ]);
 });

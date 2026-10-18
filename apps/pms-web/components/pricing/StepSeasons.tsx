@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { PlusIcon, TrashIcon, XMarkIcon } from "@heroicons/react/24/outline";
+import { MinusIcon, PlusIcon, TrashIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import {
   pricingCurrencyScale,
   type PricingConfiguration,
@@ -13,7 +13,17 @@ import { changeSeasonPrice } from "./PricingSeasons";
 import { seasonGroups, seasonTones, type SeasonGroup } from "./priceCalendarModel";
 import { recurringTemplate } from "./recurringPricingInputs";
 import { onePriceAgain, pricePerAdultCount } from "./simplePricing";
-import { adjustmentText, childrenSummary, currencySymbol, money, yearPieces } from "./stepPricing";
+import { moveRangeRule, rangeMinimum, setRangeMinimum, stayDefaults } from "./stayRuleSeasons";
+import {
+  adjustmentText,
+  childrenSummary,
+  currencySymbol,
+  mainOffer,
+  money,
+  ownRuleOptions,
+  setMinimumNights,
+  yearPieces,
+} from "./stepPricing";
 import { SeasonWindow } from "./SeasonWindow";
 import { StepCard } from "./StepCard";
 import * as ui from "./pricingStyles";
@@ -46,6 +56,7 @@ export function StepSeasons({
   onInput,
   onEditMeal,
   onEditChildren,
+  names,
   shown,
   onPriceMode,
   onChange,
@@ -64,6 +75,7 @@ export function StepSeasons({
   onInput: (key: string, value: string) => void;
   onEditMeal: () => void;
   onEditChildren: () => void;
+  names: Readonly<Record<string, string>>;
   /** The room with the typed standard price (null while it doesn't parse): switching the price per number of guests
    * starts from it, and `onPriceMode` takes the result (the typed fields no longer match). */
   shown: Room | null;
@@ -164,11 +176,14 @@ export function StepSeasons({
       }));
     }
   };
+  // A season's minimum stay is a stay-rule season with its days (VAY-2280): it follows the range when the range's
+  // days change, goes with it, and a new range of the season gets it too.
   const remove = (seasons: readonly Season[]) => {
     if (disabled) return;
     try {
       let next = room;
-      for (const season of seasons) next = changeSeasonPrice(next, offer.id, season, null);
+      for (const season of seasons)
+        next = moveRangeRule(changeSeasonPrice(next, offer.id, season, null), season, null);
       onChange(next);
       setError("");
     } catch (cause) {
@@ -178,6 +193,86 @@ export function StepSeasons({
   const open = (target: { index: number | null; prefill?: SeasonGroup }) => {
     if (!disabled) setEditing(target);
   };
+  const ownRules = offer.restrictions.kind === "own" && mainOffer(room).id === offer.id;
+  const windowChange = (next: Room) => {
+    try {
+      const before = calendar.seasons,
+        after = next.offers.find((value) => value.id === offer.id)?.price;
+      const nextSeasons = after?.kind === "independent" ? after.calendar.seasons : [];
+      let synced = next;
+      if (ownRules && editing?.index != null) {
+        const old = before[editing.index];
+        synced = moveRangeRule(
+          synced,
+          old,
+          nextSeasons.length < before.length ? null : (nextSeasons[editing.index] ?? null),
+        );
+      } else if (ownRules && editing?.prefill && nextSeasons.length > before.length) {
+        const nights = rangeMinimum(room, editing.prefill.seasons[0]);
+        if (nights !== stayDefaults(room).minArrivalNights)
+          synced = setRangeMinimum(synced, [nextSeasons[nextSeasons.length - 1]], nights);
+      }
+      onChange(synced);
+      setError("");
+    } catch (cause) {
+      onChange(next);
+      setError(errorText(cause, t, "pricing.seasonTable.minStayError"));
+    }
+    setEditing(null);
+  };
+  const step = (change: () => Room) => {
+    if (disabled) return;
+    try {
+      onChange(change());
+      setError("");
+    } catch (cause) {
+      setError(errorText(cause, t, "pricing.seasonTable.minStayError"));
+    }
+  };
+  /** `season`: a season's row (its buttons say which season); none: the standard price's (the main option's default). */
+  const stepper = (
+    aria: string,
+    nights: number,
+    change: (nights: number) => Room,
+    season?: string,
+  ) => (
+    <div
+      role="group"
+      aria-label={aria}
+      className="flex h-10 w-full items-center justify-between rounded-[10px] border border-gray-300 bg-white px-1.5 md:w-[112px]"
+    >
+      <button
+        type="button"
+        aria-label={
+          season ? t("pricing.seasonTable.fewerFor", { season }) : t("pricing.steps.rules.fewer")
+        }
+        disabled={disabled || nights <= 1}
+        onClick={() => step(() => change(nights - 1))}
+        className="rounded-md p-1 text-gray-500 hover:bg-gray-100 disabled:opacity-40"
+      >
+        <MinusIcon aria-hidden="true" className="h-3.5 w-3.5" />
+      </button>
+      <output
+        aria-live="polite"
+        className="whitespace-nowrap text-[13px] font-medium text-gray-900"
+      >
+        {t(nights === 1 ? "pricing.seasonTable.nightOne" : "pricing.seasonTable.nightOther", {
+          count: nights,
+        })}
+      </output>
+      <button
+        type="button"
+        aria-label={
+          season ? t("pricing.seasonTable.moreFor", { season }) : t("pricing.steps.rules.more")
+        }
+        disabled={disabled}
+        onClick={() => step(() => change(nights + 1))}
+        className="rounded-md p-1 text-gray-500 hover:bg-gray-100 disabled:opacity-40"
+      >
+        <PlusIcon aria-hidden="true" className="h-3.5 w-3.5" />
+      </button>
+    </div>
+  );
   const guests = base && room.capacity.adults > 1 ? base : null;
   const back = guests?.mode === "occupancy" && shown ? onePriceAgain(shown) : null;
   const switchGuests = () => {
@@ -193,7 +288,8 @@ export function StepSeasons({
   const pieces = yearPieces(offer);
   const gaps = pieces.some((piece) => piece.source.kind === "none");
   const tone = (index: number) => groups.find((group) => group.indexes.includes(index))?.tone ?? 0;
-  const meal = offer.meal;
+  const meal = offer.meal,
+    own = ownRules ? ownRuleOptions(room) : [];
   return (
     <StepCard title={t("pricing.seasonTable.title")} hint={t("pricing.seasonTable.hint")}>
       {(groups.length > 0 || gaps) && (
@@ -285,6 +381,11 @@ export function StepSeasons({
           <span role="columnheader" className="min-w-0 flex-1">
             {t("pricing.seasonTable.dates")}
           </span>
+          {ownRules && (
+            <span role="columnheader" className="w-[112px] shrink-0">
+              {t("pricing.seasonTable.minStay")}
+            </span>
+          )}
           {columns.map(([name]) => (
             <span key={name} role="columnheader" className="w-[104px] shrink-0">
               {columns.length > 1 ? name : t("pricing.seasonTable.price")}
@@ -310,6 +411,15 @@ export function StepSeasons({
           <div role="cell" className="min-w-0 flex-1 pt-2 text-[13px] text-gray-500">
             {base ? t("pricing.seasonTable.otherDates") : t("pricing.steps.price.noBase")}
           </div>
+          {ownRules && (
+            <div role="cell" className="w-full md:w-[112px] md:shrink-0">
+              {stepper(
+                t("pricing.seasonTable.minStayAria", { season: t("pricing.seasonTable.standard") }),
+                stayDefaults(room).minArrivalNights,
+                (nights) => setMinimumNights(room, nights),
+              )}
+            </div>
+          )}
           {base &&
             baseAmounts(base, t).map(([name, minor], ai) => (
               <div key={ai} role="cell" className="w-full md:w-[104px] md:shrink-0">
@@ -396,6 +506,16 @@ export function StepSeasons({
                     {t("pricing.seasonTable.addDates")}
                   </button>
                 </div>
+                {ownRules && (
+                  <div role="cell" className="w-full md:w-[112px] md:shrink-0">
+                    {stepper(
+                      t("pricing.seasonTable.minStayAria", { season: group.name }),
+                      rangeMinimum(room, group.seasons[0]),
+                      (nights) => setRangeMinimum(room, group.seasons, nights),
+                      group.name,
+                    )}
+                  </div>
+                )}
                 {values.map((value, ai) => (
                   <div key={ai} role="cell" className="w-full md:w-[104px] md:shrink-0">
                     {columns.length > 1 && (
@@ -453,6 +573,13 @@ export function StepSeasons({
       {error && (
         <p role="alert" className={ui.errorText}>
           {error}
+        </p>
+      )}
+      {own.length > 0 && (
+        <p className={ui.stepHint}>
+          {t("pricing.steps.rules.own", {
+            names: own.map((value) => names[value.id] ?? "").join(", "),
+          })}
         </p>
       )}
       {children}
@@ -526,10 +653,7 @@ export function StepSeasons({
               ),
             }
           }
-          onChange={(next) => {
-            onChange(next);
-            setEditing(null);
-          }}
+          onChange={windowChange}
           onClose={() => setEditing(null)}
         />
       )}
