@@ -20,12 +20,16 @@ function fakeStripe() {
     next: "succeeded" as string,
     loseResponse: false,
     failCreate: false,
+    /** Stripe answers the create with a definite refusal (a 4xx). */
+    refuseCreate: false,
     failList: false,
   };
   const provider = {
     createRefund: vi.fn(
       async (input: Parameters<StripeBookingPaymentProvider["createRefund"]>[0]) => {
         if (state.failCreate) throw new Error("Stripe is unavailable");
+        if (state.refuseCreate)
+          throw Object.assign(new Error("This charge can't be refunded."), { statusCode: 400 });
         const refund: StripeBookingRefund = {
           refundId: `re_${randomUUID().slice(0, 8)}`,
           status: state.next,
@@ -264,7 +268,7 @@ describe.skipIf(!url)("pricing card refunds (VAY-2205)", () => {
     });
   });
 
-  it("retries a Stripe error with a fresh key, and gives up only on a refund Stripe confirms it never made", async () => {
+  it("retries a Stripe error with a fresh key, and gives up only on a refund Stripe refused and never made", async () => {
     const f = await paidCardStay(),
       stripe = fakeStripe();
     stripe.state.failCreate = true;
@@ -288,9 +292,13 @@ describe.skipIf(!url)("pricing card refunds (VAY-2205)", () => {
     // Stripe can't even list: nothing is confirmed, so it stays pending.
     lostStripe.state.failList = true;
     expect(await executePricingCardRefund(pool, lostStripe.provider, lostId)).toBe("pending");
-    // Stripe lists no refund and refuses to make one: given up, with an audit event.
+    // Stripe lists no refund but the create's answer is lost: it may have made one, so no give-up.
     lostStripe.state.failList = false;
     lostStripe.state.failCreate = true;
+    expect(await executePricingCardRefund(pool, lostStripe.provider, lostId)).toBe("pending");
+    // Stripe lists no refund and refuses to make one: given up, with an audit event.
+    lostStripe.state.failCreate = false;
+    lostStripe.state.refuseCreate = true;
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     expect(await executePricingCardRefund(pool, lostStripe.provider, lostId)).toBe("failed");
     expect(warn).toHaveBeenCalledWith(
@@ -299,7 +307,7 @@ describe.skipIf(!url)("pricing card refunds (VAY-2205)", () => {
     );
     warn.mockRestore();
     expect((await lost.state()).commands).toMatchObject([
-      { status: "failed", reason: "Stripe is unavailable" },
+      { status: "failed", reason: "This charge can't be refunded." },
     ]);
     expect(
       (
@@ -375,6 +383,50 @@ describe.skipIf(!url)("pricing card refunds (VAY-2205)", () => {
       "succeeded",
     );
     vi.restoreAllMocks();
+    expect(await f.state()).toMatchObject({
+      payment: { status: "partially_refunded", refunded: "70.00" },
+      commands: [{ status: "failed" }, { status: "succeeded", amount: "70.00" }],
+    });
+  });
+
+  it("follows a refund an earlier attempt made after all, and never makes a second one (VAY-2205)", async () => {
+    const f = await paidCardStay(),
+      stripe = fakeStripe();
+    const retry = async (commandKey: string) => {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        const staged = await retryPricingCardRefund(client, {
+          propertyId: f.propertyId,
+          guestBookingId: f.guestBookingId,
+          commandKey,
+          occurredAt: new Date(),
+        });
+        await client.query("COMMIT");
+        return staged;
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        client.release();
+      }
+    };
+    const { commandId } = (await f.stage("3000"))!;
+    // Stripe made the refund, but its answer was lost and the command was recorded as failed.
+    stripe.state.loseResponse = true;
+    expect(await executePricingCardRefund(pool, stripe.provider, commandId)).toBe("pending");
+    stripe.state.loseResponse = false;
+    await pool.query(
+      `UPDATE finance.card_refund_commands SET status='failed',settled_at=now(),failure_reason='lost'
+       WHERE id=$1`,
+      [commandId],
+    );
+    const again = await retry("retry-after-lost");
+    expect(await executePricingCardRefund(pool, stripe.provider, again.commandId)).toBe(
+      "succeeded",
+    );
+    // The retry took the refund Stripe already made: one refund, recorded once.
+    expect(stripe.provider.createRefund).toHaveBeenCalledOnce();
     expect(await f.state()).toMatchObject({
       payment: { status: "partially_refunded", refunded: "70.00" },
       commands: [{ status: "failed" }, { status: "succeeded", amount: "70.00" }],
