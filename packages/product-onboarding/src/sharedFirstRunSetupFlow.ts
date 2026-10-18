@@ -15,6 +15,8 @@ export type SharedHotelSetupEntryProduct = ProductEntryDecision["requestedProduc
 export function parseSharedHotelSetupEntryProduct(
   value: string | null | undefined,
 ): SharedHotelSetupEntryProduct | null {
+  // An old Creator Marketplace link (VAY-2270) sets up the hotel's booking engine.
+  if (value === "marketplace") return "booking";
   return PRODUCT_ENTRY_PRODUCTS.includes(value as SetupComponentProduct)
     ? (value as SharedHotelSetupEntryProduct)
     : null;

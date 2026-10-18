@@ -116,8 +116,7 @@ export function SharedHotelSetupPage({
     };
   }, [authorized]);
 
-  // An old Marketplace link (entryProduct=marketplace) is not an entry product any more and
-  // falls back to the default.
+  // An old Marketplace link (entryProduct=marketplace) reads as booking setup.
   const entryProduct = useMemo(
     () =>
       parseSharedHotelSetupEntryProduct(searchParams.get("entryProduct")) ?? defaultEntryProduct,

@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 
 import pg from "pg";
@@ -73,6 +73,21 @@ describe("stored hotel setup track command results", () => {
         error: { code: "track_revision_conflict", currentRevision: 1 },
       }),
     ).not.toBeNull();
+  });
+
+  it("reads a receipt stored before the retired Creator Marketplace track left the response", () => {
+    expect(parseStoredHotelSetupTrackCommandResult(legacyReceipt(retiredTrackStatus()))).toEqual({
+      ok: true,
+      response: operationsResponse(),
+    });
+    for (const retired of [
+      { ...retiredTrackStatus(), provisioning: "active" },
+      { ...retiredTrackStatus(), allowedActions: ["manage_service"] },
+      { ...retiredTrackStatus(), components: [{ product: "pms", access: "absent" }] },
+      { ...retiredTrackStatus(), extra: true },
+    ]) {
+      expect(parseStoredHotelSetupTrackCommandResult(legacyReceipt(retired))).toBeNull();
+    }
   });
 
   it.each([
@@ -374,6 +389,38 @@ describe.skipIf(!TEST_DATABASE_URL)("hotel setup track command repository", () =
       ok: false,
       error: { code: "idempotency_key_conflict" },
     });
+  });
+
+  it("replays a receipt stored while responses still listed the retired track", async () => {
+    const fixture = await createFixture();
+    const request = command(fixture, {
+      selectedTracks: ["hotel_operations"],
+      expectedRevision: 0,
+      idempotencyKey: "setup-legacy-receipt",
+    });
+    const created = await repository.updateTracks(request);
+    expect(created).toMatchObject({ ok: true });
+    if (!created.ok) throw new Error("Expected the track update to succeed");
+    // The receipt as the server before VAY-2270 step 2 stored it.
+    const legacyResponse = {
+      ...created.response,
+      tracks: [...created.response.tracks, retiredTrackStatus()],
+    };
+    await client.query(
+      `UPDATE platform.idempotency_keys
+       SET idempotency_metadata = jsonb_set(idempotency_metadata, '{result,response}', $2::jsonb),
+           response_body_hash = $3
+       WHERE operation_scope = 'hotel_catalog'
+         AND operation = 'hotel_setup.tracks.update'
+         AND organization_id = $1::uuid`,
+      [
+        fixture.organizationId,
+        JSON.stringify(legacyResponse),
+        createHash("sha256").update(canonicalJson(legacyResponse)).digest("hex"),
+      ],
+    );
+
+    await expect(repository.updateTracks(request)).resolves.toEqual(created);
   });
 
   it("records blocked intent without creating either half of Operations", async () => {
@@ -1125,4 +1172,48 @@ function assertSafeTestDatabase(url: string): void {
   if (!/(^|[_-])test([_-]|$)/i.test(databaseName)) {
     throw new Error(`Refusing to use non-test database "${databaseName}"`);
   }
+}
+
+function operationsResponse() {
+  return {
+    trackRevision: 1,
+    selectedTracks: ["hotel_operations"],
+    tracks: [
+      {
+        track: "hotel_operations",
+        provisioning: "active",
+        components: [
+          { product: "pms", access: "active" },
+          { product: "booking", access: "active" },
+        ],
+        allowedActions: ["manage_service"],
+      },
+    ],
+  };
+}
+
+function retiredTrackStatus(): Record<string, unknown> {
+  return {
+    track: "creator_marketplace",
+    provisioning: "not_selected",
+    components: [{ product: "marketplace", access: "absent" }],
+    allowedActions: ["add"],
+  };
+}
+
+function legacyReceipt(retired: Record<string, unknown>) {
+  const response = operationsResponse();
+  return { ok: true, response: { ...response, tracks: [...response.tracks, retired] } };
+}
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (typeof value === "object" && value !== null) {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
 }

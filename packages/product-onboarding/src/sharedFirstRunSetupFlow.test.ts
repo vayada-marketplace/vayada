@@ -7,9 +7,20 @@ import type {
 import { describe, expect, it } from "vitest";
 
 import {
+  parseSharedHotelSetupEntryProduct,
   resolveSharedFirstRunSetupView,
   toggleSetupTrackSelection,
 } from "./sharedFirstRunSetupFlow";
+
+describe("parseSharedHotelSetupEntryProduct", () => {
+  it("reads an old Marketplace link as booking setup and refuses unknown products", () => {
+    expect(parseSharedHotelSetupEntryProduct("pms")).toBe("pms");
+    expect(parseSharedHotelSetupEntryProduct("booking")).toBe("booking");
+    expect(parseSharedHotelSetupEntryProduct("marketplace")).toBe("booking");
+    expect(parseSharedHotelSetupEntryProduct("affiliate")).toBeNull();
+    expect(parseSharedHotelSetupEntryProduct(null)).toBeNull();
+  });
+});
 
 describe("resolveSharedFirstRunSetupView", () => {
   it("shows track selection first and does not infer a track from the entry product", () => {

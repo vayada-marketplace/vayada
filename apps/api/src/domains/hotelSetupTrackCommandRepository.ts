@@ -688,9 +688,10 @@ async function findReplay(
     ? existing.idempotencyMetadata["result"]
     : null;
   const parsed = parseStoredHotelSetupTrackCommandResult(stored);
-  if (!parsed) return conflict("idempotency_key_conflict");
+  if (!parsed || !isRecord(stored)) return conflict("idempotency_key_conflict");
   const expectedStatus = parsed.ok ? 200 : 409;
-  const responseBody = parsed.ok ? parsed.response : parsed.error;
+  // The hash covers the body as stored, which may still list the retired track.
+  const responseBody = parsed.ok ? stored["response"] : stored["error"];
   if (
     existing.responseStatusCode !== expectedStatus ||
     existing.responseBodyHash !== sha256(canonicalJson(responseBody))
@@ -878,13 +879,41 @@ export function parseStoredHotelSetupTrackCommandResult(
   ) {
     return null;
   }
-  if (value["ok"] === true && isUpdateTracksResponse(value["response"])) {
-    return { ok: true, response: value["response"] };
+  if (value["ok"] === true) {
+    const response = withoutRetiredMarketplaceTrack(value["response"]);
+    if (isUpdateTracksResponse(response)) return { ok: true, response };
   }
   if (value["ok"] === false && isSetupCommandError(value["error"])) {
     return { ok: false, error: value["error"] };
   }
   return null;
+}
+
+/**
+ * Receipts stored before VAY-2270 step 2 also list the retired Creator Marketplace track, not
+ * selected, after Hotel Operations. A retry within the receipt's lifetime replays without it.
+ */
+function withoutRetiredMarketplaceTrack(value: unknown): unknown {
+  if (!isRecord(value) || !Array.isArray(value["tracks"])) return value;
+  const tracks = value["tracks"] as unknown[];
+  const last = tracks.at(-1);
+  if (
+    tracks.length !== SETUP_TRACKS.length + 1 ||
+    !isRecord(last) ||
+    !hasOnlyKeys(last, ["track", "provisioning", "components", "allowedActions"]) ||
+    last["track"] !== "creator_marketplace" ||
+    last["provisioning"] !== "not_selected" ||
+    !Array.isArray(last["components"]) ||
+    last["components"].length !== 1 ||
+    !isRecord(last["components"][0]) ||
+    last["components"][0]["product"] !== "marketplace" ||
+    !Array.isArray(last["allowedActions"]) ||
+    last["allowedActions"].length !== 1 ||
+    last["allowedActions"][0] !== "add"
+  ) {
+    return value;
+  }
+  return { ...value, tracks: tracks.slice(0, -1) };
 }
 
 function isUpdateTracksResponse(value: unknown): value is UpdateTracksResponse {
