@@ -76,6 +76,7 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
   const [preset, setPreset] = useState<PresetKey | null>(null), [deleting, setDeleting] = useState<string | null>(null), [deleteError, setDeleteError] = useState<unknown>(null);
   // The guest preview's sample stay (a picked calendar night, or the next weekend), the calendar's month and option.
   const [stayStart, setStayStart] = useState<string | null>(null), [shownMonth, setShownMonth] = useState<string | null>(null), [previewOffer, setPreviewOffer] = useState<string | null>(null);
+  const [calendarAdults, setCalendarAdults] = useState<number | null>(null);
   const [addingOfferRoom, setAddingOfferRoom] = useState<string | null>(null);
   // A first price's ways to pay from Payment settings (undefined: loading; null: unknown), and a season window to open
   // once "Add a season" has added the first prices (VAY-2188).
@@ -363,7 +364,12 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
       const previewId = previewOffer && room.offers.some((offer) => offer.id === previewOffer) ? previewOffer : main.id;
       const termsFailed = room.offers.some((offer) => !policyEdits[policyKey(focus, offer.id)] && savedTerms[termsKey(offer)] === null);
       const simple = simpleRoom(room, optionTerms), kept = keptSettings(room, simple);
-      return <div key={room.roomTypeId} className="grid items-start gap-7 xl:grid-cols-[minmax(0,1fr)_400px]">
+      // The approved layout (VAY-2280): "Prices by date" first, then the price rules beside "What guests see".
+      return <div key={room.roomTypeId} className="space-y-6">
+        <PriceCalendar room={edited} options={room.offers.map((offer) => ({ id: offer.id, name: names[offer.id] ?? "" }))} offerId={previewId} onOffer={setPreviewOffer}
+          adults={calendarAdults} onAdults={setCalendarAdults} month={shownMonth ?? stay.checkIn.slice(0, 7)} today={today} stay={stay}
+          onMonth={setShownMonth} onPick={(date) => { setStayStart(date); setShownMonth(date.slice(0, 7)); }} />
+        <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
         <div className="min-w-0 space-y-4">
         {kept && <p role="status" className={ui.infoBanner}>{t("pricing.simple.kept")}</p>}
         {/* The simple Prices card (VAY-2188): price, cancellation, the two switches and busier dates; everything else under More options. */}
@@ -479,9 +485,8 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
         <aside className="min-w-0 space-y-4">
           <GuestPreview room={edited} facts={{ name: roomName(room.roomTypeId, ri), ...(roomFacts[room.roomTypeId] ?? { size: null, photo: null }) }} names={names} terms={optionTerms}
             stay={stay} today={today} selected={previewId} onSelect={setPreviewOffer} />
-          <PriceCalendar room={edited} offerId={previewId} optionName={names[previewId] ?? ""} month={shownMonth ?? stay.checkIn.slice(0, 7)} stay={stay}
-            onMonth={setShownMonth} onPick={(date) => { setStayStart(date); setShownMonth(date.slice(0, 7)); }} />
         </aside>
+        </div>
       </div>;
     })}
     {!loading && editing && !newRoom && busy && <p className={`text-right ${ui.hint}`}>{t("pricing.editor.keepOpen")}</p>}

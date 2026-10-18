@@ -606,12 +606,13 @@ export function stayTotals(
     ]),
   );
 }
-/** Every night of a month (`month` is "YYYY-MM") for one option and the sample guests: the engine's night evaluator,
- * the one Channex nightly prices use. Each night also carries its own stay rules. */
+/** Every night of a month (`month` is "YYYY-MM") for one option and `adults` (the sample guests unless given): the
+ * engine's night evaluator, the one Channex nightly prices use. Each night also carries its own stay rules. */
 export function monthNights(
   room: Room,
   offerId: string,
   month: string,
+  adults: number = sampleAdults(room),
 ): { date: string; night: RoomNightProjectionResult }[] {
   const days = new Date(
     Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0),
@@ -628,7 +629,7 @@ export function monthNights(
       offerId,
       expectedRevision: room.revision,
       expectedTermsRevisions: termsRevisions(room),
-      guests: { adults: sampleAdults(room), childAgesAtCheckIn: [] },
+      guests: { adults, childAgesAtCheckIn: [] },
     },
     dates,
   );

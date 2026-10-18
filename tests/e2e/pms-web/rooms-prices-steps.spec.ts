@@ -375,6 +375,11 @@ test("edits a priced room on the simple card and publishes only what changed (VA
   await prices(page, DELUXE);
   for (const heading of ["Cancellation", "Extra choices for guests", "Busier dates"])
     await expect(main(page).getByRole("heading", { name: heading })).toBeVisible();
+  // "Prices by date" comes first (VAY-2280), showing the main option's nightly prices.
+  const calendar = main(page).getByRole("region", { name: "Prices by date" });
+  await expect(calendar).toBeVisible();
+  await expect(calendar.getByRole("button", { name: "Show prices for Free cancellation" })).toHaveAttribute("aria-pressed", "true");
+  await expect(calendar.getByRole("button", { name: /^\d+ \w+ \d{4}, €\d+/ }).first()).toBeVisible();
   // The design's options are the card's free cancellation and its two switches, with the engine's normal night.
   await expect(
     main(page).getByRole("button", { name: "Free cancellation", exact: true }),
