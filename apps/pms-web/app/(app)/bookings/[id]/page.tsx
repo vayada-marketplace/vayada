@@ -1457,6 +1457,20 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
   const handleMarkPaid = () => {
     if (booking?.amountStatus === "unverified") return;
     if (paymentDeadlineExpired) return;
+    // VAY-2205: a card deposit was paid when booking; the hotel records the rest it took.
+    if (booking?.paymentMethod === "card" && booking.paymentStatus === "partially_paid") {
+      setConfirmDialog({
+        message: t("bookings.detail.confirmRestPaid", {
+          amount: formatCurrency(booking.balanceAmount, booking.currency, 2),
+        }),
+        confirmLabel: t("bookings.detail.markAsPaid"),
+        onConfirm: () => {
+          setConfirmDialog(null);
+          doAction(() => bookingsService.markPaid(id), t("bookings.detail.failedToMarkPaid"));
+        },
+      });
+      return;
+    }
     const methodLabel =
       booking?.paymentMethod === "bank_transfer"
         ? t("bookings.detail.bankTransferLower")
@@ -2534,6 +2548,28 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                     {booking.paymentMethod === "bank_transfer"
                       ? t("bookings.detail.markBankTransferReceived")
                       : t("bookings.detail.markPayAtHotelReceived")}
+                  </button>
+                </div>
+              )}
+            {/* VAY-2205: a card deposit leaves the rest to pay at the hotel. */}
+            {booking.status === "confirmed" &&
+              booking.paymentMethod === "card" &&
+              booking.paymentStatus === "partially_paid" && (
+                <div className="mt-4 space-y-2">
+                  <p className="text-xs text-gray-600">
+                    {t("bookings.detail.restDueAtHotel", {
+                      amount: formatCurrency(booking.balanceAmount, booking.currency, 2),
+                    })}
+                  </p>
+                  <button
+                    onClick={handleMarkPaid}
+                    disabled={updating || booking.amountStatus === "unverified"}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+                  >
+                    <CheckCircleIcon className="h-4 w-4" />
+                    {t("bookings.detail.markRestPaid", {
+                      amount: formatCurrency(booking.balanceAmount, booking.currency, 2),
+                    })}
                   </button>
                 </div>
               )}
