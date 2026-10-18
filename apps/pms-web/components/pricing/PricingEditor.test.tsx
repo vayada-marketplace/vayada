@@ -100,6 +100,7 @@ const client = {
   publicationAction: vi.fn<(draft: PricingDraft) => typeof publish>(),
   readDraft: vi.fn(),
   paymentMethods: vi.fn(),
+  cardReadiness: vi.fn(),
 };
 /** A button by its text; icons beside the text (e.g. "+ Add linked offer") are ignored. */
 const button = (label: string) =>
@@ -190,6 +191,11 @@ beforeEach(() => {
   vi.stubGlobal("document", { addEventListener: vi.fn(), removeEventListener: vi.fn() });
   // Bank-transfer and PayPal acceptance off (VAY-2139).
   client.paymentMethods.mockResolvedValue([]);
+  // Card not ready on the booking page (VAY-2205).
+  client.cardReadiness.mockResolvedValue({
+    card: { ready: false, reason: "switch_off", charge: "at_booking" },
+    deposits: { ready: false },
+  });
   client.readTerms.mockImplementation(async (roomTypeId, offerId, revision) => ({
     roomTypeId,
     offerId,
