@@ -43,11 +43,18 @@ const labelOf = (labels: Record<string, string>, value: unknown) =>
 const REPLY_TO = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$/;
 const PROVIDER_ERROR = /^Booking email provider returned HTTP \d{3}\.$/;
 
-/** "Vayada Bookings <bookings@vayada.com>" → "Vayada contact form <bookings@vayada.com>". */
+/** A stored message the worker can never send (emptied or malformed): dead-lettered at once. */
+export class IncompleteNotificationError extends Error {}
+
+/** "Vayada Bookings <bookings@vayada.com>" → "Vayada contact and support <bookings@vayada.com>". */
 export function contactNotificationSender(from: string): string {
   const address = /<([^<>]+)>\s*$/.exec(from)?.[1] ?? from.trim();
-  return `Vayada contact form <${address}>`;
+  return `Vayada contact and support <${address}>`;
 }
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** Subject text cut at a character boundary (never inside an emoji). */
+const clip = (value: string, length: number) => Array.from(value).slice(0, length).join("");
 
 export function contactNotificationEmail(
   payload: Record<string, unknown>,
@@ -61,7 +68,8 @@ export function contactNotificationEmail(
   const name = field("name");
   const email = field("email");
   const message = field("message");
-  if (!name || !email || !message) throw new Error("Contact message is incomplete.");
+  if (!name || !email || !message)
+    throw new IncompleteNotificationError("Contact message is incomplete.");
   const userType = field("userType");
   const text = [
     "New message from the contact form on vayada.com.",
@@ -82,7 +90,7 @@ export function contactNotificationEmail(
       : "Reply-To is not set for this address: write to it directly.",
   ].join("\n");
   return {
-    subject: `Contact form: ${oneLine(name).slice(0, 120)}`,
+    subject: `Contact form: ${clip(oneLine(name), 120)}`,
     text,
     ...(REPLY_TO.test(email) ? { replyTo: email } : {}),
   };
@@ -92,6 +100,7 @@ export function contactNotificationEmail(
 export function supportNotificationEmail(
   payload: Record<string, unknown>,
   receivedAt: Date | string,
+  hotelNames: readonly string[] = [],
 ): { subject: string; text: string; replyTo?: string } {
   const text = (value: unknown) =>
     typeof value === "string" && value.trim() ? value.trim() : null;
@@ -105,18 +114,26 @@ export function supportNotificationEmail(
   const request = (parsed && typeof parsed === "object" ? parsed : {}) as Record<string, unknown>;
   const email = text(payload["email"]);
   const message = text(request["message"]);
-  if (!email || !message) throw new Error("Support request is incomplete.");
+  if (!email || !message) throw new IncompleteNotificationError("Support request is incomplete.");
   const name = oneLine(text(payload["name"]) ?? email);
   const kind = labelOf(SUPPORT_KINDS, request["kind"]) ?? "Support request";
   const app =
     labelOf(SUPPORT_APPS, request["product"]) ?? oneLine(text(request["product"]) ?? "app");
-  const hotel = oneLine(text(request["organizationName"]) ?? "unnamed hotel account");
+  // The account's hotels by name (self-signup account names are generated from the email); the
+  // account name only when no hotel is linked yet.
+  const account = text(request["organizationName"]);
+  const hotels = hotelNames.map(oneLine);
+  const hotel =
+    hotels.length > 0
+      ? `${hotels.slice(0, 3).join(", ")}${hotels.length > 3 ? ` +${hotels.length - 3}` : ""}`
+      : oneLine(account ?? "unnamed hotel account");
   return {
-    subject: `${kind} · ${app} · ${hotel}`.slice(0, 160),
+    subject: clip(`${kind} · ${app} · ${hotel}`, 160),
     text: [
       `New ${kind.toLowerCase()} from ${app}.`,
       "",
-      `Hotel account: ${hotel}`,
+      `Hotel: ${hotels.length > 0 ? hotels.join(", ") : "-"}`,
+      `Account: ${oneLine(account ?? "-")}`,
       `Name: ${name}`,
       `Email: ${oneLine(email)}`,
       `Page: ${oneLine(text(request["page"]) ?? "-")}`,
@@ -171,7 +188,7 @@ export async function runContactNotificationJobs(
       try {
         const email =
           job.channel === "in_app_support"
-            ? supportNotificationEmail(job.payload, job.createdAt)
+            ? supportNotificationEmail(job.payload, job.createdAt, await hotelNamesFor(pool, job))
             : contactNotificationEmail(job.payload, job.createdAt);
         await delivery.send({ to: options.recipient, idempotencyKey: job.jobKey, ...email });
         if ((await finishContactJob(pool, job, startedAt, "succeeded")).recorded) processed += 1;
@@ -181,7 +198,13 @@ export async function runContactNotificationJobs(
         lastError = PROVIDER_ERROR.test(message)
           ? message
           : "Contact notification delivery failed.";
-        const result = await finishContactJob(pool, job, startedAt, "failed");
+        const result = await finishContactJob(
+          pool,
+          job,
+          startedAt,
+          "failed",
+          error instanceof IncompleteNotificationError,
+        );
         if (result.recorded) failed += 1;
         if (result.deadLettered) deadLettered += 1;
       }
@@ -190,6 +213,30 @@ export async function runContactNotificationJobs(
   } finally {
     if (ownsPool) await pool.end?.();
   }
+}
+
+/** Names of the hotels the support request's organization owns or operates (at most 4). */
+async function hotelNamesFor(pool: ContactNotificationPool, job: ContactJob): Promise<string[]> {
+  let organizationId: unknown;
+  try {
+    organizationId = (JSON.parse(String(job.payload["message"])) as Record<string, unknown>)
+      ?.organizationId;
+  } catch {
+    return [];
+  }
+  if (typeof organizationId !== "string" || !UUID.test(organizationId)) return [];
+  const result = await pool.query<{ name: string }>(
+    `SELECT property.display_name AS name
+     FROM identity.organization_resource_links link
+     JOIN hotel_catalog.properties property ON property.id::text = link.resource_id
+     WHERE link.organization_id = $1::uuid
+       AND link.product = 'hotel_catalog' AND link.resource_type = 'property'
+       AND link.relationship IN ('owner', 'operator') AND link.status = 'active'
+     ORDER BY property.display_name
+     LIMIT 4`,
+    [organizationId],
+  );
+  return result.rows.map((row) => row.name);
 }
 
 async function claimContactJob(
@@ -257,6 +304,7 @@ async function finishContactJob(
   job: ContactJob,
   startedAt: number,
   outcome: "succeeded" | "failed",
+  permanent = false,
 ): Promise<{ recorded: boolean; deadLettered: boolean }> {
   const result = await pool.query<{ id: string; deadLettered: boolean }>(
     `WITH retry AS (
@@ -278,12 +326,12 @@ async function finishContactJob(
        UPDATE platform.jobs
        SET status = CASE
              WHEN $6 = 'succeeded' THEN 'succeeded'
-             WHEN attempts_count >= max_attempts THEN 'dead_lettered'
+             WHEN attempts_count >= max_attempts OR $7::boolean THEN 'dead_lettered'
              ELSE 'pending'
            END,
            run_after = CASE WHEN $6 = 'failed' THEN now() + (SELECT backoff FROM retry) ELSE run_after END,
            finished_at = CASE
-             WHEN $6 = 'succeeded' OR attempts_count >= max_attempts THEN now()
+             WHEN $6 = 'succeeded' OR attempts_count >= max_attempts OR $7::boolean THEN now()
            END,
            locked_at = NULL, locked_by = NULL, updated_at = now(),
            job_metadata = CASE WHEN $6 = 'failed'
@@ -334,6 +382,7 @@ async function finishContactJob(
       `contact-notification:${job.id}:${job.attemptsCount}:${outcome}`,
       job.workerId,
       outcome,
+      permanent,
     ],
   );
   const row = result.rows[0];
