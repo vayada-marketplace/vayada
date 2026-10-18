@@ -50,8 +50,6 @@ export const FRONTEND_ONLY_PACKAGES = {
   "feature-hub": ["pms_web_e2e", "booking_admin_e2e"],
   // booking-admin, marketplace-web, pms-web; its tests are in test:unit-suites
   "settings-ui": ["pms_web_e2e", "booking_admin_e2e", "api_unit"],
-  // landing, marketplace-web, vayada-admin
-  "marketplace-shared": [],
   // booking-web, pms-web
   "locale-ui": ["pms_web_e2e", "booking_web_e2e"],
   // booking-admin, booking-web, landing, marketplace-web, pms-web, vayada-admin
