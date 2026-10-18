@@ -142,7 +142,13 @@ export async function registerReplacementPricingRoutes(
         } catch (error) {
           if (error instanceof PricingStorageError)
             return reply
-              .code(error.code === "invalid" ? 400 : error.code === "denied" ? 403 : 409)
+              .code(
+                error.code === "invalid" || error.code === "non_refundable_pay_at_property"
+                  ? 400
+                  : error.code === "denied"
+                    ? 403
+                    : 409,
+              )
               .send({ code: error.code, ...(error.reason ? { reason: error.reason } : {}) });
           return reply.code(503).send({ code: "pricing_unavailable" });
         }

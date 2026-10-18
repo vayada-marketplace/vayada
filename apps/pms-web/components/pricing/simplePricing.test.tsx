@@ -8,7 +8,7 @@ import {
   cancellationTerms,
   hasKeptSettings,
   onePriceAgain,
-  paymentEdits,
+  rateMethodEdits,
   pricePerAdultCount,
   setBreakfastAmount,
   setDiscount,
@@ -213,17 +213,6 @@ describe("the simple card's view of a room", () => {
   it("treats an option as a switch only when nothing about it is its own", () => {
     const cases: [string, PricingConfiguration, Record<string, OptionTerms>][] = [
       [
-        "other payment methods",
-        design,
-        {
-          ...designTerms,
-          nonrefundable: {
-            ...nonRefundableTerms,
-            payment: { kind: "full", acceptedMethods: ["card"] },
-          },
-        },
-      ],
-      [
         "own stay rules",
         room(
           design.offers.map((value) =>
@@ -266,6 +255,15 @@ describe("the simple card's view of a room", () => {
       expect(ids(simple.others), name).toContain("nonrefundable");
       expect(simple.breakfast?.id, name).toBe("breakfast");
     }
+    // The Non-refundable rate has payment methods of its own (VAY-2282).
+    const ownMethods = {
+      ...designTerms,
+      nonrefundable: {
+        ...nonRefundableTerms,
+        payment: { kind: "full" as const, acceptedMethods: ["card" as const] },
+      },
+    };
+    expect(simpleRoom(design, ownMethods)!.nonRefundable?.id).toBe("nonrefundable");
     // Breakfast with its own cancellation, or a price of its own, is another option too.
     expect(simpleRoom(design, { ...designTerms, breakfast: flexibleTerms(3) })!.breakfast).toBe(
       null,
@@ -322,8 +320,9 @@ describe("the simple card's edits", () => {
       if (simple.cancellation.kind !== "own")
         for (const edit of cancellationEdits(simple, terms, simple.cancellation))
           expect(edit.terms).toEqual(terms[edit.offerId]);
-      for (const edit of paymentEdits(simple, terms, payment.acceptedMethods))
-        expect(edit.terms).toEqual(terms[edit.offerId]);
+      for (const rate of ["flexible", "non_refundable"] as const)
+        for (const edit of rateMethodEdits(simple, terms, rate, payment.acceptedMethods))
+          expect(edit.terms).toEqual(terms[edit.offerId]);
     }
     // Per adult count and back is the same room.
     const plain = room([
@@ -377,20 +376,30 @@ describe("the simple card's edits", () => {
     );
   });
 
-  it("moves the breakfast option's cancellation with the main price's, and payment with every switch", () => {
+  it("moves the breakfast option's cancellation with the main price's, and each rate's payment with its own options", () => {
     const simple = simpleRoom(design, designTerms)!;
     expect(cancellationEdits(simple, designTerms, { kind: "free", days: 3 })).toEqual([
       { offerId: "flexible", terms: { ...designTerms.flexible, cancellation: free(3) } },
       { offerId: "breakfast", terms: { ...designTerms.breakfast, cancellation: free(3) } },
     ]);
     expect(cancellationTerms({ kind: "non_refundable" })).toEqual({ kind: "non_refundable" });
-    const card = paymentEdits(simple, designTerms, ["card"]);
-    expect(card.map((edit) => [edit.offerId, edit.terms.payment])).toEqual([
-      ["flexible", { kind: "full", acceptedMethods: ["card"] }],
-      ["nonrefundable", { kind: "full", acceptedMethods: ["card"] }],
-      ["breakfast", { kind: "full", acceptedMethods: ["card"] }],
+    // Each rate's methods are its own (VAY-2282): the Flexible rate's go to the breakfast switch too.
+    expect(
+      rateMethodEdits(simple, designTerms, "flexible", ["pay_at_property"]).map((edit) => [
+        edit.offerId,
+        edit.terms.payment.acceptedMethods,
+      ]),
+    ).toEqual([
+      ["flexible", ["pay_at_property"]],
+      ["breakfast", ["pay_at_property"]],
     ]);
-    expect(() => paymentEdits(simple, designTerms, [])).toThrow();
+    expect(
+      rateMethodEdits(simple, designTerms, "non_refundable", ["bank_transfer"]).map((edit) => [
+        edit.offerId,
+        edit.terms.payment.acceptedMethods,
+      ]),
+    ).toEqual([["nonrefundable", ["bank_transfer"]]]);
+    expect(() => rateMethodEdits(simple, designTerms, "non_refundable", [])).toThrow();
   });
 
   it("adds a switch's option that the card then recognises", () => {
@@ -403,10 +412,11 @@ describe("the simple card's edits", () => {
       { percent: "15" },
       flexibleTerms(3),
     );
+    // Paid in advance: the main option's pay at property is left out (VAY-2280).
     expect(added.terms).toMatchObject({
       offerId: id,
       cancellation: { kind: "non_refundable" },
-      payment,
+      payment: { kind: "full", acceptedMethods: ["card"] },
     });
     const id2 = "cccccccc-0000-4000-8000-00000000000c";
     const both = switchOption(

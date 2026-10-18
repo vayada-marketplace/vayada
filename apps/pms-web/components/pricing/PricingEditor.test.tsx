@@ -571,7 +571,7 @@ it.each([new Error("lost preparation response")])(
       mode: "flat",
       occupancy: [],
       included: { adults: "", adjustments: [] },
-      methods: ["pay_at_property"],
+      methods: ["card"],
       room: id,
       currency: "EUR",
       base: "130",
@@ -2314,7 +2314,7 @@ it("builds a linked room-only offer with explicit terms and rejects invalid sett
     cancellation: "non_refundable",
     deadline: "",
     payment: "full",
-    methods: ["pay_at_property"] as ("card" | "pay_at_property")[],
+    methods: ["card"] as ("card" | "pay_at_property")[],
   };
   const created = linkedOfferInput(room, id, values);
   expect(created.configuration.offers[0]).toEqual(room.offers[0]);
@@ -2334,7 +2334,7 @@ it("builds a linked room-only offer with explicit terms and rejects invalid sett
   expect(created.terms).toMatchObject({
     expectedRevision: null,
     cancellation: { kind: "non_refundable" },
-    payment: { kind: "full", acceptedMethods: ["pay_at_property"] },
+    payment: { kind: "full", acceptedMethods: ["card"] },
   });
   expect(
     linkedOfferInput(room, id, {
@@ -2389,7 +2389,7 @@ it("appends linked offers preserving prices, revisions and accepted-policy retry
     cancellation: "non_refundable",
     deadline: "",
     payment: "full",
-    methods: ["pay_at_property"],
+    methods: ["card"],
   });
   client.prepare.mockRejectedValueOnce(new Error("lost preparation"));
   await act(async () => view.root.findByType(NewLinkedOffer).props.onCreate(next));
@@ -2485,7 +2485,7 @@ it.each(["flat", "occupancy", "per_person", "included_guests"])(
           { kind: "fixed", value: "25" },
         ],
       },
-      methods: ["pay_at_property"] as ("card" | "pay_at_property")[],
+      methods: ["card"] as ("card" | "pay_at_property")[],
       room: id,
       currency: "EUR",
       base: "130",
@@ -2582,7 +2582,7 @@ it("creates an independent offer through fixed-room setup and retains policy ret
       mode: "flat",
       occupancy: [],
       included: { adults: "", adjustments: [] },
-      methods: ["pay_at_property"],
+      methods: ["card"],
       room: id,
       currency: "EUR",
       base: "200",
@@ -4125,7 +4125,7 @@ const roomEditor = (rooms: { roomTypeId: string; name: string; capacity: Pricing
 const mountRoom = async (rooms = [{ roomTypeId: "room", name: "Existing", capacity: snapshot.rooms[0].capacity }, familySetup], extra: RoomProps = {}) => {
   await act(async () => { view = create(roomEditor(rooms, extra)); });
 };
-const familyInput = (base: string) => firstPricingInput("property", familySetup, familyId, { mode: "flat", occupancy: [], included: { adults: "", adjustments: [] }, methods: ["pay_at_property"], room: familyId, currency: "EUR", base, adultAge: "12", childPrice: "0", countChildren: "yes", minimum: "1", maximum: "", cancellation: "non_refundable", freeDays: "", payment: "full" });
+const familyInput = (base: string) => firstPricingInput("property", familySetup, familyId, { mode: "flat", occupancy: [], included: { adults: "", adjustments: [] }, methods: ["card"], room: familyId, currency: "EUR", base, adultAge: "12", childPrice: "0", countChildren: "yes", minimum: "1", maximum: "", cancellation: "non_refundable", freeDays: "", payment: "full" });
 it("on a room page, edits only that room, publishes every other room exactly as read and continues from the new publication (VAY-2093)", async () => {
   client.read.mockResolvedValue(published()); await mountRoom();
   expect(view.root.findAllByProps({ inputMode: "decimal" }).filter((node) => node.type === "input" && !["How much cheaper, in percent", "Breakfast price"].includes(node.props["aria-label"]))).toHaveLength(1);
@@ -4481,7 +4481,7 @@ it("keeps a switch's typed amount as typed, and an empty or wrong amount never l
   // Breakfast without a price only says so; the rest of the card stays usable.
   await act(async () => extraSwitch("With breakfast").props.onClick());
   expect(text()).toContain("Enter the breakfast price to offer it.");
-  expect(button("Non-refundable").props.disabled).toBe(false);
+  expect(extraSwitch("Non-refundable").props.disabled).toBe(false);
   await type("Breakfast price", "15");
   await act(async () => extraSwitch("With breakfast").props.onClick());
   expect(extraSwitch("With breakfast").props["aria-checked"]).toBe(true);
@@ -4490,10 +4490,9 @@ it("keeps a switch's typed amount as typed, and an empty or wrong amount never l
   expect(field("Breakfast price").props.value).toBe("1");
   await type("Breakfast price", "18");
   expect(field("Breakfast price").props.value).toBe("18");
-  // Non-refundable for the card waits while the non-refundable switch is on: guests would see two.
+  // The Non-refundable rate sits beside the Flexible rate, whose cancellation stays free (VAY-2282).
   await act(async () => extraSwitch("Non-refundable").props.onClick());
-  await click("Non-refundable");
-  expect(text()).toContain("First turn off “Non-refundable” under Extra choices for guests.");
+  expect(extraSwitch("Non-refundable").props["aria-checked"]).toBe(true);
   expect(button("Free cancellation").props["aria-pressed"]).toBe(true);
   // A discount that doesn't parse holds Save, but the switch still turns off.
   await type("How much cheaper, in percent", "abc");
@@ -4509,7 +4508,7 @@ it("keeps a switch's typed amount as typed, and an empty or wrong amount never l
 it("names a deposit and counts it as a kept setting, and prices by adult count from the typed price (VAY-2188)", async () => {
   await simpleCard({ kind: "deposit", basisPoints: 3000, balanceDaysBeforeArrival: 14, acceptedMethods: ["card"] });
   const text = () => JSON.stringify(view.toJSON());
-  expect(text()).toContain("Deposit 30%");
+  // The Flexible rate's "Paid when booking" names the deposit (VAY-2282).
   expect(text()).toContain("Deposit: 30% of the final total. Balance due 14 days before arrival.");
   expect(text()).toContain("This room has more settings than the simple view shows.");
   await act(async () => input().props.onChange({ target: { value: "120" } }));

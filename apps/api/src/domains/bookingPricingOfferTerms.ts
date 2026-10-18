@@ -98,6 +98,9 @@ export function createBookingPricingOfferTermsStore(pool: Pool) {
       scope = { propertyId: scope.propertyId.toLowerCase(), organizationId: scope.organizationId.toLowerCase(), actorUserId: scope.actorUserId.toLowerCase() };
       const terms = parseBookingPricingOfferTerms({ ...input.terms, revision: randomUUID() });
       if (!terms) return fail("invalid");
+      // New writes only: stored terms that still accept it keep loading, and quotes and bookings are unchanged (VAY-2280).
+      if (terms.cancellation.kind === "non_refundable" && terms.payment.acceptedMethods?.includes("pay_at_property"))
+        throw new PricingStorageError("non_refundable_pay_at_property");
       const draft = candidate ? { ...candidate, draftId: candidate.draftId.toLowerCase() } : null;
       const requestId = input.requestId, expected = input.expectedRevision?.toLowerCase() ?? null;
       const hash = createHash("sha256").update(canonical({ scope, requestId, expected, ...(draft ? { draft } : {}), terms: { ...terms, revision: null } })).digest("hex");

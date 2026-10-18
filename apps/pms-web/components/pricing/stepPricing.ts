@@ -17,6 +17,7 @@ import {
 import { formatCurrency } from "@/lib/formatCurrency";
 import type { PricingTermsInput } from "@/services/api/replacementPricingClient";
 import { decimalAmount, parseMinorInput, PricingError, type Translate } from "./pricingAmounts";
+import { paidInAdvance } from "@vayada/product-onboarding/AcceptedPaymentMethods";
 import type { PaymentMethod } from "./AcceptedPaymentMethods";
 
 /** The step-by-step Prices tab's view of one room's pricing-v2 configuration. Pure: every change goes back through
@@ -485,7 +486,11 @@ export function presetOption(
   const cancellation = preset.nonRefundable
     ? ({ kind: "non_refundable" } as const)
     : mainTerms.cancellation;
-  const payment = { ...mainTerms.payment, acceptedMethods: [...values.methods] };
+  // A non-refundable stay is paid in advance: pay at property is never sent with it (VAY-2280).
+  const methods =
+    cancellation.kind === "non_refundable" ? paidInAdvance(values.methods) : [...values.methods];
+  if (!methods.length) throw new PricingError("pricing.error.nonRefundableNeedsAdvance");
+  const payment = { ...mainTerms.payment, acceptedMethods: methods };
   if (
     !parseBookingPricingOfferTerms({
       roomTypeId: room.roomTypeId,

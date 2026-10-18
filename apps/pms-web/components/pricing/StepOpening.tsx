@@ -128,7 +128,7 @@ export function StepOpening({
     </fieldset>
   );
   return (
-    <StepCard title={t("pricing.opening.title")} hint={t("pricing.opening.hint")}>
+    <StepCard step={1} title={t("pricing.opening.title")} hint={t("pricing.opening.hint")}>
       <div className="space-y-3.5 rounded-xl border border-gray-200 p-4">
         <div className="flex items-center gap-3">
           <div className="min-w-0 flex-1">
