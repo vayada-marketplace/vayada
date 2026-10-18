@@ -195,6 +195,22 @@ export function setBreakfastAmount(room: Room, offerId: string, amount: string):
       : []),
   ]);
 }
+/** What guests read about an option's meal (VAY-2281): one line of plain text, trimmed, up to 200 characters; empty
+ * leaves the key out. Not priced. */
+export function setMealDescription(room: Room, offerId: string, text: string): Room {
+  const value = text.trim();
+  const next = parsePricingConfiguration({
+    ...room,
+    offers: room.offers.map((offer) => {
+      if (offer.id !== offerId) return offer;
+      const meal: Record<string, unknown> = { ...offer.meal };
+      delete meal.description;
+      return { ...offer, meal: value ? { ...meal, description: value } : meal };
+    }),
+  });
+  if (!next) throw new PricingError("pricing.mealText.invalid");
+  return next;
+}
 
 /** New terms for the options the card's cancellation covers: the main option and the breakfast option that follows
  * it. The non-refundable option keeps its own. */
