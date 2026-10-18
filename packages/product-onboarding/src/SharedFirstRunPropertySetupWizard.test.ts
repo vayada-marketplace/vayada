@@ -597,7 +597,11 @@ describe("canConfirmLocation", () => {
   };
 
   it("keeps partial Google results editable", () => {
-    expect(canConfirmLocation({ ...completeLocation, postalCode: "" })).toBe(false);
+    expect(canConfirmLocation({ ...completeLocation, streetAddress: "" })).toBe(false);
+  });
+
+  it("confirms an address without a postal code (VAY-2289)", () => {
+    expect(canConfirmLocation({ ...completeLocation, postalCode: "" })).toBe(true);
   });
 
   it("requires a time zone before confirming an address", () => {
@@ -639,6 +643,27 @@ describe("validateProfileDraft", () => {
         logoMediaObjectId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
       }).logo,
     ).toBeUndefined();
+  });
+
+  it("doesn't ask for a postal code (VAY-2289)", () => {
+    const draft = {
+      displayName: "Hotel Alpenrose",
+      propertyType: "hotel",
+      countryCode: "LK",
+      city: "Galle",
+      streetAddress: "Lighthouse Street 1",
+      postalCode: "",
+      timezone: "Asia/Colombo",
+      contactEmail: "owner@alpenrose.example",
+      phone: "+94 77 123 4567",
+      whatsapp: "",
+      localityPublic: true,
+      logoFile: null,
+      logoMediaObjectId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      logoPublicUrl: "",
+    } as Parameters<typeof validateProfileDraft>[0];
+
+    expect(validateProfileDraft(draft)).toEqual({});
   });
 
   it("rejects invalid time zones", () => {

@@ -1101,7 +1101,6 @@ function toAdaptivePropertySetupFacts(row: AdaptiveHotelSetupFactsRow): Adaptive
     !nonEmpty(row.displayName) && "missing_display_name",
     !nonEmpty(row.propertyType) && "missing_property_type",
     !row.hasStreetAddress && "missing_street_address",
-    !row.hasPostalCode && "missing_postal_code",
     !row.hasCity && "missing_city",
     !row.hasCountryCode && "missing_country_code",
     !row.hasTimezone && "missing_timezone",
