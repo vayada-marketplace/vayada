@@ -208,7 +208,8 @@ export function registerPlatformContactIntakeRoutes(
           code: "intake_unavailable",
           category: "write_model",
           // Shown to visitors on vayada.com/contact (VAY-2286).
-          message: "We could not send your message. Please try again, or email hello@vayada.com.",
+          message:
+            "We could not send your message. Please try again, or write to the email address on this page.",
         });
       }
     },

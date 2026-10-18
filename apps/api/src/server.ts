@@ -315,6 +315,10 @@ import {
   createPgContactIntakeRetentionStore,
   startContactIntakeRetentionWorker,
 } from "./jobs/contactIntakeRetention.js";
+import {
+  contactNotificationSender,
+  runContactNotificationJobs,
+} from "./jobs/contactNotificationDelivery.js";
 
 const postgresRuntime = installPostgresPoolRuntime(pg);
 const config = loadConfig();
@@ -2945,6 +2949,45 @@ app.addHook("onClose", async () => {
   await bookingLifecycleStore.close();
   await pmsInboxDeliveryStore?.close();
   await pmsInboxDeliveryPool?.end();
+});
+
+// VAY-2286: each vayada.com contact-form message is emailed to the team (Reply-To: the visitor).
+const contactNotificationRecipient = config.contactNotificationRecipient;
+const contactNotificationDelivery =
+  config.bookingEmailDelivery && contactNotificationRecipient
+    ? createResendBookingEmailDelivery({
+        ...config.bookingEmailDelivery,
+        from: contactNotificationSender(config.bookingEmailDelivery.from),
+      })
+    : undefined;
+let activeContactNotificationDelivery: Promise<void> | undefined;
+const runContactNotificationDelivery = () => {
+  if (!config.backgroundWorkersEnabled) return;
+  if (!contactNotificationDelivery || !contactNotificationRecipient) return;
+  if (activeContactNotificationDelivery) return;
+  activeContactNotificationDelivery = runContactNotificationJobs(
+    targetDatabaseUrl,
+    contactNotificationDelivery,
+    { recipient: contactNotificationRecipient },
+  )
+    .then((result) => {
+      if (result.failed > 0) {
+        app.log.warn({ failed: result.failed }, "Contact notification delivery had failures");
+      }
+    })
+    .catch((error: unknown) => app.log.warn({ err: error }, "Contact notification delivery failed"))
+    .finally(() => {
+      activeContactNotificationDelivery = undefined;
+    });
+};
+const contactNotificationTimer = contactNotificationDelivery
+  ? setInterval(runContactNotificationDelivery, 15_000)
+  : undefined;
+contactNotificationTimer?.unref();
+runContactNotificationDelivery();
+app.addHook("onClose", async () => {
+  if (contactNotificationTimer) clearInterval(contactNotificationTimer);
+  await activeContactNotificationDelivery;
 });
 
 const propertySetupDraftRetentionWorker = startPropertySetupDraftRetentionWorker({

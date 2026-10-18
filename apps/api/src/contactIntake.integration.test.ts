@@ -7,10 +7,12 @@ import {
   createHotelSetupOrdinaryLoginFixture,
   type HotelSetupOrdinaryLoginFixture,
 } from "./hotelSetupOrdinaryLogin.fixture.js";
+import type { BookingEmailDelivery } from "./jobs/bookingEmailDelivery.js";
 import {
   createPgContactIntakeRetentionStore,
   type ContactIntakeRetentionStore,
 } from "./jobs/contactIntakeRetention.js";
+import { runContactNotificationJobs } from "./jobs/contactNotificationDelivery.js";
 import {
   createPgPlatformContactIntakeRepository,
   type PlatformContactIntakePayload,
@@ -34,7 +36,7 @@ function contactPayload(marker: string): PlatformContactIntakePayload {
   };
 }
 
-describe.skipIf(!URL)("PostgreSQL contact intake storage and retention", () => {
+describe.skipIf(!URL)("PostgreSQL contact intake storage, delivery and retention", () => {
   const admin = new pg.Client({ connectionString: URL ?? "postgresql://disabled" });
   let login: HotelSetupOrdinaryLoginFixture;
   let repository: PlatformContactIntakeRepository;
@@ -110,6 +112,95 @@ describe.skipIf(!URL)("PostgreSQL contact intake storage and retention", () => {
     ]);
     // The email is stored lower-case; that form doesn't reach the append-only tables either.
     expect(await rowsMentioning(`ana.${marker}@example.com`.toLowerCase())).toEqual(["jobs"]);
+  });
+
+  /** Earlier tests (and suites) may leave contact jobs queued; only this test's jobs may run. */
+  const parkOtherContactJobs = () =>
+    admin.query(
+      `UPDATE platform.jobs SET run_after = now() + interval '1 day'
+       WHERE job_type = 'email.platform-contact-notification' AND status = 'pending'`,
+    );
+
+  it("emails contact-form messages to the recipient with the visitor as Reply-To", async () => {
+    await parkOtherContactJobs();
+    const marker = randomUUID().slice(0, 8);
+    const support = randomUUID().slice(0, 8);
+    const form = await submit(marker);
+    const supportJob = await submit(support, "in_app_support");
+    const sent: Parameters<BookingEmailDelivery["send"]>[0][] = [];
+
+    const result = await runContactNotificationJobs(
+      login.connectionString,
+      { send: async (input) => void sent.push(input) },
+      { recipient: "team@example.test" },
+    );
+
+    expect(result).toEqual({ processed: 1, failed: 0 });
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({
+      to: "team@example.test",
+      replyTo: `ana.${marker}@example.com`,
+      subject: `Contact form: Ana Host ${marker}`,
+    });
+    for (const line of [
+      `Email: ana.${marker}@example.com`,
+      `Phone: +351 ${marker}`,
+      `Company: Casa ${marker}`,
+      `We have 12 rooms ${marker}`,
+    ])
+      expect(sent[0]?.text).toContain(line);
+    const jobs = await admin.query<{ id: string; status: string }>(
+      "SELECT id::text, status FROM platform.jobs WHERE id = ANY($1::uuid[])",
+      [[form.jobId, supportJob.jobId]],
+    );
+    expect(Object.fromEntries(jobs.rows.map((row) => [row.id, row.status]))).toEqual({
+      [form.jobId]: "succeeded",
+      [supportJob.jobId]: "pending",
+    });
+    const audit = await admin.query(
+      "SELECT action, redacted_payload, private_payload FROM platform.product_audit_events WHERE job_id=$1::uuid ORDER BY recorded_at",
+      [form.jobId],
+    );
+    expect(audit.rows.map((row) => row.action)).toEqual([
+      "platform.contact_submission.received",
+      "platform.contact_notification.delivery_succeeded",
+    ]);
+    expect(audit.rows[1]).toMatchObject({
+      redacted_payload: { outcome: "succeeded", attemptNumber: 1 },
+      private_payload: {},
+    });
+    expect(await rowsMentioning(marker)).toEqual(["jobs"]);
+  });
+
+  it("retries a failed send later and records no personal data about it", async () => {
+    await parkOtherContactJobs();
+    const marker = randomUUID().slice(0, 8);
+    const form = await submit(marker);
+
+    const result = await runContactNotificationJobs(
+      login.connectionString,
+      {
+        send: async (input) => {
+          throw new Error(`provider refused ${input.replyTo}`);
+        },
+      },
+      { recipient: "team@example.test" },
+    );
+
+    expect(result).toEqual({ processed: 0, failed: 1 });
+    const job = await admin.query(
+      "SELECT status, attempts_count, run_after > now() AS later FROM platform.jobs WHERE id=$1::uuid",
+      [form.jobId],
+    );
+    expect(job.rows[0]).toEqual({ status: "pending", attempts_count: 1, later: true });
+    const attempt = await admin.query(
+      "SELECT status, error_message FROM platform.job_attempts WHERE job_id=$1::uuid",
+      [form.jobId],
+    );
+    expect(attempt.rows).toEqual([
+      { status: "failed", error_message: "Contact notification delivery failed." },
+    ]);
+    expect(await rowsMentioning(marker)).toEqual(["jobs"]);
   });
 
   it("empties messages after 90 days, cancels unsent ones and keeps younger ones", async () => {
