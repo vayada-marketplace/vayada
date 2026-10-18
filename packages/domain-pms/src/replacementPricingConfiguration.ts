@@ -46,9 +46,13 @@ export type PricingMeal = Readonly<{
     | { kind: "room"; amountMinor: string }
     | { kind: "person"; adultMinor: string; childBandAmountsMinor: readonly string[] };
 }>;
+/** Where an offer is sold (VAY-2285). Without the key: the booking page and channels. A "not_sold" offer stays in
+ * the room as the price source of offers linked to it (e.g. Flexible off, Non-refundable still "season price −X%"). */
+export type PricingOfferSale = "channels_only" | "not_sold";
 export type PricingOffer = Readonly<{
   id: string;
   termsRevision: string;
+  sale?: PricingOfferSale;
   meal: PricingMeal;
   price:
     | { kind: "independent"; calendar: PricingCalendar }
@@ -88,6 +92,9 @@ const monthDay = (value: unknown): value is string =>
 const text = (value: unknown): value is string =>
   typeof value === "string" && value.trim().length > 0;
 const unique = (values: readonly unknown[]) => new Set(values).size === values.length;
+/** Guests can choose this offer on the direct booking page (VAY-2285). */
+export const pricingOfferOnBookingPage = (offer: Pick<PricingOffer, "sale">): boolean =>
+  offer.sale === undefined;
 
 export function validPricingGuests(
   guests: PricingGuests,
@@ -308,9 +315,12 @@ export function parsePricingConfiguration(value: unknown): PricingConfiguration 
     return null;
   const offers = new Map<string, PricingOffer>();
   for (const offer of Array.from(value.offers)) {
+    // Optional, never defaulted: stored offers without it must parse (and hash) exactly as before.
+    const saleKey = pricingObject(offer) && Object.hasOwn(offer, "sale") ? ["sale"] : [];
     if (
       !pricingObject(offer) ||
-      !pricingKeys(offer, ["id", "termsRevision", "meal", "price", "restrictions"]) ||
+      !pricingKeys(offer, ["id", "termsRevision", "meal", "price", "restrictions", ...saleKey]) ||
+      (saleKey.length > 0 && offer.sale !== "channels_only" && offer.sale !== "not_sold") ||
       !text(offer.id) ||
       offers.has(offer.id) ||
       !text(offer.termsRevision) ||
@@ -362,6 +372,8 @@ export function parsePricingConfiguration(value: unknown): PricingConfiguration 
     } else return null;
     offers.set(offer.id, offer as unknown as PricingOffer);
   }
+  // Guests must always be able to book the room directly.
+  if (![...offers.values()].some(pricingOfferOnBookingPage)) return null;
   for (const start of offers.values()) {
     const seen = new Set<string>();
     let current: PricingOffer | undefined = start;

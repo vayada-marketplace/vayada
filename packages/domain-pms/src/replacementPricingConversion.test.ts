@@ -173,6 +173,23 @@ describe("complete PMS pricing currency conversion", () => {
     );
     expect(source).toEqual(history);
   });
+  it("keeps where each offer is sold (VAY-2285)", () => {
+    const source = fixture();
+    const sold = {
+      ...source,
+      offers: [
+        { ...source.offers[0], sale: "not_sold" as const },
+        { ...source.offers[1], sale: "channels_only" as const },
+        ...source.offers.slice(2),
+      ],
+    };
+    expect(convert(sold, fx, now)!.offers.map((o) => o.sale)).toEqual([
+      "not_sold",
+      "channels_only",
+      undefined,
+      undefined,
+    ]);
+  });
   it("rounds ties away from zero and accepts explicit equal minor-unit ratios across different scales", () => {
     const source = fixture();
     const result = convert(source, { ...fx, numerator: "1", denominator: "2" }, now)!;

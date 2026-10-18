@@ -166,6 +166,29 @@ describe("replacement configuration", () => {
     eur.children.bands[1]!.nightlyMinor = "2050";
     expect(parsePricingConfiguration(eur)).not.toBeNull();
   });
+  it("keeps offers without a sale unchanged and limits where an offer is sold (VAY-2285)", () => {
+    const input = configurationFixture();
+    const parsed = parsePricingConfiguration(input)!;
+    expect(parsed).toStrictEqual(input);
+    expect(parsed.offers.some((offer) => Object.hasOwn(offer, "sale"))).toBe(false);
+    for (const sale of ["channels_only", "not_sold"]) {
+      const hidden = configurationFixture();
+      Object.assign(hidden.offers[0], { sale });
+      expect(parsePricingConfiguration(hidden)!.offers.map((o) => o.sale)).toEqual([
+        sale,
+        undefined,
+      ]);
+    }
+    for (const sale of [undefined, null, "", "everywhere", "booking_page", true]) {
+      const invalid = configurationFixture();
+      Object.assign(invalid.offers[0], { sale });
+      expect(parsePricingConfiguration(invalid)).toBeNull();
+    }
+    const offBookingPage = configurationFixture();
+    Object.assign(offBookingPage.offers[0], { sale: "not_sold" });
+    Object.assign(offBookingPage.offers[1], { sale: "channels_only" });
+    expect(parsePricingConfiguration(offBookingPage)).toBeNull();
+  });
   it("copies snapshots and refuses unsupported versions or extra fields", () => {
     const input = configurationFixture();
     const parsed = parsePricingConfiguration(input)!;
