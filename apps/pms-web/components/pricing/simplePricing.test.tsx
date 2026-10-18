@@ -8,7 +8,6 @@ import {
   cancellationTerms,
   hasKeptSettings,
   onePriceAgain,
-  paymentEdits,
   rateMethodEdits,
   pricePerAdultCount,
   setBreakfastAmount,
@@ -321,8 +320,9 @@ describe("the simple card's edits", () => {
       if (simple.cancellation.kind !== "own")
         for (const edit of cancellationEdits(simple, terms, simple.cancellation))
           expect(edit.terms).toEqual(terms[edit.offerId]);
-      for (const edit of paymentEdits(simple, terms, payment.acceptedMethods))
-        expect(edit.terms).toEqual(terms[edit.offerId]);
+      for (const rate of ["flexible", "non_refundable"] as const)
+        for (const edit of rateMethodEdits(simple, terms, rate, payment.acceptedMethods))
+          expect(edit.terms).toEqual(terms[edit.offerId]);
     }
     // Per adult count and back is the same room.
     const plain = room([
@@ -376,20 +376,13 @@ describe("the simple card's edits", () => {
     );
   });
 
-  it("moves the breakfast option's cancellation with the main price's, and payment with every switch", () => {
+  it("moves the breakfast option's cancellation with the main price's, and each rate's payment with its own options", () => {
     const simple = simpleRoom(design, designTerms)!;
     expect(cancellationEdits(simple, designTerms, { kind: "free", days: 3 })).toEqual([
       { offerId: "flexible", terms: { ...designTerms.flexible, cancellation: free(3) } },
       { offerId: "breakfast", terms: { ...designTerms.breakfast, cancellation: free(3) } },
     ]);
     expect(cancellationTerms({ kind: "non_refundable" })).toEqual({ kind: "non_refundable" });
-    const card = paymentEdits(simple, designTerms, ["card"]);
-    expect(card.map((edit) => [edit.offerId, edit.terms.payment])).toEqual([
-      ["flexible", { kind: "full", acceptedMethods: ["card"] }],
-      ["nonrefundable", { kind: "full", acceptedMethods: ["card"] }],
-      ["breakfast", { kind: "full", acceptedMethods: ["card"] }],
-    ]);
-    expect(() => paymentEdits(simple, designTerms, [])).toThrow();
     // Each rate's methods are its own (VAY-2282): the Flexible rate's go to the breakfast switch too.
     expect(
       rateMethodEdits(simple, designTerms, "flexible", ["pay_at_property"]).map((edit) => [
