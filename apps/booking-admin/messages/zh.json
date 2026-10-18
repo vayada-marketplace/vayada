@@ -173,6 +173,8 @@
   "layout.sidebar.manageHotels": "管理酒店",
   "layout.sidebar.collapse": "收起",
   "dashboard.title": "预订引擎",
+  "dashboard.setupIncomplete": "您的物业设置尚未完成。您的进度已保存。",
+  "dashboard.resumeSetup": "继续设置",
   "dashboard.timeRange.today": "今天",
   "dashboard.timeRange.week": "本周",
   "dashboard.timeRange.month": "过去30天",

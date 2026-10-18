@@ -173,6 +173,8 @@
   "layout.sidebar.manageHotels": "Gestione hotel",
   "layout.sidebar.collapse": "Comprimi",
   "dashboard.title": "Motore di prenotazione",
+  "dashboard.setupIncomplete": "La configurazione della struttura non è completa. I progressi sono salvati.",
+  "dashboard.resumeSetup": "Riprendi la configurazione",
   "dashboard.timeRange.today": "Oggi",
   "dashboard.timeRange.week": "Questa settimana",
   "dashboard.timeRange.month": "Ultimi 30 giorni",

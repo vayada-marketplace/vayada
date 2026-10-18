@@ -173,6 +173,8 @@
   "layout.sidebar.manageHotels": "Управление отелями",
   "layout.sidebar.collapse": "Свернуть",
   "dashboard.title": "Система бронирования",
+  "dashboard.setupIncomplete": "Настройка вашего объекта ещё не завершена. Ваш прогресс сохранён.",
+  "dashboard.resumeSetup": "Продолжить настройку",
   "dashboard.timeRange.today": "Сегодня",
   "dashboard.timeRange.week": "Эта неделя",
   "dashboard.timeRange.month": "Последние 30 дней",
