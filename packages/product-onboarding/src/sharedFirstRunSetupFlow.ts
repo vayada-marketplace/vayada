@@ -1,5 +1,6 @@
 import {
   PRODUCT_ENTRY_PRODUCTS,
+  SETUP_TRACKS,
   type AdaptiveHotelSetupStatus,
   type ProductEntryDecision,
   type PropertySetupPlan,
@@ -14,6 +15,8 @@ export type SharedHotelSetupEntryProduct = ProductEntryDecision["requestedProduc
 export function parseSharedHotelSetupEntryProduct(
   value: string | null | undefined,
 ): SharedHotelSetupEntryProduct | null {
+  // An old Creator Marketplace link (VAY-2270) sets up the hotel's booking engine.
+  if (value === "marketplace") return "booking";
   return PRODUCT_ENTRY_PRODUCTS.includes(value as SetupComponentProduct)
     ? (value as SharedHotelSetupEntryProduct)
     : null;
@@ -124,9 +127,7 @@ export function toggleSetupTrackSelection(
   const next = selectedTracks.includes(track)
     ? selectedTracks.filter((candidate) => candidate !== track)
     : [...selectedTracks, track];
-  return (["hotel_operations", "creator_marketplace"] as const).filter((candidate) =>
-    next.includes(candidate),
-  );
+  return SETUP_TRACKS.filter((candidate) => next.includes(candidate));
 }
 
 function emptyView(screen: SharedFirstRunSetupScreen, title: string): SharedFirstRunSetupViewModel {

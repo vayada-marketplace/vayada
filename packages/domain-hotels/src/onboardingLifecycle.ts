@@ -4,27 +4,10 @@ import {
   type ReadinessProduct,
 } from "./onboardingReadiness.js";
 
-export const MARKETPLACE_MODERATION_STATUSES = [
-  "pending",
-  "changes_requested",
-  "approved",
-  "rejected",
-  "withdrawn",
-] as const;
-
-export const MARKETPLACE_ACTIVATION_STATUSES = ["active", "suspended", "deactivated"] as const;
-
-export type MarketplaceModerationStatus = (typeof MARKETPLACE_MODERATION_STATUSES)[number];
-export type MarketplaceActivationStatus = (typeof MARKETPLACE_ACTIVATION_STATUSES)[number];
-
-declare const marketplaceSubmissionRevisionId: unique symbol;
 declare const bookingContentRevisionId: unique symbol;
 declare const readyProductReadinessEvidence: unique symbol;
 declare const liveAriSourceRevision: unique symbol;
 
-export type MarketplaceSubmissionRevisionId = string & {
-  readonly [marketplaceSubmissionRevisionId]: true;
-};
 export type BookingContentRevisionId = string & {
   readonly [bookingContentRevisionId]: true;
 };
@@ -110,68 +93,6 @@ type ImmutableRevision<TProduct extends ReadinessProduct> = Readonly<{
   revisionNumber: number;
   readiness: ReadyProductReadinessEvidence<TProduct>;
 }>;
-
-export type MarketplaceSubmissionRevision = ImmutableRevision<"marketplace"> &
-  Readonly<{
-    revisionId: MarketplaceSubmissionRevisionId;
-    organizationId: string;
-    submissionSnapshot: OnboardingLifecycleJsonObject;
-    submittedByUserId: string;
-    submittedAt: string;
-  }>;
-
-export type MarketplaceSubmissionModeration = Readonly<{
-  revisionId: MarketplaceSubmissionRevisionId;
-  propertyId: string;
-  status: MarketplaceModerationStatus;
-  decidedByUserId: string | null;
-  decisionReason: string | null;
-  decidedAt: string | null;
-}>;
-
-export type MarketplaceSubmissionActivation = Readonly<{
-  propertyId: string;
-  revisionId: MarketplaceSubmissionRevisionId;
-  status: MarketplaceActivationStatus;
-  activatedByUserId: string;
-  activatedAt: string;
-  statusChangedByUserId: string;
-  statusReason: string | null;
-  updatedAt: string;
-}>;
-
-/**
- * Marketplace owns submission snapshots, moderation, and its active pointer.
- * Implementations must return detached snapshots rather than mutable storage aliases.
- */
-export interface MarketplaceSubmissionLifecyclePort {
-  appendRevision(
-    input: Omit<MarketplaceSubmissionRevision, "revisionId" | "revisionNumber">,
-  ): Promise<MarketplaceSubmissionRevision>;
-  recordModeration(input: {
-    revisionId: MarketplaceSubmissionRevisionId;
-    propertyId: string;
-    expectedStatus: "pending";
-    status: Exclude<MarketplaceModerationStatus, "pending">;
-    decidedByUserId: string;
-    decisionReason?: string;
-  }): Promise<MarketplaceSubmissionModeration>;
-  /** Atomically verifies approved moderation in Marketplace-owned storage; caller state is not trusted. */
-  activateApproved(input: {
-    propertyId: string;
-    revisionId: MarketplaceSubmissionRevisionId;
-    expectedActiveRevisionId: MarketplaceSubmissionRevisionId | null;
-    activatedByUserId: string;
-  }): Promise<MarketplaceSubmissionActivation>;
-  setActivationStatus(input: {
-    propertyId: string;
-    expectedStatus: MarketplaceActivationStatus;
-    status: MarketplaceActivationStatus;
-    changedByUserId: string;
-    reason: string;
-  }): Promise<MarketplaceSubmissionActivation>;
-  getActivation(propertyId: string): Promise<MarketplaceSubmissionActivation | null>;
-}
 
 export type BookingContentRevision = ImmutableRevision<"booking"> &
   Readonly<{

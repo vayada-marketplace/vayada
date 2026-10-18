@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FinancePaymentReadinessSnapshot } from "@vayada/domain-finance";
 import {
   AcceptedPaymentMethods,
+  paidInAdvance,
   type ManualPaymentMethod,
   type PaymentMethod,
 } from "@vayada/product-onboarding/AcceptedPaymentMethods";
@@ -208,6 +209,17 @@ export function PricingStep({
       ? undefined
       : readiness && paymentsStepMethods(readiness, manualMethods);
   const methods = stepMethods ?? picked ?? [];
+  // Guests can only pay at the property: non-refundable stays (paid in advance) can't be offered (VAY-2280).
+  const onlyAtProperty = methods.length > 0 && !paidInAdvance(methods).length;
+  // A flexible rate starts as "Nothing paid when booking" (VAY-2205): say so when other ways are chosen too.
+  const atPropertyHint = cancellation.kind === "free" &&
+    methods.includes("pay_at_property") &&
+    paidInAdvance(methods).length > 0 && (
+      <span className="mt-1 block text-xs text-gray-600">
+        Guests pay at the property. Rates paid when booking, set later in Rooms &amp; Rates, use the
+        other ways.
+      </span>
+    );
   const pricing = !!currency && !currencyMismatch && setupRooms.length > 0 && !paymentsPending;
   const children = setupRooms.some(({ capacity }) => capacity.children > 0);
   /** An edit starts a new publish attempt; `solved` names the problem it fixes. */
@@ -234,12 +246,14 @@ export function PricingStep({
     // Each room is built on its own, so a price that doesn't parse is named with its room.
     const problems: Problem[] = [];
     const rates: FirstPricing[] = [];
+    // Non-refundable stays are paid in advance, so they need a way to pay other than at the property (VAY-2280).
+    const noAdvance = cancellation.kind === "non_refundable" && !paidInAdvance(methods).length;
     for (const room of setupRooms) {
       if (!prices[room.roomTypeId]?.trim()) {
         problems.push({ key: room.roomTypeId, text: `A price per night for ${room.name}` });
         continue;
       }
-      if (!methods.length) continue;
+      if (!methods.length || noAdvance) continue;
       try {
         rates.push(
           ...setupRates(
@@ -260,6 +274,8 @@ export function PricingStep({
       }
     }
     if (setupRooms.length && !methods.length) problems.push({ key: "pay", text: "How guests pay" });
+    else if (setupRooms.length && noAdvance)
+      problems.push({ key: "pay", text: "A way to pay in advance for non-refundable stays" });
     setMissing(problems);
     if (problems.length) return;
     void run(() => finish(rates));
@@ -442,7 +458,10 @@ export function PricingStep({
                 key={kind}
                 type="button"
                 aria-pressed={cancellation.kind === kind}
-                disabled={busy}
+                disabled={
+                  busy ||
+                  (kind === "non_refundable" && cancellation.kind !== kind && onlyAtProperty)
+                }
                 onClick={() => {
                   setCancellation(
                     kind === "free"
@@ -457,6 +476,12 @@ export function PricingStep({
               </button>
             ))}
           </div>
+          {onlyAtProperty && (
+            <p className="mt-3 text-sm text-gray-600">
+              Non-refundable stays are paid in advance, so they can&apos;t be paid at the property.
+              To offer them, make bank transfer or PayPal ready in Payments.
+            </p>
+          )}
           {cancellation.kind === "free" && (
             <label className="mt-4 flex flex-wrap items-center gap-2.5 text-sm text-gray-800">
               Guests can cancel for free until
@@ -497,6 +522,13 @@ export function PricingStep({
             <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-gray-200 bg-white px-4 py-3">
               <span className="grow text-sm text-gray-900">
                 {stepMethods.map((method) => methodWords[method]).join(" · ")}
+                {cancellation.kind === "non_refundable" &&
+                  stepMethods.includes("pay_at_property") && (
+                    <span className="mt-1 block text-xs text-amber-700">
+                      Pay at property: not offered, non-refundable stays are paid in advance
+                    </span>
+                  )}
+                {atPropertyHint}
               </span>
               <button
                 type="button"
@@ -521,12 +553,14 @@ export function PricingStep({
                 methods={methods}
                 disabled={busy}
                 manualMethods={manualMethods}
+                nonRefundable={cancellation.kind === "non_refundable"}
                 onChange={(next) => {
                   setPicked(next);
                   changed(next.length ? "pay" : undefined);
                 }}
                 t={englishPricingSetup}
               />
+              {atPropertyHint}
             </div>
           )}
           <p className="mt-6 rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm leading-6 text-gray-700">

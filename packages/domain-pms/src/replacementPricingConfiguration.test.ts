@@ -166,6 +166,58 @@ describe("replacement configuration", () => {
     eur.children.bands[1]!.nightlyMinor = "2050";
     expect(parsePricingConfiguration(eur)).not.toBeNull();
   });
+  it("keeps offers without a sale unchanged and limits where an offer is sold (VAY-2285)", () => {
+    const input = configurationFixture();
+    const parsed = parsePricingConfiguration(input)!;
+    expect(parsed).toStrictEqual(input);
+    expect(parsed.offers.some((offer) => Object.hasOwn(offer, "sale"))).toBe(false);
+    for (const sale of ["channels_only", "not_sold"]) {
+      const hidden = configurationFixture();
+      Object.assign(hidden.offers[0], { sale });
+      expect(parsePricingConfiguration(hidden)!.offers.map((o) => o.sale)).toEqual([
+        sale,
+        undefined,
+      ]);
+    }
+    for (const sale of [undefined, null, "", "everywhere", "booking_page", true]) {
+      const invalid = configurationFixture();
+      Object.assign(invalid.offers[0], { sale });
+      expect(parsePricingConfiguration(invalid)).toBeNull();
+    }
+    const offBookingPage = configurationFixture();
+    Object.assign(offBookingPage.offers[0], { sale: "not_sold" });
+    Object.assign(offBookingPage.offers[1], { sale: "channels_only" });
+    expect(parsePricingConfiguration(offBookingPage)).toBeNull();
+  });
+  it("keeps an optional one-line meal description for guests (VAY-2281)", () => {
+    const described = (description: unknown) => {
+      const input = configurationFixture();
+      Object.assign(input.offers[1].meal, { description });
+      return parsePricingConfiguration(input);
+    };
+    const text = "Buffet breakfast in the Stube, 7:00–10:30";
+    expect(described(text)!.offers[1].meal.description).toBe(text);
+    expect(described("x".repeat(200))).not.toBeNull();
+    expect(described("🥐 Croissants & coffee")).not.toBeNull();
+    for (const invalid of [
+      "",
+      " Buffet",
+      "Buffet ",
+      "x".repeat(201),
+      "Two\nlines",
+      "Next\u0085line",
+      "Line\u2028separator",
+      "Bidi \u202Eoverride",
+      "Unpaired \ud800",
+      7,
+      null,
+    ])
+      expect(described(invalid)).toBeNull();
+    // Older rooms without it parse unchanged and gain no key.
+    expect(parsePricingConfiguration(configurationFixture())!.offers[1].meal).not.toHaveProperty(
+      "description",
+    );
+  });
   it("copies snapshots and refuses unsupported versions or extra fields", () => {
     const input = configurationFixture();
     const parsed = parsePricingConfiguration(input)!;

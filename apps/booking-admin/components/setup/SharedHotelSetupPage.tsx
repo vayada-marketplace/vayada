@@ -41,7 +41,7 @@ export { productHandoffReturnTo };
 // Booking Admin hosts the wizard: a hotel that arrived from the PMS (returnProduct or entryProduct
 // "pms") still hands off to pms-web on exit; every other hotel exits to this app's dashboard.
 const PMS_FRONTEND_URL = process.env.NEXT_PUBLIC_PMS_FRONTEND_URL || "https://pms.vayada.com";
-// Booking Admin offers the Hotel Operations track only (the Creator Marketplace is being removed).
+// Booking Admin offers the Hotel Operations track, the only setup track.
 const BOOKING_ADMIN_SETUP_TRACKS = ["hotel_operations"] as const;
 const PROPERTY_LAUNCH_SETTINGS_API = {
   get: (propertyId: string, options?: RequestInit) =>
@@ -116,12 +116,12 @@ export function SharedHotelSetupPage({
     };
   }, [authorized]);
 
-  const entryProduct = useMemo(() => {
-    const requested =
-      parseSharedHotelSetupEntryProduct(searchParams.get("entryProduct")) ?? defaultEntryProduct;
-    // Booking Admin has no Marketplace track: an old Marketplace link sets up booking.
-    return requested === "marketplace" ? "booking" : requested;
-  }, [defaultEntryProduct, searchParams]);
+  // An old Marketplace link (entryProduct=marketplace) reads as booking setup.
+  const entryProduct = useMemo(
+    () =>
+      parseSharedHotelSetupEntryProduct(searchParams.get("entryProduct")) ?? defaultEntryProduct,
+    [defaultEntryProduct, searchParams],
+  );
   const initialAddProperty = searchParams.get("mode") === "add";
   const initialPropertyId = searchParams.get("propertyId");
 

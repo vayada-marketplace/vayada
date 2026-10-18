@@ -41,4 +41,4 @@ them with software. Each family's licence, with its copyright notice, is in `lic
 
 `next/font/local` only works inside Next's compiler. An app whose Vitest tests import a component
 that uses these fonts aliases `next/font/local` to `src/vitestNextFontLocal.ts` (see
-apps/marketplace-web/vitest.config.ts).
+apps/booking-admin/vitest.config.ts).

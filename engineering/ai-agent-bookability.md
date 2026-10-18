@@ -61,7 +61,7 @@ Useful public pieces already exist:
 The gaps for AI-agent bookability are:
 
 - No obvious Schema.org JSON-LD or hotel-specific structured markup exists in
-  booking-web, landing, marketplace-web, booking-api, or PMS API.
+  booking-web, landing, booking-api, or PMS API.
 - Hotel identity/profile data, availability/rates, policies, payment settings,
   and booking creation are split across services and response shapes.
 - Existing public endpoints are optimized for the Vayada frontend, not for

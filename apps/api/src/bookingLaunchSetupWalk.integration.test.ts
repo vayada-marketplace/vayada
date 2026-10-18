@@ -717,7 +717,20 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
                 terms: {
                   roomTypeId,
                   offerId: "standard",
-                  cancellation: { kind: "non_refundable" },
+                  // Non-refundable stays are paid in advance, so the pay-at-hotel walk books a free-cancellation
+                  // rate (VAY-2280 refuses non-refundable terms that accept pay at property).
+                  cancellation:
+                    method === "pay_at_property"
+                      ? {
+                          kind: "flexible",
+                          terms: {
+                            type: "free_until_days_before_arrival",
+                            freeCancellationDeadlineDays: 7,
+                            afterDeadlinePenalty: "full_booking_amount",
+                            noShowPenalty: "full_booking_amount",
+                          },
+                        }
+                      : { kind: "non_refundable" },
                   payment: { kind: "full", acceptedMethods: [method] },
                 },
               },

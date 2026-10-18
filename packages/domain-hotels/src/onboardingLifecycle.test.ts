@@ -1,18 +1,12 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
 
 import {
-  MARKETPLACE_ACTIVATION_STATUSES,
-  MARKETPLACE_MODERATION_STATUSES,
   createLiveAriSourceRevision,
   createReadyProductReadinessEvidence,
   type BookingActiveContentPointer,
   type BookingContentRevisionId,
   type LiveAriSourceRevision,
   type LiveAriWatermark,
-  type MarketplaceSubmissionModeration,
-  type MarketplaceSubmissionLifecyclePort,
-  type MarketplaceSubmissionActivation,
-  type MarketplaceSubmissionRevisionId,
   type OnboardingLifecycleJsonValue,
   type ReadyProductReadinessEvidence,
 } from "./onboardingLifecycle.js";
@@ -22,34 +16,22 @@ import {
   type ProductReadinessResult,
 } from "./onboardingReadiness.js";
 
-type MarketplaceAppendInput = Parameters<MarketplaceSubmissionLifecyclePort["appendRevision"]>[0];
-
 function assertCompileTimeLifecycleBoundaries(
   bookingEvidence: ReadyProductReadinessEvidence<"booking">,
-  marketplaceInput: MarketplaceAppendInput,
-  moderation: MarketplaceSubmissionModeration,
-  activation: MarketplaceSubmissionActivation,
   bookingPointer: BookingActiveContentPointer,
   ariWatermark: LiveAriWatermark,
 ): void {
-  // @ts-expect-error Booking readiness cannot seed a Marketplace revision.
-  const marketplaceEvidence: MarketplaceAppendInput["readiness"] = bookingEvidence;
   // @ts-expect-error Hashed manifest sources are deeply immutable.
-  marketplaceInput.readiness.sourceManifest.sources[0]!.revision = "mutated";
-  // @ts-expect-error Lifecycle state results are readonly snapshots.
-  moderation.status = "approved";
-  // @ts-expect-error Lifecycle state results are readonly snapshots.
-  activation.status = "suspended";
+  bookingEvidence.sourceManifest.sources[0]!.revision = "mutated";
   // @ts-expect-error Lifecycle state results are readonly snapshots.
   bookingPointer.revisionId = "mutated" as BookingContentRevisionId;
   // @ts-expect-error Lifecycle state results are readonly snapshots.
   ariWatermark.watermarkRevision = 2;
-  void marketplaceEvidence;
 }
 
 void assertCompileTimeLifecycleBoundaries;
 
-function readyMarketplaceEvaluation(): ProductReadinessEvaluation {
+function readyBookingEvaluation(): ProductReadinessEvaluation {
   const propertyId = "10000000-0000-4000-8000-000000000001";
   const source = {
     ownerDomain: "hotel_catalog" as const,
@@ -60,7 +42,7 @@ function readyMarketplaceEvaluation(): ProductReadinessEvaluation {
   return {
     contractVersion: "onboarding-product-readiness.v1",
     propertyId,
-    product: "marketplace",
+    product: "booking",
     status: "ready",
     sourceManifest: {
       contractVersion: "onboarding-source-manifest.v1",
@@ -69,7 +51,7 @@ function readyMarketplaceEvaluation(): ProductReadinessEvaluation {
     },
     groups: [
       {
-        groupId: "marketplace.hotel_profile",
+        groupId: "booking.hotel_profile",
         status: "ready",
         steps: [
           {
@@ -85,41 +67,25 @@ function readyMarketplaceEvaluation(): ProductReadinessEvaluation {
 }
 
 describe("onboarding publication lifecycle contracts", () => {
-  it("keeps Marketplace moderation explicit", () => {
-    expect(MARKETPLACE_MODERATION_STATUSES).toEqual([
-      "pending",
-      "changes_requested",
-      "approved",
-      "rejected",
-      "withdrawn",
-    ]);
-    expect(MARKETPLACE_ACTIVATION_STATUSES).toEqual(["active", "suspended", "deactivated"]);
-  });
-
-  it("does not allow Marketplace and Booking revision identities to mix", () => {
-    expectTypeOf<MarketplaceSubmissionRevisionId>().not.toEqualTypeOf<BookingContentRevisionId>();
-    expectTypeOf<MarketplaceSubmissionActivation["revisionId"]>().not.toEqualTypeOf<
-      BookingActiveContentPointer["revisionId"]
-    >();
-    expectTypeOf<MarketplaceAppendInput["readiness"]["product"]>().toEqualTypeOf<"marketplace">();
-    expectTypeOf<MarketplaceAppendInput["readiness"]["status"]>().toEqualTypeOf<"ready">();
+  it("keeps revision identities and JSON snapshots apart", () => {
+    expectTypeOf<ReadyProductReadinessEvidence<"booking">["product"]>().toEqualTypeOf<"booking">();
+    expectTypeOf<ReadyProductReadinessEvidence<"booking">["status"]>().toEqualTypeOf<"ready">();
     expectTypeOf<Date>().not.toMatchTypeOf<OnboardingLifecycleJsonValue>();
     expectTypeOf<LiveAriSourceRevision>().not.toEqualTypeOf<BookingContentRevisionId>();
-    expectTypeOf<LiveAriSourceRevision>().not.toEqualTypeOf<MarketplaceSubmissionRevisionId>();
   });
 
   it("creates detached evidence only after recomputing its hashes", async () => {
-    const result = await createProductReadinessResult(readyMarketplaceEvaluation());
+    const result = await createProductReadinessResult(readyBookingEvaluation());
     const mutableResult = structuredClone(result) as ProductReadinessResult;
     const evidence = await createReadyProductReadinessEvidence(mutableResult, {
       propertyId: mutableResult.propertyId,
-      product: "marketplace",
+      product: "booking",
     });
 
     expect(evidence).toMatchObject({
       contractVersion: "onboarding-product-readiness.v1",
       propertyId: result.propertyId,
-      product: "marketplace",
+      product: "booking",
       status: "ready",
       sourceManifestHash: result.sourceManifestHash,
       readinessHash: result.readinessHash,
@@ -138,13 +104,14 @@ describe("onboarding publication lifecycle contracts", () => {
     await expect(
       createReadyProductReadinessEvidence(tampered, {
         propertyId: result.propertyId,
-        product: "marketplace",
+        product: "booking",
       }),
     ).rejects.toThrow("hashes do not match");
     await expect(
       createReadyProductReadinessEvidence(result, {
         propertyId: result.propertyId,
-        product: "booking",
+        // Only Booking is a readiness product now; a mismatch is still refused at runtime.
+        product: "marketplace" as never,
       }),
     ).rejects.toThrow("different product");
   });

@@ -199,12 +199,6 @@ function status(input: {
           ],
           allowedActions: ["manage_service"],
         },
-        {
-          track: "creator_marketplace",
-          provisioning: "not_selected",
-          components: [{ product: "marketplace", access: "absent" }],
-          allowedActions: ["add"],
-        },
       ],
     },
     propertySelection: {
@@ -253,7 +247,6 @@ function status(input: {
       launchReadiness: {
         operationsUse: input.withIncompleteTask ? "blocked" : "ready",
         directBookingPublish: "pending",
-        marketplacePublish: "not_applicable",
       },
     },
     updatedAt: "2026-07-26T10:00:00.000Z",

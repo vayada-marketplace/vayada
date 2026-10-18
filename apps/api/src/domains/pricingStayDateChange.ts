@@ -193,6 +193,7 @@ export const repriceFromPublication: PricingStayRepricer = async (client, input)
     },
     input.booked.paymentMethod,
     900,
+    "host",
   );
   return priced && { quote: priced.quote, calculation: priced.calculation };
 };
