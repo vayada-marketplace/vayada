@@ -189,6 +189,35 @@ describe("replacement configuration", () => {
     Object.assign(offBookingPage.offers[1], { sale: "channels_only" });
     expect(parsePricingConfiguration(offBookingPage)).toBeNull();
   });
+  it("keeps an optional one-line meal description for guests (VAY-2281)", () => {
+    const described = (description: unknown) => {
+      const input = configurationFixture();
+      Object.assign(input.offers[1].meal, { description });
+      return parsePricingConfiguration(input);
+    };
+    const text = "Buffet breakfast in the Stube, 7:00–10:30";
+    expect(described(text)!.offers[1].meal.description).toBe(text);
+    expect(described("x".repeat(200))).not.toBeNull();
+    expect(described("🥐 Croissants & coffee")).not.toBeNull();
+    for (const invalid of [
+      "",
+      " Buffet",
+      "Buffet ",
+      "x".repeat(201),
+      "Two\nlines",
+      "Next\u0085line",
+      "Line\u2028separator",
+      "Bidi \u202Eoverride",
+      "Unpaired \ud800",
+      7,
+      null,
+    ])
+      expect(described(invalid)).toBeNull();
+    // Older rooms without it parse unchanged and gain no key.
+    expect(parsePricingConfiguration(configurationFixture())!.offers[1].meal).not.toHaveProperty(
+      "description",
+    );
+  });
   it("copies snapshots and refuses unsupported versions or extra fields", () => {
     const input = configurationFixture();
     const parsed = parsePricingConfiguration(input)!;
