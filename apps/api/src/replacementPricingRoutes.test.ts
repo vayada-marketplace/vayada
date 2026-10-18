@@ -368,6 +368,8 @@ describe("replacement pricing HTTP boundary", () => {
       ["stale", 409],
       ["idempotency_conflict", 409],
       ["currency_conversion_required", 409],
+      // VAY-2280: its own code, so the PMS can say why (not "prices changed").
+      ["non_refundable_pay_at_property", 400],
     ] as const) {
       f.commands.publish.mockRejectedValue(new PricingStorageError(code));
       const response = await f.inject(5);

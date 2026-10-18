@@ -51,9 +51,11 @@ export function PriceCalendar({
   today,
   stay,
   selection = null,
+  empty = false,
   onMonth,
   onPick,
 }: {
+  /** Null while the typed prices don't parse; with `empty`, the room has no prices yet. */
   room: PricingConfiguration | null;
   /** The rates the calendar can show (VAY-2284: Flexible and Non-refundable), with their names. */
   options: readonly { id: string; name: string }[];
@@ -67,6 +69,8 @@ export function PriceCalendar({
   stay: { checkIn: string; checkOut: string };
   /** The picked nights (the night panel's), outlined strongly; the sample stay's nights lightly. */
   selection?: NightSelection | null;
+  /** The room has no prices yet (VAY-2280, approved board "no prices yet"): every night says so. */
+  empty?: boolean;
   onMonth: (month: string) => void;
   onPick: (date: string) => void;
 }) {
@@ -113,7 +117,9 @@ export function PriceCalendar({
         <h2 className="text-[12px] font-semibold uppercase tracking-[0.08em] text-gray-500">
           {t("pricing.steps.calendar.title")}
         </h2>
-        <p className="hidden text-[13px] text-gray-500 sm:block">{t("pricing.calendar.hint")}</p>
+        {!empty && (
+          <p className="hidden text-[13px] text-gray-500 sm:block">{t("pricing.calendar.hint")}</p>
+        )}
       </div>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
@@ -233,7 +239,9 @@ export function PriceCalendar({
           )}
         </div>
       )}
-      {!room ? (
+      {!room && empty ? (
+        <EmptyMonth month={month} lead={lead} title={title} />
+      ) : !room ? (
         <p className="text-[13px] text-gray-500">{t("pricing.steps.guests.invalid")}</p>
       ) : months ? (
         <YearCalendar
@@ -268,6 +276,11 @@ export function PriceCalendar({
           ))}
         </div>
       )}
+      {!room && empty && (
+        <p className="border-t border-gray-100 pt-3 text-[12px] text-gray-500">
+          {t("pricing.calendar.emptyLegend")}
+        </p>
+      )}
       {room && (
         <Legend
           room={room}
@@ -278,6 +291,43 @@ export function PriceCalendar({
         />
       )}
     </section>
+  );
+}
+
+/** A month without prices: each night says it has none yet, and nothing can be picked until there is a price. */
+function EmptyMonth({ month, lead, title }: { month: string; lead: number; title: string }) {
+  const { t } = useTranslation();
+  const days = new Date(
+    Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0),
+  ).getUTCDate();
+  return (
+    <div className="grid grid-cols-7 gap-1 md:gap-1.5">
+      {Array.from({ length: 7 }, (_, day) => (
+        <span
+          key={`head-${day}`}
+          aria-hidden="true"
+          className="text-center text-[11px] font-medium uppercase tracking-wide text-gray-500"
+        >
+          {t(`pricing.steps.calendar.weekday.${day}`)}
+        </span>
+      ))}
+      {Array.from({ length: lead }, (_, index) => (
+        <span key={`lead-${index}`} aria-hidden="true" />
+      ))}
+      {Array.from({ length: days }, (_, index) => (
+        <div
+          key={index}
+          role="img"
+          aria-label={`${index + 1} ${title}, ${t("pricing.calendar.noPriceState")}`}
+          className="flex h-[52px] min-w-0 flex-col justify-between rounded-lg border border-dashed border-gray-300 bg-white px-1 py-1.5 md:h-[72px] md:rounded-[10px] md:px-2.5 md:py-2"
+        >
+          <span className="text-[11px] font-medium text-gray-400 md:text-[12px]">{index + 1}</span>
+          <span className="truncate text-[11px] font-medium text-gray-400 md:text-[12px]">
+            {t("pricing.calendar.noPrice")}
+          </span>
+        </div>
+      ))}
+    </div>
   );
 }
 

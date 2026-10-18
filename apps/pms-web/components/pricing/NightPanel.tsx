@@ -28,6 +28,7 @@ import {
 import { seasonGroups, seasonTones } from "./priceCalendarModel";
 import { recurringTemplate } from "./recurringPricingInputs";
 import { mainOffer, money } from "./stepPricing";
+import { rangeMinimum, setRangeMinimum, stayDefaults } from "./stayRuleSeasons";
 import * as ui from "./pricingStyles";
 
 type Room = PricingConfiguration;
@@ -349,13 +350,22 @@ export function NightPanel({
               disabled={disabled}
               onClick={() => {
                 const group = groups.find((value) => value.key === entry.season);
-                apply(() =>
-                  addToSeason(
+                apply(() => {
+                  const next = addToSeason(
                     room,
                     selection,
                     group ? { name: group.name, tier: group.tier } : { name: entry.name, tier: "" },
-                  ),
-                );
+                  );
+                  // The days take the season's minimum stay too (VAY-2280 step 2).
+                  const nights = group && stayOwned ? rangeMinimum(room, group.seasons[0]) : null;
+                  return nights === null || nights === stayDefaults(room).minArrivalNights
+                    ? next
+                    : setRangeMinimum(
+                        next,
+                        [{ from: selection.from.slice(5), through: selection.to.slice(5) }],
+                        nights,
+                      );
+                });
               }}
             >
               {t("pricing.night.seasonApply")}
