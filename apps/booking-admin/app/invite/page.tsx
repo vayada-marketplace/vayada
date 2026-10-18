@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { ArrowRightIcon, CheckCircleIcon, KeyIcon } from "@heroicons/react/24/outline";
-import { HotelIcon } from "@vayada/product-onboarding";
+import { HotelIcon } from "@vayada/product-onboarding/HotelIcon";
 
 import { useTranslation } from "@/lib/i18n";
 import {
