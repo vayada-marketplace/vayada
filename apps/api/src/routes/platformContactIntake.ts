@@ -160,6 +160,8 @@ export function registerPlatformContactIntakeRoutes(
               product,
               userId: context.actor.internalUserId,
               organizationId: context.selectedOrganization.organizationId,
+              // VAY-2286: names the hotel account in the team's email subject.
+              organizationName: context.selectedOrganization.name ?? null,
             }),
           },
         });
