@@ -5,15 +5,17 @@ import { useTranslation } from "@/lib/i18n";
 import * as ui from "./pricingStyles";
 
 /** One numbered question card (the first-price form), or, without `number`, one section of the simple Prices card
- * (VAY-2188): a title, "Optional" when it is, and a short hint. */
+ * (VAY-2188): a title, "Optional" when it is, and a short hint. `step` numbers a section of "Price rules" (VAY-2280). */
 export function StepCard({
   number,
+  step,
   title,
   hint,
   optional = false,
   children,
 }: {
   number?: number;
+  step?: number;
   title: string;
   hint?: string;
   optional?: boolean;
@@ -23,7 +25,15 @@ export function StepCard({
   const id = useId();
   const heading = (
     <div className="space-y-1">
-      <h3 id={id} className={ui.stepTitle}>
+      <h3
+        id={id}
+        className={`${ui.stepTitle} ${step === undefined ? "" : "flex items-center gap-2.5"}`}
+      >
+        {step !== undefined && (
+          <span aria-hidden="true" className={ui.sectionNumber}>
+            {step}
+          </span>
+        )}
         {title}
         {optional && (
           <span className="ml-2 text-[13px] font-normal text-gray-500">
@@ -31,7 +41,9 @@ export function StepCard({
           </span>
         )}
       </h3>
-      {hint && <p className={ui.stepHint}>{hint}</p>}
+      {hint && (
+        <p className={`${ui.stepHint} ${step === undefined ? "" : "md:pl-[34px]"}`}>{hint}</p>
+      )}
     </div>
   );
   if (number === undefined)

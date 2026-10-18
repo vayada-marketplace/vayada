@@ -200,6 +200,10 @@ it("changes a range of nights at once (VAY-2280)", () => {
   expect(handlers.onClear).toHaveBeenCalled();
 });
 
+const flexRules = (value: PricingConfiguration) => {
+  const offer = value.offers[0];
+  return offer.restrictions.kind === "own" ? offer.restrictions.seasons : [];
+};
 const flexSeasons = (value: PricingConfiguration) => {
   const offer = value.offers[0];
   return offer.price.kind === "independent" ? offer.price.calendar.seasons : [];
@@ -237,6 +241,12 @@ it("adds the picked nights to a season, every year (VAY-2284)", () => {
     from: "10-05",
     through: "10-10",
     price: flat("18000"),
+  });
+  // ...and its minimum stay (VAY-2280 step 2).
+  expect(flexRules(handlers.onChange.mock.lastCall![0]).at(-1)).toEqual({
+    from: "10-05",
+    through: "10-10",
+    rules: { ...rules, minArrivalNights: 3 },
   });
   // Seasons may not overlap.
   mount({ from: "2026-09-25", to: "2026-09-27" });

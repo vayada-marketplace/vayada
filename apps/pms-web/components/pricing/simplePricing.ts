@@ -96,20 +96,21 @@ export function simpleRoom(room: Room, terms: Terms): SimpleRoom | null {
     mainTerms = terms[main.id]!,
     cancellation = simpleCancellation(mainTerms.cancellation);
   // A switch stands for an option based on the main option with nothing of its own: no date prices, the main
-  // option's stay rules and payment, and no options based on it (switching it off deletes it).
-  const plainLinked = (offer: Offer) =>
+  // option's stay rules (and payment, apart from the non-refundable rate, which has its own: VAY-2282), and no options
+  // based on it (switching it off deletes it).
+  const plainLinked = (offer: Offer, samePayment = true) =>
     offer.id !== main.id &&
     offer.price.kind === "linked" &&
     offer.price.parentId === main.id &&
     offer.price.dateOverrides.length === 0 &&
     offer.restrictions.kind === "inherit" &&
     !deleteBlocker(room, offer.id) &&
-    same(terms[offer.id]!.payment, mainTerms.payment);
+    (!samePayment || same(terms[offer.id]!.payment, mainTerms.payment));
   const nonRefundable =
     cancellation.kind === "free"
       ? (room.offers.find(
           (offer) =>
-            plainLinked(offer) &&
+            plainLinked(offer, false) &&
             offer.meal.kind === "room_only" &&
             offer.price.kind === "linked" &&
             offer.price.adjustment.kind === "percentage" &&
@@ -149,7 +150,9 @@ export function switchOption(
   room: Room,
   offerId: string,
   kind: "non_refundable" | "breakfast",
-  value: { percent: string } | { amount: string; basis: "room" | "person" },
+  value:
+    | { percent: string; methods?: readonly PricingPaymentMethod[] }
+    | { amount: string; basis: "room" | "person" },
   mainTerms: OptionTerms,
 ) {
   return presetOption(
@@ -160,7 +163,10 @@ export function switchOption(
       discount: "percent" in value ? value.percent : defaultDiscount,
       mealAmount: "amount" in value ? value.amount : "",
       mealBasis: "basis" in value ? value.basis : "room",
-      methods: [...(mainTerms.payment.acceptedMethods ?? [])],
+      // presetOption leaves pay at property out of a non-refundable option (VAY-2280).
+      methods: [
+        ...(("methods" in value && value.methods) || mainTerms.payment.acceptedMethods || []),
+      ],
     },
     mainTerms,
   );
@@ -202,14 +208,17 @@ export function cancellationEdits(
     terms: { ...terms[offer.id]!, cancellation },
   }));
 }
-/** New terms for every option the card covers (main and both switches), accepting `methods`. */
-export function paymentEdits(
+/** New terms for one rate's options (VAY-2282), accepting `methods`: the Flexible rate is the main option and the
+ * breakfast switch that follows it; the Non-refundable rate is its own option. */
+export function rateMethodEdits(
   simple: SimpleRoom,
   terms: Terms,
+  rate: "flexible" | "non_refundable",
   methods: readonly PricingPaymentMethod[],
 ): { offerId: string; terms: OptionTerms }[] {
   if (!methods.length) throw new PricingError("pricing.error.paymentMethodRequired");
-  return [simple.main, simple.nonRefundable, simple.breakfast]
+  const offers = rate === "flexible" ? [simple.main, simple.breakfast] : [simple.nonRefundable];
+  return offers
     .filter((offer): offer is Offer => !!offer)
     .map((offer) => {
       const current = terms[offer.id]!;
@@ -219,7 +228,6 @@ export function paymentEdits(
       };
     });
 }
-
 type Calendar = Extract<Offer["price"], { kind: "independent" }>["calendar"];
 type Price = NonNullable<Calendar["base"]>;
 /** Rewrites the main option's normal, monthly and season prices (one mode, as the engine requires) with `next`.
@@ -281,8 +289,9 @@ export function onePriceAgain(room: Room): Room | null {
 }
 
 /** Whether the room has settings the card's top doesn't show (other options, prices by guests, own cancellation or
- * weekday rules, month prices, season stay rules): the card then says they are kept. Single-date prices and date
- * stay rules show in "Prices by date" and its night panel (VAY-2280), so they don't count. */
+ * weekday rules, month prices, stay rules for periods that are no season): the card then says they are kept.
+ * Single-date prices and date stay rules show in "Prices by date" and its night panel, closed periods in "When guests
+ * can book" and a season's minimum stay in its row (VAY-2280), so they don't count. */
 export function hasKeptSettings(room: Room, simple: SimpleRoom): boolean {
   const { main } = simple;
   const calendar = main.price.kind === "independent" ? main.price.calendar : null;
@@ -295,6 +304,12 @@ export function hasKeptSettings(room: Room, simple: SimpleRoom): boolean {
     otherWeekdays(main).length > 0 ||
     weekendChoice(main) === "other" ||
     !restrictions ||
-    restrictions.seasons.length > 0
+    restrictions.seasons.some(
+      (rule) =>
+        !rule.rules.stopSell &&
+        !(calendar?.seasons ?? []).some(
+          (season) => season.from === rule.from && season.through === rule.through,
+        ),
+    )
   );
 }
