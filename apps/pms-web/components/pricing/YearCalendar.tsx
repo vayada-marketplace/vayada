@@ -179,7 +179,7 @@ function YearNight({
     >
       {Number(night.date.slice(8))}
       {(noArrival || night.ownPrice) && (
-        <span aria-hidden="true" className="absolute right-0.5 top-0.5 flex gap-px">
+        <span aria-hidden="true" className="absolute right-px top-px flex gap-px">
           {noArrival && <span className="h-1 w-1 rounded-full bg-red-500" />}
           {night.ownPrice && <span className="h-1 w-1 rounded-full bg-gray-900" />}
         </span>
