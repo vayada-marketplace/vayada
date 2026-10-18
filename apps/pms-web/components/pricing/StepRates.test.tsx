@@ -217,6 +217,34 @@ it("steps the discount and holds Save while it doesn't parse (VAY-2282)", () => 
   expect(handlers.onPending).toHaveBeenLastCalledWith(true);
 });
 
+it("holds Save while edited old non-refundable terms still accept pay at property, and says why (VAY-2280)", () => {
+  const value = room(),
+    optionTerms = terms(["pay_at_property"], ["card", "pay_at_property"]);
+  // Unchanged old terms aren't written, so Save stays free.
+  mount(value, optionTerms);
+  expect(handlers.onPending).toHaveBeenLastCalledWith(false);
+  act(() => {
+    view.update(
+      <PricingManualMethodsProvider value={[]}>
+        <StepRates
+          room={value}
+          simple={simpleRoom(value, optionTerms)}
+          terms={optionTerms}
+          failed={false}
+          prices={{ flexible: "10000", nonrefundable: "9000" }}
+          disabled={false}
+          edited={["nonrefundable"]}
+          {...handlers}
+        />
+      </PricingManualMethodsProvider>,
+    );
+  });
+  expect(handlers.onPending).toHaveBeenLastCalledWith(true);
+  expect(textOf(card("Non-refundable rate"))).toContain("Untick pay at property");
+  // Nothing is unticked for the hotel.
+  expect(handlers.onTerms).not.toHaveBeenCalled();
+});
+
 it("names a deposit a rate already has (VAY-2205 keeps new ones for later)", () => {
   const value = room(false);
   mount(value, {

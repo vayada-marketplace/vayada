@@ -5,6 +5,7 @@ import type { PricingConfiguration } from "@vayada/domain-pms/replacement-pricin
 import { PlusIcon } from "@heroicons/react/24/outline";
 import { useTranslation } from "@/lib/i18n";
 import type { PricingTermsInput } from "@/services/api/replacementPricingClient";
+import { paidInAdvance } from "@vayada/product-onboarding/AcceptedPaymentMethods";
 import { AcceptedPaymentMethods, type PaymentMethod } from "./AcceptedPaymentMethods";
 import { CancellationChoice } from "./StepCancellation";
 import { extraField, SwitchRow } from "./StepExtras";
@@ -96,6 +97,8 @@ export function StepFirstPrices({
   // After a save that failed, the answers still empty are marked and named, and update as they are filled in.
   const [checked, setChecked] = useState(false);
   const loadingMethods = defaultMethods === undefined && !values.methods.length;
+  // Guests can only pay at the property: non-refundable stays (paid in advance) can't be offered (VAY-2280).
+  const onlyAtProperty = values.methods.length > 0 && !paidInAdvance(values.methods).length;
   // Payment settings' ways to pay are ticked once they arrive, unless the hotel already chose.
   useEffect(() => {
     if (defaultMethods && !methodsTouched)
@@ -393,6 +396,7 @@ export function StepFirstPrices({
           <CancellationChoice
             value={cancel}
             disabled={disabled}
+            noNonRefundable={onlyAtProperty}
             onChange={(choice) => {
               setCancel(choice);
               touch();
@@ -409,7 +413,7 @@ export function StepFirstPrices({
               <SwitchRow
                 on={nonRefundable.on}
                 name={t("pricing.simple.extras.nonRefundable")}
-                disabled={disabled}
+                disabled={disabled || (onlyAtProperty && !nonRefundable.on)}
                 onToggle={() => {
                   setNonRefundable({ ...nonRefundable, on: !nonRefundable.on });
                   touch();
@@ -525,6 +529,7 @@ export function StepFirstPrices({
             <AcceptedPaymentMethods
               methods={values.methods}
               disabled={disabled}
+              nonRefundable={cancel.kind === "non_refundable"}
               onChange={(methods) => {
                 setMethodsTouched(true);
                 change({ methods });
