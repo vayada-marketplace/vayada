@@ -16,8 +16,8 @@ describe("platform contact intake routes", () => {
     const submissions: string[] = [];
     const app = buildContactIntakeApp({
       repository: {
-        async submitContact({ payload }) {
-          submissions.push(`${payload.email}:${payload.userType}`);
+        async submitContact({ payload, channel }) {
+          submissions.push(`${channel}:${payload.email}:${payload.userType}`);
           return contactResponse();
         },
       },
@@ -42,7 +42,7 @@ describe("platform contact intake routes", () => {
       contractVersion: PL1_NON_MEDIA_CONTRACT_VERSION,
       status: "accepted",
     });
-    expect(submissions).toEqual(["lina@example.com:creator"]);
+    expect(submissions).toEqual(["contact_form:lina@example.com:creator"]);
   });
 
   it("rejects invalid public contact submissions before writing intake", async () => {
@@ -179,6 +179,7 @@ describe("platform contact intake target repository", () => {
     });
 
     const response = await repository.submitContact({
+      channel: "contact_form",
       requestId: "req_contact_001",
       receivedAt: "2026-06-13T21:00:00.000Z",
       payload: {
@@ -204,6 +205,15 @@ describe("platform contact intake target repository", () => {
     ).toBe(true);
     expect(pool.queries).toContain("COMMIT");
     expect(pool.queries.at(-1)).toBe("release");
+    // VAY-2286: personal data only in the job row; the append-only rows get channel and outcome.
+    const valuesOf = (table: string) =>
+      JSON.stringify(pool.values[pool.queries.findIndex((query) => query.includes(table))]);
+    for (const personal of ["Lina Creator", "lina@example.com", "Creator Studio", "partner"]) {
+      expect(valuesOf("INSERT INTO platform.domain_events")).not.toContain(personal);
+      expect(valuesOf("INSERT INTO platform.product_audit_events")).not.toContain(personal);
+      expect(valuesOf("INSERT INTO platform.jobs")).toContain(personal);
+    }
+    expect(valuesOf("INSERT INTO platform.jobs")).toContain('\\"channel\\":\\"contact_form\\"');
   });
 });
 
@@ -235,11 +245,16 @@ function contactResponse(): PlatformContactIntakeResponse {
   };
 }
 
-function createContactPool(): PlatformContactIntakePool & { queries: string[] } {
+function createContactPool(): PlatformContactIntakePool & {
+  queries: string[];
+  values: unknown[][];
+} {
   const queries: string[] = [];
+  const values: unknown[][] = [];
   const client = {
-    async query<T>(text: string): Promise<{ rows: T[] }> {
+    async query<T>(text: string, params: unknown[] = []): Promise<{ rows: T[] }> {
       queries.push(text.trim());
+      values.push(params);
       if (text.includes("INSERT INTO platform.domain_events")) {
         return { rows: [{ eventId: "00000000-0000-0000-0000-000000000001" } as T] };
       }
@@ -255,6 +270,7 @@ function createContactPool(): PlatformContactIntakePool & { queries: string[] } 
 
   return {
     queries,
+    values,
     async connect() {
       return client as never;
     },

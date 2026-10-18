@@ -1214,6 +1214,21 @@ describe("api config", () => {
     );
   });
 
+  it("reads the contact notification recipient (VAY-2286)", () => {
+    const email = { RESEND_API_KEY: "test-key", BOOKING_EMAIL_FROM: "sender@example.test" };
+    expect(loadConfig(email).contactNotificationRecipient).toBeUndefined();
+    expect(
+      loadConfig({ ...email, CONTACT_NOTIFICATION_RECIPIENT: " team@example.test " })
+        .contactNotificationRecipient,
+    ).toBe("team@example.test");
+    expect(() =>
+      loadConfig({ ...email, CONTACT_NOTIFICATION_RECIPIENT: "Team <team@example.test>" }),
+    ).toThrow("CONTACT_NOTIFICATION_RECIPIENT must be one email address");
+    expect(() => loadConfig({ CONTACT_NOTIFICATION_RECIPIENT: "team@example.test" })).toThrow(
+      "CONTACT_NOTIFICATION_RECIPIENT requires RESEND_API_KEY and BOOKING_EMAIL_FROM",
+    );
+  });
+
   it("configures and can disable property setup draft retention", () => {
     expect(loadConfig({})).toMatchObject({
       propertySetupDraftRetentionEnabled: true,
