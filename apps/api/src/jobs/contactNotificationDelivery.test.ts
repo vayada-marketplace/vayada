@@ -4,6 +4,8 @@ import { createResendBookingEmailDelivery } from "./bookingEmailDelivery.js";
 import {
   contactNotificationEmail,
   contactNotificationSender,
+  IncompleteNotificationError,
+  supportNotificationEmail,
 } from "./contactNotificationDelivery.js";
 
 const payload = {
@@ -62,12 +64,81 @@ describe("contact notification email (VAY-2286)", () => {
     expect(() => contactNotificationEmail({}, new Date())).toThrow("incomplete");
   });
 
+  it("prints free-text user types as written", () => {
+    expect(
+      contactNotificationEmail({ ...payload, userType: "constructor" }, new Date()).text,
+    ).toContain("I am a: constructor\n");
+  });
+
+  it("describes an in-app support request with app, hotel account and page", () => {
+    const request = {
+      name: "Ben Owner",
+      email: "ben@example.com",
+      userType: "support",
+      message: JSON.stringify({
+        kind: "support",
+        message: "How do I add a second room?",
+        page: "/setup",
+        product: "booking",
+        userId: "user-1",
+        organizationId: "org-1",
+        organizationName: "Casa Ana",
+      }),
+    };
+
+    const email = supportNotificationEmail(request, "2026-10-18T20:00:00.000Z");
+
+    expect(email.subject).toBe("Support request · Booking Admin · Casa Ana");
+    expect(email.replyTo).toBe("ben@example.com");
+    expect(email.text).toBe(
+      [
+        "New support request from Booking Admin.",
+        "",
+        "Hotel: -",
+        "Account: Casa Ana",
+        "Name: Ben Owner",
+        "Email: ben@example.com",
+        "Page: /setup",
+        "Received: 2026-10-18T20:00:00.000Z",
+        "User ID: user-1",
+        "Organization ID: org-1",
+        "",
+        "Message:",
+        "How do I add a second room?",
+        "",
+        "Reply to this email to answer Ben Owner directly.",
+      ].join("\n"),
+    );
+    const bug = supportNotificationEmail(
+      {
+        ...request,
+        message: JSON.stringify({ kind: "bug", message: "Broken", product: "pms", page: "/x" }),
+      },
+      new Date(),
+    );
+    expect(bug.subject).toBe("Bug report · PMS · unnamed hotel account");
+    // Linked hotels name the request; more than three are counted.
+    expect(supportNotificationEmail(request, new Date(), ["Casa Ana"]).subject).toBe(
+      "Support request · Booking Admin · Casa Ana",
+    );
+    expect(supportNotificationEmail(request, new Date(), ["A", "B", "C", "D"]).subject).toBe(
+      "Support request · Booking Admin · A, B, C +1",
+    );
+    expect(
+      Array.from(supportNotificationEmail(request, new Date(), ["😀".repeat(200)]).subject).at(-1),
+    ).toBe("😀");
+    for (const message of ["not json", "null", JSON.stringify({ kind: "bug" })])
+      expect(() => supportNotificationEmail({ ...request, message }, new Date())).toThrow(
+        IncompleteNotificationError,
+      );
+  });
+
   it("sends from the booking address under the contact form name", () => {
     expect(contactNotificationSender("Vayada Bookings <bookings@vayada.com>")).toBe(
-      "Vayada contact form <bookings@vayada.com>",
+      "Vayada contact and support <bookings@vayada.com>",
     );
     expect(contactNotificationSender("bookings@vayada.com")).toBe(
-      "Vayada contact form <bookings@vayada.com>",
+      "Vayada contact and support <bookings@vayada.com>",
     );
   });
 
@@ -75,7 +146,7 @@ describe("contact notification email (VAY-2286)", () => {
     const bodies: unknown[] = [];
     const delivery = createResendBookingEmailDelivery({
       apiKey: "re_test",
-      from: "Vayada contact form <bookings@vayada.com>",
+      from: "Vayada contact and support <bookings@vayada.com>",
       fetch: (async (_url: string, init: RequestInit) => {
         bodies.push(JSON.parse(String(init.body)));
         return new Response("{}", { status: 200 });
@@ -92,7 +163,7 @@ describe("contact notification email (VAY-2286)", () => {
 
     expect(bodies).toEqual([
       {
-        from: "Vayada contact form <bookings@vayada.com>",
+        from: "Vayada contact and support <bookings@vayada.com>",
         to: ["team@example.test"],
         subject: "Contact form: Ana Host",
         text: "Hello",
