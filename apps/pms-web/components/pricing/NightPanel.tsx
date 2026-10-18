@@ -354,11 +354,12 @@ export function NightPanel({
             {t(single ? "pricing.night.ownPriceOne" : "pricing.night.ownPriceMany")}
           </button>
           {stayOwned && (
-            <div className="grid grid-cols-2 gap-2">
+            // Side by side when both labels fit on one line each, otherwise one under the other.
+            <div className="flex flex-wrap gap-2">
               <button
                 type="button"
                 disabled={disabled}
-                className={`${action} border-gray-300 bg-white text-gray-800 hover:bg-gray-50`}
+                className={`${action} flex-[1_0_auto] whitespace-nowrap border-gray-300 bg-white text-gray-800 hover:bg-gray-50`}
                 onClick={() => open({ kind: "minimum", value: String(rules[0].minArrivalNights) })}
               >
                 <MoonIcon aria-hidden="true" className="h-4 w-4" />
@@ -367,7 +368,7 @@ export function NightPanel({
               <button
                 type="button"
                 disabled={disabled}
-                className={`${action} ${allClosed ? "border-gray-300 text-gray-800" : "border-red-200 text-red-600"} bg-white hover:bg-gray-50`}
+                className={`${action} flex-[1_0_auto] whitespace-nowrap ${allClosed ? "border-gray-300 text-gray-800" : "border-red-200 text-red-600"} bg-white hover:bg-gray-50`}
                 onClick={() =>
                   apply(() => setNightRules(room, dates, { stopSell: !allClosed }), true)
                 }
