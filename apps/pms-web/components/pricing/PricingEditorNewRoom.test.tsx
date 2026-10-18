@@ -69,6 +69,7 @@ const client = {
   confirmationAction: vi.fn(),
   publicationAction: vi.fn(),
   paymentMethods: vi.fn(),
+  cardReadiness: vi.fn(),
 };
 
 let view: ReactTestRenderer;
@@ -119,6 +120,11 @@ beforeEach(() => {
   client.read.mockResolvedValue(published);
   // Bank-transfer and PayPal acceptance off (VAY-2139).
   client.paymentMethods.mockResolvedValue([]);
+  // Card not ready on the booking page (VAY-2205).
+  client.cardReadiness.mockResolvedValue({
+    card: { ready: false, reason: "switch_off", charge: "at_booking" },
+    deposits: { ready: false },
+  });
   take.current = null;
 });
 afterEach(() => {

@@ -191,6 +191,7 @@ import {
   createBookingPublicationProductionRuntime,
   startBookingPublicationWorker,
 } from "./domains/bookingPublicationProductionRuntime.js";
+import { createPricingCardReadinessReader } from "./domains/pricingCardReadiness.js";
 import { createFinanceManualPaymentReadinessReader } from "./domains/financeManualPaymentReadiness.js";
 import { createTargetFinanceBillingConfigReadPort } from "./domains/financeBillingConfigReadModel.js";
 import { createFinanceSubscriptionService } from "./domains/financeSubscriptionService.js";
@@ -1734,6 +1735,15 @@ const app = buildApp({
       ? {
           commands: (context) => createReplacementPricingCommands(propertySetupOwnerPool, context),
           manualPayments: financeManualPaymentReadiness,
+          cardReadiness: createPricingCardReadinessReader({
+            pool: propertySetupOwnerPool,
+            finance: financePaymentReadinessReadModel,
+            // As the booking page's card acceptance: acceptance and card switched on, Stripe configured.
+            cardAcceptanceEnabled:
+              config.replacementPricingAcceptanceEnabled === true &&
+              config.replacementPricingCardAcceptanceEnabled === true &&
+              !!stripeBookingPaymentProvider,
+          }),
         }
       : undefined,
   pmsPricing: pmsGuestPolicySetupCommands
