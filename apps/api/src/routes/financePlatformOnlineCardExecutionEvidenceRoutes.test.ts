@@ -10,6 +10,7 @@ import {
   type FinancePlatformOnlineCardExecutionEvidenceRepository,
   type RevokeFinanceOnlineCardExecutionEvidenceCommand,
 } from "@vayada/domain-finance";
+import { createHash } from "node:crypto";
 import Fastify from "fastify";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -230,6 +231,52 @@ describe("Platform Finance online-card execution evidence routes", () => {
         },
       }),
     ]);
+  });
+
+  it("records Vayada's approval at the server's time, with a fingerprint it computes (VAY-2205)", async () => {
+    const repo = repository();
+    app = await testApp(repo.value);
+    const { evidenceFingerprintHash: _hash, executedAt: _at, ...attestation } = acceptBody();
+    const result = await app.inject({
+      method: "POST",
+      url: `/finance/platform/properties/${PROPERTY_ID}/online-card-execution-evidence`,
+      headers: { authorization: "Bearer valid" },
+      payload: attestation,
+    });
+    expect(result.statusCode).toBe(200);
+    const command = repo.accepts[0]!;
+    const executedAt = command.payload.executedAt;
+    expect(executedAt).toBe(command.audit.requestedAt);
+    expect(command.audit.reason).toBe(
+      "Vayada finance operator approves card payments (attestation)",
+    );
+    expect(command.payload.evidenceFingerprintHash).toBe(
+      createHash("sha256")
+        .update(
+          [
+            "vayada-card-approval.v1",
+            PROPERTY_ID,
+            "card-capability:7",
+            "property-readiness:1",
+            `operator:${USER_ID}`,
+            executedAt,
+          ].join("\n"),
+        )
+        .digest("hex"),
+    );
+    // Half an attestation is invalid: either the server records both, or a verified run sends both.
+    for (const half of [
+      { executedAt: "2026-08-28T10:00:00.000Z" },
+      { evidenceFingerprintHash: HASH },
+    ]) {
+      const refused = await app.inject({
+        method: "POST",
+        url: `/finance/platform/properties/${PROPERTY_ID}/online-card-execution-evidence`,
+        headers: { authorization: "Bearer valid" },
+        payload: { ...attestation, ...half },
+      });
+      expect(refused.statusCode).toBe(400);
+    }
   });
 
   it("builds an exact property-scoped one-way revocation command", async () => {

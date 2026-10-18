@@ -4,6 +4,7 @@ import type {
   RevokeFinanceOnlineCardExecutionEvidenceCommand,
 } from "@vayada/domain-finance";
 import type { RequestContext } from "@vayada/backend-auth";
+import { createHash } from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
 import { authorizePlatformFinance } from "./financePlatformAuthorization.js";
@@ -95,8 +96,25 @@ function acceptCommand(
   }
   const commandId = trimmed(body.commandId);
   const idempotencyKey = trimmed(body.idempotencyKey);
-  const evidenceFingerprintHash = trimmed(body.evidenceFingerprintHash);
-  const executedAt = isoDate(body.executedAt);
+  // VAY-2205 (D3): Vayada's approval is the operator's attestation, recorded at the server's time
+  // with a fingerprint the server computes, so the browser's clock and input don't matter. The
+  // ONB-25A fields stay accepted for evidence from a verified run.
+  const attested = body.evidenceFingerprintHash === undefined && body.executedAt === undefined;
+  const executedAt = attested ? context.audit.receivedAt : isoDate(body.executedAt);
+  const evidenceFingerprintHash = attested
+    ? createHash("sha256")
+        .update(
+          [
+            "vayada-card-approval.v1",
+            request.params.propertyId.toLowerCase(),
+            `card-capability:${String(body.expectedCardCapabilityRevision)}`,
+            `property-readiness:${String(body.expectedPropertyReadinessRevision)}`,
+            `operator:${context.actor.internalUserId}`,
+            executedAt,
+          ].join("\n"),
+        )
+        .digest("hex")
+    : trimmed(body.evidenceFingerprintHash);
   if (
     !uuid(request.params.propertyId) ||
     !uuid(commandId) ||
@@ -115,7 +133,12 @@ function acceptCommand(
     commandId,
     idempotencyKey,
     propertyId: request.params.propertyId.toLowerCase(),
-    audit: audit(context, "Accept ONB-25A online-card execution evidence"),
+    audit: audit(
+      context,
+      attested
+        ? "Vayada finance operator approves card payments (attestation)"
+        : "Accept ONB-25A online-card execution evidence",
+    ),
     payload: {
       expectedCardCapabilityRevision: body.expectedCardCapabilityRevision as number,
       expectedPropertyReadinessRevision: body.expectedPropertyReadinessRevision as number,
