@@ -26,6 +26,14 @@ import {
   voidPricingCardPayment,
 } from "../domains/pricingCardPaymentCompletion.js";
 import {
+  executePricingCardRefund,
+  PricingCardRefundError,
+  previewPricingCardRefund,
+  stagePricingCardRefund,
+  type StagedPricingCardRefund,
+} from "../domains/pricingCardRefund.js";
+import { recordPricingRetainedRevenue } from "../domains/pricingRetainedRevenue.js";
+import {
   createReplacementBookingQuoteIssuer,
   requirePublicQuoteKey,
 } from "./replacementBookingQuote.js";
@@ -2350,13 +2358,34 @@ export function createTargetBookingWebCheckoutAdapter(
           bookingId,
           requireGuestEmail(request.guest_email),
         );
-        assertLifecycleMutationAllowed(booking, "cancel");
+        assertLifecycleMutationAllowed(booking, "cancel", !!config.stripePaymentProvider);
         const occurredAt = context?.occurredAt ?? new Date();
+        const outcome = await loadBookedCancellationOutcome(
+          pool,
+          property.propertyId,
+          booking,
+          occurredAt,
+        );
+        const cardRefund =
+          booking.paymentStatus === "paid" && outcome
+            ? await previewPricingCardRefund(pool, {
+                propertyId: property.propertyId,
+                guestBookingId: booking.guestBookingId,
+                retainedMinor: outcome.retainedMinor,
+              })
+            : null;
+        // A paid stay whose card can't be refunded here is refused, never shown as "nothing back".
+        if (booking.paymentStatus === "paid" && !cardRefund)
+          throw createHttpError(
+            409,
+            "This booking's card payment can't be refunded online. Please contact the hotel.",
+          );
         const preview = resolveTargetCancellationPreview(
           booking,
           property.timezone,
           occurredAt,
-          await loadBookedCancellationOutcome(pool, property.propertyId, booking, occurredAt),
+          outcome,
+          cardRefund,
         );
         return {
           propertyId: property.propertyId,
@@ -2379,6 +2408,7 @@ export function createTargetBookingWebCheckoutAdapter(
           action: "cancel",
           eventType: "guest_booking.canceled",
         },
+        config.stripePaymentProvider,
       );
     },
     async previewChangeRequest(slug, bookingId, request, context) {
@@ -3871,13 +3901,16 @@ async function withGuestLifecycleMutation(
   request: BookingWebGuestActionRequest,
   context: BookingWebCheckoutCommandContext | undefined,
   mutation: { status: string; action: string; eventType: string },
-  /** Withdraw only: cancels a pricing-v2 card booking's hold before the booking changes. */
+  /** Withdraw: cancels a pricing-v2 card booking's hold before the booking changes. Cancel:
+   * refunds a paid pricing-v2 card stay what its booked terms give back (VAY-2205). */
   cardPayments?: StripeBookingPaymentProvider,
 ): Promise<Record<string, unknown>> {
   if (!context) {
     throw createHttpError(400, "Checkout command context is required.");
   }
-  return withTargetCheckoutTransaction(pool, async (client) => {
+  // Set inside the transaction below; a plain `null` initialiser would narrow it to null here.
+  let refund = null as StagedPricingCardRefund | null;
+  const body = await withTargetCheckoutTransaction(pool, async (client) => {
     const property = await resolveTargetHistoricalBookingProperty(client, slug);
     const reservation = await reserveTargetCheckoutCommand(client, property.propertyId, context);
     if (reservation.status === "replay") {
@@ -3889,7 +3922,7 @@ async function withGuestLifecycleMutation(
       bookingId,
       requireGuestEmail(request.guest_email),
     );
-    assertLifecycleMutationAllowed(booking, mutation.action);
+    assertLifecycleMutationAllowed(booking, mutation.action, !!cardPayments);
     const bookingMetadata = objectValue(booking.bookingMetadata);
     if (
       mutation.action === "withdraw" &&
@@ -3921,12 +3954,16 @@ async function withGuestLifecycleMutation(
       }
     }
     let bookedOutcome: BookedCancellationOutcome | null = null;
+    // A paid card stay's money: what was paid and what goes back (VAY-2205).
+    let cardMoney: { paidMinor: bigint; refundMinor: bigint } | null = null;
     if (mutation.action === "cancel") {
       let feeBooking = booking;
       if (objectValue(booking.bookingMetadata)["targetSource"] === "pricing_quote_draft") {
         // Booking row, then inventory, as PMS host actions take them. NO KEY UPDATE stays
         // compatible with PMS adoption, which holds inventory while it references the booking.
-        // Paid stays were refused above, so pricing-v2 card owners (inventory first) never race.
+        // A paid card stay's payment row is locked after both (VAY-2205). Card settlement takes
+        // inventory first: a late duplicate settle of the same stay can deadlock with this, and
+        // PostgreSQL then aborts one side before anything is refunded.
         await client.query(
           "SELECT 1 FROM booking.guest_bookings WHERE id=$1::uuid AND property_id=$2::uuid FOR NO KEY UPDATE",
           [booking.guestBookingId, property.propertyId],
@@ -3939,7 +3976,7 @@ async function withGuestLifecycleMutation(
           bookingId,
           requireGuestEmail(request.guest_email),
         );
-        assertLifecycleMutationAllowed(feeBooking, mutation.action);
+        assertLifecycleMutationAllowed(feeBooking, mutation.action, !!cardPayments);
       }
       bookedOutcome = await loadBookedCancellationOutcome(
         client,
@@ -3961,6 +3998,29 @@ async function withGuestLifecycleMutation(
             409,
             "The cancellation fee has changed. Review it again before cancelling.",
           );
+        // A paid card stay gets back what the terms don't keep; Stripe hears of it after commit.
+        if (feeBooking.paymentStatus === "paid")
+          try {
+            cardMoney = await previewPricingCardRefund(client, {
+              propertyId: property.propertyId,
+              guestBookingId: feeBooking.guestBookingId,
+              retainedMinor: bookedOutcome.retainedMinor,
+            });
+            refund = await stagePricingCardRefund(client, {
+              propertyId: property.propertyId,
+              guestBookingId: feeBooking.guestBookingId,
+              retainedMinor: bookedOutcome.retainedMinor,
+              requestedBy: "guest",
+              commandKey: context.idempotencyKey,
+              occurredAt: context.occurredAt,
+            });
+          } catch (error) {
+            if (!(error instanceof PricingCardRefundError)) throw error;
+            throw createHttpError(
+              409,
+              "This booking's card payment can't be refunded online. Please contact the hotel.",
+            );
+          }
       }
     }
     const result = await client.query<TargetBookingRow>(
@@ -4049,6 +4109,15 @@ async function withGuestLifecycleMutation(
         recognizedOn: targetPropertyDateOnly(property.timezone, context.occurredAt),
         required: true,
       });
+      // What the hotel keeps of a paid card stay stays revenue on its nights (VAY-2205).
+      if (cardMoney)
+        await recordPricingRetainedRevenue(client, {
+          propertyId: updated.propertyId,
+          guestBookingId: updated.guestBookingId,
+          fingerprint: context.fingerprint,
+          keptMinor: cardMoney.paidMinor - cardMoney.refundMinor,
+          paidMinor: cardMoney.paidMinor,
+        });
     }
     await appendMissingAddonRevenueEvidence(client, {
       propertyId: updated.propertyId,
@@ -4089,6 +4158,17 @@ async function withGuestLifecycleMutation(
     });
     return body;
   });
+  // Committed: ask Stripe now. If it can't answer, the refund sweep retries.
+  if (refund && cardPayments) {
+    const { commandId } = refund;
+    await executePricingCardRefund(pool, cardPayments, commandId).catch((error: unknown) =>
+      console.warn("Pricing card refund left to the sweep.", {
+        commandId,
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
+  }
+  return body;
 }
 
 export async function loadTargetBooking(
@@ -6172,7 +6252,11 @@ function requireGuestEmail(value: unknown): string {
   return email;
 }
 
-function assertLifecycleMutationAllowed(booking: TargetBookingRow, action: string): void {
+function assertLifecycleMutationAllowed(
+  booking: TargetBookingRow,
+  action: string,
+  cardRefunds = false,
+): void {
   if (booking.lifecycleStatus === "canceled" || booking.lifecycleStatus === "completed") {
     throw createHttpError(409, "Booking can no longer be changed.");
   }
@@ -6183,13 +6267,14 @@ function assertLifecycleMutationAllowed(booking: TargetBookingRow, action: strin
     throw createHttpError(409, "Only confirmed bookings can be cancelled.");
   }
   if (action === "withdraw" || action === "cancel") {
-    assertTargetInventoryReleasePaymentStateSupported(booking, action);
+    assertTargetInventoryReleasePaymentStateSupported(booking, action, cardRefunds);
   }
 }
 
 function assertTargetInventoryReleasePaymentStateSupported(
   booking: TargetBookingRow,
   action: "withdraw" | "cancel",
+  cardRefunds: boolean,
 ): void {
   // VAY-2099: a pricing-v2 card request the guest authorised can be withdrawn; its hold is
   // cancelled first, as legacy did.
@@ -6200,6 +6285,16 @@ function assertTargetInventoryReleasePaymentStateSupported(
     metadata["targetSource"] === "pricing_quote_draft" &&
     metadata["paymentMethod"] === "card" &&
     metadata["acceptanceMode"] === "request"
+  )
+    return;
+  // VAY-2205: a paid pricing-v2 card stay can be cancelled while card refunds work; its booked
+  // terms decide what goes back to the card.
+  if (
+    action === "cancel" &&
+    cardRefunds &&
+    booking.paymentStatus === "paid" &&
+    metadata["targetSource"] === "pricing_quote_draft" &&
+    metadata["paymentMethod"] === "card"
   )
     return;
   if (booking.paymentStatus !== "unpaid") {
@@ -6215,10 +6310,12 @@ export function resolveTargetCancellationPreview(
   propertyTimezone: string | undefined,
   occurredAt: Date,
   bookedOutcome?: BookedCancellationOutcome | null,
+  /** A paid card stay's money (VAY-2205): what was paid and what goes back. */
+  cardRefund?: { paidMinor: bigint; refundMinor: bigint } | null,
 ): Record<string, unknown> {
   const metadata = objectValue(booking.bookingMetadata);
   if (metadata["targetSource"] === "pricing_quote_draft")
-    return pricingCancellationPreview(booking, bookedOutcome ?? null);
+    return pricingCancellationPreview(booking, bookedOutcome ?? null, cardRefund ?? null);
   const selectedOffer = objectValue(metadata["selectedOffer"]);
   const selection = projectBookingRoomSelection(selectedOffer);
   if (selection.roomLines) {
@@ -6331,6 +6428,7 @@ export function resolveTargetCancellationPreview(
 function pricingCancellationPreview(
   booking: TargetBookingRow,
   outcome: BookedCancellationOutcome | null,
+  cardRefund: { paidMinor: bigint; refundMinor: bigint } | null,
 ): Record<string, unknown> {
   const scale = pricingCurrencyScale(booking.currency);
   if (!outcome || scale === null)
@@ -6350,10 +6448,12 @@ function pricingCancellationPreview(
       409,
       "This booking's free-cancellation period has expired. Contact the property.",
     );
+  const paid = cardRefund?.paidMinor ?? 0n,
+    refund = cardRefund?.refundMinor ?? 0n;
   return {
-    amountPaid: 0,
-    refundAmount: 0,
-    refundPercentage: 0,
+    amountPaid: Number(paid) / 10 ** scale,
+    refundAmount: Number(refund) / 10 ** scale,
+    refundPercentage: paid > 0n ? Math.round((Number(refund) / Number(paid)) * 100) : 0,
     cancellationFeeAmount: Number(outcome.retainedMinor) / 10 ** scale,
     freeCancellationDays: Math.max(0, ...outcome.rooms.map((room) => room.matchedTierMinDays ?? 0)),
     daysUntilCheckIn: outcome.daysBeforeCheckIn,

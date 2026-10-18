@@ -3162,6 +3162,7 @@
   "hostActions.appliedReloadFailed": "Booking updated, but the latest details could not be loaded. Reload the page.",
   "hostActions.failed": "The action could not be completed.",
   "hostActions.voidImpact": "The card authorization will be released before the request is rejected and inventory is released. No payment is captured.",
+  "hostActions.cardRefundImpact": "Inventory will be released. The guest paid {paid} by card online; {refund} goes back to their card automatically when you apply. Stripe keeps its processing fee.",
   "hostActions.nonRefundable": "Non-refundable rate",
   "hostActions.freeCancellationUntil": "Free cancellation through",
   "hostActions.policyPenalty": "After the deadline or for a no-show: the full booking amount is charged.",

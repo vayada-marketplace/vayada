@@ -16,6 +16,9 @@ function fixture(status = "requires_capture") {
     amount: "100.00",
     currency: "EUR",
     reference: "VAY-TEST",
+    bookingPaid: "authorized",
+    pricingCard: true,
+    bookingCurrency: "EUR",
   };
   const intent = {
     paymentIntentId: "pi_test",
@@ -137,6 +140,37 @@ describe("Finance host-request rejection", () => {
       expect(f.provider.cancelPaymentIntent).not.toHaveBeenCalled();
     },
   );
+  it("hands a paid card stay's cancel to the refund, without touching Stripe here (VAY-2205)", async () => {
+    const f = fixture();
+    f.payment.status = "paid";
+    f.payment.bookingPaid = "paid";
+    for (const apply of [false, true])
+      await expect(f.run(f.client, { ...f.input, action: "cancel", apply })).resolves.toBe(
+        "card_refund",
+      );
+    expect(f.provider.retrievePaymentIntent).not.toHaveBeenCalled();
+    expect(f.provider.cancelPaymentIntent).not.toHaveBeenCalled();
+    expect(f.query.mock.calls.some(([sql]) => sql.includes("UPDATE finance.payments"))).toBe(false);
+    // Without Stripe, or for a payment that isn't the stay's active one, it still needs adjusting.
+    const offline = createFinanceHostBookingPayments();
+    await expect(
+      offline(f.client, { ...f.input, action: "cancel", apply: false }),
+    ).rejects.toMatchObject({ code: "payment_adjustment_required" });
+    // Only a direct charge of a paid pricing-v2 card stay, in its currency.
+    for (const changed of [
+      { activePaymentId: "other" },
+      { chargeType: "destination" },
+      { pricingCard: false },
+      { bookingPaid: "partially_paid" },
+      { bookingCurrency: "USD" },
+    ]) {
+      const g = fixture();
+      Object.assign(g.payment, { status: "paid", bookingPaid: "paid" }, changed);
+      await expect(
+        g.run(g.client, { ...g.input, action: "cancel", apply: false }),
+      ).rejects.toMatchObject({ code: "payment_adjustment_required" });
+    }
+  });
   it("fails closed if the provider cannot confirm cancellation", async () => {
     const f = fixture();
     f.provider.cancelPaymentIntent.mockRejectedValueOnce(new Error("offline"));
