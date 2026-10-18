@@ -278,6 +278,15 @@ describe("Hotel Catalog canonical Step 1 routes", () => {
     ],
     ["missing product resource link", "valid-token", { links: [catalogLink()] }, 403],
     [
+      "retired Marketplace hotel profile access",
+      "valid-token",
+      {
+        entitlements: [entitlement("marketplace")],
+        links: [catalogLink(), productLink("marketplace")],
+      },
+      403,
+    ],
+    [
       "suspended product resource link",
       "valid-token",
       { links: [catalogLink(), productLink("pms", { status: "suspended" })] },
@@ -316,21 +325,18 @@ describe("Hotel Catalog canonical Step 1 routes", () => {
     },
   );
 
-  it.each(["marketplace", "booking"] as const)(
-    "accepts complete %s product access",
-    async (product) => {
-      const repository = fakeRepository({ state: state({ assignments: desiredAssignments() }) });
-      app = testApp(repository, {
-        entitlements: [entitlement(product)],
-        links: [catalogLink(), productLink(product)],
-      });
+  it.each(["booking", "pms"] as const)("accepts complete %s product access", async (product) => {
+    const repository = fakeRepository({ state: state({ assignments: desiredAssignments() }) });
+    app = testApp(repository, {
+      entitlements: [entitlement(product)],
+      links: [catalogLink(), productLink(product)],
+    });
 
-      const response = await put(app, request());
+    const response = await put(app, request());
 
-      expect(response.statusCode).toBe(200);
-      expect(repository.prepare).toHaveBeenCalledOnce();
-    },
-  );
+    expect(response.statusCode).toBe(200);
+    expect(repository.prepare).toHaveBeenCalledOnce();
+  });
 
   it("rejects partial canonical input and a missing idempotency key", async () => {
     const repository = fakeRepository();

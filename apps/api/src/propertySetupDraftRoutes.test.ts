@@ -27,7 +27,7 @@ const propertyId = "f6853000-0000-4000-8000-000000000001";
 const otherPropertyId = "f6853000-0000-4000-8000-000000000002";
 const organizationId = "11111111-1111-4111-8111-111111111111";
 const actorUserId = "22222222-2222-4222-8222-222222222222";
-type SetupProduct = "marketplace" | "booking" | "pms";
+type SetupProduct = "booking" | "pms";
 type Options = {
   kind?: "hotel_group" | "creator_workspace";
   permissions?: PermissionKey[];
@@ -39,10 +39,6 @@ type FakeRepository = PropertySetupDraftCommandRepository & {
   resetCalls: PropertySetupDraftResetCommand[];
 };
 const ACCESS_BY_PRODUCT = {
-  marketplace: {
-    key: "marketplace-hotel-profile",
-    resourceType: "hotel_profile",
-  },
   booking: {
     key: "booking-engine",
     resourceType: "booking_hotel",
