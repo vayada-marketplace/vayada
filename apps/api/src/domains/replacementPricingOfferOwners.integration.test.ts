@@ -7612,10 +7612,23 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     }
   });
   // VAY-2285: an offer off the booking page is never listed or quoted for guests, yet the hotel
-  // can still reprice a booking already on it; staff keep channels-only offers.
+  // can still reprice a booking already on it. Staff keep naming bookings on a not-sold offer
+  // but can't pick it for new ones; channels-only offers stay pickable.
   it.each([
-    ["not_sold", ["other"]],
-    ["channels_only", ["flex", "other"]],
+    [
+      "not_sold",
+      [
+        ["flex", false],
+        ["other", true],
+      ],
+    ],
+    [
+      "channels_only",
+      [
+        ["flex", true],
+        ["other", true],
+      ],
+    ],
   ] as const)(
     "keeps a %s Flexible offer from guests but not from bookings already on it",
     async (sale, staffPlans) => {
@@ -7693,7 +7706,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       expect(
         (await readPublishedRatePlans(pool, id))
           .filter((plan) => plan.roomTypeId === roomId)
-          .map((plan) => plan.ratePlanId),
+          .map((plan) => [plan.ratePlanId, plan.active]),
       ).toEqual(staffPlans);
     },
   );
