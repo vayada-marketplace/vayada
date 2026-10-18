@@ -116,6 +116,35 @@ describe.skipIf(!url)("Booking replacement offer terms PostgreSQL owner", () => 
     expect(await store.read(f.context, f.scope, f.terms.roomTypeId, "legacy")).toEqual(legacy);
     await locked(f, async (c) => expect(await lockBookingPricingOfferTerms(c, f.scope.propertyId, [legacy])).toEqual([legacy]));
   });
+  it("holds a hotel's changed payment to the Paid when booking rules, while other edits of older terms still save (VAY-2205)", async () => {
+    const f = await fixture(), rules = { paymentRules: true }, draft = () => ({ draftId: randomUUID(), baseRevision: 0 });
+    const stage = (terms: unknown, expectedRevision: string | null = null) =>
+      store.stage(f.context, f.scope, { requestId: randomUUID(), expectedRevision, terms }, draft(), rules);
+    const card = { kind: "deposit", basisPoints: 3000, balanceDaysBeforeArrival: 0, acceptedMethods: ["card"] };
+    for (const [payment, code] of [
+      [{ kind: "full" }, "payment_methods_required"],
+      [{ kind: "deposit", basisPoints: 3000, balanceDaysBeforeArrival: 0 }, "payment_methods_required"],
+      [{ ...card, acceptedMethods: ["card", "pay_at_property"] }, "deposit_card_only"],
+      [{ ...card, acceptedMethods: ["bank_transfer"] }, "deposit_card_only"],
+      [{ ...card, balanceDaysBeforeArrival: 7 }, "deposit_rest_at_property"],
+      [{ ...card, basisPoints: 10000 }, "deposit_below_full_stay"],
+    ] as const) await expect(stage({ ...f.terms, offerId: "new", payment })).rejects.toMatchObject({ code });
+    expect((await pool.query("SELECT count(*)::int AS count FROM booking.pricing_v2_offer_terms WHERE property_id=$1", [f.scope.propertyId])).rows[0].count).toBe(0);
+    expect(await stage({ ...f.terms, offerId: "new", payment: card })).toMatchObject({ payment: card });
+    expect(await stage({ ...f.terms, offerId: "new", payment: { kind: "full", acceptedMethods: ["pay_at_property", "card"] } }))
+      .toMatchObject({ payment: { acceptedMethods: ["pay_at_property", "card"] } });
+    // The fixture's stored deposit (rest due 7 days before arrival, no methods) predates the rules.
+    const stored = await store.save(f.context, f.scope, f.command());
+    const cancellation = { kind: "flexible", terms: { ...f.terms.cancellation.terms, freeCancellationDeadlineDays: 14 } };
+    expect(await stage({ ...f.terms, cancellation }, stored.revision)).toMatchObject({ cancellation, payment: f.terms.payment });
+    // The same payment sent with its keys in another order is not a change.
+    expect(await stage({ ...f.terms, cancellation, payment: { balanceDaysBeforeArrival: 7, basisPoints: 3000, kind: "deposit" } }, stored.revision))
+      .toMatchObject({ payment: f.terms.payment });
+    await expect(stage({ ...f.terms, payment: { ...f.terms.payment, basisPoints: 2000 } }, stored.revision))
+      .rejects.toMatchObject({ code: "payment_methods_required" });
+    expect(await stage({ ...f.terms, payment: { kind: "full", acceptedMethods: ["pay_at_property"] } }, stored.revision))
+      .toMatchObject({ payment: { kind: "full", acceptedMethods: ["pay_at_property"] } });
+  });
   it("rolls back the pointer and every new effect if the audit write fails", async () => {
     const f = await fixture(), command = f.command(), key = `booking.pricing_terms:${f.scope.propertyId}:${command.requestId}`;
     await pool.query(`INSERT INTO platform.product_audit_events
