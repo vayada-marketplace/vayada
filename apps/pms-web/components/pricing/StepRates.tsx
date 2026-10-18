@@ -2,11 +2,15 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { MinusIcon, PlusIcon } from "@heroicons/react/24/outline";
-import type { PricingPaymentMethod } from "@vayada/domain-booking/replacement-pricing";
+import {
+  paidWhenBooking,
+  type PricingPaymentMethod,
+  type StoredPaidWhenBooking,
+} from "@vayada/domain-booking/replacement-pricing";
 import type { PricingConfiguration } from "@vayada/domain-pms/replacement-pricing";
 import { useTranslation } from "@/lib/i18n";
 import { errorText } from "./pricingAmounts";
-import { usePricingManualMethods } from "./pricingManualMethods";
+import { usePricingCardReadiness, usePricingManualMethods } from "./pricingManualMethods";
 import {
   cancellationDays,
   cancellationEdits,
@@ -25,9 +29,6 @@ type Terms = Readonly<Record<string, OptionTerms | undefined>>;
 type Edits = { offerId: string; terms: OptionTerms }[];
 type Payment = OptionTerms["payment"];
 
-// Card online shows once Payment settings say it is ready (VAY-2205); until then only a rate that already takes it
-// lists it, so it can be removed.
-const cardReady = false;
 const methodHints = {
   card: "pricing.rates.method.card",
   pay_at_property: "pricing.rates.method.payAtProperty",
@@ -49,8 +50,8 @@ const discountOf = (offer: SimpleRoom["nonRefundable"]) =>
 /** Step "Rates" (VAY-2282, approved board): how guests can book the room. The Flexible rate is the main option (always
  * on for now: switching it off waits for the API's sold-where setting) and the Non-refundable rate is the
  * non-refundable switch, side by side, each with its own cancellation, payment at booking and payment methods.
- * "Paid when booking" is read from the methods until card payments and deposits come (VAY-2205). `children` is the
- * "Other booking options" list (VAY-2283). */
+ * "Paid when booking" is read from the rate's terms (VAY-2205); choosing it comes with card payments and deposits.
+ * `children` is the "Other booking options" list (VAY-2283). */
 export function StepRates({
   room,
   simple,
@@ -296,7 +297,7 @@ function FlexibleRate({
           </p>
         )}
       </Part>
-      <PaidWhenBooking rate="flexible" payment={simple.mainTerms.payment} />
+      <PaidWhenBooking payment={simple.mainTerms.payment} />
       <RateMethods
         rate="flexible"
         methods={simple.mainTerms.payment.acceptedMethods ?? []}
@@ -480,10 +481,7 @@ function NonRefundableRate({
               )}
             </div>
           </Part>
-          <PaidWhenBooking
-            rate="non_refundable"
-            payment={terms[offer.id]?.payment ?? mainTerms.payment}
-          />
+          <PaidWhenBooking payment={terms[offer.id]?.payment ?? mainTerms.payment} />
           <RateMethods
             rate="non_refundable"
             methods={terms[offer.id]?.payment.acceptedMethods ?? []}
@@ -508,34 +506,27 @@ function NonRefundableRate({
   );
 }
 
-/** "Paid when booking", read from the rate's terms (VAY-2280: the choice itself comes with card payments, VAY-2205):
- * the deposit a rate already has, else nothing when guests may pay at the property, the full stay otherwise. A
- * non-refundable stay is always paid in advance, even where old terms still name pay at property. */
-function PaidWhenBooking({
-  rate,
-  payment,
-}: {
-  rate: "flexible" | "non_refundable";
-  payment: Payment;
-}) {
+/** "Paid when booking", read from the rate's terms with the shared rule (VAY-2205): nothing for pay at property only,
+ * the full stay for prepaid methods only, a deposit, "guest chooses" for older terms that take both, and Payment
+ * settings for terms from before methods were set. */
+function PaidWhenBooking({ payment }: { payment: Payment }) {
   const { t } = useTranslation();
-  const methods = payment.acceptedMethods;
-  const [value, hint] =
-    payment.kind === "deposit"
-      ? [
-          t("pricing.rates.paid.deposit"),
-          t("pricing.terms.deposit", {
+  const text: Record<StoredPaidWhenBooking, readonly [string, string]> = {
+    nothing: [t("pricing.rates.paid.nothing"), t("pricing.rates.paid.nothingHint")],
+    full_stay: [t("pricing.rates.paid.full"), t("pricing.rates.paid.fullHint")],
+    deposit: [
+      t("pricing.rates.paid.deposit"),
+      payment.kind === "deposit"
+        ? t("pricing.terms.deposit", {
             percent: payment.basisPoints / 100,
             days: payment.balanceDaysBeforeArrival,
-          }),
-        ]
-      : rate === "non_refundable"
-        ? [t("pricing.rates.paid.full"), t("pricing.rates.paid.fullHint")]
-        : !methods
-          ? [t("pricing.rates.paid.settings"), t("pricing.rates.paid.settingsHint")]
-          : methods.includes("pay_at_property")
-            ? [t("pricing.rates.paid.nothing"), t("pricing.rates.paid.nothingHint")]
-            : [t("pricing.rates.paid.full"), t("pricing.rates.paid.fullHint")];
+          })
+        : "",
+    ],
+    guest_chooses: [t("pricing.rates.paid.guestChooses"), t("pricing.rates.paid.guestChoosesHint")],
+    not_set: [t("pricing.rates.paid.settings"), t("pricing.rates.paid.settingsHint")],
+  };
+  const [value, hint] = text[paidWhenBooking(payment)];
   return (
     <Part label={t("pricing.rates.paid.title")} className="lg:min-h-[104px]">
       <p className="text-[14px] font-semibold text-gray-900">{value}</p>
@@ -544,8 +535,8 @@ function PaidWhenBooking({
   );
 }
 
-/** A rate's payment methods: pay at property, bank transfer and PayPal when the hotel can use them, and card once
- * it's ready; a method the rate already takes always shows, so it can be removed. The non-refundable rate is paid in
+/** A rate's payment methods: pay at property, bank transfer and PayPal when the hotel can use them, and card once the
+ * booking page can take it (VAY-2205); a method the rate already takes always shows, so it can be removed. The non-refundable rate is paid in
  * advance, so it can't take pay at property (one it already takes can still be removed). */
 function RateMethods({
   rate,
@@ -560,6 +551,7 @@ function RateMethods({
 }) {
   const { t } = useTranslation();
   const manual = usePricingManualMethods();
+  const card = usePricingCardReadiness()?.card;
   const [error, setError] = useState("");
   const order: PricingPaymentMethod[] =
     rate === "flexible"
@@ -569,7 +561,7 @@ function RateMethods({
     (method) =>
       methods.includes(method) ||
       method === "pay_at_property" ||
-      (method === "card" ? cardReady : manual.includes(method as "bank_transfer" | "paypal")),
+      (method === "card" ? !!card?.ready : manual.includes(method as "bank_transfer" | "paypal")),
   );
   const change = (method: PricingPaymentMethod, on: boolean) => {
     const next = on ? [...methods, method] : methods.filter((value) => value !== method);
@@ -616,7 +608,11 @@ function RateMethods({
                 <span
                   className={`block text-[12px] ${notOffered ? "text-amber-700" : "text-gray-500"}`}
                 >
-                  {notOffered ? t("pricing.rates.notOffered") : t(methodHints[method])}
+                  {notOffered
+                    ? t("pricing.rates.notOffered")
+                    : method === "card" && card?.charge === "at_booking"
+                      ? t("pricing.rates.method.cardAtBooking")
+                      : t(methodHints[method])}
                 </span>
               </span>
             </label>

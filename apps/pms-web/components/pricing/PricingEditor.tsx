@@ -13,7 +13,7 @@ import type { NewRoomPrices } from "./newRoomPrices";
 import type { KeptNewRoomPrices } from "./keptNewRoomPrices";
 import { FirstPricingSetup, type SetupRoom, type firstPricingInput } from "./FirstPricingSetup";
 import { PricingTerms } from "./PricingTerms";
-import { PricingManualMethodsProvider, useLoadedPricingManualMethods } from "./pricingManualMethods";
+import { PricingCardReadinessProvider, PricingManualMethodsProvider, useLoadedPricingCardReadiness, useLoadedPricingManualMethods } from "./pricingManualMethods";
 import { PricingIncludedAdjustments } from "./PricingIncludedAdjustments";
 import { PricingStayOwnership } from "./PricingStayOwnership";
 import { PricingStaySeasons } from "./PricingStaySeasons";
@@ -68,6 +68,7 @@ type NewRoom = { take: MutableRefObject<(() => NewRoomPrices | null) | null>; ac
  * page already warns that the prices need saving again, so the editor does not repeat it. */
 export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, roomTypeId: focus, onAttention, onPublished, refresh = 0, newRoom, kept, onHandover, staleShown = false }: { client: Client; roomNames?: Record<string, string>; roomFacts?: Record<string, { size: number | null; photo: string | null }>; setup?: { propertyId: string; rooms: readonly SetupRoom[] }; roomTypeId: string; onAttention?: () => void; onPublished?: () => void; refresh?: number; newRoom?: NewRoom; kept?: KeptNewRoomPrices; onHandover?: (kept: boolean) => void; staleShown?: boolean }) {
   const manualMethods = useLoadedPricingManualMethods(client);
+  const cardReadiness = useLoadedPricingCardReadiness(client);
   const onPrices = newRoom?.onPrices;
   const callbacks = useRef({ onAttention, onPublished, onPrices, onHandover });
   useEffect(() => { callbacks.current = { onAttention, onPublished, onPrices, onHandover }; }, [onAttention, onPublished, onPrices, onHandover]);
@@ -344,7 +345,7 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
   const cancels = leaveRisk && !needsReload && !retry && !busy && !done;
   // No prices yet (VAY-2280): the first-price form shows the calendar of nights waiting for one, beside "Start with one price".
   // Laid out as the Paper design's numbered steps; the other editors sit under More options. Cancel and Save at the bottom.
-  return <PricingManualMethodsProvider value={manualMethods}><section className="space-y-4">
+  return <PricingManualMethodsProvider value={manualMethods}><PricingCardReadinessProvider value={cardReadiness}><section className="space-y-4">
     {error !== null && <div role="alert" className={ui.errorBanner}>{pricingSaveError(error, t)}{retry && <p className="mt-2">{t("pricing.editor.retryHint")}</p>}{keepsOnReload && <p className="mt-2">{t("pricing.room.reloadKeeps")}</p>}</div>}
     {notice && !(staleShown && notice === "pricing.room.noticeStale") && <p role="status" className={warning ? ui.warningBanner : ui.successBanner}>{t(notice)}</p>}
     {loading && <p role="status" className={ui.text}>{t("pricing.editor.loading")}</p>}
@@ -550,7 +551,7 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
     {/* Last, so they open above an option's window. */}
     {reloading && <ConfirmDialog title={t(cancels ? "pricing.steps.discardTitle" : "pricing.reloadTitle")} message={t(cancels ? "pricing.steps.discardMessage" : "pricing.reloadMessage")} confirmLabel={t(cancels ? "pricing.steps.discardConfirm" : "pricing.reloadConfirm")} cancelLabel={t("common.cancel")} variant="danger" onConfirm={() => { setReloading(false); void load(); }} onCancel={() => setReloading(false)} />}
     {leave && <ConfirmDialog title={t("pricing.leaveTitle")} message={t("pricing.leaveMessage")} confirmLabel={t("pricing.leaveConfirm")} cancelLabel={t("common.cancel")} variant="danger" onConfirm={() => { leaving.current = true; setLeave(null); leave(); }} onCancel={() => setLeave(null)} />}
-  </section></PricingManualMethodsProvider>;
+  </section></PricingCardReadinessProvider></PricingManualMethodsProvider>;
 }
 /** A room's prices without what a save assigns (its revision and its options' terms revisions). */
 const savedPrices = (room: Room) => ({ ...room, revision: 0, offers: room.offers.map((offer) => ({ ...offer, termsRevision: "" })) });

@@ -204,6 +204,7 @@ async function mockPricing(
   page: Page,
   initial: ReturnType<typeof publicationOf> | null,
   readyMethods: ("bank_transfer" | "paypal")[] = [],
+  { cardReady = false } = {},
 ) {
   const terms = new Map<string, Record<string, unknown>>([
     ["flexible", { revision: TERMS, cancellation: flexible }],
@@ -226,10 +227,10 @@ async function mockPricing(
     // Bank-transfer and PayPal acceptance is off, as in production today (VAY-2139), unless a test makes them ready.
     if (suffix === "/payment-methods" && method === "GET")
       return ok(route, { acceptanceEnabled: readyMethods.length > 0, readyMethods });
-    // Card isn't ready on the booking page, as in production today (VAY-2205).
+    // Card isn't ready on the booking page, as in production today (VAY-2205), unless a test makes it ready.
     if (suffix === "/card-readiness" && method === "GET")
       return ok(route, {
-        card: { ready: false, reason: "switch_off", charge: "at_booking" },
+        card: { ready: cardReady, reason: cardReady ? null : "switch_off", charge: "at_booking" },
         deposits: { ready: false },
       });
     if (suffix === "" && method === "GET") {
@@ -839,5 +840,22 @@ test("shows the whole year and closes dates picked in the Year view (VAY-2284)",
   await expect(months).toHaveCount(0);
   for (const element of [calendar, main(page)])
     expect(await element.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
+  await assertHealthy();
+});
+
+test("offers Card online on both rates once the booking page can take card (VAY-2205)", async ({
+  page,
+}, testInfo) => {
+  await openPms(page);
+  await mockPricing(page, publicationOf(3, [designRoom(3), complexRoom(3)]), [], {
+    cardReady: true,
+  });
+  const assertHealthy = watchPageHealth(page, testInfo);
+  await prices(page, DELUXE);
+  for (const rate of ["Flexible rate", "Non-refundable rate"]) {
+    const region = main(page).getByRole("region", { name: rate });
+    await expect(region.getByRole("checkbox", { name: "Card online" })).not.toBeChecked();
+    await expect(region).toContainText("Charged at booking");
+  }
   await assertHealthy();
 });
