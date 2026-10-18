@@ -1,6 +1,9 @@
 "use client";
 
-import type { PricingConfiguration } from "@vayada/domain-pms/replacement-pricing";
+import {
+  pricingOfferOnBookingPage,
+  type PricingConfiguration,
+} from "@vayada/domain-pms/replacement-pricing";
 import { useTranslation } from "@/lib/i18n";
 import type { Translate } from "./pricingAmounts";
 import { addDays, mainOffer, money, stayTotals, type OptionTerms } from "./stepPricing";
@@ -10,8 +13,8 @@ export type RoomFacts = { name: string; size: number | null; photo: string | nul
 const day = (date: string, t: Translate) =>
   `${Number(date.slice(8))} ${t(`pricing.steps.monthShort.${Number(date.slice(5, 7))}`)}`;
 
-/** "What guests see": the room as a booking-page card with each option's total for the sample stay, from the
- * engine's stay calculation. Choosing an option here also picks the calendar's option. `room` is the edited room, or
+/** "What guests see": the room as a booking-page card with each option it sells there (VAY-2285) and its total for
+ * the sample stay, from the engine's stay calculation. Choosing an option here also picks the calendar's option. `room` is the edited room, or
  * null while an edit doesn't validate yet. */
 export function GuestPreview({
   room,
@@ -41,6 +44,7 @@ export function GuestPreview({
     return result?.kind === "priced" ? result.totalMinor : null;
   };
   const main = room ? mainOffer(room) : null;
+  const offers = room ? room.offers.filter(pricingOfferOnBookingPage) : [];
   const mainTotal = totalOf(main?.id);
   const subtitle = (offer: PricingConfiguration["offers"][number], total: string) => {
     // Display only: the saving against the main option, rounded to a whole percent ("Save 10%").
@@ -65,7 +69,7 @@ export function GuestPreview({
       green: false,
     };
   };
-  const chosen = room?.offers.some((offer) => offer.id === selected) ? selected : main?.id;
+  const chosen = offers.some((offer) => offer.id === selected) ? selected : offers[0]?.id;
   const chosenTotal = totalOf(chosen);
   return (
     <section
@@ -126,13 +130,13 @@ export function GuestPreview({
                 )[event.key];
                 if (!step) return;
                 event.preventDefault();
-                const index = room.offers.findIndex((offer) => offer.id === chosen);
-                const next = (index + step + room.offers.length) % room.offers.length;
-                onSelect(room.offers[next].id);
+                const index = offers.findIndex((offer) => offer.id === chosen);
+                const next = (index + step + offers.length) % offers.length;
+                onSelect(offers[next].id);
                 event.currentTarget.querySelectorAll<HTMLElement>('[role="radio"]')[next]?.focus();
               }}
             >
-              {room.offers.map((offer) => {
+              {offers.map((offer) => {
                 const total = totalOf(offer.id),
                   active = offer.id === chosen,
                   note =

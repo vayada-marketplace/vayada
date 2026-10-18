@@ -2,6 +2,7 @@ import {
   parsePricingConfiguration,
   pricingCurrencyScale,
   type PricingConfiguration,
+  type PricingOfferSale,
 } from "@vayada/domain-pms/replacement-pricing";
 import type { PricingPaymentMethod } from "@vayada/domain-booking/replacement-pricing";
 import { decimalAmount, PricingError } from "./pricingAmounts";
@@ -178,6 +179,22 @@ export function setDiscount(room: Room, offerId: string, percent: string): Room 
   if (!/^\d+(?:\.\d{1,2})?$/.test(value) || Number(value) <= 0 || Number(value) >= 100)
     throw new PricingError("pricing.steps.preset.errorDiscount");
   return changeLinkedAdjustment(room, offerId, { kind: "percentage", value: `-${value}` });
+}
+/** Where an option is sold (VAY-2285): without `sale` on the booking page and channels (the key is left out, never
+ * written as a default), "channels_only" off the booking page, "not_sold" nowhere. The option and its terms stay, so
+ * options linked to it keep their price. Every room keeps one option on the booking page. */
+export function setOfferSale(room: Room, offerId: string, sale: PricingOfferSale | null): Room {
+  const next = parsePricingConfiguration({
+    ...room,
+    offers: room.offers.map((offer) => {
+      if (offer.id !== offerId) return offer;
+      const next: Record<string, unknown> = { ...offer };
+      delete next.sale;
+      return sale ? { ...next, sale } : next;
+    }),
+  });
+  if (!next) throw new PricingError("pricing.rates.keepOne");
+  return next;
 }
 /** The breakfast option's price per room or per adult; children's breakfast stays as it is. */
 export function setBreakfastAmount(room: Room, offerId: string, amount: string): Room {
