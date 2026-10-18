@@ -43,6 +43,35 @@ export function pricingCardRefundMinor(paidMinor: bigint, retainedMinor: bigint,
   return rounded > paidMinor ? paidMinor : rounded;
 }
 
+/** The cancel preview's money for a paid card stay: what was paid and what the booked terms give
+ * back, by the same rule as `stagePricingCardRefund`. Null without a paid card payment. */
+export async function previewPricingCardRefund(
+  db: Pick<PoolClient, "query">,
+  input: { propertyId: string; guestBookingId: string; retainedMinor: string },
+): Promise<{ paidMinor: bigint; refundMinor: bigint; currency: string } | null> {
+  const payment = (
+    await db.query(
+      `SELECT payment.amount::text AS amount,trim(payment.currency) AS currency
+       FROM booking.guest_bookings booking
+       JOIN finance.payments payment
+         ON payment.id=booking.active_card_payment_id AND payment.property_id=booking.property_id
+       WHERE booking.property_id=$1::uuid AND booking.id=$2::uuid AND payment.payment_method='card'
+         AND payment.status='paid' AND payment.refunded_amount=0
+         AND payment.payment_metadata->>'chargeType'='direct' AND payment.currency=booking.currency
+         AND booking.payment_status='paid' AND booking.booking_metadata->>'targetSource'='pricing_quote_draft'
+         AND booking.booking_metadata->>'paymentMethod'='card'`,
+      [input.propertyId, input.guestBookingId],
+    )
+  ).rows[0];
+  const paid = payment && pricingMinor(payment.amount, payment.currency);
+  if (!paid || !/^(0|[1-9][0-9]*)$/.test(input.retainedMinor)) return null;
+  return {
+    paidMinor: paid,
+    refundMinor: pricingCardRefundMinor(paid, BigInt(input.retainedMinor), payment.currency),
+    currency: payment.currency,
+  };
+}
+
 /** Inside the caller's cancel transaction, after it locked the booking row and the property's
  * inventory: records the refund the booked terms owe on the stay's paid card payment, or nothing
  * when they keep it all. The refund reaches Stripe only after the caller commits

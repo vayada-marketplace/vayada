@@ -114,6 +114,7 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
     "repository-stay-cancel-before-adoption",
     "repository-stay-cancel-after-adoption",
     "repository-stay-cancel-guest-route",
+    "repository-stay-cancel-guest-paid-card",
     "repository-stay-cancel-host-guest-request",
     "repository-stay-cancel-host-reject",
     "repository-date-change",
@@ -887,6 +888,138 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
           [bookingId],
         );
         expect(jobs.rows).toEqual([]);
+      } else if (scenario === "repository-stay-cancel-guest-paid-card") {
+        // VAY-2205: the guest cancels a paid card stay online; the cancel records the refund its
+        // terms owe, and money moves only once Stripe answers (after the commit).
+        expect(await adopt()).toMatchObject({ outcome: "adopted" });
+        await db.query(
+          "INSERT INTO hotel_catalog.property_slugs(property_id,slug,purpose) VALUES($1,$2,'canonical')",
+          [propertyId, propertyId],
+        );
+        await db.query(
+          `INSERT INTO booking.booking_guests(guest_booking_id,guest_role,first_name,last_name,email)
+           VALUES($1,'booker','Jane','Guest','jane@example.test')`,
+          [bookingId],
+        );
+        const accountId = randomUUID(),
+          paymentId = randomUUID();
+        await db.query(
+          `INSERT INTO finance.payment_provider_accounts(id,property_id,account_scope,provider,provider_account_id,status)
+           VALUES($1,$2,'property','stripe',$3,'active')`,
+          [accountId, propertyId, `acct_${bookingId.slice(0, 8)}`],
+        );
+        await db.query(
+          `INSERT INTO finance.payments(id,property_id,guest_booking_id,provider_account_id,payment_kind,payment_method,
+             status,amount,net_amount,currency,provider_payment_intent_id,visibility_class,paid_at,payment_metadata)
+           VALUES($1,$2,$3,$4,'full','card','paid',1080,1080,'EUR',$5,'pms_finance',now(),'{"chargeType":"direct"}')`,
+          [paymentId, propertyId, bookingId, accountId, `pi_${bookingId.slice(0, 8)}`],
+        );
+        await db.query(
+          `UPDATE booking.guest_bookings SET payment_status='paid',active_card_payment_id=$2,
+             booking_metadata=booking_metadata || '{"paymentMethod":"card"}' WHERE id=$1`,
+          [bookingId, paymentId],
+        );
+        // Each transaction (the cancel's, then the refund's after it) becomes a savepoint here.
+        const savepointed = (name: string) => (text: string, values?: unknown[]) =>
+          db.query(
+            (
+              {
+                BEGIN: `SAVEPOINT ${name}`,
+                COMMIT: `RELEASE SAVEPOINT ${name}`,
+                ROLLBACK: `ROLLBACK TO SAVEPOINT ${name}`,
+              } as Record<string, string>
+            )[text] ?? text,
+            values,
+          );
+        const nested = {
+          query: savepointed("guest_cancel"),
+          connect: async () => ({ query: savepointed("card_refund"), release: () => undefined }),
+        };
+        const createRefund = vi.fn(
+          async (input: { amountMinor: number; commandId: string; paymentIntentId: string }) => ({
+            refundId: "re_guest_cancel",
+            status: "succeeded",
+            amountMinor: input.amountMinor,
+            currency: "EUR",
+            paymentIntentId: input.paymentIntentId,
+            commandId: input.commandId,
+            failureReason: null,
+          }),
+        );
+        const adapter = (stripe: boolean) =>
+          createTargetBookingWebCheckoutAdapter({
+            pool: nested as unknown as pg.Pool,
+            connectionString: url!,
+            externalChanges: externalBookingChanges,
+            inventoryReservationPort: createTargetPmsInventoryReservationPort(),
+            ...(stripe
+              ? {
+                  stripePaymentProvider: {
+                    createRefund,
+                    listRefunds: vi.fn(async () => []),
+                    retrieveRefund: vi.fn(),
+                  } as never,
+                }
+              : {}),
+          });
+        const context = (key: string) => ({
+          operation: "booking-cancel",
+          requestId: `request-${key}`,
+          correlationId: `correlation-${key}`,
+          idempotencyKey: key,
+          fingerprint: hash(key),
+          occurredAt: new Date("2026-09-21T08:00:00Z"),
+        });
+        const guest = { guest_email: "jane@example.test" };
+        // Without Stripe, card refunds can't run: a paid stay stays refused online.
+        await expect(
+          adapter(false).cancelPreview(propertyId, bookingId, guest, context("p0")),
+        ).rejects.toMatchObject({ statusCode: 409 });
+        expect(
+          await adapter(true).cancelPreview(propertyId, bookingId, guest, context("p")),
+        ).toMatchObject({
+          amountPaid: 1080,
+          refundAmount: 270,
+          refundPercentage: 25,
+          cancellationFeeAmount: 810,
+          bookedTermsOutcome: { retainedMinor: "81000", refundMinor: "27000" },
+        });
+        const cancel = adapter(true);
+        for (const key of ["c", "c"])
+          await cancel.cancel(
+            propertyId,
+            bookingId,
+            { ...guest, expected_cancellation_fee_minor: "81000" },
+            context(key),
+          );
+        await db.query("SET CONSTRAINTS ALL IMMEDIATE");
+        expect(
+          (
+            await db.query(
+              `SELECT booking.lifecycle_status AS status,booking.payment_status AS paid,
+                 payment.status AS payment,payment.refunded_amount::text AS refunded
+               FROM booking.guest_bookings booking JOIN finance.payments payment ON payment.id=booking.active_card_payment_id
+               WHERE booking.id=$1`,
+              [bookingId],
+            )
+          ).rows,
+        ).toEqual([
+          { status: "canceled", paid: "paid", payment: "partially_refunded", refunded: "270.00" },
+        ]);
+        // One refund for the replayed cancel, asked of Stripe once after the commit and settled.
+        expect(createRefund).toHaveBeenCalledOnce();
+        expect(createRefund.mock.calls[0]![0]).toMatchObject({ amountMinor: 27000 });
+        expect(
+          (
+            await db.query(
+              `SELECT status,requested_by,amount::text AS amount,amount_minor::text AS minor
+               FROM finance.card_refund_commands WHERE guest_booking_id=$1`,
+              [bookingId],
+            )
+          ).rows,
+        ).toEqual([
+          { status: "succeeded", requested_by: "guest", amount: "270.00", minor: "27000" },
+        ]);
       } else if (scenario === "repository-stay-cancel-host-guest-request") {
         // VAY-2100: PMS staff cancel an adopted v2 stay because the guest asked.
         expect(await adopt()).toMatchObject({ outcome: "adopted" });
