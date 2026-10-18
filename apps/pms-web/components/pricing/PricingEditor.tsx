@@ -31,14 +31,13 @@ import { PricingLinkedAdjustment } from "./PricingLinkedAdjustment";
 import { PricingDates } from "./PricingDates";
 import { PricingStayPreview } from "./PricingStayPreview";
 import { MoreOptions } from "./MoreOptions";
-import { StepPrice } from "./StepPrice";
 import { StepSeasons } from "./StepSeasons";
 import { StepWeekends } from "./StepWeekends";
 import { addDays, deleteBlocker, deleteOption, mainOffer, missingPresets, normalNight, optionNames, sampleAdults, sampleStay, type OptionTerms, type PresetKey } from "./stepPricing";
 import { simpleRoom } from "./simplePricing";
 import { StepCancellation } from "./StepCancellation";
 import { StepExtras } from "./StepExtras";
-import { keptSettings, MoreGroup, SimpleGuests, SimplePayment, simpleSummary } from "./SimpleMoreOptions";
+import { keptSettings, MoreGroup, SimplePayment, simpleSummary } from "./SimpleMoreOptions";
 import { PresetWindow } from "./PresetWindow";
 import { AddOptionButton, StepOptions } from "./StepOptions";
 import { StepStayRules } from "./StepStayRules";
@@ -383,27 +382,25 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
         {kept && <p role="status" className={ui.infoBanner}>{t("pricing.simple.kept")}</p>}
         {/* The simple Prices card (VAY-2188): price, cancellation, the two switches and busier dates; everything else under More options. */}
         <div className={ui.pricesCard}>
-          <StepPrice room={room} roomIndex={ri} offerIndex={mi} label={mainLabel} inputs={inputs} disabled={disabled || exclusiveEditPending}
-            onInput={(key, value) => { setInputs((previous) => ({ ...previous, [key]: value })); setDirty(true); setNotice(""); }} onEditMeal={() => setOptionOpen(main.id)} />
+          <StepSeasons room={room} offer={main} roomIndex={ri} offerIndex={mi} label={mainLabel} inputs={inputs} disabled={disabled || exclusiveEditPending}
+            onInput={(key, value) => { setInputs((previous) => ({ ...previous, [key]: value })); setDirty(true); setNotice(""); }} onEditMeal={() => setOptionOpen(main.id)}
+            onEditChildren={() => setChildrenOpen(true)} shown={edited}
+            onPriceMode={(next) => { changeRoom(ri)(next); setInputs((previous) => Object.fromEntries(Object.entries(previous).filter(([key]) => !key.startsWith(`${ri}:`)))); }}
+            onChange={changeRoom(ri)} onPending={pend(`stepSeason:${ri}`)} addOnMount={seasonOnStart} onAddStarted={() => setSeasonOnStart(false)}>
+            <StepWeekends room={room} offer={main} label={mainLabel} disabled={disabled || exclusiveEditPending} onChange={changeRoom(ri)} onPending={pend(`stepWeekday:${ri}`)} />
+          </StepSeasons>
           <StepCancellation simple={simple} terms={optionTerms} failed={termsFailed} disabled={disabled || hasPendingEntries} onTerms={applyTerms(room.roomTypeId)} onRetry={retryTerms} onEditOwn={() => setOptionOpen(main.id)} />
           {simple && <StepExtras room={room} simple={simple} prices={prices} disabled={disabled || (hasPendingEntries && !pendingEntries[`extras:${ri}`])}
             onAdd={(input) => createInitial(input, true, room.roomTypeId)} onRemove={(offerId) => { if (!disabled && !pendingBesidesExtras) setDeleting(offerId); }} onChange={changeRoom(ri)} onPending={pend(`extras:${ri}`)} />}
-          <StepSeasons room={room} offer={main} label={mainLabel} disabled={disabled || exclusiveEditPending} onChange={changeRoom(ri)} onPending={pend(`stepSeason:${ri}`)} addOnMount={seasonOnStart} onAddStarted={() => setSeasonOnStart(false)}>
-            <StepWeekends room={room} offer={main} label={mainLabel} disabled={disabled || exclusiveEditPending} onChange={changeRoom(ri)} onPending={pend(`stepWeekday:${ri}`)} />
-          </StepSeasons>
         </div>
+        <OptionWindow open={childrenOpen} title={t("pricing.steps.rules.childrenTitle")} closable={!pendingEntries[`children:${ri}`]} onClose={() => setChildrenOpen(false)}>
+          <PricingChildCharges room={room} label={roomName(room.roomTypeId, ri)} disabled={disabled || exclusiveEditPending} onPending={pend(`children:${ri}`)} onChange={changeRoom(ri)} />
+        </OptionWindow>
         <MoreOptions keepOpen={pendingIn(moreKeys)} summary={simpleSummary(room, simple, t)} marked={kept}>
           <MoreGroup title={t("pricing.simple.more.payment")} hint={t("pricing.simple.more.paymentHint")}>
             <SimplePayment simple={simple} terms={optionTerms} failed={termsFailed} disabled={disabled || hasPendingEntries} onTerms={applyTerms(room.roomTypeId)} />
           </MoreGroup>
-          <StepStayRules room={room} names={names} disabled={disabled || exclusiveEditPending} onChange={changeRoom(ri)} onEditChildren={() => setChildrenOpen(true)}>
-            <OptionWindow open={childrenOpen} title={t("pricing.steps.rules.childrenTitle")} closable={!pendingEntries[`children:${ri}`]} onClose={() => setChildrenOpen(false)}>
-              <PricingChildCharges room={room} label={roomName(room.roomTypeId, ri)} disabled={disabled || exclusiveEditPending} onPending={pend(`children:${ri}`)} onChange={changeRoom(ri)} />
-            </OptionWindow>
-          </StepStayRules>
-          {room.capacity.adults > 1 && main.price.kind === "independent" && main.price.calendar.base && <MoreGroup title={t("pricing.simple.more.guests")}>
-            <SimpleGuests room={edited ?? room} disabled={disabled || exclusiveEditPending || !edited} onChange={(next) => { changeRoom(ri)(next); setInputs((previous) => Object.fromEntries(Object.entries(previous).filter(([key]) => !key.startsWith(`${ri}:`)))); }} />
-          </MoreGroup>}
+          <StepStayRules room={room} names={names} disabled={disabled || exclusiveEditPending} onChange={changeRoom(ri)} />
           <MoreGroup title={t("pricing.simple.more.dates")}>
             <div className="space-y-2">
               <PricingMonths room={room} offer={main} label={mainLabel} disabled={disabled || exclusiveEditPending} onPending={pend(`month:${ri}:${mi}`)} onChange={changeRoom(ri)} />

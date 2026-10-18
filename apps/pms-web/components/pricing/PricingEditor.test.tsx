@@ -4513,8 +4513,9 @@ it("names a deposit and counts it as a kept setting, and prices by adult count f
   expect(text()).toContain("Deposit: 30% of the final total. Balance due 14 days before arrival.");
   expect(text()).toContain("This room has more settings than the simple view shows.");
   await act(async () => input().props.onChange({ target: { value: "120" } }));
-  await click("Set a price for each number of adults");
-  expect(text()).toContain("Now: 1 adult €120 · 2 adults €120");
+  // "Prices and seasons" switches to a price per number of adults from the typed price (VAY-2280).
+  await act(async () => view.root.findByProps({ role: "switch", "aria-label": "Price depends on number of guests" }).props.onClick());
+  expect(text()).toContain("On: a price for each number of adults, 1 to 2");
   await click("Save prices");
   expect(saved.snapshot.rooms[0].offers[0].price).toMatchObject({ calendar: { base: { mode: "occupancy", amountsMinor: ["12000", "12000"] } } });
   expect(client.termsAction).not.toHaveBeenCalled();

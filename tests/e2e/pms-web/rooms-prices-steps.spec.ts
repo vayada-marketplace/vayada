@@ -344,10 +344,10 @@ async function openPms(page: Page) {
 const main = (page: Page) => page.locator("main");
 const prices = async (page: Page, id: string) => {
   await page.goto(`/rooms/${id}?tab=prices`);
-  // An unpriced room shows "Set this room's prices"; a priced one the card's "Price per night".
+  // An unpriced room shows "Set this room's prices"; a priced one the card's "Prices and seasons" (VAY-2280).
   await expect(
     main(page)
-      .getByRole("heading", { name: /^Price per night$|Set this room's prices/ })
+      .getByRole("heading", { name: /^Prices and seasons$|Set this room's prices/ })
       .first(),
   ).toBeVisible();
 };
@@ -373,7 +373,7 @@ test("edits a priced room on the simple card and publishes only what changed (VA
   const pricing = await mockPricing(page, publicationOf(3, [designRoom(3), complexRoom(3)]));
   const assertHealthy = watchPageHealth(page, testInfo);
   await prices(page, DELUXE);
-  for (const heading of ["Cancellation", "Extra choices for guests", "Busier dates"])
+  for (const heading of ["Prices and seasons", "Cancellation", "Extra choices for guests"])
     await expect(main(page).getByRole("heading", { name: heading })).toBeVisible();
   // "Prices by date" comes first (VAY-2280), showing the main option's nightly prices.
   const calendar = main(page).getByRole("region", { name: "Prices by date" });
@@ -508,6 +508,44 @@ test("closes a night and gives another its own price from the calendar (VAY-2280
   ]);
   expect(flexibleOffer.price.calendar.dates).toEqual([
     { date: expect.stringMatching(/-03$/), price: flat("13000") },
+  ]);
+  await assertHealthy();
+});
+
+test("edits a season's price in the table and adds dates to a season (VAY-2280)", async ({
+  page,
+}, testInfo) => {
+  await openPms(page);
+  const pricing = await mockPricing(page, publicationOf(3, [designRoom(3), complexRoom(3)]));
+  const assertHealthy = watchPageHealth(page, testInfo);
+  await prices(page, DELUXE);
+  const table = main(page).getByRole("table", { name: "Prices and seasons" });
+  await expect(table.getByLabel("Deluxe Double Room Offer 1 Per room")).toHaveValue("100.00");
+  // A season's price applies when the field is left.
+  await table.getByLabel("High price Per room").fill("150");
+  await table.getByLabel("High price Per room").press("Enter");
+  await expect(table.getByRole("button", { name: /^Edit season High · €150/ })).toBeVisible();
+  // "+ Dates" adds another range with the season's name and price.
+  await table.getByRole("button", { name: "Add dates to Low" }).click();
+  await expect(dialog(page).getByLabel("Season name")).toHaveValue("Low");
+  await dialog(page).getByLabel("Starts: day").fill("1");
+  await dialog(page).getByLabel("Starts: month").selectOption("11");
+  await dialog(page).getByLabel("Ends: day").fill("15");
+  await dialog(page).getByLabel("Ends: month").selectOption("11");
+  await dialog(page).getByRole("button", { name: "Save season" }).click();
+  await expect(
+    table.getByRole("button", { name: /^Edit season Low · €80, 1 Nov – 15 Nov/ }),
+  ).toBeVisible();
+
+  await main(page).getByRole("button", { name: "Save prices" }).click();
+  await expect(main(page).getByText("Prices saved.", { exact: false })).toBeVisible();
+  const deluxe = (pricing.publishes[0].snapshot.rooms as Room[]).find(
+    (value) => value.roomTypeId === DELUXE,
+  )!;
+  expect(deluxe.offers[0].price.calendar.seasons).toEqual([
+    { name: "Low", tier: "Low", from: "01-01", through: "03-31", price: flat("8000") },
+    { name: "High", tier: "High", from: "07-01", through: "08-31", price: flat("15000") },
+    { name: "Low", tier: "Low", from: "11-01", through: "11-15", price: flat("8000") },
   ]);
   await assertHealthy();
 });
@@ -654,7 +692,7 @@ test("shows one stale-prices warning, a plain Price-free main window and a retry
   failing = false;
   await main(page).getByRole("button", { name: "Retry" }).click();
   await expect(
-    main(page).getByRole("heading", { name: "Price per night", exact: true }),
+    main(page).getByRole("heading", { name: "Prices and seasons", exact: true }),
   ).toBeVisible();
   // The room page's banner, with its "Save prices again", is the only warning.
   await expect(main(page).getByRole("button", { name: "Save prices again" })).toBeVisible();

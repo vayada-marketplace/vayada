@@ -40,7 +40,9 @@ test("first pricing setup takes the ways to pay from Payment settings and lets s
   await page.goto(`/rooms/${PMS_WEB_ROOM_TYPE_ID}?tab=prices`);
   // VAY-2188: the first price is the simple card; how guests pay is under More options, from Payment settings
   // (the shared mock: at the property only).
-  await expect(page.getByRole("heading", { name: "Price per night", exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Prices and seasons", exact: true }),
+  ).toBeVisible();
   await expect(page.getByText("Guests pay at the hotel", { exact: false })).toBeVisible();
   await page
     .locator("summary")
@@ -125,7 +127,9 @@ test("first pricing setup offers bank transfer once the hotel can use it, and ta
   );
 
   await page.goto(`/rooms/${PMS_WEB_ROOM_TYPE_ID}?tab=prices`);
-  await expect(page.getByRole("heading", { name: "Price per night", exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Prices and seasons", exact: true }),
+  ).toBeVisible();
   // Ready bank transfer is one of the hotel's ways to pay, like in setup's pricing step.
   await expect(
     page.getByText("Guests pay at the hotel or by bank transfer", { exact: false }),

@@ -1,31 +1,26 @@
 "use client";
 
-import { useId, useState, type ReactNode } from "react";
+import { useId, useState } from "react";
 import { MinusIcon, PlusIcon } from "@heroicons/react/24/outline";
 import type { PricingConfiguration } from "@vayada/domain-pms/replacement-pricing";
 import { useTranslation } from "@/lib/i18n";
 import { errorText } from "./pricingAmounts";
-import { childrenSummary, mainOffer, ownRuleOptions, setMinimumNights } from "./stepPricing";
+import { mainOffer, ownRuleOptions, setMinimumNights } from "./stepPricing";
 import { MoreGroup } from "./SimpleMoreOptions";
 import * as ui from "./pricingStyles";
 
-/** More options' "Length of stay" and "Children": the main option's minimum nights (options that follow its stay rules
- * too) and the child prices. Options with their own stay rules are named, not changed. `children` is the child-price
- * window, opened by its Edit; a room that takes no children doesn't mention them. */
+/** More options' "Length of stay": the main option's minimum nights (options that follow its stay rules too). Options
+ * with their own stay rules are named, not changed. Children's prices moved to "Prices and seasons" (VAY-2280). */
 export function StepStayRules({
   room,
   names,
   disabled,
   onChange,
-  onEditChildren,
-  children,
 }: {
   room: PricingConfiguration;
   names: Readonly<Record<string, string>>;
   disabled: boolean;
   onChange: (room: PricingConfiguration) => void;
-  onEditChildren: () => void;
-  children: ReactNode;
 }) {
   const { t } = useTranslation();
   const [error, setError] = useState("");
@@ -43,12 +38,6 @@ export function StepStayRules({
     }
   };
   const nights = rules?.minArrivalNights ?? 1;
-  const bands = room.children.bands;
-  const counted = bands.every((band) => band.countsTowardCapacity)
-    ? t("pricing.simple.more.childrenCounted", { count: room.capacity.total })
-    : bands.every((band) => !band.countsTowardCapacity)
-      ? t("pricing.simple.more.childrenNotCounted")
-      : null;
   return (
     <>
       <MoreGroup title={t("pricing.simple.more.stay")}>
@@ -101,24 +90,6 @@ export function StepStayRules({
           </p>
         )}
       </MoreGroup>
-      {room.capacity.children > 0 && (
-        <MoreGroup title={t("pricing.steps.rules.children")}>
-          <div className="flex h-[54px] items-center justify-between gap-3 rounded-[10px] bg-gray-100 px-[18px]">
-            <span className="truncate text-[14px] text-gray-900">{childrenSummary(room, t)}</span>
-            <button
-              type="button"
-              aria-label={t("pricing.steps.rules.childrenEdit")}
-              disabled={disabled}
-              onClick={onEditChildren}
-              className={`shrink-0 ${ui.stepLink}`}
-            >
-              {t("pricing.steps.options.edit")}
-            </button>
-          </div>
-          {counted && <p className={ui.stepHint}>{counted}</p>}
-        </MoreGroup>
-      )}
-      {children}
     </>
   );
 }
