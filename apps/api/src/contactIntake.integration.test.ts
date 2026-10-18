@@ -46,7 +46,8 @@ describe.skipIf(!URL)("PostgreSQL contact intake storage, delivery and retention
     repository.submitContact({
       payload: contactPayload(marker),
       channel,
-      requestId: `req-${marker}`,
+      // Like Fastify's request ids: never personal, and kept apart from the marker search.
+      requestId: `req-${randomUUID()}`,
       receivedAt: new Date().toISOString(),
     });
 
