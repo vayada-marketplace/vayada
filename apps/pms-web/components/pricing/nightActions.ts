@@ -6,7 +6,7 @@ import {
 import { changeDatePrice } from "./PricingDates";
 import { PricingError } from "./pricingAmounts";
 import { recurringTemplate } from "./recurringPricingInputs";
-import { addDays, mainOffer, restrictionOwner } from "./stepPricing";
+import { addDays, mainOffer, restrictionOwner, seasonsOverlap } from "./stepPricing";
 
 type Room = PricingConfiguration;
 type Offer = Room["offers"][number];
@@ -134,4 +134,49 @@ export function nightPrices(
       totalMinor: night?.kind === "projected" ? night.night.totalMinor : null,
     };
   });
+}
+
+const seasonKey = (name: string, tier: string) =>
+  JSON.stringify([name.trim().toLowerCase(), tier.trim().toLowerCase()]);
+/** "Add the dates to a season" (VAY-2284): the picked nights' days join a season of the main option, every year
+ * (seasons are MM-DD). A season with that name and tier keeps its price; a new one starts at the standard price, to
+ * change under "Prices and seasons". Seasons may not overlap, and the days must be less than a year. */
+export function addToSeason(
+  room: Room,
+  selection: NightSelection,
+  season: { name: string; tier: string },
+): Room {
+  const main = mainOffer(room);
+  if (main.price.kind !== "independent") throw new PricingError("pricing.seasons.errorIndependent");
+  const name = season.name.trim(),
+    tier = season.tier.trim();
+  if (!name) throw new PricingError("pricing.seasons.errorName");
+  if (selectedDates(selection).length > 365) throw new PricingError("pricing.night.seasonTooLong");
+  const calendar = main.price.calendar;
+  const range = { from: selection.from.slice(5), through: selection.to.slice(5) };
+  if (calendar.seasons.some((other) => seasonsOverlap(range, other)))
+    throw new PricingError("pricing.steps.seasons.errorOverlap");
+  const price =
+    calendar.seasons.find((other) => seasonKey(other.name, other.tier) === seasonKey(name, tier))
+      ?.price ?? calendar.base;
+  if (!price) throw new PricingError("pricing.night.seasonNoStandard");
+  const result = parsePricingConfiguration({
+    ...room,
+    offers: room.offers.map((offer) =>
+      offer.id === main.id
+        ? {
+            ...main,
+            price: {
+              ...main.price,
+              calendar: {
+                ...calendar,
+                seasons: [...calendar.seasons, { name, tier, ...range, price }],
+              },
+            },
+          }
+        : offer,
+    ),
+  });
+  if (!result) throw new PricingError("pricing.seasons.errorInvalid");
+  return result;
 }

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import {
+  ArrowsRightLeftIcon,
   CalendarDaysIcon,
   LockClosedIcon,
   LockOpenIcon,
@@ -15,6 +16,7 @@ import {
 import { useTranslation } from "@/lib/i18n";
 import { baseAmounts, decimalAmount, errorText } from "./pricingAmounts";
 import {
+  addToSeason,
   nightPrices,
   nightRules,
   ownPrice,
@@ -32,7 +34,9 @@ type Room = PricingConfiguration;
 type Entry =
   | { kind: "price"; values: string[] }
   | { kind: "minimum"; value: string }
-  | { kind: "arrival"; noArrival: boolean; noDeparture: boolean };
+  | { kind: "arrival"; noArrival: boolean; noDeparture: boolean }
+  /** `season`: a season group's key, or "" for a new season named `name`. */
+  | { kind: "season"; season: string; name: string };
 const action =
   "inline-flex h-10 items-center justify-center gap-2 rounded-lg border px-3 text-[14px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50";
 
@@ -137,6 +141,8 @@ export function NightPanel({
   const own = single ? ownPrice(room, date) : null;
   const prices = single && shown ? nightPrices(shown, date, adults) : [];
   const fields = template ? baseAmounts(template, t) : [];
+  const groups = seasonGroups(main);
+  const span = single ? day(date) : `${day(dates[0])} – ${day(dates[dates.length - 1])}`;
   return (
     <section
       aria-label={t("pricing.night.title")}
@@ -292,6 +298,78 @@ export function NightPanel({
             </button>
           </div>
         </div>
+      ) : entry?.kind === "season" ? (
+        <div className={ui.draftCard}>
+          <p className="text-[13px] font-semibold text-gray-900">
+            {t("pricing.night.seasonTitle", { days: span })}
+          </p>
+          <div
+            role="radiogroup"
+            aria-label={t("pricing.night.seasonChoice")}
+            className="mt-2 flex flex-wrap gap-1.5"
+          >
+            {[
+              ...groups.map((group) => ({ key: group.key, name: group.name })),
+              { key: "", name: t("pricing.night.seasonNew") },
+            ].map((choice) => (
+              <button
+                key={choice.key}
+                type="button"
+                role="radio"
+                aria-checked={entry.season === choice.key}
+                disabled={disabled}
+                onClick={() => setEntry({ ...entry, season: choice.key })}
+                className={`inline-flex h-8 items-center rounded-full border px-3 text-[13px] font-medium ${
+                  entry.season === choice.key
+                    ? "border-primary-300 bg-primary-50 text-primary-700"
+                    : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
+                }`}
+              >
+                {choice.name}
+              </button>
+            ))}
+          </div>
+          {entry.season === "" && (
+            <label className="mt-3 block text-[12px] text-gray-600">
+              {t("pricing.night.seasonName")}
+              <input
+                aria-label={t("pricing.night.seasonName")}
+                className={`mt-1 ${ui.input}`}
+                disabled={disabled}
+                value={entry.name}
+                onChange={(event) => setEntry({ ...entry, name: event.target.value })}
+              />
+            </label>
+          )}
+          <p className="mt-2 text-[12px] text-gray-500">{t("pricing.night.seasonHint")}</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              className={ui.primaryButton}
+              disabled={disabled}
+              onClick={() => {
+                const group = groups.find((value) => value.key === entry.season);
+                apply(() =>
+                  addToSeason(
+                    room,
+                    selection,
+                    group ? { name: group.name, tier: group.tier } : { name: entry.name, tier: "" },
+                  ),
+                );
+              }}
+            >
+              {t("pricing.night.seasonApply")}
+            </button>
+            <button
+              type="button"
+              className={ui.secondaryButton}
+              disabled={disabled}
+              onClick={close}
+            >
+              {t("common.cancel")}
+            </button>
+          </div>
+        </div>
       ) : entry?.kind === "arrival" ? (
         <div className={ui.draftCard}>
           <p className="text-[13px] font-semibold text-gray-900">
@@ -353,6 +431,17 @@ export function NightPanel({
             <PencilSquareIcon aria-hidden="true" className="h-4 w-4" />
             {t(single ? "pricing.night.ownPriceOne" : "pricing.night.ownPriceMany")}
           </button>
+          {main.price.kind === "independent" && (
+            <button
+              type="button"
+              disabled={disabled}
+              className={`${action} w-full border-gray-300 bg-white text-gray-800 hover:bg-gray-50`}
+              onClick={() => open({ kind: "season", season: groups[0]?.key ?? "", name: "" })}
+            >
+              <ArrowsRightLeftIcon aria-hidden="true" className="h-4 w-4" />
+              {t("pricing.night.season")}
+            </button>
+          )}
           {stayOwned && (
             // Side by side when both labels fit on one line each, otherwise one under the other.
             <div className="flex flex-wrap gap-2">
