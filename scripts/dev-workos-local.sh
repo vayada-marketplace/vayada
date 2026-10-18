@@ -308,10 +308,6 @@ echo "    Stop with Ctrl-C. Stop Docker services with: npm run dev:workos-local 
 echo
 
 start_api
-start_app apps/marketplace-web 3000 "${COMMON_FRONTEND_ENV[@]}" \
-  "AUTH_PUBLIC_ORIGIN=${MARKETPLACE_ORIGIN}" \
-  "AUTH_GATEWAY_UPSTREAM_ORIGIN=${AUTH_GATEWAY_UPSTREAM_ORIGIN}" \
-  "NEXT_PUBLIC_API_URL=${MARKETPLACE_API_ORIGIN}"
 start_app apps/vayada-admin 3001 "${COMMON_FRONTEND_ENV[@]}" \
   "AUTH_PUBLIC_ORIGIN=${ADMIN_ORIGIN}" \
   "AUTH_GATEWAY_UPSTREAM_ORIGIN=${AUTH_GATEWAY_UPSTREAM_ORIGIN}" \
