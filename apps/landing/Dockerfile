@@ -2,7 +2,6 @@
 # The base image is our public GHCR copy of node:24-alpine, pinned to the upstream index digest
 # (vayada-platform "Mirror CI images", VAY-2265): anonymous ECR Public pulls hit "toomanyrequests".
 # Build context is the repo root (workflow sets context: .).
-# Workspace package @vayada/marketplace-shared is resolved from packages/.
 
 # Stage 1: Builder
 FROM ghcr.io/vayada-marketplace/ci-node:24-alpine@sha256:44fce696f38ba8c987c4db89954051000bbd05ffd8d8659ba15ed4a8602e937f AS builder

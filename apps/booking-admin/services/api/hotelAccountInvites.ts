@@ -5,7 +5,8 @@ import { apiClient, ApiErrorResponse } from "./client";
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.localhost";
 
 export const HOTEL_ACCOUNT_INVITE_STORAGE_KEY = "vayada.hotel-account-invite.v1";
-export type HotelAccountInviteTrack = "hotel_operations" | "creator_marketplace";
+// The API reads every stored invite as a Hotel Operations invite (VAY-2270).
+export type HotelAccountInviteTrack = "hotel_operations";
 
 export type HotelAccountInviteLookup = {
   contractVersion: "hotel-account-invite.v1";

@@ -370,6 +370,155 @@ describe("adaptive hotel setup contracts", () => {
     expect(parseAdaptiveHotelSetupStatus(value)).toBeNull();
   });
 
+  it("accepts a status with or without the retired Marketplace placeholders (VAY-2270)", () => {
+    const status = (): Record<string, any> => ({
+      contractVersion: ADAPTIVE_HOTEL_SETUP_CONTRACT_VERSION,
+      organization: {
+        organizationId: "11111111-1111-4111-8111-111111111111",
+        displayName: "Alpenrose Hotel Group",
+        websiteUrl: null,
+        selectedTracks: ["hotel_operations"],
+        trackRevision: 1,
+        canManageTracks: false,
+        tracks: [
+          {
+            track: "hotel_operations",
+            provisioning: "active",
+            components: [
+              { product: "pms", access: "active" },
+              { product: "booking", access: "active" },
+            ],
+            allowedActions: [],
+          },
+          {
+            track: "creator_marketplace",
+            provisioning: "not_selected",
+            components: [{ product: "marketplace", access: "absent" }],
+            allowedActions: [],
+          },
+        ],
+      },
+      propertySelection: {
+        state: "no_property",
+        selectedPropertyId: null,
+        availableProperties: [],
+      },
+      entryDecision: null,
+      setupPlan: null,
+      updatedAt: "2026-07-26T12:00:00.000Z",
+    });
+    const withPlaceholders = status();
+    expect(parseAdaptiveHotelSetupStatus(withPlaceholders)).toEqual(withPlaceholders);
+
+    const withoutPlaceholders = status();
+    withoutPlaceholders.organization.tracks.pop();
+    expect(parseAdaptiveHotelSetupStatus(withoutPlaceholders)).toEqual(withoutPlaceholders);
+
+    // Without its track entry the retired track cannot be selected.
+    withoutPlaceholders.organization.selectedTracks = ["hotel_operations", "creator_marketplace"];
+    expect(parseAdaptiveHotelSetupStatus(withoutPlaceholders)).toBeNull();
+    // The track entries keep their order either way.
+    const reordered = status();
+    reordered.organization.tracks.reverse();
+    expect(parseAdaptiveHotelSetupStatus(reordered)).toBeNull();
+  });
+
+  it("accepts launch readiness with or without the retired Marketplace state (VAY-2270)", () => {
+    const task = (taskId: string, track: string, owner: string, route: string) => ({
+      taskId,
+      propertyId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      track,
+      requirementOwnerDomain: owner,
+      destinationRouteKey: route,
+      callerCapability: "allowed",
+      ownerProgress: "not_started",
+      readiness: "actionable",
+      actionableBy: "owner",
+      reasonCodes: [],
+      sourceRevision: "1",
+      freshness: "fresh",
+      evaluatedAt: "2026-07-26T12:00:00.000Z",
+    });
+    const value: Record<string, any> = {
+      contractVersion: ADAPTIVE_HOTEL_SETUP_CONTRACT_VERSION,
+      organization: {
+        organizationId: "11111111-1111-4111-8111-111111111111",
+        displayName: "Alpenrose Hotel Group",
+        websiteUrl: null,
+        selectedTracks: ["hotel_operations"],
+        trackRevision: 1,
+        canManageTracks: false,
+        tracks: [
+          {
+            track: "hotel_operations",
+            provisioning: "active",
+            components: [
+              { product: "pms", access: "active" },
+              { product: "booking", access: "active" },
+            ],
+            allowedActions: [],
+          },
+        ],
+      },
+      propertySelection: {
+        state: "single_property",
+        selectedPropertyId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        availableProperties: [
+          {
+            propertyId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            publicId: "hotel-alpenrose",
+            displayName: "Hotel Alpenrose",
+            locationSummary: "Munich, DE",
+          },
+        ],
+      },
+      entryDecision: null,
+      setupPlan: {
+        propertyId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        planRevision: "tracks:1",
+        tasks: [
+          task("shared_identity", "shared", "hotel_catalog", "hotel_catalog.shared_identity"),
+          task(
+            "rooms_rates_availability",
+            "hotel_operations",
+            "pms",
+            "pms.rooms_rates_availability",
+          ),
+          task(
+            "guest_settings_policies",
+            "hotel_operations",
+            "booking",
+            "booking.guest_settings_policies",
+          ),
+          task("billing_plan", "hotel_operations", "finance", "finance.billing_plan"),
+          task("payment", "hotel_operations", "finance", "finance.payment"),
+          task(
+            "direct_booking_publication",
+            "hotel_operations",
+            "distribution",
+            "distribution.direct_booking_publication",
+          ),
+        ],
+        recommendedTaskId: "shared_identity",
+        ownerProgress: { complete: 0, total: 6 },
+        launchReadiness: {
+          operationsUse: "pending",
+          directBookingPublish: "pending",
+          marketplacePublish: "not_applicable",
+        },
+      },
+      updatedAt: "2026-07-26T12:00:00.000Z",
+    };
+    expect(parseAdaptiveHotelSetupStatus(value)).not.toBeNull();
+
+    delete value.setupPlan.launchReadiness.marketplacePublish;
+    expect(parseAdaptiveHotelSetupStatus(value)).not.toBeNull();
+
+    // A state other than "not_applicable" still needs the retired track to be selected.
+    value.setupPlan.launchReadiness.marketplacePublish = "pending";
+    expect(parseAdaptiveHotelSetupStatus(value)).toBeNull();
+  });
+
   it("accepts a rejected Marketplace task as a correction recommendation", () => {
     const propertyId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
     const evaluatedAt = "2026-07-26T12:00:00.000Z";
