@@ -4,6 +4,7 @@ import { expect, it, vi } from "vitest";
 import type { PricingConfiguration } from "@vayada/domain-pms/replacement-pricing";
 import { NightPanel } from "./NightPanel";
 import {
+  addToSeason,
   nightRules,
   ownPrice,
   pickNight,
@@ -153,7 +154,7 @@ const button = (label: string) =>
 
 it("shows a picked night's prices and changes it from the panel (VAY-2280)", () => {
   mount(null);
-  expect(text()).toContain("Pick a night to change it");
+  expect(text()).toContain("Click a date to change it");
   mount({ from: "2026-09-25", to: "2026-09-25" });
   expect(text()).toContain("Friday, 25 September 2026");
   expect(text()).toContain("Oktoberfest · min. 3 nights");
@@ -197,4 +198,52 @@ it("changes a range of nights at once (VAY-2280)", () => {
   ]);
   act(() => button("Clear").props.onClick());
   expect(handlers.onClear).toHaveBeenCalled();
+});
+
+const flexSeasons = (value: PricingConfiguration) => {
+  const offer = value.offers[0];
+  return offer.price.kind === "independent" ? offer.price.calendar.seasons : [];
+};
+it("adds the picked nights to a season, every year (VAY-2284)", () => {
+  // A new season starts at the standard price.
+  mount({ from: "2026-12-20", to: "2027-01-06" });
+  act(() => button("Add to a season").props.onClick());
+  expect(text()).toContain("Add Sun 20 Dec – Wed 6 Jan to a season");
+  act(() =>
+    view.root
+      .findAll((node) => node.props.role === "radio" && textOf(node) === "New season")[0]
+      .props.onClick(),
+  );
+  act(() =>
+    view.root
+      .findByProps({ "aria-label": "Name of the new season" })
+      .props.onChange({ target: { value: "Christmas" } }),
+  );
+  act(() => button("Add to season").props.onClick());
+  expect(flexSeasons(handlers.onChange.mock.lastCall![0]).at(-1)).toEqual({
+    name: "Christmas",
+    tier: "",
+    from: "12-20",
+    through: "01-06",
+    price: flat("10000"),
+  });
+  // An existing season keeps its price.
+  mount({ from: "2026-10-05", to: "2026-10-10" });
+  act(() => button("Add to a season").props.onClick());
+  act(() => button("Add to season").props.onClick());
+  expect(flexSeasons(handlers.onChange.mock.lastCall![0]).at(-1)).toEqual({
+    name: "Oktoberfest",
+    tier: "",
+    from: "10-05",
+    through: "10-10",
+    price: flat("18000"),
+  });
+  // Seasons may not overlap.
+  mount({ from: "2026-09-25", to: "2026-09-27" });
+  act(() => button("Add to a season").props.onClick());
+  act(() => button("Add to season").props.onClick());
+  expect(text()).toContain("These days overlap another season.");
+  expect(() =>
+    addToSeason(room, { from: "2026-12-20", to: "2026-12-24" }, { name: " ", tier: "" }),
+  ).toThrow();
 });

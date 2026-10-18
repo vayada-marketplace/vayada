@@ -484,7 +484,7 @@ test("closes a night and gives another its own price from the calendar (VAY-2280
   await prices(page, DELUXE);
   const calendar = main(page).getByRole("region", { name: "Prices by date" });
   const panel = main(page).getByRole("region", { name: "Picked nights" });
-  await expect(panel.getByText("Pick a night to change it")).toBeVisible();
+  await expect(panel.getByText("Click a date to change it")).toBeVisible();
   // The 1st of the shown month: close it.
   await calendar.getByRole("button", { name: /^1 \w+ \d{4}, €/ }).click();
   await panel.getByRole("button", { name: "Close this night" }).click();
@@ -499,6 +499,10 @@ test("closes a night and gives another its own price from the calendar (VAY-2280
   await expect(
     calendar.getByRole("button", { name: /^3 \w+ \d{4}, €130, own price/ }),
   ).toBeVisible();
+  // VAY-2284: picked days can join a season, or start a new one (opened and left here: it depends on the month).
+  await panel.getByRole("button", { name: "Add to a season" }).click();
+  await expect(panel.getByRole("radio", { name: "New season" })).toBeVisible();
+  await panel.getByRole("button", { name: "Cancel" }).click();
 
   await main(page).getByRole("button", { name: "Save prices" }).click();
   await expect(main(page).getByText("Prices saved.", { exact: false })).toBeVisible();
