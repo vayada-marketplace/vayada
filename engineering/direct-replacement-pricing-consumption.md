@@ -737,6 +737,13 @@ amounts or availability promise. The existing date-specific /offers contract is
 not reinterpreted as this catalogue. Guest quoting and booking acceptance retain
 their own date, age, availability and current-evidence checks.
 
+Since VAY-2285 an offer can be kept off the booking page (`sale`: `channels_only` or
+`not_sold`; without it the offer is sold there and on channels). The catalogue, its
+stay prices and the booking page publication leave it out, and a guest quote or
+acceptance for it is refused, while the hotel's date change still reprices a booking
+already on it. A `not_sold` offer stays in the room as the price source of offers
+linked to it, and every room keeps at least one booking-page offer.
+
 Since VAY-2188 each catalogue offer also carries a short cancellation summary from
 its current terms: non-refundable, free until a number of days before arrival, or a
 partial refund. It lets the room choice be named in plain words before a quote
