@@ -61,6 +61,12 @@ test.describe("landing contact form", () => {
     const form = await openAndSendContactForm(page);
 
     await expect(page.getByText("Thank you! We've received your message")).toBeVisible();
+    // VAY-2286: the address beside the form is where form messages go.
+    await expect(page.getByRole("link", { name: "t.schreyer@vayada.com" })).toHaveAttribute(
+      "href",
+      "mailto:t.schreyer@vayada.com",
+    );
+    await expect(page.getByText("hello@vayada.com")).toHaveCount(0);
     expect(posts).toHaveLength(1);
     const url = new URL(posts[0].url);
     expect(`${url.origin}${url.pathname}`).toBe(`${apiOrigin}/api/contact`);
