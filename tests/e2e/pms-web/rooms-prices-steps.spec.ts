@@ -367,7 +367,8 @@ test("edits a priced room on the simple card and publishes only what changed (VA
   const pricing = await mockPricing(page, publicationOf(3, [designRoom(3), complexRoom(3)]));
   const assertHealthy = watchPageHealth(page, testInfo);
   await prices(page, DELUXE);
-  for (const heading of ["Prices and seasons", "Rates", "Extra choices for guests"])
+  // "Price rules" (VAY-2280): opening times, prices and seasons, rates and meals.
+  for (const heading of ["Price rules", "Prices and seasons", "Rates", "Meals"])
     await expect(main(page).getByRole("heading", { name: heading })).toBeVisible();
   // "Prices by date" comes first (VAY-2280), showing the main option's nightly prices.
   const calendar = main(page).getByRole("region", { name: "Prices by date" });
@@ -391,6 +392,8 @@ test("edits a priced room on the simple card and publishes only what changed (VA
   await expect(main(page).getByRole("region", { name: "Flexible rate" })).toContainText(
     "Always on",
   );
+  // The Save bar: the lowest night is the Low season's €80, 10% less on the Non-refundable rate.
+  await expect(main(page).getByText("Guests pay from €72 a night", { exact: true })).toBeVisible();
   // Non-refundable stays are paid in advance; the mock's old "pay at property" shows as not offered (VAY-2282).
   await expect(main(page).getByRole("region", { name: "Non-refundable rate" })).toContainText(
     "Not offered: non-refundable stays are paid in advance",

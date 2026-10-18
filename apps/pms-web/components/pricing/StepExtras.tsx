@@ -195,10 +195,12 @@ export function StepExtras({
   const showNonRefundable = only !== "breakfast" && simple.cancellation.kind === "free",
     showBreakfast = only !== "non_refundable" && simple.cancellation.kind !== "own";
   if (!showNonRefundable && !showBreakfast) return null;
+  // Just breakfast is step "Meals" of "Price rules" (VAY-2280); the non-refundable switch is a rate.
   return (
     <StepCard
-      title={t("pricing.simple.extras.title")}
-      hint={t("pricing.simple.extras.hint")}
+      step={only === "breakfast" ? 4 : undefined}
+      title={t(only === "breakfast" ? "pricing.meals.title" : "pricing.simple.extras.title")}
+      hint={t(only === "breakfast" ? "pricing.meals.hint" : "pricing.simple.extras.hint")}
       optional
     >
       <div>

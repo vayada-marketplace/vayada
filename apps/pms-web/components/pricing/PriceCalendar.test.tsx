@@ -3,7 +3,13 @@ import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { expect, it, vi } from "vitest";
 import type { PricingConfiguration } from "@vayada/domain-pms/replacement-pricing";
 import { PriceCalendar } from "./PriceCalendar";
-import { calendarNights, seasonGroups, seasonTones } from "./priceCalendarModel";
+import {
+  calendarNights,
+  lowestNightMinor,
+  nightsWithoutPrice,
+  seasonGroups,
+  seasonTones,
+} from "./priceCalendarModel";
 
 const rules = {
   minArrivalNights: 1,
@@ -262,4 +268,13 @@ it("groups seasons stored with the same name and tier (VAY-2280)", () => {
   expect(groups.map((group) => [group.name, group.indexes, group.tone])).toEqual([
     ["Oktoberfest", [0, 1], 0],
   ]);
+});
+
+it("counts the nights no price covers and finds the lowest night guests pay (VAY-2280)", () => {
+  expect(nightsWithoutPrice(room(), "flex", 2, "2026-09")).toBe(0);
+  // Without a standard price only Oktoberfest (16 nights) and the own price on 12 Sep are priced, over 365 nights.
+  expect(nightsWithoutPrice(room("none"), "flex", 2, "2026-09")).toBe(348);
+  // The non-refundable rate's weekday standard night, 10% under €100.
+  expect(lowestNightMinor(room(), ["flex", "nonref"], 2, "2026")).toBe("9000");
+  expect(lowestNightMinor(room(), ["flex"], 2, "2026")).toBe("10000");
 });

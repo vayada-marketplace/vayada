@@ -88,7 +88,7 @@ export function StepRates({
 }) {
   const { t } = useTranslation();
   return (
-    <StepCard title={t("pricing.rates.title")} hint={t("pricing.rates.hint")}>
+    <StepCard step={3} title={t("pricing.rates.title")} hint={t("pricing.rates.hint")}>
       {!simple ? (
         failed ? (
           <p role="status" className="text-[14px] text-amber-700">

@@ -291,7 +291,7 @@ export function StepSeasons({
   const meal = offer.meal,
     own = ownRules ? ownRuleOptions(room) : [];
   return (
-    <StepCard title={t("pricing.seasonTable.title")} hint={t("pricing.seasonTable.hint")}>
+    <StepCard step={2} title={t("pricing.seasonTable.title")} hint={t("pricing.seasonTable.hint")}>
       {(groups.length > 0 || gaps) && (
         <div className="space-y-2">
           <div className="flex flex-wrap items-center justify-between gap-2">

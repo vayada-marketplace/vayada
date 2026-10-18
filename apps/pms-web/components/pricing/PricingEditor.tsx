@@ -33,7 +33,8 @@ import { PricingStayPreview } from "./PricingStayPreview";
 import { MoreOptions } from "./MoreOptions";
 import { StepSeasons } from "./StepSeasons";
 import { StepWeekends } from "./StepWeekends";
-import { addDays, deleteBlocker, deleteOption, mainOffer, missingPresets, normalNight, optionNames, sampleAdults, sampleStay, type OptionTerms, type PresetKey } from "./stepPricing";
+import { addDays, deleteBlocker, deleteOption, mainOffer, missingPresets, money, normalNight, optionNames, sampleAdults, sampleStay, type OptionTerms, type PresetKey } from "./stepPricing";
+import { lowestNightMinor, nightsWithoutPrice } from "./priceCalendarModel";
 import { simpleRoom } from "./simplePricing";
 import { StepRates } from "./StepRates";
 import { StepExtras } from "./StepExtras";
@@ -318,6 +319,13 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
     return () => { live = false; };
   }, [firstTime, client]);
   const focusIndex = display ? display.rooms.findIndex((room) => room.roomTypeId === focus) : -1, editing = focusIndex >= 0;
+  // The Save bar's "Guests pay from" (VAY-2280): the focused room's lowest standard or season night this year, over its rates.
+  let guestsFrom = "";
+  if (display && editing) try {
+    const shown = editedSnapshot(display, inputs).rooms[focusIndex]!, rate = simpleRoom(shown, optionTerms)?.nonRefundable;
+    const minor = lowestNightMinor(shown, [mainOffer(shown).id, ...(rate ? [rate.id] : [])], sampleAdults(shown), String(new Date().getFullYear()));
+    if (minor) guestsFrom = t("pricing.bar.from", { amount: money(minor, shown.currency) });
+  } catch { guestsFrom = ""; }
   const shownRooms = (display?.rooms ?? []).map((room, ri) => [room, ri] as const).filter(([room]) => room.roomTypeId === focus);
   const scale = display ? pricingCurrencyScale(display.currency)! : 2;
   const warning = notice === "pricing.room.noticeStale" || notice === "pricing.room.noticeDropped" || notice === "pricing.newRoom.noticeKept";
@@ -368,6 +376,7 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
       // VAY-2284: the calendar shows what guests pay for the rates, Flexible and Non-refundable; other options build on them.
       const rates = [{ id: main.id, name: t("pricing.calendar.flexible") }, ...(simple?.nonRefundable ? [{ id: simple.nonRefundable.id, name: t("pricing.calendar.nonRefundable") }] : [])];
       const calendarId = rates.some((rate) => rate.id === previewId) ? previewId : main.id;
+      const gaps = edited ? nightsWithoutPrice(edited, main.id, sampleAdults(edited), today.slice(0, 7)) : 0;
       // The approved layout (VAY-2280): "Prices by date" first, then the price rules beside "What guests see".
       return <div key={room.roomTypeId} className="space-y-6">
         <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
@@ -381,6 +390,15 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
         <div className="min-w-0 space-y-4">
         {kept && <p role="status" className={ui.infoBanner}>{t("pricing.simple.kept")}</p>}
         {/* The simple Prices card (VAY-2188): price, cancellation, the two switches and busier dates; everything else under More options. */}
+        {/* "Price rules" (VAY-2280): the four steps behind every price in the calendar, and the nights no price covers. */}
+        <div className="flex flex-wrap items-end justify-between gap-2 pt-2">
+          <div className="space-y-1">
+            <h2 className="text-[20px] font-bold text-gray-900">{t("pricing.rules.title")}</h2>
+            <p className={ui.stepHint}>{t("pricing.rules.hint")}</p>
+          </div>
+          {gaps > 0 && <span role="status" className="inline-flex items-center gap-1.5 rounded-full bg-red-50 px-2.5 py-1 text-[13px] font-medium text-red-700">
+            <span aria-hidden="true" className="h-2 w-2 rounded-full bg-red-500" />{t(gaps === 1 ? "pricing.rules.gaps.one" : "pricing.rules.gaps.other", { count: gaps })}</span>}
+        </div>
         <div className={ui.pricesCard}>
           <StepOpening room={room} disabled={disabled || exclusiveEditPending} onChange={changeRoom(ri)} onPending={pend(`opening:${ri}`)} />
           <StepSeasons room={room} offer={main} roomIndex={ri} offerIndex={mi} label={mainLabel} inputs={inputs} disabled={disabled || exclusiveEditPending} names={names}
@@ -509,6 +527,7 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
     </div> : <div className={`flex-wrap ${ui.actionBar}`}>
       {!loading && editing && <p id={declarationId} className="w-full text-[11px] text-gray-500 md:mr-auto md:w-auto">{t("pricing.editor.saveDeclaration")}
         <span className={`ml-2 font-medium ${done ? "text-green-600" : dirty ? "text-amber-600" : "text-gray-400"}`}>{t(done ? "pricing.editor.statusSaved" : dirty ? "pricing.editor.statusUnsaved" : "pricing.editor.statusCurrent")}</span></p>}
+      {!loading && editing && guestsFrom && <span className="w-full text-[13px] text-gray-600 md:w-auto">{guestsFrom}</span>}
       <button type="button" className={ui.actionBarButton} disabled={loading || busy || retry} onClick={() => { if (keepsOnReload) reloadKeepingRoom(); else if (leaveRisk) setReloading(true); else void load(); }}>{t(cancels ? "common.cancel" : "pricing.editor.reload")}</button>
       {!loading && editing && done && <button type="button" className={ui.actionBarButton} onClick={() => void load()}>{t("pricing.room.editAgain")}</button>}
       {!loading && editing && (retry ? <button type="button" className={ui.actionBarPrimary} aria-describedby={declarationId} disabled={busy} onClick={() => void run()}>{t("pricing.editor.retry")}</button>
