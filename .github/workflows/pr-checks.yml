@@ -67,6 +67,9 @@ jobs:
         id: select
         env:
           MERGE_GROUP_BASE: refs/remotes/origin/merge-queue-base
+          # A pull request into another pull request's branch runs only the quick jobs unless it
+          # carries this label (STACKED_PR_JOBS and FULL_CI_LABEL in pr-checks.mjs).
+          PR_FULL_CI: ${{ contains(github.event.pull_request.labels.*.name, 'full-ci') }}
         run: node scripts/ci/pr-checks.mjs select
 
   frontend:

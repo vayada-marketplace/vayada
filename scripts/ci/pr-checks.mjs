@@ -38,6 +38,13 @@ const TYPESCRIPT_JOBS = [
 // The mocked Playwright projects that gate PRs (one dev server each, no backend).
 export const BROWSER_E2E_JOBS = ["pms_web_e2e", "booking_web_e2e", "booking_admin_e2e"];
 
+// A pull request into another pull request's branch (a stack) runs only these quick jobs of its
+// selection: typecheck, lint, build, unit suites and the auth contracts. Main is gated by its own
+// pull request, which runs the full selection once the stack collapses into it, and by the merge
+// queue, which runs again before main moves. The label runs the full selection on a stacked PR.
+export const STACKED_PR_JOBS = ["frontend", "frontend_build", "first_party_auth", "api_unit"];
+export const FULL_CI_LABEL = "full-ci";
+
 // Packages that neither apps/api nor any backend package depends on, with the extra jobs their
 // changes need: the browser projects of the apps that use them, and api_unit when
 // test:unit-suites runs their tests. frontend, frontend_build and first_party_auth always run too. The guard
@@ -239,6 +246,18 @@ export function selectJobs(files, { workflowJobs = null } = {}) {
   return { jobs: SELECTABLE_JOBS.filter((job) => selected.has(job)), reasons };
 }
 
+// Narrows a pull request's selection to STACKED_PR_JOBS when its base is another branch than main.
+// An unknown base, the label, and every other event keep the full selection.
+export function stackedSelection(jobs, { event, baseRef, fullCi }) {
+  if (event !== "pull_request" || !baseRef || baseRef === "main" || fullCi) {
+    return { jobs, reason: null };
+  }
+  return {
+    jobs: jobs.filter((job) => STACKED_PR_JOBS.includes(job)),
+    reason: `stacked on ${baseRef}: only ${STACKED_PR_JOBS.join(", ")} (label ${FULL_CI_LABEL} runs every selected job)`,
+  };
+}
+
 // `needs` is the workflow's needs context. A job passes only when it succeeded, or when it was
 // skipped because the "changes" job set run_<job>=false. Failure, cancellation (which is how a
 // timed-out job reports), an unexpected skip, a missing job and a failed "changes" job all fail.
@@ -358,7 +377,13 @@ function runSelect() {
       );
     }
   }
-  const { jobs, reasons } = selectJobs(changes.files, changes);
+  const selection = selectJobs(changes.files, changes);
+  const { jobs, reason } = stackedSelection(selection.jobs, {
+    event,
+    baseRef: process.env.GITHUB_BASE_REF,
+    fullCi: process.env.PR_FULL_CI === "true",
+  });
+  const reasons = reason ? [...selection.reasons, reason] : selection.reasons;
   for (const line of [...reasons, `selected jobs: ${jobs.join(", ") || "none"}`])
     console.error(line);
   for (const job of SELECTABLE_JOBS) emit(`run_${job}=${jobs.includes(job)}`);

@@ -18,14 +18,17 @@ import { LineCounter, isAlias, parse, parseDocument, visit } from "yaml";
 import {
   BROWSER_E2E_JOBS,
   FRONTEND_ONLY_PACKAGES,
+  FULL_CI_LABEL,
   HOLD_LABEL,
   RULES,
   SELECTABLE_JOBS,
+  STACKED_PR_JOBS,
   WORKFLOW_FILE,
   YAML_ANCHOR,
   changedFiles,
   openHolds,
   selectJobs,
+  stackedSelection,
   verifyRequiredChecks,
   waitWhileHeld,
   workflowChangeJobs,
@@ -423,7 +426,15 @@ function runSelectCli(dir, event, env = {}) {
   const result = spawnSync(process.execPath, [cli, "select"], {
     cwd: dir,
     encoding: "utf8",
-    env: { ...process.env, GITHUB_OUTPUT: output, GITHUB_EVENT_NAME: event, ...env },
+    // CI runs these tests inside a pull_request job, whose own base ref must not leak in.
+    env: {
+      ...process.env,
+      GITHUB_OUTPUT: output,
+      GITHUB_EVENT_NAME: event,
+      GITHUB_BASE_REF: "",
+      PR_FULL_CI: "",
+      ...env,
+    },
   });
   assert.equal(result.status, 0, result.stderr);
   const outputs = Object.fromEntries(
@@ -449,6 +460,50 @@ test("the select CLI runs every job for a push or a manual run", () => {
   for (const event of ["push", "workflow_dispatch"]) {
     assert.deepEqual(runSelectCli(dir, event), ALL, event);
   }
+});
+
+test("a pull request stacked on another branch runs only the quick jobs of its selection", () => {
+  const stacked = { event: "pull_request", baseRef: "fm/vay-1-parent", fullCi: false };
+  assert.deepEqual(stackedSelection(ALL, stacked).jobs, STACKED_PR_JOBS);
+  assert.deepEqual(stackedSelection([], stacked).jobs, []);
+  assert.deepEqual(stackedSelection(["api_postgres", "backend"], stacked).jobs, []);
+  assert.match(stackedSelection(ALL, stacked).reason, new RegExp(`label ${FULL_CI_LABEL}`));
+  // The quick jobs: nothing with a database, a browser project or the Python apps.
+  for (const job of STACKED_PR_JOBS) assert.ok(SELECTABLE_JOBS.includes(job), job);
+  for (const job of [
+    "api_postgres",
+    "setup_draft_reset_postgres",
+    "backend",
+    ...BROWSER_E2E_JOBS,
+  ]) {
+    assert.ok(!STACKED_PR_JOBS.includes(job), job);
+  }
+});
+
+test("pull requests into main, labelled or base-less ones and other events keep the full selection", () => {
+  for (const options of [
+    { event: "pull_request", baseRef: "main", fullCi: false },
+    { event: "pull_request", baseRef: "fm/vay-1-parent", fullCi: true },
+    { event: "pull_request", baseRef: "", fullCi: false },
+    { event: "pull_request", baseRef: undefined, fullCi: false },
+    { event: "merge_group", baseRef: "fm/vay-1-parent", fullCi: false },
+    { event: "workflow_dispatch", baseRef: "fm/vay-1-parent", fullCi: false },
+  ]) {
+    assert.deepEqual(
+      stackedSelection(ALL, options),
+      { jobs: ALL, reason: null },
+      JSON.stringify(options),
+    );
+  }
+});
+
+test("the select CLI narrows a stacked pull request unless it carries the full-ci label", () => {
+  const dir = pullRequestMergeRepo(once("  api_unit:\n", "  api_units:\n"));
+  const stacked = { GITHUB_BASE_REF: "fm/vay-1-parent" };
+  assert.deepEqual(runSelectCli(dir, "pull_request", stacked), STACKED_PR_JOBS);
+  assert.deepEqual(runSelectCli(dir, "pull_request", { ...stacked, PR_FULL_CI: "true" }), ALL);
+  assert.deepEqual(runSelectCli(dir, "pull_request", { GITHUB_BASE_REF: "main" }), ALL);
+  assert.deepEqual(runSelectCli(dir, "workflow_dispatch", stacked), ALL);
 });
 
 test("every path rule that runs frontend also runs frontend_build", () => {
@@ -1232,6 +1287,39 @@ test("pr-checks.yml wires every job through the change detector and the aggregat
   assert.deepEqual([...required.needs].sort(), ["changes", ...SELECTABLE_JOBS].sort());
   const verify = required.steps.find((step) => step.run?.includes("pr-checks.mjs verify"));
   assert.equal(verify.env.NEEDS, "${{ toJSON(needs) }}");
+});
+
+test("the select step reads the full-ci label of the pull request", () => {
+  const select = parse(WORKFLOW).jobs.changes.steps.find((step) => step.id === "select");
+  assert.equal(
+    select.env.PR_FULL_CI,
+    `\${{ contains(github.event.pull_request.labels.*.name, '${FULL_CI_LABEL}') }}`,
+  );
+});
+
+// Closing a pull request (a stack collapsing into its bottom pull request) cancels its PR Checks
+// run: the cancel workflow joins the group PR Checks uses for pull requests.
+test("closing a pull request cancels its PR Checks run and reports nothing else", () => {
+  const prChecks = parse(WORKFLOW);
+  const cancel = parse(
+    readFileSync(new URL("../../.github/workflows/pr-checks-cancel.yml", import.meta.url), "utf8"),
+  );
+  assert.equal(
+    prChecks.concurrency.group,
+    "pr-checks-${{ github.event.pull_request.number || github.ref }}",
+  );
+  assert.deepEqual(cancel.concurrency, {
+    group: "pr-checks-${{ github.event.pull_request.number }}",
+    "cancel-in-progress": true,
+  });
+  assert.deepEqual(Object.keys(cancel.on), ["pull_request"]);
+  assert.deepEqual(cancel.on.pull_request.types, ["closed"]);
+  assert.deepEqual(cancel.on.pull_request.branches, prChecks.on.pull_request.branches);
+  assert.deepEqual(cancel.permissions, {});
+  for (const job of Object.values(cancel.jobs)) {
+    assert.notEqual(job.name, "Required Checks");
+    for (const step of job.steps) assert.equal(step.uses, undefined, "runs no action or checkout");
+  }
 });
 
 test("pr-checks.yml reports Required Checks to the merge queue with the base branch fetched", () => {
