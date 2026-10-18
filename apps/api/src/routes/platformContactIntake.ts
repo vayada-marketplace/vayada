@@ -203,7 +203,11 @@ export function registerPlatformContactIntakeRoutes(
           receivedAt: new Date().toISOString(),
         });
       } catch (error) {
-        request.log.error({ err: error }, "Platform contact intake failed");
+        // Only the request id and the error code: a database error's detail can quote the row.
+        request.log.error(
+          { requestId: request.id, code: (error as { code?: unknown })?.code },
+          "Platform contact intake failed",
+        );
         return sendContactIntakeError(reply, 500, {
           code: "intake_unavailable",
           category: "write_model",
