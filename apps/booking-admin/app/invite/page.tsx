@@ -2,12 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
-import {
-  ArrowRightIcon,
-  BuildingOffice2Icon,
-  CheckCircleIcon,
-  KeyIcon,
-} from "@heroicons/react/24/outline";
+import { ArrowRightIcon, CheckCircleIcon, KeyIcon } from "@heroicons/react/24/outline";
+import { HotelIcon } from "@vayada/product-onboarding/HotelIcon";
 
 import { useTranslation } from "@/lib/i18n";
 import {
@@ -170,7 +166,7 @@ export default function HotelAccountInvitePage() {
     <InviteShell>
       <div className="mx-auto max-w-lg text-center">
         <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-primary-50 text-primary-700">
-          <BuildingOffice2Icon className="h-7 w-7" aria-hidden="true" />
+          <HotelIcon className="h-7 w-7" aria-hidden="true" />
         </div>
         <p className="mt-5 text-xs font-bold uppercase tracking-[0.18em] text-primary-700">
           {t("invite.eyebrow")}

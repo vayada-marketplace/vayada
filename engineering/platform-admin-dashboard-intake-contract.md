@@ -224,6 +224,10 @@ ownership is platform intake via jobs/events:
    and private payload only where retention allows.
 5. Return success after durable intake is committed, not after SMTP delivery.
 
+Since VAY-2286 the form fields live only in the job payload. The event and audit
+rows (append-only) carry the channel and outcome, and the job payload is emptied
+90 days after arrival (`apps/api/src/jobs/contactIntakeRetention.ts`).
+
 Target payload:
 
 ```ts
