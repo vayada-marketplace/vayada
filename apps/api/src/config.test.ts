@@ -1050,6 +1050,22 @@ describe("api config", () => {
     ).toEqual(["https://admin.booking.localhost"]);
   });
 
+  it("keeps the contact form origins apart from the identity privacy origins", () => {
+    // VAY-2286: production sets CONTACT_INTAKE_ALLOWED_ORIGINS=https://vayada.com.
+    expect(
+      loadConfig({ CONTACT_INTAKE_ALLOWED_ORIGINS: "https://vayada.com, " })
+        .contactIntakeAllowedOrigins,
+    ).toEqual(["https://vayada.com"]);
+    expect(loadConfig({}).contactIntakeAllowedOrigins).toEqual([
+      "https://landing.localhost",
+      "http://localhost:3006",
+    ]);
+    expect(
+      loadConfig({ IDENTITY_PRIVACY_ALLOWED_ORIGINS: "https://admin.localhost" })
+        .contactIntakeAllowedOrigins,
+    ).not.toContain("https://admin.localhost");
+  });
+
   it("requires booking email delivery for checkout in production", () => {
     expect(() =>
       loadConfig({

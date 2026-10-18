@@ -1878,7 +1878,7 @@ const app = buildApp({
     repository: createPgPlatformContactIntakeRepository({
       connectionString: targetDatabaseUrl,
     }),
-    allowedOrigins: config.identityPrivacyAllowedOrigins,
+    allowedOrigins: config.contactIntakeAllowedOrigins,
   },
   platformAdminDashboardRepository,
   platformAdminSmokeRecovery:

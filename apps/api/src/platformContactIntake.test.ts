@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import { buildApp } from "./app.js";
 import {
+  CONTACT_INTAKE_LIMIT,
   createPgPlatformContactIntakeRepository,
   PL1_NON_MEDIA_CONTRACT_VERSION,
   type PlatformContactIntakePool,
@@ -65,6 +66,78 @@ describe("platform contact intake routes", () => {
       category: "validation",
     });
   });
+
+  // VAY-2286: the vayada.com contact form posts straight to next-api.
+  it("lets the vayada.com contact form through CORS and refuses other origins", async () => {
+    const app = buildContactIntakeApp({
+      allowedOrigins: ["https://vayada.com"],
+      repository: {
+        async submitContact() {
+          return contactResponse();
+        },
+      },
+    });
+    const preflight = (origin: string) =>
+      app.inject({
+        method: "OPTIONS",
+        url: "/api/contact",
+        headers: {
+          origin,
+          "access-control-request-method": "POST",
+          "access-control-request-headers": "content-type",
+        },
+      });
+
+    const allowed = await preflight("https://vayada.com");
+    expect(allowed.statusCode).toBe(204);
+    expect(allowed.headers["access-control-allow-origin"]).toBe("https://vayada.com");
+    expect(allowed.headers["access-control-allow-methods"]).toContain("POST");
+    expect(allowed.headers["access-control-allow-headers"]).toContain("Content-Type");
+    expect(allowed.headers["access-control-allow-credentials"]).toBeUndefined();
+
+    for (const origin of ["https://www.vayada.com", "https://evil.example", "null"]) {
+      const refused = await preflight(origin);
+      expect(refused.statusCode).toBe(204);
+      expect(refused.headers["access-control-allow-origin"]).toBeUndefined();
+    }
+
+    const posted = await app.inject({
+      method: "POST",
+      url: "/api/contact",
+      headers: { origin: "https://vayada.com" },
+      payload: { name: "Ana Host", email: "ana@example.com", message: "Hello" },
+    });
+    expect(posted.statusCode).toBe(200);
+    expect(posted.headers["access-control-allow-origin"]).toBe("https://vayada.com");
+  });
+
+  it("limits valid messages per address per minute without touching the store", async () => {
+    let stored = 0;
+    const app = buildContactIntakeApp({
+      repository: {
+        async submitContact() {
+          stored += 1;
+          return contactResponse();
+        },
+      },
+    });
+    const post = (message: string) =>
+      injectJson(app, {
+        method: "POST",
+        url: "/api/contact",
+        payload: { name: "Ana Host", email: "ana@example.com", message },
+      });
+
+    for (let index = 0; index < CONTACT_INTAKE_LIMIT; index += 1) {
+      expect((await post(`Message ${index}`)).statusCode).toBe(200);
+    }
+    const limited = await post("One too many");
+
+    expect(limited.statusCode).toBe(429);
+    expect(Number(limited.headers["retry-after"])).toBeGreaterThan(0);
+    expect(limited.body).toMatchObject({ code: "rate_limited", category: "rate_limit" });
+    expect(stored).toBe(CONTACT_INTAKE_LIMIT);
+  });
 });
 
 describe("platform contact intake target repository", () => {
@@ -106,12 +179,13 @@ describe("platform contact intake target repository", () => {
 
 function buildContactIntakeApp(options: {
   repository: PlatformContactIntakeRepository;
+  allowedOrigins?: string[];
 }): ReturnType<typeof buildApp> {
   return buildApp({
     logger: false,
     platformContactIntake: {
       repository: options.repository,
-      allowedOrigins: ["https://landing.localhost"],
+      allowedOrigins: options.allowedOrigins ?? ["https://landing.localhost"],
     },
   });
 }

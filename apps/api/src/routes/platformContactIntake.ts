@@ -5,7 +5,13 @@ import { createHash } from "node:crypto";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import pg, { type PoolClient, type QueryResult, type QueryResultRow } from "pg";
 
+// The same in-memory, per-address, per-minute counter as "Find my booking" (VAY-2222).
+import { createBookingLookupRateLimit as createPerAddressRateLimit } from "../platform/bookingLookupRateLimit.js";
+
 export const PL1_NON_MEDIA_CONTRACT_VERSION = "pl1-non-media.v1" as const;
+
+/** Public contact messages accepted per address per minute (VAY-2286). */
+export const CONTACT_INTAKE_LIMIT = 5;
 
 export type PlatformContactIntakeRequest = {
   name?: unknown;
@@ -67,8 +73,8 @@ export type PlatformContactIntakeRoutesOptions = {
 };
 
 type ContactIntakeRouteError = {
-  code: "invalid_request" | "intake_unavailable";
-  category: "validation" | "write_model";
+  code: "invalid_request" | "intake_unavailable" | "rate_limited";
+  category: "validation" | "write_model" | "rate_limit";
   message: string;
 };
 
@@ -85,6 +91,7 @@ export function registerPlatformContactIntakeRoutes(
   options: PlatformContactIntakeRoutesOptions,
 ): void {
   const allowedOrigins = new Set(options.allowedOrigins ?? []);
+  const contactRateLimit = createPerAddressRateLimit({ limit: CONTACT_INTAKE_LIMIT });
 
   app.addHook("onClose", async () => {
     await options.repository.close?.();
@@ -164,6 +171,17 @@ export function registerPlatformContactIntakeRoutes(
   app.post<{ Body: PlatformContactIntakeRequest }>("/contact", async (request, reply) => {
     const parsed = parseContactPayload(request.body);
     if (!parsed.ok) return sendContactIntakeError(reply, 400, parsed.error);
+    // Counted in memory only for valid messages; next-api is reached directly (no proxy), so
+    // request.ip is the visitor's address.
+    const limit = contactRateLimit(request.ip || "unknown");
+    if (!limit.allowed) {
+      reply.header("Retry-After", String(limit.retryAfterSeconds));
+      return sendContactIntakeError(reply, 429, {
+        code: "rate_limited",
+        category: "rate_limit",
+        message: "Too many messages in a short time. Please wait a minute and try again.",
+      });
+    }
 
     try {
       return await options.repository.submitContact({
@@ -500,7 +518,7 @@ function normalizeEmail(value: unknown): string | null {
 
 function sendContactIntakeError(
   reply: FastifyReply,
-  statusCode: 400 | 500 | 503,
+  statusCode: 400 | 429 | 500 | 503,
   error: ContactIntakeRouteError,
 ): FastifyReply {
   return reply.status(statusCode).send({ ...error, statusCode });

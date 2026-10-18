@@ -156,8 +156,10 @@ export type ApiConfig = {
   };
   financeFolioRecipientKms?: FinanceFolioRecipientKmsConfig;
   financeBankTransferKms?: { currentKeyArn: string; allowedKeyArns: string[]; region: string };
-  /** Browser origins allowed on the identity privacy and contact intake routes. */
+  /** Browser origins allowed on the identity privacy routes. */
   identityPrivacyAllowedOrigins: string[];
+  /** Browser origins allowed to post the public contact form (VAY-2286: vayada.com). */
+  contactIntakeAllowedOrigins: string[];
   pmsOperationsAllowedOrigins: string[];
   financialsActivationPropertyIds: string[];
   bookingWebEventSink: BookingWebEventSink;
@@ -1101,6 +1103,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       "IDENTITY_PRIVACY_ALLOWED_ORIGINS",
       readOptionalCsvEnv(env, "MARKETPLACE_DISCOVERY_ALLOWED_ORIGINS"),
     ),
+    // VAY-2286: its own list, so the landing origin stays out of the identity and app CORS lists.
+    contactIntakeAllowedOrigins: readOptionalCsvEnv(env, "CONTACT_INTAKE_ALLOWED_ORIGINS", [
+      "https://landing.localhost",
+      "http://localhost:3006",
+    ]),
     pmsOperationsAllowedOrigins: readOptionalCsvEnv(env, "PMS_OPERATIONS_ALLOWED_ORIGINS", [
       "https://pms.localhost",
       "https://admin.booking.localhost",
