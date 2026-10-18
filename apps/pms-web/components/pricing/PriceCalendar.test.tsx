@@ -3,7 +3,7 @@ import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { expect, it, vi } from "vitest";
 import type { PricingConfiguration } from "@vayada/domain-pms/replacement-pricing";
 import { PriceCalendar } from "./PriceCalendar";
-import { seasonGroups } from "./priceCalendarModel";
+import { calendarNights, seasonGroups, seasonTones } from "./priceCalendarModel";
 
 const rules = {
   minArrivalNights: 1,
@@ -219,6 +219,42 @@ it("offers a price per number of adults and says which nights have no price at a
   expect(night("1 September 2026, no price")).toHaveLength(1);
   expect(text()).toContain("No price yet");
   expect(text()).not.toContain("Standard");
+});
+
+it("keeps a season's colour on a night with its own price, and marks the own price (VAY-2284)", () => {
+  const value = room();
+  const offer = value.offers[0];
+  if (offer.price.kind !== "independent") throw new Error("independent price expected");
+  const owned = {
+    ...value,
+    offers: [
+      {
+        ...offer,
+        price: {
+          ...offer.price,
+          calendar: {
+            ...offer.price.calendar,
+            dates: [...offer.price.calendar.dates, { date: "2026-09-24", price: flat("15000") }],
+          },
+        },
+      },
+      value.offers[1],
+    ],
+  } as PricingConfiguration;
+  const night24 = calendarNights(owned, "flex", "2026-09", 2, "2026-08-14", {
+    checkIn: "2026-09-25",
+    checkOut: "2026-09-28",
+  }).find((value) => value.date === "2026-09-24")!;
+  expect([night24.season?.name, night24.ownPrice, night24.totalMinor]).toEqual([
+    "Oktoberfest",
+    true,
+    "15000",
+  ]);
+  mount({ room: owned });
+  const [cell] = night("24 September 2026, €150, own price");
+  expect(cell.props.className).toContain(seasonTones[0].cell);
+  // The legend's season range leaves the own price out.
+  expect(text()).toContain("Oktoberfest €180 to €207");
 });
 
 it("groups seasons stored with the same name and tier (VAY-2280)", () => {

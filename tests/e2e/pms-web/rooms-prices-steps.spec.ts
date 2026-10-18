@@ -490,15 +490,36 @@ test("closes a night and gives another its own price from the calendar (VAY-2280
   await panel.getByRole("button", { name: "Close this night" }).click();
   await expect(panel.getByRole("button", { name: "Open this night" })).toBeVisible();
   await expect(calendar.getByRole("button", { name: /^1 \w+ \d{4}, €\d+, closed/ })).toBeVisible();
-  // The 3rd: its own price.
+  // The 3rd of July, in the High season: its own price keeps the season's colour and gets the dot (VAY-2284).
   await panel.getByRole("button", { name: "Clear" }).click();
-  await calendar.getByRole("button", { name: /^3 \w+ \d{4}, €/ }).click();
+  const months = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+  ];
+  const shown = (await calendar.getByText(/^[A-Z][a-z]+ \d{4}$/).textContent())!.split(" ")[0];
+  for (let step = (6 - months.indexOf(shown) + 12) % 12; step > 0; step--)
+    await calendar.getByRole("button", { name: "Next month" }).click();
+  await expect(calendar.getByText(/^July \d{4}$/)).toBeVisible();
+  await expect(calendar.getByRole("button", { name: /^3 July \d{4}, €/ })).toHaveClass(
+    /bg-amber-50/,
+  );
+  await calendar.getByRole("button", { name: /^3 July \d{4}, €/ }).click();
   await panel.getByRole("button", { name: "Own price for this night" }).click();
   await panel.getByLabel("Own price: Per room").fill("130");
   await panel.getByRole("button", { name: "Apply" }).click();
-  await expect(
-    calendar.getByRole("button", { name: /^3 \w+ \d{4}, €130, own price/ }),
-  ).toBeVisible();
+  const owned = calendar.getByRole("button", { name: /^3 July \d{4}, €130, own price/ });
+  await expect(owned).toHaveClass(/bg-amber-50/);
+  await expect(owned.locator("span.bg-gray-900")).toBeVisible();
   // VAY-2284: picked days can join a season, or start a new one (opened and left here: it depends on the month).
   await panel.getByRole("button", { name: "Add to a season" }).click();
   await expect(panel.getByRole("radio", { name: "New season" })).toBeVisible();
@@ -514,7 +535,7 @@ test("closes a night and gives another its own price from the calendar (VAY-2280
     { date: expect.stringMatching(/-01$/), rules: rules(2, { stopSell: true }) },
   ]);
   expect(flexibleOffer.price.calendar.dates).toEqual([
-    { date: expect.stringMatching(/-03$/), price: flat("13000") },
+    { date: expect.stringMatching(/-07-03$/), price: flat("13000") },
   ]);
   await assertHealthy();
 });
