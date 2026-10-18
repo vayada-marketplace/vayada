@@ -271,9 +271,14 @@ it("groups seasons stored with the same name and tier (VAY-2280)", () => {
 });
 
 it("counts the nights no price covers and finds the lowest night guests pay (VAY-2280)", () => {
-  expect(nightsWithoutPrice(room(), "flex", 2, "2026-09")).toBe(0);
-  // Without a standard price only Oktoberfest (16 nights) and the own price on 12 Sep are priced, over 365 nights.
-  expect(nightsWithoutPrice(room("none"), "flex", 2, "2026-09")).toBe(348);
+  expect(nightsWithoutPrice(room(), "flex", 2, "2026-09-01")).toBe(0);
+  // From today through the same date next year (366 nights here). Without a standard price only Oktoberfest
+  // (19 Sep – 4 Oct) and the own price on 12 Sep are priced.
+  expect(nightsWithoutPrice(room("none"), "flex", 2, "2026-09-01")).toBe(366 - 17);
+  // Past nights this month don't count: 1–14 Sep (and the own price on the 12th) are behind us.
+  expect(nightsWithoutPrice(room("none"), "flex", 2, "2026-09-15")).toBe(366 - 16);
+  // The window's end counts: 20 Sep 2026 – 20 Sep 2027 holds 15 Oktoberfest nights of 2026 and 19–20 Sep 2027.
+  expect(nightsWithoutPrice(room("none"), "flex", 2, "2026-09-20")).toBe(366 - 17);
   // The non-refundable rate's weekday standard night, 10% under €100.
   expect(lowestNightMinor(room(), ["flex", "nonref"], 2, "2026")).toBe("9000");
   expect(lowestNightMinor(room(), ["flex"], 2, "2026")).toBe("10000");

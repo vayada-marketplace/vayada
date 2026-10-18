@@ -389,7 +389,7 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
       // VAY-2284: the calendar shows what guests pay for the rates, Flexible and Non-refundable; other options build on them.
       const rates = [{ id: main.id, name: t("pricing.calendar.flexible") }, ...(simple?.nonRefundable ? [{ id: simple.nonRefundable.id, name: t("pricing.calendar.nonRefundable") }] : [])];
       const calendarId = rates.some((rate) => rate.id === previewId) ? previewId : main.id;
-      const gaps = edited ? nightsWithoutPrice(edited, main.id, sampleAdults(edited), today.slice(0, 7)) : 0;
+      const gaps = edited ? nightsWithoutPrice(edited, main.id, sampleAdults(edited), today) : 0;
       // The approved layout (VAY-2280): "Prices by date" first, then the price rules beside "What guests see".
       return <div key={room.roomTypeId} className="space-y-6">
         <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
