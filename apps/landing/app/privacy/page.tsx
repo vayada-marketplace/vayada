@@ -345,8 +345,9 @@ export default function PrivacyPage() {
                 for 30 days after it is closed, so that you can export it. Invoices and booking
                 records that tax and commercial law require us to keep are retained for the
                 statutory periods (usually up to ten years, Article 6(1) lit. c GDPR). Server logs
-                are deleted as described above. Messages from the contact form and support requests
-                from the apps are deleted 90 days after you send them (see Section 8).
+                are deleted as described above. Messages from the contact form (see Section 8) and
+                support requests from the apps are deleted from our database 90 days after you send
+                them.
               </p>
               <p className="mb-4">You have the following rights regarding your Personal Data:</p>
               <ul className="list-disc list-inside ml-4 space-y-2">
@@ -454,28 +455,28 @@ export default function PrivacyPage() {
                 <p>
                   We store your inquiry in our database, hosted by Amazon Web Services in the
                   European Union (Ireland), and send it by email to the member of our team who
-                  answers inquiries. That email goes through Resend, our email service provider,
-                  which may process it in the United States; this transfer is covered by the EU–US
-                  Data Privacy Framework or the European Commission&apos;s standard contractual
-                  clauses. When you or we reply, the conversation continues by email.
+                  answers inquiries; our mailboxes are hosted by Google Workspace. That email goes
+                  through Resend, our email service provider. Resend and Google may process it in
+                  the United States; these transfers are covered by the EU–US Data Privacy Framework
+                  or the European Commission&apos;s standard contractual clauses. When you or we
+                  reply, the conversation continues by email.
                 </p>
               </div>
 
               <div className="mt-6">
                 <h3 className={H3}>D. Data Retention and Deletion</h3>
                 <p className="mb-3">
-                  We delete your inquiry from our database 90 days after you send it. The
-                  notification email and the emails we exchange with you are kept in our mailbox
-                  only as long as we need them to handle your inquiry.
+                  We delete your inquiry from our database 90 days after you send it; our automatic
+                  database backups are overwritten within seven days after that. The notification
+                  email and the emails we exchange with you are kept in our mailboxes only as long
+                  as we need them to handle your inquiry.
                 </p>
                 <p>
-                  However, statutory retention periods may prevent immediate deletion. This is
-                  particularly true if your inquiry is related to a contract, warranty, or guarantee
-                  claim. In such cases, we store your inquiry data only for the purpose of
-                  fulfilling legal retention obligations (e.g., commercial and tax law retention
-                  periods, typically up to ten years, as per Article 6(1) lit. c of the GDPR). We
-                  will delete your data at the latest when these statutory retention periods expire,
-                  without requiring a specific request from you.
+                  If your inquiry leads to a contract, warranty, or guarantee claim, we keep that
+                  correspondence for the statutory retention periods (e.g., commercial and tax law,
+                  typically up to ten years, as per Article 6(1) lit. c of the GDPR) and delete it
+                  at the latest when these periods expire, without requiring a specific request from
+                  you.
                 </p>
               </div>
             </section>
