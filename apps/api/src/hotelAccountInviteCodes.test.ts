@@ -354,9 +354,7 @@ function buildInviteCodeApp(
       propertyAccessRepository: agencyPropertyAccessRepository,
       rolePermissionRepository: {
         async findPermissionsForRole(kind) {
-          return kind === "platform"
-            ? [...(options.permissions ?? ["platform.user.suspend"])]
-            : ["marketplace.profile.manage"];
+          return kind === "platform" ? [...(options.permissions ?? ["platform.user.suspend"])] : [];
         },
       },
       entitlementRepository: {

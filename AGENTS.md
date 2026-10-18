@@ -1,6 +1,6 @@
 # vayada — agent guide
 
-Hospitality platform with three products — **Creator Marketplace**, **Booking Engine**, and **PMS** — sharing a central auth DB. This repo is the product application monorepo: app code lives under `apps/`, shared code belongs under `packages/`, and root tooling owns cross-app workflow, docs, Docker Compose, scripts, and auth DB setup.
+Hospitality platform with two products — **Booking Engine** and **PMS** — sharing a central auth DB. The Creator Marketplace is retired (VAY-2259): its app is gone, its legacy API (`apps/marketplace-api`) is still deployed, and the Marketplace tables in the new database are dropped in VAY-2272. This repo is the product application monorepo: app code lives under `apps/`, shared code belongs under `packages/`, and root tooling owns cross-app workflow, docs, Docker Compose, scripts, and auth DB setup.
 
 This file is the **canonical, tool-neutral agent guide**. Claude Code, Codex, and any other agent should read this first. `README.md` covers architecture, ports, DBs, test accounts, and seeding in depth — this file covers what those references don't: how to actually do work in the repo.
 
@@ -12,7 +12,6 @@ This file is the **canonical, tool-neutral agent guide**. Claude Code, Codex, an
 | ---------------------- | ---------- | ---- | ----------------------------------- |
 | `apps/api`             | Node/TS    | 8003 | `https://api.localhost`             |
 | `apps/marketplace-api` | FastAPI    | 8000 | `https://api.marketplace.localhost` |
-| `apps/marketplace-web` | Next.js 14 | 3000 | `https://marketplace.localhost`     |
 | `apps/vayada-admin`    | Next.js 14 | 3001 | `https://admin.localhost`           |
 | `apps/booking-api`     | FastAPI    | 8001 | `https://api.booking.localhost`     |
 | `apps/booking-web`     | Next.js 14 | 3002 | `https://booking.localhost`         |
@@ -23,7 +22,7 @@ This file is the **canonical, tool-neutral agent guide**. Claude Code, Codex, an
 
 Local URLs are the recommended way to reach each app — see [Local dev — portless](#local-dev--portless). Plain `localhost:PORT` still works for contributors not on portless.
 
-`apps/landing` is the **public marketing/landing site**, split out of `apps/marketplace-web`. The marketplace frontend is the authenticated app only; its `/` redirects to `/login`. The marketing pages (home, `/booking-engine`, `/pms`, `/hotel-creator-network`, `/partner-program`, `/pricing`, about/contact/benefits, legal) live in `apps/landing`; `/hotel-creator-network` there fetches live creators/hotels from the marketplace API cross-origin. The public chrome (`Navigation` / `Footer` / `LandingFooter`) is intentionally duplicated in both apps because app pages (`/hotels/[id]`, `/creators`, `/properties`) still use it. `vayada.com` is the shared public landing surface and is served by the `vayada-landing` App Runner service; the authenticated app and APIs remain on their separate hostnames.
+`apps/landing` is the **public marketing/landing site**: home, `/booking-engine`, `/pms`, `/partner-program`, `/pricing`, about/contact and the legal pages. Its contact form posts `/api/contact` to `NEXT_PUBLIC_API_URL`. That path is the platform contact intake in `apps/api`, but the landing deploy points `NEXT_PUBLIC_API_URL` at `api.vayada.com`, the legacy marketplace API, which only serves `/contact`; this mismatch is an open follow-up (#3430). `vayada.com` is the shared public landing surface and is served by the `vayada-landing` App Runner service; the authenticated apps and APIs remain on their separate hostnames.
 
 ## Local dev — portless
 
@@ -72,7 +71,7 @@ PORTLESS_STATE_DIR=/tmp/vayada-review-1356 PORTLESS_PORT=1356 npm run dev:workos
 ```
 
 These commands start independent proxies and produce matching app and API URLs,
-for example `https://marketplace.localhost:1355` with
+for example `https://admin.booking.localhost:1355` with
 `https://api.localhost:1355`, and the same pair on `:1356`. Do not attach either
 checkout to the default proxy. `dev:workos-local` derives browser origins,
 OAuth callback URLs, and `AUTH_ALLOWED_ORIGINS` from that checkout's suffixed

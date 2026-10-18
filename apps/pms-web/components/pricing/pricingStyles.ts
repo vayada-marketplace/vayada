@@ -69,6 +69,9 @@ export const switchTrack = (on: boolean) =>
 export const stepNumber =
   "flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary-600 text-[14px] font-bold text-white";
 export const stepTitle = "text-[17px] font-semibold leading-6 text-gray-900";
+/** A "Price rules" step's number (VAY-2280). */
+export const sectionNumber =
+  "flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gray-900 text-[12px] font-semibold text-white";
 export const stepHint = "text-[14px] leading-5 text-gray-500";
 export const stepButton =
   "inline-flex h-10 items-center gap-2 rounded-[10px] border border-gray-300 bg-white px-4 text-[14px] font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50";

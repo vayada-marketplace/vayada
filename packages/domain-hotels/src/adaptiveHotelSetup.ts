@@ -1,21 +1,21 @@
-export const SETUP_TRACKS = Object.freeze(["hotel_operations", "creator_marketplace"] as const);
+// The Creator Marketplace track is retired (VAY-2270); Hotel Operations is the only setup track.
+export const SETUP_TRACKS = Object.freeze(["hotel_operations"] as const);
 
 export type SetupTrack = (typeof SETUP_TRACKS)[number];
 
 export const SETUP_TRACK_COMPONENT_PRODUCTS = Object.freeze({
   hotel_operations: Object.freeze(["pms", "booking"] as const),
-  creator_marketplace: Object.freeze(["marketplace"] as const),
 }) satisfies Record<SetupTrack, readonly string[]>;
 
-/**
- * Tracks a hotel can still choose. The Creator Marketplace track is retired (VAY-2270): rows that
- * still carry it are read as if it were absent until the data migration rewrites them.
- */
-export const OFFERED_SETUP_TRACKS = Object.freeze(["hotel_operations"] as const);
+/** The tracks a hotel can choose: every setup track. */
+export const OFFERED_SETUP_TRACKS = SETUP_TRACKS;
 
-/** Reads stored track selections, dropping retired and unknown values in canonical order. */
+/**
+ * Reads stored track selections in canonical order, dropping unknown values. Stored rows may still
+ * name the retired creator_marketplace track until the data migration rewrites them.
+ */
 export function normalizeStoredSetupTracks(values: readonly unknown[]): SetupTrack[] {
-  return OFFERED_SETUP_TRACKS.filter((track) => values.includes(track));
+  return SETUP_TRACKS.filter((track) => values.includes(track));
 }
 
 export type UpdateTracksRequest = {
@@ -23,7 +23,7 @@ export type UpdateTracksRequest = {
   expectedRevision: number;
 };
 
-export type SetupComponentProduct = "pms" | "booking" | "marketplace";
+export type SetupComponentProduct = "pms" | "booking";
 
 export type TrackStatus = {
   track: SetupTrack;
@@ -56,8 +56,6 @@ export type SetupCommandError = {
 export const ADAPTIVE_HOTEL_SETUP_CONTRACT_VERSION = "adaptive-hotel-setup.v1" as const;
 export const SETUP_TASK_IDS = [
   "shared_identity",
-  "public_profile",
-  "creator_offer",
   "rooms_rates_availability",
   "guest_settings_policies",
   "billing_plan",
@@ -66,8 +64,6 @@ export const SETUP_TASK_IDS = [
 ] as const;
 export const SETUP_TASK_DESTINATION_ROUTE_KEYS = {
   shared_identity: "hotel_catalog.shared_identity",
-  public_profile: "hotel_catalog.public_profile",
-  creator_offer: "marketplace.creator_offer",
   rooms_rates_availability: "pms.rooms_rates_availability",
   guest_settings_policies: "booking.guest_settings_policies",
   billing_plan: "finance.billing_plan",
@@ -77,7 +73,6 @@ export const SETUP_TASK_DESTINATION_ROUTE_KEYS = {
 export const SETUP_TASK_TRACKS = ["shared", ...SETUP_TRACKS] as const;
 export const SETUP_REQUIREMENT_OWNER_DOMAINS = [
   "hotel_catalog",
-  "marketplace",
   "pms",
   "booking",
   "finance",
@@ -99,7 +94,7 @@ export const SETUP_TASK_READINESS_STATES = [
 ] as const;
 export const SETUP_ACTIONABLE_BY = ["owner", "operator", "support", "system"] as const;
 export const SETUP_FACT_FRESHNESS = ["fresh", "stale"] as const;
-export const PRODUCT_ENTRY_PRODUCTS = ["booking", "pms", "marketplace"] as const;
+export const PRODUCT_ENTRY_PRODUCTS = ["booking", "pms"] as const;
 export const PRODUCT_ENTRY_DECISIONS = ["enter", "setup_required", "unavailable"] as const;
 export const PROPERTY_SELECTION_STATES = [
   "no_property",
@@ -133,11 +128,7 @@ export type SetupTask = {
 export function isSetupTaskLaunchable(
   task: Pick<SetupTask, "track" | "callerCapability" | "readiness"> | null | undefined,
 ): boolean {
-  return (
-    task?.callerCapability === "allowed" &&
-    (task.readiness === "actionable" ||
-      (task.track === "creator_marketplace" && task.readiness === "rejected"))
-  );
+  return task?.callerCapability === "allowed" && task.readiness === "actionable";
 }
 
 export type ProductEntryDecision = {
@@ -157,11 +148,6 @@ export type PropertySetupPlan = {
   launchReadiness: {
     operationsUse: (typeof SETUP_LAUNCH_READINESS_STATES)[number];
     directBookingPublish: (typeof SETUP_LAUNCH_READINESS_STATES)[number];
-    /**
-     * Retired with the Creator Marketplace (VAY-2270): always "not_applicable" while the API still
-     * sends it, then absent.
-     */
-    marketplacePublish?: (typeof SETUP_LAUNCH_READINESS_STATES)[number];
   };
 };
 
@@ -193,8 +179,6 @@ export type AdaptiveHotelSetupStatus = {
 
 const SETUP_TASK_TRACK: Record<SetupTaskId, SetupTask["track"]> = {
   shared_identity: "shared",
-  public_profile: "creator_marketplace",
-  creator_offer: "creator_marketplace",
   rooms_rates_availability: "hotel_operations",
   guest_settings_policies: "hotel_operations",
   billing_plan: "hotel_operations",
@@ -233,7 +217,48 @@ export function parseUpdateTracksRequest(value: unknown): UpdateTracksRequest | 
 }
 
 export function parseAdaptiveHotelSetupStatus(value: unknown): AdaptiveHotelSetupStatus | null {
-  return isAdaptiveHotelSetupStatus(value) ? value : null;
+  const status = withoutRetiredMarketplacePlaceholders(value);
+  return isAdaptiveHotelSetupStatus(status) ? status : null;
+}
+
+const RETIRED_MARKETPLACE_TRACK = "creator_marketplace";
+
+/**
+ * An API from before VAY-2270 step 2 still lists the retired Creator Marketplace track as "not
+ * selected" and sends launchReadiness.marketplacePublish as "not_applicable". Both are dropped so
+ * a rollout that mixes versions keeps working; anything else about the retired track stays and
+ * fails validation.
+ */
+function withoutRetiredMarketplacePlaceholders(value: unknown): unknown {
+  if (!isRecord(value)) return value;
+  let next: Record<string, unknown> = value;
+  const organization = value["organization"];
+  if (isRecord(organization) && Array.isArray(organization["tracks"])) {
+    const tracks = organization["tracks"].filter(
+      (track) =>
+        !(
+          isRecord(track) &&
+          track["track"] === RETIRED_MARKETPLACE_TRACK &&
+          track["provisioning"] === "not_selected"
+        ),
+    );
+    if (tracks.length !== organization["tracks"].length) {
+      next = { ...next, organization: { ...organization, tracks } };
+    }
+  }
+  const setupPlan = value["setupPlan"];
+  const launch = isRecord(setupPlan) ? setupPlan["launchReadiness"] : undefined;
+  if (
+    isRecord(setupPlan) &&
+    isRecord(launch) &&
+    launch["marketplacePublish"] === "not_applicable"
+  ) {
+    const launchReadiness = Object.fromEntries(
+      Object.entries(launch).filter(([key]) => key !== "marketplacePublish"),
+    );
+    next = { ...next, setupPlan: { ...setupPlan, launchReadiness } };
+  }
+  return next;
 }
 
 function isAdaptiveHotelSetupStatus(value: unknown): value is AdaptiveHotelSetupStatus {
@@ -292,9 +317,9 @@ function isAdaptiveHotelSetupStatus(value: unknown): value is AdaptiveHotelSetup
       selectedTracks,
       SETUP_TRACKS.filter((track) => selectedTracks.includes(track)),
     ) ||
-    !hasExpectedTrackEntries(
+    !sameOrder(
       tracks.map(({ track }) => track),
-      selectedTracks,
+      SETUP_TRACKS,
     ) ||
     tracks.some(({ track, provisioning }) =>
       selectedTracks.includes(track)
@@ -322,19 +347,6 @@ function isAdaptiveHotelSetupStatus(value: unknown): value is AdaptiveHotelSetup
   return true;
 }
 
-// The API lists every track, the retired Creator Marketplace one included, until it stops sending
-// it (VAY-2270); afterwards it lists the offered tracks only. Both shapes are accepted.
-function hasExpectedTrackEntries(
-  trackIds: readonly SetupTrack[],
-  selectedTracks: readonly SetupTrack[],
-): boolean {
-  return (
-    sameOrder(trackIds, SETUP_TRACKS) ||
-    (sameOrder(trackIds, OFFERED_SETUP_TRACKS) &&
-      selectedTracks.every((track) => trackIds.includes(track)))
-  );
-}
-
 function isTrackStatus(value: unknown): value is TrackStatus {
   if (
     !isRecord(value) ||
@@ -352,7 +364,7 @@ function isTrackStatus(value: unknown): value is TrackStatus {
           return (
             isRecord(component) &&
             hasOnlyKeys(component, ["product", "access"]) &&
-            isOneOf(component["product"], ["pms", "booking", "marketplace"]) &&
+            isOneOf(component["product"], ["pms", "booking"]) &&
             isOneOf(component["access"], ["absent", "active", "suspended", "unavailable"])
           );
         },
@@ -475,11 +487,9 @@ function isPropertySetupPlan(
       isNonNegativeInteger(progress["total"]) &&
       (progress["complete"] as number) <= (progress["total"] as number) &&
       isRecord(launch) &&
-      hasOnlyKeys(launch, ["operationsUse", "directBookingPublish", "marketplacePublish"]) &&
+      hasOnlyKeys(launch, ["operationsUse", "directBookingPublish"]) &&
       isOneOf(launch["operationsUse"], SETUP_LAUNCH_READINESS_STATES) &&
-      isOneOf(launch["directBookingPublish"], SETUP_LAUNCH_READINESS_STATES) &&
-      (launch["marketplacePublish"] === undefined ||
-        isOneOf(launch["marketplacePublish"], SETUP_LAUNCH_READINESS_STATES))
+      isOneOf(launch["directBookingPublish"], SETUP_LAUNCH_READINESS_STATES)
     )
   ) {
     return false;
@@ -493,7 +503,6 @@ function isPropertySetupPlan(
       selectedTracks.includes(SETUP_TASK_TRACK[taskId] as SetupTrack),
   );
   const operationsSelected = selectedTracks.includes("hotel_operations");
-  const marketplaceSelected = selectedTracks.includes("creator_marketplace");
   return (
     sameOrder(
       tasks.map(({ taskId }) => taskId),
@@ -512,11 +521,6 @@ function isPropertySetupPlan(
         launch["directBookingPublish"] !== "not_applicable"
       : launch["operationsUse"] === "not_applicable" &&
         launch["directBookingPublish"] === "not_applicable") &&
-    (launch["marketplacePublish"] === undefined
-      ? !marketplaceSelected
-      : marketplaceSelected
-        ? launch["marketplacePublish"] !== "not_applicable"
-        : launch["marketplacePublish"] === "not_applicable") &&
     (recommendedTaskId === null || isSetupTaskLaunchable(recommendedTask)) &&
     launchReadinessMatchesTasks(value as unknown as PropertySetupPlan, selectedTracks)
   );
@@ -597,10 +601,7 @@ function launchReadinessMatchesTasks(
         "billing_plan",
         "payment",
         "direct_booking_publication",
-      ]) &&
-    (plan.launchReadiness.marketplacePublish === undefined ||
-      plan.launchReadiness.marketplacePublish ===
-        expected("creator_marketplace", ["shared_identity", "public_profile", "creator_offer"]))
+      ])
   );
 }
 

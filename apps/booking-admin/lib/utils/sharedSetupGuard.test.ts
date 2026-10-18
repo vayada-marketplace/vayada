@@ -47,7 +47,8 @@ describe("resolveBookingSetupGuard", () => {
       resolveBookingSetupGuard("/dashboard", api, memoryStorage()),
     ).resolves.toMatchObject({
       action: "redirect_to_setup",
-      redirectPath: "/setup?entryProduct=booking&returnProduct=booking&returnTo=%2Fdashboard&propertyId=property-1",
+      redirectPath:
+        "/setup?entryProduct=booking&returnProduct=booking&returnTo=%2Fdashboard&propertyId=property-1",
     });
   });
 
@@ -94,7 +95,10 @@ describe("resolveBookingSetupGuard", () => {
         { propertyId: "property-3" },
       ),
     ).resolves.toMatchObject({ action: "enter_product", propertyId: "property-3" });
-    expect(api.getStatus).toHaveBeenCalledWith({ entryProduct: "booking", propertyId: "property-3" });
+    expect(api.getStatus).toHaveBeenCalledWith({
+      entryProduct: "booking",
+      propertyId: "property-3",
+    });
     expect(storage.getItem("selectedSharedPropertyId")).toBe("property-3");
   });
 
@@ -148,12 +152,6 @@ function status(input: {
           ],
           allowedActions: ["manage_service"],
         },
-        {
-          track: "creator_marketplace",
-          provisioning: "not_selected",
-          components: [{ product: "marketplace", access: "absent" }],
-          allowedActions: ["add"],
-        },
       ],
     },
     propertySelection: {
@@ -202,7 +200,6 @@ function status(input: {
       launchReadiness: {
         operationsUse: "ready",
         directBookingPublish: input.withIncompleteTask ? "pending" : "ready",
-        marketplacePublish: "not_applicable",
       },
     },
     updatedAt: "2026-07-26T10:00:00.000Z",

@@ -14,18 +14,6 @@ export type PropertySetupLifecycleScope = Readonly<{
   actorUserId: string;
 }>;
 
-export const MARKETPLACE_SETUP_LIFECYCLE_PHASES = [
-  "not_started",
-  "pending_review",
-  "changes_requested",
-  "approved",
-  "published",
-  "rejected",
-  "withdrawn",
-  "suspended",
-  "deactivated",
-] as const;
-
 export const BOOKING_SETUP_LIFECYCLE_PHASES = [
   "not_started",
   "publishing",
@@ -35,11 +23,10 @@ export const BOOKING_SETUP_LIFECYCLE_PHASES = [
   "publication_unknown",
 ] as const;
 
-export type MarketplaceSetupLifecyclePhase = (typeof MARKETPLACE_SETUP_LIFECYCLE_PHASES)[number];
 export type BookingSetupLifecyclePhase = (typeof BOOKING_SETUP_LIFECYCLE_PHASES)[number];
 
 type LifecycleStatus<
-  TProduct extends "marketplace" | "booking",
+  TProduct extends "booking",
   TPhase extends string,
 > = PropertySetupLifecycleScope &
   Readonly<{
@@ -49,17 +36,7 @@ type LifecycleStatus<
     sourceRevision: string;
   }>;
 
-export type MarketplaceSetupLifecycleStatus = LifecycleStatus<
-  "marketplace",
-  MarketplaceSetupLifecyclePhase
->;
 export type BookingSetupLifecycleStatus = LifecycleStatus<"booking", BookingSetupLifecyclePhase>;
-
-export interface MarketplaceSetupLifecycleStatusPort {
-  getMarketplaceSetupLifecycleStatus(
-    scope: PropertySetupLifecycleScope,
-  ): Promise<MarketplaceSetupLifecycleStatus>;
-}
 
 export interface BookingSetupLifecycleStatusPort {
   getBookingSetupLifecycleStatus(
@@ -68,7 +45,6 @@ export interface BookingSetupLifecycleStatusPort {
 }
 
 export type PropertySetupReviewLifecycleStateOptions = Readonly<{
-  marketplace?: MarketplaceSetupLifecycleStatusPort;
   booking?: BookingSetupLifecycleStatusPort;
 }>;
 
@@ -92,10 +68,7 @@ export function createPropertySetupReviewLifecycleStateProvider(
         const statuses = await Promise.all(
           request.selectedTracks.map(async (track) => {
             const expectedProduct = productForTrack(track);
-            const status =
-              expectedProduct === "marketplace"
-                ? await readMarketplaceLifecycle(options, scope)
-                : await readBookingLifecycle(options, scope);
+            const status = await readBookingLifecycle(options, scope);
             assertLifecycleStatus(status, scope);
             if (status.product !== expectedProduct) {
               throw new TypeError("Review lifecycle provider returned another product");
@@ -131,25 +104,16 @@ export function createPropertySetupReviewLifecycleStateProvider(
   };
 }
 
-type ReviewLifecycleStatus = MarketplaceSetupLifecycleStatus | BookingSetupLifecycleStatus;
+type ReviewLifecycleStatus = BookingSetupLifecycleStatus;
 
 const PRODUCT_BY_TRACK = {
   hotel_operations: "booking",
-  creator_marketplace: "marketplace",
-} as const satisfies Record<SetupTrack, "marketplace" | "booking">;
+} as const satisfies Record<SetupTrack, "booking">;
 
-function productForTrack(track: SetupTrack): "marketplace" | "booking" {
+function productForTrack(track: SetupTrack): "booking" {
   const product = PRODUCT_BY_TRACK[track];
   if (!product) throw new TypeError("Review lifecycle track is unsupported");
   return product;
-}
-
-function readMarketplaceLifecycle(
-  options: PropertySetupReviewLifecycleStateOptions,
-  scope: PropertySetupLifecycleScope,
-): Promise<MarketplaceSetupLifecycleStatus> {
-  if (!options.marketplace) throw new Error("Marketplace lifecycle provider missing");
-  return options.marketplace.getMarketplaceSetupLifecycleStatus(scope);
 }
 
 function readBookingLifecycle(
@@ -191,12 +155,8 @@ function assertLifecycleStatus(
     throw new TypeError("Review lifecycle status is outside its authorized scope");
   }
   const validPhase =
-    (status.product === "marketplace" &&
-      MARKETPLACE_SETUP_LIFECYCLE_PHASES.includes(
-        status.phase as MarketplaceSetupLifecyclePhase,
-      )) ||
-    (status.product === "booking" &&
-      BOOKING_SETUP_LIFECYCLE_PHASES.includes(status.phase as BookingSetupLifecyclePhase));
+    status.product === "booking" &&
+    BOOKING_SETUP_LIFECYCLE_PHASES.includes(status.phase as BookingSetupLifecyclePhase);
   if (!validPhase) throw new TypeError("Review lifecycle status has an unsupported phase");
 }
 
@@ -208,47 +168,11 @@ function reviewState(statuses: readonly ReviewLifecycleStatus[], blocked: boolea
 }
 
 function ownerLaunchActionComplete({ phase }: ReviewLifecycleStatus): boolean {
-  return phase === "pending_review" || phase === "approved" || phase === "published";
+  return phase === "published";
 }
 
 function lifecycleBlockers(status: ReviewLifecycleStatus) {
-  if (isMarketplaceStatus(status)) return marketplaceBlockers(status);
   return bookingBlockers(status);
-}
-
-function marketplaceBlockers(status: MarketplaceSetupLifecycleStatus) {
-  const definitions = {
-    changes_requested: {
-      code: "marketplace_submission_changes_requested",
-      message:
-        "Marketplace requested changes to the submitted profile. Review it before resubmitting.",
-      kind: "user_fixable",
-    },
-    rejected: {
-      code: "marketplace_submission_rejected",
-      message: "Marketplace did not approve the submitted profile. Review it before resubmitting.",
-      kind: "user_fixable",
-    },
-    withdrawn: {
-      code: "marketplace_submission_withdrawn",
-      message: "The Marketplace submission was withdrawn. Submit it again when it is ready.",
-      kind: "user_fixable",
-    },
-    suspended: {
-      code: "marketplace_profile_suspended",
-      message:
-        "The Marketplace profile is suspended. Contact support for the available next action.",
-      kind: "external_pending",
-    },
-    deactivated: {
-      code: "marketplace_profile_deactivated",
-      message:
-        "The Marketplace profile is not active. Contact support for the available next action.",
-      kind: "external_pending",
-    },
-  } as const;
-  const definition = definitions[status.phase as keyof typeof definitions];
-  return definition ? [blocker("marketplace", status.sourceRevision, definition)] : [];
 }
 
 function bookingBlockers(status: BookingSetupLifecycleStatus) {
@@ -275,7 +199,7 @@ function bookingBlockers(status: BookingSetupLifecycleStatus) {
 }
 
 function blocker(
-  ownerDomain: "marketplace" | "booking",
+  ownerDomain: "booking",
   sourceRevision: string,
   definition: Readonly<{
     code: string;
@@ -290,12 +214,6 @@ function blocker(
     owningStepId: "review" as const,
     sourceRevision,
   };
-}
-
-function isMarketplaceStatus(
-  status: ReviewLifecycleStatus,
-): status is MarketplaceSetupLifecycleStatus {
-  return status.product === "marketplace";
 }
 
 function aggregateReviewRevision(

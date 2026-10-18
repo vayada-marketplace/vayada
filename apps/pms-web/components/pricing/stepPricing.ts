@@ -17,6 +17,7 @@ import {
 import { formatCurrency } from "@/lib/formatCurrency";
 import type { PricingTermsInput } from "@/services/api/replacementPricingClient";
 import { decimalAmount, parseMinorInput, PricingError, type Translate } from "./pricingAmounts";
+import { paidInAdvance } from "@vayada/product-onboarding/AcceptedPaymentMethods";
 import type { PaymentMethod } from "./AcceptedPaymentMethods";
 
 /** The step-by-step Prices tab's view of one room's pricing-v2 configuration. Pure: every change goes back through
@@ -485,7 +486,11 @@ export function presetOption(
   const cancellation = preset.nonRefundable
     ? ({ kind: "non_refundable" } as const)
     : mainTerms.cancellation;
-  const payment = { ...mainTerms.payment, acceptedMethods: [...values.methods] };
+  // A non-refundable stay is paid in advance: pay at property is never sent with it (VAY-2280).
+  const methods =
+    cancellation.kind === "non_refundable" ? paidInAdvance(values.methods) : [...values.methods];
+  if (!methods.length) throw new PricingError("pricing.error.nonRefundableNeedsAdvance");
+  const payment = { ...mainTerms.payment, acceptedMethods: methods };
   if (
     !parseBookingPricingOfferTerms({
       roomTypeId: room.roomTypeId,
@@ -606,12 +611,13 @@ export function stayTotals(
     ]),
   );
 }
-/** Every night of a month (`month` is "YYYY-MM") for one option and the sample guests: the engine's night evaluator,
- * the one Channex nightly prices use. Each night also carries its own stay rules. */
+/** Every night of a month (`month` is "YYYY-MM") for one option and `adults` (the sample guests unless given): the
+ * engine's night evaluator, the one Channex nightly prices use. Each night also carries its own stay rules. */
 export function monthNights(
   room: Room,
   offerId: string,
   month: string,
+  adults: number = sampleAdults(room),
 ): { date: string; night: RoomNightProjectionResult }[] {
   const days = new Date(
     Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0),
@@ -628,7 +634,7 @@ export function monthNights(
       offerId,
       expectedRevision: room.revision,
       expectedTermsRevisions: termsRevisions(room),
-      guests: { adults: sampleAdults(room), childAgesAtCheckIn: [] },
+      guests: { adults, childAgesAtCheckIn: [] },
     },
     dates,
   );

@@ -7,6 +7,7 @@ import {
 } from "@vayada/domain-pms/replacement-pricing";
 import Modal from "@/components/Modal";
 import { useTranslation } from "@/lib/i18n";
+import { paidInAdvance } from "@vayada/product-onboarding/AcceptedPaymentMethods";
 import { AcceptedPaymentMethods, type PaymentMethod } from "./AcceptedPaymentMethods";
 import { decimalAmount, errorText } from "./pricingAmounts";
 import { mainOffer, presetOption, presets, type OptionTerms, type PresetKey } from "./stepPricing";
@@ -49,9 +50,12 @@ export function PresetWindow({
   const [mealBasis, setMealBasis] = useState<"room" | "person">(
     meal === "breakfast" ? "room" : "person",
   );
-  const [methods, setMethods] = useState<PaymentMethod[]>([
-    ...(mainTerms?.payment.acceptedMethods ?? []),
-  ]);
+  // A non-refundable option is paid in advance: it starts without pay at property (VAY-2280).
+  const paidAhead = nonRefundable || mainTerms?.cancellation.kind === "non_refundable";
+  const [methods, setMethods] = useState<PaymentMethod[]>(() => {
+    const main = mainTerms?.payment.acceptedMethods ?? [];
+    return paidAhead ? paidInAdvance(main) : [...main];
+  });
   const [error, setError] = useState("");
   const title = t("pricing.steps.preset.title", {
     name: t(`pricing.steps.name.${nonRefundable ? "non_refundable" : "flexible"}.${meal}`),
@@ -166,6 +170,7 @@ export function PresetWindow({
         <AcceptedPaymentMethods
           methods={methods}
           disabled={disabled}
+          nonRefundable={paidAhead}
           onChange={(next) => {
             setMethods(next);
             setError("");

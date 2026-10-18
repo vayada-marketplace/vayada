@@ -26,7 +26,6 @@ import {
   MapPinIcon,
   PhotoIcon,
   PlusIcon,
-  SparklesIcon,
   SunIcon,
   UsersIcon,
 } from "@heroicons/react/24/outline";
@@ -41,6 +40,7 @@ import type {
   SetupTrack,
   UpdatePropertyProfileRequest,
 } from "@vayada/domain-hotels";
+import { SETUP_TRACKS } from "@vayada/domain-hotels";
 import {
   COUNTRY_OPTIONS,
   CURRENCY_OPTIONS,
@@ -103,10 +103,7 @@ export type SharedFirstRunPropertySetupWizardProps = {
   /** Renders the step-by-step setup once the selected hotel's basics are saved. */
   renderAfterHotelDetails: (propertyId: string, onEditHotelDetails: () => void) => ReactNode;
   renderSetupActions?: (propertyId: string) => ReactNode;
-  /**
-   * The tracks a new hotel can choose from. Booking Admin offers Hotel Operations only (the
-   * Creator Marketplace is being removed, VAY-2259); a track selected earlier stays selected.
-   */
+  /** The tracks a new hotel can choose from; every setup track by default. */
   availableTracks?: readonly SetupTrack[];
 };
 
@@ -200,7 +197,7 @@ export function hasMapCoordinates(location: Pick<ProfileDraft, "latitude" | "lon
   );
 }
 
-const ALL_SETUP_TRACKS: readonly SetupTrack[] = ["hotel_operations", "creator_marketplace"];
+const ALL_SETUP_TRACKS: readonly SetupTrack[] = SETUP_TRACKS;
 
 const TRACK_CONTENT: Record<
   SetupTrack,
@@ -211,12 +208,6 @@ const TRACK_CONTENT: Record<
     subtitle: "PMS + Booking Engine",
     description: "Manage rooms, rates, reservations, and direct bookings.",
     icon: HotelIcon,
-  },
-  creator_marketplace: {
-    title: "Creator Marketplace",
-    subtitle: null,
-    description: "Create your hotel profile and prepare a collaboration offer.",
-    icon: SparklesIcon,
   },
 };
 
@@ -3064,9 +3055,7 @@ export function mergeTrackSelectionAfterConflict(
   intended: readonly SetupTrack[],
   current: readonly SetupTrack[],
 ): SetupTrack[] {
-  return (["hotel_operations", "creator_marketplace"] as const).filter(
-    (track) => intended.includes(track) || current.includes(track),
-  );
+  return SETUP_TRACKS.filter((track) => intended.includes(track) || current.includes(track));
 }
 
 function sameTrackSelection(left: readonly SetupTrack[], right: readonly SetupTrack[]): boolean {

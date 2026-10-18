@@ -5,8 +5,6 @@ import type {
   PropertySetupStepId,
 } from "@vayada/domain-hotels";
 const names: Record<string, string> = {
-  "marketplace.hotel_profile": "Hotel profile",
-  "marketplace.collaboration_preferences": "Collaboration preferences",
   "booking.hotel_profile": "Hotel profile",
   "booking.page_style": "Booking page style",
   "booking.rooms": "Rooms",
