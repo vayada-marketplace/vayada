@@ -39,6 +39,27 @@ function contactPayload(marker: string): PlatformContactIntakePayload {
   };
 }
 
+/** Shaped like POST /api/support's stored request (the message field is JSON). */
+function supportPayload(marker: string): PlatformContactIntakePayload {
+  return {
+    name: `Ben Owner ${marker}`,
+    email: `ben.${marker}@example.com`,
+    phone: null,
+    company: null,
+    country: null,
+    userType: "bug",
+    message: JSON.stringify({
+      kind: "bug",
+      message: `Calendar shows the wrong price ${marker}`,
+      page: "/calendar",
+      product: "pms",
+      userId: "00000000-0000-4000-8000-000000000001",
+      organizationId: "00000000-0000-4000-8000-000000000002",
+      organizationName: `Hotel ${marker}`,
+    }),
+  };
+}
+
 describe.skipIf(!URL)("PostgreSQL contact intake storage, delivery and retention", () => {
   const admin = new pg.Client({ connectionString: URL ?? "postgresql://disabled" });
   let login: HotelSetupOrdinaryLoginFixture;
@@ -131,12 +152,17 @@ describe.skipIf(!URL)("PostgreSQL contact intake storage, delivery and retention
        WHERE job_type = 'email.platform-contact-notification' AND status = 'pending'`,
     );
 
-  it("emails contact-form messages to the recipient with the visitor as Reply-To", async () => {
+  it("emails contact-form messages and support requests with the sender as Reply-To", async () => {
     await parkOtherContactJobs();
     const marker = newMarker();
     const support = newMarker();
     const form = await submit(marker);
-    const supportJob = await submit(support, "in_app_support");
+    const supportJob = await repository.submitContact({
+      payload: supportPayload(support),
+      channel: "in_app_support",
+      requestId: `req-${randomUUID()}`,
+      receivedAt: new Date().toISOString(),
+    });
     const sent: Parameters<BookingEmailDelivery["send"]>[0][] = [];
 
     const result = await runContactNotificationJobs(
@@ -145,8 +171,17 @@ describe.skipIf(!URL)("PostgreSQL contact intake storage, delivery and retention
       { recipient: "team@example.test" },
     );
 
-    expect(result).toEqual({ processed: 1, failed: 0, deadLettered: 0 });
-    expect(sent).toHaveLength(1);
+    expect(result).toEqual({ processed: 2, failed: 0, deadLettered: 0 });
+    expect(sent).toHaveLength(2);
+    const supportMail = sent.find((input) => input.subject.startsWith("Bug report"));
+    expect(supportMail).toMatchObject({
+      to: "team@example.test",
+      replyTo: `ben.${support}@example.com`,
+      subject: `Bug report · PMS · Hotel ${support}`,
+    });
+    expect(supportMail?.text).toContain(`Calendar shows the wrong price ${support}`);
+    expect(supportMail?.text).toContain("Page: /calendar");
+    sent.splice(sent.indexOf(supportMail!), 1);
     expect(sent[0]).toMatchObject({
       to: "team@example.test",
       replyTo: `ana.${marker}@example.com`,
@@ -165,7 +200,7 @@ describe.skipIf(!URL)("PostgreSQL contact intake storage, delivery and retention
     );
     expect(Object.fromEntries(jobs.rows.map((row) => [row.id, row.status]))).toEqual({
       [form.jobId]: "succeeded",
-      [supportJob.jobId]: "pending",
+      [supportJob.jobId]: "succeeded",
     });
     const audit = await admin.query(
       "SELECT action, redacted_payload, private_payload FROM platform.product_audit_events WHERE job_id=$1::uuid ORDER BY recorded_at",
@@ -180,6 +215,7 @@ describe.skipIf(!URL)("PostgreSQL contact intake storage, delivery and retention
       private_payload: {},
     });
     expect(await rowsMentioning(marker)).toEqual(["jobs"]);
+    expect(await rowsMentioning(support)).toEqual(["jobs"]);
   });
 
   it("retries a failed send later and records no personal data about it", async () => {

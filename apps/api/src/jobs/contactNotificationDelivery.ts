@@ -6,10 +6,11 @@ import {
 } from "../routes/platformContactIntake.js";
 import type { BookingEmailDelivery } from "./bookingEmailDelivery.js";
 
-// VAY-2286: each vayada.com contact-form message is emailed to one team address (config
-// CONTACT_NOTIFICATION_RECIPIENT) through the booking email provider, with Reply-To set to the
-// visitor. In-app support jobs share the job type but are not sent. The audit and failure records
-// written here hold no personal data: that stays in the job row until retention empties it.
+// VAY-2286: each vayada.com contact-form message and each in-app support request is emailed to one
+// team address (config CONTACT_NOTIFICATION_RECIPIENT) through the booking email provider, with
+// Reply-To set to the sender. Jobs queued before the channel existed (no job_metadata.channel) are
+// not sent. The audit and failure records written here hold no personal data: that stays in the
+// job row until retention empties it.
 
 type ContactJob = {
   id: string;
@@ -17,6 +18,7 @@ type ContactJob = {
   attemptsCount: number;
   workerId: string;
   createdAt: Date | string;
+  channel: "contact_form" | "in_app_support";
   payload: Record<string, unknown>;
 };
 
@@ -32,6 +34,11 @@ type ContactNotificationPool = {
  * booking emails share; the rest wait in the queue. */
 export const CONTACT_NOTIFICATION_HOURLY_CAP = 30;
 const USER_TYPES: Record<string, string> = { hotel: "Hotel owner or manager", other: "Other" };
+const SUPPORT_KINDS: Record<string, string> = { support: "Support request", bug: "Bug report" };
+const SUPPORT_APPS: Record<string, string> = { booking: "Booking Admin", pms: "PMS" };
+/** A label for a known value; free text (the public form's "I am a") never reaches inherited keys. */
+const labelOf = (labels: Record<string, string>, value: unknown) =>
+  typeof value === "string" && Object.hasOwn(labels, value) ? labels[value] : undefined;
 // Reply-To only for a plain ASCII address the provider accepts; others still appear in the text.
 const REPLY_TO = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$/;
 const PROVIDER_ERROR = /^Booking email provider returned HTTP \d{3}\.$/;
@@ -64,7 +71,7 @@ export function contactNotificationEmail(
     `Phone: ${oneLine(field("phone") ?? "-")}`,
     `Company: ${oneLine(field("company") ?? "-")}`,
     `Country: ${oneLine(field("country") ?? "-")}`,
-    `I am a: ${userType ? (USER_TYPES[userType] ?? oneLine(userType)) : "-"}`,
+    `I am a: ${userType ? (labelOf(USER_TYPES, userType) ?? oneLine(userType)) : "-"}`,
     `Received: ${new Date(receivedAt).toISOString()}`,
     "",
     "Message:",
@@ -77,6 +84,53 @@ export function contactNotificationEmail(
   return {
     subject: `Contact form: ${oneLine(name).slice(0, 120)}`,
     text,
+    ...(REPLY_TO.test(email) ? { replyTo: email } : {}),
+  };
+}
+
+/** In-app support request (stored by POST /api/support): kind, app, hotel account, page, message. */
+export function supportNotificationEmail(
+  payload: Record<string, unknown>,
+  receivedAt: Date | string,
+): { subject: string; text: string; replyTo?: string } {
+  const text = (value: unknown) =>
+    typeof value === "string" && value.trim() ? value.trim() : null;
+  const oneLine = (value: string) => value.replace(/\s*[\r\n]+\s*/g, " ");
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(String(payload["message"]));
+  } catch {
+    parsed = null;
+  }
+  const request = (parsed && typeof parsed === "object" ? parsed : {}) as Record<string, unknown>;
+  const email = text(payload["email"]);
+  const message = text(request["message"]);
+  if (!email || !message) throw new Error("Support request is incomplete.");
+  const name = oneLine(text(payload["name"]) ?? email);
+  const kind = labelOf(SUPPORT_KINDS, request["kind"]) ?? "Support request";
+  const app =
+    labelOf(SUPPORT_APPS, request["product"]) ?? oneLine(text(request["product"]) ?? "app");
+  const hotel = oneLine(text(request["organizationName"]) ?? "unnamed hotel account");
+  return {
+    subject: `${kind} · ${app} · ${hotel}`.slice(0, 160),
+    text: [
+      `New ${kind.toLowerCase()} from ${app}.`,
+      "",
+      `Hotel account: ${hotel}`,
+      `Name: ${name}`,
+      `Email: ${oneLine(email)}`,
+      `Page: ${oneLine(text(request["page"]) ?? "-")}`,
+      `Received: ${new Date(receivedAt).toISOString()}`,
+      `User ID: ${oneLine(text(request["userId"]) ?? "-")}`,
+      `Organization ID: ${oneLine(text(request["organizationId"]) ?? "-")}`,
+      "",
+      "Message:",
+      message,
+      "",
+      REPLY_TO.test(email)
+        ? `Reply to this email to answer ${name} directly.`
+        : "Reply-To is not set for this address: write to it directly.",
+    ].join("\n"),
     ...(REPLY_TO.test(email) ? { replyTo: email } : {}),
   };
 }
@@ -101,7 +155,8 @@ export async function runContactNotificationJobs(
   try {
     const sentLastHour = await pool.query<{ sent: number }>(
       `SELECT count(*)::integer AS sent FROM platform.jobs
-       WHERE queue_name = $1 AND job_type = $2 AND job_metadata ->> 'channel' = 'contact_form'
+       WHERE queue_name = $1 AND job_type = $2
+         AND job_metadata ->> 'channel' IN ('contact_form', 'in_app_support')
          AND status = 'succeeded' AND finished_at > now() - interval '1 hour'`,
       [CONTACT_NOTIFICATION_QUEUE, CONTACT_NOTIFICATION_JOB_TYPE],
     );
@@ -114,7 +169,10 @@ export async function runContactNotificationJobs(
       if (!job) break;
       const startedAt = Date.now();
       try {
-        const email = contactNotificationEmail(job.payload, job.createdAt);
+        const email =
+          job.channel === "in_app_support"
+            ? supportNotificationEmail(job.payload, job.createdAt)
+            : contactNotificationEmail(job.payload, job.createdAt);
         await delivery.send({ to: options.recipient, idempotencyKey: job.jobKey, ...email });
         if ((await finishContactJob(pool, job, startedAt, "succeeded")).recorded) processed += 1;
       } catch (error) {
@@ -150,7 +208,7 @@ async function claimContactJob(
        FROM platform.jobs
        WHERE queue_name = $1
          AND job_type = $2
-         AND job_metadata ->> 'channel' = 'contact_form'
+         AND job_metadata ->> 'channel' IN ('contact_form', 'in_app_support')
          AND payload <> '{}'::jsonb
          AND (
            status = 'pending'
@@ -168,6 +226,7 @@ async function claimContactJob(
        job.attempts_count AS "attemptsCount",
        job.locked_by AS "workerId",
        job.created_at AS "createdAt",
+       job.job_metadata ->> 'channel' AS channel,
        job.payload`,
     [CONTACT_NOTIFICATION_QUEUE, CONTACT_NOTIFICATION_JOB_TYPE, workerId],
   );
