@@ -311,6 +311,10 @@ import { createPgPlatformPropertyLifecycleCommandRepository } from "./domains/pl
 import { createPgPlatformPropertyLifecycleImpactRepository } from "./domains/platformPropertyLifecycleImpactRepository.js";
 import { createPgPlatformPropertyProvisioningRepository } from "./domains/platformPropertyProvisioningRepository.js";
 import { createPgPlatformContactIntakeRepository } from "./routes/platformContactIntake.js";
+import {
+  createPgContactIntakeRetentionStore,
+  startContactIntakeRetentionWorker,
+} from "./jobs/contactIntakeRetention.js";
 
 const postgresRuntime = installPostgresPoolRuntime(pg);
 const config = loadConfig();
@@ -2967,6 +2971,17 @@ const bookingWebEventRetentionWorker = startBookingWebEventRetentionWorker({
 
 app.addHook("onClose", async () => {
   await bookingWebEventRetentionWorker.close();
+});
+
+// VAY-2286: contact-form and in-app support messages are emptied 90 days after they arrive.
+const contactIntakeRetentionWorker = startContactIntakeRetentionWorker({
+  store: createPgContactIntakeRetentionStore({ connectionString: targetDatabaseUrl, max: 1 }),
+  enabled: config.backgroundWorkersEnabled,
+  logger: app.log,
+});
+
+app.addHook("onClose", async () => {
+  await contactIntakeRetentionWorker.close();
 });
 
 if (authSessionHandoffRepository) {
