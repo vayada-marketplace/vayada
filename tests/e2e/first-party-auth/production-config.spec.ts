@@ -70,13 +70,19 @@ test("ordinary product API clients retain configured service origins", async ({}
 
 test("landing production APIs are explicit and consent remains local", async ({}, testInfo) => {
   const root = repositoryRoot(testInfo);
-  const [workflowSource, consentSource] = await Promise.all([
+  const [workflowSource, consentSource, contactClientSource] = await Promise.all([
     source(root, ".github/workflows/deploy-landing.yml"),
     source(root, "apps/landing/context/CookieConsentContext.tsx"),
+    source(root, "apps/landing/services/api/client.ts"),
   ]);
 
-  expect(workflowSource).toContain("CONTACT_API_URL: https://api.vayada.com");
+  // VAY-2286: the contact form posts to next-api's contact intake, not the legacy marketplace API.
+  expect(workflowSource).not.toContain("https://api.vayada.com");
+  expect(contactClientSource).toContain(
+    'process.env.NEXT_PUBLIC_API_URL || "https://api.localhost"',
+  );
   expect(workflowSource).toContain("NEXT_API_URL: https://next-api.vayada.com");
+  expect(workflowSource).toContain("NEXT_PUBLIC_API_URL=${{ env.NEXT_API_URL }}");
   expect(workflowSource).toContain("NEXT_PUBLIC_VAYADA_API_URL=${{ env.NEXT_API_URL }}");
   // VAY-2260: the landing deploy no longer probes the Marketplace discovery API.
   expect(workflowSource).not.toContain("/api/marketplace/");
