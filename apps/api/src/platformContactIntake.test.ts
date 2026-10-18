@@ -1,8 +1,9 @@
 import { injectJson } from "@vayada/backend-test";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { buildApp } from "./app.js";
 import {
+  CONTACT_INTAKE_LIMIT,
   createPgPlatformContactIntakeRepository,
   PL1_NON_MEDIA_CONTRACT_VERSION,
   type PlatformContactIntakePool,
@@ -15,8 +16,8 @@ describe("platform contact intake routes", () => {
     const submissions: string[] = [];
     const app = buildContactIntakeApp({
       repository: {
-        async submitContact({ payload }) {
-          submissions.push(`${payload.email}:${payload.userType}`);
+        async submitContact({ payload, channel }) {
+          submissions.push(`${channel}:${payload.email}:${payload.userType}`);
           return contactResponse();
         },
       },
@@ -41,7 +42,7 @@ describe("platform contact intake routes", () => {
       contractVersion: PL1_NON_MEDIA_CONTRACT_VERSION,
       status: "accepted",
     });
-    expect(submissions).toEqual(["lina@example.com:creator"]);
+    expect(submissions).toEqual(["contact_form:lina@example.com:creator"]);
   });
 
   it("rejects invalid public contact submissions before writing intake", async () => {
@@ -65,6 +66,108 @@ describe("platform contact intake routes", () => {
       category: "validation",
     });
   });
+
+  // VAY-2286: the vayada.com contact form posts straight to next-api.
+  it("lets the vayada.com contact form through CORS and refuses other origins", async () => {
+    const app = buildContactIntakeApp({
+      allowedOrigins: ["https://vayada.com"],
+      repository: {
+        async submitContact() {
+          return contactResponse();
+        },
+      },
+    });
+    const preflight = (origin: string) =>
+      app.inject({
+        method: "OPTIONS",
+        url: "/api/contact",
+        headers: {
+          origin,
+          "access-control-request-method": "POST",
+          "access-control-request-headers": "content-type",
+        },
+      });
+
+    const allowed = await preflight("https://vayada.com");
+    expect(allowed.statusCode).toBe(204);
+    expect(allowed.headers["access-control-allow-origin"]).toBe("https://vayada.com");
+    expect(allowed.headers["access-control-allow-methods"]).toContain("POST");
+    expect(allowed.headers["access-control-allow-headers"]).toContain("Content-Type");
+    expect(allowed.headers["access-control-allow-credentials"]).toBeUndefined();
+
+    for (const origin of ["https://www.vayada.com", "https://evil.example", "null"]) {
+      const refused = await preflight(origin);
+      expect(refused.statusCode).toBe(204);
+      expect(refused.headers["access-control-allow-origin"]).toBeUndefined();
+    }
+
+    const posted = await app.inject({
+      method: "POST",
+      url: "/api/contact",
+      headers: { origin: "https://vayada.com" },
+      payload: { name: "Ana Host", email: "ana@example.com", message: "Hello" },
+    });
+    expect(posted.statusCode).toBe(200);
+    expect(posted.headers["access-control-allow-origin"]).toBe("https://vayada.com");
+  });
+
+  it("refuses an oversized body before writing intake", async () => {
+    const app = buildContactIntakeApp({
+      repository: {
+        async submitContact() {
+          throw new Error("repository should not be called");
+        },
+      },
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/contact",
+      payload: {
+        name: "Ana Host",
+        email: "ana@example.com",
+        message: "x",
+        company: "y".repeat(25_000),
+      },
+    });
+
+    expect(response.statusCode).toBe(413);
+  });
+
+  it("limits valid messages per address per minute without touching the store", async () => {
+    // A fixed clock keeps all six posts inside one counting minute.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-18T12:00:10.000Z"));
+    try {
+      let stored = 0;
+      const app = buildContactIntakeApp({
+        repository: {
+          async submitContact() {
+            stored += 1;
+            return contactResponse();
+          },
+        },
+      });
+      const post = (message: string) =>
+        app.inject({
+          method: "POST",
+          url: "/api/contact",
+          payload: { name: "Ana Host", email: "ana@example.com", message },
+        });
+
+      for (let index = 0; index < CONTACT_INTAKE_LIMIT; index += 1) {
+        expect((await post(`Message ${index}`)).statusCode).toBe(200);
+      }
+      const limited = await post("One too many");
+
+      expect(limited.statusCode).toBe(429);
+      expect(limited.headers["retry-after"]).toBe("50");
+      expect(limited.json()).toMatchObject({ code: "rate_limited", category: "rate_limit" });
+      expect(stored).toBe(CONTACT_INTAKE_LIMIT);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("platform contact intake target repository", () => {
@@ -76,6 +179,7 @@ describe("platform contact intake target repository", () => {
     });
 
     const response = await repository.submitContact({
+      channel: "contact_form",
       requestId: "req_contact_001",
       receivedAt: "2026-06-13T21:00:00.000Z",
       payload: {
@@ -101,17 +205,27 @@ describe("platform contact intake target repository", () => {
     ).toBe(true);
     expect(pool.queries).toContain("COMMIT");
     expect(pool.queries.at(-1)).toBe("release");
+    // VAY-2286: personal data only in the job row; the append-only rows get channel and outcome.
+    const valuesOf = (table: string) =>
+      JSON.stringify(pool.values[pool.queries.findIndex((query) => query.includes(table))]);
+    for (const personal of ["Lina Creator", "lina@example.com", "Creator Studio", "partner"]) {
+      expect(valuesOf("INSERT INTO platform.domain_events")).not.toContain(personal);
+      expect(valuesOf("INSERT INTO platform.product_audit_events")).not.toContain(personal);
+      expect(valuesOf("INSERT INTO platform.jobs")).toContain(personal);
+    }
+    expect(valuesOf("INSERT INTO platform.jobs")).toContain('\\"channel\\":\\"contact_form\\"');
   });
 });
 
 function buildContactIntakeApp(options: {
   repository: PlatformContactIntakeRepository;
+  allowedOrigins?: string[];
 }): ReturnType<typeof buildApp> {
   return buildApp({
     logger: false,
     platformContactIntake: {
       repository: options.repository,
-      allowedOrigins: ["https://landing.localhost"],
+      allowedOrigins: options.allowedOrigins ?? ["https://landing.localhost"],
     },
   });
 }
@@ -131,11 +245,16 @@ function contactResponse(): PlatformContactIntakeResponse {
   };
 }
 
-function createContactPool(): PlatformContactIntakePool & { queries: string[] } {
+function createContactPool(): PlatformContactIntakePool & {
+  queries: string[];
+  values: unknown[][];
+} {
   const queries: string[] = [];
+  const values: unknown[][] = [];
   const client = {
-    async query<T>(text: string): Promise<{ rows: T[] }> {
+    async query<T>(text: string, params: unknown[] = []): Promise<{ rows: T[] }> {
       queries.push(text.trim());
+      values.push(params);
       if (text.includes("INSERT INTO platform.domain_events")) {
         return { rows: [{ eventId: "00000000-0000-0000-0000-000000000001" } as T] };
       }
@@ -151,6 +270,7 @@ function createContactPool(): PlatformContactIntakePool & { queries: string[] } 
 
   return {
     queries,
+    values,
     async connect() {
       return client as never;
     },

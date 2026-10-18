@@ -156,8 +156,10 @@ export type ApiConfig = {
   };
   financeFolioRecipientKms?: FinanceFolioRecipientKmsConfig;
   financeBankTransferKms?: { currentKeyArn: string; allowedKeyArns: string[]; region: string };
-  /** Browser origins allowed on the identity privacy and contact intake routes. */
+  /** Browser origins allowed on the identity privacy routes. */
   identityPrivacyAllowedOrigins: string[];
+  /** Browser origins allowed to post the public contact form (VAY-2286: vayada.com). */
+  contactIntakeAllowedOrigins: string[];
   pmsOperationsAllowedOrigins: string[];
   financialsActivationPropertyIds: string[];
   bookingWebEventSink: BookingWebEventSink;
@@ -195,6 +197,8 @@ export type ApiConfig = {
   pricingPublicationFreshnessIntervalMs: number;
   /** Recipient of the at-most-daily stale-pricing email; unset sends none (log line only). */
   pricingPublicationFreshnessAlertEmail?: string;
+  /** VAY-2286: vayada.com contact-form messages are emailed here (Reply-To: the visitor). */
+  contactNotificationRecipient?: string;
   providerWebhooks: ProviderWebhookConfig;
   airbnbImport?: ReturnType<typeof loadAirbnbImportConfig>;
   airbnbAlterations?: { propertyIds: readonly string[] };
@@ -486,11 +490,11 @@ function readCalendarAutoOpenSchedulerIntervalEnv(env: NodeJS.ProcessEnv): numbe
 }
 
 // One recipient; the email goes through the booking email provider and sender.
-function readPricingPublicationFreshnessAlertEmail(
+function readSingleRecipientEnv(
   env: NodeJS.ProcessEnv,
+  key: "PRICING_PUBLICATION_FRESHNESS_ALERT_EMAIL" | "CONTACT_NOTIFICATION_RECIPIENT",
   emailConfigured: boolean,
 ): string | undefined {
-  const key = "PRICING_PUBLICATION_FRESHNESS_ALERT_EMAIL";
   const value = readOptionalEnv(env, key);
   if (!value) return undefined;
   if (!/^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+$/.test(value)) {
@@ -1101,6 +1105,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       "IDENTITY_PRIVACY_ALLOWED_ORIGINS",
       readOptionalCsvEnv(env, "MARKETPLACE_DISCOVERY_ALLOWED_ORIGINS"),
     ),
+    // VAY-2286: its own list, so the landing origin stays out of the identity and app CORS lists.
+    contactIntakeAllowedOrigins: readOptionalCsvEnv(env, "CONTACT_INTAKE_ALLOWED_ORIGINS", [
+      "https://landing.localhost",
+      "http://localhost:3006",
+    ]),
     pmsOperationsAllowedOrigins: readOptionalCsvEnv(env, "PMS_OPERATIONS_ALLOWED_ORIGINS", [
       "https://pms.localhost",
       "https://admin.booking.localhost",
@@ -1187,8 +1196,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       true,
     ),
     pricingPublicationFreshnessIntervalMs: readPricingPublicationFreshnessIntervalEnv(env),
-    pricingPublicationFreshnessAlertEmail: readPricingPublicationFreshnessAlertEmail(
+    pricingPublicationFreshnessAlertEmail: readSingleRecipientEnv(
       env,
+      "PRICING_PUBLICATION_FRESHNESS_ALERT_EMAIL",
+      Boolean(bookingEmailDelivery),
+    ),
+    contactNotificationRecipient: readSingleRecipientEnv(
+      env,
+      "CONTACT_NOTIFICATION_RECIPIENT",
       Boolean(bookingEmailDelivery),
     ),
     providerWebhooks: prospectiveConfig.providerWebhooks,

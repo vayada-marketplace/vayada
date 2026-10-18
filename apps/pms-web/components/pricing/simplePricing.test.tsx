@@ -195,6 +195,41 @@ describe("the simple card's view of a room", () => {
       },
     ]);
     expect(hasKeptSettings(dated, simpleRoom(dated, { flexible: flexibleTerms() })!)).toBe(false);
+    // A date's own "no departures" or maximum stay shows nowhere on the calendar, so the card says it is kept.
+    const hidden = (
+      dateRules: Record<string, unknown>,
+      seasonRules: Record<string, unknown> = {},
+    ) => {
+      const value = room([
+        {
+          ...independent("flexible", flat("10000"), {
+            seasons: [
+              {
+                name: "Autumn",
+                tier: "High",
+                from: "09-01",
+                through: "09-30",
+                price: flat("12000"),
+              },
+            ],
+          }),
+          restrictions: {
+            kind: "own",
+            rules: rules(2),
+            seasons: [{ from: "09-01", through: "09-30", rules: rules(2, seasonRules) }],
+            dates: [{ date: "2026-09-08", rules: rules(2, dateRules) }],
+          },
+        },
+      ]);
+      return hasKeptSettings(value, simpleRoom(value, { flexible: flexibleTerms() })!);
+    };
+    expect(hidden({})).toBe(false);
+    expect(hidden({ closedToDeparture: true })).toBe(true);
+    expect(hidden({ maxStayNights: 7 })).toBe(true);
+    // A date that keeps its season's rules (as the night panel writes them) adds nothing hidden of its own.
+    const season = { closedToDeparture: true, maxStayNights: 7 };
+    expect(hidden(season, season)).toBe(false);
+    expect(hidden({ stopSell: true, ...season }, season)).toBe(false);
   });
 
   it("waits for every option's terms before it decides", () => {
