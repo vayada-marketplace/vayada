@@ -14,19 +14,22 @@ type Rules = Extract<Offer["restrictions"], { kind: "own" }>["rules"];
 
 /** The calendar's picked nights (VAY-2280): one night, or every night from `from` through `to`. */
 export type NightSelection = { from: string; to: string };
+/** The most nights one selection holds. */
+export const MAX_PICKED_NIGHTS = 400;
 /** The selection after picking `date`: a first pick selects one night, a second pick selects everything in between,
- * a third starts again. */
+ * a third starts again. A second pick more than `MAX_PICKED_NIGHTS` away starts again too, so the calendar never
+ * outlines nights an edit wouldn't change. */
 export function pickNight(selection: NightSelection | null, date: string): NightSelection {
   if (!selection || selection.from !== selection.to) return { from: date, to: date };
-  return date < selection.from
-    ? { from: date, to: selection.from }
-    : { from: selection.from, to: date };
+  const range =
+    date < selection.from ? { from: date, to: selection.from } : { from: selection.from, to: date };
+  return addDays(range.from, MAX_PICKED_NIGHTS - 1) >= range.to ? range : { from: date, to: date };
 }
 export function selectedDates(selection: NightSelection): string[] {
   const dates: string[] = [];
   for (
     let date = selection.from;
-    date <= selection.to && dates.length < 400;
+    date <= selection.to && dates.length < MAX_PICKED_NIGHTS;
     date = addDays(date, 1)
   )
     dates.push(date);
@@ -38,7 +41,7 @@ const inSeason = (monthDay: string, from: string, through: string) =>
     ? monthDay >= from && monthDay <= through
     : monthDay >= from || monthDay <= through;
 /** The stay rules a night has without a rule of its own: its stay-rule season's, or the option's defaults. */
-function seasonRules(owner: Offer, date: string): Rules {
+export function seasonRules(owner: Offer, date: string): Rules {
   if (owner.restrictions.kind !== "own") throw new PricingError("pricing.error.stayRuleOwner");
   return (
     owner.restrictions.seasons.find((season) =>
