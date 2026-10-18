@@ -292,7 +292,7 @@ function FlexibleRate({
           </p>
         )}
       </Part>
-      <PaidWhenBooking payment={simple.mainTerms.payment} />
+      <PaidWhenBooking rate="flexible" payment={simple.mainTerms.payment} />
       <RateMethods
         rate="flexible"
         methods={simple.mainTerms.payment.acceptedMethods ?? []}
@@ -468,7 +468,10 @@ function NonRefundableRate({
               )}
             </div>
           </Part>
-          <PaidWhenBooking payment={terms[offer.id]?.payment ?? mainTerms.payment} />
+          <PaidWhenBooking
+            rate="non_refundable"
+            payment={terms[offer.id]?.payment ?? mainTerms.payment}
+          />
           <RateMethods
             rate="non_refundable"
             methods={terms[offer.id]?.payment.acceptedMethods ?? []}
@@ -489,8 +492,15 @@ function NonRefundableRate({
 }
 
 /** "Paid when booking", read from the rate's terms (VAY-2280: the choice itself comes with card payments, VAY-2205):
- * nothing when guests may pay at the property, the full stay otherwise, or the deposit a rate already has. */
-function PaidWhenBooking({ payment }: { payment: Payment }) {
+ * the deposit a rate already has, else nothing when guests may pay at the property, the full stay otherwise. A
+ * non-refundable stay is always paid in advance, even where old terms still name pay at property. */
+function PaidWhenBooking({
+  rate,
+  payment,
+}: {
+  rate: "flexible" | "non_refundable";
+  payment: Payment;
+}) {
   const { t } = useTranslation();
   const methods = payment.acceptedMethods;
   const [value, hint] =
@@ -502,11 +512,13 @@ function PaidWhenBooking({ payment }: { payment: Payment }) {
             days: payment.balanceDaysBeforeArrival,
           }),
         ]
-      : !methods
-        ? [t("pricing.rates.paid.settings"), t("pricing.rates.paid.settingsHint")]
-        : methods.includes("pay_at_property")
-          ? [t("pricing.rates.paid.nothing"), t("pricing.rates.paid.nothingHint")]
-          : [t("pricing.rates.paid.full"), t("pricing.rates.paid.fullHint")];
+      : rate === "non_refundable"
+        ? [t("pricing.rates.paid.full"), t("pricing.rates.paid.fullHint")]
+        : !methods
+          ? [t("pricing.rates.paid.settings"), t("pricing.rates.paid.settingsHint")]
+          : methods.includes("pay_at_property")
+            ? [t("pricing.rates.paid.nothing"), t("pricing.rates.paid.nothingHint")]
+            : [t("pricing.rates.paid.full"), t("pricing.rates.paid.fullHint")];
   return (
     <Part label={t("pricing.rates.paid.title")} className="lg:min-h-[104px]">
       <p className="text-[14px] font-semibold text-gray-900">{value}</p>

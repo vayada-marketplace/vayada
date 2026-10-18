@@ -145,6 +145,12 @@ it("shows the Flexible rate always on beside the Non-refundable rate, with cance
   expect(textOf(card("Non-refundable rate"))).toContain(
     "Not offered: non-refundable stays are paid in advance",
   );
+  // Old terms that still name pay at property: the rate is still paid in advance.
+  mount(room(), terms(["pay_at_property"], ["card", "pay_at_property"]));
+  expect(textOf(card("Non-refundable rate"))).toContain("Full stay");
+  expect(textOf(card("Non-refundable rate"))).not.toContain("Nothing is charged");
+  expect(checkbox("Non-refundable rate", "Pay at property").props.checked).toBe(true);
+  expect(checkbox("Non-refundable rate", "Pay at property").props.disabled).toBe(false);
 });
 
 it("changes the cancellation days, opens the refund steps, and sets each rate's methods on its own options (VAY-2282)", () => {
