@@ -232,13 +232,19 @@ jobs:
   # The mocked pms-web Playwright project against a plain-port dev server. Every API call is
   # mocked in tests/e2e/support, so no backend or database runs here.
   pms_web_e2e:
-    name: PMS Web Browser Specs
+    name: PMS Web Browser Specs (${{ matrix.shard }}/2)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: [changes]
     if: needs.changes.outputs.run_pms_web_e2e == 'true'
     permissions:
       contents: read
+    # The project's specs were the slowest PR job with one worker (VAY-2287); each shard starts its
+    # own dev server and runs half of them.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
 
     steps:
       - name: Checkout code
@@ -272,7 +278,7 @@ jobs:
             sleep 2
           done
           curl --silent --fail --max-time 10 http://localhost:3164/login >/dev/null || { tail -50 "$RUNNER_TEMP/pms-web-dev.log"; exit 1; }
-          npm run e2e:pms-web -- --workers=1 --retries=1
+          npm run e2e:pms-web -- --workers=1 --retries=1 --shard=${{ matrix.shard }}/2
         env:
           # Any non-empty CI makes playwright.config.ts use CI reporters; "false" keeps it from
           # starting every app's webServer (that needs CI === "true").
@@ -289,7 +295,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v6
         with:
-          name: pms-web-playwright-report
+          name: pms-web-playwright-report-${{ matrix.shard }}
           path: |
             playwright-report
             test-results
@@ -464,7 +470,9 @@ jobs:
 
   # Each shard gets its own PostgreSQL cluster, so cluster-wide role proofs stay isolated:
   #   platform    - identity, legacy owner, finance worker, Channex worker and authorization proofs
-  #   pms         - the PMS/booking/finance integration batch and the migration suites
+  #   pms         - the PMS/booking/finance integration batch
+  #   pms-migrations - the migration suites and the pending booking edits database, split from pms
+  #                 so the batch is not the slowest PostgreSQL job (VAY-2287)
   #   pricing     - pricing on the ordinary login in its own database (split from pms, VAY-2238)
   #   hotel-setup - hotel setup on the ordinary API login, shared setup profile, logo media and
   #                 nearby places
@@ -480,7 +488,7 @@ jobs:
       fail-fast: false
       matrix:
         postgres: [16, 17]
-        shard: [platform, pms, pricing, hotel-setup]
+        shard: [platform, pms, pms-migrations, pricing, hotel-setup]
 
     services:
       postgres:
@@ -634,7 +642,7 @@ jobs:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
       - name: Verify PMS navigation module migration backfill
-        if: matrix.shard == 'pms'
+        if: matrix.shard == 'pms-migrations'
         run: npm --workspace @vayada/backend-migration run test -- --no-file-parallelism src/pmsNavigationModules.test.ts
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
@@ -993,7 +1001,7 @@ jobs:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
       - name: Verify Booking add-on economics migration
-        if: matrix.shard == 'pms'
+        if: matrix.shard == 'pms-migrations'
         run: >-
           npm --workspace @vayada/backend-migration run test --
           --no-file-parallelism
@@ -1020,7 +1028,7 @@ jobs:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
       - name: Verify Finance OTA commission migration
-        if: matrix.shard == 'pms'
+        if: matrix.shard == 'pms-migrations'
         run: >-
           npm --workspace @vayada/backend-migration run test --
           src/financeOtaCommissionRules.test.ts src/providerFeeEvidenceMigration.integration.test.ts
@@ -1031,7 +1039,7 @@ jobs:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
       - name: Verify membership property scope migration
-        if: matrix.shard == 'pms'
+        if: matrix.shard == 'pms-migrations'
         run: >-
           npm --workspace @vayada/backend-migration run test --
           --no-file-parallelism src/membershipPropertyScope.test.ts
@@ -1040,7 +1048,7 @@ jobs:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
       - name: Run public gallery migration integration
-        if: matrix.shard == 'pms'
+        if: matrix.shard == 'pms-migrations'
         run: >-
           npm --workspace @vayada/backend-migration run test --
           src/publicBookabilityGalleryMedia.test.ts
@@ -1048,7 +1056,7 @@ jobs:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
       - name: Run pending booking edits in an isolated database
-        if: matrix.shard == 'pms'
+        if: matrix.shard == 'pms-migrations'
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_booking_edit_test
           TARGET_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_booking_edit_test
@@ -1066,7 +1074,7 @@ jobs:
           npm --workspace vayada-api run test -- --no-file-parallelism src/routes/pendingBookingEdits.integration.test.ts
 
       - name: Verify removed pricing boundaries
-        if: matrix.shard == 'pms'
+        if: matrix.shard == 'pms-migrations'
         run: >-
           npm --workspace vayada-api run test -- --no-file-parallelism
           src/pricingReset.test.ts src/integrations/channexManagementPlans.test.ts
