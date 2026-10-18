@@ -265,8 +265,9 @@ fallbacks while adding membership/resource-link checks.
 ### Marketplace hotel and creator flows
 
 > Retired with the Creator Marketplace (VAY-2259). The Marketplace app and its auth
-> surface are gone (VAY-2270, VAY-2271); creator workspaces and their data stay
-> readable until the Marketplace tables are dropped (VAY-2272). Kept as design history.
+> surface are gone (VAY-2270, VAY-2271). Creator workspace rows stay stored until the
+> Marketplace data is dropped (VAY-2272), but since migration 0493 no role is granted any
+> permission in them. Kept as design history.
 
 Move registration from "create local user with password, then create profile" to
 "authenticate with WorkOS, then create or select internal organization and
@@ -359,8 +360,9 @@ behavior or store/verify Vayada-owned password hashes.
 ### Affiliates
 
 > Retired: the affiliate portal source was removed (VAY-1498) and its auth surface went with
-> VAY-2271 (#3422). `affiliate_partner` organizations stay readable until the Marketplace data is
-> dropped (VAY-2272). Kept as design history.
+> VAY-2271 (#3422). `affiliate_partner` organization rows stay stored until the Marketplace data
+> is dropped (VAY-2272), but since migration 0493 no role is granted any permission in them. Kept
+> as design history.
 
 Affiliate dashboard login should use WorkOS and an `affiliate_partner`
 organization. Public referral links, click attribution, and unauthenticated

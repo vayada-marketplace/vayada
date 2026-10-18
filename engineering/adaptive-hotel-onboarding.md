@@ -3,11 +3,12 @@
 _VAY-965 decision record._
 
 > **Update (VAY-2270, 2026-10):** the Creator Marketplace track is retired. Migration 0492
-> rewrote stored selections to Hotel Operations only, and the database now refuses
-> `creator_marketplace`. The API offers only Hotel Operations, and the apps accept a status
-> without the Marketplace placeholders (#3421). The shared types still define the retired track,
-> its tasks and the `marketplace_preferences` step until #3427 removes them. The Marketplace parts
-> below are kept as design history.
+> rewrote combined selections to Hotel Operations only, deleted Marketplace-only selections with
+> their sessions and drafts, removed `marketplace_preferences` drafts and markers, and makes the
+> database refuse `creator_marketplace`. The API offers only Hotel Operations, and the apps accept
+> a status without the Marketplace placeholders (#3421). The shared types and the API still carry
+> the retired track (placeholder tasks, the `marketplace_preferences` step) until #3427 removes
+> them. The Marketplace parts below are kept as design history.
 
 ## Decision
 
@@ -453,8 +454,9 @@ redirect origin.
 
 When Marketplace hosted the wizard, it stored the already validated entry and
 return context in tab-scoped session storage before launching a task, and restored
-it on the same-tab return. Booking Admin's copy of the wizard (VAY-2261) keeps no
-such session storage.
+it on the same-tab return. Booking Admin's copy of the wizard (VAY-2261) does not; it keeps
+the entry and return context in local storage only around the hosted Stripe step
+(`stripeSetupReturnContext.ts`).
 
 Every actionable task renders through a tested inline adapter in the canonical
 wizard. Each save independently rechecks the current session, organization

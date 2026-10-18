@@ -1,6 +1,6 @@
 # vayada — agent guide
 
-Hospitality platform with two products — **Booking Engine** and **PMS** — sharing a central auth DB. The Creator Marketplace is retired (VAY-2259): its app is gone, and its data and legacy backend stay until the Marketplace tables are dropped (VAY-2272). This repo is the product application monorepo: app code lives under `apps/`, shared code belongs under `packages/`, and root tooling owns cross-app workflow, docs, Docker Compose, scripts, and auth DB setup.
+Hospitality platform with two products — **Booking Engine** and **PMS** — sharing a central auth DB. The Creator Marketplace is retired (VAY-2259): its app is gone, its legacy API (`apps/marketplace-api`) is still deployed, and the Marketplace tables in the new database are dropped in VAY-2272. This repo is the product application monorepo: app code lives under `apps/`, shared code belongs under `packages/`, and root tooling owns cross-app workflow, docs, Docker Compose, scripts, and auth DB setup.
 
 This file is the **canonical, tool-neutral agent guide**. Claude Code, Codex, and any other agent should read this first. `README.md` covers architecture, ports, DBs, test accounts, and seeding in depth — this file covers what those references don't: how to actually do work in the repo.
 
@@ -22,7 +22,7 @@ This file is the **canonical, tool-neutral agent guide**. Claude Code, Codex, an
 
 Local URLs are the recommended way to reach each app — see [Local dev — portless](#local-dev--portless). Plain `localhost:PORT` still works for contributors not on portless.
 
-`apps/landing` is the **public marketing/landing site**: home, `/booking-engine`, `/pms`, `/partner-program`, `/pricing`, about/contact and the legal pages. Its contact form posts `/api/contact` to `NEXT_PUBLIC_API_URL`, which the landing deploy sets to `api.vayada.com`, the legacy marketplace API host. `vayada.com` is the shared public landing surface and is served by the `vayada-landing` App Runner service; the authenticated apps and APIs remain on their separate hostnames.
+`apps/landing` is the **public marketing/landing site**: home, `/booking-engine`, `/pms`, `/partner-program`, `/pricing`, about/contact and the legal pages. Its contact form posts `/api/contact` to `NEXT_PUBLIC_API_URL`. That path is the platform contact intake in `apps/api`, but the landing deploy points `NEXT_PUBLIC_API_URL` at `api.vayada.com`, the legacy marketplace API, which only serves `/contact`; this mismatch is an open follow-up (#3430). `vayada.com` is the shared public landing surface and is served by the `vayada-landing` App Runner service; the authenticated apps and APIs remain on their separate hostnames.
 
 ## Local dev — portless
 
