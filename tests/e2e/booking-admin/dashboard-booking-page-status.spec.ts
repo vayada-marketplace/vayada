@@ -134,6 +134,33 @@ test("a hotel that isn't ready sees what's missing and where in setup to fix it"
   await capture(card, testInfo, "booking-page-not-ready");
 });
 
+test("a hotel's hidden city and country link to the location form (VAY-2288)", async ({ page }) => {
+  await openDashboard(page);
+  const review = await bookingPublicationReviewMock(BOOKING_ADMIN_PROPERTY_ID, "not_ready", [
+    {
+      groupId: "booking.hotel_profile",
+      step: "present_hotel",
+      message: "Turn on 'Show city and country publicly' so guests see where you are.",
+      code: "hotel_public_locality_hidden",
+    },
+  ]);
+  await page.route(BOOKING_PUBLICATION_PATH, (route) =>
+    fulfillPublication(route, { json: review }),
+  );
+
+  await page.goto("/dashboard");
+  const card = statusCard(page);
+  await expect(
+    card.getByText("Turn on 'Show city and country publicly' so guests see where you are."),
+  ).toBeVisible();
+  const href = await card.getByRole("link", { name: "Fix in setup" }).getAttribute("href");
+  const url = new URL(href!, "http://localhost");
+  expect(url.pathname).toBe("/setup");
+  expect(url.searchParams.get("step")).toBe("present_hotel");
+  expect(url.searchParams.get("focus")).toBe("location");
+  expect(url.searchParams.get("returnTo")).toBe("/dashboard");
+});
+
 test("a failed publication says nothing changed and lets the hotel try again", async ({
   page,
 }, testInfo) => {

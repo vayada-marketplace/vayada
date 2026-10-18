@@ -105,6 +105,10 @@ export type SharedFirstRunPropertySetupWizardProps = {
   renderSetupActions?: (propertyId: string) => ReactNode;
   /** The tracks a new hotel can choose from; every setup track by default. */
   availableTracks?: readonly SetupTrack[];
+  /** Opens the selected hotel's details on this field, e.g. from a Booking readiness item. */
+  editFocus?: "location";
+  /** Called after a save that `editFocus` opened, instead of returning to the setup plan. */
+  onEditFocusSaved?: (propertyId: string) => void;
 };
 
 type ProfileDraft = {
@@ -273,12 +277,16 @@ export default function SharedFirstRunPropertySetupWizard({
   initialProfileSuggestions,
   propertyCreateIdempotencyKey,
   availableTracks = ALL_SETUP_TRACKS,
+  editFocus,
+  onEditFocusSaved,
 }: SharedFirstRunPropertySetupWizardProps) {
   const [status, setStatus] = useState<AdaptiveHotelSetupStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [statusReloadToken, setStatusReloadToken] = useState(0);
   const [forceCreateProperty, setForceCreateProperty] = useState(initialAddProperty);
   const [editPropertyProfile, setEditPropertyProfile] = useState(false);
+  // A "Fix in setup" link opens the location form directly and saves from there (VAY-2288).
+  const [pendingEditFocus, setPendingEditFocus] = useState(editFocus ?? null);
   const [profileLoadFailed, setProfileLoadFailed] = useState(false);
   const [profileReloadToken, setProfileReloadToken] = useState(0);
   const [loadedProfile, setLoadedProfile] = useState<PropertyProfileResponse | null>(null);
@@ -326,12 +334,14 @@ export default function SharedFirstRunPropertySetupWizard({
 
   useEffect(() => {
     setForceCreateProperty(initialAddProperty);
-    setEditPropertyProfile(false);
-  }, [initialAddProperty]);
+    setEditPropertyProfile(!initialAddProperty && Boolean(editFocus));
+    setPendingEditFocus(initialAddProperty ? null : (editFocus ?? null));
+  }, [editFocus, initialAddProperty]);
 
+  const focusedEdit = view.profileMode === "update" && pendingEditFocus === "location";
   useEffect(() => {
-    setProfileStep(0);
-  }, [view.profileMode, view.selectedPropertyId]);
+    setProfileStep(focusedEdit ? 1 : 0);
+  }, [focusedEdit, view.profileMode, view.selectedPropertyId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -467,7 +477,8 @@ export default function SharedFirstRunPropertySetupWizard({
     setError("");
     setFieldErrors({});
     const nextFieldErrors = validateProfileDraft(draft);
-    if (launchSettingsEnabled && !skipLaunchSettings) {
+    // A focused location edit never shows the guest preferences, so it leaves them as saved.
+    if (launchSettingsEnabled && !skipLaunchSettings && !focusedEdit) {
       Object.assign(nextFieldErrors, validatePropertyLaunchSettings(launchSettings));
     }
     if (Object.keys(nextFieldErrors).length > 0) {
@@ -565,16 +576,24 @@ export default function SharedFirstRunPropertySetupWizard({
         view.profileMode === "update" &&
         launchSettingsEnabled &&
         propertyLaunchSettingsApi &&
-        !skipLaunchSettings
+        !skipLaunchSettings &&
+        !focusedEdit
       ) {
         await propertyLaunchSettingsApi.update(
           saved.propertyId,
           normalizedPropertyLaunchSettings(launchSettings),
         );
       }
+      if (focusedEdit && onEditFocusSaved) {
+        logoUploadKey.current = null;
+        logoAssignmentKey.current = null;
+        onEditFocusSaved(saved.propertyId);
+        return;
+      }
       await reloadStatus(saved.propertyId);
       setForceCreateProperty(false);
       setEditPropertyProfile(false);
+      setPendingEditFocus(null);
       if (view.profileMode === "create") {
         await onPropertySelected?.(saved.propertyId);
       }
@@ -776,9 +795,14 @@ export default function SharedFirstRunPropertySetupWizard({
           onConfirmLaunchSettings={() => setSkipLaunchSettings(false)}
           onSkipLaunchSettings={() => setSkipLaunchSettings(true)}
           onStepChange={setProfileStep}
+          saveStep={focusedEdit ? 1 : undefined}
+          highlightLocality={focusedEdit}
           onCancel={
             editPropertyProfile
-              ? () => setEditPropertyProfile(false)
+              ? () => {
+                  setPendingEditFocus(null);
+                  setEditPropertyProfile(false);
+                }
               : status.propertySelection.availableProperties.length > 0 &&
                   view.profileMode === "create"
                 ? () => setForceCreateProperty(false)
@@ -1131,6 +1155,8 @@ function ProfileForm({
   onCancel,
   cancelLabel = "Back to properties",
   onSave,
+  saveStep,
+  highlightLocality = false,
 }: {
   draft: ProfileDraft;
   launchSettings: PropertyLaunchSettings | null;
@@ -1154,6 +1180,10 @@ function ProfileForm({
   onCancel?: () => void;
   cancelLabel?: string;
   onSave: () => void;
+  /** Saves from this step instead of the last one (a focused edit). */
+  saveStep?: number;
+  /** Points the hotel at "Show city and country publicly" while it is off. */
+  highlightLocality?: boolean;
 }) {
   const profileStepFields = launchSettings
     ? PROFILE_STEP_FIELDS_WITH_LAUNCH
@@ -1162,7 +1192,7 @@ function ProfileForm({
     ? PROFILE_STEP_TITLES_WITH_LAUNCH
     : BASE_PROFILE_STEP_TITLES;
   const contactStep = launchSettings ? 3 : 2;
-  const finalStep = profileStepFields.length - 1;
+  const finalStep = saveStep ?? profileStepFields.length - 1;
   const googleMapsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY?.trim();
   const LocationHeading = embedded ? "h2" : "h1";
   const [showAddressFields, setShowAddressFields] = useState(
@@ -1204,6 +1234,18 @@ function ProfileForm({
   const stepHeading = useRef<HTMLHeadingElement>(null);
   const timezoneWasAutoDetected = useRef(false);
   const [whatsappFollowsPhone, setWhatsappFollowsPhone] = useState<boolean | null>(null);
+  const localityCheckbox = useRef<HTMLInputElement>(null);
+  const localityHighlighted = highlightLocality && step === 1 && !draft.localityPublic;
+  const localityShown = useRef(false);
+
+  useEffect(() => {
+    if (!localityHighlighted || loading || localityShown.current) return;
+    localityShown.current = true;
+    requestAnimationFrame(() => {
+      localityCheckbox.current?.scrollIntoView({ block: "center" });
+      localityCheckbox.current?.focus({ preventScroll: true });
+    });
+  }, [loading, localityHighlighted]);
 
   useEffect(() => {
     const errorStep = profileStepFields.findIndex((fields) =>
@@ -2052,8 +2094,15 @@ function ProfileForm({
                     </div>
                   </div>
                 )}
-                <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-xl border border-gray-200 bg-gray-50 p-3 text-left">
+                <label
+                  className={`mt-4 flex cursor-pointer items-start gap-3 rounded-xl border p-3 text-left ${
+                    localityHighlighted
+                      ? "border-amber-300 bg-amber-50 ring-2 ring-amber-300"
+                      : "border-gray-200 bg-gray-50"
+                  }`}
+                >
                   <input
+                    ref={localityCheckbox}
                     type="checkbox"
                     checked={draft.localityPublic}
                     onChange={(event) =>
@@ -2070,6 +2119,11 @@ function ProfileForm({
                         ? "Existing location visibility is preserved. If you edit the location, street address, postal code, and map coordinates stay private."
                         : "Street address, postal code, and map coordinates stay private."}
                     </span>
+                    {localityHighlighted && (
+                      <span className="mt-1 block text-xs font-medium leading-5 text-amber-800">
+                        Your booking page needs this before it can go live.
+                      </span>
+                    )}
                   </span>
                 </label>
               </div>

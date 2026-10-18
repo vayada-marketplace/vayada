@@ -470,6 +470,7 @@ function MissingItems({
                 returnTo: "/dashboard",
                 propertyId,
                 step: item.step,
+                focus: item.focus,
               })}
               className="inline-flex shrink-0 items-center gap-1.5 font-medium text-primary-600 hover:underline sm:w-40 sm:justify-end"
             >
