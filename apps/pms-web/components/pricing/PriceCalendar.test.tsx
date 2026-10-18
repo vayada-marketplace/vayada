@@ -97,7 +97,7 @@ function room(mode: "flat" | "occupancy" | "none" = "flat"): PricingConfiguratio
   } as PricingConfiguration;
 }
 const options = [
-  { id: "flex", name: "Free cancellation" },
+  { id: "flex", name: "Flexible" },
   { id: "nonref", name: "Non-refundable" },
 ];
 let view: ReactTestRenderer;
@@ -131,19 +131,48 @@ it("shows a month of nights with their season, weekend, own-price, closed and no
   expect(night("8 September 2026, €100, closed")).toHaveLength(1);
   expect(night("20 September 2026, €180, no arrival")).toHaveLength(1);
   expect(night("25 September 2026, €207, in the sample stay")).toHaveLength(1);
-  // The two Oktoberfest ranges are one season, with one legend entry.
-  expect(text()).toContain("Oktoberfest €180");
-  expect(text().match(/Oktoberfest €180/g)).toHaveLength(1);
+  // The two Oktoberfest ranges are one season, with one legend entry: the year's lowest and highest open night
+  // (Fri & Sat +15%), without own prices (VAY-2284).
+  expect(text().match(/Oktoberfest €180 to €207/g)).toHaveLength(1);
   for (const legend of [
-    "Standard €100",
-    "Fri & Sat +15%",
+    "Standard €100 to €115",
     "Own price",
-    "Closed",
+    "Closed on this date",
     "No arrivals",
     "3+ nts = minimum stay for arrivals that night",
   ])
     expect(text()).toContain(legend);
   expect(text()).toContain("3+ nts");
+  // A one-night minimum gets no badge.
+  expect(text()).not.toContain("1+ nts");
+  expect(text()).not.toContain("Not open");
+});
+
+it("shows a period closed every year as not open, apart from a closed date (VAY-2284)", () => {
+  const value = room();
+  const offer = value.offers[0];
+  if (offer.restrictions.kind !== "own") throw new Error("own rules expected");
+  const closed = {
+    ...value,
+    offers: [
+      {
+        ...offer,
+        restrictions: {
+          ...offer.restrictions,
+          seasons: [
+            ...offer.restrictions.seasons,
+            { from: "11-02", through: "11-26", rules: { ...rules, stopSell: true } },
+          ],
+        },
+      },
+      value.offers[1],
+    ],
+  } as PricingConfiguration;
+  mount({ room: closed, month: "2026-11" });
+  expect(night("2 November 2026, €100, not open")).toHaveLength(1);
+  expect(night("27 November 2026, €115")).toHaveLength(1);
+  expect(text()).toContain("Not open");
+  expect(text()).not.toContain("Closed on this date");
 });
 
 it("switches the option, the adults and the month, and starts the sample stay on a picked night (VAY-2280)", () => {
@@ -152,11 +181,11 @@ it("switches the option, the adults and the month, and starts the sample stay on
     view.root.findAll(
       (node) => node.type === "button" && node.props["aria-label"] === `Show prices for ${label}`,
     );
-  expect(pressed("Free cancellation")[0].props["aria-pressed"]).toBe(true);
+  expect(pressed("Flexible")[0].props["aria-pressed"]).toBe(true);
   act(() => pressed("Non-refundable")[0].props.onClick());
   expect(props.onOffer).toHaveBeenCalledWith("nonref");
-  // A flat price doesn't depend on the guests, so there are no adult choices.
-  expect(pressed("2 adults")).toHaveLength(0);
+  // A flat price doesn't depend on the guests, so there are no guest choices.
+  expect(pressed("2 guests")).toHaveLength(0);
   act(() => view.root.findByProps({ "aria-label": "Next month" }).props.onClick());
   expect(props.onMonth).toHaveBeenLastCalledWith("2026-10");
   act(() =>
@@ -176,19 +205,19 @@ it("offers a price per number of adults and says which nights have no price at a
   mount({ room: room("occupancy"), adults: 3 });
   const choices = view.root.findAll(
     (node) =>
-      node.type === "button" && /^Show prices for \d adults?$/.test(node.props["aria-label"] ?? ""),
+      node.type === "button" && /^Show prices for \d guests?$/.test(node.props["aria-label"] ?? ""),
   );
   expect(choices.map((node) => [node.props["aria-label"], node.props["aria-pressed"]])).toEqual([
-    ["Show prices for 1 adult", false],
-    ["Show prices for 2 adults", false],
-    ["Show prices for 3 adults", true],
+    ["Show prices for 1 guest", false],
+    ["Show prices for 2 guests", false],
+    ["Show prices for 3 guests", true],
   ]);
   expect(night("1 September 2026, €115")).toHaveLength(1);
   act(() => choices[0].props.onClick());
   expect(props.onAdults).toHaveBeenCalledWith(1);
   mount({ room: room("none") });
   expect(night("1 September 2026, no price")).toHaveLength(1);
-  expect(text()).toContain("No price: guests can't book");
+  expect(text()).toContain("No price yet");
   expect(text()).not.toContain("Standard");
 });
 

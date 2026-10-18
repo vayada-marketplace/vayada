@@ -1,5 +1,5 @@
 import type { PricingConfiguration } from "@vayada/domain-pms/replacement-pricing";
-import { headlineMinor, mainOffer, monthNights } from "./stepPricing";
+import { mainOffer, monthNights, restrictionOwner } from "./stepPricing";
 
 type Room = PricingConfiguration;
 type Offer = Room["offers"][number];
@@ -79,20 +79,61 @@ function priceOwner(room: Room, offerId: string): Offer | undefined {
 }
 
 /** One night of the calendar. `kind`: priced; closed (stop-sell; its price still shows in the label); none (no price
- * at all, so guests can't book it); unavailable (the engine can't price it for these guests). */
+ * at all, so guests can't book it); unavailable (the engine can't price it for these guests). A closed night is "not
+ * open" unless a stay rule of its own date closes it (VAY-2284: closed periods and closed dates look different). */
 export type CalendarNight = {
   date: string;
   past: boolean;
   today: boolean;
   inStay: boolean;
   kind: "priced" | "closed" | "none" | "unavailable";
+  notOpen: boolean;
   totalMinor: string | null;
   minNights: number;
   noArrival: boolean;
   ownPrice: boolean;
   season: SeasonGroup | null;
 };
+type ProjectedNight = Omit<CalendarNight, "past" | "today" | "inStay">;
 /** Every night of `month` ("YYYY-MM") for one option and number of adults, from the engine's night evaluator. */
+function projectNights(
+  room: Room,
+  offerId: string,
+  month: string,
+  adults: number,
+): ProjectedNight[] {
+  const owner = priceOwner(room, offerId),
+    groups = owner ? seasonGroups(owner) : [];
+  const seasons = owner?.price.kind === "independent" ? owner.price.calendar.seasons : [];
+  const offer = room.offers.find((value) => value.id === offerId);
+  const ruleOwner = offer && restrictionOwner(room, offer);
+  const dateRules = ruleOwner?.restrictions.kind === "own" ? ruleOwner.restrictions.dates : [];
+  return monthNights(room, offerId, month, adults).map(({ date, night }) => {
+    const projected = night.kind === "projected" ? night.night : null;
+    const rules = projected?.restrictions;
+    const sources = projected?.sources.map((source) => source.kind) ?? [];
+    const index = sources.includes("season")
+      ? seasons.findIndex((season) => inSeason(date.slice(5), season.from, season.through))
+      : -1;
+    const closed = !!projected && !!rules?.stopSell;
+    return {
+      date,
+      kind: projected
+        ? closed
+          ? "closed"
+          : "priced"
+        : night.kind === "unavailable" && night.reason === "missing_price"
+          ? "none"
+          : "unavailable",
+      notOpen: closed && !dateRules.some((value) => value.date === date && value.rules.stopSell),
+      totalMinor: projected?.totalMinor ?? null,
+      minNights: rules?.minArrivalNights ?? 1,
+      noArrival: !!rules?.closedToArrival,
+      ownPrice: sources.includes("date"),
+      season: index >= 0 ? (groups.find((group) => group.indexes.includes(index)) ?? null) : null,
+    };
+  });
+}
 export function calendarNights(
   room: Room,
   offerId: string,
@@ -101,35 +142,55 @@ export function calendarNights(
   today: string,
   stay: { checkIn: string; checkOut: string },
 ): CalendarNight[] {
-  const owner = priceOwner(room, offerId),
-    groups = owner ? seasonGroups(owner) : [];
-  const seasons = owner?.price.kind === "independent" ? owner.price.calendar.seasons : [];
-  return monthNights(room, offerId, month, adults).map(({ date, night }) => {
-    const projected = night.kind === "projected" ? night.night : null;
-    const rules = projected?.restrictions;
-    const sources = projected?.sources.map((source) => source.kind) ?? [];
-    const index = sources.includes("season")
-      ? seasons.findIndex((season) => inSeason(date.slice(5), season.from, season.through))
-      : -1;
-    return {
-      date,
-      past: date < today,
-      today: date === today,
-      inStay: date >= stay.checkIn && date < stay.checkOut,
-      kind: projected
-        ? rules?.stopSell
-          ? "closed"
-          : "priced"
-        : night.kind === "unavailable" && night.reason === "missing_price"
-          ? "none"
-          : "unavailable",
-      totalMinor: projected?.totalMinor ?? null,
-      minNights: rules?.minArrivalNights ?? 1,
-      noArrival: !!rules?.closedToArrival,
-      ownPrice: sources.includes("date"),
-      season: index >= 0 ? (groups.find((group) => group.indexes.includes(index)) ?? null) : null,
-    };
-  });
+  return projectNights(room, offerId, month, adults).map((night) => ({
+    ...night,
+    past: night.date < today,
+    today: night.date === today,
+    inStay: night.date >= stay.checkIn && night.date < stay.checkOut,
+  }));
+}
+
+export type PriceRange = { lowMinor: string; highMinor: string };
+type LegendRanges = { standard: PriceRange | null; seasons: Record<string, PriceRange> };
+// The editor rebuilds the room on every render; the year's nights are worked out again only when it changes.
+let lastRanges: { key: string; ranges: LegendRanges } | null = null;
+/** The legend's prices (VAY-2284): the lowest and highest open night of `year` at the standard price and in each
+ * season (by season key), for one option and number of adults. Own prices of single dates don't count. */
+export function legendRanges(
+  room: Room,
+  offerId: string,
+  adults: number,
+  year: string,
+): LegendRanges {
+  const key = JSON.stringify([room, offerId, adults, year]);
+  if (lastRanges?.key === key) return lastRanges.ranges;
+  const found: Record<string, { low: bigint; high: bigint }> = {};
+  for (let month = 1; month <= 12; month++)
+    for (const night of projectNights(
+      room,
+      offerId,
+      `${year}-${String(month).padStart(2, "0")}`,
+      adults,
+    )) {
+      if (night.kind !== "priced" || night.ownPrice || night.totalMinor === null) continue;
+      const key = night.season?.key ?? "",
+        amount = BigInt(night.totalMinor),
+        range = found[key];
+      if (!range) found[key] = { low: amount, high: amount };
+      else {
+        if (amount < range.low) range.low = amount;
+        if (amount > range.high) range.high = amount;
+      }
+    }
+  const ranges = Object.fromEntries(
+    Object.entries(found).map(([key, { low, high }]) => [
+      key,
+      { lowMinor: low.toString(), highMinor: high.toString() },
+    ]),
+  );
+  const { [""]: standard = null, ...seasons } = ranges;
+  lastRanges = { key, ranges: { standard, seasons } };
+  return lastRanges.ranges;
 }
 
 /** Adults the calendar can show prices for: every count when the price depends on the number of guests. */
@@ -139,10 +200,3 @@ export function calendarAdults(room: Room): number[] {
   const varies = !!base && base.mode !== "flat";
   return varies ? Array.from({ length: room.capacity.adults }, (_, index) => index + 1) : [];
 }
-
-/** The season's headline figure for the legend: its flat price, or its lowest one. */
-export const seasonMinor = (group: SeasonGroup) =>
-  group.seasons
-    .map((season) => BigInt(headlineMinor(season.price)))
-    .reduce((low, value) => (value < low ? value : low))
-    .toString();

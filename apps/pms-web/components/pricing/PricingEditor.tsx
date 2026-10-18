@@ -364,9 +364,12 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
       const previewId = previewOffer && room.offers.some((offer) => offer.id === previewOffer) ? previewOffer : main.id;
       const termsFailed = room.offers.some((offer) => !policyEdits[policyKey(focus, offer.id)] && savedTerms[termsKey(offer)] === null);
       const simple = simpleRoom(room, optionTerms), kept = keptSettings(room, simple);
+      // VAY-2284: the calendar shows what guests pay for the rates, Flexible and Non-refundable; other options build on them.
+      const rates = [{ id: main.id, name: t("pricing.calendar.flexible") }, ...(simple?.nonRefundable ? [{ id: simple.nonRefundable.id, name: t("pricing.calendar.nonRefundable") }] : [])];
+      const calendarId = rates.some((rate) => rate.id === previewId) ? previewId : main.id;
       // The approved layout (VAY-2280): "Prices by date" first, then the price rules beside "What guests see".
       return <div key={room.roomTypeId} className="space-y-6">
-        <PriceCalendar room={edited} options={room.offers.map((offer) => ({ id: offer.id, name: names[offer.id] ?? "" }))} offerId={previewId} onOffer={setPreviewOffer}
+        <PriceCalendar room={edited} options={rates} offerId={calendarId} onOffer={setPreviewOffer}
           adults={calendarAdults} onAdults={setCalendarAdults} month={shownMonth ?? stay.checkIn.slice(0, 7)} today={today} stay={stay}
           onMonth={setShownMonth} onPick={(date) => { setStayStart(date); setShownMonth(date.slice(0, 7)); }} />
         <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">

@@ -7,11 +7,13 @@ import { useTranslation } from "@/lib/i18n";
 import {
   calendarAdults,
   calendarNights,
-  seasonMinor,
+  legendRanges,
+  seasonGroups,
   seasonTones,
   type CalendarNight,
+  type PriceRange,
 } from "./priceCalendarModel";
-import { headlineMinor, mainOffer, money, sampleAdults, weekendChoice } from "./stepPricing";
+import { headlineMinor, mainOffer, money, sampleAdults } from "./stepPricing";
 
 /** "YYYY-MM" moved by `delta` months. */
 export const shiftMonth = (month: string, delta: number) => {
@@ -31,9 +33,10 @@ const navButton =
   "flex h-8 w-8 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-600 hover:bg-gray-50";
 
 /** "Prices by date" (VAY-2280, approved Paper board): the Prices tab's first card. One month of an option's nightly
- * prices from the engine's night evaluator (the one Channex nightly prices use), for the chosen option and adults.
- * Nights take their season's colour; own prices get a dot, closed nights a lock, nights that can't start a stay a
- * red dot, and nights without any price say so. The sample stay's nights are outlined; picking a night starts it. */
+ * prices from the engine's night evaluator (the one Channex nightly prices use), for the chosen rate and guests.
+ * Nights take their season's colour; own prices get a dot, closed dates a lock, closed periods say "Not open"
+ * (VAY-2284), nights that can't start a stay get a red dot, and nights without any price say so. The sample stay's
+ * nights are outlined; picking a night starts it. */
 export function PriceCalendar({
   room,
   options,
@@ -48,7 +51,7 @@ export function PriceCalendar({
   onPick,
 }: {
   room: PricingConfiguration | null;
-  /** The options the calendar can show, with their names. */
+  /** The rates the calendar can show (VAY-2284: Flexible and Non-refundable), with their names. */
   options: readonly { id: string; name: string }[];
   offerId: string;
   onOffer: (offerId: string) => void;
@@ -155,13 +158,21 @@ export function PriceCalendar({
                     onClick={() => onAdults(count)}
                     className={chip(count === guests)}
                     aria-label={t("pricing.calendar.showFor", {
-                      name: t(count === 1 ? "pricing.adults.one" : "pricing.adults.other", {
-                        count,
-                      }),
+                      name: t(
+                        count === 1
+                          ? "pricing.calendar.guests.one"
+                          : "pricing.calendar.guests.other",
+                        { count },
+                      ),
                     })}
                   >
                     <span>
-                      {t(count === 1 ? "pricing.adults.one" : "pricing.adults.other", { count })}
+                      {t(
+                        count === 1
+                          ? "pricing.calendar.guests.one"
+                          : "pricing.calendar.guests.other",
+                        { count },
+                      )}
                     </span>
                   </button>
                 ))}
@@ -197,7 +208,15 @@ export function PriceCalendar({
           ))}
         </div>
       )}
-      {room && <Legend room={room} offerId={offerId} nights={nights} />}
+      {room && (
+        <Legend
+          room={room}
+          offerId={offerId}
+          adults={guests}
+          year={month.slice(0, 4)}
+          nights={nights}
+        />
+      )}
     </section>
   );
 }
@@ -218,14 +237,18 @@ function Night({
   const price = night.totalMinor ? money(night.totalMinor, currency) : "—";
   const tone =
     night.kind === "none"
-      ? "border-dashed border-red-200 bg-red-50"
+      ? "border-dashed border-red-300 bg-red-50"
       : night.kind === "closed"
-        ? "border-gray-200 bg-gray-100"
+        ? night.notOpen
+          ? "border-gray-100 bg-gray-50"
+          : "border-gray-300 bg-gray-200"
         : night.season
           ? seasonTones[night.season.tone].cell
           : "border-gray-200 bg-white";
   const state = [
-    night.kind === "closed" ? t("pricing.steps.calendar.closed") : "",
+    night.kind === "closed"
+      ? t(night.notOpen ? "pricing.calendar.notOpenState" : "pricing.steps.calendar.closed")
+      : "",
     night.kind === "none" ? t("pricing.calendar.noPriceState") : "",
     night.noArrival && night.kind !== "closed" ? t("pricing.steps.calendar.noArrival") : "",
     night.ownPrice ? t("pricing.calendar.ownPriceState") : "",
@@ -268,10 +291,11 @@ function Night({
           {night.ownPrice ? (
             <span
               aria-hidden="true"
-              className="h-1.5 w-1.5 rounded-full bg-primary-600 md:h-[7px] md:w-[7px]"
+              className="h-1.5 w-1.5 rounded-full bg-gray-900 md:h-[7px] md:w-[7px]"
             />
           ) : (
-            night.kind === "priced" && (
+            night.kind === "priced" &&
+            night.minNights > 1 && (
               <span className="hidden text-[11px] text-gray-500 md:inline">
                 {t("pricing.calendar.minNights", { count: night.minNights })}
               </span>
@@ -279,7 +303,11 @@ function Night({
           )}
         </span>
       </span>
-      {night.kind === "closed" ? (
+      {night.kind === "closed" && night.notOpen ? (
+        <span className="truncate text-[11px] font-medium text-gray-400 md:text-[12px]">
+          {t("pricing.calendar.notOpen")}
+        </span>
+      ) : night.kind === "closed" ? (
         <span className="flex items-center gap-1 text-gray-500">
           <LockClosedIcon aria-hidden="true" className="h-3 w-3 md:h-3.5 md:w-3.5" />
           <span className="hidden text-[12px] font-medium md:inline">
@@ -302,20 +330,29 @@ function Night({
 function Legend({
   room,
   offerId,
+  adults,
+  year,
   nights,
 }: {
   room: PricingConfiguration;
   offerId: string;
+  adults: number;
+  year: string;
   nights: CalendarNight[];
 }) {
   const { t } = useTranslation();
   const offer = room.offers.find((value) => value.id === offerId) ?? mainOffer(room);
   const owner = offer.price.kind === "independent" ? offer : mainOffer(room);
   const base = owner.price.kind === "independent" ? owner.price.calendar.base : null;
-  const seasons = nights
-    .flatMap((night) => (night.season ? [night.season] : []))
-    .filter((group, index, all) => all.findIndex((value) => value.key === group.key) === index);
-  const weekend = weekendChoice(owner);
+  // VAY-2284: every season of the year with its price range, whatever month is shown.
+  const ranges = legendRanges(room, offerId, adults, year);
+  const amount = (range: PriceRange) =>
+    range.lowMinor === range.highMinor
+      ? money(range.lowMinor, room.currency)
+      : t("pricing.calendar.legend.range", {
+          low: money(range.lowMinor, room.currency),
+          high: money(range.highMinor, room.currency),
+        });
   const swatch = (classes: string) => (
     <span aria-hidden="true" className={`h-3 w-3 shrink-0 rounded-[3px] border ${classes}`} />
   );
@@ -331,36 +368,29 @@ function Legend({
         "base",
         swatch("border-gray-300 bg-white"),
         t("pricing.calendar.legend.standard", {
-          amount: money(headlineMinor(base), room.currency),
+          amount: ranges.standard
+            ? amount(ranges.standard)
+            : money(headlineMinor(base), room.currency),
         }),
       ),
-    ...seasons.map((group) =>
-      item(
+    ...seasonGroups(owner).map((group) => {
+      const range = ranges.seasons[group.key];
+      return item(
         group.key,
         swatch(seasonTones[group.tone].swatch),
-        `${group.name} ${money(seasonMinor(group), room.currency)}`,
-      ),
-    ),
-    weekend !== "none" &&
-      item(
-        "weekend",
-        null,
-        weekend === "other"
-          ? t("pricing.calendar.legend.weekdays")
-          : t("pricing.calendar.legend.weekend", { percent: weekend / 100 }),
-      ),
+        range ? `${group.name} ${amount(range)}` : group.name,
+      );
+    }),
     nights.some((night) => night.ownPrice) &&
       item(
         "own",
-        <span aria-hidden="true" className="h-[7px] w-[7px] rounded-full bg-primary-600" />,
+        <span aria-hidden="true" className="h-[7px] w-[7px] rounded-full bg-gray-900" />,
         t("pricing.calendar.legend.own"),
       ),
-    nights.some((night) => night.kind === "closed") &&
-      item(
-        "closed",
-        <LockClosedIcon aria-hidden="true" className="h-3 w-3 text-gray-400" />,
-        t("pricing.calendar.closed"),
-      ),
+    nights.some((night) => night.kind === "closed" && !night.notOpen) &&
+      item("closed", swatch("border-gray-300 bg-gray-200"), t("pricing.calendar.legend.closed")),
+    nights.some((night) => night.notOpen) &&
+      item("notOpen", swatch("border-gray-200 bg-gray-50"), t("pricing.calendar.legend.notOpen")),
     nights.some((night) => night.noArrival) &&
       item(
         "noArrival",
@@ -370,7 +400,7 @@ function Legend({
     nights.some((night) => night.kind === "none") &&
       item(
         "none",
-        swatch("border-dashed border-red-200 bg-red-50"),
+        swatch("border-dashed border-red-300 bg-red-50"),
         t("pricing.calendar.legend.noPrice"),
       ),
     nights.some((night) => night.minNights > 1) && (
