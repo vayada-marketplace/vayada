@@ -5,6 +5,7 @@ import type { PricingConfiguration } from "@vayada/domain-pms/replacement-pricin
 import { NightPanel } from "./NightPanel";
 import {
   addToSeason,
+  MAX_PICKED_NIGHTS,
   nightRules,
   ownPrice,
   pickNight,
@@ -97,6 +98,22 @@ it("selects one night, then everything up to a second night, then starts again (
     "2026-10-01",
     "2026-10-02",
   ]);
+});
+
+it("starts again instead of outlining more nights than an edit changes (VAY-2280)", () => {
+  const one = pickNight(null, "2026-01-01");
+  // Exactly the cap, both ways: the outline and the edited dates are the same nights.
+  const forward = pickNight(one, "2027-02-04");
+  expect(forward).toEqual({ from: "2026-01-01", to: "2027-02-04" });
+  expect(selectedDates(forward)).toHaveLength(MAX_PICKED_NIGHTS);
+  expect(selectedDates(forward).at(-1)).toBe(forward.to);
+  const backward = pickNight(one, "2024-11-28");
+  expect(backward).toEqual({ from: "2024-11-28", to: "2026-01-01" });
+  expect(selectedDates(backward)).toHaveLength(MAX_PICKED_NIGHTS);
+  expect(selectedDates(backward).at(-1)).toBe(backward.to);
+  // One night further (the Year view reaches the next year) starts a new selection there.
+  expect(pickNight(one, "2027-02-05")).toEqual({ from: "2027-02-05", to: "2027-02-05" });
+  expect(pickNight(one, "2024-11-27")).toEqual({ from: "2024-11-27", to: "2024-11-27" });
 });
 
 it("closes, reopens and sets a minimum stay on nights, keeping their season's other rules (VAY-2280)", () => {
