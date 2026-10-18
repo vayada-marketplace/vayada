@@ -257,21 +257,32 @@ const monthAfter = (month: string, delta: number) =>
   new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)) - 1 + delta, 1))
     .toISOString()
     .slice(0, 7);
-/** Nights in the 12 months from `month` that no price covers, so guests can't book them ("Price rules", VAY-2280). */
+/** Nights from `today` (YYYY-MM-DD) through the same date 12 months on that no price covers, so guests can't book them
+ * ("Price rules", VAY-2280). Past nights don't count. */
 export function nightsWithoutPrice(
   room: Room,
   offerId: string,
   adults: number,
-  month: string,
+  today: string,
 ): number {
+  const end = new Date(
+    Date.UTC(
+      Number(today.slice(0, 4)) + 1,
+      Number(today.slice(5, 7)) - 1,
+      Number(today.slice(8, 10)),
+    ),
+  )
+    .toISOString()
+    .slice(0, 10);
   return cached(
-    JSON.stringify(["gaps", room, offerId, adults, month]),
+    JSON.stringify(["gaps", room, offerId, adults, today]),
     () =>
-      Array.from({ length: 12 }, (_, index) =>
-        projectNights(room, offerId, monthAfter(month, index), adults),
+      Array.from({ length: 13 }, (_, index) =>
+        projectNights(room, offerId, monthAfter(today.slice(0, 7), index), adults),
       )
         .flat()
-        .filter((night) => night.kind === "none").length,
+        .filter((night) => night.kind === "none" && night.date >= today && night.date <= end)
+        .length,
   );
 }
 /** The lowest nightly price guests pay in `year` at the standard or a season price, for these rates and adults (the
