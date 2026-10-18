@@ -112,9 +112,10 @@ function projectNights(
     const projected = night.kind === "projected" ? night.night : null;
     const rules = projected?.restrictions;
     const sources = projected?.sources.map((source) => source.kind) ?? [];
-    const index = sources.includes("season")
-      ? seasons.findIndex((season) => inSeason(date.slice(5), season.from, season.through))
-      : -1;
+    // The season by its days, whatever priced the night: an own price keeps its season's colour (VAY-2284).
+    const index = seasons.findIndex((season) =>
+      inSeason(date.slice(5), season.from, season.through),
+    );
     const closed = !!projected && !!rules?.stopSell;
     return {
       date,
