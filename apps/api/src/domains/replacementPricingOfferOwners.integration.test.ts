@@ -126,6 +126,46 @@ const url = process.env["TEST_DATABASE_URL"];
 describe.skipIf(!url)("live replacement pricing offer owners", () => {
   const pool = new pg.Pool({ connectionString: url, max: 5 });
   afterAll(() => pool.end());
+  /** Saves offer terms. Non-refundable terms that accept pay at property can no longer be written (VAY-2280); they are
+   * stored as terms from before that rule are, so quotes and bookings over them are still covered. */
+  async function saveTerms(
+    booking: ReturnType<typeof createBookingPricingOfferTermsStore>,
+    context: RequestContext,
+    scope: { actorUserId: string; organizationId: string; propertyId: string },
+    command: {
+      requestId: string;
+      expectedRevision: string | null;
+      terms: Omit<ReplacementOfferTerms, "revision">;
+    },
+  ): Promise<ReplacementOfferTerms> {
+    const t = command.terms;
+    if (
+      t.cancellation.kind !== "non_refundable" ||
+      !t.payment.acceptedMethods?.includes("pay_at_property")
+    )
+      return booking.save(context, scope, command);
+    const terms = { ...t, revision: randomUUID() } as ReplacementOfferTerms;
+    await pool.query(
+      `INSERT INTO booking.pricing_v2_offer_terms (property_id,room_type_id,offer_id,revision,terms,request_id,request_hash,actor_user_id)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [
+        scope.propertyId,
+        t.roomTypeId,
+        t.offerId,
+        terms.revision,
+        JSON.stringify(terms),
+        command.requestId,
+        "0".repeat(64),
+        scope.actorUserId,
+      ],
+    );
+    await pool.query(
+      `INSERT INTO booking.pricing_v2_offer_term_heads(property_id,room_type_id,offer_id,revision) VALUES($1,$2,$3,$4)
+       ON CONFLICT(property_id,room_type_id,offer_id) DO UPDATE SET revision=$4`,
+      [scope.propertyId, t.roomTypeId, t.offerId, terms.revision],
+    );
+    return terms;
+  }
   async function fixture(
     configure?: (snapshot: PricingStorageSnapshot) => PricingStorageSnapshot,
     configureTerms?: TermsSetup,
@@ -232,7 +272,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       [secondRoomId, "flex"],
     ])
       terms.push(
-        await booking.save(context, scope, {
+        await saveTerms(booking, context, scope, {
           requestId: randomUUID(),
           expectedRevision: null,
           terms: configureTerms

@@ -28,7 +28,12 @@ it("rejects duplicate tiers, missing partial-refund tiers and fractional deposit
 it("switches explicitly to non-refundable/full and cancels without applying", async () => {
   await change("Cancellation policy", "non_refundable"); await change("Requested payment schedule", "full");
   await click("Cancel policy changes"); expect(onCancel).toHaveBeenCalledOnce(); expect(onApply).not.toHaveBeenCalled();
-  await click("Apply policy changes"); expect(onApply).toHaveBeenCalledWith({ ...terms, cancellation: { kind: "non_refundable" }, payment: { kind: "full", acceptedMethods: ["pay_at_property"] } });
+  // Non-refundable stays are paid in advance (VAY-2280): with only pay at property there is nothing to send.
+  await click("Apply policy changes"); expect(onApply).not.toHaveBeenCalled();
+  expect(JSON.stringify(view.toJSON())).toContain("Non-refundable stays are paid in advance.");
+  // With card ticked, pay at property is left out.
+  await toggle("Card online", true);
+  await click("Apply policy changes"); expect(onApply).toHaveBeenCalledWith({ ...terms, cancellation: { kind: "non_refundable" }, payment: { kind: "full", acceptedMethods: ["card"] } });
 });
 it("requires an explicit method and preserves canonical order when both are selected", async () => {
   await toggle("Card online", true);
