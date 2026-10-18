@@ -11,9 +11,11 @@ identity-only exception to product route policy: support requires no paid produc
 entitlement, resource link or product permission. Authentication still requires an
 active resolved identity and organization membership.
 
-The existing PL1 contact intake repository atomically commits the private message,
-identity and context to `platform.domain_events`, its notification job to
-`platform.jobs`, and its audit record to `platform.product_audit_events`.
+The existing PL1 contact intake repository atomically commits a domain event, its
+notification job and its audit record. Since VAY-2286 the private message, identity
+and context live only in the job row (`platform.jobs.payload`), which is emptied 90
+days after arrival; the append-only event and audit rows hold only the channel
+(`in_app_support`) and outcome.
 Success means stored, not email delivered. The existing notification job has no
 proven active delivery consumer; operators retrieve confidential submissions using
 the existing platform contact event/job records. No new recipient is configured.
