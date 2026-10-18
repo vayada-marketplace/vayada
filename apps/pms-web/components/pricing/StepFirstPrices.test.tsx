@@ -147,7 +147,8 @@ it("adds the switches' options and the weekend price to the first price", async 
     input.terms.map((terms) => [terms.offerId, terms.cancellation.kind, terms.payment]),
   ).toEqual([
     [id, "flexible", payment],
-    [second, "non_refundable", payment],
+    // Paid in advance: pay at property is left out (VAY-2280).
+    [second, "non_refundable", { kind: "full", acceptedMethods: ["card"] }],
     [third, "flexible", payment],
   ]);
 });
@@ -220,7 +221,7 @@ it("waits for Payment settings before saving, and names a discount it can't use"
         rooms={[room]}
         fixedCurrency="EUR"
         disabled={false}
-        defaultMethods={["pay_at_property"]}
+        defaultMethods={["pay_at_property", "card"]}
         onCreate={onCreate}
         onDirty={vi.fn()}
       />,
@@ -274,4 +275,14 @@ it("keeps the ways to pay that arrive while a price is being typed", async () =>
     terms: [expected.terms],
   });
   expect(missing()).toEqual([]);
+});
+
+it("offers non-refundable only with a way to pay in advance (VAY-2280)", async () => {
+  await mount({ defaultMethods: ["pay_at_property"] });
+  expect(button("Non-refundable")!.props.disabled).toBe(true);
+  expect(
+    view.root.findByProps({ role: "switch", "aria-label": "Offer “Non-refundable”" }).props
+      .disabled,
+  ).toBe(true);
+  expect(JSON.stringify(view.toJSON())).toContain("Non-refundable stays are paid in advance.");
 });

@@ -1,7 +1,7 @@
 import { ApiErrorResponse } from "@/services/api/client";
 import { samePricingValue, type createReplacementPricingClient, type PricingSnapshot, type PricingDraft, type PricingChargeReview, type PricingTermsInput } from "@/services/api/replacementPricingClient";
 
-import { errorText, type MessageKey, type Translate } from "./pricingAmounts";
+import { errorText, nonRefundablePayAtProperty, paymentRuleKey, type MessageKey, type Translate } from "./pricingAmounts";
 
 type Client = ReturnType<typeof createReplacementPricingClient>;
 
@@ -60,6 +60,9 @@ export const financeNotReady = (error: unknown) => financeReason(error) !== null
 export function pricingSaveError(error: unknown, t: Translate) {
   const finance = financeReason(error);
   if (finance) return t(finance);
+  if (nonRefundablePayAtProperty(error)) return t("pricing.error.nonRefundablePayAtProperty");
+  const paymentRule = paymentRuleKey(error);
+  if (paymentRule) return t(paymentRule);
   if (error instanceof ApiErrorResponse && error.status === 409) return t("pricing.editor.errorChanged");
   if (error instanceof ApiErrorResponse && error.status === 403) return t("pricing.editor.errorForbidden");
   return errorText(error, t, "pricing.editor.errorSaveFailed");

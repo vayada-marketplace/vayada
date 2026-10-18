@@ -11,7 +11,7 @@ const PHOTO = Buffer.from(
 );
 const STAY = "/?checkIn=2026-11-06&checkOut=2026-11-08&adults=2";
 
-async function mockRooms(page: Page) {
+async function mockRooms(page: Page, breakfastText?: string) {
   // Free cancellation reads as a date that must not have passed yet.
   await page.clock.setFixedTime(new Date("2026-10-14T08:00:00Z"));
   await page.route("https://images.vayada.com/**", (route) =>
@@ -52,6 +52,7 @@ async function mockRooms(page: Page) {
                 currency: "EUR",
                 mealPlan: "breakfast",
                 cancellation: { kind: "free_until_days_before_arrival", days: 3 },
+                ...(breakfastText && { mealDescription: breakfastText }),
               },
             ],
           },
@@ -145,6 +146,20 @@ for (const width of [1440, 390]) {
     await assertHealthy();
   });
 }
+
+test("shows the hotel's own breakfast text on its choice (VAY-2281)", async ({
+  page,
+}, testInfo) => {
+  const assertHealthy = watchPageHealth(page, testInfo);
+  await mockBookingApis(page);
+  await mockRooms(page, "Buffet breakfast in the Stube, 7:00–10:30");
+  await page.goto(STAY);
+  const breakfast = page.getByTestId("room-card-deluxe").locator(`[data-offer-key="${key("c")}"]`);
+  await expect(breakfast).toContainText("Breakfast included");
+  await expect(breakfast).toContainText("Buffet breakfast in the Stube, 7:00–10:30");
+  await expect(breakfast).not.toContainText("Breakfast every morning");
+  await assertHealthy();
+});
 
 test("keeps the rooms choosable when prices can't be loaded", async ({ page }) => {
   await mockBookingApis(page);

@@ -4,6 +4,7 @@ import { parsePricingConfiguration, type PricingConfiguration } from "@vayada/do
 import { parseBookingPricingOfferTerms } from "@vayada/domain-booking/replacement-pricing";
 import { useTranslation } from "@/lib/i18n";
 import type { PricingTermsInput } from "@/services/api/replacementPricingClient";
+import { paidInAdvance } from "@vayada/product-onboarding/AcceptedPaymentMethods";
 import { AcceptedPaymentMethods, type PaymentMethod } from "./AcceptedPaymentMethods";
 import { errorText, parseAdjustmentInput, PricingError } from "./pricingAmounts";
 import * as ui from "./pricingStyles";
@@ -12,9 +13,12 @@ type Values = { parent: string; kind: string; value: string; cancellation: strin
 export function linkedOfferInput(room: PricingConfiguration, offerId: string, values: Values) {
   if (!room.offers.some((offer) => offer.id === values.parent) || values.payment !== "full" || !["non_refundable", "flexible"].includes(values.cancellation)) throw new PricingError("pricing.linkedOffer.errorRequired");
   if (!values.methods.length) throw new PricingError("pricing.error.paymentMethodRequired");
+  // A non-refundable stay is paid in advance: pay at property is never sent with it (VAY-2280).
+  const methods = values.cancellation === "non_refundable" ? paidInAdvance(values.methods) : values.methods;
+  if (!methods.length) throw new PricingError("pricing.error.nonRefundableNeedsAdvance");
   const cancellation: PricingTermsInput["cancellation"] = values.cancellation === "non_refundable" ? { kind: "non_refundable" } : { kind: "flexible", terms: {
     type: "free_until_days_before_arrival", freeCancellationDeadlineDays: /^\d+$/.test(values.deadline) ? Number(values.deadline) : NaN, afterDeadlinePenalty: "full_booking_amount", noShowPenalty: "full_booking_amount" } };
-  const terms: PricingTermsInput = { roomTypeId: room.roomTypeId, offerId, expectedRevision: null, cancellation, payment: { kind: "full", acceptedMethods: values.methods } };
+  const terms: PricingTermsInput = { roomTypeId: room.roomTypeId, offerId, expectedRevision: null, cancellation, payment: { kind: "full", acceptedMethods: methods } };
   if (!parseBookingPricingOfferTerms({ roomTypeId: room.roomTypeId, offerId, revision: offerId, cancellation, payment: terms.payment })) throw new PricingError("pricing.error.cancellationDeadline");
   const configuration = parsePricingConfiguration({ ...room, offers: [...room.offers, { id: offerId, termsRevision: offerId,
     meal: { kind: "room_only", charge: { kind: "room", amountMinor: "0" } }, restrictions: { kind: "inherit" },
@@ -43,7 +47,7 @@ export function NewLinkedOffer({ room, names, disabled, onCreate }: { room: Pric
       {values.cancellation === "flexible" && <label className={ui.fieldLabel}>{t("pricing.freeCancellationDays")}<input aria-label={t("pricing.linkedOffer.deadline")} className={`mt-1.5 block w-36 ${ui.field}`} disabled={disabled} value={values.deadline} onChange={(event) => change("deadline", event.target.value)} /></label>}
       {select("payment", t("pricing.linkedOffer.payment"), [["full", t("pricing.fullPayment")]])}
     </div>
-    <AcceptedPaymentMethods methods={values.methods} disabled={disabled} onChange={(methods) => { setValues({ ...values, methods }); setError(""); }} />
+    <AcceptedPaymentMethods methods={values.methods} disabled={disabled} nonRefundable={values.cancellation === "non_refundable"} onChange={(methods) => { setValues({ ...values, methods }); setError(""); }} />
     <p className={ui.help}>{t("pricing.linkedOffer.adjustmentHint")}</p>
     <p className={ui.help}>{t("pricing.linkedOffer.continueHint")}</p>
     {error && <p role="alert" className={ui.errorText}>{error}</p>}

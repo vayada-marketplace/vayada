@@ -108,7 +108,7 @@ beforeEach(() => {
   );
 });
 async function harness(
-  track: "hotel_operations" | "combined" = "hotel_operations",
+  track: "hotel_operations" = "hotel_operations",
   resumed = false,
   paymentRevision = 0,
   pricingRevision = 1,
@@ -139,8 +139,7 @@ async function harness(
   };
   const route = {
     scope: { organizationId: "org", propertyId },
-    selectedTracks:
-      track === "combined" ? ["hotel_operations", "creator_marketplace"] : ["hotel_operations"],
+    selectedTracks: [track],
     trackRevision: 1,
     sessionId: "session",
     sessionRevision: 1,
@@ -188,7 +187,7 @@ async function harness(
       view.root.findAllByType("button").find((node) => node.children.includes(text))!,
   };
 }
-it.each(["hotel_operations", "combined"] as const)(
+it.each(["hotel_operations"] as const)(
   "%s saves pay-at-hotel and continues only from owner-ready evidence",
   async (track) => {
     const h = await harness(track);

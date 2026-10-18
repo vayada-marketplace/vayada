@@ -79,7 +79,6 @@ import { createBookingGuestPolicyProductionApplication } from "./domains/booking
 import { createPgBookingGuestPolicyScopeAuthorizationPort } from "./domains/bookingGuestPolicyScopeAuthorization.js";
 import { createPgHotelCatalogCurrentOwnerEvidencePorts } from "./domains/hotelCatalogCurrentOwnerEvidence.js";
 import { createPgHotelCatalogStep1Repository } from "./domains/hotelCatalogStep1Repository.js";
-import { createPgMarketplaceHotelCollaborationPreferencesRepository } from "./domains/marketplaceHotelCollaborationPreferencesRepository.js";
 import { createPgFinanceOtaCommissionRuleRepository } from "./domains/financeOtaCommissionRuleRepository.js";
 import { createBankTransferCodec } from "./domains/financeBankTransferCodec.js";
 import { createBankTransferRepository } from "./domains/financeBankTransferRepository.js";
@@ -193,6 +192,7 @@ import {
   startBookingPublicationWorker,
 } from "./domains/bookingPublicationProductionRuntime.js";
 import { runPendingPricingCardRefunds } from "./domains/pricingCardRefund.js";
+import { createPricingCardReadinessReader } from "./domains/pricingCardReadiness.js";
 import { createFinanceManualPaymentReadinessReader } from "./domains/financeManualPaymentReadiness.js";
 import { createTargetFinanceBillingConfigReadPort } from "./domains/financeBillingConfigReadModel.js";
 import { createFinanceSubscriptionService } from "./domains/financeSubscriptionService.js";
@@ -201,10 +201,7 @@ import { createStripeFinanceSubscriptionProvider } from "./domains/stripeFinance
 import { createStripeBookingPaymentProvider } from "./domains/stripeBookingPayments.js";
 import { createStripeConnectProvider } from "./domains/stripeConnect.js";
 import { createPgBookingSetupLifecycleStatusRepository } from "./domains/bookingSetupLifecycleStatusRepository.js";
-import {
-  createPropertySetupHotelCatalogStateProvider,
-  createPropertySetupMarketplaceStateProvider,
-} from "./platform/propertySetupCatalogMarketplaceState.js";
+import { createPropertySetupHotelCatalogStateProvider } from "./platform/propertySetupHotelCatalogState.js";
 import { createPropertySetupBookingStateProvider } from "./platform/propertySetupBookingState.js";
 import {
   createPropertySetupBookingGuestPolicyPmsCurrentOwnerEvidenceAdapter,
@@ -897,10 +894,6 @@ const channexUploadReconciliationPool =
 const hotelCatalogStep1Repository = createPgHotelCatalogStep1Repository({
   connectionString: targetDatabaseUrl,
 });
-const marketplaceHotelCollaborationPreferencesRepository =
-  createPgMarketplaceHotelCollaborationPreferencesRepository({
-    connectionString: targetDatabaseUrl,
-  });
 const bookingDesignRepository = createPgBookingDesignRepository({
   connectionString: targetDatabaseUrl,
 });
@@ -1423,9 +1416,6 @@ const propertySetupRouteStateReadPort = createPropertySetupRouteStateReadPort({
   trackRepository: hotelSetupTrackCommandRepository,
   ownerStateProviders: {
     hotel_catalog: createPropertySetupHotelCatalogStateProvider(hotelCatalogStep1Repository),
-    marketplace: createPropertySetupMarketplaceStateProvider(
-      marketplaceHotelCollaborationPreferencesRepository,
-    ),
     booking: createPropertySetupBookingStateProvider({
       design: bookingDesignRepository,
       catalog: hotelCatalogStep1Repository,
@@ -1747,6 +1737,15 @@ const app = buildApp({
       ? {
           commands: (context) => createReplacementPricingCommands(propertySetupOwnerPool, context),
           manualPayments: financeManualPaymentReadiness,
+          cardReadiness: createPricingCardReadinessReader({
+            pool: propertySetupOwnerPool,
+            finance: financePaymentReadinessReadModel,
+            // As the booking page's card acceptance: acceptance and card switched on, Stripe configured.
+            cardAcceptanceEnabled:
+              config.replacementPricingAcceptanceEnabled === true &&
+              config.replacementPricingCardAcceptanceEnabled === true &&
+              !!stripeBookingPaymentProvider,
+          }),
         }
       : undefined,
   pmsPricing: pmsGuestPolicySetupCommands
@@ -2105,7 +2104,6 @@ app.addHook("onClose", async () => {
   await bookingPublicationWorker?.close();
   await bookingPublicationRuntime?.close();
   await Promise.all([
-    marketplaceHotelCollaborationPreferencesRepository.close(),
     bookingDesignRepository.close(),
     bookingDesignCatalogEvidenceRepository?.close(),
     bookingPropertyAccessRepository.close?.(),

@@ -186,7 +186,7 @@ export function createReplacementPricingCommands(pool: Pool, context: RequestCon
       input: Parameters<typeof booking.stage>[2],
       draft: BookingPricingDraft,
     ) {
-      return booking.stage(trustedContext, scope(propertyId), input, draft);
+      return booking.stage(trustedContext, scope(propertyId), input, draft, { paymentRules: true });
     },
     async readDraftTerms(
       propertyId: string,

@@ -29,7 +29,6 @@ import type {
 
 export const PROPERTY_SETUP_STATE_PROVIDER_KEYS = [
   "hotel_catalog",
-  "marketplace",
   "booking",
   "pms",
   "finance",
@@ -183,7 +182,6 @@ type DraftReadResult =
 
 const PROVIDER_BY_STEP = {
   present_hotel: "hotel_catalog",
-  marketplace_preferences: "marketplace",
   booking_design: "booking",
   rooms: "pms",
   pricing: "pms",
@@ -195,7 +193,6 @@ const PROVIDER_BY_STEP = {
 
 const PROVENANCE_BY_STEP = {
   present_hotel: { product: "hotel_catalog", ownerDomain: "hotel_catalog" },
-  marketplace_preferences: { product: "marketplace", ownerDomain: "marketplace" },
   booking_design: { product: "booking", ownerDomain: "booking" },
   rooms: { product: "pms", ownerDomain: "pms" },
   pricing: { product: "pms", ownerDomain: "pms" },
@@ -540,7 +537,6 @@ function validateOwnerFact(
 
 function allowedOwnerDomains(selectedTracks: readonly SetupTrack[]): Set<PropertySetupOwnerDomain> {
   const domains = new Set<PropertySetupOwnerDomain>(["hotel_catalog"]);
-  if (selectedTracks.includes("creator_marketplace")) domains.add("marketplace");
   if (selectedTracks.includes("hotel_operations")) {
     for (const domain of ["booking", "pms", "finance", "distribution"] as const) {
       domains.add(domain);
