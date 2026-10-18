@@ -13,6 +13,7 @@ import {
   type CalendarNight,
   type PriceRange,
 } from "./priceCalendarModel";
+import type { NightSelection } from "./nightActions";
 import { headlineMinor, mainOffer, money, sampleAdults } from "./stepPricing";
 
 /** "YYYY-MM" moved by `delta` months. */
@@ -47,6 +48,7 @@ export function PriceCalendar({
   month,
   today,
   stay,
+  selection = null,
   onMonth,
   onPick,
 }: {
@@ -61,6 +63,8 @@ export function PriceCalendar({
   month: string;
   today: string;
   stay: { checkIn: string; checkOut: string };
+  /** The picked nights (the night panel's), outlined strongly; the sample stay's nights lightly. */
+  selection?: NightSelection | null;
   onMonth: (month: string) => void;
   onPick: (date: string) => void;
 }) {
@@ -203,6 +207,7 @@ export function PriceCalendar({
               night={night}
               currency={room.currency}
               title={title}
+              selected={!!selection && night.date >= selection.from && night.date <= selection.to}
               onPick={onPick}
             />
           ))}
@@ -225,11 +230,13 @@ function Night({
   night,
   currency,
   title,
+  selected,
   onPick,
 }: {
   night: CalendarNight;
   currency: string;
   title: string;
+  selected: boolean;
   onPick: (date: string) => void;
 }) {
   const { t } = useTranslation();
@@ -256,10 +263,12 @@ function Night({
   return (
     <button
       type="button"
+      aria-pressed={selected}
       aria-label={[
         `${day} ${title}`,
         night.kind === "none" ? "" : price,
         ...state,
+        selected ? t("pricing.calendar.selectedState") : "",
         night.inStay ? t("pricing.steps.calendar.inStay") : "",
       ]
         .filter(Boolean)
@@ -271,7 +280,11 @@ function Night({
       }
       onClick={() => onPick(night.date)}
       className={`flex h-[52px] min-w-0 flex-col justify-between rounded-lg border p-1.5 text-left md:h-[72px] md:rounded-[10px] md:px-2.5 md:py-2 ${tone} ${
-        night.inStay ? "ring-2 ring-inset ring-primary-600" : "hover:border-gray-400"
+        selected
+          ? "ring-2 ring-inset ring-primary-600"
+          : night.inStay
+            ? "ring-1 ring-inset ring-primary-300"
+            : "hover:border-gray-400"
       } ${night.past ? "opacity-50" : ""}`}
     >
       <span className="flex items-center justify-between gap-1">

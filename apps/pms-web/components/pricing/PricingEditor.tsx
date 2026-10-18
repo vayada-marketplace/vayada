@@ -34,7 +34,7 @@ import { MoreOptions } from "./MoreOptions";
 import { StepPrice } from "./StepPrice";
 import { StepSeasons } from "./StepSeasons";
 import { StepWeekends } from "./StepWeekends";
-import { addDays, deleteBlocker, deleteOption, mainOffer, missingPresets, normalNight, optionNames, sampleStay, type OptionTerms, type PresetKey } from "./stepPricing";
+import { addDays, deleteBlocker, deleteOption, mainOffer, missingPresets, normalNight, optionNames, sampleAdults, sampleStay, type OptionTerms, type PresetKey } from "./stepPricing";
 import { simpleRoom } from "./simplePricing";
 import { StepCancellation } from "./StepCancellation";
 import { StepExtras } from "./StepExtras";
@@ -47,6 +47,8 @@ import { paymentSettingsMethods } from "./pricingPaymentDefaults";
 import type { PaymentMethod } from "./AcceptedPaymentMethods";
 import { GuestPreview } from "./GuestPreview";
 import { PriceCalendar } from "./PriceCalendar";
+import { NightPanel } from "./NightPanel";
+import { pickNight, type NightSelection } from "./nightActions";
 import { OptionWindow } from "./OptionWindow";
 import Modal from "@/components/Modal";
 import * as ui from "./pricingStyles";
@@ -76,7 +78,7 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
   const [preset, setPreset] = useState<PresetKey | null>(null), [deleting, setDeleting] = useState<string | null>(null), [deleteError, setDeleteError] = useState<unknown>(null);
   // The guest preview's sample stay (a picked calendar night, or the next weekend), the calendar's month and option.
   const [stayStart, setStayStart] = useState<string | null>(null), [shownMonth, setShownMonth] = useState<string | null>(null), [previewOffer, setPreviewOffer] = useState<string | null>(null);
-  const [calendarAdults, setCalendarAdults] = useState<number | null>(null);
+  const [calendarAdults, setCalendarAdults] = useState<number | null>(null), [selection, setSelection] = useState<NightSelection | null>(null);
   const [addingOfferRoom, setAddingOfferRoom] = useState<string | null>(null);
   // A first price's ways to pay from Payment settings (undefined: loading; null: unknown), and a season window to open
   // once "Add a season" has added the first prices (VAY-2188).
@@ -369,9 +371,13 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
       const calendarId = rates.some((rate) => rate.id === previewId) ? previewId : main.id;
       // The approved layout (VAY-2280): "Prices by date" first, then the price rules beside "What guests see".
       return <div key={room.roomTypeId} className="space-y-6">
-        <PriceCalendar room={edited} options={rates} offerId={calendarId} onOffer={setPreviewOffer}
-          adults={calendarAdults} onAdults={setCalendarAdults} month={shownMonth ?? stay.checkIn.slice(0, 7)} today={today} stay={stay}
-          onMonth={setShownMonth} onPick={(date) => { setStayStart(date); setShownMonth(date.slice(0, 7)); }} />
+        <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+          <PriceCalendar room={edited} options={rates} offerId={calendarId} onOffer={setPreviewOffer}
+            adults={calendarAdults} onAdults={setCalendarAdults} month={shownMonth ?? stay.checkIn.slice(0, 7)} today={today} stay={stay} selection={selection}
+            onMonth={setShownMonth} onPick={(date) => { const next = pickNight(selection, date); setSelection(next); setStayStart(next.from); setShownMonth(date.slice(0, 7)); }} />
+          <NightPanel room={room} shown={edited} selection={selection} adults={calendarAdults ?? sampleAdults(room)} names={names} disabled={disabled || exclusiveEditPending}
+            onClear={() => setSelection(null)} onChange={changeRoom(ri)} onPending={pend(`night:${ri}`)} />
+        </div>
         <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
         <div className="min-w-0 space-y-4">
         {kept && <p role="status" className={ui.infoBanner}>{t("pricing.simple.kept")}</p>}

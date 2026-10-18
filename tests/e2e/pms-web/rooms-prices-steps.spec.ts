@@ -472,6 +472,46 @@ test("edits a priced room on the simple card and publishes only what changed (VA
   await assertHealthy();
 });
 
+test("closes a night and gives another its own price from the calendar (VAY-2280)", async ({
+  page,
+}, testInfo) => {
+  await openPms(page);
+  const pricing = await mockPricing(page, publicationOf(3, [designRoom(3), complexRoom(3)]));
+  const assertHealthy = watchPageHealth(page, testInfo);
+  await prices(page, DELUXE);
+  const calendar = main(page).getByRole("region", { name: "Prices by date" });
+  const panel = main(page).getByRole("region", { name: "Picked nights" });
+  await expect(panel.getByText("Pick a night to change it")).toBeVisible();
+  // The 1st of the shown month: close it.
+  await calendar.getByRole("button", { name: /^1 \w+ \d{4}, €/ }).click();
+  await panel.getByRole("button", { name: "Close this night" }).click();
+  await expect(panel.getByRole("button", { name: "Open this night" })).toBeVisible();
+  await expect(calendar.getByRole("button", { name: /^1 \w+ \d{4}, €\d+, closed/ })).toBeVisible();
+  // The 3rd: its own price.
+  await panel.getByRole("button", { name: "Clear" }).click();
+  await calendar.getByRole("button", { name: /^3 \w+ \d{4}, €/ }).click();
+  await panel.getByRole("button", { name: "Own price for this night" }).click();
+  await panel.getByLabel("Own price: Per room").fill("130");
+  await panel.getByRole("button", { name: "Apply" }).click();
+  await expect(
+    calendar.getByRole("button", { name: /^3 \w+ \d{4}, €130, own price/ }),
+  ).toBeVisible();
+
+  await main(page).getByRole("button", { name: "Save prices" }).click();
+  await expect(main(page).getByText("Prices saved.", { exact: false })).toBeVisible();
+  const deluxe = (pricing.publishes[0].snapshot.rooms as Room[]).find(
+    (value) => value.roomTypeId === DELUXE,
+  )!;
+  const [flexibleOffer] = deluxe.offers;
+  expect(flexibleOffer.restrictions.dates).toEqual([
+    { date: expect.stringMatching(/-01$/), rules: rules(2, { stopSell: true }) },
+  ]);
+  expect(flexibleOffer.price.calendar.dates).toEqual([
+    { date: expect.stringMatching(/-03$/), price: flat("13000") },
+  ]);
+  await assertHealthy();
+});
+
 test("keeps a setup the simple card can't show unchanged through a save", async ({
   page,
 }, testInfo) => {

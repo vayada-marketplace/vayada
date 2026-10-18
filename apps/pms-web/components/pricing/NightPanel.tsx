@@ -1,0 +1,417 @@
+"use client";
+
+import { useState } from "react";
+import {
+  CalendarDaysIcon,
+  LockClosedIcon,
+  LockOpenIcon,
+  MoonIcon,
+  PencilSquareIcon,
+} from "@heroicons/react/24/outline";
+import {
+  pricingCurrencyScale,
+  type PricingConfiguration,
+} from "@vayada/domain-pms/replacement-pricing";
+import { useTranslation } from "@/lib/i18n";
+import { baseAmounts, decimalAmount, errorText } from "./pricingAmounts";
+import {
+  nightPrices,
+  nightRules,
+  ownPrice,
+  selectedDates,
+  setNightRules,
+  setOwnPrices,
+  type NightSelection,
+} from "./nightActions";
+import { seasonGroups, seasonTones } from "./priceCalendarModel";
+import { recurringTemplate } from "./recurringPricingInputs";
+import { mainOffer, money } from "./stepPricing";
+import * as ui from "./pricingStyles";
+
+type Room = PricingConfiguration;
+type Entry =
+  | { kind: "price"; values: string[] }
+  | { kind: "minimum"; value: string }
+  | { kind: "arrival"; noArrival: boolean; noDeparture: boolean };
+const action =
+  "inline-flex h-10 items-center justify-center gap-2 rounded-lg border px-3 text-[14px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50";
+
+/** The picked nights' panel beside "Prices by date" (VAY-2280, approved board): what each option costs that night,
+ * and the one-off changes: an own price (the main option's single-date price; other options follow it), a minimum
+ * stay for arrivals, closing or opening, and arrival/departure rules. Every change goes to the draft like the other
+ * editors; Save publishes it. `room` is the draft, `shown` the draft with typed prices (null while one doesn't parse). */
+export function NightPanel({
+  room,
+  shown,
+  selection,
+  adults,
+  names,
+  disabled,
+  onClear,
+  onChange,
+  onPending,
+}: {
+  room: Room;
+  shown: Room | null;
+  selection: NightSelection | null;
+  adults: number;
+  names: Readonly<Record<string, string>>;
+  disabled: boolean;
+  onClear: () => void;
+  onChange: (room: Room) => void;
+  onPending: (pending: boolean) => void;
+}) {
+  const { t } = useTranslation();
+  const [entry, setEntry] = useState<Entry | null>(null),
+    [error, setError] = useState("");
+  if (!selection)
+    return (
+      <section
+        aria-label={t("pricing.night.title")}
+        className="space-y-2.5 rounded-2xl border border-gray-200 bg-white p-5 md:p-6"
+      >
+        <span className="flex h-10 w-10 items-center justify-center rounded-[10px] bg-gray-100">
+          <CalendarDaysIcon aria-hidden="true" className="h-5 w-5 text-gray-500" />
+        </span>
+        <h2 className="text-[16px] font-semibold text-gray-900">{t("pricing.night.emptyTitle")}</h2>
+        <p className="text-[14px] leading-5 text-gray-600">{t("pricing.night.emptyText")}</p>
+      </section>
+    );
+  const dates = selectedDates(selection),
+    single = dates.length === 1,
+    date = dates[0];
+  const main = mainOffer(room),
+    template = recurringTemplate(main),
+    scale = pricingCurrencyScale(room.currency) ?? 2;
+  const rules = dates.map((day) => nightRules(room, day));
+  const allClosed = rules.every((value) => value.stopSell);
+  const stayOwned = main.restrictions.kind === "own";
+  const day = (value: string, long = false) => {
+    const when = new Date(`${value}T00:00:00Z`),
+      weekday = (when.getUTCDay() + 6) % 7;
+    const monthName = t(`pricing.month.${when.getUTCMonth() + 1}`);
+    return long
+      ? t("pricing.night.dateLong", {
+          weekday: t(`pricing.night.weekday.${weekday}`),
+          day: when.getUTCDate(),
+          month: monthName,
+          year: when.getUTCFullYear(),
+        })
+      : `${t(`pricing.steps.calendar.weekday.${weekday}`)} ${when.getUTCDate()} ${t(`pricing.steps.monthShort.${when.getUTCMonth() + 1}`)}`;
+  };
+  const open = (next: Entry) => {
+    if (disabled) return;
+    setEntry(next);
+    setError("");
+    onPending(true);
+  };
+  const close = () => {
+    setEntry(null);
+    setError("");
+    onPending(false);
+  };
+  const apply = (change: () => Room, keepOpen = false) => {
+    if (disabled) return;
+    try {
+      onChange(change());
+      if (!keepOpen) close();
+    } catch (cause) {
+      setError(errorText(cause, t, "pricing.night.changeFailed"));
+    }
+  };
+  const clear = () => {
+    close();
+    onClear();
+  };
+  // A single night says where its price comes from: its season, an own price or the standard price.
+  const season =
+    single && main.price.kind === "independent"
+      ? seasonGroups(main).find((group) =>
+          group.seasons.some((value) =>
+            value.from <= value.through
+              ? date.slice(5) >= value.from && date.slice(5) <= value.through
+              : date.slice(5) >= value.from || date.slice(5) <= value.through,
+          ),
+        )
+      : undefined;
+  const own = single ? ownPrice(room, date) : null;
+  const prices = single && shown ? nightPrices(shown, date, adults) : [];
+  const fields = template ? baseAmounts(template, t) : [];
+  return (
+    <section
+      aria-label={t("pricing.night.title")}
+      className="space-y-3 rounded-2xl border border-primary-300 bg-white p-5 md:p-6"
+    >
+      <div className="flex items-start gap-3">
+        <h2 className="min-w-0 flex-1 text-[16px] font-semibold text-gray-900">
+          {single ? day(date, true) : t("pricing.night.selected", { count: dates.length })}
+        </h2>
+        <button
+          type="button"
+          onClick={clear}
+          className="h-8 shrink-0 rounded-lg border border-gray-300 bg-white px-3 text-[13px] font-medium text-gray-800 hover:bg-gray-50"
+        >
+          {t("pricing.night.clear")}
+        </button>
+      </div>
+      <p className="flex items-center gap-2 text-[13px] text-gray-600">
+        <span
+          aria-hidden="true"
+          className={`h-2 w-2 shrink-0 rounded-full ${season ? seasonTones[season.tone].dot : "bg-gray-300"}`}
+        />
+        <span>
+          {single
+            ? [
+                own
+                  ? t("pricing.night.ownPrice")
+                  : season
+                    ? season.name
+                    : t("pricing.night.standard"),
+                rules[0].stopSell
+                  ? t("pricing.calendar.closed")
+                  : t(
+                      rules[0].minArrivalNights === 1
+                        ? "pricing.night.minOne"
+                        : "pricing.night.minOther",
+                      { count: rules[0].minArrivalNights },
+                    ),
+              ].join(" · ")
+            : `${day(dates[0])} – ${day(dates[dates.length - 1])}`}
+        </span>
+      </p>
+      {single && (
+        <dl className="space-y-1.5 rounded-[10px] bg-gray-50 px-3.5 py-3">
+          {prices.map(({ offerId, totalMinor }) => (
+            <div key={offerId} className="flex items-center justify-between gap-3 text-[14px]">
+              <dt className="min-w-0 truncate text-gray-700">{names[offerId] ?? ""}</dt>
+              <dd className="font-semibold text-gray-900">
+                {totalMinor ? money(totalMinor, room.currency) : "—"}
+              </dd>
+            </div>
+          ))}
+          {!shown && (
+            <p className="text-[13px] text-gray-500">{t("pricing.steps.guests.invalid")}</p>
+          )}
+        </dl>
+      )}
+      {entry?.kind === "price" ? (
+        <div className={ui.draftCard}>
+          <p className="mb-2 text-[13px] font-semibold text-gray-900">
+            {t(single ? "pricing.night.priceTitleOne" : "pricing.night.priceTitleMany", {
+              currency: room.currency,
+            })}
+          </p>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {fields.map(([label], index) => (
+              <label key={index} className="block text-[12px] text-gray-600">
+                {label}
+                <input
+                  aria-label={t("pricing.night.priceField", { field: label })}
+                  inputMode="decimal"
+                  className={`mt-1 ${ui.input}`}
+                  disabled={disabled}
+                  value={entry.values[index] ?? ""}
+                  onChange={(event) =>
+                    setEntry({
+                      ...entry,
+                      values: entry.values.map((value, at) =>
+                        at === index ? event.target.value : value,
+                      ),
+                    })
+                  }
+                />
+              </label>
+            ))}
+          </div>
+          <p className="mt-2 text-[12px] text-gray-500">{t("pricing.night.priceHint")}</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              className={ui.primaryButton}
+              disabled={disabled}
+              onClick={() => apply(() => setOwnPrices(room, dates, entry.values))}
+            >
+              {t("pricing.night.apply")}
+            </button>
+            <button
+              type="button"
+              className={ui.secondaryButton}
+              disabled={disabled}
+              onClick={close}
+            >
+              {t("common.cancel")}
+            </button>
+            {dates.some((value) => ownPrice(room, value)) && (
+              <button
+                type="button"
+                className={`${ui.secondaryButton} text-red-600`}
+                disabled={disabled}
+                onClick={() => apply(() => setOwnPrices(room, dates, null))}
+              >
+                {t(single ? "pricing.night.removePriceOne" : "pricing.night.removePriceMany")}
+              </button>
+            )}
+          </div>
+        </div>
+      ) : entry?.kind === "minimum" ? (
+        <div className={ui.draftCard}>
+          <label className="block text-[13px] font-semibold text-gray-900">
+            {t(single ? "pricing.night.minimumOne" : "pricing.night.minimumMany")}
+            <input
+              aria-label={t("pricing.night.minimumField")}
+              inputMode="numeric"
+              className={`mt-1.5 block w-32 ${ui.field}`}
+              disabled={disabled}
+              value={entry.value}
+              onChange={(event) => setEntry({ ...entry, value: event.target.value })}
+            />
+          </label>
+          <p className="mt-2 text-[12px] text-gray-500">{t("pricing.night.minimumHint")}</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              className={ui.primaryButton}
+              disabled={disabled}
+              onClick={() =>
+                apply(() =>
+                  setNightRules(room, dates, {
+                    minArrivalNights: /^\d+$/.test(entry.value) ? Number(entry.value) : NaN,
+                  }),
+                )
+              }
+            >
+              {t("pricing.night.apply")}
+            </button>
+            <button
+              type="button"
+              className={ui.secondaryButton}
+              disabled={disabled}
+              onClick={close}
+            >
+              {t("common.cancel")}
+            </button>
+          </div>
+        </div>
+      ) : entry?.kind === "arrival" ? (
+        <div className={ui.draftCard}>
+          <p className="text-[13px] font-semibold text-gray-900">
+            {t("pricing.night.arrivalTitle")}
+          </p>
+          {(["noArrival", "noDeparture"] as const).map((key) => (
+            <label key={key} className="mt-2 flex items-center gap-2 text-[13px] text-gray-700">
+              <input
+                type="checkbox"
+                disabled={disabled}
+                checked={entry[key]}
+                onChange={(event) => setEntry({ ...entry, [key]: event.target.checked })}
+              />
+              {t(`pricing.night.${key}`)}
+            </label>
+          ))}
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              className={ui.primaryButton}
+              disabled={disabled}
+              onClick={() =>
+                apply(() =>
+                  setNightRules(room, dates, {
+                    closedToArrival: entry.noArrival,
+                    closedToDeparture: entry.noDeparture,
+                  }),
+                )
+              }
+            >
+              {t("pricing.night.apply")}
+            </button>
+            <button
+              type="button"
+              className={ui.secondaryButton}
+              disabled={disabled}
+              onClick={close}
+            >
+              {t("common.cancel")}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          <button
+            type="button"
+            disabled={disabled || !template}
+            className={`${action} w-full border-primary-600 bg-primary-600 text-white hover:bg-primary-700`}
+            onClick={() =>
+              open({
+                kind: "price",
+                values: fields.map((_, index) => {
+                  const current = own && baseAmounts(own)[index]?.[1];
+                  return current ? decimalAmount(current, scale) : "";
+                }),
+              })
+            }
+          >
+            <PencilSquareIcon aria-hidden="true" className="h-4 w-4" />
+            {t(single ? "pricing.night.ownPriceOne" : "pricing.night.ownPriceMany")}
+          </button>
+          {stayOwned && (
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                disabled={disabled}
+                className={`${action} border-gray-300 bg-white text-gray-800 hover:bg-gray-50`}
+                onClick={() => open({ kind: "minimum", value: String(rules[0].minArrivalNights) })}
+              >
+                <MoonIcon aria-hidden="true" className="h-4 w-4" />
+                {t("pricing.night.minimum")}
+              </button>
+              <button
+                type="button"
+                disabled={disabled}
+                className={`${action} ${allClosed ? "border-gray-300 text-gray-800" : "border-red-200 text-red-600"} bg-white hover:bg-gray-50`}
+                onClick={() =>
+                  apply(() => setNightRules(room, dates, { stopSell: !allClosed }), true)
+                }
+              >
+                {allClosed ? (
+                  <LockOpenIcon aria-hidden="true" className="h-4 w-4" />
+                ) : (
+                  <LockClosedIcon aria-hidden="true" className="h-4 w-4" />
+                )}
+                {t(
+                  allClosed
+                    ? single
+                      ? "pricing.night.openOne"
+                      : "pricing.night.openMany"
+                    : single
+                      ? "pricing.night.closeOne"
+                      : "pricing.night.closeMany",
+                )}
+              </button>
+            </div>
+          )}
+          {stayOwned && (
+            <button
+              type="button"
+              disabled={disabled}
+              className={ui.stepLink}
+              onClick={() =>
+                open({
+                  kind: "arrival",
+                  noArrival: rules.every((value) => value.closedToArrival),
+                  noDeparture: rules.every((value) => value.closedToDeparture),
+                })
+              }
+            >
+              {t("pricing.night.arrival")}
+            </button>
+          )}
+        </div>
+      )}
+      {error && (
+        <p role="alert" className={ui.errorText}>
+          {error}
+        </p>
+      )}
+    </section>
+  );
+}
