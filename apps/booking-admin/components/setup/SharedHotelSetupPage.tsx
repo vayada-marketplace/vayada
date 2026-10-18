@@ -19,11 +19,7 @@ import {
 import { RoomImportRevisionContext } from "./RoomImportRevisionContext";
 import { ROUTES } from "@/lib/constants";
 import { authService } from "@/services/auth";
-import {
-  sharedAccountProfileImageUploader,
-  sharedHotelSetupApi,
-  sharedSetupClient,
-} from "@/services/api/sharedHotelSetupClient";
+import { sharedHotelSetupApi, sharedSetupClient } from "@/services/api/sharedHotelSetupClient";
 import { hotelOperationsSetupApi } from "@/services/api/hotelOperationsSetupClient";
 import {
   getAuthCsrfToken,
@@ -71,10 +67,6 @@ export function SharedHotelSetupPage({
   const [accountName, setAccountName] = useState<string | null>(null);
   const [accountContactEmail, setAccountContactEmail] = useState<string | null>(null);
   const [accountContactPhone, setAccountContactPhone] = useState<string | null>(null);
-  const [accountProfilePictureUrl, setAccountProfilePictureUrl] = useState<string | null>(null);
-  const [accountProfilePictureMediaObjectId, setAccountProfilePictureMediaObjectId] = useState<
-    string | null
-  >(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -90,8 +82,6 @@ export function SharedHotelSetupPage({
         setAccountName(user?.name ?? localStorage.getItem("userName"));
         setAccountContactEmail(user?.email ?? null);
         setAccountContactPhone(user?.phone ?? null);
-        setAccountProfilePictureUrl(user?.profilePictureUrl ?? null);
-        setAccountProfilePictureMediaObjectId(user?.profilePictureMediaObjectId ?? null);
         setAuthorized(true);
       })
       .catch(() => {
@@ -225,35 +215,19 @@ export function SharedHotelSetupPage({
     !isSharedAccountDetailsComplete({
       name: accountName,
       phone: accountContactPhone,
-      profilePictureUrl: accountProfilePictureUrl,
-      profilePictureMediaObjectId: accountProfilePictureMediaObjectId,
     })
   ) {
     return (
       <SharedAccountDetailsStep
-        accountType="hotel"
         email={accountContactEmail ?? ""}
         initialName={accountName}
         initialPhone={accountContactPhone}
-        initialProfilePictureUrl={accountProfilePictureUrl}
-        initialProfilePictureMediaObjectId={accountProfilePictureMediaObjectId}
-        onUploadProfileImage={(file) => {
-          const userId = getAuthSessionUser()?.id;
-          if (!userId) throw new Error("Your session has expired. Please sign in again.");
-          return sharedAccountProfileImageUploader(userId, file);
-        }}
         onSubmit={async (accountDetails) => {
           await authService.updateAccountDetails(accountDetails);
           setAccountName(
             normalizeSharedAccountName(accountDetails.firstName, accountDetails.lastName),
           );
           setAccountContactPhone(accountDetails.phone ?? null);
-          if (accountDetails.profilePictureUrl) {
-            setAccountProfilePictureUrl(accountDetails.profilePictureUrl);
-          }
-          if (accountDetails.profilePictureMediaObjectId) {
-            setAccountProfilePictureMediaObjectId(accountDetails.profilePictureMediaObjectId);
-          }
         }}
       />
     );

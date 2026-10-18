@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { ArrowLeftIcon, ExclamationTriangleIcon } from "@heroicons/react/24/outline";
+import { ArrowLeftIcon } from "@heroicons/react/24/outline";
 
 export type AdaptiveHotelSetupShellProps = {
   brandMark: ReactNode;
@@ -22,8 +22,6 @@ export type AdaptiveHotelSetupShellProps = {
   staleDraftActionLabel?: string;
   onRefresh?: (() => void) | null;
   refreshing?: boolean;
-  /** The hotel's Marketplace profile is suspended (VAY-2177); bookingPage when it also sets up booking. */
-  marketplaceSuspended?: { bookingPage: boolean } | null;
 };
 
 export function AdaptiveHotelSetupShell({
@@ -45,7 +43,6 @@ export function AdaptiveHotelSetupShell({
   staleDraftActionLabel = "Refresh",
   onRefresh,
   refreshing = false,
-  marketplaceSuspended = null,
 }: AdaptiveHotelSetupShellProps) {
   const normalizedTotal = Math.max(1, totalSteps);
   const normalizedCurrent = Math.min(normalizedTotal, Math.max(1, currentStep));
@@ -105,27 +102,6 @@ export function AdaptiveHotelSetupShell({
       </header>
 
       <div className="mx-auto flex w-full max-w-7xl flex-col px-4 pb-12 pt-8 sm:px-6 sm:pt-10 lg:px-8">
-        {marketplaceSuspended && (
-          <div
-            role="note"
-            className="mx-auto mb-6 flex w-full max-w-3xl gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-900"
-          >
-            <ExclamationTriangleIcon className="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true" />
-            <div>
-              <p className="font-semibold">Your Creator Marketplace profile is suspended</p>
-              <p className="mt-1">
-                Creators can&apos;t find your hotel on the Marketplace right now, and finishing
-                setup won&apos;t change that. You can still finish setup
-                {marketplaceSuspended.bookingPage ? " and publish your booking page" : ""}. To ask
-                about your Marketplace profile, contact{" "}
-                <a href="mailto:support@vayada.com" className="font-semibold underline">
-                  support@vayada.com
-                </a>
-                .
-              </p>
-            </div>
-          </div>
-        )}
         <header className="mx-auto w-full max-w-3xl text-center">
           <h1
             id="adaptive-setup-heading"

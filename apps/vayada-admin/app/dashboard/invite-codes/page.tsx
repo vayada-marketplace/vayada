@@ -23,8 +23,7 @@ import {
 import { parsePreparedHotelImport } from "@vayada/domain-hotels";
 
 type InviteView = "list" | "create";
-// The Creator Marketplace is being removed (VAY-2259); new invites get the Hotel Operations
-// track only. Existing invites keep their stored tracks (see formatSetupRoute).
+// Invites set up Hotel Operations only; the API reads older Marketplace invites the same way.
 type SetupRoute = "operations";
 
 const SETUP_ROUTE_OPTIONS: Array<{
@@ -542,10 +541,5 @@ function StatusBadge({ status }: { status: InviteCode["status"] }) {
 }
 
 function formatSetupRoute(selectedTracks: readonly HotelSetupTrack[]): string {
-  const hasMarketplace = selectedTracks.includes("creator_marketplace");
-  const hasOperations = selectedTracks.includes("hotel_operations");
-  if (hasMarketplace && hasOperations) return "Marketplace + Hotel Operations";
-  if (hasMarketplace) return "Creator Marketplace";
-  if (hasOperations) return "Hotel Operations";
-  return "Legacy invite";
+  return selectedTracks.includes("hotel_operations") ? "Hotel Operations" : "Legacy invite";
 }

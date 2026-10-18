@@ -19,11 +19,6 @@ export {
   type SharedAccountDetailsInput,
   type SharedAccountDetailsProfile,
 } from "./sharedAccountDetails";
-export {
-  createSharedAccountProfileImageUploader,
-  sharedAccountProfileImageError,
-  type SharedAccountProfileImageUpload,
-} from "./sharedAccountProfileImage";
 export { sharedPropertyLogoError, type PendingPropertyLogoAssignment } from "./sharedPropertyLogo";
 export {
   propertyLaunchSettingsDefaults,

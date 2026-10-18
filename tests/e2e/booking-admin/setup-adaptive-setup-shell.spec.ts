@@ -42,16 +42,6 @@ const routeScenarios: Array<{
     expectedTotal: 8,
     expectedHeading: "Open your calendar",
   },
-  {
-    // A hotel that picked the Creator Marketplace track earlier still gets the
-    // marketplace_preferences step from the API; Booking Admin drops it and renumbers.
-    name: "Hotel Operations with an earlier Creator Marketplace selection",
-    selectedTracks: ["hotel_operations", "creator_marketplace"],
-    resumeStepId: "calendar",
-    expectedStep: 6,
-    expectedTotal: 8,
-    expectedHeading: "Open your calendar",
-  },
 ];
 
 test.describe("adaptive hotel setup shell", () => {

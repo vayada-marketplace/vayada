@@ -18,7 +18,6 @@ import {
   resolveSupportedInterfaceLocale,
   type AdaptiveSetupStepId,
   type SupportedInterfaceLocale,
-  omitMarketplaceSetupSteps,
 } from "./adaptiveSetupNavigation";
 
 const routeClient = createPropertySetupRouteClient(targetApiClient);
@@ -126,12 +125,10 @@ export function AdaptiveHotelSetupController({
       retryNavigation.current = null;
 
       try {
-        const nextRoute = omitMarketplaceSetupSteps(
-          await routeClient.getRoute(propertyId, {
-            signal,
-            cache: "no-store",
-          }),
-        );
+        const nextRoute = await routeClient.getRoute(propertyId, {
+          signal,
+          cache: "no-store",
+        });
         setRoute(nextRoute);
         setStaleDraftMessage(null);
         return nextRoute;
@@ -477,16 +474,6 @@ export function AdaptiveHotelSetupController({
   );
 
   const activeCopy = activeStep ? ADAPTIVE_SETUP_STEP_COPY[activeStep.stepId] : null;
-  // A suspended Marketplace profile is announced on every step; Review explains it in its own card.
-  const marketplaceSuspended =
-    route &&
-    activeStep &&
-    activeStep.stepId !== "review" &&
-    route.steps.some(({ blockers }) =>
-      blockers.some(({ code }) => code === "marketplace_profile_suspended"),
-    )
-      ? { bookingPage: route.selectedTracks.includes("hotel_operations") }
-      : null;
   const handleRetry = () => {
     const pendingNavigation = retryNavigation.current;
     if (pendingNavigation) {
@@ -525,7 +512,6 @@ export function AdaptiveHotelSetupController({
       staleDraftActionLabel={activeStaleRecoveryMode === "reset" ? "Reset saved draft" : "Refresh"}
       onRefresh={() => void recoverStale()}
       refreshing={refreshing || recoveringStaleDraft}
-      marketplaceSuspended={marketplaceSuspended}
     >
       {route && activeStep ? (
         <div
