@@ -190,6 +190,18 @@ describe("complete PMS pricing currency conversion", () => {
       undefined,
     ]);
   });
+  it("keeps the meal description guests read (VAY-2281)", () => {
+    const source = fixture();
+    const described = {
+      ...source,
+      offers: source.offers.map((offer, index) =>
+        index === 0
+          ? { ...offer, meal: { ...offer.meal, description: "Buffet breakfast" } }
+          : offer,
+      ),
+    };
+    expect(convert(described, fx, now)!.offers[0].meal.description).toBe("Buffet breakfast");
+  });
   it("rounds ties away from zero and accepts explicit equal minor-unit ratios across different scales", () => {
     const source = fixture();
     const result = convert(source, { ...fx, numerator: "1", denominator: "2" }, now)!;

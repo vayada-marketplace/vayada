@@ -46,6 +46,22 @@ export function mapReplacementPublicOffers(owner: Owner):
     : (rooms as { roomTypeId: string; offers: BookingPublicQuotedOffer[] }[]);
 }
 
+/** Each offer's meal text in the hotel's own words (VAY-2281), by public offer key. Offers without one have no
+ * entry, so the booking page keeps its own wording for them. */
+export function publicOfferMealDescriptions(owner: Owner): ReadonlyMap<string, string> {
+  const bindings = publicPricingOfferBindings(owner);
+  const descriptions = new Map<string, string>();
+  for (const room of owner.publication.rooms)
+    for (const offer of room.offers) {
+      const binding = bindings.find(
+        (b) => b.roomTypeId === room.roomTypeId && b.offerId === offer.id,
+      );
+      if (binding && offer.meal.description)
+        descriptions.set(binding.publicOfferKey, offer.meal.description);
+    }
+  return descriptions;
+}
+
 /** Each offer's cancellation as guests may see it before a quote, by public offer key, so the booking page can name
  * options "Free cancellation" or "Non-refundable" (VAY-2188). An offer without its exact terms has no entry. */
 export function publicOfferCancellations(
