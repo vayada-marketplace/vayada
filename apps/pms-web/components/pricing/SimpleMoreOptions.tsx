@@ -2,14 +2,11 @@
 
 import { useState, type ReactNode } from "react";
 import type { PricingConfiguration } from "@vayada/domain-pms/replacement-pricing";
-import { AcceptedPaymentMethods as SharedAcceptedPaymentMethods } from "@vayada/product-onboarding/AcceptedPaymentMethods";
 import { useTranslation } from "@/lib/i18n";
 import { errorText, type Translate } from "./pricingAmounts";
-import { usePricingManualMethods } from "./pricingManualMethods";
 import {
   hasKeptSettings,
   onePriceAgain,
-  paymentEdits,
   pricePerAdultCount,
   type SimpleRoom,
 } from "./simplePricing";
@@ -19,7 +16,6 @@ import {
   mainOffer,
   money,
   moreOptionsSummary,
-  type OptionTerms,
 } from "./stepPricing";
 import * as ui from "./pricingStyles";
 
@@ -54,36 +50,17 @@ export function paymentText(methods: readonly string[], t: Translate) {
     : `${words.slice(0, -1).join(", ")} ${t("pricing.simple.pay.or")} ${words.at(-1)}`;
 }
 
-/** The closed More options row's line: how guests pay, the minimum stay, children, and anything else it holds, so no
- * setting hides behind it. */
+/** The closed More options row's line: the minimum stay, children, and anything else it holds, so no setting hides
+ * behind it. How guests pay and the other booking options are in step "Rates" (VAY-2282). */
 export function simpleSummary(room: Room, simple: SimpleRoom | null, t: Translate) {
   const main = mainOffer(room);
   const nights = main.restrictions.kind === "own" ? main.restrictions.rules.minArrivalNights : 1;
-  const payment = simple?.mainTerms.payment;
-  const methods = payment?.acceptedMethods ?? [];
-  const others = simple?.others.length ?? 0;
   return [
-    ...(methods.length
-      ? [t("pricing.simple.summary.payment", { methods: paymentText(methods, t) })]
-      : []),
-    ...(payment?.kind === "deposit"
-      ? [t("pricing.simple.summary.deposit", { percent: payment.basisPoints / 100 })]
-      : []),
     nights > 1
       ? t("pricing.simple.summary.minimum", { count: nights })
       : t("pricing.simple.summary.noMinimum"),
     ...(room.capacity.children > 0
       ? [t("pricing.simple.summary.children", { summary: childrenSummary(room, t) })]
-      : []),
-    ...(others
-      ? [
-          t(
-            others === 1
-              ? "pricing.simple.summary.options.one"
-              : "pricing.simple.summary.options.other",
-            { count: others },
-          ),
-        ]
       : []),
     ...(moreOptionsSummary(room, t)?.split(" · ") ?? []),
   ].join(" · ");
@@ -97,65 +74,6 @@ export function keptSettings(room: Room, simple: SimpleRoom | null) {
     hasKeptSettings(room, simple) ||
     simple.mainTerms.payment.kind === "deposit" ||
     !!(rules && (rules.closedToArrival || rules.closedToDeparture || rules.stopSell))
-  );
-}
-
-/** How guests pay for the card's price and its switches (the main option's accepted methods, copied to both). */
-export function SimplePayment({
-  simple,
-  terms,
-  failed,
-  disabled,
-  onTerms,
-}: {
-  simple: SimpleRoom | null;
-  terms: Readonly<Record<string, OptionTerms | undefined>>;
-  /** The options' terms couldn't be loaded (the cancellation offers the retry). */
-  failed: boolean;
-  disabled: boolean;
-  onTerms: (edits: ReturnType<typeof paymentEdits>) => void;
-}) {
-  const { t } = useTranslation();
-  const manualMethods = usePricingManualMethods();
-  const [error, setError] = useState("");
-  if (!simple)
-    return (
-      <p className={ui.stepHint}>
-        {t(failed ? "pricing.simple.more.paymentFailed" : "pricing.simple.cancellation.loading")}
-      </p>
-    );
-  const { payment } = simple.mainTerms;
-  return (
-    <>
-      <SharedAcceptedPaymentMethods
-        methods={simple.mainTerms.payment.acceptedMethods ?? []}
-        manualMethods={manualMethods}
-        disabled={disabled}
-        onChange={(methods) => {
-          try {
-            onTerms(paymentEdits(simple, terms, methods));
-            setError("");
-          } catch (cause) {
-            setError(errorText(cause, t, "pricing.error.paymentMethodRequired"));
-          }
-        }}
-        t={t}
-        look={{ ...ui.formLook, legend: "sr-only" }}
-      />
-      {payment.kind === "deposit" && (
-        <p className={ui.stepHint}>
-          {t("pricing.terms.deposit", {
-            percent: payment.basisPoints / 100,
-            days: payment.balanceDaysBeforeArrival,
-          })}
-        </p>
-      )}
-      {error && (
-        <p role="alert" className={ui.errorText}>
-          {error}
-        </p>
-      )}
-    </>
   );
 }
 

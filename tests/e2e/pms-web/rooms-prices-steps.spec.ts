@@ -359,15 +359,6 @@ const dialog = (page: Page) => page.locator('[role="dialog"]:visible');
 /** The card's switch for an extra choice (VAY-2188). */
 const extra = (page: Page, name: string) =>
   main(page).getByRole("switch", { name: `Offer “${name}”` });
-const openMoreOptions = async (page: Page) => {
-  // Editors inside keep their own <details>, so the row is found by its summary's first words.
-  const summary = main(page)
-    .locator("summary")
-    .filter({ hasText: /^More options/ })
-    .first();
-  if (!(await summary.evaluate((element) => (element.parentElement as HTMLDetailsElement).open)))
-    await summary.click();
-};
 
 test("edits a priced room on the simple card and publishes only what changed (VAY-2188)", async ({
   page,
@@ -376,7 +367,7 @@ test("edits a priced room on the simple card and publishes only what changed (VA
   const pricing = await mockPricing(page, publicationOf(3, [designRoom(3), complexRoom(3)]));
   const assertHealthy = watchPageHealth(page, testInfo);
   await prices(page, DELUXE);
-  for (const heading of ["Prices and seasons", "Cancellation", "Extra choices for guests"])
+  for (const heading of ["Prices and seasons", "Rates", "Extra choices for guests"])
     await expect(main(page).getByRole("heading", { name: heading })).toBeVisible();
   // "Prices by date" comes first (VAY-2280), showing the main option's nightly prices.
   const calendar = main(page).getByRole("region", { name: "Prices by date" });
@@ -392,7 +383,18 @@ test("edits a priced room on the simple card and publishes only what changed (VA
   await expect(
     main(page).getByRole("button", { name: "Free cancellation", exact: true }),
   ).toHaveAttribute("aria-pressed", "true");
-  await expect(main(page).getByLabel("Days before arrival")).toHaveValue("7");
+  // Step "Rates" (VAY-2282): the Flexible rate's free cancellation days, the Non-refundable rate beside it.
+  await expect(main(page).getByRole("button", { name: "7 days", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(main(page).getByRole("region", { name: "Flexible rate" })).toContainText(
+    "Always on",
+  );
+  // Non-refundable stays are paid in advance; the mock's old "pay at property" shows as not offered (VAY-2282).
+  await expect(main(page).getByRole("region", { name: "Non-refundable rate" })).toContainText(
+    "Not offered: non-refundable stays are paid in advance",
+  );
   await expect(extra(page, "Non-refundable")).toHaveAttribute("aria-checked", "true");
   await expect(main(page).getByLabel("How much cheaper, in percent")).toHaveValue("10");
   await expect(main(page).getByText("€90 a night", { exact: true })).toBeVisible();
@@ -420,8 +422,7 @@ test("edits a priced room on the simple card and publishes only what changed (VA
       .first(),
   ).toBeVisible();
 
-  // Other options live under More options.
-  await openMoreOptions(page);
+  // Other booking options sit at the bottom of Rates (VAY-2283).
   await main(page).getByRole("button", { name: "Half board", exact: true }).click();
   await dialog(page).getByLabel("Half board price").fill("25");
   await dialog(page).getByRole("button", { name: "Add option" }).click();

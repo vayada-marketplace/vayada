@@ -9,6 +9,7 @@ import {
   hasKeptSettings,
   onePriceAgain,
   paymentEdits,
+  rateMethodEdits,
   pricePerAdultCount,
   setBreakfastAmount,
   setDiscount,
@@ -213,17 +214,6 @@ describe("the simple card's view of a room", () => {
   it("treats an option as a switch only when nothing about it is its own", () => {
     const cases: [string, PricingConfiguration, Record<string, OptionTerms>][] = [
       [
-        "other payment methods",
-        design,
-        {
-          ...designTerms,
-          nonrefundable: {
-            ...nonRefundableTerms,
-            payment: { kind: "full", acceptedMethods: ["card"] },
-          },
-        },
-      ],
-      [
         "own stay rules",
         room(
           design.offers.map((value) =>
@@ -266,6 +256,15 @@ describe("the simple card's view of a room", () => {
       expect(ids(simple.others), name).toContain("nonrefundable");
       expect(simple.breakfast?.id, name).toBe("breakfast");
     }
+    // The Non-refundable rate has payment methods of its own (VAY-2282).
+    const ownMethods = {
+      ...designTerms,
+      nonrefundable: {
+        ...nonRefundableTerms,
+        payment: { kind: "full" as const, acceptedMethods: ["card" as const] },
+      },
+    };
+    expect(simpleRoom(design, ownMethods)!.nonRefundable?.id).toBe("nonrefundable");
     // Breakfast with its own cancellation, or a price of its own, is another option too.
     expect(simpleRoom(design, { ...designTerms, breakfast: flexibleTerms(3) })!.breakfast).toBe(
       null,
@@ -391,6 +390,23 @@ describe("the simple card's edits", () => {
       ["breakfast", { kind: "full", acceptedMethods: ["card"] }],
     ]);
     expect(() => paymentEdits(simple, designTerms, [])).toThrow();
+    // Each rate's methods are its own (VAY-2282): the Flexible rate's go to the breakfast switch too.
+    expect(
+      rateMethodEdits(simple, designTerms, "flexible", ["pay_at_property"]).map((edit) => [
+        edit.offerId,
+        edit.terms.payment.acceptedMethods,
+      ]),
+    ).toEqual([
+      ["flexible", ["pay_at_property"]],
+      ["breakfast", ["pay_at_property"]],
+    ]);
+    expect(
+      rateMethodEdits(simple, designTerms, "non_refundable", ["bank_transfer"]).map((edit) => [
+        edit.offerId,
+        edit.terms.payment.acceptedMethods,
+      ]),
+    ).toEqual([["nonrefundable", ["bank_transfer"]]]);
+    expect(() => rateMethodEdits(simple, designTerms, "non_refundable", [])).toThrow();
   });
 
   it("adds a switch's option that the card then recognises", () => {

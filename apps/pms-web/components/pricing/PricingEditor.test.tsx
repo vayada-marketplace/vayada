@@ -4481,7 +4481,7 @@ it("keeps a switch's typed amount as typed, and an empty or wrong amount never l
   // Breakfast without a price only says so; the rest of the card stays usable.
   await act(async () => extraSwitch("With breakfast").props.onClick());
   expect(text()).toContain("Enter the breakfast price to offer it.");
-  expect(button("Non-refundable").props.disabled).toBe(false);
+  expect(extraSwitch("Non-refundable").props.disabled).toBe(false);
   await type("Breakfast price", "15");
   await act(async () => extraSwitch("With breakfast").props.onClick());
   expect(extraSwitch("With breakfast").props["aria-checked"]).toBe(true);
@@ -4490,10 +4490,9 @@ it("keeps a switch's typed amount as typed, and an empty or wrong amount never l
   expect(field("Breakfast price").props.value).toBe("1");
   await type("Breakfast price", "18");
   expect(field("Breakfast price").props.value).toBe("18");
-  // Non-refundable for the card waits while the non-refundable switch is on: guests would see two.
+  // The Non-refundable rate sits beside the Flexible rate, whose cancellation stays free (VAY-2282).
   await act(async () => extraSwitch("Non-refundable").props.onClick());
-  await click("Non-refundable");
-  expect(text()).toContain("First turn off “Non-refundable” under Extra choices for guests.");
+  expect(extraSwitch("Non-refundable").props["aria-checked"]).toBe(true);
   expect(button("Free cancellation").props["aria-pressed"]).toBe(true);
   // A discount that doesn't parse holds Save, but the switch still turns off.
   await type("How much cheaper, in percent", "abc");
@@ -4509,7 +4508,7 @@ it("keeps a switch's typed amount as typed, and an empty or wrong amount never l
 it("names a deposit and counts it as a kept setting, and prices by adult count from the typed price (VAY-2188)", async () => {
   await simpleCard({ kind: "deposit", basisPoints: 3000, balanceDaysBeforeArrival: 14, acceptedMethods: ["card"] });
   const text = () => JSON.stringify(view.toJSON());
-  expect(text()).toContain("Deposit 30%");
+  // The Flexible rate's "Paid when booking" names the deposit (VAY-2282).
   expect(text()).toContain("Deposit: 30% of the final total. Balance due 14 days before arrival.");
   expect(text()).toContain("This room has more settings than the simple view shows.");
   await act(async () => input().props.onChange({ target: { value: "120" } }));

@@ -39,6 +39,7 @@ export function StepExtras({
   room,
   simple,
   prices,
+  only,
   disabled,
   onAdd,
   onRemove,
@@ -47,6 +48,8 @@ export function StepExtras({
 }: {
   room: PricingConfiguration;
   simple: SimpleRoom;
+  /** Just this switch: the non-refundable one is a rate in step "Rates" (VAY-2282). */
+  only?: Kind;
   /** Each option's normal night for the sample guests (see `normalNight`). */
   prices: Readonly<Record<string, string | null>>;
   disabled: boolean;
@@ -189,8 +192,8 @@ export function StepExtras({
       className={`${width} ${extraField}`}
     />
   );
-  const showNonRefundable = simple.cancellation.kind === "free",
-    showBreakfast = simple.cancellation.kind !== "own";
+  const showNonRefundable = only !== "breakfast" && simple.cancellation.kind === "free",
+    showBreakfast = only !== "non_refundable" && simple.cancellation.kind !== "own";
   if (!showNonRefundable && !showBreakfast) return null;
   return (
     <StepCard

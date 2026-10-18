@@ -96,20 +96,21 @@ export function simpleRoom(room: Room, terms: Terms): SimpleRoom | null {
     mainTerms = terms[main.id]!,
     cancellation = simpleCancellation(mainTerms.cancellation);
   // A switch stands for an option based on the main option with nothing of its own: no date prices, the main
-  // option's stay rules and payment, and no options based on it (switching it off deletes it).
-  const plainLinked = (offer: Offer) =>
+  // option's stay rules (and payment, apart from the non-refundable rate, which has its own: VAY-2282), and no options
+  // based on it (switching it off deletes it).
+  const plainLinked = (offer: Offer, samePayment = true) =>
     offer.id !== main.id &&
     offer.price.kind === "linked" &&
     offer.price.parentId === main.id &&
     offer.price.dateOverrides.length === 0 &&
     offer.restrictions.kind === "inherit" &&
     !deleteBlocker(room, offer.id) &&
-    same(terms[offer.id]!.payment, mainTerms.payment);
+    (!samePayment || same(terms[offer.id]!.payment, mainTerms.payment));
   const nonRefundable =
     cancellation.kind === "free"
       ? (room.offers.find(
           (offer) =>
-            plainLinked(offer) &&
+            plainLinked(offer, false) &&
             offer.meal.kind === "room_only" &&
             offer.price.kind === "linked" &&
             offer.price.adjustment.kind === "percentage" &&
@@ -149,7 +150,9 @@ export function switchOption(
   room: Room,
   offerId: string,
   kind: "non_refundable" | "breakfast",
-  value: { percent: string } | { amount: string; basis: "room" | "person" },
+  value:
+    | { percent: string; methods?: readonly PricingPaymentMethod[] }
+    | { amount: string; basis: "room" | "person" },
   mainTerms: OptionTerms,
 ) {
   return presetOption(
@@ -160,7 +163,9 @@ export function switchOption(
       discount: "percent" in value ? value.percent : defaultDiscount,
       mealAmount: "amount" in value ? value.amount : "",
       mealBasis: "basis" in value ? value.basis : "room",
-      methods: [...(mainTerms.payment.acceptedMethods ?? [])],
+      methods: [
+        ...(("methods" in value && value.methods) || mainTerms.payment.acceptedMethods || []),
+      ],
     },
     mainTerms,
   );
@@ -201,6 +206,26 @@ export function cancellationEdits(
     offerId: offer.id,
     terms: { ...terms[offer.id]!, cancellation },
   }));
+}
+/** New terms for one rate's options (VAY-2282), accepting `methods`: the Flexible rate is the main option and the
+ * breakfast switch that follows it; the Non-refundable rate is its own option. */
+export function rateMethodEdits(
+  simple: SimpleRoom,
+  terms: Terms,
+  rate: "flexible" | "non_refundable",
+  methods: readonly PricingPaymentMethod[],
+): { offerId: string; terms: OptionTerms }[] {
+  if (!methods.length) throw new PricingError("pricing.error.paymentMethodRequired");
+  const offers = rate === "flexible" ? [simple.main, simple.breakfast] : [simple.nonRefundable];
+  return offers
+    .filter((offer): offer is Offer => !!offer)
+    .map((offer) => {
+      const current = terms[offer.id]!;
+      return {
+        offerId: offer.id,
+        terms: { ...current, payment: { ...current.payment, acceptedMethods: [...methods] } },
+      };
+    });
 }
 /** New terms for every option the card covers (main and both switches), accepting `methods`. */
 export function paymentEdits(
