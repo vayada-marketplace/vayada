@@ -43,20 +43,23 @@ function monthSummary(nights: CalendarNight[]): CalendarMonth["summary"] {
 
 // The editor rebuilds the room on every render; the year is worked out again only when something it shows changes.
 let lastYear: { key: string; months: CalendarMonth[] } | null = null;
-/** The twelve months of `year` ("YYYY") for one option and number of adults: the month view's nights, per month. */
+/** The twelve months of `year` ("YYYY") for one option and number of adults: the month view's nights, per month,
+ * without the sample stay (the Year view doesn't outline it). */
 export function calendarYear(
   room: PricingConfiguration,
   offerId: string,
   adults: number,
   year: string,
   today: string,
-  stay: { checkIn: string; checkOut: string },
 ): CalendarMonth[] {
-  const key = JSON.stringify([room, offerId, adults, year, today, stay]);
+  const key = JSON.stringify([room, offerId, adults, year, today]);
   if (lastYear?.key === key) return lastYear.months;
   const months = Array.from({ length: 12 }, (_, index) => {
     const month = `${year}-${String(index + 1).padStart(2, "0")}`;
-    const nights = calendarNights(room, offerId, month, adults, today, stay);
+    const nights = calendarNights(room, offerId, month, adults, today, {
+      checkIn: "",
+      checkOut: "",
+    });
     return { month, nights, summary: monthSummary(nights) };
   });
   lastYear = { key, months };
@@ -90,7 +93,7 @@ export function YearCalendar({
         const lead = (new Date(`${month}-01T00:00:00Z`).getUTCDay() + 6) % 7; // Monday first
         return (
           <div key={month} role="group" aria-label={title} className="min-w-0 space-y-1">
-            <div className="flex items-baseline justify-between gap-2">
+            <div className="flex flex-wrap items-baseline justify-between gap-x-2">
               <span className="text-[13px] font-semibold text-gray-900">{name}</span>
               {summary?.kind === "missing" ? (
                 <span className="text-[11px] font-medium text-red-600">
@@ -106,7 +109,7 @@ export function YearCalendar({
                       })}
                 </span>
               ) : summary ? (
-                <span className="text-[11px] font-medium text-gray-400">
+                <span className="text-[11px] font-medium text-gray-500">
                   {summary.kind === "notOpen"
                     ? t("pricing.calendar.notOpen")
                     : t("pricing.calendar.closed")}
@@ -158,7 +161,7 @@ function YearNight({
       ? "border-dashed border-red-300 bg-red-50 text-red-600"
       : night.kind === "closed"
         ? night.notOpen
-          ? "border-gray-100 bg-gray-50 text-gray-300"
+          ? "border-gray-100 bg-gray-50 text-gray-400"
           : "border-gray-300 bg-gray-200 text-gray-600"
         : night.season
           ? `${seasonTones[night.season.tone].year} text-gray-800`

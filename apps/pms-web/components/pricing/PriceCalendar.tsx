@@ -89,7 +89,7 @@ export function PriceCalendar({
     : 2;
   const months =
     room && view === "year" && wide
-      ? calendarYear(room, offerId, guests, month.slice(0, 4), today, stay)
+      ? calendarYear(room, offerId, guests, month.slice(0, 4), today)
       : null;
   const nights = room && !months ? calendarNights(room, offerId, month, guests, today, stay) : [];
   // The Year view has no minimum-stay badges, so its legend doesn't explain them.

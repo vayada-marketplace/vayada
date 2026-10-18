@@ -76,7 +76,7 @@ const stay = { checkIn: "2026-10-23", checkOut: "2026-10-25" };
 afterEach(() => vi.unstubAllGlobals());
 
 it("heads each month with its prices, or with the nights from today on that have no price (VAY-2284)", () => {
-  const months = calendarYear(room, "flex", 2, "2026", "2026-10-18", stay);
+  const months = calendarYear(room, "flex", 2, "2026", "2026-10-18");
   expect(months.map((month) => month.month)).toEqual(
     Array.from({ length: 12 }, (_, index) => `2026-${String(index + 1).padStart(2, "0")}`),
   );
@@ -99,13 +99,11 @@ it("heads each month with its prices, or with the nights from today on that have
     range("8500", "18000"),
   ]);
   // Unpriced nights in the past don't count; once they have all passed, the month shows its prices again.
-  expect(calendarYear(room, "flex", 2, "2026", "2026-10-28", stay)[9].summary).toEqual({
+  expect(calendarYear(room, "flex", 2, "2026", "2026-10-28")[9].summary).toEqual({
     kind: "missing",
     count: 4,
   });
-  expect(calendarYear(room, "flex", 2, "2026", "2026-11-15", stay)[9].summary).toEqual(
-    range("10000"),
-  );
+  expect(calendarYear(room, "flex", 2, "2026", "2026-11-15")[9].summary).toEqual(range("10000"));
 });
 
 let view: ReactTestRenderer;

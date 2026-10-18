@@ -685,10 +685,11 @@ test("shows the whole year and closes dates picked in the Year view (VAY-2284)",
     "true",
   );
   // Next year, so every date is still ahead.
-  await calendar.getByRole("button", { name: "Next year" }).click();
   const title = calendar.locator('[aria-live="polite"]');
   await expect(title).toHaveText(/^\d{4}$/);
-  const year = (await title.textContent())!;
+  const year = String(Number(await title.textContent()) + 1);
+  await calendar.getByRole("button", { name: "Next year" }).click();
+  await expect(title).toHaveText(year);
   const months = calendar.getByRole("group", { name: new RegExp(`^\\w+ ${year}$`) });
   await expect(months).toHaveCount(12);
   // Each month's lowest and highest price: Low season €80 and €100 standard, Fri & Sat +15%; High season €140.
