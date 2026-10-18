@@ -5,6 +5,7 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 import {
   executePricingCardRefund,
   MAX_ATTEMPTS,
+  retryPricingCardRefund,
   runPendingPricingCardRefunds,
   stagePricingCardRefund,
 } from "./pricingCardRefund.js";
@@ -334,6 +335,50 @@ describe.skipIf(!url)("pricing card refunds (VAY-2205)", () => {
       ).rows[0].later,
     ).toBe(true);
     expect((await f.state()).refundRows).toEqual([]);
+  });
+
+  it("asks again for a failed refund, same amount, only when the latest one failed", async () => {
+    const f = await paidCardStay(),
+      stripe = fakeStripe();
+    const retry = async (commandKey: string) => {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        const staged = await retryPricingCardRefund(client, {
+          propertyId: f.propertyId,
+          guestBookingId: f.guestBookingId,
+          commandKey,
+          occurredAt: new Date(),
+        });
+        await client.query("COMMIT");
+        return staged;
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        client.release();
+      }
+    };
+    const { commandId } = (await f.stage("3000"))!;
+    // Nothing failed yet: there is nothing to retry.
+    await expect(retry("retry-early")).rejects.toMatchObject({ code: "unavailable" });
+    stripe.state.next = "failed";
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    expect(await executePricingCardRefund(pool, stripe.provider, commandId)).toBe("failed");
+    const again = await retry("retry-1");
+    expect(again).toMatchObject({ amount: "70.00", currency: "EUR" });
+    expect(await retry("retry-1")).toEqual(again);
+    // The retry is now the live refund: another one is refused.
+    await expect(retry("retry-2")).rejects.toMatchObject({ code: "unavailable" });
+    stripe.state.next = "succeeded";
+    expect(await executePricingCardRefund(pool, stripe.provider, again.commandId)).toBe(
+      "succeeded",
+    );
+    vi.restoreAllMocks();
+    expect(await f.state()).toMatchObject({
+      payment: { status: "partially_refunded", refunded: "70.00" },
+      commands: [{ status: "failed" }, { status: "succeeded", amount: "70.00" }],
+    });
   });
 
   it("refuses a payment the hotel's account can't refund", async () => {
