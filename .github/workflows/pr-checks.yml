@@ -1018,6 +1018,7 @@ jobs:
           src/bookingWebEventsMigration.integration.test.ts
           src/bookingWebEventsLogBlanking.integration.test.ts
           src/bookingLookupAttemptLogBlanking.integration.test.ts
+          src/contactIntakeLogBlanking.integration.test.ts
           src/bookingAddonLeadTimeMigration.integration.test.ts
           src/productionMediaMigration.integration.test.ts
           src/productionCatalogWriters.integration.test.ts
