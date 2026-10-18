@@ -6079,6 +6079,60 @@ async function applyBookingMarkPaidCommandMutation(
           "confirmed/paid",
         );
   }
+  // VAY-2205: a pricing-v2 card deposit leaves the rest to pay at the property; the hotel records it
+  // here once paid, with Finance's commission on it, and the stay is paid in full.
+  if (
+    jsonObject(booking.bookingMetadata)["targetSource"] === "pricing_quote_draft" &&
+    booking.paymentMethod === "card" &&
+    booking.lifecycleStatus === "confirmed" &&
+    booking.paymentStatus === "partially_paid"
+  ) {
+    await recordPayment("pay_at_property");
+    const settled = await client.query(
+      `WITH booking_update AS (
+         UPDATE booking.guest_bookings
+            SET payment_status = 'paid', balance_amount = 0, updated_at = $3::timestamptz
+          WHERE property_id = $1::uuid AND id = $2::uuid
+            AND lifecycle_status = 'confirmed' AND payment_status = 'partially_paid'
+         RETURNING id
+       ),
+       status_event AS (
+         INSERT INTO booking.booking_status_events (
+           guest_booking_id, event_type, from_status, to_status, actor_type,
+           actor_user_id, public_visible, public_message, event_payload, occurred_at
+         )
+         SELECT id, 'guest_booking.payment_received', 'confirmed', 'confirmed', $4, $5::uuid,
+           TRUE, 'Remaining balance received.', $6::jsonb, $3::timestamptz
+         FROM booking_update
+       ),
+       summary AS (
+         UPDATE booking.direct_booking_summary_read_model summary
+            SET payment_status = 'paid',
+                amount_summary = jsonb_set(summary.amount_summary, '{balanceAmount}', '0'::jsonb),
+                projected_at = $3::timestamptz
+          WHERE summary.guest_booking_id = (SELECT id FROM booking_update)
+       )
+       SELECT id FROM booking_update`,
+      [
+        command.propertyId,
+        command.guestBookingId,
+        acceptedAt,
+        command.audit.actor.kind === "user" ? "property_user" : "system",
+        command.audit.actor.kind === "user" ? command.audit.actor.userId : null,
+        JSON.stringify({
+          commandId: command.commandId,
+          requestId: command.audit.requestId,
+          correlationId: command.audit.correlationId ?? command.audit.requestId,
+          paymentMethod: "pay_at_property",
+          fromPaymentStatus: "partially_paid",
+          toPaymentStatus: "paid",
+        }),
+      ],
+    );
+    return (settled.rowCount ?? settled.rows.length) === 0
+      ? invalidStatusTransition("confirmed/partially_paid", "confirmed/paid")
+      : { ok: true };
+  }
   const isPayPalPending =
     booking.paymentMethod === "paypal" && booking.lifecycleStatus === "pending_payment";
   const isAcceptedBankTransfer =

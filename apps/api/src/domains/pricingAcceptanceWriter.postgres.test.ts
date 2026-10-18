@@ -7,6 +7,7 @@ import { pricingDraftFixture } from "./pricingBookingDraft.fixtures.js";
 import { acceptanceFixture } from "./pricingAcceptanceHistory.fixtures.js";
 import { readPricingCheckInPlace } from "./pricingManualPaymentLead.js";
 import { writePricingAcceptance } from "./pricingAcceptanceWriter.js";
+import { previewPricingCardRefund } from "./pricingCardRefund.js";
 import {
   completePricingCardPayment,
   expirePricingCardBooking,
@@ -748,6 +749,85 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
         kept = BigInt(dueNowMinor);
       expect(await cents("retained_charge")).toBe((room * kept * 2n + total) / (total * 2n));
     } finally {
+      await stay.close();
+    }
+  });
+
+  it("records the rest of a card deposit paid at the property, once, without counting the deposit twice (VAY-2205)", async () => {
+    const stay = await paidDeposit();
+    const { dueLaterMinor } = stay.fixture.f.current.quote.evidence;
+    const rest = (Number(dueLaterMinor) / 100).toFixed(2);
+    const pmsPool = new pg.Pool({ connectionString: url, max: 2 });
+    const pms = createTargetPmsOperationsCommandRepository({
+      connectionString: url!,
+      pool: pmsPool,
+      readRepository: {
+        findReservationByGuestBookingId: async () => ({}),
+      } as unknown as PmsOperationsReadRepository,
+    });
+    const command = (): PmsBookingLifecycleCommand => ({
+      propertyId: stay.fixture.propertyId,
+      guestBookingId: stay.scope.bookingId,
+      commandId: randomUUID(),
+      idempotencyKey: randomUUID(),
+      audit: {
+        actor: { kind: "system", service: "apps/api" },
+        requestId: randomUUID(),
+        reason: "Rest paid at the hotel",
+        requestedAt: new Date().toISOString(),
+      },
+    });
+    try {
+      // The guest's confirmation says what the card paid and what is due at the hotel.
+      const deposit = (Number(stay.fixture.f.current.quote.evidence.dueNowMinor) / 100).toFixed(2);
+      const emails = (
+        await stay.fixture.observer.query(
+          "SELECT payload->>'text' AS text FROM platform.jobs WHERE property_id=$1 AND payload->>'recipientRole'='guest'",
+          [stay.fixture.propertyId],
+        )
+      ).rows.map((row) => row.text as string);
+      expect(emails.some((text) => text.includes(`Paid by card: ${deposit} EUR`))).toBe(true);
+      expect(emails.some((text) => text.includes(`Due at the hotel: ${rest} EUR`))).toBe(true);
+      // The balance is only the rest: the card deposit isn't taken off it a second time.
+      await expect(pms.markBookingPaid(command())).resolves.toMatchObject({ ok: true });
+      const state = (
+        await stay.fixture.observer.query(
+          `SELECT b.lifecycle_status,b.payment_status,b.balance_amount::text AS balance,
+             (SELECT string_agg(p.payment_method||':'||p.amount::text,',' ORDER BY p.payment_method)
+              FROM finance.payments p WHERE p.guest_booking_id=b.id AND p.status='paid') AS payments,
+             (SELECT count(*)::int FROM booking.booking_status_events e
+              WHERE e.guest_booking_id=b.id AND e.public_message='Remaining balance received.') AS events
+           FROM booking.guest_bookings b WHERE b.id=$1`,
+          [stay.scope.bookingId],
+        )
+      ).rows[0];
+      expect(state).toMatchObject({
+        lifecycle_status: "confirmed",
+        payment_status: "paid",
+        balance: "0.00",
+        events: 1,
+      });
+      expect(state.payments).toContain(`:${rest}`);
+      expect(state.payments).toMatch(/^card:/);
+      // Paid in full now: a second record is refused.
+      await expect(pms.markBookingPaid(command())).resolves.toMatchObject({
+        ok: false,
+        code: "invalid_status_transition",
+      });
+      // Part was paid at the property, so a cancel is the hotel's to settle: no automatic card
+      // refund for the guest online, and the PMS asks for a payment adjustment.
+      expect(
+        await previewPricingCardRefund(stay.fixture.observer, {
+          propertyId: stay.fixture.propertyId,
+          guestBookingId: stay.scope.bookingId,
+          retainedMinor: "0",
+        }),
+      ).toBeNull();
+      await expect(
+        stay.actions.preview(stay.scope, { action: "cancel", reason: "Overbooked" }),
+      ).rejects.toMatchObject({ code: "payment_adjustment_required" });
+    } finally {
+      await pmsPool.end();
       await stay.close();
     }
   });
