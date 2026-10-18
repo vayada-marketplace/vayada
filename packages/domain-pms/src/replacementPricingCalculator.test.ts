@@ -489,6 +489,29 @@ describe("replacement room-night calculator", () => {
       ),
     ).toMatchObject({ reason: "restriction" });
   });
+  it("prices and restricts a linked offer through a parent that is not sold (VAY-2285)", () => {
+    const c = fixture(),
+      policy = own();
+    if (policy.kind !== "own") throw new Error("fixture");
+    const flexibleOff = {
+      ...c,
+      offers: [{ ...c.offers[0], sale: "not_sold" as const }, c.offers[1]],
+    };
+    expect(total(flexibleOff, request(2, "nr")).totalMinor).toBe("11700");
+    const minimumThree = {
+      ...flexibleOff,
+      offers: [
+        {
+          ...flexibleOff.offers[0],
+          restrictions: { ...policy, rules: { ...policy.rules, minArrivalNights: 3 } },
+        },
+        c.offers[1],
+      ],
+    };
+    expect(
+      calculateReplacementRoomStay(minimumThree, { ...request(2, "nr"), checkOut: "2026-08-02" }),
+    ).toMatchObject({ reason: "restriction" });
+  });
   it("rounds each night, rejects zero and overflow, and rejects stale/missing evidence", () => {
     const tiny = calendar({ base: { mode: "flat", amountMinor: "5" } });
     expect(total(tiny, { ...request(1, "nr"), checkOut: "2026-08-02" }).totalMinor).toBe("10");

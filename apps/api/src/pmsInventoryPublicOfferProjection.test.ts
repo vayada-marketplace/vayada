@@ -226,7 +226,7 @@ describe("pricing-v2 public offer days", () => {
     open,
   });
 
-  function client(priced: boolean | "unreadable") {
+  function client(priced: boolean | "unreadable", pricing: object = configuration) {
     const calls: Array<{ text: string; values: readonly unknown[] }> = [];
     const query = async <T extends QueryResultRow>(
       text: string,
@@ -249,7 +249,7 @@ describe("pricing-v2 public offer days", () => {
             : []) as unknown as T[],
         );
       if (text.includes("FROM pms.pricing_v2_rooms"))
-        return rows([{ room_type_id: roomTypeId, configuration }] as unknown as T[]);
+        return rows([{ room_type_id: roomTypeId, configuration: pricing }] as unknown as T[]);
       if (text.includes('AS "stayDate"'))
         return rows([
           day("2026-08-15", 2),
@@ -289,6 +289,36 @@ describe("pricing-v2 public offer days", () => {
       Array(5).fill(2),
       Array(5).fill(null),
     ]);
+    const close = target.calls.find((call) => call.text === CLOSE_UNPRICED_PUBLIC_OFFERS)!;
+    expect(close.values).toEqual([propertyId, "2026-08-14T17:00:00.000Z", [key]]);
+  });
+
+  it("leaves offers off the booking page out and closes their days (VAY-2285)", async () => {
+    const flexibleOff = {
+      ...configuration,
+      offers: [
+        { ...configuration.offers[0], sale: "not_sold" },
+        {
+          ...configuration.offers[0],
+          id: "nr",
+          termsRevision: "terms-2",
+          price: {
+            kind: "linked",
+            parentId: "flex",
+            adjustment: { kind: "percentage", basisPoints: -1000 },
+            dateOverrides: [],
+          },
+          restrictions: { kind: "inherit" },
+        },
+      ],
+    };
+    const target = client(true, flexibleOff);
+    await projectPmsInventoryToPublicOffers(target, propertyId, new Date("2026-08-14T17:00:00Z"));
+    const key = `pricing-v2:${roomTypeId}:nr`;
+    const upsert = target.calls.find((call) => call.text === UPSERT_PRICED_PUBLIC_OFFERS)!;
+    expect(upsert.values[5]).toEqual(Array(5).fill(key));
+    // Season price minus 10% through the hidden Flexible offer, plus the meal.
+    expect(upsert.values[8]).toEqual(Array(5).fill("105.00"));
     const close = target.calls.find((call) => call.text === CLOSE_UNPRICED_PUBLIC_OFFERS)!;
     expect(close.values).toEqual([propertyId, "2026-08-14T17:00:00.000Z", [key]]);
   });

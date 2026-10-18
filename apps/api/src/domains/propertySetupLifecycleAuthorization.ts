@@ -10,10 +10,10 @@ export type PropertySetupLifecycleQueryExecutor = {
 };
 
 type ProductLifecycleAccess = Readonly<{
-  product: "marketplace" | "booking";
-  permission: "marketplace.collaboration.read" | "booking.settings.read";
-  resourceType: "hotel_profile" | "booking_hotel";
-  entitlementKey: "marketplace-hotel-profile" | "booking-engine";
+  product: "booking";
+  permission: "booking.settings.read";
+  resourceType: "booking_hotel";
+  entitlementKey: "booking-engine";
 }>;
 
 /** Rechecks the owner-specific permission, resource, and entitlement at read time. */

@@ -5,18 +5,13 @@ import {
   createPgHotelCatalogStep1Repository,
   lockHotelCatalogSetupScope,
 } from "./domains/hotelCatalogStep1Repository.js";
-import {
-  createPgMarketplaceHotelCollaborationPreferencesRepository,
-  lockMarketplaceHotelProfileForSetup,
-  readLockedMarketplaceHotelCollaborationPreferences,
-} from "./domains/marketplaceHotelCollaborationPreferencesRepository.js";
 
 const organizationId = "a4000000-0000-4000-8000-000000000001";
 const propertyId = "a4000000-0000-4000-8000-000000000002";
 const actorUserId = "a4000000-0000-4000-8000-000000000003";
 
 describe("owner setup reads with a SELECT-only database role", () => {
-  it("uses read-only SQL for the setup route's public Catalog and Marketplace readers", async () => {
+  it("uses read-only SQL for the setup route's public Catalog reader", async () => {
     const sql: string[] = [];
     const client = {
       async query(text: string) {
@@ -25,13 +20,6 @@ describe("owner setup reads with a SELECT-only database role", () => {
           throw Object.assign(new Error("permission denied for table properties"), {
             code: "42501",
           });
-        if (text.includes("FROM marketplace.marketplace_hotel_profiles profile"))
-          return { rows: [{ property_id: propertyId }], rowCount: 1 };
-        if (text.includes("FROM identity.product_entitlements"))
-          return {
-            rows: [{ status: "active", startsAt: null, expiresAt: null }],
-            rowCount: 1,
-          };
         return { rows: [], rowCount: 0 };
       },
       release() {},
@@ -41,22 +29,15 @@ describe("owner setup reads with a SELECT-only database role", () => {
       connectionString: "postgresql://test.invalid/test",
       pool,
     });
-    const preferences = createPgMarketplaceHotelCollaborationPreferencesRepository({
-      connectionString: "postgresql://test.invalid/test",
-      pool,
-    });
 
     await expect(catalog.getState({ organizationId, propertyId, actorUserId })).resolves.toBeNull();
-    await expect(
-      preferences.getHotelCollaborationPreferences({ organizationId, propertyId }),
-    ).resolves.toMatchObject({ outcome: "available" });
     expect(
       sql.filter((query) => query === "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY"),
-    ).toHaveLength(2);
+    ).toHaveLength(1);
     expect(sql.some((query) => query.includes("WHERE property.id = $2::uuid"))).toBe(true);
   });
 
-  it("runs the nested Marketplace owner readers without row locks", async () => {
+  it("runs the nested Catalog owner reader without row locks", async () => {
     const sql: string[] = [];
     const client = {
       async query(text: string) {
@@ -67,24 +48,10 @@ describe("owner setup reads with a SELECT-only database role", () => {
           });
         if (text.includes("FROM hotel_catalog.properties property"))
           return { rows: [{ propertyId }], rowCount: 1 };
-        if (text.includes("FROM marketplace.marketplace_hotel_profiles profile"))
-          return { rows: [{ property_id: propertyId }], rowCount: 1 };
-        if (text.includes("FROM identity.product_entitlements"))
-          return {
-            rows: [{ status: "active", startsAt: null, expiresAt: null }],
-            rowCount: 1,
-          };
         return { rows: [], rowCount: 0 };
       },
       release() {},
     };
-    const audit = {
-      requestedAt: new Date().toISOString(),
-      actor: { kind: "user" as const, userId: actorUserId },
-      requestId: "read-only-test",
-      correlationId: "read-only-test",
-    };
-
     await expect(
       lockHotelCatalogSetupScope(
         client as never,
@@ -92,24 +59,7 @@ describe("owner setup reads with a SELECT-only database role", () => {
         true,
       ),
     ).resolves.toBe(true);
-    await expect(
-      lockMarketplaceHotelProfileForSetup(
-        client as never,
-        { organizationId, propertyId, audit },
-        new Date(),
-        true,
-      ),
-    ).resolves.toBe(true);
-    await expect(
-      readLockedMarketplaceHotelCollaborationPreferences(
-        client as never,
-        { organizationId, propertyId },
-        new Date(),
-        true,
-      ),
-    ).resolves.toMatchObject({ outcome: "available" });
     expect(sql.some((query) => query.includes("WHERE property.id = $2::uuid"))).toBe(true);
-    expect(sql.some((query) => query.includes("WHERE profile.property_id = $2::uuid"))).toBe(true);
   });
 
   it("keeps Booking publication review scoped without row-lock privileges", async () => {

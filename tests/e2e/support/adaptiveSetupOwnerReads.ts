@@ -1,6 +1,5 @@
 import { expect, type Page } from "@playwright/test";
 import { createFinancePaymentReadinessSnapshot } from "@vayada/domain-finance";
-import { createMarketplaceHotelCollaborationPreferencesEvidence } from "@vayada/domain-marketplace";
 import {
   PMS_OPERATING_CALENDAR_CONTRACT_VERSION,
   PMS_PRICING_CONTRACT_VERSION,
@@ -45,14 +44,6 @@ export async function mockAdaptiveSetupOwnerReads(page: Page) {
       },
     },
     [`/api/hotel-setup/properties/${propertyId}/profile`]: propertyProfile(),
-    [`/api/marketplace/properties/${propertyId}/hotel-collaboration-preferences`]: {
-      contractVersion: "marketplace-hotel-collaboration-preferences.v1",
-      propertyId,
-      revision: 0,
-      sourceRevision: "preferences:0",
-      preferences: null,
-      readiness: createMarketplaceHotelCollaborationPreferencesEvidence(propertyId, 0, null),
-    },
     [`/api/booking/properties/${propertyId}/booking-design`]: {
       contractVersion: "booking-design.v1",
       propertyId,

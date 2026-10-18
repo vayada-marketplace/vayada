@@ -646,6 +646,13 @@ test("sets the first price of an unpriced room with one Save, next to the other 
   const assertHealthy = watchPageHealth(page, testInfo);
   await prices(page, LAKE);
   await expect(main(page).getByText("Lake Loft has no price yet", { exact: false })).toBeVisible();
+  // VAY-2280: the calendar shows the nights waiting for a price, beside "Start with one price".
+  await expect(main(page).getByRole("region", { name: "Start with one price" })).toBeVisible();
+  await expect(
+    main(page)
+      .getByRole("region", { name: "Prices by date" })
+      .getByRole("img", { name: /^1 \w+ \d{4}, no price$/ }),
+  ).toBeVisible();
   await expect(main(page).getByLabel("Room type")).toHaveCount(0);
   // Save without a price names what is missing; nothing else needs an answer.
   await main(page).getByRole("button", { name: "Save prices" }).click();
@@ -759,4 +766,72 @@ test("shows one stale-prices warning, a plain Price-free main window and a retry
   await main(page).getByRole("button", { name: "Edit what the price includes" }).click();
   await expect(dialog(page).getByRole("heading", { name: "Meals" })).toBeVisible();
   await expect(dialog(page).getByRole("heading", { name: "Price", exact: true })).toHaveCount(0);
+});
+
+test("shows the whole year and closes dates picked in the Year view (VAY-2284)", async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openPms(page);
+  const pricing = await mockPricing(page, publicationOf(3, [designRoom(3), complexRoom(3)]));
+  const assertHealthy = watchPageHealth(page, testInfo);
+  await prices(page, DELUXE);
+  const calendar = main(page).getByRole("region", { name: "Prices by date" });
+  const toggle = calendar.getByRole("group", { name: "Calendar view" });
+  await toggle.getByRole("button", { name: "Year" }).click();
+  await expect(toggle.getByRole("button", { name: "Year" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  // Next year, so every date is still ahead.
+  const title = calendar.locator('[aria-live="polite"]');
+  await expect(title).toHaveText(/^\d{4}$/);
+  const year = String(Number(await title.textContent()) + 1);
+  await calendar.getByRole("button", { name: "Next year" }).click();
+  await expect(title).toHaveText(year);
+  const months = calendar.getByRole("group", { name: new RegExp(`^\\w+ ${year}$`) });
+  await expect(months).toHaveCount(12);
+  // Each month's lowest and highest price: Low season €80 and €100 standard, Fri & Sat +15%; High season €140.
+  await expect(months.nth(0)).toContainText("€80 to €92");
+  await expect(months.nth(3)).toContainText("€100 to €115");
+  await expect(months.nth(6)).toContainText("€140 to €161");
+  // Four months in a row at 1440px (the approved board), inside the card.
+  const tops = await months.evaluateAll((nodes) =>
+    nodes.map((node) => Math.round(node.getBoundingClientRect().top)),
+  );
+  expect(new Set(tops.slice(0, 4)).size).toBe(1);
+  expect(tops[4]).toBeGreaterThan(tops[0]);
+  expect(await calendar.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
+
+  // Click a date, then a second one: the side panel closes everything in between.
+  await calendar.getByRole("button", { name: new RegExp(`^10 March ${year}, €`) }).click();
+  await calendar.getByRole("button", { name: new RegExp(`^12 March ${year}, €`) }).click();
+  const panel = main(page).getByRole("region", { name: "Picked nights" });
+  await expect(panel.getByText("3 nights selected")).toBeVisible();
+  await panel.getByRole("button", { name: "Close these nights" }).click();
+  for (const day of [10, 11, 12])
+    await expect(
+      calendar.getByRole("button", { name: new RegExp(`^${day} March ${year}, €\\d+, closed`) }),
+    ).toHaveAttribute("aria-pressed", "true");
+  await expect(calendar.getByText("Closed on this date")).toBeVisible();
+  await main(page).getByRole("button", { name: "Save prices" }).click();
+  await expect(main(page).getByText("Prices saved.", { exact: false })).toBeVisible();
+  const deluxe = (pricing.publishes[0].snapshot.rooms as Room[]).find(
+    (value) => value.roomTypeId === DELUXE,
+  )!;
+  expect(deluxe.offers[0].restrictions.dates).toEqual(
+    [10, 11, 12].map((day) => ({
+      date: `${year}-03-${day}`,
+      rules: rules(2, { stopSell: true }),
+    })),
+  );
+
+  // Phones get the month view only (the approved 390px board): the toggle hides and the picked month shows.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(toggle).toBeHidden();
+  await expect(title).toHaveText(`March ${year}`);
+  await expect(months).toHaveCount(0);
+  for (const element of [calendar, main(page)])
+    expect(await element.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
+  await assertHealthy();
 });

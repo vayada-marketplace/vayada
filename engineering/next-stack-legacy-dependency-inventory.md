@@ -26,8 +26,10 @@ Audited next-stack surfaces:
 - `next-booking-admin` (`apps/booking-admin`)
 - `next-booking` (`apps/booking-web`)
 - `next-admin` (`apps/vayada-admin`)
-- `next-marketplace` (`apps/marketplace-web`)
-- `next-affiliate` (`apps/affiliate-dashboard`)
+- `next-marketplace` (`apps/marketplace-web`), retired: the app and its auth surface were
+  removed (VAY-2270, VAY-2271), so entry 16 below is history
+- `next-affiliate` (`apps/affiliate-dashboard`), retired (see
+  [affiliate portal source retirement](affiliate-portal-retirement.md))
 
 Out of scope for this inventory: changing customer-facing normal production
 routes, deleting compatibility code, or migrating callers. This document records

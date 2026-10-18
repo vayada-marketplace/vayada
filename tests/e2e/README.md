@@ -229,11 +229,11 @@ npm --workspace vayada-api run test -- src/authSession.test.ts
 
 ## First-Party Auth Regressions
 
-`tests/e2e/first-party-auth` is the focused regression suite for the four
-migrated browser surfaces. It covers password login, signup and recovery where
-available, session refresh, CSRF, logout, app-local Google callback state,
-Marketplace signup-to-onboarding, cross-app handoff, stale-cookie cleanup, and
-production routing guards. Chromium runs with third-party-cookie phaseout
+`tests/e2e/first-party-auth` is the focused regression suite for the three
+migrated browser surfaces: Booking Admin, PMS and Vayada Admin. It covers
+password login, signup and recovery where available, session refresh, CSRF,
+logout, app-local Google callback state, cross-app handoff, stale-cookie
+cleanup, and production routing guards. Chromium runs with third-party-cookie phaseout
 enabled, and the browser flows assert that auth requests and cookies stay on
 the current frontend origin.
 

@@ -123,10 +123,8 @@ export async function mockPropertySetupRoute(
 
 function activeStepIds(selectedTracks: SetupTrack[]): PropertySetupStepId[] {
   const hotelOperations = selectedTracks.includes("hotel_operations");
-  const creatorMarketplace = selectedTracks.includes("creator_marketplace");
   return [
     "present_hotel",
-    ...(creatorMarketplace ? (["marketplace_preferences"] as const) : []),
     ...(hotelOperations
       ? ([
           "booking_design",
@@ -143,13 +141,11 @@ function activeStepIds(selectedTracks: SetupTrack[]): PropertySetupStepId[] {
 
 function ownerDomainFor(
   stepId: PropertySetupStepId,
-): "hotel_catalog" | "marketplace" | "booking" | "pms" | "finance" | "distribution" {
+): "hotel_catalog" | "booking" | "pms" | "finance" | "distribution" {
   switch (stepId) {
     case "present_hotel":
     case "review":
       return "hotel_catalog";
-    case "marketplace_preferences":
-      return "marketplace";
     case "booking_design":
     case "guest_experience":
       return "booking";
