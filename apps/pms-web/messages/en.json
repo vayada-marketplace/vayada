@@ -2432,7 +2432,7 @@
   "pricing.calendar.legend.own": "Own price",
   "pricing.calendar.legend.noArrival": "No arrivals",
   "pricing.calendar.legend.noPrice": "No price: guests can't book",
-  "pricing.calendar.legend.minNights": "3+ nts = minimum stay for arrivals that night",
+  "pricing.calendar.legend.minNights": "{count}+ nts = minimum stay for arrivals that night",
   "pricing.steps.more.check": "Check a stay",
   "pricing.steps.first.title": "Set this room's prices",
   "pricing.steps.first.intro": "Answer three questions. Seasons, weekend prices and more options come right after.",

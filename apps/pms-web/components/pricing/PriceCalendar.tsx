@@ -375,7 +375,9 @@ function Legend({
       ),
     nights.some((night) => night.minNights > 1) && (
       <li key="min" className="hidden text-gray-500 md:list-item">
-        {t("pricing.calendar.legend.minNights")}
+        {t("pricing.calendar.legend.minNights", {
+          count: nights.find((night) => night.minNights > 1)?.minNights ?? 2,
+        })}
       </li>
     ),
   ].filter(Boolean);

@@ -2446,7 +2446,7 @@
   "pricing.calendar.legend.own": "Eigener Preis",
   "pricing.calendar.legend.noArrival": "Keine Anreise",
   "pricing.calendar.legend.noPrice": "Kein Preis: Gäste können nicht buchen",
-  "pricing.calendar.legend.minNights": "ab 3 N. = Mindestaufenthalt bei Anreise an diesem Tag",
+  "pricing.calendar.legend.minNights": "ab {count} N. = Mindestaufenthalt bei Anreise an diesem Tag",
   "pricing.steps.more.check": "Aufenthalt prüfen",
   "pricing.steps.first.title": "Preise für dieses Zimmer festlegen",
   "pricing.steps.first.intro": "Beantworten Sie drei Fragen. Saisons, Wochenendpreise und weitere Optionen folgen direkt danach.",
