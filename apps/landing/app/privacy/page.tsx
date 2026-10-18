@@ -484,6 +484,19 @@ export default function PrivacyPage() {
                   you.
                 </p>
               </div>
+
+              <div className="mt-6">
+                <h3 className={H3}>E. Support Requests from the Apps</h3>
+                <p>
+                  When you send a support request or bug report from Booking Admin or the PMS, we
+                  store your message, the request type, the app and page you sent it from, your
+                  name, email address and user ID, and your account&apos;s ID and name, and look up
+                  the names of the hotels in your account. We handle it like a contact form inquiry:
+                  it is emailed to our team through Resend, arrives in our Google Workspace
+                  mailboxes, and is deleted from our database 90 days after you send it (Article
+                  6(1) lit. b GDPR, to help you use the Services).
+                </p>
+              </div>
             </section>
 
             <section id="booking-guests" className="mt-12 scroll-mt-24">
