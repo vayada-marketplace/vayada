@@ -1,5 +1,5 @@
 import React from "react";
-import { act, create, type ReactTestRenderer } from "react-test-renderer";
+import { act, create, type ReactTestInstance, type ReactTestRenderer } from "react-test-renderer";
 import { expect, it, vi } from "vitest";
 import type { PricingConfiguration } from "@vayada/domain-pms/replacement-pricing";
 import { NightPanel } from "./NightPanel";
@@ -146,10 +146,10 @@ const mount = (selection: { from: string; to: string } | null) =>
     );
   });
 const text = () => JSON.stringify(view.toJSON());
+const textOf = (node: ReactTestInstance): string =>
+  node.children.map((child) => (typeof child === "string" ? child : textOf(child))).join("");
 const button = (label: string) =>
-  view.root.findAll(
-    (node) => node.type === "button" && JSON.stringify(node.children).includes(label),
-  )[0];
+  view.root.findAll((node) => node.type === "button" && textOf(node).includes(label))[0];
 
 it("shows a picked night's prices and changes it from the panel (VAY-2280)", () => {
   mount(null);
