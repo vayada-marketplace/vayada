@@ -742,7 +742,10 @@ Since VAY-2285 an offer can be kept off the booking page (`sale`: `channels_only
 stay prices and the booking page publication leave it out, and a guest quote or
 acceptance for it is refused, while the hotel's date change still reprices a booking
 already on it. A `not_sold` offer stays in the room as the price source of offers
-linked to it, and every room keeps at least one booking-page offer.
+linked to it, and every room keeps at least one booking-page offer. In the PMS it keeps
+naming the bookings already on it but is not offered for new ones. Pricing-v2 offers
+are not delivered to channels yet; once they are, a `not_sold` offer must stay closed
+there.
 
 Since VAY-2188 each catalogue offer also carries a short cancellation summary from
 its current terms: non-refundable, free until a number of days before arrival, or a
