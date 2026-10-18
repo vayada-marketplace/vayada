@@ -15,6 +15,7 @@ import {
   weekendChoice,
   type OptionTerms,
 } from "./stepPricing";
+import { seasonRules } from "./nightActions";
 
 /** The simple Prices card (VAY-2188): a lens over the same pricing-v2 room and terms. It reads the main option, its
  * cancellation and the two options its switches stand for; everything else is listed under More options, unchanged.
@@ -290,8 +291,9 @@ export function onePriceAgain(room: Room): Room | null {
 
 /** Whether the room has settings the card's top doesn't show (other options, prices by guests, own cancellation or
  * weekday rules, month prices, stay rules for periods that are no season): the card then says they are kept.
- * Single-date prices and date stay rules show in "Prices by date" and its night panel, closed periods in "When guests
- * can book" and a season's minimum stay in its row (VAY-2280), so they don't count. */
+ * Single-date prices and a date's closing, arrival rule and minimum stay show in "Prices by date" and its night panel,
+ * closed periods in "When guests can book" and a season's minimum stay in its row (VAY-2280), so they don't count.
+ * A date's own "no departures" or maximum stay (unlike its season's) shows nowhere on the calendar, so it does. */
 export function hasKeptSettings(room: Room, simple: SimpleRoom): boolean {
   const { main } = simple;
   const calendar = main.price.kind === "independent" ? main.price.calendar : null;
@@ -304,6 +306,13 @@ export function hasKeptSettings(room: Room, simple: SimpleRoom): boolean {
     otherWeekdays(main).length > 0 ||
     weekendChoice(main) === "other" ||
     !restrictions ||
+    restrictions.dates.some(({ date, rules }) => {
+      const base = seasonRules(main, date);
+      return (
+        rules.closedToDeparture !== base.closedToDeparture ||
+        rules.maxStayNights !== base.maxStayNights
+      );
+    }) ||
     restrictions.seasons.some(
       (rule) =>
         !rule.rules.stopSell &&
