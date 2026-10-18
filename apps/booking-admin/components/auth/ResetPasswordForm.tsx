@@ -115,7 +115,7 @@ function ResetPasswordFormInner({
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-5">
+    <form method="post" onSubmit={handleSubmit} className="space-y-5">
       {/* New Password */}
       <div>
         <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1.5">

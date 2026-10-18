@@ -293,11 +293,7 @@ export default function InviteCodesPage() {
               </label>
               {prepareData && (
                 <div className="mt-4">
-                  <PreparedHotelEditor
-                    value={preparedData}
-                    onChange={setPreparedData}
-                    allowRooms
-                  />
+                  <PreparedHotelEditor value={preparedData} onChange={setPreparedData} allowRooms />
                 </div>
               )}
             </section>
@@ -494,8 +490,9 @@ function InviteCreated({ invite, onDone }: { invite: InviteCode; onDone: () => v
         </div>
         <h1 className="text-xl font-bold text-gray-900">Hotel invite created</h1>
         <p className="mt-2 text-sm text-gray-500">
-          Share this code with {invite.identity?.email}. They enter it on the Marketplace invitation
-          page, then continue through the {formatSetupRoute(invite.selectedTracks)} route.
+          Share this code with {invite.identity?.email}. They enter it on the Booking Admin
+          invitation page, then continue through the {formatSetupRoute(invite.selectedTracks)}{" "}
+          route.
         </p>
         <div className="my-6 rounded-xl border border-gray-200 bg-gray-50 p-5">
           <p className="break-all font-mono text-xl font-bold tracking-wider text-gray-900 sm:text-2xl">

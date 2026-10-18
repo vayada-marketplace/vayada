@@ -68,7 +68,7 @@ function LoginContent() {
           <p className="text-[13px] text-gray-500 mt-1">Sign in to access the admin panel</p>
         </div>
 
-        <form onSubmit={handleLogin} className="space-y-5">
+        <form method="post" onSubmit={handleLogin} className="space-y-5">
           {sessionExpired && (
             <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-4">
               <p className="text-sm font-medium text-yellow-800">
