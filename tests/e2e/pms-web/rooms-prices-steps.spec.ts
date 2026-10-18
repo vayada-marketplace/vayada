@@ -200,11 +200,16 @@ const publicationOf = (revision: number, rooms: Room[]) => ({
 });
 
 /** An in-memory pricing-v2 store: published rooms, terms per offer (saved through drafts), and every publish. */
+/** Every option's stored payment, unless a test gives another. */
+const storedPayment: Record<string, unknown> = {
+  kind: "full",
+  acceptedMethods: ["card", "pay_at_property"],
+};
 async function mockPricing(
   page: Page,
   initial: ReturnType<typeof publicationOf> | null,
   readyMethods: ("bank_transfer" | "paypal")[] = [],
-  { cardReady = false } = {},
+  { cardReady = false, payment = storedPayment } = {},
 ) {
   const terms = new Map<string, Record<string, unknown>>([
     ["flexible", { revision: TERMS, cancellation: flexible }],
@@ -251,7 +256,7 @@ async function mockPricing(
         offerId,
         revision: saved.revision,
         cancellation: saved.cancellation,
-        payment: { kind: "full", acceptedMethods: ["card", "pay_at_property"] },
+        payment,
       });
     }
     if (offerTerms && method === "PUT") {
@@ -847,8 +852,10 @@ test("offers Card online on both rates once the booking page can take card (VAY-
   page,
 }, testInfo) => {
   await openPms(page);
+  // The rates take only pay at property, so Card online shows because card is ready, not because a rate has it.
   await mockPricing(page, publicationOf(3, [designRoom(3), complexRoom(3)]), [], {
     cardReady: true,
+    payment: { kind: "full", acceptedMethods: ["pay_at_property"] },
   });
   const assertHealthy = watchPageHealth(page, testInfo);
   await prices(page, DELUXE);
