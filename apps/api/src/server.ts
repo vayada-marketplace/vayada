@@ -192,6 +192,10 @@ import {
   startBookingPublicationWorker,
 } from "./domains/bookingPublicationProductionRuntime.js";
 import { runPendingPricingCardRefunds } from "./domains/pricingCardRefund.js";
+import {
+  createPricingCardReconciliationAlert,
+  reconcilePricingCardPayments,
+} from "./domains/pricingCardReconciliation.js";
 import { createPricingCardReadinessReader } from "./domains/pricingCardReadiness.js";
 import { createFinanceManualPaymentReadinessReader } from "./domains/financeManualPaymentReadiness.js";
 import { createTargetFinanceBillingConfigReadPort } from "./domains/financeBillingConfigReadModel.js";
@@ -2912,6 +2916,42 @@ const runPricingCardRefunds = () => {
 const pricingCardRefundTimer = setInterval(runPricingCardRefunds, 60_000);
 pricingCardRefundTimer.unref();
 
+// VAY-2205: a daily read-only check of pricing-v2 card payments and refunds against Stripe; each
+// difference is logged (ids only) and emailed to the pricing alert recipient at most once a day.
+const pricingCardReconciliationAlert =
+  config.pricingPublicationFreshnessAlertEmail && config.bookingEmailDelivery
+    ? createPricingCardReconciliationAlert({
+        to: config.pricingPublicationFreshnessAlertEmail,
+        delivery: createResendBookingEmailDelivery(config.bookingEmailDelivery),
+      })
+    : undefined;
+let activePricingCardReconciliation: Promise<void> | undefined;
+const runPricingCardReconciliation = () => {
+  if (!config.backgroundWorkersEnabled || !stripeBookingPaymentProvider) return;
+  if (activePricingCardReconciliation) return;
+  activePricingCardReconciliation = reconcilePricingCardPayments(
+    propertySetupOwnerPool,
+    stripeBookingPaymentProvider,
+  )
+    .then(async ({ payments, refunds, mismatches }) => {
+      app.log[mismatches.length ? "warn" : "info"](
+        { payments, refunds, mismatches },
+        "Pricing card reconciliation",
+      );
+      await pricingCardReconciliationAlert?.(mismatches).catch((error: unknown) =>
+        app.log.warn({ err: error }, "Pricing card reconciliation alert failed"),
+      );
+    })
+    .catch((error: unknown) => app.log.warn({ err: error }, "Pricing card reconciliation failed"))
+    .finally(() => {
+      activePricingCardReconciliation = undefined;
+    });
+};
+const pricingCardReconciliationTimer = setInterval(runPricingCardReconciliation, 86_400_000);
+pricingCardReconciliationTimer.unref();
+const pricingCardReconciliationStart = setTimeout(runPricingCardReconciliation, 300_000);
+pricingCardReconciliationStart.unref();
+
 const pmsInboxDeliveryWorker =
   config.backgroundWorkersEnabled && pmsInboxDeliveryStore && pmsInboxDeliveryPool
     ? startPmsInboxDeliveryWorker({
@@ -2970,9 +3010,12 @@ app.addHook("preClose", async () => {
 app.addHook("onClose", async () => {
   clearInterval(bookingLifecycleTimer);
   clearInterval(pricingCardRefundTimer);
+  clearInterval(pricingCardReconciliationTimer);
+  clearTimeout(pricingCardReconciliationStart);
   if (bookingEmailDeliveryTimer) clearInterval(bookingEmailDeliveryTimer);
   await activeBookingLifecycleRun;
   await activePricingCardRefundRun;
+  await activePricingCardReconciliation;
   await activeBookingEmailDelivery;
   await bookingLifecycleStore.close();
   await pmsInboxDeliveryStore?.close();

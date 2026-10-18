@@ -42,6 +42,7 @@ import {
   type StagedPricingCardRefund,
 } from "./pricingCardRefund.js";
 import type { StripeBookingPaymentProvider } from "./stripeBookingPayments.js";
+import { recordPricingRetainedRevenue } from "./pricingRetainedRevenue.js";
 
 export type HostActionRequest = {
   action: HostBookingAction;
@@ -606,6 +607,16 @@ export function createBookingHostActions(config: {
             fingerprint: context.fingerprint,
             recognizedOn: bookingOwner.propertyDate(state.property.timezone, at),
             required: true,
+          });
+        // What the hotel keeps of a paid card stay stays revenue on its nights (VAY-2205).
+        const cardRefund = state.impact.cardRefund;
+        if (cardRefund && !state.dates && !state.pricingChange)
+          await recordPricingRetainedRevenue(client, {
+            propertyId: scope.propertyId,
+            guestBookingId: scope.bookingId,
+            fingerprint: context.fingerprint,
+            keptMinor: BigInt(cardRefund.paidMinor) - BigInt(cardRefund.refundMinor),
+            paidMinor: BigInt(cardRefund.paidMinor),
           });
         // Nothing consumes pms.reservation.* handoffs for pricing-v2 stays; a cancel or reject
         // frees their inventory and assignments above (VAY-2100).
