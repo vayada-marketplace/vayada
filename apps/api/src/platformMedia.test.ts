@@ -75,21 +75,15 @@ const uploadContractCases = JSON.parse(
 const propertyGalleryCase = contractCase("property-gallery-upload-session");
 const propertyGalleryBatchCase = contractCase("property-gallery-batch-upload-session");
 const propertyTargetDenyCase = contractCase("property-gallery-deny-unresolved-property-target");
-const privateChatVisibilityCase = contractCase("private-chat-attachment-rejects-public-visibility");
 const propertyHeroPdfCase = contractCase("property-hero-rejects-pdf");
 const pmsRoomTypeMediaCase = contractCase("pms-room-type-media-upload-session");
 const pmsImportSourceImageCase = contractCase("pms-import-source-image-job");
-const marketplaceCreatorProfileCase = contractCase("marketplace-creator-profile-upload-session");
-const marketplaceOfferMediaCase = contractCase("marketplace-offer-media-upload-session");
 const allMediaPurposes: readonly PlatformMediaPurpose[] = [
   "identity.user.profile_image",
   "booking.header_logo",
   "property.hero_image",
   "property.gallery_image",
   "property.logo",
-  "marketplace.offer.media",
-  "marketplace.creator.profile_image",
-  "marketplace.collaboration_chat.attachment",
   "finance.expense.receipt",
   "pms.room_type.media",
   "pms.messaging.attachment",
@@ -487,7 +481,7 @@ describe("platform media upload routes", () => {
 
     const app = buildMediaApp({
       repository,
-      enabledPurposes: ["identity.user.profile_image", "marketplace.creator.profile_image"],
+      enabledPurposes: ["identity.user.profile_image"],
     });
 
     const createDisabled = await injectJson(app, {
@@ -1479,150 +1473,40 @@ describe("platform media upload routes", () => {
     expect(repository.auditEvents).toHaveLength(1);
   });
 
-  it("rejects public visibility for private-only chat attachments", async () => {
-    const app = buildMediaApp({
-      organizationKind: "creator_workspace",
-      permissions: ["marketplace.collaboration.write"],
-      resources: [
-        {
-          product: "marketplace",
-          resourceType: "creator_profile",
-          resourceId: "creator_profile_lina",
-          relationship: "owner",
-        },
-      ],
-    });
-
-    const response = await injectJson(app, {
-      method: "POST",
-      url: privateChatVisibilityCase.request.path,
-      headers: { authorization: "Bearer valid-token" },
-      payload: privateChatVisibilityCase.request.body,
-    });
-
-    expect(response.statusCode).toBe(privateChatVisibilityCase.expected.status);
-    expect((response.body as ErrorResponse).code).toBe(
-      privateChatVisibilityCase.expected.errorCode,
-    );
-  });
-
-  it.each([
-    {
-      name: "creator participant",
-      organizationKind: "creator_workspace" as const,
-      resource: {
-        product: "marketplace" as const,
-        resourceType: "creator_profile" as const,
-        resourceId: "creator_profile_lina",
-        relationship: "owner" as const,
-      },
-      resources: [
-        {
-          product: "marketplace" as const,
-          resourceType: "creator_profile" as const,
-          resourceId: "creator_profile_lina",
-          relationship: "owner" as const,
-        },
-      ],
-      expectedStatus: 201,
-    },
-    {
-      name: "hotel participant with profile and offer links",
-      organizationKind: "hotel_group" as const,
-      resource: {
-        product: "marketplace" as const,
-        resourceType: "marketplace_offer" as const,
-        resourceId: "offer_alpenrose",
-        relationship: "operator" as const,
-      },
-      resources: [
-        {
-          product: "marketplace" as const,
-          resourceType: "hotel_profile" as const,
-          resourceId: "hotel_profile_alpenrose",
-          relationship: "owner" as const,
-        },
-        {
-          product: "marketplace" as const,
-          resourceType: "marketplace_offer" as const,
-          resourceId: "offer_alpenrose",
-          relationship: "operator" as const,
-        },
-      ],
-      expectedStatus: 201,
-    },
-    {
-      name: "hotel missing its profile-owner link",
-      organizationKind: "hotel_group" as const,
-      resource: {
-        product: "marketplace" as const,
-        resourceType: "marketplace_offer" as const,
-        resourceId: "offer_alpenrose",
-        relationship: "operator" as const,
-      },
-      resources: [
-        {
-          product: "marketplace" as const,
-          resourceType: "marketplace_offer" as const,
-          resourceId: "offer_alpenrose",
-          relationship: "operator" as const,
-        },
-      ],
-      expectedStatus: 403,
-    },
-  ])("enforces exact chat-write upload policy for $name", async (testCase) => {
-    const app = buildMediaApp({
-      organizationKind: testCase.organizationKind,
-      permissions: ["marketplace.collaboration.write"],
-      resources: testCase.resources,
-    });
-    const response = await injectJson(app, {
-      method: "POST",
-      url: "/api/media/upload-sessions",
-      headers: { authorization: "Bearer valid-token" },
-      payload: {
-        ...privateChatVisibilityCase.request.body,
-        visibility: "private",
-        resource: {
-          product: testCase.resource.product,
-          resourceType: testCase.resource.resourceType,
-          resourceId: testCase.resource.resourceId,
-          targetResourceId: "collaboration-source-001",
-        },
-      },
-    });
-
-    expect(response.statusCode).toBe(testCase.expectedStatus);
-  });
-
   it("marks private media finalize and replay responses private and authorization-varying", async () => {
     const repository = createInMemoryPlatformMediaRepository();
     const app = buildMediaApp({
       repository,
-      organizationKind: "creator_workspace",
-      permissions: ["marketplace.collaboration.write"],
+      permissions: ["pms.finance.manage"],
       resources: [
         {
-          product: "marketplace",
-          resourceType: "creator_profile",
-          resourceId: "creator_profile_lina",
-          relationship: "owner",
+          product: "pms",
+          resourceType: "pms_property",
+          resourceId: financePropertyId,
+          relationship: "finance_manager",
         },
       ],
+      entitlements: [
+        financeEntitlement("property-management"),
+        financeEntitlement("module:financials"),
+      ],
+      enabledPurposes: ["finance.expense.receipt"],
     });
     const create = await injectJson(app, {
       method: "POST",
       url: "/api/media/upload-sessions",
       headers: { authorization: "Bearer valid-token" },
       payload: {
-        ...privateChatVisibilityCase.request.body,
+        purpose: "finance.expense.receipt",
         visibility: "private",
         resource: {
-          product: "marketplace",
-          resourceType: "creator_profile",
-          resourceId: "creator_profile_lina",
-          targetResourceId: "collaboration-source-001",
+          product: "pms",
+          resourceType: "pms_property",
+          resourceId: financePropertyId,
+          propertyId: financePropertyId,
+          targetResourceId: "00000000-0000-4000-8000-000000000060",
         },
+        files: [{ filename: "receipt.webp", contentType: "image/webp", sizeBytes: 1024 }],
       },
     });
     const created = create.body as MediaCreateResponse;
@@ -1634,7 +1518,7 @@ describe("platform media upload routes", () => {
         files: [
           {
             uploadTargetId: created.uploadTargets[0]!.uploadTargetId,
-            contentType: "image/gif",
+            contentType: "image/webp",
             sizeBytes: 1024,
           },
         ],
@@ -1653,23 +1537,17 @@ describe("platform media upload routes", () => {
   });
 
   it("requires explicit public visibility for public profile images", async () => {
-    const app = buildMediaApp({
-      permissions: ["marketplace.profile.manage"],
-      resources: [
-        {
-          product: "marketplace",
-          resourceType: "creator_profile",
-          resourceId: "creator_profile_lina",
-          relationship: "owner",
-        },
-      ],
-    });
-    const { visibility: _visibility, ...body } = marketplaceCreatorProfileCase.request.body;
+    const app = buildMediaApp({ organizationKind: "platform", userId: "user_media" });
+    const body = {
+      purpose: "identity.user.profile_image",
+      resource: { product: "platform", resourceType: "user_profile", resourceId: "user_media" },
+      files: [{ filename: "avatar.webp", contentType: "image/webp", sizeBytes: 1024 }],
+    };
 
     for (const visibility of [undefined, "private"] as const) {
       const response = await injectJson(app, {
         method: "POST",
-        url: marketplaceCreatorProfileCase.request.path,
+        url: "/api/media/upload-sessions",
         headers: { authorization: "Bearer valid-token" },
         payload: visibility === undefined ? body : { ...body, visibility },
       });
@@ -1678,87 +1556,6 @@ describe("platform media upload routes", () => {
       expect((response.body as ErrorResponse).code).toBe("invalid_media_visibility");
     }
   });
-
-  it.each([
-    {
-      contractCase: marketplaceCreatorProfileCase,
-      resources: [
-        {
-          product: "marketplace" as const,
-          resourceType: "creator_profile" as const,
-          resourceId: "creator_profile_lina",
-          relationship: "owner" as const,
-        },
-      ],
-    },
-    {
-      contractCase: marketplaceOfferMediaCase,
-      resources: [
-        {
-          product: "marketplace" as const,
-          resourceType: "marketplace_offer" as const,
-          resourceId: "offer_alpenrose",
-          relationship: "owner" as const,
-        },
-      ],
-    },
-  ])(
-    "creates and finalizes marketplace media for $contractCase.caseId",
-    async ({ contractCase, resources }) => {
-      const repository = createInMemoryPlatformMediaRepository();
-      const app = buildMediaApp({
-        repository,
-        permissions: ["marketplace.profile.manage"],
-        resources,
-      });
-
-      const create = await injectJson(app, {
-        method: "POST",
-        url: contractCase.request.path,
-        headers: { authorization: "Bearer valid-token" },
-        payload: contractCase.request.body,
-      });
-      const createBody = create.body as MediaCreateResponse;
-
-      expect(create.statusCode).toBe(contractCase.expected.status);
-      expect(createBody.uploadSession.requestedVisibility).toBe(
-        contractCase.expected.requestedVisibility,
-      );
-      expect(createBody.uploadTargets).toHaveLength(contractCase.expected.mediaObjectCount ?? 1);
-
-      const finalize = await injectJson(app, {
-        method: "POST",
-        url: `/api/media/upload-sessions/${createBody.uploadSession.sessionId}/finalize`,
-        headers: { authorization: "Bearer valid-token" },
-        payload: {
-          files: contractCase.finalize!.files.map((file, index) => ({
-            ...file,
-            uploadTargetId: createBody.uploadTargets[index]!.uploadTargetId,
-          })),
-        },
-      });
-
-      expect(finalize.statusCode).toBe(contractCase.expected.finalizeStatus);
-      const finalizeBody = finalize.body as MediaFinalizeResponse;
-      expect(finalizeBody.mediaObjects).toHaveLength(contractCase.expected.mediaObjectCount ?? 1);
-      expect(finalizeBody.mediaObject).toMatchObject(contractCase.expected.mediaObject!);
-      expect(finalizeBody.mediaObject.mediaId).toBeTruthy();
-      expect(finalizeBody.mediaObject.variants.map((variant) => variant.variantName)).toEqual([
-        ...(contractCase.expected.requiredVariants ?? []),
-      ]);
-      if (contractCase === marketplaceCreatorProfileCase) {
-        expect(finalizeBody.mediaObject).toMatchObject({
-          visibility: "public",
-          approvalStatus: "approved",
-          lifecycleStatus: "active",
-        });
-        expect(
-          finalizeBody.mediaObject.variants.every(({ visibility }) => visibility === "public"),
-        ).toBe(true);
-      }
-      expect(finalizeBody.sideEffects).toEqual(contractCase.expected.sideEffects);
-    },
-  );
 
   it("keeps actor-owned profile media available from the platform organization", async () => {
     const response = await injectJson(
@@ -1824,11 +1621,7 @@ describe("platform media upload routes", () => {
     });
   });
 
-  it.each([
-    ["marketplace.creator.profile_image", "marketplace", "creator_profile", "public"],
-    ["marketplace.offer.media", "marketplace", "marketplace_offer", "private"],
-    ["property.hero_image", "hotel_catalog", "property", "private"],
-  ] as const)(
+  it.each([["property.hero_image", "hotel_catalog", "property", "private"]] as const)(
     "allows Platform Admin to create and finalize exact %s media owned by the target organization",
     async (purpose, product, resourceType, visibility) => {
       const repository = createInMemoryPlatformMediaRepository();
@@ -1899,18 +1692,6 @@ describe("platform media upload routes", () => {
         },
       });
       expect(finalize.statusCode).toBe(200);
-
-      if (purpose === "marketplace.creator.profile_image") {
-        const missingOwner = buildMediaApp({
-          ...adminAccess,
-          targetResolver: {
-            async resolveTarget() {
-              return { ok: true, target };
-            },
-          },
-        });
-        expect((await injectJson(missingOwner, createRequest)).statusCode).toBe(404);
-      }
     },
   );
 
@@ -1940,11 +1721,11 @@ describe("platform media upload routes", () => {
         url: "/api/media/upload-sessions",
         headers: { authorization: "Bearer valid-token" },
         payload: {
-          purpose: "marketplace.offer.media",
+          purpose: "property.hero_image",
           visibility: "private",
           resource: {
-            product: "marketplace",
-            resourceType: "marketplace_offer",
+            product: "hotel_catalog",
+            resourceType: "property",
             resourceId: "00000000-0000-4000-8000-000000000984",
           },
           files: [{ filename: "admin.webp", contentType: "image/webp", sizeBytes: 1024 }],
@@ -2197,31 +1978,17 @@ describe("platform media upload routes", () => {
   it.each([
     ["camera.heic", "image/heic"],
     ["camera.heif", ""],
-  ])("gives mobile creators conversion guidance for %s", async (filename, contentType) => {
-    const app = buildMediaApp({
-      permissions: ["marketplace.profile.manage"],
-      resources: [
-        {
-          product: "marketplace",
-          resourceType: "creator_profile",
-          resourceId: "creator_profile_lina",
-          relationship: "owner",
-        },
-      ],
-    });
+  ])("gives mobile users conversion guidance for %s", async (filename, contentType) => {
+    const app = buildMediaApp({ organizationKind: "platform", userId: "user_media" });
 
     const response = await injectJson(app, {
       method: "POST",
       url: "/api/media/upload-sessions",
       headers: { authorization: "Bearer valid-token" },
       payload: {
-        purpose: "marketplace.creator.profile_image",
+        purpose: "identity.user.profile_image",
         visibility: "public",
-        resource: {
-          product: "marketplace",
-          resourceType: "creator_profile",
-          resourceId: "creator_profile_lina",
-        },
+        resource: { product: "platform", resourceType: "user_profile", resourceId: "user_media" },
         files: [{ filename, contentType, sizeBytes: 1024 }],
       },
     });
@@ -2234,23 +2001,10 @@ describe("platform media upload routes", () => {
     });
   });
 
-  it.each([
-    ["identity.user.profile_image", "platform", "user_profile", "user_media"],
-    ["marketplace.creator.profile_image", "marketplace", "creator_profile", "creator_profile_lina"],
-  ])(
+  it.each([["identity.user.profile_image", "platform", "user_profile", "user_media"]])(
     "accepts a supported mobile %s photo when the browser omits its MIME type",
     async (purpose, product, resourceType, resourceId) => {
-      const app = buildMediaApp({
-        permissions: ["marketplace.profile.manage"],
-        resources: [
-          {
-            product: "marketplace",
-            resourceType: "creator_profile",
-            resourceId: "creator_profile_lina",
-            relationship: "owner",
-          },
-        ],
-      });
+      const app = buildMediaApp({ organizationKind: "platform", userId: "user_media" });
 
       const response = await injectJson(app, {
         method: "POST",

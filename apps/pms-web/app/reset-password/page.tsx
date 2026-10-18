@@ -102,7 +102,7 @@ function ResetPasswordContent() {
                 </a>
               </div>
             ) : (
-              <form onSubmit={handleSubmit} className="space-y-5">
+              <form method="post" onSubmit={handleSubmit} className="space-y-5">
                 <div>
                   <label
                     htmlFor="password"

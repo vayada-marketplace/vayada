@@ -165,7 +165,8 @@ export default function SharedHotelLoginForm({
                     </div>
                   </>
                 )}
-                <form onSubmit={onSubmit} className="space-y-5">
+                {/* POST: a click before the page hydrates must not put the email and password in the URL. */}
+                <form method="post" onSubmit={onSubmit} className="space-y-5">
                   <div>
                     <label
                       htmlFor="email"

@@ -9,8 +9,8 @@ import {
   syncCloudflareAnalytics,
 } from "@/lib/cloudflareAnalytics";
 
-import { CookieConsent, readConsent } from "@vayada/marketplace-shared/consent/preferences";
-export type { CookieConsent } from "@vayada/marketplace-shared/consent/preferences";
+import { CookieConsent, readConsent } from "@/lib/consent/preferences";
+export type { CookieConsent } from "@/lib/consent/preferences";
 
 // Context value type
 interface CookieConsentContextType {

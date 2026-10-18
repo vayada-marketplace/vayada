@@ -159,7 +159,7 @@ describe("S3 platform profile media adapter", () => {
     });
   });
 
-  it("preserves private chat bytes and signs short-lived GET access", async () => {
+  it("preserves private attachment bytes and signs short-lived GET access", async () => {
     const source = await validJpeg();
     const { client, send } = fakeS3(async (command) =>
       command instanceof GetObjectCommand
@@ -167,7 +167,7 @@ describe("S3 platform profile media adapter", () => {
         : {},
     );
     const adapter = createAdapter(client);
-    const session = chatSession(source.length);
+    const session = inboxSession(source.length, "image/jpeg");
     const sessionFile = session.files[0]!;
     const uploadTarget = session.uploadTargets[0]!;
     const inspected = await adapter.inspectUploadedFile({
@@ -175,15 +175,15 @@ describe("S3 platform profile media adapter", () => {
       sessionFile,
       uploadTarget,
       clientFile: { uploadTargetId },
-      policy: chatPolicy,
+      policy: inboxPolicy,
     });
-    if (!inspected.ok) throw new Error("Expected chat image inspection to succeed");
+    if (!inspected.ok) throw new Error("Expected attachment image inspection to succeed");
 
     const [variant] = await adapter.generateVariants({
       session,
       file: { sessionFile, uploadTarget, inspection: inspected.inspection },
       fileIndex: 0,
-      policy: chatPolicy,
+      policy: inboxPolicy,
     });
     expect(variant).toMatchObject({
       variantName: "provider_original",
@@ -450,7 +450,7 @@ describe("S3 platform profile media adapter", () => {
     expect(variants.every((variant) => variant.storageKey.endsWith(".webp"))).toBe(true);
   });
 
-  it("keeps pending marketplace offer variants private and uncached", async () => {
+  it("keeps variants awaiting domain approval private and uncached", async () => {
     const source = await validJpeg();
     const { client, send } = fakeS3(async (command) =>
       command instanceof GetObjectCommand
@@ -458,7 +458,7 @@ describe("S3 platform profile media adapter", () => {
         : {},
     );
     const adapter = createAdapter(client);
-    const session = offerSession(source.length);
+    const session = pendingApprovalSession(source.length);
     const sessionFile = session.files[0]!;
     const uploadTarget = session.uploadTargets[0]!;
     const inspected = await adapter.inspectUploadedFile({
@@ -466,18 +466,18 @@ describe("S3 platform profile media adapter", () => {
       sessionFile,
       uploadTarget,
       clientFile: { uploadTargetId },
-      policy: offerPolicy,
+      policy: pendingApprovalPolicy,
     });
-    if (!inspected.ok) throw new Error("Expected offer image inspection to succeed");
+    if (!inspected.ok) throw new Error("Expected pending image inspection to succeed");
 
     const variants = await adapter.generateVariants({
       session,
       file: { sessionFile, uploadTarget, inspection: inspected.inspection },
       fileIndex: 0,
-      policy: offerPolicy,
+      policy: pendingApprovalPolicy,
     });
 
-    expect(variants).toHaveLength(offerPolicy.requiredVariants.length);
+    expect(variants).toHaveLength(pendingApprovalPolicy.requiredVariants.length);
     for (const variant of variants) {
       expect(variant).toMatchObject({ visibility: "private", publicCdnUrl: null });
       expect(variant.storageKey).toMatch(/^private\/media\//);
@@ -485,7 +485,7 @@ describe("S3 platform profile media adapter", () => {
     const puts = send.mock.calls
       .map(([command]) => command)
       .filter((command): command is PutObjectCommand => command instanceof PutObjectCommand);
-    expect(puts).toHaveLength(offerPolicy.requiredVariants.length);
+    expect(puts).toHaveLength(pendingApprovalPolicy.requiredVariants.length);
     for (const put of puts) {
       expect(put.input.CacheControl).toBe(privateCacheControl);
     }
@@ -585,7 +585,7 @@ describe("S3 platform profile media adapter", () => {
     },
   );
 
-  it("rejects marketplace offer variants that bypass pending approval", async () => {
+  it("rejects variants awaiting domain approval that bypass it", async () => {
     const source = await validJpeg();
     const { client, send } = fakeS3(async (command) =>
       command instanceof GetObjectCommand
@@ -593,7 +593,7 @@ describe("S3 platform profile media adapter", () => {
         : {},
     );
     const adapter = createAdapter(client);
-    const session = offerSession(source.length);
+    const session = pendingApprovalSession(source.length);
     const sessionFile = session.files[0]!;
     const uploadTarget = session.uploadTargets[0]!;
     const inspected = await adapter.inspectUploadedFile({
@@ -601,16 +601,16 @@ describe("S3 platform profile media adapter", () => {
       sessionFile,
       uploadTarget,
       clientFile: { uploadTargetId },
-      policy: offerPolicy,
+      policy: pendingApprovalPolicy,
     });
-    if (!inspected.ok) throw new Error("Expected offer image inspection to succeed");
+    if (!inspected.ok) throw new Error("Expected pending image inspection to succeed");
 
     await expect(
       adapter.generateVariants({
         session: { ...session, effectiveVisibility: "public" },
         file: { sessionFile, uploadTarget, inspection: inspected.inspection },
         fileIndex: 0,
-        policy: offerPolicy,
+        policy: pendingApprovalPolicy,
       }),
     ).rejects.toThrow("Images awaiting domain approval must stay private");
     expect(send.mock.calls.some(([command]) => command instanceof PutObjectCommand)).toBe(false);
@@ -1319,36 +1319,26 @@ function bookingHeaderLogoSession(sizeBytes: number): PlatformMediaSessionRecord
   };
 }
 
-const offerPolicy: PlatformMediaPurposePolicy = {
+// A public image awaiting domain approval (requested public, kept private until approved).
+const pendingApprovalPolicy: PlatformMediaPurposePolicy = {
   ...policy,
-  purpose: "marketplace.offer.media",
+  purpose: "property.hero_image",
   actorOwned: false,
   allowedRelationships: ["owner", "operator"],
-  allowedResources: [{ product: "marketplace", resourceType: "marketplace_offer" }],
+  allowedResources: [{ product: "hotel_catalog", resourceType: "property" }],
   maxFileSizeBytes: 10 * 1024 * 1024,
   maxFileCount: 12,
   autoApprovePublicOnFinalize: undefined,
-  targetResourceProduct: "marketplace",
-  targetResourceType: "marketplace_offer",
-};
-
-const chatPolicy: PlatformMediaPurposePolicy = {
-  ...offerPolicy,
-  purpose: "marketplace.collaboration_chat.attachment",
-  allowedResources: [{ product: "marketplace", resourceType: "creator_profile" }],
-  allowedContentTypes: ["image/jpeg", "image/png", "image/webp", "image/gif"],
-  allowedExtensions: [".jpg", ".jpeg", ".png", ".webp", ".gif"],
-  maxFileSizeBytes: 20 * 1024 * 1024,
-  maxFileCount: 1,
-  privateOnly: true,
-  targetResourceProduct: "marketplace",
-  targetResourceType: "collaboration",
-  requiredVariants: ["provider_original"],
+  targetResourceProduct: "hotel_catalog",
+  targetResourceType: "property",
 };
 
 const inboxPolicy: PlatformMediaPurposePolicy = {
-  ...chatPolicy,
+  ...pendingApprovalPolicy,
   purpose: "pms.messaging.attachment",
+  maxFileCount: 1,
+  privateOnly: true,
+  requiredVariants: ["provider_original"],
   permission: "pms.inbox.reply",
   allowedRelationships: ["owner", "operator", "front_desk"],
   allowedResources: [{ product: "pms", resourceType: "pms_property" }],
@@ -1375,7 +1365,7 @@ function propertyPolicy(
     | "pms.room_type.media",
 ): PlatformMediaPurposePolicy {
   return {
-    ...offerPolicy,
+    ...pendingApprovalPolicy,
     purpose,
     allowedResources: [{ product: "hotel_catalog", resourceType: "property" }],
     maxFileCount:
@@ -1386,47 +1376,29 @@ function propertyPolicy(
           : 25,
     autoApprovePublicOnFinalize: undefined,
     privateOnly: true,
-    maxImagePixels: purpose === "pms.room_type.media" ? 60_000_000 : offerPolicy.maxImagePixels,
+    maxImagePixels:
+      purpose === "pms.room_type.media" ? 60_000_000 : pendingApprovalPolicy.maxImagePixels,
     resizeOversizedPublicImages: purpose === "pms.room_type.media" || undefined,
     targetResourceProduct: purpose === "pms.room_type.media" ? "pms" : "hotel_catalog",
     targetResourceType: purpose === "pms.room_type.media" ? "room_type" : "property",
   };
 }
 
-function offerSession(sizeBytes: number): PlatformMediaSessionRecord {
+function pendingApprovalSession(sizeBytes: number): PlatformMediaSessionRecord {
   return {
     ...profileSession(sizeBytes),
-    purpose: "marketplace.offer.media",
+    purpose: "property.hero_image",
     requestedVisibility: "public",
     effectiveVisibility: "private",
     resource: {
-      product: "marketplace",
-      resourceType: "marketplace_offer",
-      resourceId: "offer_01J_TEST",
+      product: "hotel_catalog",
+      resourceType: "property",
+      resourceId: "11111111-1111-4111-8111-111111111111",
     },
     target: {
-      resourceProduct: "marketplace",
-      resourceType: "marketplace_offer",
-      resourceId: "offer_01J_TEST",
-    },
-  };
-}
-
-function chatSession(sizeBytes: number): PlatformMediaSessionRecord {
-  return {
-    ...offerSession(sizeBytes),
-    purpose: "marketplace.collaboration_chat.attachment",
-    requestedVisibility: "private",
-    resource: {
-      product: "marketplace",
-      resourceType: "creator_profile",
-      resourceId: "creator_01J_TEST",
-      targetResourceId: "collaboration_01J_TEST",
-    },
-    target: {
-      resourceProduct: "marketplace",
-      resourceType: "collaboration",
-      resourceId: "collaboration_01J_TEST",
+      resourceProduct: "hotel_catalog",
+      resourceType: "property",
+      resourceId: "11111111-1111-4111-8111-111111111111",
     },
   };
 }

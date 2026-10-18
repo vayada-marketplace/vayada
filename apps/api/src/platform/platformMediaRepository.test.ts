@@ -299,90 +299,10 @@ describe("PostgreSQL platform media repository", () => {
     ).toContain("to_char(");
   });
 
-  it("persists requested-public offer media as private and staged for approval", async () => {
-    const database = createFakeDatabase();
-    const repository = repositoryFor(database.pool);
-    const session = await createSession(repository, "marketplace.offer.media");
-
-    expect(session).toMatchObject({
-      purpose: "marketplace.offer.media",
-      requestedVisibility: "public",
-      effectiveVisibility: "private",
-    });
-
-    const completed = await repository.completeUploadSession(completionInput(session));
-    expect(completed.mediaObjects[0]).toMatchObject({
-      purpose: "marketplace.offer.media",
-      visibility: "private",
-      requestedVisibility: "public",
-      approvalStatus: "pending_domain_approval",
-      lifecycleStatus: "staged",
-      variants: [
-        expect.objectContaining({
-          visibility: "private",
-          publicCdnUrl: null,
-        }),
-      ],
-    });
-
-    const objectInsert = database.clientQueries.find(({ text }) =>
-      text.includes("INSERT INTO platform.media_objects"),
-    );
-    expect(objectInsert?.values?.[3]).toBe("private");
-    expect(objectInsert?.values?.[10]).toBe("staged");
-    expect(objectInsert?.values?.[18]).toBe(false);
-    const variantInsert = database.clientQueries.find(({ text }) =>
-      text.includes("INSERT INTO platform.media_variants"),
-    );
-    expect(variantInsert?.values?.[2]).toBe("private");
-    expect(variantInsert?.values?.[9]).toBeNull();
-
-    await expect(
-      repositoryFor(database.pool).findMediaObject(session.files[0]!.mediaId),
-    ).resolves.toMatchObject({
-      approvalStatus: "pending_domain_approval",
-      lifecycleStatus: "staged",
-    });
-  });
-
-  it("persists private collaboration attachments as active provider originals", async () => {
-    const database = createFakeDatabase();
-    const repository = repositoryFor(database.pool);
-    const session = await createSession(repository, "marketplace.collaboration_chat.attachment");
-
-    const completed = await repository.completeUploadSession(completionInput(session));
-
-    expect(completed.mediaObjects[0]).toMatchObject({
-      purpose: "marketplace.collaboration_chat.attachment",
-      visibility: "private",
-      approvalStatus: "private",
-      lifecycleStatus: "active",
-      resourceProduct: "marketplace",
-      resourceType: "collaboration",
-      variants: [
-        expect.objectContaining({
-          variantName: "provider_original",
-          visibility: "private",
-          publicCdnUrl: null,
-        }),
-      ],
-    });
-
-    const objectInsert = database.clientQueries.find(({ text }) =>
-      text.includes("INSERT INTO platform.media_objects"),
-    );
-    expect(objectInsert?.text).toContain("retained_until");
-    expect(objectInsert?.text).toContain("interval '1 hour'");
-    expect(JSON.parse(String(objectInsert?.values?.[17]))).toMatchObject({
-      requestedVisibility: "private",
-      attachmentState: "orphan",
-    });
-  });
-
   it("persists Finance receipts as bounded staged orphans", async () => {
     const database = createFakeDatabase();
     const repository = repositoryFor(database.pool);
-    await createSession(repository, "marketplace.collaboration_chat.attachment");
+    await createSession(repository, "property.hero_image");
     database.updateSession({
       purpose: "finance.expense.receipt",
       resource: {
@@ -421,7 +341,7 @@ describe("PostgreSQL platform media repository", () => {
   it("persists Inbox uploads as bounded staged thread-scoped orphans", async () => {
     const database = createFakeDatabase();
     const repository = repositoryFor(database.pool);
-    await createSession(repository, "marketplace.collaboration_chat.attachment");
+    await createSession(repository, "property.hero_image");
     database.updateSession({
       purpose: "pms.messaging.attachment",
       resource: {
@@ -455,50 +375,6 @@ describe("PostgreSQL platform media repository", () => {
     expect(JSON.parse(String(objectInsert?.values?.[17]))).toMatchObject({
       attachmentState: "orphan",
     });
-  });
-
-  it("resolves a chat target only when the source resource belongs to the collaboration", async () => {
-    const query = vi.fn(async () => ({
-      rows: [{ collaborationId: "collaboration-target-001", propertyId: PROPERTY_ID }],
-    }));
-    const repository = createPgPlatformMediaRepository({
-      connectionString: "postgresql://target.test/vayada",
-      publicCdnBaseUrl: "https://cdn.example.com",
-      pool: { query, connect: vi.fn(), end: vi.fn() } as never,
-    });
-
-    await expect(
-      repository.resolveTarget({
-        request: {
-          purpose: "marketplace.collaboration_chat.attachment",
-          visibility: "private",
-          resource: {
-            product: "marketplace",
-            resourceType: "creator_profile",
-            resourceId: "creator-profile-001",
-            targetResourceId: "collaboration-source-001",
-          },
-          files: [],
-        },
-        policy: {
-          targetResourceProduct: "marketplace",
-          targetResourceType: "collaboration",
-        } as never,
-        context: {} as never,
-      }),
-    ).resolves.toEqual({
-      ok: true,
-      target: {
-        resourceProduct: "marketplace",
-        resourceType: "collaboration",
-        resourceId: "collaboration-target-001",
-        propertyId: PROPERTY_ID,
-      },
-    });
-    expect(query).toHaveBeenCalledWith(expect.stringContaining("creator_profile_id"), [
-      "collaboration-source-001",
-      "creator-profile-001",
-    ]);
   });
 
   it("resolves Inbox attachment uploads only to a thread in the canonical PMS property", async () => {
@@ -603,22 +479,6 @@ describe("PostgreSQL platform media repository", () => {
 
   it.each([
     [
-      "marketplace.creator.profile_image",
-      "marketplace",
-      "creator_profile",
-      { resourceId: ROOM_TYPE_ID, ownerOrganizationId: "org-creator" },
-      "marketplace.creator_profiles",
-      "profile.profile_status <> 'archived'",
-    ],
-    [
-      "marketplace.offer.media",
-      "marketplace",
-      "marketplace_offer",
-      { resourceId: PROPERTY_ID, ownerOrganizationId: "org-hotel", propertyId: ROOM_TYPE_ID },
-      "marketplace.marketplace_offers",
-      "offer.offer_status <> 'archived'",
-    ],
-    [
       "property.hero_image",
       "hotel_catalog",
       "property",
@@ -640,7 +500,7 @@ describe("PostgreSQL platform media repository", () => {
         repository.resolveTarget({
           request: {
             purpose,
-            visibility: purpose === "marketplace.creator.profile_image" ? "public" : "private",
+            visibility: "private",
             resource: { product, resourceType, resourceId: PROPERTY_ID },
             files: [],
           },
@@ -665,10 +525,6 @@ describe("PostgreSQL platform media repository", () => {
       expect(sql).toContain(table);
       expect(sql).toContain(predicate);
       expect(sql).toContain("organization.status = 'active'");
-      if (purpose === "marketplace.creator.profile_image") {
-        expect(sql).toContain("membership.user_id = $1::uuid");
-        expect(sql).toContain("membership.status = 'active'");
-      }
       if (purpose === "property.hero_image") expect(sql).toContain("owner.relationship = 'owner'");
     },
   );
@@ -701,44 +557,6 @@ describe("PostgreSQL platform media repository", () => {
         policy: {
           targetResourceProduct: "hotel_catalog",
           targetResourceType: "property",
-        } as never,
-        context: { selectedOrganization: { kind: "platform" } } as never,
-      }),
-    ).resolves.toMatchObject({ ok: false, statusCode: 404, code: "media_target_not_found" });
-  });
-
-  it.each([
-    ["missing", []],
-    [
-      "ambiguous",
-      [
-        { resourceId: PROPERTY_ID, ownerOrganizationId: "org-one" },
-        { resourceId: ROOM_TYPE_ID, ownerOrganizationId: "org-two" },
-      ],
-    ],
-  ])("rejects %s Platform Admin creator ownership", async (_case, rows) => {
-    const query = vi.fn(async () => ({ rows }));
-    const repository = createPgPlatformMediaRepository({
-      connectionString: "postgresql://target.test/vayada",
-      publicCdnBaseUrl: "https://cdn.example.com",
-      pool: { query, connect: vi.fn(), end: vi.fn() } as never,
-    });
-
-    await expect(
-      repository.resolveTarget({
-        request: {
-          purpose: "marketplace.creator.profile_image",
-          visibility: "public",
-          resource: {
-            product: "marketplace",
-            resourceType: "creator_profile",
-            resourceId: PROPERTY_ID,
-          },
-          files: [],
-        },
-        policy: {
-          targetResourceProduct: "marketplace",
-          targetResourceType: "creator_profile",
         } as never,
         context: { selectedOrganization: { kind: "platform" } } as never,
       }),
@@ -1023,7 +841,7 @@ describe("PostgreSQL platform media repository", () => {
   it("rejects Platform Admin finalize when target ownership changed before completion", async () => {
     const database = createFakeDatabase();
     const repository = repositoryFor(database.pool);
-    const session = await createSession(repository, "marketplace.offer.media");
+    const session = await createSession(repository, "property.hero_image");
     database.updateSession({ platformAdmin: true });
     database.setAdminTargetExists(false);
 
@@ -1049,8 +867,6 @@ async function createSession(
   repository: ReturnType<typeof createPgPlatformMediaRepository>,
   purpose:
     | "identity.user.profile_image"
-    | "marketplace.offer.media"
-    | "marketplace.collaboration_chat.attachment"
     | "booking.addon.image"
     | "property.hero_image"
     | "property.gallery_image"
@@ -1060,8 +876,6 @@ async function createSession(
   resourceOverride?: PlatformMediaSessionRecord["resource"],
 ) {
   const isProfile = purpose === "identity.user.profile_image";
-  const isOffer = purpose === "marketplace.offer.media";
-  const isChat = purpose === "marketplace.collaboration_chat.attachment";
   const isBookingAddon = purpose === "booking.addon.image";
   const isPropertyMedia = [
     "property.hero_image",
@@ -1070,38 +884,14 @@ async function createSession(
     "pms.room_type.media",
   ].includes(purpose);
   const isRoomMedia = purpose === "pms.room_type.media";
-  const product = isProfile
-    ? "platform"
-    : isOffer || isChat
-      ? "marketplace"
-      : isBookingAddon
-        ? "booking"
-        : "hotel_catalog";
-  const resourceType = isProfile
-    ? "user_profile"
-    : isOffer
-      ? "marketplace_offer"
-      : isChat
-        ? "creator_profile"
-        : isBookingAddon
-          ? "booking_hotel"
-          : "property";
+  const product = isProfile ? "platform" : isBookingAddon ? "booking" : "hotel_catalog";
+  const resourceType = isProfile ? "user_profile" : isBookingAddon ? "booking_hotel" : "property";
   const resourceId = isProfile
     ? "00000000-0000-4000-8000-000000000001"
-    : isOffer || isChat
-      ? "00000000-0000-4000-8000-000000000020"
-      : isBookingAddon
-        ? "booking_hotel_alpenrose"
-        : PROPERTY_ID;
-  const filename = isProfile
-    ? "profile.jpg"
-    : isOffer
-      ? "offer.jpg"
-      : isChat
-        ? "chat.jpg"
-        : isBookingAddon
-          ? "addon.jpg"
-          : "property.jpg";
+    : isBookingAddon
+      ? "booking_hotel_alpenrose"
+      : PROPERTY_ID;
+  const filename = isProfile ? "profile.jpg" : isBookingAddon ? "addon.jpg" : "property.jpg";
   return repository.createUploadSession({
     sessionId: "00000000-0000-4000-8000-000000000010",
     uploadSessionKey: "media.upload_session:session-1",
@@ -1114,8 +904,7 @@ async function createSession(
     } as never,
     request: {
       purpose,
-      visibility:
-        visibility ?? (isRoomMedia ? "public" : isChat || isPropertyMedia ? "private" : "public"),
+      visibility: visibility ?? (isRoomMedia ? "public" : isPropertyMedia ? "private" : "public"),
       resource: resourceOverride ?? {
         product,
         resourceType,
@@ -1134,39 +923,27 @@ async function createSession(
     policy: {
       purpose,
       autoApprovePublicOnFinalize: isProfile || isRoomMedia || isBookingAddon ? true : undefined,
-      privateOnly: (isPropertyMedia && !isRoomMedia) || isChat,
+      privateOnly: isPropertyMedia && !isRoomMedia,
     } as never,
     ownerOrganizationId: "00000000-0000-4000-8000-000000000002",
     target: {
       resourceProduct: isProfile
         ? "platform"
-        : isOffer || isChat
-          ? "marketplace"
-          : isBookingAddon
-            ? "booking"
-            : isRoomMedia
-              ? "pms"
-              : "hotel_catalog",
+        : isBookingAddon
+          ? "booking"
+          : isRoomMedia
+            ? "pms"
+            : "hotel_catalog",
       resourceType: isProfile
         ? "user_profile"
-        : isOffer
-          ? "marketplace_offer"
-          : isChat
-            ? "collaboration"
-            : isBookingAddon
-              ? "booking_hotel"
-              : isRoomMedia
-                ? "room_type"
-                : "property",
-      resourceId: isChat
-        ? "collaboration-target-001"
-        : isProfile || isOffer || isBookingAddon
-          ? resourceId
+        : isBookingAddon
+          ? "booking_hotel"
           : isRoomMedia
-            ? ROOM_TYPE_ID
-            : PROPERTY_ID,
-      propertyId:
-        isChat || isBookingAddon ? PROPERTY_ID : isProfile || isOffer ? undefined : PROPERTY_ID,
+            ? "room_type"
+            : "property",
+      resourceId:
+        isProfile || isBookingAddon ? resourceId : isRoomMedia ? ROOM_TYPE_ID : PROPERTY_ID,
+      propertyId: isProfile ? undefined : PROPERTY_ID,
     },
     uploadTargets: [
       {
@@ -1196,7 +973,6 @@ async function createSession(
 
 function completionInput(session: PlatformMediaSessionRecord) {
   const isPrivate = session.effectiveVisibility === "private";
-  const isChat = session.purpose === "marketplace.collaboration_chat.attachment";
   const isFinance = session.purpose === "finance.expense.receipt";
   const isInbox = session.purpose === "pms.messaging.attachment";
   const isBookingAddon = session.purpose === "booking.addon.image";
@@ -1209,11 +985,7 @@ function completionInput(session: PlatformMediaSessionRecord) {
   const variantNames =
     isPropertyMedia || isBookingAddon
       ? PROPERTY_MEDIA_PUBLIC_VARIANTS
-      : [
-          isChat || isFinance || isInbox
-            ? ("provider_original" as const)
-            : ("original_safe" as const),
-        ];
+      : [isFinance || isInbox ? ("provider_original" as const) : ("original_safe" as const)];
   return {
     session,
     files: [

@@ -3,8 +3,8 @@ import { expect, test, type APIRequestContext, type Browser, type Page } from "@
 import {
   NEXT_STACK_ORIGINS,
   arrayField,
-  login,
   loginPms,
+  primeSyntheticIdentity,
   readAuthSession,
   record,
   stringField,
@@ -37,7 +37,7 @@ export async function runRestrictedStaffAcceptance(args: RestrictedStaffArgs): P
   try {
     const page = await context.newPage();
     await test.step("prime the staff identity through Vayada", () =>
-      login(page, staff, environment.password));
+      primeSyntheticIdentity(request, staff, environment.password));
 
     const membershipId =
       await test.step("invite and activate assigned-property staff", async () => {

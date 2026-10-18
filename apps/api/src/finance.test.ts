@@ -425,9 +425,9 @@ describe("finance route contracts", () => {
       method: "POST",
       url: `/api/finance/properties/${propertyId}/provider-accounts/${providerAccountId}/onboarding-link`,
       payload: {
-        commandId: "cmd-stripe-marketplace-return",
-        idempotencyKey: "key-stripe-marketplace-return",
-        returnSurface: "marketplace",
+        commandId: "cmd-stripe-setup-return",
+        idempotencyKey: "key-stripe-setup-return",
+        returnSurface: "booking_admin_setup",
         propertyId: foreignPropertyId,
         returnUrl: "https://attacker.test/setup",
       },
@@ -438,16 +438,16 @@ describe("finance route contracts", () => {
     expect(commands).toHaveLength(1);
     expect(commands[0]).toMatchObject({
       propertyId,
-      payload: { providerAccountId, returnSurface: "marketplace" },
+      payload: { providerAccountId, returnSurface: "booking_admin_setup" },
     });
     expect(commands[0]!.payload).not.toHaveProperty("propertyId");
     expect(commands[0]!.payload).not.toHaveProperty("returnUrl");
 
-    // VAY-2262: the setup wizard in Booking Admin asks for its own return surface; unknown values
-    // fall back to the provider default.
+    // Booking Admin's payment settings ask for their own return surface; unknown values (such as
+    // the retired Marketplace host, VAY-2270) fall back to the provider default.
     for (const [returnSurface, expected] of [
-      ["booking_admin_setup", "booking_admin_setup"],
-      ["marketplace-web", undefined],
+      ["booking_admin", "booking_admin"],
+      ["marketplace", undefined],
     ] as const) {
       const answered = await injectJson<Record<string, unknown>>(app, {
         method: "POST",
@@ -485,7 +485,7 @@ describe("finance route contracts", () => {
       payload: {
         commandId: "cmd-stripe-foreign-return",
         idempotencyKey: "key-stripe-foreign-return",
-        returnSurface: "marketplace",
+        returnSurface: "booking_admin_setup",
       },
       headers: { authorization: "Bearer valid-token" },
     });
