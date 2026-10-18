@@ -340,7 +340,8 @@ describe("onboarding source manifest and readiness contract", () => {
     await expect(createProductReadinessResult(stale)).rejects.toThrow("absent or stale");
 
     const misdirected = fixtureEvaluation();
-    misdirected.groups[0]!.steps[0]!.entities[0]!.blockers[0]!.product = "marketplace";
+    // A product other than the evaluation's; Booking is the only readiness product now.
+    misdirected.groups[0]!.steps[0]!.entities[0]!.blockers[0]!.product = "marketplace" as never;
     await expect(createProductReadinessResult(misdirected)).rejects.toThrow("coordinates");
 
     const duplicate = fixtureEvaluation();

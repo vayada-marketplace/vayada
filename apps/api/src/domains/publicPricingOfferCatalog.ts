@@ -7,6 +7,7 @@ import { lockPublicPricingAuthority } from "./publicPricingAuthority.js";
 import {
   mapReplacementPublicOffers,
   publicOfferCancellations,
+  publicOfferMealDescriptions,
 } from "./replacementPublicOfferMapping.js";
 import { readPmsRoomOperatingEligibility } from "./pmsRoomOperatingEligibility.js";
 import { toPublicPmsRoomAmenityLabelsV1 } from "./pmsRoomAmenityVocabulary.js";
@@ -45,6 +46,7 @@ export function createPublicPricingOfferCatalog(
         const mapped = mapReplacementPublicOffers(owner);
         if (!mapped) return null;
         const cancellations = publicOfferCancellations(owner);
+        const mealDescriptions = publicOfferMealDescriptions(owner);
         const { propertyId, organizationId } = owner.scope;
         const live = await client.query(
           "SELECT 1 FROM distribution.active_public_booking_revision WHERE property_id=$1 FOR SHARE",
@@ -77,6 +79,10 @@ export function createPublicPricingOfferCatalog(
               mealPlan: rate.mealPlan,
               // Additive (VAY-2188). A mapped offer always has its terms; null would mean unknown.
               cancellation: cancellations.get(rate.ratePlanId) ?? null,
+              // Additive (VAY-2281), only when the hotel wrote one.
+              ...(mealDescriptions.has(rate.ratePlanId) && {
+                mealDescription: mealDescriptions.get(rate.ratePlanId)!,
+              }),
             })),
           });
         }

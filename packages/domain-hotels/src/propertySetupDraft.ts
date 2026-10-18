@@ -6,7 +6,6 @@ export const PROPERTY_SETUP_COMPLETED_RETENTION_DAYS = 30;
 export const PROPERTY_SETUP_DRAFT_PII_CLASSIFICATION = "potential_incidental_pii" as const;
 export type PropertySetupStepPermission =
   | "hotel_catalog.setup.manage"
-  | "marketplace.profile.manage"
   | "booking.settings.manage"
   | "pms.operations.manage";
 
@@ -22,18 +21,6 @@ export const PROPERTY_SETUP_STEP_DEFINITIONS = [
       "profile.hero_image",
       "profile.gallery_images",
       "profile.amenities",
-    ],
-  },
-  {
-    stepId: "marketplace_preferences",
-    track: "creator_marketplace",
-    permission: "marketplace.profile.manage",
-    baseRevisionKeys: ["marketplace.collaboration_preferences"],
-    fields: [
-      "marketplace.preferences.compensation_types",
-      "marketplace.preferences.content_platforms",
-      "marketplace.preferences.content_types",
-      "marketplace.preferences.availability",
     ],
   },
   {

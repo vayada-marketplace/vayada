@@ -157,7 +157,8 @@ describe("AdaptiveHotelSetupController", () => {
       );
     });
     await act(async () => {
-      context.goToStep!("marketplace_preferences");
+      // A step outside the server route (here a retired one) is ignored.
+      context.goToStep!("retired_step" as never);
     });
     expect(beforeLeave).not.toHaveBeenCalled();
     await act(async () => {
@@ -624,7 +625,7 @@ function currentShell(): CapturedShellProps {
 function setupSearchParams(stepId: string): URLSearchParams {
   return new URLSearchParams({
     propertyId,
-    entryProduct: "marketplace",
+    entryProduct: "booking",
     step: stepId,
   });
 }

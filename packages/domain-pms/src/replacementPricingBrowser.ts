@@ -9,7 +9,9 @@ export {
 } from "./replacementPricing.js";
 export {
   parsePricingConfiguration,
+  pricingOfferOnBookingPage,
   type PricingConfiguration,
+  type PricingOfferSale,
 } from "./replacementPricingConfiguration.js";
 export { parseFlexibleCancellationTerms } from "./pricing.js";
 export {

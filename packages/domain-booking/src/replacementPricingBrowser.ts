@@ -12,6 +12,7 @@ const uuid = (v: unknown): v is string =>
 const text = (v: unknown): v is string =>
   typeof v === "string" && v === v.trim() && v.length > 0 && v.length <= 200;
 export type { ReplacementOfferTerms } from "./replacementPricingEvidence.js";
+export * from "./pricingPaidWhenBooking.js";
 export * from "./pricingOfferNames.js";
 export {
   isManualPricingPaymentMethod,
