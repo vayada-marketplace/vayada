@@ -118,6 +118,7 @@ it("keeps the room cards' content and drops malformed parts without failing sele
               {
                 ...rooms[0].offers[0],
                 cancellation: { kind: "free_until_days_before_arrival", days: 3 },
+                mealDescription: "Buffet breakfast in the Stube",
               },
             ],
           },
@@ -133,6 +134,7 @@ it("keeps the room cards' content and drops malformed parts without failing sele
                 currency: "EUR",
                 mealPlan: "room_only",
                 cancellation: { kind: "free_until_days_before_arrival", days: -1 },
+                mealDescription: "   ",
               },
             ],
           },
@@ -157,6 +159,7 @@ it("keeps the room cards' content and drops malformed parts without failing sele
         {
           ...rooms[0].offers[0],
           cancellation: { kind: "free_until_days_before_arrival", days: 3 },
+          mealDescription: "Buffet breakfast in the Stube",
         },
       ],
     },

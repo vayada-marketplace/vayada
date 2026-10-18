@@ -68,15 +68,9 @@ describe("createPropertySetupRouteClient", () => {
 });
 
 describe("parsePropertySetupRouteReadModel", () => {
-  it("accepts each canonical active route without mutating the wire value", () => {
-    for (const selectedTracks of [
-      ["creator_marketplace"],
-      ["hotel_operations"],
-      ["hotel_operations", "creator_marketplace"],
-    ] as const) {
-      const route = routeWire(propertyId, selectedTracks);
-      expect(parsePropertySetupRouteReadModel(route)).toBe(route);
-    }
+  it("accepts the canonical active route without mutating the wire value", () => {
+    const route = routeWire(propertyId, ["hotel_operations"]);
+    expect(parsePropertySetupRouteReadModel(route)).toBe(route);
   });
 
   it("fails closed for extra keys, discontinuous positions, or dishonest progress", () => {
@@ -124,7 +118,7 @@ describe("parsePropertySetupRouteReadModel", () => {
         ),
       }),
     ).toBeNull();
-    // A step from a track that is not selected.
+    // A step outside the route definitions (the retired Marketplace step).
     expect(
       parsePropertySetupRouteReadModel({
         ...route,
@@ -239,7 +233,7 @@ function clientReturning(value: unknown): PropertySetupRouteHttpClient {
 
 function routeWire(
   routePropertyId = propertyId,
-  selectedTracks: readonly ("hotel_operations" | "creator_marketplace")[] = ["creator_marketplace"],
+  selectedTracks: readonly "hotel_operations"[] = ["hotel_operations"],
 ): PropertySetupRouteReadModel {
   return buildPropertySetupRoute({
     organizationId,

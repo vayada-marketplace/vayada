@@ -145,10 +145,10 @@ describe("resolveSharedHotelSetupGuard", () => {
       ],
     };
     fallback.entryDecision = {
-      requestedProduct: "marketplace",
+      requestedProduct: "booking",
       propertyId: "property-2",
       decision: "enter",
-      destinationRouteKey: "marketplace.workspace",
+      destinationRouteKey: "booking.dashboard",
       reasonCode: null,
     };
     const getStatus = vi
@@ -161,9 +161,9 @@ describe("resolveSharedHotelSetupGuard", () => {
       resolveSharedHotelSetupGuard(
         { getStatus },
         {
-          entryProduct: "marketplace",
-          returnProduct: "marketplace",
-          returnTo: "/marketplace",
+          entryProduct: "booking",
+          returnProduct: "booking",
+          returnTo: "/dashboard",
           propertyId: "stale-property",
           onInvalidPropertyId,
         },
@@ -171,7 +171,7 @@ describe("resolveSharedHotelSetupGuard", () => {
     ).resolves.toMatchObject({ action: "enter_product", propertyId: "property-2" });
     // VAY-2094: the fallback answer is for no property, so it must not trigger a second retry.
     expect(getStatus).toHaveBeenCalledTimes(2);
-    expect(getStatus).toHaveBeenNthCalledWith(2, { entryProduct: "marketplace", propertyId: null });
+    expect(getStatus).toHaveBeenNthCalledWith(2, { entryProduct: "booking", propertyId: null });
     expect(onInvalidPropertyId).toHaveBeenCalledOnce();
   });
 });

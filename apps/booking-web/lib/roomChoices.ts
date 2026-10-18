@@ -6,13 +6,16 @@ import type { PricingOffer } from "@/services/api/replacementOffers";
 
 /** The parts of a choice's plain name, shared with the PMS (VAY-2188): its meal, how it cancels,
  * free cancellation's deadline in days and, for two choices that would read the same in one
- * room, a number ("Free cancellation 2"). */
-export type ChoiceKeys = PricingOfferNameKey;
+ * room, a number ("Free cancellation 2"). Plus the hotel's own meal text, if any (VAY-2281). */
+export type ChoiceKeys = PricingOfferNameKey & { mealDescription?: string };
 
 export function choiceKeys(offers: readonly PricingOffer[]): ChoiceKeys[] {
   return pricingOfferNameKeys(
     offers.map(({ mealPlan, cancellation }) => ({ mealPlan, cancellation })),
-  );
+  ).map((keys, index) => {
+    const mealDescription = offers[index]!.mealDescription;
+    return mealDescription ? { ...keys, mealDescription } : keys;
+  });
 }
 
 /** The last day free cancellation is possible for a stay (YYYY-MM-DD): the cutoff day itself
@@ -79,7 +82,8 @@ export function choiceText(
           ? t("choice.mealPartialRefund", { meal })
           : meal;
   const terms = [
-    keys.meal === "room_only" ? null : t(`choice.mealTerms.${keys.meal}`),
+    // The hotel's own meal text when it wrote one, shown as written (not translated).
+    keys.mealDescription ?? (keys.meal === "room_only" ? null : t(`choice.mealTerms.${keys.meal}`)),
     cancellationPassed
       ? t("choice.noLongerFree")
       : cancellation === "free" && until

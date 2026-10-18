@@ -243,7 +243,6 @@ jobs:
                 --build-arg "NEXT_PUBLIC_PLATFORM_MEDIA_API_URL=${NEXT_API_URL}"
                 --build-arg "NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY}"
                 --build-arg NEXT_PUBLIC_BOOKING_ADMIN_URL=https://next-booking-admin.vayada.com
-                --build-arg NEXT_PUBLIC_MARKETPLACE_URL=https://next-marketplace.vayada.com
                 --build-arg NEXT_PUBLIC_AUTHKIT_LOGIN_ENABLED=true
                 --build-arg NEXT_PUBLIC_AIRBNB_IMPORT_ENABLED=true
                 --build-arg NEXT_PUBLIC_AUTHKIT_COMPATIBILITY_TOKEN_ENABLED=false
@@ -268,7 +267,6 @@ jobs:
                 --build-arg "NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY}"
                 --build-arg "NEXT_PUBLIC_PMS_URL=${NEXT_API_URL}"
                 --build-arg NEXT_PUBLIC_PMS_FRONTEND_URL=https://next-pms.vayada.com
-                --build-arg NEXT_PUBLIC_MARKETPLACE_URL=https://next-marketplace.vayada.com
                 --build-arg 'NEXT_PUBLIC_BOOKING_URL_TEMPLATE=https://{slug}.next-booking.vayada.com'
                 --build-arg NEXT_PUBLIC_AIRBNB_IMPORT_ENABLED=true
               )
@@ -286,7 +284,6 @@ jobs:
                 --build-arg "NEXT_PUBLIC_PMS_URL=${NEXT_API_URL}"
                 --build-arg "NEXT_PUBLIC_PMS_API_URL=${NEXT_API_URL}"
                 --build-arg 'NEXT_PUBLIC_BOOKING_URL_TEMPLATE=https://{slug}.next-booking.vayada.com'
-                --build-arg NEXT_PUBLIC_MARKETPLACE_URL=https://next-marketplace.vayada.com
               )
               ;;
             *) echo "::error::Unknown managed service $SERVICE"; exit 1 ;;

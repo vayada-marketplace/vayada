@@ -49,6 +49,18 @@ describe("room choices", () => {
     ]);
   });
 
+  it("uses the hotel's own meal text in place of the fixed one (VAY-2281)", () => {
+    expect(
+      text([
+        { ...offer("breakfast", free(3)), mealDescription: "Buffet breakfast, 7:00–10:30" },
+        offer("breakfast", { kind: "non_refundable" }),
+      ]),
+    ).toEqual([
+      "Breakfast included | Buffet breakfast, 7:00–10:30 · Free cancellation until 2026-11-03",
+      "Breakfast included, non-refundable | Breakfast every morning · No refund if you cancel or don't arrive",
+    ]);
+  });
+
   it("numbers choices that would read the same in one room", () => {
     expect(
       text([

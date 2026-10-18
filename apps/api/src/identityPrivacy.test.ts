@@ -220,7 +220,7 @@ function buildAuthedPrivacyApp(repository: IdentityPrivacyRepository): ReturnTyp
       propertyAccessRepository: agencyPropertyAccessRepository,
       rolePermissionRepository: {
         async findPermissionsForRole() {
-          return ["marketplace.profile.manage"];
+          return [];
         },
       },
     },

@@ -2,10 +2,6 @@ import {
   parseHotelCatalogStep1ReadModel,
   type HotelCatalogStep1ReadModel,
 } from "@vayada/domain-hotels";
-import {
-  parseMarketplaceHotelCollaborationPreferencesReadModel,
-  type MarketplaceHotelCollaborationPreferencesReadPort,
-} from "@vayada/domain-marketplace";
 
 import type { HotelCatalogStep1Repository } from "../domains/hotelCatalogStep1Repository.js";
 import type {
@@ -47,40 +43,6 @@ export function createPropertySetupHotelCatalogStateProvider(
   };
 }
 
-export function createPropertySetupMarketplaceStateProvider(
-  preferences: MarketplaceHotelCollaborationPreferencesReadPort,
-): PropertySetupOwnerStateProviderPort {
-  return {
-    async getOwnerState(request) {
-      if (!validSingleStepRequest(request, "marketplace_preferences")) return failure();
-      try {
-        const outcome = await preferences.getHotelCollaborationPreferences({
-          organizationId: request.organizationId,
-          propertyId: request.propertyId,
-        });
-        if (outcome.outcome !== "available") return failure();
-        const readModel = parseMarketplaceHotelCollaborationPreferencesReadModel(outcome.readModel);
-        if (!readModel || readModel.propertyId !== request.propertyId) return failure();
-        return found({
-          organizationId: request.organizationId,
-          propertyId: request.propertyId,
-          stepId: "marketplace_preferences",
-          product: "marketplace",
-          ownerDomain: "marketplace",
-          state: readModel.preferences === null ? "not_started" : "complete",
-          sourceRevision: readModel.sourceRevision,
-          currentBaseRevisions: Object.freeze({
-            "marketplace.collaboration_preferences": readModel.sourceRevision,
-          }),
-          blockers: [],
-        });
-      } catch {
-        return failure();
-      }
-    },
-  };
-}
-
 function presentHotelState(readModel: HotelCatalogStep1ReadModel) {
   if (
     readModel.profile.shortDescription &&
@@ -100,7 +62,7 @@ function presentHotelState(readModel: HotelCatalogStep1ReadModel) {
 
 function validSingleStepRequest(
   request: PropertySetupOwnerStateRequest,
-  stepId: "present_hotel" | "marketplace_preferences",
+  stepId: "present_hotel",
 ): boolean {
   return (
     request.stepIds.length === 1 &&

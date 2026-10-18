@@ -3,11 +3,10 @@ import { PROPERTY_SETUP_STEP_DEFINITIONS, type PropertySetupStepId } from "./pro
 export const SOURCE_MANIFEST_CONTRACT_VERSION = "onboarding-source-manifest.v1" as const;
 export const PRODUCT_READINESS_CONTRACT_VERSION = "onboarding-product-readiness.v1" as const;
 
-export const READINESS_PRODUCTS = ["marketplace", "booking"] as const;
+export const READINESS_PRODUCTS = ["booking"] as const;
 export type ReadinessProduct = (typeof READINESS_PRODUCTS)[number];
 
 export const READINESS_GROUP_IDS_BY_PRODUCT = {
-  marketplace: ["marketplace.hotel_profile", "marketplace.collaboration_preferences"],
   booking: [
     "booking.hotel_profile",
     "booking.page_style",

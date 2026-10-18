@@ -48,7 +48,7 @@ test.describe("pms-web canonical setup redirect", () => {
     await expect(page.getByRole("heading", { name: "Before local setup" })).toBeVisible();
   });
 
-  test("preserves another valid entry product while defaulting an unsafe return path", async ({
+  test("reads an old Marketplace link as booking setup while defaulting an unsafe return path", async ({
     page,
   }) => {
     await mockPmsWebTargetRoutes(page);
@@ -61,7 +61,7 @@ test.describe("pms-web canonical setup redirect", () => {
     await expect.poll(() => page.url()).toBe(handoffDestination());
     expect(handoffs.map((handoff) => handoff.targetPath)).toEqual([
       canonicalSetupPath({
-        entryProduct: "marketplace",
+        entryProduct: "booking",
         returnTo: "/dashboard",
         propertyId: PMS_WEB_PROPERTY_ID,
       }),
@@ -349,7 +349,7 @@ function handoffDestination(): string {
 }
 
 function canonicalSetupPath(input: {
-  entryProduct: "booking" | "marketplace" | "pms";
+  entryProduct: "booking" | "pms";
   returnTo: string;
   propertyId?: string;
   mode?: "add";
