@@ -10,10 +10,7 @@ vi.mock("./BookingReviewCard", () => ({
   },
 }));
 import { ReviewStep } from "./ReviewStep";
-it.each([
-  [["hotel_operations"], 1],
-  [["creator_marketplace", "hotel_operations"], 1],
-] as const)(
+it.each([[["hotel_operations"], 1]] as const)(
   "composes the booking card for %s with independent status and edit coordinates",
   async (tracks, booking) => {
     vi.clearAllMocks();
@@ -42,12 +39,11 @@ it.each([
   },
 );
 
-// Booking Admin hosts no Marketplace review card (VAY-2261): a hotel that only chose the
-// Creator Marketplace track sees the finish controls without a product card.
+// Without a selected track there is no product card, only the finish controls.
 it("renders only the finish controls when no booking track is selected", async () => {
   vi.clearAllMocks();
   const props = {
-    route: { scope: { propertyId: "hotel", organizationId: "org" }, selectedTracks: ["creator_marketplace"] },
+    route: { scope: { propertyId: "hotel", organizationId: "org" }, selectedTracks: [] },
     goToStep: vi.fn(),
     saveAndContinue: vi.fn().mockResolvedValue(undefined),
   } as unknown as AdaptiveSetupStepComponentProps;

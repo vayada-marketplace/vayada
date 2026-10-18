@@ -1,5 +1,6 @@
 import {
   PRODUCT_ENTRY_PRODUCTS,
+  SETUP_TRACKS,
   type AdaptiveHotelSetupStatus,
   type ProductEntryDecision,
   type PropertySetupPlan,
@@ -124,9 +125,7 @@ export function toggleSetupTrackSelection(
   const next = selectedTracks.includes(track)
     ? selectedTracks.filter((candidate) => candidate !== track)
     : [...selectedTracks, track];
-  return (["hotel_operations", "creator_marketplace"] as const).filter((candidate) =>
-    next.includes(candidate),
-  );
+  return SETUP_TRACKS.filter((candidate) => next.includes(candidate));
 }
 
 function emptyView(screen: SharedFirstRunSetupScreen, title: string): SharedFirstRunSetupViewModel {

@@ -237,7 +237,6 @@ describe("property setup draft save route", () => {
 
   it.each([
     ["present_hotel", "hotel_catalog.setup.manage", "pms"],
-    ["marketplace_preferences", "marketplace.profile.manage", "marketplace"],
     ["booking_design", "booking.settings.manage", "booking"],
     ["rooms", "pms.operations.manage", "pms"],
   ] as const)(
@@ -343,7 +342,6 @@ describe("property setup draft save route", () => {
   );
 
   it.each([
-    ["marketplace_preferences", "marketplace.profile.manage", "marketplace"],
     ["booking_design", "booking.settings.manage", "booking"],
     ["rooms", "pms.operations.manage", "pms"],
   ] as const)(

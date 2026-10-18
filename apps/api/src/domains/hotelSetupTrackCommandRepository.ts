@@ -83,7 +83,7 @@ type ProvisioningState = {
 
 const OPERATION = "hotel_setup.tracks.update";
 const SETUP_SOURCE = "adaptive_hotel_setup";
-const COMPONENT_PRODUCTS = ["pms", "booking", "marketplace"] as const;
+const COMPONENT_PRODUCTS = ["pms", "booking"] as const;
 
 export function createPgHotelSetupTrackCommandRepository(config: {
   connectionString: string;
@@ -351,7 +351,6 @@ async function loadProvisioningState(
        AND entitlement_key = CASE product
          WHEN 'pms' THEN 'property-management'
          WHEN 'booking' THEN 'booking-engine'
-         WHEN 'marketplace' THEN 'marketplace-hotel-profile'
        END
      ${forUpdate ? "FOR UPDATE" : ""}`,
     [organizationId, COMPONENT_PRODUCTS],
@@ -368,7 +367,6 @@ async function loadProvisioningState(
        AND entitlement_key = CASE product
          WHEN 'pms' THEN 'property-management'
          WHEN 'booking' THEN 'booking-engine'
-         WHEN 'marketplace' THEN 'marketplace-hotel-profile'
        END
      ${forUpdate ? "FOR UPDATE" : ""}`,
     [organizationId, COMPONENT_PRODUCTS],
@@ -385,7 +383,6 @@ async function loadProvisioningState(
        AND (
          (product = 'pms' AND resource_type = 'pms_property')
          OR (product = 'booking' AND resource_type = 'booking_hotel')
-         OR (product = 'marketplace' AND resource_type = 'hotel_profile')
        )
      ${forUpdate ? "FOR UPDATE" : ""}`,
     [organizationId, COMPONENT_PRODUCTS],
@@ -526,7 +523,6 @@ async function provisionTrack(
        CASE product
          WHEN 'pms' THEN 'property-management'
          WHEN 'booking' THEN 'booking-engine'
-         WHEN 'marketplace' THEN 'marketplace-hotel-profile'
        END,
        'active',
        $4::timestamptz,
@@ -575,7 +571,6 @@ async function provisionTrack(
        CASE requested.product
          WHEN 'pms' THEN 'pms_property'
          WHEN 'booking' THEN 'booking_hotel'
-         WHEN 'marketplace' THEN 'hotel_profile'
        END,
        catalog.resource_id,
        catalog.relationship,

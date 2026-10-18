@@ -18,14 +18,9 @@ describe("hotel account invites", () => {
 
   it("enters PMS setup for PMS-only invitations and booking setup otherwise", () => {
     expect(hotelAccountInviteEntryProduct(["hotel_operations"])).toBe("pms");
-    expect(hotelAccountInviteEntryProduct(["hotel_operations", "creator_marketplace"])).toBe(
-      "booking",
-    );
+    expect(hotelAccountInviteEntryProduct([])).toBe("booking");
     expect(hotelAccountInviteSetupPath(["hotel_operations"])).toBe(
       "/setup?entryProduct=pms&returnProduct=pms",
-    );
-    expect(hotelAccountInviteSetupPath(["hotel_operations", "creator_marketplace"])).toBe(
-      "/setup?entryProduct=booking&returnProduct=booking",
     );
     expect(hotelAccountInviteSetupPath([])).toBe(
       "/setup?entryProduct=booking&returnProduct=booking",

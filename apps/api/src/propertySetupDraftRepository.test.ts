@@ -99,7 +99,7 @@ describe.skipIf(!TEST_DATABASE_URL)("property setup draft PostgreSQL repository"
     await client.end();
   });
 
-  it("uses the current authorized route while retaining hidden-track drafts", async () => {
+  it("uses the current authorized route and never returns a stored retired-step draft", async () => {
     await insertSession(["hotel_operations"], "2026-09-30T12:00:00.000Z");
     await insertDraft({
       stepId: "marketplace_preferences",
@@ -174,22 +174,12 @@ describe.skipIf(!TEST_DATABASE_URL)("property setup draft PostgreSQL repository"
       ),
     ).resolves.toMatchObject({ rows: [{ count: "1" }] });
 
-    // Restoring Marketplace in the current route must reveal the retained
-    // draft even though the historical session still records Operations only.
+    // The retired Marketplace step (VAY-2270) is no setup step any more: its stored draft stays
+    // until the data migration deletes it, but no caller can be authorized for it.
     await expect(repository.getActiveSession(scope)).resolves.toMatchObject({
       selectedTracks: ["hotel_operations"],
       trackRevision: 2,
-      drafts: [
-        { stepId: "present_hotel" },
-        {
-          stepId: "marketplace_preferences",
-          payload: {
-            "marketplace.preferences.content_types": ["short_form_video"],
-          },
-          dirtyFields: ["marketplace.preferences.content_types"],
-          revision: 2,
-        },
-      ],
+      drafts: [{ stepId: "present_hotel" }],
     });
   });
 

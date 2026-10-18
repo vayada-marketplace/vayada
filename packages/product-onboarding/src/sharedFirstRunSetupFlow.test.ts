@@ -48,25 +48,6 @@ describe("resolveSharedFirstRunSetupView", () => {
         "direct_booking_publication",
       ] as SetupTaskId[],
     },
-    {
-      name: "Creator Marketplace",
-      tracks: ["creator_marketplace"] as SetupTrack[],
-      tasks: ["shared_identity", "public_profile", "creator_offer"] as SetupTaskId[],
-    },
-    {
-      name: "both tracks",
-      tracks: ["hotel_operations", "creator_marketplace"] as SetupTrack[],
-      tasks: [
-        "shared_identity",
-        "public_profile",
-        "creator_offer",
-        "rooms_rates_availability",
-        "guest_settings_policies",
-        "billing_plan",
-        "payment",
-        "direct_booking_publication",
-      ] as SetupTaskId[],
-    },
   ])("keeps the authoritative $name task plan", ({ tracks, tasks }) => {
     const view = resolveSharedFirstRunSetupView(statusFor(tracks, tasks));
 
@@ -75,10 +56,7 @@ describe("resolveSharedFirstRunSetupView", () => {
   });
 
   it("reopens the selected property's existing profile inside setup when hotel basics are edited", () => {
-    const status = statusFor(
-      ["creator_marketplace"],
-      ["shared_identity", "public_profile", "creator_offer"],
-    );
+    const status = statusFor(["hotel_operations"], ["shared_identity", "rooms_rates_availability"]);
 
     expect(resolveSharedFirstRunSetupView(status, { editPropertyProfile: true })).toMatchObject({
       screen: "property_profile",
@@ -90,13 +68,12 @@ describe("resolveSharedFirstRunSetupView", () => {
 });
 
 describe("toggleSetupTrackSelection", () => {
-  it("locks existing tracks while allowing another track to be added", () => {
+  it("locks existing tracks and toggles an unlocked one", () => {
     expect(
       toggleSetupTrackSelection(["hotel_operations"], ["hotel_operations"], "hotel_operations"),
     ).toEqual(["hotel_operations"]);
-    expect(
-      toggleSetupTrackSelection(["hotel_operations"], ["hotel_operations"], "creator_marketplace"),
-    ).toEqual(["hotel_operations", "creator_marketplace"]);
+    expect(toggleSetupTrackSelection([], [], "hotel_operations")).toEqual(["hotel_operations"]);
+    expect(toggleSetupTrackSelection(["hotel_operations"], [], "hotel_operations")).toEqual([]);
   });
 });
 
@@ -119,12 +96,6 @@ function statusFor(selectedTracks: SetupTrack[], taskIds: SetupTaskId[]): Adapti
             { product: "pms", access: "active" },
             { product: "booking", access: "active" },
           ],
-          allowedActions: [],
-        },
-        {
-          track: "creator_marketplace",
-          provisioning: selectedTracks.includes("creator_marketplace") ? "active" : "not_selected",
-          components: [{ product: "marketplace", access: "active" }],
           allowedActions: [],
         },
       ],
@@ -160,9 +131,6 @@ function statusFor(selectedTracks: SetupTrack[], taskIds: SetupTaskId[]): Adapti
         directBookingPublish: selectedTracks.includes("hotel_operations")
           ? "pending"
           : "not_applicable",
-        marketplacePublish: selectedTracks.includes("creator_marketplace")
-          ? "pending"
-          : "not_applicable",
       },
     },
     updatedAt: "2026-07-26T12:00:00.000Z",
@@ -171,12 +139,7 @@ function statusFor(selectedTracks: SetupTrack[], taskIds: SetupTaskId[]): Adapti
 
 function setupTask(taskId: SetupTaskId): SetupTask {
   const complete = taskId === "shared_identity";
-  const track =
-    taskId === "shared_identity"
-      ? "shared"
-      : ["public_profile", "creator_offer"].includes(taskId)
-        ? "creator_marketplace"
-        : "hotel_operations";
+  const track = taskId === "shared_identity" ? "shared" : "hotel_operations";
   return {
     taskId,
     propertyId: "property-1",

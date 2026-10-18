@@ -666,22 +666,8 @@ describe.skipIf(!TEST_DATABASE_URL)("property setup draft save repository", () =
     expect(stored.rows).toEqual([{ baseRevisions: PRESENT_BASE }]);
   });
 
-  it("rejects inactive steps and revoked access before replay", async () => {
+  it("rejects revoked access before replay", async () => {
     const fixture = await createFixture(["hotel_operations"]);
-    const marketplace = command(fixture, {
-      idempotencyKey: "inactive-marketplace",
-      stepId: "marketplace_preferences",
-      payload: {},
-      dirtyFields: [],
-      expectedBaseRevisions: {
-        "marketplace.collaboration_preferences": "preferences:1",
-      },
-    });
-    await expect(repository.saveStepDraft(marketplace)).resolves.toEqual({
-      ok: false,
-      error: { code: "inactive_setup_step", currentTrackRevision: 1 },
-    });
-
     const initial = command(fixture, {
       idempotencyKey: "revoked-replay",
       payload: { "profile.short_description": "Do not disclose this draft." },

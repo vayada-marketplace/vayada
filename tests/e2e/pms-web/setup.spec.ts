@@ -55,13 +55,13 @@ test.describe("pms-web canonical setup redirect", () => {
     const handoffs = await mockSetupHandoff(page);
 
     await page.goto(
-      `/setup?entryProduct=marketplace&returnTo=${encodeURIComponent("https://attacker.example/dashboard")}&propertyId=${PMS_WEB_PROPERTY_ID}`,
+      `/setup?entryProduct=booking&returnTo=${encodeURIComponent("https://attacker.example/dashboard")}&propertyId=${PMS_WEB_PROPERTY_ID}`,
     );
 
     await expect.poll(() => page.url()).toBe(handoffDestination());
     expect(handoffs.map((handoff) => handoff.targetPath)).toEqual([
       canonicalSetupPath({
-        entryProduct: "marketplace",
+        entryProduct: "booking",
         returnTo: "/dashboard",
         propertyId: PMS_WEB_PROPERTY_ID,
       }),
@@ -349,7 +349,7 @@ function handoffDestination(): string {
 }
 
 function canonicalSetupPath(input: {
-  entryProduct: "booking" | "marketplace" | "pms";
+  entryProduct: "booking" | "pms";
   returnTo: string;
   propertyId?: string;
   mode?: "add";

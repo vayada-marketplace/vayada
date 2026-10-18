@@ -63,12 +63,6 @@ describe("stored hotel setup track command results", () => {
               ],
               allowedActions: ["manage_service"],
             },
-            {
-              track: "creator_marketplace",
-              provisioning: "not_selected",
-              components: [{ product: "marketplace", access: "absent" }],
-              allowedActions: ["add"],
-            },
           ],
         },
       }),
@@ -194,10 +188,7 @@ describe.skipIf(!TEST_DATABASE_URL)("hotel setup track command repository", () =
     ).toMatchObject({
       trackRevision: 0,
       selectedTracks: [],
-      tracks: [
-        { track: "hotel_operations", provisioning: "not_selected" },
-        { track: "creator_marketplace", provisioning: "not_selected" },
-      ],
+      tracks: [{ track: "hotel_operations", provisioning: "not_selected" }],
     });
 
     const created = await repository.updateTracks(operations);
@@ -215,7 +206,6 @@ describe.skipIf(!TEST_DATABASE_URL)("hotel setup track command repository", () =
               { product: "booking", access: "active" },
             ],
           },
-          { track: "creator_marketplace", provisioning: "not_selected" },
         ],
       },
     });
@@ -285,7 +275,8 @@ describe.skipIf(!TEST_DATABASE_URL)("hotel setup track command repository", () =
 
     const reusedKey = await repository.updateTracks({
       ...operations,
-      selectedTracks: ["hotel_operations", "creator_marketplace"],
+      // The retired Creator Marketplace track (VAY-2270) is not a SetupTrack any more.
+      selectedTracks: ["hotel_operations", "creator_marketplace"] as never,
     });
     expect(reusedKey).toMatchObject({
       ok: false,
@@ -315,7 +306,8 @@ describe.skipIf(!TEST_DATABASE_URL)("hotel setup track command repository", () =
     // The Creator Marketplace track is retired (VAY-2270): it cannot be added any more.
     const retired = await repository.updateTracks(
       command(fixture, {
-        selectedTracks: ["hotel_operations", "creator_marketplace"],
+        // The retired Creator Marketplace track (VAY-2270) is not a SetupTrack any more.
+        selectedTracks: ["hotel_operations", "creator_marketplace"] as never,
         expectedRevision: 1,
         idempotencyKey: "setup-both",
       }),
@@ -442,10 +434,7 @@ describe.skipIf(!TEST_DATABASE_URL)("hotel setup track command repository", () =
       ok: true,
       response: {
         trackRevision: 1,
-        tracks: [
-          { track: "hotel_operations", provisioning: "active" },
-          { track: "creator_marketplace", provisioning: "not_selected" },
-        ],
+        tracks: [{ track: "hotel_operations", provisioning: "active" }],
       },
     });
     expect(await activeEntitlementProducts(suspended.organizationId)).toEqual(["booking", "pms"]);
@@ -472,10 +461,7 @@ describe.skipIf(!TEST_DATABASE_URL)("hotel setup track command repository", () =
     expect(scheduledOwnSuspensionResult).toMatchObject({
       ok: true,
       response: {
-        tracks: [
-          { track: "hotel_operations", provisioning: "active" },
-          { track: "creator_marketplace", provisioning: "not_selected" },
-        ],
+        tracks: [{ track: "hotel_operations", provisioning: "active" }],
       },
     });
 
@@ -539,10 +525,7 @@ describe.skipIf(!TEST_DATABASE_URL)("hotel setup track command repository", () =
     expect(activeBillingResult).toMatchObject({
       ok: true,
       response: {
-        tracks: [
-          { track: "hotel_operations", provisioning: "active" },
-          { track: "creator_marketplace", provisioning: "not_selected" },
-        ],
+        tracks: [{ track: "hotel_operations", provisioning: "active" }],
       },
     });
     const pmsEntitlements = await client.query<{ entitlementKey: string; source: string }>(
@@ -879,10 +862,7 @@ describe.skipIf(!TEST_DATABASE_URL)("hotel setup track command repository", () =
       {
         trackRevision: 1,
         selectedTracks: ["hotel_operations"],
-        tracks: [
-          { track: "hotel_operations", provisioning: "active" },
-          { track: "creator_marketplace", provisioning: "not_selected" },
-        ],
+        tracks: [{ track: "hotel_operations", provisioning: "active" }],
       },
     );
 
