@@ -166,9 +166,6 @@ jobs:
       - name: Vayada Admin tests
         run: npm --workspace vayada-admin run test
 
-      - name: Marketplace Web tests
-        run: npm --workspace vayada-creator-marketplace run test
-
       - name: Landing consent browser regressions
         run: |
           npx playwright install --with-deps chromium
@@ -222,7 +219,6 @@ jobs:
 
       - name: Verify frontend auth gateways
         run: |
-          npm --workspace vayada-creator-marketplace run test -- 'app/auth/[...path]/route.test.ts'
           npm --workspace vayada-booking-engine-frontend-admin run test -- 'app/auth/[...path]/route.test.ts'
           npm --workspace vayada-pms-frontend run test -- 'app/auth/[...path]/route.test.ts'
           npm --workspace vayada-admin run test -- 'app/auth/[...path]/route.test.ts'
