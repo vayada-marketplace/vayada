@@ -70,7 +70,10 @@ export function CardRefundPanel({
   const amount = formatCurrency(Number(refund.amount), refund.currency, 2);
   const amountOf = t("bookings.detail.cardRefund.amountOf", {
     amount,
-    total: formatCurrency(booking.totalAmount, booking.currency, 2),
+    // Out of what the card paid (a deposit is only part of the stay), else the stay's total.
+    total: refund.paidAmount
+      ? formatCurrency(Number(refund.paidAmount), refund.currency, 2)
+      : formatCurrency(booking.totalAmount, booking.currency, 2),
   });
   const when = (iso: string) =>
     new Date(iso).toLocaleString(locale, {

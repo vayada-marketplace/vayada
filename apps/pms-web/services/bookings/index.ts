@@ -77,6 +77,8 @@ export type BookingCardRefund = {
   failureReason: string | null;
   createdAt: string;
   settledAt: string | null;
+  /** What the guest paid by card (two decimals), when the API says. */
+  paidAmount?: string | null;
 };
 
 export interface Booking {

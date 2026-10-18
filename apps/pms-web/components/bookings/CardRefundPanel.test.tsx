@@ -63,6 +63,14 @@ it("says a refund is on its way, then that it is done, with who cancelled (VAY-2
   expect(text(done)).toContain("Refunded to the guest's card");
   expect(text(done)).toContain("you cancelled");
   expect(text(done)).toContain("vayada's commission on the €80.50 went back to you.");
+  // A deposit's refund reads against what the card paid, not the stay's total.
+  const deposit = create(
+    createElement(CardRefundPanel, {
+      booking: booking(refund({ status: "succeeded", amount: "72.00", paidAmount: "72.00" })),
+      onRetried: vi.fn(),
+    }),
+  );
+  expect(text(deposit)).toContain("€72.00 of €72.00");
 });
 
 it.each([
