@@ -63,7 +63,10 @@ export async function stagePricingCardRefund(
     await client.query(
       `SELECT payment.id,payment.amount::text AS amount,payment.refunded_amount::text AS refunded,
          trim(payment.currency) AS currency,payment.status,payment.payment_method AS method,
-         payment.provider_payment_intent_id AS intent,account.provider_account_id AS "accountRef"
+         payment.provider_payment_intent_id AS intent,account.provider_account_id AS "accountRef",
+         payment.payment_metadata->>'chargeType' AS "chargeType",trim(booking.currency) AS "bookingCurrency",
+         booking.payment_status AS "bookingPaid",booking.booking_metadata->>'targetSource' AS source,
+         booking.booking_metadata->>'paymentMethod' AS "bookedMethod"
        FROM booking.guest_bookings booking
        JOIN finance.payments payment
          ON payment.id=booking.active_card_payment_id AND payment.property_id=booking.property_id
@@ -74,7 +77,7 @@ export async function stagePricingCardRefund(
       [input.propertyId, input.guestBookingId],
     )
   ).rows[0];
-  const key = `pricing-card-refund:${input.propertyId}:${createHash("sha256").update(input.commandKey).digest("hex")}`;
+  const key = `pricing-card-refund:${input.propertyId}:${input.guestBookingId}:${input.requestedBy}:${createHash("sha256").update(input.commandKey).digest("hex")}`;
   const commandId = uuidFrom(key);
   const replay = (
     await client.query(
@@ -92,6 +95,13 @@ export async function stagePricingCardRefund(
     !payment ||
     payment.method !== "card" ||
     payment.status !== "paid" ||
+    // Refunds run on the hotel's own Stripe account: only its direct charges, in the stay's
+    // currency, of a paid pricing-v2 card stay.
+    payment.chargeType !== "direct" ||
+    payment.currency !== payment.bookingCurrency ||
+    payment.bookingPaid !== "paid" ||
+    payment.source !== "pricing_quote_draft" ||
+    payment.bookedMethod !== "card" ||
     payment.refunded !== "0.00" ||
     !paid ||
     typeof payment.intent !== "string" ||
@@ -153,7 +163,7 @@ type Command = {
 /** After the cancel committed (and from the sweep): asks Stripe for the refund once, or finds the
  * one it already made, and settles it when Stripe says it succeeded. Busy elsewhere, or already
  * settled: nothing happens. Stripe errors keep the command pending with a later retry; after
- * MAX_ATTEMPTS it fails and the PMS shows it. */
+ * MAX_ATTEMPTS a refund Stripe never made fails, with an audit event and a warning. */
 export async function executePricingCardRefund(
   pool: Pick<Pool, "connect">,
   provider: StripeBookingPaymentProvider,
@@ -178,13 +188,15 @@ export async function executePricingCardRefund(
       await client.query("COMMIT");
       return command ? (command.status as "succeeded" | "failed") : "busy";
     }
+    const lookup = { listed: false };
     let refund: StripeBookingRefund | undefined;
     try {
-      refund = await findOrCreateRefund(provider, command);
+      refund = await findOrCreateRefund(provider, command, lookup);
     } catch (error) {
-      // Once Stripe has the refund, it is followed to the end; only one never made is given up.
+      // Once Stripe has the refund, it is followed to the end. One Stripe confirms it never made
+      // (the list answered without it) is given up after MAX_ATTEMPTS, with an audit event.
       const attempts = command.attempts + 1,
-        giveUp = !command.provider_refund_id && attempts >= MAX_ATTEMPTS;
+        giveUp = !command.provider_refund_id && lookup.listed && attempts >= MAX_ATTEMPTS;
       await client.query(
         `UPDATE finance.card_refund_commands SET attempts=$2,failure_reason=$3,updated_at=clock_timestamp(),
            next_attempt_at=clock_timestamp()+make_interval(mins=>$4),
@@ -193,17 +205,52 @@ export async function executePricingCardRefund(
          WHERE id=$1`,
         [command.id, attempts, reason(error), Math.min(2 ** command.attempts, 60), giveUp],
       );
+      if (giveUp) {
+        await audit(client, command, "finance.card_refund_failed", {
+          refundId: null,
+          status: "failed",
+        });
+        warnFailed(command, reason(error));
+      }
       await client.query("COMMIT");
       return giveUp ? "failed" : "pending";
     }
-    const result =
-      refund.status === "succeeded"
-        ? await settleRefund(client, command, refund)
-        : refund.status === "failed" || refund.status === "canceled"
+    if (refund.status !== "succeeded") {
+      const result =
+        refund.status === "failed" || refund.status === "canceled"
           ? await failRefund(client, command, refund)
           : await keepPending(client, command, refund);
+      await client.query("COMMIT");
+      return result;
+    }
+    // The money moved: if recording it fails, keep the refund id and retry later, never in a loop.
+    await client.query("SAVEPOINT settle_refund");
+    try {
+      await settleRefund(client, command, refund);
+    } catch (error) {
+      await client.query("ROLLBACK TO SAVEPOINT settle_refund");
+      await client.query(
+        `UPDATE finance.card_refund_commands SET provider_refund_id=$2,provider_status=$3,attempts=attempts+1,
+           failure_reason=$4,updated_at=clock_timestamp(),next_attempt_at=clock_timestamp()+make_interval(mins=>$5)
+         WHERE id=$1`,
+        [
+          command.id,
+          refund.refundId,
+          refund.status,
+          `settlement: ${reason(error)}`,
+          Math.min(2 ** command.attempts, 60),
+        ],
+      );
+      await client.query("COMMIT");
+      throw new Error(
+        `Pricing card refund ${command.id} succeeded at Stripe but couldn't be recorded`,
+        {
+          cause: error,
+        },
+      );
+    }
     await client.query("COMMIT");
-    return result;
+    return "succeeded";
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
     throw error;
@@ -216,13 +263,23 @@ export async function executePricingCardRefund(
  * backoff). */
 export const MAX_ATTEMPTS = 30;
 
-async function findOrCreateRefund(provider: StripeBookingPaymentProvider, command: Command) {
+async function findOrCreateRefund(
+  provider: StripeBookingPaymentProvider,
+  command: Command,
+  lookup: { listed: boolean },
+) {
+  const listRefunds = async () => {
+    const refunds = await provider.listRefunds(
+      command.provider_payment_intent_id,
+      command.provider_account_ref,
+    );
+    lookup.listed = true;
+    return refunds;
+  };
   const refund = command.provider_refund_id
     ? await provider.retrieveRefund(command.provider_refund_id, command.provider_account_ref)
     : // Stripe forgets idempotency keys after 24 hours: look for this command's refund first.
-      ((
-        await provider.listRefunds(command.provider_payment_intent_id, command.provider_account_ref)
-      ).find((candidate) => candidate.commandId === command.id) ??
+      ((await listRefunds()).find((candidate) => candidate.commandId === command.id) ??
       (await provider.createRefund({
         paymentIntentId: command.provider_payment_intent_id,
         providerAccountRef: command.provider_account_ref,
@@ -230,7 +287,11 @@ async function findOrCreateRefund(provider: StripeBookingPaymentProvider, comman
         commandId: command.id,
         propertyId: command.property_id,
         bookingReference: command.booking_reference,
-        idempotencyKey: command.idempotency_key,
+        // Stripe replays a key's first answer, errors included, for 24 hours: a retry after an
+        // error needs its own key. The list above already rules out a second refund.
+        idempotencyKey: command.attempts
+          ? `${command.idempotency_key}:attempt-${command.attempts}`
+          : command.idempotency_key,
       })));
   if (
     refund.paymentIntentId !== command.provider_payment_intent_id ||
@@ -260,6 +321,7 @@ async function failRefund(client: PoolClient, command: Command, refund: StripeBo
     [command.id, refund.refundId, refund.status, refund.failureReason ?? refund.status],
   );
   await audit(client, command, "finance.card_refund_failed", refund);
+  warnFailed(command, refund.failureReason ?? refund.status);
   return "failed" as const;
 }
 
@@ -331,11 +393,21 @@ async function settleRefund(client: PoolClient, command: Command, refund: Stripe
   return "succeeded" as const;
 }
 
+/** A guest who isn't refunded needs a person: the log line carries ids only, no guest data. */
+function warnFailed(command: Command, why: string) {
+  console.warn("Pricing card refund failed; the hotel must refund the guest another way.", {
+    commandId: command.id,
+    propertyId: command.property_id,
+    guestBookingId: command.guest_booking_id,
+    reason: why,
+  });
+}
+
 async function audit(
   client: PoolClient,
   command: Command,
   action: string,
-  refund: StripeBookingRefund,
+  refund: Pick<StripeBookingRefund, "status"> & { refundId: string | null },
 ) {
   await client.query(
     `INSERT INTO platform.product_audit_events
@@ -368,7 +440,7 @@ export async function runPendingPricingCardRefunds(
   pool: Pick<Pool, "connect" | "query">,
   provider: StripeBookingPaymentProvider,
   limit = 20,
-): Promise<{ attempted: number; errors: number }> {
+): Promise<{ attempted: number; failed: number; errors: number }> {
   const due = (
     await pool.query(
       `SELECT id FROM finance.card_refund_commands WHERE status='pending' AND next_attempt_at<=now()
@@ -376,13 +448,14 @@ export async function runPendingPricingCardRefunds(
       [limit],
     )
   ).rows as { id: string }[];
-  let errors = 0;
+  let errors = 0,
+    failed = 0;
   for (const { id } of due) {
     try {
-      await executePricingCardRefund(pool, provider, id);
+      if ((await executePricingCardRefund(pool, provider, id)) === "failed") failed += 1;
     } catch {
       errors += 1;
     }
   }
-  return { attempted: due.length, errors };
+  return { attempted: due.length, failed, errors };
 }

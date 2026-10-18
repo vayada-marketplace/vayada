@@ -4,6 +4,7 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 
 import {
   executePricingCardRefund,
+  MAX_ATTEMPTS,
   runPendingPricingCardRefunds,
   stagePricingCardRefund,
 } from "./pricingCardRefund.js";
@@ -14,7 +15,12 @@ const url = process.env["TEST_DATABASE_URL"];
 /** Stripe's refunds of one payment, kept in memory; `next` decides what the next one does. */
 function fakeStripe() {
   const refunds: StripeBookingRefund[] = [];
-  const state = { next: "succeeded" as string, loseResponse: false, failCreate: false };
+  const state = {
+    next: "succeeded" as string,
+    loseResponse: false,
+    failCreate: false,
+    failList: false,
+  };
   const provider = {
     createRefund: vi.fn(
       async (input: Parameters<StripeBookingPaymentProvider["createRefund"]>[0]) => {
@@ -33,7 +39,10 @@ function fakeStripe() {
         return refund;
       },
     ),
-    listRefunds: vi.fn(async () => [...refunds]),
+    listRefunds: vi.fn(async () => {
+      if (state.failList) throw new Error("Stripe list is unavailable");
+      return [...refunds];
+    }),
     retrieveRefund: vi.fn(async (id: string) => refunds.find((r) => r.refundId === id)!),
   };
   return {
@@ -62,8 +71,9 @@ describe.skipIf(!url)("pricing card refunds (VAY-2205)", () => {
     );
     await pool.query(
       `INSERT INTO booking.guest_bookings(id,property_id,public_reference,lifecycle_status,payment_status,
-         check_in,check_out,currency)
-       VALUES($1,$2,$3,'canceled','paid','2027-03-10','2027-03-12','EUR')`,
+         check_in,check_out,currency,booking_metadata)
+       VALUES($1,$2,$3,'canceled','paid','2027-03-10','2027-03-12','EUR',
+         '{"targetSource":"pricing_quote_draft","paymentMethod":"card"}')`,
       [guestBookingId, propertyId, `R-${guestBookingId.slice(0, 8)}`],
     );
     await pool.query(
@@ -80,8 +90,9 @@ describe.skipIf(!url)("pricing card refunds (VAY-2205)", () => {
     );
     await pool.query(
       `INSERT INTO finance.payments(id,property_id,guest_booking_id,provider_account_id,payment_kind,payment_method,
-         status,amount,net_amount,currency,provider_payment_intent_id,visibility_class,paid_at)
-       VALUES($1,$2,$3,$4,'full','card','paid',$5::numeric,$5::numeric,'EUR',$6,'pms_finance',now())`,
+         status,amount,net_amount,currency,provider_payment_intent_id,visibility_class,paid_at,payment_metadata)
+       VALUES($1,$2,$3,$4,'full','card','paid',$5::numeric,$5::numeric,'EUR',$6,'pms_finance',now(),
+         '{"chargeType":"direct"}')`,
       [paymentId, propertyId, guestBookingId, accountId, amount, intent],
     );
     await pool.query(
@@ -250,6 +261,88 @@ describe.skipIf(!url)("pricing card refunds (VAY-2205)", () => {
       refundRows: [],
       commands: [{ status: "failed", reason: "expired_or_canceled_card" }],
     });
+  });
+
+  it("retries a Stripe error with a fresh key, and gives up only on a refund Stripe confirms it never made", async () => {
+    const f = await paidCardStay(),
+      stripe = fakeStripe();
+    stripe.state.failCreate = true;
+    const { commandId } = (await f.stage("0"))!;
+    expect(await executePricingCardRefund(pool, stripe.provider, commandId)).toBe("pending");
+    stripe.state.failCreate = false;
+    await pool.query("UPDATE finance.card_refund_commands SET next_attempt_at=now() WHERE id=$1", [
+      commandId,
+    ]);
+    expect(await executePricingCardRefund(pool, stripe.provider, commandId)).toBe("succeeded");
+    const keys = stripe.provider.createRefund.mock.calls.map(([input]) => input.idempotencyKey);
+    expect(keys[1]).toBe(`${keys[0]}:attempt-1`);
+
+    const lost = await paidCardStay(),
+      lostStripe = fakeStripe();
+    const lostId = (await lost.stage("0"))!.commandId;
+    await pool.query("UPDATE finance.card_refund_commands SET attempts=$2 WHERE id=$1", [
+      lostId,
+      MAX_ATTEMPTS - 1,
+    ]);
+    // Stripe can't even list: nothing is confirmed, so it stays pending.
+    lostStripe.state.failList = true;
+    expect(await executePricingCardRefund(pool, lostStripe.provider, lostId)).toBe("pending");
+    // Stripe lists no refund and refuses to make one: given up, with an audit event.
+    lostStripe.state.failList = false;
+    lostStripe.state.failCreate = true;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    expect(await executePricingCardRefund(pool, lostStripe.provider, lostId)).toBe("failed");
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("must refund the guest"),
+      expect.objectContaining({ commandId: lostId }),
+    );
+    warn.mockRestore();
+    expect((await lost.state()).commands).toMatchObject([
+      { status: "failed", reason: "Stripe is unavailable" },
+    ]);
+    expect(
+      (
+        await pool.query("SELECT action FROM platform.product_audit_events WHERE property_id=$1", [
+          lost.propertyId,
+        ])
+      ).rows,
+    ).toEqual([{ action: "finance.card_refund_failed" }]);
+  });
+
+  it("keeps a refund Stripe made but that couldn't be recorded, for a later retry", async () => {
+    const f = await paidCardStay(),
+      stripe = fakeStripe();
+    const { commandId } = (await f.stage("3000"))!;
+    // The payment no longer has room for the refund, so recording it fails.
+    await pool.query("UPDATE finance.payments SET refunded_amount=90 WHERE id=$1", [f.paymentId]);
+    await expect(executePricingCardRefund(pool, stripe.provider, commandId)).rejects.toThrow(
+      "couldn't be recorded",
+    );
+    const [command] = (await f.state()).commands;
+    expect(command).toMatchObject({
+      status: "pending",
+      attempts: 1,
+      refundId: stripe.refunds[0]!.refundId,
+    });
+    expect(command.reason).toContain("settlement:");
+    expect(
+      (
+        await pool.query(
+          "SELECT next_attempt_at>now() AS later FROM finance.card_refund_commands WHERE id=$1",
+          [commandId],
+        )
+      ).rows[0].later,
+    ).toBe(true);
+    expect((await f.state()).refundRows).toEqual([]);
+  });
+
+  it("refuses a payment the hotel's account can't refund", async () => {
+    const f = await paidCardStay();
+    await pool.query(
+      `UPDATE finance.payments SET payment_metadata='{"chargeType":"destination"}' WHERE id=$1`,
+      [f.paymentId],
+    );
+    await expect(f.stage("0")).rejects.toMatchObject({ code: "unavailable" });
   });
 
   it("asks Stripe once when the cancel and the sweep run the same refund together", async () => {

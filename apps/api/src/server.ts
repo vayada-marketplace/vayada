@@ -2902,8 +2902,8 @@ const runPricingCardRefunds = () => {
     stripeBookingPaymentProvider,
   )
     .then((result) => {
-      if (result.errors > 0)
-        app.log.warn({ ...result }, "Pricing card refund sweep completed with errors");
+      if (result.errors > 0 || result.failed > 0)
+        app.log.warn({ ...result }, "Pricing card refund sweep: refunds failed or need a retry");
     })
     .catch((error: unknown) => app.log.warn({ err: error }, "Pricing card refund sweep failed"))
     .finally(() => {
