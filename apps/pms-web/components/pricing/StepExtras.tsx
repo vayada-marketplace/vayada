@@ -11,6 +11,7 @@ import {
   defaultDiscount,
   setBreakfastAmount,
   setDiscount,
+  setMealDescription,
   switchOption,
   type SimpleRoom,
 } from "./simplePricing";
@@ -19,6 +20,7 @@ import { StepCard } from "./StepCard";
 import * as ui from "./pricingStyles";
 
 type Kind = "non_refundable" | "breakfast";
+type Field = Kind | "mealText";
 const basisPoints = (offer: SimpleRoom["nonRefundable"]) =>
   offer?.price.kind === "linked" && offer.price.adjustment.kind === "percentage"
     ? -offer.price.adjustment.basisPoints
@@ -73,7 +75,9 @@ export function StepExtras({
     savedDiscount === null ? defaultDiscount : String(savedDiscount / 100),
   );
   const [amount, setAmount] = useState(savedMinor === null ? "" : decimalAmount(savedMinor, scale));
-  const [errors, setErrors] = useState<Partial<Record<Kind, string>>>({});
+  const savedText = breakfast?.meal.description ?? "";
+  const [mealText, setMealText] = useState(savedText);
+  const [errors, setErrors] = useState<Partial<Record<Field, string>>>({});
   const errorId = useId();
   // A reload or a reset brings the saved values back. Typing changes the saved value too, so text that already
   // means it ("1", "12.") stays as typed.
@@ -91,20 +95,37 @@ export function StepExtras({
         typedMinor(typed, scale) === savedMinor ? typed : decimalAmount(savedMinor, scale),
       );
   }, [savedMinor, scale]);
+  useEffect(
+    () => setMealText((typed) => (typed.trim() === savedText ? typed : savedText)),
+    [savedText],
+  );
   // The editor's callback is new on every render, so it is read through a ref.
   const pendingRef = useRef(onPending);
   useEffect(() => {
     pendingRef.current = onPending;
   });
   // Only an option that is on has a value to hold Save for; a switch that is off just shows why it didn't turn on.
-  const pending = !!((errors.non_refundable && nonRefundable) || (errors.breakfast && breakfast));
+  const pending = !!(
+    (errors.non_refundable && nonRefundable) ||
+    ((errors.breakfast || errors.mealText) && breakfast)
+  );
   useEffect(() => pendingRef.current(pending), [pending]);
-  const fail = (kind: Kind, cause: unknown) =>
+  const fail = (kind: Field, cause: unknown) =>
     setErrors((previous) => ({
       ...previous,
       [kind]: errorText(cause, t, "pricing.linkedOffer.errorCheck"),
     }));
-  const clear = (kind: Kind) => setErrors((previous) => ({ ...previous, [kind]: undefined }));
+  const clear = (kind: Field) => setErrors((previous) => ({ ...previous, [kind]: undefined }));
+  const editText = (value: string) => {
+    setMealText(value);
+    if (!breakfast) return;
+    try {
+      onChange(setMealDescription(room, breakfast.id, value));
+      clear("mealText");
+    } catch (cause) {
+      fail("mealText", cause);
+    }
+  };
   /** Applies a typed value to an option that is on; a value that doesn't parse stays typed and holds Save. */
   const edit = (kind: Kind, value: string) => {
     if (kind === "non_refundable") setDiscountText(value);
@@ -230,11 +251,28 @@ export function StepExtras({
             </>,
             night(breakfast?.id, true),
           )}
+        {/* What guests read about breakfast (VAY-2281), in the Meals step. */}
+        {only === "breakfast" && breakfast && (
+          <label className="block space-y-1.5 pb-1">
+            <span className="block text-[13px] text-gray-600">{t("pricing.mealText.label")}</span>
+            <input
+              aria-invalid={!!errors.mealText || undefined}
+              aria-describedby={errors.mealText ? `${errorId}-mealText` : undefined}
+              maxLength={200}
+              disabled={disabled}
+              value={mealText}
+              placeholder={t("pricing.mealText.placeholder")}
+              onChange={(event) => editText(event.target.value)}
+              className={`w-full ${ui.field}`}
+            />
+          </label>
+        )}
       </div>
-      {(errors.non_refundable || errors.breakfast) && (
+      {(errors.non_refundable || errors.breakfast || errors.mealText) && (
         <div role="alert" className={ui.errorText}>
           {errors.non_refundable && <p id={`${errorId}-non_refundable`}>{errors.non_refundable}</p>}
           {errors.breakfast && <p id={`${errorId}-breakfast`}>{errors.breakfast}</p>}
+          {errors.mealText && <p id={`${errorId}-mealText`}>{errors.mealText}</p>}
         </div>
       )}
     </StepCard>
