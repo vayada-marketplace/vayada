@@ -200,6 +200,28 @@ export default function TermsPage() {
                   Guest funds.
                 </p>
                 <p>
+                  <strong>Card Refunds:</strong> When a booking paid by card on your booking site is
+                  cancelled, vayada instructs Stripe to refund the Guest automatically. The amount
+                  follows the cancellation terms of the booked rate: if the Guest cancels, the Guest
+                  gets back what those terms do not let you keep; if you cancel for a reason on your
+                  side, the Guest gets back everything paid by card. Refunds are paid from your
+                  Stripe account. The part of our fee on the refunded amount is returned to you;
+                  Stripe&apos;s own processing fees are not. If a refund fails, it is shown in your
+                  account so that you can retry it or settle it with the Guest.
+                </p>
+                <p>
+                  <strong>Disputes:</strong> If a Guest disputes a card payment with their bank (a
+                  chargeback), Stripe handles the dispute on your Stripe account. You are
+                  responsible for responding to it and for the disputed amount and any dispute fee
+                  charged by Stripe.
+                </p>
+                <p>
+                  <strong>Negative Balance:</strong> If your Stripe balance cannot cover a refund, a
+                  dispute or a fee, Stripe may recover the amount from your bank account. If Stripe
+                  charges vayada for a negative balance on your Stripe account, you must reimburse
+                  vayada for that amount, and we may set it off against amounts we owe you.
+                </p>
+                <p>
                   <strong>Late Payment:</strong> If an invoice is not paid when due, we may remind
                   you, charge statutory default interest and, after notice, suspend the Services
                   until the amount is settled.
@@ -220,7 +242,9 @@ export default function TermsPage() {
                 responsible for the stay, its price, cancellations, refunds or disputes between
                 you and a Guest. Guest payments are handled according to the payment methods and
                 policies you configure. Refunds to Guests are your responsibility and are executed
-                through the payment method the Guest used.
+                through the payment method the Guest used: for card payments on your booking site,
+                vayada sends them to Stripe automatically on your behalf, as described in Section 5;
+                for bank transfer, PayPal and payment at the property, you make them yourself.
               </p>
             </section>
 
