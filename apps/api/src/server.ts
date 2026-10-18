@@ -1691,6 +1691,7 @@ const app = buildApp({
           ...targetBookingHostActionGuards,
           payment: createFinanceHostBookingPayments(stripeBookingPaymentProvider),
         },
+        cardRefunds: stripeBookingPaymentProvider,
       })
     : undefined,
   pmsConfirmationEmails:
