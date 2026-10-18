@@ -52,6 +52,11 @@ const snapshot = (v: unknown): v is PricingStorageSnapshot =>
   v.rooms.length > 0 &&
   v.rooms.every((r) => parsePricingConfiguration(r) !== null) &&
   owners(v.ownerReferences);
+/** Terms the hotel can fix: they break a payment rule (VAY-2280, VAY-2205). */
+const payloadRule = (code: string): boolean =>
+  code === "non_refundable_pay_at_property" ||
+  code === "payment_methods_required" ||
+  code.startsWith("deposit_");
 const invalid = (): never => {
   throw new PricingStorageError("invalid");
 };
@@ -143,7 +148,7 @@ export async function registerReplacementPricingRoutes(
           if (error instanceof PricingStorageError)
             return reply
               .code(
-                error.code === "invalid" || error.code === "non_refundable_pay_at_property"
+                error.code === "invalid" || payloadRule(error.code)
                   ? 400
                   : error.code === "denied"
                     ? 403

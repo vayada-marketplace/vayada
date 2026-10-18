@@ -370,6 +370,11 @@ describe("replacement pricing HTTP boundary", () => {
       ["currency_conversion_required", 409],
       // VAY-2280: its own code, so the PMS can say why (not "prices changed").
       ["non_refundable_pay_at_property", 400],
+      // VAY-2205: "Paid when booking" rules, named so the PMS can say which.
+      ["payment_methods_required", 400],
+      ["deposit_card_only", 400],
+      ["deposit_rest_at_property", 400],
+      ["deposit_below_full_stay", 400],
     ] as const) {
       f.commands.publish.mockRejectedValue(new PricingStorageError(code));
       const response = await f.inject(5);
