@@ -15,7 +15,8 @@ export default function PrivacyPage() {
           <div className="mb-8">
             <h1 className="text-4xl md:text-5xl font-bold text-primary-800 mb-4">Privacy Policy</h1>
             <p className="text-gray-600">
-              <strong>Effective Date:</strong> October 18, 2026
+              {/* VAY-2286: placeholder; replaced with the go-live date when this merges. */}
+              <strong>Effective Date:</strong> [go-live date]
             </p>
           </div>
 
@@ -298,7 +299,11 @@ export default function PrivacyPage() {
                   </li>
                   <li>
                     <strong>Email:</strong> Resend, for the service and booking emails we send and
-                    to deliver contact form messages to our team.
+                    to deliver contact form messages and support requests to our team.
+                  </li>
+                  <li>
+                    <strong>Team mailboxes:</strong> Google Workspace, where contact form messages
+                    and support requests arrive and where we keep our email correspondence with you.
                   </li>
                   <li>
                     <strong>Channel connections:</strong> Channex, the channel manager behind the
@@ -346,8 +351,8 @@ export default function PrivacyPage() {
                 records that tax and commercial law require us to keep are retained for the
                 statutory periods (usually up to ten years, Article 6(1) lit. c GDPR). Server logs
                 are deleted as described above. Messages from the contact form (see Section 8) and
-                support requests from the apps are deleted from our database 90 days after you send
-                them.
+                support requests from the apps are emailed to our team and deleted from our database
+                90 days after you send them.
               </p>
               <p className="mb-4">You have the following rights regarding your Personal Data:</p>
               <ul className="list-disc list-inside ml-4 space-y-2">
