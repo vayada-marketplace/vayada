@@ -25,6 +25,19 @@ export type StripeBookingPaymentIntent = {
   } | null;
 };
 
+/** A refund of a booking's card payment on the hotel's connected account (VAY-2205). */
+export type StripeBookingRefund = {
+  refundId: string;
+  /** pending, requires_action, succeeded, failed or canceled. */
+  status: string;
+  amountMinor: number;
+  currency: string;
+  paymentIntentId: string;
+  /** The refund command that asked for it, from its metadata. */
+  commandId: string | null;
+  failureReason: string | null;
+};
+
 export type StripeBookingPaymentProvider = {
   createPaymentIntent(input: {
     propertyId: string;
@@ -50,6 +63,20 @@ export type StripeBookingPaymentProvider = {
     providerAccountRef: string | null,
     idempotencyKey: string,
   ): Promise<StripeBookingPaymentIntent>;
+  /** Refunds part or all of a captured payment and Vayada's fee in proportion. Marked
+   * `vayada_source=pricing_v2`, so the legacy Connect webhook leaves it alone. */
+  createRefund(input: {
+    paymentIntentId: string;
+    providerAccountRef: string;
+    amountMinor: number;
+    commandId: string;
+    propertyId: string;
+    bookingReference: string;
+    idempotencyKey: string;
+  }): Promise<StripeBookingRefund>;
+  /** Every refund of a payment, newest first: a retry looks here before it asks again. */
+  listRefunds(paymentIntentId: string, providerAccountRef: string): Promise<StripeBookingRefund[]>;
+  retrieveRefund(refundId: string, providerAccountRef: string): Promise<StripeBookingRefund>;
 };
 
 export function createStripeBookingPaymentProvider(config: {
@@ -151,6 +178,64 @@ export function createStripeBookingPaymentProvider(config: {
       );
     },
 
+    async createRefund(input) {
+      if (!Number.isSafeInteger(input.amountMinor) || input.amountMinor <= 0)
+        throw new Error("A Stripe refund needs a positive amount.");
+      const created = refund(
+        await request(
+          "POST",
+          "/refunds",
+          [
+            ["payment_intent", input.paymentIntentId],
+            ["amount", String(input.amountMinor)],
+            ["refund_application_fee", "true"],
+            ["reason", "requested_by_customer"],
+            ["metadata[vayada_source]", "pricing_v2"],
+            ["metadata[vayada_refund_command_id]", input.commandId],
+            ["metadata[vayada_property_id]", input.propertyId],
+            ["metadata[vayada_booking_reference]", input.bookingReference],
+          ],
+          input.idempotencyKey,
+          input.providerAccountRef,
+        ),
+      );
+      if (
+        created.paymentIntentId !== input.paymentIntentId ||
+        created.commandId !== input.commandId ||
+        created.amountMinor !== input.amountMinor
+      )
+        throw new Error("Stripe replayed a refund for a different command.");
+      return created;
+    },
+
+    async listRefunds(paymentIntentId, providerAccountRef) {
+      const list = await request(
+        "GET",
+        "/refunds",
+        [
+          ["payment_intent", paymentIntentId],
+          ["limit", "100"],
+        ],
+        undefined,
+        providerAccountRef,
+      );
+      if (!Array.isArray(list["data"]) || list["has_more"] === true)
+        throw new Error("Stripe returned an incomplete refund list.");
+      return list["data"].map((value) => refund(object(value)));
+    },
+
+    async retrieveRefund(refundId, providerAccountRef) {
+      return refund(
+        await request(
+          "GET",
+          `/refunds/${encodeURIComponent(refundId)}`,
+          [],
+          undefined,
+          providerAccountRef,
+        ),
+      );
+    },
+
     async cancelPaymentIntent(paymentIntentId, providerAccountRef, idempotencyKey) {
       return paymentIntent(
         await request(
@@ -236,6 +321,32 @@ function paymentIntent(
             netPayoutAmountMinor: balanceNet,
           }
         : null,
+  };
+}
+
+function refund(value: StripeObject): StripeBookingRefund {
+  const refundId = text(value["id"]);
+  const status = text(value["status"]);
+  const amountMinor = Number(value["amount"]);
+  const currency = text(value["currency"]);
+  const paymentIntentId = text(value["payment_intent"]);
+  if (
+    !refundId ||
+    !status ||
+    !Number.isSafeInteger(amountMinor) ||
+    amountMinor <= 0 ||
+    !currency ||
+    !paymentIntentId
+  )
+    throw new Error("Stripe returned an invalid refund.");
+  return {
+    refundId,
+    status,
+    amountMinor,
+    currency: currency.toUpperCase(),
+    paymentIntentId,
+    commandId: text(object(value["metadata"])["vayada_refund_command_id"]),
+    failureReason: text(value["failure_reason"]),
   };
 }
 

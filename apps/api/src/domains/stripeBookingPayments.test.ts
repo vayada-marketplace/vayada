@@ -228,4 +228,119 @@ describe("Stripe booking payments", () => {
 
     expect(new URLSearchParams(body).has("application_fee_amount")).toBe(false);
   });
+
+  describe("refunds (VAY-2205)", () => {
+    const stripeRefund = (extra: Record<string, unknown> = {}) => ({
+      id: "re_1",
+      status: "pending",
+      amount: 4000,
+      currency: "eur",
+      payment_intent: "pi_booking_1",
+      metadata: { vayada_refund_command_id: "command-1" },
+      ...extra,
+    });
+    const recording = (payload: unknown) => {
+      const calls: Array<{
+        method: string;
+        url: string;
+        body: string;
+        key: string | null;
+        account: string | null;
+      }> = [];
+      const provider = createStripeBookingPaymentProvider({
+        secretKey: "sk_test",
+        fetch: async (input, init) => {
+          const headers = new Headers(init?.headers);
+          calls.push({
+            method: String(init?.method),
+            url: String(input),
+            body: String(init?.body ?? ""),
+            key: headers.get("Idempotency-Key"),
+            account: headers.get("Stripe-Account"),
+          });
+          return new Response(JSON.stringify(payload), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        },
+      });
+      return { calls, provider };
+    };
+    const input = {
+      paymentIntentId: "pi_booking_1",
+      providerAccountRef: "acct_1",
+      amountMinor: 4000,
+      commandId: "command-1",
+      propertyId: "property-1",
+      bookingReference: "B-001",
+      idempotencyKey: "refund-command-1",
+    };
+
+    it("refunds on the hotel's account, marked for the legacy webhook, with Vayada's fee in proportion", async () => {
+      const { calls, provider } = recording(stripeRefund({ failure_reason: null }));
+      await expect(provider.createRefund(input)).resolves.toEqual({
+        refundId: "re_1",
+        status: "pending",
+        amountMinor: 4000,
+        currency: "EUR",
+        paymentIntentId: "pi_booking_1",
+        commandId: "command-1",
+        failureReason: null,
+      });
+      expect(calls).toHaveLength(1);
+      expect(calls[0]).toMatchObject({
+        method: "POST",
+        url: "https://api.stripe.com/v1/refunds",
+        key: "refund-command-1",
+        account: "acct_1",
+      });
+      expect(Object.fromEntries(new URLSearchParams(calls[0]!.body))).toEqual({
+        payment_intent: "pi_booking_1",
+        amount: "4000",
+        refund_application_fee: "true",
+        reason: "requested_by_customer",
+        "metadata[vayada_source]": "pricing_v2",
+        "metadata[vayada_refund_command_id]": "command-1",
+        "metadata[vayada_property_id]": "property-1",
+        "metadata[vayada_booking_reference]": "B-001",
+      });
+    });
+
+    it("refuses a replay that answers for another command, payment or amount", async () => {
+      for (const extra of [
+        { metadata: { vayada_refund_command_id: "command-2" } },
+        { payment_intent: "pi_other" },
+        { amount: 3999 },
+      ])
+        await expect(recording(stripeRefund(extra)).provider.createRefund(input)).rejects.toThrow(
+          "different command",
+        );
+      await expect(
+        recording(stripeRefund()).provider.createRefund({ ...input, amountMinor: 0 }),
+      ).rejects.toThrow("positive amount");
+    });
+
+    it("lists a payment's refunds and reads one, on the hotel's account", async () => {
+      const list = recording({ data: [stripeRefund({ status: "succeeded" })], has_more: false });
+      expect(await list.provider.listRefunds("pi_booking_1", "acct_1")).toMatchObject([
+        { refundId: "re_1", status: "succeeded", commandId: "command-1" },
+      ]);
+      expect(list.calls[0]).toMatchObject({
+        method: "GET",
+        url: "https://api.stripe.com/v1/refunds?payment_intent=pi_booking_1&limit=100",
+        account: "acct_1",
+      });
+      await expect(
+        recording({ data: [], has_more: true }).provider.listRefunds("pi_booking_1", "acct_1"),
+      ).rejects.toThrow("incomplete");
+      const one = recording(
+        stripeRefund({ status: "failed", failure_reason: "expired_or_canceled_card" }),
+      );
+      expect(await one.provider.retrieveRefund("re_1", "acct_1")).toMatchObject({
+        status: "failed",
+        failureReason: "expired_or_canceled_card",
+      });
+      expect(one.calls[0]!.url).toBe("https://api.stripe.com/v1/refunds/re_1");
+    });
+  });
 });
