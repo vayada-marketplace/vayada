@@ -178,6 +178,21 @@ describe("the simple card's view of a room", () => {
     expect(hasKeptSettings(design, simple)).toBe(true);
     const plain = room([independent("flexible", flat("10000"))]);
     expect(hasKeptSettings(plain, simpleRoom(plain, { flexible: flexibleTerms() })!)).toBe(false);
+    // A single-date price and a date's stay rules show in "Prices by date" (VAY-2280), so nothing is hidden.
+    const dated = room([
+      {
+        ...independent("flexible", flat("10000"), {
+          dates: [{ date: "2026-09-12", price: flat("13000") }],
+        }),
+        restrictions: {
+          kind: "own",
+          rules: rules(2),
+          seasons: [],
+          dates: [{ date: "2026-09-08", rules: { ...rules(2), stopSell: true } }],
+        },
+      },
+    ]);
+    expect(hasKeptSettings(dated, simpleRoom(dated, { flexible: flexibleTerms() })!)).toBe(false);
   });
 
   it("waits for every option's terms before it decides", () => {

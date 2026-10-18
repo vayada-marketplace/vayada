@@ -281,7 +281,8 @@ export function onePriceAgain(room: Room): Room | null {
 }
 
 /** Whether the room has settings the card's top doesn't show (other options, prices by guests, own cancellation or
- * weekday rules, month or date prices, date or season stay rules): the card then says they are kept. */
+ * weekday rules, month prices, season stay rules): the card then says they are kept. Single-date prices and date
+ * stay rules show in "Prices by date" and its night panel (VAY-2280), so they don't count. */
 export function hasKeptSettings(room: Room, simple: SimpleRoom): boolean {
   const { main } = simple;
   const calendar = main.price.kind === "independent" ? main.price.calendar : null;
@@ -291,11 +292,9 @@ export function hasKeptSettings(room: Room, simple: SimpleRoom): boolean {
     simple.cancellation.kind === "own" ||
     (calendar?.base != null && calendar.base.mode !== "flat") ||
     (calendar?.months.length ?? 0) > 0 ||
-    (calendar?.dates.length ?? 0) > 0 ||
     otherWeekdays(main).length > 0 ||
     weekendChoice(main) === "other" ||
     !restrictions ||
-    restrictions.dates.length > 0 ||
     restrictions.seasons.length > 0
   );
 }
