@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { ChevronLeftIcon, ChevronRightIcon, LockClosedIcon } from "@heroicons/react/24/outline";
 import type { PricingConfiguration } from "@vayada/domain-pms/replacement-pricing";
 import { useTranslation } from "@/lib/i18n";
@@ -8,6 +8,7 @@ import {
   calendarAdults,
   calendarNights,
   legendRanges,
+  nightLabel,
   seasonGroups,
   seasonTones,
   type CalendarNight,
@@ -15,6 +16,7 @@ import {
 } from "./priceCalendarModel";
 import type { NightSelection } from "./nightActions";
 import { headlineMinor, mainOffer, money, sampleAdults } from "./stepPricing";
+import { calendarYear, YearCalendar } from "./YearCalendar";
 
 /** "YYYY-MM" moved by `delta` months. */
 export const shiftMonth = (month: string, delta: number) => {
@@ -37,7 +39,7 @@ const navButton =
  * prices from the engine's night evaluator (the one Channex nightly prices use), for the chosen rate and guests.
  * Nights take their season's colour; own prices get a dot, closed dates a lock, closed periods say "Not open"
  * (VAY-2284), nights that can't start a stay get a red dot, and nights without any price say so. The sample stay's
- * nights are outlined; picking a night starts it. */
+ * nights are outlined; picking a night starts it. The Year view (VAY-2284) shows the same nights for twelve months. */
 export function PriceCalendar({
   room,
   options,
@@ -69,16 +71,39 @@ export function PriceCalendar({
   onPick: (date: string) => void;
 }) {
   const { t } = useTranslation();
+  const [view, setView] = useState<"month" | "year">("month");
+  // The approved phone board has no Year view: under 640px the calendar shows the month (VAY-2284).
+  const [wide, setWide] = useState(false);
+  useEffect(() => {
+    const query = globalThis.matchMedia?.("(min-width: 640px)");
+    if (!query) return;
+    const update = () => setWide(query.matches);
+    update();
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
   const guests = room
     ? adults !== null && adults <= room.capacity.adults
       ? adults
       : sampleAdults(room)
     : 2;
-  const nights = room ? calendarNights(room, offerId, month, guests, today, stay) : [];
+  const months =
+    room && view === "year" && wide
+      ? calendarYear(room, offerId, guests, month.slice(0, 4), today, stay)
+      : null;
+  const nights = room && !months ? calendarNights(room, offerId, month, guests, today, stay) : [];
+  // The Year view has no minimum-stay badges, so its legend doesn't explain them.
+  const legendNights = months
+    ? months.flatMap((value) => value.nights.map((night) => ({ ...night, minNights: 1 })))
+    : nights;
   const counts = room ? calendarAdults(room) : [];
   const first = new Date(`${month}-01T00:00:00Z`);
   const lead = (first.getUTCDay() + 6) % 7; // Monday first, as the engine counts weekdays.
   const title = `${t(`pricing.month.${Number(month.slice(5, 7))}`)} ${month.slice(0, 4)}`;
+  const views = [
+    { key: "month", name: t("pricing.calendar.view.month") },
+    { key: "year", name: t("pricing.calendar.view.year") },
+  ] as const;
   return (
     <section
       aria-label={t("pricing.steps.calendar.title")}
@@ -90,20 +115,22 @@ export function PriceCalendar({
         </h2>
         <p className="hidden text-[13px] text-gray-500 sm:block">{t("pricing.calendar.hint")}</p>
       </div>
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <button
             type="button"
-            aria-label={t("pricing.steps.calendar.previous")}
-            onClick={() => onMonth(shiftMonth(month, -1))}
+            aria-label={
+              months ? t("pricing.calendar.previousYear") : t("pricing.steps.calendar.previous")
+            }
+            onClick={() => onMonth(shiftMonth(month, months ? -12 : -1))}
             className={navButton}
           >
             <ChevronLeftIcon aria-hidden="true" className="h-4 w-4" />
           </button>
           <button
             type="button"
-            aria-label={t("pricing.steps.calendar.next")}
-            onClick={() => onMonth(shiftMonth(month, 1))}
+            aria-label={months ? t("pricing.calendar.nextYear") : t("pricing.steps.calendar.next")}
+            onClick={() => onMonth(shiftMonth(month, months ? 12 : 1))}
             className={navButton}
           >
             <ChevronRightIcon aria-hidden="true" className="h-4 w-4" />
@@ -112,16 +139,37 @@ export function PriceCalendar({
             aria-live="polite"
             className="text-[16px] font-semibold text-gray-900 md:text-[18px]"
           >
-            {title}
+            {months ? month.slice(0, 4) : title}
           </span>
+          <button
+            type="button"
+            onClick={() => onMonth(today.slice(0, 7))}
+            className="h-8 rounded-lg border border-gray-300 bg-white px-3 text-[13px] font-medium text-gray-800 hover:bg-gray-50"
+          >
+            {t("pricing.calendar.today")}
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={() => onMonth(today.slice(0, 7))}
-          className="h-8 rounded-lg border border-gray-300 bg-white px-3 text-[13px] font-medium text-gray-800 hover:bg-gray-50"
+        <div
+          role="group"
+          aria-label={t("pricing.calendar.view.label")}
+          className="hidden shrink-0 gap-0.5 rounded-lg bg-gray-100 p-[3px] sm:flex"
         >
-          {t("pricing.calendar.today")}
-        </button>
+          {views.map((value) => (
+            <button
+              key={value.key}
+              type="button"
+              aria-pressed={(value.key === "year") === !!months}
+              onClick={() => setView(value.key)}
+              className={`h-6 rounded-md px-3.5 text-[13px] ${
+                (value.key === "year") === !!months
+                  ? "bg-white font-medium text-gray-900 shadow-sm"
+                  : "text-gray-500 hover:text-gray-900"
+              }`}
+            >
+              {value.name}
+            </button>
+          ))}
+        </div>
       </div>
       {room && (options.length > 1 || counts.length > 1) && (
         <div className="flex flex-wrap items-center gap-1.5">
@@ -187,6 +235,13 @@ export function PriceCalendar({
       )}
       {!room ? (
         <p className="text-[13px] text-gray-500">{t("pricing.steps.guests.invalid")}</p>
+      ) : months ? (
+        <YearCalendar
+          months={months}
+          currency={room.currency}
+          selection={selection}
+          onPick={onPick}
+        />
       ) : (
         <div className="grid grid-cols-7 gap-1 md:gap-1.5">
           {Array.from({ length: 7 }, (_, day) => (
@@ -219,7 +274,7 @@ export function PriceCalendar({
           offerId={offerId}
           adults={guests}
           year={month.slice(0, 4)}
-          nights={nights}
+          nights={legendNights}
         />
       )}
     </section>
@@ -252,23 +307,12 @@ function Night({
         : night.season
           ? seasonTones[night.season.tone].cell
           : "border-gray-200 bg-white";
-  const state = [
-    night.kind === "closed"
-      ? t(night.notOpen ? "pricing.calendar.notOpenState" : "pricing.steps.calendar.closed")
-      : "",
-    night.kind === "none" ? t("pricing.calendar.noPriceState") : "",
-    night.noArrival && night.kind !== "closed" ? t("pricing.steps.calendar.noArrival") : "",
-    night.ownPrice ? t("pricing.calendar.ownPriceState") : "",
-  ].filter(Boolean);
   return (
     <button
       type="button"
       aria-pressed={selected}
       aria-label={[
-        `${day} ${title}`,
-        night.kind === "none" ? "" : price,
-        ...state,
-        selected ? t("pricing.calendar.selectedState") : "",
+        nightLabel(t, night, title, currency, selected),
         night.inStay ? t("pricing.steps.calendar.inStay") : "",
       ]
         .filter(Boolean)

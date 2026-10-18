@@ -1,31 +1,49 @@
 import type { PricingConfiguration } from "@vayada/domain-pms/replacement-pricing";
-import { mainOffer, monthNights, restrictionOwner } from "./stepPricing";
+import { mainOffer, money, monthNights, restrictionOwner } from "./stepPricing";
 
 type Room = PricingConfiguration;
 type Offer = Room["offers"][number];
 type Season = Extract<Offer["price"], { kind: "independent" }>["calendar"]["seasons"][number];
 
-/** Season colours of the price calendar (VAY-2280), in the order seasons first appear. Literal classes, so Tailwind
- * keeps them. */
+/** Season colours of the price calendar (VAY-2280), in the order seasons first appear; `year` fills the Year view's
+ * small date cells (VAY-2284). Literal classes, so Tailwind keeps them. */
 export const seasonTones = [
-  { cell: "bg-sky-50 border-sky-200", swatch: "bg-sky-50 border-sky-300", dot: "bg-sky-500" },
+  {
+    cell: "bg-sky-50 border-sky-200",
+    year: "bg-sky-200 border-sky-200",
+    swatch: "bg-sky-50 border-sky-300",
+    dot: "bg-sky-500",
+  },
   {
     cell: "bg-amber-50 border-amber-200",
+    year: "bg-amber-200 border-amber-200",
     swatch: "bg-amber-50 border-amber-300",
     dot: "bg-amber-500",
   },
-  { cell: "bg-pink-50 border-pink-200", swatch: "bg-pink-50 border-pink-300", dot: "bg-pink-500" },
+  {
+    cell: "bg-pink-50 border-pink-200",
+    year: "bg-pink-200 border-pink-200",
+    swatch: "bg-pink-50 border-pink-300",
+    dot: "bg-pink-500",
+  },
   {
     cell: "bg-emerald-50 border-emerald-200",
+    year: "bg-emerald-200 border-emerald-200",
     swatch: "bg-emerald-50 border-emerald-300",
     dot: "bg-emerald-600",
   },
   {
     cell: "bg-violet-50 border-violet-200",
+    year: "bg-violet-200 border-violet-200",
     swatch: "bg-violet-50 border-violet-300",
     dot: "bg-violet-500",
   },
-  { cell: "bg-teal-50 border-teal-200", swatch: "bg-teal-50 border-teal-300", dot: "bg-teal-600" },
+  {
+    cell: "bg-teal-50 border-teal-200",
+    year: "bg-teal-200 border-teal-200",
+    swatch: "bg-teal-50 border-teal-300",
+    dot: "bg-teal-600",
+  },
 ] as const;
 
 /** One season as the hotel sees it: seasons stored with the same name and tier are one season with several date
@@ -148,6 +166,29 @@ export function calendarNights(
     today: night.date === today,
     inStay: night.date >= stay.checkIn && night.date < stay.checkOut,
   }));
+}
+
+/** A night's name for screen readers, the same in the Month and Year views: "8 September 2026, €100, closed". */
+export function nightLabel(
+  t: (key: string, params?: Record<string, string | number>) => string,
+  night: CalendarNight,
+  title: string,
+  currency: string,
+  selected: boolean,
+) {
+  return [
+    `${Number(night.date.slice(8))} ${title}`,
+    night.kind === "none" ? "" : night.totalMinor ? money(night.totalMinor, currency) : "—",
+    night.kind === "closed"
+      ? t(night.notOpen ? "pricing.calendar.notOpenState" : "pricing.steps.calendar.closed")
+      : "",
+    night.kind === "none" ? t("pricing.calendar.noPriceState") : "",
+    night.noArrival && night.kind !== "closed" ? t("pricing.steps.calendar.noArrival") : "",
+    night.ownPrice ? t("pricing.calendar.ownPriceState") : "",
+    selected ? t("pricing.calendar.selectedState") : "",
+  ]
+    .filter(Boolean)
+    .join(", ");
 }
 
 export type PriceRange = { lowMinor: string; highMinor: string };
