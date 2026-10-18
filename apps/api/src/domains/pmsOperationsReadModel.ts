@@ -1413,7 +1413,7 @@ function toPublishedRatePlan(plan: PublishedRatePlan): PmsRatePlan {
     // Linked offers have no own base; their nightly price comes from the preview.
     baseRate: plan.baseAmount ?? { amountDecimal: "0", currency: plan.currency },
     cancellationPolicySnapshot: toJsonRecord(plan.cancellation),
-    active: true,
+    active: plan.active,
   };
 }
 

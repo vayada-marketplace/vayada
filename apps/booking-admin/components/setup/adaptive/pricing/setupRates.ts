@@ -1,6 +1,10 @@
 import type { PaymentMethod } from "@vayada/product-onboarding/AcceptedPaymentMethods";
 import { firstPricingInput, type SetupRoom } from "@vayada/product-onboarding/FirstPricingSetup";
 import type { FinancePaymentReadinessSnapshot } from "@vayada/domain-finance";
+import {
+  defaultPaidWhenBookingPayment,
+  paidWhenBooking,
+} from "@vayada/domain-booking/replacement-pricing";
 
 import type { FirstPricing } from "./publishFirstPricing";
 
@@ -29,6 +33,8 @@ export function paymentsStepMethods(
 
 /** One first rate per room from its price per night (VAY-2188): one price for the room, the step's cancellation and
  * ways to pay, children under 12 free and no minimum stay. Seasons, meals and more are added later in the PMS.
+ * "Paid when booking" starts as the PMS's default (VAY-2205): a flexible rate is paid at the property when the hotel
+ * takes that, every other rate in full when booking.
  * `offerId` names each room's offer; a retry passes the same ids. Throws the first price that doesn't parse. */
 export function setupRates(
   propertyId: string,
@@ -39,6 +45,10 @@ export function setupRates(
   methods: readonly PaymentMethod[],
   offerId: (roomTypeId: string) => string = () => crypto.randomUUID(),
 ): FirstPricing[] {
+  const kind = cancellation.kind === "free" ? "flexible" : "non_refundable";
+  const first = defaultPaidWhenBookingPayment(kind, methods);
+  // None fits: the builder names what's missing.
+  const payment = first ? paidWhenBooking(first) : "full_stay";
   return rooms.map((room) =>
     firstPricingInput(propertyId, room, offerId(room.roomTypeId), {
       mode: "flat",
@@ -55,7 +65,7 @@ export function setupRates(
       maximum: "",
       cancellation: cancellation.kind === "free" ? "flexible" : "non_refundable",
       freeDays: cancellation.kind === "free" ? String(cancellation.days) : "",
-      payment: "full",
+      payment,
     }),
   );
 }

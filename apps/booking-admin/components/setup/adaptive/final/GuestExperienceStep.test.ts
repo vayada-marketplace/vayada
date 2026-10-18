@@ -34,7 +34,7 @@ beforeEach(() => {
   mocks.loadTerms.mockResolvedValue(null);
   mocks.saveTerms.mockImplementation(async (_propertyId: string, text: string | null) => text);
 });
-async function render(track: "hotel_operations" | "both" = "hotel_operations") {
+async function render(track: "hotel_operations" = "hotel_operations") {
   let leave!: () => Promise<void>;
   const step = {
     stepId: "guest_experience",
@@ -45,7 +45,7 @@ async function render(track: "hotel_operations" | "both" = "hotel_operations") {
     propertyId,
     route: {
       scope: { organizationId, propertyId },
-      selectedTracks: track === "both" ? ["hotel_operations", "creator_marketplace"] : [track],
+      selectedTracks: [track],
       trackRevision: 1,
       sessionRevision: 1,
       sessionId: "session",

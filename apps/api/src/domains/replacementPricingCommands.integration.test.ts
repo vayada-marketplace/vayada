@@ -766,7 +766,7 @@ describe.skipIf(!url)("trusted replacement pricing commands", () => {
           text: "Fourteen days",
         },
       },
-      payment: { kind: "full" },
+      payment: { kind: "full", acceptedMethods: ["pay_at_property"] },
     };
     const changed = await f.commands.stageTerms(
       id,
@@ -942,7 +942,12 @@ describe.skipIf(!url)("trusted replacement pricing commands", () => {
         expectedRevision: f.baseline.rooms[0]!.offers[0]!.termsRevision,
         terms: {
           ...f.policy,
-          payment: { kind: "deposit", basisPoints: 3000, balanceDaysBeforeArrival: 7 },
+          payment: {
+            kind: "deposit",
+            basisPoints: 3000,
+            balanceDaysBeforeArrival: 0,
+            acceptedMethods: ["card"],
+          },
         },
       },
       context,
@@ -993,7 +998,11 @@ describe.skipIf(!url)("trusted replacement pricing commands", () => {
       {
         requestId: randomUUID(),
         expectedRevision: f.baseline.rooms[0]!.offers[0]!.termsRevision,
-        terms: { ...f.policy, cancellation: { kind: "non_refundable" } },
+        terms: {
+          ...f.policy,
+          cancellation: { kind: "non_refundable" },
+          payment: { kind: "full", acceptedMethods: ["card"] },
+        },
       },
       context,
     );

@@ -28,6 +28,15 @@ export type PricingTermsInput = Omit<ReplacementOfferTerms, "revision"> & {
   expectedRevision: string | null;
 };
 export type PricingDraftContext = { draftId: string; baseRevision: number };
+/** Whether rates can take card and deposits on the booking page now, for "Paid when booking" (VAY-2205). */
+export type PricingCardReadiness = {
+  card: {
+    ready: boolean;
+    reason: "not_connected" | "currency" | "not_approved" | "switch_off" | null;
+    charge: "at_booking" | "on_accept";
+  };
+  deposits: { ready: boolean };
+};
 export type PricingSources = { room: string; terms: string; finance: string };
 export type PricingSnapshot = {
   currency: string;
@@ -254,6 +263,33 @@ export function createReplacementPricingClient(
       )
         return bad();
       return acceptanceEnabled ? [...(methods as ("bank_transfer" | "paypal")[])] : [];
+    },
+    /** Card and deposits for the rate screens (VAY-2205). An API without the read offers neither. */
+    async cardReadiness(): Promise<PricingCardReadiness> {
+      const value = await optionalRead(`${base}/card-readiness`);
+      if (value === missing)
+        return {
+          card: { ready: false, reason: "switch_off", charge: "at_booking" },
+          deposits: { ready: false },
+        };
+      if (!exact(value, ["card", "deposits"]) || !exact(value.card, ["ready", "reason", "charge"]))
+        return bad();
+      const { ready, reason, charge } = value.card;
+      if (
+        typeof ready !== "boolean" ||
+        !(reason === null
+          ? ready
+          : !ready &&
+            ["not_connected", "currency", "not_approved", "switch_off"].includes(
+              reason as string,
+            )) ||
+        (charge !== "at_booking" && charge !== "on_accept") ||
+        !exact(value.deposits, ["ready"]) ||
+        typeof value.deposits.ready !== "boolean" ||
+        (value.deposits.ready && !ready)
+      )
+        return bad();
+      return structuredClone(value) as PricingCardReadiness;
     },
     termsAction(input: PricingTermsInput, draftContext: PricingDraftContext) {
       const selected = context(draftContext);

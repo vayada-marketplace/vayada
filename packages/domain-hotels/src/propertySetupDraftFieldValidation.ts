@@ -8,24 +8,6 @@ const DECIMAL_AMOUNT_PATTERN = /^(?:0|[1-9]\d{0,12})(?:\.\d{1,2})?$/;
 const LANGUAGE_TAG_PATTERN = /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,3}$/;
 const TIME_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
 
-const COMPENSATION_TYPES = new Set(["free_stay", "paid", "discount", "affiliate"]);
-const CONTENT_PLATFORMS = new Set([
-  "instagram",
-  "tiktok",
-  "youtube",
-  "facebook",
-  "blog",
-  "x",
-  "other",
-]);
-const CONTENT_TYPES = new Set([
-  "post",
-  "story",
-  "short_form_video",
-  "long_form_video",
-  "photography",
-  "other",
-]);
 const FONT_PAIRINGS = new Set([
   "high-end-serif",
   "modern-minimalist",
@@ -68,16 +50,6 @@ const FIELD_VALIDATORS = {
   "profile.hero_image": nullable(opaqueId),
   "profile.gallery_images": nullable(list(opaqueId, 50, true)),
   "profile.amenities": nullable(list(token, 100, true)),
-  "marketplace.preferences.compensation_types": nullable(
-    list(enumValue(COMPENSATION_TYPES), COMPENSATION_TYPES.size, true),
-  ),
-  "marketplace.preferences.content_platforms": nullable(
-    list(enumValue(CONTENT_PLATFORMS), CONTENT_PLATFORMS.size, true),
-  ),
-  "marketplace.preferences.content_types": nullable(
-    list(enumValue(CONTENT_TYPES), CONTENT_TYPES.size, true),
-  ),
-  "marketplace.preferences.availability": nullable(isMarketplaceAvailability),
   // The canonical booking command checks membership in the supported accessible preset palette.
   "booking.primary_color": nullable(text(7, /^#[0-9A-Fa-f]{6}$/)),
   "booking.font_pairing": nullable(enumValue(FONT_PAIRINGS)),
@@ -135,18 +107,6 @@ export function isPropertySetupDraftFieldValue(
     return false;
   }
   return FIELD_VALIDATORS[field](value);
-}
-
-function isMarketplaceAvailability(value: unknown): boolean {
-  if (
-    !closedObject(value, {
-      mode: nullable(enumValue(new Set(["year_round", "selected_months"]))),
-      months: list(integer(1, 12), 12, true),
-    })
-  ) {
-    return false;
-  }
-  return value.mode !== "year_round" || !Array.isArray(value.months) || value.months.length === 0;
 }
 
 function isBed(value: unknown): boolean {

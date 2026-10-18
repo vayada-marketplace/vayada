@@ -2,15 +2,19 @@ import { lockPublicPricingAuthority } from "./publicPricingAuthority.js";
 import { createHash, randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
 import { parseStoredPricingQuote, type ReplacementPricingLine } from "@vayada/domain-booking";
+import { pricingOfferOnBookingPage } from "@vayada/domain-pms";
 import { lockPublicPricingPaymentAmounts } from "./publicPricingPaymentAmounts.js";
 
-/** Internal issuance only; caller owns transaction and supplies server-configured lifetime. */
+/** Internal issuance only; caller owns transaction and supplies server-configured lifetime.
+ * Guests can only be quoted offers on the booking page (VAY-2285); the hotel ("host") can still
+ * reprice a booking whose offer was hidden after it was booked. */
 export async function lockCurrentPricingQuote(
   client: PoolClient,
   slug: unknown,
   input: unknown,
   method: unknown,
   lifetimeSeconds: number,
+  quotedFor: "guest" | "host" = "guest",
 ) {
   if (!Number.isInteger(lifetimeSeconds) || lifetimeSeconds < 1 || lifetimeSeconds > 900)
     return null;
@@ -19,6 +23,19 @@ export async function lockCurrentPricingQuote(
   const { total } = payment,
     components = total.components,
     owner = components.room.owner;
+  if (
+    quotedFor === "guest" &&
+    !components.room.stay.rooms.every((selected) =>
+      owner.publication.rooms.some(
+        (room) =>
+          room.roomTypeId === selected.roomTypeId &&
+          room.offers.some(
+            (offer) => offer.id === selected.offerId && pricingOfferOnBookingPage(offer),
+          ),
+      ),
+    )
+  )
+    return null;
   const settings = (
     await client.query(
       "SELECT acceptance_mode FROM booking.booking_settings WHERE property_id=$1 FOR SHARE",

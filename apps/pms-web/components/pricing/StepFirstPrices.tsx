@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useId, useState, type MutableRefObject } from "react";
+import { useEffect, useId, useState, type MutableRefObject, type ReactNode } from "react";
 import type { PricingConfiguration } from "@vayada/domain-pms/replacement-pricing";
 import { PlusIcon } from "@heroicons/react/24/outline";
 import { useTranslation } from "@/lib/i18n";
 import type { PricingTermsInput } from "@/services/api/replacementPricingClient";
+import { paidInAdvance } from "@vayada/product-onboarding/AcceptedPaymentMethods";
 import { AcceptedPaymentMethods, type PaymentMethod } from "./AcceptedPaymentMethods";
 import { CancellationChoice } from "./StepCancellation";
 import { extraField, SwitchRow } from "./StepExtras";
@@ -50,6 +51,7 @@ export function StepFirstPrices({
   onDirty,
   onCreate,
   pending,
+  calendar,
 }: {
   propertyId: string;
   /** The room page's room (the first; the page offers only its own room). */
@@ -64,6 +66,8 @@ export function StepFirstPrices({
   /** Filled with a builder for the answers as they stand, for the New room page, which saves them with the room. It
    * shows and throws what is missing. */
   pending?: MutableRefObject<(() => FirstPrices) | null>;
+  /** Shown under the first line, above the form: the empty calendar (VAY-2280). */
+  calendar?: ReactNode;
 }) {
   const { t } = useTranslation();
   const room = rooms[0]!;
@@ -96,6 +100,8 @@ export function StepFirstPrices({
   // After a save that failed, the answers still empty are marked and named, and update as they are filled in.
   const [checked, setChecked] = useState(false);
   const loadingMethods = defaultMethods === undefined && !values.methods.length;
+  // Guests can only pay at the property: non-refundable stays (paid in advance) can't be offered (VAY-2280).
+  const onlyAtProperty = values.methods.length > 0 && !paidInAdvance(values.methods).length;
   // Payment settings' ways to pay are ticked once they arrive, unless the hotel already chose.
   useEffect(() => {
     if (defaultMethods && !methodsTouched)
@@ -315,6 +321,7 @@ export function StepFirstPrices({
           ? t("pricing.simple.first.newRoom")
           : t("pricing.simple.first.noPrice", { room: room.name })}
       </p>
+      {calendar}
       <div className={ui.pricesCard}>
         <StepCard title={t("pricing.steps.price.title")}>
           <div className="flex flex-wrap items-end gap-3">
@@ -393,6 +400,7 @@ export function StepFirstPrices({
           <CancellationChoice
             value={cancel}
             disabled={disabled}
+            noNonRefundable={onlyAtProperty}
             onChange={(choice) => {
               setCancel(choice);
               touch();
@@ -409,7 +417,7 @@ export function StepFirstPrices({
               <SwitchRow
                 on={nonRefundable.on}
                 name={t("pricing.simple.extras.nonRefundable")}
-                disabled={disabled}
+                disabled={disabled || (onlyAtProperty && !nonRefundable.on)}
                 onToggle={() => {
                   setNonRefundable({ ...nonRefundable, on: !nonRefundable.on });
                   touch();
@@ -525,6 +533,7 @@ export function StepFirstPrices({
             <AcceptedPaymentMethods
               methods={values.methods}
               disabled={disabled}
+              nonRefundable={cancel.kind === "non_refundable"}
               onChange={(methods) => {
                 setMethodsTouched(true);
                 change({ methods });
