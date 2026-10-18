@@ -11,6 +11,7 @@ import {
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { createReplacementPricingCommands } from "../domains/replacementPricingCommands.js";
 import type { FinanceManualPaymentMethodsReadPort } from "../domains/financeManualPaymentReadiness.js";
+import type { PricingCardReadinessReadPort } from "../domains/pricingCardReadiness.js";
 import {
   PricingStorageError,
   type PricingStorageSnapshot,
@@ -23,6 +24,8 @@ export type ReplacementPricingRoutesOptions = {
   commands(context: RequestContext): Commands;
   /** Present only while bank-transfer and PayPal acceptance is on (VAY-2139). */
   manualPayments?: FinanceManualPaymentMethodsReadPort;
+  /** Whether rates can take card and deposits on the booking page now (VAY-2205). */
+  cardReadiness?: PricingCardReadinessReadPort;
 };
 type Params = { propertyId: string; draftId?: string; roomTypeId?: string; offerId?: string };
 const uuid = (v: unknown): v is string =>
@@ -170,6 +173,17 @@ export async function registerReplacementPricingRoutes(
           readyMethods: await options.manualPayments.acceptedMethods({ propertyId: id }),
         }
       : { acceptanceEnabled: false, readyMethods: [] };
+  });
+  // Card and deposits for the rate screens' "Paid when booking" (VAY-2205); none without the read.
+  route("GET", "/card-readiness", async (commands, id, request) => {
+    if (!(await commands.authorizeRead(id))) throw new PricingStorageError("denied");
+    const organizationId = authorized.get(request)!.selectedOrganization.organizationId;
+    return options.cardReadiness
+      ? options.cardReadiness.read({ organizationId, propertyId: id })
+      : {
+          card: { ready: false, reason: "switch_off", charge: "at_booking" },
+          deposits: { ready: false },
+        };
   });
   route("GET", "/rooms/:roomTypeId/offers/:offerId/terms", (commands, id, request) =>
     commands.readTerms(id, request.params.roomTypeId!, request.params.offerId!),
