@@ -27,6 +27,9 @@ export function replacementQuoteErrorMessage(error: unknown): string {
     (error.detail as { code?: unknown }).code === "MANUAL_PAYMENT_TOO_SOON"
   )
     return "This payment method isn’t available this close to check-in. Choose another way to pay.";
+  // VAY-2205: the rate takes part now by card and the rest at the hotel, and the hotel can't yet.
+  if (replacementQuoteErrorCode(error) === "CARD_DEPOSIT_UNAVAILABLE")
+    return "Paying part now by card isn’t available at this hotel yet. Choose another way to pay.";
   return "We couldn't price this selection. Check your room choices and try again.";
 }
 
