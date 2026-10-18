@@ -37,6 +37,15 @@ describe("signupErrorKey (VAY-2250)", () => {
     expect(signupErrorKey(null)).toBe("auth.register.errorUnexpected");
   });
 
+  it("treats other refusals like the generic case", () => {
+    // 403: wrong origin, or an SSO/MFA step after the account exists; a retry then answers 409.
+    expect(signupErrorKey({ status: 403, message: "Sign-in requires another step." })).toBe(
+      "auth.register.errorUnexpected",
+    );
+    // A 400 without a message (non-JSON body) still asks to check the details.
+    expect(signupErrorKey({ status: 400 })).toBe("auth.register.errorSignupFailed");
+  });
+
   it("maps the Google sign-up redirect error", () => {
     expect(
       signupRedirectErrorKey("This email already has a vayada account. Sign in instead."),

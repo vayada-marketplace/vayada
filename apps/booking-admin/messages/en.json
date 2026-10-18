@@ -45,7 +45,6 @@
   "auth.register.errorPasswordMismatch": "Passwords do not match",
   "auth.register.title": "Booking Engine",
   "auth.register.subtitle": "Create a new admin account",
-  "auth.register.errorEmailExists": "An account with this email already exists.",
   "auth.register.errorValidation": "Validation error.",
   "auth.register.errorUnexpected": "An unexpected error occurred. Please try again.",
   "auth.register.errorEmailExists": "This email already has a vayada account. Sign in instead.",

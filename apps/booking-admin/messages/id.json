@@ -46,7 +46,6 @@
   "auth.register.errorPasswordMismatch": "Kata sandi tidak cocok",
   "auth.register.title": "Mesin Pemesanan",
   "auth.register.subtitle": "Buat akun admin baru",
-  "auth.register.errorEmailExists": "Akun dengan email ini sudah ada.",
   "auth.register.errorValidation": "Kesalahan validasi.",
   "auth.register.errorUnexpected": "Terjadi kesalahan tak terduga. Silakan coba lagi.",
   "auth.register.errorEmailExists": "Email ini sudah memiliki akun vayada. Silakan masuk.",

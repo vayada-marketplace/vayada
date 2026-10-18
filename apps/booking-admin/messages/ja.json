@@ -46,7 +46,6 @@
   "auth.register.errorPasswordMismatch": "パスワードが一致しません",
   "auth.register.title": "予約エンジン",
   "auth.register.subtitle": "新しい管理者アカウントを作成",
-  "auth.register.errorEmailExists": "このメールアドレスのアカウントは既に存在します。",
   "auth.register.errorValidation": "入力エラーです。",
   "auth.register.errorUnexpected": "予期しないエラーが発生しました。もう一度お試しください。",
   "auth.register.errorEmailExists": "このメールアドレスにはすでにvayadaアカウントがあります。ログインしてください。",

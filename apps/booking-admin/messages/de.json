@@ -46,7 +46,6 @@
   "auth.register.errorPasswordMismatch": "Passwörter stimmen nicht überein",
   "auth.register.title": "Buchungssystem",
   "auth.register.subtitle": "Neues Admin-Konto erstellen",
-  "auth.register.errorEmailExists": "Ein Konto mit dieser E-Mail-Adresse existiert bereits.",
   "auth.register.errorValidation": "Validierungsfehler.",
   "auth.register.errorUnexpected": "Ein unerwarteter Fehler ist aufgetreten. Bitte versuchen Sie es erneut.",
   "auth.register.errorEmailExists": "Für diese E-Mail-Adresse gibt es bereits ein vayada-Konto. Bitte melden Sie sich an.",

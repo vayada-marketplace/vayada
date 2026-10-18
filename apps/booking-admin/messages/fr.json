@@ -46,7 +46,6 @@
   "auth.register.errorPasswordMismatch": "Les mots de passe ne correspondent pas",
   "auth.register.title": "Moteur de reservation",
   "auth.register.subtitle": "Créer un nouveau compte administrateur",
-  "auth.register.errorEmailExists": "Un compte avec cette adresse e-mail existe déjà.",
   "auth.register.errorValidation": "Erreur de validation.",
   "auth.register.errorUnexpected": "Une erreur inattendue s'est produite. Veuillez réessayer.",
   "auth.register.errorEmailExists": "Cette adresse e-mail a déjà un compte vayada. Connectez-vous.",

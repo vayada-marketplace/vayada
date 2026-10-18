@@ -46,7 +46,6 @@
   "auth.register.errorPasswordMismatch": "Пароли не совпадают",
   "auth.register.title": "Система бронирования",
   "auth.register.subtitle": "Создайте новый аккаунт администратора",
-  "auth.register.errorEmailExists": "Аккаунт с этим адресом электронной почты уже существует.",
   "auth.register.errorValidation": "Ошибка валидации.",
   "auth.register.errorUnexpected": "Произошла непредвиденная ошибка. Пожалуйста, попробуйте снова.",
   "auth.register.errorEmailExists": "Для этого адреса уже есть аккаунт vayada. Войдите в него.",

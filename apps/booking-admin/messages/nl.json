@@ -46,7 +46,6 @@
   "auth.register.errorPasswordMismatch": "Wachtwoorden komen niet overeen",
   "auth.register.title": "Boekingsmodule",
   "auth.register.subtitle": "Maak een nieuw beheerdersaccount aan",
-  "auth.register.errorEmailExists": "Er bestaat al een account met dit e-mailadres.",
   "auth.register.errorValidation": "Validatiefout.",
   "auth.register.errorUnexpected": "Er is een onverwachte fout opgetreden. Probeer het opnieuw.",
   "auth.register.errorEmailExists": "Dit e-mailadres heeft al een vayada-account. Log in.",

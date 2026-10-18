@@ -46,7 +46,6 @@
   "auth.register.errorPasswordMismatch": "Le password non corrispondono",
   "auth.register.title": "Motore di prenotazione",
   "auth.register.subtitle": "Crea un nuovo account amministratore",
-  "auth.register.errorEmailExists": "Esiste già un account con questo indirizzo email.",
   "auth.register.errorValidation": "Errore di validazione.",
   "auth.register.errorUnexpected": "Si è verificato un errore imprevisto. Riprova.",
   "auth.register.errorEmailExists": "Questa email ha già un account vayada. Accedi.",
