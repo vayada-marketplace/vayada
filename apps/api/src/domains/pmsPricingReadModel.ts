@@ -269,8 +269,9 @@ export async function readSourcePublishedFlexibleRatePlans(
   );
 }
 
-/** Every published offer for rate-plan lists (e.g. the New Booking dropdown), in editor order.
- * Labels come from the offer's current terms; only independent offers carry a base amount. */
+/** Every sold published offer for rate-plan lists (e.g. the New Booking dropdown), in editor
+ * order: a "not_sold" offer is left out, a channels-only one stays (VAY-2285). Labels come from
+ * the offer's current terms; only independent offers carry a base amount. */
 export type PublishedRatePlan = Readonly<{
   roomTypeId: string;
   ratePlanId: string;
@@ -289,7 +290,11 @@ export async function readPublishedRatePlans(
   return (await readPublishedOfferRows(queryable, propertyId)).flatMap((row) => {
     const { offer, terms } = row;
     const rateType = terms?.cancellation?.kind;
-    if (typeof offer?.id !== "string" || (rateType !== "flexible" && rateType !== "non_refundable"))
+    if (
+      typeof offer?.id !== "string" ||
+      offer.sale === "not_sold" ||
+      (rateType !== "flexible" && rateType !== "non_refundable")
+    )
       return [];
     const minor =
       offer.price?.kind === "independent" ? baseMinor(offer.price.calendar?.base) : null;

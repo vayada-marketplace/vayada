@@ -114,6 +114,7 @@ import {
   replacementChargeFingerprint,
 } from "./replacementChargeDeclarations.js";
 import type { PricingStorageSnapshot, PricingStorageSources } from "./replacementPricingStore.js";
+import { readPublishedRatePlans } from "./pmsPricingReadModel.js";
 import { createReplacementPricingStore } from "./replacementPricingStore.js";
 import { createReplacementPricingStorageGuard } from "./replacementPricingStorageGuard.js";
 import { lockPublicPricingPublication } from "./publicPricingPublication.js";
@@ -7149,8 +7150,9 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     policy?: FixedChargePolicy,
     configureTerms?: TermsSetup,
     enableCard = false,
+    configure = familyPrices,
   ) {
-    const f = await stayFixture(familyPrices, policy, configureTerms, enableCard),
+    const f = await stayFixture(configure, policy, configureTerms, enableCard),
       id = randomUUID();
     await pool.query(
       `INSERT INTO booking.booking_settings(property_id,default_currency,last_minute_discount)
@@ -7609,6 +7611,92 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       client.release();
     }
   });
+  // VAY-2285: an offer off the booking page is never listed or quoted for guests, yet the hotel
+  // can still reprice a booking already on it; staff keep channels-only offers.
+  it.each([
+    ["not_sold", ["other"]],
+    ["channels_only", ["flex", "other"]],
+  ] as const)(
+    "keeps a %s Flexible offer from guests but not from bookings already on it",
+    async (sale, staffPlans) => {
+      const flexibleHidden = (snapshot: PricingStorageSnapshot): PricingStorageSnapshot => {
+        const family = familyPrices(snapshot);
+        return {
+          ...family,
+          rooms: family.rooms.map((room, index) =>
+            index === 0
+              ? {
+                  ...room,
+                  offers: room.offers.map((offer) =>
+                    offer.id === "flex" ? { ...offer, sale } : offer,
+                  ),
+                }
+              : room,
+          ),
+        };
+      };
+      const f = await componentsFixture(undefined, propertyTerms, false, flexibleHidden),
+        id = f.scope.propertyId,
+        roomId = f.snapshot.rooms[0]!.roomTypeId;
+      await pool.query(
+        `UPDATE booking.booking_settings
+         SET last_minute_discount='{"enabled":false,"stackWithPromo":false,"tiers":[]}' WHERE property_id=$1`,
+        [id],
+      );
+      const key = (offerId: string) =>
+        f.bindings.find((b) => b.roomTypeId === roomId && b.offerId === offerId)!.publicOfferKey;
+      // The booking page lists only the Non-refundable offer linked to the hidden Flexible one.
+      const published = await publishBookingPage(f.scope);
+      expect(
+        published.find((room) => room.roomTypeId === roomId)!.offers.map((o) => o.ratePlanId),
+      ).toEqual([key("other")]);
+      const read = await createPublicPricingOfferCatalog(pool).read(id);
+      expect(
+        read!.rooms.find((room) => room.roomTypeId === roomId)!.offers.map((o) => o.publicOfferKey),
+      ).toEqual([key("other")]);
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        const quote = (offerId: string, quotedFor?: "guest" | "host") =>
+          lockCurrentPricingQuote(
+            client,
+            id,
+            {
+              ...f.selection,
+              version: "public-pricing-selection.v1",
+              rooms: [{ ...f.selection.rooms[0]!, publicOfferKey: key(offerId) }],
+              addons: [],
+              promoCode: null,
+            },
+            "pay_at_property",
+            300,
+            quotedFor,
+          );
+        expect(await quote("flex")).toBeNull();
+        const other = (await quote("other"))!.quote;
+        const booked = (await quote("flex", "host"))!.quote;
+        // Non-refundable is the hidden Flexible price minus 10%.
+        expect(BigInt(other.rooms[0]!.nights[0]!.roomMinor) * 10n).toBe(
+          BigInt(booked.rooms[0]!.nights[0]!.roomMinor) * 9n,
+        );
+        const moved = await repriceFromPublication(client, {
+          propertyId: id,
+          booked,
+          checkIn: booked.stay.checkIn,
+          checkOut: booked.stay.checkOut,
+        });
+        expect(moved?.quote.evidence.totalMinor).toBe(booked.evidence.totalMinor);
+      } finally {
+        await client.query("ROLLBACK");
+        client.release();
+      }
+      expect(
+        (await readPublishedRatePlans(pool, id))
+          .filter((plan) => plan.roomTypeId === roomId)
+          .map((plan) => plan.ratePlanId),
+      ).toEqual(staffPlans);
+    },
+  );
   it("assembles a validated historical quote with exact lines, nightly records and seven sources", async () => {
     const f = await componentsFixture(fixedPolicy(), propertyTerms),
       record = await assembledQuote(f);
