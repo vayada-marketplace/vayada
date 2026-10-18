@@ -91,6 +91,12 @@ async function mockPricing(page: Page, initial: ReturnType<typeof publicationOf>
     // Bank-transfer and PayPal acceptance is off, as in production today (VAY-2139).
     if (suffix === "/payment-methods" && method === "GET")
       return ok(route, { acceptanceEnabled: false, readyMethods: [] });
+    // Card isn't ready on the booking page, as in production today (VAY-2205).
+    if (suffix === "/card-readiness" && method === "GET")
+      return ok(route, {
+        card: { ready: false, reason: "switch_off", charge: "at_booking" },
+        deposits: { ready: false },
+      });
     if (suffix === "" && method === "GET") {
       if (!state.publication) return route.fulfill({ status: 404, json: { code: "not_found" } });
       return ok(route, state.publication);
