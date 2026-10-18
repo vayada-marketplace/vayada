@@ -33,6 +33,16 @@ import {
   type PricingStayRepricer,
 } from "./pricingStayDateChange.js";
 import type { BookedCancellationOutcome } from "@vayada/domain-booking";
+import {
+  executePricingCardRefund,
+  PricingCardRefundError,
+  previewPricingCardRefund,
+  retryPricingCardRefund,
+  stagePricingCardRefund,
+  type StagedPricingCardRefund,
+} from "./pricingCardRefund.js";
+import type { StripeBookingPaymentProvider } from "./stripeBookingPayments.js";
+import { recordPricingRetainedRevenue } from "./pricingRetainedRevenue.js";
 
 export type HostActionRequest = {
   action: HostBookingAction;
@@ -56,7 +66,10 @@ export type HostActionImpact = {
   oldPolicy: Record<string, unknown>;
   newPolicy: Record<string, unknown>;
   inventory: "release" | "replace";
-  payment: "no_payment_received" | "authorization_void";
+  payment: "no_payment_received" | "authorization_void" | "card_refund";
+  /** A paid card stay's cancel (VAY-2205): what was paid and what goes back to the card, in
+   * minor units. A property cancel refunds everything; a guest request follows the booked terms. */
+  cardRefund?: { paidMinor: string; refundMinor: string; currency: string };
   /** Guest-requested cancel of a pricing-v2 stay: what its booked terms keep today. Unpaid, so
    * recorded only; no money moves and nothing is counted as revenue. */
   cancellationOutcome?: BookedCancellationOutcome;
@@ -75,6 +88,11 @@ export type BookingHostActions = {
     previewId: string,
     idempotencyKey: string,
   ): Promise<HostActionResult>;
+  /** Asks Stripe again for a cancelled stay's failed card refund, same amount (VAY-2205). */
+  retryCardRefund(
+    scope: HostActionScope,
+    idempotencyKey: string,
+  ): Promise<{ status: "succeeded" | "pending" | "failed" | "busy" }>;
   close(): Promise<void>;
 };
 export class HostActionError extends Error {
@@ -113,6 +131,9 @@ export function createBookingHostActions(config: {
   repriceStay?: PricingStayRepricer;
   /** Holds a pricing-v2 date change's new nights; the pricing-v2 quote reservation by default. */
   reserveStayHolds?: PricingStayHoldReserver;
+  /** Refunds a cancelled paid pricing-v2 card stay after the commit; without it such stays can't
+   * be cancelled here (VAY-2205). */
+  cardRefunds?: StripeBookingPaymentProvider;
 }): BookingHostActions {
   const now = config.now ?? (() => new Date());
   const pricingMove = (
@@ -154,6 +175,7 @@ export function createBookingHostActions(config: {
       acceptanceMode:
         typeof metadata["acceptanceMode"] === "string" ? metadata["acceptanceMode"] : null,
       pricingQuoteBooking: metadata["targetSource"] === "pricing_quote_draft",
+      cardRefunds: !!config.cardRefunds,
       operationalStayStarted: await config.guards.stayStarted(
         client,
         scope.propertyId,
@@ -262,6 +284,19 @@ export function createBookingHostActions(config: {
         "unsupported_edit",
         "The booked cancellation terms cannot be applied to this booking. Cancel it as the property.",
       );
+    const cardRefund =
+      payment === "card_refund"
+        ? await previewPricingCardRefund(client, {
+            propertyId: scope.propertyId,
+            guestBookingId: scope.bookingId,
+            retainedMinor: cancellationOutcome?.retainedMinor ?? "0",
+          })
+        : null;
+    if (payment === "card_refund" && !cardRefund)
+      throw new HostActionError(
+        "payment_adjustment_required",
+        "This booking's card payment can't be refunded here.",
+      );
     const impact: HostActionImpact = {
       action: request.action,
       pricingFingerprint: hash(
@@ -293,6 +328,15 @@ export function createBookingHostActions(config: {
       newPolicy: offer["roomSelection"] ? object(newOffer["publicPolicy"]) : frozenPolicy,
       inventory: dates || pricingChange ? "replace" : "release",
       payment,
+      ...(cardRefund
+        ? {
+            cardRefund: {
+              paidMinor: cardRefund.paidMinor.toString(),
+              refundMinor: cardRefund.refundMinor.toString(),
+              currency: cardRefund.currency,
+            },
+          }
+        : {}),
       ...(cancellationOutcome ? { cancellationOutcome } : {}),
     };
     return {
@@ -316,6 +360,40 @@ export function createBookingHostActions(config: {
     },
     async close() {
       await config.pool.end();
+    },
+    async retryCardRefund(scope, idempotencyKey) {
+      const provider = config.cardRefunds;
+      if (!provider)
+        throw new HostActionError("payment_adjustment_required", "Card refunds are unavailable.");
+      const at = now();
+      const staged = await bookingOwner.transaction(config.pool, async (client) => {
+        // The booking row scopes the retry to this property; then the card payment, as a cancel.
+        await bookingOwner.loadBooking(client, scope.propertyId, scope.bookingId, "no_key");
+        try {
+          return await retryPricingCardRefund(client, {
+            propertyId: scope.propertyId,
+            guestBookingId: scope.bookingId,
+            commandKey: idempotencyKey,
+            occurredAt: at,
+          });
+        } catch (error) {
+          if (!(error instanceof PricingCardRefundError)) throw error;
+          throw new HostActionError(
+            "payment_adjustment_required",
+            "This booking has no failed card refund to retry.",
+          );
+        }
+      });
+      const status = await executePricingCardRefund(config.pool, provider, staged.commandId).catch(
+        (error: unknown) => {
+          console.warn("Pricing card refund left to the sweep.", {
+            commandId: staged.commandId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          return "pending" as const;
+        },
+      );
+      return { status };
     },
     async preview(scope, request) {
       const at = now();
@@ -354,7 +432,9 @@ export function createBookingHostActions(config: {
         fingerprint: hash({ ...scope, previewId }),
         occurredAt: at,
       };
-      return bookingOwner.transaction(config.pool, async (client) => {
+      // Set inside the transaction below; a plain `null` initialiser would narrow it to null here.
+      let refund = null as StagedPricingCardRefund | null;
+      const result = await bookingOwner.transaction(config.pool, async (client) => {
         const command = await bookingOwner.reserveCommand(client, scope.propertyId, context);
         if (command.status === "replay") return command.body as HostActionResult;
         const saved = await client.query<{
@@ -387,6 +467,24 @@ export function createBookingHostActions(config: {
           occurredAt: at,
           authorized: state.booking.paymentStatus === "authorized",
         });
+        // A paid card stay gets back what the cancel doesn't keep; Stripe hears of it after commit.
+        if (state.impact.payment === "card_refund")
+          try {
+            refund = await stagePricingCardRefund(client, {
+              propertyId: scope.propertyId,
+              guestBookingId: scope.bookingId,
+              retainedMinor: state.impact.cancellationOutcome?.retainedMinor ?? "0",
+              requestedBy: "host",
+              commandKey: idempotencyKey,
+              occurredAt: at,
+            });
+          } catch (error) {
+            if (!(error instanceof PricingCardRefundError)) throw error;
+            throw new HostActionError(
+              "payment_adjustment_required",
+              "This booking's card payment can't be refunded here.",
+            );
+          }
         const amendment = state.dates
           ? await config.guards.prepareDateEdit(client, {
               ...scope,
@@ -510,6 +608,16 @@ export function createBookingHostActions(config: {
             recognizedOn: bookingOwner.propertyDate(state.property.timezone, at),
             required: true,
           });
+        // What the hotel keeps of a paid card stay stays revenue on its nights (VAY-2205).
+        const cardRefund = state.impact.cardRefund;
+        if (cardRefund && !state.dates && !state.pricingChange)
+          await recordPricingRetainedRevenue(client, {
+            propertyId: scope.propertyId,
+            guestBookingId: scope.bookingId,
+            fingerprint: context.fingerprint,
+            keptMinor: BigInt(cardRefund.paidMinor) - BigInt(cardRefund.refundMinor),
+            paidMinor: BigInt(cardRefund.paidMinor),
+          });
         // Nothing consumes pms.reservation.* handoffs for pricing-v2 stays; a cancel or reject
         // frees their inventory and assignments above (VAY-2100).
         if (object(state.booking.bookingMetadata)["targetSource"] !== "pricing_quote_draft")
@@ -554,6 +662,18 @@ export function createBookingHostActions(config: {
         });
         return body;
       });
+      // Committed: ask Stripe now. If it can't answer, the refund sweep retries.
+      if (refund && config.cardRefunds) {
+        const { commandId } = refund;
+        await executePricingCardRefund(config.pool, config.cardRefunds, commandId).catch(
+          (error: unknown) =>
+            console.warn("Pricing card refund left to the sweep.", {
+              commandId,
+              error: error instanceof Error ? error.message : String(error),
+            }),
+        );
+      }
+      return result;
     },
   };
 }

@@ -391,11 +391,18 @@ async def _handle_stripe_webhook(request: Request, webhook_secret: str):
             )
 
     elif event_type in ("refund.created", "refund.updated", "refund.failed"):
-        from app.services.booking_service import reconcile_stripe_refund_event
+        from app.services.booking_service import (
+            is_foreign_stripe_refund,
+            reconcile_stripe_refund_event,
+        )
 
         refund_id = data["id"]
         if not data.get("status"):
             data["status"] = "failed" if event_type == "refund.failed" else "pending"
+        # The new API's refunds are its own (VAY-2205): answer 200 so Stripe doesn't retry them here.
+        if await is_foreign_stripe_refund(data):
+            logger.info("Stripe refund %s is not a legacy payment; ignored", refund_id)
+            return {"status": "ok"}
         payment = await reconcile_stripe_refund_event(data)
         if payment:
             logger.info("Stripe refund %s reconciled as %s", refund_id, data["status"])

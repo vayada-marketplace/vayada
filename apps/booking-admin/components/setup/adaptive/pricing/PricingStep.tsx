@@ -211,6 +211,15 @@ export function PricingStep({
   const methods = stepMethods ?? picked ?? [];
   // Guests can only pay at the property: non-refundable stays (paid in advance) can't be offered (VAY-2280).
   const onlyAtProperty = methods.length > 0 && !paidInAdvance(methods).length;
+  // A flexible rate starts as "Nothing paid when booking" (VAY-2205): say so when other ways are chosen too.
+  const atPropertyHint = cancellation.kind === "free" &&
+    methods.includes("pay_at_property") &&
+    paidInAdvance(methods).length > 0 && (
+      <span className="mt-1 block text-xs text-gray-600">
+        Guests pay at the property. Rates paid when booking, set later in Rooms &amp; Rates, use the
+        other ways.
+      </span>
+    );
   const pricing = !!currency && !currencyMismatch && setupRooms.length > 0 && !paymentsPending;
   const children = setupRooms.some(({ capacity }) => capacity.children > 0);
   /** An edit starts a new publish attempt; `solved` names the problem it fixes. */
@@ -519,6 +528,7 @@ export function PricingStep({
                       Pay at property: not offered, non-refundable stays are paid in advance
                     </span>
                   )}
+                {atPropertyHint}
               </span>
               <button
                 type="button"
@@ -550,6 +560,7 @@ export function PricingStep({
                 }}
                 t={englishPricingSetup}
               />
+              {atPropertyHint}
             </div>
           )}
           <p className="mt-6 rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm leading-6 text-gray-700">

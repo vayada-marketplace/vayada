@@ -238,6 +238,12 @@ async function mockPricing(page: Page) {
     // Bank transfer is ready (VAY-2139): the new room's non-refundable first price is paid in advance (VAY-2280).
     if (suffix === "/payment-methods" && method === "GET")
       return ok(route, { acceptanceEnabled: true, readyMethods: ["bank_transfer"] });
+    // Card isn't ready on the booking page, as in production today (VAY-2205).
+    if (suffix === "/card-readiness" && method === "GET")
+      return ok(route, {
+        card: { ready: false, reason: "switch_off", charge: "at_booking" },
+        deposits: { ready: false },
+      });
     if (suffix === "" && method === "GET") return ok(route, state.publication);
     const step = suffix === "/prepare" ? "prepare" : suffix === "/publish" ? "publish" : null;
     if (step && state.refuse?.step === step) {
