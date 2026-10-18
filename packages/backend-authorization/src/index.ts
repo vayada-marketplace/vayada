@@ -88,8 +88,7 @@ export type EffectivePropertyAccess = {
 
 export type TargetPropertyResource =
   | { product: "booking"; resourceType: "booking_hotel" }
-  | { product: "pms"; resourceType: "pms_property" }
-  | { product: "marketplace"; resourceType: "hotel_profile" };
+  | { product: "pms"; resourceType: "pms_property" };
 
 export type PropertyAccessRequirement = {
   propertyId: string;
@@ -153,9 +152,6 @@ function canonicalEntitlementKey(product: Product, key: string): string {
   if (product === "booking" && key === "account_access") return "booking-engine";
   if (product === "pms" && (key === "account_access" || key === "pms-core")) {
     return "property-management";
-  }
-  if (product === "marketplace" && key === "account_access") {
-    return "marketplace-hotel-profile";
   }
   return key;
 }
