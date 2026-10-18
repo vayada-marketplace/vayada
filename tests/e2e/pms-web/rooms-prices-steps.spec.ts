@@ -515,6 +515,39 @@ test("writes what guests read about breakfast and shows it in the guest card (VA
   await assertHealthy();
 });
 
+test("writes what guests read about a half board option in its window (VAY-2281)", async ({
+  page,
+}, testInfo) => {
+  await openPms(page);
+  const pricing = await mockPricing(page, publicationOf(3, [designRoom(3), complexRoom(3)]));
+  const assertHealthy = watchPageHealth(page, testInfo);
+  await prices(page, DELUXE);
+  await main(page).getByRole("button", { name: "Half board", exact: true }).click();
+  await dialog(page).getByLabel("Half board price").fill("25");
+  await dialog(page).getByRole("button", { name: "Add option" }).click();
+  await main(page)
+    .getByRole("button", { name: /^Edit Half board/ })
+    .click();
+  const text = "Three-course dinner from 18:30";
+  await dialog(page).getByLabel("What guests read").fill(text);
+  await dialog(page).getByRole("button", { name: "Close" }).click();
+  await expect(
+    main(page)
+      .getByRole("radiogroup", { name: "Options for this stay" })
+      .getByRole("radio")
+      .filter({ hasText: text }),
+  ).toHaveCount(1);
+  await main(page).getByRole("button", { name: "Save prices" }).click();
+  await expect(main(page).getByText("Prices saved.", { exact: false })).toBeVisible();
+  const deluxe = (pricing.publishes[0].snapshot.rooms as Room[]).find(
+    (value) => value.roomTypeId === DELUXE,
+  )!;
+  expect(deluxe.offers.find((offer: Room) => offer.meal.kind === "half_board").meal).toMatchObject({
+    description: text,
+  });
+  await assertHealthy();
+});
+
 test("closes a night and gives another its own price from the calendar (VAY-2280)", async ({
   page,
 }, testInfo) => {
