@@ -873,6 +873,7 @@ jobs:
             src/domains/pricingBookingRevenue.postgres.test.ts \
             src/domains/pricingInventoryAdoption.postgres.test.ts \
             src/domains/pricingRevenueClear.postgres.test.ts \
+            src/domains/pricingCardRefund.integration.test.ts \
             src/domains/bookingHostActionLocks.postgres.test.ts \
             src/domains/bookingHostActions.integration.test.ts \
             src/domains/replacementAddons.integration.test.ts \

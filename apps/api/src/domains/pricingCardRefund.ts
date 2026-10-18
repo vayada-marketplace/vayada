@@ -1,0 +1,381 @@
+import { createHash } from "node:crypto";
+import type { Pool, PoolClient } from "pg";
+import { pricingAmountStep, pricingCurrencyScale } from "@vayada/domain-pms";
+import { pricingMinorDecimal } from "./pricingCardPayment.js";
+import type { StripeBookingPaymentProvider, StripeBookingRefund } from "./stripeBookingPayments.js";
+import { stripeAmountMinor } from "./stripeMoney.js";
+
+/** "unavailable": no paid card payment to refund; "conflict": another refund of it is under way. */
+export class PricingCardRefundError extends Error {
+  constructor(readonly code: "unavailable" | "conflict") {
+    super(`Pricing card refund ${code}`);
+  }
+}
+
+export type StagedPricingCardRefund = Readonly<{
+  commandId: string;
+  amount: string;
+  currency: string;
+}>;
+
+const uuidFrom = (seed: string): string => {
+  const h = createHash("sha256").update(seed).digest("hex");
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-${((parseInt(h[16]!, 16) & 3) | 8).toString(16)}${h.slice(17, 20)}-${h.slice(20, 32)}`;
+};
+
+/** A stored two-decimal amount in the pricing currency's minor units; null if it doesn't fit. */
+function pricingMinor(amount: string, currency: string): bigint | null {
+  const scale = pricingCurrencyScale(currency);
+  const match = /^(\d{1,13})\.(\d{2})$/.exec(amount);
+  if (scale === null || !match) return null;
+  const cents = BigInt(match[1]!) * 100n + BigInt(match[2]!);
+  const minor = cents * 10n ** BigInt(scale);
+  return minor % 100n === 0n ? minor / 100n : null;
+}
+
+/** What a cancelled paid stay gets back: what was paid online minus what the booked terms keep,
+ * rounded up to the currency's step in the guest's favour, never more than was paid (VAY-2205). */
+export function pricingCardRefundMinor(paidMinor: bigint, retainedMinor: bigint, currency: string) {
+  const step = BigInt(pricingAmountStep(currency));
+  const owed = paidMinor - retainedMinor;
+  if (owed <= 0n) return 0n;
+  const rounded = ((owed + step - 1n) / step) * step;
+  return rounded > paidMinor ? paidMinor : rounded;
+}
+
+/** Inside the caller's cancel transaction, after it locked the booking row and the property's
+ * inventory: records the refund the booked terms owe on the stay's paid card payment, or nothing
+ * when they keep it all. The refund reaches Stripe only after the caller commits
+ * (`executePricingCardRefund`), so a rollback never refunds. A replay of the same command returns
+ * the same refund; a second refund of a payment whose refund hasn't failed is a conflict. */
+export async function stagePricingCardRefund(
+  client: Pick<PoolClient, "query">,
+  input: {
+    propertyId: string;
+    guestBookingId: string;
+    retainedMinor: string;
+    requestedBy: "guest" | "host";
+    commandKey: string;
+    occurredAt: Date;
+  },
+): Promise<StagedPricingCardRefund | null> {
+  const payment = (
+    await client.query(
+      `SELECT payment.id,payment.amount::text AS amount,payment.refunded_amount::text AS refunded,
+         trim(payment.currency) AS currency,payment.status,payment.payment_method AS method,
+         payment.provider_payment_intent_id AS intent,account.provider_account_id AS "accountRef"
+       FROM booking.guest_bookings booking
+       JOIN finance.payments payment
+         ON payment.id=booking.active_card_payment_id AND payment.property_id=booking.property_id
+       LEFT JOIN finance.payment_provider_accounts account
+         ON account.id=payment.provider_account_id AND account.property_id=payment.property_id
+       WHERE booking.property_id=$1::uuid AND booking.id=$2::uuid
+       FOR UPDATE OF payment`,
+      [input.propertyId, input.guestBookingId],
+    )
+  ).rows[0];
+  const key = `pricing-card-refund:${input.propertyId}:${createHash("sha256").update(input.commandKey).digest("hex")}`;
+  const commandId = uuidFrom(key);
+  const replay = (
+    await client.query(
+      `SELECT payment_id,amount::text AS amount,trim(currency) AS currency FROM finance.card_refund_commands
+       WHERE idempotency_key=$1`,
+      [key],
+    )
+  ).rows[0];
+  if (replay) {
+    if (replay.payment_id !== payment?.id) throw new PricingCardRefundError("conflict");
+    return { commandId, amount: replay.amount, currency: replay.currency };
+  }
+  const paid = payment && pricingMinor(payment.amount, payment.currency);
+  if (
+    !payment ||
+    payment.method !== "card" ||
+    payment.status !== "paid" ||
+    payment.refunded !== "0.00" ||
+    !paid ||
+    typeof payment.intent !== "string" ||
+    typeof payment.accountRef !== "string" ||
+    !payment.accountRef.startsWith("acct_") ||
+    !/^(0|[1-9][0-9]*)$/.test(input.retainedMinor)
+  )
+    throw new PricingCardRefundError("unavailable");
+  const refundMinor = pricingCardRefundMinor(paid, BigInt(input.retainedMinor), payment.currency);
+  if (refundMinor === 0n) return null;
+  const amount = pricingMinorDecimal(refundMinor.toString(), payment.currency);
+  try {
+    await client.query(
+      `INSERT INTO finance.card_refund_commands
+         (id,property_id,guest_booking_id,payment_id,idempotency_key,requested_by,amount,amount_minor,currency,
+          provider_account_ref,provider_payment_intent_id,next_attempt_at,created_at,updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7::numeric,$8,$9,$10,$11,$12,$12,$12)`,
+      [
+        commandId,
+        input.propertyId,
+        input.guestBookingId,
+        payment.id,
+        key,
+        input.requestedBy,
+        amount,
+        stripeAmountMinor(amount, payment.currency),
+        payment.currency,
+        payment.accountRef,
+        payment.intent,
+        input.occurredAt.toISOString(),
+      ],
+    );
+  } catch (error) {
+    // 0494's one-live-refund index: someone else's cancel already refunds this payment.
+    if ((error as { code?: string }).code === "23505") throw new PricingCardRefundError("conflict");
+    throw error;
+  }
+  return { commandId, amount, currency: payment.currency };
+}
+
+type Command = {
+  id: string;
+  property_id: string;
+  guest_booking_id: string;
+  payment_id: string;
+  idempotency_key: string;
+  requested_by: string;
+  amount: string;
+  amount_minor: string;
+  currency: string;
+  provider_account_ref: string;
+  provider_payment_intent_id: string;
+  status: string;
+  provider_refund_id: string | null;
+  attempts: number;
+  booking_reference: string;
+};
+
+/** After the cancel committed (and from the sweep): asks Stripe for the refund once, or finds the
+ * one it already made, and settles it when Stripe says it succeeded. Busy elsewhere, or already
+ * settled: nothing happens. Stripe errors keep the command pending with a later retry; after
+ * MAX_ATTEMPTS it fails and the PMS shows it. */
+export async function executePricingCardRefund(
+  pool: Pick<Pool, "connect">,
+  provider: StripeBookingPaymentProvider,
+  commandId: string,
+): Promise<"succeeded" | "pending" | "failed" | "busy"> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const command = (
+      await client.query<Command>(
+        `SELECT id,property_id,guest_booking_id,payment_id,idempotency_key,requested_by,amount::text AS amount,
+           amount_minor::text AS amount_minor,trim(currency) AS currency,provider_account_ref,
+           provider_payment_intent_id,status,provider_refund_id,attempts,
+           (SELECT public_reference FROM booking.guest_bookings booking
+            WHERE booking.id=command.guest_booking_id AND booking.property_id=command.property_id)
+             AS booking_reference
+         FROM finance.card_refund_commands command WHERE id=$1 FOR UPDATE OF command SKIP LOCKED`,
+        [commandId],
+      )
+    ).rows[0];
+    if (!command || command.status !== "pending") {
+      await client.query("COMMIT");
+      return command ? (command.status as "succeeded" | "failed") : "busy";
+    }
+    let refund: StripeBookingRefund | undefined;
+    try {
+      refund = await findOrCreateRefund(provider, command);
+    } catch (error) {
+      // Once Stripe has the refund, it is followed to the end; only one never made is given up.
+      const attempts = command.attempts + 1,
+        giveUp = !command.provider_refund_id && attempts >= MAX_ATTEMPTS;
+      await client.query(
+        `UPDATE finance.card_refund_commands SET attempts=$2,failure_reason=$3,updated_at=clock_timestamp(),
+           next_attempt_at=clock_timestamp()+make_interval(mins=>$4),
+           status=CASE WHEN $5 THEN 'failed' ELSE status END,
+           settled_at=CASE WHEN $5 THEN clock_timestamp() END
+         WHERE id=$1`,
+        [command.id, attempts, reason(error), Math.min(2 ** command.attempts, 60), giveUp],
+      );
+      await client.query("COMMIT");
+      return giveUp ? "failed" : "pending";
+    }
+    const result =
+      refund.status === "succeeded"
+        ? await settleRefund(client, command, refund)
+        : refund.status === "failed" || refund.status === "canceled"
+          ? await failRefund(client, command, refund)
+          : await keepPending(client, command, refund);
+    await client.query("COMMIT");
+    return result;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/** Stripe errors before a refund Stripe never made stops being retried (about a day with the
+ * backoff). */
+export const MAX_ATTEMPTS = 30;
+
+async function findOrCreateRefund(provider: StripeBookingPaymentProvider, command: Command) {
+  const refund = command.provider_refund_id
+    ? await provider.retrieveRefund(command.provider_refund_id, command.provider_account_ref)
+    : // Stripe forgets idempotency keys after 24 hours: look for this command's refund first.
+      ((
+        await provider.listRefunds(command.provider_payment_intent_id, command.provider_account_ref)
+      ).find((candidate) => candidate.commandId === command.id) ??
+      (await provider.createRefund({
+        paymentIntentId: command.provider_payment_intent_id,
+        providerAccountRef: command.provider_account_ref,
+        amountMinor: Number(command.amount_minor),
+        commandId: command.id,
+        propertyId: command.property_id,
+        bookingReference: command.booking_reference,
+        idempotencyKey: command.idempotency_key,
+      })));
+  if (
+    refund.paymentIntentId !== command.provider_payment_intent_id ||
+    refund.amountMinor !== Number(command.amount_minor) ||
+    refund.currency !== command.currency ||
+    (refund.commandId !== null && refund.commandId !== command.id)
+  )
+    throw new Error("Stripe answered with a refund for another command.");
+  return refund;
+}
+
+async function keepPending(client: PoolClient, command: Command, refund: StripeBookingRefund) {
+  await client.query(
+    `UPDATE finance.card_refund_commands SET provider_refund_id=$2,provider_status=$3,attempts=attempts+1,
+       updated_at=clock_timestamp(),next_attempt_at=clock_timestamp()+make_interval(mins=>$4)
+     WHERE id=$1`,
+    [command.id, refund.refundId, refund.status, Math.min(2 ** command.attempts, 60)],
+  );
+  return "pending" as const;
+}
+
+async function failRefund(client: PoolClient, command: Command, refund: StripeBookingRefund) {
+  await client.query(
+    `UPDATE finance.card_refund_commands SET status='failed',provider_refund_id=$2,provider_status=$3,
+       failure_reason=$4,settled_at=clock_timestamp(),updated_at=clock_timestamp()
+     WHERE id=$1`,
+    [command.id, refund.refundId, refund.status, refund.failureReason ?? refund.status],
+  );
+  await audit(client, command, "finance.card_refund_failed", refund);
+  return "failed" as const;
+}
+
+/** The refund is money now: the card payment records it, a refund payment row corrects it, and
+ * the booking says refunded when nothing paid is left (as manual refunds do). */
+async function settleRefund(client: PoolClient, command: Command, refund: StripeBookingRefund) {
+  const payment = (
+    await client.query(
+      `SELECT amount::text AS amount,refunded_amount::text AS refunded,organization_id,provider_account_id
+       FROM finance.payments WHERE id=$1 AND property_id=$2 FOR UPDATE`,
+      [command.payment_id, command.property_id],
+    )
+  ).rows[0];
+  const cents = (value: string) => BigInt(value.replace(".", ""));
+  const refunded = cents(payment.refunded) + cents(command.amount);
+  if (refunded > cents(payment.amount)) throw new Error("A card refund exceeds its payment.");
+  const status = refunded === cents(payment.amount) ? "refunded" : "partially_refunded";
+  await client.query(
+    `UPDATE finance.payments SET refunded_amount=refunded_amount+$3::numeric,status=$4,updated_at=clock_timestamp()
+     WHERE id=$1 AND property_id=$2`,
+    [command.payment_id, command.property_id, command.amount, status],
+  );
+  await client.query(
+    `INSERT INTO finance.payments
+       (property_id,organization_id,guest_booking_id,provider_account_id,source_system,source_payment_id,
+        idempotency_key,payment_kind,payment_method,status,amount,net_amount,refunded_amount,currency,
+        provider_transaction_id,provider_payment_intent_id,payment_metadata,visibility_class,paid_at)
+     VALUES ($1,$2,$3,$4,'finance',$5,$6,'refund','card','refunded',$7::numeric,-$7::numeric,$7::numeric,$8,
+       $9,$10,$11::jsonb,'pms_finance',clock_timestamp())`,
+    [
+      command.property_id,
+      payment.organization_id,
+      command.guest_booking_id,
+      payment.provider_account_id,
+      `pricing-card-refund:${command.id}`,
+      `${command.idempotency_key}:settlement`,
+      command.amount,
+      command.currency,
+      refund.refundId,
+      command.provider_payment_intent_id,
+      JSON.stringify({
+        contractVersion: "finance-card-refund.v1",
+        correctsPaymentEvidenceId: command.payment_id,
+        commandId: command.id,
+        requestedBy: command.requested_by,
+        resultStatus: status,
+      }),
+    ],
+  );
+  await client.query(
+    `UPDATE booking.guest_bookings SET payment_status=$3,updated_at=clock_timestamp()
+     WHERE id=$1 AND property_id=$2`,
+    [command.guest_booking_id, command.property_id, status === "refunded" ? "refunded" : "paid"],
+  );
+  await client.query(
+    `UPDATE finance.card_refund_commands SET status='succeeded',provider_refund_id=$2,provider_status=$3,
+       failure_reason=NULL,settled_at=clock_timestamp(),updated_at=clock_timestamp()
+     WHERE id=$1`,
+    [command.id, refund.refundId, refund.status],
+  );
+  await audit(client, command, "finance.card_refund", refund);
+  return "succeeded" as const;
+}
+
+async function audit(
+  client: PoolClient,
+  command: Command,
+  action: string,
+  refund: StripeBookingRefund,
+) {
+  await client.query(
+    `INSERT INTO platform.product_audit_events
+       (audit_key,product,action,occurred_at,tenant_scope,property_id,actor_type,target_resource_product,
+        target_resource_type,target_resource_id,redacted_payload,audit_metadata,retention_class,privacy_scope)
+     VALUES ($1,'finance',$2,clock_timestamp(),'property',$3,'system','finance','payment',$4,$5::jsonb,$6::jsonb,
+       'financial','confidential')
+     ON CONFLICT DO NOTHING`,
+    [
+      `${action}.${command.id}.v1`,
+      action,
+      command.property_id,
+      command.payment_id,
+      JSON.stringify({ amount: command.amount, currency: command.currency, status: refund.status }),
+      JSON.stringify({
+        commandId: command.id,
+        providerRefundId: refund.refundId,
+        requestedBy: command.requested_by,
+      }),
+    ],
+  );
+}
+
+const reason = (error: unknown) =>
+  (error instanceof Error ? error.message : "Stripe refund failed").slice(0, 500);
+
+/** Retries due refunds: commands whose Stripe call failed or whose refund is still pending at
+ * Stripe. Each runs in its own transaction; one bad command doesn't stop the others. */
+export async function runPendingPricingCardRefunds(
+  pool: Pick<Pool, "connect" | "query">,
+  provider: StripeBookingPaymentProvider,
+  limit = 20,
+): Promise<{ attempted: number; errors: number }> {
+  const due = (
+    await pool.query(
+      `SELECT id FROM finance.card_refund_commands WHERE status='pending' AND next_attempt_at<=now()
+       ORDER BY next_attempt_at,id LIMIT $1`,
+      [limit],
+    )
+  ).rows as { id: string }[];
+  let errors = 0;
+  for (const { id } of due) {
+    try {
+      await executePricingCardRefund(pool, provider, id);
+    } catch {
+      errors += 1;
+    }
+  }
+  return { attempted: due.length, errors };
+}

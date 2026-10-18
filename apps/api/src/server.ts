@@ -192,6 +192,7 @@ import {
   createBookingPublicationProductionRuntime,
   startBookingPublicationWorker,
 } from "./domains/bookingPublicationProductionRuntime.js";
+import { runPendingPricingCardRefunds } from "./domains/pricingCardRefund.js";
 import { createFinanceManualPaymentReadinessReader } from "./domains/financeManualPaymentReadiness.js";
 import { createTargetFinanceBillingConfigReadPort } from "./domains/financeBillingConfigReadModel.js";
 import { createFinanceSubscriptionService } from "./domains/financeSubscriptionService.js";
@@ -2890,6 +2891,28 @@ const bookingLifecycleTimer = setInterval(runBookingLifecycle, 60_000);
 bookingLifecycleTimer.unref();
 runBookingLifecycle();
 
+// Card refunds of cancelled pricing-v2 stays (VAY-2205): retries Stripe errors and follows refunds
+// still pending at Stripe. Commands exist only once a hotel takes card.
+let activePricingCardRefundRun: Promise<void> | undefined;
+const runPricingCardRefunds = () => {
+  if (!config.backgroundWorkersEnabled || !stripeBookingPaymentProvider) return;
+  if (activePricingCardRefundRun) return;
+  activePricingCardRefundRun = runPendingPricingCardRefunds(
+    propertySetupOwnerPool,
+    stripeBookingPaymentProvider,
+  )
+    .then((result) => {
+      if (result.errors > 0)
+        app.log.warn({ ...result }, "Pricing card refund sweep completed with errors");
+    })
+    .catch((error: unknown) => app.log.warn({ err: error }, "Pricing card refund sweep failed"))
+    .finally(() => {
+      activePricingCardRefundRun = undefined;
+    });
+};
+const pricingCardRefundTimer = setInterval(runPricingCardRefunds, 60_000);
+pricingCardRefundTimer.unref();
+
 const pmsInboxDeliveryWorker =
   config.backgroundWorkersEnabled && pmsInboxDeliveryStore && pmsInboxDeliveryPool
     ? startPmsInboxDeliveryWorker({
@@ -2947,8 +2970,10 @@ app.addHook("preClose", async () => {
 });
 app.addHook("onClose", async () => {
   clearInterval(bookingLifecycleTimer);
+  clearInterval(pricingCardRefundTimer);
   if (bookingEmailDeliveryTimer) clearInterval(bookingEmailDeliveryTimer);
   await activeBookingLifecycleRun;
+  await activePricingCardRefundRun;
   await activeBookingEmailDelivery;
   await bookingLifecycleStore.close();
   await pmsInboxDeliveryStore?.close();
