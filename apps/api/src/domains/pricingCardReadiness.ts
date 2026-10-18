@@ -5,7 +5,7 @@ import type { FinancePaymentReadinessReadPort } from "@vayada/domain-finance";
  *   card acceptance is switched on;
  * - `reason` names the first thing missing: the hotel's Stripe account, its currency, Vayada's approval, the switch;
  * - `charge` is when the guest's card is charged: at booking (instant book) or when the hotel accepts (request);
- * - deposits stay off until deposit execution ships. */
+ * - deposits (a share by card when booking, the rest at the property) need card ready and deposits switched on. */
 export type PricingCardReadiness = Readonly<{
   card: Readonly<{
     ready: boolean;
@@ -24,6 +24,7 @@ export function createPricingCardReadinessReader(config: {
   pool: QueryPool;
   finance: FinancePaymentReadinessReadPort;
   cardAcceptanceEnabled: boolean;
+  depositAcceptanceEnabled: boolean;
 }): PricingCardReadinessReadPort {
   return {
     async read({ organizationId, propertyId }) {
@@ -62,7 +63,10 @@ export function createPricingCardReadinessReader(config: {
               : config.cardAcceptanceEnabled
                 ? null
                 : "switch_off";
-      return { card: { ready: reason === null, reason, charge }, deposits: { ready: false } };
+      return {
+        card: { ready: reason === null, reason, charge },
+        deposits: { ready: reason === null && config.depositAcceptanceEnabled },
+      };
     },
   };
 }

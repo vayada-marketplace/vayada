@@ -185,8 +185,13 @@ export function createReplacementPricingCommands(pool: Pool, context: RequestCon
       propertyId: string,
       input: Parameters<typeof booking.stage>[2],
       draft: BookingPricingDraft,
+      /** Whether this hotel can take deposits now (VAY-2205); only asked for a deposit. */
+      depositsReady = false,
     ) {
-      return booking.stage(trustedContext, scope(propertyId), input, draft, { paymentRules: true });
+      return booking.stage(trustedContext, scope(propertyId), input, draft, {
+        paymentRules: true,
+        depositsReady,
+      });
     },
     async readDraftTerms(
       propertyId: string,

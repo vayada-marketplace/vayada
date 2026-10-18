@@ -1749,6 +1749,7 @@ const app = buildApp({
               config.replacementPricingAcceptanceEnabled === true &&
               config.replacementPricingCardAcceptanceEnabled === true &&
               !!stripeBookingPaymentProvider,
+            depositAcceptanceEnabled: config.replacementPricingDepositAcceptanceEnabled === true,
           }),
         }
       : undefined,

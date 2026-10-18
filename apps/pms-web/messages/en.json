@@ -1725,6 +1725,7 @@
   "pricing.error.depositCardOnly": "A deposit is paid by card when booking. Choose card for it, then save again. Your edits are kept.",
   "pricing.error.depositRestAtProperty": "After a deposit, the rest is paid at the property. Save the deposit again from its option window. Your edits are kept.",
   "pricing.error.depositBelowFullStay": "A deposit must be less than 100%. To take the whole stay when booking, choose full payment instead. Your edits are kept.",
+  "pricing.error.depositsUnavailable": "Deposits aren't available for this hotel yet: card payments and deposits must be on first. Choose another way to be paid when booking, then save again. Your edits are kept.",
   "pricing.paymentMethods.notOffered": "Not offered: non-refundable stays are paid in advance",
   "pricing.error.cancellationDeadline": "Check the cancellation deadline (0–365 days).",
   "pricing.page.loading": "Loading selected property…",

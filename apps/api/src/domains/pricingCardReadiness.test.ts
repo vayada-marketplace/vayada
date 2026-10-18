@@ -24,6 +24,7 @@ function reader(
   finance: FinancePaymentReadinessSnapshot | null,
   local: { mode?: string | null; linked?: boolean } = {},
   cardAcceptanceEnabled = true,
+  depositAcceptanceEnabled = false,
 ) {
   const query = vi
     .fn()
@@ -33,6 +34,7 @@ function reader(
     pool: { query },
     finance: { getPaymentReadiness },
     cardAcceptanceEnabled,
+    depositAcceptanceEnabled,
   }).read({ organizationId, propertyId });
   return { read, query, getPaymentReadiness };
 }
@@ -80,6 +82,22 @@ describe("pricing card readiness", () => {
     expect(
       await reason(snapshot(card("unready", ["online_card_execution_unavailable"])), {}, false),
     ).toBe("not_approved");
+  });
+
+  it("offers deposits only with card ready and deposits switched on (VAY-2205)", async () => {
+    const deposits = async (...args: Parameters<typeof reader>) =>
+      (await reader(...args).read).deposits.ready;
+    expect(await deposits(snapshot(card("ready")), {}, true, true)).toBe(true);
+    expect(await deposits(snapshot(card("ready")), {}, true, false)).toBe(false);
+    expect(await deposits(snapshot(card("ready")), {}, false, true)).toBe(false);
+    expect(
+      await deposits(
+        snapshot(card("unready", ["online_card_execution_unavailable"])),
+        {},
+        true,
+        true,
+      ),
+    ).toBe(false);
   });
 
   it("trusts Finance's ready answer over the linked-account check", async () => {

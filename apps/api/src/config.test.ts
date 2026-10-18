@@ -757,6 +757,14 @@ describe("api config", () => {
     ).toBe(true);
   });
 
+  it("keeps deposit quote acceptance off unless explicitly enabled (VAY-2205)", () => {
+    expect(loadConfig({}).replacementPricingDepositAcceptanceEnabled).toBe(false);
+    expect(
+      loadConfig({ REPLACEMENT_PRICING_DEPOSIT_ACCEPTANCE_ENABLED: "true" })
+        .replacementPricingDepositAcceptanceEnabled,
+    ).toBe(true);
+  });
+
   it("keeps bank-transfer and PayPal quote acceptance off unless explicitly enabled", () => {
     expect(loadConfig({}).replacementPricingManualPaymentAcceptanceEnabled).toBe(false);
     expect(

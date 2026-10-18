@@ -12,6 +12,7 @@ describe("Paid when booking refusals (VAY-2205)", () => {
       ["deposit_card_only", "pricing.error.depositCardOnly"],
       ["deposit_rest_at_property", "pricing.error.depositRestAtProperty"],
       ["deposit_below_full_stay", "pricing.error.depositBelowFullStay"],
+      ["deposits_unavailable", "pricing.error.depositsUnavailable"],
     ]) {
       const refused = new ApiErrorResponse(400, { code } as never);
       expect(pricingSaveError(refused, t as never)).toBe(key);
