@@ -157,6 +157,11 @@ export function GuestPreview({
                       <span className="block text-[14px] font-semibold leading-[18px] text-gray-900">
                         {names[offer.id]}
                       </span>
+                      {offer.meal.description && (
+                        <span className="block text-[12px] text-gray-600">
+                          {offer.meal.description}
+                        </span>
+                      )}
                       {note.text && (
                         <span
                           className={`block text-[12px] ${note.green ? "font-medium text-green-700" : "text-gray-500"}`}

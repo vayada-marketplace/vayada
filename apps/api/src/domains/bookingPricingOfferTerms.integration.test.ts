@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { RequestContext } from "@vayada/backend-auth";
 import pg from "pg";
 import { afterAll, describe, expect, it } from "vitest";
@@ -115,6 +115,25 @@ describe.skipIf(!url)("Booking replacement offer terms PostgreSQL owner", () => 
       [f.scope.propertyId, f.terms.roomTypeId, legacy.revision]);
     expect(await store.read(f.context, f.scope, f.terms.roomTypeId, "legacy")).toEqual(legacy);
     await locked(f, async (c) => expect(await lockBookingPricingOfferTerms(c, f.scope.propertyId, [legacy])).toEqual([legacy]));
+  });
+  it("replays a request stored before the non-refundable rule instead of refusing it (VAY-2280)", async () => {
+    const f = await fixture(), requestId = randomUUID();
+    const sent = { roomTypeId: f.terms.roomTypeId, offerId: "legacy", cancellation: { kind: "non_refundable" },
+      payment: { kind: "full", acceptedMethods: ["pay_at_property"] } };
+    const stored = { ...sent, revision: randomUUID() };
+    // The request hash as the store computed it when the request was first saved (keys sorted, revision left out).
+    const sorted = (value: unknown): string => JSON.stringify(value, (_key, v) => v && typeof v === "object" && !Array.isArray(v)
+      ? Object.fromEntries(Object.keys(v).sort().map((key) => [key, v[key]])) : v);
+    const hash = createHash("sha256").update(sorted({ scope: f.scope, requestId, expected: null, terms: { ...sent, revision: null } })).digest("hex");
+    await pool.query(`INSERT INTO booking.pricing_v2_offer_terms (property_id,room_type_id,offer_id,revision,terms,request_id,request_hash,actor_user_id)
+      VALUES($1,$2,'legacy',$3,$4,$5,$6,$7)`, [f.scope.propertyId, f.terms.roomTypeId, stored.revision, JSON.stringify(stored), requestId, hash, f.scope.actorUserId]);
+    await pool.query("INSERT INTO booking.pricing_v2_offer_term_heads(property_id,room_type_id,offer_id,revision) VALUES($1,$2,'legacy',$3)",
+      [f.scope.propertyId, f.terms.roomTypeId, stored.revision]);
+    expect(await store.save(f.context, f.scope, { requestId, expectedRevision: null, terms: sent })).toEqual(stored);
+    // A new request with the same terms is still refused, and nothing new is written.
+    await expect(store.save(f.context, f.scope, { requestId: randomUUID(), expectedRevision: stored.revision, terms: sent }))
+      .rejects.toMatchObject({ code: "non_refundable_pay_at_property" });
+    expect((await pool.query("SELECT count(*)::int AS count FROM booking.pricing_v2_offer_terms WHERE property_id=$1", [f.scope.propertyId])).rows[0].count).toBe(1);
   });
   it("holds a hotel's changed payment to the Paid when booking rules, while other edits of older terms still save (VAY-2205)", async () => {
     const f = await fixture(), rules = { paymentRules: true, depositsReady: true }, draft = () => ({ draftId: randomUUID(), baseRevision: 0 });
