@@ -10,6 +10,8 @@ export type BookingEmailDelivery = {
     text: string;
     idempotencyKey: string;
     emailProduct?: "booking";
+    /** VAY-2286: contact-form notifications are answered straight to the visitor. */
+    replyTo?: string;
   }): Promise<void>;
 };
 
@@ -50,6 +52,7 @@ export function createResendBookingEmailDelivery(config: {
           to: [input.to],
           subject: input.subject,
           text: input.text,
+          ...(input.replyTo ? { reply_to: input.replyTo } : {}),
           ...(input.emailProduct === "booking"
             ? { tags: [{ name: "vayada_product", value: "booking" }] }
             : {}),
