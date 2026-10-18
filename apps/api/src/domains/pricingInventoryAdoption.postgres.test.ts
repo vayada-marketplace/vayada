@@ -1208,6 +1208,18 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
           },
         ]);
         expect(createRefund).toHaveBeenCalledOnce();
+        // The reservation page reads the refund (VAY-2205).
+        const read = await createTargetPmsOperationsReadRepository({
+          connectionString: url!,
+          pool: db,
+        }).findReservationByGuestBookingId(propertyId, bookingId);
+        expect(read?.cardRefund).toMatchObject({
+          status: "succeeded",
+          amount: "270.00",
+          currency: "EUR",
+          requestedBy: "host",
+          failureReason: null,
+        });
       } else if (scenario === "repository-date-change") {
         // VAY-2110: PMS staff move an adopted v2 stay to new dates at its booked terms.
         expect(await adopt()).toMatchObject({ outcome: "adopted" });

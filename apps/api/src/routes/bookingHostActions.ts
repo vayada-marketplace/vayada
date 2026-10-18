@@ -43,7 +43,7 @@ export async function registerBookingHostActionRoutes(
     );
     actors.set(request, context.actor.internalUserId);
   });
-  for (const suffix of ["preview", "apply"])
+  for (const suffix of ["preview", "apply", "card-refund-retry"])
     app.options(`${path}/${suffix}`, async (_, reply) => reply.code(204).send());
   app.post<{ Params: Params; Body: HostActionRequest }>(
     `${path}/preview`,
@@ -123,12 +123,10 @@ export async function registerBookingHostActionRoutes(
       };
       const action = await options.actions.findAction(scope, request.body.previewId);
       if (!action)
-        return reply
-          .code(409)
-          .send({
-            code: "stale_preview",
-            message: "Preview unavailable. Preview this action again.",
-          });
+        return reply.code(409).send({
+          code: "stale_preview",
+          message: "Preview unavailable. Preview this action again.",
+        });
       if (action !== "edit_dates")
         await enforcePmsPropertyRoutePolicy(
           request,
@@ -142,6 +140,42 @@ export async function registerBookingHostActionRoutes(
       return options.actions.apply(
         scope,
         request.body.previewId.toLowerCase(),
+        request.body.idempotencyKey,
+      );
+    },
+  );
+  // VAY-2205: a cancelled stay's card refund failed at Stripe; staff ask again, same amount.
+  app.post<{ Params: Params; Body: { idempotencyKey: string } }>(
+    `${path}/card-refund-retry`,
+    {
+      schema: {
+        params,
+        body: {
+          type: "object",
+          additionalProperties: false,
+          required: ["idempotencyKey"],
+          properties: {
+            idempotencyKey: { type: "string", minLength: 1, maxLength: 200, pattern: "\\S" },
+          },
+        },
+      },
+    },
+    async (request) => {
+      await enforcePmsPropertyRoutePolicy(
+        request,
+        {
+          propertyId: request.params.propertyId,
+          permission: "pms.reservation.cancel",
+          allowedRelationships: ["owner", "operator", "front_desk"],
+        },
+        options.propertyAccessRepository,
+      );
+      return options.actions.retryCardRefund(
+        {
+          propertyId: request.params.propertyId,
+          bookingId: request.params.guestBookingId,
+          actorUserId: actors.get(request)!,
+        },
         request.body.idempotencyKey,
       );
     },
