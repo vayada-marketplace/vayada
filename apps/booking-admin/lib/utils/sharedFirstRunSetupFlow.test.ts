@@ -140,7 +140,7 @@ function status(input: {
   selectedTracks?: AdaptiveHotelSetupStatus["organization"]["selectedTracks"];
   selectedPropertyId?: string | null;
   sharedIdentityIncomplete?: boolean;
-  entryProduct?: "booking" | "pms" | "marketplace";
+  entryProduct?: "booking" | "pms";
 }): AdaptiveHotelSetupStatus {
   const selectedTracks = input.selectedTracks ?? ["hotel_operations"];
   const selectedPropertyId =
@@ -177,19 +177,6 @@ function status(input: {
             },
           ],
           allowedActions: selectedTracks.includes("hotel_operations")
-            ? ["manage_service"]
-            : ["add"],
-        },
-        {
-          track: "creator_marketplace",
-          provisioning: selectedTracks.includes("creator_marketplace") ? "active" : "not_selected",
-          components: [
-            {
-              product: "marketplace",
-              access: selectedTracks.includes("creator_marketplace") ? "active" : "absent",
-            },
-          ],
-          allowedActions: selectedTracks.includes("creator_marketplace")
             ? ["manage_service"]
             : ["add"],
         },
@@ -239,11 +226,6 @@ function status(input: {
                 ? "pending"
                 : "ready"
               : "not_applicable",
-            marketplacePublish: selectedTracks.includes("creator_marketplace")
-              ? input.sharedIdentityIncomplete
-                ? "pending"
-                : "ready"
-              : "not_applicable",
           },
         }
       : null,
@@ -264,18 +246,6 @@ function setupTasks(
       track: "shared",
       requirementOwnerDomain: "hotel_catalog",
       destinationRouteKey: "hotel_catalog.shared_identity",
-    },
-    {
-      taskId: "public_profile",
-      track: "creator_marketplace",
-      requirementOwnerDomain: "hotel_catalog",
-      destinationRouteKey: "hotel_catalog.public_profile",
-    },
-    {
-      taskId: "creator_offer",
-      track: "creator_marketplace",
-      requirementOwnerDomain: "marketplace",
-      destinationRouteKey: "marketplace.creator_offer",
     },
     {
       taskId: "rooms_rates_availability",

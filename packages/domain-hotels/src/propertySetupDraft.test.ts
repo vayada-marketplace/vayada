@@ -79,13 +79,12 @@ describe("property setup draft contract", () => {
     expectTypeOf(current).toMatchTypeOf<PropertySetupBaseRevisions<"calendar">>();
   });
 
-  it("defines the approved retention, PII posture, and nine stable steps", () => {
+  it("defines the approved retention, PII posture, and eight stable steps", () => {
     expect(PROPERTY_SETUP_ACTIVE_RETENTION_DAYS).toBe(90);
     expect(PROPERTY_SETUP_COMPLETED_RETENTION_DAYS).toBe(30);
     expect(PROPERTY_SETUP_DRAFT_PII_CLASSIFICATION).toBe("potential_incidental_pii");
     expect(PROPERTY_SETUP_STEP_DEFINITIONS.map(({ stepId }) => stepId)).toEqual([
       "present_hotel",
-      "marketplace_preferences",
       "booking_design",
       "rooms",
       "payments",
@@ -130,7 +129,6 @@ describe("property setup draft contract", () => {
       ),
     ).toEqual({
       present_hotel: "hotel_catalog.profile|hotel_catalog.media|hotel_catalog.amenities",
-      marketplace_preferences: "marketplace.collaboration_preferences",
       booking_design: "booking.design|hotel_catalog.profile|hotel_catalog.media",
       rooms: "pms.room_types|pms.room_units|pms.room_media",
       pricing: "pms.pricing_settings|pms.rate_plans|pms.rate_rules",
@@ -157,25 +155,10 @@ describe("property setup draft contract", () => {
 
   it.each([
     [[], []],
-    [["creator_marketplace"], ["present_hotel", "marketplace_preferences", "review"]],
     [
       ["hotel_operations"],
       [
         "present_hotel",
-        "booking_design",
-        "rooms",
-        "payments",
-        "pricing",
-        "calendar",
-        "guest_experience",
-        "review",
-      ],
-    ],
-    [
-      ["hotel_operations", "creator_marketplace"],
-      [
-        "present_hotel",
-        "marketplace_preferences",
         "booking_design",
         "rooms",
         "payments",

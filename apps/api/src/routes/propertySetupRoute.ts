@@ -81,21 +81,6 @@ type PropertySetupRouteParams = {
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const TRACK_POLICIES = {
-  creator_marketplace: [
-    {
-      permission: "marketplace.collaboration.read",
-      entitlement: {
-        product: "marketplace",
-        key: "marketplace-hotel-profile",
-        resource: { product: "marketplace", resourceType: "hotel_profile" },
-      },
-      resource: {
-        product: "marketplace",
-        resourceType: "hotel_profile",
-        allowedRelationships: ["owner", "operator"],
-      },
-    },
-  ],
   hotel_operations: [
     {
       permission: "booking.settings.read",
@@ -275,7 +260,6 @@ function assertAuthorizedOwnerFacts(
   selectedTracks: readonly SetupTrack[],
 ): void {
   const allowedDomains = new Set<PropertySetupOwnerDomain>(["hotel_catalog"]);
-  if (selectedTracks.includes("creator_marketplace")) allowedDomains.add("marketplace");
   if (selectedTracks.includes("hotel_operations")) {
     for (const domain of ["booking", "pms", "finance", "distribution"] as const) {
       allowedDomains.add(domain);

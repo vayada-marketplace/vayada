@@ -130,7 +130,6 @@ async function main() {
         status: "active",
         permissions: [
           "hotel_catalog.setup.manage",
-          "marketplace.profile.manage",
           "pms.operations.manage",
           "pms.rooms_rates.read",
           "pms.room_status.read",
