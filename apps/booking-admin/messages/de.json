@@ -139,6 +139,8 @@
   "layout.sidebar.manageHotels": "Hotels verwalten",
   "layout.sidebar.collapse": "Einklappen",
   "dashboard.title": "Buchungssystem",
+  "dashboard.setupIncomplete": "Die Einrichtung Ihrer Unterkunft ist noch nicht abgeschlossen. Ihr Fortschritt wurde gespeichert.",
+  "dashboard.resumeSetup": "Einrichtung fortsetzen",
   "dashboard.timeRange.today": "Heute",
   "dashboard.timeRange.week": "Diese Woche",
   "dashboard.timeRange.month": "Letzte 30 Tage",

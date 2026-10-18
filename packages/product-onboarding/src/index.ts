@@ -121,7 +121,14 @@ export {
   type RedeemedBrowserAuthHandoff,
 } from "./authHandoff";
 export { useSingleFlightGuard } from "./useSingleFlight";
-export { isPmsSetupExitPath, pmsSetupExitPath, pmsSetupExitPropertyId } from "./setupExit";
+export {
+  isPmsSetupExitPath,
+  pmsSetupExitPath,
+  pmsSetupExitPropertyId,
+  setupExitTarget,
+  type SetupExitSurface,
+  type SetupExitTarget,
+} from "./setupExit";
 export {
   readBankTransferDestination,
   saveBankTransferDestination,

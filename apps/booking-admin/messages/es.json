@@ -139,6 +139,8 @@
   "layout.sidebar.manageHotels": "Gestionar hoteles",
   "layout.sidebar.collapse": "Contraer",
   "dashboard.title": "Motor de reservas",
+  "dashboard.setupIncomplete": "La configuración de su alojamiento no está completa. Su progreso está guardado.",
+  "dashboard.resumeSetup": "Continuar la configuración",
   "dashboard.timeRange.today": "Hoy",
   "dashboard.timeRange.week": "Esta semana",
   "dashboard.timeRange.month": "Últimos 30 días",

@@ -139,6 +139,8 @@
   "layout.sidebar.manageHotels": "Kelola Hotel",
   "layout.sidebar.collapse": "Perkecil",
   "dashboard.title": "Mesin Pemesanan",
+  "dashboard.setupIncomplete": "Penyiapan properti Anda belum selesai. Progres Anda sudah tersimpan.",
+  "dashboard.resumeSetup": "Lanjutkan penyiapan",
   "dashboard.timeRange.today": "Hari ini",
   "dashboard.timeRange.week": "Minggu ini",
   "dashboard.timeRange.month": "30 hari terakhir",

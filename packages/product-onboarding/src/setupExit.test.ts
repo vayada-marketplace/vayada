@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { isPmsSetupExitPath, pmsSetupExitPath, pmsSetupExitPropertyId } from "./setupExit";
+import {
+  isPmsSetupExitPath,
+  pmsSetupExitPath,
+  pmsSetupExitPropertyId,
+  setupExitTarget,
+} from "./setupExit";
 
 describe("PMS setup exit routing", () => {
   it("lands a selected property on the dashboard", () => {
@@ -41,5 +46,57 @@ describe("PMS setup exit routing", () => {
         "https://attacker.example/dashboard?setup=incomplete&propertyId=property-1",
       ),
     ).toBeNull();
+  });
+});
+
+describe("setup exit target (VAY-2249)", () => {
+  const exit = (query: string, extra: Partial<Parameters<typeof setupExitTarget>[0]> = {}) =>
+    setupExitTarget({ query, propertyId: "property-1", defaultProduct: "marketplace", ...extra });
+
+  it("returns Booking Engine setup to Booking Admin's dashboard", () => {
+    expect(exit("entryProduct=booking&returnProduct=booking&returnTo=%2Fdashboard")).toEqual({
+      surface: "booking-admin",
+      path: "/dashboard?setup=incomplete&propertyId=property-1",
+    });
+  });
+
+  it("returns PMS setup to the PMS dashboard and keeps calendar recovery", () => {
+    expect(exit("entryProduct=pms&returnProduct=pms")).toEqual({
+      surface: "pms-web",
+      path: "/dashboard?setup=incomplete&propertyId=property-1",
+    });
+    expect(
+      exit("entryProduct=pms&returnProduct=pms&recovery=pms-calendar&returnTo=%2Fsettings%23calendar"),
+    ).toEqual({ surface: "pms-web", path: "/settings#calendar" });
+  });
+
+  it("keeps Marketplace hotels in the Marketplace, on a safe return path", () => {
+    expect(exit("entryProduct=marketplace&returnProduct=marketplace&returnTo=%2Fprofile")).toEqual({
+      surface: "marketplace-web",
+      path: "/profile",
+    });
+    expect(
+      exit("entryProduct=marketplace&returnProduct=marketplace&returnTo=https%3A%2F%2Fevil.example"),
+    ).toEqual({ surface: "marketplace-web", path: "/marketplace" });
+    expect(exit("", { selectedTracks: ["creator_marketplace"] })).toEqual({
+      surface: "marketplace-web",
+      path: "/marketplace",
+    });
+  });
+
+  it("sends a Marketplace entry without the Marketplace track to PMS", () => {
+    expect(exit("entryProduct=marketplace", { selectedTracks: ["hotel_operations"] })).toEqual({
+      surface: "pms-web",
+      path: "/dashboard?setup=incomplete&propertyId=property-1",
+    });
+    expect(exit("", { selectedTracks: [], propertyId: null })).toEqual({
+      surface: "pms-web",
+      path: "/choose-property?setup=incomplete",
+    });
+  });
+
+  it("prefers the product the hotel will return to over the entry product", () => {
+    expect(exit("entryProduct=marketplace&returnProduct=booking").surface).toBe("booking-admin");
+    expect(exit("entryProduct=booking").surface).toBe("booking-admin");
   });
 });

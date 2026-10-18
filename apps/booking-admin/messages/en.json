@@ -138,6 +138,8 @@
   "layout.sidebar.manageHotels": "Manage Hotels",
   "layout.sidebar.collapse": "Collapse",
   "dashboard.title": "Booking Engine",
+  "dashboard.setupIncomplete": "Your property setup isn't complete. Your progress is saved.",
+  "dashboard.resumeSetup": "Resume setup",
   "dashboard.timeRange.today": "Today",
   "dashboard.timeRange.week": "This week",
   "dashboard.timeRange.month": "Last 30 days",
