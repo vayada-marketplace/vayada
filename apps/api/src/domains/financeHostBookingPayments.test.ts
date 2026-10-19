@@ -151,6 +151,12 @@ describe("Finance host-request rejection", () => {
     expect(f.provider.retrievePaymentIntent).not.toHaveBeenCalled();
     expect(f.provider.cancelPaymentIntent).not.toHaveBeenCalled();
     expect(f.query.mock.calls.some(([sql]) => sql.includes("UPDATE finance.payments"))).toBe(false);
+    // A card deposit, the rest due at the property, is refunded the same way.
+    const deposit = fixture();
+    Object.assign(deposit.payment, { status: "paid", bookingPaid: "partially_paid" });
+    await expect(
+      deposit.run(deposit.client, { ...deposit.input, action: "cancel", apply: false }),
+    ).resolves.toBe("card_refund");
     // Without Stripe, or for a payment that isn't the stay's active one, it still needs adjusting.
     const offline = createFinanceHostBookingPayments();
     await expect(
@@ -161,7 +167,7 @@ describe("Finance host-request rejection", () => {
       { activePaymentId: "other" },
       { chargeType: "destination" },
       { pricingCard: false },
-      { bookingPaid: "partially_paid" },
+      { bookingPaid: "unpaid" },
       { bookingCurrency: "USD" },
     ]) {
       const g = fixture();

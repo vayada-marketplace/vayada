@@ -34,15 +34,22 @@ const methods: Record<PricingPaymentMethod, { title: string; note: string; icon:
   paypal: { title: "PayPal", note: "Send the amount to us by PayPal.", icon: cardIcon },
 };
 
-/** What happens with the chosen way to pay, in the old info box (VAY-2195). */
+/** What happens with the chosen way to pay, in the old info box (VAY-2195). `split` is a card
+ * quote's part now and the rest paid at the hotel: a deposit's remainder or the hotel's own fees
+ * (VAY-2205). */
 function explanation(
   method: PricingPaymentMethod,
   quote: PublicBookingQuote | undefined,
   total: string,
+  split?: { now: string; later: string },
 ) {
   const request = quote?.acceptanceMode === "request";
   if (isManualPricingPaymentMethod(method))
     return "We hold your room until the payment deadline and confirm your booking when your payment arrives.";
+  if (method === "card" && split)
+    return request
+      ? `We authorise ${split.now} on your card now and charge it only if we accept your request. You pay the rest, ${split.later}, at the hotel. We answer within 24 hours.`
+      : `We charge ${split.now} to your card when you confirm. You pay the rest, ${split.later}, at the hotel. Your booking is confirmed straight away.`;
   if (method === "card")
     return request
       ? `We authorise ${total} on your card now and charge it only if we accept your request. We answer within 24 hours.`
@@ -66,6 +73,7 @@ export default function PaymentStep({
   onMethod,
   quote,
   total,
+  split,
   notice,
   acknowledgements,
   cancellation,
@@ -84,6 +92,8 @@ export default function PaymentStep({
   quote: PublicBookingQuote | undefined;
   /** The quote's total as the guest reads it, or "" while it loads. */
   total: string;
+  /** A card quote's part now and the rest at the hotel, as the guest reads them (VAY-2205). */
+  split?: { now: string; later: string };
   notice: ReactNode;
   acknowledgements: ReactNode;
   cancellation: string[];
@@ -179,7 +189,7 @@ export default function PaymentStep({
         {tooSoon && <p className="mb-4 text-sm text-gray-600">{tooSoon}</p>}
         {method && total && (
           <div className="p-4 bg-primary-50 border border-primary-100 rounded-xl text-sm text-primary-700">
-            {explanation(method, quote, total)}
+            {explanation(method, quote, total, split)}
           </div>
         )}
         {method === "card" && (

@@ -57,7 +57,8 @@ export function hostBookingActionConflict(
     action === "cancel" &&
     booking.cardRefunds === true &&
     booking.pricingQuoteBooking === true &&
-    booking.paymentStatus === "paid" &&
+    // A card deposit leaves the rest to pay at the property (VAY-2205).
+    (booking.paymentStatus === "paid" || booking.paymentStatus === "partially_paid") &&
     booking.paymentMethod === "card";
   if (
     !voidableRequest &&

@@ -326,12 +326,38 @@ describe("replacement pricing HTTP boundary", () => {
         },
       },
       { draftId, baseRevision: 0 },
+      false,
     );
     f.commands.reviewCharges.mockResolvedValue(null);
     expect((await f.inject(8)).statusCode).toBe(404);
     f.commands.reviewCharges.mockRejectedValue(new PricingStorageError("stale"));
     expect((await f.inject(8)).statusCode).toBe(409);
   });
+  it("asks whether deposits are ready only for a deposit, and passes the answer on (VAY-2205)", async () => {
+    const read = vi.fn().mockResolvedValue({
+      card: { ready: true, reason: null, charge: "at_booking" },
+      deposits: { ready: true },
+    });
+    const f = await fixture(context, undefined, { read }),
+      valid = endpoints[7][2];
+    expect((await f.inject(7)).statusCode).toBe(200);
+    expect(read).not.toHaveBeenCalled();
+    const deposit = {
+      kind: "deposit",
+      basisPoints: 3000,
+      balanceDaysBeforeArrival: 0,
+      acceptedMethods: ["card"],
+    };
+    expect((await f.inject(7, { ...valid, payment: deposit })).statusCode).toBe(200);
+    expect(read).toHaveBeenCalledWith({ organizationId: id, propertyId: id });
+    expect(f.commands.stageTerms).toHaveBeenLastCalledWith(
+      id,
+      expect.objectContaining({ terms: expect.objectContaining({ payment: deposit }) }),
+      { draftId, baseRevision: 0 },
+      true,
+    );
+  });
+
   it("no longer offers a price-source choice (VAY-2079)", async () => {
     const f = await fixture(),
       base = `/api/pms/properties/${id}/pricing-v2/authority`;
@@ -408,6 +434,7 @@ describe("replacement pricing HTTP boundary", () => {
       ["deposit_card_only", 400],
       ["deposit_rest_at_property", 400],
       ["deposit_below_full_stay", 400],
+      ["deposits_unavailable", 400],
     ] as const) {
       f.commands.publish.mockRejectedValue(new PricingStorageError(code));
       const response = await f.inject(5);

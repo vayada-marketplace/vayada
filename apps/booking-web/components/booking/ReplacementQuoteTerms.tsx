@@ -144,7 +144,11 @@ export default function ReplacementQuoteTerms({
             </div>
           )}
           <h4 className="font-medium">Payment</h4>
-          <p>Payment terms: full payment.</p>
+          <p>
+            {room.payment.kind === "deposit"
+              ? `Payment terms: ${room.payment.basisPoints / 100}% when booking, the rest at the property.`
+              : "Payment terms: full payment."}
+          </p>
           <p>
             Accepted methods:{" "}
             {room.payment.acceptedMethods?.map((method) => methodNames[method]).join(", ")}.

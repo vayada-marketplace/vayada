@@ -28,7 +28,9 @@ export class PricingStorageError extends Error {
       /** A non-refundable stay is paid in advance, so its terms can't accept pay at property (VAY-2280). */
       | "non_refundable_pay_at_property"
       /** A changed payment breaks the "Paid when booking" write rules (VAY-2205). */
-      | PricingPaymentWriteProblem,
+      | PricingPaymentWriteProblem
+      /** A new deposit while this hotel can't take deposits yet (card off or deposits switched off). */
+      | "deposits_unavailable",
     /** Owner readiness reason the caller may act on (Finance readiness on prepare). */
     readonly reason?: string,
   ) {

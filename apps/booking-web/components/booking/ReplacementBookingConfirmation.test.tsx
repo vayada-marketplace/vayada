@@ -237,9 +237,11 @@ it("keeps an uncertain attempt retryable", async () => {
   ]);
 });
 
+// A card always takes something now, and the parts add up to the total; a deposit's rest is
+// paid at the property (VAY-2205).
 it.each([
-  { paymentMethod: "card", dueNowMinor: "5000", dueLaterMinor: "15000" },
-  { acceptanceMode: "request", paymentMethod: "card", dueNowMinor: "5000", dueLaterMinor: "15000" },
+  { paymentMethod: "card", dueNowMinor: "0", dueLaterMinor: "20000" },
+  { acceptanceMode: "request", paymentMethod: "card", dueNowMinor: "5000", dueLaterMinor: "5000" },
 ] as const)("does not offer unsupported request or payment modes (%o)", (change) => {
   act(() =>
     root.render(

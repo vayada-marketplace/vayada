@@ -42,6 +42,7 @@ const paymentRuleKeys = {
   deposit_card_only: "pricing.error.depositCardOnly",
   deposit_rest_at_property: "pricing.error.depositRestAtProperty",
   deposit_below_full_stay: "pricing.error.depositBelowFullStay",
+  deposits_unavailable: "pricing.error.depositsUnavailable",
 } as const satisfies Record<string, MessageKey>;
 export const paymentRuleKey = (cause: unknown): MessageKey | null => {
   const code =

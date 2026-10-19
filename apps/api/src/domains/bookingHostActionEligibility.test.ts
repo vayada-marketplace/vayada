@@ -81,10 +81,14 @@ describe("host Booking action eligibility", () => {
       cardRefunds: true,
     };
     expect(hostBookingActionConflict("cancel", paid)).toBeNull();
+    // A card deposit, the rest due at the property, refunds the same way.
+    expect(
+      hostBookingActionConflict("cancel", { ...paid, paymentStatus: "partially_paid" }),
+    ).toBeNull();
     for (const changed of [
       { cardRefunds: false },
       { pricingQuoteBooking: false },
-      { paymentStatus: "partially_paid" },
+      { paymentStatus: "authorized" },
       { paymentMethod: "bank_transfer" },
     ])
       expect(hostBookingActionConflict("cancel", { ...paid, ...changed })?.code).toBe(

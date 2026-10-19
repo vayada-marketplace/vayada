@@ -136,7 +136,7 @@ describe.skipIf(!url)("Booking replacement offer terms PostgreSQL owner", () => 
     expect((await pool.query("SELECT count(*)::int AS count FROM booking.pricing_v2_offer_terms WHERE property_id=$1", [f.scope.propertyId])).rows[0].count).toBe(1);
   });
   it("holds a hotel's changed payment to the Paid when booking rules, while other edits of older terms still save (VAY-2205)", async () => {
-    const f = await fixture(), rules = { paymentRules: true }, draft = () => ({ draftId: randomUUID(), baseRevision: 0 });
+    const f = await fixture(), rules = { paymentRules: true, depositsReady: true }, draft = () => ({ draftId: randomUUID(), baseRevision: 0 });
     const stage = (terms: unknown, expectedRevision: string | null = null) =>
       store.stage(f.context, f.scope, { requestId: randomUUID(), expectedRevision, terms }, draft(), rules);
     const card = { kind: "deposit", basisPoints: 3000, balanceDaysBeforeArrival: 0, acceptedMethods: ["card"] };
@@ -149,6 +149,9 @@ describe.skipIf(!url)("Booking replacement offer terms PostgreSQL owner", () => 
       [{ ...card, basisPoints: 10000 }, "deposit_below_full_stay"],
     ] as const) await expect(stage({ ...f.terms, offerId: "new", payment })).rejects.toMatchObject({ code });
     expect((await pool.query("SELECT count(*)::int AS count FROM booking.pricing_v2_offer_terms WHERE property_id=$1", [f.scope.propertyId])).rows[0].count).toBe(0);
+    // A deposit also needs the hotel's card ready and deposits switched on.
+    await expect(store.stage(f.context, f.scope, { requestId: randomUUID(), expectedRevision: null,
+      terms: { ...f.terms, offerId: "new", payment: card } }, draft(), { paymentRules: true })).rejects.toMatchObject({ code: "deposits_unavailable" });
     expect(await stage({ ...f.terms, offerId: "new", payment: card })).toMatchObject({ payment: card });
     expect(await stage({ ...f.terms, offerId: "new", payment: { kind: "full", acceptedMethods: ["pay_at_property", "card"] } }))
       .toMatchObject({ payment: { acceptedMethods: ["pay_at_property", "card"] } });

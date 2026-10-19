@@ -935,22 +935,28 @@ describe.skipIf(!url)("trusted replacement pricing commands", () => {
         { ...context, draftId: randomUUID() },
       ),
     ).rejects.toMatchObject({ code: "denied" });
-    const deposit = await f.commands.stageTerms(
-      id,
-      {
-        requestId: randomUUID(),
-        expectedRevision: f.baseline.rooms[0]!.offers[0]!.termsRevision,
-        terms: {
-          ...f.policy,
-          payment: {
-            kind: "deposit",
-            basisPoints: 3000,
-            balanceDaysBeforeArrival: 0,
-            acceptedMethods: ["card"],
-          },
+    const depositTerms = {
+      requestId: randomUUID(),
+      expectedRevision: f.baseline.rooms[0]!.offers[0]!.termsRevision,
+      terms: {
+        ...f.policy,
+        payment: {
+          kind: "deposit" as const,
+          basisPoints: 3000,
+          balanceDaysBeforeArrival: 0,
+          acceptedMethods: ["card" as const],
         },
       },
+    };
+    // VAY-2205: a new deposit needs the hotel's card ready and deposits switched on.
+    await expect(f.commands.stageTerms(id, depositTerms, context)).rejects.toMatchObject({
+      code: "deposits_unavailable",
+    });
+    const deposit = await f.commands.stageTerms(
+      id,
+      { ...depositTerms, requestId: randomUUID() },
       context,
+      true,
     );
     const rooms = f.prepared.snapshot.rooms.map((r) => ({
       ...r,
@@ -960,9 +966,9 @@ describe.skipIf(!url)("trusted replacement pricing commands", () => {
           : o,
       ),
     }));
-    await expect(f.commands.prepare(id, { currency: "EUR", rooms }, context)).rejects.toMatchObject(
-      { code: "denied" },
-    );
+    // A card deposit's readiness doesn't hang on card: without it the rate just can't take card,
+    // and the hotel's other rates keep selling.
+    await expect(f.commands.prepare(id, { currency: "EUR", rooms }, context)).resolves.toBeTruthy();
     await f.commands.saveDraft(id, f.draft);
     const review = (await f.commands.reviewCharges(id, f.draft.draftId))!;
     await pool.query(
