@@ -306,11 +306,7 @@ describe("protected Booking guest-policy routes", () => {
   it.each([
     ["missing authentication", {}, null],
     ["invalid authentication", {}, "Bearer invalid-token"],
-    [
-      "wrong organization",
-      { organizationKind: "creator_workspace" as const },
-      "Bearer valid-token",
-    ],
+    ["wrong organization", { organizationKind: "platform" as const }, "Bearer valid-token"],
     ["missing permission", { permissions: [] }, "Bearer valid-token"],
     ["inactive membership", { membershipStatus: "inactive" as const }, "Bearer valid-token"],
     [

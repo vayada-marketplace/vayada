@@ -30,7 +30,7 @@ type State = {
   roomTypeCurrency?: string | null;
 };
 type Auth = Partial<Record<"token" | "permission" | "entitlement" | "link", boolean>> & {
-  organizationKind?: "hotel_group" | "creator_workspace";
+  organizationKind?: "hotel_group" | "platform";
   relationship?: string;
   entitlementResourceId?: string;
   linkResourceId?: string;
@@ -51,7 +51,7 @@ describe("target manual-booking preview", () => {
     ["entitlement_required", { entitlementResourceId: id(99) }],
     ["forbidden", { linkResourceId: id(99) }],
     ["forbidden", { relationship: "viewer" }],
-    ["forbidden", { organizationKind: "creator_workspace" }],
+    ["forbidden", { organizationKind: "platform" }],
   ] as const)("denies %s before query validation or reads", async (code, auth) => {
     const state: State = { reads: [] };
     app = await testApp(state, auth);

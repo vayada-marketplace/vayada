@@ -146,7 +146,7 @@ describe.skipIf(!url)("Public pricing access and booking pricing owners PostgreS
     for (const slug of [null, {}, "", " ", "x".repeat(201), randomUUID()])
       expect(await f.readPublic(slug)).toBeNull();
     await pool.query(
-      "INSERT INTO hotel_catalog.property_slugs(property_id,slug,purpose) VALUES($1,$2,'marketplace_overlay')",
+      "INSERT INTO hotel_catalog.property_slugs(property_id,slug,purpose) VALUES($1,$2,'redirect')",
       [f.scope.propertyId, "alias-" + f.scope.propertyId],
     );
     expect(await f.readPublic("alias-" + f.scope.propertyId)).toBeNull();

@@ -27,7 +27,7 @@ const actorUserId = "85858585-8585-4585-8585-858585858504";
 const otherPropertyId = "85858585-8585-4585-8585-858585858505";
 const foreignPropertyId = "85858585-8585-4585-8585-858585858506";
 type AuthOptions = {
-  kind?: "hotel_group" | "creator_workspace";
+  kind?: "hotel_group" | "platform";
   permissions?: readonly PermissionKey[];
   entitlements?: readonly ProductEntitlement[];
   links?: readonly LinkedResource[];
@@ -49,7 +49,7 @@ type FakeRepository = BookingPublicationCommandPort &
 const authorizationDenials: Array<[string, string | null, AuthOptions]> = [
   ["missing authentication", null, {}],
   ["invalid authentication", "invalid", {}],
-  ["wrong organization", "valid-token", { kind: "creator_workspace" }],
+  ["wrong organization", "valid-token", { kind: "platform" }],
   ["inactive membership", "valid-token", { membershipStatus: "inactive" }],
   ["suspended membership", "valid-token", { membershipStatus: "suspended" }],
   ["missing permission", "valid-token", { permissions: [] }],
@@ -261,7 +261,7 @@ describe("Booking publication routes", () => {
     [
       "organization",
       "valid-token",
-      { kind: "creator_workspace" },
+      { kind: "platform" },
       {
         statusCode: 403,
         error: "Forbidden",
