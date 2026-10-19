@@ -16,7 +16,6 @@ on relevant pushes to `main`.
 
 | Runtime             | Workflow                                          |
 | ------------------- | ------------------------------------------------- |
-| Marketplace API     | `.github/workflows/deploy-marketplace-api.yml`    |
 | Booking API         | `.github/workflows/deploy-booking-api.yml`        |
 | PMS API             | `.github/workflows/deploy-pms-api.yml`            |
 | Next TypeScript API | `.github/workflows/deploy-next-api.yml`           |

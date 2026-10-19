@@ -219,15 +219,20 @@ export function HostBookingActions({
                 {preview.impact.newTotalAmount} {preview.impact.currency}
               </p>
               <p>
-                {t(
-                  preview.impact.payment === "authorization_void"
-                    ? "hostActions.voidImpact"
-                    : action === "edit_dates"
-                      ? "hostActions.editImpact"
-                      : preview.impact.cancellationOutcome
-                        ? "hostActions.guestRequestImpact"
-                        : "hostActions.cancelImpact",
-                )}
+                {preview.impact.cardRefund
+                  ? t("hostActions.cardRefundImpact", {
+                      paid: money(preview.impact.cardRefund.paidMinor, preview.impact.currency),
+                      refund: money(preview.impact.cardRefund.refundMinor, preview.impact.currency),
+                    })
+                  : t(
+                      preview.impact.payment === "authorization_void"
+                        ? "hostActions.voidImpact"
+                        : action === "edit_dates"
+                          ? "hostActions.editImpact"
+                          : preview.impact.cancellationOutcome
+                            ? "hostActions.guestRequestImpact"
+                            : "hostActions.cancelImpact",
+                    )}
               </p>
               {preview.impact.cancellationOutcome && (
                 <p className="font-medium">

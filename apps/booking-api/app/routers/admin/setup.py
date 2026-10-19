@@ -1,8 +1,9 @@
-"""Onboarding setup-status endpoint + marketplace pre-fill.
+"""Onboarding setup-status endpoint.
 
 Pulled out of the property-settings router so the setup wizard's
 read-only check sits next to its data sources, not next to property
-CRUD."""
+CRUD. The old Marketplace pre-fill is gone with the retired Marketplace
+database (VAY-2259); ``prefill_data`` stays in the response as ``None``."""
 
 import logging
 
@@ -11,7 +12,6 @@ from fastapi import APIRouter, Depends
 from app.dependencies import get_current_hotel, require_hotel_admin
 from app.models.setup import SetupStatusResponse
 from app.repositories.booking_hotel_repo import BookingHotelRepository
-from app.services.marketplace_service import get_setup_prefill
 
 logger = logging.getLogger(__name__)
 
@@ -37,23 +37,14 @@ async def get_setup_status(
     hotel: dict | None = Depends(get_current_hotel),
 ):
     if not hotel:
-        prefill = await get_setup_prefill(user_id)
-        return SetupStatusResponse(
-            setup_complete=False, missing_fields=_ALL_SETUP_FIELDS, prefill_data=prefill
-        )
+        return SetupStatusResponse(setup_complete=False, missing_fields=_ALL_SETUP_FIELDS)
 
     hotel_data = await BookingHotelRepository.get_by_id(str(hotel["id"]), columns=_SETUP_COLUMNS)
     if not hotel_data:
-        prefill = await get_setup_prefill(user_id)
-        return SetupStatusResponse(
-            setup_complete=False, missing_fields=_ALL_SETUP_FIELDS, prefill_data=prefill
-        )
+        return SetupStatusResponse(setup_complete=False, missing_fields=_ALL_SETUP_FIELDS)
 
     missing = [
         api_name for db_col, api_name in _SETUP_FIELD_MAP.items() if not hotel_data.get(db_col)
     ]
-    prefill = await get_setup_prefill(user_id) if missing else None
 
-    return SetupStatusResponse(
-        setup_complete=len(missing) == 0, missing_fields=missing, prefill_data=prefill
-    )
+    return SetupStatusResponse(setup_complete=len(missing) == 0, missing_fields=missing)

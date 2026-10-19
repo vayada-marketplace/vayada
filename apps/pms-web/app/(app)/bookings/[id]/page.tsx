@@ -5,6 +5,7 @@ import { NoShowReporting } from "@/components/bookings/NoShowReporting";
 import { useState, useEffect, useCallback, use, useMemo, useRef } from "react";
 import Link from "next/link";
 import { HostBookingActions } from "@/components/bookings/HostBookingActions";
+import { CardRefundPanel } from "@/components/bookings/CardRefundPanel";
 import {
   ArrowLeftIcon,
   CheckCircleIcon,
@@ -1454,8 +1455,30 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
     }
   };
 
+  // VAY-2205: a card deposit was paid when booking; the rest is paid at the hotel, often on arrival
+  // or departure, so the stay may show as checked in or out.
+  const cardRestDue =
+    booking?.paymentMethod === "card" &&
+    booking.paymentStatus === "partially_paid" &&
+    ["confirmed", "checked_in", "in_house", "checked_out"].includes(booking.status);
+
   const handleMarkPaid = () => {
     if (booking?.amountStatus === "unverified") return;
+    // The hotel records the rest it took. The card's payment window is long past and doesn't
+    // apply to the rest.
+    if (booking && cardRestDue) {
+      setConfirmDialog({
+        message: t("bookings.detail.confirmRestPaid", {
+          amount: formatCurrency(booking.balanceAmount, booking.currency, 2),
+        }),
+        confirmLabel: t("bookings.detail.markAsPaid"),
+        onConfirm: () => {
+          setConfirmDialog(null);
+          doAction(() => bookingsService.markPaid(id), t("bookings.detail.failedToMarkPaid"));
+        },
+      });
+      return;
+    }
     if (paymentDeadlineExpired) return;
     const methodLabel =
       booking?.paymentMethod === "bank_transfer"
@@ -2393,6 +2416,13 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                 )}
               </div>
             </div>
+            <CardRefundPanel
+              booking={booking}
+              messageGuestHref={
+                canMessageGuest ? `/inbox?booking=${encodeURIComponent(booking.id)}` : null
+              }
+              onRetried={async () => setBooking(await bookingsService.get(id))}
+            />
             {booking.paymentBreakdown && (
               <div className="mt-4 rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm">
                 <div className="flex justify-between gap-4 py-1">
@@ -2537,6 +2567,26 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                   </button>
                 </div>
               )}
+            {/* VAY-2205: a card deposit leaves the rest to pay at the hotel. */}
+            {cardRestDue && (
+              <div className="mt-4 space-y-2">
+                <p className="text-xs text-gray-600">
+                  {t("bookings.detail.restDueAtHotel", {
+                    amount: formatCurrency(booking.balanceAmount, booking.currency, 2),
+                  })}
+                </p>
+                <button
+                  onClick={handleMarkPaid}
+                  disabled={updating || booking.amountStatus === "unverified"}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+                >
+                  <CheckCircleIcon className="h-4 w-4" />
+                  {t("bookings.detail.markRestPaid", {
+                    amount: formatCurrency(booking.balanceAmount, booking.currency, 2),
+                  })}
+                </button>
+              </div>
+            )}
           </div>
         </div>
 

@@ -801,7 +801,22 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
       );
 
       expect(tableRows.map((row) => row.table_name)).toEqual([
+        "active_booking_addon_selections",
         "addon_definitions",
+        "addon_revenue_evidence",
+        "affiliate_click_admissions",
+        "affiliate_click_contexts",
+        "affiliate_destination_versions",
+        "affiliate_original_booking_bindings",
+        "affiliate_referral_production_preflight_revocations",
+        "affiliate_referral_production_preflights",
+        "affiliate_referral_transport_certifications",
+        "affiliate_source_capability_certifications",
+        "affiliate_source_capability_preflight_revocations",
+        "affiliate_source_capability_production_preflights",
+        "affiliate_validation_booking_bindings",
+        "affiliate_validation_probe_revocations",
+        "affiliate_validation_probes",
         "booking_addon_selection_items",
         "booking_addon_selections",
         "booking_change_requests",
@@ -816,17 +831,34 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
         "current_working_design_revisions",
         "current_working_guest_policy_revisions",
         "direct_booking_summary_read_model",
+        "edit_authorization_releases",
         "finance_addon_purchase_evidence",
+        "finance_addon_revenue_evidence",
         "finance_booking_attribution",
         "finance_nightly_revenue_evidence",
+        "fixed_charge_heads",
+        "fixed_charge_revisions",
         "guest_bookings",
+        "guest_choice_heads",
+        "guest_choice_revisions",
         "guest_policy_projection_receipts",
         "guest_policy_revisions",
+        "host_action_previews",
         "nightly_revenue_evidence",
         "nightly_revenue_room_scopes",
+        "pending_booking_edit_attempts",
+        "pricing_acceptance_amendments",
+        "pricing_quote_acceptances",
+        "pricing_quotes",
+        "pricing_runtime_effective_property_scopes",
+        "pricing_v2_offer_term_candidates",
+        "pricing_v2_offer_term_heads",
+        "pricing_v2_offer_terms",
         "promo_applications",
         "promo_definitions",
         "quote_sessions",
+        "room_last_minute_heads",
+        "room_last_minute_revisions",
         "same_day_booking_policies",
       ]);
 
@@ -906,6 +938,7 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
       );
 
       expect(pmsTableRows.map((row) => row.table_name)).toEqual([
+        "active_inventory_reservation_receipts",
         "booking_checkin_records",
         "booking_checkout_charges",
         "booking_checkout_records",
@@ -915,15 +948,32 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
         "channel_booking_mappings",
         "channel_booking_revision_tombstones",
         "channel_connections",
+        "channel_date_prices",
+        "channel_operational_alert_occurrences",
+        "channel_operational_alerts",
         "channel_rate_plan_mappings",
         "channel_reviews",
         "channel_room_type_mappings",
         "channel_sync_status",
+        "channex_ari_schedule_sources",
+        "channex_external_rate_owners",
+        "channex_offer_ari_attempts",
+        "channex_offer_ari_receipts",
+        "channex_offer_create_attempts",
+        "channex_offer_create_receipts",
+        "channex_offer_target_intents",
+        "channex_offer_target_versions",
+        "channex_offer_targets",
+        "channex_room_availability_attempts",
+        "channex_room_availability_receipts",
+        "channex_room_availability_reconciliation_attestations",
+        "channex_staging_catalog_references",
         "checkin_checklist_templates",
         "checkout_inspection_templates",
         "effective_calendar_auto_open_settings",
         "effective_room_assignment_optimization_settings",
         "flexible_rate_plan_cancellation_extensions",
+        "guest_review_submissions",
         "inbox_email_routes",
         "inventory_coverage_validation_queue",
         "inventory_days",
@@ -931,6 +981,7 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
         "inventory_reservation_day_watermarks",
         "inventory_reservation_receipts",
         "inventory_reservation_statuses",
+        "inventory_reservation_successors",
         "linked_inventory_groups",
         "mandatory_charge_confirmation_revisions",
         "message_assistance_results",
@@ -946,6 +997,14 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
         "operating_calendar_revisions",
         "operating_calendar_room_bindings",
         "operational_booking_assignments",
+        "pending_booking_edit_receipts",
+        "pending_booking_edit_support",
+        "pricing_v2_charge_declarations",
+        "pricing_v2_drafts",
+        "pricing_v2_heads",
+        "pricing_v2_revisions",
+        "pricing_v2_rooms",
+        "property_navigation_modules",
         "property_pricing_settings",
         "rate_plans",
         "rate_rules",
@@ -954,8 +1013,10 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
         "recurring_pricing_materialized_rows",
         "recurring_pricing_source_room_values",
         "recurring_pricing_sources",
+        "review_reply_submissions",
         "room_assignment_optimization_settings",
         "room_blocks",
+        "room_type_closures",
         "room_type_media",
         "room_types",
         "rooms",
@@ -1282,11 +1343,22 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
       );
 
       expect(financeTableRows.map((row) => row.table_name)).toEqual([
+        "affiliate_earning_allocation_items",
+        "affiliate_earning_allocations",
+        "affiliate_earning_journal",
+        "affiliate_earning_reconciliation_revisions",
+        "affiliate_eligible_earning_revisions",
         "affiliate_payout_payment_evidence",
         "affiliate_payout_payment_evidence_items",
+        "affiliate_percentage_policy_approvals",
+        "affiliate_percentage_policy_versions",
+        "airbnb_current_provider_amounts",
+        "airbnb_current_provider_nights",
+        "airbnb_provider_snapshots",
         "bank_transfer_bookings",
         "bank_transfer_destinations",
         "billing_entitlements",
+        "card_refund_commands",
         "commission_rate_changes",
         "commission_rules",
         "expense_categories",
@@ -1306,6 +1378,7 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
         "payments",
         "payout_settings",
         "payouts",
+        "pricing_v2_fx_observations",
         "provider_fee_evidence",
         "provider_fee_reporting_evidence",
         "recurring_expense_rules",
@@ -1617,7 +1690,21 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
          ORDER BY tc.constraint_name`,
       );
 
-      expect(financeForeignKeySchemas).toHaveLength(0);
+      // Affiliate earning tables pointing at Marketplace rows; they go with the affiliate drop.
+      expect(financeForeignKeySchemas).toEqual([
+        {
+          constraint_name: "affiliate_earning_reconciliat_creator_profile_id_beneficia_fkey",
+          referenced_schema: "marketplace",
+        },
+        {
+          constraint_name: "affiliate_eligible_earning_re_creator_profile_id_beneficia_fkey",
+          referenced_schema: "marketplace",
+        },
+        {
+          constraint_name: "affiliate_eligible_earning_revisions_agreement_id_fkey",
+          referenced_schema: "marketplace",
+        },
+      ]);
 
       const { rows: financePermissionKeys } = await verifyClient.query<{ key: string }>(
         `SELECT key
@@ -1793,9 +1880,26 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
 
       expect(marketplaceTableRows.map((row) => row.table_name)).toEqual([
         "active_hotel_submission_revisions",
+        "affiliate_agreement_activations",
+        "affiliate_agreement_lifecycle_events",
+        "affiliate_agreements",
+        "affiliate_assent_decisions",
+        "affiliate_click_occurrences",
+        "affiliate_click_quota_windows",
+        "affiliate_discrepancy_claims",
+        "affiliate_discrepancy_resolutions",
         "affiliate_lifecycle_changes",
+        "affiliate_links",
+        "affiliate_offer_terms_drafts",
+        "affiliate_participation_attempts",
+        "affiliate_participations",
+        "affiliate_programs",
+        "affiliate_published_terms",
         "collaboration_deliverables",
         "collaborations",
+        "communication_channel_preferences",
+        "communication_preference_sets",
+        "communication_topic_preferences",
         "creator_matching_preferences",
         "creator_platform_authorizations",
         "creator_platform_connections",
@@ -2249,7 +2353,13 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
          ORDER BY tc.constraint_name`,
       );
 
-      expect(marketplaceForeignKeySchemas).toHaveLength(0);
+      // An affiliate claim that points at a booking; it goes with the affiliate drop.
+      expect(marketplaceForeignKeySchemas).toEqual([
+        {
+          constraint_name: "affiliate_discrepancy_claims_booking_id_property_id_fkey",
+          referenced_schema: "booking",
+        },
+      ]);
 
       const { rows: marketplaceReadModelSensitiveColumns } = await verifyClient.query<{
         column_name: string;
@@ -3384,16 +3494,32 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
       );
 
       expect(platformTableRows.map((row) => row.table_name)).toEqual([
+        "channex_adoption_approval_records",
+        "channex_adoption_approval_revocations",
+        "channex_adoption_manifest_consumptions",
+        "channex_adoption_rollback_approval_records",
+        "channex_adoption_rollback_approval_revocations",
+        "channex_adoption_rollbacks",
+        "channex_management_worker_operations",
+        "channex_management_worker_properties",
         "dead_letter_events",
         "domain_events",
         "external_webhook_events",
+        "finance_expense_worker_properties",
+        "finance_export_worker_properties",
         "idempotency_keys",
+        "identity_migration_provenance",
         "job_attempts",
         "jobs",
+        "legacy_historical_binding_transitions",
+        "legacy_owner_approval_records",
+        "legacy_owner_approval_revocations",
+        "legacy_owner_bootstrap_receipts",
         "media_objects",
         "media_upload_sessions",
         "media_variants",
         "outbox_events",
+        "pricing_runtime_property_scopes",
         "product_audit_events",
         "production_booking_migration_inferences",
         "production_booking_migration_quarantines",
@@ -4014,7 +4140,22 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
          ORDER BY tc.constraint_name`,
       );
 
-      expect(platformForeignKeySchemas).toHaveLength(0);
+      // Channex adoption and legacy binding evidence point at PMS channel binding claims
+      // (0181, 0186, 0432); these stay.
+      expect(platformForeignKeySchemas).toEqual([
+        {
+          constraint_name: "channex_adoption_manifest_consumptions_claim_id_fkey",
+          referenced_schema: "pms",
+        },
+        {
+          constraint_name: "channex_adoption_rollbacks_claim_id_fkey",
+          referenced_schema: "pms",
+        },
+        {
+          constraint_name: "legacy_historical_binding_transitions_claim_id_fkey",
+          referenced_schema: "pms",
+        },
+      ]);
 
       const { rows: platformAiDefaults } = await verifyClient.query<{
         table_name: string;

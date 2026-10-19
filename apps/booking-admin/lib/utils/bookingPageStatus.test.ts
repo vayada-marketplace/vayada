@@ -13,7 +13,7 @@ const GROUPS = [
   "booking.payments",
 ];
 
-type Blocked = Record<string, { kind: string; step: string; message: string }>;
+type Blocked = Record<string, { kind: string; step: string; message: string; code?: string }>;
 
 function review({
   status = "ready",
@@ -57,6 +57,7 @@ function review({
                         ? [
                             {
                               kind: blocker.kind,
+                              code: blocker.code ?? "test_blocker",
                               owningStepId: blocker.step,
                               message: blocker.message,
                             },
@@ -103,6 +104,29 @@ describe("bookingPageStatus", () => {
       ],
     });
   });
+
+  it.each(["hotel_public_locality_hidden", "hotel_public_locality_missing"])(
+    "sends %s to the location form (VAY-2288)",
+    (code) => {
+      const status = bookingPageStatus(
+        review({
+          status: "blocked",
+          blocked: {
+            "booking.hotel_profile": {
+              kind: "user_fixable",
+              step: "present_hotel",
+              message: "Turn on 'Show city and country publicly' so guests see where you are.",
+              code,
+            },
+          },
+        }),
+      );
+      expect(status).toMatchObject({
+        kind: "not_ready",
+        items: [{ groupId: "booking.hotel_profile", step: "present_hotel", focus: "location" }],
+      });
+    },
+  );
 
   it("is hidden, not online, when a published page has no guest URL", () => {
     expect(bookingPageStatus(review({ published: true, hidden: true }))).toEqual({

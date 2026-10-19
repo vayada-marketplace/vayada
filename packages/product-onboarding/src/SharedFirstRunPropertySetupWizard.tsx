@@ -105,6 +105,10 @@ export type SharedFirstRunPropertySetupWizardProps = {
   renderSetupActions?: (propertyId: string) => ReactNode;
   /** The tracks a new hotel can choose from; every setup track by default. */
   availableTracks?: readonly SetupTrack[];
+  /** Opens the selected hotel's details on this field, e.g. from a Booking readiness item. */
+  editFocus?: "location";
+  /** Called after a save that `editFocus` opened, instead of returning to the setup plan. */
+  onEditFocusSaved?: (propertyId: string) => void;
 };
 
 type ProfileDraft = {
@@ -148,7 +152,6 @@ export function canConfirmLocation(
 ): boolean {
   return Boolean(
     location.streetAddress.trim() &&
-    location.postalCode.trim() &&
     location.city.trim() &&
     COUNTRY_OPTIONS.some((country) => country.code === location.countryCode) &&
     isValidIanaTimezone(location.timezone.trim()),
@@ -273,12 +276,16 @@ export default function SharedFirstRunPropertySetupWizard({
   initialProfileSuggestions,
   propertyCreateIdempotencyKey,
   availableTracks = ALL_SETUP_TRACKS,
+  editFocus,
+  onEditFocusSaved,
 }: SharedFirstRunPropertySetupWizardProps) {
   const [status, setStatus] = useState<AdaptiveHotelSetupStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [statusReloadToken, setStatusReloadToken] = useState(0);
   const [forceCreateProperty, setForceCreateProperty] = useState(initialAddProperty);
   const [editPropertyProfile, setEditPropertyProfile] = useState(false);
+  // A "Fix in setup" link opens the location form directly and saves from there (VAY-2288).
+  const [pendingEditFocus, setPendingEditFocus] = useState(editFocus ?? null);
   const [profileLoadFailed, setProfileLoadFailed] = useState(false);
   const [profileReloadToken, setProfileReloadToken] = useState(0);
   const [loadedProfile, setLoadedProfile] = useState<PropertyProfileResponse | null>(null);
@@ -326,12 +333,14 @@ export default function SharedFirstRunPropertySetupWizard({
 
   useEffect(() => {
     setForceCreateProperty(initialAddProperty);
-    setEditPropertyProfile(false);
-  }, [initialAddProperty]);
+    setEditPropertyProfile(!initialAddProperty && Boolean(editFocus));
+    setPendingEditFocus(initialAddProperty ? null : (editFocus ?? null));
+  }, [editFocus, initialAddProperty]);
 
+  const focusedEdit = view.profileMode === "update" && pendingEditFocus === "location";
   useEffect(() => {
-    setProfileStep(0);
-  }, [view.profileMode, view.selectedPropertyId]);
+    setProfileStep(focusedEdit ? 1 : 0);
+  }, [focusedEdit, view.profileMode, view.selectedPropertyId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -451,6 +460,7 @@ export default function SharedFirstRunPropertySetupWizard({
     setError("");
     setForceCreateProperty(false);
     setEditPropertyProfile(false);
+    setPendingEditFocus(null);
     setLoading(true);
     try {
       await reloadStatus(propertyId);
@@ -467,7 +477,8 @@ export default function SharedFirstRunPropertySetupWizard({
     setError("");
     setFieldErrors({});
     const nextFieldErrors = validateProfileDraft(draft);
-    if (launchSettingsEnabled && !skipLaunchSettings) {
+    // A focused location edit never shows the guest preferences, so it leaves them as saved.
+    if (launchSettingsEnabled && !skipLaunchSettings && !focusedEdit) {
       Object.assign(nextFieldErrors, validatePropertyLaunchSettings(launchSettings));
     }
     if (Object.keys(nextFieldErrors).length > 0) {
@@ -565,16 +576,24 @@ export default function SharedFirstRunPropertySetupWizard({
         view.profileMode === "update" &&
         launchSettingsEnabled &&
         propertyLaunchSettingsApi &&
-        !skipLaunchSettings
+        !skipLaunchSettings &&
+        !focusedEdit
       ) {
         await propertyLaunchSettingsApi.update(
           saved.propertyId,
           normalizedPropertyLaunchSettings(launchSettings),
         );
       }
+      if (focusedEdit && onEditFocusSaved) {
+        logoUploadKey.current = null;
+        logoAssignmentKey.current = null;
+        onEditFocusSaved(saved.propertyId);
+        return;
+      }
       await reloadStatus(saved.propertyId);
       setForceCreateProperty(false);
       setEditPropertyProfile(false);
+      setPendingEditFocus(null);
       if (view.profileMode === "create") {
         await onPropertySelected?.(saved.propertyId);
       }
@@ -688,7 +707,10 @@ export default function SharedFirstRunPropertySetupWizard({
     return (
       <>
         {renderSetupActions?.(view.selectedPropertyId)}
-        {renderAfterHotelDetails(view.selectedPropertyId, () => setEditPropertyProfile(true))}
+        {renderAfterHotelDetails(view.selectedPropertyId, () => {
+          setPendingEditFocus(null);
+          setEditPropertyProfile(true);
+        })}
       </>
     );
   }
@@ -776,9 +798,14 @@ export default function SharedFirstRunPropertySetupWizard({
           onConfirmLaunchSettings={() => setSkipLaunchSettings(false)}
           onSkipLaunchSettings={() => setSkipLaunchSettings(true)}
           onStepChange={setProfileStep}
+          saveStep={focusedEdit ? 1 : undefined}
+          highlightLocality={focusedEdit}
           onCancel={
             editPropertyProfile
-              ? () => setEditPropertyProfile(false)
+              ? () => {
+                  setPendingEditFocus(null);
+                  setEditPropertyProfile(false);
+                }
               : status.propertySelection.availableProperties.length > 0 &&
                   view.profileMode === "create"
                 ? () => setForceCreateProperty(false)
@@ -1131,6 +1158,8 @@ function ProfileForm({
   onCancel,
   cancelLabel = "Back to properties",
   onSave,
+  saveStep,
+  highlightLocality = false,
 }: {
   draft: ProfileDraft;
   launchSettings: PropertyLaunchSettings | null;
@@ -1154,6 +1183,10 @@ function ProfileForm({
   onCancel?: () => void;
   cancelLabel?: string;
   onSave: () => void;
+  /** Saves from this step instead of the last one (a focused edit). */
+  saveStep?: number;
+  /** Points the hotel at "Show city and country publicly" while it is off. */
+  highlightLocality?: boolean;
 }) {
   const profileStepFields = launchSettings
     ? PROFILE_STEP_FIELDS_WITH_LAUNCH
@@ -1162,7 +1195,12 @@ function ProfileForm({
     ? PROFILE_STEP_TITLES_WITH_LAUNCH
     : BASE_PROFILE_STEP_TITLES;
   const contactStep = launchSettings ? 3 : 2;
-  const finalStep = profileStepFields.length - 1;
+  // A focused edit saves from its step, and from any later step a field error sends it to.
+  const savesHere =
+    saveStep === undefined ? step === profileStepFields.length - 1 : step >= saveStep;
+  // A focused edit doesn't save guest preferences, so Back doesn't offer them.
+  const previousStep =
+    saveStep !== undefined && launchSettings && step === contactStep ? saveStep : step - 1;
   const googleMapsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY?.trim();
   const LocationHeading = embedded ? "h2" : "h1";
   const [showAddressFields, setShowAddressFields] = useState(
@@ -1204,6 +1242,18 @@ function ProfileForm({
   const stepHeading = useRef<HTMLHeadingElement>(null);
   const timezoneWasAutoDetected = useRef(false);
   const [whatsappFollowsPhone, setWhatsappFollowsPhone] = useState<boolean | null>(null);
+  const localityCheckbox = useRef<HTMLInputElement>(null);
+  const localityHighlighted = highlightLocality && step === 1 && !draft.localityPublic;
+  const localityShown = useRef(false);
+
+  useEffect(() => {
+    if (!localityHighlighted || loading || localityShown.current) return;
+    localityShown.current = true;
+    requestAnimationFrame(() => {
+      localityCheckbox.current?.scrollIntoView({ block: "center" });
+      localityCheckbox.current?.focus({ preventScroll: true });
+    });
+  }, [loading, localityHighlighted]);
 
   useEffect(() => {
     const errorStep = profileStepFields.findIndex((fields) =>
@@ -1440,7 +1490,7 @@ function ProfileForm({
         <button
           type="button"
           disabled={saving}
-          onClick={() => (step > 0 ? changeStep(step - 1) : onCancel?.())}
+          onClick={() => (step > 0 ? changeStep(previousStep) : onCancel?.())}
           className={`w-full rounded-full border border-gray-200 bg-white px-5 py-3 text-sm font-medium text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto ${
             step === 1 ? "sm:min-w-32" : ""
           }`}
@@ -1450,23 +1500,19 @@ function ProfileForm({
       )}
       <button
         type="submit"
-        disabled={step === finalStep && saving}
+        disabled={savesHere && saving}
         className={`inline-flex w-full items-center justify-center gap-2 rounded-full bg-primary-600 px-6 py-3 text-sm font-semibold text-white transition hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto ${
           step === 1 ? "sm:min-w-32" : ""
         }`}
       >
-        {step === finalStep && saving && (
+        {savesHere && saving && (
           <span
             className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white"
             aria-hidden="true"
           />
         )}
-        <span>
-          {step === finalStep ? (saving ? "Saving..." : "Save and continue") : "Continue"}
-        </span>
-        {!(step === finalStep && saving) && (
-          <ArrowRightIcon className="h-4 w-4" aria-hidden="true" />
-        )}
+        <span>{savesHere ? (saving ? "Saving..." : "Save and continue") : "Continue"}</span>
+        {!(savesHere && saving) && <ArrowRightIcon className="h-4 w-4" aria-hidden="true" />}
       </button>
     </div>
   );
@@ -1477,7 +1523,7 @@ function ProfileForm({
       aria-busy={saving}
       onSubmit={(event) => {
         event.preventDefault();
-        if (step === finalStep) onSave();
+        if (savesHere) onSave();
         else continueToNextStep();
       }}
       className={`mx-auto ${step === 1 ? "max-w-none" : "max-w-7xl space-y-8"}`}
@@ -1943,10 +1989,9 @@ function ProfileForm({
                         onChange={(value) => setField("streetAddress", value)}
                       />
                       <TextField
-                        label="Postal code"
+                        label="Postal code (optional)"
                         value={draft.postalCode}
                         placeholder="80331"
-                        required
                         error={fieldErrors["location.postalCode"]?.[0]}
                         onChange={(value) => setField("postalCode", value)}
                       />
@@ -2052,8 +2097,15 @@ function ProfileForm({
                     </div>
                   </div>
                 )}
-                <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-xl border border-gray-200 bg-gray-50 p-3 text-left">
+                <label
+                  className={`mt-4 flex cursor-pointer items-start gap-3 rounded-xl border p-3 text-left ${
+                    localityHighlighted
+                      ? "border-amber-300 bg-amber-50 ring-2 ring-amber-300"
+                      : "border-gray-200 bg-gray-50"
+                  }`}
+                >
                   <input
+                    ref={localityCheckbox}
                     type="checkbox"
                     checked={draft.localityPublic}
                     onChange={(event) =>
@@ -2067,9 +2119,14 @@ function ProfileForm({
                     </span>
                     <span className="mt-1 block text-xs leading-5 text-gray-600">
                       {mode === "update"
-                        ? "Existing location visibility is preserved. If you edit the location, street address, postal code, and map coordinates stay private."
-                        : "Street address, postal code, and map coordinates stay private."}
+                        ? "Guests see your city and country on your booking page. Street address and postal code stay private, and changing the address turns off your guest map."
+                        : "Guests see your city and country on your booking page. Street address, postal code, and map pin stay private."}
                     </span>
+                    {localityHighlighted && (
+                      <span className="mt-1 block text-xs font-medium leading-5 text-amber-800">
+                        Your booking page needs this before it can go live.
+                      </span>
+                    )}
                   </span>
                 </label>
               </div>
@@ -2354,9 +2411,6 @@ export function validateProfileDraft(draft: ProfileDraft): Record<string, string
   }
   if (!draft.streetAddress.trim()) {
     errors["location.streetAddress"] = ["Street address is required."];
-  }
-  if (!draft.postalCode.trim()) {
-    errors["location.postalCode"] = ["Postal code is required."];
   }
   if (!draft.city.trim()) {
     errors["location.city"] = ["City is required."];
@@ -2911,9 +2965,12 @@ export function profileUpdateFromDraft(
     ),
   ) as NonNullable<PropertyProfilePatch["location"]>;
   if (Object.keys(locationPatch).length > 0) {
-    // Consent for an existing location does not publish newly entered location details.
-    if (profile.location.geoPublic) locationPatch.geoPublic = false;
-    if (profile.location.mapDisplayMode !== "hidden") locationPatch.mapDisplayMode = "hidden";
+    // Consent for an existing location does not publish newly entered location details. The city
+    // and country box alone changes no address, so a public guest map stays on (VAY-2288).
+    if (Object.keys(locationPatch).some((key) => key !== "localityPublic")) {
+      if (profile.location.geoPublic) locationPatch.geoPublic = false;
+      if (profile.location.mapDisplayMode !== "hidden") locationPatch.mapDisplayMode = "hidden";
+    }
     patch.location = locationPatch;
   }
 
@@ -2941,7 +2998,9 @@ function newPropertyDraft(timezone = ""): ProfileDraft {
     contactEmail: "",
     phone: "",
     whatsapp: "",
-    localityPublic: false,
+    // A booking page needs a public city and country; street, postal code and pin stay private
+    // (VAY-2288). Existing hotels keep the choice they saved.
+    localityPublic: true,
     logoFile: null,
     logoMediaObjectId: null,
     logoPublicUrl: "",

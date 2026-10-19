@@ -2,6 +2,7 @@ import {
   parsePricingConfiguration,
   pricingCurrencyScale,
   type PricingConfiguration,
+  type PricingOfferSale,
 } from "@vayada/domain-pms/replacement-pricing";
 import type { PricingPaymentMethod } from "@vayada/domain-booking/replacement-pricing";
 import { decimalAmount, PricingError } from "./pricingAmounts";
@@ -15,6 +16,7 @@ import {
   weekendChoice,
   type OptionTerms,
 } from "./stepPricing";
+import { seasonRules } from "./nightActions";
 
 /** The simple Prices card (VAY-2188): a lens over the same pricing-v2 room and terms. It reads the main option, its
  * cancellation and the two options its switches stand for; everything else is listed under More options, unchanged.
@@ -96,20 +98,21 @@ export function simpleRoom(room: Room, terms: Terms): SimpleRoom | null {
     mainTerms = terms[main.id]!,
     cancellation = simpleCancellation(mainTerms.cancellation);
   // A switch stands for an option based on the main option with nothing of its own: no date prices, the main
-  // option's stay rules and payment, and no options based on it (switching it off deletes it).
-  const plainLinked = (offer: Offer) =>
+  // option's stay rules (and payment, apart from the non-refundable rate, which has its own: VAY-2282), and no options
+  // based on it (switching it off deletes it).
+  const plainLinked = (offer: Offer, samePayment = true) =>
     offer.id !== main.id &&
     offer.price.kind === "linked" &&
     offer.price.parentId === main.id &&
     offer.price.dateOverrides.length === 0 &&
     offer.restrictions.kind === "inherit" &&
     !deleteBlocker(room, offer.id) &&
-    same(terms[offer.id]!.payment, mainTerms.payment);
+    (!samePayment || same(terms[offer.id]!.payment, mainTerms.payment));
   const nonRefundable =
     cancellation.kind === "free"
       ? (room.offers.find(
           (offer) =>
-            plainLinked(offer) &&
+            plainLinked(offer, false) &&
             offer.meal.kind === "room_only" &&
             offer.price.kind === "linked" &&
             offer.price.adjustment.kind === "percentage" &&
@@ -149,7 +152,9 @@ export function switchOption(
   room: Room,
   offerId: string,
   kind: "non_refundable" | "breakfast",
-  value: { percent: string } | { amount: string; basis: "room" | "person" },
+  value:
+    | { percent: string; methods?: readonly PricingPaymentMethod[] }
+    | { amount: string; basis: "room" | "person" },
   mainTerms: OptionTerms,
 ) {
   return presetOption(
@@ -160,7 +165,10 @@ export function switchOption(
       discount: "percent" in value ? value.percent : defaultDiscount,
       mealAmount: "amount" in value ? value.amount : "",
       mealBasis: "basis" in value ? value.basis : "room",
-      methods: [...(mainTerms.payment.acceptedMethods ?? [])],
+      // presetOption leaves pay at property out of a non-refundable option (VAY-2280).
+      methods: [
+        ...(("methods" in value && value.methods) || mainTerms.payment.acceptedMethods || []),
+      ],
     },
     mainTerms,
   );
@@ -171,6 +179,22 @@ export function setDiscount(room: Room, offerId: string, percent: string): Room 
   if (!/^\d+(?:\.\d{1,2})?$/.test(value) || Number(value) <= 0 || Number(value) >= 100)
     throw new PricingError("pricing.steps.preset.errorDiscount");
   return changeLinkedAdjustment(room, offerId, { kind: "percentage", value: `-${value}` });
+}
+/** Where an option is sold (VAY-2285): without `sale` on the booking page and channels (the key is left out, never
+ * written as a default), "channels_only" off the booking page, "not_sold" nowhere. The option and its terms stay, so
+ * options linked to it keep their price. Every room keeps one option on the booking page. */
+export function setOfferSale(room: Room, offerId: string, sale: PricingOfferSale | null): Room {
+  const next = parsePricingConfiguration({
+    ...room,
+    offers: room.offers.map((offer) => {
+      if (offer.id !== offerId) return offer;
+      const next: Record<string, unknown> = { ...offer };
+      delete next.sale;
+      return sale ? { ...next, sale } : next;
+    }),
+  });
+  if (!next) throw new PricingError("pricing.rates.keepOne");
+  return next;
 }
 /** The breakfast option's price per room or per adult; children's breakfast stays as it is. */
 export function setBreakfastAmount(room: Room, offerId: string, amount: string): Room {
@@ -188,6 +212,22 @@ export function setBreakfastAmount(room: Room, offerId: string, amount: string):
       : []),
   ]);
 }
+/** What guests read about an option's meal (VAY-2281): one line of plain text, trimmed, up to 200 characters; empty
+ * leaves the key out. Not priced. */
+export function setMealDescription(room: Room, offerId: string, text: string): Room {
+  const value = text.trim();
+  const next = parsePricingConfiguration({
+    ...room,
+    offers: room.offers.map((offer) => {
+      if (offer.id !== offerId) return offer;
+      const meal: Record<string, unknown> = { ...offer.meal };
+      delete meal.description;
+      return { ...offer, meal: value ? { ...meal, description: value } : meal };
+    }),
+  });
+  if (!next) throw new PricingError("pricing.mealText.invalid");
+  return next;
+}
 
 /** New terms for the options the card's cancellation covers: the main option and the breakfast option that follows
  * it. The non-refundable option keeps its own. */
@@ -202,14 +242,17 @@ export function cancellationEdits(
     terms: { ...terms[offer.id]!, cancellation },
   }));
 }
-/** New terms for every option the card covers (main and both switches), accepting `methods`. */
-export function paymentEdits(
+/** New terms for one rate's options (VAY-2282), accepting `methods`: the Flexible rate is the main option and the
+ * breakfast switch that follows it; the Non-refundable rate is its own option. */
+export function rateMethodEdits(
   simple: SimpleRoom,
   terms: Terms,
+  rate: "flexible" | "non_refundable",
   methods: readonly PricingPaymentMethod[],
 ): { offerId: string; terms: OptionTerms }[] {
   if (!methods.length) throw new PricingError("pricing.error.paymentMethodRequired");
-  return [simple.main, simple.nonRefundable, simple.breakfast]
+  const offers = rate === "flexible" ? [simple.main, simple.breakfast] : [simple.nonRefundable];
+  return offers
     .filter((offer): offer is Offer => !!offer)
     .map((offer) => {
       const current = terms[offer.id]!;
@@ -219,7 +262,6 @@ export function paymentEdits(
       };
     });
 }
-
 type Calendar = Extract<Offer["price"], { kind: "independent" }>["calendar"];
 type Price = NonNullable<Calendar["base"]>;
 /** Rewrites the main option's normal, monthly and season prices (one mode, as the engine requires) with `next`.
@@ -281,7 +323,10 @@ export function onePriceAgain(room: Room): Room | null {
 }
 
 /** Whether the room has settings the card's top doesn't show (other options, prices by guests, own cancellation or
- * weekday rules, month or date prices, date or season stay rules): the card then says they are kept. */
+ * weekday rules, month prices, stay rules for periods that are no season): the card then says they are kept.
+ * Single-date prices and a date's closing, arrival rule and minimum stay show in "Prices by date" and its night panel,
+ * closed periods in "When guests can book" and a season's minimum stay in its row (VAY-2280), so they don't count.
+ * A date's own "no departures" or maximum stay (unlike its season's) shows nowhere on the calendar, so it does. */
 export function hasKeptSettings(room: Room, simple: SimpleRoom): boolean {
   const { main } = simple;
   const calendar = main.price.kind === "independent" ? main.price.calendar : null;
@@ -291,11 +336,22 @@ export function hasKeptSettings(room: Room, simple: SimpleRoom): boolean {
     simple.cancellation.kind === "own" ||
     (calendar?.base != null && calendar.base.mode !== "flat") ||
     (calendar?.months.length ?? 0) > 0 ||
-    (calendar?.dates.length ?? 0) > 0 ||
     otherWeekdays(main).length > 0 ||
     weekendChoice(main) === "other" ||
     !restrictions ||
-    restrictions.dates.length > 0 ||
-    restrictions.seasons.length > 0
+    restrictions.dates.some(({ date, rules }) => {
+      const base = seasonRules(main, date);
+      return (
+        rules.closedToDeparture !== base.closedToDeparture ||
+        rules.maxStayNights !== base.maxStayNights
+      );
+    }) ||
+    restrictions.seasons.some(
+      (rule) =>
+        !rule.rules.stopSell &&
+        !(calendar?.seasons ?? []).some(
+          (season) => season.from === rule.from && season.through === rule.through,
+        ),
+    )
   );
 }

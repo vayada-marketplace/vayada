@@ -14,6 +14,9 @@ export type StripeBookingPaymentIntent = {
   providerAccountRef: string | null;
   cardBrand?: string | null;
   cardLast4?: string | null;
+  /** From the expanded latest charge (retrieve/capture), for reconciliation (VAY-2205). */
+  amountRefundedMinor?: number | null;
+  disputed?: boolean;
   feeBreakdown?: {
     balanceTransactionId: string;
     chargeId: string;
@@ -23,6 +26,19 @@ export type StripeBookingPaymentIntent = {
     applicationFeeAmountMinor: number;
     netPayoutAmountMinor: number;
   } | null;
+};
+
+/** A refund of a booking's card payment on the hotel's connected account (VAY-2205). */
+export type StripeBookingRefund = {
+  refundId: string;
+  /** pending, requires_action, succeeded, failed or canceled. */
+  status: string;
+  amountMinor: number;
+  currency: string;
+  paymentIntentId: string;
+  /** The refund command that asked for it, from its metadata. */
+  commandId: string | null;
+  failureReason: string | null;
 };
 
 export type StripeBookingPaymentProvider = {
@@ -50,7 +66,23 @@ export type StripeBookingPaymentProvider = {
     providerAccountRef: string | null,
     idempotencyKey: string,
   ): Promise<StripeBookingPaymentIntent>;
+  /** Refunds part or all of a captured payment and Vayada's fee in proportion. Marked
+   * `vayada_source=pricing_v2`, so the legacy Connect webhook leaves it alone. */
+  createRefund(input: {
+    paymentIntentId: string;
+    providerAccountRef: string;
+    amountMinor: number;
+    commandId: string;
+    propertyId: string;
+    bookingReference: string;
+    idempotencyKey: string;
+  }): Promise<StripeBookingRefund>;
+  /** Every refund of a payment, newest first: a retry looks here before it asks again. */
+  listRefunds(paymentIntentId: string, providerAccountRef: string): Promise<StripeBookingRefund[]>;
+  retrieveRefund(refundId: string, providerAccountRef: string): Promise<StripeBookingRefund>;
 };
+
+const REFUND_TIMEOUT_MS = 30_000;
 
 export function createStripeBookingPaymentProvider(config: {
   secretKey: string;
@@ -66,6 +98,8 @@ export function createStripeBookingPaymentProvider(config: {
     fields: ReadonlyArray<readonly [string, string]> = [],
     idempotencyKey?: string,
     providerAccountRef?: string | null,
+    /** Refund calls hold a refund row lock while they wait (VAY-2205): give up after this long. */
+    timeoutMs?: number,
   ): Promise<StripeObject> => {
     const form = new URLSearchParams(fields.map(([key, value]): [string, string] => [key, value]));
     const response = await fetchImpl(
@@ -79,12 +113,17 @@ export function createStripeBookingPaymentProvider(config: {
           ...(providerAccountRef ? { "Stripe-Account": providerAccountRef } : {}),
         },
         ...(method === "POST" ? { body: form.toString() } : {}),
+        ...(timeoutMs ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
       },
     );
     const payload = object(await response.json());
     if (!response.ok) {
-      throw new Error(
-        text(object(payload["error"])["message"]) ?? `Stripe failed (${response.status}).`,
+      // The status tells a definite refusal (4xx) from an answer that may have been lost.
+      throw Object.assign(
+        new Error(
+          text(object(payload["error"])["message"]) ?? `Stripe failed (${response.status}).`,
+        ),
+        { statusCode: response.status },
       );
     }
     return payload;
@@ -148,6 +187,67 @@ export function createStripeBookingPaymentProvider(config: {
           providerAccountRef,
         ),
         providerAccountRef,
+      );
+    },
+
+    async createRefund(input) {
+      if (!Number.isSafeInteger(input.amountMinor) || input.amountMinor <= 0)
+        throw new Error("A Stripe refund needs a positive amount.");
+      const created = refund(
+        await request(
+          "POST",
+          "/refunds",
+          [
+            ["payment_intent", input.paymentIntentId],
+            ["amount", String(input.amountMinor)],
+            ["refund_application_fee", "true"],
+            ["reason", "requested_by_customer"],
+            ["metadata[vayada_source]", "pricing_v2"],
+            ["metadata[vayada_refund_command_id]", input.commandId],
+            ["metadata[vayada_property_id]", input.propertyId],
+            ["metadata[vayada_booking_reference]", input.bookingReference],
+          ],
+          input.idempotencyKey,
+          input.providerAccountRef,
+          REFUND_TIMEOUT_MS,
+        ),
+      );
+      if (
+        created.paymentIntentId !== input.paymentIntentId ||
+        created.commandId !== input.commandId ||
+        created.amountMinor !== input.amountMinor
+      )
+        throw new Error("Stripe replayed a refund for a different command.");
+      return created;
+    },
+
+    async listRefunds(paymentIntentId, providerAccountRef) {
+      const list = await request(
+        "GET",
+        "/refunds",
+        [
+          ["payment_intent", paymentIntentId],
+          ["limit", "100"],
+        ],
+        undefined,
+        providerAccountRef,
+        REFUND_TIMEOUT_MS,
+      );
+      if (!Array.isArray(list["data"]) || list["has_more"] === true)
+        throw new Error("Stripe returned an incomplete refund list.");
+      return list["data"].map((value) => refund(object(value)));
+    },
+
+    async retrieveRefund(refundId, providerAccountRef) {
+      return refund(
+        await request(
+          "GET",
+          `/refunds/${encodeURIComponent(refundId)}`,
+          [],
+          undefined,
+          providerAccountRef,
+          REFUND_TIMEOUT_MS,
+        ),
       );
     },
 
@@ -218,6 +318,8 @@ function paymentIntent(
       requestProviderAccountRef ?? text(object(value["transfer_data"])["destination"]),
     cardBrand: text(card["brand"]),
     cardLast4: /^\d{4}$/.test(text(card["last4"]) ?? "") ? text(card["last4"]) : null,
+    amountRefundedMinor: chargeId ? integer(charge["amount_refunded"]) : null,
+    disputed: charge["disputed"] === true,
     feeBreakdown:
       balanceTransactionId &&
       chargeId &&
@@ -236,6 +338,32 @@ function paymentIntent(
             netPayoutAmountMinor: balanceNet,
           }
         : null,
+  };
+}
+
+function refund(value: StripeObject): StripeBookingRefund {
+  const refundId = text(value["id"]);
+  const status = text(value["status"]);
+  const amountMinor = Number(value["amount"]);
+  const currency = text(value["currency"]);
+  const paymentIntentId = text(value["payment_intent"]);
+  if (
+    !refundId ||
+    !status ||
+    !Number.isSafeInteger(amountMinor) ||
+    amountMinor <= 0 ||
+    !currency ||
+    !paymentIntentId
+  )
+    throw new Error("Stripe returned an invalid refund.");
+  return {
+    refundId,
+    status,
+    amountMinor,
+    currency: currency.toUpperCase(),
+    paymentIntentId,
+    commandId: text(object(value["metadata"])["vayada_refund_command_id"]),
+    failureReason: text(value["failure_reason"]),
   };
 }
 

@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useEffect, useState } from "react";
 import type { ManualPaymentMethod } from "@vayada/product-onboarding/AcceptedPaymentMethods";
+import type { PricingCardReadiness } from "@vayada/product-onboarding/replacementPricingClient";
 
 const ManualMethods = createContext<readonly ManualPaymentMethod[]>([]);
 
@@ -29,4 +30,32 @@ export function useLoadedPricingManualMethods(client: {
     };
   }, [client]);
   return methods;
+}
+
+const CardReadiness = createContext<PricingCardReadiness | null>(null);
+
+/** Whether the booking page can take card now, and when it charges (VAY-2205), loaded once per pricing editor. Null
+ * until it is read or when it can't be: the rate pickers then don't offer card. */
+export const PricingCardReadinessProvider = CardReadiness.Provider;
+export const usePricingCardReadiness = () => useContext(CardReadiness);
+
+export function useLoadedPricingCardReadiness(client: {
+  cardReadiness(): Promise<PricingCardReadiness>;
+}): PricingCardReadiness | null {
+  const [readiness, setReadiness] = useState<PricingCardReadiness | null>(null);
+  useEffect(() => {
+    let current = true;
+    client.cardReadiness().then(
+      (value) => {
+        if (current) setReadiness(value);
+      },
+      () => {
+        if (current) setReadiness(null);
+      },
+    );
+    return () => {
+      current = false;
+    };
+  }, [client]);
+  return readiness;
 }

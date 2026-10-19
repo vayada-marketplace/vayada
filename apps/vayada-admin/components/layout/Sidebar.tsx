@@ -3,12 +3,13 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { HotelIcon } from "@vayada/product-onboarding/HotelIcon";
 import { authService } from "@/services/auth";
 
 const navItems = [
   { label: "Dashboard", href: "/dashboard/kpis", icon: DashboardIcon },
   { label: "Users", href: "/dashboard", icon: UsersIcon },
-  { label: "Hotels", href: "/dashboard/hotels", icon: HotelsIcon },
+  { label: "Hotels", href: "/dashboard/hotels", icon: HotelIcon },
   { label: "Bookings", href: "/dashboard/bookings", icon: BookingsIcon },
   { label: "Invite Codes", href: "/dashboard/invite-codes", icon: InviteCodesIcon },
   { label: "Settings", href: "/dashboard/settings", icon: SettingsIcon },
@@ -124,27 +125,6 @@ function UsersIcon({ className }: { className?: string }) {
       <circle cx="9" cy="7" r="4" />
       <path d="M23 21v-2a4 4 0 00-3-3.87" />
       <path d="M16 3.13a4 4 0 010 7.75" />
-    </svg>
-  );
-}
-
-function HotelsIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M3 21h18" />
-      <path d="M5 21V7l8-4v18" />
-      <path d="M19 21V11l-6-4" />
-      <path d="M9 9h1" />
-      <path d="M9 13h1" />
-      <path d="M9 17h1" />
     </svg>
   );
 }

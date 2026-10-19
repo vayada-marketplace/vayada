@@ -111,3 +111,44 @@ test("a fee that changed since the preview is shown in the dialog before cancell
   await expect(page.getByText("Your booking has been cancelled.")).toBeVisible();
   expect(sent.map((body) => body.expectedCancellationFeeMinor)).toEqual(["20000", "40000"]);
 });
+
+// VAY-2205: a paid card stay's preview says what goes back to the card.
+for (const [refund, fee, message] of [
+  [400, 0, /You will receive a full refund of .*400/],
+  [200, 200, /You will receive a partial refund of .*200.*\(50%\)/],
+] as const) {
+  test(`paid card cancellation preview refunding ${refund}`, async ({ page }) => {
+    await mockBookingApis(page);
+    await page.route("**/api/booking-web/hotels/*/bookings/lookup", (route) =>
+      route.fulfill({
+        json: { ...booking, paymentStatus: "paid", paymentMethod: "card", balanceAmount: 0 },
+      }),
+    );
+    await page.route("**/api/booking-web/hotels/*/bookings/*/cancel-preview", (route) =>
+      route.fulfill({
+        json: {
+          ...preview,
+          amountPaid: 400,
+          refundAmount: refund,
+          refundPercentage: (refund / 400) * 100,
+          cancellationFeeAmount: fee,
+          bookedTermsOutcome: { retainedMinor: String(fee * 100) },
+        },
+      }),
+    );
+    const cancelled: unknown[] = [];
+    await page.route("**/api/booking-web/hotels/*/bookings/*/cancel", (route) => {
+      cancelled.push(route.request().postDataJSON());
+      return route.fulfill({ json: { status: "cancelled" } });
+    });
+    await page.goto("/en/my-booking?reference=VAY-2100&email=ada%40example.test");
+    await page.getByRole("button", { name: "Cancel Booking" }).click();
+    const dialog = page.getByText("Cancel This Booking?").locator("..");
+    await expect(dialog.locator("p.text-gray-700")).toHaveText(message);
+    await page.getByRole("button", { name: "Yes, Cancel" }).click();
+    await expect(page.getByText("Your booking has been cancelled.")).toBeVisible();
+    expect(cancelled).toEqual([
+      expect.objectContaining({ expectedCancellationFeeMinor: String(fee * 100) }),
+    ]);
+  });
+}

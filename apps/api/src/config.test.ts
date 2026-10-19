@@ -522,6 +522,7 @@ describe("api config", () => {
         AUTH_FIRST_PARTY_SURFACES: "booking-admin,pms-web,booking-admin",
         AUTH_COOKIE_SECURE: "true",
         AUTH_COOKIE_DOMAIN: "localhost",
+        // VAY-2259: still set in production until the platform mapping goes; now ignored.
         AUTH_LEGACY_MARKETPLACE_JWT_SECRET: "legacy-secret",
       }).authSession,
     ).toEqual({
@@ -545,7 +546,6 @@ describe("api config", () => {
       authFirstPartySurfaces: ["booking-admin", "pms-web"],
       authCookieSecure: true,
       authCookieDomain: "localhost",
-      authLegacyMarketplaceJwtSecret: "legacy-secret",
     });
   });
 
@@ -754,6 +754,14 @@ describe("api config", () => {
     expect(
       loadConfig({ REPLACEMENT_PRICING_CARD_ACCEPTANCE_ENABLED: "true" })
         .replacementPricingCardAcceptanceEnabled,
+    ).toBe(true);
+  });
+
+  it("keeps deposit quote acceptance off unless explicitly enabled (VAY-2205)", () => {
+    expect(loadConfig({}).replacementPricingDepositAcceptanceEnabled).toBe(false);
+    expect(
+      loadConfig({ REPLACEMENT_PRICING_DEPOSIT_ACCEPTANCE_ENABLED: "true" })
+        .replacementPricingDepositAcceptanceEnabled,
     ).toBe(true);
   });
 

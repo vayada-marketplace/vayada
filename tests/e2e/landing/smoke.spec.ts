@@ -42,8 +42,8 @@ test.describe("landing smoke", () => {
     await assertHealthy();
   });
 
-  // VAY-2286: the privacy text ships with a "[go-live date]" placeholder that is replaced when it
-  // merges; this fails until a real date is set, so the placeholder can't go live.
+  // VAY-2286: the effective date must be a real date; a "[go-live date]" placeholder waiting for
+  // the release day must never go live.
   test("/privacy shows a real effective date", async ({ page }) => {
     await page.goto("/privacy");
 

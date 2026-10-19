@@ -5,7 +5,6 @@
 # Usage:
 #   ./scripts/run_migration.sh pms
 #   ./scripts/run_migration.sh booking
-#   ./scripts/run_migration.sh marketplace
 #   ./scripts/run_migration.sh auth
 #
 # Prerequisites:
@@ -47,7 +46,7 @@ read_ssm() {
 # ---------------------------------------------------------------------------
 if [[ $# -lt 1 ]]; then
     echo "Usage: $0 <service>"
-    echo "  service: pms | booking | marketplace | auth"
+    echo "  service: pms | booking | auth"
     exit 1
 fi
 
@@ -70,21 +69,13 @@ case "$SERVICE" in
         MIGRATION_SCRIPT="apps/booking-api/scripts/run_migrations.py"
         SERVICE_DIR="apps/booking-api"
         ;;
-    marketplace)
-        # Note: /vayada/prod/db-marketplace-url is the admin URL pointing at
-        # the postgres database. Build the marketplace URL explicitly using
-        # the master password.
-        SSM_URL_KEY=""
-        MIGRATION_SCRIPT="apps/marketplace-api/scripts/run_migrations.py"
-        SERVICE_DIR="apps/marketplace-api"
-        ;;
     auth)
         SSM_URL_KEY="${SSM_PREFIX}/db-auth-url-ssl"
         MIGRATION_SCRIPT="auth-db/scripts/run_migrations.py"
         SERVICE_DIR="auth-db"
         ;;
     *)
-        die "Unknown service: $SERVICE (expected: pms, booking, marketplace, auth)"
+        die "Unknown service: $SERVICE (expected: pms, booking, auth)"
         ;;
 esac
 
@@ -93,14 +84,6 @@ esac
 # ---------------------------------------------------------------------------
 aws sts get-caller-identity --region "$AWS_REGION" >/dev/null 2>&1 \
     || die "AWS credentials are not configured or expired. Run your SSO login first."
-
-if [[ "$SERVICE" == "marketplace" ]]; then
-    # Marketplace doesn't have a clean SSM URL — assemble it from one we do.
-    # db-pms-url-ssl is in the same RDS instance with sslmode=require, so reuse
-    # its host. Password comes from a dedicated SSM lookup if it exists,
-    # otherwise the platform team needs to add /vayada/prod/db-marketplace-url-ssl.
-    die "marketplace migrations require /vayada/prod/db-marketplace-url-ssl in SSM (not yet provisioned). Ask platform team to add it, or set DATABASE_URL manually and run the migration script directly."
-fi
 
 echo "🔑 Fetching DATABASE_URL from SSM ($SSM_URL_KEY)..."
 DATABASE_URL=$(read_ssm "$SSM_URL_KEY")

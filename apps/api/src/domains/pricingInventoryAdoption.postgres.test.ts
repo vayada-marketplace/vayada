@@ -13,6 +13,7 @@ import { externalBookingChanges } from "../integrations/externalBookingChanges.j
 import { createTargetBookingWebCheckoutAdapter } from "../routes/bookingWebPublic.js";
 import { createBookingHostActions } from "./bookingHostActions.js";
 import { targetBookingHostActionGuards } from "./bookingHostActionGuards.js";
+import { createFinanceHostBookingPayments } from "./financeHostBookingPayments.js";
 import {
   cancelAcceptedPricingStay,
   loadPricingBookingCancellation,
@@ -114,7 +115,9 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
     "repository-stay-cancel-before-adoption",
     "repository-stay-cancel-after-adoption",
     "repository-stay-cancel-guest-route",
+    "repository-stay-cancel-guest-paid-card",
     "repository-stay-cancel-host-guest-request",
+    "repository-stay-cancel-host-paid-card",
     "repository-stay-cancel-host-reject",
     "repository-date-change",
     "repository-stay-cancel-amended",
@@ -671,6 +674,63 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
         }
         await db.query("SET CONSTRAINTS ALL IMMEDIATE");
       };
+      // VAY-2205: room-night revenue as a paid card stay records it, three lines a night at uneven
+      // prices (330.01), so the kept share needs rounding. Returns the stay dates.
+      const roomLines = [types[0]!, types[1]!, types[0]!];
+      const seedRoomNights = async () => {
+        const stayDates: string[] = [];
+        for (
+          let day = Date.parse(`${quote.stay.checkIn}T00:00:00Z`);
+          day < Date.parse(`${quote.stay.checkOut}T00:00:00Z`);
+          day += 86_400_000
+        )
+          stayDates.push(new Date(day).toISOString().slice(0, 10));
+        for (const roomTypeId of new Set(roomLines))
+          await db.query(
+            "INSERT INTO booking.nightly_revenue_room_scopes(property_id,room_type_id) VALUES($1,$2) ON CONFLICT DO NOTHING",
+            [propertyId, roomTypeId],
+          );
+        for (const [night, stayDate] of stayDates.entries())
+          for (const [index, roomTypeId] of roomLines.entries())
+            await db.query(
+              `INSERT INTO booking.nightly_revenue_evidence
+                 (property_id,guest_booking_id,room_type_id,stay_date,recognized_on,currency,gross_room_amount,
+                  occupied_room_nights,economic_event,lifecycle_state,source_kind,evidence_quality,source_revision,
+                  line_position,corrects_evidence_id,command_key)
+               VALUES($1,$2,$3,$4::date,$4::date,'EUR',$5::numeric,1,'room_night','confirmed','direct','exact',1,$6,NULL,$7)`,
+              [
+                propertyId,
+                bookingId,
+                roomTypeId,
+                stayDate,
+                ["100.01", "133.33", "96.67"][index],
+                index + 1,
+                `test-night:${night}:${index}`,
+              ],
+            );
+        return stayDates;
+      };
+      // The hotel keeps 75% of what was paid, so the nights keep 75% of their room value as
+      // retained revenue, split by room price and adding up exactly, on each stay date.
+      const expectRetainedRevenue = async (stayDates: string[]) => {
+        const roomValue = 330_01n * BigInt(stayDates.length);
+        const retained = (
+          await db.query(
+            `SELECT stay_date::text AS "stayDate",recognized_on::text AS "recognizedOn",
+               (gross_room_amount*100)::bigint::text AS cents,occupied_room_nights AS occupied,lifecycle_state AS state
+             FROM booking.nightly_revenue_evidence WHERE guest_booking_id=$1 AND economic_event='retained_charge'`,
+            [bookingId],
+          )
+        ).rows;
+        expect(retained).toHaveLength(stayDates.length * roomLines.length);
+        expect(retained.reduce((sum, row) => sum + BigInt(row.cents), 0n)).toBe(
+          (roomValue * 81000n * 2n + 108000n) / (108000n * 2n),
+        );
+        expect(
+          retained.every((row) => row.recognizedOn === row.stayDate && row.occupied === 0),
+        ).toBe(true);
+        expect(new Set(retained.map((row) => row.state))).toEqual(new Set(["canceled"]));
+      };
       if (
         [
           "complete",
@@ -887,6 +947,140 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
           [bookingId],
         );
         expect(jobs.rows).toEqual([]);
+      } else if (scenario === "repository-stay-cancel-guest-paid-card") {
+        // VAY-2205: the guest cancels a paid card stay online; the cancel records the refund its
+        // terms owe, and money moves only once Stripe answers (after the commit).
+        expect(await adopt()).toMatchObject({ outcome: "adopted" });
+        await db.query(
+          "INSERT INTO hotel_catalog.property_slugs(property_id,slug,purpose) VALUES($1,$2,'canonical')",
+          [propertyId, propertyId],
+        );
+        await db.query(
+          `INSERT INTO booking.booking_guests(guest_booking_id,guest_role,first_name,last_name,email)
+           VALUES($1,'booker','Jane','Guest','jane@example.test')`,
+          [bookingId],
+        );
+        const accountId = randomUUID(),
+          paymentId = randomUUID();
+        await db.query(
+          `INSERT INTO finance.payment_provider_accounts(id,property_id,account_scope,provider,provider_account_id,status)
+           VALUES($1,$2,'property','stripe',$3,'active')`,
+          [accountId, propertyId, `acct_${bookingId.slice(0, 8)}`],
+        );
+        await db.query(
+          `INSERT INTO finance.payments(id,property_id,guest_booking_id,provider_account_id,payment_kind,payment_method,
+             status,amount,net_amount,currency,provider_payment_intent_id,visibility_class,paid_at,payment_metadata)
+           VALUES($1,$2,$3,$4,'full','card','paid',1080,1080,'EUR',$5,'pms_finance',now(),'{"chargeType":"direct"}')`,
+          [paymentId, propertyId, bookingId, accountId, `pi_${bookingId.slice(0, 8)}`],
+        );
+        await db.query(
+          `UPDATE booking.guest_bookings SET payment_status='paid',active_card_payment_id=$2,
+             booking_metadata=booking_metadata || '{"paymentMethod":"card"}' WHERE id=$1`,
+          [bookingId, paymentId],
+        );
+        const stayDates = await seedRoomNights();
+        // Each transaction (the cancel's, then the refund's after it) becomes a savepoint here.
+        const savepointed = (name: string) => (text: string, values?: unknown[]) =>
+          db.query(
+            (
+              {
+                BEGIN: `SAVEPOINT ${name}`,
+                COMMIT: `RELEASE SAVEPOINT ${name}`,
+                ROLLBACK: `ROLLBACK TO SAVEPOINT ${name}`,
+              } as Record<string, string>
+            )[text] ?? text,
+            values,
+          );
+        const nested = {
+          query: savepointed("guest_cancel"),
+          connect: async () => ({ query: savepointed("card_refund"), release: () => undefined }),
+        };
+        const createRefund = vi.fn(
+          async (input: { amountMinor: number; commandId: string; paymentIntentId: string }) => ({
+            refundId: "re_guest_cancel",
+            status: "succeeded",
+            amountMinor: input.amountMinor,
+            currency: "EUR",
+            paymentIntentId: input.paymentIntentId,
+            commandId: input.commandId,
+            failureReason: null,
+          }),
+        );
+        const adapter = (stripe: boolean) =>
+          createTargetBookingWebCheckoutAdapter({
+            pool: nested as unknown as pg.Pool,
+            connectionString: url!,
+            externalChanges: externalBookingChanges,
+            inventoryReservationPort: createTargetPmsInventoryReservationPort(),
+            ...(stripe
+              ? {
+                  stripePaymentProvider: {
+                    createRefund,
+                    listRefunds: vi.fn(async () => []),
+                    retrieveRefund: vi.fn(),
+                  } as never,
+                }
+              : {}),
+          });
+        const context = (key: string) => ({
+          operation: "booking-cancel",
+          requestId: `request-${key}`,
+          correlationId: `correlation-${key}`,
+          idempotencyKey: key,
+          fingerprint: hash(key),
+          occurredAt: new Date("2026-09-21T08:00:00Z"),
+        });
+        const guest = { guest_email: "jane@example.test" };
+        // Without Stripe, card refunds can't run: a paid stay stays refused online.
+        await expect(
+          adapter(false).cancelPreview(propertyId, bookingId, guest, context("p0")),
+        ).rejects.toMatchObject({ statusCode: 409 });
+        expect(
+          await adapter(true).cancelPreview(propertyId, bookingId, guest, context("p")),
+        ).toMatchObject({
+          amountPaid: 1080,
+          refundAmount: 270,
+          refundPercentage: 25,
+          cancellationFeeAmount: 810,
+          bookedTermsOutcome: { retainedMinor: "81000", refundMinor: "27000" },
+        });
+        const cancel = adapter(true);
+        for (const key of ["c", "c"])
+          await cancel.cancel(
+            propertyId,
+            bookingId,
+            { ...guest, expected_cancellation_fee_minor: "81000" },
+            context(key),
+          );
+        await db.query("SET CONSTRAINTS ALL IMMEDIATE");
+        expect(
+          (
+            await db.query(
+              `SELECT booking.lifecycle_status AS status,booking.payment_status AS paid,
+                 payment.status AS payment,payment.refunded_amount::text AS refunded
+               FROM booking.guest_bookings booking JOIN finance.payments payment ON payment.id=booking.active_card_payment_id
+               WHERE booking.id=$1`,
+              [bookingId],
+            )
+          ).rows,
+        ).toEqual([
+          { status: "canceled", paid: "paid", payment: "partially_refunded", refunded: "270.00" },
+        ]);
+        await expectRetainedRevenue(stayDates);
+        // One refund for the replayed cancel, asked of Stripe once after the commit and settled.
+        expect(createRefund).toHaveBeenCalledOnce();
+        expect(createRefund.mock.calls[0]![0]).toMatchObject({ amountMinor: 27000 });
+        expect(
+          (
+            await db.query(
+              `SELECT status,requested_by,amount::text AS amount,amount_minor::text AS minor
+               FROM finance.card_refund_commands WHERE guest_booking_id=$1`,
+              [bookingId],
+            )
+          ).rows,
+        ).toEqual([
+          { status: "succeeded", requested_by: "guest", amount: "270.00", minor: "27000" },
+        ]);
       } else if (scenario === "repository-stay-cancel-host-guest-request") {
         // VAY-2100: PMS staff cancel an adopted v2 stay because the guest asked.
         expect(await adopt()).toMatchObject({ outcome: "adopted" });
@@ -956,6 +1150,137 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
           [bookingId],
         );
         expect(jobs.rows).toEqual([]);
+      } else if (scenario === "repository-stay-cancel-host-paid-card") {
+        // VAY-2205: PMS staff cancel a paid card stay; a property cancel would refund everything, a
+        // guest request what the booked terms don't keep. Money moves only once Stripe answers.
+        expect(await adopt()).toMatchObject({ outcome: "adopted" });
+        const accountId = randomUUID(),
+          paymentId = randomUUID(),
+          actorUserId = randomUUID();
+        await db.query(
+          `INSERT INTO finance.payment_provider_accounts(id,property_id,account_scope,provider,provider_account_id,status)
+           VALUES($1,$2,'property','stripe',$3,'active')`,
+          [accountId, propertyId, `acct_${bookingId.slice(0, 8)}`],
+        );
+        await db.query(
+          `INSERT INTO finance.payments(id,property_id,guest_booking_id,provider_account_id,payment_kind,payment_method,
+             status,amount,net_amount,currency,provider_payment_intent_id,visibility_class,paid_at,payment_metadata)
+           VALUES($1,$2,$3,$4,'full','card','paid',1080,1080,'EUR',$5,'pms_finance',now(),'{"chargeType":"direct"}')`,
+          [paymentId, propertyId, bookingId, accountId, `pi_${bookingId.slice(0, 8)}`],
+        );
+        await db.query(
+          `UPDATE booking.guest_bookings SET payment_status='paid',active_card_payment_id=$2,
+             booking_metadata=booking_metadata || '{"paymentMethod":"card"}' WHERE id=$1`,
+          [bookingId, paymentId],
+        );
+        const stayDates = await seedRoomNights();
+        await db.query("INSERT INTO identity.users(id,email,status) VALUES($1,$2,'active')", [
+          actorUserId,
+          `${actorUserId}@example.test`,
+        ]);
+        // Each transaction (the cancel's, then the refund's after it) becomes a savepoint here.
+        const savepointed = (name: string) => (text: string, values?: unknown[]) =>
+          db.query(
+            (
+              {
+                BEGIN: `SAVEPOINT ${name}`,
+                COMMIT: `RELEASE SAVEPOINT ${name}`,
+                ROLLBACK: `ROLLBACK TO SAVEPOINT ${name}`,
+              } as Record<string, string>
+            )[text] ?? text,
+            values,
+          );
+        const nested = {
+          query: savepointed("host_cancel"),
+          connect: async () => ({ query: savepointed("card_refund"), release: () => undefined }),
+        };
+        const createRefund = vi.fn(
+          async (input: { amountMinor: number; commandId: string; paymentIntentId: string }) => ({
+            refundId: "re_host_cancel",
+            status: "succeeded",
+            amountMinor: input.amountMinor,
+            currency: "EUR",
+            paymentIntentId: input.paymentIntentId,
+            commandId: input.commandId,
+            failureReason: null,
+          }),
+        );
+        const stripe = {
+          createRefund,
+          listRefunds: vi.fn(async () => []),
+          retrieveRefund: vi.fn(),
+        } as never;
+        const actions = (refunds: boolean) =>
+          createBookingHostActions({
+            pool: nested as unknown as pg.Pool,
+            inventory: createTargetPmsInventoryReservationPort(),
+            guards: {
+              ...targetBookingHostActionGuards,
+              payment: createFinanceHostBookingPayments(refunds ? stripe : undefined),
+            },
+            now: () => new Date("2026-09-21T08:00:00Z"),
+            ...(refunds ? { cardRefunds: stripe } : {}),
+          });
+        const hostScope = { propertyId, bookingId, actorUserId };
+        // Without Stripe a paid card stay still needs a payment adjustment first.
+        await expect(
+          actions(false).preview(hostScope, { action: "cancel", reason: "Overbooked" }),
+        ).rejects.toMatchObject({ code: "payment_adjustment_required" });
+        const host = actions(true);
+        expect(
+          (await host.preview(hostScope, { action: "cancel", reason: "Overbooked" })).impact,
+        ).toMatchObject({
+          payment: "card_refund",
+          cardRefund: { paidMinor: "108000", refundMinor: "108000", currency: "EUR" },
+        });
+        const asked = await host.preview(hostScope, {
+          action: "cancel",
+          reason: "Guest emailed",
+          cancellationKind: "guest_request",
+        });
+        expect(asked.impact).toMatchObject({
+          payment: "card_refund",
+          cardRefund: { paidMinor: "108000", refundMinor: "27000" },
+          cancellationOutcome: { retainedMinor: "81000" },
+        });
+        await host.apply(hostScope, asked.previewId, "host-paid-card");
+        await db.query("SET CONSTRAINTS ALL IMMEDIATE");
+        expect(
+          (
+            await db.query(
+              `SELECT booking.lifecycle_status AS status,booking.payment_status AS paid,payment.status AS payment,
+                 command.status AS refund,command.requested_by AS "by",command.amount::text AS amount
+               FROM booking.guest_bookings booking
+               JOIN finance.payments payment ON payment.id=booking.active_card_payment_id
+               JOIN finance.card_refund_commands command ON command.payment_id=payment.id
+               WHERE booking.id=$1`,
+              [bookingId],
+            )
+          ).rows,
+        ).toEqual([
+          {
+            status: "canceled",
+            paid: "paid",
+            payment: "partially_refunded",
+            refund: "succeeded",
+            by: "host",
+            amount: "270.00",
+          },
+        ]);
+        expect(createRefund).toHaveBeenCalledOnce();
+        await expectRetainedRevenue(stayDates);
+        // The reservation page reads the refund (VAY-2205).
+        const read = await createTargetPmsOperationsReadRepository({
+          connectionString: url!,
+          pool: db,
+        }).findReservationByGuestBookingId(propertyId, bookingId);
+        expect(read?.cardRefund).toMatchObject({
+          status: "succeeded",
+          amount: "270.00",
+          currency: "EUR",
+          requestedBy: "host",
+          failureReason: null,
+        });
       } else if (scenario === "repository-date-change") {
         // VAY-2110: PMS staff move an adopted v2 stay to new dates at its booked terms.
         expect(await adopt()).toMatchObject({ outcome: "adopted" });

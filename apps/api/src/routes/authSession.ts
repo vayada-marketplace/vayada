@@ -181,7 +181,6 @@ export type AuthSessionRouteOptions = {
   oauthStateSecret: string;
   cookieSecure: boolean;
   cookieDomain?: string;
-  legacyMarketplaceJwtSecret?: string;
   profileImageMediaRepository?: ApprovedPublicProfileImageRepository;
   hotelAccountInviteOnboarding?: Pick<HotelAccountInviteRepository, "resolveForOnboarding">;
   handoffRepository?: AuthSessionHandoffRepository;
@@ -409,7 +408,6 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
     "/session",
     "/session/refresh",
     "/logout",
-    "/compat/marketplace-admin-token",
     "/compat/booking-admin-token",
     "/compat/pms-web-token",
     "/profile",
@@ -1921,11 +1919,7 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
       .send({ logoutUrl });
   });
 
-  registerCompatibilityTokenRoute(app, options, {
-    path: "/compat/marketplace-admin-token",
-    surface: "platform-admin",
-    userType: "admin",
-  });
+  // VAY-2259: the platform-admin bridge to the retired Python Marketplace API is gone.
   registerCompatibilityTokenRoute(app, options, {
     path: "/compat/booking-admin-token",
     surface: "booking-admin",
@@ -2969,8 +2963,6 @@ function findSurfacePolicy(
   const defaultPlatformPolicy: AuthSurfacePolicy = {
     requiredOrganizationKind: options.requiredOrganizationKind,
     logoutReturnUrl: options.logoutReturnUrl,
-    legacyJwtSecret: options.legacyMarketplaceJwtSecret,
-    legacyJwtUserType: "admin",
     requiredMembershipRoleKey: "platform_admin",
   };
   if (surface === DEFAULT_SURFACE) {

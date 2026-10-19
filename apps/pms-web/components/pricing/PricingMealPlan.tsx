@@ -40,10 +40,20 @@ export function changeMealPlan(
     : entry.basis === "room"
       ? { kind: "room", amountMinor: amounts[0] }
       : { kind: "person", adultMinor: amounts[0], childBandAmountsMinor: amounts.slice(1) };
+  // What guests read about the meal stays while there is a meal to read about (VAY-2281).
   const result = parsePricingConfiguration({
     ...room,
     offers: room.offers.map((offer) =>
-      offer.id === offerId ? { ...offer, meal: { kind: entry.kind, charge } } : offer,
+      offer.id === offerId
+        ? {
+            ...offer,
+            meal: {
+              kind: entry.kind,
+              charge,
+              ...(!noMeal && offer.meal.description ? { description: offer.meal.description } : {}),
+            },
+          }
+        : offer,
     ),
   });
   if (!result) throw new PricingError("pricing.error.mealConfigInvalid");

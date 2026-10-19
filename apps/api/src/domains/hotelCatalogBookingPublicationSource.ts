@@ -260,8 +260,9 @@ async function load(
     blockers.push(blocker("hotel_setup_in_progress", "external_pending"));
   }
   if (!content.profileComplete) blockers.push(blocker("hotel_profile_incomplete"));
-  if (!localityPublic || !content.location.country || !content.location.city)
-    blockers.push(blocker("hotel_public_locality_missing"));
+  // A city and country the hotel keeps private need the box ticked, not new data (VAY-2288).
+  if (!first.countryCode || !first.city) blockers.push(blocker("hotel_public_locality_missing"));
+  else if (!localityPublic) blockers.push(blocker("hotel_public_locality_hidden"));
   if (!content.slug) blockers.push(blocker("hotel_canonical_slug_missing"));
   if (!content.timezone) blockers.push(blocker("hotel_timezone_missing"));
   if (mediaBlocker) blockers.push(mediaBlocker);

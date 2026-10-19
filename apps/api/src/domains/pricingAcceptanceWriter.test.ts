@@ -116,6 +116,7 @@ describe("pricing acceptance writer", () => {
     });
     expect(preparePricingAcceptance).toHaveBeenCalledWith(client, input.slug, input.command, {
       card: false,
+      deposits: false,
       request: true,
     });
     expect(storePricingAcceptance).toHaveBeenCalledWith(

@@ -1,0 +1,29 @@
+name: Cancel PR Checks of closed pull requests
+
+# Closing or merging a pull request (stack-mq.sh collapsing a stack into its bottom pull request,
+# say) leaves its PR Checks run going for results nobody reads. This run joins that run's
+# concurrency group (pr-checks.yml: pr-checks-<pull request number>), so cancel-in-progress stops
+# it. It reports no "Required Checks" and runs nothing from the repository.
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - main
+      - "fm/**"
+      - "fix/**"
+      - "flamurmaliqi2811/**"
+
+concurrency:
+  group: pr-checks-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  cancel:
+    name: Cancel PR Checks of a closed pull request
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Report
+        run: echo "Pull request closed; joining its PR Checks concurrency group cancelled any run still going."

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { PricingPaymentMethod, ReplacementOfferTerms } from "@vayada/domain-booking";
+import { pricingPaymentWriteProblem, type PricingPaymentMethod, type ReplacementOfferTerms } from "@vayada/domain-booking";
 import { resolveFinanceOnlineCardReadiness } from "@vayada/domain-finance";
 import { pricingCurrencyScale, pricingInteger, pricingObject } from "@vayada/domain-pms";
 import type { PoolClient } from "pg";
@@ -30,8 +30,11 @@ export async function lockFinanceReplacementPricingReadiness(client: PoolClient,
   if (!settings.payments_enabled) return unavailable("payments_disabled");
   if (settings.default_currency !== request.currency) return unavailable("currency_mismatch");
   if (!Array.isArray(settings.accepted_methods) || new Set(settings.accepted_methods).size !== settings.accepted_methods.length) return unavailable("invalid");
-  // The current execution contract does not establish split-payment/deposit support.
-  if (request.terms.some((t) => t.payment.kind === "deposit")) return unavailable("deposit_execution_unavailable");
+  // VAY-2205: deposits run only as a share by card when booking with the rest at the property; other deposit shapes
+  // (a later balance, other methods) have no execution. Without card a deposit rate just can't sell: the quote needs
+  // card among the methods, as for any card-only rate, so a card lapse never takes the hotel's other rates down.
+  if (request.terms.some((t) => t.payment.kind === "deposit" && pricingPaymentWriteProblem(t.payment)))
+    return unavailable("deposit_execution_unavailable");
   const methods: Method[] = [];
   if (settings.accepted_methods.includes("pay_at_property")) methods.push("pay_at_property");
   let cardSource: unknown = null;

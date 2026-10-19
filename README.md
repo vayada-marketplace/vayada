@@ -7,8 +7,8 @@ Vayada is a hospitality platform with two connected products:
   reservations, and channel connectivity.
 
 The Creator Marketplace is retired (VAY-2259). Its web app is gone; its legacy
-API is still deployed, and the Marketplace tables in the new database are dropped
-in VAY-2272.
+API is switched off (api.vayada.com answers 410) and no longer runs locally, and
+the Marketplace tables in the new database are dropped in VAY-2272.
 
 This repository is the product application monorepo. It contains every web app,
 the target TypeScript API, the legacy FastAPI services still used during
@@ -36,7 +36,7 @@ flowchart LR
 | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Web applications    | Five Next.js apps serve platform admin, the booking storefront and admin, PMS, and the public landing site.                                                                                                                        |
 | Target API          | `apps/api` is the modular TypeScript/Fastify backend for WorkOS/AuthKit, identity and authorization, migrated product routes, platform media, jobs, and target-domain APIs.                                                        |
-| Legacy APIs         | `apps/marketplace-api`, `apps/booking-api`, and `apps/pms-api` remain in service while routes and data move to the target backend.                                                                                                 |
+| Legacy APIs         | `apps/booking-api` and `apps/pms-api` remain in service while routes and data move to the target backend.                                                                                                                          |
 | Target data model   | `packages/backend-migration` owns reviewed SQL migrations and parity tooling for the schema-organized target PostgreSQL database. Runtime source flags select target, compatibility, or disabled implementations during migration. |
 | Local support stack | Docker Compose starts the historical PostgreSQL databases, auth migrations, MinIO/media services, and the FastAPI APIs. `apps/api` and the web apps run from the npm workspace.                                                    |
 
@@ -81,17 +81,16 @@ requirements files, and Dockerfiles.
 exposes HTTPS on port 443; the plain ports remain available when running
 processes directly.
 
-| Path                                           | Role                          | Runtime | Portless URL                                | Plain port |
-| ---------------------------------------------- | ----------------------------- | ------- | ------------------------------------------- | ---------: |
-| [`apps/api`](apps/api)                         | Target cross-product API      | Fastify | `https://api.localhost`                     |       8003 |
-| [`apps/marketplace-api`](apps/marketplace-api) | Legacy Marketplace API        | FastAPI | `https://api.marketplace.localhost`         |       8000 |
-| [`apps/vayada-admin`](apps/vayada-admin)       | Platform administration       | Next.js | `https://admin.localhost`                   |       3001 |
-| [`apps/booking-api`](apps/booking-api)         | Legacy Booking API            | FastAPI | `https://api.booking.localhost`             |       8001 |
-| [`apps/booking-web`](apps/booking-web)         | Guest booking storefront      | Next.js | `https://hotel-alpenrose.booking.localhost` |       3002 |
-| [`apps/booking-admin`](apps/booking-admin)     | Booking Engine administration | Next.js | `https://admin.booking.localhost`           |       3003 |
-| [`apps/pms-api`](apps/pms-api)                 | Legacy PMS API                | FastAPI | `https://api.pms.localhost`                 |       8002 |
-| [`apps/pms-web`](apps/pms-web)                 | PMS operations                | Next.js | `https://pms.localhost`                     |       3004 |
-| [`apps/landing`](apps/landing)                 | Public marketing site         | Next.js | `https://landing.localhost`                 |       3006 |
+| Path                                       | Role                          | Runtime | Portless URL                                | Plain port |
+| ------------------------------------------ | ----------------------------- | ------- | ------------------------------------------- | ---------: |
+| [`apps/api`](apps/api)                     | Target cross-product API      | Fastify | `https://api.localhost`                     |       8003 |
+| [`apps/vayada-admin`](apps/vayada-admin)   | Platform administration       | Next.js | `https://admin.localhost`                   |       3001 |
+| [`apps/booking-api`](apps/booking-api)     | Legacy Booking API            | FastAPI | `https://api.booking.localhost`             |       8001 |
+| [`apps/booking-web`](apps/booking-web)     | Guest booking storefront      | Next.js | `https://hotel-alpenrose.booking.localhost` |       3002 |
+| [`apps/booking-admin`](apps/booking-admin) | Booking Engine administration | Next.js | `https://admin.booking.localhost`           |       3003 |
+| [`apps/pms-api`](apps/pms-api)             | Legacy PMS API                | FastAPI | `https://api.pms.localhost`                 |       8002 |
+| [`apps/pms-web`](apps/pms-web)             | PMS operations                | Next.js | `https://pms.localhost`                     |       3004 |
+| [`apps/landing`](apps/landing)             | Public marketing site         | Next.js | `https://landing.localhost`                 |       3006 |
 
 FastAPI documentation is available at `/docs` on each legacy API origin.
 
@@ -101,15 +100,14 @@ select a property. The integrated local workflow enables wildcard routing.
 
 ### Local support ports
 
-| Service                | Port | Local database      | Local user            |
-| ---------------------- | ---: | ------------------- | --------------------- |
-| Marketplace PostgreSQL | 5432 | `vayada_db`         | `vayada_user`         |
-| Booking PostgreSQL     | 5434 | `vayada_booking_db` | `vayada_booking_user` |
-| Auth PostgreSQL        | 5435 | `vayada_auth_db`    | `vayada_auth_user`    |
-| PMS PostgreSQL         | 5436 | `vayada_pms_db`     | `vayada_pms_user`     |
-| MinIO API              | 9000 | —                   | —                     |
-| MinIO console          | 9001 | —                   | —                     |
-| Local media CDN        | 9002 | —                   | —                     |
+| Service            | Port | Local database      | Local user            |
+| ------------------ | ---: | ------------------- | --------------------- |
+| Booking PostgreSQL | 5434 | `vayada_booking_db` | `vayada_booking_user` |
+| Auth PostgreSQL    | 5435 | `vayada_auth_db`    | `vayada_auth_user`    |
+| PMS PostgreSQL     | 5436 | `vayada_pms_db`     | `vayada_pms_user`     |
+| MinIO API          | 9000 | —                   | —                     |
+| MinIO console      | 9001 | —                   | —                     |
+| Local media CDN    | 9002 | —                   | —                     |
 
 The canonical local mappings are maintained in
 [`scripts/portless-setup.sh`](scripts/portless-setup.sh), app package
@@ -172,7 +170,7 @@ npm run dev:workos-local
 
 `npm run dev:portless` delegates to the same workflow. The launcher:
 
-- starts Postgres, MinIO, the media CDN, and all three legacy FastAPI APIs;
+- starts Postgres, MinIO, the media CDN, and the two legacy FastAPI APIs (booking, PMS);
 - applies auth, legacy-service, and target-schema migrations;
 - starts `apps/api` and all six Next.js apps;
 - enables wildcard routing for Booking Web tenant subdomains; and
@@ -280,8 +278,7 @@ PYTHON_BIN=.venv/bin/python npm run seed:test-data
 ```
 
 The integrated local stack runs this automatically unless `SKIP_SEED=1` is
-set. The seed command populates the legacy auth, marketplace, booking, and PMS
-PostgreSQL data.
+set. The seed command populates the legacy auth, booking, and PMS PostgreSQL data.
 
 **The seed command does not create users or passwords in WorkOS.** Use an
 approved staging WorkOS account for current AuthKit-backed UIs. The credentials
@@ -298,7 +295,7 @@ below are for legacy-auth and data testing only.
 | `hotel2@mock.com`   | `Test1234`  | Verified; Grand Hotel Riviera                                  |
 | `hotel3@mock.com`   | `Test1234`  | Verified; The Birchwood Lodge                                  |
 | `hotel4@mock.com`   | `Test1234`  | Pending; minimal City Center Hotel data                        |
-| `hotel5@mock.com`   | `Test1234`  | Verified; marketplace profile without a booking record         |
+| `hotel5@mock.com`   | `Test1234`  | Verified; no booking record                                    |
 
 See [`scripts/README.md`](scripts/README.md) for seed inputs and individual
 commands.
