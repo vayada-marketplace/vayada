@@ -175,6 +175,8 @@
   "layout.sidebar.manageHotels": "Hotels beheren",
   "layout.sidebar.collapse": "Inklappen",
   "dashboard.title": "Boekingsmodule",
+  "dashboard.setupIncomplete": "De setup van je accommodatie is nog niet klaar. Je voortgang is opgeslagen.",
+  "dashboard.resumeSetup": "Setup hervatten",
   "dashboard.timeRange.today": "Vandaag",
   "dashboard.timeRange.week": "Deze week",
   "dashboard.timeRange.month": "Laatste 30 dagen",

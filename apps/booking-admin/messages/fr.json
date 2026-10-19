@@ -175,6 +175,8 @@
   "layout.sidebar.manageHotels": "Gérer les hôtels",
   "layout.sidebar.collapse": "Réduire",
   "dashboard.title": "Moteur de reservation",
+  "dashboard.setupIncomplete": "La configuration de votre établissement n'est pas terminée. Votre progression est enregistrée.",
+  "dashboard.resumeSetup": "Reprendre la configuration",
   "dashboard.timeRange.today": "Aujourd'hui",
   "dashboard.timeRange.week": "Cette semaine",
   "dashboard.timeRange.month": "30 derniers jours",

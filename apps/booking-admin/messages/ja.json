@@ -175,6 +175,8 @@
   "layout.sidebar.manageHotels": "ホテル管理",
   "layout.sidebar.collapse": "折りたたむ",
   "dashboard.title": "予約エンジン",
+  "dashboard.setupIncomplete": "施設のセットアップはまだ完了していません。進行状況は保存されています。",
+  "dashboard.resumeSetup": "セットアップを再開",
   "dashboard.timeRange.today": "今日",
   "dashboard.timeRange.week": "今週",
   "dashboard.timeRange.month": "過去30日間",
