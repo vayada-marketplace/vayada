@@ -283,11 +283,6 @@ export function hotelCatalogIdempotencyKey(
   return `${commandType}:property:${propertyId}:${trimmedSuffix}`;
 }
 
-export type {
-  PlatformMarketplaceAccount,
-  PlatformMarketplaceAccountsResponse,
-} from "./platformMarketplaceActivation.js";
-
 export * from "./nearbyView.js";
 
 export * from "./preparedHotelImport.js";

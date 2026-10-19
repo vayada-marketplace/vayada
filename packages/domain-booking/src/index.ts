@@ -677,5 +677,3 @@ export * from "./pricingOfferNames.js";
 export * from "./publicPricingSelection.js";
 
 export * from "./storedPricingQuote.js";
-// Marketplace hotel profile editor (apps/marketplace-web) still reads this; it goes in step 3b.
-export * from "./affiliateBookingDestination.js";
