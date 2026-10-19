@@ -15,8 +15,7 @@ export default function PrivacyPage() {
           <div className="mb-8">
             <h1 className="text-4xl md:text-5xl font-bold text-primary-800 mb-4">Privacy Policy</h1>
             <p className="text-gray-600">
-              {/* VAY-2286: placeholder; replaced with the go-live date when this merges. */}
-              <strong>Effective Date:</strong> [go-live date]
+              <strong>Effective Date:</strong> October 20, 2026
             </p>
           </div>
 
