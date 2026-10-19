@@ -12,7 +12,6 @@ const EXPECTED_TARGET_KEYS = new Set([
   "bookingCheckoutChecks",
   "financeChecks",
   "pmsOperationsChecks",
-  "marketplaceChecks",
   "distributionBookabilityChecks",
   "platformMediaChecks",
   "mediaUrlMigrationChecks",
@@ -37,68 +36,6 @@ const FINANCE_CHECK_KEYS = new Set([
   "forbiddenVisibilityKeys",
 ]);
 const PMS_OPERATIONS_CHECK_KEYS = new Set(["properties", "forbiddenOperationalSummaryKeys"]);
-const MARKETPLACE_CHECK_KEYS = new Set(["slices", "forbiddenPublicReadModelValues"]);
-const MARKETPLACE_SLICE_STRING_FIELDS = [
-  "propertyId",
-  "hotelOrganizationId",
-  "hotelOwnerUserId",
-  "hotelOwnerRoleKey",
-  "creatorProfileId",
-  "creatorOrganizationId",
-  "creatorOwnerUserId",
-  "creatorOwnerRoleKey",
-  "offerId",
-  "commissionRuleId",
-  "creatorPlatformId",
-  "creatorRatingId",
-  "compensationOptionFreeStayId",
-  "compensationOptionAffiliateId",
-  "compensationOptionPaidId",
-  "compensationOptionDiscountId",
-  "requirementId",
-  "collaborationId",
-  "paidCollaborationId",
-  "discountCollaborationId",
-  "deliverableApprovedId",
-  "deliverableSubmittedId",
-  "creatorChatMessageId",
-  "hotelChatMessageId",
-  "tripId",
-  "externalCollaborationId",
-  "unreadNotificationId",
-  "readNotificationId",
-  "pendingInviteCodeId",
-  "redeemedInviteCodeId",
-  "creatorNewsletterPreferenceId",
-  "hotelNewsletterPreferenceId",
-  "sourceCreatorId",
-  "sourceHotelProfileId",
-  "sourceOfferId",
-  "sourceCollaborationId",
-  "creatorDisplayName",
-  "platform",
-  "offerPublicId",
-  "offerSlug",
-  "visibilityStatus",
-  "lifecycleStatus",
-  "affiliateReferralCode",
-  "creatorChatBody",
-  "hotelChatBody",
-  "tripName",
-  "externalCollaborationTitle",
-  "pendingInviteCode",
-  "redeemedInviteCode",
-];
-const MARKETPLACE_SLICE_INTEGER_FIELDS = [
-  "compensationOptionCount",
-  "deliverableCount",
-  "chatMessageCount",
-  "notificationCount",
-  "inviteCodeCount",
-  "newsletterPreferenceCount",
-  "rating",
-  "platformFollowerCount",
-];
 const DISTRIBUTION_BOOKABILITY_CHECK_KEYS = new Set(["properties", "forbiddenPublicOutputValues"]);
 const PLATFORM_MEDIA_CHECK_KEYS = new Set([
   "legacyUrlInventory",
@@ -402,7 +339,6 @@ export function validateExpectedTargetConfig(
     "bookingCheckoutChecks",
     "financeChecks",
     "pmsOperationsChecks",
-    "marketplaceChecks",
     "distributionBookabilityChecks",
     "platformMediaChecks",
     "mediaUrlMigrationChecks",
@@ -701,31 +637,6 @@ export function validateExpectedTargetConfig(
       validateStringArray(
         pmsOperationsChecks["forbiddenOperationalSummaryKeys"],
         "expected-target.json.pmsOperationsChecks.forbiddenOperationalSummaryKeys",
-        findings,
-      );
-    }
-  }
-
-  const marketplaceChecks = expected["marketplaceChecks"];
-  if (isRecord(marketplaceChecks)) {
-    validateKnownKeys(
-      marketplaceChecks,
-      MARKETPLACE_CHECK_KEYS,
-      "expected-target.json.marketplaceChecks",
-      findings,
-    );
-    validateObjectArray(
-      marketplaceChecks["slices"],
-      "expected-target.json.marketplaceChecks.slices",
-      MARKETPLACE_SLICE_STRING_FIELDS,
-      findings,
-      ["compensationType"],
-      MARKETPLACE_SLICE_INTEGER_FIELDS,
-    );
-    if (marketplaceChecks["forbiddenPublicReadModelValues"] !== undefined) {
-      validateStringArray(
-        marketplaceChecks["forbiddenPublicReadModelValues"],
-        "expected-target.json.marketplaceChecks.forbiddenPublicReadModelValues",
         findings,
       );
     }

@@ -24,7 +24,6 @@
     "target:media:migrate": "tsx src/cli/productionMediaMigration.ts",
     "target:booking:migrate": "tsx src/cli/productionBookingMigration.ts",
     "target:pms:migrate": "tsx src/cli/productionPmsMigration.ts",
-    "target:marketplace:migrate": "tsx src/cli/productionMarketplaceMigration.ts",
     "target:finance:migrate": "tsx src/cli/productionFinanceMigration.ts",
     "target:parity": "tsx src/cli/parity.ts",
     "target:rehearse:staging": "tsx src/cli/cutover.ts rehearse-staging",
@@ -54,7 +53,6 @@
     "target:media:migrate:dist": "node dist/cli/productionMediaMigration.js",
     "target:booking:migrate:dist": "node dist/cli/productionBookingMigration.js",
     "target:pms:migrate:dist": "node dist/cli/productionPmsMigration.js",
-    "target:marketplace:migrate:dist": "node dist/cli/productionMarketplaceMigration.js",
     "target:finance:migrate:dist": "node dist/cli/productionFinanceMigration.js",
     "target:parity:dist": "node dist/cli/parity.js",
     "target:rehearse:staging:dist": "node dist/cli/cutover.js rehearse-staging",
@@ -78,7 +76,6 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1088.0",
     "@vayada/domain-booking": "*",
-    "@vayada/domain-marketplace": "*",
     "@vayada/locale-constants": "*",
     "@workos-inc/node": "^10.2.0",
     "pg": "^8.16.3",
