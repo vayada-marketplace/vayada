@@ -424,6 +424,9 @@ describe("target provider webhook routes", () => {
     ["platform", "store", "invalid", 400, { error: "invalid_resend_signature" }],
     ["pms_inbox", "secret", "none", 503, { error: "resend_webhook_not_configured" }],
     [null, "store", "valid", 503, { error: "resend_webhook_not_configured" }],
+    [null, "store", "invalid", 400, { error: "invalid_resend_signature" }],
+    ["pms_inbox", "store", "invalid", 400, { error: "invalid_resend_signature" }],
+    ["pms_inbox", "store", "none", 400, { error: "invalid_resend_signature" }],
     ["platform-x", "secret", "none", 503, { error: "resend_webhook_not_configured" }],
   ] as const)(
     "answers %s events without a configured %s (%s signature)",

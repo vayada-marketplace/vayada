@@ -269,13 +269,13 @@ export const registerProviderWebhookRoutes: FastifyPluginAsync<
     if (!secret || !options.pmsInboxDeliveryReceipts) {
       // VAY-2293: booking and platform (contact form, support, alert) emails need no delivery
       // receipt, so their events are acknowledged even without the Inbox receipt path; nothing is
-      // recorded. With a secret the signature is still checked. Untagged and Inbox events keep
-      // the 503 so Resend retries them.
+      // recorded. With a secret the signature is checked first, so nothing unsigned is parsed.
+      // Signed untagged and Inbox events keep the 503 so Resend retries them.
+      if (secret && !resendSignatureValid(secret, request.headers, request.body))
+        return reply.code(400).send({ error: "invalid_resend_signature" });
       const unconfigured = parseJsonPayload(request.body);
       const product = unconfigured.ok ? resendNonInboxProduct(unconfigured.value) : null;
       if (!product) return reply.code(503).send({ error: "resend_webhook_not_configured" });
-      if (secret && !resendSignatureValid(secret, request.headers, request.body))
-        return reply.code(400).send({ error: "invalid_resend_signature" });
       return reply.code(200).send({ status: `ignored_${product}_notification` });
     }
     const id = request.headers["svix-id"];
