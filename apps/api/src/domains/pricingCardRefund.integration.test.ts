@@ -518,7 +518,7 @@ describe.skipIf(!url)("pricing card refunds (VAY-2205)", () => {
       `INSERT INTO finance.card_refund_commands
          (id,property_id,guest_booking_id,payment_id,idempotency_key,requested_by,amount,amount_minor,currency,
           status,provider_account_ref,provider_payment_intent_id,next_attempt_at,created_at,updated_at,settled_at,attempts)
-       SELECT $2,property_id,guest_booking_id,payment_id,'earlier-'||$2,requested_by,20.00,2000,currency,
+       SELECT $2::uuid,property_id,guest_booking_id,payment_id,'earlier-'||$2::text,requested_by,20.00,2000,currency,
           'failed',provider_account_ref,provider_payment_intent_id,now(),now()-interval '1 hour',now(),now(),1
        FROM finance.card_refund_commands WHERE id=$1`,
       [otherId, otherStripe.refunds[0]!.commandId],
