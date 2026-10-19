@@ -259,6 +259,13 @@ export function parsePublicBookabilityProfileProjection(
   }
 }
 
+/** Where a profile breaks the public contract, as field paths only, never values (VAY-2292). */
+export function publicBookabilityProfileIssuePaths(value: unknown): string[] {
+  const parsed = profileSchema.safeParse(value);
+  if (parsed.success) return [];
+  return [...new Set(parsed.error.issues.map(({ path }) => path.map(String).join(".") || "."))];
+}
+
 function uniqueArray<T>(schema: z.ZodType<T>, key: (value: T) => unknown = (value) => value) {
   return z.array(schema).superRefine((values, context) => {
     if (new Set(values.map(key)).size !== values.length) issue(context, []);
