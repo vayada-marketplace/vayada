@@ -89,7 +89,7 @@ export const RULES = [
   },
   {
     name: "python-backend",
-    test: /^apps\/(marketplace-api|booking-api|pms-api)\//,
+    test: /^apps\/(booking-api|pms-api)\//,
     jobs: ["backend"],
   },
   // pms_web_e2e, booking_web_e2e and booking_admin_e2e run each app's mocked Playwright project.

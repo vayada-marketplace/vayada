@@ -1302,15 +1302,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - app: marketplace-api
-            app_dir: apps/marketplace-api
-            db_user: vayada_user
-            db_password: vayada_password
-            db_name: vayada_db
-            test_db_name: vayada_test_db
-            db_port: 5432
-            cors_origins: http://localhost:3000,http://localhost:3001
-            frontend_url: http://localhost:3000
           - app: booking-api
             app_dir: apps/booking-api
             db_user: vayada_booking_user
@@ -1411,14 +1402,9 @@ jobs:
             sleep 2
           done
 
-          if [ "${{ matrix.app }}" = "marketplace-api" ]; then
-            PGPASSWORD="${{ matrix.db_password }}" psql -h localhost -p "${{ matrix.db_port }}" -U "${{ matrix.db_user }}" -d "${{ matrix.db_name }}" -c "CREATE DATABASE ${{ matrix.test_db_name }};" || true
-            PYTHONPATH=. python scripts/run_migrations.py
-          else
-            for f in migrations/*.sql; do
-              PGPASSWORD="${{ matrix.db_password }}" psql -h localhost -p "${{ matrix.db_port }}" -U "${{ matrix.db_user }}" -d "${{ matrix.db_name }}" -f "$f"
-            done
-          fi
+          for f in migrations/*.sql; do
+            PGPASSWORD="${{ matrix.db_password }}" psql -h localhost -p "${{ matrix.db_port }}" -U "${{ matrix.db_user }}" -d "${{ matrix.db_name }}" -f "$f"
+          done
         env:
           DATABASE_URL: postgresql://${{ matrix.db_user }}:${{ matrix.db_password }}@localhost:${{ matrix.db_port }}/${{ matrix.test_db_name || matrix.db_name }}
           AUTH_DATABASE_URL: postgresql://vayada_auth_user:vayada_auth_password@localhost:5435/vayada_auth_db
