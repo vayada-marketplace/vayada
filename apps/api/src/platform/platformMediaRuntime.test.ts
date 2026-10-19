@@ -1,8 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createPgPlatformMediaCleanupStore } from "../jobs/platformMediaCleanup.js";
+import {
+  createPgPlatformMediaCleanupStore,
+  DEFAULT_PLATFORM_MEDIA_CLEANUP_RUNS,
+} from "../jobs/platformMediaCleanup.js";
 import { createPgS3PropertyMediaCommandRepository } from "../domains/propertyMediaCommandRepository.js";
 import type { PlatformMediaServingConfig } from "./mediaServing.js";
+import { createCloudFrontMediaInvalidator } from "./platformMediaCdnInvalidation.js";
 import { createPgPlatformMediaRepository } from "./platformMediaRepository.js";
 import {
   composePlatformMediaRuntime,
@@ -104,6 +108,31 @@ describe("platform media runtime composition", () => {
     });
   });
 
+  it("adds the retired-media purge and its CDN invalidator only when configured (VAY-2272)", () => {
+    const { adapter, cdnInvalidator, factories } = fakeFactories();
+
+    const off = composePlatformMediaRuntime(completeInput, factories);
+    expect(off?.cleanupRuns).toEqual(DEFAULT_PLATFORM_MEDIA_CLEANUP_RUNS);
+    expect(factories.createCdnInvalidator).not.toHaveBeenCalled();
+
+    const on = composePlatformMediaRuntime(
+      { ...completeInput, retiredPurge: { cdnDistributionId: "E2EXAMPLE12345" } },
+      factories,
+    );
+    expect(factories.createCdnInvalidator).toHaveBeenCalledWith({
+      distributionId: "E2EXAMPLE12345",
+    });
+    expect(factories.createCleanupStore).toHaveBeenLastCalledWith({
+      connectionString: "postgresql://target-db",
+      objectDeleter: adapter,
+      cdnInvalidator,
+    });
+    expect(on?.cleanupRuns).toEqual([
+      ...DEFAULT_PLATFORM_MEDIA_CLEANUP_RUNS,
+      "retiredMarketplacePurge",
+    ]);
+  });
+
   it("keeps Inbox attachment mutations disabled outside the target PMS runtime", () => {
     const runtime = composePlatformMediaRuntime(
       { ...completeInput, pmsInboxEnabled: false },
@@ -118,17 +147,20 @@ function fakeFactories() {
   const adapter = {} as ReturnType<typeof createS3PlatformMediaAdapter>;
   const cleanupStore = {} as ReturnType<typeof createPgPlatformMediaCleanupStore>;
   const propertyMediaCommands = {} as ReturnType<typeof createPgS3PropertyMediaCommandRepository>;
+  const cdnInvalidator = {} as ReturnType<typeof createCloudFrontMediaInvalidator>;
   const factories: PlatformMediaRuntimeFactories = {
     createRepository: vi.fn(() => repository),
     createAdapter: vi.fn(() => adapter),
     createCleanupStore: vi.fn(() => cleanupStore),
     createPropertyMediaCommands: vi.fn(() => propertyMediaCommands),
+    createCdnInvalidator: vi.fn(() => cdnInvalidator),
   };
   return {
     repository,
     adapter,
     cleanupStore,
     propertyMediaCommands,
+    cdnInvalidator,
     factories,
   };
 }

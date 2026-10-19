@@ -215,6 +215,7 @@ import { createPropertySetupFinanceStateProvider } from "./platform/propertySetu
 import { createPropertySetupReviewLifecycleStateProvider } from "./platform/propertySetupReviewLifecycleState.js";
 import { createPropertySetupRouteStateReadPort } from "./platform/propertySetupRouteState.js";
 import {
+  PLATFORM_MEDIA_CLEANUP_MAX_ATTEMPTS,
   platformMediaCleanupFailureLogEntries,
   runPlatformMediaCleanupJobs,
 } from "./jobs/platformMediaCleanup.js";
@@ -939,6 +940,7 @@ const platformMediaRuntime = composePlatformMediaRuntime({
   pmsInboxEnabled: Boolean(pmsOperationsRepository),
   targetDatabaseUrl,
   platformMediaServing: config.platformMediaServing,
+  retiredPurge: config.platformMediaRetiredPurge,
   allowedOrigins: config.authSession?.authAllowedOrigins,
 });
 const pmsInboxRuntime = pmsOperationsRepository
@@ -2805,8 +2807,15 @@ if (platformMediaRuntime) {
   const runCleanup = () => {
     if (!config.backgroundWorkersEnabled) return;
     if (activeCleanup) return;
-    activeCleanup = runPlatformMediaCleanupJobs(platformMediaRuntime.cleanupStore)
+    activeCleanup = runPlatformMediaCleanupJobs(platformMediaRuntime.cleanupStore, {
+      run: platformMediaRuntime.cleanupRuns,
+    })
       .then((result) => {
+        // VAY-2272: objects a hotel still uses are left for a person; 0500 waits until none is left.
+        const blocked = result.runs.flatMap((run) => run.blocked ?? []);
+        if (blocked.length > 0) {
+          app.log.warn({ mediaObjectIds: blocked }, "Retired media purge skipped objects in use");
+        }
         const failures = platformMediaCleanupFailureLogEntries(result);
         const deadLettered = failures.filter((failure) => failure.deadLettered);
         const retrying = failures.filter((failure) => !failure.deadLettered);
@@ -2819,6 +2828,13 @@ if (platformMediaRuntime) {
         }
         if (retrying.length > 0) {
           app.log.info({ failures: retrying }, "Platform media cleanup will retry failed items");
+        }
+        // Only the retired-media purge (VAY-2272) retries past the cap: it never dead-letters.
+        const stuck = retrying.filter(
+          (failure) => failure.attempt >= PLATFORM_MEDIA_CLEANUP_MAX_ATTEMPTS,
+        );
+        if (stuck.length > 0) {
+          app.log.warn({ failures: stuck }, "Retired media purge keeps failing for items");
         }
       })
       .catch((error: unknown) => {
