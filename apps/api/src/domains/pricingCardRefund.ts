@@ -61,7 +61,13 @@ export async function previewPricingCardRefund(
          AND payment.payment_metadata->>'chargeType'='direct' AND payment.currency=booking.currency
          AND booking.payment_status IN ('paid','partially_paid')
          AND booking.booking_metadata->>'targetSource'='pricing_quote_draft'
-         AND booking.booking_metadata->>'paymentMethod'='card'`,
+         AND booking.booking_metadata->>'paymentMethod'='card'
+         -- Only the card was paid: once the rest was paid at the property too, the hotel settles
+         -- the cancel itself (VAY-2205).
+         AND NOT EXISTS (SELECT 1 FROM finance.payments other
+           WHERE other.property_id=booking.property_id AND other.guest_booking_id=booking.id
+             AND other.id<>payment.id AND other.payment_kind<>'refund'
+             AND other.status IN ('authorized','pending','paid','partially_refunded'))`,
       [input.propertyId, input.guestBookingId],
     )
   ).rows[0];
@@ -97,7 +103,11 @@ export async function stagePricingCardRefund(
          payment.provider_payment_intent_id AS intent,account.provider_account_id AS "accountRef",
          payment.payment_metadata->>'chargeType' AS "chargeType",trim(booking.currency) AS "bookingCurrency",
          booking.payment_status AS "bookingPaid",booking.booking_metadata->>'targetSource' AS source,
-         booking.booking_metadata->>'paymentMethod' AS "bookedMethod"
+         booking.booking_metadata->>'paymentMethod' AS "bookedMethod",
+         NOT EXISTS (SELECT 1 FROM finance.payments other
+           WHERE other.property_id=booking.property_id AND other.guest_booking_id=booking.id
+             AND other.id<>payment.id AND other.payment_kind<>'refund'
+             AND other.status IN ('authorized','pending','paid','partially_refunded')) AS "onlyCard"
        FROM booking.guest_bookings booking
        JOIN finance.payments payment
          ON payment.id=booking.active_card_payment_id AND payment.property_id=booking.property_id
@@ -134,6 +144,8 @@ export async function stagePricingCardRefund(
     (payment.bookingPaid !== "paid" && payment.bookingPaid !== "partially_paid") ||
     payment.source !== "pricing_quote_draft" ||
     payment.bookedMethod !== "card" ||
+    // Once the rest of a deposit was paid at the property, the hotel settles the cancel itself.
+    payment.onlyCard !== true ||
     payment.refunded !== "0.00" ||
     !paid ||
     typeof payment.intent !== "string" ||
