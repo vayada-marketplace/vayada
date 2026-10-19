@@ -99,6 +99,7 @@ export function createPricingPublicationFreshnessAlert(options: {
       subject: string;
       text: string;
       idempotencyKey: string;
+      emailProduct?: "platform";
     }): Promise<void>;
   };
   now?: () => Date;

@@ -161,6 +161,7 @@ export function createPricingCardReconciliationAlert(options: {
       subject: string;
       text: string;
       idempotencyKey: string;
+      emailProduct?: "platform";
     }): Promise<void>;
   };
 }) {
