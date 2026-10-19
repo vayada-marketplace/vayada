@@ -30,7 +30,6 @@ export type ApiAuthSessionConfig = {
   authFirstPartySurfaces: ApiAuthSurface[];
   authCookieSecure: boolean;
   authCookieDomain?: string;
-  authLegacyMarketplaceJwtSecret?: string;
   authBookingAdminLogoutUrl?: string;
   authLegacyBookingJwtSecret?: string;
   authPmsWebLogoutUrl?: string;
@@ -595,7 +594,6 @@ function loadAuthSessionConfig(env: NodeJS.ProcessEnv): ApiAuthSessionConfig | u
     authFirstPartySurfaces,
     authCookieSecure,
     authCookieDomain: readOptionalEnv(env, "AUTH_COOKIE_DOMAIN"),
-    authLegacyMarketplaceJwtSecret: readOptionalEnv(env, "AUTH_LEGACY_MARKETPLACE_JWT_SECRET"),
     authBookingAdminLogoutUrl: readOptionalEnv(env, "AUTH_BOOKING_ADMIN_LOGOUT_URL"),
     authLegacyBookingJwtSecret: readOptionalEnv(env, "AUTH_LEGACY_BOOKING_JWT_SECRET"),
     authPmsWebLogoutUrl: readOptionalEnv(env, "AUTH_PMS_WEB_LOGOUT_URL"),
