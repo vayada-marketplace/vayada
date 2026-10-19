@@ -4273,10 +4273,8 @@ describe("AuthKit session routes", () => {
     expect(preflight.headers["access-control-allow-credentials"]).toBe("true");
   });
 
-  it("mints a short-lived marketplace admin compatibility token after platform session resolution", async () => {
-    app = buildAuthSessionApp({
-      legacyMarketplaceJwtSecret: "legacy-secret",
-    });
+  it("no longer mints a legacy Marketplace compatibility token for platform admins", async () => {
+    app = buildAuthSessionApp();
 
     const response = await app.inject({
       method: "POST",
@@ -4288,17 +4286,7 @@ describe("AuthKit session routes", () => {
       },
     });
 
-    expect(response.statusCode).toBe(200);
-    expect(response.json()).toMatchObject({
-      accessToken: expect.any(String),
-      expiresIn: 900,
-      tokenType: "Bearer",
-    });
-    expect(readJwtPayload(response.json().accessToken)).toMatchObject({
-      sub: "user_platform_admin",
-      email: "f.maliqi@vayada.com",
-      type: "admin",
-    });
+    expect(response.statusCode).toBe(404);
   });
 
   it("mints a hotel-scoped booking compatibility token for a hotel-group session", async () => {
@@ -5467,7 +5455,6 @@ function buildAuthSessionApp(
     lifecycleCommandBus?: IdentityLifecycleCommandBus;
     productAuditSink?: { record(event: ProductAuditEvent): Promise<void> };
     tokenVerifier?: TokenVerifier;
-    legacyMarketplaceJwtSecret?: string;
     allowedOrigins?: string[];
     compatibilityCallbackOrigin?: string;
     cookieSecure?: boolean;
@@ -5507,7 +5494,6 @@ function buildAuthSessionApp(
       oauthStateSecret: "test-oauth-state-secret",
       cookieSecure: options.cookieSecure ?? false,
       ...(options.cookieDomain ? { cookieDomain: options.cookieDomain } : {}),
-      legacyMarketplaceJwtSecret: options.legacyMarketplaceJwtSecret,
       profileImageMediaRepository: options.profileImageMediaRepository,
       hotelAccountInviteOnboarding: options.hotelAccountInviteOnboarding,
       handoffRepository: options.handoffRepository,

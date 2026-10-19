@@ -7,14 +7,12 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE_FILES=(-f docker-compose.yml -f docker-compose.portless.yml)
 BACKEND_SERVICES=(
-  marketplace-postgres
   booking-postgres
   auth-postgres
   pms-postgres
   auth-db-migrate
   minio
   minio-setup
-  marketplace-backend
   booking-backend
   pms-backend
 )
@@ -47,7 +45,6 @@ echo "==> Starting Docker databases and FastAPI backends"
 docker compose "${COMPOSE_FILES[@]}" up -d "${BACKEND_SERVICES[@]}"
 
 echo "==> Ensuring portless API aliases exist"
-portless alias api.marketplace 8000
 portless alias api.booking 8001
 portless alias api.pms 8002
 

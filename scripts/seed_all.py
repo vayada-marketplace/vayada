@@ -1,5 +1,5 @@
 """
-Run all seed scripts in order: users -> marketplace -> booking engine.
+Run all seed scripts in order: users -> booking engine.
 
 Usage:
     python scripts/seed_all.py
@@ -13,7 +13,6 @@ SCRIPTS_DIR = Path(__file__).parent
 
 SCRIPTS = [
     ("Auth users", SCRIPTS_DIR / "seed_users.py"),
-    ("Marketplace", SCRIPTS_DIR / "seed_marketplace.py"),
     ("Booking engine", SCRIPTS_DIR / "seed_booking.py"),
 ]
 
@@ -37,7 +36,7 @@ def main():
     print("    hotel2@mock.com (Grand Hotel Riviera)  — COMPLETE")
     print("    hotel3@mock.com (The Birchwood Lodge)  — COMPLETE")
     print("    hotel4@mock.com (City Center Hotel)    — incomplete (minimal data)")
-    print("    hotel5@mock.com (Seaside Retreat)      — no booking record (marketplace pre-fill)")
+    print("    hotel5@mock.com (Seaside Retreat)      — no booking record")
     print()
     print("  Credentials:")
     print("    Admin:    admin@vayada.com / Vayada123")
