@@ -415,48 +415,64 @@ describe("target provider webhook routes", () => {
   );
 
   // VAY-2293: without the Inbox receipt path, booking and platform events are acknowledged so
-  // Resend stops retrying; untagged and Inbox events still ask for a retry.
+  // Resend stops retrying (signature still checked when a secret exists); untagged and Inbox
+  // events still ask for a retry.
   it.each([
-    ["platform", "secret", 200, { status: "ignored_platform_notification" }],
-    ["booking", "secret", 200, { status: "ignored_booking_notification" }],
-    ["platform", "store", 200, { status: "ignored_platform_notification" }],
-    ["pms_inbox", "secret", 503, { error: "resend_webhook_not_configured" }],
-    [null, "store", 503, { error: "resend_webhook_not_configured" }],
-    ["platform-x", "secret", 503, { error: "resend_webhook_not_configured" }],
-  ] as const)("answers %s events without a configured %s", async (tag, missing, status, body) => {
-    const recordTrustedProviderReceipt = vi.fn(async () => ({ matchCount: 1, recorded: true }));
-    const app = buildApp({
-      providerWebhooks: {
-        secrets: {
-          resend:
-            missing === "secret"
-              ? undefined
-              : `whsec_${Buffer.from("resend-unconfigured").toString("base64")}`,
+    ["platform", "secret", "none", 200, { status: "ignored_platform_notification" }],
+    ["booking", "secret", "none", 200, { status: "ignored_booking_notification" }],
+    ["platform", "store", "valid", 200, { status: "ignored_platform_notification" }],
+    ["platform", "store", "invalid", 400, { error: "invalid_resend_signature" }],
+    ["pms_inbox", "secret", "none", 503, { error: "resend_webhook_not_configured" }],
+    [null, "store", "valid", 503, { error: "resend_webhook_not_configured" }],
+    ["platform-x", "secret", "none", 503, { error: "resend_webhook_not_configured" }],
+  ] as const)(
+    "answers %s events without a configured %s (%s signature)",
+    async (tag, missing, signature, status, body) => {
+      const secret = `whsec_${Buffer.from("resend-unconfigured").toString("base64")}`;
+      const recordTrustedProviderReceipt = vi.fn(async () => ({ matchCount: 1, recorded: true }));
+      const app = buildApp({
+        providerWebhooks: {
+          secrets: { resend: missing === "secret" ? undefined : secret },
+          store: createMemoryProviderWebhookStore(),
+          ...(missing === "store"
+            ? {}
+            : { pmsInboxDeliveryReceipts: { recordTrustedProviderReceipt } }),
         },
-        store: createMemoryProviderWebhookStore(),
-        ...(missing === "store"
-          ? {}
-          : { pmsInboxDeliveryReceipts: { recordTrustedProviderReceipt } }),
-      },
-    });
-    try {
-      const response = await app.inject({
-        method: "POST",
-        url: "/webhooks/resend",
-        headers: { "content-type": "application/json" },
-        payload: JSON.stringify({
-          type: "email.delivered",
-          created_at: "2026-10-19T21:26:30Z",
-          data: { email_id: "email-unconfigured", tags: tag ? { vayada_product: tag } : undefined },
-        }),
       });
-      expect(response.statusCode).toBe(status);
-      expect(response.json()).toEqual(body);
-      expect(recordTrustedProviderReceipt).not.toHaveBeenCalled();
-    } finally {
-      await app.close();
-    }
-  });
+      const payload = JSON.stringify({
+        type: "email.delivered",
+        created_at: "2026-10-19T21:26:30Z",
+        data: { email_id: "email-unconfigured", tags: tag ? { vayada_product: tag } : undefined },
+      });
+      const id = "msg_resend_unconfigured";
+      const timestamp = new Date();
+      try {
+        const response = await app.inject({
+          method: "POST",
+          url: "/webhooks/resend",
+          headers: {
+            "content-type": "application/json",
+            ...(signature === "none"
+              ? {}
+              : {
+                  "svix-id": id,
+                  "svix-timestamp": String(Math.floor(timestamp.getTime() / 1000)),
+                  "svix-signature":
+                    signature === "valid"
+                      ? new Webhook(secret).sign(id, timestamp, payload)
+                      : "v1,invalid",
+                }),
+          },
+          payload,
+        });
+        expect(response.statusCode).toBe(status);
+        expect(response.json()).toEqual(body);
+        expect(recordTrustedProviderReceipt).not.toHaveBeenCalled();
+      } finally {
+        await app.close();
+      }
+    },
+  );
 
   it("records an authenticated Resend delivery receipt against its provider reference", async () => {
     const secret = `whsec_${Buffer.from("resend-webhook-secret").toString("base64")}`;

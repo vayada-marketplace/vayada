@@ -181,6 +181,8 @@ export function createPricingCardReconciliationAlert(options: {
       subject: `Vayada: ${mismatches.length} card payment difference(s) with Stripe`,
       text,
       idempotencyKey: `pricing-card-reconciliation:${day}:${createHash("sha256").update(text).digest("hex").slice(0, 32)}`,
+      // VAY-2293: the Resend webhook acknowledges platform events instead of retrying them.
+      emailProduct: "platform",
     });
     return true;
   };

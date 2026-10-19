@@ -266,13 +266,17 @@ export const registerProviderWebhookRoutes: FastifyPluginAsync<
 
   app.post<{ Body: string }>("/webhooks/resend", async (request, reply) => {
     const secret = options.secrets.resend;
-    // VAY-2293: booking and platform (contact form, support) emails need no delivery receipt.
-    // Without the Inbox receipt path their events are acknowledged unverified, which is safe
-    // because nothing is recorded; untagged and Inbox events keep the 503 so Resend retries them.
-    const product = resendNonInboxProduct(request.body);
     if (!secret || !options.pmsInboxDeliveryReceipts) {
-      if (product) return reply.code(200).send({ status: `ignored_${product}_notification` });
-      return reply.code(503).send({ error: "resend_webhook_not_configured" });
+      // VAY-2293: booking and platform (contact form, support, alert) emails need no delivery
+      // receipt, so their events are acknowledged even without the Inbox receipt path; nothing is
+      // recorded. With a secret the signature is still checked. Untagged and Inbox events keep
+      // the 503 so Resend retries them.
+      const unconfigured = parseJsonPayload(request.body);
+      const product = unconfigured.ok ? resendNonInboxProduct(unconfigured.value) : null;
+      if (!product) return reply.code(503).send({ error: "resend_webhook_not_configured" });
+      if (secret && !resendSignatureValid(secret, request.headers, request.body))
+        return reply.code(400).send({ error: "invalid_resend_signature" });
+      return reply.code(200).send({ status: `ignored_${product}_notification` });
     }
     const id = request.headers["svix-id"];
     const timestamp = request.headers["svix-timestamp"];
@@ -301,6 +305,7 @@ export const registerProviderWebhookRoutes: FastifyPluginAsync<
 
     // Only a signed event of a non-Inbox product (booking, platform) bypasses Inbox correlation.
     // Untagged/unknown events retain retries for old sends and acceptance races.
+    const product = resendNonInboxProduct(payload.value);
     if (product) return reply.code(200).send({ status: `ignored_${product}_notification` });
 
     const result = await options.pmsInboxDeliveryReceipts.recordTrustedProviderReceipt({
@@ -1539,14 +1544,34 @@ function fallbackPreview(
 }
 
 /** The `vayada_product` tag of a Resend event when it names a product without Inbox receipts. */
-function resendNonInboxProduct(body: string): "booking" | "platform" | null {
-  const payload = parseJsonPayload(body);
-  if (!payload.ok) return null;
+function resendNonInboxProduct(event: Record<string, unknown>): "booking" | "platform" | null {
   const product = optionalString(
-    optionalRecord(optionalRecord(payload.value, "data"), "tags"),
+    optionalRecord(optionalRecord(event, "data"), "tags"),
     "vayada_product",
   );
   return product === "booking" || product === "platform" ? product : null;
+}
+
+function resendSignatureValid(
+  secret: string,
+  headers: Record<string, string | string[] | undefined>,
+  body: string,
+): boolean {
+  const id = headers["svix-id"];
+  const timestamp = headers["svix-timestamp"];
+  const signature = headers["svix-signature"];
+  if (typeof id !== "string" || typeof timestamp !== "string" || typeof signature !== "string")
+    return false;
+  try {
+    new Webhook(secret).verify(body, {
+      "svix-id": id,
+      "svix-timestamp": timestamp,
+      "svix-signature": signature,
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function parseJsonPayload(

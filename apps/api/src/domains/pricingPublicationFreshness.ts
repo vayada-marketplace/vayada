@@ -131,6 +131,8 @@ export function createPricingPublicationFreshnessAlert(options: {
       subject: `Vayada: ${summary.problems} published price list(s) need "Save prices"`,
       text,
       idempotencyKey: `pricing-publication-freshness:${day}:${createHash("sha256").update(text).digest("hex").slice(0, 32)}`,
+      // VAY-2293: the Resend webhook acknowledges platform events instead of retrying them.
+      emailProduct: "platform",
     });
     lastSentAt = now.getTime();
     return true;

@@ -193,10 +193,10 @@ export async function runContactNotificationJobs(
         // VAY-2293: tagged so the Resend webhook acknowledges its events instead of matching them
         // against PMS Inbox messages.
         await delivery.send({
+          ...email,
           to: options.recipient,
           idempotencyKey: job.jobKey,
           emailProduct: "platform",
-          ...email,
         });
         if ((await finishContactJob(pool, job, startedAt, "succeeded")).recorded) processed += 1;
       } catch (error) {
