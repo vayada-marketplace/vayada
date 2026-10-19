@@ -157,3 +157,22 @@ it("keeps the server clock across a reload, so a replayed quote is judged on it 
   resetServerClock();
   await expect(requestReplacementQuote("hotel", request)).rejects.toThrow("expired");
 });
+it("reads a card deposit: part now, the rest at the property, one schedule for the stay (VAY-2205)", () => {
+  const card = { ...request, paymentMethod: "card" as const };
+  const deposit = { kind: "deposit", basisPoints: 3000, balanceDaysBeforeArrival: 0, acceptedMethods: ["card"] };
+  const depositReply = (payment: (index: number) => unknown = () => deposit, dueNowMinor = "6180", dueLaterMinor = "14420") => ({
+    ...reply(), paymentMethod: "card", dueNowMinor, dueLaterMinor,
+    rooms: reply().rooms.map((room, index) => ({ ...room, payment: payment(index) })),
+  });
+  expect(parsePublicBookingQuote(depositReply(), card)).toMatchObject({ dueNowMinor: "6180", dueLaterMinor: "14420" });
+  for (const invalid of [
+    depositReply(() => ({ ...deposit, balanceDaysBeforeArrival: 7 })),
+    depositReply(() => ({ ...deposit, acceptedMethods: ["card", "pay_at_property"] })),
+    depositReply(() => ({ ...deposit, basisPoints: 10000 })),
+    depositReply((index) => (index ? { ...deposit, basisPoints: 5000 } : deposit)),
+    depositReply((index) => (index ? { kind: "full", acceptedMethods: ["card"] } : deposit)),
+    depositReply(undefined, "20600", "0"),
+  ]) expect(parsePublicBookingQuote(invalid, card)).toBeNull();
+  // Never for pay at the property.
+  expect(parsePublicBookingQuote({ ...depositReply(), paymentMethod: "pay_at_property" }, request)).toBeNull();
+});

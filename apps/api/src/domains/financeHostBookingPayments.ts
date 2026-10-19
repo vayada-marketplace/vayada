@@ -80,7 +80,7 @@ export function createFinanceHostBookingPayments(
       payment.method === "card" &&
       payment.chargeType === "direct" &&
       payment.activePaymentId === payment.id &&
-      payment.bookingPaid === "paid" &&
+      (payment.bookingPaid === "paid" || payment.bookingPaid === "partially_paid") &&
       payment.pricingCard &&
       payment.currency === payment.bookingCurrency &&
       payment.intentId &&

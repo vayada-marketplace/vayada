@@ -102,9 +102,13 @@ export async function reconcilePricingCardPayments(
       `SELECT id,property_id,guest_booking_id,status,provider_refund_id AS "refundId",
          provider_account_ref AS "accountRef",failure_reason AS reason,
          created_at<now()-interval '1 day' AS old
-       FROM finance.card_refund_commands
+       FROM finance.card_refund_commands command
        WHERE (status='succeeded' AND settled_at>=now()-make_interval(days=>$1))
-          OR (status='failed' AND settled_at>=now()-make_interval(days=>$1))
+          -- A failure the hotel retried is no longer a difference: the newer refund is checked.
+          OR (status='failed' AND settled_at>=now()-make_interval(days=>$1)
+              AND NOT EXISTS (SELECT 1 FROM finance.card_refund_commands newer
+                WHERE newer.payment_id=command.payment_id AND newer.property_id=command.property_id
+                  AND newer.created_at>command.created_at))
           OR status='pending'
        ORDER BY created_at DESC LIMIT 500`,
       [windowDays],

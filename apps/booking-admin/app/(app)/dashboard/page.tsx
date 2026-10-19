@@ -5,6 +5,7 @@ import { useTranslation } from "@/lib/i18n";
 import { formatCurrency, formatNumber } from "@/lib/utils";
 import { settingsService, type PropertySettings } from "@/services/settings";
 import { BookingPageStatusCard } from "@/components/dashboard/BookingPageStatusCard";
+import { ResumeSetupBanner } from "@/components/dashboard/ResumeSetupBanner";
 import { ConversionFunnelCard } from "@/components/dashboard/ConversionFunnelCard";
 import { SummaryCard } from "@/components/dashboard/SummaryCard";
 import { PageHeader, PageLayout } from "@/components/layout/PageLayout";
@@ -217,6 +218,8 @@ export default function DashboardPage() {
   return (
     <PageLayout className="space-y-3 md:space-y-4">
       <PageHeader title={t("dashboard.title")} />
+
+      <ResumeSetupBanner />
 
       <BookingPageStatusCard />
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useId, useRef, useState, type MutableRefObject, type ReactNode } from "react";
-import { pricingAmountStep, pricingCurrencyScale, parsePricingConfiguration } from "@vayada/domain-pms/replacement-pricing";
+import { pricingAmountStep, pricingCurrencyScale, parsePricingConfiguration, pricingOfferOnBookingPage } from "@vayada/domain-pms/replacement-pricing";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import { useTranslation } from "@/lib/i18n";
 import { ApiErrorResponse } from "@/services/api/client";
@@ -13,7 +13,7 @@ import type { NewRoomPrices } from "./newRoomPrices";
 import type { KeptNewRoomPrices } from "./keptNewRoomPrices";
 import { FirstPricingSetup, type SetupRoom, type firstPricingInput } from "./FirstPricingSetup";
 import { PricingTerms } from "./PricingTerms";
-import { PricingManualMethodsProvider, useLoadedPricingManualMethods } from "./pricingManualMethods";
+import { PricingCardReadinessProvider, PricingManualMethodsProvider, useLoadedPricingCardReadiness, useLoadedPricingManualMethods } from "./pricingManualMethods";
 import { PricingIncludedAdjustments } from "./PricingIncludedAdjustments";
 import { PricingStayOwnership } from "./PricingStayOwnership";
 import { PricingStaySeasons } from "./PricingStaySeasons";
@@ -26,6 +26,7 @@ import { NewLinkedOffer } from "./NewLinkedOffer";
 import { PricingLinkedParent } from "./PricingLinkedParent";
 import { PricingMealPlan } from "./PricingMealPlan";
 import { PricingMealCharges } from "./PricingMealCharges";
+import { PricingMealText } from "./PricingMealText";
 import { PricingChildCharges } from "./PricingChildCharges";
 import { PricingLinkedAdjustment } from "./PricingLinkedAdjustment";
 import { PricingDates } from "./PricingDates";
@@ -35,7 +36,7 @@ import { StepSeasons } from "./StepSeasons";
 import { StepWeekends } from "./StepWeekends";
 import { addDays, deleteBlocker, deleteOption, mainOffer, missingPresets, money, normalNight, optionNames, sampleAdults, sampleStay, type OptionTerms, type PresetKey } from "./stepPricing";
 import { lowestNightMinor, nightsWithoutPrice } from "./priceCalendarModel";
-import { simpleRoom } from "./simplePricing";
+import { setOfferSale, simpleRoom } from "./simplePricing";
 import { StepRates } from "./StepRates";
 import { StepExtras } from "./StepExtras";
 import { keptSettings, MoreGroup, simpleSummary } from "./SimpleMoreOptions";
@@ -68,6 +69,7 @@ type NewRoom = { take: MutableRefObject<(() => NewRoomPrices | null) | null>; ac
  * page already warns that the prices need saving again, so the editor does not repeat it. */
 export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, roomTypeId: focus, onAttention, onPublished, refresh = 0, newRoom, kept, onHandover, staleShown = false }: { client: Client; roomNames?: Record<string, string>; roomFacts?: Record<string, { size: number | null; photo: string | null }>; setup?: { propertyId: string; rooms: readonly SetupRoom[] }; roomTypeId: string; onAttention?: () => void; onPublished?: () => void; refresh?: number; newRoom?: NewRoom; kept?: KeptNewRoomPrices; onHandover?: (kept: boolean) => void; staleShown?: boolean }) {
   const manualMethods = useLoadedPricingManualMethods(client);
+  const cardReadiness = useLoadedPricingCardReadiness(client);
   const onPrices = newRoom?.onPrices;
   const callbacks = useRef({ onAttention, onPublished, onPrices, onHandover });
   useEffect(() => { callbacks.current = { onAttention, onPublished, onPrices, onHandover }; }, [onAttention, onPublished, onPrices, onHandover]);
@@ -320,11 +322,13 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
     return () => { live = false; };
   }, [firstTime, client]);
   const focusIndex = display ? display.rooms.findIndex((room) => room.roomTypeId === focus) : -1, editing = focusIndex >= 0;
-  // The Save bar's "Guests pay from" (VAY-2280): the focused room's lowest standard or season night this year, over its rates.
+  // The Save bar's "Guests pay from" (VAY-2280): the focused room's lowest standard or season night this year, over the
+  // rates guests can book (VAY-2285).
   let guestsFrom = "";
   if (display && editing) try {
     const shown = editedSnapshot(display, inputs).rooms[focusIndex]!, rate = simpleRoom(shown, optionTerms)?.nonRefundable;
-    const minor = lowestNightMinor(shown, [mainOffer(shown).id, ...(rate ? [rate.id] : [])], sampleAdults(shown), String(new Date().getFullYear()));
+    const booked = [mainOffer(shown), ...(rate ? [rate] : [])].filter(pricingOfferOnBookingPage).map((offer) => offer.id);
+    const minor = lowestNightMinor(shown, booked, sampleAdults(shown), String(new Date().getFullYear()));
     if (minor) guestsFrom = t("pricing.bar.from", { amount: money(minor, shown.currency) });
   } catch { guestsFrom = ""; }
   const shownRooms = (display?.rooms ?? []).map((room, ri) => [room, ri] as const).filter(([room]) => room.roomTypeId === focus);
@@ -344,7 +348,7 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
   const cancels = leaveRisk && !needsReload && !retry && !busy && !done;
   // No prices yet (VAY-2280): the first-price form shows the calendar of nights waiting for one, beside "Start with one price".
   // Laid out as the Paper design's numbered steps; the other editors sit under More options. Cancel and Save at the bottom.
-  return <PricingManualMethodsProvider value={manualMethods}><section className="space-y-4">
+  return <PricingManualMethodsProvider value={manualMethods}><PricingCardReadinessProvider value={cardReadiness}><section className="space-y-4">
     {error !== null && <div role="alert" className={ui.errorBanner}>{pricingSaveError(error, t)}{retry && <p className="mt-2">{t("pricing.editor.retryHint")}</p>}{keepsOnReload && <p className="mt-2">{t("pricing.room.reloadKeeps")}</p>}</div>}
     {notice && !(staleShown && notice === "pricing.room.noticeStale") && <p role="status" className={warning ? ui.warningBanner : ui.successBanner}>{t(notice)}</p>}
     {loading && <p role="status" className={ui.text}>{t("pricing.editor.loading")}</p>}
@@ -377,18 +381,22 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
         if (!key.startsWith(`${ri}:${oi}:`)) return false;
         try { parseMinorInput(value, scale, false, pricingAmountStep(room.currency)); return false; } catch { return true; }
       });
-      const windowKeys = (oi: number) => (oi === mi ? ["policy", "included", "mealPlan", "meal"] : ["policy", "included", "date", "weekday", "month", "season", "mealPlan", "meal", "parent", "linked", "ownership", "stay", "stayDate", "staySeason"]).map((key) => `${key}:${ri}:${oi}`);
+      const windowKeys = (oi: number) => (oi === mi ? ["policy", "included", "mealPlan", "meal", "mealText"] : ["policy", "included", "date", "weekday", "month", "season", "mealPlan", "meal", "mealText", "parent", "linked", "ownership", "stay", "stayDate", "staySeason"]).map((key) => `${key}:${ri}:${oi}`);
       const cancelAdding = () => { if (!disabled) { setAddingOfferRoom(null); setError(null); } };
       const group = (title: string) => <h3 className={`pt-2 ${ui.cardHeading}`}>{title}</h3>;
       const now = new Date(), today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
       const sample = sampleStay(edited ?? room, today), stayNights = Math.round((Date.parse(sample.checkOut) - Date.parse(sample.checkIn)) / 86400000);
       const stay = stayStart ? { checkIn: stayStart, checkOut: addDays(stayStart, stayNights) } : sample;
-      const previewId = previewOffer && room.offers.some((offer) => offer.id === previewOffer) ? previewOffer : main.id;
+      // Options off the booking page (VAY-2285) aren't in the guest card or the calendar's rates.
+      const firstShown = room.offers.find(pricingOfferOnBookingPage) ?? main;
+      const previewId = previewOffer && room.offers.some((offer) => offer.id === previewOffer && pricingOfferOnBookingPage(offer)) ? previewOffer : firstShown.id;
       const termsFailed = room.offers.some((offer) => !policyEdits[policyKey(focus, offer.id)] && savedTerms[termsKey(offer)] === null);
       const simple = simpleRoom(room, optionTerms), kept = keptSettings(room, simple);
       // VAY-2284: the calendar shows what guests pay for the rates, Flexible and Non-refundable; other options build on them.
-      const rates = [{ id: main.id, name: t("pricing.calendar.flexible") }, ...(simple?.nonRefundable ? [{ id: simple.nonRefundable.id, name: t("pricing.calendar.nonRefundable") }] : [])];
-      const calendarId = rates.some((rate) => rate.id === previewId) ? previewId : main.id;
+      const rates = [{ offer: main, name: t("pricing.calendar.flexible") }, ...(simple?.nonRefundable ? [{ offer: simple.nonRefundable, name: t("pricing.calendar.nonRefundable") }] : [])]
+        .filter(({ offer }) => pricingOfferOnBookingPage(offer)).map(({ offer, name }) => ({ id: offer.id, name }));
+      const calendarId = rates.some((rate) => rate.id === previewId) ? previewId : rates[0]?.id ?? main.id;
+      const others = simple ? simple.others : room.offers.filter((offer) => offer.id !== main.id);
       const gaps = edited ? nightsWithoutPrice(edited, main.id, sampleAdults(edited), today) : 0;
       // The approved layout (VAY-2280): "Prices by date" first, then the price rules beside "What guests see".
       return <div key={room.roomTypeId} className="space-y-6">
@@ -427,9 +435,13 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
             onRemove={(offerId) => { if (!disabled && !pendingBesidesExtras) setDeleting(offerId); }} onChange={changeRoom(ri)} onPending={pend(`rates:${ri}`)}
             edited={room.offers.filter((offer) => policyEdits[policyKey(focus, offer.id)]).map((offer) => offer.id)}>
             <div className="space-y-2">
-              <h4 className="text-[11px] font-semibold uppercase tracking-[0.06em] text-gray-500">{t("pricing.rates.others")}</h4>
-              <StepOptions room={room} offers={simple ? simple.others : room.offers.filter((offer) => offer.id !== main.id)} names={names} terms={optionTerms} prices={prices} disabled={disabled}
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <h4 className="text-[11px] font-semibold uppercase tracking-[0.06em] text-gray-500">{t("pricing.rates.others")}</h4>
+                {others.length > 0 && <p className="text-[12px] text-gray-500">{t("pricing.rates.othersHint")}</p>}
+              </div>
+              <StepOptions room={room} offers={others} names={names} terms={optionTerms} prices={prices} disabled={disabled}
                 termsFailed={termsFailed} onRetryTerms={retryTerms} onEdit={(offerId) => setOptionOpen(offerId)}
+                onSale={(offerId, sale) => { if (!disabled) try { changeRoom(ri)(setOfferSale(room, offerId, sale)); } catch { /* the room's last booking-page option keeps its place */ } }}
                 add={<>
                   {missingPresets(room, optionTerms).filter((key) => !(key === "non_refundable" && simple?.cancellation.kind === "free") && !(key === "breakfast" && simple && simple.cancellation.kind !== "own")).map((key) => <AddOptionButton key={key} label={t(`pricing.steps.preset.button.${key}`)} disabled={disabled || hasPendingEntries}
                     onClick={() => { if (!disabled && !hasPendingEntries) { setPreset(key); setError(null); } }} />)}
@@ -492,6 +504,7 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
             <div className="space-y-2">
               <PricingMealPlan room={room} offer={offer} label={label} disabled={disabled} blocked={hasPendingEntries} onPending={pend(`mealPlan:${ri}:${oi}`)} onChange={changeRoom(ri)} />
               <PricingMealCharges room={room} offer={offer} label={label} disabled={disabled || exclusiveEditPending} onPending={pend(`meal:${ri}:${oi}`)} onChange={changeRoom(ri)} />
+              <PricingMealText room={room} offer={offer} disabled={disabled || exclusiveEditPending} onPending={pend(`mealText:${ri}:${oi}`)} onChange={changeRoom(ri)} />
             </div>
             {group(t("pricing.steps.option.terms"))}
             <PricingTerms propertyId={room.propertyId} client={client} roomTypeId={room.roomTypeId} offerId={offer.id} revision={offer.termsRevision}
@@ -550,7 +563,7 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
     {/* Last, so they open above an option's window. */}
     {reloading && <ConfirmDialog title={t(cancels ? "pricing.steps.discardTitle" : "pricing.reloadTitle")} message={t(cancels ? "pricing.steps.discardMessage" : "pricing.reloadMessage")} confirmLabel={t(cancels ? "pricing.steps.discardConfirm" : "pricing.reloadConfirm")} cancelLabel={t("common.cancel")} variant="danger" onConfirm={() => { setReloading(false); void load(); }} onCancel={() => setReloading(false)} />}
     {leave && <ConfirmDialog title={t("pricing.leaveTitle")} message={t("pricing.leaveMessage")} confirmLabel={t("pricing.leaveConfirm")} cancelLabel={t("common.cancel")} variant="danger" onConfirm={() => { leaving.current = true; setLeave(null); leave(); }} onCancel={() => setLeave(null)} />}
-  </section></PricingManualMethodsProvider>;
+  </section></PricingCardReadinessProvider></PricingManualMethodsProvider>;
 }
 /** A room's prices without what a save assigns (its revision and its options' terms revisions). */
 const savedPrices = (room: Room) => ({ ...room, revision: 0, offers: room.offers.map((offer) => ({ ...offer, termsRevision: "" })) });

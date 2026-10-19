@@ -33,6 +33,10 @@ function todayIn(timeZone?: string): string {
   }
 }
 
+/** The whole card payment goes back: decided on the amounts, never on a rounded percentage. */
+const fullRefund = (preview: { amountPaid?: number; refundAmount: number }) =>
+  (preview.amountPaid ?? 0) > 0 && preview.refundAmount >= (preview.amountPaid ?? 0);
+
 export default function MyBookingPageClient() {
   const t = useTranslations("myBooking");
   const locale = useLocale();
@@ -425,16 +429,14 @@ export default function MyBookingPageClient() {
               <div className="mb-4 space-y-2">
                 <div
                   className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium ${
-                    cancelPreview.cancellationFeeAmount === 0 ||
-                    cancelPreview.refundPercentage >= 100
+                    cancelPreview.cancellationFeeAmount === 0 || fullRefund(cancelPreview)
                       ? "bg-green-100 text-green-700"
-                      : cancelPreview.refundPercentage > 0
+                      : cancelPreview.refundAmount > 0
                         ? "bg-yellow-100 text-yellow-700"
                         : "bg-red-100 text-red-700"
                   }`}
                 >
-                  {cancelPreview.cancellationFeeAmount === 0 ||
-                  cancelPreview.refundPercentage >= 100
+                  {cancelPreview.cancellationFeeAmount === 0 || fullRefund(cancelPreview)
                     ? t("freeCancellation")
                     : t("cancellationFeeApplies")}
                 </div>
@@ -449,17 +451,18 @@ export default function MyBookingPageClient() {
                             cancelPreview.currency,
                           ),
                         })
-                      : cancelPreview.refundPercentage >= 100
+                      : fullRefund(cancelPreview)
                         ? t("fullRefund", {
                             amount: formatPrice(cancelPreview.refundAmount, cancelPreview.currency),
                           })
-                        : cancelPreview.refundPercentage > 0
+                        : cancelPreview.refundAmount > 0
                           ? t("partialRefund", {
                               amount: formatPrice(
                                 cancelPreview.refundAmount,
                                 cancelPreview.currency,
                               ),
-                              percentage: cancelPreview.refundPercentage,
+                              // A part refund never reads 0% or 100% (VAY-2205).
+                              percentage: Math.min(99, Math.max(1, cancelPreview.refundPercentage)),
                             })
                           : t("noRefund")}
                 </p>

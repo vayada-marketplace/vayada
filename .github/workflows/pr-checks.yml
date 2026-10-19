@@ -10,7 +10,8 @@ on:
       - "fix/**"
       - "flamurmaliqi2811/**"
   # The merge queue tests each queued PR on top of main and the entries ahead of it; the ruleset
-  # waits for the same "Required Checks" status there.
+  # waits for the same "Required Checks" status there. It runs every job (VAY-2287): main
+  # fast-forwards to the tested commit, so the release precheck reuses this run.
   merge_group:
     types: [checks_requested]
     branches:
@@ -50,23 +51,15 @@ jobs:
       - name: Checkout merge commit and its parents
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          # A queue entry sits on the entries ahead of it, so it needs enough history to reach main.
-          fetch-depth: ${{ github.event_name == 'merge_group' && 50 || 2 }}
+          fetch-depth: 2
           persist-credentials: false
-
-      - name: Fetch the merge queue's base branch
-        if: github.event_name == 'merge_group'
-        env:
-          BASE_REF: ${{ github.event.merge_group.base_ref }}
-        # Without the base the selector cannot find a merge-base and runs every job.
-        run: |
-          git fetch --no-tags --depth=50 origin "+${BASE_REF}:refs/remotes/origin/merge-queue-base" ||
-            echo "::warning::Could not fetch ${BASE_REF}; every job will run"
 
       - name: Select jobs from changed paths
         id: select
         env:
-          MERGE_GROUP_BASE: refs/remotes/origin/merge-queue-base
+          # A pull request into another pull request's branch runs only the quick jobs unless it
+          # carries this label (STACKED_PR_JOBS and FULL_CI_LABEL in pr-checks.mjs).
+          PR_FULL_CI: ${{ contains(github.event.pull_request.labels.*.name, 'full-ci') }}
         run: node scripts/ci/pr-checks.mjs select
 
   frontend:
@@ -232,13 +225,19 @@ jobs:
   # The mocked pms-web Playwright project against a plain-port dev server. Every API call is
   # mocked in tests/e2e/support, so no backend or database runs here.
   pms_web_e2e:
-    name: PMS Web Browser Specs
+    name: PMS Web Browser Specs (${{ matrix.shard }}/2)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: [changes]
     if: needs.changes.outputs.run_pms_web_e2e == 'true'
     permissions:
       contents: read
+    # The project's specs were the slowest PR job with one worker (VAY-2287); each shard starts its
+    # own dev server and runs half of them.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
 
     steps:
       - name: Checkout code
@@ -272,7 +271,7 @@ jobs:
             sleep 2
           done
           curl --silent --fail --max-time 10 http://localhost:3164/login >/dev/null || { tail -50 "$RUNNER_TEMP/pms-web-dev.log"; exit 1; }
-          npm run e2e:pms-web -- --workers=1 --retries=1
+          npm run e2e:pms-web -- --workers=1 --retries=1 --shard=${{ matrix.shard }}/2
         env:
           # Any non-empty CI makes playwright.config.ts use CI reporters; "false" keeps it from
           # starting every app's webServer (that needs CI === "true").
@@ -289,7 +288,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v6
         with:
-          name: pms-web-playwright-report
+          name: pms-web-playwright-report-${{ matrix.shard }}
           path: |
             playwright-report
             test-results
@@ -298,13 +297,18 @@ jobs:
   # The mocked booking-web Playwright project against a plain-port dev server on the seeded
   # hotel-alpenrose tenant host. The project runs with one worker (playwright.config.ts).
   booking_web_e2e:
-    name: Booking Web Browser Specs
+    name: Booking Web Browser Specs (${{ matrix.shard }}/2)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: [changes]
     if: needs.changes.outputs.run_booking_web_e2e == 'true'
     permissions:
       contents: read
+    # Two shards, each with its own dev server (VAY-2287, as pms_web_e2e).
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
 
     steps:
       - name: Checkout code
@@ -338,7 +342,7 @@ jobs:
             sleep 2
           done
           curl --silent --fail --max-time 10 http://127.0.0.1:3002/api/health >/dev/null || { tail -50 "$RUNNER_TEMP/booking-web-dev.log"; exit 1; }
-          npm run e2e:booking-web -- --retries=1
+          npm run e2e:booking-web -- --retries=1 --shard=${{ matrix.shard }}/2
         env:
           # See pms_web_e2e: "false" keeps playwright.config.ts from starting every webServer.
           CI: "false"
@@ -351,7 +355,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v6
         with:
-          name: booking-web-playwright-report
+          name: booking-web-playwright-report-${{ matrix.shard }}
           path: |
             playwright-report
             test-results
@@ -361,13 +365,18 @@ jobs:
   # The mocked booking-admin Playwright project against a plain-port dev server (VAY-2261: Booking
   # Admin hosts the hotel setup wizard). Every API call is mocked in the specs and tests/e2e/support.
   booking_admin_e2e:
-    name: Booking Admin Browser Specs
+    name: Booking Admin Browser Specs (${{ matrix.shard }}/2)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: [changes]
     if: needs.changes.outputs.run_booking_admin_e2e == 'true'
     permissions:
       contents: read
+    # Two shards, each with its own dev server (VAY-2287, as pms_web_e2e).
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
 
     steps:
       - name: Checkout code
@@ -409,7 +418,7 @@ jobs:
           # handoffReturnToForOrganization from the login pages); it stays out until that is fixed.
           specs=$(ls tests/e2e/booking-admin/*.spec.ts | grep -v '/handoff-authkit\.spec\.ts$')
           # shellcheck disable=SC2086
-          npm run e2e:booking-admin -- --workers=1 --retries=1 $specs
+          npm run e2e:booking-admin -- --workers=1 --retries=1 --shard=${{ matrix.shard }}/2 $specs
         env:
           # Any non-empty CI makes playwright.config.ts use CI reporters; "false" keeps it from
           # starting every app's webServer (that needs CI === "true").
@@ -424,7 +433,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v6
         with:
-          name: booking-admin-playwright-report
+          name: booking-admin-playwright-report-${{ matrix.shard }}
           path: |
             playwright-report
             test-results
@@ -464,7 +473,9 @@ jobs:
 
   # Each shard gets its own PostgreSQL cluster, so cluster-wide role proofs stay isolated:
   #   platform    - identity, legacy owner, finance worker, Channex worker and authorization proofs
-  #   pms         - the PMS/booking/finance integration batch and the migration suites
+  #   pms         - the PMS/booking/finance integration batch
+  #   pms-migrations - the migration suites and the pending booking edits database, split from pms
+  #                 so the batch is not the slowest PostgreSQL job (VAY-2287)
   #   pricing     - pricing on the ordinary login in its own database (split from pms, VAY-2238)
   #   hotel-setup - hotel setup on the ordinary API login, shared setup profile, logo media and
   #                 nearby places
@@ -480,7 +491,7 @@ jobs:
       fail-fast: false
       matrix:
         postgres: [16, 17]
-        shard: [platform, pms, pricing, hotel-setup]
+        shard: [platform, pms, pms-migrations, pricing, hotel-setup]
 
     services:
       postgres:
@@ -634,7 +645,7 @@ jobs:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
       - name: Verify PMS navigation module migration backfill
-        if: matrix.shard == 'pms'
+        if: matrix.shard == 'pms-migrations'
         run: npm --workspace @vayada/backend-migration run test -- --no-file-parallelism src/pmsNavigationModules.test.ts
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
@@ -1003,7 +1014,7 @@ jobs:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
       - name: Verify Booking add-on economics migration
-        if: matrix.shard == 'pms'
+        if: matrix.shard == 'pms-migrations'
         run: >-
           npm --workspace @vayada/backend-migration run test --
           --no-file-parallelism
@@ -1030,7 +1041,7 @@ jobs:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
       - name: Verify Finance OTA commission migration
-        if: matrix.shard == 'pms'
+        if: matrix.shard == 'pms-migrations'
         run: >-
           npm --workspace @vayada/backend-migration run test --
           src/financeOtaCommissionRules.test.ts src/providerFeeEvidenceMigration.integration.test.ts
@@ -1041,7 +1052,7 @@ jobs:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
       - name: Verify membership property scope migration
-        if: matrix.shard == 'pms'
+        if: matrix.shard == 'pms-migrations'
         run: >-
           npm --workspace @vayada/backend-migration run test --
           --no-file-parallelism src/membershipPropertyScope.test.ts
@@ -1050,7 +1061,7 @@ jobs:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
       - name: Run public gallery migration integration
-        if: matrix.shard == 'pms'
+        if: matrix.shard == 'pms-migrations'
         run: >-
           npm --workspace @vayada/backend-migration run test --
           src/publicBookabilityGalleryMedia.test.ts
@@ -1058,7 +1069,7 @@ jobs:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
       - name: Run pending booking edits in an isolated database
-        if: matrix.shard == 'pms'
+        if: matrix.shard == 'pms-migrations'
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_booking_edit_test
           TARGET_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_booking_edit_test
@@ -1076,7 +1087,7 @@ jobs:
           npm --workspace vayada-api run test -- --no-file-parallelism src/routes/pendingBookingEdits.integration.test.ts
 
       - name: Verify removed pricing boundaries
-        if: matrix.shard == 'pms'
+        if: matrix.shard == 'pms-migrations'
         run: >-
           npm --workspace vayada-api run test -- --no-file-parallelism
           src/pricingReset.test.ts src/integrations/channexManagementPlans.test.ts

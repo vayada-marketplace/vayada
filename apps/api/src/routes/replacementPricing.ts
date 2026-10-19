@@ -59,6 +59,7 @@ const snapshot = (v: unknown): v is PricingStorageSnapshot =>
 const payloadRule = (code: string): boolean =>
   code === "non_refundable_pay_at_property" ||
   code === "payment_methods_required" ||
+  code === "deposits_unavailable" ||
   code.startsWith("deposit_");
 const invalid = (): never => {
   throw new PricingStorageError("invalid");
@@ -194,7 +195,7 @@ export async function registerReplacementPricingRoutes(
   route(
     "PUT",
     "/drafts/:draftId/rooms/:roomTypeId/offers/:offerId/terms",
-    (commands, id, request) => {
+    async (commands, id, request) => {
       const requestId = key(request),
         body = request.body;
       if (
@@ -212,10 +213,21 @@ export async function registerReplacementPricingRoutes(
       });
       if (!parsed) return invalid();
       const { revision: _revision, ...terms } = parsed;
+      // A deposit needs the hotel's card ready and deposits switched on (VAY-2205).
+      const depositsReady =
+        terms.payment.kind === "deposit" && options.cardReadiness
+          ? (
+              await options.cardReadiness.read({
+                organizationId: authorized.get(request)!.selectedOrganization.organizationId,
+                propertyId: id,
+              })
+            ).deposits.ready
+          : false;
       return commands.stageTerms(
         id,
         { requestId, expectedRevision: body.expectedRevision, terms },
         { draftId: request.params.draftId!, baseRevision: body.baseRevision as number },
+        depositsReady,
       );
     },
   );

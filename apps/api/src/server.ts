@@ -483,6 +483,7 @@ const bookingWebCheckoutAdapter = createTargetBookingWebCheckoutAdapter({
   mixedRoomSelectionsEnabled: true,
   replacementPricingAcceptanceEnabled: config.replacementPricingAcceptanceEnabled,
   replacementPricingCardAcceptanceEnabled: config.replacementPricingCardAcceptanceEnabled,
+  replacementPricingDepositAcceptanceEnabled: config.replacementPricingDepositAcceptanceEnabled,
   replacementPricingRequestAcceptanceEnabled: config.replacementPricingRequestAcceptanceEnabled,
   replacementPricingManualPaymentAcceptanceEnabled:
     config.replacementPricingManualPaymentAcceptanceEnabled,
@@ -1757,6 +1758,7 @@ const app = buildApp({
               config.replacementPricingAcceptanceEnabled === true &&
               config.replacementPricingCardAcceptanceEnabled === true &&
               !!stripeBookingPaymentProvider,
+            depositAcceptanceEnabled: config.replacementPricingDepositAcceptanceEnabled === true,
           }),
         }
       : undefined,

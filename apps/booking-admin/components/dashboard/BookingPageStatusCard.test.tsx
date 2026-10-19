@@ -103,6 +103,22 @@ describe("BookingPageStatusView", () => {
     expect(buttons(markup)).toEqual([{ label: "Publish booking page", disabled: true }]);
   });
 
+  it("links a hotel location item to the location form (VAY-2288)", () => {
+    const markup = render({
+      kind: "not_ready",
+      readyGroups: [],
+      items: [
+        {
+          groupId: "booking.hotel_profile",
+          message: "Turn on 'Show city and country publicly' so guests see where you are.",
+          step: "present_hotel",
+          focus: "location",
+        },
+      ],
+    });
+    expect(markup).toContain("step=present_hotel&amp;focus=location");
+  });
+
   it("does not link items that only need waiting", () => {
     const markup = render({
       kind: "waiting",

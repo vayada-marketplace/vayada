@@ -320,6 +320,23 @@ describe("Stripe booking payments", () => {
       ).rejects.toThrow("positive amount");
     });
 
+    it("gives the HTTP status with Stripe's error, so a refusal is told from a lost answer", async () => {
+      for (const status of [400, 429, 500]) {
+        const provider = createStripeBookingPaymentProvider({
+          secretKey: "sk_test",
+          fetch: async () =>
+            new Response(JSON.stringify({ error: { message: "No." } }), {
+              status,
+              headers: { "content-type": "application/json" },
+            }),
+        });
+        await expect(provider.createRefund(input)).rejects.toMatchObject({
+          message: "No.",
+          statusCode: status,
+        });
+      }
+    });
+
     it("gives up on a refund call after 30 seconds, so a row lock isn't held forever", async () => {
       const signals: Array<AbortSignal | null | undefined> = [];
       const provider = createStripeBookingPaymentProvider({

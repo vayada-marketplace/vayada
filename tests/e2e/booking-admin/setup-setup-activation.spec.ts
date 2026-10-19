@@ -8,6 +8,7 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 import type { AdaptiveHotelSetupStatus } from "@vayada/domain-hotels";
 import { createAdaptiveHotelSetupStatusMock } from "../support/sharedHotelSetupMocks";
 import { corsHeaders, fulfillCorsPreflight } from "../support/cors";
+import { mockBookingDashboardExit } from "../support/setupExitHandoff";
 
 const propertyId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 
@@ -152,6 +153,73 @@ test.describe("shared setup activation", () => {
     });
   });
 
+  // VAY-2289: a hotel without a postal code (Sri Lanka, rural addresses) saves the same way.
+  for (const postalCode of ["80331", ""]) {
+    test(`a Booking dashboard fix for the hotel's location ticks the box, saves and returns (VAY-2288)${postalCode ? "" : " without a postal code"}`, async ({
+      page,
+      baseURL,
+    }) => {
+      await mockGooglePlaces(page);
+      await primeBrowserState(page, true);
+      await mockAuthSession(page);
+      // Basics are complete, so only the dashboard's focus opens the hotel details form.
+      await mockSharedSetupStatus(page, readySetupStatus());
+      const writes = { profile: [] as unknown[], launchSettings: [] as unknown[] };
+      await mockHotelProfileApis(
+        page,
+        [{ mediaType: "logo", url: "https://media.example/alpenrose-logo.webp" }],
+        writes,
+        {
+          latitude: 48.1373932,
+          longitude: 11.5754485,
+          postalCode,
+          localityPublic: false,
+          geoPublic: false,
+          mapDisplayMode: "hidden",
+        },
+      );
+      await routeJson(page, /\/api\/hotel-setup\/property-types/, {
+        contractVersion: "adaptive-hotel-property-types.v1",
+        propertyTypes: [{ value: "hotel", label: "Hotel" }],
+      });
+      await routeJson(page, new RegExp(`/api/hotel-setup/properties/${propertyId}/import$`), {
+        import: null,
+      });
+      const dashboard = await mockBookingDashboardExit(page, baseURL, propertyId);
+      const fixUrl = new URL(setupUrl(baseURL), baseURL ?? "http://localhost:3003");
+      fixUrl.searchParams.set("propertyId", propertyId);
+      fixUrl.searchParams.set("step", "present_hotel");
+      fixUrl.searchParams.set("focus", "location");
+      await page.goto(baseURL ? fixUrl.toString() : `${fixUrl.pathname}${fixUrl.search}`);
+
+      const locationActionBar = page.getByTestId("location-action-bar");
+      const showLocality = page.getByRole("checkbox", { name: "Show city and country publicly" });
+      await expect(
+        page.getByTestId("location-search-panel").getByRole("heading", {
+          name: "Where is your property?",
+        }),
+      ).toBeVisible();
+      await expect(showLocality).not.toBeChecked();
+      await expect(showLocality).toBeFocused();
+      await expect(
+        page.getByText("Your booking page needs this before it can go live."),
+      ).toBeVisible();
+
+      await showLocality.check();
+      await expect(
+        page.getByText("Your booking page needs this before it can go live."),
+      ).toHaveCount(0);
+      await locationActionBar.getByRole("button", { name: "Save and continue" }).click();
+
+      await page.waitForURL(dashboard);
+      expect(writes.profile).toEqual([
+        { expectedProfileRevision: 1, patch: { location: { localityPublic: true } } },
+      ]);
+      // The focused edit never showed the guest preferences, so it leaves them as saved.
+      expect(writes.launchSettings).toEqual([]);
+    });
+  }
+
   test("lets a hotel place and drag its map pin when Google address search is unavailable", async ({
     page,
     baseURL,
@@ -234,6 +302,83 @@ test.describe("shared setup activation", () => {
     expect(profileWrites[0]).toMatchObject({
       patch: { location: { latitude: 48.13745, longitude: 11.5756 } },
     });
+  });
+
+  test("a focused location fix still saves when the hotel's details lack a phone number (VAY-2288)", async ({
+    page,
+    baseURL,
+  }) => {
+    await mockGooglePlaces(page);
+    await primeBrowserState(page, true);
+    await mockAuthSession(page);
+    await mockSharedSetupStatus(page, readySetupStatus());
+    const writes = { profile: [] as unknown[], launchSettings: [] as unknown[] };
+    await mockHotelProfileApis(
+      page,
+      [{ mediaType: "logo", url: "https://media.example/alpenrose-logo.webp" }],
+      writes,
+      {
+        latitude: 48.1373932,
+        longitude: 11.5754485,
+        localityPublic: false,
+        geoPublic: false,
+        mapDisplayMode: "hidden",
+      },
+      [
+        {
+          channelType: "email",
+          value: "owner@alpenrose.example",
+          purpose: "general",
+          isPublic: false,
+        },
+      ],
+    );
+    await routeJson(page, /\/api\/hotel-setup\/property-types/, {
+      contractVersion: "adaptive-hotel-property-types.v1",
+      propertyTypes: [{ value: "hotel", label: "Hotel" }],
+    });
+    await routeJson(page, new RegExp(`/api/hotel-setup/properties/${propertyId}/import$`), {
+      import: null,
+    });
+    const dashboard = await mockBookingDashboardExit(page, baseURL, propertyId);
+    const fixUrl = new URL(setupUrl(baseURL), baseURL ?? "http://localhost:3003");
+    fixUrl.searchParams.set("propertyId", propertyId);
+    fixUrl.searchParams.set("step", "present_hotel");
+    fixUrl.searchParams.set("focus", "location");
+    await page.goto(baseURL ? fixUrl.toString() : `${fixUrl.pathname}${fixUrl.search}`);
+
+    await page.getByRole("checkbox", { name: "Show city and country publicly" }).check();
+    await page
+      .getByTestId("location-action-bar")
+      .getByRole("button", { name: "Save and continue" })
+      .click();
+
+    // The missing phone number opens the contact step, which saves directly too.
+    await expect(page.getByRole("heading", { name: "How can guests reach you?" })).toBeVisible();
+    await expect(page.getByText("Phone number is required.")).toBeVisible();
+    expect(writes.profile).toEqual([]);
+    // Back skips the guest preferences, which a focused edit never saves.
+    await page.getByRole("button", { name: "Back", exact: true }).click();
+    await expect(
+      page.getByTestId("location-search-panel").getByRole("heading", {
+        name: "Where is your property?",
+      }),
+    ).toBeVisible();
+    await page
+      .getByTestId("location-action-bar")
+      .getByRole("button", { name: "Save and continue" })
+      .click();
+    await expect(page.getByRole("heading", { name: "How can guests reach you?" })).toBeVisible();
+    await page.getByRole("textbox", { name: /^Phone number/ }).fill("+49 89 123456");
+    await page.getByRole("button", { name: "Save and continue" }).click();
+
+    await page.waitForURL(dashboard);
+    expect(writes.profile).toHaveLength(1);
+    expect(writes.profile[0]).toMatchObject({
+      expectedProfileRevision: 1,
+      patch: { location: { localityPublic: true } },
+    });
+    expect(writes.launchSettings).toEqual([]);
   });
 
   test("keeps the map clickable on a phone while the address fields are open", async ({
@@ -820,8 +965,8 @@ test.describe("shared setup activation", () => {
     const localityConsent = page.getByRole("checkbox", {
       name: "Show city and country publicly",
     });
-    await expect(localityConsent).not.toBeChecked();
-    await localityConsent.check();
+    // New hotels show their city and country by default (VAY-2288).
+    await expect(localityConsent).toBeChecked();
     await expect(locationContinueButton).toBeEnabled();
 
     if (searchFirst) {
@@ -1197,7 +1342,10 @@ async function mockHotelProfileApis(
     profile?: unknown[];
     publicProfile?: unknown[];
     propertyPresentation?: unknown[];
+    launchSettings?: unknown[];
   },
+  location: Record<string, unknown> = {},
+  contacts?: unknown[],
 ) {
   await page.route(
     new RegExp(`/api/hotel-setup/properties/${propertyId}/launch-settings$`),
@@ -1206,6 +1354,8 @@ async function mockHotelProfileApis(
         await fulfillCorsPreflight(route);
         return;
       }
+      if (route.request().method() === "PUT")
+        writes?.launchSettings?.push(route.request().postDataJSON());
       await route.fulfill({
         status: 200,
         headers: corsHeaders(route),
@@ -1239,6 +1389,7 @@ async function mockHotelProfileApis(
       localityPublic: true,
       geoPublic: true,
       mapDisplayMode: "exact",
+      ...location,
     },
     contacts: [
       {
@@ -1261,6 +1412,9 @@ async function mockHotelProfileApis(
       },
     ],
   });
+  if (contacts) {
+    canonicalProfile = { ...canonicalProfile, profile: { ...canonicalProfile.profile, contacts } };
+  }
   await page.route(
     new RegExp(`/api/hotel-setup/properties/${propertyId}/profile`),
     async (route) => {

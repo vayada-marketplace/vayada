@@ -92,7 +92,7 @@ export function createBookingPricingOfferTermsStore(pool: Pool) {
     } catch (error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); }
   }
   async function write(context: RequestContext | null, scope: PricingStorageScope,
-      input: TermsCommand, candidate?: BookingPricingDraft, paymentRules = false): Promise<ReplacementOfferTerms> {
+      input: TermsCommand, candidate?: BookingPricingDraft, paymentRules = false, depositsReady = true): Promise<ReplacementOfferTerms> {
       if ((candidate !== undefined && !draftValid(candidate)) || !text(input.requestId) || !(input.expectedRevision === null || uuid(input.expectedRevision)) ||
           !pricingObject(input.terms) || !pricingKeys(input.terms, ["roomTypeId", "offerId", "cancellation", "payment"])) return fail("invalid");
       scope = { propertyId: scope.propertyId.toLowerCase(), organizationId: scope.organizationId.toLowerCase(), actorUserId: scope.actorUserId.toLowerCase() };
@@ -115,7 +115,8 @@ export function createBookingPricingOfferTermsStore(pool: Pool) {
         // The hotel's writes keep the "Paid when booking" rules (VAY-2205), for a changed payment only, so other edits
         // of older terms still save.
         const current = paymentRules && expected && (await client.query("SELECT terms->'payment' AS payment FROM booking.pricing_v2_offer_terms WHERE property_id=$1 AND revision=$2", [scope.propertyId, expected])).rows[0];
-        const problem = !paymentRules || (current && canonical(current.payment) === canonical(terms.payment)) ? null : pricingPaymentWriteProblem(terms.payment);
+        const problem = !paymentRules || (current && canonical(current.payment) === canonical(terms.payment)) ? null
+          : pricingPaymentWriteProblem(terms.payment) ?? (terms.payment.kind === "deposit" && !depositsReady ? "deposits_unavailable" : null);
         if (problem) throw new PricingStorageError(problem);
         await client.query(`INSERT INTO booking.pricing_v2_offer_terms
           (property_id,room_type_id,offer_id,revision,terms,request_id,request_hash,actor_user_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,
@@ -131,9 +132,12 @@ export function createBookingPricingOfferTermsStore(pool: Pool) {
     }
   return {
     save: (context: RequestContext | null, scope: PricingStorageScope, input: TermsCommand) => write(context, scope, input),
-    /** `paymentRules`: a hotel's write, held to the "Paid when booking" rules. */
+    /** `paymentRules`: a hotel's write, held to the "Paid when booking" rules; a new deposit also needs `depositsReady`
+     * (card ready and deposits switched on, VAY-2205), so no deposit rate is published that guests can't book. */
     stage: (context: RequestContext | null, scope: PricingStorageScope, input: TermsCommand, draft: BookingPricingDraft,
-      options: { paymentRules?: boolean } = {}) => draftValid(draft) ? write(context, scope, input, draft, options.paymentRules) : Promise.reject(new PricingStorageError("invalid")),
+      options: { paymentRules?: boolean; depositsReady?: boolean } = {}) => draftValid(draft)
+      ? write(context, scope, input, draft, options.paymentRules, options.depositsReady ?? !options.paymentRules)
+      : Promise.reject(new PricingStorageError("invalid")),
     read(context: RequestContext | null, scope: PricingStorageScope, roomTypeId: string, offerId: string) {
       if (!uuid(roomTypeId) || !text(offerId)) return Promise.reject(new PricingStorageError("invalid"));
       return transaction(context, scope, "read", async (client) => {

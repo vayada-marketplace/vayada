@@ -66,10 +66,26 @@ export type BookingCancellationOutcome = {
   retainedMinor: string;
 };
 
+/** The refund back to the guest's card after a paid card stay was cancelled (VAY-2205). */
+export type BookingCardRefund = {
+  status: "pending" | "succeeded" | "failed";
+  /** Two-decimal amount in `currency`. */
+  amount: string;
+  currency: string;
+  requestedBy: "guest" | "host";
+  /** Stripe's reason when the refund failed, e.g. "expired_or_canceled_card". */
+  failureReason: string | null;
+  createdAt: string;
+  settledAt: string | null;
+  /** What the guest paid by card (two decimals), when the API says. */
+  paidAmount?: string | null;
+};
+
 export interface Booking {
   mealDescription?: string | null;
   /** Recorded when the guest's cancellation applied the booked terms. */
   cancellationOutcome?: BookingCancellationOutcome | null;
+  cardRefund?: BookingCardRefund | null;
   id: string;
   bookingReference: string;
   roomTypeId: string;
@@ -385,6 +401,7 @@ type PmsOperationalReservation = {
   checkin: { completedAt: string | null; pendingFlags: string[] };
   checkout: { completedAt: string | null; pendingFlags: string[] };
   cancellationOutcome?: BookingCancellationOutcome | null;
+  cardRefund?: BookingCardRefund;
   mealDescription?: string | null;
   bookedOffer?: { roomTypeId: string; roomName: string };
   roomLines?: Array<{
@@ -1083,6 +1100,13 @@ export const bookingsService = {
       { previewId, idempotencyKey },
       pmsOperationsRequestOptions,
     ),
+  /** Asks Stripe again for a failed card refund, same amount (VAY-2205). */
+  retryCardRefund: async (id: string, idempotencyKey: string) =>
+    pmsOperationsClient.post<{ status: "succeeded" | "pending" | "failed" | "busy" }>(
+      await reservationEndpoint(id, "/host-actions/card-refund-retry"),
+      { idempotencyKey },
+      pmsOperationsRequestOptions,
+    ),
 
   cancelWithReason: async (id: string, reason: string, guestMessage?: string) => {
     await pmsOperationsClient.post<PmsOperationsCommandResponse>(
@@ -1377,6 +1401,7 @@ function toBooking(
     hostResponseDeadline: reservation.hostResponseDeadlineAt ?? null,
     awaitingPaymentConfirmation: reservation.awaitingHotelPaymentConfirmation === true,
     cancellationOutcome: reservation.cancellationOutcome ?? null,
+    cardRefund: reservation.cardRefund ?? null,
     platformFeeAmount: null,
     affiliateCommissionAmount: null,
     propertyPayoutAmount: null,
