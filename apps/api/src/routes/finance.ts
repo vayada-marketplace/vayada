@@ -97,6 +97,10 @@ import {
 } from "../domains/financeOnlineCardReadinessTransition.js";
 import { lockFinancePaymentSettings } from "../domains/financePaymentReadinessCommandRepository.js";
 import {
+  readPricingPublicationFreshness,
+  type PricingPublicationFreshness,
+} from "../domains/pricingPublicationFreshness.js";
+import {
   lockFinancePaymentPricingCurrency,
   nextFinancePaymentSettingsBinding,
   recordFinancePaymentSettingsBinding,
@@ -1138,6 +1142,17 @@ export function createXenditBankValidator(config: {
   };
 }
 
+/** VAY-2205: a card change leaves the hotel's published prices stale until it saves them again
+ * (option A). Unknown (undefined) when the check couldn't read them. */
+export function cardSwitchPrices(
+  report: readonly PricingPublicationFreshness[],
+): "current" | "save_needed" | "not_published" | undefined {
+  const [row] = report;
+  if (!row) return "not_published";
+  if (!("stale" in row)) return undefined;
+  return row.stale.length ? "save_needed" : "current";
+}
+
 export function createTargetFinancePropertySettingsRepository(config: {
   connectionString: string;
   max?: number;
@@ -1167,7 +1182,17 @@ export function createTargetFinancePropertySettingsRepository(config: {
   // approval as an attestation and revokes it to turn card off; both need platform finance rights.
   const onlineCardEvidenceWrites = onlineCardEvidenceRepository
     ? {
-        readOnlineCardExecutionState: onlineCardEvidenceRepository.readOnlineCardExecutionState,
+        // The switch also says whether the hotel's prices must be saved again (option A).
+        async readOnlineCardExecutionState(propertyId: string) {
+          const state = await onlineCardEvidenceRepository.readOnlineCardExecutionState(propertyId);
+          if (!state) return null;
+          const report = await readPricingPublicationFreshness(
+            pool as unknown as pg.Pool,
+            propertyId,
+          ).catch(() => null);
+          const prices = report && cardSwitchPrices(report);
+          return prices ? { ...state, prices } : state;
+        },
         acceptOnlineCardExecutionEvidence:
           onlineCardEvidenceRepository.acceptOnlineCardExecutionEvidence,
         revokeOnlineCardExecutionEvidence:

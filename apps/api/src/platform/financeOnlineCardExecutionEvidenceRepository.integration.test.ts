@@ -155,6 +155,7 @@ describe.skipIf(!TEST_DATABASE_URL)("Online-card execution evidence PostgreSQL",
       propertyId,
       providerAccount: { ready: true, cardCapabilityRevision: 7 },
       propertyReadinessRevision: 1,
+      paymentSettings: { paymentsOn: true, cardChosen: true, currencyEligible: true },
       evidence: null,
       cardReady: false,
     });
@@ -180,8 +181,18 @@ describe.skipIf(!TEST_DATABASE_URL)("Online-card execution evidence PostgreSQL",
 
     const replay = await repository.acceptOnlineCardExecutionEvidence(acceptCommand());
     expect(replay).toEqual({ ...accepted, status: "idempotent_replay" });
+    // A retried approval gets a new server time and fingerprint, and still replays (VAY-2205).
+    expect(
+      await repository.acceptOnlineCardExecutionEvidence(
+        acceptCommand({
+          executedAt: "2026-08-28T10:06:00.000Z",
+          evidenceFingerprintHash: "b".repeat(64),
+          requestedAt: "2026-08-28T10:06:00.000Z",
+        }),
+      ),
+    ).toEqual({ ...accepted, status: "idempotent_replay" });
     expect(await repository.readOnlineCardExecutionState(propertyId)).toMatchObject({
-      evidence: { evidenceId, acceptedAt: accepted.response.acceptedAt },
+      evidence: { evidenceId, acceptedAt: accepted.response.acceptedAt, current: true },
       cardReady: true,
     });
 
@@ -524,6 +535,12 @@ describe.skipIf(!TEST_DATABASE_URL)("Online-card execution evidence PostgreSQL",
       [propertyId, providerAccountId],
     );
     expect(state.rows[0]).toMatchObject({ revision: 8, ready: false, losses: 2 });
+    // VAY-2205: the operator's switch shows the approval as out of date.
+    expect(await repository.readOnlineCardExecutionState(propertyId)).toMatchObject({
+      providerAccount: { cardCapabilityRevision: 8 },
+      evidence: { current: false },
+      cardReady: false,
+    });
   });
 
   it("emits and suppresses loss from the legacy payment-settings writer", async () => {

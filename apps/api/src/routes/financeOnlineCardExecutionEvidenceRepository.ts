@@ -237,8 +237,20 @@ async function readState(
     [propertyId],
   );
   if (!property.rows[0]) return null;
-  const settings = await client.query<{ revision: number | string | null }>(
-    `SELECT online_card_readiness_revision AS revision FROM finance.payment_settings
+  // What card readiness needs from the hotel's Payment settings besides Stripe and the approval:
+  // finance.online_card_readiness reads the same columns.
+  const settings = await client.query<{
+    revision: number | string | null;
+    paymentsOn: boolean;
+    cardChosen: boolean;
+    currencyEligible: boolean;
+  }>(
+    `SELECT online_card_readiness_revision AS revision,
+            COALESCE(payments_enabled, FALSE) AS "paymentsOn",
+            COALESCE('card' = ANY(accepted_methods), FALSE) AS "cardChosen",
+            COALESCE(upper(trim(default_currency)) NOT IN ('BHD', 'JOD', 'KWD', 'OMR', 'TND'), FALSE)
+              AS "currencyEligible"
+     FROM finance.payment_settings
      WHERE property_id = $1::uuid`,
     [propertyId],
   );
@@ -272,9 +284,13 @@ async function readState(
           evidenceId: string;
           acceptedAt: Date | string;
           acceptedByUserId: string | null;
+          cardCapabilityRevision: number | string;
+          propertyReadinessRevision: number | string;
         }>(
           `SELECT id::text AS "evidenceId", accepted_at AS "acceptedAt",
-                  accepted_by_user_id::text AS "acceptedByUserId"
+                  accepted_by_user_id::text AS "acceptedByUserId",
+                  provider_capability_revision AS "cardCapabilityRevision",
+                  property_readiness_revision AS "propertyReadinessRevision"
            FROM finance.online_card_execution_evidence
            WHERE property_id = $1::uuid AND provider_account_id = $2::uuid AND revoked_at IS NULL
            ORDER BY accepted_at DESC LIMIT 1`,
@@ -291,11 +307,24 @@ async function readState(
         }
       : null,
     propertyReadinessRevision: positiveInteger(settings.rows[0]?.revision) ?? null,
+    paymentSettings: settings.rows[0]
+      ? {
+          paymentsOn: settings.rows[0].paymentsOn,
+          cardChosen: settings.rows[0].cardChosen,
+          currencyEligible: settings.rows[0].currencyEligible,
+        }
+      : null,
     evidence: evidence
       ? {
           evidenceId: evidence.evidenceId,
           acceptedAt: new Date(evidence.acceptedAt).toISOString(),
           acceptedByUserId: evidence.acceptedByUserId,
+          // A Stripe account or Payment settings change since leaves the approval out of date.
+          current:
+            positiveInteger(evidence.cardCapabilityRevision) ===
+              positiveInteger(provider?.cardCapabilityRevision) &&
+            positiveInteger(evidence.propertyReadinessRevision) ===
+              positiveInteger(settings.rows[0]?.revision),
         }
       : null,
     cardReady: await currentCardReady(client, propertyId),
@@ -667,12 +696,21 @@ function commonCommand(
 }
 
 function commandFingerprint(command: UserEvidenceCommand): string {
+  // An approval's time and attestation hash are the server's (VAY-2205): a retried request names the
+  // same revisions and replays instead of conflicting.
+  const payload =
+    command.commandType === "finance.online_card_execution_evidence.accept"
+      ? {
+          expectedCardCapabilityRevision: command.payload.expectedCardCapabilityRevision,
+          expectedPropertyReadinessRevision: command.payload.expectedPropertyReadinessRevision,
+        }
+      : command.payload;
   return sha256(
     JSON.stringify({
       commandType: command.commandType,
       propertyId: command.propertyId,
       actorOrganizationId: command.audit.actor.organizationId,
-      payload: command.payload,
+      payload,
     }),
   );
 }

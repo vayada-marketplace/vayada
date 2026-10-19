@@ -158,8 +158,6 @@ function acceptBody(overrides: Record<string, unknown> = {}) {
     idempotencyKey: ACCEPT_IDEMPOTENCY_KEY,
     expectedCardCapabilityRevision: 7,
     expectedPropertyReadinessRevision: 1,
-    evidenceFingerprintHash: HASH,
-    executedAt: "2026-08-28T10:00:00.000Z",
     ...overrides,
   };
 }
@@ -226,8 +224,8 @@ describe("Platform Finance online-card execution evidence routes", () => {
         payload: {
           expectedCardCapabilityRevision: 7,
           expectedPropertyReadinessRevision: 1,
-          evidenceFingerprintHash: HASH,
-          executedAt: "2026-08-28T10:00:00.000Z",
+          evidenceFingerprintHash: expect.stringMatching(/^[0-9a-f]{64}$/),
+          executedAt: expect.any(String),
         },
       }),
     ]);
@@ -236,7 +234,7 @@ describe("Platform Finance online-card execution evidence routes", () => {
   it("records Vayada's approval at the server's time, with a fingerprint it computes (VAY-2205)", async () => {
     const repo = repository();
     app = await testApp(repo.value);
-    const { evidenceFingerprintHash: _hash, executedAt: _at, ...attestation } = acceptBody();
+    const attestation = acceptBody();
     const result = await app.inject({
       method: "POST",
       url: `/finance/platform/properties/${PROPERTY_ID}/online-card-execution-evidence`,
@@ -264,19 +262,21 @@ describe("Platform Finance online-card execution evidence routes", () => {
         )
         .digest("hex"),
     );
-    // Half an attestation is invalid: either the server records both, or a verified run sends both.
-    for (const half of [
+    // Proof from a run is refused until something verifies it: the server records both.
+    for (const proof of [
       { executedAt: "2026-08-28T10:00:00.000Z" },
       { evidenceFingerprintHash: HASH },
+      { executedAt: "2026-08-28T10:00:00.000Z", evidenceFingerprintHash: HASH },
     ]) {
       const refused = await app.inject({
         method: "POST",
         url: `/finance/platform/properties/${PROPERTY_ID}/online-card-execution-evidence`,
         headers: { authorization: "Bearer valid" },
-        payload: { ...attestation, ...half },
+        payload: { ...attestation, ...proof },
       });
       expect(refused.statusCode).toBe(400);
     }
+    expect(repo.accepts).toHaveLength(1);
   });
 
   it("builds an exact property-scoped one-way revocation command", async () => {
