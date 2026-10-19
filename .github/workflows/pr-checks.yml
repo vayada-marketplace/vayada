@@ -204,7 +204,6 @@ jobs:
         run: |
           npm --workspace @vayada/domain-hotels run build
           npm --workspace @vayada/domain-booking run build
-          npm --workspace @vayada/domain-marketplace run build
           npm --workspace @vayada/domain-pms run build
 
       - name: Install Chromium

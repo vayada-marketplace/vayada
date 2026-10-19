@@ -119,28 +119,6 @@ const checks = [
     ],
   },
   {
-    name: "Marketplace domain must not depend on PMS implementations",
-    roots: ["packages/domain-marketplace/src", "apps/api/src/domains/marketplace"],
-    include: () => true,
-    rules: [
-      forbiddenPattern(
-        "PMS database env",
-        /\bPMS_DATABASE_URL\b/,
-        "Marketplace domain must not open PMS database connections; use CollaborationAffiliatePort instead",
-      ),
-      forbiddenPattern(
-        "PMS table dependency",
-        productTablePattern(),
-        "Marketplace domain must not reference PMS table names; use typed command/port boundaries",
-      ),
-      forbiddenImport(
-        "PMS implementation import",
-        isPmsImplementationImport,
-        "Marketplace domain must not import PMS implementations or adapters; depend on CollaborationAffiliatePort, not PMS internals",
-      ),
-    ],
-  },
-  {
     name: "PMS operations must not write Booking guest PII tables directly",
     roots: ["apps/api/src/routes", "apps/api/src/domains/pms"],
     include: (filePath) =>
@@ -162,13 +140,11 @@ const checks = [
       "packages/domain-distribution/src",
       "packages/domain-finance/src",
       "packages/domain-hotels/src",
-      "packages/domain-marketplace/src",
       "packages/domain-pms/src",
       "apps/api/src/domains/booking",
       "apps/api/src/domains/distribution",
       "apps/api/src/domains/finance",
       "apps/api/src/domains/hotels",
-      "apps/api/src/domains/marketplace",
       "apps/api/src/domains/pms",
     ],
     include: () => true,

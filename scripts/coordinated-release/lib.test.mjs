@@ -27,7 +27,6 @@ function snapshot(overrides = {}) {
     ["packages/backend-migration", "@vayada/backend-migration", ["@vayada/domain-booking"]],
     ["packages/domain-booking", "@vayada/domain-booking", ["@vayada/domain-hotels"]],
     ["packages/domain-hotels", "@vayada/domain-hotels", []],
-    ["packages/domain-marketplace", "@vayada/domain-marketplace", []],
   ].map(([path, name, dependencies]) => ({
     path,
     packageJson: {
