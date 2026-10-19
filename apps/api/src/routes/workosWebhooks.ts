@@ -49,7 +49,8 @@ export type WorkosWebhookStore = {
   findUserIdByWorkosUserId(workosUserId: string): Promise<string | null>;
   findOrganizationIdByWorkosOrgId(workosOrgId: string): Promise<string | null>;
   upsertWorkosUser(input: WorkosUserPayload): Promise<string>;
-  upsertWorkosOrganization(input: WorkosOrganizationPayload): Promise<string>;
+  /** null: the stored organization has a retired kind (VAY-2272), so the event changes nothing. */
+  upsertWorkosOrganization(input: WorkosOrganizationPayload): Promise<string | null>;
   deactivateWorkosUser(workosUserId: string): Promise<{ userId?: string }>;
   archiveWorkosOrganization(workosOrgId: string): Promise<{ organizationId?: string }>;
   deactivateDirectoryUser(input: {
@@ -59,10 +60,11 @@ export type WorkosWebhookStore = {
   deactivateOrganizationDirectoryMemberships(
     workosOrgId: string,
   ): Promise<{ organizationId?: string }>;
+  /** null: the organization has a retired kind (VAY-2272), so no membership is written. */
   upsertWorkosMembership(input: WorkosMembershipPayload): Promise<{
     userId: string;
     organizationId: string;
-  }>;
+  } | null>;
   deactivateWorkosMembership(workosMembershipId: string): Promise<{
     userId?: string;
     organizationId?: string;
@@ -105,8 +107,12 @@ export type WorkosOrganizationPayload = {
   name: string;
   slug: string;
   status: "active" | "suspended" | "archived";
-  kind: "platform" | "hotel_group" | "creator_workspace" | "affiliate_partner";
+  kind: "platform" | "hotel_group";
 };
+
+// VAY-2272: creator and affiliate organizations are retired. Their WorkOS events are answered
+// "ignored" and never become (or rename) a hotel group.
+const RETIRED_ORGANIZATION_KINDS = new Set(["creator_workspace", "affiliate_partner"]);
 
 export type WorkosMembershipPayload = {
   workosMembershipId: string;
@@ -358,10 +364,13 @@ async function applyWorkosIdentityEvent(
     }
     case "organization.created":
     case "organization.updated": {
+      if (RETIRED_ORGANIZATION_KINDS.has(organizationKindOf(event) ?? "")) {
+        return { status: "ignored" };
+      }
       const organizationId = await store.upsertWorkosOrganization(
         toWorkosOrganizationPayload(event),
       );
-      return { status: "normalized", organizationId };
+      return organizationId ? { status: "normalized", organizationId } : { status: "ignored" };
     }
     case "organization.deleted": {
       const result = await store.archiveWorkosOrganization(requiredString(event.data, "id"));
@@ -370,7 +379,7 @@ async function applyWorkosIdentityEvent(
     case "organization_membership.created":
     case "organization_membership.updated": {
       const result = await store.upsertWorkosMembership(toWorkosMembershipPayload(event));
-      return { status: "normalized", ...result };
+      return result ? { status: "normalized", ...result } : { status: "ignored" };
     }
     case "organization_membership.deleted": {
       const membershipId = requiredString(event.data, "id");
@@ -470,8 +479,20 @@ function toWorkosOrganizationPayload(event: WorkosWebhookEvent): WorkosOrganizat
       optionalString(event.data, "slug") ??
       slugify(optionalString(event.data, "name") ?? externalId ?? randomUUID()),
     status: "active",
-    kind: toOrganizationKind(optionalString(event.data, "organization_kind")),
+    kind: organizationKindOf(event) === "platform" ? "platform" : "hotel_group",
   };
+}
+
+// The kind the sign-up wrote into the organization's metadata; absent for organizations made
+// elsewhere, which stay hotel groups.
+function organizationKindOf(event: WorkosWebhookEvent): string | undefined {
+  const metadata = event.data?.["metadata"];
+  return (
+    optionalString(event.data, "organization_kind") ??
+    (metadata && typeof metadata === "object" && !Array.isArray(metadata)
+      ? optionalString(metadata as Record<string, unknown>, "organization_kind")
+      : undefined)
+  );
 }
 
 function toWorkosMembershipPayload(event: WorkosWebhookEvent): WorkosMembershipPayload {
@@ -544,15 +565,6 @@ function membershipRoleSlugs(data: Record<string, unknown> | undefined): string[
         .filter((role): role is string => Boolean(role))
     : [];
   return Array.from(new Set([nestedRole, flatRole, ...roleSlugs].filter(Boolean) as string[]));
-}
-
-function toOrganizationKind(value: string | undefined): WorkosOrganizationPayload["kind"] {
-  return value === "platform" ||
-    value === "hotel_group" ||
-    value === "creator_workspace" ||
-    value === "affiliate_partner"
-    ? value
-    : "hotel_group";
 }
 
 function toMembershipStatus(value: string | undefined): WorkosMembershipPayload["status"] {

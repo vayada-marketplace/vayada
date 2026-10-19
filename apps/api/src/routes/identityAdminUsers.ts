@@ -73,13 +73,16 @@ export const IDENTITY_ADMIN_PLATFORM_ACCESS_CONTRACT = {
   commandTypes: ["identity.access.grant", "identity.access.revoke"],
 } as const;
 
+// "creator" is read only: accounts created as creators before VAY-2272 until migration 0500
+// closes them. Staff create hotel or admin users only.
 export type IdentityAdminUserType = "creator" | "hotel" | "admin";
+export type IdentityAdminCreatableUserType = "hotel" | "admin";
 export type LegacyAdminUserStatus = "pending" | "verified" | "rejected" | "suspended";
 
 export type IdentityAdminCreateUserRequest = {
   email: string;
   name?: string;
-  type: IdentityAdminUserType;
+  type: IdentityAdminCreatableUserType;
   status?: LegacyAdminUserStatus;
   emailVerified?: boolean;
 };
@@ -212,7 +215,7 @@ export function createPgIdentityAdminUsersReadRepository(config: {
     async findUserById(userId) {
       const result = await pool.query<IdentityAdminUserRow>(
         `${ADMIN_USERS_SELECT_SQL}
-         WHERE id = $1
+         WHERE id = $1 AND status <> 'deleted'
          LIMIT 1`,
         [userId],
       );
@@ -282,6 +285,9 @@ export async function registerIdentityAdminUserRoutes(
     const body = request.body;
     if (!body?.email || !body.type) {
       return sendAdminUserError(reply, 422, "email and type are required.");
+    }
+    if (body.type !== "hotel" && body.type !== "admin") {
+      return sendAdminUserError(reply, 422, "type must be hotel or admin.");
     }
 
     const command: IdentityLifecycleCommand = {
@@ -568,7 +574,7 @@ const ADMIN_USERS_SELECT_SQL = `
       COALESCE(
         CASE WHEN platform_members.user_id IS NOT NULL THEN 'admin' END,
         created_user_events.legacy_type,
-        'creator'
+        'hotel'
       ) AS type,
       users.status,
       COALESCE(
@@ -596,7 +602,8 @@ function buildAdminUsersFilters(
   },
   values: unknown[],
 ): { sql: string } {
-  const filters: string[] = [];
+  // Deleted users (closed in WorkOS or by migration 0500) never show in Vayada Admin.
+  const filters: string[] = ["status <> 'deleted'"];
   if (input.type) {
     values.push(input.type);
     filters.push(`type = $${values.length}`);
@@ -609,9 +616,7 @@ function buildAdminUsersFilters(
     values.push(`%${input.search.trim()}%`);
     filters.push(`(email ILIKE $${values.length} OR name ILIKE $${values.length})`);
   }
-  return {
-    sql: filters.length ? `WHERE ${filters.join(" AND ")}` : "",
-  };
+  return { sql: `WHERE ${filters.join(" AND ")}` };
 }
 
 function serializeAdminUser(row: IdentityAdminUserRow): IdentityAdminUser {
@@ -619,7 +624,7 @@ function serializeAdminUser(row: IdentityAdminUserRow): IdentityAdminUser {
     id: row.id,
     email: row.email,
     name: row.name ?? "",
-    type: row.type ?? "creator",
+    type: row.type ?? "hotel",
     status: fromIdentityStatus(row.status),
     avatar: null,
     email_verified: Boolean(row.email_verified),

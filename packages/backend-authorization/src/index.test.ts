@@ -652,7 +652,7 @@ describe.skipIf(!TEST_DATABASE_URL)("createPgRolePermissionRepository", () => {
          VALUES
            ('hotel_group', 'hotel_owner', 'booking.settings.manage'),
            ('hotel_group', 'hotel_owner', 'pms.booking.update'),
-           ('creator_workspace', 'creator_owner', 'marketplace.profile.manage')`,
+           ('hotel_group', 'front_desk', 'pms.reservation.read')`,
       );
     } finally {
       await client.end();
@@ -970,7 +970,7 @@ describe("authorization helpers", () => {
         linkedResources: [
           {
             ...linkedResource("booking", "booking_hotel", "booking_hotel_alpenrose"),
-            relationship: "promotes",
+            relationship: "billing_account",
           },
         ],
       }),

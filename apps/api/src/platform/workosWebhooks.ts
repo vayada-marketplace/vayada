@@ -24,8 +24,14 @@ type PgWorkosWebhookStoreConfig = {
 
 type WorkosOrganizationRow = {
   id: string;
-  kind: WorkosOrganizationPayload["kind"];
+  // Rows may still carry a retired creator or affiliate kind until migration 0500 (VAY-2272).
+  kind: string;
 };
+
+// Organizations WorkOS events may change; every other kind is retired and left alone.
+function isActiveOrganizationKind(kind: string): kind is WorkosOrganizationPayload["kind"] {
+  return kind === "platform" || kind === "hotel_group";
+}
 
 export function mapWorkosMembershipRoleKey(input: {
   organizationKind: WorkosOrganizationPayload["kind"];
@@ -43,9 +49,7 @@ export function mapWorkosMembershipRoleKey(input: {
   ) {
     return input.existingRoleKey;
   }
-  if (input.organizationKind === "platform") return "platform_admin";
-  if (input.organizationKind === "hotel_group") return "hotel_owner";
-  return input.roleKey;
+  return input.organizationKind === "platform" ? "platform_admin" : "hotel_owner";
 }
 
 export function createWorkosWebhookVerifier(config: {
@@ -577,8 +581,11 @@ async function upsertWorkosUser(pool: pg.Pool, input: WorkosUserPayload): Promis
 async function upsertWorkosOrganization(
   pool: pg.Pool,
   input: WorkosOrganizationPayload,
-): Promise<string> {
-  const existing = await findOrganizationIdByWorkosOrgId(pool, input.workosOrgId);
+): Promise<string | null> {
+  const stored = await findOrganizationByWorkosOrgId(pool, input.workosOrgId);
+  // A closed creator or affiliate workspace keeps its blanked name and slug (VAY-2272).
+  if (stored && !isActiveOrganizationKind(stored.kind)) return null;
+  const existing = stored?.id;
   if (existing) {
     await pool.query(
       `UPDATE identity.organizations
@@ -611,12 +618,14 @@ async function upsertWorkosOrganization(
 async function upsertWorkosMembership(
   pool: pg.Pool,
   input: WorkosMembershipPayload,
-): Promise<{ userId: string; organizationId: string }> {
+): Promise<{ userId: string; organizationId: string } | null> {
   const userId = await findUserIdByWorkosUserId(pool, input.workosUserId);
   const organization = await findOrganizationByWorkosOrgId(pool, input.workosOrgId);
   if (!userId || !organization) {
     throw new Error("WorkOS membership references an unknown user or organization");
   }
+  // No membership in a retired creator or affiliate workspace is written again (VAY-2272).
+  if (!isActiveOrganizationKind(organization.kind)) return null;
   const existingMembership = await pool.query<{ role_key: string }>(
     `SELECT role_key
      FROM identity.organization_memberships

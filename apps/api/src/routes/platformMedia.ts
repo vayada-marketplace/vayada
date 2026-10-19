@@ -55,7 +55,6 @@ export type PlatformMediaResourceProduct =
   | "booking"
   | "pms"
   | "finance"
-  | "marketplace"
   | "distribution"
   | "platform"
   | "migration";
