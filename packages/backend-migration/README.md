@@ -414,7 +414,7 @@ TARGET_DATABASE_URL=<target database> npm run target:pms:migrate -- \
 Apply locks every PMS target table, writes in dependency order inside one
 repeatable-read transaction, verifies exact write/provenance counts, and rereads
 the target before commit. Rerun the same dry run and require unchanged parity.
-PMS success does not authorize legacy shutdown: VAY-1357 through VAY-1363,
+PMS success does not authorize legacy shutdown: VAY-1358 through VAY-1363,
 the rollback window, and the final human cutover approval remain mandatory.
 
 ### Signed Channex adoption
@@ -478,41 +478,6 @@ two independent humans are required.
 Supply the reviewed reason through a file. Successful rollback only changes the
 matching adoption claim from `verified_non_active` to retained `released`.
 
-## Production Marketplace Migration
-
-VAY-1357 consumes creators, offers, collaborations, deliverables, chat, trips,
-notifications, invites, and newsletter preferences from the immutable VAY-1351
-run. It resolves ownership only through the accepted Identity and Hotel Catalog
-links. Every legacy Marketplace image must already resolve to an active VAY-1055
-Platform Media object; unresolved or ambiguous media blocks the run.
-Legacy offer settings are reported as deterministic, presentation-only hotel
-preference drafts. They never write canonical preferences because legacy offers
-cannot prove the required content-type answer.
-
-Run the exact production dry run:
-
-```bash
-TARGET_DATABASE_URL=<target database> npm run target:marketplace:migrate -- \
-  --source-run-id vay1351-<24 lowercase hex characters> --dry-run
-```
-
-The dry run always rolls back. Review every blocker, source/target table count,
-property-scoped count, preserved newer target row, preserved target deletion,
-ownership link, and rewritten media reference.
-
-After backup, source write freeze/queue, a blocker-free reviewed dry run, and
-human go/no-go approval, apply the exact reviewed run:
-
-```bash
-TARGET_DATABASE_URL=<target database> npm run target:marketplace:migrate -- \
-  --source-run-id vay1351-<24 lowercase hex characters> --apply \
-  --confirm production-marketplace:vay1351-<same 24 lowercase hex characters>
-```
-
-Apply is transactional and verifies the target before commit. Marketplace
-success does not authorize legacy shutdown: Finance, VAY-1359 through VAY-1363,
-the rollback window, and the final human cutover approval remain mandatory.
-
 ## Production Finance Migration
 
 VAY-1358 consumes the exact Booking and PMS Finance rows from the immutable
@@ -565,7 +530,7 @@ and final human approval remain mandatory.
 ## Production Full Parity and Go/No-Go
 
 VAY-1359 aggregates the rollback-only Identity, Hotel Catalog, Booking, PMS,
-Marketplace, and Finance dry runs for one immutable extraction. It also verifies
+and Finance dry runs for one immutable extraction. It also verifies
 the four source tags against their extraction ledger, source schema fingerprints
 and checksums, target migration checksums, target provenance, forbidden PII, and
 raw legacy media references. It never repairs data or applies a domain migration.
@@ -623,20 +588,20 @@ running application. Production parity does not accept a migration-directory
 override, so an operator cannot replace the trusted checksum manifest.
 
 The command acquires PostgreSQL `SHARE` locks across target and staged-source
-tables for the complete report so its seven readers cannot observe mixed target
+tables for the complete report so its six readers cannot observe mixed target
 states. Run it only inside the approved cutover write-freeze window. It aborts
 rather than waiting indefinitely when those locks cannot be acquired within five
 seconds.
 
 ## Guarded Rehearsal and Cutover Orchestration
 
-VAY-1360 composes the reviewed schema, immutable extraction, six domain apply,
+VAY-1360 composes the reviewed schema, immutable extraction, five domain apply,
 full-parity, and smoke-evidence gates in this fixed order:
 
 ```text
 schema_migrations -> source_extraction -> identity ->
 catalog(prerequisites -> media -> complete) -> booking ->
-pms -> marketplace -> finance -> parity -> smoke_evidence
+pms -> finance -> parity -> smoke_evidence
 ```
 
 The command stores each attempt and evidence checksum in

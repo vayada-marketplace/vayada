@@ -4,7 +4,6 @@ import { join } from "node:path";
 import pg from "pg";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { transformMarketplace } from "./cases/marketplace/transform.js";
 import { transformPlatformJobsEventsAudit } from "./cases/platformJobsEventsAudit/transform.js";
 import { assertSafeTestDatabase } from "./testUtils.js";
 
@@ -26,7 +25,6 @@ const membershipWriterPaths = [
   "cases/distributionBookability/transform.ts",
   "cases/finance/transform.ts",
   "cases/identityOrganizationLinks/transform.ts",
-  "cases/marketplace/transform.ts",
   "cases/platformJobsEventsAudit/transform.ts",
   "cases/pmsOperations/transform.ts",
 ];
@@ -106,7 +104,6 @@ describe.skipIf(!TEST_DATABASE_URL)("membership property scope (PostgreSQL)", ()
     try {
       await client.query("DROP SCHEMA IF EXISTS identity CASCADE");
       await client.query("DROP SCHEMA IF EXISTS hotel_catalog CASCADE");
-      await client.query("DROP SCHEMA IF EXISTS migration_source_marketplace CASCADE");
       await client.query("DROP SCHEMA IF EXISTS migration_source_platform CASCADE");
     } finally {
       await client.end();
@@ -310,13 +307,10 @@ describe.skipIf(!TEST_DATABASE_URL)("membership property scope (PostgreSQL)", ()
     );
     expect(remaining.rows[0]).toEqual({ count: 0 });
   });
-  it.each([
-    ["marketplace", transformMarketplace],
-    ["platform", transformPlatformJobsEventsAudit],
-  ])("rejects orphan %s source memberships instead of dropping them", async (source, transform) => {
+  it("rejects orphan platform source memberships instead of dropping them", async () => {
     await client.query(delegationMigration);
     const queries: string[] = [];
-    await transform({
+    await transformPlatformJobsEventsAudit({
       async query(sql: string) {
         queries.push(sql);
         return { rows: [] };
@@ -327,7 +321,7 @@ describe.skipIf(!TEST_DATABASE_URL)("membership property scope (PostgreSQL)", ()
     );
     expect(membershipInsert).toBeDefined();
 
-    await createOrphanSourceMembership(client, source);
+    await createOrphanSourceMembership(client);
     await expect(client.query(membershipInsert!)).rejects.toMatchObject({
       code: "23503",
       constraint: "organization_memberships_organization_id_fkey",
@@ -335,16 +329,14 @@ describe.skipIf(!TEST_DATABASE_URL)("membership property scope (PostgreSQL)", ()
   });
 });
 
-async function createOrphanSourceMembership(client: pg.Client, source: string): Promise<void> {
-  const schema =
-    source === "marketplace" ? "migration_source_marketplace" : "migration_source_platform";
-  const membershipTable =
-    source === "marketplace" ? "organization_memberships" : "identity_organization_memberships";
-  const organizationTable = source === "marketplace" ? "organizations" : "identity_organizations";
+async function createOrphanSourceMembership(client: pg.Client): Promise<void> {
   await client.query(`
-    CREATE SCHEMA ${schema};
-    CREATE TABLE ${schema}.${organizationTable} (id UUID PRIMARY KEY, kind TEXT NOT NULL);
-    CREATE TABLE ${schema}.${membershipTable} (
+    CREATE SCHEMA migration_source_platform;
+    CREATE TABLE migration_source_platform.identity_organizations (
+      id UUID PRIMARY KEY,
+      kind TEXT NOT NULL
+    );
+    CREATE TABLE migration_source_platform.identity_organization_memberships (
       id UUID PRIMARY KEY,
       organization_id UUID NOT NULL,
       user_id UUID NOT NULL,
@@ -353,7 +345,7 @@ async function createOrphanSourceMembership(client: pg.Client, source: string): 
       workos_membership_id TEXT,
       workos_role_slugs TEXT[] NOT NULL DEFAULT '{}'
     );
-    INSERT INTO ${schema}.${membershipTable}
+    INSERT INTO migration_source_platform.identity_organization_memberships
       (id, organization_id, user_id, status, role_key)
     VALUES ('${STAFF_MEMBERSHIP}', '${PROPERTY_A}', '${STAFF}', 'active', 'hotel_owner');
   `);

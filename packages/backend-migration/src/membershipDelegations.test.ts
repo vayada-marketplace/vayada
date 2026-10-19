@@ -21,7 +21,6 @@ const membershipWriterPaths = [
   "cases/distributionBookability/transform.ts",
   "cases/finance/transform.ts",
   "cases/identityOrganizationLinks/transform.ts",
-  "cases/marketplace/transform.ts",
   "cases/platformJobsEventsAudit/transform.ts",
   "cases/pmsOperations/transform.ts",
   "platformIdentityBootstrap.ts",

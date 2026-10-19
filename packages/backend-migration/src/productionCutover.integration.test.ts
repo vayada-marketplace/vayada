@@ -76,7 +76,6 @@ describe.skipIf(!URL)("production cutover orchestration (PostgreSQL)", () => {
       "catalog",
       "booking",
       "pms",
-      "marketplace",
       "finance",
       "parity",
       "smoke_evidence",

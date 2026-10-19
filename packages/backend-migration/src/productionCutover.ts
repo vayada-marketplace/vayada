@@ -30,10 +30,6 @@ import {
   type ProductionIdentityMigrationReport,
 } from "./productionIdentityMigration.js";
 import {
-  runProductionMarketplaceMigration,
-  type ProductionMarketplaceMigrationReport,
-} from "./productionMarketplaceMigration.js";
-import {
   runProductionParity,
   type ProductionParityDecision,
   type ProductionParityReport,
@@ -60,7 +56,6 @@ export const PRODUCTION_CUTOVER_STEPS = [
   "catalog",
   "booking",
   "pms",
-  "marketplace",
   "finance",
   "parity",
   "smoke_evidence",
@@ -109,7 +104,6 @@ type DomainReport =
   | ProductionCatalogMigrationReport
   | ProductionBookingMigrationReport
   | ProductionPmsMigrationReport
-  | ProductionMarketplaceMigrationReport
   | ProductionFinanceMigrationReport;
 
 export type ProductionCutoverStepResult = {
@@ -414,11 +408,6 @@ const defaultServices: ProductionCutoverServices = {
         runProductionPmsMigration({
           ...input,
           applyConfirmation: `production-pms:${config.sourceRunId}`,
-        }),
-      marketplace: () =>
-        runProductionMarketplaceMigration({
-          ...input,
-          applyConfirmation: `production-marketplace:${config.sourceRunId}`,
         }),
       finance: () =>
         runProductionFinanceMigration({
