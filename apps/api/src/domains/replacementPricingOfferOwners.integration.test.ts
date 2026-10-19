@@ -126,6 +126,46 @@ const url = process.env["TEST_DATABASE_URL"];
 describe.skipIf(!url)("live replacement pricing offer owners", () => {
   const pool = new pg.Pool({ connectionString: url, max: 5 });
   afterAll(() => pool.end());
+  /** Saves offer terms. Non-refundable terms that accept pay at property can no longer be written (VAY-2280); they are
+   * stored as terms from before that rule are, so quotes and bookings over them are still covered. */
+  async function saveTerms(
+    booking: ReturnType<typeof createBookingPricingOfferTermsStore>,
+    context: RequestContext,
+    scope: { actorUserId: string; organizationId: string; propertyId: string },
+    command: {
+      requestId: string;
+      expectedRevision: string | null;
+      terms: Omit<ReplacementOfferTerms, "revision">;
+    },
+  ): Promise<ReplacementOfferTerms> {
+    const t = command.terms;
+    if (
+      t.cancellation.kind !== "non_refundable" ||
+      !t.payment.acceptedMethods?.includes("pay_at_property")
+    )
+      return booking.save(context, scope, command);
+    const terms = { ...t, revision: randomUUID() } as ReplacementOfferTerms;
+    await pool.query(
+      `INSERT INTO booking.pricing_v2_offer_terms (property_id,room_type_id,offer_id,revision,terms,request_id,request_hash,actor_user_id)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [
+        scope.propertyId,
+        t.roomTypeId,
+        t.offerId,
+        terms.revision,
+        JSON.stringify(terms),
+        command.requestId,
+        "0".repeat(64),
+        scope.actorUserId,
+      ],
+    );
+    await pool.query(
+      `INSERT INTO booking.pricing_v2_offer_term_heads(property_id,room_type_id,offer_id,revision) VALUES($1,$2,$3,$4)
+       ON CONFLICT(property_id,room_type_id,offer_id) DO UPDATE SET revision=$4`,
+      [scope.propertyId, t.roomTypeId, t.offerId, terms.revision],
+    );
+    return terms;
+  }
   async function fixture(
     configure?: (snapshot: PricingStorageSnapshot) => PricingStorageSnapshot,
     configureTerms?: TermsSetup,
@@ -232,7 +272,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       [secondRoomId, "flex"],
     ])
       terms.push(
-        await booking.save(context, scope, {
+        await saveTerms(booking, context, scope, {
           requestId: randomUUID(),
           expectedRevision: null,
           terms: configureTerms
@@ -7544,6 +7584,59 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       dueLaterMinor: "20600",
     });
     expect(card?.paymentEvidenceId).not.toBe(property?.paymentEvidenceId);
+    await pool.query(
+      "UPDATE finance.payment_provider_accounts SET charges_enabled=false WHERE property_id=$1",
+      [f.scope.propertyId],
+    );
+    expect(await paymentAmounts(f, "card")).toBeNull();
+  });
+  it("charges a card deposit's share now and leaves the rest at the property (VAY-2205)", async () => {
+    const deposit = (basisPoints: number) =>
+      ({
+        kind: "deposit",
+        basisPoints,
+        balanceDaysBeforeArrival: 0,
+        acceptedMethods: ["card"],
+      }) as const;
+    const f = await componentsFixture(
+      fixedPolicy(),
+      (t) => ({ ...t, payment: t.offerId === "other" ? deposit(5000) : deposit(3000) }),
+      true,
+    );
+    // 30% of the whole total, rounded half-up; the rest, the property's own fee included, is
+    // paid at the property.
+    expect(await paymentAmounts(f, "card")).toMatchObject({
+      totalMinor: "20600",
+      dueNowMinor: "6180",
+      dueLaterMinor: "14420",
+    });
+    expect(await paymentAmounts(f)).toBeNull();
+    // A stay is paid on one schedule: rooms on different deposits, or a deposit and a full
+    // payment, are not booked together.
+    const withOther = (fixture: typeof f) => ({
+      ...fixture.selection,
+      rooms: [
+        fixture.selection.rooms[0],
+        {
+          ...fixture.selection.rooms[1],
+          publicOfferKey: fixture.bindings.find(
+            (b) => b.roomTypeId === fixture.snapshot.rooms[0].roomTypeId && b.offerId === "other",
+          )!.publicOfferKey,
+        },
+      ],
+    });
+    expect(await paymentAmounts(f, "card", withOther(f))).toBeNull();
+    const mixed = await componentsFixture(
+      fixedPolicy(),
+      (t) => ({
+        ...t,
+        payment:
+          t.offerId === "other" ? { kind: "full", acceptedMethods: ["card"] } : deposit(3000),
+      }),
+      true,
+    );
+    expect(await paymentAmounts(mixed, "card", withOther(mixed))).toBeNull();
+    // Card lapses: no deposit is taken.
     await pool.query(
       "UPDATE finance.payment_provider_accounts SET charges_enabled=false WHERE property_id=$1",
       [f.scope.propertyId],

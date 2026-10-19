@@ -116,6 +116,21 @@ describe("production Booking publication owner sources", () => {
     expect(incomplete.entities[0]?.blockers.map(({ code }) => code)).toEqual([
       "hotel_profile_incomplete",
     ]);
+    // VAY-2288: a city and country kept private ask for the box, not for the data again.
+    row.profileStatus = "complete";
+    row.lifecycleStatus = "active";
+    row.localityPublic = false;
+    const hidden = await source.getBookingLaunchEvidence(scope);
+    if (hidden.outcome !== "evidence") throw new Error("Expected Catalog evidence");
+    expect(hidden.entities[0]?.blockers.map(({ code }) => code)).toEqual([
+      "hotel_public_locality_hidden",
+    ]);
+    row.city = "";
+    const missing = await source.getBookingLaunchEvidence(scope);
+    if (missing.outcome !== "evidence") throw new Error("Expected Catalog evidence");
+    expect(missing.entities[0]?.blockers.map(({ code }) => code)).toEqual([
+      "hotel_public_locality_missing",
+    ]);
   });
 
   it.each([

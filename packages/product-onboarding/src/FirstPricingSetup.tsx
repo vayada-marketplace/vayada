@@ -6,12 +6,16 @@ import {
   pricingCurrencyScale,
   type PricingConfiguration,
 } from "@vayada/domain-pms/replacement-pricing";
-import { parseBookingPricingOfferTerms } from "@vayada/domain-booking/replacement-pricing";
+import {
+  parseBookingPricingOfferTerms,
+  paymentForChoice,
+} from "@vayada/domain-booking/replacement-pricing";
 import type { PricingTermsInput } from "./replacementPricingClient";
 import type { Translate } from "./firstPricingSetupMessages";
 import { IncludedPricing, includedPrice, type IncludedInput } from "./IncludedPricing";
 import {
   AcceptedPaymentMethods,
+  paidInAdvance,
   type ManualPaymentMethod,
   type PaymentMethod,
 } from "./AcceptedPaymentMethods";
@@ -60,11 +64,34 @@ export function firstPricingInput(
   if (
     scale === null ||
     (!existingRoom && !["yes", "no"].includes(values.countChildren)) ||
-    values.payment !== "full" ||
+    // "full": the ticked ways to pay; "nothing" / "full_stay": the rate's "Paid when booking" (VAY-2205).
+    !["full", "nothing", "full_stay"].includes(values.payment) ||
+    (values.payment === "nothing" && values.cancellation === "non_refundable") ||
     !["non_refundable", "flexible"].includes(values.cancellation)
   )
     throw new PricingError("pricing.setup.errorIncomplete");
-  if (!values.methods.length) throw new PricingError("pricing.error.paymentMethodRequired");
+  if (
+    !values.methods.length ||
+    (values.payment === "nothing" && !values.methods.includes("pay_at_property"))
+  )
+    throw new PricingError("pricing.error.paymentMethodRequired");
+  // A non-refundable stay is paid in advance: pay at property is never sent with it (VAY-2280).
+  const payment =
+    values.payment === "full"
+      ? {
+          kind: "full" as const,
+          acceptedMethods:
+            values.cancellation === "non_refundable"
+              ? paidInAdvance(values.methods)
+              : values.methods,
+        }
+      : paymentForChoice(values.payment as "nothing" | "full_stay", { methods: values.methods });
+  if (!payment?.acceptedMethods?.length)
+    throw new PricingError(
+      values.cancellation === "non_refundable"
+        ? "pricing.error.nonRefundableNeedsAdvance"
+        : "pricing.error.paymentMethodRequired",
+    );
   if (!["flat", "occupancy", "per_person", "included_guests"].includes(values.mode))
     throw new PricingError("pricing.setup.errorMode");
   if (values.mode === "occupancy" && values.occupancy.length !== room.capacity.adults)
@@ -103,7 +130,7 @@ export function firstPricingInput(
     offerId,
     expectedRevision: null,
     cancellation,
-    payment: { kind: "full", acceptedMethods: values.methods },
+    payment,
   };
   const configuration = parsePricingConfiguration({
     version: "pricing.v2",
@@ -378,6 +405,7 @@ export function FirstPricingSetup({
         methods={values.methods}
         disabled={disabled}
         manualMethods={manualMethods}
+        nonRefundable={values.cancellation === "non_refundable"}
         onChange={(methods) => {
           setValues({ ...values, methods });
           setError("");

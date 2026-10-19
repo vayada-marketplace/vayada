@@ -191,6 +191,12 @@ import {
   createBookingPublicationProductionRuntime,
   startBookingPublicationWorker,
 } from "./domains/bookingPublicationProductionRuntime.js";
+import { runPendingPricingCardRefunds } from "./domains/pricingCardRefund.js";
+import {
+  createPricingCardReconciliationAlert,
+  reconcilePricingCardPayments,
+} from "./domains/pricingCardReconciliation.js";
+import { createPricingCardReadinessReader } from "./domains/pricingCardReadiness.js";
 import { createFinanceManualPaymentReadinessReader } from "./domains/financeManualPaymentReadiness.js";
 import { createTargetFinanceBillingConfigReadPort } from "./domains/financeBillingConfigReadModel.js";
 import { createFinanceSubscriptionService } from "./domains/financeSubscriptionService.js";
@@ -477,6 +483,7 @@ const bookingWebCheckoutAdapter = createTargetBookingWebCheckoutAdapter({
   mixedRoomSelectionsEnabled: true,
   replacementPricingAcceptanceEnabled: config.replacementPricingAcceptanceEnabled,
   replacementPricingCardAcceptanceEnabled: config.replacementPricingCardAcceptanceEnabled,
+  replacementPricingDepositAcceptanceEnabled: config.replacementPricingDepositAcceptanceEnabled,
   replacementPricingRequestAcceptanceEnabled: config.replacementPricingRequestAcceptanceEnabled,
   replacementPricingManualPaymentAcceptanceEnabled:
     config.replacementPricingManualPaymentAcceptanceEnabled,
@@ -1574,8 +1581,6 @@ const app = buildApp({
             "platform-admin": {
               requiredOrganizationKind: "platform",
               logoutReturnUrl: config.authSession.authLogoutUrl,
-              legacyJwtSecret: config.authSession.authLegacyMarketplaceJwtSecret,
-              legacyJwtUserType: "admin",
               requiredMembershipRoleKey: "platform_admin",
               publicOrigin: config.authSession.authSurfaceOrigins["platform-admin"],
               firstPartySession:
@@ -1613,7 +1618,6 @@ const app = buildApp({
           },
           cookieSecure: config.authSession.authCookieSecure,
           cookieDomain: config.authSession.authCookieDomain,
-          legacyMarketplaceJwtSecret: config.authSession.authLegacyMarketplaceJwtSecret,
           adminTransfer: adminTransferRuntime,
         }
       : undefined,
@@ -1687,6 +1691,7 @@ const app = buildApp({
           ...targetBookingHostActionGuards,
           payment: createFinanceHostBookingPayments(stripeBookingPaymentProvider),
         },
+        cardRefunds: stripeBookingPaymentProvider,
       })
     : undefined,
   pmsConfirmationEmails:
@@ -1742,6 +1747,16 @@ const app = buildApp({
       ? {
           commands: (context) => createReplacementPricingCommands(propertySetupOwnerPool, context),
           manualPayments: financeManualPaymentReadiness,
+          cardReadiness: createPricingCardReadinessReader({
+            pool: propertySetupOwnerPool,
+            finance: financePaymentReadinessReadModel,
+            // As the booking page's card acceptance: acceptance and card switched on, Stripe configured.
+            cardAcceptanceEnabled:
+              config.replacementPricingAcceptanceEnabled === true &&
+              config.replacementPricingCardAcceptanceEnabled === true &&
+              !!stripeBookingPaymentProvider,
+            depositAcceptanceEnabled: config.replacementPricingDepositAcceptanceEnabled === true,
+          }),
         }
       : undefined,
   pmsPricing: pmsGuestPolicySetupCommands
@@ -2886,6 +2901,64 @@ const bookingLifecycleTimer = setInterval(runBookingLifecycle, 60_000);
 bookingLifecycleTimer.unref();
 runBookingLifecycle();
 
+// Card refunds of cancelled pricing-v2 stays (VAY-2205): retries Stripe errors and follows refunds
+// still pending at Stripe. Commands exist only once a hotel takes card.
+let activePricingCardRefundRun: Promise<void> | undefined;
+const runPricingCardRefunds = () => {
+  if (!config.backgroundWorkersEnabled || !stripeBookingPaymentProvider) return;
+  if (activePricingCardRefundRun) return;
+  activePricingCardRefundRun = runPendingPricingCardRefunds(
+    propertySetupOwnerPool,
+    stripeBookingPaymentProvider,
+  )
+    .then((result) => {
+      if (result.errors > 0 || result.failed > 0)
+        app.log.warn({ ...result }, "Pricing card refund sweep: refunds failed or need a retry");
+    })
+    .catch((error: unknown) => app.log.warn({ err: error }, "Pricing card refund sweep failed"))
+    .finally(() => {
+      activePricingCardRefundRun = undefined;
+    });
+};
+const pricingCardRefundTimer = setInterval(runPricingCardRefunds, 60_000);
+pricingCardRefundTimer.unref();
+
+// VAY-2205: a daily read-only check of pricing-v2 card payments and refunds against Stripe; each
+// difference is logged (ids only) and emailed to the pricing alert recipient at most once a day.
+const pricingCardReconciliationAlert =
+  config.pricingPublicationFreshnessAlertEmail && config.bookingEmailDelivery
+    ? createPricingCardReconciliationAlert({
+        to: config.pricingPublicationFreshnessAlertEmail,
+        delivery: createResendBookingEmailDelivery(config.bookingEmailDelivery),
+      })
+    : undefined;
+let activePricingCardReconciliation: Promise<void> | undefined;
+const runPricingCardReconciliation = () => {
+  if (!config.backgroundWorkersEnabled || !stripeBookingPaymentProvider) return;
+  if (activePricingCardReconciliation) return;
+  activePricingCardReconciliation = reconcilePricingCardPayments(
+    propertySetupOwnerPool,
+    stripeBookingPaymentProvider,
+  )
+    .then(async ({ payments, refunds, mismatches }) => {
+      app.log[mismatches.length ? "warn" : "info"](
+        { payments, refunds, mismatches },
+        "Pricing card reconciliation",
+      );
+      await pricingCardReconciliationAlert?.(mismatches).catch((error: unknown) =>
+        app.log.warn({ err: error }, "Pricing card reconciliation alert failed"),
+      );
+    })
+    .catch((error: unknown) => app.log.warn({ err: error }, "Pricing card reconciliation failed"))
+    .finally(() => {
+      activePricingCardReconciliation = undefined;
+    });
+};
+const pricingCardReconciliationTimer = setInterval(runPricingCardReconciliation, 86_400_000);
+pricingCardReconciliationTimer.unref();
+const pricingCardReconciliationStart = setTimeout(runPricingCardReconciliation, 300_000);
+pricingCardReconciliationStart.unref();
+
 const pmsInboxDeliveryWorker =
   config.backgroundWorkersEnabled && pmsInboxDeliveryStore && pmsInboxDeliveryPool
     ? startPmsInboxDeliveryWorker({
@@ -2943,8 +3016,13 @@ app.addHook("preClose", async () => {
 });
 app.addHook("onClose", async () => {
   clearInterval(bookingLifecycleTimer);
+  clearInterval(pricingCardRefundTimer);
+  clearInterval(pricingCardReconciliationTimer);
+  clearTimeout(pricingCardReconciliationStart);
   if (bookingEmailDeliveryTimer) clearInterval(bookingEmailDeliveryTimer);
   await activeBookingLifecycleRun;
+  await activePricingCardRefundRun;
+  await activePricingCardReconciliation;
   await activeBookingEmailDelivery;
   await bookingLifecycleStore.close();
   await pmsInboxDeliveryStore?.close();

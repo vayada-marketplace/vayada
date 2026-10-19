@@ -10,7 +10,7 @@ import { lockCurrentQuoteGuestDisclosure } from "./currentQuoteGuestDisclosure.j
 import { lockFinancePricingAcceptanceTerms } from "./financePricingAcceptanceTerms.js";
 import { parseBookingQuoteAcceptanceInput } from "./bookingQuoteAcceptanceInput.js";
 import { pricingRoomRevenueProjection } from "./pricingRoomRevenueProjection.js";
-import { pricingCardQuoteSupported } from "./pricingCardPayment.js";
+import { pricingCardQuoteSplit, pricingCardQuoteSupported } from "./pricingCardPayment.js";
 import { pricingManualQuoteSupported } from "./pricingManualPayment.js";
 
 /** Start only; caller owns READ COMMITTED through full acceptance or rollback.
@@ -23,7 +23,7 @@ export async function preparePricingAcceptance(
   client: PoolClient,
   slug: unknown,
   input: unknown,
-  options: { card?: boolean; request?: boolean; manual?: boolean } = {},
+  options: { card?: boolean; deposits?: boolean; request?: boolean; manual?: boolean } = {},
 ) {
   const fail = (): never => {
     throw new Error("Booking acceptance unavailable");
@@ -72,7 +72,11 @@ export async function preparePricingAcceptance(
   // A request while hotel-confirmed acceptance is off is unavailable, not a stale price.
   if (command && mode === "request" && options.request !== true && !manual)
     throw new Error("Request acceptance unavailable");
-  const card = options.card === true && pricingCardQuoteSupported(current.quote);
+  // A card quote that leaves the rest to pay at the property also needs the deposits switch (VAY-2205).
+  const card =
+    options.card === true &&
+    pricingCardQuoteSupported(current.quote) &&
+    (options.deposits === true || !pricingCardQuoteSplit(current.quote));
   // Likewise a card quote while online card acceptance is off.
   if (command && !card && current.quote.paymentMethod === "card")
     throw new Error("Card acceptance unavailable");

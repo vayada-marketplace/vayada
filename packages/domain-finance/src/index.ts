@@ -582,7 +582,33 @@ export type FinanceOnlineCardExecutionEvidenceResult =
       message: string;
     };
 
+/** What a Vayada finance operator needs before turning card on or off for a hotel (VAY-2205). */
+export type FinanceOnlineCardExecutionState = {
+  propertyId: FinancePropertyId;
+  /** The hotel's Stripe account, when one is linked. `ready`: charges, payouts and card payments on. */
+  providerAccount: { ready: boolean; cardCapabilityRevision: number } | null;
+  propertyReadinessRevision: number | null;
+  /** What card also needs from the hotel's Payment settings: payments on, card chosen, and a
+   * currency card can take. */
+  paymentSettings: { paymentsOn: boolean; cardChosen: boolean; currencyEligible: boolean } | null;
+  /** The approval in force, if any; turning card off revokes it. `current`: given for today's
+   * Stripe account and Payment settings revisions. */
+  evidence: {
+    evidenceId: string;
+    acceptedAt: FinanceUtcDateTime;
+    acceptedByUserId: string | null;
+    current: boolean;
+  } | null;
+  cardReady: boolean;
+  /** Whether the hotel's published prices are up to date. A card change leaves them stale until the
+   * hotel saves them again; until then its booking page takes no bookings. Absent when unknown. */
+  prices?: "current" | "save_needed" | "not_published";
+};
+
 export type FinancePlatformOnlineCardExecutionEvidenceRepository = {
+  readOnlineCardExecutionState(
+    propertyId: FinancePropertyId,
+  ): Promise<FinanceOnlineCardExecutionState | null>;
   acceptOnlineCardExecutionEvidence(
     command: AcceptFinanceOnlineCardExecutionEvidenceCommand,
   ): Promise<FinanceOnlineCardExecutionEvidenceResult>;

@@ -2,7 +2,7 @@ import type { PoolClient } from "pg";
 import type { StripeBookingPaymentProvider } from "./stripeBookingPayments.js";
 import { stripeAmountMinor } from "./stripeMoney.js";
 
-export type HostPaymentDisposition = "no_payment_received" | "authorization_void";
+export type HostPaymentDisposition = "no_payment_received" | "authorization_void" | "card_refund";
 export type FinanceHostBookingPayments = (
   client: PoolClient,
   input: {
@@ -36,12 +36,18 @@ export function createFinanceHostBookingPayments(
       reference: string;
       activePaymentId: string | null;
       superseded: boolean;
+      bookingPaid: string;
+      pricingCard: boolean;
+      bookingCurrency: string;
     }>(
       `SELECT payment.id::text,payment.status,payment.payment_method AS method,
          payment.provider_payment_intent_id AS "intentId",account.provider_account_id AS "accountRef",
          payment.payment_metadata->>'chargeType' AS "chargeType",payment.amount::text,trim(payment.currency) AS currency,
          booking.public_reference AS reference,booking.active_card_payment_id::text AS "activePaymentId",
-         payment.payment_metadata->>'supersededByEdit'='true' AS superseded
+         payment.payment_metadata->>'supersededByEdit'='true' AS superseded,
+         booking.payment_status AS "bookingPaid",trim(booking.currency) AS "bookingCurrency",
+         (booking.booking_metadata->>'targetSource'='pricing_quote_draft'
+           AND booking.booking_metadata->>'paymentMethod'='card') IS TRUE AS "pricingCard"
        FROM finance.payments payment
        JOIN booking.guest_bookings booking ON booking.id=payment.guest_booking_id AND booking.property_id=payment.property_id
        LEFT JOIN finance.payment_provider_accounts account ON account.id=payment.provider_account_id AND account.property_id=payment.property_id
@@ -65,6 +71,23 @@ export function createFinanceHostBookingPayments(
       return "no_payment_received";
     }
     const payment = payments[0]!;
+    // VAY-2205: cancelling a paid pricing-v2 card stay refunds its card. The host action records
+    // the refund in this transaction; Stripe hears of it after the commit.
+    if (
+      payments.length === 1 &&
+      input.action === "cancel" &&
+      payment.status === "paid" &&
+      payment.method === "card" &&
+      payment.chargeType === "direct" &&
+      payment.activePaymentId === payment.id &&
+      (payment.bookingPaid === "paid" || payment.bookingPaid === "partially_paid") &&
+      payment.pricingCard &&
+      payment.currency === payment.bookingCurrency &&
+      payment.intentId &&
+      payment.accountRef &&
+      provider
+    )
+      return "card_refund";
     if (
       payments.length !== 1 ||
       input.action !== "reject" ||

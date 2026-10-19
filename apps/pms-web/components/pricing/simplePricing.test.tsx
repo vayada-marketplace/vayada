@@ -8,14 +8,16 @@ import {
   cancellationTerms,
   hasKeptSettings,
   onePriceAgain,
-  paymentEdits,
+  rateMethodEdits,
   pricePerAdultCount,
   setBreakfastAmount,
   setDiscount,
+  setMealDescription,
   simpleCancellation,
   simpleRoom,
   switchOption,
 } from "./simplePricing";
+import { changeMealPlan } from "./PricingMealPlan";
 import type { OptionTerms } from "./stepPricing";
 
 const roomTypeId = "aaaaaaaa-0000-4000-8000-00000000000a";
@@ -178,6 +180,56 @@ describe("the simple card's view of a room", () => {
     expect(hasKeptSettings(design, simple)).toBe(true);
     const plain = room([independent("flexible", flat("10000"))]);
     expect(hasKeptSettings(plain, simpleRoom(plain, { flexible: flexibleTerms() })!)).toBe(false);
+    // A single-date price and a date's stay rules show in "Prices by date" (VAY-2280), so nothing is hidden.
+    const dated = room([
+      {
+        ...independent("flexible", flat("10000"), {
+          dates: [{ date: "2026-09-12", price: flat("13000") }],
+        }),
+        restrictions: {
+          kind: "own",
+          rules: rules(2),
+          seasons: [],
+          dates: [{ date: "2026-09-08", rules: { ...rules(2), stopSell: true } }],
+        },
+      },
+    ]);
+    expect(hasKeptSettings(dated, simpleRoom(dated, { flexible: flexibleTerms() })!)).toBe(false);
+    // A date's own "no departures" or maximum stay shows nowhere on the calendar, so the card says it is kept.
+    const hidden = (
+      dateRules: Record<string, unknown>,
+      seasonRules: Record<string, unknown> = {},
+    ) => {
+      const value = room([
+        {
+          ...independent("flexible", flat("10000"), {
+            seasons: [
+              {
+                name: "Autumn",
+                tier: "High",
+                from: "09-01",
+                through: "09-30",
+                price: flat("12000"),
+              },
+            ],
+          }),
+          restrictions: {
+            kind: "own",
+            rules: rules(2),
+            seasons: [{ from: "09-01", through: "09-30", rules: rules(2, seasonRules) }],
+            dates: [{ date: "2026-09-08", rules: rules(2, dateRules) }],
+          },
+        },
+      ]);
+      return hasKeptSettings(value, simpleRoom(value, { flexible: flexibleTerms() })!);
+    };
+    expect(hidden({})).toBe(false);
+    expect(hidden({ closedToDeparture: true })).toBe(true);
+    expect(hidden({ maxStayNights: 7 })).toBe(true);
+    // A date that keeps its season's rules (as the night panel writes them) adds nothing hidden of its own.
+    const season = { closedToDeparture: true, maxStayNights: 7 };
+    expect(hidden(season, season)).toBe(false);
+    expect(hidden({ stopSell: true, ...season }, season)).toBe(false);
   });
 
   it("waits for every option's terms before it decides", () => {
@@ -197,17 +249,6 @@ describe("the simple card's view of a room", () => {
 
   it("treats an option as a switch only when nothing about it is its own", () => {
     const cases: [string, PricingConfiguration, Record<string, OptionTerms>][] = [
-      [
-        "other payment methods",
-        design,
-        {
-          ...designTerms,
-          nonrefundable: {
-            ...nonRefundableTerms,
-            payment: { kind: "full", acceptedMethods: ["card"] },
-          },
-        },
-      ],
       [
         "own stay rules",
         room(
@@ -251,6 +292,15 @@ describe("the simple card's view of a room", () => {
       expect(ids(simple.others), name).toContain("nonrefundable");
       expect(simple.breakfast?.id, name).toBe("breakfast");
     }
+    // The Non-refundable rate has payment methods of its own (VAY-2282).
+    const ownMethods = {
+      ...designTerms,
+      nonrefundable: {
+        ...nonRefundableTerms,
+        payment: { kind: "full" as const, acceptedMethods: ["card" as const] },
+      },
+    };
+    expect(simpleRoom(design, ownMethods)!.nonRefundable?.id).toBe("nonrefundable");
     // Breakfast with its own cancellation, or a price of its own, is another option too.
     expect(simpleRoom(design, { ...designTerms, breakfast: flexibleTerms(3) })!.breakfast).toBe(
       null,
@@ -307,8 +357,9 @@ describe("the simple card's edits", () => {
       if (simple.cancellation.kind !== "own")
         for (const edit of cancellationEdits(simple, terms, simple.cancellation))
           expect(edit.terms).toEqual(terms[edit.offerId]);
-      for (const edit of paymentEdits(simple, terms, payment.acceptedMethods))
-        expect(edit.terms).toEqual(terms[edit.offerId]);
+      for (const rate of ["flexible", "non_refundable"] as const)
+        for (const edit of rateMethodEdits(simple, terms, rate, payment.acceptedMethods))
+          expect(edit.terms).toEqual(terms[edit.offerId]);
     }
     // Per adult count and back is the same room.
     const plain = room([
@@ -362,20 +413,30 @@ describe("the simple card's edits", () => {
     );
   });
 
-  it("moves the breakfast option's cancellation with the main price's, and payment with every switch", () => {
+  it("moves the breakfast option's cancellation with the main price's, and each rate's payment with its own options", () => {
     const simple = simpleRoom(design, designTerms)!;
     expect(cancellationEdits(simple, designTerms, { kind: "free", days: 3 })).toEqual([
       { offerId: "flexible", terms: { ...designTerms.flexible, cancellation: free(3) } },
       { offerId: "breakfast", terms: { ...designTerms.breakfast, cancellation: free(3) } },
     ]);
     expect(cancellationTerms({ kind: "non_refundable" })).toEqual({ kind: "non_refundable" });
-    const card = paymentEdits(simple, designTerms, ["card"]);
-    expect(card.map((edit) => [edit.offerId, edit.terms.payment])).toEqual([
-      ["flexible", { kind: "full", acceptedMethods: ["card"] }],
-      ["nonrefundable", { kind: "full", acceptedMethods: ["card"] }],
-      ["breakfast", { kind: "full", acceptedMethods: ["card"] }],
+    // Each rate's methods are its own (VAY-2282): the Flexible rate's go to the breakfast switch too.
+    expect(
+      rateMethodEdits(simple, designTerms, "flexible", ["pay_at_property"]).map((edit) => [
+        edit.offerId,
+        edit.terms.payment.acceptedMethods,
+      ]),
+    ).toEqual([
+      ["flexible", ["pay_at_property"]],
+      ["breakfast", ["pay_at_property"]],
     ]);
-    expect(() => paymentEdits(simple, designTerms, [])).toThrow();
+    expect(
+      rateMethodEdits(simple, designTerms, "non_refundable", ["bank_transfer"]).map((edit) => [
+        edit.offerId,
+        edit.terms.payment.acceptedMethods,
+      ]),
+    ).toEqual([["nonrefundable", ["bank_transfer"]]]);
+    expect(() => rateMethodEdits(simple, designTerms, "non_refundable", [])).toThrow();
   });
 
   it("adds a switch's option that the card then recognises", () => {
@@ -388,10 +449,11 @@ describe("the simple card's edits", () => {
       { percent: "15" },
       flexibleTerms(3),
     );
+    // Paid in advance: the main option's pay at property is left out (VAY-2280).
     expect(added.terms).toMatchObject({
       offerId: id,
       cancellation: { kind: "non_refundable" },
-      payment,
+      payment: { kind: "full", acceptedMethods: ["card"] },
     });
     const id2 = "cccccccc-0000-4000-8000-00000000000c";
     const both = switchOption(
@@ -429,5 +491,44 @@ describe("the simple card's edits", () => {
     expect(onePriceAgain(perCount)).toEqual(design);
     expect(onePriceAgain(complex)).toBe(null);
     expect(() => pricePerAdultCount(complex)).toThrow();
+  });
+});
+
+describe("what guests read about a meal (VAY-2281)", () => {
+  it("keeps one trimmed line, leaves the key out when empty, and survives price and meal changes", () => {
+    const text = "Buffet breakfast in the Stube, 7:00–10:30";
+    const read = setMealDescription(frozen(design), "breakfast", `  ${text} `);
+    expect(offer(read, "breakfast").meal).toEqual({
+      kind: "breakfast",
+      charge: { kind: "room", amountMinor: "1500" },
+      description: text,
+    });
+    expect(read.offers.filter((value) => value.id !== "breakfast")).toEqual(
+      design.offers.filter((value) => value.id !== "breakfast"),
+    );
+    expect(offer(setMealDescription(read, "breakfast", "  "), "breakfast").meal).not.toHaveProperty(
+      "description",
+    );
+    for (const bad of ["x".repeat(201), "Line one\u2028line two", "\u202Eevil", "bell\u0007"])
+      expect(() => setMealDescription(design, "breakfast", bad), bad).toThrow();
+    // A new price or another meal keeps the text; no meal drops it.
+    expect(offer(setBreakfastAmount(read, "breakfast", "18"), "breakfast").meal.description).toBe(
+      text,
+    );
+    const halfBoard = changeMealPlan(read, "breakfast", {
+      kind: "half_board",
+      basis: "room",
+      amounts: ["35"],
+    });
+    expect(offer(halfBoard, "breakfast").meal).toMatchObject({
+      kind: "half_board",
+      description: text,
+    });
+    const roomOnly = changeMealPlan(read, "breakfast", {
+      kind: "room_only",
+      basis: "room",
+      amounts: [],
+    });
+    expect(offer(roomOnly, "breakfast").meal).not.toHaveProperty("description");
   });
 });

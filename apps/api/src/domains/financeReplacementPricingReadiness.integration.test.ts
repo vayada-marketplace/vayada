@@ -65,6 +65,27 @@ describe.skipIf(!url)("replacement pricing Finance owner readiness", () => {
     await pool.query("UPDATE finance.payment_settings SET payments_enabled=false WHERE property_id=$1", [f.propertyId]);
     expect(await f.read()).toMatchObject({ reason: "payments_disabled" });
   });
+  it("takes a deposit by card with the rest at the property, and a card lapse never stops the other rates (VAY-2205)", async () => {
+    const f = await fixture(["card", "pay_at_property"]);
+    const deposit = (payment: Record<string, unknown>) =>
+      f.read({ terms: [{ ...f.input.terms[0], payment } as ReplacementOfferTerms] });
+    const cardDeposit = { kind: "deposit", basisPoints: 3000, balanceDaysBeforeArrival: 0, acceptedMethods: ["card"] };
+    // Without card the deposit rate is published but can't take card; pay at property sells as before.
+    expect(await deposit(cardDeposit)).toMatchObject({ kind: "ready", methods: ["pay_at_property"] });
+    await f.executionEvidence();
+    expect(await deposit(cardDeposit)).toMatchObject({ kind: "ready", methods: ["pay_at_property", "card"] });
+    // No other deposit shape runs: a later balance, other methods, none named, or the whole stay.
+    for (const payment of [
+      { ...cardDeposit, balanceDaysBeforeArrival: 7 },
+      { ...cardDeposit, acceptedMethods: ["card", "pay_at_property"] },
+      { kind: "deposit", basisPoints: 3000, balanceDaysBeforeArrival: 0 },
+      { ...cardDeposit, basisPoints: 10000 },
+    ])
+      expect(await deposit(payment)).toMatchObject({ reason: "deposit_execution_unavailable" });
+    // Card lapses with the deposit rate among the saved ones: the hotel stays publishable, without card.
+    await pool.query("UPDATE finance.payment_provider_accounts SET charges_enabled=false WHERE id=$1", [f.accountId]);
+    expect(await deposit(cardDeposit)).toMatchObject({ kind: "ready", methods: ["pay_at_property"] });
+  });
   it("adds bank transfer and PayPal only with bank details or a PayPal email, keeping the evidence (VAY-2139)", async () => {
     const destination = async (propertyId: string) => (await pool.query(`INSERT INTO finance.bank_transfer_destinations
       (property_id,revision,ciphertext,key_arn,account_last4) VALUES($1,1,$2,'key','3000') RETURNING id`, [propertyId, Buffer.alloc(40)])).rows[0].id;

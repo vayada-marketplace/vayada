@@ -24,7 +24,6 @@ const membershipWriterPaths = [
   "cases/marketplace/transform.ts",
   "cases/platformJobsEventsAudit/transform.ts",
   "cases/pmsOperations/transform.ts",
-  "nextSmokeBackfill.ts",
   "platformIdentityBootstrap.ts",
 ];
 const TEST_DATABASE_URL = process.env["TEST_DATABASE_URL"];

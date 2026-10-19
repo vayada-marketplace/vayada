@@ -18,14 +18,16 @@ import { LineCounter, isAlias, parse, parseDocument, visit } from "yaml";
 import {
   BROWSER_E2E_JOBS,
   FRONTEND_ONLY_PACKAGES,
+  FULL_CI_LABEL,
   HOLD_LABEL,
   RULES,
   SELECTABLE_JOBS,
+  STACKED_PR_JOBS,
   WORKFLOW_FILE,
   YAML_ANCHOR,
-  changedFiles,
   openHolds,
   selectJobs,
+  stackedSelection,
   verifyRequiredChecks,
   waitWhileHeld,
   workflowChangeJobs,
@@ -423,7 +425,15 @@ function runSelectCli(dir, event, env = {}) {
   const result = spawnSync(process.execPath, [cli, "select"], {
     cwd: dir,
     encoding: "utf8",
-    env: { ...process.env, GITHUB_OUTPUT: output, GITHUB_EVENT_NAME: event, ...env },
+    // CI runs these tests inside a pull_request job, whose own base ref must not leak in.
+    env: {
+      ...process.env,
+      GITHUB_OUTPUT: output,
+      GITHUB_EVENT_NAME: event,
+      GITHUB_BASE_REF: "",
+      PR_FULL_CI: "",
+      ...env,
+    },
   });
   assert.equal(result.status, 0, result.stderr);
   const outputs = Object.fromEntries(
@@ -451,6 +461,50 @@ test("the select CLI runs every job for a push or a manual run", () => {
   }
 });
 
+test("a pull request stacked on another branch runs only the quick jobs of its selection", () => {
+  const stacked = { event: "pull_request", baseRef: "fm/vay-1-parent", fullCi: false };
+  assert.deepEqual(stackedSelection(ALL, stacked).jobs, STACKED_PR_JOBS);
+  assert.deepEqual(stackedSelection([], stacked).jobs, []);
+  assert.deepEqual(stackedSelection(["api_postgres", "backend"], stacked).jobs, []);
+  assert.match(stackedSelection(ALL, stacked).reason, new RegExp(`label ${FULL_CI_LABEL}`));
+  // The quick jobs: nothing with a database, a browser project or the Python apps.
+  for (const job of STACKED_PR_JOBS) assert.ok(SELECTABLE_JOBS.includes(job), job);
+  for (const job of [
+    "api_postgres",
+    "setup_draft_reset_postgres",
+    "backend",
+    ...BROWSER_E2E_JOBS,
+  ]) {
+    assert.ok(!STACKED_PR_JOBS.includes(job), job);
+  }
+});
+
+test("pull requests into main, labelled or base-less ones and other events keep the full selection", () => {
+  for (const options of [
+    { event: "pull_request", baseRef: "main", fullCi: false },
+    { event: "pull_request", baseRef: "fm/vay-1-parent", fullCi: true },
+    { event: "pull_request", baseRef: "", fullCi: false },
+    { event: "pull_request", baseRef: undefined, fullCi: false },
+    { event: "merge_group", baseRef: "fm/vay-1-parent", fullCi: false },
+    { event: "workflow_dispatch", baseRef: "fm/vay-1-parent", fullCi: false },
+  ]) {
+    assert.deepEqual(
+      stackedSelection(ALL, options),
+      { jobs: ALL, reason: null },
+      JSON.stringify(options),
+    );
+  }
+});
+
+test("the select CLI narrows a stacked pull request unless it carries the full-ci label", () => {
+  const dir = pullRequestMergeRepo(once("  api_unit:\n", "  api_units:\n"));
+  const stacked = { GITHUB_BASE_REF: "fm/vay-1-parent" };
+  assert.deepEqual(runSelectCli(dir, "pull_request", stacked), STACKED_PR_JOBS);
+  assert.deepEqual(runSelectCli(dir, "pull_request", { ...stacked, PR_FULL_CI: "true" }), ALL);
+  assert.deepEqual(runSelectCli(dir, "pull_request", { GITHUB_BASE_REF: "main" }), ALL);
+  assert.deepEqual(runSelectCli(dir, "workflow_dispatch", stacked), ALL);
+});
+
 test("every path rule that runs frontend also runs frontend_build", () => {
   for (const rule of RULES) {
     // Workflow files are read only by contract tests in the frontend job (guard test below).
@@ -463,116 +517,12 @@ test("every path rule that runs frontend also runs frontend_build", () => {
   }
 });
 
-// A checkout of merge queue entry "pr-2" as actions/checkout leaves it: main, then each entry
-// ahead as a single-parent commit, then this entry. `ahead` and `entry` map paths to contents.
-function mergeQueueRepo({ ahead = [], entry }) {
-  const dir = mkdtempSync(join(tmpdir(), "pr-checks-queue-"));
-  const git = (...args) => {
-    const identity = ["-c", "user.name=ci", "-c", "user.email=ci@example.com"];
-    const result = spawnSync("git", [...identity, "-c", "commit.gpgsign=false", ...args], {
-      cwd: dir,
-      encoding: "utf8",
-    });
-    assert.equal(result.status, 0, result.stderr);
-    return result.stdout.trim();
-  };
-  const commit = (files, message) => {
-    for (const [file, text] of Object.entries(files)) {
-      mkdirSync(dirname(join(dir, file)), { recursive: true });
-      writeFileSync(join(dir, file), text);
-    }
-    git("add", "-A");
-    git("commit", "-q", "-m", message);
-    return git("rev-parse", "HEAD");
-  };
-  git("init", "-q", "-b", "main");
-  commit({ [WORKFLOW_FILE]: FIXTURE, "README.md": "main\n" }, "main");
-  git("checkout", "-q", "-b", "gh-readonly-queue/main/pr-2");
-  const aheadShas = ahead.map((files, index) => commit(files, `entry ahead ${index + 1}`));
-  commit(entry, "this entry");
-  return { dir, git, aheadShas };
-}
-
-const queued = (dir, base = "refs/heads/main") => {
-  const { files, workflowJobs } = changedFiles({ event: "merge_group", base, cwd: dir });
-  return selectJobs(files, { workflowJobs }).jobs;
-};
-
-test("a queued docs-only PR selects no PostgreSQL or browser jobs", () => {
-  const { dir } = mergeQueueRepo({ entry: { "docs/queue.md": "docs\n" } });
-  assert.deepEqual(queued(dir), []);
-  const jobs = runSelectCli(dir, "merge_group", { MERGE_GROUP_BASE: "refs/heads/main" });
-  assert.deepEqual(jobs, []);
-});
-
-test("a queued PR behind a backend PR also runs that backend PR's jobs until it lands", () => {
-  const backend = { "apps/api/src/server.ts": "// api\n", "apps/pms-api/app/main.py": "# pms\n" };
-  const { dir, git, aheadShas } = mergeQueueRepo({
-    ahead: [backend],
-    entry: { "docs/queue.md": "docs\n" },
-  });
-  const jobs = queued(dir);
-  assert.deepEqual(jobs, selectJobs(Object.keys(backend)).jobs);
-  for (const job of ["api_unit", "api_postgres", "setup_draft_reset_postgres", "backend"]) {
-    assert.ok(jobs.includes(job), job);
-  }
-  assert.deepEqual(runSelectCli(dir, "merge_group", { MERGE_GROUP_BASE: "refs/heads/main" }), jobs);
-  // Once the entry ahead lands, main is that commit and only this entry's own files count.
-  git("update-ref", "refs/heads/main", aheadShas[0]);
-  assert.deepEqual(queued(dir), []);
-});
-
-test("a pr-checks.yml edit by an entry ahead selects its job blocks for the entries behind", () => {
-  const { dir } = mergeQueueRepo({
-    ahead: [{ [WORKFLOW_FILE]: addSuite(FIXTURE) }],
-    entry: { "docs/queue.md": "docs\n" },
-  });
-  assert.deepEqual(queued(dir), ["frontend", "api_postgres"]);
-});
-
-test("a queue entry without a reachable base runs every job", () => {
-  const { dir } = mergeQueueRepo({ entry: { "docs/queue.md": "docs\n" } });
-  assert.throws(() => changedFiles({ event: "merge_group", cwd: dir }), /fetched base branch/);
-  assert.throws(() => queued(dir, "refs/remotes/origin/merge-queue-base"));
-  const jobs = runSelectCli(dir, "merge_group", {
-    MERGE_GROUP_BASE: "refs/remotes/origin/merge-queue-base",
-  });
-  assert.deepEqual(jobs, ALL);
-});
-
-test("a shallow queue checkout finds the merge-base when its history reaches main", () => {
-  const { dir } = mergeQueueRepo({
-    ahead: [{ "apps/pms-api/app/main.py": "# pms\n" }],
-    entry: { "docs/queue.md": "docs\n" },
-  });
-  const shallowClone = (depth) => {
-    const clone = mkdtempSync(join(tmpdir(), "pr-checks-shallow-"));
-    const run = (...args) => {
-      const result = spawnSync("git", args, { cwd: clone, encoding: "utf8" });
-      assert.equal(result.status, 0, result.stderr);
-    };
-    run(
-      "clone",
-      "-q",
-      `--depth=${depth}`,
-      "-b",
-      "gh-readonly-queue/main/pr-2",
-      `file://${dir}`,
-      ".",
-    );
-    run(
-      "fetch",
-      "-q",
-      "--no-tags",
-      `--depth=${depth}`,
-      "origin",
-      "+refs/heads/main:refs/remotes/origin/merge-queue-base",
-    );
-    return clone;
-  };
-  // Depth 3 reaches main's tip from the entry, so the answer matches a full clone. (CI fetches 50;
-  // when history does not reach a common commit, merge-base fails and every job runs.)
-  assert.deepEqual(queued(shallowClone(3), "refs/remotes/origin/merge-queue-base"), ["backend"]);
+// The merge queue runs every job (VAY-2287): main fast-forwards to the commit the queue tested, so
+// the release precheck reuses that run instead of dispatching its own on the same commit.
+test("a queued entry runs every job, whatever its pull request selected", () => {
+  const dir = pullRequestMergeRepo(addSuite);
+  assert.deepEqual(runSelectCli(dir, "pull_request"), ["frontend", "api_postgres"]);
+  assert.deepEqual(runSelectCli(dir, "merge_group"), ALL);
 });
 
 test("other workflow files run the jobs whose tests read workflow files", () => {
@@ -1234,24 +1184,48 @@ test("pr-checks.yml wires every job through the change detector and the aggregat
   assert.equal(verify.env.NEEDS, "${{ toJSON(needs) }}");
 });
 
-test("pr-checks.yml reports Required Checks to the merge queue with the base branch fetched", () => {
+test("the select step reads the full-ci label of the pull request", () => {
+  const select = parse(WORKFLOW).jobs.changes.steps.find((step) => step.id === "select");
+  assert.equal(
+    select.env.PR_FULL_CI,
+    `\${{ contains(github.event.pull_request.labels.*.name, '${FULL_CI_LABEL}') }}`,
+  );
+});
+
+// Closing a pull request (a stack collapsing into its bottom pull request) cancels its PR Checks
+// run: the cancel workflow joins the group PR Checks uses for pull requests.
+test("closing a pull request cancels its PR Checks run and reports nothing else", () => {
+  const prChecks = parse(WORKFLOW);
+  const cancel = parse(
+    readFileSync(new URL("../../.github/workflows/pr-checks-cancel.yml", import.meta.url), "utf8"),
+  );
+  assert.equal(
+    prChecks.concurrency.group,
+    "pr-checks-${{ github.event.pull_request.number || github.ref }}",
+  );
+  assert.deepEqual(cancel.concurrency, {
+    group: "pr-checks-${{ github.event.pull_request.number }}",
+    "cancel-in-progress": true,
+  });
+  assert.deepEqual(Object.keys(cancel.on), ["pull_request"]);
+  assert.deepEqual(cancel.on.pull_request.types, ["closed"]);
+  assert.deepEqual(cancel.on.pull_request.branches, prChecks.on.pull_request.branches);
+  assert.deepEqual(cancel.permissions, {});
+  for (const job of Object.values(cancel.jobs)) {
+    assert.notEqual(job.name, "Required Checks");
+    for (const step of job.steps) assert.equal(step.uses, undefined, "runs no action or checkout");
+  }
+});
+
+test("pr-checks.yml reports Required Checks to the merge queue and selects from a 2-deep checkout", () => {
   const workflow = parse(WORKFLOW);
   assert.deepEqual(workflow.on.merge_group, { types: ["checks_requested"], branches: ["main"] });
   assert.ok("workflow_dispatch" in workflow.on);
   const steps = workflow.jobs.changes.steps;
-  const fetch = steps.find((step) => step.name === "Fetch the merge queue's base branch");
-  assert.equal(fetch.if, "github.event_name == 'merge_group'");
-  assert.equal(fetch.env.BASE_REF, "${{ github.event.merge_group.base_ref }}");
+  assert.equal(steps[0].with["fetch-depth"], 2, "HEAD^1 of the pull request merge commit");
   const select = steps.find((step) => step.id === "select");
-  assert.ok(
-    fetch.run.includes(`:${select.env.MERGE_GROUP_BASE}"`),
-    "fetch writes the ref select reads",
-  );
-  assert.ok(steps.indexOf(fetch) < steps.indexOf(select));
-  assert.equal(
-    steps[0].with["fetch-depth"],
-    "${{ github.event_name == 'merge_group' && 50 || 2 }}",
-  );
+  assert.ok(steps.indexOf(select) > 0);
+  assert.equal(select.env.MERGE_GROUP_BASE, undefined, "the queue no longer diffs");
 });
 
 test("Required Checks waits out a merge queue hold only after the jobs verified", () => {
@@ -1286,7 +1260,7 @@ test("every API PostgreSQL step belongs to exactly one shard or runs in all of t
   );
   const job = workflow.jobs.api_postgres;
   const shards = job.strategy.matrix.shard;
-  assert.deepEqual(shards, ["platform", "pms", "pricing", "hotel-setup"]);
+  assert.deepEqual(shards, ["platform", "pms", "pms-migrations", "pricing", "hotel-setup"]);
   const perShard = Object.fromEntries(shards.map((shard) => [shard, 0]));
   for (const step of job.steps) {
     if (!step.if) continue;

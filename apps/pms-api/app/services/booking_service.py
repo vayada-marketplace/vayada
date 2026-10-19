@@ -2116,6 +2116,21 @@ async def reconcile_stripe_refund(refund_id: str, provider_status: str) -> dict 
     return await _finish_succeeded_stripe_refund(payment)
 
 
+async def is_foreign_stripe_refund(refund: dict) -> bool:
+    """A refund of a payment this service never took: the new API refunds its pricing-v2 card
+    payments on the same connected accounts and marks them (VAY-2205). Refunds of legacy payments,
+    known or still being prepared, stay ours."""
+    refund_id = refund.get("id")
+    if refund_id and await PaymentRepository.get_by_stripe_refund(str(refund_id)):
+        return False
+    if (refund.get("metadata") or {}).get("vayada_source") == "pricing_v2":
+        return True
+    payment_intent = refund.get("payment_intent")
+    return bool(payment_intent) and not await PaymentRepository.get_by_stripe_pi(
+        str(payment_intent)
+    )
+
+
 async def reconcile_stripe_refund_event(refund: dict) -> dict | None:
     """Attach Stripe refund events to their pre-recorded command and resume it."""
     refund_id = refund.get("id")

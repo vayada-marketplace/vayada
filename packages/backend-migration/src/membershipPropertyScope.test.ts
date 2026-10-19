@@ -21,7 +21,6 @@ const delegationMigration = await readFile(
   "utf8",
 );
 const membershipWriterPaths = [
-  "nextSmokeBackfill.ts",
   "platformIdentityBootstrap.ts",
   "cases/bookingCheckout/transform.ts",
   "cases/distributionBookability/transform.ts",

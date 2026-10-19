@@ -7,6 +7,7 @@ import { useTranslation } from "@/lib/i18n";
 import { resolveBookingSetupGuard } from "@/lib/utils/sharedSetupGuard";
 import { hasPendingHotelAccountInvite } from "@/services/api/hotelAccountInvites";
 import { AuthStateError, authService, storePendingEmailVerification } from "@/services/auth";
+import { signupErrorKey, signupRedirectErrorKey } from "@/lib/utils/signupError";
 
 export default function SignupPage() {
   const { t } = useTranslation();
@@ -15,8 +16,8 @@ export default function SignupPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
-    if (new URLSearchParams(window.location.search).has("auth_error"))
-      setSubmitError(t("auth.register.errorUnexpected"));
+    const authError = new URLSearchParams(window.location.search).get("auth_error");
+    if (authError !== null) setSubmitError(t(signupRedirectErrorKey(authError)));
   }, [t]);
 
   async function handleSignup(data: { email: string; password: string }) {
@@ -44,7 +45,7 @@ export default function SignupPage() {
         router.push("/verify-email");
         return;
       }
-      setSubmitError(t("auth.register.errorUnexpected"));
+      setSubmitError(t(signupErrorKey(error)));
     } finally {
       setIsSubmitting(false);
     }

@@ -85,7 +85,7 @@ service. Temporarily opens the RDS security group to your public IP, runs the
 service's `scripts/run_migrations.py`, then revokes the ingress rule on exit.
 
 ```sh
-./scripts/run_migration.sh <pms|booking|marketplace|auth>
+./scripts/run_migration.sh <pms|booking|auth>
 ```
 
 Requires AWS CLI credentials and Python 3 with `asyncpg`. DB passwords are stored in AWS SSM under `/vayada/prod/`.
@@ -96,12 +96,11 @@ Populate local databases with mock data for development. All seed scripts
 default to `localhost` Postgres URLs; override via `DATABASE_URL`,
 `AUTH_DATABASE_URL`, `PMS_DATABASE_URL` env vars.
 
-| Script                | Purpose                                                                                                            |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `seed_users.py`       | Seeds the shared auth DB with the admin user and mock hotel/creator accounts. **Run this first.**                  |
-| `seed_marketplace.py` | Seeds the marketplace DB with profiles, listings, collaborations, chats, and reviews.                              |
-| `seed_booking.py`     | Seeds the booking-engine DB (hotel properties, translations) and the PMS DB (hotels, room types, sample bookings). |
-| `seed_all.py`         | Runs the three above in order (`users → marketplace → booking`) and prints credentials at the end.                 |
+| Script            | Purpose                                                                                                            |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `seed_users.py`   | Seeds the shared auth DB with the admin user and mock hotel/creator accounts. **Run this first.**                  |
+| `seed_booking.py` | Seeds the booking-engine DB (hotel properties, translations) and the PMS DB (hotels, room types, sample bookings). |
+| `seed_all.py`     | Runs the two above in order (`users → booking`) and prints credentials at the end.                                 |
 
 ```sh
 npm run seed:test-data
