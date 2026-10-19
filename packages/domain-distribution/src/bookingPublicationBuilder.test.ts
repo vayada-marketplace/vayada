@@ -40,16 +40,56 @@ describe("Booking publication builder", () => {
   });
 
   it("takes currencies from Finance and still rejects incompatible PMS rates", async () => {
-    const readiness = await readyEvidence(), snapshots = snapshotSet(readiness);
-    const booking = { ...snapshots.booking, content: { ...snapshots.booking.content,
-      supportedQuoteParameters: { ...snapshots.booking.content.supportedQuoteParameters, supportedCurrencies: [] } } };
-    await expect(run(readiness, { booking, finance: { ...snapshots.finance, content: {
-      ...snapshots.finance.content, supportedCurrencies: ["EUR", "USD"] } } })).resolves.toMatchObject({ outcome: "rejected" });
+    const readiness = await readyEvidence(),
+      snapshots = snapshotSet(readiness);
+    const booking = {
+      ...snapshots.booking,
+      content: {
+        ...snapshots.booking.content,
+        supportedQuoteParameters: {
+          ...snapshots.booking.content.supportedQuoteParameters,
+          supportedCurrencies: [],
+        },
+      },
+    };
+    await expect(
+      run(readiness, {
+        booking,
+        finance: {
+          ...snapshots.finance,
+          content: {
+            ...snapshots.finance.content,
+            supportedCurrencies: ["EUR", "USD"],
+          },
+        },
+      }),
+    ).resolves.toMatchObject({ outcome: "rejected" });
     const result = await run(readiness, { booking });
-    expect(result).toMatchObject({ outcome: "built", build: { publicContent: { profile: { hotel: {
-      supportedQuoteParameters: { supportedCurrencies: ["EUR"] } } } } } });
-    await expect(run(readiness, { booking, finance: { ...snapshots.finance, content: {
-      ...snapshots.finance.content, defaultCurrency: "USD", supportedCurrencies: ["USD"] } } })).resolves.toMatchObject({ outcome: "rejected" });
+    expect(result).toMatchObject({
+      outcome: "built",
+      build: {
+        publicContent: {
+          profile: {
+            hotel: {
+              supportedQuoteParameters: { supportedCurrencies: ["EUR"] },
+            },
+          },
+        },
+      },
+    });
+    await expect(
+      run(readiness, {
+        booking,
+        finance: {
+          ...snapshots.finance,
+          content: {
+            ...snapshots.finance.content,
+            defaultCurrency: "USD",
+            supportedCurrencies: ["USD"],
+          },
+        },
+      }),
+    ).resolves.toMatchObject({ outcome: "rejected" });
   });
 
   it("fails closed for unavailable, mismatched, or incomplete snapshots", async () => {
@@ -69,7 +109,11 @@ describe("Booking publication builder", () => {
       run(readiness, {
         pms: { ...snapshots.pms, content: { ...snapshots.pms.content, rooms: [] } },
       }),
-    ).resolves.toEqual({ outcome: "rejected", code: "public_content_incomplete" });
+    ).resolves.toEqual({
+      outcome: "rejected",
+      code: "public_content_incomplete",
+      reason: "content",
+    });
 
     await expect(
       run(readiness, {
@@ -81,11 +125,17 @@ describe("Booking publication builder", () => {
           },
         },
       }),
-    ).resolves.toEqual({ outcome: "rejected", code: "public_content_incomplete" });
+    ).resolves.toEqual({
+      outcome: "rejected",
+      code: "public_content_incomplete",
+      reason: "profile",
+      issuePaths: ["hotel.publicContacts.0.value"],
+    });
 
     await expect(run(readiness, {}, "http")).resolves.toEqual({
       outcome: "rejected",
       code: "public_content_incomplete",
+      reason: "booking_web",
     });
   });
 
@@ -94,7 +144,67 @@ describe("Booking publication builder", () => {
     await expect(run(readiness, {}, web)).resolves.toEqual({
       outcome: "rejected",
       code: "public_content_incomplete",
+      reason: "booking_web",
     });
+  });
+
+  it("publishes the hotel profile's languages when Booking saved other ones (VAY-2292)", async () => {
+    const readiness = await readyEvidence(),
+      snapshots = snapshotSet(readiness);
+    const catalog = snapshots.hotel_catalog.content;
+    const parameters = snapshots.booking.content.supportedQuoteParameters;
+    // Booking Admin's language setting writes only Booking's list, e.g. one language more.
+    const booking = {
+      ...snapshots.booking,
+      content: {
+        ...snapshots.booking.content,
+        supportedQuoteParameters: { ...parameters, supportedLocales: ["de", "en", "fr"] },
+      },
+    };
+    const result = await run(readiness, { booking });
+    expect(result).toMatchObject({
+      outcome: "built",
+      build: {
+        publicContent: {
+          profile: {
+            hotel: {
+              supportedLocales: catalog.supportedLocales,
+              supportedQuoteParameters: { supportedLocales: catalog.supportedLocales },
+            },
+          },
+        },
+      },
+    });
+    const fewer = {
+      ...snapshots.booking,
+      content: {
+        ...snapshots.booking.content,
+        supportedQuoteParameters: { ...parameters, supportedLocales: [] },
+      },
+    };
+    await expect(run(readiness, { booking: fewer })).resolves.toMatchObject({ outcome: "built" });
+  });
+
+  it("names broken profile fields without their values", async () => {
+    const readiness = await readyEvidence(),
+      snapshots = snapshotSet(readiness);
+    const result = await run(readiness, {
+      hotel_catalog: {
+        ...snapshots.hotel_catalog,
+        content: {
+          ...snapshots.hotel_catalog.content,
+          location: { ...snapshots.hotel_catalog.content.location, country: "lk" },
+          publicContacts: [{ type: "website", value: "www.private-hotel.test" }],
+        },
+      },
+    });
+    expect(result).toEqual({
+      outcome: "rejected",
+      code: "public_content_incomplete",
+      reason: "profile",
+      issuePaths: ["hotel.location.country", "hotel.publicContacts.0.value"],
+    });
+    expect(JSON.stringify(result)).not.toMatch(/private-hotel|"lk"/);
   });
 });
 

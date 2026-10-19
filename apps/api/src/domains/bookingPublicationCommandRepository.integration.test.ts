@@ -55,7 +55,14 @@ const builder: BookingPublicationBuilderPort = {
       builderMode !== "wrong_hash" &&
       builderMode !== "wrong_readiness_hash"
     ) {
-      return { outcome: "rejected", code: builderMode };
+      return builderMode === "public_content_incomplete"
+        ? {
+            outcome: "rejected",
+            code: builderMode,
+            reason: "profile",
+            issuePaths: ["hotel.supportedQuoteParameters.supportedLocales"],
+          }
+        : { outcome: "rejected", code: builderMode };
     }
     return {
       outcome: "built",
@@ -76,6 +83,7 @@ const builder: BookingPublicationBuilderPort = {
 
 describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Booking publication command safety", () => {
   let currentReadinessRevision = "booking-settings:4";
+  const warnings: { fields: Record<string, unknown>; message: string }[] = [];
   const admin = new pg.Client({ connectionString: TEST_DATABASE_URL });
   const distributionPublication = createPgDistributionBookingPublicationProjection({
     connectionString: TEST_DATABASE_URL ?? "postgresql://integration-test-disabled",
@@ -95,6 +103,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Booking publication command safe
     },
     builder,
     now: () => new Date("2026-08-02T13:01:00.000Z"),
+    warn: (fields, message) => warnings.push({ fields, message }),
   });
   const repository = createPgBookingPublicationCommandRepository({
     connectionString: TEST_DATABASE_URL ?? "postgresql://integration-test-disabled",
@@ -112,6 +121,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Booking publication command safe
     currentReadinessRevision = "booking-settings:4";
     builderMode = "built";
     readinessProviderAvailable = true;
+    warnings.length = 0;
     await cleanup();
     await seedAuthorizedScope();
   });
@@ -556,11 +566,24 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Booking publication command safe
   });
 
   it.each([
-    ["source_manifest_mismatch", "source_content_changed"],
-    ["public_content_incomplete", "projection_failed"],
-    ["wrong_hash", "source_content_changed"],
-    ["wrong_readiness_hash", "source_content_changed"],
-  ] as const)("fails safely when the builder returns %s", async (mode, failureCode) => {
+    [
+      "source_manifest_mismatch",
+      "source_content_changed",
+      { stage: "build", builderCode: "source_manifest_mismatch" },
+    ],
+    [
+      "public_content_incomplete",
+      "projection_failed",
+      {
+        stage: "build",
+        builderCode: "public_content_incomplete",
+        reason: "profile",
+        issuePaths: ["hotel.supportedQuoteParameters.supportedLocales"],
+      },
+    ],
+    ["wrong_hash", "source_content_changed", { stage: "build_hash" }],
+    ["wrong_readiness_hash", "source_content_changed", { stage: "build_hash" }],
+  ] as const)("fails safely when the builder returns %s", async (mode, failureCode, detail) => {
     builderMode = mode;
     const accepted = await repository.requestPublication(await command(`builder-${mode}`));
     if (!accepted.ok) throw new Error("Expected accepted publication request");
@@ -580,6 +603,18 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Booking publication command safe
         operationId: accepted.operation.operationId,
       }),
     ).resolves.toMatchObject({ status: "failed", failureCode });
+    // The failure names its reason in the logs, with IDs and codes only (VAY-2292).
+    expect(warnings).toEqual([
+      {
+        message: "Booking publication failed",
+        fields: {
+          propertyId,
+          operationId: accepted.operation.operationId,
+          failureCode,
+          ...detail,
+        },
+      },
+    ]);
   });
 
   it("retries status terminalization without failing an already-active revision", async () => {

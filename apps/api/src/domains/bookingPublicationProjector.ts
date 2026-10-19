@@ -92,6 +92,8 @@ export function createBookingPublicationProjector(config: {
   now?: () => Date;
   leaseDurationMs?: number;
   retryDelayMs?: number;
+  /** One line per publication that fails for good: IDs, codes and field paths only (VAY-2292). */
+  warn?: (fields: Record<string, unknown>, message: string) => void;
 }): BookingPublicationProjector {
   if (!config.connectionString.trim()) {
     throw new Error("Booking publication projector connectionString must not be empty");
@@ -131,6 +133,31 @@ export function createBookingPublicationProjector(config: {
       retryDelayMs,
     );
     if (reconciled) return reconciled;
+    const fail = async (
+      failureCode: "projection_failed" | "source_content_changed",
+      detail: Record<string, unknown>,
+    ) => {
+      const result = await terminalFailure(
+        pool,
+        config.projection,
+        config.attempts,
+        claim,
+        failureCode,
+        projectedAt,
+      );
+      if (result.failed > 0) {
+        config.warn?.(
+          {
+            propertyId: claim.propertyId,
+            operationId: claim.operationId,
+            failureCode,
+            ...detail,
+          },
+          "Booking publication failed",
+        );
+      }
+      return result;
+    };
     try {
       const publication = await parsePublicationInput(
         claim.payload,
@@ -140,27 +167,9 @@ export function createBookingPublicationProjector(config: {
         claim.operationId,
         projectedAt,
       );
-      if (!publication) {
-        return await terminalFailure(
-          pool,
-          config.projection,
-          config.attempts,
-          claim,
-          "projection_failed",
-          projectedAt,
-        );
-      }
+      if (!publication) return await fail("projection_failed", { stage: "payload" });
       const readiness = await currentReadiness(config.readiness, publication);
-      if (!readiness) {
-        return await terminalFailure(
-          pool,
-          config.projection,
-          config.attempts,
-          claim,
-          "source_content_changed",
-          projectedAt,
-        );
-      }
+      if (!readiness) return await fail("source_content_changed", { stage: "readiness" });
       const built = await config.builder.build({
         organizationId: publication.organizationId,
         readiness,
@@ -168,29 +177,23 @@ export function createBookingPublicationProjector(config: {
       });
       if (built.outcome === "rejected") {
         if (built.code === "owner_snapshot_unavailable") throw new Error(built.code);
-        return await terminalFailure(
-          pool,
-          config.projection,
-          config.attempts,
-          claim,
+        return await fail(
           built.code === "source_manifest_mismatch"
             ? "source_content_changed"
             : "projection_failed",
-          projectedAt,
+          {
+            stage: "build",
+            builderCode: built.code,
+            ...(built.reason ? { reason: built.reason } : {}),
+            ...(built.issuePaths ? { issuePaths: built.issuePaths.slice(0, 20) } : {}),
+          },
         );
       }
       if (
         built.build.sourceManifestHash !== publication.readiness.sourceManifestHash ||
         built.build.readinessHash !== publication.readiness.readinessHash
       ) {
-        return await terminalFailure(
-          pool,
-          config.projection,
-          config.attempts,
-          claim,
-          "source_content_changed",
-          projectedAt,
-        );
+        return await fail("source_content_changed", { stage: "build_hash" });
       }
       try {
         const active = await config.projection.projectPublication({
@@ -225,24 +228,15 @@ export function createBookingPublicationProjector(config: {
           error instanceof BookingPublicationActiveRevisionConflictError ||
           error instanceof BookingPublicationRoomClosureConflictError
         ) {
-          return await terminalFailure(
-            pool,
-            config.projection,
-            config.attempts,
-            claim,
-            "source_content_changed",
-            projectedAt,
-          );
+          return await fail("source_content_changed", {
+            stage:
+              error instanceof BookingPublicationRoomClosureConflictError
+                ? "room_closure_conflict"
+                : "active_revision_conflict",
+          });
         }
         if (error instanceof BookingPublicationPropertyUnavailableError) {
-          return await terminalFailure(
-            pool,
-            config.projection,
-            config.attempts,
-            claim,
-            "projection_failed",
-            projectedAt,
-          );
+          return await fail("projection_failed", { stage: "property_unavailable" });
         }
         throw error;
       }

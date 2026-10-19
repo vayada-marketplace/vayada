@@ -1046,6 +1046,17 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
         planStatus: { plan: "commission", status: "commission" },
       });
 
+      // Booking Admin's language setting saves only Booking's list, which the hotel profile
+      // doesn't follow; publishing must still work (VAY-2292).
+      expect(
+        (
+          await admin.query(
+            "UPDATE booking.booking_settings SET supported_languages = ARRAY['de','en','fr'] WHERE property_id = $1",
+            [propertyId],
+          )
+        ).rowCount,
+      ).toBe(1);
+
       // Ready with no admin action, then "Publish booking page".
       const ready = await readiness();
       expect(blockerCodes(ready)).toEqual([]);
@@ -1119,9 +1130,19 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
       ).toEqual([gardenSuite, seaSuite].sort());
       const content = active[0]!.content as {
         payments: { readyMethods: string[] };
-        profile: { hotel: { slug: string } };
+        profile: {
+          hotel: {
+            slug: string;
+            supportedLocales: string[];
+            supportedQuoteParameters: { supportedLocales: string[] };
+          };
+        };
       };
       expect(content.payments.readyMethods).toEqual([method]);
+      expect(content.profile.hotel.supportedLocales).not.toContain("fr");
+      expect(content.profile.hotel.supportedQuoteParameters.supportedLocales).toEqual(
+        content.profile.hotel.supportedLocales,
+      );
       // The public page counts bank transfer and PayPal only while their acceptance is on.
       const publicProfile = (manualPayments: boolean) =>
         createActiveBookingPublicationProfileRepository({

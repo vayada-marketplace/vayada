@@ -10,6 +10,7 @@ import {
   type PublicBookabilityProducerInputs,
 } from "./index.js";
 import { buildBookingPublicContent, type BookingPublicContentBuild } from "./bookingPublication.js";
+import { publicBookabilityProfileIssuePaths } from "./publicBookabilityProfileParser.js";
 import {
   bookingPublicationOwnerSnapshotProvenanceMatches,
   type BookingPublicationOwnerSnapshot,
@@ -23,7 +24,18 @@ export type BookingPublicationBuildResult =
   | Readonly<{
       outcome: "rejected";
       code: "owner_snapshot_unavailable" | "source_manifest_mismatch" | "public_content_incomplete";
+      /** Which rule refused incomplete content, for logs (VAY-2292). */
+      reason?: BookingPublicationContentRejectionReason;
+      /** Profile fields that break the public contract: paths only, never values. */
+      issuePaths?: readonly string[];
     }>;
+
+export type BookingPublicationContentRejectionReason =
+  | "currency"
+  | "booking_web"
+  | "profile"
+  | "content"
+  | "build_error";
 
 export type BookingPublicationBuilderPort = Readonly<{
   build(
@@ -99,21 +111,27 @@ export function createBookingPublicationBuilder(config: {
       try {
         // Existing publication supports one pricing currency; Finance multi-currency
         // support alone does not establish quote conversion evidence.
-        if (finance.content.supportedCurrencies.length !== 1 ||
-            finance.content.supportedCurrencies[0] !== finance.content.defaultCurrency)
-          return rejected("public_content_incomplete");
+        if (
+          finance.content.supportedCurrencies.length !== 1 ||
+          finance.content.supportedCurrencies[0] !== finance.content.defaultCurrency
+        )
+          return rejected("public_content_incomplete", "currency");
         const bookingWeb = config.bookingWeb({
           propertyId: request.propertyId,
           slug: catalog.content.slug,
           ...catalog.content.bookingWeb,
         });
-        if (!validBookingWeb(bookingWeb)) return rejected("public_content_incomplete");
+        if (!validBookingWeb(bookingWeb))
+          return rejected("public_content_incomplete", "booking_web");
         const profile = buildPublicBookabilityProfileProjection(input.generatedAt, {
           hotelCatalog: catalog.content,
           booking: sanitizeBooking({
             ...booking.content,
             supportedQuoteParameters: {
               ...booking.content.supportedQuoteParameters,
+              // Guests get the hotel profile's languages. Booking Admin saves its own list,
+              // which may differ, and the page contract needs both to match (VAY-2292).
+              supportedLocales: catalog.content.supportedLocales,
               supportedCurrencies: finance.content.supportedCurrencies,
             },
           }),
@@ -129,11 +147,13 @@ export function createBookingPublicationBuilder(config: {
           calendar: pms.content.calendar,
           finance: finance.content,
         });
-        return build
-          ? deepFreeze({ outcome: "built", build })
-          : rejected("public_content_incomplete");
+        if (build) return deepFreeze({ outcome: "built", build });
+        const issuePaths = publicBookabilityProfileIssuePaths(profile);
+        return issuePaths.length > 0
+          ? rejected("public_content_incomplete", "profile", issuePaths)
+          : rejected("public_content_incomplete", "content");
       } catch {
-        return rejected("public_content_incomplete");
+        return rejected("public_content_incomplete", "build_error");
       }
     },
   };
@@ -202,8 +222,17 @@ async function safeManifestHash(manifest: SourceManifest): Promise<SourceManifes
   }
 }
 
-function rejected(code: Extract<BookingPublicationBuildResult, { outcome: "rejected" }>["code"]) {
-  return Object.freeze({ outcome: "rejected" as const, code });
+function rejected(
+  code: Extract<BookingPublicationBuildResult, { outcome: "rejected" }>["code"],
+  reason?: BookingPublicationContentRejectionReason,
+  issuePaths?: readonly string[],
+) {
+  return deepFreeze({
+    outcome: "rejected" as const,
+    code,
+    ...(reason ? { reason } : {}),
+    ...(issuePaths ? { issuePaths: [...issuePaths] } : {}),
+  });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
