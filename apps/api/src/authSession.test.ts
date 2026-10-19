@@ -307,15 +307,15 @@ describe("AuthKit session routes", () => {
   it("logs in with email and password through WorkOS and creates the AuthKit browser session", async () => {
     const auditEvents: ProductAuditEvent[] = [];
     let passwordAuthInput: Parameters<AuthKitClient["authenticateWithPassword"]>[0] | undefined;
-    const marketplaceSession: AuthKitSession = {
+    const hotelSession: AuthKitSession = {
       ...session,
-      accessToken: "creator-workos-access-token",
-      sealedSession: "creator-sealed-session",
-      organizationId: "org_workos_creator",
+      accessToken: "hotel-workos-access-token",
+      sealedSession: "hotel-sealed-session",
+      organizationId: "org_workos_hotel",
       user: {
         ...session.user,
-        id: "user_workos_creator",
-        email: "creator@example.test",
+        id: "user_workos_hotel",
+        email: "hotel@example.test",
       },
     };
     app = buildAuthSessionApp({
@@ -324,37 +324,37 @@ describe("AuthKit session routes", () => {
       authKitClient: createAuthKitClient({
         async authenticateWithPassword(input) {
           passwordAuthInput = input;
-          return marketplaceSession;
+          return hotelSession;
         },
       }),
       identityRepository: createIdentityRepository({
         userByProviderUserId: async () => ({
-          userId: "user_creator",
-          email: "creator@example.test",
-          name: "Creator Example",
+          userId: "user_hotel",
+          email: "hotel@example.test",
+          name: "Hotel Example",
           phone: "+49 30 123456",
-          profilePictureUrl: "https://media.example/creator.webp",
-          profilePictureMediaObjectId: "media_creator_profile",
+          profilePictureUrl: "https://media.example/hotel.webp",
+          profilePictureMediaObjectId: "media_hotel_profile",
           status: "active",
         }),
         organizationByWorkosOrgId: async () => ({
-          organizationId: "org_creator",
-          workosOrgId: "org_workos_creator",
-          name: "Creator Workspace",
-          kind: "creator_workspace",
+          organizationId: "org_hotel",
+          workosOrgId: "org_workos_hotel",
+          name: "Hotel Group",
+          kind: "hotel_group",
           status: "active",
         }),
         activeMembership: async () => ({
-          membershipId: "membership_creator",
+          membershipId: "membership_hotel_owner",
           status: "active",
-          roleKey: "creator_owner",
-          workosMembershipId: "om_creator",
-          workosRoleSlugs: ["creator_owner"],
+          roleKey: "hotel_owner",
+          workosMembershipId: "om_hotel_owner",
+          workosRoleSlugs: ["hotel_owner"],
         }),
       }),
       surfacePolicies: {
         "booking-admin": {
-          requiredOrganizationKind: ["creator_workspace", "hotel_group"],
+          requiredOrganizationKind: ["hotel_group"],
           publicOrigin: "https://admin.booking.localhost",
           firstPartySession: true,
         },
@@ -374,7 +374,7 @@ describe("AuthKit session routes", () => {
         "user-agent": "vitest",
       },
       payload: {
-        email: " creator@example.test ",
+        email: " hotel@example.test ",
         password: "correct-password",
         surface: "booking-admin",
       },
@@ -382,32 +382,32 @@ describe("AuthKit session routes", () => {
 
     expect(response.statusCode).toBe(200);
     expect(passwordAuthInput).toMatchObject({
-      email: "creator@example.test",
+      email: "hotel@example.test",
       password: "correct-password",
       userAgent: "vitest",
       ipAddress: expect.any(String),
     });
     expect(response.json()).toMatchObject({
-      accessToken: "creator-workos-access-token",
+      accessToken: "hotel-workos-access-token",
       csrfToken: expect.any(String),
-      organizationId: "org_creator",
-      workosOrganizationId: "org_workos_creator",
-      organizationKind: "creator_workspace",
+      organizationId: "org_hotel",
+      workosOrganizationId: "org_workos_hotel",
+      organizationKind: "hotel_group",
       user: {
-        id: "user_creator",
-        email: "creator@example.test",
-        name: "Creator Example",
+        id: "user_hotel",
+        email: "hotel@example.test",
+        name: "Hotel Example",
         phone: "+49 30 123456",
-        profilePictureUrl: "https://media.example/creator.webp",
-        profilePictureMediaObjectId: "media_creator_profile",
-        workosUserId: "user_workos_creator",
+        profilePictureUrl: "https://media.example/hotel.webp",
+        profilePictureMediaObjectId: "media_hotel_profile",
+        workosUserId: "user_workos_hotel",
       },
     });
     expect(response.json()).not.toHaveProperty("sealedSession");
     expect(response.json()).not.toHaveProperty("clientSecret");
     expect(response.headers["set-cookie"]).toEqual(
       expect.arrayContaining([
-        expect.stringContaining("vayada_fp_workos_session=creator-sealed-session"),
+        expect.stringContaining("vayada_fp_workos_session=hotel-sealed-session"),
         expect.stringContaining("vayada_fp_auth_csrf="),
       ]),
     );
@@ -415,10 +415,10 @@ describe("AuthKit session routes", () => {
       expect.objectContaining({
         action: "auth.login",
         authFlow: "login",
-        actorUserId: "user_creator",
-        organizationId: "org_creator",
+        actorUserId: "user_hotel",
+        organizationId: "org_hotel",
         surface: "booking-admin",
-        workosUserId: "user_workos_creator",
+        workosUserId: "user_workos_hotel",
       }),
     ]);
   });
@@ -589,7 +589,7 @@ describe("AuthKit session routes", () => {
       allowedOrigins: ["https://admin.booking.localhost"],
       surfacePolicies: {
         "booking-admin": {
-          requiredOrganizationKind: ["creator_workspace", "hotel_group"],
+          requiredOrganizationKind: ["hotel_group"],
         },
       },
       authKitClient: createAuthKitClient({
@@ -678,7 +678,7 @@ describe("AuthKit session routes", () => {
       authKitClient: createAuthKitClient({ getAuthorizationUrl }),
       surfacePolicies: {
         "booking-admin": {
-          requiredOrganizationKind: ["creator_workspace", "hotel_group"],
+          requiredOrganizationKind: ["hotel_group"],
           publicOrigin: "https://admin.booking.localhost",
           firstPartySession: true,
         },
@@ -713,7 +713,7 @@ describe("AuthKit session routes", () => {
       }),
       surfacePolicies: {
         "booking-admin": {
-          requiredOrganizationKind: ["creator_workspace", "hotel_group"],
+          requiredOrganizationKind: ["hotel_group"],
           publicOrigin: "https://admin.booking.localhost",
           firstPartySession: true,
         },
@@ -1022,7 +1022,7 @@ describe("AuthKit session routes", () => {
       }),
       surfacePolicies: {
         "booking-admin": {
-          requiredOrganizationKind: ["creator_workspace", "hotel_group"],
+          requiredOrganizationKind: ["hotel_group"],
           publicOrigin: "https://admin.booking.localhost",
           firstPartySession: true,
         },
@@ -1055,17 +1055,17 @@ describe("AuthKit session routes", () => {
     expect(authenticateWithCode).not.toHaveBeenCalled();
   });
 
-  it("logs in an existing marketplace account through Google OAuth callback", async () => {
+  it("logs in an existing hotel account through Google OAuth callback", async () => {
     let state = "";
-    const marketplaceSession: AuthKitSession = {
+    const hotelSession: AuthKitSession = {
       ...session,
       accessToken: "google-workos-access-token",
       sealedSession: "google-sealed-session",
-      organizationId: "org_workos_creator",
+      organizationId: "org_workos_hotel",
       user: {
         ...session.user,
-        id: "user_workos_google_creator",
-        email: "creator@example.test",
+        id: "user_workos_google_hotel",
+        email: "hotel@example.test",
       },
     };
     app = buildAuthSessionApp({
@@ -1079,33 +1079,33 @@ describe("AuthKit session routes", () => {
         },
         async authenticateWithCode(input) {
           expect(input.code).toBe("google-code");
-          return marketplaceSession;
+          return hotelSession;
         },
       }),
       identityRepository: createIdentityRepository({
         userByProviderUserId: async () => ({
-          userId: "user_creator",
-          email: "creator@example.test",
+          userId: "user_hotel",
+          email: "hotel@example.test",
           status: "active",
         }),
         organizationByWorkosOrgId: async () => ({
-          organizationId: "org_creator",
-          workosOrgId: "org_workos_creator",
-          name: "Creator Workspace",
-          kind: "creator_workspace",
+          organizationId: "org_hotel",
+          workosOrgId: "org_workos_hotel",
+          name: "Hotel Group",
+          kind: "hotel_group",
           status: "active",
         }),
         activeMembership: async () => ({
-          membershipId: "membership_creator",
+          membershipId: "membership_hotel_owner",
           status: "active",
-          roleKey: "creator_owner",
-          workosMembershipId: "om_creator",
-          workosRoleSlugs: ["creator_owner"],
+          roleKey: "hotel_owner",
+          workosMembershipId: "om_hotel_owner",
+          workosRoleSlugs: ["hotel_owner"],
         }),
       }),
       surfacePolicies: {
         "booking-admin": {
-          requiredOrganizationKind: ["creator_workspace", "hotel_group"],
+          requiredOrganizationKind: ["hotel_group"],
           publicOrigin: "https://admin.booking.localhost",
           firstPartySession: true,
         },
@@ -1468,7 +1468,7 @@ describe("AuthKit session routes", () => {
     app = buildAuthSessionApp({
       allowedOrigins: ["https://admin.booking.localhost"],
       surfacePolicies: {
-        "booking-admin": { requiredOrganizationKind: ["creator_workspace", "hotel_group"] },
+        "booking-admin": { requiredOrganizationKind: ["hotel_group"] },
       },
       authKitClient: createAuthKitClient({
         getAuthorizationUrl(input) {
@@ -1694,7 +1694,7 @@ describe("AuthKit session routes", () => {
       error: {
         code: "email_verification_required",
         pending_authentication_token: "pending_email",
-        email: "creator@example.test",
+        email: "hotel@example.test",
       },
       statusCode: 403,
       body: {
@@ -1707,13 +1707,13 @@ describe("AuthKit session routes", () => {
       error: {
         code: "organization_selection_required",
         pending_authentication_token: "pending_org",
-        organizations: [{ id: "org_workos_creator", name: "Creator Workspace" }],
+        organizations: [{ id: "org_workos_hotel", name: "Hotel Group" }],
       },
       statusCode: 403,
       body: {
         state: "organization_selection_required",
         pendingAuthenticationToken: "pending_org",
-        organizations: [{ id: "org_workos_creator", name: "Creator Workspace" }],
+        organizations: [{ id: "org_workos_hotel", name: "Hotel Group" }],
       },
     },
     {
@@ -1751,8 +1751,8 @@ describe("AuthKit session routes", () => {
         organizationByWorkosOrgId: async (id) => ({
           organizationId: id,
           workosOrgId: id,
-          name: "Creator Workspace",
-          kind: "creator_workspace",
+          name: "Hotel Group",
+          kind: "hotel_group",
           status: "active",
         }),
       }),
@@ -1763,7 +1763,7 @@ describe("AuthKit session routes", () => {
       }),
       surfacePolicies: {
         "booking-admin": {
-          requiredOrganizationKind: ["creator_workspace", "hotel_group"],
+          requiredOrganizationKind: ["hotel_group"],
         },
       },
       productAuditSink: {
@@ -1778,7 +1778,7 @@ describe("AuthKit session routes", () => {
       url: "/auth/password/login",
       headers: { origin: "https://admin.booking.localhost" },
       payload: {
-        email: "creator@example.test",
+        email: "hotel@example.test",
         password: "wrong-password",
         surface: "booking-admin",
       },
@@ -1805,18 +1805,18 @@ describe("AuthKit session routes", () => {
           throw {
             code: "email_verification_required",
             pending_authentication_token: "pending_email",
-            email: "creator@example.test",
+            email: "hotel@example.test",
             email_verification_id: "email_verification_123",
           };
         },
         async resendVerificationEmail() {
           resendCalled = true;
-          return { email: "creator@example.test" };
+          return { email: "hotel@example.test" };
         },
       }),
       surfacePolicies: {
         "booking-admin": {
-          requiredOrganizationKind: ["creator_workspace", "hotel_group"],
+          requiredOrganizationKind: ["hotel_group"],
         },
       },
     });
@@ -1826,7 +1826,7 @@ describe("AuthKit session routes", () => {
       url: "/auth/password/login",
       headers: { origin: "https://admin.booking.localhost" },
       payload: {
-        email: "creator@example.test",
+        email: "hotel@example.test",
         password: "correct-password",
         surface: "booking-admin",
       },
@@ -1843,33 +1843,33 @@ describe("AuthKit session routes", () => {
 
   it("records a failed password login audit when identity resolution rejects the session", async () => {
     const auditEvents: ProductAuditEvent[] = [];
-    const marketplaceSession: AuthKitSession = {
+    const hotelSession: AuthKitSession = {
       ...session,
       organizationId: "org_workos_missing",
       user: {
         ...session.user,
-        id: "user_workos_creator",
-        email: "creator@example.test",
+        id: "user_workos_hotel",
+        email: "hotel@example.test",
       },
     };
     app = buildAuthSessionApp({
       allowedOrigins: ["https://admin.booking.localhost"],
       authKitClient: createAuthKitClient({
         async authenticateWithPassword() {
-          return marketplaceSession;
+          return hotelSession;
         },
       }),
       identityRepository: createIdentityRepository({
         userByProviderUserId: async () => ({
-          userId: "user_creator",
-          email: "creator@example.test",
+          userId: "user_hotel",
+          email: "hotel@example.test",
           status: "active",
         }),
         organizationByWorkosOrgId: async () => null,
       }),
       surfacePolicies: {
         "booking-admin": {
-          requiredOrganizationKind: ["creator_workspace", "hotel_group"],
+          requiredOrganizationKind: ["hotel_group"],
         },
       },
       productAuditSink: {
@@ -1884,7 +1884,7 @@ describe("AuthKit session routes", () => {
       url: "/auth/password/login",
       headers: { origin: "https://admin.booking.localhost" },
       payload: {
-        email: "creator@example.test",
+        email: "hotel@example.test",
         password: "correct-password",
         surface: "booking-admin",
       },
@@ -1897,7 +1897,7 @@ describe("AuthKit session routes", () => {
         authFlow: "login",
         failureReason: "identity_resolution",
         surface: "booking-admin",
-        workosUserId: "user_workos_creator",
+        workosUserId: "user_workos_hotel",
         workosOrgId: "org_workos_missing",
         workosSessionId: "session_workos",
       }),
@@ -2256,7 +2256,7 @@ describe("AuthKit session routes", () => {
       }),
       surfacePolicies: {
         "booking-admin": {
-          requiredOrganizationKind: ["creator_workspace", "hotel_group"],
+          requiredOrganizationKind: ["hotel_group"],
         },
       },
     });
@@ -2550,7 +2550,7 @@ describe("AuthKit session routes", () => {
     const warn = vi.fn();
     app = buildAuthSessionApp({
       surfacePolicies: {
-        "booking-admin": { requiredOrganizationKind: ["creator_workspace", "hotel_group"] },
+        "booking-admin": { requiredOrganizationKind: ["hotel_group"] },
       },
       authKitClient: createAuthKitClient({
         async createUser() {
@@ -2613,7 +2613,7 @@ describe("AuthKit session routes", () => {
       }),
       surfacePolicies: {
         "booking-admin": {
-          requiredOrganizationKind: ["creator_workspace", "hotel_group"],
+          requiredOrganizationKind: ["hotel_group"],
         },
       },
     });
@@ -2681,7 +2681,7 @@ describe("AuthKit session routes", () => {
       },
       surfacePolicies: {
         "booking-admin": {
-          requiredOrganizationKind: ["creator_workspace", "hotel_group"],
+          requiredOrganizationKind: ["hotel_group"],
         },
       },
     });
@@ -2806,7 +2806,7 @@ describe("AuthKit session routes", () => {
       },
       surfacePolicies: {
         "booking-admin": {
-          requiredOrganizationKind: ["creator_workspace", "hotel_group"],
+          requiredOrganizationKind: ["hotel_group"],
           allowMissingOrganization: true,
         },
       },
@@ -2872,10 +2872,10 @@ describe("AuthKit session routes", () => {
     const inviteExternalId = `vayada-signup:booking-admin:hotel:invite:${inviteId}`;
     const commands: IdentityLifecycleCommand[] = [];
     const onboardingInputs: unknown[] = [];
-    const existingCreatorSession: AuthKitSession = {
+    const existingHotelSession: AuthKitSession = {
       ...session,
-      organizationId: "org_workos_existing_creator",
-      sealedSession: "existing-creator-session",
+      organizationId: "org_workos_existing_hotel",
+      sealedSession: "existing-hotel-session",
       user: {
         ...session.user,
         id: "user_workos_invited_owner",
@@ -2883,7 +2883,7 @@ describe("AuthKit session routes", () => {
       },
     };
     const invitedHotelSession: AuthKitSession = {
-      ...existingCreatorSession,
+      ...existingHotelSession,
       organizationId: "org_workos_invite_hotel",
       sealedSession: "invite-hotel-session",
       accessToken: "invite-hotel-access-token",
@@ -2893,7 +2893,7 @@ describe("AuthKit session routes", () => {
       allowedOrigins: ["https://admin.booking.localhost"],
       authKitClient: createAuthKitClient({
         async authenticateSession() {
-          return existingCreatorSession;
+          return existingHotelSession;
         },
         async createSignupOrganization(input) {
           expect(input).toMatchObject({
@@ -2917,7 +2917,7 @@ describe("AuthKit session routes", () => {
         },
         async refreshSession(input) {
           expect(input).toEqual({
-            sealedSession: "existing-creator-session",
+            sealedSession: "existing-hotel-session",
             organizationId: "org_workos_invite_hotel",
           });
           return invitedHotelSession;
@@ -2939,21 +2939,19 @@ describe("AuthKit session routes", () => {
                 status: "active",
               }
             : {
-                organizationId: "org_existing_creator",
+                organizationId: "org_existing_hotel",
                 workosOrgId,
-                name: "Existing Creator Workspace",
-                kind: "creator_workspace",
+                name: "Existing Hotel Group",
+                kind: "hotel_group",
                 status: "active",
               },
         activeMembership: async (_userId, organizationId) => ({
           membershipId: `membership_${organizationId}`,
           status: "active",
-          roleKey: organizationId === "org_invite_hotel" ? "hotel_owner" : "creator_owner",
+          roleKey: "hotel_owner",
           workosMembershipId:
-            organizationId === "org_invite_hotel" ? "om_invite_hotel" : "om_existing_creator",
-          workosRoleSlugs: [
-            organizationId === "org_invite_hotel" ? "hotel_owner" : "creator_owner",
-          ],
+            organizationId === "org_invite_hotel" ? "om_invite_hotel" : "om_existing_hotel",
+          workosRoleSlugs: ["hotel_owner"],
         }),
       }),
       lifecycleCommandBus: {
@@ -2979,7 +2977,7 @@ describe("AuthKit session routes", () => {
       },
       surfacePolicies: {
         "booking-admin": {
-          requiredOrganizationKind: ["creator_workspace", "hotel_group"],
+          requiredOrganizationKind: ["hotel_group"],
         },
       },
     });
@@ -3051,7 +3049,7 @@ describe("AuthKit session routes", () => {
         },
         surfacePolicies: {
           "booking-admin": {
-            requiredOrganizationKind: ["creator_workspace", "hotel_group"],
+            requiredOrganizationKind: ["hotel_group"],
             allowMissingOrganization: true,
           },
         },
@@ -3136,47 +3134,47 @@ describe("AuthKit session routes", () => {
   );
 
   it("persists a refreshed WorkOS session when onboarding is already complete", async () => {
-    const existingCreatorSession: AuthKitSession = {
+    const existingHotelSession: AuthKitSession = {
       ...session,
-      sealedSession: "creator-onboarding-refreshed-session",
-      organizationId: "org_workos_creator_workspace",
+      sealedSession: "hotel-onboarding-refreshed-session",
+      organizationId: "org_workos_hotel_workspace",
       user: {
         ...session.user,
-        id: "user_workos_creator",
-        email: "creator@example.com",
+        id: "user_workos_hotel",
+        email: "hotel@example.com",
       },
     };
     app = buildAuthSessionApp({
       allowedOrigins: ["https://admin.booking.localhost"],
       authKitClient: createAuthKitClient({
         async authenticateSession() {
-          return existingCreatorSession;
+          return existingHotelSession;
         },
       }),
       identityRepository: createIdentityRepository({
         userByProviderUserId: async () => ({
-          userId: "user_creator",
-          email: "creator@example.com",
+          userId: "user_hotel",
+          email: "hotel@example.com",
           status: "active",
         }),
         organizationByWorkosOrgId: async () => ({
-          organizationId: "org_creator_workspace",
-          workosOrgId: "org_workos_creator_workspace",
-          name: "Creator Workspace",
-          kind: "creator_workspace",
+          organizationId: "org_hotel_workspace",
+          workosOrgId: "org_workos_hotel_workspace",
+          name: "Hotel Group",
+          kind: "hotel_group",
           status: "active",
         }),
         activeMembership: async () => ({
-          membershipId: "membership_creator",
+          membershipId: "membership_hotel_owner",
           status: "active",
-          roleKey: "creator_owner",
-          workosMembershipId: "om_creator",
-          workosRoleSlugs: ["creator_owner"],
+          roleKey: "hotel_owner",
+          workosMembershipId: "om_hotel_owner",
+          workosRoleSlugs: ["hotel_owner"],
         }),
       }),
       surfacePolicies: {
         "booking-admin": {
-          requiredOrganizationKind: ["creator_workspace", "hotel_group"],
+          requiredOrganizationKind: ["hotel_group"],
         },
       },
     });
@@ -3194,7 +3192,7 @@ describe("AuthKit session routes", () => {
 
     expect(response.statusCode).toBe(200);
     expect(String(response.headers["set-cookie"])).toContain(
-      "vayada_workos_session=creator-onboarding-refreshed-session",
+      "vayada_workos_session=hotel-onboarding-refreshed-session",
     );
   });
 
@@ -3228,7 +3226,7 @@ describe("AuthKit session routes", () => {
       }),
       surfacePolicies: {
         "booking-admin": {
-          requiredOrganizationKind: ["creator_workspace", "hotel_group"],
+          requiredOrganizationKind: ["hotel_group"],
           allowMissingOrganization: true,
         },
       },
@@ -3348,7 +3346,7 @@ describe("AuthKit session routes", () => {
       },
       surfacePolicies: {
         "booking-admin": {
-          requiredOrganizationKind: ["creator_workspace", "hotel_group"],
+          requiredOrganizationKind: ["hotel_group"],
         },
       },
       profileImageMediaRepository: approvedProfileImageRepository({
@@ -3556,34 +3554,6 @@ describe("AuthKit session routes", () => {
             },
           },
           {
-            organizationId: "org_creator",
-            workosOrgId: "org_workos_creator",
-            name: "Creator Workspace",
-            kind: "creator_workspace",
-            status: "active",
-            membership: {
-              membershipId: "membership_creator",
-              status: "active",
-              roleKey: "creator_owner",
-              workosMembershipId: "om_creator",
-              workosRoleSlugs: ["creator_owner"],
-            },
-          },
-          {
-            organizationId: "org_affiliate",
-            workosOrgId: "org_workos_affiliate",
-            name: "Affiliate Partner",
-            kind: "affiliate_partner",
-            status: "active",
-            membership: {
-              membershipId: "membership_affiliate",
-              status: "active",
-              roleKey: "affiliate_owner",
-              workosMembershipId: "om_affiliate",
-              workosRoleSlugs: ["affiliate_owner"],
-            },
-          },
-          {
             organizationId: "org_hotel_group",
             workosOrgId: "org_workos_hotel_group",
             name: "Alpenrose Hotel Group",
@@ -3691,34 +3661,6 @@ describe("AuthKit session routes", () => {
               roleKey: "platform_admin",
               workosMembershipId: "om_platform",
               workosRoleSlugs: ["platform_admin"],
-            },
-          },
-          {
-            organizationId: "org_creator",
-            workosOrgId: "org_workos_creator",
-            name: "Creator Workspace",
-            kind: "creator_workspace",
-            status: "active",
-            membership: {
-              membershipId: "membership_creator",
-              status: "active",
-              roleKey: "creator_owner",
-              workosMembershipId: "om_creator",
-              workosRoleSlugs: ["creator_owner"],
-            },
-          },
-          {
-            organizationId: "org_affiliate",
-            workosOrgId: "org_workos_affiliate",
-            name: "Affiliate Partner",
-            kind: "affiliate_partner",
-            status: "active",
-            membership: {
-              membershipId: "membership_affiliate",
-              status: "active",
-              roleKey: "affiliate_owner",
-              workosMembershipId: "om_affiliate",
-              workosRoleSlugs: ["affiliate_owner"],
             },
           },
           {
@@ -4837,7 +4779,7 @@ describe("AuthKit session routes", () => {
       allowedOrigins: ["https://admin.booking.localhost"],
       surfacePolicies: {
         "booking-admin": {
-          requiredOrganizationKind: ["creator_workspace", "hotel_group"],
+          requiredOrganizationKind: ["hotel_group"],
         },
       },
     });

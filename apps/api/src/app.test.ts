@@ -7734,12 +7734,6 @@ describe("vayada-api", () => {
             ] as unknown as T[],
           };
         }
-        if (
-          text.includes("FROM marketplace.marketplace_offers offer") &&
-          text.includes('offer.id::text AS "offerId"')
-        ) {
-          return { rows: [] };
-        }
         if (text.includes("INSERT INTO hotel_catalog.property_public_profile_read_model")) {
           return { rows: [] };
         }

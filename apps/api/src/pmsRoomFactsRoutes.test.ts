@@ -36,7 +36,7 @@ const now = "2026-08-03T12:00:00.000Z";
 const draftRoomId = parseDraftRoomId("setup-room-1")!;
 
 type AuthOptions = {
-  kind?: "hotel_group" | "creator_workspace";
+  kind?: "hotel_group" | "platform";
   permissions?: PermissionKey[];
   entitlements?: ProductEntitlement[];
   links?: LinkedResource[];
@@ -419,7 +419,7 @@ describe("PMS room-facts routes", () => {
 
   it.each([
     ["missing authentication", {}, null],
-    ["non-hotel organization", { kind: "creator_workspace" }, "valid-token"],
+    ["non-hotel organization", { kind: "platform" }, "valid-token"],
     ["missing read permission", { permissions: ["pms.operations.manage"] }, "valid-token"],
     ["missing entitlement", { entitlements: [] }, "valid-token"],
     ["inactive entitlement", { entitlements: [entitlement("suspended")] }, "valid-token"],
