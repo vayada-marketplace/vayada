@@ -14,6 +14,7 @@ const state = (change: Partial<HotelCardPaymentsState> = {}): HotelCardPaymentsS
   propertyId,
   providerAccount: { ready: true, cardCapabilityRevision: 3 },
   propertyReadinessRevision: 7,
+  paymentSettings: { paymentsOn: true, cardChosen: true, currencyEligible: true },
   evidence: null,
   cardReady: false,
   ...change,
@@ -42,10 +43,27 @@ describe("hotel card payments (VAY-2205)", () => {
       canTurnOn: false,
     });
     expect(hotelCardPaymentsView(state({ propertyReadinessRevision: null })).canTurnOn).toBe(false);
+    // The hotel chooses card first: an approval given before would go out of date.
+    for (const paymentSettings of [
+      { paymentsOn: true, cardChosen: false, currencyEligible: true },
+      { paymentsOn: false, cardChosen: true, currencyEligible: true },
+      { paymentsOn: true, cardChosen: true, currencyEligible: false },
+      null,
+    ])
+      expect(hotelCardPaymentsView(state({ paymentSettings }))).toMatchObject({
+        hotelChoseCard: false,
+        canTurnOn: false,
+      });
+    expect(
+      hotelCardPaymentsView(
+        state({ paymentSettings: { paymentsOn: true, cardChosen: true, currencyEligible: false } }),
+      ).currencyEligible,
+    ).toBe(false);
     const approval = {
       evidenceId: "22222222-2222-4222-8222-222222222222",
       acceptedAt: "2026-10-18T19:40:00.000Z",
       acceptedByUserId: "33333333-3333-4333-8333-333333333333",
+      current: true,
     };
     expect(hotelCardPaymentsView(state({ evidence: approval, cardReady: true }))).toMatchObject({
       on: true,
@@ -53,12 +71,24 @@ describe("hotel card payments (VAY-2205)", () => {
       approval,
       canTurnOn: false,
     });
-    // An approval whose Stripe account changed since: not on, and only off-then-on renews it.
-    expect(hotelCardPaymentsView(state({ evidence: approval, cardReady: false }))).toMatchObject({
-      on: false,
-      approvalOutOfDate: true,
-      canTurnOn: false,
-    });
+    // An approval given for an earlier Stripe account or Payment settings: not on, and only
+    // off-then-on renews it.
+    expect(
+      hotelCardPaymentsView(state({ evidence: { ...approval, current: false }, cardReady: false })),
+    ).toMatchObject({ on: false, approvalOutOfDate: true, canTurnOn: false });
+    // A current approval while the hotel turned card off in its Payment settings: off, not out
+    // of date.
+    expect(
+      hotelCardPaymentsView(
+        state({
+          evidence: approval,
+          cardReady: false,
+          paymentSettings: { paymentsOn: true, cardChosen: false, currencyEligible: true },
+        }),
+      ),
+    ).toMatchObject({ on: false, approvalOutOfDate: false, hotelChoseCard: false });
+    expect(hotelCardPaymentsView(state({ prices: "save_needed" })).pricesSaveNeeded).toBe(true);
+    expect(hotelCardPaymentsView(state({ prices: "current" })).pricesSaveNeeded).toBe(false);
   });
 
   it("reads the hotel's card state", async () => {

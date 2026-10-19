@@ -78,16 +78,24 @@ async function openPayments(page: Page, baseURL: string | undefined, state: () =
   return origin;
 }
 
-const off = (ready = true) => ({
+const off = (ready = true, prices = "current") => ({
   propertyId,
   providerAccount: { ready, cardCapabilityRevision: 3 },
   propertyReadinessRevision: 7,
+  paymentSettings: { paymentsOn: true, cardChosen: true, currencyEligible: true },
   evidence: null,
   cardReady: false,
+  prices,
 });
+// Right after a change, the server says the hotel's prices must be saved again.
 const on = {
-  ...off(),
-  evidence: { evidenceId, acceptedAt: "2026-10-18T19:40:00.000Z", acceptedByUserId: approverId },
+  ...off(true, "save_needed"),
+  evidence: {
+    evidenceId,
+    acceptedAt: "2026-10-18T19:40:00.000Z",
+    acceptedByUserId: approverId,
+    current: true,
+  },
   cardReady: true,
 };
 
@@ -157,7 +165,7 @@ test("turns card payments on as vayada's approval, then off, each time asking fo
     ),
     async (route) => {
       revoked = true;
-      current = off();
+      current = off(true, "save_needed");
       await fulfillJson(route, origin, { ok: true });
     },
   );
@@ -193,15 +201,51 @@ test("can't turn card on before the hotel's Stripe account is ready", async ({
   await page.screenshot({ path: testInfo.outputPath("payments-not-ready.png"), fullPage: true });
 });
 
+test("can't turn card on before the hotel chooses card in its payment settings", async ({
+  page,
+  baseURL,
+}) => {
+  await openPayments(page, baseURL, () => ({
+    ...off(),
+    paymentSettings: { paymentsOn: true, cardChosen: false, currencyEligible: true },
+  }));
+  const card = page.getByRole("region", { name: "Card payments" });
+  await expect(
+    card.getByText("Not yet. The hotel turns on payments with card in its payment settings."),
+  ).toBeVisible();
+  await expect(card.getByRole("button", { name: "Turn on card payments" })).toBeDisabled();
+  await expect(
+    card.getByText("Possible once the hotel chooses card in its payment settings."),
+  ).toBeVisible();
+});
+
+test("still asks for prices to be saved again after a reload", async ({ page, baseURL }) => {
+  await openPayments(page, baseURL, () => on);
+  await expect(page.getByText("The hotel's prices must be saved again.")).toBeVisible();
+  await expect(
+    page.getByText(
+      "Card is on, but this hotel's booking page takes no bookings until its prices are saved again.",
+    ),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: /Open the hotel's Prices in the PMS/ }),
+  ).toHaveAttribute("href", /\/rooms$/);
+});
+
 test("an approval whose Stripe account changed since is out of date, and turning off clears it", async ({
   page,
   baseURL,
 }) => {
-  await openPayments(page, baseURL, () => ({ ...on, cardReady: false }));
+  await openPayments(page, baseURL, () => ({
+    ...on,
+    evidence: { ...on.evidence, current: false },
+    cardReady: false,
+    prices: "current",
+  }));
   const card = page.getByRole("region", { name: "Card payments" });
   await expect(card.getByText("Off", { exact: true })).toBeVisible();
   await expect(
-    card.getByText(/Out of date: the hotel's Stripe account changed since\./),
+    card.getByText(/Out of date: the hotel's Stripe account or payment settings changed since\./),
   ).toBeVisible();
   await expect(card.getByRole("button", { name: "Turn off card payments" })).toBeEnabled();
   await expect(card.getByRole("button", { name: "Turn on card payments" })).toHaveCount(0);

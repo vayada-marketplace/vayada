@@ -138,9 +138,12 @@ export default function CardPaymentsSection({
       minute: "2-digit",
     });
 
+  // A card change stales the hotel's prices; the server says so until they are saved again.
+  const saveNeeded = (changed !== null && state.prices !== "current") || view.pricesSaveNeeded;
+
   return (
     <div className="max-w-3xl space-y-4">
-      {changed && (
+      {saveNeeded && (
         <div
           role="status"
           className="flex gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm"
@@ -150,7 +153,9 @@ export default function CardPaymentsSection({
             <p className="font-semibold text-amber-900">
               {changed === "on"
                 ? "Card payments are on. The hotel's prices must be saved again."
-                : "Card payments are off. The hotel's prices must be saved again."}
+                : changed === "off"
+                  ? "Card payments are off. The hotel's prices must be saved again."
+                  : "The hotel's prices must be saved again."}
             </p>
             <p className="text-amber-800">
               Until someone saves them, this hotel&apos;s booking page takes no bookings.
@@ -175,9 +180,11 @@ export default function CardPaymentsSection({
           <div>
             <h2 className="text-base font-semibold text-gray-900">Card payments</h2>
             <p className="mt-1 text-sm text-gray-600">
-              {view.on
-                ? "Guests can pay by card on this hotel's booking page. Card is charged when booking, or held and charged when the hotel accepts a request."
-                : "Guests can pay by card on this hotel's booking page once its Stripe account is ready and vayada approves it."}
+              {view.on && saveNeeded
+                ? "Card is on, but this hotel's booking page takes no bookings until its prices are saved again."
+                : view.on
+                  ? "Guests can pay by card on this hotel's booking page. Card is charged when booking, or held and charged when the hotel accepts a request."
+                  : "Guests can pay by card on this hotel's booking page once its Stripe account is ready, the hotel chooses card, and vayada approves it."}
             </p>
           </div>
           <span
@@ -208,13 +215,24 @@ export default function CardPaymentsSection({
             }
           />
           <Item
+            state={view.hotelChoseCard ? "done" : "open"}
+            title="Card chosen in the hotel's payment settings"
+            note={
+              view.hotelChoseCard
+                ? "Payments are on, with card."
+                : !view.currencyEligible
+                  ? "The hotel's currency can't take card payments."
+                  : "Not yet. The hotel turns on payments with card in its payment settings."
+            }
+          />
+          <Item
             state={view.approvalOutOfDate ? "waiting" : view.approval ? "done" : "open"}
             title="vayada's approval"
             note={
               view.approval
                 ? `Given ${when(view.approval.acceptedAt)}${approver ? ` by ${approver}` : ""}.${
                     view.approvalOutOfDate
-                      ? " Out of date: the hotel's Stripe account changed since. Turn card payments off, then on, to approve it again."
+                      ? " Out of date: the hotel's Stripe account or payment settings changed since. Turn card payments off, then on, to approve it again."
                       : ""
                   }`
                 : changed === "off"
@@ -256,7 +274,9 @@ export default function CardPaymentsSection({
               <span className="text-xs text-gray-500">
                 {view.canTurnOn
                   ? "You'll confirm it as vayada's approval."
-                  : "Possible once the hotel's Stripe account is ready."}
+                  : !view.stripeReady
+                    ? "Possible once the hotel's Stripe account is ready."
+                    : "Possible once the hotel chooses card in its payment settings."}
               </span>
             </>
           )}
