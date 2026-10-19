@@ -23,6 +23,7 @@ export type BookingReadinessBlockerMock = {
     | "guest_experience"
     | "payments";
   message: string;
+  code?: string;
 };
 
 export const BOOKING_PUBLICATION_PATH =
@@ -69,7 +70,7 @@ export async function bookingReadinessMock(
                   ? [
                       {
                         kind: "user_fixable" as const,
-                        code: "e2e_blocker",
+                        code: blocker.code ?? "e2e_blocker",
                         message: blocker.message,
                         product: "booking" as const,
                         groupId,

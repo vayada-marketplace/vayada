@@ -29,6 +29,14 @@ describe("buildSharedHotelSetupRedirectPath", () => {
     });
   });
 
+  it("opens the location form for a hotel location item (VAY-2288)", () => {
+    const url = new URL(
+      buildSharedHotelSetupRedirectPath({ ...input, step: "present_hotel", focus: "location" }),
+    );
+    expect(url.searchParams.get("step")).toBe("present_hotel");
+    expect(url.searchParams.get("focus")).toBe("location");
+  });
+
   it("drops a step setup does not know", () => {
     const url = new URL(
       buildSharedHotelSetupRedirectPath({ ...input, step: "unknown" as PropertySetupStepId }),

@@ -258,6 +258,9 @@ export function SharedHotelSetupPage({
         }
         api={sharedHotelSetupApi}
         availableTracks={BOOKING_ADMIN_SETUP_TRACKS}
+        // "Fix in setup" for the hotel's location saves there and returns (VAY-2288).
+        editFocus={searchParams.get("focus") === "location" ? "location" : undefined}
+        onEditFocusSaved={(propertyId) => handleExit(propertyId)}
         entryProduct={entryProduct}
         initialPropertyId={initialPropertyId}
         initialAddProperty={initialAddProperty}

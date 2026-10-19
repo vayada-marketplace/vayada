@@ -8,7 +8,15 @@ export type BookingPageItem = {
   groupId: string;
   message: string | null;
   step: Blocker["owningStepId"] | null;
+  /** The setup field to open on that step, e.g. the location form (VAY-2288). */
+  focus?: "location";
 };
+
+// City and country live in the hotel details form, not on the Present your hotel step.
+const LOCATION_BLOCKERS = new Set([
+  "hotel_public_locality_hidden",
+  "hotel_public_locality_missing",
+]);
 
 export type BookingPageStatus =
   | { kind: "online"; url: string; items: BookingPageItem[] }
@@ -60,6 +68,7 @@ function missingItems(readiness: Readiness): BookingPageItem[] {
         groupId: group.groupId,
         message: (fixable ?? blockers[0])?.message ?? null,
         step: fixable?.owningStepId ?? null,
+        ...(fixable && LOCATION_BLOCKERS.has(fixable.code) ? { focus: "location" as const } : {}),
       };
     });
 }

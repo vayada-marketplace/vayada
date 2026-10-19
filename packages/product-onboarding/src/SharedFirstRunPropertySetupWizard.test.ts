@@ -192,6 +192,29 @@ describe("property profile requests", () => {
     });
   });
 
+  it("keeps a public guest map when only the city and country box changes (VAY-2288)", () => {
+    const profile = createProfileFromDraft(draft);
+    profile.contacts = profile.contacts.map((contact) => ({ ...contact, isPublic: true }));
+    profile.location = {
+      ...profile.location,
+      latitude: 48.1373932,
+      longitude: 11.5754485,
+      geoPublic: true,
+      mapDisplayMode: "exact",
+    };
+    const existing = { propertyId: "property-1", profileRevision: 9, profile };
+    const baseline = draftFromProfile(existing, null, null);
+
+    expect(
+      profileUpdateFromDraft({ ...baseline, localityPublic: !baseline.localityPublic }, existing)
+        ?.patch.location,
+    ).toEqual({ localityPublic: !baseline.localityPublic });
+    expect(
+      profileUpdateFromDraft({ ...baseline, streetAddress: "Marienplatz 2" }, existing)?.patch
+        .location,
+    ).toEqual({ streetAddress: "Marienplatz 2", geoPublic: false, mapDisplayMode: "hidden" });
+  });
+
   it("leaves an existing published contact unchanged when the entered value matches", () => {
     const profile = createProfileFromDraft(draft);
     profile.contacts = profile.contacts.map((contact) => ({ ...contact, isPublic: true }));
@@ -515,7 +538,7 @@ describe("property profile requests", () => {
     });
   });
 
-  it("persists explicit public-locality consent while forcing private geo fields", () => {
+  it("persists explicit public-locality consent; only an address change forces private geo fields", () => {
     expect(createProfileFromDraft({ ...draft, localityPublic: true }).location).toMatchObject({
       localityPublic: true,
       geoPublic: false,
@@ -529,15 +552,23 @@ describe("property profile requests", () => {
       geoPublic: true,
       mapDisplayMode: "exact",
     };
+    // VAY-2288: the box alone publishes no new location detail, so the hotel's map stays as set.
     expect(
       profileUpdateFromDraft(
         { ...draft, localityPublic: true },
+        { propertyId: "property-1", profileRevision: 9, profile: existing },
+      ),
+    ).toEqual({ expectedProfileRevision: 9, patch: { location: { localityPublic: true } } });
+    expect(
+      profileUpdateFromDraft(
+        { ...draft, localityPublic: true, city: "Augsburg" },
         { propertyId: "property-1", profileRevision: 9, profile: existing },
       ),
     ).toEqual({
       expectedProfileRevision: 9,
       patch: {
         location: {
+          city: "Augsburg",
           localityPublic: true,
           geoPublic: false,
           mapDisplayMode: "hidden",
@@ -597,7 +628,11 @@ describe("canConfirmLocation", () => {
   };
 
   it("keeps partial Google results editable", () => {
-    expect(canConfirmLocation({ ...completeLocation, postalCode: "" })).toBe(false);
+    expect(canConfirmLocation({ ...completeLocation, streetAddress: "" })).toBe(false);
+  });
+
+  it("confirms an address without a postal code (VAY-2289)", () => {
+    expect(canConfirmLocation({ ...completeLocation, postalCode: "" })).toBe(true);
   });
 
   it("requires a time zone before confirming an address", () => {
@@ -639,6 +674,27 @@ describe("validateProfileDraft", () => {
         logoMediaObjectId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
       }).logo,
     ).toBeUndefined();
+  });
+
+  it("doesn't ask for a postal code (VAY-2289)", () => {
+    const draft = {
+      displayName: "Hotel Alpenrose",
+      propertyType: "hotel",
+      countryCode: "LK",
+      city: "Galle",
+      streetAddress: "Lighthouse Street 1",
+      postalCode: "",
+      timezone: "Asia/Colombo",
+      contactEmail: "owner@alpenrose.example",
+      phone: "+94 77 123 4567",
+      whatsapp: "",
+      localityPublic: true,
+      logoFile: null,
+      logoMediaObjectId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      logoPublicUrl: "",
+    } as Parameters<typeof validateProfileDraft>[0];
+
+    expect(validateProfileDraft(draft)).toEqual({});
   });
 
   it("rejects invalid time zones", () => {
