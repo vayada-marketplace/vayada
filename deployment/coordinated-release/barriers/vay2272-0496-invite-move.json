@@ -1,6 +1,0 @@
-{
-  "id": "vay2272-0496-invite-move",
-  "kind": "migration",
-  "requiredCheckpointManifestId": null,
-  "evidenceRequirement": "counts-0496 before-run (B17 = 0, B20 = 9, B27 = 0, B28 = B29 = 1) and Flamur's yes"
-}
