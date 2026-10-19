@@ -353,6 +353,18 @@ test.describe("shared setup activation", () => {
     await expect(page.getByRole("heading", { name: "How can guests reach you?" })).toBeVisible();
     await expect(page.getByText("Phone number is required.")).toBeVisible();
     expect(writes.profile).toEqual([]);
+    // Back skips the guest preferences, which a focused edit never saves.
+    await page.getByRole("button", { name: "Back", exact: true }).click();
+    await expect(
+      page.getByTestId("location-search-panel").getByRole("heading", {
+        name: "Where is your property?",
+      }),
+    ).toBeVisible();
+    await page
+      .getByTestId("location-action-bar")
+      .getByRole("button", { name: "Save and continue" })
+      .click();
+    await expect(page.getByRole("heading", { name: "How can guests reach you?" })).toBeVisible();
     await page.getByRole("textbox", { name: /^Phone number/ }).fill("+49 89 123456");
     await page.getByRole("button", { name: "Save and continue" }).click();
 
