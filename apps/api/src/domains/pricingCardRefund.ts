@@ -251,6 +251,7 @@ type Command = {
   status: string;
   provider_refund_id: string | null;
   attempts: number;
+  waiting: boolean;
   booking_reference: string;
 };
 
@@ -271,6 +272,7 @@ export async function executePricingCardRefund(
         `SELECT id,property_id,guest_booking_id,payment_id,idempotency_key,requested_by,amount::text AS amount,
            amount_minor::text AS amount_minor,trim(currency) AS currency,provider_account_ref,
            provider_payment_intent_id,status,provider_refund_id,attempts,
+           attempts>0 AND next_attempt_at>clock_timestamp() AS waiting,
            (SELECT public_reference FROM booking.guest_bookings booking
             WHERE booking.id=command.guest_booking_id AND booking.property_id=command.property_id)
              AS booking_reference
@@ -281,6 +283,12 @@ export async function executePricingCardRefund(
     if (!command || command.status !== "pending") {
       await client.query("COMMIT");
       return command ? (command.status as "succeeded" | "failed") : "busy";
+    }
+    // A retry waits for its time, whoever asks: right after a lost answer, Stripe may still be
+    // making the refund and not list it yet, and a create then would make a second one.
+    if (command.waiting) {
+      await client.query("COMMIT");
+      return "pending";
     }
     const lookup = { listed: false, refused: false };
     const earlier = (
@@ -295,8 +303,9 @@ export async function executePricingCardRefund(
     } catch (error) {
       // Once Stripe has the refund, it is followed to the end. One Stripe confirms it never made
       // (the list answered without it, then Stripe refused the create) is given up after
-      // MAX_ATTEMPTS, with an audit event; a lost answer is never given up on. Another live refund
-      // of the payment at Stripe stops this one at once.
+      // MAX_ATTEMPTS, with an audit event; a lost answer is never given up on, and is asked about
+      // again only after LOST_ANSWER_WAIT_MINUTES. Another live refund of the payment at Stripe
+      // stops this one at once.
       const attempts = command.attempts + 1,
         blocked = error instanceof RefundAlreadyAtStripe,
         giveUp =
@@ -311,14 +320,23 @@ export async function executePricingCardRefund(
            status=CASE WHEN $5 THEN 'failed' ELSE status END,
            settled_at=CASE WHEN $5 THEN clock_timestamp() END
          WHERE id=$1`,
-        [command.id, attempts, reason(error), Math.min(2 ** command.attempts, 60), giveUp],
+        [
+          command.id,
+          attempts,
+          reason(error),
+          Math.max(
+            Math.min(2 ** command.attempts, 60),
+            lookup.refused ? 0 : LOST_ANSWER_WAIT_MINUTES,
+          ),
+          giveUp,
+        ],
       );
       if (giveUp) {
         await audit(client, command, "finance.card_refund_failed", {
           refundId: null,
           status: "failed",
         });
-        warnFailed(command, reason(error));
+        warnFailed(command, reason(error), blocked);
       }
       await client.query("COMMIT");
       return giveUp ? "failed" : "pending";
@@ -397,15 +415,24 @@ export async function executePricingCardRefundSoon(
  * backoff). */
 export const MAX_ATTEMPTS = 30;
 
+/** After a lost answer, Stripe has long finished the create (or never got it) before it is asked
+ * again, so the list then shows any refund it made. */
+export const LOST_ANSWER_WAIT_MINUTES = 5;
+
 /** A Stripe answer that the refund was refused (4xx), not one that may have been lost. */
 const definiteRefusal = (error: unknown) => {
   const status = (error as { statusCode?: unknown } | null)?.statusCode;
   return (
-    typeof status === "number" && status >= 400 && status < 500 && status !== 409 && status !== 429
+    typeof status === "number" &&
+    status >= 400 &&
+    status < 500 &&
+    status !== 408 &&
+    status !== 409 &&
+    status !== 429
   );
 };
 
-/** An earlier refund of the same payment is live at Stripe: none may be made next to it. */
+/** Another refund of the same payment is live at Stripe: none may be made next to it. */
 class RefundAlreadyAtStripe extends Error {}
 
 async function findOrCreateRefund(
@@ -428,18 +455,26 @@ async function findOrCreateRefund(
       command.provider_account_ref,
     );
     lookup.listed = true;
-    const live = (candidate: StripeBookingRefund) =>
-      candidate.status !== "failed" && candidate.status !== "canceled";
-    // A refund an earlier command made after all (its answer was lost): this retry is that refund,
-    // when it is for the same amount; any other one blocks, so the guest is never refunded twice.
-    const previous = listed.find(
-      (candidate) =>
-        candidate.commandId !== null && earlier.includes(candidate.commandId) && live(candidate),
-    );
-    if (previous && previous.amountMinor !== Number(command.amount_minor))
-      throw new RefundAlreadyAtStripe("An earlier refund of this payment is already at Stripe.");
-    const found =
-      listed.find((candidate) => candidate.commandId === command.id) ?? previous ?? null;
+    // This command's own refund first. Otherwise the one live refund an earlier command made after
+    // all (its answer was lost) is this retry's refund, when it is for the same amount. Any other
+    // live refund, one made in Stripe's dashboard too, stops this one: the guest is never refunded
+    // twice.
+    const own = listed.find((candidate) => candidate.commandId === command.id);
+    const others = own
+      ? []
+      : listed.filter(
+          (candidate) => candidate.status !== "failed" && candidate.status !== "canceled",
+        );
+    const previous = others[0];
+    if (
+      others.length > 1 ||
+      (previous &&
+        (previous.commandId === null ||
+          !earlier.includes(previous.commandId) ||
+          previous.amountMinor !== Number(command.amount_minor)))
+    )
+      throw new RefundAlreadyAtStripe("Another refund of this payment is already at Stripe.");
+    const found = own ?? previous ?? null;
     if (found) refund = found;
     else
       try {
@@ -565,8 +600,11 @@ async function settleRefund(client: PoolClient, command: Command, refund: Stripe
 }
 
 /** A guest who isn't refunded needs a person: the log line carries ids only, no guest data. */
-function warnFailed(command: Command, why: string) {
-  console.warn("Pricing card refund failed; the hotel must refund the guest another way.", {
+function warnFailed(command: Command, why: string, blocked = false) {
+  const message = blocked
+    ? "Pricing card refund stopped; another refund of this payment is at Stripe. Check it there before refunding the guest."
+    : "Pricing card refund failed; the hotel must refund the guest another way.";
+  console.warn(message, {
     commandId: command.id,
     propertyId: command.property_id,
     guestBookingId: command.guest_booking_id,

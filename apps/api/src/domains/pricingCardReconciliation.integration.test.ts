@@ -92,6 +92,10 @@ describe.skipIf(!url)("pricing card reconciliation (VAY-2205)", () => {
     const retried = await stay("40.00", "partially_refunded");
     await refundCommand(retried, "failed", "now()-interval '1 hour'");
     await refundCommand(retried, "succeeded");
+    // A retry that failed too is still reported, once.
+    const failedTwice = await stay();
+    await refundCommand(failedTwice, "failed", "now()-interval '1 hour'");
+    await refundCommand(failedTwice, "failed");
     const intent = (id: string, extra: Partial<StripeBookingPaymentIntent> = {}) =>
       ({
         paymentIntentId: id,
@@ -142,6 +146,7 @@ describe.skipIf(!url)("pricing card reconciliation (VAY-2205)", () => {
     expect(mine(stuck)).toEqual(["refund_stuck"]);
     expect(mine(failed)).toEqual(["refund_failed"]);
     expect(mine(retried)).toEqual([]);
+    expect(mine(failedTwice)).toEqual(["refund_failed"]);
     expect(mismatches.find((m) => m.propertyId === failedLater.propertyId)?.detail).toContain(
       "lost_or_stolen_card",
     );
