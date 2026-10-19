@@ -460,6 +460,7 @@ export default function SharedFirstRunPropertySetupWizard({
     setError("");
     setForceCreateProperty(false);
     setEditPropertyProfile(false);
+    setPendingEditFocus(null);
     setLoading(true);
     try {
       await reloadStatus(propertyId);
@@ -706,7 +707,10 @@ export default function SharedFirstRunPropertySetupWizard({
     return (
       <>
         {renderSetupActions?.(view.selectedPropertyId)}
-        {renderAfterHotelDetails(view.selectedPropertyId, () => setEditPropertyProfile(true))}
+        {renderAfterHotelDetails(view.selectedPropertyId, () => {
+          setPendingEditFocus(null);
+          setEditPropertyProfile(true);
+        })}
       </>
     );
   }
@@ -1194,6 +1198,9 @@ function ProfileForm({
   // A focused edit saves from its step, and from any later step a field error sends it to.
   const savesHere =
     saveStep === undefined ? step === profileStepFields.length - 1 : step >= saveStep;
+  // A focused edit doesn't save guest preferences, so Back doesn't offer them.
+  const previousStep =
+    saveStep !== undefined && launchSettings && step === contactStep ? saveStep : step - 1;
   const googleMapsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY?.trim();
   const LocationHeading = embedded ? "h2" : "h1";
   const [showAddressFields, setShowAddressFields] = useState(
@@ -1483,7 +1490,7 @@ function ProfileForm({
         <button
           type="button"
           disabled={saving}
-          onClick={() => (step > 0 ? changeStep(step - 1) : onCancel?.())}
+          onClick={() => (step > 0 ? changeStep(previousStep) : onCancel?.())}
           className={`w-full rounded-full border border-gray-200 bg-white px-5 py-3 text-sm font-medium text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto ${
             step === 1 ? "sm:min-w-32" : ""
           }`}
@@ -2112,8 +2119,8 @@ function ProfileForm({
                     </span>
                     <span className="mt-1 block text-xs leading-5 text-gray-600">
                       {mode === "update"
-                        ? "Guests see only your city and country on your booking page. Street address and postal code stay private, and saving a location change keeps your map pin private."
-                        : "Guests see only your city and country on your booking page. Street address, postal code, and map pin stay private."}
+                        ? "Guests see your city and country on your booking page. Street address and postal code stay private, and changing the address turns off your guest map."
+                        : "Guests see your city and country on your booking page. Street address, postal code, and map pin stay private."}
                     </span>
                     {localityHighlighted && (
                       <span className="mt-1 block text-xs font-medium leading-5 text-amber-800">
@@ -2958,9 +2965,12 @@ export function profileUpdateFromDraft(
     ),
   ) as NonNullable<PropertyProfilePatch["location"]>;
   if (Object.keys(locationPatch).length > 0) {
-    // Consent for an existing location does not publish newly entered location details.
-    if (profile.location.geoPublic) locationPatch.geoPublic = false;
-    if (profile.location.mapDisplayMode !== "hidden") locationPatch.mapDisplayMode = "hidden";
+    // Consent for an existing location does not publish newly entered location details. The city
+    // and country box alone changes no address, so a public guest map stays on (VAY-2288).
+    if (Object.keys(locationPatch).some((key) => key !== "localityPublic")) {
+      if (profile.location.geoPublic) locationPatch.geoPublic = false;
+      if (profile.location.mapDisplayMode !== "hidden") locationPatch.mapDisplayMode = "hidden";
+    }
     patch.location = locationPatch;
   }
 
