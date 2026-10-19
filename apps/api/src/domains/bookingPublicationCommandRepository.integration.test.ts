@@ -1082,6 +1082,18 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Booking publication command safe
     ).resolves.toMatchObject({
       rows: [{ outboxStatus: "failed", reasonCode: "max_attempts_exhausted" }],
     });
+    expect(warnings).toEqual([
+      {
+        message: "Booking publication failed",
+        fields: {
+          propertyId,
+          operationId: accepted.operation.operationId,
+          failureCode: "projection_failed",
+          stage: "retries_exhausted",
+          errorCode: "owner_snapshot_unavailable",
+        },
+      },
+    ]);
   });
 
   async function counts() {

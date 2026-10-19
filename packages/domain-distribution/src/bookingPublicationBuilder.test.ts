@@ -112,7 +112,7 @@ describe("Booking publication builder", () => {
     ).resolves.toEqual({
       outcome: "rejected",
       code: "public_content_incomplete",
-      reason: "content",
+      reason: "rooms",
     });
 
     await expect(

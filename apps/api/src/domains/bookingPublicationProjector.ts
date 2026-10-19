@@ -133,6 +133,21 @@ export function createBookingPublicationProjector(config: {
       retryDelayMs,
     );
     if (reconciled) return reconciled;
+    const logFailure = (failureCode: string, detail: Record<string, unknown>) => {
+      try {
+        config.warn?.(
+          {
+            propertyId: claim.propertyId,
+            operationId: claim.operationId,
+            failureCode,
+            ...detail,
+          },
+          "Booking publication failed",
+        );
+      } catch {
+        // A log line never changes the outcome.
+      }
+    };
     const fail = async (
       failureCode: "projection_failed" | "source_content_changed",
       detail: Record<string, unknown>,
@@ -145,17 +160,7 @@ export function createBookingPublicationProjector(config: {
         failureCode,
         projectedAt,
       );
-      if (result.failed > 0) {
-        config.warn?.(
-          {
-            propertyId: claim.propertyId,
-            operationId: claim.operationId,
-            failureCode,
-            ...detail,
-          },
-          "Booking publication failed",
-        );
-      }
+      if (result.failed > 0) logFailure(failureCode, detail);
       return result;
     };
     try {
@@ -240,7 +245,7 @@ export function createBookingPublicationProjector(config: {
         }
         throw error;
       }
-    } catch {
+    } catch (error) {
       const recovered = await reconcileActivatedPublication(
         pool,
         config.projection,
@@ -260,6 +265,17 @@ export function createBookingPublicationProjector(config: {
       );
       if (failure.succeeded) {
         return { processed: 1, succeeded: 1, failed: 0, exhausted: 0 };
+      }
+      if (failure.exhausted) {
+        // Codes only: an error message may carry anything.
+        const errorCode =
+          error instanceof Error && /^[a-z][a-z0-9_]{0,63}$/.test(error.message)
+            ? error.message
+            : null;
+        logFailure("projection_failed", {
+          stage: "retries_exhausted",
+          ...(errorCode ? { errorCode } : {}),
+        });
       }
       return { processed: 1, succeeded: 0, failed: 1, exhausted: Number(failure.exhausted) };
     }

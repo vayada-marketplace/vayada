@@ -9,7 +9,11 @@ import {
   buildPublicBookabilityProfileProjection,
   type PublicBookabilityProducerInputs,
 } from "./index.js";
-import { buildBookingPublicContent, type BookingPublicContentBuild } from "./bookingPublication.js";
+import {
+  tryBuildBookingPublicContent,
+  type BookingPublicContentBuild,
+  type BookingPublicContentRejection,
+} from "./bookingPublication.js";
 import { publicBookabilityProfileIssuePaths } from "./publicBookabilityProfileParser.js";
 import {
   bookingPublicationOwnerSnapshotProvenanceMatches,
@@ -33,8 +37,7 @@ export type BookingPublicationBuildResult =
 export type BookingPublicationContentRejectionReason =
   | "currency"
   | "booking_web"
-  | "profile"
-  | "content"
+  | BookingPublicContentRejection
   | "build_error";
 
 export type BookingPublicationBuilderPort = Readonly<{
@@ -139,7 +142,7 @@ export function createBookingPublicationBuilder(config: {
           finance: finance.content,
           bookingWeb,
         });
-        const build = buildBookingPublicContent({
+        const result = tryBuildBookingPublicContent({
           sourceManifestHash: readiness.sourceManifestHash,
           readinessHash: readiness.readinessHash,
           profile,
@@ -147,11 +150,14 @@ export function createBookingPublicationBuilder(config: {
           calendar: pms.content.calendar,
           finance: finance.content,
         });
-        if (build) return deepFreeze({ outcome: "built", build });
-        const issuePaths = publicBookabilityProfileIssuePaths(profile);
-        return issuePaths.length > 0
-          ? rejected("public_content_incomplete", "profile", issuePaths)
-          : rejected("public_content_incomplete", "content");
+        if ("build" in result) return deepFreeze({ outcome: "built", build: result.build });
+        const issuePaths =
+          result.rejected === "profile" ? publicBookabilityProfileIssuePaths(profile) : [];
+        return rejected(
+          "public_content_incomplete",
+          result.rejected,
+          issuePaths.length > 0 ? issuePaths : undefined,
+        );
       } catch {
         return rejected("public_content_incomplete", "build_error");
       }
