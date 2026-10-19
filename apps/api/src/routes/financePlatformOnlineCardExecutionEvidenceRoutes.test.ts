@@ -175,8 +175,10 @@ describe("Platform Finance online-card execution evidence routes", () => {
       propertyId: PROPERTY_ID,
       providerAccount: { ready: true, cardCapabilityRevision: 7 },
       propertyReadinessRevision: 1,
+      paymentSettings: { paymentsOn: true, cardChosen: true, currencyEligible: true },
       evidence: null,
       cardReady: false,
+      prices: "current" as const,
     };
     const read = vi.fn(async (propertyId: string) => (propertyId === PROPERTY_ID ? state : null));
     const url = `/finance/platform/properties/${PROPERTY_ID}/online-card-execution-evidence`;
