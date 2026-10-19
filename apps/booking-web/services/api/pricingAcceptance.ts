@@ -314,13 +314,19 @@ export async function acceptPricingQuote(
 }
 
 /** Quotes this page can book, instantly or as a request the hotel confirms: paid at the
- * property, or paid in full by card (a request only authorises the card). */
+ * property, or by card now (a request only authorises the card), with any rest paid at the
+ * property: a deposit's remainder or the hotel's own fees (VAY-2205). */
 export function pricingQuoteBookableOnline(quote: PublicBookingQuote): boolean {
   if (quote.paymentMethod === "pay_at_property")
     return quote.dueNowMinor === "0" && quote.dueLaterMinor === quote.totalMinor;
-  // Card is charged in full now; bank transfer and PayPal are paid in full before the deadline.
+  if (quote.paymentMethod === "card")
+    return (
+      quote.dueNowMinor !== "0" &&
+      BigInt(quote.dueNowMinor) + BigInt(quote.dueLaterMinor) === BigInt(quote.totalMinor)
+    );
+  // Bank transfer and PayPal are paid in full before the deadline.
   return (
-    (quote.paymentMethod === "card" || isManualPricingPaymentMethod(quote.paymentMethod)) &&
+    isManualPricingPaymentMethod(quote.paymentMethod) &&
     quote.dueNowMinor === quote.totalMinor &&
     quote.dueLaterMinor === "0"
   );

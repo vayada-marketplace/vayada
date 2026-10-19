@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { PoolClient } from "pg";
+import { pricingMinor } from "./pricingCardRefund.js";
 
 /** Splits `total` over `weights` in proportion, largest remainder first: the shares always add up
  * to `total` exactly, and equal remainders go to the earlier weight. */
@@ -33,9 +34,10 @@ const decimal = (value: bigint) => `${value / 100n}.${String(value % 100n).padSt
 /** After a paid card stay's cancel cleared its nights (`captureDirectNightlyRevenueEvidence`
  * with `clear`, same fingerprint): what the hotel keeps becomes retained revenue on those nights
  * (VAY-2205, Flamur 2026-10-18, as PMS manual cancellations do). The kept share of what was paid
- * (`keptMinor` of `paidMinor`) of the nights' room value is split over the nights by their room
- * prices; add-ons keep their own records. Each night's share is recognised on its stay date, as
- * the evidence rule requires. Idempotent per cancel; returns the number of nights recorded. */
+ * (`keptMinor` of `paidMinor`, or of the stay's total for a deposit) of the nights' room value is
+ * split over the nights by their room prices; add-ons keep their own records. Each night's share
+ * is recognised on its stay date, as the evidence rule requires. Idempotent per cancel; returns
+ * the number of nights recorded. */
 export async function recordPricingRetainedRevenue(
   client: Pick<PoolClient, "query">,
   input: {
@@ -71,9 +73,23 @@ export async function recordPricingRetainedRevenue(
   const roomTotal = values.reduce((a, b) => a + b, 0n);
   if (roomTotal <= 0n) return 0;
   const kept = input.keptMinor > input.paidMinor ? input.paidMinor : input.keptMinor;
+  // A full payment is the stay's online part; a deposit is a share of the whole stay, so what it
+  // keeps is that share of the stay's value (VAY-2205).
+  const deposit = (
+    await client.query<{ total: string; currency: string }>(
+      `SELECT booking.total_amount::text AS total,trim(booking.currency) AS currency
+       FROM booking.guest_bookings booking
+       JOIN finance.payments payment
+         ON payment.id=booking.active_card_payment_id AND payment.property_id=booking.property_id
+       WHERE booking.property_id=$1::uuid AND booking.id=$2::uuid AND payment.payment_kind='deposit'`,
+      [input.propertyId, input.guestBookingId],
+    )
+  ).rows[0];
+  const stayMinor = deposit ? pricingMinor(deposit.total, deposit.currency) : null;
+  const basis = stayMinor && stayMinor > input.paidMinor ? stayMinor : input.paidMinor;
   // In cents, half-up: the nights keep the same share of their room value as the hotel keeps of
-  // what was paid.
-  const retained = (roomTotal * kept * 2n + input.paidMinor * 100n) / (input.paidMinor * 200n);
+  // what the payment stood for.
+  const retained = (roomTotal * kept * 2n + basis * 100n) / (basis * 200n);
   const shares = splitByWeight(retained, values);
   const lines = nights
     .map((night, index) => ({ ...night, share: shares[index]! }))
