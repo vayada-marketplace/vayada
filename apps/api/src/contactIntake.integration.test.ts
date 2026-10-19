@@ -212,6 +212,7 @@ describe.skipIf(!URL)("PostgreSQL contact intake storage, delivery and retention
     const supportMail = sent.find((input) => input.subject.startsWith("Bug report"));
     expect(supportMail).toMatchObject({
       to: "team@example.test",
+      emailProduct: "platform",
       replyTo: `ben.${support}@example.com`,
       // The linked hotel's name, not the generated account name.
       subject: `Bug report · PMS · ${account.hotel}`,
@@ -222,6 +223,7 @@ describe.skipIf(!URL)("PostgreSQL contact intake storage, delivery and retention
     sent.splice(sent.indexOf(supportMail!), 1);
     expect(sent[0]).toMatchObject({
       to: "team@example.test",
+      emailProduct: "platform",
       replyTo: `ana.${marker}@example.com`,
       subject: `Contact form: Ana Host ${marker}`,
     });

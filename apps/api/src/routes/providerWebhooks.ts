@@ -266,8 +266,14 @@ export const registerProviderWebhookRoutes: FastifyPluginAsync<
 
   app.post<{ Body: string }>("/webhooks/resend", async (request, reply) => {
     const secret = options.secrets.resend;
-    if (!secret || !options.pmsInboxDeliveryReceipts)
+    // VAY-2293: booking and platform (contact form, support) emails need no delivery receipt.
+    // Without the Inbox receipt path their events are acknowledged unverified, which is safe
+    // because nothing is recorded; untagged and Inbox events keep the 503 so Resend retries them.
+    const product = resendNonInboxProduct(request.body);
+    if (!secret || !options.pmsInboxDeliveryReceipts) {
+      if (product) return reply.code(200).send({ status: `ignored_${product}_notification` });
       return reply.code(503).send({ error: "resend_webhook_not_configured" });
+    }
     const id = request.headers["svix-id"];
     const timestamp = request.headers["svix-timestamp"];
     const signature = request.headers["svix-signature"];
@@ -293,10 +299,9 @@ export const registerProviderWebhookRoutes: FastifyPluginAsync<
     if (!providerReference || !Number.isFinite(acknowledgedAt.getTime()))
       return reply.code(400).send({ error: "invalid_resend_delivery_receipt" });
 
-    // Only a signed, explicitly Booking-owned event bypasses Inbox correlation.
+    // Only a signed event of a non-Inbox product (booking, platform) bypasses Inbox correlation.
     // Untagged/unknown events retain retries for old sends and acceptance races.
-    if (optionalString(optionalRecord(data, "tags"), "vayada_product") === "booking")
-      return reply.code(200).send({ status: "ignored_booking_notification" });
+    if (product) return reply.code(200).send({ status: `ignored_${product}_notification` });
 
     const result = await options.pmsInboxDeliveryReceipts.recordTrustedProviderReceipt({
       adapter: "resend",
@@ -610,8 +615,10 @@ function channexModeFor(
     return options.channexReviewMode ?? mode;
   if (classification.family === "alert") return "observe_only";
   return mode === "mutating" &&
-    ((classification.family === "alteration" && (!options.channexAlterationPromotionEnabled ||
-        (options.channexAlterationPropertyIds !== undefined && !options.channexAlterationPropertyIds.includes(classification.propertyId)))) ||
+    ((classification.family === "alteration" &&
+      (!options.channexAlterationPromotionEnabled ||
+        (options.channexAlterationPropertyIds !== undefined &&
+          !options.channexAlterationPropertyIds.includes(classification.propertyId)))) ||
       (classification.family === "booking" && !options.channexBookingPromotionEnabled) ||
       (["booking", "message", "alteration"].includes(classification.family) &&
         classification.propertyOwnerResolved === false) ||
@@ -1529,6 +1536,17 @@ function fallbackPreview(
       rawPayload,
     },
   };
+}
+
+/** The `vayada_product` tag of a Resend event when it names a product without Inbox receipts. */
+function resendNonInboxProduct(body: string): "booking" | "platform" | null {
+  const payload = parseJsonPayload(body);
+  if (!payload.ok) return null;
+  const product = optionalString(
+    optionalRecord(optionalRecord(payload.value, "data"), "tags"),
+    "vayada_product",
+  );
+  return product === "booking" || product === "platform" ? product : null;
 }
 
 function parseJsonPayload(

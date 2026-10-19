@@ -190,7 +190,14 @@ export async function runContactNotificationJobs(
           job.channel === "in_app_support"
             ? supportNotificationEmail(job.payload, job.createdAt, await hotelNamesFor(pool, job))
             : contactNotificationEmail(job.payload, job.createdAt);
-        await delivery.send({ to: options.recipient, idempotencyKey: job.jobKey, ...email });
+        // VAY-2293: tagged so the Resend webhook acknowledges its events instead of matching them
+        // against PMS Inbox messages.
+        await delivery.send({
+          to: options.recipient,
+          idempotencyKey: job.jobKey,
+          emailProduct: "platform",
+          ...email,
+        });
         if ((await finishContactJob(pool, job, startedAt, "succeeded")).recorded) processed += 1;
       } catch (error) {
         // Only the provider's status line is kept; never the message or the visitor's details.

@@ -359,6 +359,9 @@ describe("target provider webhook routes", () => {
   it.each([
     ["booking", true, 0, 200, "ignored_booking_notification"],
     ["booking", false, 0, 400, null],
+    // VAY-2293: contact-form and support notifications are tagged platform.
+    ["platform", true, 0, 200, "ignored_platform_notification"],
+    ["platform", false, 0, 400, null],
     ["pms_inbox", true, 0, 503, null],
     ["unknown", true, 0, 503, null],
     [null, true, 0, 503, null],
@@ -403,13 +406,57 @@ describe("target provider webhook routes", () => {
         expect(response.statusCode).toBe(status);
         if (result) expect(response.json()).toEqual({ status: result });
         expect(recordTrustedProviderReceipt).toHaveBeenCalledTimes(
-          signed && tag !== "booking" ? 1 : 0,
+          signed && tag !== "booking" && tag !== "platform" ? 1 : 0,
         );
       } finally {
         await app.close();
       }
     },
   );
+
+  // VAY-2293: without the Inbox receipt path, booking and platform events are acknowledged so
+  // Resend stops retrying; untagged and Inbox events still ask for a retry.
+  it.each([
+    ["platform", "secret", 200, { status: "ignored_platform_notification" }],
+    ["booking", "secret", 200, { status: "ignored_booking_notification" }],
+    ["platform", "store", 200, { status: "ignored_platform_notification" }],
+    ["pms_inbox", "secret", 503, { error: "resend_webhook_not_configured" }],
+    [null, "store", 503, { error: "resend_webhook_not_configured" }],
+    ["platform-x", "secret", 503, { error: "resend_webhook_not_configured" }],
+  ] as const)("answers %s events without a configured %s", async (tag, missing, status, body) => {
+    const recordTrustedProviderReceipt = vi.fn(async () => ({ matchCount: 1, recorded: true }));
+    const app = buildApp({
+      providerWebhooks: {
+        secrets: {
+          resend:
+            missing === "secret"
+              ? undefined
+              : `whsec_${Buffer.from("resend-unconfigured").toString("base64")}`,
+        },
+        store: createMemoryProviderWebhookStore(),
+        ...(missing === "store"
+          ? {}
+          : { pmsInboxDeliveryReceipts: { recordTrustedProviderReceipt } }),
+      },
+    });
+    try {
+      const response = await app.inject({
+        method: "POST",
+        url: "/webhooks/resend",
+        headers: { "content-type": "application/json" },
+        payload: JSON.stringify({
+          type: "email.delivered",
+          created_at: "2026-10-19T21:26:30Z",
+          data: { email_id: "email-unconfigured", tags: tag ? { vayada_product: tag } : undefined },
+        }),
+      });
+      expect(response.statusCode).toBe(status);
+      expect(response.json()).toEqual(body);
+      expect(recordTrustedProviderReceipt).not.toHaveBeenCalled();
+    } finally {
+      await app.close();
+    }
+  });
 
   it("records an authenticated Resend delivery receipt against its provider reference", async () => {
     const secret = `whsec_${Buffer.from("resend-webhook-secret").toString("base64")}`;
