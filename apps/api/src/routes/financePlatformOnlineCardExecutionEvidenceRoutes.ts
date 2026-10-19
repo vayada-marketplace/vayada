@@ -87,8 +87,6 @@ function acceptCommand(
           "idempotencyKey",
           "expectedCardCapabilityRevision",
           "expectedPropertyReadinessRevision",
-          "evidenceFingerprintHash",
-          "executedAt",
         ].includes(key),
     )
   ) {
@@ -97,34 +95,27 @@ function acceptCommand(
   const commandId = trimmed(body.commandId);
   const idempotencyKey = trimmed(body.idempotencyKey);
   // VAY-2205 (D3): Vayada's approval is the operator's attestation, recorded at the server's time
-  // with a fingerprint the server computes, so the browser's clock and input don't matter. The
-  // ONB-25A fields stay accepted for evidence from a verified run.
-  const attested = body.evidenceFingerprintHash === undefined && body.executedAt === undefined;
-  const executedAt = attested ? context.audit.receivedAt : isoDate(body.executedAt);
-  const evidenceFingerprintHash = attested
-    ? createHash("sha256")
-        .update(
-          [
-            "vayada-card-approval.v1",
-            request.params.propertyId.toLowerCase(),
-            `card-capability:${String(body.expectedCardCapabilityRevision)}`,
-            `property-readiness:${String(body.expectedPropertyReadinessRevision)}`,
-            `operator:${context.actor.internalUserId}`,
-            executedAt,
-          ].join("\n"),
-        )
-        .digest("hex")
-    : trimmed(body.evidenceFingerprintHash);
+  // with a fingerprint the server computes, so the browser's clock and input don't matter. Proof
+  // from an ONB-25A run is refused until something verifies it.
+  const executedAt = context.audit.receivedAt;
+  const evidenceFingerprintHash = createHash("sha256")
+    .update(
+      [
+        "vayada-card-approval.v1",
+        request.params.propertyId.toLowerCase(),
+        `card-capability:${String(body.expectedCardCapabilityRevision)}`,
+        `property-readiness:${String(body.expectedPropertyReadinessRevision)}`,
+        `operator:${context.actor.internalUserId}`,
+        executedAt,
+      ].join("\n"),
+    )
+    .digest("hex");
   if (
     !uuid(request.params.propertyId) ||
     !uuid(commandId) ||
     !uuid(idempotencyKey) ||
     !positiveInteger(body.expectedCardCapabilityRevision) ||
-    !positiveInteger(body.expectedPropertyReadinessRevision) ||
-    !evidenceFingerprintHash ||
-    !/^[0-9a-f]{64}$/.test(evidenceFingerprintHash) ||
-    !executedAt ||
-    Date.parse(executedAt) > Date.parse(context.audit.receivedAt)
+    !positiveInteger(body.expectedPropertyReadinessRevision)
   ) {
     return null;
   }
@@ -133,12 +124,7 @@ function acceptCommand(
     commandId,
     idempotencyKey,
     propertyId: request.params.propertyId.toLowerCase(),
-    audit: audit(
-      context,
-      attested
-        ? "Vayada finance operator approves card payments (attestation)"
-        : "Accept ONB-25A online-card execution evidence",
-    ),
+    audit: audit(context, "Vayada finance operator approves card payments (attestation)"),
     payload: {
       expectedCardCapabilityRevision: body.expectedCardCapabilityRevision as number,
       expectedPropertyReadinessRevision: body.expectedPropertyReadinessRevision as number,
@@ -240,17 +226,6 @@ function trimmed(value: unknown): string | null {
 
 function positiveInteger(value: unknown): value is number {
   return Number.isSafeInteger(value) && Number(value) >= 1 && Number(value) <= 2_147_483_647;
-}
-
-function isoDate(value: unknown): string | null {
-  if (
-    typeof value !== "string" ||
-    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(value) ||
-    Number.isNaN(Date.parse(value))
-  ) {
-    return null;
-  }
-  return new Date(value).toISOString();
 }
 
 function uuid(value: unknown): value is string {

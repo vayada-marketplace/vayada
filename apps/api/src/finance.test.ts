@@ -40,6 +40,7 @@ import { agencyPropertyAccessRepository } from "./testAuthorization.js";
 import type { PublicHotelProfileRepository } from "./routes/aiHotels.js";
 import { unusedBookingWebCheckoutAdapter } from "./routes/bookingWebPublic.fixtures.js";
 import {
+  cardSwitchPrices,
   createTargetFinancePropertySettingsRepository,
   type FinanceXenditBankValidator,
   type FinancePublicHotelPropertyResolver,
@@ -941,6 +942,13 @@ describe("finance route contracts", () => {
       uncompensatedRepository.createStripeProviderAccount!(stripePropertyTargetCommand()),
     ).resolves.toMatchObject({ ok: false, code: "provider_unavailable" });
     expect(provider.createAccountCount).toBe(0);
+  });
+
+  it("says whether a hotel's prices must be saved again after a card change (VAY-2205)", () => {
+    expect(cardSwitchPrices([])).toBe("not_published");
+    expect(cardSwitchPrices([{ propertyId, revision: 3, stale: [] }])).toBe("current");
+    expect(cardSwitchPrices([{ propertyId, revision: 3, stale: ["finance"] }])).toBe("save_needed");
+    expect(cardSwitchPrices([{ propertyId, error: "lock_timeout" }])).toBeUndefined();
   });
 
   it("wires ONB-25A acceptance next to the revoke: a Vayada finance operator's attestation (VAY-2205 D3)", () => {
