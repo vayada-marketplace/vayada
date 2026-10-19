@@ -1581,8 +1581,6 @@ const app = buildApp({
             "platform-admin": {
               requiredOrganizationKind: "platform",
               logoutReturnUrl: config.authSession.authLogoutUrl,
-              legacyJwtSecret: config.authSession.authLegacyMarketplaceJwtSecret,
-              legacyJwtUserType: "admin",
               requiredMembershipRoleKey: "platform_admin",
               publicOrigin: config.authSession.authSurfaceOrigins["platform-admin"],
               firstPartySession:
@@ -1620,7 +1618,6 @@ const app = buildApp({
           },
           cookieSecure: config.authSession.authCookieSecure,
           cookieDomain: config.authSession.authCookieDomain,
-          legacyMarketplaceJwtSecret: config.authSession.authLegacyMarketplaceJwtSecret,
           adminTransfer: adminTransferRuntime,
         }
       : undefined,
