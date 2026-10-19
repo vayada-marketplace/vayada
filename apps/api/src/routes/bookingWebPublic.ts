@@ -26,7 +26,7 @@ import {
   voidPricingCardPayment,
 } from "../domains/pricingCardPaymentCompletion.js";
 import {
-  executePricingCardRefund,
+  executePricingCardRefundSoon,
   PricingCardRefundError,
   previewPricingCardRefund,
   stagePricingCardRefund,
@@ -4161,12 +4161,7 @@ async function withGuestLifecycleMutation(
   // Committed: ask Stripe now. If it can't answer, the refund sweep retries.
   if (refund && cardPayments) {
     const { commandId } = refund;
-    await executePricingCardRefund(pool, cardPayments, commandId).catch((error: unknown) =>
-      console.warn("Pricing card refund left to the sweep.", {
-        commandId,
-        error: error instanceof Error ? error.message : String(error),
-      }),
-    );
+    await executePricingCardRefundSoon(pool, cardPayments, commandId);
   }
   return body;
 }

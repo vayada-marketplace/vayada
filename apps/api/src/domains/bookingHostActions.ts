@@ -34,7 +34,7 @@ import {
 } from "./pricingStayDateChange.js";
 import type { BookedCancellationOutcome } from "@vayada/domain-booking";
 import {
-  executePricingCardRefund,
+  executePricingCardRefundSoon,
   PricingCardRefundError,
   previewPricingCardRefund,
   retryPricingCardRefund,
@@ -384,15 +384,7 @@ export function createBookingHostActions(config: {
           );
         }
       });
-      const status = await executePricingCardRefund(config.pool, provider, staged.commandId).catch(
-        (error: unknown) => {
-          console.warn("Pricing card refund left to the sweep.", {
-            commandId: staged.commandId,
-            error: error instanceof Error ? error.message : String(error),
-          });
-          return "pending" as const;
-        },
-      );
+      const status = await executePricingCardRefundSoon(config.pool, provider, staged.commandId);
       return { status };
     },
     async preview(scope, request) {
@@ -665,13 +657,7 @@ export function createBookingHostActions(config: {
       // Committed: ask Stripe now. If it can't answer, the refund sweep retries.
       if (refund && config.cardRefunds) {
         const { commandId } = refund;
-        await executePricingCardRefund(config.pool, config.cardRefunds, commandId).catch(
-          (error: unknown) =>
-            console.warn("Pricing card refund left to the sweep.", {
-              commandId,
-              error: error instanceof Error ? error.message : String(error),
-            }),
-        );
+        await executePricingCardRefundSoon(config.pool, config.cardRefunds, commandId);
       }
       return result;
     },

@@ -88,6 +88,14 @@ describe.skipIf(!url)("pricing card reconciliation (VAY-2205)", () => {
     const later = await refundCommand(failedLater, "succeeded");
     await refundCommand(stuck, "pending", "now()-interval '2 days'");
     await refundCommand(failed, "failed");
+    // A failure the hotel retried successfully is no longer a difference.
+    const retried = await stay("40.00", "partially_refunded");
+    await refundCommand(retried, "failed", "now()-interval '1 hour'");
+    await refundCommand(retried, "succeeded");
+    // A retry that failed too is still reported, once.
+    const failedTwice = await stay();
+    await refundCommand(failedTwice, "failed", "now()-interval '1 hour'");
+    await refundCommand(failedTwice, "failed");
     const intent = (id: string, extra: Partial<StripeBookingPaymentIntent> = {}) =>
       ({
         paymentIntentId: id,
@@ -107,6 +115,7 @@ describe.skipIf(!url)("pricing card reconciliation (VAY-2205)", () => {
       [refundedAtStripe.intent]: { amountRefundedMinor: 2500 },
       [disputed.intent]: { disputed: true },
       [failedLater.intent]: { amountRefundedMinor: 4000 },
+      [retried.intent]: { amountRefundedMinor: 4000 },
     };
     const provider = {
       retrievePaymentIntent: vi.fn(async (id: string) => {
@@ -136,6 +145,8 @@ describe.skipIf(!url)("pricing card reconciliation (VAY-2205)", () => {
     // A refund under way is expected to differ at Stripe; one pending for over a day is reported.
     expect(mine(stuck)).toEqual(["refund_stuck"]);
     expect(mine(failed)).toEqual(["refund_failed"]);
+    expect(mine(retried)).toEqual([]);
+    expect(mine(failedTwice)).toEqual(["refund_failed"]);
     expect(mismatches.find((m) => m.propertyId === failedLater.propertyId)?.detail).toContain(
       "lost_or_stolen_card",
     );

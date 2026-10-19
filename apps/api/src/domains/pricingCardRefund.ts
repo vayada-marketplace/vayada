@@ -251,6 +251,7 @@ type Command = {
   status: string;
   provider_refund_id: string | null;
   attempts: number;
+  waiting: boolean;
   booking_reference: string;
 };
 
@@ -271,6 +272,7 @@ export async function executePricingCardRefund(
         `SELECT id,property_id,guest_booking_id,payment_id,idempotency_key,requested_by,amount::text AS amount,
            amount_minor::text AS amount_minor,trim(currency) AS currency,provider_account_ref,
            provider_payment_intent_id,status,provider_refund_id,attempts,
+           attempts>0 AND next_attempt_at>clock_timestamp() AS waiting,
            (SELECT public_reference FROM booking.guest_bookings booking
             WHERE booking.id=command.guest_booking_id AND booking.property_id=command.property_id)
              AS booking_reference
@@ -282,29 +284,59 @@ export async function executePricingCardRefund(
       await client.query("COMMIT");
       return command ? (command.status as "succeeded" | "failed") : "busy";
     }
-    const lookup = { listed: false };
+    // A retry waits for its time, whoever asks: right after a lost answer, Stripe may still be
+    // making the refund and not list it yet, and a create then would make a second one.
+    if (command.waiting) {
+      await client.query("COMMIT");
+      return "pending";
+    }
+    const lookup = { listed: false, refused: false };
+    const earlier = (
+      await client.query<{ id: string }>(
+        "SELECT id FROM finance.card_refund_commands WHERE payment_id=$1 AND property_id=$2 AND id<>$3",
+        [command.payment_id, command.property_id, command.id],
+      )
+    ).rows.map((row) => row.id);
     let refund: StripeBookingRefund | undefined;
     try {
-      refund = await findOrCreateRefund(provider, command, lookup);
+      refund = await findOrCreateRefund(provider, command, lookup, earlier);
     } catch (error) {
       // Once Stripe has the refund, it is followed to the end. One Stripe confirms it never made
-      // (the list answered without it) is given up after MAX_ATTEMPTS, with an audit event.
+      // (the list answered without it, then Stripe refused the create) is given up after
+      // MAX_ATTEMPTS, with an audit event; a lost answer is never given up on, and is asked about
+      // again only after LOST_ANSWER_WAIT_MINUTES. Another live refund of the payment at Stripe
+      // stops this one at once.
       const attempts = command.attempts + 1,
-        giveUp = !command.provider_refund_id && lookup.listed && attempts >= MAX_ATTEMPTS;
+        blocked = error instanceof RefundAlreadyAtStripe,
+        giveUp =
+          blocked ||
+          (!command.provider_refund_id &&
+            lookup.listed &&
+            lookup.refused &&
+            attempts >= MAX_ATTEMPTS);
       await client.query(
         `UPDATE finance.card_refund_commands SET attempts=$2,failure_reason=$3,updated_at=clock_timestamp(),
            next_attempt_at=clock_timestamp()+make_interval(mins=>$4),
            status=CASE WHEN $5 THEN 'failed' ELSE status END,
            settled_at=CASE WHEN $5 THEN clock_timestamp() END
          WHERE id=$1`,
-        [command.id, attempts, reason(error), Math.min(2 ** command.attempts, 60), giveUp],
+        [
+          command.id,
+          attempts,
+          reason(error),
+          Math.max(
+            Math.min(2 ** command.attempts, 60),
+            lookup.refused ? 0 : LOST_ANSWER_WAIT_MINUTES,
+          ),
+          giveUp,
+        ],
       );
       if (giveUp) {
         await audit(client, command, "finance.card_refund_failed", {
           refundId: null,
           status: "failed",
         });
-        warnFailed(command, reason(error));
+        warnFailed(command, reason(error), blocked);
       }
       await client.query("COMMIT");
       return giveUp ? "failed" : "pending";
@@ -353,45 +385,125 @@ export async function executePricingCardRefund(
   }
 }
 
+/** After a cancel commits: ask Stripe now, but answer the guest or the hotel within `waitMs`. A
+ * slower refund carries on in the background, and the 60-second sweep retries anything left. */
+export async function executePricingCardRefundSoon(
+  pool: Pick<Pool, "connect">,
+  provider: StripeBookingPaymentProvider,
+  commandId: string,
+  waitMs = 8_000,
+): Promise<"succeeded" | "pending" | "failed" | "busy"> {
+  const run = executePricingCardRefund(pool, provider, commandId).catch((error: unknown) => {
+    console.warn("Pricing card refund left to the sweep.", {
+      commandId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return "pending" as const;
+  });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<"pending">((resolve) => {
+    timer = setTimeout(() => resolve("pending"), waitMs);
+  });
+  try {
+    return await Promise.race([run, late]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** Stripe errors before a refund Stripe never made stops being retried (about a day with the
  * backoff). */
 export const MAX_ATTEMPTS = 30;
 
+/** After a lost answer, Stripe has long finished the create (or never got it) before it is asked
+ * again, so the list then shows any refund it made. */
+export const LOST_ANSWER_WAIT_MINUTES = 5;
+
+/** A Stripe answer that the refund was refused (4xx), not one that may have been lost. */
+const definiteRefusal = (error: unknown) => {
+  const status = (error as { statusCode?: unknown } | null)?.statusCode;
+  return (
+    typeof status === "number" &&
+    status >= 400 &&
+    status < 500 &&
+    status !== 408 &&
+    status !== 409 &&
+    status !== 429
+  );
+};
+
+/** Another refund of the same payment is live at Stripe: none may be made next to it. */
+class RefundAlreadyAtStripe extends Error {}
+
 async function findOrCreateRefund(
   provider: StripeBookingPaymentProvider,
   command: Command,
-  lookup: { listed: boolean },
+  lookup: { listed: boolean; refused: boolean },
+  /** The payment's other refund commands: a retry follows one Stripe made after all. */
+  earlier: readonly string[],
 ) {
-  const listRefunds = async () => {
-    const refunds = await provider.listRefunds(
+  let refund: StripeBookingRefund;
+  if (command.provider_refund_id)
+    refund = await provider.retrieveRefund(
+      command.provider_refund_id,
+      command.provider_account_ref,
+    );
+  else {
+    // Stripe forgets idempotency keys after 24 hours: look for this command's refund first.
+    const listed = await provider.listRefunds(
       command.provider_payment_intent_id,
       command.provider_account_ref,
     );
     lookup.listed = true;
-    return refunds;
-  };
-  const refund = command.provider_refund_id
-    ? await provider.retrieveRefund(command.provider_refund_id, command.provider_account_ref)
-    : // Stripe forgets idempotency keys after 24 hours: look for this command's refund first.
-      ((await listRefunds()).find((candidate) => candidate.commandId === command.id) ??
-      (await provider.createRefund({
-        paymentIntentId: command.provider_payment_intent_id,
-        providerAccountRef: command.provider_account_ref,
-        amountMinor: Number(command.amount_minor),
-        commandId: command.id,
-        propertyId: command.property_id,
-        bookingReference: command.booking_reference,
-        // Stripe replays a key's first answer, errors included, for 24 hours: a retry after an
-        // error needs its own key. The list above already rules out a second refund.
-        idempotencyKey: command.attempts
-          ? `${command.idempotency_key}:attempt-${command.attempts}`
-          : command.idempotency_key,
-      })));
+    // This command's own refund first. Otherwise the one live refund an earlier command made after
+    // all (its answer was lost) is this retry's refund, when it is for the same amount. Any other
+    // live refund, one made in Stripe's dashboard too, stops this one: the guest is never refunded
+    // twice.
+    const own = listed.find((candidate) => candidate.commandId === command.id);
+    const others = own
+      ? []
+      : listed.filter(
+          (candidate) => candidate.status !== "failed" && candidate.status !== "canceled",
+        );
+    const previous = others[0];
+    if (
+      others.length > 1 ||
+      (previous &&
+        (previous.commandId === null ||
+          !earlier.includes(previous.commandId) ||
+          previous.amountMinor !== Number(command.amount_minor)))
+    )
+      throw new RefundAlreadyAtStripe("Another refund of this payment is already at Stripe.");
+    const found = own ?? previous ?? null;
+    if (found) refund = found;
+    else
+      try {
+        refund = await provider.createRefund({
+          paymentIntentId: command.provider_payment_intent_id,
+          providerAccountRef: command.provider_account_ref,
+          amountMinor: Number(command.amount_minor),
+          commandId: command.id,
+          propertyId: command.property_id,
+          bookingReference: command.booking_reference,
+          // Stripe replays a key's first answer, errors included, for 24 hours: a retry after an
+          // error needs its own key. The list above already rules out a second refund.
+          idempotencyKey: command.attempts
+            ? `${command.idempotency_key}:attempt-${command.attempts}`
+            : command.idempotency_key,
+        });
+      } catch (error) {
+        // Only a definite refusal counts toward giving up; a lost answer may be a refund Stripe made.
+        lookup.refused = definiteRefusal(error);
+        throw error;
+      }
+  }
   if (
     refund.paymentIntentId !== command.provider_payment_intent_id ||
     refund.amountMinor !== Number(command.amount_minor) ||
     refund.currency !== command.currency ||
-    (refund.commandId !== null && refund.commandId !== command.id)
+    (refund.commandId !== null &&
+      refund.commandId !== command.id &&
+      !earlier.includes(refund.commandId))
   )
     throw new Error("Stripe answered with a refund for another command.");
   return refund;
@@ -488,8 +600,11 @@ async function settleRefund(client: PoolClient, command: Command, refund: Stripe
 }
 
 /** A guest who isn't refunded needs a person: the log line carries ids only, no guest data. */
-function warnFailed(command: Command, why: string) {
-  console.warn("Pricing card refund failed; the hotel must refund the guest another way.", {
+function warnFailed(command: Command, why: string, blocked = false) {
+  const message = blocked
+    ? "Pricing card refund stopped; another refund of this payment is at Stripe. Check it there before refunding the guest."
+    : "Pricing card refund failed; the hotel must refund the guest another way.";
+  console.warn(message, {
     commandId: command.id,
     propertyId: command.property_id,
     guestBookingId: command.guest_booking_id,

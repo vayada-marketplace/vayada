@@ -118,8 +118,12 @@ export function createStripeBookingPaymentProvider(config: {
     );
     const payload = object(await response.json());
     if (!response.ok) {
-      throw new Error(
-        text(object(payload["error"])["message"]) ?? `Stripe failed (${response.status}).`,
+      // The status tells a definite refusal (4xx) from an answer that may have been lost.
+      throw Object.assign(
+        new Error(
+          text(object(payload["error"])["message"]) ?? `Stripe failed (${response.status}).`,
+        ),
+        { statusCode: response.status },
       );
     }
     return payload;
