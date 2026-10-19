@@ -9,7 +9,6 @@ on:
         type: choice
         options:
           - booking-admin
-          - marketplace-admin
       cutover_justification:
         description: Why this production recovery is required
         required: true
@@ -55,36 +54,6 @@ jobs:
                 echo "rollback_build_args<<EOF"
                 echo "NEXT_PUBLIC_API_URL=https://booking-api.vayada.com"
                 echo "NEXT_PUBLIC_PMS_URL=https://pms-api.vayada.com"
-                echo "EOF"
-              } >> "${GITHUB_OUTPUT}"
-              ;;
-            marketplace-admin)
-              echo "source_ref=3c7c216956e2d770bcf0542c56e864b86880d115" >> "${GITHUB_OUTPUT}"
-              echo "rollback_source_ref=9d8d4f85217740c0f79adf9e84a4f1065c9f8647" >> "${GITHUB_OUTPUT}"
-              echo "image_tag=prod-recovery-marketplace-admin-3c7c216-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "${GITHUB_OUTPUT}"
-              echo "rollback_tag=prod-rollback-marketplace-admin-9d8d4f8-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "${GITHUB_OUTPUT}"
-              echo "app_dir=apps/vayada-admin" >> "${GITHUB_OUTPUT}"
-              echo "ecr_repository=vayada-admin-frontend" >> "${GITHUB_OUTPUT}"
-              echo "platform_service=marketplace-admin" >> "${GITHUB_OUTPUT}"
-              {
-                echo "build_args<<EOF"
-                echo "NEXT_PUBLIC_API_URL=https://api.vayada.com"
-                echo "NEXT_PUBLIC_AUTH_API_URL=https://api.vayada.com"
-                echo "NEXT_PUBLIC_AUTHKIT_LOGIN_ENABLED=false"
-                echo "NEXT_PUBLIC_AUTHKIT_LEGACY_FALLBACK_ENABLED=true"
-                echo "NEXT_PUBLIC_AUTHKIT_COMPATIBILITY_TOKEN_ENABLED=true"
-                echo "NEXT_PUBLIC_PMS_API_URL=https://pms-api.vayada.com"
-                echo "NEXT_PUBLIC_BOOKING_API_URL=https://api.vayada.com"
-                echo "NEXT_PUBLIC_PMS_URL=https://api.vayada.com"
-                echo "EOF"
-                echo "rollback_build_args<<EOF"
-                echo "NEXT_PUBLIC_API_URL=https://api.vayada.com"
-                echo "NEXT_PUBLIC_AUTH_API_URL=https://api.vayada.com"
-                echo "NEXT_PUBLIC_AUTHKIT_LOGIN_ENABLED=false"
-                echo "NEXT_PUBLIC_AUTHKIT_LEGACY_FALLBACK_ENABLED=true"
-                echo "NEXT_PUBLIC_AUTHKIT_COMPATIBILITY_TOKEN_ENABLED=true"
-                echo "NEXT_PUBLIC_BOOKING_API_URL=https://api.vayada.com"
-                echo "NEXT_PUBLIC_PMS_URL=https://api.vayada.com"
                 echo "EOF"
               } >> "${GITHUB_OUTPUT}"
               ;;
