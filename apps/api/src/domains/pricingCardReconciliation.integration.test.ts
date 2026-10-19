@@ -173,6 +173,7 @@ describe.skipIf(!url)("pricing card reconciliation (VAY-2205)", () => {
         subject: "Vayada: 1 card payment difference(s) with Stripe",
         text: expect.stringContaining("- disputed: property p, booking b, pay"),
         idempotencyKey: expect.stringMatching(/^pricing-card-reconciliation:2027-01-02:/),
+        emailProduct: "platform",
       }),
     );
   });

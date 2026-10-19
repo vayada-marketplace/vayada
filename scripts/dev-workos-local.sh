@@ -134,7 +134,6 @@ get_portless_origin() {
 echo "==> Ensuring WorkOS local role slugs exist"
 ensure_workos_role platform_admin "Platform Admin"
 ensure_workos_role hotel_owner "Hotel Owner"
-ensure_workos_role creator_owner "Creator Owner"
 
 unset BOOKING_PUBLIC_API_URL
 unset PMS_API_URL
@@ -149,7 +148,6 @@ portless proxy start --wildcard
 
 echo "==> Ensuring portless API aliases exist"
 portless alias api 8003
-portless alias api.marketplace 8000
 portless alias api.booking 8001
 portless alias api.pms 8002
 portless alias media 9002
@@ -168,7 +166,6 @@ BOOKING_ORIGIN="$(get_portless_origin booking)"
 PMS_ORIGIN="$(get_portless_origin pms)"
 MARKETPLACE_ORIGIN="$(get_portless_origin marketplace)"
 LANDING_ORIGIN="$(get_portless_origin landing)"
-MARKETPLACE_API_ORIGIN="$(get_portless_origin api.marketplace)"
 BOOKING_API_ORIGIN="$(get_portless_origin api.booking)"
 PMS_API_ORIGIN="$(get_portless_origin api.pms)"
 # Keep media canonical because Next image allowlists use this exact local host.
@@ -204,7 +201,6 @@ export AUTH_FIRST_PARTY_SURFACES="${AUTH_FIRST_PARTY_SURFACES-booking-admin,pms-
 export AUTH_BOOKING_ADMIN_LOGOUT_URL="${AUTH_BOOKING_ADMIN_LOGOUT_URL:-${BOOKING_ADMIN_ORIGIN}/login}"
 export AUTH_PMS_WEB_LOGOUT_URL="${AUTH_PMS_WEB_LOGOUT_URL:-${PMS_ORIGIN}/login}"
 export AUTH_MARKETPLACE_WEB_LOGOUT_URL="${AUTH_MARKETPLACE_WEB_LOGOUT_URL:-${MARKETPLACE_ORIGIN}/login}"
-export AUTH_LEGACY_MARKETPLACE_JWT_SECRET="${AUTH_LEGACY_MARKETPLACE_JWT_SECRET:-your-secret-key-change-in-production}"
 export AUTH_LEGACY_BOOKING_JWT_SECRET="${AUTH_LEGACY_BOOKING_JWT_SECRET:-local-legacy-booking-secret}"
 export AUTH_LEGACY_PMS_JWT_SECRET="${AUTH_LEGACY_PMS_JWT_SECRET:-local-legacy-pms-secret}"
 export PLATFORM_MEDIA_BUCKET="vayada-media-local"

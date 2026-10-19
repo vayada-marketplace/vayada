@@ -142,7 +142,7 @@ export type ProductAuditSink = {
 
 export type AuthSurface = "platform-admin" | "booking-admin" | "pms-web";
 
-export type AuthSignupIntent = "admin" | "hotel" | "creator";
+export type AuthSignupIntent = "admin" | "hotel";
 
 // VAY-2260: creator sign-ups are closed on every surface while the Marketplace is removed.
 export const CREATOR_SIGNUP_CLOSED_MESSAGE =
@@ -1681,7 +1681,7 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
           source: "web",
           requestId: request.id,
           correlationId: session.sessionId,
-          reason: "Marketplace self-service onboarding",
+          reason: "Hotel self-service onboarding",
           requestedAt: new Date().toISOString(),
         },
         payload: {
@@ -2921,13 +2921,6 @@ function signupOrganizationTemplate(
         name: displayName ? `${displayName} Hotel Group` : "New Hotel Group",
         roleKey: "hotel_owner",
       };
-    case "creator":
-      return {
-        externalId: `vayada-signup:${surface}:creator:${externalIdSuffix}`,
-        kind: "creator_workspace",
-        name: displayName ? `${displayName} Workspace` : "New Creator Workspace",
-        roleKey: "creator_owner",
-      };
   }
 }
 
@@ -3005,7 +2998,7 @@ async function selectSignupOrganizationSession(
 function registerCompatibilityTokenRoute(
   app: FastifyInstance,
   options: AuthSessionRouteOptions,
-  route: { path: string; surface: AuthSurface; userType?: string },
+  route: { path: string; surface: AuthSurface; userType: string },
 ): void {
   app.post(route.path, async (request, reply) => {
     if (!writeCorsHeaders(request, reply, options)) {
@@ -3069,10 +3062,7 @@ function registerCompatibilityTokenRoute(
         {
           sub: resolution.user.userId,
           email: resolution.user.email,
-          type:
-            surfacePolicy.legacyJwtUserType ??
-            route.userType ??
-            legacyUserTypeForOrganizationKind(resolution.organizationKind),
+          type: surfacePolicy.legacyJwtUserType ?? route.userType,
           org: resolution.organizationId,
           surface: route.surface,
           resources: resourceScope,
@@ -3084,13 +3074,6 @@ function registerCompatibilityTokenRoute(
       tokenType: "Bearer",
     });
   });
-}
-
-function legacyUserTypeForOrganizationKind(kind: OrganizationKind | undefined): string {
-  if (kind === "creator_workspace") return "creator";
-  if (kind === "hotel_group") return "hotel";
-  if (kind === "affiliate_partner") return "affiliate";
-  return "admin";
 }
 
 async function resolveOrCreateIdentity(

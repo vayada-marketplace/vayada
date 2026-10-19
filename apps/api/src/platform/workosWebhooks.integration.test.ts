@@ -479,6 +479,148 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL WorkOS webhook store", () => {
     }
   });
 
+  it("leaves a closed creator workspace alone on WorkOS organization and membership events (VAY-2272)", async () => {
+    const organizationId = randomUUID();
+    const userId = randomUUID();
+    const workosUserId = `user_vay_2272_${randomUUID()}`;
+    const workosOrgId = `org_vay_2272_${randomUUID()}`;
+
+    try {
+      await admin.query(
+        `INSERT INTO identity.users (id, email, name, status) VALUES ($1, $2, 'Creator', 'active')`,
+        [userId, `creator-${userId}@example.test`],
+      );
+      await admin.query(
+        `INSERT INTO identity.external_identities (user_id, provider, provider_user_id)
+         VALUES ($1, 'workos', $2)`,
+        [userId, workosUserId],
+      );
+      await admin.query(
+        `INSERT INTO identity.organizations (id, kind, name, slug, status, workos_org_id)
+         VALUES ($1, 'creator_workspace', 'removed', $2, 'archived', $3)`,
+        [organizationId, `removed-${organizationId}`, workosOrgId],
+      );
+
+      await expect(
+        store.upsertWorkosOrganization({
+          workosOrgId,
+          name: "Real Creator Name",
+          slug: "real-creator-name",
+          status: "active",
+          kind: "hotel_group",
+        }),
+      ).resolves.toBeNull();
+      await expect(
+        store.upsertWorkosMembership({
+          workosMembershipId: `om_vay_2272_${randomUUID()}`,
+          workosUserId,
+          workosOrgId,
+          roleKey: "admin",
+          workosRoleSlugs: ["admin"],
+          status: "active",
+        }),
+      ).resolves.toBeNull();
+      // Also when migration 0500 already removed the member's account.
+      await expect(
+        store.upsertWorkosMembership({
+          workosMembershipId: `om_vay_2272_${randomUUID()}`,
+          workosUserId: `user_vay_2272_removed_${randomUUID()}`,
+          workosOrgId,
+          roleKey: "admin",
+          workosRoleSlugs: ["admin"],
+          status: "active",
+        }),
+      ).resolves.toBeNull();
+
+      expect(
+        (
+          await admin.query(
+            `SELECT kind, name, slug, status FROM identity.organizations WHERE id = $1`,
+            [organizationId],
+          )
+        ).rows,
+      ).toEqual([
+        {
+          kind: "creator_workspace",
+          name: "removed",
+          slug: `removed-${organizationId}`,
+          status: "archived",
+        },
+      ]);
+      expect(
+        (
+          await admin.query(
+            `SELECT count(*)::int AS count FROM identity.organization_memberships
+             WHERE organization_id = $1`,
+            [organizationId],
+          )
+        ).rows,
+      ).toEqual([{ count: 0 }]);
+    } finally {
+      await admin.query(
+        "DELETE FROM identity.organization_memberships WHERE organization_id = $1",
+        [organizationId],
+      );
+      await admin.query("DELETE FROM identity.organizations WHERE id = $1", [organizationId]);
+      await admin.query("DELETE FROM identity.external_identities WHERE user_id = $1", [userId]);
+      await admin.query("DELETE FROM identity.users WHERE id = $1", [userId]);
+    }
+  });
+
+  it("keeps a deleted account's blanked details on late WorkOS user events (VAY-2272)", async () => {
+    const userId = randomUUID();
+    const workosUserId = `user_vay_2272_${randomUUID()}`;
+
+    try {
+      await admin.query(
+        `INSERT INTO identity.users (id, email, name, status)
+         VALUES ($1, $2, NULL, 'deleted')`,
+        [userId, `deleted+${userId}@deleted.vayada.local`],
+      );
+      await admin.query(
+        `INSERT INTO identity.external_identities
+           (user_id, provider, provider_user_id, provider_email, raw_profile)
+         VALUES ($1, 'workos', $2, NULL, '{}'::jsonb)`,
+        [userId, workosUserId],
+      );
+
+      await expect(
+        store.upsertWorkosUser({
+          workosUserId,
+          email: "real-creator@example.test",
+          name: "Real Creator",
+          emailVerified: true,
+          status: "active",
+          rawProfile: { email: "real-creator@example.test" },
+        }),
+      ).resolves.toBeNull();
+
+      expect(
+        (
+          await admin.query(
+            `SELECT users.email, users.name, users.status,
+                    external.provider_email, external.raw_profile
+             FROM identity.users users
+             JOIN identity.external_identities external ON external.user_id = users.id
+             WHERE users.id = $1`,
+            [userId],
+          )
+        ).rows,
+      ).toEqual([
+        {
+          email: `deleted+${userId}@deleted.vayada.local`,
+          name: null,
+          status: "deleted",
+          provider_email: null,
+          raw_profile: {},
+        },
+      ]);
+    } finally {
+      await admin.query("DELETE FROM identity.external_identities WHERE user_id = $1", [userId]);
+      await admin.query("DELETE FROM identity.users WHERE id = $1", [userId]);
+    }
+  });
+
   it("loads and resolves deferred invitation acceptance for the exact WorkOS user", async () => {
     const eventId = `evt_vay_1085_deferred_${randomUUID()}`;
     const providerUserId = `user_vay_1085_deferred_${randomUUID()}`;
