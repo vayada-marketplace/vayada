@@ -7,7 +7,7 @@ import { pricingDraftFixture } from "./pricingBookingDraft.fixtures.js";
 import { acceptanceFixture } from "./pricingAcceptanceHistory.fixtures.js";
 import { readPricingCheckInPlace } from "./pricingManualPaymentLead.js";
 import { writePricingAcceptance } from "./pricingAcceptanceWriter.js";
-import { previewPricingCardRefund } from "./pricingCardRefund.js";
+import { previewPricingCardRefund, stagePricingCardRefund } from "./pricingCardRefund.js";
 import {
   completePricingCardPayment,
   expirePricingCardBooking,
@@ -586,7 +586,7 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
   });
 
   /** A confirmed instant stay that paid a 30% deposit by card (VAY-2205). */
-  async function paidDeposit(cancellation?: unknown) {
+  async function paidDeposit(cancellation?: unknown, commission = false) {
     const card = await cardFixture(undefined, "EUR", "instant", (quote) => {
       const total = BigInt(quote.evidence.totalMinor),
         dueNow = (total * 3000n + 5000n) / 10000n;
@@ -605,6 +605,8 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
       });
     });
     const { fixture, slug, provider, createPaymentIntent, retrievePaymentIntent } = card;
+    // A commission plan (the fixture's plan is fixed, which takes no commission).
+    if (commission) Object.assign(fixture.f.finance, { billingPlanSnapshot: "commission" });
     const result = (await writePricingAcceptance(fixture.pool, fixture.input, {
       provider,
       deposits: true,
@@ -754,7 +756,7 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
   });
 
   it("records the rest of a card deposit paid at the property, once, without counting the deposit twice (VAY-2205)", async () => {
-    const stay = await paidDeposit();
+    const stay = await paidDeposit(undefined, true);
     const { dueLaterMinor } = stay.fixture.f.current.quote.evidence;
     const rest = (Number(dueLaterMinor) / 100).toFixed(2);
     const pmsPool = new pg.Pool({ connectionString: url, max: 2 });
@@ -809,6 +811,21 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
       });
       expect(state.payments).toContain(`:${rest}`);
       expect(state.payments).toMatch(/^card:/);
+      // Finance's 5% commission on the rest, once; the card deposit's row is unchanged.
+      const fees = (
+        await stay.fixture.observer.query(
+          `SELECT payment_method,amount::text AS amount,fee_amount::text AS fee,net_amount::text AS net
+           FROM finance.payments WHERE guest_booking_id=$1 AND status='paid' ORDER BY payment_method`,
+          [stay.scope.bookingId],
+        )
+      ).rows;
+      const cents = (v: string) => Math.round(Number(v) * 100);
+      expect(fees).toHaveLength(2);
+      const restRow = fees.find((row) => row.payment_method === "pay_at_property")!;
+      expect(restRow.amount).toBe(rest);
+      expect(cents(restRow.fee)).toBe(Math.round(cents(rest) * 0.05));
+      expect(cents(restRow.fee)).toBeGreaterThan(0);
+      expect(cents(restRow.net)).toBe(cents(rest) - cents(restRow.fee));
       // Paid in full now: a second record is refused.
       await expect(pms.markBookingPaid(command())).resolves.toMatchObject({
         ok: false,
@@ -823,6 +840,24 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
           retainedMinor: "0",
         }),
       ).toBeNull();
+      const client = await stay.fixture.pool.connect();
+      try {
+        // The guest's cancel stages no card refund either.
+        await client.query("BEGIN");
+        await expect(
+          stagePricingCardRefund(client, {
+            propertyId: stay.fixture.propertyId,
+            guestBookingId: stay.scope.bookingId,
+            retainedMinor: "0",
+            requestedBy: "guest",
+            commandKey: "cancel-after-rest",
+            occurredAt: new Date(),
+          }),
+        ).rejects.toMatchObject({ code: "unavailable" });
+      } finally {
+        await client.query("ROLLBACK");
+        client.release();
+      }
       await expect(
         stay.actions.preview(stay.scope, { action: "cancel", reason: "Overbooked" }),
       ).rejects.toMatchObject({ code: "payment_adjustment_required" });
