@@ -14,8 +14,8 @@ import { enforceRoutePolicy } from "./policy.js";
 
 // Hotel account invite codes, issued by platform staff in Vayada Admin and redeemed in Booking
 // Admin (routes/hotelAccountInvites.ts). Carved out of the retired Marketplace admin routes
-// (VAY-2270). The routes keep their `/api/marketplace/admin/invite-codes` path and the invite
-// rows stay in `marketplace.invite_codes` until the invite-code move (held migration).
+// (VAY-2270). The routes keep their `/api/marketplace/admin/invite-codes` path; the rows live in
+// `hotel_catalog.hotel_account_invites` since migration 0496 (VAY-2272).
 
 export const HOTEL_ACCOUNT_INVITE_CONTRACT_VERSION = "hotel-account-invite.v1" as const;
 export const HOTEL_ACCOUNT_INVITE_HANDOFF_PATH = "/setup" as const;
@@ -123,7 +123,7 @@ export function createPgHotelAccountInviteCodeRepository(config: {
     async createInviteCode(input) {
       const result = await pool.query<InviteCodeRow>(
         `WITH invite AS (
-           INSERT INTO marketplace.invite_codes (
+           INSERT INTO hotel_catalog.hotel_account_invites (
              code,
              invite_type,
              status,
@@ -149,7 +149,7 @@ export function createPgHotelAccountInviteCodeRepository(config: {
         await client.query("BEGIN");
         const invite = await client.query<{ id: string }>(
           `SELECT id::text AS id
-           FROM marketplace.invite_codes
+           FROM hotel_catalog.hotel_account_invites
            WHERE id::text = $1
              AND invite_type = 'hotel'
              AND payload ->> 'contractVersion' = $2
@@ -187,7 +187,7 @@ export function createPgHotelAccountInviteCodeRepository(config: {
         }
 
         const result = await client.query<{ id: string }>(
-          `UPDATE marketplace.invite_codes
+          `UPDATE hotel_catalog.hotel_account_invites
            SET status = 'revoked'
            WHERE id::text = $1
              AND status <> 'redeemed'
@@ -485,7 +485,7 @@ const INVITE_CODE_SELECT_BODY = `
 const INVITE_CODE_SELECT_SQL = `
   WITH invite AS (
     SELECT *
-    FROM marketplace.invite_codes invite
+    FROM hotel_catalog.hotel_account_invites invite
   )
   ${INVITE_CODE_SELECT_BODY}
 `;

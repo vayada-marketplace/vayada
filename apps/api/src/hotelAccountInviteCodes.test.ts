@@ -255,7 +255,7 @@ function createAdminPgPool(
       rows = [{ id: "idempotency_801" }];
     } else if (
       options.revokeInviteExists &&
-      text.includes("FROM marketplace.invite_codes") &&
+      text.includes("FROM hotel_catalog.hotel_account_invites") &&
       text.includes("FOR UPDATE")
     ) {
       rows = [{ id: "invite_legacy_or_non_hotel" }];
