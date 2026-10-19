@@ -54,7 +54,6 @@ const PLATFORM_MEDIA_INVENTORY_KEYS = new Set([
 const MEDIA_URL_MIGRATION_CHECK_KEYS = new Set([
   "bookingPropertyMedia",
   "propertyPublicProfiles",
-  "marketplace",
   "pms",
   "forbiddenPublicReferenceValues",
 ]);

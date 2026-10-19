@@ -307,15 +307,6 @@ export type ExpectedTarget = {
       urls: string[];
       forbiddenUrls: string[];
     }>;
-    marketplace?: {
-      creatorProfileId: string;
-      profilePictureUrl: string;
-      offerId: string;
-      offerImageUrls: string[];
-      chatMessageId: string;
-      chatMediaObjectId: string;
-      chatRetainedUntil: string;
-    };
     pms?: {
       roomTypeId: string;
       roomMediaObjectIds: string[];

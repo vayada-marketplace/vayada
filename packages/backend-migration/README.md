@@ -807,8 +807,8 @@ track:
 - forbidden private values in public media objects, variant CDN URLs, or future
   public read models.
 
-Product fixtures that later migrate Booking, Marketplace, or PMS media URLs
-should reuse `platformMediaChecks` instead of creating ad hoc media assertions.
+Product fixtures that later migrate Booking or PMS media URLs should reuse
+`platformMediaChecks` instead of creating ad hoc media assertions.
 
 ## WorkOS Backfill
 
