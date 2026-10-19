@@ -670,9 +670,18 @@ function emailCopy(input: BookingLifecycleEmailInput) {
 }
 
 function confirmationDetails(booking: BookingLifecycleEmailInput["booking"]): string[] {
+  const total = Math.round(Number(booking.totalAmount) * 100),
+    balance = Math.round(Number(booking.balanceAmount) * 100);
+  // VAY-2205: a card deposit was paid when booking; the rest is due at the hotel.
+  const deposit = booking.paymentMethod === "card" && balance > 0 && balance < total;
   return [
     `Total: ${money(booking.totalAmount, booking.currency)}`,
-    `Balance: ${money(booking.balanceAmount, booking.currency)}`,
+    ...(deposit
+      ? [
+          `Paid by card: ${money((total - balance) / 100, booking.currency)}`,
+          `Due at the hotel: ${money(booking.balanceAmount, booking.currency)}`,
+        ]
+      : [`Balance: ${money(booking.balanceAmount, booking.currency)}`]),
     // The booking page's words, in guest and hotel emails alike (VAY-2195); PMS screens keep the
     // shared label.
     `Payment method: ${booking.paymentMethod === "pay_at_property" ? "Pay at the hotel" : paymentMethodLabel(booking.paymentMethod)}`,

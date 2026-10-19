@@ -7590,6 +7590,59 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     );
     expect(await paymentAmounts(f, "card")).toBeNull();
   });
+  it("charges a card deposit's share now and leaves the rest at the property (VAY-2205)", async () => {
+    const deposit = (basisPoints: number) =>
+      ({
+        kind: "deposit",
+        basisPoints,
+        balanceDaysBeforeArrival: 0,
+        acceptedMethods: ["card"],
+      }) as const;
+    const f = await componentsFixture(
+      fixedPolicy(),
+      (t) => ({ ...t, payment: t.offerId === "other" ? deposit(5000) : deposit(3000) }),
+      true,
+    );
+    // 30% of the whole total, rounded half-up; the rest, the property's own fee included, is
+    // paid at the property.
+    expect(await paymentAmounts(f, "card")).toMatchObject({
+      totalMinor: "20600",
+      dueNowMinor: "6180",
+      dueLaterMinor: "14420",
+    });
+    expect(await paymentAmounts(f)).toBeNull();
+    // A stay is paid on one schedule: rooms on different deposits, or a deposit and a full
+    // payment, are not booked together.
+    const withOther = (fixture: typeof f) => ({
+      ...fixture.selection,
+      rooms: [
+        fixture.selection.rooms[0],
+        {
+          ...fixture.selection.rooms[1],
+          publicOfferKey: fixture.bindings.find(
+            (b) => b.roomTypeId === fixture.snapshot.rooms[0].roomTypeId && b.offerId === "other",
+          )!.publicOfferKey,
+        },
+      ],
+    });
+    expect(await paymentAmounts(f, "card", withOther(f))).toBeNull();
+    const mixed = await componentsFixture(
+      fixedPolicy(),
+      (t) => ({
+        ...t,
+        payment:
+          t.offerId === "other" ? { kind: "full", acceptedMethods: ["card"] } : deposit(3000),
+      }),
+      true,
+    );
+    expect(await paymentAmounts(mixed, "card", withOther(mixed))).toBeNull();
+    // Card lapses: no deposit is taken.
+    await pool.query(
+      "UPDATE finance.payment_provider_accounts SET charges_enabled=false WHERE property_id=$1",
+      [f.scope.propertyId],
+    );
+    expect(await paymentAmounts(f, "card")).toBeNull();
+  });
   it("rejects selected rates with incompatible cancellation terms", async () => {
     const f = await componentsFixture(fixedPolicy(), (t) => ({
       ...propertyTerms(t),

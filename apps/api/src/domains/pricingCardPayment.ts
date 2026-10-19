@@ -26,19 +26,24 @@ const fail = (): never => {
   throw new Error("Pricing card payment is unavailable");
 };
 
-/** Card quotes this path can execute: fully paid online, instant (captured at once) or a
- * request (authorised now, captured when the hotel accepts). Quotes with an amount due at the
- * property stay pay-at-property until partially paid bookings are supported downstream
- * (balance collection, host cancel, PMS handoff). */
+/** Card quotes this path can execute: instant (captured at once) or a request (authorised now,
+ * captured when the hotel accepts), charging what is due now. The rest, if any, is paid at the
+ * property: a deposit's remainder or fees the hotel collects there (VAY-2205); new acceptances of
+ * those also need the deposits switch (`pricingCardQuoteSplit`). */
 export function pricingCardQuoteSupported(quote: Current["quote"]): boolean {
   const { totalMinor, dueNowMinor, dueLaterMinor } = quote.evidence;
   return (
     quote.paymentMethod === "card" &&
     (quote.acceptanceMode === "instant" || quote.acceptanceMode === "request") &&
     /^[1-9][0-9]*$/.test(dueNowMinor) &&
-    dueNowMinor === totalMinor &&
-    dueLaterMinor === "0"
+    /^(0|[1-9][0-9]*)$/.test(dueLaterMinor) &&
+    BigInt(dueNowMinor) + BigInt(dueLaterMinor) === BigInt(totalMinor)
   );
+}
+
+/** A card quote that leaves part of the stay to pay at the property (VAY-2205). */
+export function pricingCardQuoteSplit(quote: Current["quote"]): boolean {
+  return pricingCardQuoteSupported(quote) && quote.evidence.dueLaterMinor !== "0";
 }
 
 /** Stable booking id for a card acceptance command: a retry after a rollback sends Stripe the
@@ -147,7 +152,7 @@ export async function startPricingCardPayment(
        property_id,guest_booking_id,provider_account_id,source_system,idempotency_key,payment_kind,
        payment_method,status,amount,fee_amount,net_amount,refunded_amount,currency,
        provider_payment_intent_id,processor_fee_breakdown,payment_metadata,visibility_class,created_at,updated_at
-     ) VALUES ($1,$2,$3,'finance',$4,'full','card','requires_action',$5::numeric,$6::numeric,$7::numeric,0,$8,
+     ) VALUES ($1,$2,$3,'finance',$4,$13,'card','requires_action',$5::numeric,$6::numeric,$7::numeric,0,$8,
        $9,$10::jsonb,$11::jsonb,'pms_finance',$12::timestamptz,$12::timestamptz)
      ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING RETURNING id`,
     [
@@ -178,6 +183,8 @@ export async function startPricingCardPayment(
         reconciliationStatus: "pending",
       },
       input.occurredAt,
+      // A deposit's share is recorded as a deposit; the rest is paid at the property (VAY-2205).
+      quote.evidence.terms.some((terms) => terms.payment.kind === "deposit") ? "deposit" : "full",
     ],
   );
   if (inserted.rowCount !== 1) return fail();

@@ -24,7 +24,8 @@ const uuidFrom = (seed: string): string => {
 };
 
 /** A stored two-decimal amount in the pricing currency's minor units; null if it doesn't fit. */
-function pricingMinor(amount: string, currency: string): bigint | null {
+/** A two-decimal amount in the currency's pricing minor units; null when it doesn't fit. */
+export function pricingMinor(amount: string, currency: string): bigint | null {
   const scale = pricingCurrencyScale(currency);
   const match = /^(\d{1,13})\.(\d{2})$/.exec(amount);
   if (scale === null || !match) return null;
@@ -58,8 +59,15 @@ export async function previewPricingCardRefund(
        WHERE booking.property_id=$1::uuid AND booking.id=$2::uuid AND payment.payment_method='card'
          AND payment.status='paid' AND payment.refunded_amount=0
          AND payment.payment_metadata->>'chargeType'='direct' AND payment.currency=booking.currency
-         AND booking.payment_status='paid' AND booking.booking_metadata->>'targetSource'='pricing_quote_draft'
-         AND booking.booking_metadata->>'paymentMethod'='card'`,
+         AND booking.payment_status IN ('paid','partially_paid')
+         AND booking.booking_metadata->>'targetSource'='pricing_quote_draft'
+         AND booking.booking_metadata->>'paymentMethod'='card'
+         -- Only the card was paid: once the rest was paid at the property too, the hotel settles
+         -- the cancel itself (VAY-2205).
+         AND NOT EXISTS (SELECT 1 FROM finance.payments other
+           WHERE other.property_id=booking.property_id AND other.guest_booking_id=booking.id
+             AND other.id<>payment.id AND other.payment_kind<>'refund'
+             AND other.status IN ('authorized','pending','paid','partially_refunded'))`,
       [input.propertyId, input.guestBookingId],
     )
   ).rows[0];
@@ -95,7 +103,11 @@ export async function stagePricingCardRefund(
          payment.provider_payment_intent_id AS intent,account.provider_account_id AS "accountRef",
          payment.payment_metadata->>'chargeType' AS "chargeType",trim(booking.currency) AS "bookingCurrency",
          booking.payment_status AS "bookingPaid",booking.booking_metadata->>'targetSource' AS source,
-         booking.booking_metadata->>'paymentMethod' AS "bookedMethod"
+         booking.booking_metadata->>'paymentMethod' AS "bookedMethod",
+         NOT EXISTS (SELECT 1 FROM finance.payments other
+           WHERE other.property_id=booking.property_id AND other.guest_booking_id=booking.id
+             AND other.id<>payment.id AND other.payment_kind<>'refund'
+             AND other.status IN ('authorized','pending','paid','partially_refunded')) AS "onlyCard"
        FROM booking.guest_bookings booking
        JOIN finance.payments payment
          ON payment.id=booking.active_card_payment_id AND payment.property_id=booking.property_id
@@ -128,9 +140,12 @@ export async function stagePricingCardRefund(
     // currency, of a paid pricing-v2 card stay.
     payment.chargeType !== "direct" ||
     payment.currency !== payment.bookingCurrency ||
-    payment.bookingPaid !== "paid" ||
+    // A card deposit leaves the rest to pay at the property (VAY-2205).
+    (payment.bookingPaid !== "paid" && payment.bookingPaid !== "partially_paid") ||
     payment.source !== "pricing_quote_draft" ||
     payment.bookedMethod !== "card" ||
+    // Once the rest of a deposit was paid at the property, the hotel settles the cancel itself.
+    payment.onlyCard !== true ||
     payment.refunded !== "0.00" ||
     !paid ||
     typeof payment.intent !== "string" ||
@@ -465,12 +480,15 @@ async function settleRefund(client: PoolClient, command: Command, refund: Stripe
       }),
     ],
   );
-  const bookingStatus = status === "refunded" ? "refunded" : "paid";
-  await client.query(
-    `UPDATE booking.guest_bookings SET payment_status=$3,updated_at=clock_timestamp()
-     WHERE id=$1 AND property_id=$2`,
-    [command.guest_booking_id, command.property_id, bookingStatus],
-  );
+  // A part refund leaves the stay paid, or partly paid when a deposit was taken (VAY-2205).
+  const bookingStatus = (
+    await client.query(
+      `UPDATE booking.guest_bookings
+       SET payment_status=CASE WHEN $3 THEN 'refunded' ELSE payment_status END,updated_at=clock_timestamp()
+       WHERE id=$1 AND property_id=$2 RETURNING payment_status`,
+      [command.guest_booking_id, command.property_id, status === "refunded"],
+    )
+  ).rows[0]?.payment_status;
   // PMS lists read the summary; a stay without one has nothing to update.
   await client.query(
     `UPDATE booking.direct_booking_summary_read_model SET payment_status=$2,projected_at=clock_timestamp()
