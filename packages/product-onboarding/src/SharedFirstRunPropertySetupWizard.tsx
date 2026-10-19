@@ -152,7 +152,6 @@ export function canConfirmLocation(
 ): boolean {
   return Boolean(
     location.streetAddress.trim() &&
-    location.postalCode.trim() &&
     location.city.trim() &&
     COUNTRY_OPTIONS.some((country) => country.code === location.countryCode) &&
     isValidIanaTimezone(location.timezone.trim()),
@@ -1990,10 +1989,9 @@ function ProfileForm({
                         onChange={(value) => setField("streetAddress", value)}
                       />
                       <TextField
-                        label="Postal code"
+                        label="Postal code (optional)"
                         value={draft.postalCode}
                         placeholder="80331"
-                        required
                         error={fieldErrors["location.postalCode"]?.[0]}
                         onChange={(value) => setField("postalCode", value)}
                       />
@@ -2121,8 +2119,8 @@ function ProfileForm({
                     </span>
                     <span className="mt-1 block text-xs leading-5 text-gray-600">
                       {mode === "update"
-                        ? "Existing location visibility is preserved. If you edit the location, street address, postal code, and map coordinates stay private."
-                        : "Street address, postal code, and map coordinates stay private."}
+                        ? "Guests see your city and country on your booking page. Street address and postal code stay private, and changing the address turns off your guest map."
+                        : "Guests see your city and country on your booking page. Street address, postal code, and map pin stay private."}
                     </span>
                     {localityHighlighted && (
                       <span className="mt-1 block text-xs font-medium leading-5 text-amber-800">
@@ -2413,9 +2411,6 @@ export function validateProfileDraft(draft: ProfileDraft): Record<string, string
   }
   if (!draft.streetAddress.trim()) {
     errors["location.streetAddress"] = ["Street address is required."];
-  }
-  if (!draft.postalCode.trim()) {
-    errors["location.postalCode"] = ["Postal code is required."];
   }
   if (!draft.city.trim()) {
     errors["location.city"] = ["City is required."];
@@ -3003,7 +2998,9 @@ function newPropertyDraft(timezone = ""): ProfileDraft {
     contactEmail: "",
     phone: "",
     whatsapp: "",
-    localityPublic: false,
+    // A booking page needs a public city and country; street, postal code and pin stay private
+    // (VAY-2288). Existing hotels keep the choice they saved.
+    localityPublic: true,
     logoFile: null,
     logoMediaObjectId: null,
     logoPublicUrl: "",

@@ -1611,8 +1611,9 @@ function parseProfileLocation(
       requiredString(input["streetAddress"], "location.streetAddress", errors, {
         maxLength: 240,
       }) ?? "",
+    // Optional: many addresses have no postal code (VAY-2289).
     postalCode:
-      requiredString(input["postalCode"], "location.postalCode", errors, {
+      optionalString(input["postalCode"], "location.postalCode", errors, {
         maxLength: 32,
       }) ?? "",
     timezone: timezone ?? "",

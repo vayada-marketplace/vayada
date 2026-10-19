@@ -263,7 +263,8 @@ function isPropertyProfileLocation(value: unknown): value is PropertyProfileLoca
   }
   return (
     isNonEmptyString(value["streetAddress"]) &&
-    isNonEmptyString(value["postalCode"]) &&
+    // Many addresses have no postal code (VAY-2289).
+    typeof value["postalCode"] === "string" &&
     isNonEmptyString(value["city"]) &&
     isNonEmptyString(value["countryCode"]) &&
     isNonEmptyString(value["timezone"]) &&
@@ -324,8 +325,11 @@ function isPropertyProfilePatch(value: unknown): value is PropertyProfilePatch {
     ) {
       return false;
     }
-    for (const key of ["streetAddress", "postalCode", "city", "countryCode", "timezone"]) {
+    for (const key of ["streetAddress", "city", "countryCode", "timezone"]) {
       if (location[key] !== undefined && !isNonEmptyString(location[key])) return false;
+    }
+    if (location["postalCode"] !== undefined && typeof location["postalCode"] !== "string") {
+      return false;
     }
     for (const key of ["latitude", "longitude"]) {
       if (location[key] !== undefined && !isNullableFiniteNumber(location[key])) return false;
