@@ -192,6 +192,29 @@ describe("property profile requests", () => {
     });
   });
 
+  it("keeps a public guest map when only the city and country box changes (VAY-2288)", () => {
+    const profile = createProfileFromDraft(draft);
+    profile.contacts = profile.contacts.map((contact) => ({ ...contact, isPublic: true }));
+    profile.location = {
+      ...profile.location,
+      latitude: 48.1373932,
+      longitude: 11.5754485,
+      geoPublic: true,
+      mapDisplayMode: "exact",
+    };
+    const existing = { propertyId: "property-1", profileRevision: 9, profile };
+    const baseline = draftFromProfile(existing, null, null);
+
+    expect(
+      profileUpdateFromDraft({ ...baseline, localityPublic: !baseline.localityPublic }, existing)
+        ?.patch.location,
+    ).toEqual({ localityPublic: !baseline.localityPublic });
+    expect(
+      profileUpdateFromDraft({ ...baseline, streetAddress: "Marienplatz 2" }, existing)?.patch
+        .location,
+    ).toEqual({ streetAddress: "Marienplatz 2", geoPublic: false, mapDisplayMode: "hidden" });
+  });
+
   it("leaves an existing published contact unchanged when the entered value matches", () => {
     const profile = createProfileFromDraft(draft);
     profile.contacts = profile.contacts.map((contact) => ({ ...contact, isPublic: true }));
