@@ -21,16 +21,19 @@ ECR repositories are created and owned by `vayada-platform` (via `ecr.tf`). The 
 
 ## Services
 
-| App directory          | ECR repository                       | Deploy target |
-| ---------------------- | ------------------------------------ | ------------- |
-| `apps/booking-api`     | `vayada-booking-backend`             | ECS Fargate   |
-| `apps/booking-web`     | `vayada-booking-frontend`            | ECS Fargate   |
-| `apps/booking-admin`   | `vayada-booking-admin-frontend`      | ECS Fargate   |
-| `apps/pms-api`         | `vayada-pms-backend`                 | ECS Fargate   |
-| `apps/pms-web`         | `vayada-pms-frontend`                | ECS Fargate   |
-| `apps/marketplace-api` | `vayada-creator-marketplace-backend` | ECS Fargate   |
-| `apps/vayada-admin`    | `vayada-admin-frontend`              | ECS Fargate   |
-| `apps/landing`         | `vayada-landing`                     | App Runner    |
+| App directory        | ECR repository                  | Deploy target |
+| -------------------- | ------------------------------- | ------------- |
+| `apps/booking-api`   | `vayada-booking-backend`        | ECS Fargate   |
+| `apps/booking-web`   | `vayada-booking-frontend`       | ECS Fargate   |
+| `apps/booking-admin` | `vayada-booking-admin-frontend` | ECS Fargate   |
+| `apps/pms-api`       | `vayada-pms-backend`            | ECS Fargate   |
+| `apps/pms-web`       | `vayada-pms-frontend`           | ECS Fargate   |
+| `apps/vayada-admin`  | `vayada-next-admin-frontend`    | ECS Fargate   |
+| `apps/landing`       | `vayada-landing`                | App Runner    |
+
+The legacy Python Marketplace (`apps/marketplace-api`, image `vayada-creator-marketplace-backend`)
+and the legacy admin build (`vayada-admin-frontend`, admin.vayada.com) are switched off (VAY-2259);
+this repository no longer deploys or recovers them.
 
 The affiliate portal source has been retired. Existing `vayada-affiliate-dashboard`
 and `vayada-next-affiliate-dashboard` images/services remain for temporary runtime
