@@ -2121,8 +2121,8 @@ function ProfileForm({
                     </span>
                     <span className="mt-1 block text-xs leading-5 text-gray-600">
                       {mode === "update"
-                        ? "Guests see only your city and country on your booking page. Street address and postal code stay private, and saving a location change keeps your map pin private."
-                        : "Guests see only your city and country on your booking page. Street address, postal code, and map pin stay private."}
+                        ? "Guests see your city and country on your booking page. Street address and postal code stay private, and changing the address turns off your guest map."
+                        : "Guests see your city and country on your booking page. Street address, postal code, and map pin stay private."}
                     </span>
                     {localityHighlighted && (
                       <span className="mt-1 block text-xs font-medium leading-5 text-amber-800">

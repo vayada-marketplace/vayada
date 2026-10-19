@@ -162,7 +162,7 @@ test.describe("hotel account prerequisites", () => {
     await expect(localityConsent).toBeChecked();
     await expect(
       page.getByText(
-        "Guests see only your city and country on your booking page. Street address, postal code, and map pin stay private.",
+        "Guests see your city and country on your booking page. Street address, postal code, and map pin stay private.",
       ),
     ).toBeVisible();
     await localityConsent.focus();
