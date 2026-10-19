@@ -126,15 +126,18 @@ export function createBookingPublicationBuilder(config: {
         });
         if (!validBookingWeb(bookingWeb))
           return rejected("public_content_incomplete", "booking_web");
+        // The page and its quotes offer one language list (VAY-2292).
+        const supportedLocales = publishedLocales(
+          catalog.content.defaultLocale,
+          booking.content.supportedQuoteParameters.supportedLocales,
+        );
         const profile = buildPublicBookabilityProfileProjection(input.generatedAt, {
-          hotelCatalog: catalog.content,
+          hotelCatalog: { ...catalog.content, supportedLocales },
           booking: sanitizeBooking({
             ...booking.content,
             supportedQuoteParameters: {
               ...booking.content.supportedQuoteParameters,
-              // Guests get the hotel profile's languages. Booking Admin saves its own list,
-              // which may differ, and the page contract needs both to match (VAY-2292).
-              supportedLocales: catalog.content.supportedLocales,
+              supportedLocales,
               supportedCurrencies: finance.content.supportedCurrencies,
             },
           }),
@@ -163,6 +166,22 @@ export function createBookingPublicationBuilder(config: {
       }
     },
   };
+}
+
+/** Booking Admin's languages plus the hotel profile's main language, as the old page offered
+ * them. An entry guests can't be served in is dropped, so it never blocks publishing. */
+function publishedLocales(defaultLocale: string, bookingLocales: readonly string[]): string[] {
+  return [...new Set([defaultLocale, ...bookingLocales.filter(servableLocale)])].sort();
+}
+
+function servableLocale(value: unknown): value is string {
+  if (typeof value !== "string" || !value || value.trim() !== value) return false;
+  try {
+    new Intl.Locale(value);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function validBookingWeb(value: PublicBookabilityProducerInputs["bookingWeb"]): boolean {

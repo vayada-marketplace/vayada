@@ -148,41 +148,42 @@ describe("Booking publication builder", () => {
     });
   });
 
-  it("publishes the hotel profile's languages when Booking saved other ones (VAY-2292)", async () => {
+  it("offers Booking Admin's languages plus the profile's main language (VAY-2292)", async () => {
     const readiness = await readyEvidence(),
       snapshots = snapshotSet(readiness);
-    const catalog = snapshots.hotel_catalog.content;
-    const parameters = snapshots.booking.content.supportedQuoteParameters;
-    // Booking Admin's language setting writes only Booking's list, e.g. one language more.
-    const booking = {
-      ...snapshots.booking,
-      content: {
-        ...snapshots.booking.content,
-        supportedQuoteParameters: { ...parameters, supportedLocales: ["de", "en", "fr"] },
-      },
-    };
-    const result = await run(readiness, { booking });
-    expect(result).toMatchObject({
-      outcome: "built",
-      build: {
-        publicContent: {
-          profile: {
-            hotel: {
-              supportedLocales: catalog.supportedLocales,
-              supportedQuoteParameters: { supportedLocales: catalog.supportedLocales },
+    const published = async (bookingLocales: string[]) => {
+      const result = await run(readiness, {
+        hotel_catalog: {
+          ...snapshots.hotel_catalog,
+          content: {
+            ...snapshots.hotel_catalog.content,
+            defaultLocale: "en",
+            supportedLocales: ["de", "en"],
+          },
+        },
+        booking: {
+          ...snapshots.booking,
+          content: {
+            ...snapshots.booking.content,
+            supportedQuoteParameters: {
+              ...snapshots.booking.content.supportedQuoteParameters,
+              supportedLocales: bookingLocales,
             },
           },
         },
-      },
-    });
-    const fewer = {
-      ...snapshots.booking,
-      content: {
-        ...snapshots.booking.content,
-        supportedQuoteParameters: { ...parameters, supportedLocales: [] },
-      },
+      });
+      if (result.outcome !== "built") throw new Error(JSON.stringify(result));
+      const { hotel } = result.build.publicContent.profile;
+      expect(hotel.supportedQuoteParameters.supportedLocales).toEqual(hotel.supportedLocales);
+      return hotel.supportedLocales;
     };
-    await expect(run(readiness, { booking: fewer })).resolves.toMatchObject({ outcome: "built" });
+    // Booking Admin's language setting saves only Booking's list, which the profile doesn't follow.
+    expect(await published(["fr", "it"])).toEqual(["en", "fr", "it"]);
+    // A profile language the owner didn't offer on the booking page stays off it.
+    expect(await published(["en"])).toEqual(["en"]);
+    // An entry guests can't be served in never blocks publishing.
+    expect(await published(["", " fr", "fr", "not a locale!"])).toEqual(["en", "fr"]);
+    expect(await published([])).toEqual(["en"]);
   });
 
   it("names broken profile fields without their values", async () => {

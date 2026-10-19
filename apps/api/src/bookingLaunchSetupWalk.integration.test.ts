@@ -1139,7 +1139,8 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
         };
       };
       expect(content.payments.readyMethods).toEqual([method]);
-      expect(content.profile.hotel.supportedLocales).not.toContain("fr");
+      // The page offers the owner's Booking languages, not only the profile's (VAY-2292).
+      expect(content.profile.hotel.supportedLocales).toEqual(["de", "en", "fr"]);
       expect(content.profile.hotel.supportedQuoteParameters.supportedLocales).toEqual(
         content.profile.hotel.supportedLocales,
       );
