@@ -300,6 +300,71 @@ test.describe("shared setup activation", () => {
     });
   });
 
+  test("a focused location fix still saves when the hotel's details lack a phone number (VAY-2288)", async ({
+    page,
+    baseURL,
+  }) => {
+    await mockGooglePlaces(page);
+    await primeBrowserState(page, true);
+    await mockAuthSession(page);
+    await mockSharedSetupStatus(page, readySetupStatus());
+    const writes = { profile: [] as unknown[], launchSettings: [] as unknown[] };
+    await mockHotelProfileApis(
+      page,
+      [{ mediaType: "logo", url: "https://media.example/alpenrose-logo.webp" }],
+      writes,
+      {
+        latitude: 48.1373932,
+        longitude: 11.5754485,
+        localityPublic: false,
+        geoPublic: false,
+        mapDisplayMode: "hidden",
+      },
+      [
+        {
+          channelType: "email",
+          value: "owner@alpenrose.example",
+          purpose: "general",
+          isPublic: false,
+        },
+      ],
+    );
+    await routeJson(page, /\/api\/hotel-setup\/property-types/, {
+      contractVersion: "adaptive-hotel-property-types.v1",
+      propertyTypes: [{ value: "hotel", label: "Hotel" }],
+    });
+    await routeJson(page, new RegExp(`/api/hotel-setup/properties/${propertyId}/import$`), {
+      import: null,
+    });
+    const dashboard = await mockBookingDashboardExit(page, baseURL, propertyId);
+    const fixUrl = new URL(setupUrl(baseURL), baseURL ?? "http://localhost:3003");
+    fixUrl.searchParams.set("propertyId", propertyId);
+    fixUrl.searchParams.set("step", "present_hotel");
+    fixUrl.searchParams.set("focus", "location");
+    await page.goto(baseURL ? fixUrl.toString() : `${fixUrl.pathname}${fixUrl.search}`);
+
+    await page.getByRole("checkbox", { name: "Show city and country publicly" }).check();
+    await page
+      .getByTestId("location-action-bar")
+      .getByRole("button", { name: "Save and continue" })
+      .click();
+
+    // The missing phone number opens the contact step, which saves directly too.
+    await expect(page.getByRole("heading", { name: "How can guests reach you?" })).toBeVisible();
+    await expect(page.getByText("Phone number is required.")).toBeVisible();
+    expect(writes.profile).toEqual([]);
+    await page.getByRole("textbox", { name: /^Phone number/ }).fill("+49 89 123456");
+    await page.getByRole("button", { name: "Save and continue" }).click();
+
+    await page.waitForURL(dashboard);
+    expect(writes.profile).toHaveLength(1);
+    expect(writes.profile[0]).toMatchObject({
+      expectedProfileRevision: 1,
+      patch: { location: { localityPublic: true } },
+    });
+    expect(writes.launchSettings).toEqual([]);
+  });
+
   test("keeps the map clickable on a phone while the address fields are open", async ({
     page,
     baseURL,
@@ -1264,6 +1329,7 @@ async function mockHotelProfileApis(
     launchSettings?: unknown[];
   },
   location: Record<string, unknown> = {},
+  contacts?: unknown[],
 ) {
   await page.route(
     new RegExp(`/api/hotel-setup/properties/${propertyId}/launch-settings$`),
@@ -1330,6 +1396,9 @@ async function mockHotelProfileApis(
       },
     ],
   });
+  if (contacts) {
+    canonicalProfile = { ...canonicalProfile, profile: { ...canonicalProfile.profile, contacts } };
+  }
   await page.route(
     new RegExp(`/api/hotel-setup/properties/${propertyId}/profile`),
     async (route) => {
