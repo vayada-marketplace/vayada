@@ -804,19 +804,6 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
         "active_booking_addon_selections",
         "addon_definitions",
         "addon_revenue_evidence",
-        "affiliate_click_admissions",
-        "affiliate_click_contexts",
-        "affiliate_destination_versions",
-        "affiliate_original_booking_bindings",
-        "affiliate_referral_production_preflight_revocations",
-        "affiliate_referral_production_preflights",
-        "affiliate_referral_transport_certifications",
-        "affiliate_source_capability_certifications",
-        "affiliate_source_capability_preflight_revocations",
-        "affiliate_source_capability_production_preflights",
-        "affiliate_validation_booking_bindings",
-        "affiliate_validation_probe_revocations",
-        "affiliate_validation_probes",
         "booking_addon_selection_items",
         "booking_addon_selections",
         "booking_change_requests",
@@ -1346,8 +1333,6 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
         "affiliate_earning_allocation_items",
         "affiliate_earning_allocations",
         "affiliate_earning_journal",
-        "affiliate_earning_reconciliation_revisions",
-        "affiliate_eligible_earning_revisions",
         "affiliate_payout_payment_evidence",
         "affiliate_payout_payment_evidence_items",
         "affiliate_percentage_policy_approvals",
@@ -1690,21 +1675,8 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
          ORDER BY tc.constraint_name`,
       );
 
-      // Affiliate earning tables pointing at Marketplace rows; they go with the affiliate drop.
-      expect(financeForeignKeySchemas).toEqual([
-        {
-          constraint_name: "affiliate_earning_reconciliat_creator_profile_id_beneficia_fkey",
-          referenced_schema: "marketplace",
-        },
-        {
-          constraint_name: "affiliate_eligible_earning_re_creator_profile_id_beneficia_fkey",
-          referenced_schema: "marketplace",
-        },
-        {
-          constraint_name: "affiliate_eligible_earning_revisions_agreement_id_fkey",
-          referenced_schema: "marketplace",
-        },
-      ]);
+      // 0498 dropped the affiliate earning tables that pointed at Marketplace rows.
+      expect(financeForeignKeySchemas).toEqual([]);
 
       const { rows: financePermissionKeys } = await verifyClient.query<{ key: string }>(
         `SELECT key
@@ -1880,21 +1852,6 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
 
       expect(marketplaceTableRows.map((row) => row.table_name)).toEqual([
         "active_hotel_submission_revisions",
-        "affiliate_agreement_activations",
-        "affiliate_agreement_lifecycle_events",
-        "affiliate_agreements",
-        "affiliate_assent_decisions",
-        "affiliate_click_occurrences",
-        "affiliate_click_quota_windows",
-        "affiliate_discrepancy_claims",
-        "affiliate_discrepancy_resolutions",
-        "affiliate_lifecycle_changes",
-        "affiliate_links",
-        "affiliate_offer_terms_drafts",
-        "affiliate_participation_attempts",
-        "affiliate_participations",
-        "affiliate_programs",
-        "affiliate_published_terms",
         "collaboration_deliverables",
         "collaborations",
         "communication_channel_preferences",
@@ -1925,7 +1882,6 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
         "offer_creator_requirements",
         "offer_deliverables",
         "offer_matching_criteria",
-        "property_affiliates",
         "trips",
       ]);
 
@@ -2338,13 +2294,8 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
          ORDER BY tc.constraint_name`,
       );
 
-      // An affiliate claim that points at a booking; it goes with the affiliate drop.
-      expect(marketplaceForeignKeySchemas).toEqual([
-        {
-          constraint_name: "affiliate_discrepancy_claims_booking_id_property_id_fkey",
-          referenced_schema: "booking",
-        },
-      ]);
+      // 0498 dropped the affiliate claims, the last marketplace rows that pointed at a booking.
+      expect(marketplaceForeignKeySchemas).toEqual([]);
 
       const { rows: marketplaceReadModelSensitiveColumns } = await verifyClient.query<{
         column_name: string;
