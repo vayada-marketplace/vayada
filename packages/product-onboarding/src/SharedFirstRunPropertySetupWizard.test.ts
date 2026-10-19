@@ -538,7 +538,7 @@ describe("property profile requests", () => {
     });
   });
 
-  it("persists explicit public-locality consent while forcing private geo fields", () => {
+  it("persists explicit public-locality consent; only an address change forces private geo fields", () => {
     expect(createProfileFromDraft({ ...draft, localityPublic: true }).location).toMatchObject({
       localityPublic: true,
       geoPublic: false,
@@ -552,15 +552,23 @@ describe("property profile requests", () => {
       geoPublic: true,
       mapDisplayMode: "exact",
     };
+    // VAY-2288: the box alone publishes no new location detail, so the hotel's map stays as set.
     expect(
       profileUpdateFromDraft(
         { ...draft, localityPublic: true },
+        { propertyId: "property-1", profileRevision: 9, profile: existing },
+      ),
+    ).toEqual({ expectedProfileRevision: 9, patch: { location: { localityPublic: true } } });
+    expect(
+      profileUpdateFromDraft(
+        { ...draft, localityPublic: true, city: "Augsburg" },
         { propertyId: "property-1", profileRevision: 9, profile: existing },
       ),
     ).toEqual({
       expectedProfileRevision: 9,
       patch: {
         location: {
+          city: "Augsburg",
           localityPublic: true,
           geoPublic: false,
           mapDisplayMode: "hidden",
