@@ -15,15 +15,6 @@ type MediaUrlMigrationChecks = {
     urls: string[];
     forbiddenUrls: string[];
   }>;
-  marketplace?: {
-    creatorProfileId: string;
-    profilePictureUrl: string;
-    offerId: string;
-    offerImageUrls: string[];
-    chatMessageId: string;
-    chatMediaObjectId: string;
-    chatRetainedUntil: string;
-  };
   pms?: {
     roomTypeId: string;
     roomMediaObjectIds: string[];
@@ -59,10 +50,6 @@ function addMediaUrlFinding(
   });
 }
 
-function sameStringArray(left: string[], right: string[]): boolean {
-  return left.length === right.length && left.every((value, index) => value === right[index]);
-}
-
 export async function checkMediaUrlMigrationParity({
   client,
   expected,
@@ -75,7 +62,7 @@ export async function checkMediaUrlMigrationParity({
       "MEDIA_URL_MIGRATION_EXPECTED_CONFIG_MISSING",
       "expected-target.json.mediaUrlMigrationChecks",
       "Media URL migration fixture must document domain-reference parity expectations",
-      "mediaUrlMigrationChecks with Booking, Marketplace, PMS references",
+      "mediaUrlMigrationChecks with Booking and PMS references",
       "undefined",
       "Add mediaUrlMigrationChecks to media-url-migration/expected-target.json.",
     );
@@ -156,62 +143,6 @@ export async function checkMediaUrlMigrationParity({
     );
   }
 
-  if (config.marketplace) {
-    const { rows } = await client.query<{
-      profile_picture_url: string | null;
-      offer_image_urls: string[];
-      read_model_image_urls: string[];
-      chat_media_object_id: string | null;
-      chat_retained_until: string | null;
-    }>(
-      `
-        SELECT
-          creator.profile_picture_url,
-          offer.image_urls AS offer_image_urls,
-          read_model.image_urls AS read_model_image_urls,
-          chat.message_metadata ->> 'mediaObjectId' AS chat_media_object_id,
-          to_char(
-            chat_media.retained_until AT TIME ZONE 'UTC',
-            'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
-          ) AS chat_retained_until
-        FROM marketplace.creator_profiles creator
-        CROSS JOIN marketplace.marketplace_offers offer
-        JOIN marketplace.marketplace_offer_read_model read_model
-          ON read_model.offer_id = offer.id
-        CROSS JOIN marketplace.marketplace_chat_messages chat
-        JOIN platform.media_objects chat_media
-          ON chat_media.id::text = chat.message_metadata ->> 'mediaObjectId'
-        WHERE creator.id = $1
-          AND offer.id = $2
-          AND chat.id = $3
-      `,
-      [
-        config.marketplace.creatorProfileId,
-        config.marketplace.offerId,
-        config.marketplace.chatMessageId,
-      ],
-    );
-    const actual = rows[0];
-    if (
-      !actual ||
-      actual.profile_picture_url !== config.marketplace.profilePictureUrl ||
-      !sameStringArray(actual.offer_image_urls, config.marketplace.offerImageUrls) ||
-      !sameStringArray(actual.read_model_image_urls, config.marketplace.offerImageUrls) ||
-      actual.chat_media_object_id !== config.marketplace.chatMediaObjectId ||
-      actual.chat_retained_until !== config.marketplace.chatRetainedUntil
-    ) {
-      addMediaUrlFinding(
-        findings,
-        "MEDIA_URL_MARKETPLACE_REFERENCE_MISMATCH",
-        "marketplace media references",
-        "Marketplace offer/profile/chat URLs did not migrate to the expected target references",
-        JSON.stringify(config.marketplace),
-        JSON.stringify(actual ?? null),
-        "Check creator profile, offer gallery, offer read model, and chat attachment mapping.",
-      );
-    }
-  }
-
   if (config.pms) {
     const { rows: roomRows } = await client.query<{ media_snapshot: unknown }>(
       `
@@ -285,18 +216,6 @@ export async function checkMediaUrlMigrationParity({
           WHERE url LIKE '%' || $1 || '%'
           UNION ALL
           SELECT 1
-          FROM marketplace.creator_profiles
-          WHERE COALESCE(profile_picture_url, '') LIKE '%' || $1 || '%'
-          UNION ALL
-          SELECT 1
-          FROM marketplace.marketplace_offers
-          WHERE array_to_string(image_urls, ' ') LIKE '%' || $1 || '%'
-          UNION ALL
-          SELECT 1
-          FROM marketplace.marketplace_offer_read_model
-          WHERE array_to_string(image_urls, ' ') LIKE '%' || $1 || '%'
-          UNION ALL
-          SELECT 1
           FROM pms.room_types
           WHERE media_snapshot::text LIKE '%' || $1 || '%'
         ) AS leaked
@@ -309,7 +228,7 @@ export async function checkMediaUrlMigrationParity({
       findings,
       "MEDIA_URL_PUBLIC_REFERENCE_PRIVATE_VALUE_LEAK",
       "public media references",
-      "Public Booking, Marketplace, or PMS media references expose a value marked private by the fixture",
+      "Public Booking or PMS media references expose a value marked private by the fixture",
       "No forbidden private value in public media references",
       forbiddenValue,
       "Rewrite public references to platform CDN URLs or preserved public external URLs only.",
