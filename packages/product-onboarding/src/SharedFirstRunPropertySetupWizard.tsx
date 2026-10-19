@@ -1191,7 +1191,9 @@ function ProfileForm({
     ? PROFILE_STEP_TITLES_WITH_LAUNCH
     : BASE_PROFILE_STEP_TITLES;
   const contactStep = launchSettings ? 3 : 2;
-  const finalStep = saveStep ?? profileStepFields.length - 1;
+  // A focused edit saves from its step, and from any later step a field error sends it to.
+  const savesHere =
+    saveStep === undefined ? step === profileStepFields.length - 1 : step >= saveStep;
   const googleMapsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY?.trim();
   const LocationHeading = embedded ? "h2" : "h1";
   const [showAddressFields, setShowAddressFields] = useState(
@@ -1491,23 +1493,19 @@ function ProfileForm({
       )}
       <button
         type="submit"
-        disabled={step === finalStep && saving}
+        disabled={savesHere && saving}
         className={`inline-flex w-full items-center justify-center gap-2 rounded-full bg-primary-600 px-6 py-3 text-sm font-semibold text-white transition hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto ${
           step === 1 ? "sm:min-w-32" : ""
         }`}
       >
-        {step === finalStep && saving && (
+        {savesHere && saving && (
           <span
             className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white"
             aria-hidden="true"
           />
         )}
-        <span>
-          {step === finalStep ? (saving ? "Saving..." : "Save and continue") : "Continue"}
-        </span>
-        {!(step === finalStep && saving) && (
-          <ArrowRightIcon className="h-4 w-4" aria-hidden="true" />
-        )}
+        <span>{savesHere ? (saving ? "Saving..." : "Save and continue") : "Continue"}</span>
+        {!(savesHere && saving) && <ArrowRightIcon className="h-4 w-4" aria-hidden="true" />}
       </button>
     </div>
   );
@@ -1518,7 +1516,7 @@ function ProfileForm({
       aria-busy={saving}
       onSubmit={(event) => {
         event.preventDefault();
-        if (step === finalStep) onSave();
+        if (savesHere) onSave();
         else continueToNextStep();
       }}
       className={`mx-auto ${step === 1 ? "max-w-none" : "max-w-7xl space-y-8"}`}
