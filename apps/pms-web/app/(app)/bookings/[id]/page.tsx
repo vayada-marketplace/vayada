@@ -5,6 +5,7 @@ import { NoShowReporting } from "@/components/bookings/NoShowReporting";
 import { useState, useEffect, useCallback, use, useMemo, useRef } from "react";
 import Link from "next/link";
 import { HostBookingActions } from "@/components/bookings/HostBookingActions";
+import { CardRefundPanel } from "@/components/bookings/CardRefundPanel";
 import {
   ArrowLeftIcon,
   CheckCircleIcon,
@@ -2393,6 +2394,13 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                 )}
               </div>
             </div>
+            <CardRefundPanel
+              booking={booking}
+              messageGuestHref={
+                canMessageGuest ? `/inbox?booking=${encodeURIComponent(booking.id)}` : null
+              }
+              onRetried={async () => setBooking(await bookingsService.get(id))}
+            />
             {booking.paymentBreakdown && (
               <div className="mt-4 rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm">
                 <div className="flex justify-between gap-4 py-1">

@@ -978,12 +978,25 @@ const BOOKED_OFFER_CANCELLATION_JOIN_SQL = `LEFT JOIN LATERAL (
   ) accepted_offer ON TRUE`;
 
 // VAY-2205: the stay's latest automatic card refund, for the reservation page.
-const CARD_REFUND_SQL = `(
+/** The stay's latest card refund (VAY-2205): its status, amount and Stripe's reason, with who
+ * cancelled and when from the first attempt (a retry is the hotel asking again, not a new cancel),
+ * and what the card payment was. Reads `booking` from the enclosing query. */
+export const CARD_REFUND_SQL = `(
   SELECT jsonb_build_object(
     'status', command.status, 'amount', command.amount::text, 'currency', trim(command.currency),
-    'requestedBy', command.requested_by, 'failureReason', command.failure_reason,
-    'createdAt', command.created_at, 'settledAt', command.settled_at)
+    'requestedBy', first_attempt.requested_by, 'failureReason', command.failure_reason,
+    'createdAt', first_attempt.created_at, 'settledAt', command.settled_at,
+    'paidAmount', payment.amount::text)
   FROM finance.card_refund_commands command
+  JOIN LATERAL (
+    SELECT earliest.requested_by, earliest.created_at
+    FROM finance.card_refund_commands earliest
+    WHERE earliest.payment_id = command.payment_id AND earliest.property_id = command.property_id
+    ORDER BY earliest.created_at, earliest.id
+    LIMIT 1
+  ) first_attempt ON TRUE
+  LEFT JOIN finance.payments payment
+    ON payment.id = command.payment_id AND payment.property_id = command.property_id
   WHERE command.property_id = booking.property_id AND command.guest_booking_id = booking.id
   ORDER BY command.created_at DESC, command.id DESC
   LIMIT 1
@@ -1637,6 +1650,8 @@ export type PmsCardRefund = {
   failureReason: string | null;
   createdAt: string;
   settledAt: string | null;
+  /** What the guest paid by card, refunded or not (two decimals). */
+  paidAmount: string | null;
 };
 function toCardRefund(value: unknown): PmsCardRefund | null {
   const row = value && typeof value === "object" ? (value as Record<string, unknown>) : null;
@@ -1658,6 +1673,7 @@ function toCardRefund(value: unknown): PmsCardRefund | null {
     createdAt: new Date(row["createdAt"]).toISOString(),
     settledAt:
       typeof row["settledAt"] === "string" ? new Date(row["settledAt"]).toISOString() : null,
+    paidAmount: typeof row["paidAmount"] === "string" ? row["paidAmount"] : null,
   };
 }
 

@@ -12,6 +12,7 @@ import {
   stagePricingCardRefund,
 } from "./pricingCardRefund.js";
 import type { StripeBookingPaymentProvider, StripeBookingRefund } from "./stripeBookingPayments.js";
+import { CARD_REFUND_SQL } from "./pmsOperationsReadModel.js";
 
 const url = process.env["TEST_DATABASE_URL"];
 
@@ -409,6 +410,21 @@ describe.skipIf(!url)("pricing card refunds (VAY-2205)", () => {
     expect(await executePricingCardRefund(pool, stripe.provider, commandId)).toBe("failed");
     const again = await retry("retry-1");
     expect(again).toMatchObject({ amount: "70.00", currency: "EUR" });
+    // The reservation still says the guest cancelled, at the cancel's time, and what the card paid.
+    const read = (
+      await pool.query(
+        `SELECT ${CARD_REFUND_SQL} AS refund FROM booking.guest_bookings booking WHERE booking.id=$1`,
+        [f.guestBookingId],
+      )
+    ).rows[0].refund;
+    const firstAttempt = (
+      await pool.query("SELECT created_at FROM finance.card_refund_commands WHERE id=$1", [
+        commandId,
+      ])
+    ).rows[0].created_at as Date;
+    expect(read).toMatchObject({ status: "pending", amount: "70.00", requestedBy: "guest" });
+    expect(new Date(read.createdAt).getTime()).toBe(firstAttempt.getTime());
+    expect(read.paidAmount).toMatch(/^\d+\.\d{2}$/);
     expect(await retry("retry-1")).toEqual(again);
     // The retry is now the live refund: another one is refused.
     await expect(retry("retry-2")).rejects.toMatchObject({ code: "unavailable" });
