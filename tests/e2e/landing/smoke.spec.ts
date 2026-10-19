@@ -42,6 +42,19 @@ test.describe("landing smoke", () => {
     await assertHealthy();
   });
 
+  // VAY-2286: the effective date must be a real date; a "[go-live date]" placeholder waiting for
+  // the release day must never go live.
+  test("/privacy shows a real effective date", async ({ page }) => {
+    await page.goto("/privacy");
+
+    const effective = page.locator("p", {
+      has: page.getByText("Effective Date:", { exact: true }),
+    });
+    await expect(effective).toHaveText(
+      /^Effective Date: (January|February|March|April|May|June|July|August|September|October|November|December) \d{1,2}, \d{4}$/,
+    );
+  });
+
   for (const route of routes) {
     test(`${route.path} renders the public shell`, async ({ page }, testInfo) => {
       const assertHealthy = watchPageHealth(page, testInfo);
