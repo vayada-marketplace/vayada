@@ -652,7 +652,8 @@ describe.skipIf(!TEST_DATABASE_URL)("createPgRolePermissionRepository", () => {
          VALUES
            ('hotel_group', 'hotel_owner', 'booking.settings.manage'),
            ('hotel_group', 'hotel_owner', 'pms.booking.update'),
-           ('hotel_group', 'front_desk', 'pms.reservation.read')`,
+           ('hotel_group', 'front_desk', 'pms.reservation.read'),
+           ('platform', 'hotel_owner', 'pms.reservation.read')`,
       );
     } finally {
       await client.end();

@@ -48,7 +48,8 @@ export type WorkosWebhookStore = {
   resolveDeferredStaffInvitationAcceptance(receiptId: string): Promise<void>;
   findUserIdByWorkosUserId(workosUserId: string): Promise<string | null>;
   findOrganizationIdByWorkosOrgId(workosOrgId: string): Promise<string | null>;
-  upsertWorkosUser(input: WorkosUserPayload): Promise<string>;
+  /** null: the user is deleted (VAY-2272), so the event changes nothing. */
+  upsertWorkosUser(input: WorkosUserPayload): Promise<string | null>;
   /** null: the stored organization has a retired kind (VAY-2272), so the event changes nothing. */
   upsertWorkosOrganization(input: WorkosOrganizationPayload): Promise<string | null>;
   deactivateWorkosUser(workosUserId: string): Promise<{ userId?: string }>;
@@ -349,6 +350,7 @@ async function applyWorkosIdentityEvent(
     case "user.updated": {
       const user = toWorkosUserPayload(event);
       const userId = await store.upsertWorkosUser(user);
+      if (!userId) return { status: "ignored" };
       if (user.emailVerified && staffInvitationAcceptance) {
         await replayDeferredStaffInvitationAcceptances(
           user.workosUserId,
@@ -364,7 +366,7 @@ async function applyWorkosIdentityEvent(
     }
     case "organization.created":
     case "organization.updated": {
-      if (RETIRED_ORGANIZATION_KINDS.has(organizationKindOf(event) ?? "")) {
+      if (organizationKindsOf(event).some((kind) => RETIRED_ORGANIZATION_KINDS.has(kind))) {
         return { status: "ignored" };
       }
       const organizationId = await store.upsertWorkosOrganization(
@@ -479,20 +481,24 @@ function toWorkosOrganizationPayload(event: WorkosWebhookEvent): WorkosOrganizat
       optionalString(event.data, "slug") ??
       slugify(optionalString(event.data, "name") ?? externalId ?? randomUUID()),
     status: "active",
-    kind: organizationKindOf(event) === "platform" ? "platform" : "hotel_group",
+    kind:
+      optionalString(event.data, "organization_kind") === "platform" ? "platform" : "hotel_group",
   };
 }
 
-// The kind the sign-up wrote into the organization's metadata; absent for organizations made
-// elsewhere, which stay hotel groups.
-function organizationKindOf(event: WorkosWebhookEvent): string | undefined {
+// Every kind an organization event names: the sign-up writes organization_kind into the
+// metadata and the WorkOS backfill wrote vayada_kind. Only used to spot retired kinds.
+function organizationKindsOf(event: WorkosWebhookEvent): string[] {
   const metadata = event.data?.["metadata"];
-  return (
-    optionalString(event.data, "organization_kind") ??
-    (metadata && typeof metadata === "object" && !Array.isArray(metadata)
-      ? optionalString(metadata as Record<string, unknown>, "organization_kind")
-      : undefined)
-  );
+  const fields =
+    metadata && typeof metadata === "object" && !Array.isArray(metadata)
+      ? (metadata as Record<string, unknown>)
+      : {};
+  return [
+    optionalString(event.data, "organization_kind"),
+    optionalString(fields, "organization_kind"),
+    optionalString(fields, "vayada_kind"),
+  ].filter((kind): kind is string => kind !== undefined);
 }
 
 function toWorkosMembershipPayload(event: WorkosWebhookEvent): WorkosMembershipPayload {

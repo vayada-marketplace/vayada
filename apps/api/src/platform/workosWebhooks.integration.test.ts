@@ -520,6 +520,17 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL WorkOS webhook store", () => {
           status: "active",
         }),
       ).resolves.toBeNull();
+      // Also when migration 0500 already removed the member's account.
+      await expect(
+        store.upsertWorkosMembership({
+          workosMembershipId: `om_vay_2272_${randomUUID()}`,
+          workosUserId: `user_vay_2272_removed_${randomUUID()}`,
+          workosOrgId,
+          roleKey: "admin",
+          workosRoleSlugs: ["admin"],
+          status: "active",
+        }),
+      ).resolves.toBeNull();
 
       expect(
         (
@@ -551,6 +562,60 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL WorkOS webhook store", () => {
         [organizationId],
       );
       await admin.query("DELETE FROM identity.organizations WHERE id = $1", [organizationId]);
+      await admin.query("DELETE FROM identity.external_identities WHERE user_id = $1", [userId]);
+      await admin.query("DELETE FROM identity.users WHERE id = $1", [userId]);
+    }
+  });
+
+  it("keeps a deleted account's blanked details on late WorkOS user events (VAY-2272)", async () => {
+    const userId = randomUUID();
+    const workosUserId = `user_vay_2272_${randomUUID()}`;
+
+    try {
+      await admin.query(
+        `INSERT INTO identity.users (id, email, name, status)
+         VALUES ($1, $2, NULL, 'deleted')`,
+        [userId, `deleted+${userId}@deleted.vayada.local`],
+      );
+      await admin.query(
+        `INSERT INTO identity.external_identities
+           (user_id, provider, provider_user_id, provider_email, raw_profile)
+         VALUES ($1, 'workos', $2, NULL, '{}'::jsonb)`,
+        [userId, workosUserId],
+      );
+
+      await expect(
+        store.upsertWorkosUser({
+          workosUserId,
+          email: "real-creator@example.test",
+          name: "Real Creator",
+          emailVerified: true,
+          status: "active",
+          rawProfile: { email: "real-creator@example.test" },
+        }),
+      ).resolves.toBeNull();
+
+      expect(
+        (
+          await admin.query(
+            `SELECT users.email, users.name, users.status,
+                    external.provider_email, external.raw_profile
+             FROM identity.users users
+             JOIN identity.external_identities external ON external.user_id = users.id
+             WHERE users.id = $1`,
+            [userId],
+          )
+        ).rows,
+      ).toEqual([
+        {
+          email: `deleted+${userId}@deleted.vayada.local`,
+          name: null,
+          status: "deleted",
+          provider_email: null,
+          raw_profile: {},
+        },
+      ]);
+    } finally {
       await admin.query("DELETE FROM identity.external_identities WHERE user_id = $1", [userId]);
       await admin.query("DELETE FROM identity.users WHERE id = $1", [userId]);
     }

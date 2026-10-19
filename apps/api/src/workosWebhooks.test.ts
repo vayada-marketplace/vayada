@@ -275,6 +275,7 @@ describe("WorkOS webhook routes", () => {
     ["organization.created", { organization_kind: "creator_workspace" }],
     ["organization.updated", { organization_kind: "affiliate_partner" }],
     ["organization.updated", { metadata: { organization_kind: "creator_workspace" } }],
+    ["organization.updated", { metadata: { vayada_kind: "creator_workspace" } }],
   ])(
     "ignores %s for a retired organization kind without touching the store (VAY-2272)",
     async (eventName, kindFields) => {
@@ -309,6 +310,49 @@ describe("WorkOS webhook routes", () => {
       await app.close();
     },
   );
+
+  it("creates platform organizations only from the event's own kind, never from metadata", async () => {
+    const store = createMemoryStore();
+    const app = buildApp({
+      workosWebhooks: {
+        secret: "whsec_test",
+        verifier: verifierFor(
+          event("evt_org_metadata_platform", "organization.created", {
+            id: "org_workos_metadata_platform",
+            name: "Metadata Platform",
+            slug: "metadata-platform",
+            metadata: { organization_kind: "platform" },
+          }),
+        ),
+        store,
+        processInline: true,
+      },
+    });
+
+    const response = await postWebhook(app, "evt_org_metadata_platform");
+
+    expect(response.json()).toMatchObject({ status: "accepted" });
+    expect(store.organizations.get("org_workos_metadata_platform")?.kind).toBe("hotel_group");
+    await app.close();
+  });
+
+  it("ignores user events for a deleted account (VAY-2272)", async () => {
+    const store = createMemoryStore();
+    store.upsertWorkosUser = async () => null;
+    const app = buildApp({
+      workosWebhooks: {
+        secret: "whsec_test",
+        verifier: verifierFor(event("evt_deleted_user", "user.updated", userData())),
+        store,
+        processInline: true,
+      },
+    });
+
+    const response = await postWebhook(app, "evt_deleted_user");
+
+    expect(response.json()).toMatchObject({ status: "ignored" });
+    await app.close();
+  });
 
   it("keeps organizations without a kind hotel groups", async () => {
     const store = createMemoryStore();

@@ -574,7 +574,7 @@ const ADMIN_USERS_SELECT_SQL = `
       COALESCE(
         CASE WHEN platform_members.user_id IS NOT NULL THEN 'admin' END,
         created_user_events.legacy_type,
-        'hotel'
+        'creator'
       ) AS type,
       users.status,
       COALESCE(
@@ -624,7 +624,7 @@ function serializeAdminUser(row: IdentityAdminUserRow): IdentityAdminUser {
     id: row.id,
     email: row.email,
     name: row.name ?? "",
-    type: row.type ?? "hotel",
+    type: row.type ?? "creator",
     status: fromIdentityStatus(row.status),
     avatar: null,
     email_verified: Boolean(row.email_verified),
