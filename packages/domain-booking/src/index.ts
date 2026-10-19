@@ -19,6 +19,7 @@ export {
 
 export * from "./onboardingPublication.js";
 export * from "./defaultGuestTerms.js";
+export * from "./firstRunDefaults.js";
 export * from "./bookingLaunchEvidence.js";
 export * from "./bookingLaunchReadiness.js";
 export * from "./bookingDesign.js";
