@@ -1,6 +1,6 @@
 # vayada — agent guide
 
-Hospitality platform with two products — **Booking Engine** and **PMS** — sharing a central auth DB. The Creator Marketplace is retired (VAY-2259): its app is gone, its legacy API (`apps/marketplace-api`) is still deployed, and the Marketplace tables in the new database are dropped in VAY-2272. This repo is the product application monorepo: app code lives under `apps/`, shared code belongs under `packages/`, and root tooling owns cross-app workflow, docs, Docker Compose, scripts, and auth DB setup.
+Hospitality platform with two products — **Booking Engine** and **PMS** — sharing a central auth DB. The Creator Marketplace is retired (VAY-2259): its app is gone, its legacy API (`apps/marketplace-api`) is switched off (api.vayada.com answers 410) and no longer runs locally, and the Marketplace tables in the new database are dropped in VAY-2272. This repo is the product application monorepo: app code lives under `apps/`, shared code belongs under `packages/`, and root tooling owns cross-app workflow, docs, Docker Compose, scripts, and auth DB setup.
 
 This file is the **canonical, tool-neutral agent guide**. Claude Code, Codex, and any other agent should read this first. `README.md` covers architecture, ports, DBs, test accounts, and seeding in depth — this file covers what those references don't: how to actually do work in the repo.
 
@@ -36,7 +36,7 @@ npm install -g portless                # requires Node 24+
 ./scripts/portless-setup.sh            # trusts local CA (sudo) + registers the FastAPI aliases
 ```
 
-`portless trust` adds the local CA to your system trust store so browsers don't show TLS warnings (may prompt for sudo on first run). The proxy then binds **port 443** and requires sudo to do so — accept the prompt when launching an app for the first time. If you skip sudo, portless falls back to **port 1355** and all URLs become `https://<name>.localhost:1355`; functional but loses the "clean URL" payoff. The checked-in frontend defaults assume port 443, so when you are on the 1355 fallback you must override API URLs with the explicit port, e.g. `NEXT_PUBLIC_API_URL=https://api.marketplace.localhost:1355`. To recover, stop the proxy and re-run `portless proxy start` accepting the sudo prompt, or install the proxy as a launch-time service: `portless service install`.
+`portless trust` adds the local CA to your system trust store so browsers don't show TLS warnings (may prompt for sudo on first run). The proxy then binds **port 443** and requires sudo to do so — accept the prompt when launching an app for the first time. If you skip sudo, portless falls back to **port 1355** and all URLs become `https://<name>.localhost:1355`; functional but loses the "clean URL" payoff. The checked-in frontend defaults assume port 443, so when you are on the 1355 fallback you must override API URLs with the explicit port, e.g. `NEXT_PUBLIC_API_URL=https://api.booking.localhost:1355`. To recover, stop the proxy and re-run `portless proxy start` accepting the sudo prompt, or install the proxy as a launch-time service: `portless service install`.
 
 ### Running apps
 
@@ -48,7 +48,7 @@ npm install -g portless                # requires Node 24+
 | Start `apps/api`                      | `cd apps/api && npm run dev`                                                     |
 | Start a FastAPI backend               | `cd apps/<api> && uvicorn app.main:app --reload --port <P>` (P from the App map) |
 
-The Next.js apps and `apps/api` register their portless names via a `"portless"` key in `apps/<name>/package.json`. The FastAPI apps run on their existing uvicorn ports (8000 / 8001 / 8002) and are reached at `https://api.<product>.localhost` thanks to the static aliases registered by `scripts/portless-setup.sh`.
+The Next.js apps and `apps/api` register their portless names via a `"portless"` key in `apps/<name>/package.json`. The FastAPI apps run on their existing uvicorn ports (8001 / 8002) and are reached at `https://api.<product>.localhost` thanks to the static aliases registered by `scripts/portless-setup.sh`.
 
 `npm run dev:workos-local` requires `apps/api/.env` with local WorkOS settings and wires AuthKit/target frontend calls to `https://api.localhost`. `npm run dev:portless` delegates to that AuthKit-capable workflow so signup/login routes work by default. Use `./scripts/dev-portless.sh --legacy` only for the old FastAPI-backed surfaces without WorkOS/AuthKit env wiring.
 
@@ -95,7 +95,7 @@ Plain-port fallback still works: `cd apps/booking-web && npm run dev` and reach 
 
 ### Plain-port fallback
 
-Without portless, `npm run dev` in each Next.js app binds to its conventional port (3000-3006), `apps/api` binds to 8003, and uvicorn binds to 8000/8001/8002 as before. To make the frontends talk to plain-port backends, override the API URLs in `apps/<name>/.env.local` — each `apps/*/.env.example` lists the plain-port URL alongside the portless default.
+Without portless, `npm run dev` in each Next.js app binds to its conventional port (3000-3006), `apps/api` binds to 8003, and uvicorn binds to 8001/8002 as before. To make the frontends talk to plain-port backends, override the API URLs in `apps/<name>/.env.local` — each `apps/*/.env.example` lists the plain-port URL alongside the portless default.
 
 ### Pre-1.0 caveat
 

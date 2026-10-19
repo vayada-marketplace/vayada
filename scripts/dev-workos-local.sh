@@ -7,7 +7,6 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT_DIR/scripts/lib/workos-local-config.sh"
 COMPOSE_FILES=(-f docker-compose.yml -f docker-compose.portless.yml)
 BACKEND_SERVICES=(
-  marketplace-postgres
   booking-postgres
   auth-postgres
   pms-postgres
@@ -15,12 +14,10 @@ BACKEND_SERVICES=(
   minio
   minio-setup
   media-cdn
-  marketplace-backend
   booking-backend
   pms-backend
 )
 COMPOSE_CONTAINERS=(
-  vayada-marketplace-postgres
   vayada-booking-postgres
   vayada-auth-postgres
   vayada-pms-postgres
@@ -28,7 +25,6 @@ COMPOSE_CONTAINERS=(
   vayada-minio
   vayada-minio-setup
   vayada-media-cdn
-  vayada-marketplace-backend
   vayada-booking-backend
   vayada-pms-backend
 )
