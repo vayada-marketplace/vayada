@@ -161,22 +161,6 @@ export type ExpectedTarget = {
       visibilityScope: string;
       requiredPermissionKey: string;
     }>;
-    affiliatePayouts?: Array<{
-      organizationId: string;
-      affiliateResourceId: string;
-      providerAccountId: string;
-      payoutSettingsId: string;
-      payoutId: string;
-      identityEntitlementId: string;
-      billingEntitlementId: string;
-      visibilityReadModelId: string;
-      providerAccountRef: string;
-      providerPayoutId: string;
-      payoutAmount: string;
-      currency: string;
-      visibilityScope: string;
-      requiredPermissionKey: string;
-    }>;
     forbiddenVisibilityKeys?: string[];
   };
   pmsOperationsChecks?: {

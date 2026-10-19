@@ -56,8 +56,8 @@ marketplace	manual_writer	scripts/backfill_listing_status.py	manual_only	retire	
 pms	extension	uuid-ossp	active	snapshot_only	none	none	schema-fingerprint	none	migration-evidence	none	VAY-1351
 pms	table	public.schema_migrations	active	snapshot_only	none	none	schema-fingerprint	none	migration-evidence	none	VAY-1351
 pms	sequence	public.schema_migrations_id_seq	active	snapshot_only	none	none	schema-fingerprint	none	migration-evidence	none	VAY-1351
-pms	table	public.affiliate_clicks	active	migrate	finance	finance	finance-attribution	pii	pii-lifecycle	apps/api:finance	VAY-1358
-pms	table	public.affiliate_payout_settings	active	migrate	finance	finance	finance-payouts	pii	pii-lifecycle	apps/api:finance	VAY-1358
+pms	table	public.affiliate_clicks	active	retire	none	none	retired-sources	pii	rollback-window	none	VAY-2272
+pms	table	public.affiliate_payout_settings	active	retire	none	none	retired-sources	pii	rollback-window	none	VAY-2272
 pms	table	public.affiliates	active	retire	none	none	retired-sources	pii	rollback-window	none	VAY-2272
 pms	table	public.beds24_booking_mappings	dropped	snapshot_only	none	none	retired-sources	private	rollback-window	none	VAY-1351
 pms	table	public.beds24_connections	dropped	snapshot_only	none	none	retired-sources	private	rollback-window	none	VAY-1351
@@ -105,7 +105,7 @@ pms	scheduler	expire_pending_bookings	active	transform	booking	booking-checkout	
 pms	scheduler	cancel_stale_unpaid_bookings	active	transform	booking	booking-checkout	booking-jobs	private	cutover-control	apps/api:booking-jobs	VAY-1360
 pms	scheduler	cleanup_expired_drafts	active	transform	booking	booking-checkout	booking-jobs	pii	cutover-control	apps/api:booking-jobs	VAY-1360
 pms	scheduler	process_property_payouts	active	transform	finance	finance	finance-payouts	pii	cutover-control	apps/api:finance-jobs	VAY-1360
-pms	scheduler	process_affiliate_payouts	active	transform	finance	finance	finance-payouts	pii	cutover-control	apps/api:finance-jobs	VAY-1360
+pms	scheduler	process_affiliate_payouts	active	retire	none	none	retired-sources	pii	cutover-control	none	VAY-2272
 pms	scheduler	poll_xendit_processing_payouts	active	transform	finance	finance	provider-reconciliation	private	cutover-control	apps/api:finance-jobs	VAY-1360
 pms	scheduler	poll_channex_bookings	active	transform	pms	pms-operations	channel-reconciliation	pii	cutover-control	apps/api:pms-jobs	VAY-1360
 pms	scheduler	full_channex_ari_sync	active	transform	pms	pms-operations	channel-reconciliation	private	cutover-control	apps/api:pms-jobs	VAY-1360

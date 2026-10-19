@@ -30,11 +30,7 @@ const CATALOG_PUBLIC_PROFILE_CHECK_KEYS = new Set([
   "forbiddenPublicProfileKeys",
 ]);
 const BOOKING_CHECKOUT_CHECK_KEYS = new Set(["flows", "settings", "forbiddenSummaryKeys"]);
-const FINANCE_CHECK_KEYS = new Set([
-  "propertyFlows",
-  "affiliatePayouts",
-  "forbiddenVisibilityKeys",
-]);
+const FINANCE_CHECK_KEYS = new Set(["propertyFlows", "forbiddenVisibilityKeys"]);
 const PMS_OPERATIONS_CHECK_KEYS = new Set(["properties", "forbiddenOperationalSummaryKeys"]);
 const DISTRIBUTION_BOOKABILITY_CHECK_KEYS = new Set(["properties", "forbiddenPublicOutputValues"]);
 const PLATFORM_MEDIA_CHECK_KEYS = new Set([
@@ -533,29 +529,6 @@ export function validateExpectedTargetConfig(
           "netPaymentAmount",
           "payoutAmount",
           "commissionRate",
-          "currency",
-          "visibilityScope",
-          "requiredPermissionKey",
-        ],
-        findings,
-      );
-    }
-    if (financeChecks["affiliatePayouts"] !== undefined) {
-      validateObjectArray(
-        financeChecks["affiliatePayouts"],
-        "expected-target.json.financeChecks.affiliatePayouts",
-        [
-          "organizationId",
-          "affiliateResourceId",
-          "providerAccountId",
-          "payoutSettingsId",
-          "payoutId",
-          "identityEntitlementId",
-          "billingEntitlementId",
-          "visibilityReadModelId",
-          "providerAccountRef",
-          "providerPayoutId",
-          "payoutAmount",
           "currency",
           "visibilityScope",
           "requiredPermissionKey",

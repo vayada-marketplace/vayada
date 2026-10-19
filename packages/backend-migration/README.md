@@ -481,8 +481,8 @@ matching adoption claim from `verified_non_active` to retained `released`.
 ## Production Finance Migration
 
 VAY-1358 consumes the exact Booking and PMS Finance rows from the immutable
-VAY-1351 extraction. It resolves property, organization, affiliate, and booking
-ownership only through accepted earlier migration links. Monetary parity uses
+VAY-1351 extraction. It resolves property, organization, and booking ownership
+only through accepted earlier migration links. Monetary parity uses
 exact decimal arithmetic. The migration never invokes a payment provider and
 never turns configuration flags into online-card execution evidence.
 
@@ -494,12 +494,15 @@ TARGET_DATABASE_URL=<target database> npm run target:finance:migrate -- \
 ```
 
 Ambiguous ownership, duplicate provider identities, unexplained monetary
-variance, newer target economic facts, unattributed webhooks, checkout rows
-lacking encrypted folio-recipient evidence, and completed affiliate payouts
-lacking immutable command evidence remain hard blockers. Invalid source rows
-and capture-incomplete payments are omitted only through immutable hash-only
-dispositions; raw source totals must equal planned target totals plus those
-explicit omissions. Bank, PayPal, and payout destinations never enter target
+variance, newer target economic facts, unattributed webhooks, and checkout rows
+lacking encrypted folio-recipient evidence remain hard blockers. Invalid source
+rows and capture-incomplete payments are omitted only through immutable
+hash-only dispositions; raw source totals must equal planned target totals plus
+those explicit omissions. The affiliate program is retired (VAY-2272): legacy
+affiliates and their payout settings are not read, and affiliate payouts and
+booking commission shares are omitted as `RETIRED_AFFILIATE_PROGRAM`, so they
+stay in the source totals and the omissions but never reach the target. Bank,
+PayPal, and payout destinations never enter target
 product state: their target settings remain disabled or setup-incomplete until
 approved re-entry. Historical provider transactions without account ownership
 remain unbound, and disagreeing payment flags cannot enable a method.
