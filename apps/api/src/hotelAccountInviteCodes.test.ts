@@ -29,9 +29,9 @@ const platformSession: VerifiedSession = {
 };
 
 const nonPlatformSession: VerifiedSession = {
-  workosUserId: "user_workos_creator",
-  workosOrgId: "org_workos_creator",
-  sessionId: "session_creator",
+  workosUserId: "user_workos_hotel",
+  workosOrgId: "org_workos_hotel",
+  sessionId: "session_hotel",
   expiresAt: Math.floor(Date.now() / 1000) + 3600,
 };
 
@@ -49,7 +49,7 @@ describe("hotel account invite code routes", () => {
     const response = await injectJson(app, {
       method: "GET",
       url: "/api/marketplace/admin/invite-codes",
-      headers: { authorization: "Bearer creator-token" },
+      headers: { authorization: "Bearer hotel-token" },
     });
 
     expect(response.statusCode).toBe(403);
@@ -187,7 +187,7 @@ describe("hotel account invite code routes", () => {
     const unauthorized = await injectJson(app, {
       method: "POST",
       url: "/api/marketplace/admin/invite-codes",
-      headers: { authorization: "Bearer creator-token" },
+      headers: { authorization: "Bearer hotel-token" },
       payload,
     });
     expect(unauthorized.statusCode).toBe(403);
@@ -288,7 +288,7 @@ function buildInviteCodeApp(
       if (providerUserId === "user_workos_platform") {
         return { userId: "user_platform", email: "admin@vayada.com", status: "active" };
       }
-      return { userId: "user_creator", email: "creator@example.com", status: "active" };
+      return { userId: "user_hotel", email: "hotel@example.com", status: "active" };
     },
     async findOrganizationByWorkosOrgId(workosOrgId) {
       if (workosOrgId === "org_workos_platform") {
@@ -300,9 +300,9 @@ function buildInviteCodeApp(
         };
       }
       return {
-        organizationId: "org_creator",
+        organizationId: "org_hotel",
         workosOrgId,
-        kind: "creator_workspace",
+        kind: "hotel_group",
         status: "active",
       };
     },
@@ -317,11 +317,11 @@ function buildInviteCodeApp(
         };
       }
       return {
-        membershipId: "membership_creator",
+        membershipId: "membership_hotel_owner",
         status: "active",
-        roleKey: "creator_owner",
+        roleKey: "hotel_owner",
         workosMembershipId: null,
-        workosRoleSlugs: ["creator_owner"],
+        workosRoleSlugs: ["hotel_owner"],
       };
     },
     async findLinkedResources(organizationId) {
@@ -347,7 +347,7 @@ function buildInviteCodeApp(
       verifier: createFakeVerifier(
         new Map([
           ["platform-token", platformSession],
-          ["creator-token", nonPlatformSession],
+          ["hotel-token", nonPlatformSession],
         ]),
       ),
       repository: identityRepository,
