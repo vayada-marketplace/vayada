@@ -26,7 +26,6 @@ export const identityLifecycleCommandTypes = [
   "identity.staff.access.update",
   "identity.staff.status.update",
   "identity.staff.remove",
-  "identity.invite.affiliate.create",
   "identity.invite.customer.create",
   "identity.consent.cookie.upsert",
   "identity.consent.marketing.update",
@@ -52,7 +51,6 @@ export const identityLifecycleEventTypes = [
   "identity.staff.access.updated",
   "identity.staff.status.updated",
   "identity.staff.removed",
-  "identity.invite.affiliate.created",
   "identity.invite.customer.created",
   "identity.consent.cookie.upserted",
   "identity.consent.marketing.updated",
@@ -419,7 +417,7 @@ export type CreateIdentityUserPayload = {
    * Temporary migration input for legacy admin surfaces while product profile
    * resources move behind organization/resource links.
    */
-  legacyUserType?: "creator" | "hotel" | "admin";
+  legacyUserType?: "hotel" | "admin";
   providerIdentity?: {
     provider: AuthProvider;
     providerUserId?: string;
@@ -513,17 +511,6 @@ export type CreateIdentityRecoveryFlowPayload =
       newEmail: string;
       redirectUrl?: string;
     };
-
-export type CreateAffiliateInvitePayload = {
-  email: string;
-  name?: string;
-  organization: OrganizationCommandInput;
-  membership: MembershipCommandInput;
-  affiliateResourceLink: ResourceLinkCommandInput & {
-    product: "affiliate";
-    resourceType: "affiliate";
-  };
-};
 
 export type CreateCustomerInvitePayload = {
   email: string;
@@ -671,11 +658,6 @@ export type CreateIdentityRecoveryFlowCommand = IdentityLifecycleCommandBase<
   CreateIdentityRecoveryFlowPayload
 >;
 
-export type CreateAffiliateInviteCommand = IdentityLifecycleCommandBase<
-  "identity.invite.affiliate.create",
-  CreateAffiliateInvitePayload
->;
-
 export type CreateStaffInviteCommand = IdentityLifecycleCommandBase<
   "identity.invite.staff.create",
   CreateStaffInvitePayload
@@ -749,7 +731,6 @@ export type IdentityLifecycleCommand =
   | UpdateStaffAccessCommand
   | UpdateStaffStatusCommand
   | RemoveStaffCommand
-  | CreateAffiliateInviteCommand
   | CreateCustomerInviteCommand
   | UpsertCookieConsentCommand
   | UpdateMarketingConsentCommand
@@ -816,7 +797,6 @@ export type IdentityLifecycleEvent =
   | StaffAccessUpdatedEvent
   | StaffStatusUpdatedEvent
   | StaffRemovedEvent
-  | IdentityLifecycleEventBase<"identity.invite.affiliate.created", CreateAffiliateInvitePayload>
   | IdentityLifecycleEventBase<"identity.invite.customer.created", CreateCustomerInvitePayload>
   | IdentityLifecycleEventBase<"identity.consent.cookie.upserted", CookieConsentPayload>
   | IdentityLifecycleEventBase<"identity.consent.marketing.updated", UpdateMarketingConsentPayload>

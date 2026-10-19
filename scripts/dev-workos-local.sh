@@ -134,7 +134,6 @@ get_portless_origin() {
 echo "==> Ensuring WorkOS local role slugs exist"
 ensure_workos_role platform_admin "Platform Admin"
 ensure_workos_role hotel_owner "Hotel Owner"
-ensure_workos_role creator_owner "Creator Owner"
 
 unset BOOKING_PUBLIC_API_URL
 unset PMS_API_URL
