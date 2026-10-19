@@ -1162,6 +1162,36 @@ describe("api config", () => {
     );
   });
 
+  it("keeps the retired-media purge off unless it is switched on with the CDN and media config (VAY-2272)", () => {
+    const media = {
+      PLATFORM_MEDIA_BUCKET: "vayada-media-staging",
+      PLATFORM_MEDIA_CDN_BASE_URL: "https://cdn.staging.vayada.com",
+      PLATFORM_MEDIA_CDN_ORIGIN_HOST: "vayada-media-staging.s3.us-east-1.amazonaws.com",
+    };
+    const runtime = completeCreatorMarketplaceEnv;
+    const distribution = { PLATFORM_MEDIA_CDN_DISTRIBUTION_ID: "E2EXAMPLE12345" };
+    const on = { PLATFORM_MEDIA_RETIRED_PURGE_ENABLED: "true" };
+
+    expect(loadConfig({ ...media, ...distribution }).platformMediaRetiredPurge).toBeUndefined();
+    expect(loadConfig({ ...runtime, ...distribution, ...on }).platformMediaRetiredPurge).toEqual({
+      cdnDistributionId: "E2EXAMPLE12345",
+    });
+    expect(
+      loadConfig({ ...runtime, ...distribution, ...on, API_BACKGROUND_WORKERS_ENABLED: "false" })
+        .platformMediaRetiredPurge,
+    ).toEqual({ cdnDistributionId: "E2EXAMPLE12345" });
+    expect(() => loadConfig({ ...media, ...on })).toThrow("PLATFORM_MEDIA_CDN_DISTRIBUTION_ID");
+    expect(() => loadConfig({ ...distribution, ...on })).toThrow(
+      "complete PLATFORM_MEDIA_* config",
+    );
+    expect(() => loadConfig({ ...media, ...distribution, ...on })).toThrow(
+      "TARGET_DATABASE_URL and complete auth config",
+    );
+    expect(() =>
+      loadConfig({ ...runtime, ...distribution, ...on, PLATFORM_MEDIA_CLEANUP_ENABLED: "false" }),
+    ).toThrow("PLATFORM_MEDIA_CLEANUP_ENABLED must stay on");
+  });
+
   it("runs the calendar auto-open scheduler hourly unless switched off", () => {
     expect(loadConfig({})).toMatchObject({
       pmsCalendarAutoOpenSchedulerEnabled: true,
