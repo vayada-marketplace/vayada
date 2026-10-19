@@ -7,8 +7,8 @@ Vayada is a hospitality platform with two connected products:
   reservations, and channel connectivity.
 
 The Creator Marketplace is retired (VAY-2259). Its web app is gone; its legacy
-API is still deployed, and the Marketplace tables in the new database are dropped
-in VAY-2272.
+API is switched off (api.vayada.com answers 410) and no longer runs locally, and
+the Marketplace tables in the new database are dropped in VAY-2272.
 
 This repository is the product application monorepo. It contains every web app,
 the target TypeScript API, the legacy FastAPI services still used during
@@ -36,7 +36,7 @@ flowchart LR
 | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Web applications    | Five Next.js apps serve platform admin, the booking storefront and admin, PMS, and the public landing site.                                                                                                                        |
 | Target API          | `apps/api` is the modular TypeScript/Fastify backend for WorkOS/AuthKit, identity and authorization, migrated product routes, platform media, jobs, and target-domain APIs.                                                        |
-| Legacy APIs         | `apps/marketplace-api`, `apps/booking-api`, and `apps/pms-api` remain in service while routes and data move to the target backend.                                                                                                 |
+| Legacy APIs         | `apps/booking-api` and `apps/pms-api` remain in service while routes and data move to the target backend.                                                                                                                          |
 | Target data model   | `packages/backend-migration` owns reviewed SQL migrations and parity tooling for the schema-organized target PostgreSQL database. Runtime source flags select target, compatibility, or disabled implementations during migration. |
 | Local support stack | Docker Compose starts the historical PostgreSQL databases, auth migrations, MinIO/media services, and the FastAPI APIs. `apps/api` and the web apps run from the npm workspace.                                                    |
 

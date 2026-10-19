@@ -1,6 +1,6 @@
 # vayada — agent guide
 
-Hospitality platform with two products — **Booking Engine** and **PMS** — sharing a central auth DB. The Creator Marketplace is retired (VAY-2259): its app is gone, its legacy API (`apps/marketplace-api`) is still deployed, and the Marketplace tables in the new database are dropped in VAY-2272. This repo is the product application monorepo: app code lives under `apps/`, shared code belongs under `packages/`, and root tooling owns cross-app workflow, docs, Docker Compose, scripts, and auth DB setup.
+Hospitality platform with two products — **Booking Engine** and **PMS** — sharing a central auth DB. The Creator Marketplace is retired (VAY-2259): its app is gone, its legacy API (`apps/marketplace-api`) is switched off (api.vayada.com answers 410) and no longer runs locally, and the Marketplace tables in the new database are dropped in VAY-2272. This repo is the product application monorepo: app code lives under `apps/`, shared code belongs under `packages/`, and root tooling owns cross-app workflow, docs, Docker Compose, scripts, and auth DB setup.
 
 This file is the **canonical, tool-neutral agent guide**. Claude Code, Codex, and any other agent should read this first. `README.md` covers architecture, ports, DBs, test accounts, and seeding in depth — this file covers what those references don't: how to actually do work in the repo.
 
