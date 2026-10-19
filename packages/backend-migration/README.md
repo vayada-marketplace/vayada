@@ -261,8 +261,9 @@ npm run target:media:migrate -- \
 ```
 
 The report inventories hero, gallery, catalog logo, Booking header logo, room,
-add-on, Marketplace, and private attachment references with stable source
-identities. Missing, corrupt, oversized, unsafe, or unavailable source objects
+add-on, legacy Marketplace hotel picture, and private attachment references with
+stable source identities. Marketplace listing, creator and chat media are
+retired (VAY-2272) and not read. Missing, corrupt, oversized, unsafe, or unavailable source objects
 are recorded individually while the remaining inventory continues. Public
 objects receive `original_safe`, `large`, `thumbnail`, and `blur_preview` WebP
 variants under `public/media/*`; private attachments receive only a private
