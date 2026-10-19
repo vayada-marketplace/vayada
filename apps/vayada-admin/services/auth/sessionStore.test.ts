@@ -6,10 +6,8 @@ import {
   clearAuthData,
   getAuthBearerToken,
   getAuthKitAccessToken,
-  getAuthStateGeneration,
   getOrRefreshAuthKitAccessToken,
   setAuthKitSession,
-  setLegacyCompatibilityToken,
 } from "./sessionStore";
 
 beforeEach(() => {
@@ -306,33 +304,21 @@ describe("admin Vayada API authentication", () => {
     expect(localStorage.getItem("userEmail")).toBe("new-admin@example.com");
   });
 
-  it("routes login and the admin compatibility bridge through same-origin auth", async () => {
-    vi.stubEnv("NEXT_PUBLIC_AUTHKIT_COMPATIBILITY_TOKEN_ENABLED", "true");
+  it("routes login through same-origin auth and uses the AuthKit token", async () => {
     vi.stubEnv("NEXT_PUBLIC_PLATFORM_WORKOS_ORG_ID", "org_workos_platform");
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        jsonResponse({
-          accessToken: "workos-access-token",
-          csrfToken: "csrf-token",
-          user: { id: "admin-user", email: "admin@example.com", status: "active" },
-        }),
-      )
-      .mockResolvedValueOnce(
-        jsonResponse({
-          accessToken: "compatibility-token",
-          expiresIn: 900,
-          tokenType: "Bearer",
-        }),
-      );
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      jsonResponse({
+        accessToken: "workos-access-token",
+        csrfToken: "csrf-token",
+        user: { id: "admin-user", email: "admin@example.com", status: "active" },
+      }),
+    );
     vi.stubGlobal("fetch", fetchMock);
 
     await authService.login({ email: "admin@example.com", password: "secret" });
 
-    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
-      "/auth/password/login",
-      "/auth/compat/marketplace-admin-token",
-    ]);
+    // VAY-2259: no legacy Marketplace compatibility token any more.
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/auth/password/login"]);
     expect(fetchMock.mock.calls[0]?.[1]).toEqual(
       expect.objectContaining({
         body: JSON.stringify({
@@ -343,11 +329,10 @@ describe("admin Vayada API authentication", () => {
         }),
       }),
     );
-    expect(getAuthBearerToken()).toBe("compatibility-token");
+    expect(getAuthBearerToken()).toBe("workos-access-token");
   });
 
   it("includes the platform surface on CSRF-protected session switches", async () => {
-    vi.stubEnv("NEXT_PUBLIC_AUTHKIT_COMPATIBILITY_TOKEN_ENABLED", "false");
     setAuthKitSession({
       accessToken: "workos-access-token",
       csrfToken: "csrf-token",
@@ -377,7 +362,6 @@ describe("admin Vayada API authentication", () => {
   });
 
   it("routes recovery and logout through same-origin auth", async () => {
-    vi.stubEnv("NEXT_PUBLIC_AUTHKIT_COMPATIBILITY_TOKEN_ENABLED", "false");
     const location = { href: "https://admin.localhost/dashboard" };
     Object.assign(window, { location });
     setAuthKitSession({
@@ -410,48 +394,6 @@ describe("admin Vayada API authentication", () => {
       }),
     );
     expect(location.href).toBe("/login");
-  });
-
-  it("drops a compatibility token when a different AuthKit session is committed", () => {
-    vi.stubEnv("NEXT_PUBLIC_AUTHKIT_COMPATIBILITY_TOKEN_ENABLED", "true");
-    setAuthKitSession({
-      accessToken: "old-workos-token",
-      csrfToken: "old-csrf-token",
-      user: { id: "old-admin", email: "old-admin@example.com", status: "active" },
-    });
-    setLegacyCompatibilityToken("old-compatibility-token", 900);
-    expect(getAuthBearerToken()).toBe("old-compatibility-token");
-
-    setAuthKitSession({
-      accessToken: "new-workos-token",
-      csrfToken: "new-csrf-token",
-      user: { id: "new-admin", email: "new-admin@example.com", status: "active" },
-    });
-
-    expect(getAuthBearerToken()).toBe("new-workos-token");
-  });
-
-  it("keeps a compatibility token during a same-session refresh", () => {
-    vi.stubEnv("NEXT_PUBLIC_AUTHKIT_COMPATIBILITY_TOKEN_ENABLED", "true");
-    setAuthKitSession({
-      accessToken: "old-workos-token",
-      csrfToken: "old-csrf-token",
-      organizationId: "organization-a",
-      user: { id: "admin-a", email: "admin@example.com", status: "active" },
-    });
-    setLegacyCompatibilityToken("current-compatibility-token", 900);
-
-    setAuthKitSession(
-      {
-        accessToken: "refreshed-workos-token",
-        csrfToken: "refreshed-csrf-token",
-        organizationId: "organization-a",
-        user: { id: "admin-a", email: "admin@example.com", status: "active" },
-      },
-      getAuthStateGeneration(),
-    );
-
-    expect(getAuthBearerToken()).toBe("current-compatibility-token");
   });
 });
 
