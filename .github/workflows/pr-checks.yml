@@ -1435,7 +1435,6 @@ jobs:
           DATABASE_URL: postgresql://${{ matrix.db_user }}:${{ matrix.db_password }}@localhost:${{ matrix.db_port }}/${{ matrix.test_db_name || matrix.db_name }}
           AUTH_DATABASE_URL: postgresql://vayada_auth_user:vayada_auth_password@localhost:5435/vayada_auth_db
           TEST_DATABASE_URL: postgresql://${{ matrix.db_user }}:${{ matrix.db_password }}@localhost:${{ matrix.db_port }}/${{ matrix.test_db_name || matrix.db_name }}
-          MARKETPLACE_DATABASE_URL: ""
           PMS_API_URL: http://localhost:8002
           CORS_ORIGINS: ${{ matrix.cors_origins }}
           EMAIL_ENABLED: "true"
