@@ -42,8 +42,11 @@ export function BookingPageStatusCard() {
   const active = useRef(false);
   const mounted = useRef(true);
   const propertyIdRef = useRef<string | null>(null);
+  const loads = useRef(0);
+  const rechecking = useRef(false);
 
   const load = useCallback(async (id: string) => {
+    loads.current += 1;
     const next = await bookingPublicationApi.load(id);
     if (mounted.current) setReview(next);
     return next;
@@ -88,6 +91,39 @@ export function BookingPageStatusCard() {
       window.removeEventListener(SELECTED_HOTEL_CHANGED_EVENT, onSelected);
     };
   }, [refresh]);
+
+  // Hotels fix items in setup, often in another tab: check again when they come back (VAY-2288).
+  // Quietly: Publish stays enabled, so a click that brought the window back still counts, and an
+  // answer that arrives after another read never replaces it.
+  const recheck = useCallback(async () => {
+    const id = propertyIdRef.current;
+    if (!id || active.current || rechecking.current) return;
+    rechecking.current = true;
+    const read = ++loads.current;
+    try {
+      const next = await bookingPublicationApi.load(id);
+      if (mounted.current && !active.current && loads.current === read) {
+        setReview(next);
+        setLoadFailed(false);
+      }
+    } catch {
+      // The card keeps what it shows; the next return or "Check again" reads again.
+    } finally {
+      rechecking.current = false;
+    }
+  }, []);
+
+  useEffect(() => {
+    const onReturn = () => {
+      if (document.visibilityState === "visible") void recheck();
+    };
+    window.addEventListener("focus", onReturn);
+    document.addEventListener("visibilitychange", onReturn);
+    return () => {
+      window.removeEventListener("focus", onReturn);
+      document.removeEventListener("visibilitychange", onReturn);
+    };
+  }, [recheck]);
 
   const status = review ? bookingPageStatus(review) : null;
   const publishing = status?.kind === "publishing";

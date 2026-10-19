@@ -64,6 +64,26 @@ describe("canonical property profile wire contract", () => {
     expect(parseCreatePropertyProfileRequest(incomplete.profile)).toBeNull();
   });
 
+  it("accepts a hotel without a postal code (VAY-2289)", () => {
+    const withoutPostalCode = {
+      ...response.profile,
+      location: { ...response.profile.location, postalCode: "" },
+    };
+    expect(parseCreatePropertyProfileRequest(withoutPostalCode)).toEqual(withoutPostalCode);
+    expect(
+      parseUpdatePropertyProfileRequest({
+        expectedProfileRevision: 2,
+        patch: { location: { postalCode: "" } },
+      }),
+    ).not.toBeNull();
+    expect(
+      parseUpdatePropertyProfileRequest({
+        expectedProfileRevision: 2,
+        patch: { location: { streetAddress: "" } },
+      }),
+    ).toBeNull();
+  });
+
   it("parses only the exact nested create profile", () => {
     expect(parseCreatePropertyProfileRequest(response.profile)).toEqual(response.profile);
     expect(

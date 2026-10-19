@@ -2436,6 +2436,58 @@ describe("shared hotel setup status route", () => {
     app = owner();
   });
 
+  it("creates and edits a hotel without a postal code (VAY-2289)", async () => {
+    const input = minimalHotelInput();
+    input.location.postalCode = "";
+    const createPropertyProfile = vi.fn(
+      async ({ profile }: { profile: SharedPropertyProfileInput }) =>
+        profileResponse(propertyId, profile),
+    );
+    app = buildSharedSetupApp({
+      linkedResources: [],
+      permissions: ["hotel_catalog.setup.read", "hotel_catalog.setup.manage"],
+      repository: {
+        ...unusedStatusMethods(),
+        ...unusedPropertyProfileMethods(),
+        createPropertyProfile,
+      },
+    });
+    const locationWithoutPostalCode: Record<string, unknown> = { ...input.location };
+    delete locationWithoutPostalCode["postalCode"];
+    const created = await injectJson<SharedPropertyProfile>(app, {
+      method: "POST",
+      url: "/api/hotel-setup/properties",
+      headers: { authorization: "Bearer valid-token", "idempotency-key": "create-no-postcode" },
+      payload: { ...input, location: locationWithoutPostalCode },
+    });
+    expect(created.statusCode).toBe(201);
+    expect(createPropertyProfile).toHaveBeenCalledWith(expect.objectContaining({ profile: input }));
+    await app.close();
+
+    const command = vi
+      .fn<import("./routes/sharedHotelSetupStatus.js").HotelSetupPropertyProfileUpdate>()
+      .mockResolvedValue({ status: "updated", profile: profileResponse(propertyId, input) });
+    app = buildSharedSetupApp({
+      permissions: ["hotel_catalog.setup.manage", "booking.settings.manage"],
+      linkedResources: [propertyLink(propertyId)],
+      repository: repositoryWith([]),
+      profileCommand: command,
+    });
+    const edited = await injectJson(app, {
+      method: "PUT",
+      url: `/api/hotel-setup/properties/${propertyId}/profile`,
+      headers: { authorization: "Bearer valid-token", "idempotency-key": "tick-locality" },
+      payload: { expectedProfileRevision: 1, patch: { location: { localityPublic: true } } },
+    });
+    expect(edited.statusCode).toBe(200);
+    // A stored hotel without a postal code can still save other location changes.
+    const { merge } = command.mock.calls[0]![2];
+    expect(merge(input)).toEqual({
+      expectedProfileRevision: 1,
+      profile: { ...input, location: { ...input.location, localityPublic: true } },
+    });
+  });
+
   it("saves launch settings through the Owner-only ordinary command, never the broad writer", async () => {
     const write = vi.fn();
     const payload = {
