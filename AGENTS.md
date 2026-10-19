@@ -8,17 +8,16 @@ This file is the **canonical, tool-neutral agent guide**. Claude Code, Codex, an
 
 ## App map
 
-| Path                   | Stack      | Port | Local URL                           |
-| ---------------------- | ---------- | ---- | ----------------------------------- |
-| `apps/api`             | Node/TS    | 8003 | `https://api.localhost`             |
-| `apps/marketplace-api` | FastAPI    | 8000 | `https://api.marketplace.localhost` |
-| `apps/vayada-admin`    | Next.js 14 | 3001 | `https://admin.localhost`           |
-| `apps/booking-api`     | FastAPI    | 8001 | `https://api.booking.localhost`     |
-| `apps/booking-web`     | Next.js 14 | 3002 | `https://booking.localhost`         |
-| `apps/booking-admin`   | Next.js 14 | 3003 | `https://admin.booking.localhost`   |
-| `apps/pms-api`         | FastAPI    | 8002 | `https://api.pms.localhost`         |
-| `apps/pms-web`         | Next.js 14 | 3004 | `https://pms.localhost`             |
-| `apps/landing`         | Next.js 14 | 3006 | `https://landing.localhost`         |
+| Path                 | Stack      | Port | Local URL                         |
+| -------------------- | ---------- | ---- | --------------------------------- |
+| `apps/api`           | Node/TS    | 8003 | `https://api.localhost`           |
+| `apps/vayada-admin`  | Next.js 14 | 3001 | `https://admin.localhost`         |
+| `apps/booking-api`   | FastAPI    | 8001 | `https://api.booking.localhost`   |
+| `apps/booking-web`   | Next.js 14 | 3002 | `https://booking.localhost`       |
+| `apps/booking-admin` | Next.js 14 | 3003 | `https://admin.booking.localhost` |
+| `apps/pms-api`       | FastAPI    | 8002 | `https://api.pms.localhost`       |
+| `apps/pms-web`       | Next.js 14 | 3004 | `https://pms.localhost`           |
+| `apps/landing`       | Next.js 14 | 3006 | `https://landing.localhost`       |
 
 Local URLs are the recommended way to reach each app — see [Local dev — portless](#local-dev--portless). Plain `localhost:PORT` still works for contributors not on portless.
 
