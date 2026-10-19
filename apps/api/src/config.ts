@@ -228,13 +228,15 @@ type NextRuntimeSourceRequirement = {
 
 function loadPlatformMediaRetiredPurgeConfig(
   env: NodeJS.ProcessEnv,
-  input: { platformMediaServing: boolean },
+  input: { platformMediaServing: boolean; targetDatabaseWithAuth: boolean },
 ): ApiConfig["platformMediaRetiredPurge"] {
   if (!readBooleanEnv(env, "PLATFORM_MEDIA_RETIRED_PURGE_ENABLED")) return undefined;
   const cdnDistributionId = readOptionalEnv(env, "PLATFORM_MEDIA_CDN_DISTRIBUTION_ID");
-  if (!cdnDistributionId || !input.platformMediaServing) {
+  // The purge runs in the media runtime, which needs the target database and auth. Tasks
+  // without background workers share the service environment and simply skip it.
+  if (!cdnDistributionId || !input.platformMediaServing || !input.targetDatabaseWithAuth) {
     throw new Error(
-      "PLATFORM_MEDIA_RETIRED_PURGE_ENABLED requires PLATFORM_MEDIA_CDN_DISTRIBUTION_ID and complete PLATFORM_MEDIA_* config",
+      "PLATFORM_MEDIA_RETIRED_PURGE_ENABLED requires PLATFORM_MEDIA_CDN_DISTRIBUTION_ID, complete PLATFORM_MEDIA_* config, TARGET_DATABASE_URL and complete auth config",
     );
   }
   if (!readBooleanEnv(env, "PLATFORM_MEDIA_CLEANUP_ENABLED", true)) {
@@ -932,6 +934,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
   }
   const platformMediaRetiredPurge = loadPlatformMediaRetiredPurgeConfig(env, {
     platformMediaServing: Boolean(platformMediaServing),
+    targetDatabaseWithAuth: Boolean(targetDatabaseUrl && auth),
   });
   if (env.NODE_ENV === "production" && !bookingEmailDelivery) {
     throw new Error(
