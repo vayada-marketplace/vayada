@@ -30,6 +30,7 @@ describe("production Booking publication owner sources", () => {
       supportedLocales: ["en", "de"],
       profileStatus: "complete",
       lifecycleStatus: "active",
+      setupGoLiveContent: true,
       profileRevision: 8,
       sourceUpdatedAt: now,
       timezone: "Europe/Berlin",
@@ -105,6 +106,14 @@ describe("production Booking publication owner sources", () => {
     expect(provisioning.entities[0]?.blockers).toEqual([
       { code: "hotel_setup_in_progress", scope: "launch_configuration", kind: "external_pending" },
     ]);
+    // VAY-2247: without a description and an approved image, setup's saves can't make it live.
+    row.setupGoLiveContent = false;
+    const withoutContent = await source.getBookingLaunchEvidence(scope);
+    if (withoutContent.outcome !== "evidence") throw new Error("Expected Catalog evidence");
+    expect(withoutContent.entities[0]?.blockers).toEqual([
+      { code: "hotel_setup_content_missing", scope: "launch_configuration", kind: "user_fixable" },
+    ]);
+    row.setupGoLiveContent = true;
     await expect(source.getSnapshot(manifestRequest(provisioning.sources))).resolves.toEqual({
       outcome: "unavailable",
       owner: "hotel_catalog",

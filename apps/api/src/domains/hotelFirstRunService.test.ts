@@ -39,15 +39,21 @@ const actor: HotelFirstRunActor = {
   correlationId: null,
   requestedAt: "2026-10-20T09:00:00.000Z",
 };
+const classicDouble = {
+  name: "Classic Double",
+  numberOfRooms: 8,
+  maxGuests: 2,
+  pricePerNight: "145",
+};
 const request = {
-  room: { name: "Classic Double", numberOfRooms: 8, maxGuests: 2, pricePerNight: "145" },
+  rooms: [classicDouble],
   pricesIncludeMandatoryCharges: true,
   guestPayment: "pay_at_property" as const,
   plan: "commission" as const,
 };
 const facts: HotelFirstRunWriteFacts = {
   propertyId,
-  firstRunRoomTypeId: roomTypeId,
+  firstRunRoomTypeIds: [roomTypeId],
   language: "de",
   profile: {
     revision: 2,
@@ -198,23 +204,48 @@ describe("hotel first run (VAY-2247)", () => {
   });
 
   it("doesn't price the owner's own rooms", async () => {
-    await service({ facts: { ...facts, firstRunRoomTypeId: null } }).first.run(
-      actor,
-      request,
-      null,
-    );
+    await service({ facts: { ...facts, firstRunRoomTypeIds: [] } }).first.run(actor, request, null);
     expect(steps.pricing).not.toHaveBeenCalled();
     expect(steps.calendar).toHaveBeenCalled();
   });
 
-  it("refuses an invalid room before any step", async () => {
-    const result = await service().first.run(
-      actor,
-      { ...request, room: { ...request.room, maxGuests: 0 } },
-      null,
-    );
+  it.each([
+    ["an invalid room", [{ ...classicDouble, maxGuests: 0 }]],
+    ["no room type", []],
+    [
+      "two room types with the same name",
+      [classicDouble, { ...classicDouble, name: "classic double" }],
+    ],
+    [
+      "more than ten room types",
+      Array.from({ length: 11 }, (_, index) => ({ ...classicDouble, name: `Type ${index}` })),
+    ],
+  ])("refuses %s before any step", async (_case, rooms) => {
+    const result = await service().first.run(actor, { ...request, rooms }, null);
     expect(result).toMatchObject({ ok: false, code: "first_run_room_invalid", step: "rooms" });
     expect(steps.currency).not.toHaveBeenCalled();
+  });
+
+  it("prices each of its room types with its own price and guests (1.12)", async () => {
+    const suiteTypeId = "c3d4e5f6-a7b8-4c9d-8e0f-1a2b3c4d5e6f";
+    const suite = { name: "Alpine Suite", numberOfRooms: 4, maxGuests: 3, pricePerNight: "210" };
+    steps.pricing.mockResolvedValue({ ok: true, wrote: true });
+    await service({
+      facts: { ...facts, firstRunRoomTypeIds: [roomTypeId, suiteTypeId] },
+    }).first.run(actor, { ...request, rooms: [classicDouble, suite] }, null);
+    expect(steps.rooms).toHaveBeenCalledWith(expect.anything(), actor, [classicDouble, suite]);
+    expect(steps.pricing.mock.calls.map((call) => call[2])).toEqual([
+      expect.objectContaining({
+        roomTypeId,
+        pricePerNight: "145",
+        capacity: { total: 2, adults: 2, children: 1 },
+      }),
+      expect.objectContaining({
+        roomTypeId: suiteTypeId,
+        pricePerNight: "210",
+        capacity: { total: 3, adults: 3, children: 2 },
+      }),
+    ]);
   });
 });
 
