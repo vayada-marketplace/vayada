@@ -32,7 +32,9 @@
     "./pricingSetupAmounts": "./src/pricingSetupAmounts.ts",
     "./firstPricingSetupMessages": "./src/firstPricingSetupMessages.ts",
     "./bookingPublicationReviewApi": "./src/bookingPublicationReviewApi.ts",
-    "./setupProfileFields": "./src/setupProfileFields.tsx"
+    "./setupProfileFields": "./src/setupProfileFields.tsx",
+    "./HotelSetupChecklistCard": "./src/HotelSetupChecklistCard.tsx",
+    "./hotelSetupChecklistMessages": "./src/hotelSetupChecklistMessages.ts"
   },
   "dependencies": {
     "@vayada/domain-booking": "*",
