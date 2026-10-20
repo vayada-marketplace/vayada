@@ -33,6 +33,7 @@ const FILLED: QuickHotelDraft = {
   timezone: "Europe/Berlin",
   contactEmail: "clara@example.com",
   phone: "+49 30 0000 0000",
+  currency: "",
 };
 
 function props(overrides: Partial<QuickHotelStepProps> = {}): QuickHotelStepProps {

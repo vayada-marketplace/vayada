@@ -14,6 +14,8 @@ export type QuickHotelDraft = {
   timezone: string;
   contactEmail: string;
   phone: string;
+  /** Another currency than the country's; "" follows the country. */
+  currency: string;
 };
 
 export type QuickHotelField = "displayName" | "propertyType" | "address" | "contactEmail" | "phone";
@@ -31,6 +33,7 @@ export const EMPTY_QUICK_HOTEL_DRAFT: QuickHotelDraft = Object.freeze({
   timezone: "",
   contactEmail: "",
   phone: "",
+  currency: "",
 });
 
 /** The pills shown first, in this order; every other type sits behind "More…". */

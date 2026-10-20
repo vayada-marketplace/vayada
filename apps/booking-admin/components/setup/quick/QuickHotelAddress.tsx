@@ -15,6 +15,7 @@ import {
 import { COUNTRY_OPTIONS } from "@vayada/locale-constants";
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { QuickCurrencyPicker } from "./QuickHotelDetails";
 import { QUICK_SETUP_INPUT, QuickSetupField, QuickSetupFieldError } from "./QuickSetupField";
 import type { QuickHotelDraft } from "./quickHotelDraft";
 
@@ -29,9 +30,10 @@ export type QuickHotelAddressProps = {
   error?: string;
   /** Google Maps key; without it the address is typed in and the map is left out. */
   apiKey?: string | null;
-  /** The hotel's currency once the country is known, e.g. { label: "EUR (€)", note: "From Germany" }. */
-  currency?: { label: string; note: string } | null;
-  onChangeCurrency?: (() => void) | null;
+  /** The hotel's currency once the country is known, e.g. { code: "EUR", label: "EUR (€)", note: "From Germany" }. */
+  currency?: { code: string; label: string; note: string } | null;
+  /** The owner picked another currency after "Change". */
+  onCurrencyChange?: ((code: string) => void) | null;
 };
 
 export function formattedAddress(draft: AddressDraft): string {
@@ -53,7 +55,7 @@ export function QuickHotelAddress({
   error,
   apiKey,
   currency,
-  onChangeCurrency,
+  onCurrencyChange,
 }: QuickHotelAddressProps) {
   const key = apiKey?.trim() || null;
   const addressRevision = useRef(0);
@@ -63,6 +65,7 @@ export function QuickHotelAddress({
   );
   const [adjusting, setAdjusting] = useState(false);
   const [changingTimezone, setChangingTimezone] = useState(false);
+  const [changingCurrency, setChangingCurrency] = useState(false);
   const timezones = useMemo(() => availableTimezones(), []);
   const timezoneFollowsAddress = useRef(!draft.timezone);
 
@@ -322,11 +325,19 @@ export function QuickHotelAddress({
         </div>
         <div>
           <p className="text-sm font-semibold text-gray-950">Currency</p>
-          {currency ? (
+          {currency && changingCurrency && onCurrencyChange ? (
+            <QuickCurrencyPicker
+              value={currency.code}
+              onChange={(code) => {
+                onCurrencyChange(code);
+                setChangingCurrency(false);
+              }}
+            />
+          ) : currency ? (
             <ReadOnlyBox
               value={currency.label}
               note={`${currency.note} · used for every price`}
-              onChange={onChangeCurrency ?? null}
+              onChange={onCurrencyChange ? () => setChangingCurrency(true) : null}
             />
           ) : (
             <p className="mt-2 text-[13px] text-gray-400">Set from your country</p>
