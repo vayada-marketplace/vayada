@@ -70,22 +70,24 @@ export function quickHotelErrors(draft: QuickHotelDraft): QuickHotelErrors {
   return errors;
 }
 
-const GENERIC_WORDS = new Set(["hotel", "the", "das", "der", "die", "le", "la", "il", "el"]);
-
+/** The server's rule for the address (ensureCanonicalPropertySlug's slugify): the name, URL-safe. */
 function slug(value: string): string {
   return value
     .normalize("NFKD")
-    .replace(/[̀-ͯ]/g, "")
+    .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
-    .replace(/ß/g, "ss")
-    .split(/[^a-z0-9]+/)
-    .filter((word) => word && !GENERIC_WORDS.has(word))
-    .join("-");
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .replace(/-{2,}/g, "-")
+    .slice(0, 63)
+    .replace(/-+$/g, "");
 }
 
-/** The booking-page address shown in the preview ("alpenrose-munich.booking.vayada.com"). */
-export function previewBookingHost(displayName: string, city: string): string {
-  const name = slug(displayName) || "yourhotel";
-  const place = slug(city);
-  return `${[name, place].filter(Boolean).join("-").slice(0, 60)}.booking.vayada.com`;
+/**
+ * The booking-page address shown in the preview: what the server reserves when the hotel is created
+ * ("Hotel Alpenrose" → "hotel-alpenrose.booking.vayada.com"). If another hotel has that name, the
+ * server adds the hotel's id, which the preview can't know yet.
+ */
+export function previewBookingHost(displayName: string): string {
+  return `${slug(displayName) || "yourhotel"}.booking.vayada.com`;
 }

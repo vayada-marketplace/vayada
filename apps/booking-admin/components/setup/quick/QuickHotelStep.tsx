@@ -159,7 +159,7 @@ export function QuickHotelStep({
         preview={
           <QuickSetupPreviewCard caption="Your booking page, live as you type">
             <QuickBookingPagePreview
-              url={previewBookingHost(draft.displayName, draft.city)}
+              url={previewBookingHost(draft.displayName)}
               hotelName={draft.displayName.trim() || "Your hotel name"}
               place={
                 [draft.streetAddress.trim(), draft.city.trim()].filter(Boolean).join(", ") ||
