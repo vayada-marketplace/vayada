@@ -309,6 +309,8 @@ type MockBookingApisOptions = {
   promoCodes?: boolean;
   /** A Design Studio font pairing id, e.g. "high-end-serif". */
   fontPairing?: string;
+  /** VAY-2247: a hotel that went live before adding any photos. */
+  noPhotos?: boolean;
 };
 
 export async function mockBookingApis(page: Page, options: MockBookingApisOptions = {}) {
@@ -334,6 +336,7 @@ export async function mockBookingApis(page: Page, options: MockBookingApisOption
             },
           }
         : {}),
+      ...(options.noPhotos ? { images: [] } : {}),
       policies: { ...publicHotelProfile.hotel.policies, ...options.arrivalBounds },
       capabilities: {
         ...publicHotelProfile.hotel.capabilities,
