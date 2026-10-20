@@ -66,10 +66,7 @@ export function QuickSetupField({
         ) : null}
       </div>
       {error ? (
-        <p id={noteId} className="mt-2 flex items-start gap-1.5 text-[13px] text-red-700">
-          <ExclamationCircleIcon className="mt-px h-4 w-4 shrink-0" aria-hidden="true" />
-          {error}
-        </p>
+        <QuickSetupFieldError id={noteId} message={error} />
       ) : helper ? (
         <p id={noteId} className="mt-2 text-[13px] leading-5 text-gray-500">
           {helper}
@@ -77,4 +74,14 @@ export function QuickSetupField({
       ) : null}
     </div>
   );
+}
+
+/** The red line under a setup field: an icon and the message. */
+export function QuickSetupFieldError({ id, message }: { id?: string; message?: string | null }) {
+  return message ? (
+    <p id={id} className="mt-2 flex items-start gap-1.5 text-[13px] text-red-700">
+      <ExclamationCircleIcon className="mt-px h-4 w-4 shrink-0" aria-hidden="true" />
+      {message}
+    </p>
+  ) : null;
 }

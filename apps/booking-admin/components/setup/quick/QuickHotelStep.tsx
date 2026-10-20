@@ -1,18 +1,12 @@
 "use client";
 
-import {
-  CheckIcon,
-  ExclamationCircleIcon,
-  MapPinIcon,
-  PhoneIcon,
-  PhotoIcon,
-} from "@heroicons/react/24/outline";
+import { CheckIcon, MapPinIcon, PhoneIcon, PhotoIcon } from "@heroicons/react/24/outline";
 import { HotelIcon } from "@vayada/product-onboarding/HotelIcon";
 import type { SharedPropertyTypeOption } from "@vayada/product-onboarding";
 import { useState, type ComponentType, type FormEvent, type ReactNode, type SVGProps } from "react";
 
 import { QuickBookingPagePreview } from "./QuickBookingPagePreview";
-import { QuickSetupField } from "./QuickSetupField";
+import { QuickSetupField, QuickSetupFieldError } from "./QuickSetupField";
 import { QuickSetupPreviewCard } from "./QuickSetupPreviewCard";
 import { QuickSetupShell } from "./QuickSetupShell";
 import { QuickSetupStepLayout } from "./QuickSetupStepLayout";
@@ -34,6 +28,10 @@ export type QuickHotelStepProps = {
   address: (error: string | undefined) => ReactNode;
   /** Above the contact fields, e.g. "Use my details". */
   contactsAction?: ReactNode;
+  /** Under the contact fields, e.g. "Filled from your account". */
+  contactsNote?: ReactNode;
+  /** For the preview's placeholder price ("€ —"). */
+  currencySymbol?: string;
   logoPreviewUrl?: string | null;
   onLogoSelected: (file: File) => void;
   logoError?: string | null;
@@ -73,15 +71,6 @@ function SectionTitle({
   );
 }
 
-function FieldError({ message }: { message?: string | null }) {
-  return message ? (
-    <p className="mt-2 flex items-start gap-1.5 text-[13px] text-red-700">
-      <ExclamationCircleIcon className="mt-px h-4 w-4 shrink-0" aria-hidden="true" />
-      {message}
-    </p>
-  ) : null;
-}
-
 /**
  * VAY-2247 step 2, "Your hotel" (Paper rev 4): name with an optional logo, property type, where it
  * is and how guests reach it. The booking-page preview on the right follows as the owner types.
@@ -92,6 +81,8 @@ export function QuickHotelStep({
   propertyTypes,
   address,
   contactsAction,
+  contactsNote,
+  currencySymbol,
   logoPreviewUrl,
   onLogoSelected,
   logoError,
@@ -168,13 +159,14 @@ export function QuickHotelStep({
         preview={
           <QuickSetupPreviewCard caption="Your booking page, live as you type">
             <QuickBookingPagePreview
-              url={previewBookingHost(draft.displayName, draft.city)}
+              url={previewBookingHost(draft.displayName)}
               hotelName={draft.displayName.trim() || "Your hotel name"}
               place={
                 [draft.streetAddress.trim(), draft.city.trim()].filter(Boolean).join(", ") ||
                 "Your address"
               }
               rooms={[]}
+              currencySymbol={currencySymbol}
             />
           </QuickSetupPreviewCard>
         }
@@ -243,7 +235,7 @@ export function QuickHotelStep({
                   </button>
                 ) : null}
               </div>
-              <FieldError message={errors.propertyType} />
+              <QuickSetupFieldError message={errors.propertyType} />
             </div>
           </section>
 
@@ -281,6 +273,7 @@ export function QuickHotelStep({
                 onChange={(phone) => change({ phone }, "phone")}
               />
             </div>
+            {contactsNote}
           </section>
           {submitError ? (
             <p role="alert" className="text-sm text-red-700">
