@@ -57,7 +57,10 @@ import { createHmac } from "node:crypto";
 
 import { buildApp, type ApiAuthOptions } from "./app.js";
 import { createOrdinaryHotelSetupLogoRuntime } from "./hotelSetupLogoRuntime.js";
-import { createOrdinaryHotelSetupProfileCommand } from "./platform/hotelSetupProfileWriter.js";
+import {
+  createOrdinaryHotelSetupActivation,
+  createOrdinaryHotelSetupProfileCommand,
+} from "./platform/hotelSetupProfileWriter.js";
 import { createOrdinaryHotelSetupLaunchSettingsCommand } from "./hotelSetupLaunchSettingsRepository.js";
 import { createOrdinaryHotelSetupFeatureHubCommands } from "./hotelSetupFeatureHubOrdinary.js";
 import {
@@ -1586,6 +1589,7 @@ const hotelFirstRun = (() => {
     pricingPool: propertySetupOwnerPool,
     profile: sharedHotelSetupStatusRepository,
     profileCommand,
+    activateProperty: createOrdinaryHotelSetupActivation(hotelSetupOrdinaryPool),
     launchSettings: {
       async readDefaultLanguage(propertyId) {
         const settings = await findPropertyLaunchSettings(propertyId);
