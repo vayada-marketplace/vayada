@@ -126,3 +126,44 @@ describe("Booking Web retired booking pages", () => {
     }
   });
 });
+
+describe("Booking Web former hotel addresses (VAY-2295)", () => {
+  beforeEach(() => vi.resetAllMocks());
+
+  function resolvesTo(slug: string) {
+    vi.mocked(bookingWebPublicApi.resolveHost).mockResolvedValue({
+      slug,
+      canonicalUrl: `https://${slug}.next-booking.vayada.com/en`,
+      bookingBaseUrl: `https://${slug}.next-booking.vayada.com`,
+      customDomainUrl: null,
+      shouldRedirect: false,
+      redirectUrl: null,
+      redirectStatus: null,
+      hotel: { slug, name: "Hotel Alpenrose", defaultLocale: "en", supportedLocales: ["en", "de"] },
+    });
+  }
+
+  it("permanently redirects a former address to the hotel's current one, keeping path and query", async () => {
+    resolvesTo("alpenrose-lodge");
+    const response = await middleware(
+      new NextRequest("https://hotel-alpenrose.next-booking.vayada.com/de/book?checkIn=2026-11-12", {
+        headers: { host: "hotel-alpenrose.next-booking.vayada.com" },
+      }),
+    );
+    expect(response.status).toBe(308);
+    expect(response.headers.get("location")).toBe(
+      "https://alpenrose-lodge.next-booking.vayada.com/de/book?checkIn=2026-11-12",
+    );
+  });
+
+  it("serves the current address in place", async () => {
+    resolvesTo("alpenrose-lodge");
+    const response = await middleware(
+      new NextRequest("https://alpenrose-lodge.next-booking.vayada.com/de/book", {
+        headers: { host: "alpenrose-lodge.next-booking.vayada.com" },
+      }),
+    );
+    expect(response.status).not.toBe(308);
+    expect(response.headers.get("location")).toBeNull();
+  });
+});

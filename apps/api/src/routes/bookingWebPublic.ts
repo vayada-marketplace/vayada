@@ -1,6 +1,8 @@
 import { createPublicPricingOfferCatalog } from "../domains/publicPricingOfferCatalog.js";
 import {
   activeBookingPublicationGateConfig,
+  hotelAddressSql,
+  publicationServesAddress,
   visibleActiveBookingPublication,
 } from "../domains/activeBookingPublicationGate.js";
 import { createPublicQuoteGuestDisclosure } from "../domains/publicQuoteGuestDisclosure.js";
@@ -2759,8 +2761,7 @@ async function publishedCheckoutProperty(
        ON same_day.property_id = p.id
      WHERE s.slug = $1
        AND s.locale IS NULL
-       AND s.purpose = 'canonical'
-       AND s.status = 'active'`,
+       AND ${hotelAddressSql("s")}`,
     [
       slug,
       SAME_DAY_BOOKING_POLICY_DEFAULTS.enabled,
@@ -2776,7 +2777,9 @@ async function publishedCheckoutProperty(
     { propertyId: row.propertyId, publicContent },
     context,
   );
-  return content?.profile.hotel.slug === slug ? property : "hidden";
+  return (await publicationServesAddress(pool, row.propertyId, slug, content))
+    ? property
+    : "hidden";
 }
 
 /** Bookings belong to the hotel, so a former address that now redirects still finds them (VAY-2295). */
@@ -2794,9 +2797,7 @@ export async function resolveTargetHistoricalBookingProperty(
      JOIN hotel_catalog.properties p ON p.id = s.property_id
      LEFT JOIN distribution.public_hotel_bookability_profiles profile
        ON profile.property_id = p.id
-     WHERE s.slug = $1
-       AND ((s.purpose = 'canonical' AND s.status = 'active')
-         OR (s.purpose = 'redirect' AND s.status = 'redirected'))
+     WHERE s.slug = $1 AND ${hotelAddressSql("s")}
      LIMIT 1`,
     [slug],
   );

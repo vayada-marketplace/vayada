@@ -8,7 +8,10 @@ import {
   resolveTargetCheckoutProperty,
   resolveTargetHistoricalBookingProperty,
 } from "./routes/bookingWebPublic.js";
-import { configureActiveBookingPublicationGate } from "./domains/activeBookingPublicationGate.js";
+import {
+  configureActiveBookingPublicationGate,
+  lockActiveBookingPublication,
+} from "./domains/activeBookingPublicationGate.js";
 import type { PublicHotelProfileReadPool } from "./routes/aiHotels.js";
 
 const TEST_DATABASE_URL = process.env["TEST_DATABASE_URL"];
@@ -102,6 +105,67 @@ describe.skipIf(!TEST_DATABASE_URL)("active Booking publication reads in Postgre
     await expect(
       resolveTargetHistoricalBookingProperty(pool, "former-alpenrose"),
     ).rejects.toMatchObject({ statusCode: 404 });
+  });
+
+  it("keeps selling under former addresses across an address change (VAY-2295)", async () => {
+    await admin.query(
+      "UPDATE hotel_catalog.properties SET lifecycle_status = 'active' WHERE id = $1::uuid",
+      [propertyA],
+    );
+    await admin.query(
+      `INSERT INTO hotel_catalog.property_locations (property_id, timezone)
+       VALUES ($1::uuid, 'Europe/Vienna')`,
+      [propertyA],
+    );
+    const gate = (slug: string) =>
+      lockActiveBookingPublication(admin, slug, propertyA, { manualPayments: false });
+    const sells = async (slug: string) => {
+      await expect(gate(slug)).resolves.toBe("visible");
+      await expect(resolveTargetCheckoutProperty(pool, slug)).resolves.toMatchObject({
+        propertyId: propertyA,
+      });
+    };
+    const refuses = async (slug: string) => {
+      await expect(gate(slug)).resolves.toBe("hidden");
+      await expect(resolveTargetCheckoutProperty(pool, slug)).rejects.toMatchObject({
+        statusCode: 404,
+      });
+    };
+    configureActiveBookingPublicationGate({ servesPublications: true, manualPayments: false });
+    try {
+      await sells("hotel-alpenrose");
+      await sells("former-alpenrose");
+
+      // The address moves on before the page is rebuilt, so the page still carries the old one.
+      await admin.query(
+        "UPDATE hotel_catalog.property_slugs SET status = 'retired' WHERE slug = 'hotel-alpenrose'",
+      );
+      await admin.query(
+        `INSERT INTO hotel_catalog.property_slugs (property_id, slug, purpose, status)
+         VALUES ($1::uuid, 'alpenrose-lodge', 'canonical', 'active')`,
+        [propertyA],
+      );
+      await admin.query(
+        `UPDATE hotel_catalog.property_slugs
+         SET purpose = 'redirect', status = 'redirected',
+             redirects_to_id = (SELECT id FROM hotel_catalog.property_slugs WHERE slug = 'alpenrose-lodge')
+         WHERE slug IN ('hotel-alpenrose', 'former-alpenrose')`,
+      );
+      for (const slug of ["alpenrose-lodge", "hotel-alpenrose", "former-alpenrose"]) {
+        await sells(slug);
+      }
+
+      // A page whose own address was retired sells under none of them.
+      await admin.query(
+        `UPDATE hotel_catalog.property_slugs SET status = 'retired', redirects_to_id = NULL
+         WHERE slug = 'hotel-alpenrose'`,
+      );
+      for (const slug of ["alpenrose-lodge", "former-alpenrose", "hotel-alpenrose"]) {
+        await refuses(slug);
+      }
+    } finally {
+      configureActiveBookingPublicationGate({ servesPublications: false, manualPayments: false });
+    }
   });
 
   it("fails closed when the active revision omits required public content", async () => {
