@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import type { RequestContext } from "@vayada/backend-auth";
 import type { PoolClient } from "pg";
 
+import type { HotelSetupPropertyActivation } from "../platform/hotelSetupProfileWriter.js";
 import type { HotelSetupPropertyProfileUpdate } from "../routes/sharedHotelSetupStatus.js";
 import {
   createHotelFirstRunFactsReader,
@@ -26,13 +27,14 @@ type PricingPool = Parameters<typeof createReplacementPricingCommands>[0];
 
 export type HotelFirstRunRuntimeDependencies = Omit<
   HotelFirstRunPorts,
-  "facts" | "lock" | "locality" | "pricing"
+  "facts" | "lock" | "locality" | "pricing" | "activation"
 > &
   Omit<HotelFirstRunFactsPorts, "language" | "pricing"> & {
     lockPool: LockPool;
     pricingPool: PricingPool;
     launchSettings: { readDefaultLanguage(propertyId: string): Promise<string | null> };
     profileCommand: HotelSetupPropertyProfileUpdate;
+    activateProperty: HotelSetupPropertyActivation;
   };
 
 /** Holds a session advisory lock on its own connection for the whole run; "busy" when another run holds it. */
@@ -96,6 +98,27 @@ export function createHotelFirstRunLocality(
   };
 }
 
+/** Makes the hotel live at the end of the first run through the owner's activation (VAY-2247 1.5). */
+export function createHotelFirstRunActivation(
+  context: RequestContext,
+  activate: HotelSetupPropertyActivation,
+): HotelFirstRunPorts["activation"] {
+  return {
+    async activateWhenComplete(actor: HotelFirstRunActor) {
+      const result = await activate(context, actor.propertyId);
+      if (result.status === "activated") return { ok: true, activated: true };
+      if (result.status === "already_active") return { ok: true, activated: false };
+      return {
+        ok: false,
+        code:
+          result.status === "incomplete"
+            ? "first_run_profile_incomplete"
+            : "first_run_hotel_not_provisioning",
+      };
+    },
+  };
+}
+
 export function createHotelFirstRunRuntime(deps: HotelFirstRunRuntimeDependencies) {
   const lock = createHotelFirstRunLock(deps.lockPool);
   const language = {
@@ -110,6 +133,7 @@ export function createHotelFirstRunRuntime(deps: HotelFirstRunRuntimeDependencie
       facts,
       lock,
       locality: createHotelFirstRunLocality(context, deps.profile, deps.profileCommand),
+      activation: createHotelFirstRunActivation(context, deps.activateProperty),
     });
   };
 }

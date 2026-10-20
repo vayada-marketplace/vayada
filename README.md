@@ -7,7 +7,7 @@ Vayada is a hospitality platform with two connected products:
   reservations, and channel connectivity.
 
 The Creator Marketplace is retired (VAY-2259). Its web app is gone; its legacy
-API is switched off (api.vayada.com answers 410) and no longer runs locally, and
+API is switched off (api.vayada.com answers 410) and its source is deleted, and
 the Marketplace tables in the new database are dropped in VAY-2272.
 
 This repository is the product application monorepo. It contains every web app,

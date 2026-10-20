@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type pg from "pg";
 import { pricingCurrencyScale } from "@vayada/domain-pms";
+import { hotelAddressSql } from "./activeBookingPublicationGate.js";
 import { enqueueBookingTransitionNotifications } from "../jobs/bookingEmails.js";
 import { decodeCurrentPricingQuoteRecord } from "./currentPricingQuoteStore.js";
 import { decodePricingAcceptanceHistory } from "./pricingAcceptanceHistory.js";
@@ -344,8 +345,8 @@ export async function completePricingCardPayment(
     await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
     const property = (
       await client.query(
-        `SELECT property_id FROM hotel_catalog.property_slugs
-        WHERE slug=$1 AND locale IS NULL AND purpose='canonical' AND status='active'`,
+        `SELECT property_id FROM hotel_catalog.property_slugs s
+        WHERE s.slug=$1 AND s.locale IS NULL AND ${hotelAddressSql("s")}`,
         [slug],
       )
     ).rows;
