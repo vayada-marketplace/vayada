@@ -309,11 +309,20 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
         profile: {
           displayName: "Walk Beach Hotel",
           propertyType: "hotel",
-          contacts: [],
+          // Like the setup form: the basics (VAY-2247) include the street and both contacts.
+          contacts: [
+            {
+              channelType: "email",
+              value: "reception@walk.example.test",
+              purpose: "general",
+              isPublic: true,
+            },
+            { channelType: "phone", value: "+94 91 222 3344", purpose: "general", isPublic: true },
+          ],
           location: {
             countryCode: "LK",
             city: "Galle",
-            streetAddress: "",
+            streetAddress: "Lighthouse Street 12",
             postalCode: "",
             timezone: TIME_ZONE,
             latitude: null,
@@ -339,7 +348,9 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
         expect.arrayContaining([
           "booking.calendar:operating_calendar_missing",
           "booking.guest_experience:guest_policy_not_configured",
-          "booking.hotel_profile:hotel_profile_incomplete",
+          // VAY-2247: the basics are complete at creation; the hotel goes live once "Present your
+          // hotel" adds a description and a photo, so that is what's asked for.
+          "booking.hotel_profile:hotel_setup_content_missing",
           "booking.page_style:booking_design_missing",
           "booking.payments:billing_plan_not_selected",
           "booking.payments:payment_methods_not_configured",

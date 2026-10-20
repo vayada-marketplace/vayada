@@ -39,15 +39,23 @@ const actor: HotelFirstRunActor = {
   correlationId: null,
   requestedAt: "2026-10-20T09:00:00.000Z",
 };
+const classicDouble = {
+  name: "Classic Double",
+  numberOfRooms: 8,
+  maxGuests: 2,
+  pricePerNight: "145",
+};
 const request = {
-  room: { name: "Classic Double", numberOfRooms: 8, maxGuests: 2, pricePerNight: "145" },
+  rooms: [classicDouble],
   pricesIncludeMandatoryCharges: true,
   guestPayment: "pay_at_property" as const,
   plan: "commission" as const,
+  freeCancellationDays: 3 as const,
+  bed: "double" as const,
 };
 const facts: HotelFirstRunWriteFacts = {
   propertyId,
-  firstRunRoomTypeId: roomTypeId,
+  firstRunRoomTypeIds: [roomTypeId],
   language: "de",
   profile: {
     revision: 2,
@@ -73,7 +81,19 @@ const facts: HotelFirstRunWriteFacts = {
   plan: "none",
 };
 
-function service(options: { busy?: boolean; facts?: HotelFirstRunWriteFacts; plan?: object } = {}) {
+function service(
+  options: {
+    busy?: boolean;
+    facts?: HotelFirstRunWriteFacts;
+    plan?: object;
+    activation?: Awaited<ReturnType<HotelFirstRunPorts["activation"]["activateWhenComplete"]>>;
+  } = {},
+) {
+  const activation = {
+    activateWhenComplete: vi.fn(
+      async () => options.activation ?? { ok: true as const, activated: true },
+    ),
+  };
   const plans = {
     getPlanStatus: vi.fn(async () => ({ plan: null })),
     selectCommissionPlan: vi.fn(async () => ({ ok: true, status: "created", value: {} })),
@@ -91,8 +111,9 @@ function service(options: { busy?: boolean; facts?: HotelFirstRunWriteFacts; pla
       withPropertyLock: async (_id: string, work: () => Promise<unknown>) =>
         options.busy ? "busy" : work(),
     },
+    activation,
   } as unknown as HotelFirstRunPorts;
-  return { first: createHotelFirstRunService(ports), plans };
+  return { first: createHotelFirstRunService(ports), plans, activation };
 }
 
 beforeEach(() => {
@@ -116,6 +137,7 @@ describe("hotel first run (VAY-2247)", () => {
       currency: "EUR",
       pricePerNight: "145",
       pricesIncludeMandatoryCharges: true,
+      freeCancellationDays: 3,
     });
     expect(steps.guestRules).toHaveBeenCalledWith(expect.anything(), actor, {
       language: "de",
@@ -135,6 +157,29 @@ describe("hotel first run (VAY-2247)", () => {
     });
     expect(steps.calendar).not.toHaveBeenCalled();
     expect(steps.guestRules).not.toHaveBeenCalled();
+  });
+
+  it("makes the hotel live once every step is saved, and only then (1.5)", async () => {
+    const done = service();
+    expect(await done.first.run(actor, request, null)).toMatchObject({ ok: true });
+    expect(done.activation.activateWhenComplete).toHaveBeenCalledWith(actor);
+
+    steps.calendar.mockResolvedValue({ ok: false, code: "first_run_calendar_failed" });
+    const stopped = service();
+    await stopped.first.run(actor, request, null);
+    expect(stopped.activation.activateWhenComplete).not.toHaveBeenCalled();
+  });
+
+  it("reports a hotel it could not make live", async () => {
+    const result = await service({
+      activation: { ok: false, code: "first_run_profile_incomplete" },
+    }).first.run(actor, request, null);
+    expect(result).toMatchObject({
+      ok: false,
+      code: "first_run_profile_incomplete",
+      step: null,
+      ran: ["currency", "rooms", "payments", "pricing", "calendar", "guest_rules", "plan"],
+    });
   });
 
   it("refuses a second run for the same hotel while one is running", async () => {
@@ -162,23 +207,73 @@ describe("hotel first run (VAY-2247)", () => {
   });
 
   it("doesn't price the owner's own rooms", async () => {
-    await service({ facts: { ...facts, firstRunRoomTypeId: null } }).first.run(
-      actor,
-      request,
-      null,
-    );
+    await service({ facts: { ...facts, firstRunRoomTypeIds: [] } }).first.run(actor, request, null);
     expect(steps.pricing).not.toHaveBeenCalled();
     expect(steps.calendar).toHaveBeenCalled();
   });
 
-  it("refuses an invalid room before any step", async () => {
-    const result = await service().first.run(
-      actor,
-      { ...request, room: { ...request.room, maxGuests: 0 } },
-      null,
-    );
+  it.each([
+    ["an invalid room", [{ ...classicDouble, maxGuests: 0 }]],
+    ["no room type", []],
+    [
+      "two room types with the same name",
+      [classicDouble, { ...classicDouble, name: "classic double" }],
+    ],
+    [
+      "more than ten room types",
+      Array.from({ length: 11 }, (_, index) => ({ ...classicDouble, name: `Type ${index}` })),
+    ],
+  ])("refuses %s before any step", async (_case, rooms) => {
+    const result = await service().first.run(actor, { ...request, rooms }, null);
     expect(result).toMatchObject({ ok: false, code: "first_run_room_invalid", step: "rooms" });
     expect(steps.currency).not.toHaveBeenCalled();
+  });
+
+  it("prices each of its room types with its own price and guests (1.12)", async () => {
+    const suiteTypeId = "c3d4e5f6-a7b8-4c9d-8e0f-1a2b3c4d5e6f";
+    const suite = { name: "Alpine Suite", numberOfRooms: 4, maxGuests: 3, pricePerNight: "210" };
+    steps.pricing.mockResolvedValue({ ok: true, wrote: true });
+    await service({
+      facts: { ...facts, firstRunRoomTypeIds: [roomTypeId, suiteTypeId] },
+    }).first.run(actor, { ...request, rooms: [classicDouble, suite] }, null);
+    expect(steps.rooms).toHaveBeenCalledWith(
+      expect.anything(),
+      actor,
+      [classicDouble, suite],
+      "double",
+    );
+    expect(steps.pricing.mock.calls.map((call) => call[2])).toEqual([
+      expect.objectContaining({
+        roomTypeId,
+        pricePerNight: "145",
+        capacity: { total: 2, adults: 2, children: 1 },
+      }),
+      expect.objectContaining({
+        roomTypeId: suiteTypeId,
+        pricePerNight: "210",
+        capacity: { total: 3, adults: 3, children: 2 },
+      }),
+    ]);
+  });
+
+  it("gives every room type the owner's bed and every price the owner's cancellation (1.12b)", async () => {
+    const suiteTypeId = "c3d4e5f6-a7b8-4c9d-8e0f-1a2b3c4d5e6f";
+    const suite = { name: "Alpine Suite", numberOfRooms: 4, maxGuests: 3, pricePerNight: "210" };
+    steps.pricing.mockResolvedValue({ ok: true, wrote: true });
+    await service({
+      facts: { ...facts, firstRunRoomTypeIds: [roomTypeId, suiteTypeId] },
+    }).first.run(
+      actor,
+      { ...request, rooms: [classicDouble, suite], freeCancellationDays: 14, bed: "twin" },
+      null,
+    );
+    expect(steps.rooms).toHaveBeenCalledWith(
+      expect.anything(),
+      actor,
+      [classicDouble, suite],
+      "twin",
+    );
+    expect(steps.pricing.mock.calls.map((call) => call[2].freeCancellationDays)).toEqual([14, 14]);
   });
 });
 
