@@ -24,12 +24,14 @@ import {
 import { QuickAboutYouStep } from "./QuickAboutYouStep";
 import { QuickContactsFromAccountNote, QuickUseMyDetails } from "./QuickHotelDetails";
 import { QuickHotelAddress } from "./QuickHotelAddress";
+import { QuickHotelEdit } from "./QuickHotelEdit";
 import { QuickHotelStep } from "./QuickHotelStep";
-import { QuickPropertySetup } from "./QuickPropertySetup";
+import { QuickPropertySetup, type QuickSetupPage } from "./QuickPropertySetup";
 import { QuickSetupShell } from "./QuickSetupShell";
 import { quickHotelCurrency } from "./quickHotelCurrency";
 import { EMPTY_QUICK_HOTEL_DRAFT, type QuickHotelDraft } from "./quickHotelDraft";
 import { saveQuickHotel } from "./quickHotelSave";
+import type { QuickPublicationClient } from "./useQuickPublication";
 
 const DRAFT_STORAGE_KEY = "vayada.quickSetup.v1.hotel";
 
@@ -53,6 +55,13 @@ export type QuickSetupFlowProps = {
   storage?: Pick<Storage, "getItem" | "setItem" | "removeItem"> | null;
   /** Steps 3–5 (first room and price, how guests pay, go live) for a hotel that exists. */
   renderHotelStep?: (step: 3 | 4 | 5, propertyId: string) => ReactNode;
+  /** Step 5: the setup "Booking Engine" card's review and publish API. */
+  publication: QuickPublicationClient;
+  organizationId: string;
+  /** Where step 5 keeps its publish request for recovery (the browser's local storage). */
+  publicationStorage: Pick<Storage, "getItem" | "setItem" | "removeItem">;
+  /** Opens a page setup hands over to, for this hotel. */
+  openPage: (page: QuickSetupPage, propertyId: string) => void;
 };
 
 /** The hotel draft kept on this device, and whether its contacts came from "Use my details". */
@@ -62,7 +71,8 @@ type View =
   | { kind: "unavailable" }
   | { kind: "about_you" }
   | { kind: "hotel"; resumed: boolean }
-  | { kind: "property"; step: 3 | 4 | 5; propertyId: string };
+  | { kind: "property"; step: 3 | 4 | 5; propertyId: string }
+  | { kind: "edit_hotel"; propertyId: string };
 
 function readStored(storage: QuickSetupFlowProps["storage"]): Stored | null {
   try {
@@ -177,7 +187,9 @@ export function QuickSetupFlow(props: QuickSetupFlowProps) {
     [stored.draft.countryCode, stored.draft.currency],
   );
   const exit = () =>
-    props.onSaveAndExit(view.kind === "property" ? view.propertyId : props.propertyId);
+    props.onSaveAndExit(
+      view.kind === "property" || view.kind === "edit_hotel" ? view.propertyId : props.propertyId,
+    );
 
   if (view.kind === "loading") {
     return (
@@ -260,8 +272,28 @@ export function QuickSetupFlow(props: QuickSetupFlowProps) {
           openCheckout={props.openCheckout}
           storage={storage}
           onSaveAndExit={exit}
+          publication={props.publication}
+          organizationId={props.organizationId}
+          publicationStorage={props.publicationStorage}
+          openPage={(page) => props.openPage(page, view.propertyId)}
+          onEditHotel={() => setView({ kind: "edit_hotel", propertyId: view.propertyId })}
         />
       )
+    );
+  }
+
+  if (view.kind === "edit_hotel") {
+    return (
+      <QuickHotelEdit
+        propertyId={view.propertyId}
+        setup={setup}
+        propertyTypes={types}
+        readCurrency={props.readCurrency}
+        saveCurrency={props.saveCurrency}
+        googleMapsApiKey={props.googleMapsApiKey}
+        onDone={() => setView({ kind: "property", step: 3, propertyId: view.propertyId })}
+        onSaveAndExit={exit}
+      />
     );
   }
 

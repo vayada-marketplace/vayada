@@ -33,7 +33,7 @@ const ALL_DONE = Object.fromEntries(HOTEL_FIRST_RUN_STEPS.map((id) => [id, "done
   HotelFirstRunStepState
 >;
 const REQUEST = {
-  room: { name: "Classic Double", numberOfRooms: 8, maxGuests: 2, pricePerNight: "145" },
+  rooms: [{ name: "Classic Double", numberOfRooms: 8, maxGuests: 2, pricePerNight: "145" }],
   pricesIncludeMandatoryCharges: true,
   guestPayment: "pay_at_property",
   plan: "commission",

@@ -11,9 +11,12 @@ import {
 import { QuickBookingPagePreview, type QuickPreviewRoom } from "./QuickBookingPagePreview";
 import { QuickSetupShell } from "./QuickSetupShell";
 
-/** What the first run filled in for the hotel (VAY-2247 W1 defaults). */
-export const QUICK_GO_LIVE_DEFAULTS =
-  "Open all year · free cancellation until 3 days · check-in 15:00, out 11:00 · standard terms · Classic style";
+/** What the first run filled in for the hotel (VAY-2247 W1 defaults, with the owner's cancellation, 1.12b). */
+export function quickGoLiveDefaults(freeCancellationDays = 3): string {
+  const days = `${freeCancellationDays} day${freeCancellationDays === 1 ? "" : "s"}`;
+  return `Open all year · free cancellation until ${days} · check-in 15:00, out 11:00 · standard terms · Classic style`;
+}
+export const QUICK_GO_LIVE_DEFAULTS = quickGoLiveDefaults();
 
 export type QuickGoLiveStatus =
   | Readonly<{ kind: "loading" }>
@@ -24,7 +27,9 @@ export type QuickGoLiveStatus =
 export type QuickGoLiveStepProps = {
   hotel: { name: string; place: string; url: string };
   currency: { code: string; symbol: string };
-  room: QuickPreviewRoom | null;
+  rooms: readonly QuickPreviewRoom[];
+  /** The owner's free cancellation days from step 3 (1.12b); 3 when not given. */
+  freeCancellationDays?: number;
   status: QuickGoLiveStatus;
   onPublish: () => void;
   onRetry: () => void;
@@ -112,7 +117,8 @@ function StatusBanner({ status, onRetry }: Pick<QuickGoLiveStepProps, "status" |
 export function QuickGoLiveStep({
   hotel,
   currency,
-  room,
+  rooms,
+  freeCancellationDays,
   status,
   onPublish,
   onRetry,
@@ -151,7 +157,7 @@ export function QuickGoLiveStep({
               hotelName={hotel.name}
               place={hotel.place}
               currencySymbol={currency.symbol}
-              rooms={room ? [room] : []}
+              rooms={rooms}
             />
           </div>
           <div className="flex w-full items-start gap-3 rounded-xl border border-gray-200 bg-white px-4 py-4">
@@ -160,7 +166,9 @@ export function QuickGoLiveStep({
             </span>
             <div className="min-w-0 flex-1">
               <p className="text-sm font-semibold text-gray-950">We filled in the rest for you</p>
-              <p className="mt-1 text-sm leading-5 text-gray-600">{QUICK_GO_LIVE_DEFAULTS}</p>
+              <p className="mt-1 text-sm leading-5 text-gray-600">
+                {quickGoLiveDefaults(freeCancellationDays)}
+              </p>
             </div>
             <button
               type="button"
