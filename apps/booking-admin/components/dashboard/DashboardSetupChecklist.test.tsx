@@ -3,6 +3,22 @@ import React from "react";
 import { act, create, type ReactTestInstance, type ReactTestRenderer } from "react-test-renderer";
 import { describe, expect, it, vi } from "vitest";
 
+const i18n = vi.hoisted(() => ({ lang: "en" as "en" | "de" | "ja" }));
+vi.mock("@/lib/i18n", async () => {
+  const catalogs = {
+    en: (await import("../../messages/en.json")).default as Record<string, string>,
+    de: (await import("../../messages/de.json")).default as Record<string, string>,
+    ja: (await import("../../messages/ja.json")).default as Record<string, string>,
+  };
+  // As the app's translate: the catalog's text with {params} filled in, English when missing.
+  const t = (key: string, params: Record<string, string | number> = {}) =>
+    Object.entries(params).reduce(
+      (text, [name, value]) => text.split(`{${name}}`).join(String(value)),
+      catalogs[i18n.lang][key] ?? catalogs.en[key] ?? key,
+    );
+  return { useTranslation: () => ({ t }) };
+});
+
 import { SELECTED_HOTEL_CHANGED_EVENT } from "@/services/api/bookingHotelScope";
 import {
   BOOKING_ADMIN_CHECKLIST_PAGES,
@@ -45,7 +61,12 @@ async function mount(
   {
     navigate = vi.fn(),
     resolvePropertyId = async (): Promise<string | null> => PROPERTY,
-  }: { navigate?: (path: string) => void; resolvePropertyId?: () => Promise<string | null> } = {},
+    hotelName = "Hotel Alpenrose",
+  }: {
+    navigate?: (path: string) => void;
+    resolvePropertyId?: () => Promise<string | null>;
+    hotelName?: string;
+  } = {},
 ) {
   const client = {
     load: vi.fn(load),
@@ -61,11 +82,7 @@ async function mount(
     return (
       <div>
         <DashboardSetupChecklistChip setup={setup} />
-        <DashboardSetupChecklistCard
-          setup={setup}
-          hotelName="Hotel Alpenrose"
-          navigate={navigate}
-        />
+        <DashboardSetupChecklistCard setup={setup} hotelName={hotelName} navigate={navigate} />
       </div>
     );
   }
@@ -170,6 +187,32 @@ describe("Booking Admin dashboard setup checklist (VAY-2247 wave 2)", () => {
     await act(async () => undefined);
     expect(dashboard.state()).toBe("ready");
     expect(dashboard.client.load).toHaveBeenCalledTimes(1);
+    dashboard.renderer.unmount();
+  });
+
+  it("speaks the admin's language from Booking Admin's catalogs", async () => {
+    i18n.lang = "de";
+    try {
+      const dashboard = await mount(async () => checklist());
+      expect(dashboard.text()).toContain("Hotel Alpenrose fertig einrichten");
+      expect(dashboard.text()).toContain(
+        "Dieselbe Checkliste im PMS und im Booking Admin. Der Fortschritt wird geteilt.",
+      );
+      expect(dashboard.text()).toContain("4 von 9 erledigt");
+      expect(dashboard.text()).toContain("alle Zimmer buchbar");
+      expect(dashboard.text()).toContain("Passt so");
+      expect(dashboard.text()).toContain("öffnet Booking Admin → Designstudio");
+      await dashboard.click("Vorerst ausblenden");
+      expect(dashboard.text()).toContain("Einrichtung 4 von 9");
+      dashboard.renderer.unmount();
+    } finally {
+      i18n.lang = "en";
+    }
+  });
+
+  it("names the hotel generically until its settings answer", async () => {
+    const dashboard = await mount(async () => checklist(), { hotelName: "" });
+    expect(dashboard.text()).toContain("Finish setting up your hotel");
     dashboard.renderer.unmount();
   });
 
