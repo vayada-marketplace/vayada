@@ -20,6 +20,7 @@ export default function HotelConfigPage() {
   const [activeSection, setActiveSection] = useState<Section>("design");
   const [hotel, setHotel] = useState<SuperAdminHotel | null>(null);
   const [loading, setLoading] = useState(true);
+  const [missing, setMissing] = useState(false);
 
   useEffect(() => {
     bookingSettingsService
@@ -27,6 +28,9 @@ export default function HotelConfigPage() {
       .then((hotels) => {
         const found = hotels.find((h) => h.id === hotelId);
         if (found) setHotel(found);
+        // The list holds every property, test data included: a hotel missing from it doesn't
+        // exist, as with a mistyped or pasted link (VAY-2295).
+        else setMissing(true);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -69,18 +73,26 @@ export default function HotelConfigPage() {
                 </button>
                 <span>/</span>
                 <span className="text-gray-900 font-medium">
-                  {loading ? "..." : hotel?.name || "Hotel Configuration"}
+                  {loading
+                    ? "..."
+                    : missing
+                      ? "Hotel not found"
+                      : hotel?.name || "Hotel Configuration"}
                 </span>
               </div>
               <h1 className="text-xl font-bold text-gray-900 mt-0.5">
-                {loading ? "Loading..." : hotel?.name || "Hotel Configuration"}
+                {loading
+                  ? "Loading..."
+                  : missing
+                    ? "Hotel not found"
+                    : hotel?.name || "Hotel Configuration"}
               </h1>
             </div>
           </div>
 
           {/* Section tabs */}
           <div className="mt-4 flex gap-1">
-            {sections.map((section) => (
+            {(missing ? [] : sections).map((section) => (
               <button
                 key={section.id}
                 onClick={() => setActiveSection(section.id)}
@@ -98,17 +110,34 @@ export default function HotelConfigPage() {
       </header>
 
       {/* Content */}
-      <div className="px-4 sm:px-6 lg:px-8 py-6" style={{ height: "calc(100vh - 160px)" }}>
-        {activeSection === "design" && <DesignStudioSection hotelId={hotelId} />}
-        {activeSection === "booking" && <BookingFlowSection hotelId={hotelId} />}
-        {activeSection === "settings" && <HotelSettingsSection hotelId={hotelId} />}
-        {activeSection === "payments" && (
-          <CardPaymentsSection hotelId={hotelId} hotelName={hotel?.name ?? "this hotel"} />
-        )}
-        {activeSection === "address" && (
-          <BookingAddressSection hotelId={hotelId} currentSlug={hotel?.slug} />
-        )}
-      </div>
+      {missing ? (
+        <div className="px-4 sm:px-6 lg:px-8 py-6">
+          <div className="max-w-3xl rounded-lg border border-gray-200 bg-white p-5 text-sm text-gray-600">
+            <p>
+              There&apos;s no hotel at this link. Check the link, or open the hotel from the list.
+            </p>
+            <button
+              type="button"
+              onClick={() => router.push("/dashboard/hotels")}
+              className="mt-4 rounded-lg bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200"
+            >
+              Back to Hotels
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="px-4 sm:px-6 lg:px-8 py-6" style={{ height: "calc(100vh - 160px)" }}>
+          {activeSection === "design" && <DesignStudioSection hotelId={hotelId} />}
+          {activeSection === "booking" && <BookingFlowSection hotelId={hotelId} />}
+          {activeSection === "settings" && <HotelSettingsSection hotelId={hotelId} />}
+          {activeSection === "payments" && (
+            <CardPaymentsSection hotelId={hotelId} hotelName={hotel?.name ?? "this hotel"} />
+          )}
+          {activeSection === "address" && (
+            <BookingAddressSection hotelId={hotelId} currentSlug={hotel?.slug} />
+          )}
+        </div>
+      )}
     </div>
   );
 }

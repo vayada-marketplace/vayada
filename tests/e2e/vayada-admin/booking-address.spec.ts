@@ -21,7 +21,7 @@ async function fulfillJson(route: Route, origin: string, body: unknown, status =
   });
 }
 
-async function openAddress(page: Page, baseURL: string | undefined) {
+async function openHotel(page: Page, baseURL: string | undefined, hotelPath = propertyId) {
   const adminBaseURL = baseURL?.startsWith("http://127.0.0.1:3001")
     ? "http://localhost:3001"
     : (baseURL ?? "https://admin.localhost");
@@ -64,7 +64,12 @@ async function openAddress(page: Page, baseURL: string | undefined) {
       ],
     }),
   );
-  await page.goto(new URL(`/dashboard/hotels/${propertyId}`, adminBaseURL).toString());
+  await page.goto(new URL(`/dashboard/hotels/${hotelPath}`, adminBaseURL).toString());
+  return origin;
+}
+
+async function openAddress(page: Page, baseURL: string | undefined) {
+  const origin = await openHotel(page, baseURL);
   await expect(page.getByRole("heading", { name: "Hotel Alpenrose Munich" })).toBeVisible();
   await page.getByRole("button", { name: "Address", exact: true }).click();
   return origin;
@@ -143,4 +148,16 @@ test("explains a refusal and keeps the form", async ({ page, baseURL }, testInfo
   await expect(card.getByRole("alert")).toHaveText("Another hotel already uses this address.");
   await expect(card.getByLabel("New address")).toHaveValue("alpenrose");
   await page.screenshot({ path: testInfo.outputPath("address-refused.png"), fullPage: true });
+});
+
+// A link pasted with a stray character (here a trailing ".") names no hotel: the page says so
+// instead of showing tabs whose actions would fail (VAY-2295 follow-up).
+test("a link to a hotel that doesn't exist says so", async ({ page, baseURL }, testInfo) => {
+  await openHotel(page, baseURL, `${propertyId}.`);
+  await expect(page.getByRole("heading", { name: "Hotel not found" })).toBeVisible();
+  await expect(page.getByText("There's no hotel at this link.", { exact: false })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Address", exact: true })).toHaveCount(0);
+  await page.screenshot({ path: testInfo.outputPath("hotel-not-found.png"), fullPage: true });
+  await page.getByRole("button", { name: "Back to Hotels" }).click();
+  await expect(page).toHaveURL(/\/dashboard\/hotels$/);
 });

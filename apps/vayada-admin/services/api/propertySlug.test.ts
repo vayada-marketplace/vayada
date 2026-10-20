@@ -50,6 +50,9 @@ describe("booking page address (VAY-2295)", () => {
     expect(propertySlugErrorMessage(refusal("plan_changed"))).toBe(
       "Something changed since the preview. Preview the change again.",
     );
+    expect(propertySlugErrorMessage({ status: 400, data: { code: "invalid_property_id" } })).toBe(
+      "This hotel wasn't found. Open it from the Hotels list.",
+    );
     expect(propertySlugErrorMessage(refusal("something_new"))).toBe(
       "The address couldn't be changed. Try again.",
     );
