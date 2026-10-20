@@ -3,7 +3,7 @@ import { CheckIcon } from "@heroicons/react/24/outline";
 export type QuickPreviewRoom = Readonly<{ name: string; details: string; price: string }>;
 
 export type QuickBookingPagePreviewProps = {
-  /** Shown in the browser bar, e.g. "alpenrose-munich.booking.vayada.com". */
+  /** Shown in the browser bar, e.g. "hotel-alpenrose.booking.vayada.com". */
   url: string;
   hotelName: string;
   /** Street and city under the name. */

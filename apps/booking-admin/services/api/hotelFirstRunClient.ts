@@ -26,10 +26,19 @@ export type HotelFirstRunState = Readonly<{
 }>;
 
 export type HotelFirstRunRequest = Readonly<{
-  room: Readonly<{ name: string; numberOfRooms: number; maxGuests: number; pricePerNight: string }>;
+  /** The hotel's room types, in order: 1–10 with different names (the server's 1.12). */
+  rooms: readonly Readonly<{
+    name: string;
+    numberOfRooms: number;
+    maxGuests: number;
+    pricePerNight: string;
+  }>[];
   pricesIncludeMandatoryCharges: boolean;
   guestPayment: "pay_at_property";
   plan: "commission" | "fixed_fee";
+  /** The owner's choices for every room type (the server's 1.12b, #3594); its defaults when left out. */
+  cancellation?: Readonly<{ kind: "free_until_days_before_arrival"; days: 1 | 3 | 7 | 14 }>;
+  bed?: "double" | "queen" | "king" | "twin" | "single";
 }>;
 
 export type HotelFirstRunRunResult = Readonly<{

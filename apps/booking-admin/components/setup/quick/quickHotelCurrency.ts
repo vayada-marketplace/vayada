@@ -22,6 +22,19 @@ export function currencySymbol(code: string): string {
   }
 }
 
+/** The currency's name in the plural ("Swiss francs"), or the code when unknown. */
+export function currencyName(code: string): string {
+  try {
+    return (
+      new Intl.NumberFormat("en", { style: "currency", currency: code, currencyDisplay: "name" })
+        .formatToParts(2)
+        .find((part) => part.type === "currency")?.value ?? code
+    );
+  } catch {
+    return code;
+  }
+}
+
 export type QuickHotelCurrency = Readonly<{
   code: string;
   symbol: string;
