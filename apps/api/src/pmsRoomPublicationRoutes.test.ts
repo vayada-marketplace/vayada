@@ -391,22 +391,12 @@ describe("PMS room publication routes", () => {
           sourceRevision: roomSourceRevision,
         },
         {
-          code: "room_photo_required",
+          code: "room_media_unavailable",
           product: "pms",
           ownerDomain: "pms",
           owningStepId: "rooms",
           affectedEntity: { entityType: "room_type", entityId: roomTypeId },
-          message: "Add at least one room photo before publishing.",
-          kind: "user_fixable",
-          sourceRevision: roomSourceRevision,
-        },
-        {
-          code: "room_amenities_review_required",
-          product: "pms",
-          ownerDomain: "pms",
-          owningStepId: "rooms",
-          affectedEntity: { entityType: "room_type", entityId: roomTypeId },
-          message: "Review this room's amenities before publishing.",
+          message: "Review this room's photos before publishing.",
           kind: "user_fixable",
           sourceRevision: roomSourceRevision,
         },
@@ -414,6 +404,25 @@ describe("PMS room publication routes", () => {
       sourceRevision: JSON.stringify([[roomTypeId, roomSourceRevision]]),
     } as unknown as RoomPublicationSnapshot;
     app = await testApp(fakePorts({ snapshotResult: reversedBlockers }));
+    expect((await snapshotRequest(app)).statusCode).toBe(500);
+    await app.close();
+
+    // VAY-2247: in canonical order the same room is accepted; no photos and unreviewed amenities
+    // carry no blocker of their own, and a snapshot that still claims one is refused.
+    const canonical = structuredClone(reversedBlockers) as unknown as {
+      blockers: Array<{ code: string }>;
+    } & RoomPublicationSnapshot;
+    canonical.blockers.reverse();
+    app = await testApp(fakePorts({ snapshotResult: canonical }));
+    expect((await snapshotRequest(app)).statusCode).toBe(200);
+    await app.close();
+    const claimsPhoto = structuredClone(canonical);
+    claimsPhoto.blockers[0] = {
+      ...claimsPhoto.blockers[0]!,
+      code: "room_photo_required",
+      message: "Add at least one room photo before publishing.",
+    } as never;
+    app = await testApp(fakePorts({ snapshotResult: claimsPhoto }));
     expect((await snapshotRequest(app)).statusCode).toBe(500);
   });
 });
