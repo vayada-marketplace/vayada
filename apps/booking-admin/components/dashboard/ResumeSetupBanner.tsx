@@ -7,8 +7,11 @@ import { buildSharedHotelSetupRedirectPath, setupExitPropertyId } from "@vayada/
 import { useTranslation } from "@/lib/i18n";
 import { sharedHotelSetupApi } from "@/services/api/sharedHotelSetupClient";
 
-/** Shown after "Exit setup" brings a hotel back here while its setup is still unfinished (VAY-2249). */
-export function ResumeSetupBanner() {
+/**
+ * Shown after "Exit setup" brings a hotel back here while its setup is still unfinished (VAY-2249).
+ * `hidden` while the setup checklist shows instead (VAY-2247): the exit marker is still dropped.
+ */
+export function ResumeSetupBanner({ hidden = false }: { hidden?: boolean } = {}) {
   const { t } = useTranslation();
   const router = useRouter();
   const [propertyId, setPropertyId] = useState<string | null>(null);
@@ -44,7 +47,7 @@ export function ResumeSetupBanner() {
     };
   }, [router]);
 
-  if (!propertyId) return null;
+  if (!propertyId || hidden) return null;
   return (
     <div
       className="flex flex-col gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950 sm:flex-row sm:items-center sm:justify-between"
