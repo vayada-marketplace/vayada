@@ -3,9 +3,14 @@ import type {
   ApprovedPublicProfileImageRepository,
   PlatformMediaRoutesOptions,
 } from "../routes/platformMedia.js";
-import { createPgPlatformMediaCleanupStore } from "../jobs/platformMediaCleanup.js";
+import {
+  createPgPlatformMediaCleanupStore,
+  DEFAULT_PLATFORM_MEDIA_CLEANUP_RUNS,
+  type PlatformMediaCleanupRunName,
+} from "../jobs/platformMediaCleanup.js";
 import { createPgS3PropertyMediaCommandRepository } from "../domains/propertyMediaCommandRepository.js";
 import type { PlatformMediaServingConfig } from "./mediaServing.js";
+import { createCloudFrontMediaInvalidator } from "./platformMediaCdnInvalidation.js";
 import { createPgPlatformMediaRepository } from "./platformMediaRepository.js";
 import {
   createS3PlatformMediaAdapter,
@@ -20,6 +25,7 @@ export type PlatformMediaRuntimeInput = {
   pmsInboxEnabled: boolean;
   targetDatabaseUrl: string;
   platformMediaServing?: PlatformMediaServingConfig;
+  retiredPurge?: { cdnDistributionId: string };
 };
 
 export type PlatformMediaRuntimeFactories = {
@@ -27,6 +33,7 @@ export type PlatformMediaRuntimeFactories = {
   createAdapter: typeof createS3PlatformMediaAdapter;
   createCleanupStore: typeof createPgPlatformMediaCleanupStore;
   createPropertyMediaCommands: typeof createPgS3PropertyMediaCommandRepository;
+  createCdnInvalidator: typeof createCloudFrontMediaInvalidator;
 };
 
 export type PlatformMediaRuntime = {
@@ -38,6 +45,7 @@ export type PlatformMediaRuntime = {
   };
   inboundAttachments: PlatformMediaInboundAttachmentWriter;
   cleanupStore: ReturnType<typeof createPgPlatformMediaCleanupStore>;
+  cleanupRuns: readonly PlatformMediaCleanupRunName[];
   propertyMediaCommands: ReturnType<typeof createPgS3PropertyMediaCommandRepository>;
   routes: PlatformMediaRoutesOptions;
 };
@@ -47,6 +55,7 @@ const productionFactories: PlatformMediaRuntimeFactories = {
   createAdapter: createS3PlatformMediaAdapter,
   createCleanupStore: createPgPlatformMediaCleanupStore,
   createPropertyMediaCommands: createPgS3PropertyMediaCommandRepository,
+  createCdnInvalidator: createCloudFrontMediaInvalidator,
 };
 
 export function composePlatformMediaRuntime(
@@ -69,6 +78,13 @@ export function composePlatformMediaRuntime(
   const cleanupStore = factories.createCleanupStore({
     connectionString: input.targetDatabaseUrl,
     objectDeleter: adapter,
+    ...(input.retiredPurge
+      ? {
+          cdnInvalidator: factories.createCdnInvalidator({
+            distributionId: input.retiredPurge.cdnDistributionId,
+          }),
+        }
+      : {}),
   });
   const propertyMediaCommands = factories.createPropertyMediaCommands({
     connectionString: input.targetDatabaseUrl,
@@ -92,6 +108,9 @@ export function composePlatformMediaRuntime(
     privateDownloads: { signer: adapter, reader: adapter, serving: input.platformMediaServing },
     inboundAttachments: adapter,
     cleanupStore,
+    cleanupRuns: input.retiredPurge
+      ? [...DEFAULT_PLATFORM_MEDIA_CLEANUP_RUNS, "retiredMarketplacePurge"]
+      : DEFAULT_PLATFORM_MEDIA_CLEANUP_RUNS,
     propertyMediaCommands,
     routes: {
       repository,

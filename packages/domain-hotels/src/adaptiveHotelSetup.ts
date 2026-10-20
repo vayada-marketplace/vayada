@@ -217,48 +217,7 @@ export function parseUpdateTracksRequest(value: unknown): UpdateTracksRequest | 
 }
 
 export function parseAdaptiveHotelSetupStatus(value: unknown): AdaptiveHotelSetupStatus | null {
-  const status = withoutRetiredMarketplacePlaceholders(value);
-  return isAdaptiveHotelSetupStatus(status) ? status : null;
-}
-
-const RETIRED_MARKETPLACE_TRACK = "creator_marketplace";
-
-/**
- * An API from before VAY-2270 step 2 still lists the retired Creator Marketplace track as "not
- * selected" and sends launchReadiness.marketplacePublish as "not_applicable". Both are dropped so
- * a rollout that mixes versions keeps working; anything else about the retired track stays and
- * fails validation.
- */
-function withoutRetiredMarketplacePlaceholders(value: unknown): unknown {
-  if (!isRecord(value)) return value;
-  let next: Record<string, unknown> = value;
-  const organization = value["organization"];
-  if (isRecord(organization) && Array.isArray(organization["tracks"])) {
-    const tracks = organization["tracks"].filter(
-      (track) =>
-        !(
-          isRecord(track) &&
-          track["track"] === RETIRED_MARKETPLACE_TRACK &&
-          track["provisioning"] === "not_selected"
-        ),
-    );
-    if (tracks.length !== organization["tracks"].length) {
-      next = { ...next, organization: { ...organization, tracks } };
-    }
-  }
-  const setupPlan = value["setupPlan"];
-  const launch = isRecord(setupPlan) ? setupPlan["launchReadiness"] : undefined;
-  if (
-    isRecord(setupPlan) &&
-    isRecord(launch) &&
-    launch["marketplacePublish"] === "not_applicable"
-  ) {
-    const launchReadiness = Object.fromEntries(
-      Object.entries(launch).filter(([key]) => key !== "marketplacePublish"),
-    );
-    next = { ...next, setupPlan: { ...setupPlan, launchReadiness } };
-  }
-  return next;
+  return isAdaptiveHotelSetupStatus(value) ? value : null;
 }
 
 function isAdaptiveHotelSetupStatus(value: unknown): value is AdaptiveHotelSetupStatus {

@@ -20,12 +20,6 @@ const PROPERTY_MEDIA_ID = "13590000-0000-4000-8000-000000000002";
 const MEDIA_OBJECT_ID = "13590000-0000-4000-8000-000000000003";
 const ADDON_ID = "13590000-0000-4000-8000-000000000004";
 const OTHER_MEDIA_OBJECT_ID = "13590000-0000-4000-8000-000000000005";
-const CREATOR_ORGANIZATION_ID = "13590000-0000-4000-8000-000000000006";
-const HOTEL_ORGANIZATION_ID = "13590000-0000-4000-8000-000000000007";
-const CREATOR_PROFILE_ID = "13590000-0000-4000-8000-000000000008";
-const LISTING_ID = "13590000-0000-4000-8000-000000000009";
-const COLLABORATION_ID = "13590000-0000-4000-8000-000000000010";
-const MESSAGE_ID = "13590000-0000-4000-8000-000000000011";
 const ROOM_TYPE_ID = "13590000-0000-4000-8000-000000000012";
 const ROOM_MEDIA_OBJECT_ID = "13590000-0000-4000-8000-000000000013";
 
@@ -464,92 +458,6 @@ describe.skipIf(!URL)("production parity evidence reader (PostgreSQL)", () => {
     }
   });
 
-  it("rejects migrated Marketplace chat media without runtime migration evidence", async () => {
-    assertSafeTestDatabase(URL!);
-    const client = new pg.Client({ connectionString: URL });
-    await client.connect();
-    try {
-      await client.query(
-        `INSERT INTO identity.organizations (id, kind, name, slug)
-         VALUES
-           ($1, 'creator_workspace', 'Parity creator', 'parity-creator'),
-           ($2, 'hotel_group', 'Parity hotel', 'parity-hotel')`,
-        [CREATOR_ORGANIZATION_ID, HOTEL_ORGANIZATION_ID],
-      );
-      await client.query(
-        `INSERT INTO hotel_catalog.properties (id, public_id, display_name)
-         VALUES ($1, 'parity-private-chat', 'Parity private chat')`,
-        [PROPERTY_ID],
-      );
-      await client.query(
-        `INSERT INTO marketplace.creator_profiles (id, organization_id)
-         VALUES ($1, $2)`,
-        [CREATOR_PROFILE_ID, CREATOR_ORGANIZATION_ID],
-      );
-      await client.query(
-        `INSERT INTO marketplace.marketplace_hotel_profiles (property_id, organization_id)
-         VALUES ($1, $2)`,
-        [PROPERTY_ID, HOTEL_ORGANIZATION_ID],
-      );
-      await client.query(
-        `INSERT INTO marketplace.marketplace_offers
-           (id, property_id, organization_id, title)
-         VALUES ($1, $2, $3, 'Parity listing')`,
-        [LISTING_ID, PROPERTY_ID, HOTEL_ORGANIZATION_ID],
-      );
-      await client.query(
-        `INSERT INTO marketplace.collaborations
-           (id, creator_profile_id, creator_organization_id, property_id,
-            hotel_organization_id, offer_id, initiator_type)
-         VALUES ($1, $2, $3, $4, $5, $6, 'hotel')`,
-        [
-          COLLABORATION_ID,
-          CREATOR_PROFILE_ID,
-          CREATOR_ORGANIZATION_ID,
-          PROPERTY_ID,
-          HOTEL_ORGANIZATION_ID,
-          LISTING_ID,
-        ],
-      );
-      await client.query(
-        `INSERT INTO platform.media_objects
-           (id, bucket, storage_key, storage_kind, visibility, purpose,
-            owner_organization_id, property_id, resource_product, resource_type,
-            resource_id, lifecycle_status, source_metadata, public_approved, retained_until)
-         VALUES ($1::uuid, 'platform-media-test',
-                 'private/media/' || $1::uuid::text || '/provider_original/chat.webp',
-                 'vayada_managed', 'private', 'marketplace.collaboration_chat.attachment',
-                 $2, $3, 'marketplace', 'collaboration_chat_message', $4::text,
-                 'active', '{}'::jsonb, FALSE, now() + interval '1 year')`,
-        [MEDIA_OBJECT_ID, CREATOR_ORGANIZATION_ID, PROPERTY_ID, MESSAGE_ID],
-      );
-      await client.query(
-        `INSERT INTO platform.media_variants
-           (media_object_id, variant_name, visibility, storage_key, content_type)
-         VALUES ($1::uuid, 'provider_original', 'private',
-                 'private/media/' || $1::uuid::text || '/provider_original/chat.webp', 'image/webp')`,
-        [MEDIA_OBJECT_ID],
-      );
-      await client.query(
-        `INSERT INTO marketplace.marketplace_chat_messages
-           (id, collaboration_id, property_id, sender_type, message_type, body, message_metadata)
-         VALUES ($1, $2, $3, 'creator', 'image', '[image attachment migrated]',
-                 jsonb_build_object(
-                   'mediaObjectId', $4::text,
-                   'attachmentSource', 'platform_media_migration'
-                 ))`,
-        [MESSAGE_ID, COLLABORATION_ID, PROPERTY_ID, MEDIA_OBJECT_ID],
-      );
-
-      const evidence = await readProductionParityEvidence(config());
-
-      expect(evidence.rawLegacyMediaReferenceCount).toBeGreaterThanOrEqual(1);
-    } finally {
-      await cleanup(client);
-      await client.end();
-    }
-  });
-
   it("holds a write freeze across the complete parity callback", async () => {
     assertSafeTestDatabase(URL!);
     const setup = new pg.Client({ connectionString: URL });
@@ -626,12 +534,6 @@ async function cleanup(client: pg.Client): Promise<void> {
     [RUN_ID, STALE_RUN_ID],
   ]);
   await client.query("DELETE FROM hotel_catalog.properties WHERE id = $1", [PROPERTY_ID]);
-  await client.query("DELETE FROM marketplace.creator_profiles WHERE id = $1", [
-    CREATOR_PROFILE_ID,
-  ]);
-  await client.query("DELETE FROM identity.organizations WHERE id = ANY($1::uuid[])", [
-    [CREATOR_ORGANIZATION_ID, HOTEL_ORGANIZATION_ID],
-  ]);
 }
 
 type PrivateAssignmentOptions = {

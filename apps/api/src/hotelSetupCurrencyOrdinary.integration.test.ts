@@ -327,7 +327,7 @@ describe.skipIf(!url)("ordinary first currency and Financials default (VAY-2056)
       const scopeCommand = command("scope");
       for (const [sourceOrganization, sourceProduct, sourceKey, sourceProperty, targetKey] of [
         [org, "pms", "unrelated", null, "pms-core"],
-        [org, "marketplace", "account_access", null, "account_access"],
+        [org, "booking", "account_access", null, "account_access"],
         [org, "pms", "property-management", other, "property-management"],
         [foreignOrg, "pms", "account_access", null, "account_access"],
       ] as const) {

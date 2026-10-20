@@ -9,8 +9,6 @@ type QueryClient = Pick<pg.ClientBase, "query">;
 export const PRODUCTION_FINANCE_SOURCE_TABLES = {
   booking: ["booking_hotels", "commission_rate_changes"],
   pms: [
-    "affiliate_payout_settings",
-    "affiliates",
     "booking_checkout_charges",
     "booking_checkout_records",
     "bookings",

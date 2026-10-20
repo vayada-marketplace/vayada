@@ -35,7 +35,7 @@ const futureExpiry = Math.floor(Date.now() / 1000) + 3600;
 const retentionExpiresAt = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString();
 
 type OrganizationOverride = {
-  kind?: "hotel_group" | "creator_workspace";
+  kind?: "hotel_group" | "platform";
   status?: "active" | "suspended";
 };
 
@@ -243,8 +243,8 @@ describe("property setup route", () => {
 
   it.each([
     {
-      name: "creator-workspace organization",
-      organization: { kind: "creator_workspace" as const },
+      name: "platform organization",
+      organization: { kind: "platform" as const },
       expectedStatus: 403,
       expectedCode: "invalid_organization_scope",
     },

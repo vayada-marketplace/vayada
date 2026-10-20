@@ -159,6 +159,7 @@ describe("contact notification email (VAY-2286)", () => {
       text: "Hello",
       idempotencyKey: "platform.contact_submission:abc:v1",
       replyTo: "ana@example.com",
+      emailProduct: "platform",
     });
 
     expect(bodies).toEqual([
@@ -168,6 +169,8 @@ describe("contact notification email (VAY-2286)", () => {
         subject: "Contact form: Ana Host",
         text: "Hello",
         reply_to: "ana@example.com",
+        // VAY-2293: the Resend webhook acknowledges platform events.
+        tags: [{ name: "vayada_product", value: "platform" }],
       },
     ]);
   });

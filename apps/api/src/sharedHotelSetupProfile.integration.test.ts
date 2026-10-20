@@ -119,20 +119,18 @@ describe.skipIf(!TEST_DATABASE_URL)("canonical property profile repository", () 
         const database = decodeURIComponent(login.pathname.slice(1)).replaceAll('"', '""');
         await client.query(`GRANT CONNECT ON DATABASE "${database}" TO ${role}`);
         await client.query(`GRANT USAGE ON SCHEMA
-        hotel_catalog, identity, finance, booking, marketplace, platform TO ${role}`);
+        hotel_catalog, identity, finance, booking, platform TO ${role}`);
         await client.query(`GRANT SELECT ON
         identity.organizations, identity.organization_resource_links,
         identity.product_entitlements, finance.billing_entitlements,
         hotel_catalog.properties, hotel_catalog.property_locations,
         hotel_catalog.property_contact_channels,
         hotel_catalog.organization_setup_track_intents,
-        booking.booking_settings, marketplace.marketplace_hotel_profiles,
-        platform.idempotency_keys TO ${role}`);
+        booking.booking_settings, platform.idempotency_keys TO ${role}`);
         await client.query(`GRANT INSERT ON
         hotel_catalog.properties, hotel_catalog.property_locations,
         hotel_catalog.property_contact_channels,
         identity.organization_resource_links, booking.booking_settings,
-        marketplace.marketplace_hotel_profiles,
         platform.idempotency_keys, platform.product_audit_events TO ${role}`);
         await client.query(`GRANT UPDATE ON platform.idempotency_keys TO ${role}`);
         // Existing location triggers record a separate canonical owner revision.
@@ -416,8 +414,8 @@ describe.skipIf(!TEST_DATABASE_URL)("canonical property profile repository", () 
          'property.hero_image',
          $2::uuid,
          $3::uuid,
-         'marketplace',
-         'hotel_profile',
+         'hotel_catalog',
+         'property',
          $3,
          'active',
          'image/webp',

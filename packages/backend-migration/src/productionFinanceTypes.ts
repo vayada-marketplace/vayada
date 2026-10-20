@@ -49,7 +49,8 @@ export type ProductionFinanceDispositionReasonCode =
   | "FIXED_PLAN_BILLING_PRICE_DIRTY"
   | "FIXED_PLAN_BILLING_PRICE_EVIDENCE_REQUIRED"
   | "INVALID_FIXED_PLAN_BILLING_EVIDENCE"
-  | "FIXED_PLAN_BILLING_AMOUNT_MISMATCH";
+  | "FIXED_PLAN_BILLING_AMOUNT_MISMATCH"
+  | "RETIRED_AFFILIATE_PROGRAM";
 
 export type ProductionFinanceDisposition = {
   sourceDatabase: "booking" | "pms";
@@ -119,8 +120,6 @@ export type FinanceBuildContext = {
   organizationByResource: Map<string, string>;
   guestBookingByPmsId: Map<string, FinanceGuestBooking>;
   pmsBookingById: Map<string, IdentitySourceRow>;
-  pmsAffiliateById: Map<string, IdentitySourceRow>;
-  pmsAffiliatesByUserId: Map<string, IdentitySourceRow[]>;
   pmsSettingsByProperty: Map<string, IdentitySourceRow>;
   plannedTargetIdsByTable: Map<string, Set<string>>;
   quarantinedSourceRows: Set<IdentitySourceRow>;
