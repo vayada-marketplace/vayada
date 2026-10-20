@@ -28,6 +28,9 @@ import {
   getAuthWorkosOrganizationId,
 } from "@/services/auth/sessionStore";
 import { AdaptiveRoomAuthoringSetupController } from "./adaptive/rooms/AdaptiveRoomAuthoringSetupController";
+import { QuickSetupFlow } from "./quick/QuickSetupFlow";
+import { hotelFirstRunApi } from "@/services/api/hotelFirstRunClient";
+import { onboardingPricingApi } from "@/services/api/onboardingPricingClient";
 import { productHandoffReturnTo } from "./productHandoffReturnTo";
 
 import {
@@ -52,9 +55,12 @@ const PROPERTY_LAUNCH_SETTINGS_API = {
 export function SharedHotelSetupPage({
   defaultEntryProduct,
   airbnbImportEnabled = false,
+  quickSetupEnabled = false,
 }: {
   defaultEntryProduct: SharedHotelSetupEntryProduct;
   airbnbImportEnabled?: boolean;
+  /** VAY-2247: the new first run (ONBOARDING_V2); adding a second hotel keeps the wizard for now. */
+  quickSetupEnabled?: boolean;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -211,6 +217,36 @@ export function SharedHotelSetupPage({
     );
   }
 
+  if (quickSetupEnabled && !initialAddProperty) {
+    return (
+      <QuickSetupFlow
+        account={{
+          email: accountContactEmail ?? "",
+          name: accountName,
+          phone: accountContactPhone,
+        }}
+        saveAccount={async (accountDetails) => {
+          await authService.updateAccountDetails(accountDetails);
+          setAccountName(
+            normalizeSharedAccountName(accountDetails.firstName, accountDetails.lastName),
+          );
+          setAccountContactPhone(accountDetails.phone ?? null);
+        }}
+        setup={sharedHotelSetupApi}
+        firstRun={hotelFirstRunApi}
+        saveCurrency={async (propertyId, currency) => {
+          const owners = await onboardingPricingApi.load(propertyId, { cache: "no-store" });
+          await onboardingPricingApi.saveCurrency(propertyId, currency, owners);
+        }}
+        propertyId={initialPropertyId}
+        onPropertyCreated={handlePropertySelected}
+        onSaveAndExit={(propertyId) => handleExit(propertyId)}
+        googleMapsApiKey={process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY}
+        storage={quickSetupStorage()}
+      />
+    );
+  }
+
   if (
     !isSharedAccountDetailsComplete({
       name: accountName,
@@ -336,6 +372,15 @@ function loginPathForSetup(): string {
   if (typeof window === "undefined") return ROUTES.LOGIN;
   const returnTo = `${window.location.pathname}${window.location.search}`;
   return `${ROUTES.LOGIN}?returnTo=${encodeURIComponent(returnTo)}`;
+}
+
+/** This device's storage for the hotel draft, when the browser allows it. */
+function quickSetupStorage(): Storage | null {
+  try {
+    return typeof window === "undefined" ? null : window.localStorage;
+  } catch {
+    return null;
+  }
 }
 
 export function setupPathForSelectedProperty(query: string, propertyId: string): string {
