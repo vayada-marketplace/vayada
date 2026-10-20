@@ -4,7 +4,10 @@ import pg, { type QueryResultRow } from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { createActiveBookingPublicationProfileRepository } from "./routes/activeBookingPublicationProfile.js";
-import { resolveTargetCheckoutProperty } from "./routes/bookingWebPublic.js";
+import {
+  resolveTargetCheckoutProperty,
+  resolveTargetHistoricalBookingProperty,
+} from "./routes/bookingWebPublic.js";
 import { configureActiveBookingPublicationGate } from "./domains/activeBookingPublicationGate.js";
 import type { PublicHotelProfileReadPool } from "./routes/aiHotels.js";
 
@@ -84,6 +87,21 @@ describe.skipIf(!TEST_DATABASE_URL)("active Booking publication reads in Postgre
       hotel: { propertyId: propertyA, slug: "hotel-alpenrose" },
     });
     await expect(repository.findProfileBySlug("inactive-alpenrose")).resolves.toBeNull();
+  });
+
+  it("finds a hotel's bookings by its former address (VAY-2295)", async () => {
+    for (const slug of ["hotel-alpenrose", "former-alpenrose"]) {
+      await expect(resolveTargetHistoricalBookingProperty(pool, slug)).resolves.toMatchObject({
+        propertyId: propertyA,
+      });
+    }
+    await admin.query(
+      `UPDATE hotel_catalog.property_slugs SET status = 'retired', redirects_to_id = NULL
+       WHERE slug = 'former-alpenrose'`,
+    );
+    await expect(
+      resolveTargetHistoricalBookingProperty(pool, "former-alpenrose"),
+    ).rejects.toMatchObject({ statusCode: 404 });
   });
 
   it("fails closed when the active revision omits required public content", async () => {

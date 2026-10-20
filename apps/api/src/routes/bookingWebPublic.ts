@@ -2779,6 +2779,7 @@ async function publishedCheckoutProperty(
   return content?.profile.hotel.slug === slug ? property : "hidden";
 }
 
+/** Bookings belong to the hotel, so a former address that now redirects still finds them (VAY-2295). */
 export async function resolveTargetHistoricalBookingProperty(
   pool: BookingWebQueryExecutor,
   slug: string,
@@ -2794,8 +2795,8 @@ export async function resolveTargetHistoricalBookingProperty(
      LEFT JOIN distribution.public_hotel_bookability_profiles profile
        ON profile.property_id = p.id
      WHERE s.slug = $1
-       AND s.purpose IN ('canonical', 'alias')
-       AND s.status = 'active'
+       AND ((s.purpose = 'canonical' AND s.status = 'active')
+         OR (s.purpose = 'redirect' AND s.status = 'redirected'))
      LIMIT 1`,
     [slug],
   );
