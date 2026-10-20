@@ -4,6 +4,7 @@ import type {
   BookingLaunchCatalogEvidencePort,
   BookingLaunchOwnerBlocker,
 } from "@vayada/domain-booking";
+import { PUBLIC_BOOKABILITY_SLUG_PATTERN, isValidTimeZone } from "@vayada/domain-distribution";
 import {
   BOOKING_OWNER_SNAPSHOT_VERSION,
   type BookingPublicationOwnerSnapshotPort,
@@ -263,8 +264,12 @@ async function load(
   // A city and country the hotel keeps private need the box ticked, not new data (VAY-2288).
   if (!first.countryCode || !first.city) blockers.push(blocker("hotel_public_locality_missing"));
   else if (!localityPublic) blockers.push(blocker("hotel_public_locality_hidden"));
+  // The page can't be built from an address or time zone it can't use (VAY-2292).
   if (!content.slug) blockers.push(blocker("hotel_canonical_slug_missing"));
+  else if (!PUBLIC_BOOKABILITY_SLUG_PATTERN.test(content.slug))
+    blockers.push(blocker("hotel_canonical_slug_invalid"));
   if (!content.timezone) blockers.push(blocker("hotel_timezone_missing"));
+  else if (!isValidTimeZone(content.timezone)) blockers.push(blocker("hotel_timezone_invalid"));
   if (mediaBlocker) blockers.push(mediaBlocker);
   else if (content.images.length === 0) blockers.push(blocker("hotel_public_media_missing"));
   return {

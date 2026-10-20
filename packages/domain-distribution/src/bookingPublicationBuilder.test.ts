@@ -121,7 +121,7 @@ describe("Booking publication builder", () => {
           ...snapshots.hotel_catalog,
           content: {
             ...snapshots.hotel_catalog.content,
-            publicContacts: [{ type: "email", value: "not-an-email" }],
+            timezone: "Europe/Atlantis",
           },
         },
       }),
@@ -129,7 +129,7 @@ describe("Booking publication builder", () => {
       outcome: "rejected",
       code: "public_content_incomplete",
       reason: "profile",
-      issuePaths: ["hotel.publicContacts.0.value"],
+      issuePaths: ["hotel.timezone"],
     });
 
     await expect(run(readiness, {}, "http")).resolves.toEqual({
@@ -194,8 +194,8 @@ describe("Booking publication builder", () => {
         ...snapshots.hotel_catalog,
         content: {
           ...snapshots.hotel_catalog.content,
-          location: { ...snapshots.hotel_catalog.content.location, country: "lk" },
-          publicContacts: [{ type: "website", value: "www.private-hotel.test" }],
+          timezone: "Europe/Atlantis",
+          location: { ...snapshots.hotel_catalog.content.location, city: " " },
         },
       },
     });
@@ -203,9 +203,70 @@ describe("Booking publication builder", () => {
       outcome: "rejected",
       code: "public_content_incomplete",
       reason: "profile",
-      issuePaths: ["hotel.location.country", "hotel.publicContacts.0.value"],
+      issuePaths: ["hotel.timezone", "hotel.location.city"],
     });
-    expect(JSON.stringify(result)).not.toMatch(/private-hotel|"lk"/);
+    expect(JSON.stringify(result)).not.toMatch(/Atlantis/);
+  });
+
+  it("leaves off what the page can't show instead of failing it (VAY-2292)", async () => {
+    const readiness = await readyEvidence(),
+      snapshots = snapshotSet(readiness);
+    const catalog = snapshots.hotel_catalog.content;
+    const photo = catalog.images[0]!;
+    const [room] = rooms();
+    const result = await run(readiness, {
+      hotel_catalog: {
+        ...snapshots.hotel_catalog,
+        content: {
+          ...catalog,
+          location: { ...catalog.location, country: "de", city: " Munich ", region: "" },
+          images: [{ ...photo, alt: "  " }, photo],
+          publicContacts: [
+            { type: "website", value: "http://hotel.test" },
+            { type: "instagram", value: "https://instagram.test/hotel#top" },
+            { type: "x", value: " https://x.test/hotel " },
+            { type: "email", value: "not-an-email" },
+            { type: "phone", value: "+94 771 021 677" },
+            { type: "phone", value: "+94 771 021 677 " },
+          ],
+        },
+      },
+      pms: {
+        ...snapshots.pms,
+        content: {
+          ...snapshots.pms.content,
+          rooms: [
+            {
+              ...room!,
+              bathrooms: 1.5,
+              images: [{ url: "https://cdn.test/room.jpg", alt: "" }, ...room!.images],
+            },
+          ],
+        },
+      },
+    });
+    if (result.outcome !== "built") throw new Error(JSON.stringify(result));
+    const { profile, rooms: published } = result.build.publicContent;
+    expect(profile.hotel.location).toMatchObject({ country: "DE", city: "Munich", region: null });
+    expect(profile.hotel.images).toEqual([{ url: photo.url, alt: null }]);
+    expect(profile.hotel.publicContacts).toEqual([
+      { type: "x", value: "https://x.test/hotel" },
+      { type: "phone", value: "+94 771 021 677" },
+    ]);
+    // Setup offers half bathrooms; the room's photo shows once, without blank text.
+    expect(published[0]).toMatchObject({
+      bathrooms: 1.5,
+      images: [{ url: "https://cdn.test/room.jpg", alt: null }],
+    });
+
+    const odd = await run(readiness, {
+      pms: {
+        ...snapshots.pms,
+        content: { ...snapshots.pms.content, rooms: [{ ...room!, bathrooms: 1.25 }] },
+      },
+    });
+    if (odd.outcome !== "built") throw new Error(JSON.stringify(odd));
+    expect(odd.build.publicContent.rooms[0]?.bathrooms).toBeNull();
   });
 });
 

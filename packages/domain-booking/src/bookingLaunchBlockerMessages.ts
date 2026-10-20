@@ -8,7 +8,10 @@ export const BOOKING_LAUNCH_BLOCKER_MESSAGES: Readonly<Record<string, string>> =
   hotel_public_locality_hidden:
     "Turn on 'Show city and country publicly' so guests see where you are.",
   hotel_canonical_slug_missing: "Your hotel needs a booking page address.",
+  hotel_canonical_slug_invalid:
+    "Your booking page address can't be used. Contact support to change it.",
   hotel_timezone_missing: "Add your hotel's time zone in Present your hotel.",
+  hotel_timezone_invalid: "Choose your hotel's time zone again in Present your hotel.",
   hotel_public_media_missing: "Add at least one hotel photo in Present your hotel.",
   hotel_public_media_processing: "Your hotel photos are still being processed.",
   hotel_public_media_unavailable:
