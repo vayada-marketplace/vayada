@@ -32,7 +32,12 @@
     "./pricingSetupAmounts": "./src/pricingSetupAmounts.ts",
     "./firstPricingSetupMessages": "./src/firstPricingSetupMessages.ts",
     "./bookingPublicationReviewApi": "./src/bookingPublicationReviewApi.ts",
-    "./setupProfileFields": "./src/setupProfileFields.tsx"
+    "./setupProfileFields": "./src/setupProfileFields.tsx",
+    "./GooglePlacesAddressField": "./src/GooglePlacesAddressField.tsx",
+    "./GoogleAddressMap": "./src/GoogleAddressMap.tsx",
+    "./googleMaps": "./src/googleMaps.ts",
+    "./TimezoneField": "./src/TimezoneField.tsx",
+    "./timezones": "./src/timezones.ts"
   },
   "dependencies": {
     "@vayada/domain-booking": "*",
