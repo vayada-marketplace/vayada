@@ -14,9 +14,8 @@ export default function TermsPage() {
               Terms of Service (AGB)
             </h1>
             <p className="text-gray-600">
-              <strong>Effective Date:</strong> November 20, 2026
+              <strong>Effective Date:</strong> October 20, 2026
             </p>
-            <p className="text-gray-600">Until then, the version of October 17, 2026 applies.</p>
           </div>
 
           <div className="prose prose-lg max-w-none space-y-8 text-gray-700">
