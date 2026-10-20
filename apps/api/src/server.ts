@@ -289,7 +289,11 @@ import { createPgTargetBookingPromoCodesRepository } from "./routes/bookingPromo
 import { promotePulledChannexBookingRevision } from "./routes/providerWebhooks.js";
 import { createTargetBookingWebCheckoutAdapter } from "./routes/bookingWebPublic.js";
 import { createBookingWebDisplayRates } from "./routes/bookingWebExchangeRates.js";
-import { createPgTargetBookingSettingsRepository } from "./routes/bookingSettings.js";
+import {
+  createPgTargetBookingSettingsRepository,
+  toLocalizationSettingsResponse,
+} from "./routes/bookingSettings.js";
+import { createHotelFirstRunRuntime } from "./domains/hotelFirstRunRuntime.js";
 import { createTargetBookingCustomDomainRepository } from "./routes/bookingCustomDomain.js";
 import {
   createTargetFinancePropertySettingsRepository,
@@ -1545,6 +1549,72 @@ const airbnbImportRuntime = config.airbnbImport
       allowedOrigins: config.authSession!.authAllowedOrigins,
     })
   : undefined;
+// VAY-2247: the server's first run for the new setup in Booking Admin, behind HOTEL_FIRST_RUN_ENABLED.
+// It only reuses runtimes built above; when one is missing the route stays unmounted (fail closed).
+const hotelFirstRun = (() => {
+  if (!config.hotelFirstRunEnabled) return undefined;
+  const ordinary =
+    "hotelSetupProfileCommand" in hotelSetupOrdinaryOptions ? hotelSetupOrdinaryOptions : undefined;
+  const currency = ordinary?.hotelSetupCurrencyCommandPort;
+  const profileCommand = ordinary?.hotelSetupProfileCommand;
+  const readiness = bookingPublicationRuntime?.routes.readinessProvider;
+  const calendarRuntime = pmsOperatingCalendarRuntime;
+  const materialization = calendarRuntime?.routes.materializationPort;
+  if (
+    !hotelSetupOrdinaryPool ||
+    !currency ||
+    !profileCommand ||
+    !pmsRoomSetupRuntime ||
+    !financeSubscriptionService ||
+    !readiness ||
+    !calendarRuntime ||
+    !materialization
+  ) {
+    process.emitWarning(
+      "HOTEL_FIRST_RUN_ENABLED is on, but a runtime it needs is not configured; the first-run route stays unmounted",
+    );
+    return undefined;
+  }
+  const hotelFirstRunTerms = createBookingGuestTermsStore(propertySetupOwnerPool, (client) =>
+    createPgBookingGuestPolicyScopeAuthorizationPort({ pool: client }),
+  );
+  return createHotelFirstRunRuntime({
+    lockPool: hotelSetupOrdinaryPool,
+    pricingPool: propertySetupOwnerPool,
+    profile: sharedHotelSetupStatusRepository,
+    profileCommand,
+    launchSettings: {
+      async readDefaultLanguage(propertyId) {
+        const settings = await findPropertyLaunchSettings(propertyId);
+        return settings ? toLocalizationSettingsResponse(settings).defaultLanguage : null;
+      },
+    },
+    pricingRead: pmsPricingReadModel,
+    currency,
+    roomRead: propertySetupPmsRuntime.roomFacts,
+    roomFacts: pmsRoomSetupRuntime.roomFactsCommands,
+    units: pmsRoomSetupRuntime.physicalUnits,
+    labels: pmsRoomSetupRuntime.operationalLabels,
+    paymentRead: financePaymentSetupRuntime.routes.readPort,
+    payments: financePaymentSetupRuntime.routes.commandPort,
+    calendarRead: calendarRuntime.routes.readPort,
+    preview: calendarRuntime.routes.impactPreviewPort,
+    calendar: calendarRuntime.routes.commandPort,
+    materialization,
+    guestRules: bookingGuestChoiceStore,
+    terms: {
+      read: (scope) => hotelFirstRunTerms.read(scope),
+      // The first run only saves the non-empty default text, so the saved text is never null here.
+      save: async (scope, text, expected) => ({
+        termsText: (await hotelFirstRunTerms.save(scope, text, expected)).termsText ?? "",
+      }),
+    },
+    designRead: bookingDesignRepository,
+    design: bookingDesignRepository,
+    plans: financeSubscriptionService,
+    readiness,
+  });
+})();
 const app = buildApp({
   airbnbImports: airbnbImportRuntime?.routes,
   databaseHealth: postgresRuntime.healthCheck(targetDatabaseUrl),
@@ -1803,6 +1873,7 @@ const app = buildApp({
   pmsNavigationModuleRepository,
   bookingModuleRepository,
   ...hotelSetupOrdinaryOptions,
+  hotelFirstRun,
   financialsActivationPropertyIds: config.financialsActivationPropertyIds,
   pmsReviewRepository: createPgPmsReviewRepository({
     connectionString: targetDatabaseUrl,
