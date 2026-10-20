@@ -15,8 +15,9 @@ import {
   HotelSetupChecklistChip,
 } from "@vayada/product-onboarding/HotelSetupChecklistCard";
 import type { HotelSetupChecklistClient } from "@vayada/product-onboarding/hotelSetupChecklistApi";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { useTranslation } from "@/lib/i18n";
 import { getBookingHotelPropertyLink } from "@/services/api/bookingPropertyLinkClient";
 import {
   getSelectedBookingHotelId,
@@ -24,6 +25,8 @@ import {
 } from "@/services/api/bookingHotelScope";
 import { hotelSetupChecklistApi } from "@/services/api/hotelSetupChecklistClient";
 import { getAuthCsrfToken } from "@/services/auth/sessionStore";
+
+import { bookingAdminChecklistMessages } from "./bookingAdminChecklistMessages";
 
 const PMS_FRONTEND_URL = process.env.NEXT_PUBLIC_PMS_FRONTEND_URL || "https://pms.vayada.com";
 
@@ -150,6 +153,8 @@ export function DashboardSetupChecklistCard({
   hotelName: string;
   navigate?: (path: string) => void;
 }) {
+  const { t } = useTranslation();
+  const messages = useMemo(() => bookingAdminChecklistMessages(t), [t]);
   const { state } = setup;
   if (state.kind !== "ready") return null;
   const open = (item: HotelSetupChecklistItemId) => {
@@ -176,14 +181,21 @@ export function DashboardSetupChecklistCard({
       onLooksGood={setup.looksGood}
       onHide={setup.hide}
       onDismiss={setup.dismiss}
+      messages={messages}
     />
   );
 }
 
 /** The "Setup N of 9" pill while the checklist is hidden; it brings the card back. */
 export function DashboardSetupChecklistChip({ setup }: { setup: DashboardSetupChecklist }) {
+  const { t } = useTranslation();
+  const messages = useMemo(() => bookingAdminChecklistMessages(t), [t]);
   if (setup.state.kind !== "ready") return null;
   return (
-    <HotelSetupChecklistChip checklist={setup.state.checklist} onShow={() => void setup.show()} />
+    <HotelSetupChecklistChip
+      checklist={setup.state.checklist}
+      onShow={() => void setup.show()}
+      messages={messages}
+    />
   );
 }

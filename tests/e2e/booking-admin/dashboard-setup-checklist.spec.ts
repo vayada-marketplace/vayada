@@ -137,3 +137,20 @@ test("lays the checklist out for phones (c02-0m)", async ({ page }, testInfo) =>
   ).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("ba-dashboard-checklist-m.png") });
 });
+
+test("speaks the admin's language (German)", async ({ page }, testInfo) => {
+  await page.addInitScript(() => localStorage.setItem("admin_language", "de"));
+  await mockSetupChecklist(page, liveChecklistFacts(BOOKING_ADMIN_PROPERTY_ID));
+  await page.goto("/dashboard");
+
+  const card = page.getByRole("region", { name: "Hotel Alpenrose fertig einrichten" });
+  await expect(card).toBeVisible();
+  await expect(
+    card.getByText(
+      "Dieselbe Checkliste im PMS und im Booking Admin. Der Fortschritt wird geteilt.",
+    ),
+  ).toBeVisible();
+  await expect(card.getByText("4 von 9 erledigt").filter({ visible: true })).toBeVisible();
+  await expect(card.getByRole("button", { name: "Passt so" })).toHaveCount(2);
+  await page.screenshot({ path: testInfo.outputPath("ba-dashboard-checklist-de-d.png") });
+});
