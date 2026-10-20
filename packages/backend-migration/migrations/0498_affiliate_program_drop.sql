@@ -2,14 +2,11 @@
 -- Owner: platform / VAY-2272 (Marketplace removal step 5, M-C, window W2 with 0499). HOLD: merge only
 -- with Flamur's yes, after the counts-0498 before-runs.
 --
--- Drops the retired affiliate program: 33 of its 38 tables in marketplace, booking and finance and
--- 21 of its functions, the percentage policy rates too (Flamur, 2026-10-20). Law variant (decision
--- 2): production recorded an affiliate payment, so five finance tables stay as a read-only archive
--- with their payee names: the earning journal, the earning allocations and their items, and the
--- payout payment evidence and its items. They reference no dropped table and keep their own guards.
--- The journal's two insert-time validators read booking tables that go away, so they go first.
--- The legacy finance import (VAY-1358) records retired affiliate rows as RETIRED_AFFILIATE_PROGRAM
--- dispositions, which the dispositions reason-code CHECK now accepts.
+-- Drops the retired affiliate program: all 38 of its tables in marketplace, booking and finance and
+-- 24 of its functions, with every row: the percentage policy rates and the money records (earning
+-- journal, allocations, payout payment evidence) too. Decision 2 (Flamur, 2026-10-20): delete
+-- everything, no export. The legacy finance import (VAY-1358) records retired affiliate rows as
+-- RETIRED_AFFILIATE_PROGRAM dispositions, which the dispositions reason-code CHECK now accepts.
 -- Rollback: any image built from main at or after f027728cc (no image since reads these tables). The
 -- dropped data is gone and no rollback restores it.
 
@@ -18,8 +15,7 @@ SET LOCAL lock_timeout = '5s';
 SET LOCAL statement_timeout = '15s';
 
 -- Every table this changes, in one statement and one order: the dropped tables, every table one of
--- them references (dropping a foreign key removes its triggers there), the archive and the
--- dispositions table.
+-- them references (dropping a foreign key removes its triggers there) and the dispositions table.
 LOCK TABLE
   booking.affiliate_click_admissions, booking.affiliate_click_contexts, booking.affiliate_destination_versions,
   booking.affiliate_original_booking_bindings, booking.affiliate_referral_production_preflight_revocations,
@@ -38,12 +34,9 @@ LOCK TABLE
   marketplace.affiliate_links, marketplace.affiliate_offer_terms_drafts, marketplace.affiliate_participation_attempts,
   marketplace.affiliate_participations, marketplace.affiliate_programs, marketplace.affiliate_published_terms,
   marketplace.creator_profiles, marketplace.marketplace_offers, marketplace.property_affiliates,
-  platform.product_audit_events, platform.production_finance_migration_dispositions,
+  platform.idempotency_keys, platform.product_audit_events, platform.production_finance_migration_dispositions,
   pms.operational_booking_assignments
   IN ACCESS EXCLUSIVE MODE;
-
-DROP TRIGGER affiliate_earning_journal_reject_validation_probe ON finance.affiliate_earning_journal;
-DROP TRIGGER affiliate_earning_journal_reject_synthetic_original ON finance.affiliate_earning_journal;
 
 DROP TABLE
   marketplace.affiliate_discrepancy_resolutions, marketplace.affiliate_discrepancy_claims,
@@ -58,6 +51,8 @@ DROP TABLE
   booking.affiliate_source_capability_preflight_revocations, booking.affiliate_source_capability_production_preflights,
   booking.affiliate_source_capability_certifications, booking.affiliate_validation_booking_bindings,
   booking.affiliate_validation_probe_revocations, booking.affiliate_validation_probes,
+  finance.affiliate_payout_payment_evidence_items, finance.affiliate_payout_payment_evidence,
+  finance.affiliate_earning_allocation_items, finance.affiliate_earning_allocations, finance.affiliate_earning_journal,
   finance.affiliate_earning_reconciliation_revisions, finance.affiliate_eligible_earning_revisions,
   finance.affiliate_percentage_policy_approvals, finance.affiliate_percentage_policy_versions;
 
@@ -69,27 +64,12 @@ DROP FUNCTION
   booking.reject_synthetic_binding_with_earning(), booking.try_affiliate_booking_uuid(text),
   booking.valid_affiliate_certification_references(jsonb), booking.verify_affiliate_referral_transport_certification(),
   booking.verify_affiliate_source_capability_certification(),
-  finance.reject_affiliate_validation_probe_earning(), finance.reject_synthetic_original_booking_earning(),
+  finance.guard_affiliate_earning_allocation_evidence(), finance.reject_affiliate_validation_probe_earning(),
+  finance.reject_synthetic_original_booking_earning(), finance.validate_affiliate_payout_payment_evidence_aggregate(),
+  finance.validate_affiliate_payout_payment_evidence_item(),
   marketplace.reject_affiliate_click_occurrence_mutation(), marketplace.reject_affiliate_offer_draft_mutation(),
   marketplace.stamp_affiliate_agreement_lifecycle_event(), marketplace.valid_affiliate_claim_references(jsonb),
   marketplace.validate_affiliate_discrepancy_claim(), marketplace.validate_affiliate_discrepancy_resolution();
-
--- No code writes the archive any more, and the law keeps its rows as they are: every write fails.
-CREATE TRIGGER affiliate_earning_journal_retired_read_only
-  BEFORE INSERT OR UPDATE OR DELETE ON finance.affiliate_earning_journal
-  FOR EACH STATEMENT EXECUTE FUNCTION platform.prevent_append_only_mutation();
-CREATE TRIGGER affiliate_earning_allocations_retired_read_only
-  BEFORE INSERT OR UPDATE OR DELETE ON finance.affiliate_earning_allocations
-  FOR EACH STATEMENT EXECUTE FUNCTION platform.prevent_append_only_mutation();
-CREATE TRIGGER affiliate_earning_allocation_items_retired_read_only
-  BEFORE INSERT OR UPDATE OR DELETE ON finance.affiliate_earning_allocation_items
-  FOR EACH STATEMENT EXECUTE FUNCTION platform.prevent_append_only_mutation();
-CREATE TRIGGER affiliate_payout_payment_evidence_retired_read_only
-  BEFORE INSERT OR UPDATE OR DELETE ON finance.affiliate_payout_payment_evidence
-  FOR EACH STATEMENT EXECUTE FUNCTION platform.prevent_append_only_mutation();
-CREATE TRIGGER affiliate_payout_payment_evidence_items_retired_read_only
-  BEFORE INSERT OR UPDATE OR DELETE ON finance.affiliate_payout_payment_evidence_items
-  FOR EACH STATEMENT EXECUTE FUNCTION platform.prevent_append_only_mutation();
 
 ALTER TABLE platform.production_finance_migration_dispositions
   DROP CONSTRAINT production_finance_migration_dispositions_reason_code_check,
@@ -121,38 +101,17 @@ ALTER TABLE platform.production_finance_migration_dispositions
     'RETIRED_AFFILIATE_PROGRAM'
   ));
 
+-- Indexes are not checked: two on finance.commission_rules carry the name and stay.
 DO $$
-DECLARE
-  archive CONSTANT text[] := ARRAY[
-    'affiliate_earning_journal', 'affiliate_earning_allocations', 'affiliate_earning_allocation_items',
-    'affiliate_payout_payment_evidence', 'affiliate_payout_payment_evidence_items'];
-  guards CONSTANT text[] := ARRAY[
-    'guard_affiliate_earning_allocation_evidence', 'validate_affiliate_payout_payment_evidence_aggregate',
-    'validate_affiliate_payout_payment_evidence_item'];
 BEGIN
-  -- Indexes are not checked: the archive tables' own and two on finance.commission_rules carry the
-  -- name and stay.
   IF EXISTS (
     SELECT 1 FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
     WHERE n.nspname IN ('marketplace', 'booking', 'finance') AND c.relname LIKE '%affiliate%'
       AND c.relkind IN ('r', 'p', 'v', 'm', 'f', 'S')
-      AND NOT (n.nspname = 'finance' AND c.relname = ANY (archive))
   ) OR EXISTS (
     SELECT 1 FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
     WHERE n.nspname IN ('marketplace', 'booking', 'finance') AND p.proname LIKE '%affiliate%'
-      AND NOT (n.nspname = 'finance' AND p.proname = ANY (guards))
   ) THEN
-    RAISE EXCEPTION 'Affiliate objects outside the finance archive remain';
-  END IF;
-  IF (SELECT count(*) FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
-      WHERE n.nspname = 'finance' AND c.relkind = 'r' AND c.relname = ANY (archive)) <> 5
-    OR (SELECT count(*) FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
-        WHERE n.nspname = 'finance' AND p.proname = ANY (guards)) <> 3
-    OR (SELECT count(*) FROM pg_catalog.pg_trigger t JOIN pg_catalog.pg_class c ON c.oid = t.tgrelid
-        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
-        WHERE n.nspname = 'finance' AND c.relname = ANY (archive)
-          AND t.tgname = c.relname || '_retired_read_only') <> 5
-  THEN
-    RAISE EXCEPTION 'The affiliate money archive is incomplete';
+    RAISE EXCEPTION 'Affiliate objects remain';
   END IF;
 END $$;

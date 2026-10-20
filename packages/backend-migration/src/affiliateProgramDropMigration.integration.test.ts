@@ -13,13 +13,6 @@ const MIGRATIONS = join(import.meta.dirname, "../migrations");
 const DATABASE = "vayada_affiliate_program_drop_test";
 const MIGRATION = 498;
 const RUN_ID = `vay1351-${"a".repeat(24)}`;
-const ARCHIVE = [
-  "finance.affiliate_earning_allocation_items",
-  "finance.affiliate_earning_allocations",
-  "finance.affiliate_earning_journal",
-  "finance.affiliate_payout_payment_evidence",
-  "finance.affiliate_payout_payment_evidence_items",
-];
 
 const listAfter = (sql: string, keyword: string) =>
   sql
@@ -28,9 +21,9 @@ const listAfter = (sql: string, keyword: string) =>
     .split(",")
     .map((name) => name.trim());
 
-// VAY-2272: the affiliate program goes; by law its money tables stay as a read-only archive.
+// VAY-2272: the affiliate program goes, money records included (decision 2: delete everything).
 describe.skipIf(!URL)("affiliate program drop 0498", () => {
-  it("drops the program, keeps the money archive and accepts retired finance dispositions", async () => {
+  it("drops the whole program with its rows and accepts retired finance dispositions", async () => {
     assertSafeTestDatabase(URL!);
     const admin = new pg.Client({ connectionString: URL });
     const targetUrl = new globalThis.URL(URL!);
@@ -55,8 +48,8 @@ describe.skipIf(!URL)("affiliate program drop 0498", () => {
       await target.connect();
       const db = target;
 
-      // One LOCK covers the dropped tables, every table they reference, the archive and the
-      // dispositions table, and nothing else.
+      // One LOCK covers the dropped tables, every table they reference and the dispositions table,
+      // and nothing else.
       const sql = await readFile(join(MIGRATIONS, file), "utf8");
       const dropped = listAfter(sql, "DROP TABLE");
       const referenced = await db.query<{ name: string }>(
@@ -75,7 +68,6 @@ describe.skipIf(!URL)("affiliate program drop 0498", () => {
           ...new Set([
             ...dropped,
             ...referenced.rows.map((row) => row.name),
-            ...ARCHIVE,
             "platform.production_finance_migration_dispositions",
           ]),
         ].sort(),
@@ -86,18 +78,19 @@ describe.skipIf(!URL)("affiliate program drop 0498", () => {
       const property = randomUUID();
       await db.query(`INSERT INTO identity.users (id, email, status) VALUES ($1, $2, 'active')`, [
         user,
-        `affiliate-archive-${user}@example.test`,
+        `affiliate-journal-${user}@example.test`,
       ]);
       await db.query(
         `INSERT INTO identity.organizations (id, kind, name, slug)
-         VALUES ($1, 'hotel_group', 'Archive hotel', $2)`,
-        [organization, `archive-${organization}`],
+         VALUES ($1, 'hotel_group', 'Journal hotel', $2)`,
+        [organization, `journal-${organization}`],
       );
       await db.query(
         `INSERT INTO hotel_catalog.properties (id, public_id, display_name)
-         VALUES ($1::uuid, $1::text, 'Archive hotel')`,
+         VALUES ($1::uuid, $1::text, 'Journal hotel')`,
         [property],
       );
+      // Production holds money rows; the drop takes them along.
       await db.query(
         `INSERT INTO finance.affiliate_earning_journal
            (id, property_id, booking_id, stay_item_id, revision, source_revision, input_digest,
@@ -133,7 +126,7 @@ describe.skipIf(!URL)("affiliate program drop 0498", () => {
            AND c.relkind IN ('r', 'p', 'v', 'm', 'f', 'S')
          ORDER BY 1`,
       );
-      expect(relations.rows.map((row) => row.name)).toEqual(ARCHIVE);
+      expect(relations.rows.map((row) => row.name)).toEqual([]);
       const functions = await db.query<{ name: string }>(
         `SELECT n.nspname || '.' || p.proname AS name
          FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
@@ -141,44 +134,11 @@ describe.skipIf(!URL)("affiliate program drop 0498", () => {
            AND (p.proname LIKE '%affiliate%' OR p.proname LIKE 'reject\\_synthetic\\_%')
          ORDER BY 1`,
       );
-      expect(functions.rows.map((row) => row.name)).toEqual([
-        "finance.guard_affiliate_earning_allocation_evidence",
-        "finance.validate_affiliate_payout_payment_evidence_aggregate",
-        "finance.validate_affiliate_payout_payment_evidence_item",
-      ]);
-      const journalTriggers = await db.query<{ name: string }>(
-        `SELECT tgname AS name FROM pg_catalog.pg_trigger
-         WHERE tgrelid = 'finance.affiliate_earning_journal'::regclass AND NOT tgisinternal
-         ORDER BY 1`,
-      );
-      expect(journalTriggers.rows.map((row) => row.name)).toEqual([
-        "affiliate_earning_journal_immutable",
-        "affiliate_earning_journal_no_truncate",
-        "affiliate_earning_journal_retired_read_only",
-      ]);
-      expect(
-        (await db.query(`SELECT count(*)::int AS n FROM finance.affiliate_earning_journal`)).rows,
-      ).toEqual([{ n: 1 }]);
-      // Every write to the archive fails, even one that matches no row.
-      for (const table of ARCHIVE) {
-        const { rows } = await db.query<{ name: string }>(
-          `SELECT attname AS name FROM pg_catalog.pg_attribute
-           WHERE attrelid = $1::regclass AND attnum = 1`,
-          [table],
-        );
-        const column = rows[0]!.name;
-        for (const write of [
-          `INSERT INTO ${table} SELECT * FROM ${table} WHERE false`,
-          `UPDATE ${table} SET ${column} = ${column} WHERE false`,
-          `DELETE FROM ${table} WHERE false`,
-        ])
-          await expect(db.query(write), write).rejects.toMatchObject({ code: "55000" });
-      }
-      // Outside the archive tables, only the two commission rule indexes carry the name.
+      expect(functions.rows.map((row) => row.name)).toEqual([]);
+      // Only the two commission rule indexes carry the name.
       const indexes = await db.query<{ name: string }>(
         `SELECT tablename || '.' || indexname AS name FROM pg_catalog.pg_indexes
          WHERE schemaname = 'finance' AND indexname LIKE '%affiliate%'
-           AND tablename NOT LIKE 'affiliate%'
          ORDER BY 1`,
       );
       expect(indexes.rows.map((row) => row.name)).toEqual([
