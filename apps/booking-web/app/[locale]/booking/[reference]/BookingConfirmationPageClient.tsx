@@ -11,7 +11,7 @@ import { paymentMethodLabelKey, type PaymentMethodLabelKey } from "@vayada/local
 import { Link, useRouter } from "@/i18n/navigation";
 import BookingNavigation from "@/components/layout/BookingNavigation";
 import BookingFooter from "@/components/layout/BookingFooter";
-import Image from "next/image";
+import HotelHeroImage from "@/components/booking/HotelHeroImage";
 import { bookingImageSizes } from "@/components/booking/imageSizes";
 import { useHotel, useSlug } from "@/contexts/HotelContext";
 import { useCurrency } from "@/contexts/CurrencyContext";
@@ -376,14 +376,7 @@ export default function BookingConfirmationPageClient({
     <div className="min-h-screen bg-surface">
       {/* Mini Hero */}
       <div className="relative h-32 w-full">
-        <Image
-          src={hotel.heroImage}
-          alt={hotel.name}
-          fill
-          className="object-cover"
-          priority
-          sizes={bookingImageSizes.hero}
-        />
+        <HotelHeroImage src={hotel.heroImage} alt={hotel.name} sizes={bookingImageSizes.hero} />
         <div className="absolute inset-0 bg-gradient-to-b from-black/40 to-black/60" />
         <BookingNavigation />
       </div>

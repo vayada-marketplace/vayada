@@ -33,7 +33,13 @@ function review({
   return {
     activeContentRevisionId: published ? "11111111-1111-4111-8111-111111111111" : null,
     publishedUrl: published && !hidden ? "https://hotel-alpenrose.booking.vayada.com" : null,
-    latestOperation: operation ? { status: operation } : null,
+    latestOperation: operation
+      ? {
+          status: operation,
+          operationId: "3f2a9c1b-0000-4000-8000-000000000001",
+          failureCode: operation === "failed" ? "projection_failed" : null,
+        }
+      : null,
     readiness: readinessFailed
       ? { outcome: "provider_failure", status: "error" }
       : {
@@ -143,6 +149,11 @@ describe("bookingPageStatus", () => {
     expect(bookingPageStatus(review({ operation: "failed" }))).toEqual({
       kind: "failed",
       readyGroups: GROUPS,
+      failure: {
+        kind: "operation",
+        code: "projection_failed",
+        operationId: "3f2a9c1b-0000-4000-8000-000000000001",
+      },
     });
   });
 

@@ -31,11 +31,13 @@ type TableEvidence = {
   checksum: string | null;
 };
 
+// VAY-2272: no Marketplace creators or PMS affiliates. Marketplace hotel profiles are read only to
+// name the hotel owners who had nothing else.
 export const PRODUCTION_IDENTITY_SOURCE_TABLES: Record<SourceDatabase, readonly string[]> = {
   auth: ["users", "cookie_consent", "consent_history", "gdpr_requests", "login_audit_log"],
   booking: ["booking_hotels"],
-  marketplace: ["creators", "hotel_profiles"],
-  pms: ["affiliates", "bookings", "hotels", "property_module_activations"],
+  marketplace: ["hotel_profiles"],
+  pms: ["bookings", "hotels", "property_module_activations"],
 };
 export const VAY_1350_ACTIVE_SOURCE_TABLES: Record<SourceDatabase, readonly string[]> = {
   auth: [

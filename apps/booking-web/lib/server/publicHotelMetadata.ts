@@ -145,7 +145,10 @@ export function requestProtocol(headersList: Headers): "http" | "https" {
     : "https";
 }
 
-export function absoluteImages(baseUrl: string, images: Array<string | undefined>): string[] {
+export function absoluteImages(
+  baseUrl: string,
+  images: Array<string | null | undefined>,
+): string[] {
   return images
     .filter((image): image is string => Boolean(image))
     .map((image) => new URL(image, baseUrl).toString());
