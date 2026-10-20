@@ -1,18 +1,12 @@
 "use client";
 
-import {
-  CheckIcon,
-  ExclamationCircleIcon,
-  MapPinIcon,
-  PhoneIcon,
-  PhotoIcon,
-} from "@heroicons/react/24/outline";
+import { CheckIcon, MapPinIcon, PhoneIcon, PhotoIcon } from "@heroicons/react/24/outline";
 import { HotelIcon } from "@vayada/product-onboarding/HotelIcon";
 import type { SharedPropertyTypeOption } from "@vayada/product-onboarding";
 import { useState, type ComponentType, type FormEvent, type ReactNode, type SVGProps } from "react";
 
 import { QuickBookingPagePreview } from "./QuickBookingPagePreview";
-import { QuickSetupField } from "./QuickSetupField";
+import { QuickSetupField, QuickSetupFieldError } from "./QuickSetupField";
 import { QuickSetupPreviewCard } from "./QuickSetupPreviewCard";
 import { QuickSetupShell } from "./QuickSetupShell";
 import { QuickSetupStepLayout } from "./QuickSetupStepLayout";
@@ -71,15 +65,6 @@ function SectionTitle({
       </div>
     </div>
   );
-}
-
-function FieldError({ message }: { message?: string | null }) {
-  return message ? (
-    <p className="mt-2 flex items-start gap-1.5 text-[13px] text-red-700">
-      <ExclamationCircleIcon className="mt-px h-4 w-4 shrink-0" aria-hidden="true" />
-      {message}
-    </p>
-  ) : null;
 }
 
 /**
@@ -243,7 +228,7 @@ export function QuickHotelStep({
                   </button>
                 ) : null}
               </div>
-              <FieldError message={errors.propertyType} />
+              <QuickSetupFieldError message={errors.propertyType} />
             </div>
           </section>
 
