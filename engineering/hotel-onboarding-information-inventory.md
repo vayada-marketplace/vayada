@@ -3589,8 +3589,11 @@ optional with VAY-2247 wave 1, 2026-10-20; guests see placeholders until they ar
 - at least one room type, with every required room field (photos are optional; assigned
   photos that can't be resolved safely still block);
 - room amenities are optional to review: unreviewed amenities stay private and none are shown;
-- a hotel that has gone live (`lifecycle_status = 'active'`); setup does this at the end of the
-  first run (VAY-2247) or when "Present your hotel" saves;
+- a hotel that has gone live (`lifecycle_status = 'active'`). The first run does this at its end,
+  on the basics (VAY-2247). In the old setup, saves (and photo saves) do it only once the hotel
+  also has a description and an approved hotel photo, as before wave 1. Until then the page says
+  "To go live, add a description and at least one hotel photo in Present your hotel."
+  (`hotel_setup_content_missing`, #3568);
 - one consistent hotel pricing currency and a standard flexible price with a
   structured cancellation deadline for every published room type;
 - valid enabled seasonal, weekend, and additional-guest rules, their
