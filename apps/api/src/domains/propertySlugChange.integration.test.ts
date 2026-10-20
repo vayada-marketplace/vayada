@@ -267,6 +267,13 @@ describe.skipIf(!url)("operator booking address change in PostgreSQL (VAY-2295)"
     await refuses("property_not_found", `lodge-${n}`, { propertyId: randomUUID() });
 
     await pool.query(
+      `INSERT INTO hotel_catalog.property_public_profile_read_model
+         (property_id, public_id, display_name, canonical_slug, default_locale,
+          supported_locales, profile_status)
+       VALUES ($1::uuid, $2, 'Slug Change Test', $2, 'en', ARRAY['en'], 'complete')`,
+      [propertyId, `hotel-${n}`],
+    );
+    await pool.query(
       `INSERT INTO distribution.public_hotel_bookability_profiles
          (property_id, public_id, canonical_slug, canonical_url, booking_base_url, timezone,
           default_currency, supported_currencies, profile_status, freshness_status,
