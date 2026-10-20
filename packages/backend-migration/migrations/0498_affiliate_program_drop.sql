@@ -7,6 +7,8 @@
 -- journal, allocations, payout payment evidence) too. Decision 2 (Flamur, 2026-10-20): delete
 -- everything, no export. The legacy finance import (VAY-1358) records retired affiliate rows as
 -- RETIRED_AFFILIATE_PROGRAM dispositions, which the dispositions reason-code CHECK now accepts.
+-- Rows in the shared finance tables stay: payouts (an affiliate payout too), the affiliate commission
+-- rules and billing entitlements, and the idempotency key of a recorded payment.
 -- Rollback: any image built from main at or after f027728cc (no image since reads these tables). The
 -- dropped data is gone and no rollback restores it.
 
