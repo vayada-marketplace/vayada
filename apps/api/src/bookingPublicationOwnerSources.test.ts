@@ -30,6 +30,7 @@ describe("production Booking publication owner sources", () => {
       supportedLocales: ["en", "de"],
       profileStatus: "complete",
       lifecycleStatus: "active",
+      setupGoLiveContent: true,
       profileRevision: 8,
       sourceUpdatedAt: now,
       timezone: "Europe/Berlin",
@@ -105,6 +106,14 @@ describe("production Booking publication owner sources", () => {
     expect(provisioning.entities[0]?.blockers).toEqual([
       { code: "hotel_setup_in_progress", scope: "launch_configuration", kind: "external_pending" },
     ]);
+    // VAY-2247: without a description and an approved image, setup's saves can't make it live.
+    row.setupGoLiveContent = false;
+    const withoutContent = await source.getBookingLaunchEvidence(scope);
+    if (withoutContent.outcome !== "evidence") throw new Error("Expected Catalog evidence");
+    expect(withoutContent.entities[0]?.blockers).toEqual([
+      { code: "hotel_setup_content_missing", scope: "launch_configuration", kind: "user_fixable" },
+    ]);
+    row.setupGoLiveContent = true;
     await expect(source.getSnapshot(manifestRequest(provisioning.sources))).resolves.toEqual({
       outcome: "unavailable",
       owner: "hotel_catalog",
@@ -130,6 +139,24 @@ describe("production Booking publication owner sources", () => {
     if (missing.outcome !== "evidence") throw new Error("Expected Catalog evidence");
     expect(missing.entities[0]?.blockers.map(({ code }) => code)).toEqual([
       "hotel_public_locality_missing",
+    ]);
+    // VAY-2292: a blank city is missing too; the page trims it to nothing.
+    row.city = " ";
+    const blank = await source.getBookingLaunchEvidence(scope);
+    if (blank.outcome !== "evidence") throw new Error("Expected Catalog evidence");
+    expect(blank.entities[0]?.blockers.map(({ code }) => code)).toEqual([
+      "hotel_public_locality_missing",
+    ]);
+    // VAY-2292: an address or time zone the page can't use is a setup item, not a failed publish.
+    row.city = "Alpenstadt";
+    row.localityPublic = true;
+    row.canonicalSlug = "Hotel_Alpenrose";
+    row.timezone = "Europe/Atlantis";
+    const unusable = await source.getBookingLaunchEvidence(scope);
+    if (unusable.outcome !== "evidence") throw new Error("Expected Catalog evidence");
+    expect(unusable.entities[0]?.blockers.map(({ code }) => code)).toEqual([
+      "hotel_canonical_slug_invalid",
+      "hotel_timezone_invalid",
     ]);
   });
 

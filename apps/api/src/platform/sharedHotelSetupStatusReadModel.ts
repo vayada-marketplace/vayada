@@ -23,13 +23,14 @@ import type {
   SharedPublicPropertyProfile,
   UpdatePublicPropertyProfileResult,
 } from "../routes/sharedHotelSetupStatus.js";
+import { SETUP_GO_LIVE_CONTENT_SQL } from "./hotelSetupGoLiveContent.js";
 import { projectPropertyPublicProfile } from "./propertyPublicProfileProjection.js";
 import {
   ACTIVE_PROPERTY_MEDIA_PUBLICATION_PREDICATE,
   APPROVED_PUBLIC_PROPERTY_MEDIA_OBJECT_PREDICATE,
 } from "./propertyMediaPublicationJob.js";
 
-type SharedHotelSetupQueryClient = {
+export type SharedHotelSetupQueryClient = {
   query<T extends QueryResultRow = QueryResultRow>(
     text: string,
     values?: readonly unknown[],
@@ -530,65 +531,108 @@ async function replacePublicPropertyMedia(
   );
 }
 
+/**
+ * VAY-2247: a hotel's profile is complete when its basics are there, the same rule as the setup plan's
+ * "shared identity" task: name, property type, street, city, country, time zone, and an email and a
+ * phone contact. A description and photos are optional (guests see placeholders).
+ */
+export const HOTEL_BASICS_REASON_CODES = [
+  "missing_display_name",
+  "missing_property_type",
+  "missing_street_address",
+  "missing_city",
+  "missing_country_code",
+  "missing_timezone",
+  "missing_email_contact",
+  "missing_phone_contact",
+] as const;
+export type HotelBasicsReasonCode = (typeof HOTEL_BASICS_REASON_CODES)[number];
+
+/** SQL for each basics reason, on `property` and its `location` (in HOTEL_BASICS_REASON_CODES order). */
+const HOTEL_BASICS_MISSING_SQL: Record<HotelBasicsReasonCode, string> = {
+  missing_display_name: "NULLIF(property.display_name, '') IS NULL",
+  missing_property_type: "NULLIF(property.property_type, '') IS NULL",
+  missing_street_address: "NULLIF(location.street_address, '') IS NULL",
+  missing_city: "NULLIF(location.city, '') IS NULL",
+  missing_country_code: "NULLIF(location.country_code::text, '') IS NULL",
+  missing_timezone: "NULLIF(location.timezone, '') IS NULL",
+  missing_email_contact: hotelContactMissingSql("email"),
+  missing_phone_contact: hotelContactMissingSql("phone"),
+};
+
+function hotelContactMissingSql(channel: "email" | "phone"): string {
+  return `NOT EXISTS (
+    SELECT 1 FROM hotel_catalog.property_contact_channels contact
+    WHERE contact.property_id = property.id AND contact.channel_type = '${channel}'
+      AND NULLIF(contact.value, '') IS NOT NULL
+  )`;
+}
+
+const HOTEL_BASICS_REASONS_SQL = `ARRAY_REMOVE(ARRAY[${HOTEL_BASICS_REASON_CODES.map(
+  (code) => `CASE WHEN ${HOTEL_BASICS_MISSING_SQL[code]} THEN '${code}' END`,
+).join(", ")}]::text[], NULL)`;
+
+/** When a completeness update may make a provisioning hotel live. */
+type HotelActivation = "never" | "with_setup_content" | "on_basics";
+
+/**
+ * After an old-setup or photo save: recomputes completeness, bumps the revision, and makes the hotel
+ * live once its basics are complete and it has a description and an approved image (as before VAY-2247).
+ */
 export async function advancePublicProfileRevision(
   client: SharedHotelSetupQueryClient,
   propertyId: string,
 ): Promise<void> {
-  return updatePublicProfileCompleteness(client, propertyId, true);
+  return updatePublicProfileCompleteness(client, propertyId, true, "with_setup_content");
+}
+
+/**
+ * Recomputes the stored completeness after the basics were written (creation, profile edits), without a
+ * revision bump and without going live: activation stays with the steps that did it before.
+ */
+export async function recomputeHotelProfileCompleteness(
+  client: SharedHotelSetupQueryClient,
+  propertyId: string,
+): Promise<void> {
+  return updatePublicProfileCompleteness(client, propertyId, false, "never");
+}
+
+/**
+ * VAY-2247 1.5: makes a provisioning hotel live when its profile is complete (the first run calls this
+ * at its end). Callers lock the property first; suspended, retired, disabled and private hotels stay.
+ */
+export async function activateCompleteHotel(
+  client: SharedHotelSetupQueryClient,
+  propertyId: string,
+): Promise<void> {
+  return updatePublicProfileCompleteness(client, propertyId, false, "on_basics");
 }
 
 async function updatePublicProfileCompleteness(
   client: SharedHotelSetupQueryClient,
   propertyId: string,
   advanceRevision: boolean,
+  activation: HotelActivation,
 ): Promise<void> {
   const updated = await client.query<{ activated: boolean; lifecycleRevision: number | string }>(
     `WITH completeness AS (
        SELECT
          property.id AS property_id,
-         ARRAY_REMOVE(
-           ARRAY[
-             CASE WHEN NOT EXISTS (
-               SELECT 1
-               FROM hotel_catalog.property_profiles profile
-               WHERE profile.property_id = property.id
-                 AND profile.locale = property.default_locale
-                 AND COALESCE(
-                   NULLIF(BTRIM(profile.short_description), ''),
-                   NULLIF(BTRIM(profile.long_description), '')
-                 ) IS NOT NULL
-             ) THEN 'description' END,
-             CASE WHEN NOT EXISTS (
-               SELECT 1
-               FROM hotel_catalog.property_media media
-               JOIN platform.media_objects media_object
-                 ON media_object.id = media.platform_media_object_id
-                AND media_object.property_id = media.property_id
-                AND media_object.visibility = 'public'
-                AND media_object.public_approved = TRUE
-                AND media_object.lifecycle_status = 'active'
-               JOIN platform.media_variants variant
-                 ON variant.media_object_id = media_object.id
-                AND variant.variant_name = 'original_safe'
-                AND variant.visibility = 'public'
-                AND NULLIF(variant.public_cdn_url, '') IS NOT NULL
-               WHERE media.property_id = property.id
-                 AND media.public_approved = TRUE
-                 AND media.source_system = 'platform'
-             ) THEN 'media' END
-           ]::text[],
-           NULL
-         ) AS reasons
+         ${HOTEL_BASICS_REASONS_SQL} AS reasons
        FROM hotel_catalog.properties property
+       LEFT JOIN hotel_catalog.property_locations location ON location.property_id = property.id
        WHERE property.id = $1::uuid
      ),
      -- VAY-2140: a new hotel goes live once setup completes its profile; Vayada does not
      -- approve it. Only provisioning hotels change; suspended and retired ones stay.
+     -- VAY-2247: old-setup and photo saves also need a description and an approved image.
      transition AS (
        SELECT completeness.*, property.lifecycle_revision AS before_revision, (
-         property.lifecycle_status = 'provisioning'
+         $3::boolean
+         AND property.lifecycle_status = 'provisioning'
          AND property.profile_status NOT IN ('disabled', 'private')
          AND cardinality(completeness.reasons) = 0
+         ${activation === "with_setup_content" ? `AND ${SETUP_GO_LIVE_CONTENT_SQL}` : ""}
        ) AS activate
        FROM completeness
        JOIN hotel_catalog.properties property ON property.id = completeness.property_id
@@ -616,7 +660,7 @@ async function updatePublicProfileCompleteness(
      RETURNING transition.activate AND property.lifecycle_status = 'active'
          AND property.lifecycle_revision = transition.before_revision + 1 AS activated,
        property.lifecycle_revision AS "lifecycleRevision"`,
-    [propertyId, advanceRevision],
+    [propertyId, advanceRevision, activation !== "never"],
   );
   const row = updated.rows[0];
   if (!row?.activated) return;
@@ -801,6 +845,10 @@ async function writePropertyProfile(
         if (!initialized.rows[0]?.bookingInitialized) throw new AuthorizationError();
         await createInitialSocialContacts(client, propertyId, initialSettings);
       }
+      await recomputeHotelProfileCompleteness(client, propertyId);
+      // VAY-2247 1.5: reserve the booking-page address now (from the name, with the hotel's id as a
+      // suffix if the name is taken) and project the public profile, as every later profile save does.
+      await projectPropertyPublicProfile(client, { propertyId });
       if (input.provisioningReference) {
         await linkProvisioningReference(client, {
           propertyId,
@@ -834,6 +882,7 @@ async function writePropertyProfile(
       ]);
       const propertyId = result.rows[0]?.propertyId ?? null;
       if (propertyId) {
+        await recomputeHotelProfileCompleteness(client, propertyId);
         await projectPropertyPublicProfile(client, {
           propertyId,
         });
@@ -1099,16 +1148,19 @@ function toPublicPropertyProfile(row: PublicPropertyProfileRow): SharedPublicPro
 }
 
 function toAdaptivePropertySetupFacts(row: AdaptiveHotelSetupFactsRow): AdaptivePropertySetupFacts {
-  const identityReasons = [
-    !nonEmpty(row.displayName) && "missing_display_name",
-    !nonEmpty(row.propertyType) && "missing_property_type",
-    !row.hasStreetAddress && "missing_street_address",
-    !row.hasCity && "missing_city",
-    !row.hasCountryCode && "missing_country_code",
-    !row.hasTimezone && "missing_timezone",
-    !row.hasEmail && "missing_email_contact",
-    !row.hasPhone && "missing_phone_contact",
-  ].filter(isReasonCode);
+  const identityMissing: Record<HotelBasicsReasonCode, boolean> = {
+    missing_display_name: !nonEmpty(row.displayName),
+    missing_property_type: !nonEmpty(row.propertyType),
+    missing_street_address: !row.hasStreetAddress,
+    missing_city: !row.hasCity,
+    missing_country_code: !row.hasCountryCode,
+    missing_timezone: !row.hasTimezone,
+    missing_email_contact: !row.hasEmail,
+    missing_phone_contact: !row.hasPhone,
+  };
+  const identityReasons: string[] = HOTEL_BASICS_REASON_CODES.filter(
+    (code) => identityMissing[code],
+  );
   const roomReasons = [
     !row.hasActiveRoomType && "missing_active_room_type",
     !row.hasNonRetiredRoom && "missing_non_retired_room",

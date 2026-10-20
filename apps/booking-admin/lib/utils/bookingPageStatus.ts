@@ -12,10 +12,12 @@ export type BookingPageItem = {
   focus?: "location";
 };
 
-// City and country live in the hotel details form, not on the Present your hotel step.
+// City, country and time zone live in the hotel details form, not on the Present your hotel step.
 const LOCATION_BLOCKERS = new Set([
   "hotel_public_locality_hidden",
   "hotel_public_locality_missing",
+  "hotel_timezone_missing",
+  "hotel_timezone_invalid",
 ]);
 
 type FailureCode = NonNullable<BookingPublicationReview["latestOperation"]>["failureCode"];
