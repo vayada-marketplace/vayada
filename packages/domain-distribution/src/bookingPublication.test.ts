@@ -27,32 +27,78 @@ describe("Booking public content", () => {
     expect(Object.isFrozen(result)).toBe(true);
   });
 
+  it("publishes a hotel and rooms without photos, which guests see on placeholders (VAY-2247)", () => {
+    const withoutPhotos = changeProfile((value) => {
+      value.hotel.images = [];
+      if (value.hotel.branding) value.hotel.branding.heroImage = null;
+    });
+    const result = build({
+      ...withoutPhotos,
+      rooms: [{ ...rooms()[0]!, images: [], amenities: [] }],
+    });
+    expect(result?.publicContent.rooms[0]).toMatchObject({ images: [], amenities: [] });
+    expect(result?.publicContent.profile.hotel.images).toEqual([]);
+    // The stored page reads back the same way, so guests can open it.
+    expect(parseBookingPublicContent(result?.publicContent)).toEqual(result?.publicContent);
+  });
+
   it("round-trips quoted offers without fabricating amounts or payment timing", () => {
-    const offer = { ratePlanId: `pricing-offer.v2:${"a".repeat(64)}`, currency: "EUR",
-      pricing: { kind: "quote_required", publicationRevision: 7, termsRevision: "11111111-1111-4111-8111-111111111111" }, mealPlan: "breakfast" };
+    const offer = {
+      ratePlanId: `pricing-offer.v2:${"a".repeat(64)}`,
+      currency: "EUR",
+      pricing: {
+        kind: "quote_required",
+        publicationRevision: 7,
+        termsRevision: "11111111-1111-4111-8111-111111111111",
+      },
+      mealPlan: "breakfast",
+    };
     const result = build({ rooms: [{ ...rooms()[0], rates: [offer] }] });
     expect(result?.publicContent.rooms[0]?.rates).toEqual([offer]);
     expect(parseBookingPublicContent(result?.publicContent)).toEqual(result?.publicContent);
     expect(result?.publicContent.rooms[0]?.rates[0]).not.toHaveProperty("baseNightlyAmount");
     expect(result?.publicContent.rooms[0]?.rates[0]).not.toHaveProperty("paymentTiming");
     for (const invalid of [
-      { ratePlanId: offer.ratePlanId, currency: "EUR", baseNightlyAmount: "100.00", refundable: true, paymentTiming: "pay_at_property" },
-      { ...offer, baseNightlyAmount: "100.00" }, { ...offer, paymentTiming: "pay_at_property" },
-      { ...offer, currency: "USD" }, { ...offer, mealPlan: "unknown" },
-      { ...offer, ratePlanId: "legacy-plan" }, { ...offer, pricing: { ...offer.pricing, publicationRevision: 0 } },
+      {
+        ratePlanId: offer.ratePlanId,
+        currency: "EUR",
+        baseNightlyAmount: "100.00",
+        refundable: true,
+        paymentTiming: "pay_at_property",
+      },
+      { ...offer, baseNightlyAmount: "100.00" },
+      { ...offer, paymentTiming: "pay_at_property" },
+      { ...offer, currency: "USD" },
+      { ...offer, mealPlan: "unknown" },
+      { ...offer, ratePlanId: "legacy-plan" },
+      { ...offer, pricing: { ...offer.pricing, publicationRevision: 0 } },
       { ...offer, pricing: { ...offer.pricing, termsRevision: "stale" } },
       { ...offer, pricing: { ...offer.pricing, internalCost: "12" } },
-    ]) expect(build({ rooms: [{ ...rooms()[0], rates: [invalid] }] })).toBeNull();
+    ])
+      expect(build({ rooms: [{ ...rooms()[0], rates: [invalid] }] })).toBeNull();
     expect(build({ rooms: [{ ...rooms()[0], rates: [offer, offer] }] })).toBeNull();
-    expect(build({ rooms: [{ ...rooms()[0], rates: [offer] }], finance: { ...finance(), readyPaymentMethods: [] } })).toBeNull();
+    expect(
+      build({
+        rooms: [{ ...rooms()[0], rates: [offer] }],
+        finance: { ...finance(), readyPaymentMethods: [] },
+      }),
+    ).toBeNull();
   });
 
   it("publishes pricing offers for a hotel paid only by bank transfer or PayPal (VAY-2139)", () => {
     const publicProfile = profile();
     publicProfile.hotel.capabilities.onlinePayment = false;
     publicProfile.hotel.capabilities.payAtProperty = false;
-    const offer = { ratePlanId: `pricing-offer.v2:${"b".repeat(64)}`, currency: "EUR",
-      pricing: { kind: "quote_required", publicationRevision: 7, termsRevision: "11111111-1111-4111-8111-111111111111" }, mealPlan: "room_only" };
+    const offer = {
+      ratePlanId: `pricing-offer.v2:${"b".repeat(64)}`,
+      currency: "EUR",
+      pricing: {
+        kind: "quote_required",
+        publicationRevision: 7,
+        termsRevision: "11111111-1111-4111-8111-111111111111",
+      },
+      mealPlan: "room_only",
+    };
     const result = build({
       profile: publicProfile,
       rooms: [{ ...rooms()[0], rates: [offer] }],
@@ -151,7 +197,15 @@ describe("Booking public content", () => {
     ["stale", () => changeProfile((value) => (value.freshness.status = "stale"))],
     ["freshness provenance", () => changeProfile((value) => (value.freshness.sources = []))],
     ["trust", () => changeProfile((value) => (value.hotel.trust.profileVerified = false))],
-    ["room", () => ({ rooms: [{ ...rooms()[0]!, images: [] }] })],
+    [
+      "room",
+      () => {
+        const room = rooms()[0]!;
+        return {
+          rooms: [{ ...room, images: [{ url: "http://cdn.example/room.jpg", alt: null }] }],
+        };
+      },
+    ],
     ["currencies", () => ({ finance: { ...finance(), supportedCurrencies: ["EUR", "EUR"] } })],
     ["Finance mismatch", () => ({ finance: { ...finance(), onlinePayment: false } })],
     ["payment", () => ({ finance: { ...finance(), readyPaymentMethods: [] } })],

@@ -12,10 +12,14 @@ import {
 
 import {
   FIRST_RUN_ADULT_AGE_THRESHOLD,
-  FIRST_RUN_BEDS,
-  FIRST_RUN_CANCELLATION_TERMS,
+  FIRST_RUN_DEFAULT_BED,
+  FIRST_RUN_DEFAULT_FREE_CANCELLATION_DAYS,
   FIRST_RUN_MINIMUM_STAY_NIGHTS,
   FIRST_RUN_OPERATING_SCHEDULE,
+  firstRunBeds,
+  firstRunCancellationTerms,
+  type FirstRunBedChoice,
+  type FirstRunFreeCancellationDays,
 } from "./firstRunDefaults.js";
 import type { ReplacementOfferTerms } from "./replacementPricingEvidence.js";
 import { parseBookingPricingOfferTerms } from "./replacementPricingBrowser.js";
@@ -39,10 +43,13 @@ export type FirstRunRoomInput = Readonly<{
 export const FIRST_RUN_MAX_ROOMS = 200;
 
 /**
- * Room facts with one double bed and a private bathroom. Max guests may all be adults; children are welcome
- * up to one less, so at least one adult books.
+ * Room facts with the chosen beds (one double bed unless the owner picked another) and a private bathroom.
+ * Max guests may all be adults; children are welcome up to one less, so at least one adult books.
  */
-export function firstRunRoomFacts(room: FirstRunRoomInput): RoomTypeFacts | null {
+export function firstRunRoomFacts(
+  room: FirstRunRoomInput,
+  bed: FirstRunBedChoice = FIRST_RUN_DEFAULT_BED,
+): RoomTypeFacts | null {
   if (
     !Number.isInteger(room.numberOfRooms) ||
     room.numberOfRooms < 1 ||
@@ -60,7 +67,7 @@ export function firstRunRoomFacts(room: FirstRunRoomInput): RoomTypeFacts | null
       maxAdults: room.maxGuests,
       maxChildren: room.maxGuests - 1,
     },
-    beds: FIRST_RUN_BEDS.map((bed) => ({ ...bed })),
+    beds: firstRunBeds(bed).map((one) => ({ ...one })),
     bedrooms: null,
     bathrooms: null,
     bathroomType: "private",
@@ -90,7 +97,7 @@ export function firstRunPriceMinor(pricePerNight: string, currency: string): str
   return minor;
 }
 
-/** What pricing-v2 stages for the first rate: free cancellation until 3 days, paid in full at the property. */
+/** What pricing-v2 stages for the first rate: free cancellation until N days, paid in full at the property. */
 export type FirstRunPricingTerms = Omit<ReplacementOfferTerms, "revision"> & {
   expectedRevision: null;
 };
@@ -107,10 +114,19 @@ export function firstRunPricing(input: {
   currency: string;
   capacity: PricingCapacity;
   pricePerNight: string;
+  /** The owner's choice in the first run (VAY-2247 1.12b); 3 when not given. */
+  freeCancellationDays?: FirstRunFreeCancellationDays;
 }): { configuration: PricingConfiguration; terms: FirstRunPricingTerms } | null {
   const amountMinor = firstRunPriceMinor(input.pricePerNight, input.currency);
   if (!amountMinor) return null;
-  const cancellation = { kind: "flexible" as const, terms: { ...FIRST_RUN_CANCELLATION_TERMS } };
+  const cancellation = {
+    kind: "flexible" as const,
+    terms: {
+      ...firstRunCancellationTerms(
+        input.freeCancellationDays ?? FIRST_RUN_DEFAULT_FREE_CANCELLATION_DAYS,
+      ),
+    },
+  };
   const payment = { kind: "full" as const, acceptedMethods: ["pay_at_property" as const] };
   if (
     !parseBookingPricingOfferTerms({
