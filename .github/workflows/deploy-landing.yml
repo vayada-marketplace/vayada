@@ -23,9 +23,8 @@ env:
   AWS_REGION: eu-west-1
   AWS_ACCOUNT_ID: 269416271598
   ECR_REPOSITORY: vayada-landing
-  CONTACT_API_URL: https://api.vayada.com
-  # VAY-2260: the Marketplace discovery check is gone; the TypeScript API base stays for
-  # the shared public API client until the landing site no longer imports it.
+  # VAY-2286: the contact form posts /api/contact to the TypeScript API (next-api). The old
+  # api.vayada.com host only has /contact, so the form got a 404 from June 2026.
   NEXT_API_URL: https://next-api.vayada.com
   # Public Web Analytics site identifier; automatic edge injection must stay off.
   CLOUDFLARE_ANALYTICS_TOKEN: 15ff9d551bd749d5930214d99f0eae70
@@ -75,7 +74,7 @@ jobs:
           platforms: linux/amd64
           push: true
           build-args: |
-            NEXT_PUBLIC_API_URL=${{ env.CONTACT_API_URL }}
+            NEXT_PUBLIC_API_URL=${{ env.NEXT_API_URL }}
             NEXT_PUBLIC_VAYADA_API_URL=${{ env.NEXT_API_URL }}
             NEXT_PUBLIC_CLOUDFLARE_ANALYTICS_TOKEN=${{ env.CLOUDFLARE_ANALYTICS_TOKEN }}
           tags: |

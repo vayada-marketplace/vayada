@@ -38,10 +38,10 @@ const otherOwnerSession: VerifiedSession = {
   sessionId: "other_owner_session",
   expiresAt: Math.floor(Date.now() / 1000) + 3600,
 };
-const creatorSession: VerifiedSession = {
-  workosUserId: "workos_creator",
-  workosOrgId: "workos_creator_org",
-  sessionId: "creator_session",
+const platformSession: VerifiedSession = {
+  workosUserId: "workos_platform_user",
+  workosOrgId: "workos_platform_org",
+  sessionId: "platform_session",
   expiresAt: Math.floor(Date.now() / 1000) + 3600,
 };
 
@@ -147,15 +147,15 @@ describe("hotel account invite routes", () => {
       url: "/api/marketplace/hotel-account-invites/redeem",
       payload: { code: INVITE_CODE },
     });
-    const creator = await injectJson(app, {
+    const platform = await injectJson(app, {
       method: "POST",
       url: "/api/marketplace/hotel-account-invites/redeem",
-      headers: { authorization: "Bearer creator-token" },
+      headers: { authorization: "Bearer platform-token" },
       payload: { code: INVITE_CODE },
     });
 
     expect(unauthenticated.statusCode).toBe(401);
-    expect(creator.statusCode).toBe(403);
+    expect(platform.statusCode).toBe(403);
     expect(repository.calls.redeem).toHaveLength(0);
     expect(tracks.calls).toHaveLength(0);
   });
@@ -661,7 +661,7 @@ function buildInviteApp(
       }
       return {
         userId: "55555555-5555-4555-8555-555555555555",
-        email: "creator@example.test",
+        email: "platform@example.test",
         status: "active",
       };
     },
@@ -687,7 +687,7 @@ function buildInviteApp(
       return {
         organizationId: "66666666-6666-4666-8666-666666666666",
         workosOrgId,
-        kind: "creator_workspace",
+        kind: "platform",
         status: "active",
       };
     },
@@ -695,7 +695,7 @@ function buildInviteApp(
       return {
         membershipId: `membership-${organizationId}`,
         status: "active",
-        roleKey: organizationId === HOTEL_ORGANIZATION_ID ? "hotel_owner" : "creator_owner",
+        roleKey: organizationId === HOTEL_ORGANIZATION_ID ? "hotel_owner" : "platform_admin",
         workosMembershipId: null,
         workosRoleSlugs: [],
       };
@@ -714,7 +714,7 @@ function buildInviteApp(
         new Map([
           ["owner-token", ownerSession],
           ["other-owner-token", otherOwnerSession],
-          ["creator-token", creatorSession],
+          ["platform-token", platformSession],
         ]),
       ),
       repository: identityRepository,

@@ -182,6 +182,9 @@ export type ApiConfig = {
   platformMediaServing?: PlatformMediaServingConfig;
   platformMediaCleanupEnabled: boolean;
   platformMediaCleanupIntervalMs: number;
+  /** VAY-2272: the one-time purge of retired Marketplace and creator media runs with the cleanup
+   * while set, clearing the images.vayada.com distribution for deleted public files. Off by default. */
+  platformMediaRetiredPurge?: { cdnDistributionId: string };
   propertySetupDraftRetentionEnabled: boolean;
   propertySetupDraftRetentionIntervalMs: number;
   propertySetupDraftRetentionBatchSize: number;
@@ -222,6 +225,27 @@ type NextRuntimeSourceRequirement = {
   allowedValues?: readonly string[];
   allowExplicitDisabled?: boolean;
 };
+
+function loadPlatformMediaRetiredPurgeConfig(
+  env: NodeJS.ProcessEnv,
+  input: { platformMediaServing: boolean; targetDatabaseWithAuth: boolean },
+): ApiConfig["platformMediaRetiredPurge"] {
+  if (!readBooleanEnv(env, "PLATFORM_MEDIA_RETIRED_PURGE_ENABLED")) return undefined;
+  const cdnDistributionId = readOptionalEnv(env, "PLATFORM_MEDIA_CDN_DISTRIBUTION_ID");
+  // The purge runs in the media runtime, which needs the target database and auth. Tasks
+  // without background workers share the service environment and simply skip it.
+  if (!cdnDistributionId || !input.platformMediaServing || !input.targetDatabaseWithAuth) {
+    throw new Error(
+      "PLATFORM_MEDIA_RETIRED_PURGE_ENABLED requires PLATFORM_MEDIA_CDN_DISTRIBUTION_ID, complete PLATFORM_MEDIA_* config, TARGET_DATABASE_URL and complete auth config",
+    );
+  }
+  if (!readBooleanEnv(env, "PLATFORM_MEDIA_CLEANUP_ENABLED", true)) {
+    throw new Error(
+      "PLATFORM_MEDIA_RETIRED_PURGE_ENABLED runs with the media cleanup; PLATFORM_MEDIA_CLEANUP_ENABLED must stay on",
+    );
+  }
+  return { cdnDistributionId };
+}
 
 function readOptionalEnv(env: NodeJS.ProcessEnv, key: string): string | undefined {
   const value = env[key]?.trim();
@@ -908,6 +932,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       "Target database with complete auth requires complete PLATFORM_MEDIA_* config because hotel profile photos are required",
     );
   }
+  const platformMediaRetiredPurge = loadPlatformMediaRetiredPurgeConfig(env, {
+    platformMediaServing: Boolean(platformMediaServing),
+    targetDatabaseWithAuth: Boolean(targetDatabaseUrl && auth),
+  });
   if (env.NODE_ENV === "production" && !bookingEmailDelivery) {
     throw new Error(
       "Target booking checkout requires RESEND_API_KEY and BOOKING_EMAIL_FROM in production",
@@ -1149,6 +1177,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       "PLATFORM_MEDIA_CLEANUP_INTERVAL_MS",
       15 * 60 * 1000,
     ),
+    platformMediaRetiredPurge,
     propertySetupDraftRetentionEnabled: readBooleanEnv(
       env,
       "PROPERTY_SETUP_DRAFT_RETENTION_ENABLED",

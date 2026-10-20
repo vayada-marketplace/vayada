@@ -29,7 +29,7 @@ const organizationId = "11111111-1111-4111-8111-111111111111";
 const actorUserId = "22222222-2222-4222-8222-222222222222";
 type SetupProduct = "booking" | "pms";
 type Options = {
-  kind?: "hotel_group" | "creator_workspace";
+  kind?: "hotel_group" | "platform";
   permissions?: PermissionKey[];
   entitlements?: ProductEntitlement[];
   links?: LinkedResource[];
@@ -305,7 +305,7 @@ describe("property setup draft save route", () => {
   it.each([
     ["missing authentication", null, {}],
     ["invalid authentication", "bad-token", {}],
-    ["non-hotel organization", "valid-token", { kind: "creator_workspace" }],
+    ["non-hotel organization", "valid-token", { kind: "platform" }],
     ["missing step permission", "valid-token", { permissions: ["hotel_catalog.setup.read"] }],
     ["missing entitlement", "valid-token", { entitlements: [] }],
     ["inactive entitlement", "valid-token", { entitlements: [entitlement("pms", "suspended")] }],
@@ -496,7 +496,7 @@ describe("property setup draft save route", () => {
   it.each([
     ["missing authentication", null, {}],
     ["invalid authentication", "bad-token", {}],
-    ["non-hotel organization", "valid-token", { kind: "creator_workspace" }],
+    ["non-hotel organization", "valid-token", { kind: "platform" }],
     ["missing step permission", "valid-token", { permissions: ["hotel_catalog.setup.read"] }],
     ["missing entitlement", "valid-token", { entitlements: [] }],
     ["inactive entitlement", "valid-token", { entitlements: [entitlement("pms", "suspended")] }],

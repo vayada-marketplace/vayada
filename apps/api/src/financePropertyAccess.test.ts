@@ -252,7 +252,9 @@ const denialCases: Array<[string, (value: State) => void, number?]> = [
   [
     "wrong organization kind",
     (s) => {
-      s.context.selectedOrganization.kind = "creator_workspace";
+      // A role permission, so only the kind can deny: hotel-scope overrides apply to hotel groups.
+      s.context.membership.permissions = ["pms.finance.read"];
+      s.context.selectedOrganization.kind = "platform";
     },
   ],
   [

@@ -239,6 +239,7 @@ export function createBookingPublicationProductionRuntime(config: {
     attempts,
     readiness: readinessProvider,
     builder,
+    warn: config.warn,
   });
   const refresh = createBookingPublicationRefresh({
     readinessProvider,

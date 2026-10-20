@@ -7,15 +7,16 @@ Sign-up and log-in links point at Booking Admin.
 
 ## Pages
 
-| Route                                                                               | Purpose                                   |
-| ----------------------------------------------------------------------------------- | ----------------------------------------- |
-| `/`                                                                                 | Home                                      |
-| `/booking-engine`, `/pms`, `/partner-program`, `/pricing`                           | Product pages                             |
-| `/about`, `/contact`                                                                 | Marketing                                 |
-| `/imprint`, `/privacy`, `/terms`                                                    | Legal                                     |
-| `/api/health`                                                                       | Health check (for the container platform) |
+| Route                                                     | Purpose                                   |
+| --------------------------------------------------------- | ----------------------------------------- |
+| `/`                                                       | Home                                      |
+| `/booking-engine`, `/pms`, `/partner-program`, `/pricing` | Product pages                             |
+| `/about`, `/contact`                                      | Marketing                                 |
+| `/imprint`, `/privacy`, `/terms`                          | Legal                                     |
+| `/api/health`                                             | Health check (for the container platform) |
 
-`/contact` submits to the public contact endpoint via `NEXT_PUBLIC_API_URL`.
+`/contact` posts to the contact intake of the TypeScript API (`apps/api`,
+`POST /api/contact`) at `NEXT_PUBLIC_API_URL`.
 `/hotel-creator-network`, `/creator-benefits` and `/hotel-benefits` forward to
 the home page (the Marketplace was removed, VAY-2260).
 
@@ -28,7 +29,8 @@ npm run build    # always run before declaring a change done
 npm run lint
 ```
 
-`NEXT_PUBLIC_API_URL` is the contact API. `NEXT_PUBLIC_VAYADA_API_URL` is still
+`NEXT_PUBLIC_API_URL` is the TypeScript API (next-api.vayada.com in production).
+`NEXT_PUBLIC_VAYADA_API_URL` is still
 passed at build time but no page reads it any more. See `.env.example` for local
 targets.
 

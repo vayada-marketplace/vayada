@@ -161,22 +161,6 @@ export type ExpectedTarget = {
       visibilityScope: string;
       requiredPermissionKey: string;
     }>;
-    affiliatePayouts?: Array<{
-      organizationId: string;
-      affiliateResourceId: string;
-      providerAccountId: string;
-      payoutSettingsId: string;
-      payoutId: string;
-      identityEntitlementId: string;
-      billingEntitlementId: string;
-      visibilityReadModelId: string;
-      providerAccountRef: string;
-      providerPayoutId: string;
-      payoutAmount: string;
-      currency: string;
-      visibilityScope: string;
-      requiredPermissionKey: string;
-    }>;
     forbiddenVisibilityKeys?: string[];
   };
   pmsOperationsChecks?: {
@@ -231,69 +215,6 @@ export type ExpectedTarget = {
       bookerCountryCodeReviewRequired: boolean;
     }>;
     forbiddenOperationalSummaryKeys?: string[];
-  };
-  marketplaceChecks?: {
-    slices: Array<{
-      propertyId: string;
-      hotelOrganizationId: string;
-      hotelOwnerUserId: string;
-      hotelOwnerRoleKey: string;
-      creatorProfileId: string;
-      creatorOrganizationId: string;
-      creatorOwnerUserId: string;
-      creatorOwnerRoleKey: string;
-      offerId: string;
-      commissionRuleId: string;
-      creatorPlatformId: string;
-      creatorRatingId: string;
-      compensationOptionFreeStayId: string;
-      compensationOptionAffiliateId: string;
-      compensationOptionPaidId: string;
-      compensationOptionDiscountId: string;
-      requirementId: string;
-      collaborationId: string;
-      paidCollaborationId: string;
-      discountCollaborationId: string;
-      deliverableApprovedId: string;
-      deliverableSubmittedId: string;
-      creatorChatMessageId: string;
-      hotelChatMessageId: string;
-      tripId: string;
-      externalCollaborationId: string;
-      unreadNotificationId: string;
-      readNotificationId: string;
-      pendingInviteCodeId: string;
-      redeemedInviteCodeId: string;
-      creatorNewsletterPreferenceId: string;
-      hotelNewsletterPreferenceId: string;
-      sourceCreatorId: string;
-      sourceHotelProfileId: string;
-      sourceOfferId: string;
-      sourceCollaborationId: string;
-      creatorDisplayName: string;
-      platform: string;
-      offerPublicId: string;
-      offerSlug: string;
-      visibilityStatus: string;
-      lifecycleStatus: string;
-      compensationType: string | null;
-      affiliateReferralCode: string;
-      creatorChatBody: string;
-      hotelChatBody: string;
-      tripName: string;
-      externalCollaborationTitle: string;
-      pendingInviteCode: string;
-      redeemedInviteCode: string;
-      compensationOptionCount: number;
-      deliverableCount: number;
-      chatMessageCount: number;
-      notificationCount: number;
-      inviteCodeCount: number;
-      newsletterPreferenceCount: number;
-      rating: number;
-      platformFollowerCount: number;
-    }>;
-    forbiddenPublicReadModelValues?: string[];
   };
   distributionBookabilityChecks?: {
     properties: Array<{
@@ -370,15 +291,6 @@ export type ExpectedTarget = {
       urls: string[];
       forbiddenUrls: string[];
     }>;
-    marketplace?: {
-      creatorProfileId: string;
-      profilePictureUrl: string;
-      offerId: string;
-      offerImageUrls: string[];
-      chatMessageId: string;
-      chatMediaObjectId: string;
-      chatRetainedUntil: string;
-    };
     pms?: {
       roomTypeId: string;
       roomMediaObjectIds: string[];

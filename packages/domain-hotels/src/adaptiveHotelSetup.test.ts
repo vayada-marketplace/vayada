@@ -339,7 +339,7 @@ describe("adaptive hotel setup contracts", () => {
     expect(parseAdaptiveHotelSetupStatus(value)).toBeNull();
   });
 
-  it("drops the retired Marketplace track entry an older API still sends (VAY-2270)", () => {
+  it("rejects the retired Marketplace track entry the API stopped sending (VAY-2270)", () => {
     const status = (): Record<string, any> => ({
       contractVersion: ADAPTIVE_HOTEL_SETUP_CONTRACT_VERSION,
       organization: {
@@ -376,21 +376,19 @@ describe("adaptive hotel setup contracts", () => {
       setupPlan: null,
       updatedAt: "2026-07-26T12:00:00.000Z",
     });
-    const withoutPlaceholders = status();
-    withoutPlaceholders.organization.tracks.pop();
-    expect(parseAdaptiveHotelSetupStatus(status())).toEqual(withoutPlaceholders);
-    expect(parseAdaptiveHotelSetupStatus(withoutPlaceholders)).toEqual(withoutPlaceholders);
+    const withoutRetiredTrack = status();
+    withoutRetiredTrack.organization.tracks.pop();
+    expect(parseAdaptiveHotelSetupStatus(status())).toBeNull();
+    expect(parseAdaptiveHotelSetupStatus(withoutRetiredTrack)).toEqual(withoutRetiredTrack);
 
-    // A selected or provisioned retired track is not a placeholder and stays invalid.
+    // Naming the retired track as selected is rejected on its own too.
     const selected = status();
+    selected.organization.tracks.pop();
     selected.organization.selectedTracks = ["hotel_operations", "creator_marketplace"];
     expect(parseAdaptiveHotelSetupStatus(selected)).toBeNull();
-    const provisioned = status();
-    provisioned.organization.tracks[1].provisioning = "active";
-    expect(parseAdaptiveHotelSetupStatus(provisioned)).toBeNull();
   });
 
-  it("drops the retired Marketplace launch state an older API still sends (VAY-2270)", () => {
+  it("rejects the retired Marketplace launch state the API stopped sending (VAY-2270)", () => {
     const task = (taskId: string, track: string, owner: string, route: string) => ({
       taskId,
       propertyId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
@@ -476,18 +474,13 @@ describe("adaptive hotel setup contracts", () => {
       },
       updatedAt: "2026-07-26T12:00:00.000Z",
     };
-    const parsed = parseAdaptiveHotelSetupStatus(value);
-    expect(parsed?.setupPlan?.launchReadiness).toEqual({
+    expect(parseAdaptiveHotelSetupStatus(value)).toBeNull();
+
+    delete value.setupPlan.launchReadiness.marketplacePublish;
+    expect(parseAdaptiveHotelSetupStatus(value)?.setupPlan?.launchReadiness).toEqual({
       operationsUse: "pending",
       directBookingPublish: "pending",
     });
-
-    delete value.setupPlan.launchReadiness.marketplacePublish;
-    expect(parseAdaptiveHotelSetupStatus(value)).toEqual(parsed);
-
-    // Any other Marketplace launch state is not a placeholder and stays invalid.
-    value.setupPlan.launchReadiness.marketplacePublish = "pending";
-    expect(parseAdaptiveHotelSetupStatus(value)).toBeNull();
   });
 
   it("recommends only actionable tasks the caller may start", () => {

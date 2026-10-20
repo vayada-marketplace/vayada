@@ -7,23 +7,15 @@ export type AuthProvider = "workos";
 
 export type InternalUserStatus = "active" | "pending" | "suspended" | "deleted";
 
-export type OrganizationKind =
-  | "platform"
-  | "hotel_group"
-  | "creator_workspace"
-  | "affiliate_partner";
+// The creator and affiliate kinds are retired (VAY-2272); rows that still carry them are closed by
+// migration 0500 and never come back into an API context.
+export type OrganizationKind = "platform" | "hotel_group";
 
 export type OrganizationStatus = "active" | "suspended" | "archived";
 
 export type MembershipStatus = "active" | "pending" | "inactive" | "suspended";
 
-export type Product =
-  | "platform"
-  | "hotel_catalog"
-  | "marketplace"
-  | "booking"
-  | "pms"
-  | "affiliate";
+export type Product = "platform" | "hotel_catalog" | "booking" | "pms";
 
 export type ResourceType =
   | "platform"
@@ -32,10 +24,6 @@ export type ResourceType =
   | "booking_hotel"
   | "pms_hotel"
   | "pms_property"
-  | "hotel_profile"
-  | "marketplace_offer"
-  | "creator_profile"
-  | "affiliate"
   | "payout_account";
 
 export type ResourceRelationship =
@@ -43,7 +31,6 @@ export type ResourceRelationship =
   | "operator"
   | "front_desk"
   | "finance_manager"
-  | "promotes"
   | "billing_account";
 
 export type PermissionKey =

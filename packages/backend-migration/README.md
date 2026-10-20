@@ -414,7 +414,7 @@ TARGET_DATABASE_URL=<target database> npm run target:pms:migrate -- \
 Apply locks every PMS target table, writes in dependency order inside one
 repeatable-read transaction, verifies exact write/provenance counts, and rereads
 the target before commit. Rerun the same dry run and require unchanged parity.
-PMS success does not authorize legacy shutdown: VAY-1357 through VAY-1363,
+PMS success does not authorize legacy shutdown: VAY-1358 through VAY-1363,
 the rollback window, and the final human cutover approval remain mandatory.
 
 ### Signed Channex adoption
@@ -478,46 +478,11 @@ two independent humans are required.
 Supply the reviewed reason through a file. Successful rollback only changes the
 matching adoption claim from `verified_non_active` to retained `released`.
 
-## Production Marketplace Migration
-
-VAY-1357 consumes creators, offers, collaborations, deliverables, chat, trips,
-notifications, invites, and newsletter preferences from the immutable VAY-1351
-run. It resolves ownership only through the accepted Identity and Hotel Catalog
-links. Every legacy Marketplace image must already resolve to an active VAY-1055
-Platform Media object; unresolved or ambiguous media blocks the run.
-Legacy offer settings are reported as deterministic, presentation-only hotel
-preference drafts. They never write canonical preferences because legacy offers
-cannot prove the required content-type answer.
-
-Run the exact production dry run:
-
-```bash
-TARGET_DATABASE_URL=<target database> npm run target:marketplace:migrate -- \
-  --source-run-id vay1351-<24 lowercase hex characters> --dry-run
-```
-
-The dry run always rolls back. Review every blocker, source/target table count,
-property-scoped count, preserved newer target row, preserved target deletion,
-ownership link, and rewritten media reference.
-
-After backup, source write freeze/queue, a blocker-free reviewed dry run, and
-human go/no-go approval, apply the exact reviewed run:
-
-```bash
-TARGET_DATABASE_URL=<target database> npm run target:marketplace:migrate -- \
-  --source-run-id vay1351-<24 lowercase hex characters> --apply \
-  --confirm production-marketplace:vay1351-<same 24 lowercase hex characters>
-```
-
-Apply is transactional and verifies the target before commit. Marketplace
-success does not authorize legacy shutdown: Finance, VAY-1359 through VAY-1363,
-the rollback window, and the final human cutover approval remain mandatory.
-
 ## Production Finance Migration
 
 VAY-1358 consumes the exact Booking and PMS Finance rows from the immutable
-VAY-1351 extraction. It resolves property, organization, affiliate, and booking
-ownership only through accepted earlier migration links. Monetary parity uses
+VAY-1351 extraction. It resolves property, organization, and booking ownership
+only through accepted earlier migration links. Monetary parity uses
 exact decimal arithmetic. The migration never invokes a payment provider and
 never turns configuration flags into online-card execution evidence.
 
@@ -529,12 +494,15 @@ TARGET_DATABASE_URL=<target database> npm run target:finance:migrate -- \
 ```
 
 Ambiguous ownership, duplicate provider identities, unexplained monetary
-variance, newer target economic facts, unattributed webhooks, checkout rows
-lacking encrypted folio-recipient evidence, and completed affiliate payouts
-lacking immutable command evidence remain hard blockers. Invalid source rows
-and capture-incomplete payments are omitted only through immutable hash-only
-dispositions; raw source totals must equal planned target totals plus those
-explicit omissions. Bank, PayPal, and payout destinations never enter target
+variance, newer target economic facts, unattributed webhooks, and checkout rows
+lacking encrypted folio-recipient evidence remain hard blockers. Invalid source
+rows and capture-incomplete payments are omitted only through immutable
+hash-only dispositions; raw source totals must equal planned target totals plus
+those explicit omissions. The affiliate program is retired (VAY-2272): legacy
+affiliates and their payout settings are not read, and affiliate payouts and
+booking commission shares are omitted as `RETIRED_AFFILIATE_PROGRAM`, so they
+stay in the source totals and the omissions but never reach the target. Bank,
+PayPal, and payout destinations never enter target
 product state: their target settings remain disabled or setup-incomplete until
 approved re-entry. Historical provider transactions without account ownership
 remain unbound, and disagreeing payment flags cannot enable a method.
@@ -565,7 +533,7 @@ and final human approval remain mandatory.
 ## Production Full Parity and Go/No-Go
 
 VAY-1359 aggregates the rollback-only Identity, Hotel Catalog, Booking, PMS,
-Marketplace, and Finance dry runs for one immutable extraction. It also verifies
+and Finance dry runs for one immutable extraction. It also verifies
 the four source tags against their extraction ledger, source schema fingerprints
 and checksums, target migration checksums, target provenance, forbidden PII, and
 raw legacy media references. It never repairs data or applies a domain migration.
@@ -623,20 +591,20 @@ running application. Production parity does not accept a migration-directory
 override, so an operator cannot replace the trusted checksum manifest.
 
 The command acquires PostgreSQL `SHARE` locks across target and staged-source
-tables for the complete report so its seven readers cannot observe mixed target
+tables for the complete report so its six readers cannot observe mixed target
 states. Run it only inside the approved cutover write-freeze window. It aborts
 rather than waiting indefinitely when those locks cannot be acquired within five
 seconds.
 
 ## Guarded Rehearsal and Cutover Orchestration
 
-VAY-1360 composes the reviewed schema, immutable extraction, six domain apply,
+VAY-1360 composes the reviewed schema, immutable extraction, five domain apply,
 full-parity, and smoke-evidence gates in this fixed order:
 
 ```text
 schema_migrations -> source_extraction -> identity ->
 catalog(prerequisites -> media -> complete) -> booking ->
-pms -> marketplace -> finance -> parity -> smoke_evidence
+pms -> finance -> parity -> smoke_evidence
 ```
 
 The command stores each attempt and evidence checksum in
@@ -842,8 +810,8 @@ track:
 - forbidden private values in public media objects, variant CDN URLs, or future
   public read models.
 
-Product fixtures that later migrate Booking, Marketplace, or PMS media URLs
-should reuse `platformMediaChecks` instead of creating ad hoc media assertions.
+Product fixtures that later migrate Booking or PMS media URLs should reuse
+`platformMediaChecks` instead of creating ad hoc media assertions.
 
 ## WorkOS Backfill
 
@@ -927,145 +895,6 @@ loaded into live target tables. Omit both source options to migrate identities
 without importing legacy bcrypt password hashes. The direct legacy auth
 connection remains available for pre-VAY-1351 recovery only and cannot be
 combined with `--source-run-id`.
-
-## Next Stack Smoke Backfill
-
-VAY-874 and VAY-877 use one targeted command for the production next-route smoke
-data. It is intentionally narrow:
-
-- activates the Booking Engine entitlement for smoke booking hotel
-  `43303cea-963c-445a-9522-a05145fe0918`;
-- adds the marketplace hotel profile owner link and scoped entitlement for the
-  selected hotel-group org;
-- creates or updates an affiliate-partner org, membership, affiliate resource
-  link, and `affiliate-payouts` entitlement for the smoke affiliate user;
-- optionally activates Booking Admin Feature Hub module rows in the PMS DB when
-  `PMS_DATABASE_URL` is supplied.
-
-Run all reviewed target migrations first so the current role grants and schema
-state are present:
-
-```bash
-TARGET_DATABASE_URL=<target database url> \
-  npm --workspace @vayada/backend-migration run target:migrate:dist -- --env production
-```
-
-Dry-run the smoke backfill:
-
-```bash
-TARGET_DATABASE_URL=<target database url> \
-  npm --workspace @vayada/backend-migration run target:next-smoke:backfill:dist -- \
-    --dry-run
-```
-
-If the command cannot infer the marketplace profile, pass the Vayada resource ID
-explicitly:
-
-```bash
---marketplace-hotel-profile-resource-id <marketplace hotel profile resource id>
-```
-
-Apply mode requires the printed guard:
-
-```bash
-TARGET_DATABASE_URL=<target database url> \
-  PMS_DATABASE_URL=<pms database url> \
-  npm --workspace @vayada/backend-migration run target:next-smoke:backfill:dist -- \
-    --apply \
-    --affiliate-organization-id <verified affiliate organization id> \
-    --confirm next-smoke-backfill:vay-874-vay-877
-```
-
-`PMS_DATABASE_URL` is required in apply mode because the VAY-874 smoke criteria
-include the Feature Hub module activation. The command activates the
-`affiliates` module for the smoke PMS hotel ID, defaulting to the same UUID as
-the booking hotel. Use `--pms-hotel-id <uuid>` if the PMS hotel ID differs, and
-repeat `--module-id <id>` to activate a different reviewed module set. Dry runs
-may omit `PMS_DATABASE_URL`; apply will fail before committing target identity
-changes if PMS or WorkOS readiness blockers remain.
-
-Apply mode does not accept `--affiliate-workos-org-id` or
-`--affiliate-workos-membership-id`; those flags are dry-run/audit aids only. The
-affiliate org and smoke-user membership must already exist locally and have
-verified WorkOS IDs before the smoke backfill applies resource links and
-entitlements. If the affiliate org does not exist yet, create the local
-affiliate org/membership in a separate reviewed prepare step, complete provider
-state with the existing WorkOS command, then rerun the smoke backfill dry-run and
-apply with the verified `--affiliate-organization-id`:
-
-```bash
-TARGET_DATABASE_URL=<target database url> \
-  WORKOS_API_KEY=<workos api key> \
-  npm --workspace @vayada/backend-migration run target:workos:backfill:dist -- \
-    --email flamur.maliqi2811@gmail.com \
-    --apply \
-    --confirm email:flamur.maliqi2811@gmail.com
-```
-
-The smoke command output documents:
-
-- hotel-group WorkOS org ID;
-- booking hotel entitlement status;
-- marketplace hotel profile resource ID;
-- affiliate-partner WorkOS org ID and WorkOS membership ID;
-- affiliate Vayada resource ID and entitlement status.
-
-Validate the emitted IDs with:
-
-```sql
-SELECT organization.id::text AS organization_id,
-       organization.workos_org_id,
-       booking_entitlement.status AS booking_engine_status,
-       marketplace_link.resource_id AS marketplace_hotel_profile_resource_id,
-       marketplace_entitlement.status AS marketplace_hotel_profile_status
-FROM identity.organizations organization
-LEFT JOIN identity.product_entitlements booking_entitlement
-  ON booking_entitlement.organization_id = organization.id
- AND booking_entitlement.product = 'booking'
- AND booking_entitlement.entitlement_key = 'booking-engine'
- AND booking_entitlement.resource_id = '<booking hotel id>'
-LEFT JOIN identity.organization_resource_links marketplace_link
-  ON marketplace_link.organization_id = organization.id
- AND marketplace_link.product = 'marketplace'
- AND marketplace_link.resource_type = 'hotel_profile'
- AND marketplace_link.resource_id = '<marketplace hotel profile resource id>'
- AND marketplace_link.status = 'active'
-LEFT JOIN identity.product_entitlements marketplace_entitlement
-  ON marketplace_entitlement.organization_id = organization.id
- AND marketplace_entitlement.product = 'marketplace'
- AND marketplace_entitlement.entitlement_key = 'marketplace-hotel-profile'
- AND marketplace_entitlement.resource_id = '<marketplace hotel profile resource id>'
-WHERE organization.id = '<hotel organization id>'::uuid;
-
-SELECT affiliate_org.id::text AS affiliate_organization_id,
-       affiliate_org.workos_org_id,
-       membership.workos_membership_id,
-       affiliate_link.resource_id AS affiliate_resource_id,
-       affiliate_entitlement.status AS affiliate_payouts_status
-FROM identity.organizations affiliate_org
-JOIN identity.organization_memberships membership
-  ON membership.organization_id = affiliate_org.id
- AND membership.user_id = '<affiliate user id>'::uuid
-LEFT JOIN identity.organization_resource_links affiliate_link
-  ON affiliate_link.organization_id = affiliate_org.id
- AND affiliate_link.product = 'affiliate'
- AND affiliate_link.resource_type = 'affiliate'
- AND affiliate_link.resource_id = '<affiliate resource id>'
- AND affiliate_link.status = 'active'
-LEFT JOIN identity.product_entitlements affiliate_entitlement
-  ON affiliate_entitlement.organization_id = affiliate_org.id
- AND affiliate_entitlement.product = 'affiliate'
- AND affiliate_entitlement.entitlement_key = 'affiliate-payouts'
- AND affiliate_entitlement.resource_id = '<affiliate resource id>'
-WHERE affiliate_org.id = '<affiliate organization id>'::uuid;
-```
-
-Run the global audit after the targeted backfill:
-
-```bash
-TARGET_DATABASE_URL=<target database url> \
-  npm --workspace @vayada/backend-migration run target:workos:audit:dist
-```
 
 ## PMS Financials activation readiness
 

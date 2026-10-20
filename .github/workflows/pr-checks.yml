@@ -204,7 +204,6 @@ jobs:
         run: |
           npm --workspace @vayada/domain-hotels run build
           npm --workspace @vayada/domain-booking run build
-          npm --workspace @vayada/domain-marketplace run build
           npm --workspace @vayada/domain-pms run build
 
       - name: Install Chromium
@@ -637,12 +636,6 @@ jobs:
           '
           TARGET_DATABASE_URL="$VAY2017_LIFECYCLE_TEST_DATABASE_URL" npm --workspace @vayada/backend-migration run target:migrate -- --env local
           npm --workspace vayada-api run test -- --no-file-parallelism src/platform/legacyOwnerLifecycleMutations.integration.test.ts
-
-      - name: Verify Marketplace matching event storage
-        if: matrix.shard == 'platform'
-        run: npm --workspace @vayada/backend-migration run test -- --no-file-parallelism src/matchingEventProjections.test.ts src/affiliatePercentagePolicyStorage.test.ts
-        env:
-          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
       - name: Verify PMS navigation module migration backfill
         if: matrix.shard == 'pms-migrations'
