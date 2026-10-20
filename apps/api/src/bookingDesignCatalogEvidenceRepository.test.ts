@@ -11,6 +11,7 @@ const mediaObjectId = "523e4567-e89b-42d3-a456-426614174000";
 function harness(
   options: {
     missingProfile?: boolean;
+    noDescription?: boolean;
     mediaReady?: boolean;
     coverCount?: number;
     coverPublicApproved?: boolean;
@@ -26,8 +27,9 @@ function harness(
                 displayName: "Hotel Alpenrose",
                 contentLocale: "en",
                 profileRevision: "7",
-                shortDescription:
-                  "A calm alpine hotel with welcoming rooms and a view of the surrounding peaks.",
+                shortDescription: options.noDescription
+                  ? null
+                  : "A calm alpine hotel with welcoming rooms and a view of the surrounding peaks.",
               },
             ],
         rowCount: options.missingProfile ? 0 : 1,
@@ -126,6 +128,21 @@ describe("Booking design Catalog evidence repository", () => {
     for (const [, parameters] of query.mock.calls) {
       expect(parameters).toEqual([organizationId, propertyId]);
     }
+  });
+
+  it("keeps a page style for a hotel without a description or a cover photo (VAY-2247)", async () => {
+    await expect(
+      harness({ noDescription: true, coverCount: 0 }).readiness.getBookingDesignReadiness({
+        organizationId,
+        propertyId,
+      }),
+    ).resolves.toMatchObject({
+      outcome: "ready",
+      snapshot: {
+        profile: { displayName: "Hotel Alpenrose", shortDescription: null },
+        cover: { kind: "fallback" },
+      },
+    });
   });
 
   it("maps absent profile and unresolved assigned media to typed blockers", async () => {

@@ -28,6 +28,11 @@ import {
   getAuthWorkosOrganizationId,
 } from "@/services/auth/sessionStore";
 import { AdaptiveRoomAuthoringSetupController } from "./adaptive/rooms/AdaptiveRoomAuthoringSetupController";
+import { QuickSetupFlow } from "./quick/QuickSetupFlow";
+import type { QuickSetupPage } from "./quick/QuickPropertySetup";
+import { bookingPublicationReviewClient } from "@/services/api/bookingPublicationReviewClient";
+import { hotelFirstRunApi } from "@/services/api/hotelFirstRunClient";
+import { onboardingPricingApi } from "@/services/api/onboardingPricingClient";
 import { productHandoffReturnTo } from "./productHandoffReturnTo";
 
 import {
@@ -52,9 +57,12 @@ const PROPERTY_LAUNCH_SETTINGS_API = {
 export function SharedHotelSetupPage({
   defaultEntryProduct,
   airbnbImportEnabled = false,
+  quickSetupEnabled = false,
 }: {
   defaultEntryProduct: SharedHotelSetupEntryProduct;
   airbnbImportEnabled?: boolean;
+  /** VAY-2247: the new first run (ONBOARDING_V2); adding a second hotel keeps the wizard for now. */
+  quickSetupEnabled?: boolean;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -211,6 +219,55 @@ export function SharedHotelSetupPage({
     );
   }
 
+  if (quickSetupEnabled && !initialAddProperty) {
+    return (
+      <QuickSetupFlow
+        account={{
+          email: accountContactEmail ?? "",
+          name: accountName,
+          phone: accountContactPhone,
+        }}
+        saveAccount={async (accountDetails) => {
+          await authService.updateAccountDetails(accountDetails);
+          setAccountName(
+            normalizeSharedAccountName(accountDetails.firstName, accountDetails.lastName),
+          );
+          setAccountContactPhone(accountDetails.phone ?? null);
+        }}
+        setup={sharedHotelSetupApi}
+        firstRun={hotelFirstRunApi}
+        saveCurrency={async (propertyId, currency) => {
+          const owners = await onboardingPricingApi.load(propertyId, { cache: "no-store" });
+          await onboardingPricingApi.saveCurrency(propertyId, currency, owners);
+        }}
+        readCheckoutPending={async (propertyId) =>
+          (await hotelOperationsSetupApi.getPlanStatus(propertyId)).checkoutPending
+        }
+        openCheckout={(url) => window.location.assign(url)}
+        readCurrency={async (propertyId) =>
+          (await onboardingPricingApi.load(propertyId, { cache: "no-store" })).pricing
+            ?.pricingCurrency.currency ?? null
+        }
+        propertyId={initialPropertyId}
+        onPropertyCreated={handlePropertySelected}
+        onSaveAndExit={(propertyId) => handleExit(propertyId)}
+        googleMapsApiKey={process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY}
+        storage={quickSetupStorage()}
+        publication={bookingPublicationReviewClient}
+        organizationId={getAuthOrganizationId() ?? ""}
+        publicationStorage={quickSetupStorage() ?? NO_PUBLICATION_STORAGE}
+        openPage={(page, propertyId) => {
+          if (page === "rooms_and_rates") {
+            void handoffToPms("/rooms", propertyId);
+            return;
+          }
+          localStorage.setItem("selectedSharedPropertyId", propertyId);
+          window.location.assign(QUICK_SETUP_PAGES[page]);
+        }}
+      />
+    );
+  }
+
   if (
     !isSharedAccountDetailsComplete({
       name: accountName,
@@ -336,6 +393,31 @@ function loginPathForSetup(): string {
   if (typeof window === "undefined") return ROUTES.LOGIN;
   const returnTo = `${window.location.pathname}${window.location.search}`;
   return `${ROUTES.LOGIN}?returnTo=${encodeURIComponent(returnTo)}`;
+}
+
+/** This device's storage for the hotel draft, when the browser allows it. */
+/** VAY-2247 first run: the Booking Admin pages setup hands over to (Rooms & Rates is in the PMS). */
+const QUICK_SETUP_PAGES: Record<Exclude<QuickSetupPage, "rooms_and_rates">, string> = {
+  review: "/settings/policies",
+  design_studio: "/design-studio",
+  payment_settings: "/settings/payments",
+};
+
+/** Without browser storage the publish request can't be kept for recovery, so publishing says so. */
+const NO_PUBLICATION_STORAGE: Pick<Storage, "getItem" | "setItem" | "removeItem"> = {
+  getItem: () => null,
+  setItem: () => {
+    throw new Error("Browser storage is unavailable.");
+  },
+  removeItem: () => undefined,
+};
+
+function quickSetupStorage(): Storage | null {
+  try {
+    return typeof window === "undefined" ? null : window.localStorage;
+  } catch {
+    return null;
+  }
 }
 
 export function setupPathForSelectedProperty(query: string, propertyId: string): string {
