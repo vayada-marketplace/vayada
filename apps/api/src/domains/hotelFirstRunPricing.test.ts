@@ -150,6 +150,24 @@ describe("first run step 4: the first price (VAY-2247)", () => {
     expect(fake.calls).toEqual([]);
   });
 
+  it("stages the owner's cancellation days, in their own draft (1.12b)", async () => {
+    const draftOf = async (freeCancellationDays?: 1 | 3 | 7 | 14) => {
+      const fake = fakePricing();
+      await runFirstRunPricing(fake.ports, actor, { ...input, freeCancellationDays });
+      return fake.calls[1]![1] as {
+        command: { terms: { cancellation: { terms: { freeCancellationDeadlineDays: number } } } };
+        context: { draftId: string };
+      };
+    };
+    const seven = await draftOf(7);
+    expect(seven.command.terms.cancellation.terms.freeCancellationDeadlineDays).toBe(7);
+    const standard = await draftOf();
+    expect(standard.command.terms.cancellation.terms.freeCancellationDeadlineDays).toBe(3);
+    // A retry with another choice can't replay the first one's terms request.
+    expect(seven.context.draftId).not.toBe(standard.context.draftId);
+    expect((await draftOf(3)).context.draftId).toBe(standard.context.draftId);
+  });
+
   it("leaves a room type alone that already has a price", async () => {
     const fake = fakePricing({ priced: true });
     expect(await runFirstRunPricing(fake.ports, actor, input)).toEqual({ ok: true, wrote: false });
