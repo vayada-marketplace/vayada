@@ -111,28 +111,31 @@ describe("bookingPageStatus", () => {
     });
   });
 
-  it.each(["hotel_public_locality_hidden", "hotel_public_locality_missing"])(
-    "sends %s to the location form (VAY-2288)",
-    (code) => {
-      const status = bookingPageStatus(
-        review({
-          status: "blocked",
-          blocked: {
-            "booking.hotel_profile": {
-              kind: "user_fixable",
-              step: "present_hotel",
-              message: "Turn on 'Show city and country publicly' so guests see where you are.",
-              code,
-            },
+  it.each([
+    "hotel_public_locality_hidden",
+    "hotel_public_locality_missing",
+    // The time zone sits next to the country (VAY-2292).
+    "hotel_timezone_missing",
+    "hotel_timezone_invalid",
+  ])("sends %s to the location form (VAY-2288)", (code) => {
+    const status = bookingPageStatus(
+      review({
+        status: "blocked",
+        blocked: {
+          "booking.hotel_profile": {
+            kind: "user_fixable",
+            step: "present_hotel",
+            message: "Turn on 'Show city and country publicly' so guests see where you are.",
+            code,
           },
-        }),
-      );
-      expect(status).toMatchObject({
-        kind: "not_ready",
-        items: [{ groupId: "booking.hotel_profile", step: "present_hotel", focus: "location" }],
-      });
-    },
-  );
+        },
+      }),
+    );
+    expect(status).toMatchObject({
+      kind: "not_ready",
+      items: [{ groupId: "booking.hotel_profile", step: "present_hotel", focus: "location" }],
+    });
+  });
 
   it("is hidden, not online, when a published page has no guest URL", () => {
     expect(bookingPageStatus(review({ published: true, hidden: true }))).toEqual({
