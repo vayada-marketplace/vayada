@@ -1335,8 +1335,6 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
         "affiliate_earning_journal",
         "affiliate_payout_payment_evidence",
         "affiliate_payout_payment_evidence_items",
-        "affiliate_percentage_policy_approvals",
-        "affiliate_percentage_policy_versions",
         "airbnb_current_provider_amounts",
         "airbnb_current_provider_nights",
         "airbnb_provider_snapshots",

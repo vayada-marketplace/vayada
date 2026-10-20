@@ -19,8 +19,6 @@ const ARCHIVE = [
   "finance.affiliate_earning_journal",
   "finance.affiliate_payout_payment_evidence",
   "finance.affiliate_payout_payment_evidence_items",
-  "finance.affiliate_percentage_policy_approvals",
-  "finance.affiliate_percentage_policy_versions",
 ];
 
 const listAfter = (sql: string, keyword: string) =>
@@ -30,7 +28,7 @@ const listAfter = (sql: string, keyword: string) =>
     .split(",")
     .map((name) => name.trim());
 
-// VAY-2272: the affiliate program goes; by law its money and rate tables stay as a read-only archive.
+// VAY-2272: the affiliate program goes; by law its money tables stay as a read-only archive.
 describe.skipIf(!URL)("affiliate program drop 0498", () => {
   it("drops the program, keeps the money archive and accepts retired finance dispositions", async () => {
     assertSafeTestDatabase(URL!);
@@ -86,7 +84,6 @@ describe.skipIf(!URL)("affiliate program drop 0498", () => {
       const user = randomUUID();
       const organization = randomUUID();
       const property = randomUUID();
-      const policy = randomUUID();
       await db.query(`INSERT INTO identity.users (id, email, status) VALUES ($1, $2, 'active')`, [
         user,
         `affiliate-archive-${user}@example.test`,
@@ -108,21 +105,6 @@ describe.skipIf(!URL)("affiliate program drop 0498", () => {
          VALUES ($1, $2, 'booking-1', 'stay-1', 1, 1, $3, '{}', '{"status": "calculated"}', $4, $5,
                  'request-1')`,
         [randomUUID(), property, "b".repeat(64), user, organization],
-      );
-      await db.query(
-        `INSERT INTO finance.affiliate_percentage_policy_versions
-           (id, property_id, contract_version, model, revenue_basis, eligibility, rate_basis_points,
-            created_by_user_id, created_by_organization_id, request_id)
-         VALUES ($1, $2, 'finance-affiliate-percentage-policy.v1', 'percentage',
-                 'accommodation_excluding_taxes_and_extras', 'verified_completion', 1000, $3, $4,
-                 'request-2')`,
-        [policy, property, user, organization],
-      );
-      await db.query(
-        `INSERT INTO finance.affiliate_percentage_policy_approvals
-           (policy_version_id, property_id, approved_by_user_id, approved_by_organization_id, request_id)
-         VALUES ($1, $2, $3, $4, 'request-3')`,
-        [policy, property, user, organization],
       );
       await db.query(
         `INSERT INTO platform.source_extraction_runs
@@ -175,14 +157,8 @@ describe.skipIf(!URL)("affiliate program drop 0498", () => {
         "affiliate_earning_journal_retired_read_only",
       ]);
       expect(
-        (
-          await db.query(
-            `SELECT (SELECT count(*)::int FROM finance.affiliate_earning_journal) AS journal,
-                    (SELECT count(*)::int FROM finance.affiliate_percentage_policy_versions) AS policies,
-                    (SELECT count(*)::int FROM finance.affiliate_percentage_policy_approvals) AS approvals`,
-          )
-        ).rows,
-      ).toEqual([{ journal: 1, policies: 1, approvals: 1 }]);
+        (await db.query(`SELECT count(*)::int AS n FROM finance.affiliate_earning_journal`)).rows,
+      ).toEqual([{ n: 1 }]);
       // Every write to the archive fails, even one that matches no row.
       for (const table of ARCHIVE) {
         const { rows } = await db.query<{ name: string }>(

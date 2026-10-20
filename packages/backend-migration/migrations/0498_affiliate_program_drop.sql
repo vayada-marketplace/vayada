@@ -2,13 +2,12 @@
 -- Owner: platform / VAY-2272 (Marketplace removal step 5, M-C, window W2 with 0499). HOLD: merge only
 -- with Flamur's yes, after the counts-0498 before-runs.
 --
--- Drops the retired affiliate program: 31 of its 38 tables in marketplace, booking and finance and
--- 21 of its functions. Law variant (decision 2): production recorded an affiliate payment, so seven
--- finance tables stay as a read-only archive with their payee names: the earning journal, the
--- earning allocations and their items, the payout payment evidence and its items, and the
--- percentage policy versions and approvals (the hotel-chosen rates behind the kept money; the
--- allocations name them by id). They reference no dropped table and keep their own guards. The
--- journal's two insert-time validators read booking tables that go away, so they go first.
+-- Drops the retired affiliate program: 33 of its 38 tables in marketplace, booking and finance and
+-- 21 of its functions, the percentage policy rates too (Flamur, 2026-10-20). Law variant (decision
+-- 2): production recorded an affiliate payment, so five finance tables stay as a read-only archive
+-- with their payee names: the earning journal, the earning allocations and their items, and the
+-- payout payment evidence and its items. They reference no dropped table and keep their own guards.
+-- The journal's two insert-time validators read booking tables that go away, so they go first.
 -- The legacy finance import (VAY-1358) records retired affiliate rows as RETIRED_AFFILIATE_PROGRAM
 -- dispositions, which the dispositions reason-code CHECK now accepts.
 -- Rollback: any image built from main at or after f027728cc (no image since reads these tables). The
@@ -59,7 +58,8 @@ DROP TABLE
   booking.affiliate_source_capability_preflight_revocations, booking.affiliate_source_capability_production_preflights,
   booking.affiliate_source_capability_certifications, booking.affiliate_validation_booking_bindings,
   booking.affiliate_validation_probe_revocations, booking.affiliate_validation_probes,
-  finance.affiliate_earning_reconciliation_revisions, finance.affiliate_eligible_earning_revisions;
+  finance.affiliate_earning_reconciliation_revisions, finance.affiliate_eligible_earning_revisions,
+  finance.affiliate_percentage_policy_approvals, finance.affiliate_percentage_policy_versions;
 
 DROP FUNCTION
   booking.complete_affiliate_referral_production_preflight(), booking.complete_affiliate_source_capability_preflight(),
@@ -89,12 +89,6 @@ CREATE TRIGGER affiliate_payout_payment_evidence_retired_read_only
   FOR EACH STATEMENT EXECUTE FUNCTION platform.prevent_append_only_mutation();
 CREATE TRIGGER affiliate_payout_payment_evidence_items_retired_read_only
   BEFORE INSERT OR UPDATE OR DELETE ON finance.affiliate_payout_payment_evidence_items
-  FOR EACH STATEMENT EXECUTE FUNCTION platform.prevent_append_only_mutation();
-CREATE TRIGGER affiliate_percentage_policy_versions_retired_read_only
-  BEFORE INSERT OR UPDATE OR DELETE ON finance.affiliate_percentage_policy_versions
-  FOR EACH STATEMENT EXECUTE FUNCTION platform.prevent_append_only_mutation();
-CREATE TRIGGER affiliate_percentage_policy_approvals_retired_read_only
-  BEFORE INSERT OR UPDATE OR DELETE ON finance.affiliate_percentage_policy_approvals
   FOR EACH STATEMENT EXECUTE FUNCTION platform.prevent_append_only_mutation();
 
 ALTER TABLE platform.production_finance_migration_dispositions
@@ -131,8 +125,7 @@ DO $$
 DECLARE
   archive CONSTANT text[] := ARRAY[
     'affiliate_earning_journal', 'affiliate_earning_allocations', 'affiliate_earning_allocation_items',
-    'affiliate_payout_payment_evidence', 'affiliate_payout_payment_evidence_items',
-    'affiliate_percentage_policy_versions', 'affiliate_percentage_policy_approvals'];
+    'affiliate_payout_payment_evidence', 'affiliate_payout_payment_evidence_items'];
   guards CONSTANT text[] := ARRAY[
     'guard_affiliate_earning_allocation_evidence', 'validate_affiliate_payout_payment_evidence_aggregate',
     'validate_affiliate_payout_payment_evidence_item'];
@@ -152,13 +145,13 @@ BEGIN
     RAISE EXCEPTION 'Affiliate objects outside the finance archive remain';
   END IF;
   IF (SELECT count(*) FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
-      WHERE n.nspname = 'finance' AND c.relkind = 'r' AND c.relname = ANY (archive)) <> 7
+      WHERE n.nspname = 'finance' AND c.relkind = 'r' AND c.relname = ANY (archive)) <> 5
     OR (SELECT count(*) FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
         WHERE n.nspname = 'finance' AND p.proname = ANY (guards)) <> 3
     OR (SELECT count(*) FROM pg_catalog.pg_trigger t JOIN pg_catalog.pg_class c ON c.oid = t.tgrelid
         JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
         WHERE n.nspname = 'finance' AND c.relname = ANY (archive)
-          AND t.tgname = c.relname || '_retired_read_only') <> 7
+          AND t.tgname = c.relname || '_retired_read_only') <> 5
   THEN
     RAISE EXCEPTION 'The affiliate money archive is incomplete';
   END IF;
