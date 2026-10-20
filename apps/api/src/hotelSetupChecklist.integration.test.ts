@@ -10,7 +10,7 @@ import { createHotelSetupOrdinaryLoginFixture } from "./hotelSetupOrdinaryLogin.
 const url = process.env["TEST_DATABASE_URL"];
 
 /**
- * VAY-2247 wave 2: the checklist's facts and its two writes (migration 0501) on the real database, read and
+ * VAY-2247 wave 2: the checklist's facts and its two writes (migration 0503) on the real database, read and
  * written by the ordinary API login, as in production. Fixture rows are written by the test's own login with
  * triggers and foreign keys off; the repository runs with every constraint on.
  */
