@@ -8,8 +8,9 @@ import DesignStudioSection from "@/components/booking/DesignStudioSection";
 import BookingFlowSection from "@/components/booking/BookingFlowSection";
 import HotelSettingsSection from "@/components/booking/HotelSettingsSection";
 import CardPaymentsSection from "@/components/booking/CardPaymentsSection";
+import BookingAddressSection from "@/components/booking/BookingAddressSection";
 
-type Section = "design" | "booking" | "settings" | "payments";
+type Section = "design" | "booking" | "settings" | "payments" | "address";
 
 export default function HotelConfigPage() {
   const params = useParams();
@@ -37,6 +38,8 @@ export default function HotelConfigPage() {
     { id: "settings" as const, label: "Settings" },
     // VAY-2205: card payments for Vayada finance.
     { id: "payments" as const, label: "Payments" },
+    // VAY-2295: the booking page address, changed by a Vayada operator.
+    { id: "address" as const, label: "Address" },
   ];
 
   return (
@@ -101,6 +104,9 @@ export default function HotelConfigPage() {
         {activeSection === "settings" && <HotelSettingsSection hotelId={hotelId} />}
         {activeSection === "payments" && (
           <CardPaymentsSection hotelId={hotelId} hotelName={hotel?.name ?? "this hotel"} />
+        )}
+        {activeSection === "address" && (
+          <BookingAddressSection hotelId={hotelId} currentSlug={hotel?.slug} />
         )}
       </div>
     </div>

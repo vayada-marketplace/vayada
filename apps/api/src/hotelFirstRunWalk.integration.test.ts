@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import type { RequestContext } from "@vayada/backend-auth";
 import {
@@ -51,7 +51,11 @@ import {
   createOrdinaryHotelSetupProfileCommand,
 } from "./platform/hotelSetupProfileWriter.js";
 import type { PlatformMediaServingConfig } from "./platform/mediaServing.js";
-import { createPgSharedHotelSetupStatusRepository } from "./platform/sharedHotelSetupStatusReadModel.js";
+import {
+  advancePublicProfileRevision,
+  createPgSharedHotelSetupStatusRepository,
+} from "./platform/sharedHotelSetupStatusReadModel.js";
+import { createTargetPlatformAdminDashboardRepository } from "./routes/platform/admin/dashboard/bookingCompatible.js";
 
 const url = process.env["TEST_DATABASE_URL"];
 const TIME_ZONE = "Asia/Colombo";
@@ -65,7 +69,7 @@ const serving: PlatformMediaServingConfig = {
   privateDownloadMaxTtlSeconds: 900,
 };
 const request: HotelFirstRunRequest = {
-  room: { name: "Garden Suite", numberOfRooms: 3, maxGuests: 2, pricePerNight: "14500" },
+  rooms: [{ name: "Garden Suite", numberOfRooms: 3, maxGuests: 2, pricePerNight: "14500" }],
   pricesIncludeMandatoryCharges: true,
   guestPayment: "pay_at_property",
   plan: "commission",
@@ -82,6 +86,44 @@ function blockerCodes(readiness: ProductReadinessResult | ReadinessProviderFailu
       ),
     )
     .sort();
+}
+
+/** An approved public hotel photo, written straight to the tables (as the 0482 backfill test does). */
+async function insertPublicPhoto(client: pg.Client, propertyId: string) {
+  const mediaId = randomUUID();
+  const checksum = createHash("sha256").update(`${mediaId}:original_safe`).digest("hex");
+  const path = `media/${mediaId}/original_safe/sha256-${checksum}.webp`;
+  await client.query("BEGIN");
+  try {
+    await client.query("SET LOCAL session_replication_role = replica");
+    await client.query(
+      `INSERT INTO platform.media_objects (
+         id, bucket, storage_key, storage_kind, visibility, purpose, property_id,
+         resource_product, resource_type, resource_id, lifecycle_status, content_type,
+         width_px, height_px, size_bytes, checksum_sha256, public_approved
+       ) VALUES ($1, 'vayada-media-test', $2, 'vayada_managed', 'public', 'property.hero_image', $3::uuid,
+         'hotel_catalog', 'property', $3::text, 'active', 'image/webp', 1200, 800, 900, $4, TRUE)`,
+      [mediaId, `public/${path}`, propertyId, checksum],
+    );
+    await client.query(
+      `INSERT INTO platform.media_variants (
+         media_object_id, variant_name, visibility, storage_key, content_type,
+         width_px, height_px, size_bytes, checksum_sha256, public_cdn_url
+       ) VALUES ($1, 'original_safe', 'public', $2, 'image/webp', 1200, 800, 900, $3, $4)`,
+      [mediaId, `public/${path}`, checksum, `https://cdn.example.test/${path}`],
+    );
+    await client.query(
+      `INSERT INTO hotel_catalog.property_media
+         (property_id, media_type, url, sort_order, source_system, public_approved,
+          platform_media_object_id)
+       VALUES ($1, 'hero_image', $2, 0, 'platform', TRUE, $3)`,
+      [propertyId, `https://cdn.example.test/${path}`, mediaId],
+    );
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  }
 }
 
 /**
@@ -384,6 +426,7 @@ describe.skipIf(!url)(
       };
       return {
         admin,
+        pool,
         propertyId,
         organizationId,
         actor,
@@ -503,6 +546,55 @@ describe.skipIf(!url)(
       }
     });
 
+    it("creates several room types, numbers their rooms on across them and prices each (1.12)", async () => {
+      const h = await hotel();
+      try {
+        const rooms = [
+          ...request.rooms,
+          { name: "Ocean Villa", numberOfRooms: 2, maxGuests: 4, pricePerNight: "26000" },
+        ];
+        const result = await h.service().run(h.actor, { ...request, rooms }, h.email);
+        expect(result, JSON.stringify(result)).toMatchObject({ ok: true, checkoutUrl: null });
+        if (!result.ok) return;
+        expect(new Set(result.state.steps.map((step) => step.state))).toEqual(new Set(["done"]));
+
+        // Room names are unique in a hotel: the villas continue after the suites.
+        const { roomFacts } = h.ports;
+        const types = await roomFacts.listRoomTypeFacts(h.propertyId);
+        const byName = new Map(types.map((type) => [type.facts.name, type]));
+        expect([...byName.keys()].sort()).toEqual(["Garden Suite", "Ocean Villa"]);
+        expect(byName.get("Ocean Villa")?.facts.occupancy).toEqual({
+          maxGuests: 4,
+          maxAdults: 4,
+          maxChildren: 3,
+        });
+        const labels = async (name: string) =>
+          (
+            await roomFacts.listPhysicalRoomUnitIdentities(
+              h.propertyId,
+              byName.get(name)!.roomTypeId,
+            )
+          )
+            .map((unit) => `${unit.operationalLabel}:${unit.operationalLabelStatus}`)
+            .sort();
+        expect(await labels("Garden Suite")).toEqual([
+          "Room 1:verified",
+          "Room 2:verified",
+          "Room 3:verified",
+        ]);
+        expect(await labels("Ocean Villa")).toEqual(["Room 4:verified", "Room 5:verified"]);
+
+        // Both are priced and on the calendar, so nothing blocks publishing; a second run writes nothing.
+        expect(blockerCodes(await h.readiness())).toEqual([]);
+        expect(await h.service().run(h.actor, { ...request, rooms }, h.email)).toMatchObject({
+          ok: true,
+          ran: [],
+        });
+      } finally {
+        await h.close();
+      }
+    });
+
     it("stops before pricing without the taxes tick and resumes there with it", async () => {
       const h = await hotel();
       try {
@@ -531,6 +623,70 @@ describe.skipIf(!url)(
           ran: ["pricing", "calendar", "guest_rules", "plan"],
         });
         expect(await lifecycle()).toBe("active");
+      } finally {
+        await h.close();
+      }
+    });
+
+    it("keeps a hotel with only its basics being set up on old-setup saves until it has a description and a photo", async () => {
+      const h = await hotel();
+      try {
+        const state = async () =>
+          (
+            await h.admin.query(
+              `SELECT property.lifecycle_status AS lifecycle, property.profile_status AS profile,
+                      count(audit.id)::int AS activations
+               FROM hotel_catalog.properties property
+               LEFT JOIN platform.product_audit_events audit ON audit.property_id = property.id
+                 AND audit.action = 'hotel_catalog.property.lifecycle.auto_activate'
+               WHERE property.id = $1 GROUP BY property.id`,
+              [h.propertyId],
+            )
+          ).rows[0];
+        const dashboard = createTargetPlatformAdminDashboardRepository({
+          connectionString: url!,
+          pool: {
+            query: (text: string, values?: readonly unknown[]) =>
+              h.admin.query(text, values as unknown[]),
+            end: async () => undefined,
+          } as never,
+        });
+        const label = async () =>
+          (await dashboard.listGrowthProperties({ excludeTestData: false })).find(
+            (property) => property.id === h.propertyId,
+          )?.status;
+
+        // Its profile is complete, but it isn't live: operators don't count it as live, and the
+        // owner is told what makes it live.
+        expect(await state()).toEqual({
+          lifecycle: "provisioning",
+          profile: "complete",
+          activations: 0,
+        });
+        expect(await label()).toBe("demo");
+        expect(blockerCodes(await h.readiness())).toContain(
+          "booking.hotel_profile:hotel_setup_content_missing",
+        );
+
+        // An old-setup save or a finished photo upload doesn't make it live on the basics alone,
+        // nor with only a description.
+        await advancePublicProfileRevision(h.pool, h.propertyId);
+        expect(await state()).toMatchObject({ lifecycle: "provisioning", activations: 0 });
+        await h.admin.query(
+          `INSERT INTO hotel_catalog.property_profiles (property_id, locale, short_description)
+           VALUES ($1, 'en', 'A calm hotel by the lighthouse.')
+           ON CONFLICT (property_id, locale) DO UPDATE SET short_description = EXCLUDED.short_description`,
+          [h.propertyId],
+        );
+        await advancePublicProfileRevision(h.pool, h.propertyId);
+        expect(await state()).toMatchObject({ lifecycle: "provisioning", activations: 0 });
+        expect(await label()).toBe("demo");
+
+        // With a description and an approved photo, the next save makes it live, as before VAY-2247.
+        await insertPublicPhoto(h.admin, h.propertyId);
+        await advancePublicProfileRevision(h.pool, h.propertyId);
+        expect(await state()).toEqual({ lifecycle: "active", profile: "complete", activations: 1 });
+        expect(await label()).toBe("live");
       } finally {
         await h.close();
       }
