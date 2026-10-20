@@ -1,5 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { act, create, type ReactTestRenderer } from "react-test-renderer";
+import { useState } from "react";
+import { act, create, type ReactTestInstance, type ReactTestRenderer } from "react-test-renderer";
 import { describe, expect, it, vi } from "vitest";
 
 import { QuickPropertySetup, quickRoomStorageKey } from "./QuickPropertySetup";
@@ -46,6 +47,8 @@ function props(overrides: Partial<QuickRoomStepProps> = {}): QuickRoomStepProps 
 }
 
 const text = (renderer: ReactTestRenderer) => JSON.stringify(renderer.toJSON());
+const nodeText = (node: ReactTestInstance): string =>
+  node.children.map((child) => (typeof child === "string" ? child : nodeText(child))).join("");
 async function submit(renderer: ReactTestRenderer) {
   await act(async () => renderer.root.findByType("form").props.onSubmit({ preventDefault() {} }));
 }
@@ -62,19 +65,105 @@ describe("QuickRoomStep (VAY-2247 step 3)", () => {
     expect(markup).toContain("One double bed per room");
     expect(markup).toContain("Up to 2 guests · Free cancellation until 3 days before");
     expect(markup).toContain("€145");
-    // Until the first run takes them (follow-up), no Change links and no second room type.
-    expect(markup).not.toContain(">Change<");
-    expect(markup).not.toContain("Add another room type");
+    expect(markup).toContain("Add another room type");
+    // The first run takes both choices (1.12b): each default has its Change link.
+    expect(markup.match(/>Change</g)).toHaveLength(2);
+    expect(markup).toContain("Our default. After that, the full stay is charged.");
   });
 
-  it("shows the Change links and Add another room type once they are passed", () => {
-    const markup = renderToStaticMarkup(
-      <QuickRoomStep
-        {...props({ onAddRoomType: vi.fn(), onChangeCancellation: vi.fn(), onChangeBed: vi.fn() })}
-      />,
+  it("changes the free cancellation for every room type; Non-refundable shows but can't be picked (1.12b)", async () => {
+    let current: QuickRoomsDraft = DRAFT;
+    const onChange = vi.fn((next: QuickRoomsDraft) => {
+      current = next;
+    });
+    function Harness() {
+      const [draft, setDraft] = useState(DRAFT);
+      return (
+        <QuickRoomStep
+          {...props({
+            draft,
+            onChange: (next) => {
+              onChange(next);
+              setDraft(next);
+            },
+          })}
+        />
+      );
+    }
+    const renderer = create(<Harness />);
+    const change = () =>
+      renderer.root.findAll((node) => node.type === "button" && nodeText(node) === "Change");
+    await act(async () => change()[0]!.props.onClick());
+    const radios = renderer.root.findAll(
+      (node) => node.type === "input" && node.props.name === "quick-cancellation",
     );
-    expect(markup.match(/>Change</g)).toHaveLength(2);
-    expect(markup).toContain("Add another room type");
+    expect(radios.map((radio) => nodeText(radio.parent!))).toEqual([
+      "Free until 1 day before arrival",
+      "Free until 3 days before arrival",
+      "Free until 7 days before arrival",
+      "Free until 14 days before arrival",
+      "Non-refundableNeeds online card payments. Set it later in Rooms & Rates once cards are on.",
+    ]);
+    expect(radios.map((radio) => radio.props.checked)).toEqual([false, true, false, false, false]);
+    expect(radios[4]!.props.disabled).toBe(true);
+    await act(async () => radios[2]!.props.onChange());
+    expect(current.freeCancellationDays).toBe(7);
+    expect(nodeText(renderer.root)).toContain("Free cancellation until 7 days before arrival");
+    expect(nodeText(renderer.root)).toContain(
+      "Up to 2 guests · Free cancellation until 7 days before",
+    );
+    // Done closes it; the line no longer says it is our default.
+    const done = renderer.root.findAll(
+      (node) => node.type === "button" && nodeText(node) === "Done",
+    );
+    expect(done[0]!.props["aria-expanded"]).toBe(true);
+    await act(async () => done[0]!.props.onClick());
+    expect(
+      renderer.root.findAll(
+        (node) => node.type === "input" && node.props.name === "quick-cancellation",
+      ),
+    ).toHaveLength(0);
+    expect(nodeText(renderer.root)).not.toContain("Our default. After that");
+    renderer.unmount();
+  });
+
+  it("changes the beds for every room type, two twin beds for a twin room (1.12b)", async () => {
+    const onChange = vi.fn();
+    const renderer = create(<QuickRoomStep {...props({ onChange })} />);
+    const change = renderer.root.findAll(
+      (node) => node.type === "button" && nodeText(node) === "Change",
+    );
+    await act(async () => change[1]!.props.onClick());
+    const radios = renderer.root.findAll(
+      (node) => node.type === "input" && node.props.name === "quick-bed",
+    );
+    expect(radios.map((radio) => nodeText(radio.parent!))).toEqual([
+      "One double bed",
+      "One queen bed",
+      "One king bed",
+      "Two twin beds",
+      "One single bed",
+    ]);
+    await act(async () => radios[3]!.props.onChange());
+    expect(onChange).toHaveBeenLastCalledWith({ ...DRAFT, bed: "twin" });
+    renderer.unmount();
+    const twin = renderToStaticMarkup(
+      <QuickRoomStep {...props({ draft: { ...DRAFT, bed: "twin" } })} />,
+    );
+    expect(twin).toContain("Two twin beds per room");
+  });
+
+  it("keeps saved choices the first run still takes and drops the others", () => {
+    expect(
+      parseQuickRoomsDraft({ rooms: [FILLED], freeCancellationDays: 14, bed: "king" }),
+    ).toMatchObject({ freeCancellationDays: 14, bed: "king" });
+    const dropped = parseQuickRoomsDraft({
+      rooms: [FILLED],
+      freeCancellationDays: 5,
+      bed: "bunk_bed",
+    });
+    expect(dropped).not.toHaveProperty("freeCancellationDays");
+    expect(dropped).not.toHaveProperty("bed");
   });
 
   it("asks for what is missing, including the taxes tick, before going on", async () => {
@@ -107,6 +196,131 @@ describe("QuickRoomStep (VAY-2247 step 3)", () => {
     await submit(renderer);
     expect(onSubmit).toHaveBeenCalledWith(DRAFT);
     renderer.unmount();
+  });
+});
+
+describe("QuickRoomStep room types (VAY-2247 1.12, Paper rev 4 a05-1)", () => {
+  const textOf = (node: ReactTestInstance): string =>
+    node.children.map((child) => (typeof child === "string" ? child : textOf(child))).join("");
+  const SUITE: QuickRoomDraft = {
+    name: "Alpine Suite",
+    numberOfRooms: "4",
+    maxGuests: "3",
+    pricePerNight: "210",
+  };
+
+  /** The step with its draft kept in state, as QuickPropertySetup keeps it. */
+  async function mountSteps(initial: QuickRoomsDraft) {
+    const seen: { draft: QuickRoomsDraft } = { draft: initial };
+    const onSubmit = vi.fn(async () => undefined);
+    function Harness() {
+      const [draft, setDraft] = useState(initial);
+      seen.draft = draft;
+      return <QuickRoomStep {...props({ draft, onChange: setDraft, onSubmit })} />;
+    }
+    let renderer: ReactTestRenderer | undefined;
+    await act(async () => {
+      renderer = create(<Harness />);
+    });
+    const r = renderer!;
+    const click = async (label: string) => {
+      const button = r.root.findAll(
+        (node) => node.type === "button" && textOf(node).includes(label),
+      )[0]!;
+      await act(async () => button.props.onClick());
+    };
+    const type = async (index: number, value: string) => {
+      await act(async () =>
+        r.root.findAllByType("input")[index]!.props.onChange({ target: { value } }),
+      );
+    };
+    return { r, seen, click, type, onSubmit, text: () => textOf(r.root) };
+  }
+
+  it("adds a room type once the current one is complete, numbering its rooms on", async () => {
+    const step = await mountSteps({
+      rooms: [{ ...FILLED, pricePerNight: "" }],
+      pricesIncludeMandatoryCharges: true,
+    });
+    await step.click("Add another room type");
+    expect(step.seen.draft.rooms).toHaveLength(1);
+    expect(step.text()).toContain("Enter a price per night.");
+
+    await step.type(3, "145");
+    await step.click("Add another room type");
+    expect(step.seen.draft.rooms).toHaveLength(2);
+    // The first room type is one line with Edit; the new one is the form.
+    expect(step.text()).toContain("Classic Double8 rooms · up to 2 guests · €145 / nightEdit");
+    expect(step.text()).toContain("New room type");
+    const values = ["Alpine Suite", "4", "3", "210"];
+    for (let index = 0; index < values.length; index += 1) await step.type(index, values[index]!);
+    expect(step.text()).toContain("We create Room 9–12 in the PMS. Rename them later.");
+    await submit(step.r);
+    expect(step.onSubmit).toHaveBeenCalledWith({
+      rooms: [FILLED, SUITE],
+      pricesIncludeMandatoryCharges: true,
+    });
+    step.r.unmount();
+  });
+
+  it("refuses a second room type with the same name", async () => {
+    const step = await mountSteps({
+      rooms: [FILLED, { ...SUITE, name: "classic double" }],
+      pricesIncludeMandatoryCharges: true,
+    });
+    await submit(step.r);
+    expect(step.onSubmit).not.toHaveBeenCalled();
+    expect(step.text()).toContain("You already have a room type with this name.");
+    step.r.unmount();
+  });
+
+  it("edits an earlier room type, drops an empty new one, and removes one", async () => {
+    const step = await mountSteps({ rooms: [FILLED, SUITE], pricesIncludeMandatoryCharges: true });
+    // Editing Classic Double: Alpine Suite becomes the line.
+    await step.click("Edit");
+    expect(step.text()).toContain("Alpine Suite4 rooms · up to 3 guests · €210 / nightEdit");
+    await step.type(0, "Classic Queen");
+    expect(step.seen.draft.rooms[0]!.name).toBe("Classic Queen");
+
+    // A room type added and left empty goes away when another one is opened.
+    await step.click("Add another room type");
+    expect(step.seen.draft.rooms).toHaveLength(3);
+    await step.click("Edit");
+    expect(step.seen.draft.rooms).toHaveLength(2);
+
+    // Remove takes the room type being edited away (never the first).
+    await step.click("Edit");
+    expect(step.text()).toContain("Remove");
+    await step.click("Remove");
+    expect(step.seen.draft.rooms.map((room) => room.name)).toEqual(["Classic Queen"]);
+    expect(step.text()).not.toContain("Remove");
+    step.r.unmount();
+  });
+
+  it("opens the first room type that still needs something when Continue is pressed", async () => {
+    const step = await mountSteps({
+      rooms: [{ ...FILLED, numberOfRooms: "" }, SUITE],
+      pricesIncludeMandatoryCharges: true,
+    });
+    await submit(step.r);
+    expect(step.onSubmit).not.toHaveBeenCalled();
+    expect(step.text()).toContain("Enter at least 1 room.");
+    expect(step.text()).toContain("Alpine Suite4 rooms · up to 3 guests · €210 / nightEdit");
+    step.r.unmount();
+  });
+
+  it("stops at ten room types", () => {
+    const markup = renderToStaticMarkup(
+      <QuickRoomStep
+        {...props({
+          draft: {
+            rooms: Array.from({ length: 10 }, (_, index) => ({ ...FILLED, name: `Type ${index}` })),
+            pricesIncludeMandatoryCharges: true,
+          },
+        })}
+      />,
+    );
+    expect(markup).not.toContain("Add another room type");
   });
 });
 
@@ -232,6 +446,38 @@ describe("QuickPropertySetup (VAY-2247 steps 3–5)", () => {
     // On to step 4 (How guests pay), with the room in its preview.
     expect(text(renderer!)).toContain("How guests pay");
     expect(text(renderer!)).toContain("Garden Suite Deluxe");
+    renderer!.unmount();
+  });
+
+  it("goes back to Your hotel for this hotel from step 3", async () => {
+    const onEditHotel = vi.fn();
+    let renderer: ReactTestRenderer | undefined;
+    await act(async () => {
+      renderer = create(
+        <QuickPropertySetup
+          propertyId={PROPERTY}
+          initialStep={3}
+          setup={setup}
+          readCurrency={async () => "EUR"}
+          firstRun={{ run: vi.fn() } as never}
+          readCheckoutPending={async () => false}
+          openCheckout={vi.fn()}
+          storage={storage()}
+          onSaveAndExit={vi.fn()}
+          publication={{ load: vi.fn(), publish: vi.fn() }}
+          organizationId="9a8b7c6d-5e4f-4a3b-8c2d-1e0f99887766"
+          publicationStorage={storage()}
+          openPage={vi.fn()}
+          onEditHotel={onEditHotel}
+        />,
+      );
+    });
+    const back = renderer!.root.findAll(
+      (node) => node.type === "button" && node.props.children === "Back",
+    );
+    expect(back.length).toBeGreaterThan(0);
+    await act(async () => back[0]!.props.onClick());
+    expect(onEditHotel).toHaveBeenCalledTimes(1);
     renderer!.unmount();
   });
 

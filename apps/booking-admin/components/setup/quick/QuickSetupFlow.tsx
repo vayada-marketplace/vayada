@@ -24,6 +24,7 @@ import {
 import { QuickAboutYouStep } from "./QuickAboutYouStep";
 import { QuickContactsFromAccountNote, QuickUseMyDetails } from "./QuickHotelDetails";
 import { QuickHotelAddress } from "./QuickHotelAddress";
+import { QuickHotelEdit } from "./QuickHotelEdit";
 import { QuickHotelStep } from "./QuickHotelStep";
 import { QuickPropertySetup, type QuickSetupPage } from "./QuickPropertySetup";
 import { QuickSetupShell } from "./QuickSetupShell";
@@ -70,7 +71,8 @@ type View =
   | { kind: "unavailable" }
   | { kind: "about_you" }
   | { kind: "hotel"; resumed: boolean }
-  | { kind: "property"; step: 3 | 4 | 5; propertyId: string };
+  | { kind: "property"; step: 3 | 4 | 5; propertyId: string }
+  | { kind: "edit_hotel"; propertyId: string };
 
 function readStored(storage: QuickSetupFlowProps["storage"]): Stored | null {
   try {
@@ -185,7 +187,9 @@ export function QuickSetupFlow(props: QuickSetupFlowProps) {
     [stored.draft.countryCode, stored.draft.currency],
   );
   const exit = () =>
-    props.onSaveAndExit(view.kind === "property" ? view.propertyId : props.propertyId);
+    props.onSaveAndExit(
+      view.kind === "property" || view.kind === "edit_hotel" ? view.propertyId : props.propertyId,
+    );
 
   if (view.kind === "loading") {
     return (
@@ -272,8 +276,24 @@ export function QuickSetupFlow(props: QuickSetupFlowProps) {
           organizationId={props.organizationId}
           publicationStorage={props.publicationStorage}
           openPage={(page) => props.openPage(page, view.propertyId)}
+          onEditHotel={() => setView({ kind: "edit_hotel", propertyId: view.propertyId })}
         />
       )
+    );
+  }
+
+  if (view.kind === "edit_hotel") {
+    return (
+      <QuickHotelEdit
+        propertyId={view.propertyId}
+        setup={setup}
+        propertyTypes={types}
+        readCurrency={props.readCurrency}
+        saveCurrency={props.saveCurrency}
+        googleMapsApiKey={props.googleMapsApiKey}
+        onDone={() => setView({ kind: "property", step: 3, propertyId: view.propertyId })}
+        onSaveAndExit={exit}
+      />
     );
   }
 

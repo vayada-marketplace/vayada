@@ -1,4 +1,16 @@
-import { FIRST_RUN_MAX_ROOMS, firstRunPriceMinor, firstRunRoomFacts } from "@vayada/domain-booking";
+import {
+  FIRST_RUN_BED_CHOICES,
+  FIRST_RUN_DEFAULT_BED,
+  FIRST_RUN_DEFAULT_FREE_CANCELLATION_DAYS,
+  FIRST_RUN_FREE_CANCELLATION_DAYS,
+  FIRST_RUN_MAX_ROOMS,
+  firstRunPriceMinor,
+  firstRunRoomFacts,
+  isFirstRunBedChoice,
+  isFirstRunFreeCancellationDays,
+  type FirstRunBedChoice,
+  type FirstRunFreeCancellationDays,
+} from "@vayada/domain-booking";
 
 import type { QuickPreviewRoom } from "./QuickBookingPagePreview";
 
@@ -10,11 +22,71 @@ export type QuickRoomDraft = {
   pricePerNight: string;
 };
 
-/** The hotel's room types (in order) and the taxes tick, which covers all their prices. */
+/**
+ * The hotel's room types (in order), the taxes tick, which covers all their prices, and the owner's
+ * cancellation and bed choices for all of them (1.12b; the first run's defaults when not set).
+ */
 export type QuickRoomsDraft = {
   rooms: QuickRoomDraft[];
   pricesIncludeMandatoryCharges: boolean;
+  freeCancellationDays?: FirstRunFreeCancellationDays;
+  bed?: FirstRunBedChoice;
 };
+
+/** The draft's cancellation and bed, with the first run's defaults (free until 3 days, a double bed). */
+export function quickRoomChoices(draft: QuickRoomsDraft): {
+  freeCancellationDays: FirstRunFreeCancellationDays;
+  bed: FirstRunBedChoice;
+} {
+  return {
+    freeCancellationDays: draft.freeCancellationDays ?? FIRST_RUN_DEFAULT_FREE_CANCELLATION_DAYS,
+    bed: draft.bed ?? FIRST_RUN_DEFAULT_BED,
+  };
+}
+
+const days = (count: number) => `${count} day${count === 1 ? "" : "s"}`;
+
+/** "Free cancellation until 7 days before arrival". */
+export function quickCancellationTitle(freeCancellationDays: FirstRunFreeCancellationDays): string {
+  return `Free cancellation until ${days(freeCancellationDays)} before arrival`;
+}
+
+const BED_TITLES: Record<FirstRunBedChoice, string> = {
+  double: "One double bed per room",
+  queen: "One queen bed per room",
+  king: "One king bed per room",
+  twin: "Two twin beds per room",
+  single: "One single bed per room",
+};
+
+export function quickBedTitle(bed: FirstRunBedChoice): string {
+  return BED_TITLES[bed];
+}
+
+/** The cancellation picker's choices (Flamur, 2026-10-20), then Non-refundable, not offered yet. */
+export const QUICK_CANCELLATION_OPTIONS = FIRST_RUN_FREE_CANCELLATION_DAYS.map((value) => ({
+  value,
+  label: `Free until ${days(value)} before arrival`,
+}));
+export const QUICK_NON_REFUNDABLE_NOTE =
+  "Needs online card payments. Set it later in Rooms & Rates once cards are on.";
+
+export const QUICK_BED_OPTIONS = FIRST_RUN_BED_CHOICES.map((value) => ({
+  value,
+  label: BED_TITLES[value].replace(" per room", ""),
+}));
+
+/** What the first-run request carries for the choices. */
+export function quickFirstRunChoices(draft: QuickRoomsDraft) {
+  const { freeCancellationDays, bed } = quickRoomChoices(draft);
+  return Object.freeze({
+    cancellation: Object.freeze({
+      kind: "free_until_days_before_arrival" as const,
+      days: freeCancellationDays,
+    }),
+    bed,
+  });
+}
 
 /** The first run takes up to this many room types (the server's FIRST_RUN_MAX_ROOM_TYPES). */
 export const QUICK_MAX_ROOM_TYPES = 10;
@@ -130,16 +202,25 @@ export function parseQuickRoomsDraft(value: unknown): QuickRoomsDraft | null {
     ...EMPTY_QUICK_ROOM_DRAFT,
     ...(item && typeof item === "object" ? pick(item as Record<string, unknown>) : {}),
   });
+  // The choices (1.12b) come back only when they are still ones the first run takes.
+  const choices = {
+    ...(isFirstRunFreeCancellationDays(record.freeCancellationDays)
+      ? { freeCancellationDays: record.freeCancellationDays }
+      : {}),
+    ...(isFirstRunBedChoice(record.bed) ? { bed: record.bed } : {}),
+  };
   if (Array.isArray(record.rooms))
     return {
       rooms: record.rooms.length
         ? record.rooms.slice(0, QUICK_MAX_ROOM_TYPES).map(room)
         : [EMPTY_QUICK_ROOM_DRAFT],
       pricesIncludeMandatoryCharges: record.pricesIncludeMandatoryCharges === true,
+      ...choices,
     };
   return {
     rooms: [room(record)],
     pricesIncludeMandatoryCharges: record.pricesIncludeMandatoryCharges === true,
+    ...choices,
   };
 }
 
@@ -152,6 +233,7 @@ function pick(value: Record<string, unknown>): Partial<QuickRoomDraft> {
 
 /** The room types as the preview shows them, once each has a name and a price. */
 export function quickPreviewRooms(draft: QuickRoomsDraft, symbol: string): QuickPreviewRoom[] {
+  const { freeCancellationDays } = quickRoomChoices(draft);
   return draft.rooms.flatMap((room) => {
     const name = room.name.trim();
     const price = room.pricePerNight.trim();
@@ -160,7 +242,7 @@ export function quickPreviewRooms(draft: QuickRoomsDraft, symbol: string): Quick
     return [
       {
         name,
-        details: `Up to ${guests} guest${guests === 1 ? "" : "s"} · Free cancellation until 3 days before`,
+        details: `Up to ${guests} guest${guests === 1 ? "" : "s"} · Free cancellation until ${days(freeCancellationDays)} before`,
         price: `${symbol}${price}`,
       },
     ];
