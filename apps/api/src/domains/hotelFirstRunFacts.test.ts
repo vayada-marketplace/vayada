@@ -50,7 +50,9 @@ function ports(hotel: Hotel = {}): HotelFirstRunFactsPorts {
     },
     roomRead: {
       listRoomTypeFacts: async () => (set ? [{ roomTypeId, roomFactsRevision: 1 }] : []),
-      getDraftRoomTypeBinding: async () => (set ? { roomTypeId } : null),
+      // The first run made one room type here: the second draft has none, which ends the list.
+      getDraftRoomTypeBinding: async (_propertyId: string, draftRoomId: string) =>
+        set && draftRoomId === "first-run-room-1" ? { roomTypeId } : null,
       getRoomTypeCapacity: async () => ({ roomUnitsRevision: 9, activeUnitCount: 3 }),
       listPhysicalRoomUnitIdentities: async () =>
         [1, 2, 3].map((n) => unit(n, n > (hotel.unlabelled ?? 0))),
@@ -99,7 +101,7 @@ const read = (hotel?: Hotel) => createHotelFirstRunFactsReader(ports(hotel)).rea
 describe("first-run facts reader (VAY-2247)", () => {
   it("reads a fresh hotel: a profile and nothing else", async () => {
     expect(await read()).toMatchObject({
-      firstRunRoomTypeId: null,
+      firstRunRoomTypeIds: [],
       language: "de",
       profile: {
         revision: 4,
@@ -120,7 +122,7 @@ describe("first-run facts reader (VAY-2247)", () => {
 
   it("reads a hotel after a complete first run", async () => {
     expect(await read({ set: true })).toMatchObject({
-      firstRunRoomTypeId: roomTypeId,
+      firstRunRoomTypeIds: [roomTypeId],
       currency: { code: "EUR", revision: 2 },
       roomTypes: [
         {
