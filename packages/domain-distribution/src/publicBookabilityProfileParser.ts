@@ -225,7 +225,6 @@ const profileSchema: z.ZodType<PublicBookabilityProfileProjection> = z
       (!hotel.trust.profileComplete ||
         !hotel.trust.profileVerified ||
         hotel.trust.reasonCodes.length > 0 ||
-        hotel.images.length === 0 ||
         !hotel.capabilities.bookingDeepLinks)
     )
       issue(context, ["hotel", "trust"]);

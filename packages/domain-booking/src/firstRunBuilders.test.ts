@@ -67,6 +67,14 @@ describe("firstRunPriceMinor", () => {
   });
 });
 
+describe("firstRunRoomFacts with the owner's bed (1.12b)", () => {
+  it("puts the chosen bed in every room, two twin beds for a twin room", () => {
+    expect(firstRunRoomFacts(room, "king")?.beds).toEqual([{ type: "king", quantity: 1 }]);
+    expect(firstRunRoomFacts(room, "twin")?.beds).toEqual([{ type: "twin", quantity: 2 }]);
+    expect(firstRunRoomFacts(room, "double")).toEqual(firstRunRoomFacts(room));
+  });
+});
+
 describe("firstRunPricing", () => {
   const input = {
     propertyId,
@@ -107,6 +115,23 @@ describe("firstRunPricing", () => {
       },
       payment: { kind: "full", acceptedMethods: ["pay_at_property"] },
     });
+  });
+
+  it("uses the owner's free cancellation days (1.12b)", () => {
+    for (const days of [1, 7, 14] as const) {
+      const result = firstRunPricing({ ...input, freeCancellationDays: days });
+      expect(result?.terms.cancellation).toEqual({
+        kind: "flexible",
+        terms: {
+          type: "free_until_days_before_arrival",
+          freeCancellationDeadlineDays: days,
+          afterDeadlinePenalty: "full_booking_amount",
+          noShowPenalty: "full_booking_amount",
+        },
+      });
+      expect(result?.terms.payment).toEqual({ kind: "full", acceptedMethods: ["pay_at_property"] });
+    }
+    expect(firstRunPricing({ ...input, freeCancellationDays: 3 })).toEqual(firstRunPricing(input));
   });
 
   it("returns null for a price or offer id the server would refuse", () => {
