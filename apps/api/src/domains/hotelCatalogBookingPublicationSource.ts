@@ -262,7 +262,8 @@ async function load(
   }
   if (!content.profileComplete) blockers.push(blocker("hotel_profile_incomplete"));
   // A city and country the hotel keeps private need the box ticked, not new data (VAY-2288).
-  if (!first.countryCode || !first.city) blockers.push(blocker("hotel_public_locality_missing"));
+  if (!first.countryCode?.trim() || !first.city?.trim())
+    blockers.push(blocker("hotel_public_locality_missing"));
   else if (!localityPublic) blockers.push(blocker("hotel_public_locality_hidden"));
   // The page can't be built from an address or time zone it can't use (VAY-2292).
   if (!content.slug) blockers.push(blocker("hotel_canonical_slug_missing"));

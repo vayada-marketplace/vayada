@@ -310,7 +310,8 @@ function sanitizeRooms(
 }
 
 /** Room details the page can't show are left off rather than failing it: a bathroom count other
- * than whole or half numbers, a photo used twice and blank photo text (VAY-2292). */
+ * than whole or half numbers, a photo used twice and blank photo text (VAY-2292). Content that
+ * was already valid comes back unchanged, because reads compare stored content with a rebuild. */
 function cleanRoomFacts(room: BookingPublicRoom): BookingPublicRoom {
   if (!record(room) || !Array.isArray(room.images)) return room;
   const urls = new Set<unknown>();
@@ -319,9 +320,9 @@ function cleanRoomFacts(room: BookingPublicRoom): BookingPublicRoom {
     bathrooms:
       room.bathroomType === "private" && bathroomCount(room.bathrooms) ? room.bathrooms : null,
     images: room.images.flatMap((image) => {
-      if (!record(image) || urls.has(image.url)) return [];
+      if (!image || typeof image !== "object" || urls.has(image.url)) return [];
       urls.add(image.url);
-      const alt = typeof image.alt === "string" ? image.alt.trim() || null : image.alt;
+      const alt = typeof image.alt === "string" && !image.alt.trim() ? null : image.alt;
       return [{ url: image.url, ...(alt === undefined ? {} : { alt }) }];
     }),
   };

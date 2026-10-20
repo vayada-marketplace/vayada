@@ -239,7 +239,11 @@ describe("Booking publication builder", () => {
             {
               ...room!,
               bathrooms: 1.5,
-              images: [{ url: "https://cdn.test/room.jpg", alt: "" }, ...room!.images],
+              images: [
+                { url: "https://cdn.test/room.jpg", alt: "" },
+                ...room!.images,
+                { url: "https://cdn.test/room-2.jpg", alt: " Sea view" },
+              ],
             },
           ],
         },
@@ -253,10 +257,14 @@ describe("Booking publication builder", () => {
       { type: "x", value: "https://x.test/hotel" },
       { type: "phone", value: "+94 771 021 677" },
     ]);
-    // Setup offers half bathrooms; the room's photo shows once, without blank text.
+    // Setup offers half bathrooms; the room's photo shows once, without blank text. Text that was
+    // already valid stays as published, since reads compare stored rooms with a rebuild.
     expect(published[0]).toMatchObject({
       bathrooms: 1.5,
-      images: [{ url: "https://cdn.test/room.jpg", alt: null }],
+      images: [
+        { url: "https://cdn.test/room.jpg", alt: null },
+        { url: "https://cdn.test/room-2.jpg", alt: " Sea view" },
+      ],
     });
 
     const odd = await run(readiness, {
