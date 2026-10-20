@@ -34,7 +34,8 @@
     "./bookingPublicationReviewApi": "./src/bookingPublicationReviewApi.ts",
     "./setupProfileFields": "./src/setupProfileFields.tsx",
     "./HotelSetupChecklistCard": "./src/HotelSetupChecklistCard.tsx",
-    "./hotelSetupChecklistMessages": "./src/hotelSetupChecklistMessages.ts"
+    "./hotelSetupChecklistMessages": "./src/hotelSetupChecklistMessages.ts",
+    "./hotelSetupChecklistApi": "./src/hotelSetupChecklistApi.ts"
   },
   "dependencies": {
     "@vayada/domain-booking": "*",
