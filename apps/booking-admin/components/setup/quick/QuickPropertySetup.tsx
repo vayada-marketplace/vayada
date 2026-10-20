@@ -16,6 +16,8 @@ import { previewBookingHost } from "./quickHotelDraft";
 import {
   EMPTY_QUICK_ROOMS_DRAFT,
   parseQuickRoomsDraft,
+  quickFirstRunChoices,
+  quickRoomChoices,
   quickRoomRequest,
   quickPreviewRooms,
   quickRoomsFirstError,
@@ -50,6 +52,8 @@ export type QuickPropertySetupProps = {
   openPage: (page: QuickSetupPage) => void;
   /** Copies the booking page link (the clipboard by default). */
   copyLink?: (url: string) => Promise<void>;
+  /** Back from step 3: "Your hotel" for this hotel. */
+  onEditHotel?: (() => void) | null;
 };
 
 type Hotel = {
@@ -108,6 +112,7 @@ export function QuickPropertySetup({
   publicationStorage,
   openPage,
   copyLink = (url) => navigator.clipboard.writeText(url),
+  onEditHotel = null,
 }: QuickPropertySetupProps) {
   const [step, setStep] = useState(initialStep);
   const [hotel, setHotel] = useState<Hotel | null>(null);
@@ -176,6 +181,7 @@ export function QuickPropertySetup({
         currency={hotel.currency}
         hotel={hotel}
         onSubmit={async () => setStep(4)}
+        onBack={onEditHotel}
         onSaveAndExit={onSaveAndExit}
       />
     );
@@ -207,6 +213,8 @@ export function QuickPropertySetup({
               pricesIncludeMandatoryCharges: rooms.pricesIncludeMandatoryCharges,
               guestPayment: "pay_at_property",
               plan,
+              // The owner's cancellation and bed for every room type (1.12b, #3594).
+              ...quickFirstRunChoices(rooms),
             });
           } catch (error) {
             throw new Error(quickFirstRunErrorMessage(error));
@@ -229,6 +237,7 @@ export function QuickPropertySetup({
       storage={publicationStorage}
       hotel={hotel}
       rooms={quickPreviewRooms(rooms, hotel.currency.symbol)}
+      freeCancellationDays={quickRoomChoices(rooms).freeCancellationDays}
       openPage={openPage}
       copyLink={copyLink}
       onSaveAndExit={onSaveAndExit}
@@ -244,6 +253,7 @@ function QuickPublishSteps({
   storage,
   hotel,
   rooms,
+  freeCancellationDays,
   openPage,
   copyLink,
   onSaveAndExit,
@@ -254,6 +264,7 @@ function QuickPublishSteps({
   storage: Store;
   hotel: Hotel;
   rooms: readonly QuickPreviewRoom[];
+  freeCancellationDays: number;
   openPage: (page: QuickSetupPage) => void;
   copyLink: (url: string) => Promise<void>;
   onSaveAndExit: () => void;
@@ -285,6 +296,7 @@ function QuickPublishSteps({
       hotel={hotel}
       currency={hotel.currency}
       rooms={rooms}
+      freeCancellationDays={freeCancellationDays}
       status={state}
       onPublish={() => void publish()}
       onRetry={() => void retry()}
