@@ -99,6 +99,31 @@ describe.skipIf(!URL)("affiliate program drop 0498", () => {
                  'request-1')`,
         [randomUUID(), property, "b".repeat(64), user, organization],
       );
+      // A recorded affiliate payment: the evidence and its item, the idempotency key and the payout.
+      // Replica mode skips the evidence's aggregate triggers; checks still apply.
+      const [payout, key, evidence] = [randomUUID(), randomUUID(), randomUUID()];
+      await db.query(
+        `BEGIN; SET LOCAL session_replication_role = replica;
+         INSERT INTO finance.payouts
+           (id, owner_scope, organization_id, source_system, payout_status, amount, net_amount, currency)
+           VALUES ('${payout}', 'organization', '${organization}', 'finance', 'paid', 100, 100, 'EUR');
+         INSERT INTO platform.idempotency_keys
+           (id, operation_scope, operation, key_hash, request_fingerprint_hash, status, tenant_scope,
+            organization_id, expires_at)
+           VALUES ('${key}', 'finance', 'affiliate.payout.payment.record', 'key-1', 'request-1',
+                   'in_progress', 'organization', '${organization}', now() + interval '1 day');
+         INSERT INTO finance.affiliate_payout_payment_evidence
+           (id, organization_id, affiliate_id, recorded_by_organization_id, recorded_by_user_id,
+            idempotency_key_id, command_id, request_fingerprint_hash, payment_method, external_reference,
+            evidence_reference, amount, currency, payout_count, paid_at, recorded_at)
+           VALUES ('${evidence}', '${organization}', 'affiliate-1', '${organization}', '${user}', '${key}',
+                   'command-1', 'request-1', 'manual', 'reference-1', 'evidence-1', 100, 'EUR', 1, now(),
+                   now());
+         INSERT INTO finance.affiliate_payout_payment_evidence_items
+           (evidence_id, organization_id, payout_id, amount, currency)
+           VALUES ('${evidence}', '${organization}', '${payout}', 100, 'EUR');
+         COMMIT`,
+      );
       await db.query(
         `INSERT INTO platform.source_extraction_runs
            (run_id, environment, source_schema_revision, status, finished_at, duration_ms)
@@ -145,6 +170,14 @@ describe.skipIf(!URL)("affiliate program drop 0498", () => {
         "commission_rules.uq_finance_active_property_affiliate_default",
         "commission_rules.uq_finance_active_property_affiliate_override",
       ]);
+      // The payout stays a finance record; nothing holds its idempotency key or the user who
+      // recorded the payment any more.
+      expect(
+        (await db.query(`SELECT count(*)::int AS n FROM finance.payouts WHERE id = $1`, [payout]))
+          .rows,
+      ).toEqual([{ n: 1 }]);
+      await db.query(`DELETE FROM platform.idempotency_keys WHERE id = $1`, [key]);
+      await db.query(`DELETE FROM identity.users WHERE id = $1`, [user]);
       await retiredDisposition("payout-after");
       expect(
         (
