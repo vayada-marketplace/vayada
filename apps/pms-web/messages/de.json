@@ -3479,6 +3479,7 @@
   "dashboard.checklist.item.calendar": "Kalender",
   "dashboard.checklist.item.calendarDescription": "Ganzjährig geöffnet · {rooms} buchbar · mindestens 1 Nacht · öffnet PMS → Einstellungen → Zukünftigen Kalender automatisch öffnen (Mindestaufenthalt unter Zimmer & Preise)",
   "dashboard.checklist.item.calendarRooms": "alle {count} Zimmer",
+  "dashboard.checklist.item.calendarOneRoom": "1 Zimmer",
   "dashboard.checklist.item.calendarAllRooms": "alle Zimmer",
   "dashboard.checklist.item.guestTerms": "Gästebedingungen",
   "dashboard.checklist.item.guestTermsDescription": "Check-in 15:00 · Check-out 11:00 · vayada-Standardbedingungen · öffnet Booking Admin → Einstellungen → Richtlinien",

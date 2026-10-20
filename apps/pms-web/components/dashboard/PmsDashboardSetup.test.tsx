@@ -30,6 +30,7 @@ import {
   PmsDashboardSetupChip,
   usePmsSetupChecklist,
 } from "./PmsDashboardSetup";
+import { pmsChecklistMessages } from "./pmsChecklistMessages";
 
 const PROPERTY = "3f2c4d5e-6a7b-4c8d-9e0f-112233445566";
 const LIVE: HotelSetupChecklistFacts = {
@@ -145,6 +146,15 @@ describe("PMS dashboard setup checklist (VAY-2247 wave 2)", () => {
     } finally {
       i18n.lang = "en";
     }
+  });
+
+  it("counts the rooms in the calendar row, one room included", async () => {
+    const { useTranslation } = await import("@/lib/i18n");
+    const { t } = useTranslation();
+    const calendar = pmsChecklistMessages(t).items.calendar.description;
+    expect(calendar({ roomCount: 8 })).toContain("all 8 rooms bookable");
+    expect(calendar({ roomCount: 1 })).toContain("Open all year · 1 room bookable");
+    expect(calendar({ roomCount: null })).toContain("all rooms bookable");
   });
 
   it("sends Booking Admin's items to Booking Admin and the PMS's to the PMS", () => {
