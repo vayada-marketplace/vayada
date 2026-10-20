@@ -1,4 +1,4 @@
-import Image from "next/image";
+import HotelHeroImage from "@/components/booking/HotelHeroImage";
 import BookingNavigation from "@/components/layout/BookingNavigation";
 
 /** The hotel's hero above the booking steps, as on the old booking pages (VAY-2195). */
@@ -7,23 +7,13 @@ export default function HeroSection({
   heading,
   subtext,
 }: {
-  heroImage?: string;
+  heroImage: string | null;
   heading: string;
   subtext?: string;
 }) {
   return (
     <div className="relative h-[300px] md:h-[420px] w-full bg-gray-800">
-      {heroImage && (
-        <Image
-          src={heroImage}
-          alt=""
-          fill
-          className="object-cover"
-          priority
-          quality={90}
-          sizes="100vw"
-        />
-      )}
+      <HotelHeroImage src={heroImage} alt="" quality={90} sizes="100vw" />
       <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-black/30 to-black/60" />
       <BookingNavigation />
       <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-4">

@@ -116,6 +116,80 @@ export const CURRENCY_OPTIONS: CurrencyOption[] = [
   { code: "VND", name: "Vietnamese Dong", flag: "🇻🇳" },
 ];
 
+/**
+ * The currency a new hotel starts with, from its country (ISO 3166-1 alpha-2). Only currencies in
+ * CURRENCY_OPTIONS; countries without their own supported currency start in EUR and can change it (VAY-2247).
+ */
+const COUNTRY_DEFAULT_CURRENCY: Readonly<Record<string, string>> = Object.freeze({
+  AE: "AED",
+  AU: "AUD",
+  BR: "BRL",
+  CA: "CAD",
+  CH: "CHF",
+  LI: "CHF",
+  CN: "CNY",
+  CZ: "CZK",
+  DK: "DKK",
+  GB: "GBP",
+  HK: "HKD",
+  HU: "HUF",
+  ID: "IDR",
+  IN: "INR",
+  JP: "JPY",
+  KR: "KRW",
+  LK: "LKR",
+  MX: "MXN",
+  MY: "MYR",
+  NO: "NOK",
+  NZ: "NZD",
+  PH: "PHP",
+  PL: "PLN",
+  RO: "RON",
+  RU: "RUB",
+  SE: "SEK",
+  SG: "SGD",
+  TH: "THB",
+  TR: "TRY",
+  US: "USD",
+  VN: "VND",
+  // Euro area (Croatia since 2023, Bulgaria since 2026) and the countries that use the euro.
+  AT: "EUR",
+  BE: "EUR",
+  BG: "EUR",
+  CY: "EUR",
+  DE: "EUR",
+  EE: "EUR",
+  ES: "EUR",
+  FI: "EUR",
+  FR: "EUR",
+  GR: "EUR",
+  HR: "EUR",
+  IE: "EUR",
+  IT: "EUR",
+  LT: "EUR",
+  LU: "EUR",
+  LV: "EUR",
+  MT: "EUR",
+  NL: "EUR",
+  PT: "EUR",
+  SI: "EUR",
+  SK: "EUR",
+  AD: "EUR",
+  MC: "EUR",
+  ME: "EUR",
+  SM: "EUR",
+  VA: "EUR",
+  XK: "EUR",
+});
+
+export const FALLBACK_HOTEL_CURRENCY = "EUR";
+
+export function defaultCurrencyForCountry(countryCode: string | null | undefined): string {
+  return (
+    COUNTRY_DEFAULT_CURRENCY[(countryCode ?? "").trim().toUpperCase()] ?? FALLBACK_HOTEL_CURRENCY
+  );
+}
+
 export const POPULAR_CURRENCY_CODES = [
   "USD",
   "EUR",
