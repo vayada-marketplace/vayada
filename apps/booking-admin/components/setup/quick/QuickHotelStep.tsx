@@ -28,6 +28,10 @@ export type QuickHotelStepProps = {
   address: (error: string | undefined) => ReactNode;
   /** Above the contact fields, e.g. "Use my details". */
   contactsAction?: ReactNode;
+  /** Under the contact fields, e.g. "Filled from your account". */
+  contactsNote?: ReactNode;
+  /** For the preview's placeholder price ("€ —"). */
+  currencySymbol?: string;
   logoPreviewUrl?: string | null;
   onLogoSelected: (file: File) => void;
   logoError?: string | null;
@@ -77,6 +81,8 @@ export function QuickHotelStep({
   propertyTypes,
   address,
   contactsAction,
+  contactsNote,
+  currencySymbol,
   logoPreviewUrl,
   onLogoSelected,
   logoError,
@@ -153,13 +159,14 @@ export function QuickHotelStep({
         preview={
           <QuickSetupPreviewCard caption="Your booking page, live as you type">
             <QuickBookingPagePreview
-              url={previewBookingHost(draft.displayName, draft.city)}
+              url={previewBookingHost(draft.displayName)}
               hotelName={draft.displayName.trim() || "Your hotel name"}
               place={
                 [draft.streetAddress.trim(), draft.city.trim()].filter(Boolean).join(", ") ||
                 "Your address"
               }
               rooms={[]}
+              currencySymbol={currencySymbol}
             />
           </QuickSetupPreviewCard>
         }
@@ -266,6 +273,7 @@ export function QuickHotelStep({
                 onChange={(phone) => change({ phone }, "phone")}
               />
             </div>
+            {contactsNote}
           </section>
           {submitError ? (
             <p role="alert" className="text-sm text-red-700">

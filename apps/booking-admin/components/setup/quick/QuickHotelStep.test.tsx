@@ -33,6 +33,7 @@ const FILLED: QuickHotelDraft = {
   timezone: "Europe/Berlin",
   contactEmail: "clara@example.com",
   phone: "+49 30 0000 0000",
+  currency: "",
 };
 
 function props(overrides: Partial<QuickHotelStepProps> = {}): QuickHotelStepProps {
@@ -63,7 +64,7 @@ describe("QuickHotelStep (VAY-2247 step 2, fields)", () => {
     expect(markup).toContain("address slot");
     expect(markup).toContain("Logo optional — you can add it later.");
     expect(markup).toContain("Your booking page, live as you type");
-    expect(markup).toContain("alpenrose-munich.booking.vayada.com");
+    expect(markup).toContain("hotel-alpenrose.booking.vayada.com");
     expect(markup).toContain("Sendlinger Straße 12, Munich");
     expect(markup).toContain("Your first room");
     expect(renderToStaticMarkup(<QuickHotelStep {...props()} />)).toContain("Your hotel name");
@@ -151,14 +152,12 @@ describe("quickHotelDraft", () => {
     expect(quickHotelErrors({ ...FILLED, timezone: "" })).toHaveProperty("address");
   });
 
-  it("builds the preview's booking-page address from the name and city", () => {
-    expect(previewBookingHost("Hotel Alpenrose", "Munich")).toBe(
-      "alpenrose-munich.booking.vayada.com",
+  it("shows the address the server reserves: the name, URL-safe", () => {
+    expect(previewBookingHost("Hotel Alpenrose")).toBe("hotel-alpenrose.booking.vayada.com");
+    expect(previewBookingHost("  Gästehaus  Weiß & Co. ")).toBe(
+      "gastehaus-wei-co.booking.vayada.com",
     );
-    expect(previewBookingHost("Gästehaus Weiß", "München")).toBe(
-      "gastehaus-weiss-munchen.booking.vayada.com",
-    );
-    expect(previewBookingHost("", "")).toBe("yourhotel.booking.vayada.com");
+    expect(previewBookingHost("")).toBe("yourhotel.booking.vayada.com");
   });
 
   it("orders the property types for the pills", () => {

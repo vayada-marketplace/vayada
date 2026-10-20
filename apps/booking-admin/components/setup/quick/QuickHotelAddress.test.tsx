@@ -100,11 +100,11 @@ describe("QuickHotelAddress (VAY-2247 'Where it is')", () => {
   });
 
   it("shows a found address with its pin, map, time zone and currency, each with a way to change it", async () => {
-    const onChangeCurrency = vi.fn();
+    const onCurrencyChange = vi.fn();
     const { renderer, onChange } = render({
       draft: PICKED,
-      currency: { label: "EUR (€)", note: "From Germany" },
-      onChangeCurrency,
+      currency: { code: "EUR", label: "EUR (€)", note: "From Germany" },
+      onCurrencyChange,
     });
     expect(text(renderer)).toContain("Sendlinger Straße 12, 80331 Munich, Germany");
     expect(text(renderer)).toContain("Pin placed on the map");
@@ -122,7 +122,13 @@ describe("QuickHotelAddress (VAY-2247 'Where it is')", () => {
     // Address, time zone, currency.
     expect(changes).toHaveLength(3);
     await act(async () => changes[2]!.props.onClick());
-    expect(onChangeCurrency).toHaveBeenCalledOnce();
+    await act(async () =>
+      renderer.root
+        .findByProps({ "aria-label": "Currency" })
+        .props.onChange({ target: { value: "CHF" } }),
+    );
+    expect(onCurrencyChange).toHaveBeenCalledWith("CHF");
+    expect(text(renderer)).toContain("EUR (€)");
     await act(async () => changes[1]!.props.onClick());
     await act(async () => byTestId(renderer, "pick-timezone")[0]!.props.onClick());
     expect(onChange).toHaveBeenLastCalledWith({ timezone: "Europe/Vienna" });
