@@ -20,11 +20,13 @@ function props(overrides: Partial<QuickGoLiveStepProps> = {}): QuickGoLiveStepPr
       url: "hotel-alpenrose.booking.vayada.com",
     },
     currency: { code: "EUR", symbol: "€" },
-    room: {
-      name: "Classic Double",
-      details: "Up to 2 guests · Free cancellation until 3 days before",
-      price: "€145",
-    },
+    rooms: [
+      {
+        name: "Classic Double",
+        details: "Up to 2 guests · Free cancellation until 3 days before",
+        price: "€145",
+      },
+    ],
     status: { kind: "ready" },
     onPublish: vi.fn(),
     onRetry: vi.fn(),
