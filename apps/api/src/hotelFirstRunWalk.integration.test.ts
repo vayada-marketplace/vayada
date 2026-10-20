@@ -73,6 +73,8 @@ const request: HotelFirstRunRequest = {
   pricesIncludeMandatoryCharges: true,
   guestPayment: "pay_at_property",
   plan: "commission",
+  freeCancellationDays: 3,
+  bed: "double",
 };
 
 function blockerCodes(readiness: ProductReadinessResult | ReadinessProviderFailure): string[] {
@@ -590,6 +592,56 @@ describe.skipIf(!url)(
           ok: true,
           ran: [],
         });
+      } finally {
+        await h.close();
+      }
+    });
+
+    it("gives every room type the owner's bed and every price the owner's cancellation (1.12b)", async () => {
+      const h = await hotel();
+      try {
+        const rooms = [
+          ...request.rooms,
+          { name: "Ocean Villa", numberOfRooms: 2, maxGuests: 4, pricePerNight: "26000" },
+        ];
+        const chosen = {
+          ...request,
+          rooms,
+          freeCancellationDays: 7 as const,
+          bed: "twin" as const,
+        };
+        const result = await h.service().run(h.actor, chosen, h.email);
+        expect(result, JSON.stringify(result)).toMatchObject({ ok: true });
+
+        const types = await h.ports.roomFacts.listRoomTypeFacts(h.propertyId);
+        expect(types.map((type) => [type.facts.name, type.facts.beds]).sort()).toEqual([
+          ["Garden Suite", [{ type: "twin", quantity: 2 }]],
+          ["Ocean Villa", [{ type: "twin", quantity: 2 }]],
+        ]);
+        const terms = await h.admin.query<{
+          room_type_id: string;
+          cancellation: unknown;
+          payment: unknown;
+        }>(
+          `SELECT DISTINCT room_type_id, terms->'cancellation' AS cancellation, terms->'payment' AS payment
+             FROM booking.pricing_v2_offer_terms WHERE property_id = $1`,
+          [h.propertyId],
+        );
+        expect(terms.rows).toHaveLength(2);
+        for (const row of terms.rows) {
+          expect(row.cancellation).toEqual({
+            kind: "flexible",
+            terms: {
+              type: "free_until_days_before_arrival",
+              freeCancellationDeadlineDays: 7,
+              afterDeadlinePenalty: "full_booking_amount",
+              noShowPenalty: "full_booking_amount",
+            },
+          });
+          expect(row.payment).toEqual({ kind: "full", acceptedMethods: ["pay_at_property"] });
+        }
+        // Still a refundable rate paid at the hotel, so nothing blocks publishing.
+        expect(blockerCodes(await h.readiness())).toEqual([]);
       } finally {
         await h.close();
       }

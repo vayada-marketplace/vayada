@@ -50,6 +50,8 @@ const request = {
   pricesIncludeMandatoryCharges: true,
   guestPayment: "pay_at_property" as const,
   plan: "commission" as const,
+  freeCancellationDays: 3 as const,
+  bed: "double" as const,
 };
 const facts: HotelFirstRunWriteFacts = {
   propertyId,
@@ -135,6 +137,7 @@ describe("hotel first run (VAY-2247)", () => {
       currency: "EUR",
       pricePerNight: "145",
       pricesIncludeMandatoryCharges: true,
+      freeCancellationDays: 3,
     });
     expect(steps.guestRules).toHaveBeenCalledWith(expect.anything(), actor, {
       language: "de",
@@ -233,7 +236,12 @@ describe("hotel first run (VAY-2247)", () => {
     await service({
       facts: { ...facts, firstRunRoomTypeIds: [roomTypeId, suiteTypeId] },
     }).first.run(actor, { ...request, rooms: [classicDouble, suite] }, null);
-    expect(steps.rooms).toHaveBeenCalledWith(expect.anything(), actor, [classicDouble, suite]);
+    expect(steps.rooms).toHaveBeenCalledWith(
+      expect.anything(),
+      actor,
+      [classicDouble, suite],
+      "double",
+    );
     expect(steps.pricing.mock.calls.map((call) => call[2])).toEqual([
       expect.objectContaining({
         roomTypeId,
@@ -246,6 +254,26 @@ describe("hotel first run (VAY-2247)", () => {
         capacity: { total: 3, adults: 3, children: 2 },
       }),
     ]);
+  });
+
+  it("gives every room type the owner's bed and every price the owner's cancellation (1.12b)", async () => {
+    const suiteTypeId = "c3d4e5f6-a7b8-4c9d-8e0f-1a2b3c4d5e6f";
+    const suite = { name: "Alpine Suite", numberOfRooms: 4, maxGuests: 3, pricePerNight: "210" };
+    steps.pricing.mockResolvedValue({ ok: true, wrote: true });
+    await service({
+      facts: { ...facts, firstRunRoomTypeIds: [roomTypeId, suiteTypeId] },
+    }).first.run(
+      actor,
+      { ...request, rooms: [classicDouble, suite], freeCancellationDays: 14, bed: "twin" },
+      null,
+    );
+    expect(steps.rooms).toHaveBeenCalledWith(
+      expect.anything(),
+      actor,
+      [classicDouble, suite],
+      "twin",
+    );
+    expect(steps.pricing.mock.calls.map((call) => call[2].freeCancellationDays)).toEqual([14, 14]);
   });
 });
 

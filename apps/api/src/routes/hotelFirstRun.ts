@@ -4,7 +4,14 @@ import {
   resolveEffectivePropertyAccess,
   type PropertyAccessRepository,
 } from "@vayada/backend-authorization";
-import type { FirstRunRoomInput } from "@vayada/domain-booking";
+import {
+  FIRST_RUN_DEFAULT_BED,
+  FIRST_RUN_DEFAULT_FREE_CANCELLATION_DAYS,
+  isFirstRunBedChoice,
+  isFirstRunFreeCancellationDays,
+  type FirstRunFreeCancellationDays,
+  type FirstRunRoomInput,
+} from "@vayada/domain-booking";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
 import type { HotelFirstRunRequest, HotelFirstRunResult } from "../domains/hotelFirstRunService.js";
@@ -45,10 +52,16 @@ const REQUEST_ERRORS = new Set([
   "mandatory_charges_declaration_required",
 ]);
 
-function exact(value: unknown, keys: readonly string[]): value is Record<string, unknown> {
+function exact(
+  value: unknown,
+  keys: readonly string[],
+  optional: readonly string[] = [],
+): value is Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-  const actual = Object.keys(value);
-  return actual.length === keys.length && keys.every((key) => Object.hasOwn(value, key));
+  return (
+    keys.every((key) => Object.hasOwn(value, key)) &&
+    Object.keys(value).every((key) => keys.includes(key) || optional.includes(key))
+  );
 }
 
 const ROOM_KEYS = ["name", "numberOfRooms", "maxGuests", "pricePerNight"] as const;
@@ -71,14 +84,36 @@ function parseRoom(room: unknown): FirstRunRoomInput | null {
 }
 
 /**
+ * `cancellation`, when given: `{ kind: "free_until_days_before_arrival", days: 1 | 3 | 7 | 14 }`. Non-refundable
+ * is refused for now: it is paid in advance (VAY-2280) and the first run only sets up paying at the property.
+ */
+function parseCancellation(value: unknown): FirstRunFreeCancellationDays | null {
+  if (value === undefined) return FIRST_RUN_DEFAULT_FREE_CANCELLATION_DAYS;
+  if (!exact(value, ["kind", "days"]) || value.kind !== "free_until_days_before_arrival")
+    return null;
+  return isFirstRunFreeCancellationDays(value.days) ? value.days : null;
+}
+
+/**
  * The body: `rooms` (1–10 room types, VAY-2247 1.12), or `room` for one, as the first version sent it.
- * Room type names must differ (the PMS keeps them unique per hotel, ignoring case).
+ * Room type names must differ (the PMS keeps them unique per hotel, ignoring case). Optional since 1.12b:
+ * `cancellation` and `bed` (double, queen, king, twin or single), the owner's choices for every room type;
+ * without them the first run keeps its defaults (free until 3 days, one double bed).
  */
 export function parseHotelFirstRunRequest(value: unknown): HotelFirstRunRequest | null {
   const roomsKey =
     typeof value === "object" && value !== null && Object.hasOwn(value, "rooms") ? "rooms" : "room";
-  if (!exact(value, [roomsKey, "pricesIncludeMandatoryCharges", "guestPayment", "plan"]))
+  if (
+    !exact(
+      value,
+      [roomsKey, "pricesIncludeMandatoryCharges", "guestPayment", "plan"],
+      ["cancellation", "bed"],
+    )
+  )
     return null;
+  const freeCancellationDays = parseCancellation(value.cancellation);
+  const bed = value.bed === undefined ? FIRST_RUN_DEFAULT_BED : value.bed;
+  if (freeCancellationDays === null || !isFirstRunBedChoice(bed)) return null;
   const given = roomsKey === "rooms" ? value.rooms : [value.room];
   if (!Array.isArray(given) || given.length < 1 || given.length > FIRST_RUN_MAX_ROOM_TYPES)
     return null;
@@ -97,6 +132,8 @@ export function parseHotelFirstRunRequest(value: unknown): HotelFirstRunRequest 
     pricesIncludeMandatoryCharges: value.pricesIncludeMandatoryCharges,
     guestPayment: "pay_at_property",
     plan: value.plan,
+    freeCancellationDays,
+    bed,
   });
 }
 

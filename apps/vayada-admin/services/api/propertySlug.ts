@@ -19,7 +19,8 @@ export type PropertySlugChangeResult = PropertySlugChangePreview & {
 const MESSAGES: Record<string, string> = {
   invalid_slug: "Use lowercase letters, numbers and single hyphens, up to 63 characters.",
   slug_taken: "Another hotel already uses this address.",
-  property_not_found: "This hotel wasn't found.",
+  property_not_found: "This hotel wasn't found. Open it from the Hotels list.",
+  invalid_property_id: "This hotel wasn't found. Open it from the Hotels list.",
   property_unavailable: "This hotel is suspended or retired, so its address can't change.",
   canonical_slug_missing: "This hotel has no booking page address yet.",
   legacy_page_only:

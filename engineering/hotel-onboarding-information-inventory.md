@@ -3193,17 +3193,26 @@ with missing readiness.
 
 ### Target launch-readiness rules
 
-Booking publication requires:
+Booking publication requires (photos, a description, a logo and an amenities review became
+optional with VAY-2247 wave 1, 2026-10-20; guests see placeholders until they are added):
 
-- the preserved hotel identity, location, contact, and property logo;
+- the hotel's basics: name, property type, street, city, country, time zone, and an email
+  and a phone contact (one rule, `HOTEL_BASICS_REASON_CODES`, shared with the setup plan's
+  `shared_identity` task); a property logo is optional;
 - explicit `hotel.locality_public` consent for the city/country used by the
   public profile, with street address and coordinates still private;
-- `profile.short_description`;
-- generated `profile.public_slug`;
-- at least one room type, with every required room field and at least one
-  authorized, active, publicly resolvable assigned photo;
-- a room-amenities review acknowledgment for every published room type, even
-  when the confirmed selection is empty;
+- `profile.short_description` when the hotel has one (optional; when present it is still a
+  50–500 character summary);
+- generated `profile.public_slug` (reserved at hotel creation from the first saved name; it
+  does not follow later renames, see VAY-2295);
+- at least one room type, with every required room field (photos are optional; assigned
+  photos that can't be resolved safely still block);
+- room amenities are optional to review: unreviewed amenities stay private and none are shown;
+- a hotel that has gone live (`lifecycle_status = 'active'`). The first run does this at its end,
+  on the basics (VAY-2247). In the old setup, saves (and photo saves) do it only once the hotel
+  also has a description and an approved hotel photo, as before wave 1. Until then the page says
+  "To go live, add a description and at least one hotel photo in Present your hotel."
+  (`hotel_setup_content_missing`, #3568);
 - one consistent hotel pricing currency and a standard flexible price with a
   structured cancellation deadline for every published room type;
 - valid enabled seasonal, weekend, and additional-guest rules, their
