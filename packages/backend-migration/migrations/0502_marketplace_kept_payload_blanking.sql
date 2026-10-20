@@ -4,27 +4,28 @@
 --
 -- Blanks what kept history and queue rows still say about the Marketplace and the removed creators;
 -- every row stays, only its contents go (decision 10):
--- - domain events and product audit events of the Marketplace, of a removed user (0500 left them as
---   blank rows, removed-*@removed.invalid) or of a creator or affiliate organization
+-- - domain events and product audit events of the Marketplace or of a creator or affiliate
+--   organization, and those of a removed user (0500's blank rows, removed-*@removed.invalid) outside
+--   any hotel or property: a hotel's own history stays as it is, because hotel features read it
 -- - outbox events, jobs and dead letters of the Marketplace or of those organizations
--- As its own yes (decision 10), it also blanks once the raw copies of every processed WorkOS webhook
--- receipt, which hold every user's e-mail. That is a one-time clean-up, not a retention rule:
+-- Finance rows keep their contents (finance resources, financial audit rows), so the payouts 0500
+-- keeps stay explained. Free-text summaries (dead-letter summaries, failure reasons, attempt errors)
+-- stay too.
+-- As its own yes (decision 10), it also blanks once the raw copies of processed WorkOS webhook
+-- receipts, which hold every user's e-mail: those a normalized or ignored marker names, or a
+-- dead-lettered one whose dead letter is resolved. It is a one-time clean-up, not a retention rule:
 -- payload_purged_at stays NULL, because its check allows it only for Stripe and Channex messages.
--- Receipts of those organizations from other providers are Stripe ones, which their retention purges.
 -- The append-only triggers are switched off only inside this transaction (0153 and 0487 pattern) and
 -- come back unchanged, so the Channex worker's trigger catalog digest stays the same.
--- Rollback: any image from the 0500 release on. Nothing reads these payloads back: the WorkOS reconcile
--- job reads its receipt only until it is processed, and staff-invitation recovery reads identity dead
--- letters, which are not touched.
+-- Rollback: any image from the 0500 release on; nothing reads these contents back.
 
 SET LOCAL lock_timeout = '5s';
--- Each blanking statement scans its table once.
-SET LOCAL statement_timeout = '120s';
+-- A run too slow for next-api's start fails cleanly on the first slow statement.
+SET LOCAL statement_timeout = '30s';
 
--- Writes to these tables wait until the end; reads go on. Switching a trigger needs this lock anyway.
-LOCK TABLE
-  platform.dead_letter_events, platform.domain_events, platform.external_webhook_events, platform.jobs,
-  platform.outbox_events, platform.product_audit_events
+-- Switching a trigger needs this lock: writes to these three tables wait until the end, reads go on.
+-- Jobs, outbox events and dead letters are updated under row locks only.
+LOCK TABLE platform.domain_events, platform.external_webhook_events, platform.product_audit_events
   IN SHARE ROW EXCLUSIVE MODE;
 
 CREATE TEMP TABLE blanked_organizations ON COMMIT DROP AS
@@ -52,47 +53,75 @@ ALTER TABLE platform.domain_events DISABLE TRIGGER trg_platform_domain_events_ap
 ALTER TABLE platform.product_audit_events DISABLE TRIGGER trg_platform_product_audit_events_append_only;
 ALTER TABLE platform.external_webhook_events DISABLE TRIGGER trg_platform_external_webhook_events_append_only;
 
-UPDATE platform.domain_events domain_event
+-- Each statement picks its rows from narrow columns first, so stored contents are read only for the
+-- rows it blanks.
+WITH target AS MATERIALIZED (
+  SELECT id FROM platform.domain_events
+  WHERE resource_product <> 'finance'
+    AND (source_system = 'marketplace' OR resource_product = 'marketplace'
+         OR organization_id IN (SELECT id FROM blanked_organizations)
+         OR (actor_user_id IN (SELECT id FROM blanked_users) AND organization_id IS NULL AND property_id IS NULL))
+)
+UPDATE platform.domain_events
   SET payload = '{}'::jsonb, event_metadata = '{}'::jsonb
-  WHERE (domain_event.source_system = 'marketplace' OR domain_event.resource_product = 'marketplace'
-         OR domain_event.actor_user_id IN (SELECT id FROM blanked_users)
-         OR domain_event.organization_id IN (SELECT id FROM blanked_organizations))
-    AND (domain_event.payload <> '{}'::jsonb OR domain_event.event_metadata <> '{}'::jsonb);
+  WHERE id IN (SELECT id FROM target) AND (payload <> '{}'::jsonb OR event_metadata <> '{}'::jsonb);
 
-UPDATE platform.product_audit_events audit
+WITH target AS MATERIALIZED (
+  SELECT id FROM platform.product_audit_events
+  WHERE product <> 'finance' AND retention_class <> 'financial'
+    AND (product = 'marketplace'
+         OR organization_id IN (SELECT id FROM blanked_organizations)
+         OR (actor_user_id IN (SELECT id FROM blanked_users) AND organization_id IS NULL AND property_id IS NULL))
+)
+UPDATE platform.product_audit_events
   SET redacted_payload = '{}'::jsonb, private_payload = '{}'::jsonb, audit_metadata = '{}'::jsonb
-  WHERE (audit.product = 'marketplace'
-         OR audit.actor_user_id IN (SELECT id FROM blanked_users)
-         OR audit.organization_id IN (SELECT id FROM blanked_organizations))
-    AND (audit.redacted_payload <> '{}'::jsonb OR audit.private_payload <> '{}'::jsonb
-         OR audit.audit_metadata <> '{}'::jsonb);
+  WHERE id IN (SELECT id FROM target)
+    AND (redacted_payload <> '{}'::jsonb OR private_payload <> '{}'::jsonb OR audit_metadata <> '{}'::jsonb);
 
-UPDATE platform.outbox_events outbox
+WITH target AS MATERIALIZED (
+  SELECT id FROM platform.outbox_events
+  WHERE resource_product <> 'finance'
+    AND (resource_product = 'marketplace' OR organization_id IN (SELECT id FROM blanked_organizations))
+)
+UPDATE platform.outbox_events
   SET payload = '{}'::jsonb, outbox_metadata = '{}'::jsonb
-  WHERE (outbox.resource_product = 'marketplace' OR outbox.organization_id IN (SELECT id FROM blanked_organizations))
-    AND (outbox.payload <> '{}'::jsonb OR outbox.outbox_metadata <> '{}'::jsonb);
+  WHERE id IN (SELECT id FROM target) AND (payload <> '{}'::jsonb OR outbox_metadata <> '{}'::jsonb);
 
-UPDATE platform.jobs job
+WITH target AS MATERIALIZED (
+  SELECT id FROM platform.jobs
+  WHERE resource_product <> 'finance'
+    AND (resource_product = 'marketplace' OR organization_id IN (SELECT id FROM blanked_organizations))
+)
+UPDATE platform.jobs
   SET payload = '{}'::jsonb, job_metadata = '{}'::jsonb
-  WHERE (job.resource_product = 'marketplace' OR job.organization_id IN (SELECT id FROM blanked_organizations))
-    AND (job.payload <> '{}'::jsonb OR job.job_metadata <> '{}'::jsonb);
+  WHERE id IN (SELECT id FROM target) AND (payload <> '{}'::jsonb OR job_metadata <> '{}'::jsonb);
 
-UPDATE platform.dead_letter_events dead
+WITH target AS MATERIALIZED (
+  SELECT id FROM platform.dead_letter_events
+  WHERE resource_product <> 'finance'
+    AND (resource_product = 'marketplace' OR organization_id IN (SELECT id FROM blanked_organizations))
+)
+UPDATE platform.dead_letter_events
   SET failure_payload = '{}'::jsonb
-  WHERE (dead.resource_product = 'marketplace' OR dead.organization_id IN (SELECT id FROM blanked_organizations))
-    AND dead.failure_payload <> '{}'::jsonb;
+  WHERE id IN (SELECT id FROM target) AND failure_payload <> '{}'::jsonb;
 
--- Processed: a WorkOS marker (normalized, ignored or dead-lettered) names the receipt. An unprocessed
--- receipt keeps its copy until the reconcile job has read it.
-UPDATE platform.external_webhook_events receipt
-  SET raw_payload = '{}'::jsonb, raw_headers = '{}'::jsonb
+-- A receipt no marker names, or whose dead letter is still open, keeps its copy.
+WITH target AS MATERIALIZED (
+  SELECT receipt.id FROM platform.external_webhook_events receipt
   WHERE receipt.provider = 'workos'
-    AND (receipt.raw_payload <> '{}'::jsonb OR receipt.raw_headers <> '{}'::jsonb)
     AND EXISTS (
       SELECT 1 FROM identity.auth_reconciliation_events marker
       WHERE marker.provider = 'workos' AND marker.provider_event_id = receipt.id::text
         AND marker.event_type IN ('workos.webhook.normalized', 'workos.webhook.ignored', 'workos.webhook.dead_lettered')
-    );
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM platform.dead_letter_events dead
+      WHERE dead.webhook_event_id = receipt.id AND dead.recovery_status <> 'resolved'
+    )
+)
+UPDATE platform.external_webhook_events
+  SET raw_payload = '{}'::jsonb, raw_headers = '{}'::jsonb
+  WHERE id IN (SELECT id FROM target) AND (raw_payload <> '{}'::jsonb OR raw_headers <> '{}'::jsonb);
 
 ALTER TABLE platform.external_webhook_events ENABLE TRIGGER trg_platform_external_webhook_events_append_only;
 ALTER TABLE platform.product_audit_events ENABLE TRIGGER trg_platform_product_audit_events_append_only;
