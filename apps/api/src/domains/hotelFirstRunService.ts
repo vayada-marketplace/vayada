@@ -1,4 +1,9 @@
-import { firstRunRoomFacts, type FirstRunRoomInput } from "@vayada/domain-booking";
+import {
+  firstRunRoomFacts,
+  type FirstRunBedChoice,
+  type FirstRunFreeCancellationDays,
+  type FirstRunRoomInput,
+} from "@vayada/domain-booking";
 
 import { runFirstRunCalendar, type HotelFirstRunCalendarPorts } from "./hotelFirstRunCalendar.js";
 import {
@@ -40,6 +45,9 @@ export type HotelFirstRunRequest = Readonly<{
   /** Online card comes later (VAY-2205): the first run only sets up paying at the property. */
   guestPayment: "pay_at_property";
   plan: HotelFirstRunPlanChoice;
+  /** The owner's choices for every room type the first run makes (1.12b): free cancellation and beds. */
+  freeCancellationDays: FirstRunFreeCancellationDays;
+  bed: FirstRunBedChoice;
 }>;
 
 /** The state facts plus what the steps need to write: the first run's room types and the hotel's language. */
@@ -113,7 +121,9 @@ async function runSteps(
 ): Promise<HotelFirstRunResult> {
   const ran: HotelFirstRunStepId[] = [];
   let checkoutUrl: string | null = null;
-  const occupancies = request.rooms.map((room) => firstRunRoomFacts(room)?.occupancy ?? null);
+  const occupancies = request.rooms.map(
+    (room) => firstRunRoomFacts(room, request.bed)?.occupancy ?? null,
+  );
   const names = new Set(request.rooms.map((room) => room.name.trim().toLowerCase()));
   if (
     request.rooms.length < 1 ||
@@ -134,7 +144,7 @@ async function runSteps(
     [HotelFirstRunStepId, (facts: HotelFirstRunWriteFacts) => ReturnType<typeof runFirstRunPlan>]
   > = [
     ["currency", (facts) => runFirstRunCurrency(ports, actor, facts.profile?.countryCode ?? null)],
-    ["rooms", () => runFirstRunRooms(ports, actor, request.rooms)],
+    ["rooms", () => runFirstRunRooms(ports, actor, request.rooms, request.bed)],
     ["payments", () => runFirstRunPayments(ports, actor)],
     [
       "pricing",
@@ -157,6 +167,7 @@ async function runSteps(
             currency: facts.currency.code,
             pricePerNight: room.pricePerNight,
             pricesIncludeMandatoryCharges: request.pricesIncludeMandatoryCharges,
+            freeCancellationDays: request.freeCancellationDays,
           });
           if (!outcome.ok) return outcome;
           wrote ||= outcome.wrote;

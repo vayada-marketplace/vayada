@@ -1,9 +1,11 @@
 import { createHash } from "node:crypto";
 
 import {
+  FIRST_RUN_DEFAULT_BED,
   FIRST_RUN_DEFAULTS_VERSION,
   firstRunRoomFacts,
   firstRunRoomLabels,
+  type FirstRunBedChoice,
   type FirstRunRoomInput,
 } from "@vayada/domain-booking";
 import {
@@ -118,11 +120,13 @@ export async function runFirstRunCurrency(
  * Step 2: the room types in order, their rooms and the rooms' names. Skipped when the owner already has room
  * types of their own; resumes a half-done first run (a room type created, its rooms missing or not yet
  * named). Room names are unique in a hotel, so they count on across room types: Room 1–8, then Room 9–12.
+ * Every room type gets the owner's bed choice (1.12b); a room type already made keeps its beds.
  */
 export async function runFirstRunRooms(
   ports: HotelFirstRunSetupPorts,
   actor: HotelFirstRunActor,
   rooms: readonly FirstRunRoomInput[],
+  bed: FirstRunBedChoice = FIRST_RUN_DEFAULT_BED,
 ): Promise<HotelFirstRunStepOutcome> {
   const ids = await Promise.all(
     rooms.map(async (_room, index) => {
@@ -148,6 +152,7 @@ export async function runFirstRunRooms(
       room,
       ids[index] ?? null,
       nextNumber,
+      bed,
     );
     if (!outcome.ok) return outcome;
     wrote ||= outcome.wrote;
@@ -165,12 +170,13 @@ async function runFirstRunRoomType(
   room: FirstRunRoomInput,
   existingRoomTypeId: string | null,
   nextNumber: number,
+  bed: FirstRunBedChoice,
 ): Promise<Readonly<{ ok: true; wrote: boolean; nextNumber: number }> | ReturnType<typeof fail>> {
   const { propertyId } = actor;
   let wrote = false;
   let roomTypeId = existingRoomTypeId;
   if (!roomTypeId) {
-    const facts = firstRunRoomFacts(room);
+    const facts = firstRunRoomFacts(room, bed);
     if (!facts) return fail("first_run_room_invalid");
     const command = parseCreateRoomTypeFactsCommand({
       organizationId: actor.organizationId,

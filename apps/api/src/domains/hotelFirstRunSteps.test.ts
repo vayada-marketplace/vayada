@@ -187,6 +187,21 @@ describe("first run steps 1–3 (VAY-2247)", () => {
     expect(hotel.calls).toHaveLength(5);
   });
 
+  it("rooms: gives the room type the owner's bed choice, two twin beds for a twin room (1.12b)", async () => {
+    const hotel = fakeHotel();
+    expect(await runFirstRunRooms(hotel.ports, actor, [room], "twin")).toEqual({
+      ok: true,
+      wrote: true,
+    });
+    expect(hotel.calls[0]![1]).toMatchObject({ facts: { beds: [{ type: "twin", quantity: 2 }] } });
+    // A room type the first run already made keeps its beds.
+    expect(await runFirstRunRooms(hotel.ports, actor, [room], "king")).toEqual({
+      ok: true,
+      wrote: false,
+    });
+    expect(hotel.calls).toHaveLength(5);
+  });
+
   it("rooms: resumes after a crash halfway through naming the rooms", async () => {
     const hotel = fakeHotel();
     hotel.state.boundRoomTypeId = roomTypeId;
