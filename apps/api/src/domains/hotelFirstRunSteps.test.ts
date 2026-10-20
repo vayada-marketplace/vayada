@@ -58,8 +58,11 @@ function fakeHotel(start: { currency?: string; ownRoomTypes?: number; methods?: 
     roomRead: {
       listRoomTypeFacts: async () =>
         Array.from({ length: state.ownRoomTypes + (state.boundRoomTypeId ? 1 : 0) }, () => ({})),
-      getDraftRoomTypeBinding: async () =>
-        state.boundRoomTypeId ? { roomTypeId: state.boundRoomTypeId } : null,
+      // One first-run room type here; several are walked on the real database.
+      getDraftRoomTypeBinding: async (_propertyId: string, draftRoomId: string) =>
+        draftRoomId === "first-run-room-1" && state.boundRoomTypeId
+          ? { roomTypeId: state.boundRoomTypeId }
+          : null,
       getRoomTypeCapacity: async () => ({
         roomUnitsRevision: state.unitsRevision,
         activeUnitCount: state.units.length,
@@ -161,7 +164,7 @@ describe("first run steps 1–3 (VAY-2247)", () => {
 
   it("rooms: creates the room type, its rooms and names them Room 1–3, chaining the units revision", async () => {
     const hotel = fakeHotel();
-    expect(await runFirstRunRooms(hotel.ports, actor, room)).toEqual({ ok: true, wrote: true });
+    expect(await runFirstRunRooms(hotel.ports, actor, [room])).toEqual({ ok: true, wrote: true });
     expect(hotel.calls.map(([name]) => name)).toEqual([
       "room_type",
       "units",
@@ -180,7 +183,22 @@ describe("first run steps 1–3 (VAY-2247)", () => {
       "Room 3",
     ]);
     // A second run finds everything in place and writes nothing.
-    expect(await runFirstRunRooms(hotel.ports, actor, room)).toEqual({ ok: true, wrote: false });
+    expect(await runFirstRunRooms(hotel.ports, actor, [room])).toEqual({ ok: true, wrote: false });
+    expect(hotel.calls).toHaveLength(5);
+  });
+
+  it("rooms: gives the room type the owner's bed choice, two twin beds for a twin room (1.12b)", async () => {
+    const hotel = fakeHotel();
+    expect(await runFirstRunRooms(hotel.ports, actor, [room], "twin")).toEqual({
+      ok: true,
+      wrote: true,
+    });
+    expect(hotel.calls[0]![1]).toMatchObject({ facts: { beds: [{ type: "twin", quantity: 2 }] } });
+    // A room type the first run already made keeps its beds.
+    expect(await runFirstRunRooms(hotel.ports, actor, [room], "king")).toEqual({
+      ok: true,
+      wrote: false,
+    });
     expect(hotel.calls).toHaveLength(5);
   });
 
@@ -193,7 +211,7 @@ describe("first run steps 1–3 (VAY-2247)", () => {
       { roomUnitId: unitId(3), operationalLabel: null, verified: false },
     ];
     hotel.state.unitsRevision = 3;
-    expect(await runFirstRunRooms(hotel.ports, actor, room)).toEqual({ ok: true, wrote: true });
+    expect(await runFirstRunRooms(hotel.ports, actor, [room])).toEqual({ ok: true, wrote: true });
     expect(hotel.calls.map(([name, command]) => [name, command["operationalLabel"]])).toEqual([
       ["label", "Room 2"],
       ["label", "Room 3"],
@@ -202,18 +220,18 @@ describe("first run steps 1–3 (VAY-2247)", () => {
 
   it("rooms: leaves a hotel alone that already set up its own room types", async () => {
     const hotel = fakeHotel({ ownRoomTypes: 2 });
-    expect(await runFirstRunRooms(hotel.ports, actor, room)).toEqual({ ok: true, wrote: false });
+    expect(await runFirstRunRooms(hotel.ports, actor, [room])).toEqual({ ok: true, wrote: false });
     expect(hotel.calls).toEqual([]);
   });
 
   it("rooms: refuses an invalid room before writing anything", async () => {
     const hotel = fakeHotel();
-    expect(await runFirstRunRooms(hotel.ports, actor, { ...room, numberOfRooms: 0 })).toMatchObject(
-      {
-        ok: false,
-        code: "first_run_room_invalid",
-      },
-    );
+    expect(
+      await runFirstRunRooms(hotel.ports, actor, [{ ...room, numberOfRooms: 0 }]),
+    ).toMatchObject({
+      ok: false,
+      code: "first_run_room_invalid",
+    });
     expect(hotel.calls).toEqual([]);
   });
 

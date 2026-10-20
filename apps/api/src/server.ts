@@ -57,7 +57,10 @@ import { createHmac } from "node:crypto";
 
 import { buildApp, type ApiAuthOptions } from "./app.js";
 import { createOrdinaryHotelSetupLogoRuntime } from "./hotelSetupLogoRuntime.js";
-import { createOrdinaryHotelSetupProfileCommand } from "./platform/hotelSetupProfileWriter.js";
+import {
+  createOrdinaryHotelSetupActivation,
+  createOrdinaryHotelSetupProfileCommand,
+} from "./platform/hotelSetupProfileWriter.js";
 import { createOrdinaryHotelSetupLaunchSettingsCommand } from "./hotelSetupLaunchSettingsRepository.js";
 import { createOrdinaryHotelSetupFeatureHubCommands } from "./hotelSetupFeatureHubOrdinary.js";
 import {
@@ -320,6 +323,7 @@ import { createPgIdentityPrivacyRepository } from "./routes/identityPrivacy.js";
 import { createTargetPlatformAdminDashboardRepository } from "./routes/platform/admin/dashboard/bookingCompatible.js";
 import { createPgPlatformPropertyLifecycleCommandRepository } from "./domains/platformPropertyLifecycleCommandRepository.js";
 import { createPgPlatformPropertyLifecycleImpactRepository } from "./domains/platformPropertyLifecycleImpactRepository.js";
+import { createPropertySlugChangeCommand } from "./domains/propertySlugChange.js";
 import { createPgPlatformPropertyProvisioningRepository } from "./domains/platformPropertyProvisioningRepository.js";
 import { createPgPlatformContactIntakeRepository } from "./routes/platformContactIntake.js";
 import {
@@ -1583,6 +1587,7 @@ const hotelFirstRun = (() => {
     pricingPool: propertySetupOwnerPool,
     profile: sharedHotelSetupStatusRepository,
     profileCommand,
+    activateProperty: createOrdinaryHotelSetupActivation(hotelSetupOrdinaryPool),
     launchSettings: {
       async readDefaultLanguage(propertyId) {
         const settings = await findPropertyLaunchSettings(propertyId);
@@ -1994,6 +1999,18 @@ const app = buildApp({
     provisioningRepository: createPgPlatformPropertyProvisioningRepository({
       connectionString: targetDatabaseUrl,
       setupRepository: sharedHotelSetupStatusRepository,
+    }),
+  },
+  platformPropertySlug: {
+    command: createPropertySlugChangeCommand({
+      connectionString: targetDatabaseUrl,
+      // A live page is republished only where the public site serves setup publications.
+      ...(config.publicHotelProfileSource === "active_publication" && bookingPublicationRuntime
+        ? {
+            refresh: bookingPublicationRuntime.refresh.bind(bookingPublicationRuntime),
+            readiness: bookingPublicationRuntime.routes.readinessProvider,
+          }
+        : {}),
     }),
   },
   pmsOperationsAllowedOrigins: config.pmsOperationsAllowedOrigins,
