@@ -5,8 +5,9 @@ import type {
   IdentitySourceRow,
 } from "./productionIdentityDisposition.js";
 
-export type OrganizationKind =
-  "platform" | "hotel_group" | "creator_workspace" | "affiliate_partner";
+// VAY-2272: creator workspaces and affiliate partners belonged to retired products; the import
+// creates neither.
+export type OrganizationKind = "platform" | "hotel_group";
 export type OrganizationStatus = "active" | "suspended" | "archived";
 export type MembershipStatus = "active" | "pending" | "suspended" | "inactive";
 
@@ -78,7 +79,6 @@ type OwnershipSpec = {
   relationship: string;
   nameField?: string;
   statusField?: string;
-  optionalUser?: boolean;
 };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -91,6 +91,8 @@ const TERMINAL_BOOKING_STATUSES = new Set([
   "no_show",
   "rejected",
 ]);
+// VAY-2272: Marketplace hotel profiles are no longer ownership evidence (no Marketplace product
+// links after 0501); a hotel whose only legacy owner record was one needs another source (VAY-1362).
 const SPECS: OwnershipSpec[] = [
   {
     database: "booking",
@@ -111,35 +113,6 @@ const SPECS: OwnershipSpec[] = [
     relationship: "operator",
     nameField: "name",
   },
-  {
-    database: "marketplace",
-    table: "hotel_profiles",
-    kind: "hotel_group",
-    product: "marketplace",
-    resourceType: "hotel_profile",
-    relationship: "owner",
-    nameField: "name",
-    statusField: "status",
-  },
-  {
-    database: "marketplace",
-    table: "creators",
-    kind: "creator_workspace",
-    product: "marketplace",
-    resourceType: "creator_profile",
-    relationship: "owner",
-  },
-  {
-    database: "pms",
-    table: "affiliates",
-    kind: "affiliate_partner",
-    product: "affiliate",
-    resourceType: "affiliate",
-    relationship: "owner",
-    nameField: "full_name",
-    statusField: "status",
-    optionalUser: true,
-  },
 ];
 
 export function parseIdentityOwnershipRows(sourceRows: IdentitySourceRow[]): {
@@ -154,7 +127,6 @@ export function parseIdentityOwnershipRows(sourceRows: IdentitySourceRow[]): {
     )) {
       try {
         const userId = optionalUuid(row.data["user_id"], "user_id");
-        if (!userId && spec.optionalUser) continue;
         if (!userId) throw new Error("user_id is required for an owned product row");
         const source = `${spec.database}.${spec.table}`;
         const rawStatus = spec.statusField
@@ -204,13 +176,7 @@ export function mapOwnershipStatus(
   if (!status) return "active";
   if (source === "booking.booking_hotels")
     return ["live", "demo", "test"].includes(status) ? "active" : null;
-  if (source === "marketplace.hotel_profiles") {
-    if (status === "verified") return "active";
-  } else if (source === "pms.affiliates") {
-    if (status === "approved") return "active";
-  } else return null;
-  if (status === "pending" || status === "suspended") return "suspended";
-  return status === "rejected" ? "archived" : null;
+  return null;
 }
 
 export function stableOrganizationId(userId: string, kind: OrganizationKind): string {

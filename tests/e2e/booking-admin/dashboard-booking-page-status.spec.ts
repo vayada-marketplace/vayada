@@ -234,6 +234,46 @@ test("a failed publication says nothing changed and lets the hotel try again", a
   await expect(card.getByText("Publishing failed")).toBeVisible();
 });
 
+test("a publication the server refused says why and gives a reference (VAY-2292)", async ({
+  page,
+}, testInfo) => {
+  await openDashboard(page);
+  const review = await bookingPublicationReviewMock(BOOKING_ADMIN_PROPERTY_ID, "failed");
+  await page.route(BOOKING_PUBLICATION_PATH, (route) =>
+    fulfillPublication(route, { json: review }),
+  );
+
+  await page.goto("/dashboard");
+  const card = statusCard(page);
+  await expect(card.getByText("Publishing failed")).toBeVisible();
+  await expect(
+    card.getByText(/Some of your hotel details can't be shown on your booking page yet/),
+  ).toBeVisible();
+  await expect(card.getByText("Reference: projection_failed · 44444444")).toBeVisible();
+  await expect(card.getByRole("button", { name: "Try again" })).toBeEnabled();
+  await capture(card, testInfo, "booking-page-failed-refused");
+});
+
+test("a publish refused because setup changed says so (VAY-2292)", async ({ page }) => {
+  await openDashboard(page);
+  await page.route(BOOKING_PUBLICATION_PATH, async (route) => {
+    if (route.request().method() === "POST")
+      return fulfillPublication(route, {
+        status: 409,
+        json: { code: "invalid_readiness_evidence" },
+      });
+    return fulfillPublication(route, {
+      json: await bookingPublicationReviewMock(BOOKING_ADMIN_PROPERTY_ID, "ready"),
+    });
+  });
+
+  await page.goto("/dashboard");
+  const card = statusCard(page);
+  await card.getByRole("button", { name: "Publish booking page" }).click();
+  await expect(card.getByText(/Your setup changed after this page loaded/)).toBeVisible();
+  await expect(card.getByRole("button", { name: "Try again" })).toBeEnabled();
+});
+
 test("a publication still running shows progress", async ({ page }, testInfo) => {
   await openDashboard(page);
   const review = await bookingPublicationReviewMock(BOOKING_ADMIN_PROPERTY_ID, "publishing");
