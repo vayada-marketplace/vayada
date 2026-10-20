@@ -323,6 +323,7 @@ import { createPgIdentityPrivacyRepository } from "./routes/identityPrivacy.js";
 import { createTargetPlatformAdminDashboardRepository } from "./routes/platform/admin/dashboard/bookingCompatible.js";
 import { createPgPlatformPropertyLifecycleCommandRepository } from "./domains/platformPropertyLifecycleCommandRepository.js";
 import { createPgPlatformPropertyLifecycleImpactRepository } from "./domains/platformPropertyLifecycleImpactRepository.js";
+import { createPropertySlugChangeCommand } from "./domains/propertySlugChange.js";
 import { createPgPlatformPropertyProvisioningRepository } from "./domains/platformPropertyProvisioningRepository.js";
 import { createPgPlatformContactIntakeRepository } from "./routes/platformContactIntake.js";
 import {
@@ -1998,6 +1999,18 @@ const app = buildApp({
     provisioningRepository: createPgPlatformPropertyProvisioningRepository({
       connectionString: targetDatabaseUrl,
       setupRepository: sharedHotelSetupStatusRepository,
+    }),
+  },
+  platformPropertySlug: {
+    command: createPropertySlugChangeCommand({
+      connectionString: targetDatabaseUrl,
+      // A live page is republished only where the public site serves setup publications.
+      ...(config.publicHotelProfileSource === "active_publication" && bookingPublicationRuntime
+        ? {
+            refresh: bookingPublicationRuntime.refresh.bind(bookingPublicationRuntime),
+            readiness: bookingPublicationRuntime.routes.readinessProvider,
+          }
+        : {}),
     }),
   },
   pmsOperationsAllowedOrigins: config.pmsOperationsAllowedOrigins,

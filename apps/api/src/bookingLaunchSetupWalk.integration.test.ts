@@ -86,6 +86,7 @@ import {
   registerBookingWebPublicRoutes,
 } from "./routes/bookingWebPublic.js";
 import { projectPropertyPublicProfile } from "./platform/propertyPublicProfileProjection.js";
+import { createPropertySlugChangeCommand } from "./domains/propertySlugChange.js";
 import { createTargetFinancePropertySettingsRepository } from "./routes/finance.js";
 
 const url = process.env["TEST_DATABASE_URL"];
@@ -1176,6 +1177,23 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
       expect(await publicProfile(true)).toMatchObject({ hotel: { propertyId } });
       if (manualMethod) expect(await publicProfile(false)).toBeNull();
       else expect(await publicProfile(false)).toMatchObject({ hotel: { propertyId } });
+      // A Vayada operator: changes the page address (VAY-2295) and suspends the hotel (step 11).
+      await admin.query("INSERT INTO identity.users(id,email,status) VALUES($1,$2,'active')", [
+        platformAdmin,
+        `admin-${suffix}@example.test`,
+      ]);
+      await admin.query(
+        "INSERT INTO identity.organizations(id,kind,name,slug,status) VALUES($1,'platform','Vayada',$2,'active')",
+        [platformOrganizationId, `platform-${suffix}`],
+      );
+      await admin.query(
+        "INSERT INTO identity.organization_memberships(organization_id,user_id,status,role_key,access_origin) VALUES($1,$2,'active','platform_admin','agency')",
+        [platformOrganizationId, platformAdmin],
+      );
+      await admin.query(
+        "INSERT INTO identity.organization_resource_links(organization_id,product,resource_type,resource_id,relationship,status) VALUES($1,'platform','platform','vayada','operator','active')",
+        [platformOrganizationId],
+      );
       // The public site in active_publication mode serves the page, its prices, checkout and a
       // quote. The Sea Suite got its first price after the calendar, right before publishing, as
       // TEST ONLY's rooms did on 10-13; production read only legacy profiles then (VAY-2134).
@@ -1238,11 +1256,11 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
         expect(await read(`/hotels/${slug}/checkout-config`)).toMatchObject({
           termsText: "Our guest terms.",
         });
-        const quoteSeaSuite = async () => {
-          const offers = (await read(`/hotels/${slug}/pricing-offers`)) as Offers;
+        const quoteSeaSuite = async (at = slug) => {
+          const offers = (await read(`/hotels/${at}/pricing-offers`)) as Offers;
           return site.inject({
             method: "POST",
-            url: `/api/booking-web/hotels/${slug}/bookings/quote`,
+            url: `/api/booking-web/hotels/${at}/bookings/quote`,
             headers: { "Idempotency-Key": randomUUID() },
             payload: {
               version: "public-booking-quote-request.v1",
@@ -1367,6 +1385,54 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
         };
         await acceptQuote(quoted, "guest");
 
+        // VAY-2295: a Vayada operator moves the page to a new address. The new address serves the
+        // republished page and its prices; the former one redirects, and still prices and books
+        // for tabs left open on it (the steps below keep using it).
+        const addressChange = createPropertySlugChangeCommand({
+          connectionString: cs,
+          refresh: runtime.refresh.bind(runtime),
+          readiness: runtime.routes.readinessProvider,
+        });
+        closers.push(() => addressChange.close());
+        const operatorAudit = {
+          actorUserId: platformAdmin,
+          organizationId: platformOrganizationId,
+          requestId: `address-${suffix}`,
+          correlationId: `address-${suffix}`,
+          requestedAt: now(),
+        };
+        const moved = `moved-${suffix}`;
+        const addressPlan = await addressChange.preview({
+          propertyId,
+          slug: moved,
+          audit: operatorAudit,
+        });
+        expect(addressPlan.plan).toMatchObject({
+          fromSlug: slug,
+          toSlug: moved,
+          livePage: { pageSlug: slug, republishAsUserId: owner },
+        });
+        expect(
+          await addressChange.apply({
+            propertyId,
+            slug: moved,
+            audit: operatorAudit,
+            reason: "Setup walk address change",
+            expectedPlanSha256: addressPlan.planSha256,
+          }),
+        ).toMatchObject({ publication: { status: "succeeded" } });
+        // The old host now answers with a permanent redirect to the new page.
+        expect(await read(`/hosts/${slug}.next-booking.vayada.com`)).toMatchObject({
+          hotel: { slug: moved },
+          shouldRedirect: true,
+          redirectStatus: 308,
+        });
+        for (const at of [moved, slug]) {
+          expect(await read(`/hotels/${at}?locale=en`)).toMatchObject({ hotel: { slug: moved } });
+          const movedQuote = await quoteSeaSuite(at);
+          expect(movedQuote.statusCode, movedQuote.body).toBe(200);
+        }
+
         // VAY-2150: hotel and room detail edits after the calendar save keep it current, so the
         // page stays ready and guests can still book. Before, accepting failed with "Quote
         // inventory is unavailable" until the calendar was saved again.
@@ -1483,22 +1549,6 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
       // 11. Vayada can still suspend a hotel: it can't publish or take bookings any more.
       const offers = createReplacementPricingPublicationReader(pool);
       expect(await offers.getCurrentPricingOffers(scope)).not.toBeNull();
-      await admin.query("INSERT INTO identity.users(id,email,status) VALUES($1,$2,'active')", [
-        platformAdmin,
-        `admin-${suffix}@example.test`,
-      ]);
-      await admin.query(
-        "INSERT INTO identity.organizations(id,kind,name,slug,status) VALUES($1,'platform','Vayada',$2,'active')",
-        [platformOrganizationId, `platform-${suffix}`],
-      );
-      await admin.query(
-        "INSERT INTO identity.organization_memberships(organization_id,user_id,status,role_key,access_origin) VALUES($1,$2,'active','platform_admin','agency')",
-        [platformOrganizationId, platformAdmin],
-      );
-      await admin.query(
-        "INSERT INTO identity.organization_resource_links(organization_id,product,resource_type,resource_id,relationship,status) VALUES($1,'platform','platform','vayada','operator','active')",
-        [platformOrganizationId],
-      );
       const lifecycle = closing(
         createPgPlatformPropertyLifecycleCommandRepository({ connectionString: cs }),
       );
