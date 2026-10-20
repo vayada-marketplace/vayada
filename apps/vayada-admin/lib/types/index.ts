@@ -6,7 +6,7 @@ export interface User {
   id: string;
   email: string;
   name: string;
-  /** "creator" rows exist until the Marketplace data is deleted (VAY-2259 step 5). */
+  /** The API still labels accounts without a recorded creation type "creator" (VAY-2272 follow-up). */
   type: "hotel" | "creator" | "admin";
   status: "pending" | "verified" | "rejected" | "suspended";
   avatar?: string | null;

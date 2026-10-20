@@ -17,10 +17,10 @@ import {
 } from "@heroicons/react/24/outline";
 import { Modal } from "@/components/ui/Modal";
 
-type FilterType = "all" | "hotel" | "creator" | "admin";
+type FilterType = "all" | "hotel" | "admin";
 type FilterStatus = "all" | "pending" | "verified" | "rejected" | "suspended";
 
-const VALID_TYPES: FilterType[] = ["all", "hotel", "creator", "admin"];
+const VALID_TYPES: FilterType[] = ["all", "hotel", "admin"];
 const VALID_STATUSES: FilterStatus[] = ["all", "pending", "verified", "rejected", "suspended"];
 
 const SCROLL_STORAGE_KEY = "admin:users-list:scroll";
