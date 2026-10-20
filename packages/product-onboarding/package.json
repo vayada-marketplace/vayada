@@ -37,7 +37,10 @@
     "./GoogleAddressMap": "./src/GoogleAddressMap.tsx",
     "./googleMaps": "./src/googleMaps.ts",
     "./TimezoneField": "./src/TimezoneField.tsx",
-    "./timezones": "./src/timezones.ts"
+    "./timezones": "./src/timezones.ts",
+    "./HotelSetupChecklistCard": "./src/HotelSetupChecklistCard.tsx",
+    "./hotelSetupChecklistMessages": "./src/hotelSetupChecklistMessages.ts",
+    "./hotelSetupChecklistApi": "./src/hotelSetupChecklistApi.ts"
   },
   "dependencies": {
     "@vayada/domain-booking": "*",
