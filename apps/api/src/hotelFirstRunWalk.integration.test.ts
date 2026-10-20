@@ -46,7 +46,10 @@ import { createPgPmsRoomPublicationReadModel } from "./domains/pmsRoomPublicatio
 import { createReplacementPricingPublicationReader } from "./domains/replacementPricingPublicationReader.js";
 import { createHotelSetupOrdinaryLoginFixture } from "./hotelSetupOrdinaryLogin.fixture.js";
 import { createPgHotelMediaResolutionPort } from "./platform/hotelMediaResolver.js";
-import { createOrdinaryHotelSetupProfileCommand } from "./platform/hotelSetupProfileWriter.js";
+import {
+  createOrdinaryHotelSetupActivation,
+  createOrdinaryHotelSetupProfileCommand,
+} from "./platform/hotelSetupProfileWriter.js";
 import type { PlatformMediaServingConfig } from "./platform/mediaServing.js";
 import { createPgSharedHotelSetupStatusRepository } from "./platform/sharedHotelSetupStatusReadModel.js";
 
@@ -270,6 +273,7 @@ describe.skipIf(!url)(
         pricingPool: pool,
         profile: profiles,
         profileCommand: createOrdinaryHotelSetupProfileCommand(pool),
+        activateProperty: createOrdinaryHotelSetupActivation(pool),
         launchSettings: { readDefaultLanguage: async () => "en" },
         pricingRead,
         currency: closing(
@@ -466,10 +470,30 @@ describe.skipIf(!url)(
 
         // Nothing the first run owns still blocks publishing; what's left is exactly what the held
         // wave 1 PRs relax, and each of them shortens this list.
-        expect(blockerCodes(await h.readiness())).toEqual([
-          "booking.hotel_profile:hotel_setup_in_progress", // 1.5: activate at the end of the first run
-          "booking.pricing:pricing_hotel_setup_in_progress", // 1.5: activate at the end of the first run
-        ]);
+        // VAY-2247 wave 1 done: a hotel with only its basics, one room and one price can publish
+        // (photos, a description and an amenities review are optional; the first run made it live).
+        expect(blockerCodes(await h.readiness())).toEqual([]);
+        const property = (
+          await h.admin.query(
+            `SELECT property.lifecycle_status AS lifecycle, property.profile_status AS profile,
+                    slug.slug, count(audit.id)::int AS activations
+             FROM hotel_catalog.properties property
+             LEFT JOIN hotel_catalog.property_slugs slug ON slug.property_id = property.id
+               AND slug.purpose = 'canonical' AND slug.status = 'active'
+             LEFT JOIN platform.product_audit_events audit ON audit.property_id = property.id
+               AND audit.action = 'hotel_catalog.property.lifecycle.auto_activate'
+             WHERE property.id = $1 GROUP BY property.id, slug.slug`,
+            [h.propertyId],
+          )
+        ).rows[0];
+        // The address was reserved at creation from the name; the hotel went live once, with an audit row.
+        expect(property).toMatchObject({
+          lifecycle: "active",
+          profile: "complete",
+          // The name, or the name and the hotel's id when another test hotel took it first.
+          slug: expect.stringMatching(/^first-run-beach-hotel(-[a-z0-9]+)?$/),
+          activations: 1,
+        });
 
         // A second run finds everything in place.
         const again = await h.service().run(h.actor, request, h.email);
@@ -492,11 +516,21 @@ describe.skipIf(!url)(
           ran: ["currency", "rooms", "payments"],
         });
         expect((await h.service().read(h.actor)).nextStep).toBe("pricing");
+        // A first run that stopped leaves the hotel being set up; finishing it makes it live.
+        const lifecycle = async () =>
+          (
+            await h.admin.query(
+              "SELECT lifecycle_status AS lifecycle FROM hotel_catalog.properties WHERE id=$1",
+              [h.propertyId],
+            )
+          ).rows[0]?.lifecycle;
+        expect(await lifecycle()).toBe("provisioning");
         const resumed = await h.service().run(h.actor, request, h.email);
         expect(resumed).toMatchObject({
           ok: true,
           ran: ["pricing", "calendar", "guest_rules", "plan"],
         });
+        expect(await lifecycle()).toBe("active");
       } finally {
         await h.close();
       }
