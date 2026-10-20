@@ -47,14 +47,14 @@ export const FIRST_RUN_GUEST_TERMS = DEFAULT_GUEST_TERMS;
 
 /**
  * Free cancellation until 3 days before arrival, then the full stay. A refundable rate, so it can be paid at
- * the property (the VAY-2280 rule only forbids non-refundable rates there).
+ * the property (the VAY-2280 rule only forbids non-refundable rates there). The same shape the setup screen's
+ * first price sends through pricing-v2 (FirstPricingSetup), so server- and owner-made rates look alike.
  */
 export const FIRST_RUN_CANCELLATION_TERMS: FlexibleCancellationTerms = Object.freeze({
   type: "free_until_days_before_arrival",
   freeCancellationDeadlineDays: 3,
   afterDeadlinePenalty: "full_booking_amount",
   noShowPenalty: "full_booking_amount",
-  flexibleCancellationType: "free",
 });
 
 /** Open all year with a one-night minimum; future dates keep opening through auto-open (on by default). */

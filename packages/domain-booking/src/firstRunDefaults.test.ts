@@ -39,10 +39,11 @@ describe("first-run defaults (VAY-2247)", () => {
   });
 
   it("cancellation is free until 3 days before arrival, then the full stay", () => {
-    expect(parseFlexibleCancellationTerms(FIRST_RUN_CANCELLATION_TERMS)).toMatchObject({
+    expect(parseFlexibleCancellationTerms(FIRST_RUN_CANCELLATION_TERMS)).toEqual({
       type: "free_until_days_before_arrival",
       freeCancellationDeadlineDays: 3,
       afterDeadlinePenalty: "full_booking_amount",
+      noShowPenalty: "full_booking_amount",
     });
   });
 
