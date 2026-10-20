@@ -1410,8 +1410,11 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
             expectedPlanSha256: addressPlan.planSha256,
           }),
         ).toMatchObject({ publication: { status: "succeeded" } });
+        // The old host now answers with a permanent redirect to the new page.
         expect(await read(`/hosts/${slug}.next-booking.vayada.com`)).toMatchObject({
           hotel: { slug: moved },
+          shouldRedirect: true,
+          redirectStatus: 308,
         });
         for (const at of [moved, slug]) {
           expect(await read(`/hotels/${at}?locale=en`)).toMatchObject({ hotel: { slug: moved } });
