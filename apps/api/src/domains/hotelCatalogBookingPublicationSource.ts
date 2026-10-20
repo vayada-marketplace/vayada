@@ -271,8 +271,9 @@ async function load(
     blockers.push(blocker("hotel_canonical_slug_invalid"));
   if (!content.timezone) blockers.push(blocker("hotel_timezone_missing"));
   else if (!isValidTimeZone(content.timezone)) blockers.push(blocker("hotel_timezone_invalid"));
+  // VAY-2247: hotel photos are optional (guests see a placeholder); photos still processing or
+  // unavailable block until they are ready.
   if (mediaBlocker) blockers.push(mediaBlocker);
-  else if (content.images.length === 0) blockers.push(blocker("hotel_public_media_missing"));
   return {
     sources: [profileSource, assignmentSource, ...mediaSources, aggregateSource].sort(
       compareSource,
