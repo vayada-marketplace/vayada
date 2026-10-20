@@ -24,7 +24,7 @@ export type QuickGoLiveStatus =
 export type QuickGoLiveStepProps = {
   hotel: { name: string; place: string; url: string };
   currency: { code: string; symbol: string };
-  room: QuickPreviewRoom | null;
+  rooms: readonly QuickPreviewRoom[];
   status: QuickGoLiveStatus;
   onPublish: () => void;
   onRetry: () => void;
@@ -112,7 +112,7 @@ function StatusBanner({ status, onRetry }: Pick<QuickGoLiveStepProps, "status" |
 export function QuickGoLiveStep({
   hotel,
   currency,
-  room,
+  rooms,
   status,
   onPublish,
   onRetry,
@@ -151,7 +151,7 @@ export function QuickGoLiveStep({
               hotelName={hotel.name}
               place={hotel.place}
               currencySymbol={currency.symbol}
-              rooms={room ? [room] : []}
+              rooms={rooms}
             />
           </div>
           <div className="flex w-full items-start gap-3 rounded-xl border border-gray-200 bg-white px-4 py-4">

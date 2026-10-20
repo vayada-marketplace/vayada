@@ -14,11 +14,13 @@ function props(overrides: Partial<QuickLiveScreenProps> = {}): QuickLiveScreenPr
   return {
     hotel: { name: "Hotel Alpenrose", place: "Sendlinger Straße 12, Munich" },
     currency: { code: "EUR", symbol: "€" },
-    room: {
-      name: "Classic Double",
-      details: "Up to 2 guests · Free cancellation until 3 days before",
-      price: "€145",
-    },
+    rooms: [
+      {
+        name: "Classic Double",
+        details: "Up to 2 guests · Free cancellation until 3 days before",
+        price: "€145",
+      },
+    ],
     url: URL_EN,
     previewHost: "hotel-alpenrose.booking.vayada.com",
     copy: vi.fn(async () => undefined),

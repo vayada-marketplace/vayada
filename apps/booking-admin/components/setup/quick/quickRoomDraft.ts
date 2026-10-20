@@ -1,33 +1,59 @@
 import { FIRST_RUN_MAX_ROOMS, firstRunPriceMinor, firstRunRoomFacts } from "@vayada/domain-booking";
 
-/** VAY-2247 "First room and price": what the owner types, kept by the host until the first run is sent. */
+import type { QuickPreviewRoom } from "./QuickBookingPagePreview";
+
+/** VAY-2247 "First room and price": one room type as the owner types it. */
 export type QuickRoomDraft = {
   name: string;
   numberOfRooms: string;
   maxGuests: string;
   pricePerNight: string;
+};
+
+/** The hotel's room types (in order) and the taxes tick, which covers all their prices. */
+export type QuickRoomsDraft = {
+  rooms: QuickRoomDraft[];
   pricesIncludeMandatoryCharges: boolean;
 };
+
+/** The first run takes up to this many room types (the server's FIRST_RUN_MAX_ROOM_TYPES). */
+export const QUICK_MAX_ROOM_TYPES = 10;
 
 export const EMPTY_QUICK_ROOM_DRAFT: QuickRoomDraft = Object.freeze({
   name: "",
   numberOfRooms: "",
   maxGuests: "2",
   pricePerNight: "",
+});
+
+export const EMPTY_QUICK_ROOMS_DRAFT: QuickRoomsDraft = Object.freeze({
+  rooms: [EMPTY_QUICK_ROOM_DRAFT],
   pricesIncludeMandatoryCharges: false,
 });
 
-export type QuickRoomField = "name" | "numberOfRooms" | "maxGuests" | "pricePerNight" | "taxes";
+export const QUICK_TAXES_ERROR = "Confirm that your prices include taxes and fees.";
+
+export type QuickRoomField = "name" | "numberOfRooms" | "maxGuests" | "pricePerNight";
 export type QuickRoomErrors = Partial<Record<QuickRoomField, string>>;
 
 const whole = (value: string) => (/^\d{1,4}$/.test(value.trim()) ? Number(value.trim()) : null);
+const sameName = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 
-/** The same rules as the server's first run (firstRunRoomFacts, firstRunPriceMinor), in the owner's words. */
-export function quickRoomErrors(draft: QuickRoomDraft, currency: string): QuickRoomErrors {
+/**
+ * The same rules as the server's first run (firstRunRoomFacts, firstRunPriceMinor), in the owner's words.
+ * `otherNames` are the hotel's other room types: the PMS keeps room type names unique.
+ */
+export function quickRoomErrors(
+  draft: QuickRoomDraft,
+  currency: string,
+  otherNames: readonly string[] = [],
+): QuickRoomErrors {
   const errors: QuickRoomErrors = {};
   const rooms = whole(draft.numberOfRooms);
   const guests = whole(draft.maxGuests);
   if (!draft.name.trim()) errors.name = "Enter a name for this room type.";
+  else if (otherNames.some((name) => sameName(name, draft.name)))
+    errors.name = "You already have a room type with this name.";
   if (rooms === null || rooms < 1) errors.numberOfRooms = "Enter at least 1 room.";
   else if (rooms > FIRST_RUN_MAX_ROOMS)
     errors.numberOfRooms = `Enter up to ${FIRST_RUN_MAX_ROOMS} rooms; add more later in Rooms & Rates.`;
@@ -35,8 +61,6 @@ export function quickRoomErrors(draft: QuickRoomDraft, currency: string): QuickR
   if (!draft.pricePerNight.trim()) errors.pricePerNight = "Enter a price per night.";
   else if (!firstRunPriceMinor(draft.pricePerNight, currency))
     errors.pricePerNight = "Enter a price like 145 or 145.50.";
-  if (!draft.pricesIncludeMandatoryCharges)
-    errors.taxes = "Confirm that your prices include taxes and fees.";
   if (
     !errors.name &&
     !errors.numberOfRooms &&
@@ -52,6 +76,19 @@ export function quickRoomErrors(draft: QuickRoomDraft, currency: string): QuickR
   return errors;
 }
 
+/** The first room type with something to fix, and what; null when all of them can be sent. */
+export function quickRoomsFirstError(
+  draft: QuickRoomsDraft,
+  currency: string,
+): { index: number; errors: QuickRoomErrors } | null {
+  for (let index = 0; index < draft.rooms.length; index += 1) {
+    const others = draft.rooms.filter((_, other) => other !== index).map((other) => other.name);
+    const errors = quickRoomErrors(draft.rooms[index]!, currency, others);
+    if (Object.keys(errors).length > 0) return { index, errors };
+  }
+  return null;
+}
+
 /** The first-run request's room once the draft is valid. */
 export function quickRoomRequest(draft: QuickRoomDraft) {
   return Object.freeze({
@@ -62,11 +99,70 @@ export function quickRoomRequest(draft: QuickRoomDraft) {
   });
 }
 
-/** "We create Room 1–8 in the PMS." for the rooms the first run names. */
-export function quickRoomLabelsHint(numberOfRooms: string): string | null {
+/**
+ * The number of each room type's first room: names are unique in a hotel, so the first run counts on
+ * across room types (Room 1–8, then Room 9–12). Unusable counts take no numbers.
+ */
+export function quickRoomFirstNumbers(rooms: readonly QuickRoomDraft[]): number[] {
+  let next = 1;
+  return rooms.map((room) => {
+    const first = next;
+    const count = whole(room.numberOfRooms);
+    if (count !== null && count >= 1 && count <= FIRST_RUN_MAX_ROOMS) next += count;
+    return first;
+  });
+}
+
+/** "We create Room 1–8 in the PMS." for the rooms the first run names, from `firstNumber` on. */
+export function quickRoomLabelsHint(numberOfRooms: string, firstNumber = 1): string | null {
   const count = whole(numberOfRooms);
   if (count === null || count < 1 || count > FIRST_RUN_MAX_ROOMS) return null;
   return count === 1
-    ? "We create Room 1 in the PMS. Rename it later."
-    : `We create Room 1–${count} in the PMS. Rename them later.`;
+    ? `We create Room ${firstNumber} in the PMS. Rename it later.`
+    : `We create Room ${firstNumber}–${firstNumber + count - 1} in the PMS. Rename them later.`;
+}
+
+/** Reads a saved draft: this version's shape, or the first version's single room with its tick. */
+export function parseQuickRoomsDraft(value: unknown): QuickRoomsDraft | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  const room = (item: unknown): QuickRoomDraft => ({
+    ...EMPTY_QUICK_ROOM_DRAFT,
+    ...(item && typeof item === "object" ? pick(item as Record<string, unknown>) : {}),
+  });
+  if (Array.isArray(record.rooms))
+    return {
+      rooms: record.rooms.length
+        ? record.rooms.slice(0, QUICK_MAX_ROOM_TYPES).map(room)
+        : [EMPTY_QUICK_ROOM_DRAFT],
+      pricesIncludeMandatoryCharges: record.pricesIncludeMandatoryCharges === true,
+    };
+  return {
+    rooms: [room(record)],
+    pricesIncludeMandatoryCharges: record.pricesIncludeMandatoryCharges === true,
+  };
+}
+
+function pick(value: Record<string, unknown>): Partial<QuickRoomDraft> {
+  const out: Partial<QuickRoomDraft> = {};
+  for (const key of ["name", "numberOfRooms", "maxGuests", "pricePerNight"] as const)
+    if (typeof value[key] === "string") out[key] = value[key] as string;
+  return out;
+}
+
+/** The room types as the preview shows them, once each has a name and a price. */
+export function quickPreviewRooms(draft: QuickRoomsDraft, symbol: string): QuickPreviewRoom[] {
+  return draft.rooms.flatMap((room) => {
+    const name = room.name.trim();
+    const price = room.pricePerNight.trim();
+    if (!name || !price) return [];
+    const guests = Number(room.maxGuests) || 1;
+    return [
+      {
+        name,
+        details: `Up to ${guests} guest${guests === 1 ? "" : "s"} · Free cancellation until 3 days before`,
+        price: `${symbol}${price}`,
+      },
+    ];
+  });
 }

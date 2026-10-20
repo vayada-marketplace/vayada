@@ -6,10 +6,14 @@ import { QuickPropertySetup, quickRoomStorageKey } from "./QuickPropertySetup";
 import { QuickRoomStep, type QuickRoomStepProps } from "./QuickRoomStep";
 import {
   EMPTY_QUICK_ROOM_DRAFT,
+  parseQuickRoomsDraft,
   quickRoomErrors,
+  quickRoomFirstNumbers,
   quickRoomLabelsHint,
   quickRoomRequest,
+  quickRoomsFirstError,
   type QuickRoomDraft,
+  type QuickRoomsDraft,
 } from "./quickRoomDraft";
 
 vi.mock("next/image", () => ({
@@ -22,12 +26,12 @@ const FILLED: QuickRoomDraft = {
   numberOfRooms: "8",
   maxGuests: "2",
   pricePerNight: "145",
-  pricesIncludeMandatoryCharges: true,
 };
+const DRAFT: QuickRoomsDraft = { rooms: [FILLED], pricesIncludeMandatoryCharges: true };
 
 function props(overrides: Partial<QuickRoomStepProps> = {}): QuickRoomStepProps {
   return {
-    draft: FILLED,
+    draft: DRAFT,
     onChange: vi.fn(),
     currency: { code: "EUR", symbol: "€" },
     hotel: {
@@ -79,9 +83,7 @@ describe("QuickRoomStep (VAY-2247 step 3)", () => {
       <QuickRoomStep
         {...props({
           draft: {
-            ...FILLED,
-            numberOfRooms: "0",
-            pricePerNight: "",
+            rooms: [{ ...FILLED, numberOfRooms: "0", pricePerNight: "" }],
             pricesIncludeMandatoryCharges: false,
           },
           onSubmit,
@@ -103,7 +105,7 @@ describe("QuickRoomStep (VAY-2247 step 3)", () => {
     const onSubmit = vi.fn(async () => undefined);
     const renderer = create(<QuickRoomStep {...props({ onSubmit })} />);
     await submit(renderer);
-    expect(onSubmit).toHaveBeenCalledWith(FILLED);
+    expect(onSubmit).toHaveBeenCalledWith(DRAFT);
     renderer.unmount();
   });
 });
@@ -123,8 +125,20 @@ describe("quickRoomDraft", () => {
     expect(quickRoomErrors({ ...FILLED, maxGuests: "" }, "EUR")).toHaveProperty("maxGuests");
     expect(quickRoomErrors(EMPTY_QUICK_ROOM_DRAFT, "EUR")).toMatchObject({
       name: "Enter a name for this room type.",
-      taxes: "Confirm that your prices include taxes and fees.",
     });
+    // Room type names are unique in a hotel (the PMS ignores case).
+    expect(quickRoomErrors(FILLED, "EUR", ["Garden Suite", " classic double "])).toEqual({
+      name: "You already have a room type with this name.",
+    });
+    expect(
+      quickRoomsFirstError(
+        {
+          rooms: [FILLED, { ...FILLED, name: "Garden Suite", pricePerNight: "" }],
+          pricesIncludeMandatoryCharges: true,
+        },
+        "EUR",
+      ),
+    ).toEqual({ index: 1, errors: { pricePerNight: "Enter a price per night." } });
   });
 
   it("builds the first-run room and the rooms hint", () => {
@@ -136,6 +150,21 @@ describe("quickRoomDraft", () => {
     });
     expect(quickRoomLabelsHint("1")).toBe("We create Room 1 in the PMS. Rename it later.");
     expect(quickRoomLabelsHint("")).toBeNull();
+    // Names count on across room types, as the first run names them.
+    expect(quickRoomFirstNumbers([FILLED, { ...FILLED, numberOfRooms: "x" }, FILLED])).toEqual([
+      1, 9, 9,
+    ]);
+    expect(quickRoomLabelsHint("4", 9)).toBe("We create Room 9–12 in the PMS. Rename them later.");
+  });
+
+  it("reads a saved draft in this version's shape or the first version's single room", () => {
+    expect(parseQuickRoomsDraft({ ...FILLED, pricesIncludeMandatoryCharges: true })).toEqual(DRAFT);
+    expect(parseQuickRoomsDraft(DRAFT)).toEqual(DRAFT);
+    expect(parseQuickRoomsDraft({ rooms: [], pricesIncludeMandatoryCharges: false })).toEqual({
+      rooms: [EMPTY_QUICK_ROOM_DRAFT],
+      pricesIncludeMandatoryCharges: false,
+    });
+    expect(parseQuickRoomsDraft(null)).toBeNull();
   });
 });
 
@@ -160,7 +189,12 @@ describe("QuickPropertySetup (VAY-2247 steps 3–5)", () => {
 
   it("loads the hotel for the preview, keeps the room on this device and goes on to step 4", async () => {
     const kept = storage({
-      [quickRoomStorageKey(PROPERTY)]: JSON.stringify({ ...FILLED, name: "Garden Suite" }),
+      // Saved by the first version: one room with its tick.
+      [quickRoomStorageKey(PROPERTY)]: JSON.stringify({
+        ...FILLED,
+        name: "Garden Suite",
+        pricesIncludeMandatoryCharges: true,
+      }),
     });
     let renderer: ReactTestRenderer | undefined;
     await act(async () => {
@@ -190,8 +224,9 @@ describe("QuickPropertySetup (VAY-2247 steps 3–5)", () => {
         .findAllByType("input")[0]!
         .props.onChange({ target: { value: "Garden Suite Deluxe" } }),
     );
-    expect(JSON.parse(kept.values.get(quickRoomStorageKey(PROPERTY))!)).toMatchObject({
-      name: "Garden Suite Deluxe",
+    expect(JSON.parse(kept.values.get(quickRoomStorageKey(PROPERTY))!)).toEqual({
+      rooms: [{ ...FILLED, name: "Garden Suite Deluxe" }],
+      pricesIncludeMandatoryCharges: true,
     });
     await submit(renderer!);
     // On to step 4 (How guests pay), with the room in its preview.

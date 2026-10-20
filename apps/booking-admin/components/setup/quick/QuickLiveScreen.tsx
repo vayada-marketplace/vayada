@@ -17,7 +17,7 @@ import { QuickSetupShell } from "./QuickSetupShell";
 export type QuickLiveScreenProps = {
   hotel: { name: string; place: string };
   currency: { code: string; symbol: string };
-  room: QuickPreviewRoom | null;
+  rooms: readonly QuickPreviewRoom[];
   /**
    * The published booking page, e.g. "https://hotel-alpenrose.booking.vayada.com/en"; null while guests
    * can't open published pages yet (the booking site is still switching over, VAY-2134).
@@ -83,7 +83,7 @@ function NextStep({
 export function QuickLiveScreen({
   hotel,
   currency,
-  room,
+  rooms,
   url,
   previewHost,
   copy,
@@ -209,7 +209,7 @@ export function QuickLiveScreen({
               hotelName={hotel.name}
               place={hotel.place}
               currencySymbol={currency.symbol}
-              rooms={room ? [room] : []}
+              rooms={rooms}
               live
             />
           </QuickSetupPreviewCard>

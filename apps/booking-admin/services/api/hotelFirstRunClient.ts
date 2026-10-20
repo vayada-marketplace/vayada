@@ -26,7 +26,13 @@ export type HotelFirstRunState = Readonly<{
 }>;
 
 export type HotelFirstRunRequest = Readonly<{
-  room: Readonly<{ name: string; numberOfRooms: number; maxGuests: number; pricePerNight: string }>;
+  /** The hotel's room types, in order: 1–10 with different names (the server's 1.12). */
+  rooms: readonly Readonly<{
+    name: string;
+    numberOfRooms: number;
+    maxGuests: number;
+    pricePerNight: string;
+  }>[];
   pricesIncludeMandatoryCharges: boolean;
   guestPayment: "pay_at_property";
   plan: "commission" | "fixed_fee";

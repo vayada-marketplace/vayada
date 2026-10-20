@@ -23,7 +23,7 @@ export type QuickPlanChoice = "commission" | "fixed_fee";
 export type QuickPayStepProps = {
   hotel: { name: string; place: string; url: string };
   currency: { code: string; symbol: string };
-  room: QuickPreviewRoom | null;
+  rooms: readonly QuickPreviewRoom[];
   /** A Fixed Fee checkout already started in Stripe (back from checkout before it confirmed). */
   checkoutPending?: boolean;
   initialPlan?: QuickPlanChoice;
@@ -126,7 +126,7 @@ function MethodRow({
 export function QuickPayStep({
   hotel,
   currency,
-  room,
+  rooms,
   checkoutPending = false,
   initialPlan = "commission",
   onSubmit,
@@ -221,7 +221,7 @@ export function QuickPayStep({
               hotelName={hotel.name}
               place={hotel.place}
               currencySymbol={currency.symbol}
-              rooms={room ? [room] : []}
+              rooms={rooms}
             />
           </QuickSetupPreviewCard>
         }

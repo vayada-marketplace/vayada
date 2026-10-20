@@ -10,20 +10,24 @@ import { QuickSetupPreviewCard } from "./QuickSetupPreviewCard";
 import { QuickSetupShell } from "./QuickSetupShell";
 import { QuickSetupStepLayout } from "./QuickSetupStepLayout";
 import {
+  QUICK_TAXES_ERROR,
+  quickPreviewRooms,
   quickRoomErrors,
   quickRoomLabelsHint,
   type QuickRoomDraft,
   type QuickRoomErrors,
+  type QuickRoomsDraft,
 } from "./quickRoomDraft";
 
 const FORM_ID = "quick-setup-first-room";
 
 export type QuickRoomStepProps = {
-  draft: QuickRoomDraft;
-  onChange: (patch: Partial<QuickRoomDraft>) => void;
+  /** The hotel's room types and the taxes tick; this step edits the first room type (1.12b adds more). */
+  draft: QuickRoomsDraft;
+  onChange: (next: QuickRoomsDraft) => void;
   currency: { code: string; symbol: string };
   hotel: { name: string; place: string; url: string };
-  onSubmit: (draft: QuickRoomDraft) => Promise<void>;
+  onSubmit: (draft: QuickRoomsDraft) => Promise<void>;
   /** Back to "Your hotel" once it can edit a hotel that exists (follow-up); hidden until then. */
   onBack?: (() => void) | null;
   onSaveAndExit: () => void;
@@ -88,19 +92,27 @@ export function QuickRoomStep({
   onChangeCancellation,
   onChangeBed,
 }: QuickRoomStepProps) {
-  const [errors, setErrors] = useState<QuickRoomErrors>({});
+  const [errors, setErrors] = useState<QuickRoomErrors & { taxes?: string }>({});
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  const room = draft.rooms[0]!;
   const change = (patch: Partial<QuickRoomDraft>, cleared: keyof QuickRoomErrors) => {
-    onChange(patch);
+    onChange({ ...draft, rooms: [{ ...room, ...patch }, ...draft.rooms.slice(1)] });
     setErrors((current) => ({ ...current, [cleared]: undefined }));
+  };
+  const tick = (pricesIncludeMandatoryCharges: boolean) => {
+    onChange({ ...draft, pricesIncludeMandatoryCharges });
+    setErrors((current) => ({ ...current, taxes: undefined }));
   };
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSubmitError(null);
-    const found = quickRoomErrors(draft, currency.code);
+    const found = {
+      ...quickRoomErrors(room, currency.code),
+      ...(draft.pricesIncludeMandatoryCharges ? {} : { taxes: QUICK_TAXES_ERROR }),
+    };
     setErrors(found);
     if (Object.keys(found).length > 0) return;
     setSubmitting(true);
@@ -113,9 +125,6 @@ export function QuickRoomStep({
     }
   }
 
-  const guests = Number(draft.maxGuests) || 0;
-  const roomName = draft.name.trim();
-  const price = draft.pricePerNight.trim();
   return (
     <QuickSetupShell step={3} onSaveAndExit={onSaveAndExit} saveAndExitDisabled={submitting}>
       <QuickSetupStepLayout
@@ -137,17 +146,7 @@ export function QuickRoomStep({
               hotelName={hotel.name}
               place={hotel.place}
               currencySymbol={currency.symbol}
-              rooms={
-                roomName && price
-                  ? [
-                      {
-                        name: roomName,
-                        details: `Up to ${guests || 1} guest${guests === 1 ? "" : "s"} · Free cancellation until 3 days before`,
-                        price: `${currency.symbol}${price}`,
-                      },
-                    ]
-                  : []
-              }
+              rooms={quickPreviewRooms(draft, currency.symbol)}
             />
           </QuickSetupPreviewCard>
         }
@@ -162,7 +161,7 @@ export function QuickRoomStep({
           <QuickSetupField
             label="Room type name"
             required
-            value={draft.name}
+            value={room.name}
             error={errors.name}
             helper="Guests see this name when they choose a room."
             inputProps={{ placeholder: "e.g. Classic Double", maxLength: 120 }}
@@ -172,16 +171,16 @@ export function QuickRoomStep({
             <QuickSetupField
               label="Rooms of this type"
               required
-              value={draft.numberOfRooms}
+              value={room.numberOfRooms}
               error={errors.numberOfRooms}
-              helper={quickRoomLabelsHint(draft.numberOfRooms)}
+              helper={quickRoomLabelsHint(room.numberOfRooms)}
               inputProps={{ inputMode: "numeric", placeholder: "e.g. 8", maxLength: 3 }}
               onChange={(numberOfRooms) => change({ numberOfRooms }, "numberOfRooms")}
             />
             <QuickSetupField
               label="Max guests"
               required
-              value={draft.maxGuests}
+              value={room.maxGuests}
               error={errors.maxGuests}
               inputProps={{ inputMode: "numeric", maxLength: 2 }}
               onChange={(maxGuests) => change({ maxGuests }, "maxGuests")}
@@ -190,7 +189,7 @@ export function QuickRoomStep({
           <QuickSetupField
             label="Price per night"
             required
-            value={draft.pricePerNight}
+            value={room.pricePerNight}
             error={errors.pricePerNight}
             suffix={currency.code}
             helper="Includes taxes and fees. Seasons and weekday prices come later in Rooms & Rates."
@@ -207,9 +206,7 @@ export function QuickRoomStep({
                 type="checkbox"
                 className="peer sr-only"
                 checked={draft.pricesIncludeMandatoryCharges}
-                onChange={(event) =>
-                  change({ pricesIncludeMandatoryCharges: event.target.checked }, "taxes")
-                }
+                onChange={(event) => tick(event.target.checked)}
               />
               <span
                 aria-hidden="true"

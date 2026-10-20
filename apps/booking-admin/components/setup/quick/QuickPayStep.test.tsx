@@ -21,6 +21,7 @@ const hotel = {
   place: "Sendlinger Straße 12, Munich",
   url: "hotel-alpenrose.booking.vayada.com",
 };
+// Saved as the first version did: one room with its taxes tick (the setup reads both shapes).
 const ROOM = {
   name: "Classic Double",
   numberOfRooms: "8",
@@ -33,7 +34,7 @@ function props(overrides: Partial<QuickPayStepProps> = {}): QuickPayStepProps {
   return {
     hotel,
     currency: { code: "EUR", symbol: "€" },
-    room: { name: "Classic Double", details: "Up to 2 guests", price: "€145" },
+    rooms: [{ name: "Classic Double", details: "Up to 2 guests", price: "€145" }],
     onSubmit: vi.fn(async () => undefined),
     onBack: vi.fn(),
     onSaveAndExit: vi.fn(),
@@ -151,7 +152,7 @@ describe("step 4 sends the first run (VAY-2247 3.7)", () => {
     const { renderer } = await mount(run, ROOM);
     await submit(renderer);
     expect(run).toHaveBeenCalledWith(PROPERTY, {
-      room: { name: "Classic Double", numberOfRooms: 8, maxGuests: 2, pricePerNight: "145" },
+      rooms: [{ name: "Classic Double", numberOfRooms: 8, maxGuests: 2, pricePerNight: "145" }],
       pricesIncludeMandatoryCharges: true,
       guestPayment: "pay_at_property",
       plan: "commission",
