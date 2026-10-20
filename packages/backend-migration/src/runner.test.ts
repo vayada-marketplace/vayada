@@ -1330,11 +1330,6 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
       );
 
       expect(financeTableRows.map((row) => row.table_name)).toEqual([
-        "affiliate_earning_allocation_items",
-        "affiliate_earning_allocations",
-        "affiliate_earning_journal",
-        "affiliate_payout_payment_evidence",
-        "affiliate_payout_payment_evidence_items",
         "airbnb_current_provider_amounts",
         "airbnb_current_provider_nights",
         "airbnb_provider_snapshots",
