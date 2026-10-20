@@ -189,7 +189,7 @@ CREATE TEMPORARY TABLE tombstone_organizations ON COMMIT DROP AS
 CREATE TEMPORARY TABLE tombstone_users ON COMMIT DROP AS
   SELECT r.id FROM removed_users r
   -- A user WorkOS knows keeps a blank row, so a late WorkOS message cannot create a new account.
-  WHERE EXISTS (SELECT 1 FROM identity.external_identities x WHERE x.user_id = r.id AND x.provider = 'workos')
+  WHERE EXISTS (SELECT 1 FROM identity.external_identities x WHERE x.user_id = r.id AND x.provider_user_id IS NOT NULL)
      OR EXISTS (SELECT 1 FROM platform.domain_events d WHERE d.actor_user_id = r.id)
      OR EXISTS (SELECT 1 FROM platform.product_audit_events a WHERE a.actor_user_id = r.id)
      -- Columns that would otherwise be set to NULL without a word.
@@ -201,13 +201,13 @@ CREATE TEMPORARY TABLE tombstone_users ON COMMIT DROP AS
      OR EXISTS (SELECT 1 FROM finance.affiliate_earning_journal j WHERE j.actor_user_id = r.id)
      OR EXISTS (SELECT 1 FROM finance.affiliate_payout_payment_evidence ev WHERE ev.recorded_by_user_id = r.id);
 
+-- The WorkOS user id stays for the lookup; nothing else about the person does.
 UPDATE identity.external_identities
    SET provider_email = NULL, provider_email_verified = false, raw_profile = NULL, last_login_at = NULL,
        updated_at = now()
- WHERE user_id IN (SELECT id FROM tombstone_users) AND provider = 'workos';
+ WHERE user_id IN (SELECT id FROM tombstone_users);
 DELETE FROM identity.external_identities
-  WHERE user_id IN (SELECT id FROM removed_users)
-    AND NOT (provider = 'workos' AND user_id IN (SELECT id FROM tombstone_users));
+  WHERE user_id IN (SELECT id FROM removed_users) AND user_id NOT IN (SELECT id FROM tombstone_users);
 UPDATE identity.organizations SET status = 'archived', updated_at = now()
  WHERE id IN (SELECT id FROM finance_kept_organizations);
 UPDATE identity.organizations

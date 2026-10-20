@@ -17,17 +17,20 @@ const CLOSED_ORG = id(1); // creator workspace WorkOS knows: kept as a blank row
 const EMPTY_ORG = id(2); // creator workspace nothing names: deleted
 const PAYEE_ORG = id(3); // affiliate partner with a billing record: archived, name kept
 const HOTEL_ORG = id(4);
+const ARCHIVE_ORG = id(5); // affiliate partner the 0498 archive pays: archived, name kept
 const WORKOS_USER = id(11); // creator only, WorkOS knows them: blank row, WorkOS link kept
 const PLAIN_USER = id(12); // creator only, nothing names them: deleted
 const LEGACY_TYPE_USER = id(13); // created as a creator, no membership: deleted
 const AUDITED_USER = id(14); // creator only, named by an audit event: blank row
 const DUAL_USER = id(15); // creator and hotel member: stays
+const ARCHIVE_USER = id(16); // affiliate the 0498 archive names as its actor: blank row
 const PROPERTY = id(21);
 const MARKED_MEDIA = id(31);
 const EXTERNAL_MEDIA = id(32);
 const HOTEL_MEDIA = id(33);
 const UNMARKED_MEDIA = id(34);
 const SESSION = id(41);
+const JOURNAL = id(51);
 
 const MEDIA_COLUMNS = `(id, bucket, storage_key, storage_kind, visibility, purpose, owner_organization_id,
   property_id, resource_product, resource_type, resource_id, lifecycle_status, public_approved,
@@ -38,20 +41,23 @@ const SEED = `
     ('${CLOSED_ORG}', 'creator_workspace', 'Closed creator', 'closed-creator', 'org_closed_creator'),
     ('${EMPTY_ORG}', 'creator_workspace', 'Empty creator', 'empty-creator', NULL),
     ('${PAYEE_ORG}', 'affiliate_partner', 'Paid affiliate', 'paid-affiliate', NULL),
-    ('${HOTEL_ORG}', 'hotel_group', 'Kept hotel', 'kept-hotel', NULL);
+    ('${HOTEL_ORG}', 'hotel_group', 'Kept hotel', 'kept-hotel', NULL),
+    ('${ARCHIVE_ORG}', 'affiliate_partner', 'Archived affiliate', 'archived-affiliate', NULL);
   INSERT INTO identity.users (id, email, name) VALUES
     ('${WORKOS_USER}', 'workos-creator@example.test', 'WorkOS Creator'),
     ('${PLAIN_USER}', 'plain-creator@example.test', 'Plain Creator'),
     ('${LEGACY_TYPE_USER}', 'legacy-type@example.test', 'Legacy Type'),
     ('${AUDITED_USER}', 'audited-creator@example.test', 'Audited Creator'),
-    ('${DUAL_USER}', 'dual@example.test', 'Dual Member');
+    ('${DUAL_USER}', 'dual@example.test', 'Dual Member'),
+    ('${ARCHIVE_USER}', 'archive-affiliate@example.test', 'Archive Affiliate');
   INSERT INTO identity.organization_memberships
     (organization_id, user_id, role_key, access_origin, property_access_mode) VALUES
     ('${CLOSED_ORG}', '${WORKOS_USER}', 'creator_owner', 'agency', 'all'),
     ('${EMPTY_ORG}', '${PLAIN_USER}', 'creator_owner', 'agency', 'all'),
     ('${EMPTY_ORG}', '${AUDITED_USER}', 'creator_owner', 'agency', 'all'),
     ('${CLOSED_ORG}', '${DUAL_USER}', 'creator_owner', 'agency', 'all'),
-    ('${HOTEL_ORG}', '${DUAL_USER}', 'hotel_owner', 'agency', 'all');
+    ('${HOTEL_ORG}', '${DUAL_USER}', 'hotel_owner', 'agency', 'all'),
+    ('${ARCHIVE_ORG}', '${ARCHIVE_USER}', 'affiliate_owner', 'agency', 'all');
   INSERT INTO identity.external_identities
     (user_id, provider, provider_user_id, provider_email, provider_email_verified, raw_profile)
     VALUES ('${WORKOS_USER}', 'workos', 'user_workos_creator', 'workos-creator@example.test', TRUE,
@@ -75,6 +81,12 @@ const SEED = `
   INSERT INTO finance.billing_entitlements
     (organization_id, product, entitlement_key, billing_status, billing_provider)
     VALUES ('${PAYEE_ORG}', 'affiliate', 'affiliate-partner', 'active', 'manual');
+  INSERT INTO finance.affiliate_earning_journal
+    (id, property_id, booking_id, stay_item_id, revision, source_revision, input_digest,
+     calculation_input, outcome, actor_user_id, organization_id, request_id)
+    VALUES ('${JOURNAL}', '${PROPERTY}', 'booking-1', 'stay-1', 1, 1,
+            'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', '{}',
+            '{"status": "calculated"}', '${ARCHIVE_USER}', '${ARCHIVE_ORG}', 'request-1');
   INSERT INTO platform.product_audit_events
     (audit_key, product, action, occurred_at, tenant_scope, actor_type, actor_user_id,
      target_resource_product, target_resource_type, target_resource_id)
@@ -154,6 +166,17 @@ const GATES: [string, string, string, string][] = [
     `DELETE FROM identity.gdpr_requests WHERE status = 'pending'`,
     "Open GDPR requests of creator users",
   ],
+  [
+    "a creator workspace delegates a membership",
+    `INSERT INTO identity.membership_delegations
+       (organization_id, subject_membership_id, delegator_membership_id, created_by_membership_id)
+       SELECT '${CLOSED_ORG}', subject.id, delegator.id, delegator.id
+       FROM identity.organization_memberships subject, identity.organization_memberships delegator
+       WHERE subject.organization_id = '${CLOSED_ORG}' AND subject.user_id = '${DUAL_USER}'
+         AND delegator.organization_id = '${CLOSED_ORG}' AND delegator.user_id = '${WORKOS_USER}'`,
+    `DELETE FROM identity.membership_delegations WHERE organization_id = '${CLOSED_ORG}'`,
+    "Staff invitations or membership delegations in a creator workspace",
+  ],
 ];
 
 // 0500 deals with each of these before a delete reaches it; a new one needs a look.
@@ -181,7 +204,8 @@ const SILENT_REFERENCES = [
   "platform.media_objects <- platform.media_variants(media_object_id,visibility) c deferred",
 ];
 
-// VAY-2272: the creator and affiliate side of identity goes; hotels, payees and WorkOS links stay.
+// VAY-2272: the creator and affiliate side of identity goes; hotels, payees, the people the 0498
+// archive names and WorkOS links stay.
 describe.skipIf(!URL)("creator identity and media removal 0500", () => {
   it("stops on each gate, then removes creators and keeps what others still name", async () => {
     assertSafeTestDatabase(URL!);
@@ -216,7 +240,7 @@ describe.skipIf(!URL)("creator identity and media removal 0500", () => {
                 (SELECT string_agg(a.attname, ',' ORDER BY k.ord)
                  FROM unnest(c.conkey) WITH ORDINALITY k(attnum, ord)
                  JOIN pg_catalog.pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum) ||
-                ') ' || c.confdeltype || CASE WHEN c.condeferred THEN ' deferred' ELSE '' END AS name
+                ') ' || c.confdeltype::text || CASE WHEN c.condeferred THEN ' deferred' ELSE '' END AS name
          FROM pg_catalog.pg_constraint c
          WHERE c.contype = 'f' AND (c.confdeltype IN ('c', 'n', 'd') OR c.condeferred)
            AND c.confrelid IN ('identity.users'::regclass, 'identity.organizations'::regclass,
@@ -245,9 +269,9 @@ describe.skipIf(!URL)("creator identity and media removal 0500", () => {
           )
         ).rows[0];
       const seeded = {
-        organizations: 4,
-        users: 5,
-        memberships: 5,
+        organizations: 5,
+        users: 6,
+        memberships: 6,
         links: 2,
         identities: 1,
         events: 2,
@@ -318,6 +342,13 @@ describe.skipIf(!URL)("creator identity and media removal 0500", () => {
           slug: "kept-hotel",
           workos_org_id: null,
         },
+        {
+          id: ARCHIVE_ORG,
+          status: "archived",
+          name: "Archived affiliate",
+          slug: "archived-affiliate",
+          workos_org_id: null,
+        },
       ]);
       expect(
         (
@@ -347,6 +378,13 @@ describe.skipIf(!URL)("creator identity and media removal 0500", () => {
           email: "dual@example.test",
           name: "Dual Member",
           picture: HOTEL_MEDIA,
+        },
+        {
+          id: ARCHIVE_USER,
+          status: "deleted",
+          email: `removed-${ARCHIVE_USER}@removed.invalid`,
+          name: null,
+          picture: null,
         },
       ]);
       // WorkOS still finds the closed account, so a late message cannot create a new one.
@@ -393,7 +431,9 @@ describe.skipIf(!URL)("creator identity and media removal 0500", () => {
                (SELECT array_agg(product) FROM identity.organization_resource_links) AS links,
                (SELECT array_agg(id::text) FROM platform.media_objects) AS media,
                (SELECT array_agg(status) FROM platform.jobs) AS jobs,
-               (SELECT array_agg(organization_id::text) FROM finance.billing_entitlements) AS billing`,
+               (SELECT array_agg(organization_id::text) FROM finance.billing_entitlements) AS billing,
+               (SELECT array_agg(organization_id::text || ' ' || actor_user_id::text)
+                FROM finance.affiliate_earning_journal) AS journal`,
           )
         ).rows,
       ).toEqual([
@@ -403,6 +443,7 @@ describe.skipIf(!URL)("creator identity and media removal 0500", () => {
           media: [HOTEL_MEDIA],
           jobs: ["canceled"],
           billing: [PAYEE_ORG],
+          journal: [`${ARCHIVE_ORG} ${ARCHIVE_USER}`],
         },
       ]);
     } finally {
