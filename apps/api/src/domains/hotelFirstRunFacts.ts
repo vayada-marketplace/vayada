@@ -11,7 +11,8 @@ import type { HotelFirstRunPricingPorts } from "./hotelFirstRunPricing.js";
 import type { HotelFirstRunWriteFacts } from "./hotelFirstRunService.js";
 import type { HotelFirstRunFacts } from "./hotelFirstRunState.js";
 import {
-  FIRST_RUN_DRAFT_ROOM_ID,
+  FIRST_RUN_MAX_ROOM_TYPES,
+  firstRunDraftRoomId,
   type HotelFirstRunActor,
   type HotelFirstRunSetupPorts,
 } from "./hotelFirstRunSteps.js";
@@ -71,6 +72,23 @@ async function readinessCodes(
   return codes;
 }
 
+/** The room types the first run made, in order: it makes them one after another, so the first gap ends them. */
+async function firstRunRoomTypeIds(
+  ports: HotelFirstRunFactsPorts,
+  propertyId: string,
+): Promise<readonly string[]> {
+  const ids: string[] = [];
+  for (let index = 0; index < FIRST_RUN_MAX_ROOM_TYPES; index += 1) {
+    const binding = await ports.roomRead.getDraftRoomTypeBinding(
+      propertyId,
+      parseDraftRoomId(firstRunDraftRoomId(index))!,
+    );
+    if (!binding) break;
+    ids.push(binding.roomTypeId);
+  }
+  return Object.freeze(ids);
+}
+
 export function createHotelFirstRunFactsReader(ports: HotelFirstRunFactsPorts) {
   return {
     async read(actor: HotelFirstRunActor): Promise<HotelFirstRunWriteFacts> {
@@ -81,7 +99,7 @@ export function createHotelFirstRunFactsReader(ports: HotelFirstRunFactsPorts) {
         language,
         currency,
         roomTypes,
-        binding,
+        firstRunRoomTypes,
         payments,
         pricing,
         calendar,
@@ -95,10 +113,7 @@ export function createHotelFirstRunFactsReader(ports: HotelFirstRunFactsPorts) {
         ports.language.read(propertyId),
         ports.pricingRead.getPropertyPricingCurrency(propertyId),
         ports.roomRead.listRoomTypeFacts(propertyId),
-        ports.roomRead.getDraftRoomTypeBinding(
-          propertyId,
-          parseDraftRoomId(FIRST_RUN_DRAFT_ROOM_ID)!,
-        ),
+        firstRunRoomTypeIds(ports, propertyId),
         ports.paymentRead.getPaymentReadiness({ organizationId, propertyId }),
         ports.pricing.read(propertyId),
         ports.calendarRead.getCurrentOperatingCalendarConfiguration(propertyId),
@@ -135,7 +150,7 @@ export function createHotelFirstRunFactsReader(ports: HotelFirstRunFactsPorts) {
       );
       return Object.freeze({
         propertyId,
-        firstRunRoomTypeId: binding?.roomTypeId ?? null,
+        firstRunRoomTypeIds: firstRunRoomTypes,
         language,
         profile: profile
           ? Object.freeze({
