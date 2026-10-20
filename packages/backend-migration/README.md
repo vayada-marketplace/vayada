@@ -164,6 +164,32 @@ secrets/recovery codes, and login-rate-limit rows are reported by count and are
 never copied. Existing WorkOS links are validated and preserved; this command
 does not call WorkOS or create provider credentials.
 
+Creators and affiliates are not migrated (VAY-2272): the Marketplace and the
+affiliate program are retired.
+
+- A legacy user of type `creator` or `affiliate` is left out, unless they are a
+  superadmin. A superadmin is migrated as a platform admin.
+- The auth rows that belong to such a user are left out with them: their terms,
+  privacy and marketing consents, consent history, GDPR requests and login
+  audit. Failed logins that name only their email are left out too.
+- Their cookie consents stay without the user, so a visitor's newest choice still
+  wins (counted as `cookie_consent_unlinked`).
+- A Booking or PMS hotel such a user owned is quarantined without a user, as a
+  hotel with an owner of the wrong type always was. With a future booking it
+  blocks for review (`OWNER_TYPE_MISMATCH_WITH_FUTURE_BOOKING`).
+- The report counts all of this:
+  - the users in `counts.retiredProductUsers`
+  - their rows in `counts.retiredProductUserRows`, and per table in
+    `retiredProductUserRows`
+  - those still in the target in `counts.retiredProductUsersInTarget` (0500
+    closes them; the import leaves them alone)
+- An open GDPR request of such a user blocks the run. Finish it in the legacy
+  system and extract again.
+- Ownership comes only from Booking and PMS hotels. A Marketplace hotel profile
+  is no longer ownership evidence. An active hotel user whose only legacy hotel
+  was one blocks with `MARKETPLACE_ONLY_HOTEL_OWNER` until VAY-1362 provides
+  another owner source.
+
 Run and review a dry run first. It executes the complete read and reconciliation
 inside a repeatable-read transaction, then always rolls back:
 
@@ -173,9 +199,10 @@ TARGET_DATABASE_URL=<target database> npm run target:identity:migrate -- \
 ```
 
 The report must have no blockers. Review its checksum, counts,
-`preservedNewerUsers`, WorkOS identity count, and retired-auth counts against the
-approved extraction evidence. Newer target state is preserved; equal-time
-disagreement and ambiguous ownership block the apply.
+`preservedNewerUsers`, WorkOS identity count, retired-auth counts, and the
+creators and affiliates left out against the approved extraction evidence.
+Newer target state is preserved; equal-time disagreement and ambiguous ownership
+block the apply.
 
 After the reviewed backup, write freeze/queue, dry-run report, and go/no-go
 approval, apply that exact run ID with confirmation bound to it:
@@ -817,8 +844,8 @@ Product fixtures that later migrate Booking or PMS media URLs should reuse
 
 Bootstrap platform admins from the legacy auth DB before running the WorkOS
 backfill. The command imports only legacy `is_superadmin` / `type = 'admin'`
-users into the fixed platform organization and leaves hotel/creator/affiliate
-resource ETL to the product-specific migration pipeline.
+users into the fixed platform organization and leaves hotel resource ETL to the
+product-specific migration pipeline.
 
 ```bash
 TARGET_DATABASE_URL=<target database url> \
