@@ -7,8 +7,10 @@
 -- journal, allocations, payout payment evidence) too. Decision 2 (Flamur, 2026-10-20): delete
 -- everything, no export. The legacy finance import (VAY-1358) records retired affiliate rows as
 -- RETIRED_AFFILIATE_PROGRAM dispositions, which the dispositions reason-code CHECK now accepts.
--- Rows in the shared finance tables stay: payouts (an affiliate payout too), the affiliate commission
--- rules and billing entitlements, and the idempotency key of a recorded payment.
+-- Its rows in the shared finance tables go too: its payouts (never a hotel's), billing entitlements
+-- and commission rules. The idempotency keys of its commands stay: an append-only audit event names a
+-- recorded payment's key, and checking the others against every table that may name a key would scan
+-- unindexed tables while these locks are held.
 -- Rollback: any image built from main at or after f027728cc (no image since reads these tables). The
 -- dropped data is gone and no rollback restores it.
 
@@ -16,8 +18,9 @@ SET LOCAL lock_timeout = '5s';
 -- Each lock waits at most 5 seconds; together they may not hold the API up for more than 15.
 SET LOCAL statement_timeout = '15s';
 
--- Every table this changes, in one statement and one order: the dropped tables, every table one of
--- them references (dropping a foreign key removes its triggers there) and the dispositions table.
+-- Every table whose structure this changes, in one statement and one order: the dropped tables,
+-- every table one of them references (dropping a foreign key removes its triggers there) and the
+-- dispositions table. Deleting rows from billing entitlements and commission rules takes row locks.
 LOCK TABLE
   booking.affiliate_click_admissions, booking.affiliate_click_contexts, booking.affiliate_destination_versions,
   booking.affiliate_original_booking_bindings, booking.affiliate_referral_production_preflight_revocations,
@@ -39,6 +42,33 @@ LOCK TABLE
   platform.idempotency_keys, platform.product_audit_events, platform.production_finance_migration_dispositions,
   pms.operational_booking_assignments
   IN ACCESS EXCLUSIVE MODE;
+
+-- The program's rows in the shared tables, found while the affiliate tables still name them. An
+-- organization payout is the program's if it carries an affiliate id, belongs to an affiliate partner
+-- or an affiliate table names it; hotel and platform payouts stay even then.
+CREATE TEMP TABLE removed_affiliate_payouts ON COMMIT DROP AS
+  SELECT payout.id, payout.payout_status FROM finance.payouts payout
+  WHERE payout.owner_scope = 'organization'
+    AND (payout.payout_metadata ? 'affiliateId' OR payout.payout_metadata ? 'affiliate_id'
+      OR EXISTS (SELECT 1 FROM identity.organizations o
+                 WHERE o.id = payout.organization_id AND o.kind = 'affiliate_partner')
+      OR EXISTS (SELECT 1 FROM finance.affiliate_earning_allocation_items i WHERE i.payout_id = payout.id)
+      OR EXISTS (SELECT 1 FROM finance.affiliate_payout_payment_evidence_items i WHERE i.payout_id = payout.id)
+      OR EXISTS (SELECT 1 FROM marketplace.affiliate_discrepancy_claims c WHERE c.payout_id = payout.id)
+      OR EXISTS (SELECT 1 FROM marketplace.affiliate_discrepancy_resolutions r WHERE r.payout_id = payout.id));
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM removed_affiliate_payouts
+             WHERE payout_status IN ('pending', 'scheduled', 'processing')) THEN
+    RAISE EXCEPTION 'Affiliate payouts still in flight';
+  END IF;
+  IF EXISTS (SELECT 1 FROM finance.ota_commission_evidence evidence
+             JOIN finance.commission_rules rule ON rule.id = evidence.commission_rule_id
+             WHERE rule.product = 'affiliate' OR rule.rule_scope = 'affiliate' OR rule.affiliate_id IS NOT NULL) THEN
+    RAISE EXCEPTION 'OTA commission evidence uses an affiliate commission rule';
+  END IF;
+END $$;
 
 DROP TABLE
   marketplace.affiliate_discrepancy_resolutions, marketplace.affiliate_discrepancy_claims,
@@ -103,6 +133,11 @@ ALTER TABLE platform.production_finance_migration_dispositions
     'RETIRED_AFFILIATE_PROGRAM'
   ));
 
+DELETE FROM finance.payouts WHERE id IN (SELECT id FROM removed_affiliate_payouts);
+DELETE FROM finance.billing_entitlements WHERE product = 'affiliate';
+-- Their rate changes cascade.
+DELETE FROM finance.commission_rules
+  WHERE product = 'affiliate' OR rule_scope = 'affiliate' OR affiliate_id IS NOT NULL;
 -- Indexes are not checked: two on finance.commission_rules carry the name and stay.
 DO $$
 BEGIN
@@ -115,5 +150,11 @@ BEGIN
     WHERE n.nspname IN ('marketplace', 'booking', 'finance') AND p.proname LIKE '%affiliate%'
   ) THEN
     RAISE EXCEPTION 'Affiliate objects remain';
+  END IF;
+  IF EXISTS (SELECT 1 FROM finance.payouts WHERE id IN (SELECT id FROM removed_affiliate_payouts))
+     OR EXISTS (SELECT 1 FROM finance.billing_entitlements WHERE product = 'affiliate')
+     OR EXISTS (SELECT 1 FROM finance.commission_rules
+                WHERE product = 'affiliate' OR rule_scope = 'affiliate' OR affiliate_id IS NOT NULL) THEN
+    RAISE EXCEPTION 'Affiliate finance rows remain';
   END IF;
 END $$;
