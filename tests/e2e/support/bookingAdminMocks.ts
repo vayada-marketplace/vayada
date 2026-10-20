@@ -1,5 +1,6 @@
 import type { Page } from "@playwright/test";
 import { mockBookingPublication } from "./bookingPublicationMocks";
+import { mockSetupChecklistUnavailable } from "./setupChecklistMocks";
 import { createAdaptiveHotelSetupStatusMock } from "./sharedHotelSetupMocks";
 import { mockBookingModules } from "./featureHubModuleMocks";
 
@@ -391,6 +392,7 @@ export async function mockBookingAdminShellRoutes(
   let sameDayCutoff: string | null = "18:00";
   // The dashboard's booking page card; specs override it with their own state.
   await mockBookingPublication(page, BOOKING_ADMIN_PROPERTY_ID);
+  await mockSetupChecklistUnavailable(page);
   await page.route("**/api/pms/properties/*/module-activations", (route) =>
     route.fulfill({
       json: {
