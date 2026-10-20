@@ -8,15 +8,19 @@
 -- memberships, links, entitlements, consents and GDPR requests, payout settings and provider
 -- accounts no kept record uses (decision 7), the Marketplace finance visibility rows, and the media
 -- whose files the purge already deleted (decision 5). An account that kept rows still name is closed
--- with blank details instead of deleted (decision 3): finance payees keep their name and slug, and
--- anything WorkOS knows keeps a blank row, so a late WorkOS message lands there instead of creating
--- a new account. Law variant (decision 2): the affiliate archive 0498 kept names its payees and the
--- people who recorded it, so they stay too. The staged legacy copies (migration_source_*) are not
--- touched (decision 8).
+-- with blank details instead of deleted (decision 3): finance payees keep only their name and slug,
+-- and anything WorkOS knows keeps a blank row, so a late WorkOS message lands there instead of
+-- creating a new account. Law variant (decision 2): the affiliate archive 0498 kept names its payees
+-- and the people who recorded it, so they stay too. The staged legacy copies (migration_source_*)
+-- are not touched (decision 8).
 -- Rollback: any image that has PR 7 (older ones let WorkOS updates rewrite closed accounts). Deleted
 -- rows and purged files do not come back.
 
 SET LOCAL lock_timeout = '5s';
+-- next-api runs migrations before it serves, so a slow run fails here with a clear error first.
+SET LOCAL statement_timeout = '120s';
+-- Nobody joins, leaves or files a GDPR request while the sets below are in use; reads go on.
+LOCK TABLE identity.organization_memberships, identity.gdpr_requests IN SHARE ROW EXCLUSIVE MODE;
 
 CREATE TEMPORARY TABLE removed_organizations ON COMMIT DROP AS
   SELECT id, workos_org_id FROM identity.organizations WHERE kind IN ('creator_workspace', 'affiliate_partner');
@@ -32,17 +36,13 @@ CREATE TEMPORARY TABLE removed_users ON COMMIT DROP AS
     AND NOT EXISTS (SELECT 1 FROM identity.organization_memberships other
                     WHERE other.user_id = u.id AND other.organization_id NOT IN (SELECT id FROM removed_organizations));
 CREATE TEMPORARY TABLE removed_media ON COMMIT DROP AS
-  SELECT id, storage_kind, source_metadata ->> 'retiredPurgeCompletedAt' AS purged_at FROM platform.media_objects
+  SELECT id, storage_kind, source_metadata FROM platform.media_objects
   WHERE purpose LIKE 'marketplace.%' OR owner_organization_id IN (SELECT id FROM removed_organizations)
      OR created_by_user_id IN (SELECT id FROM removed_users);
 
--- Gates: stop before anything changes. After the first one every removed media row is an external
--- reference or carries the purge marker.
+-- Gates: stop before anything changes.
 DO $$
 BEGIN
-  IF EXISTS (SELECT 1 FROM removed_media WHERE storage_kind = 'vayada_managed' AND NULLIF(purged_at, '') IS NULL) THEN
-    RAISE EXCEPTION 'Creator media stored by Vayada without the purge marker';
-  END IF;
   -- The purge leaves these for a person; the foreign keys would fail or set a logo to NULL without a
   -- word. Same list as the purge's kept references.
   IF EXISTS (SELECT 1 FROM removed_media media
@@ -60,6 +60,15 @@ BEGIN
                            WHERE lower(kept.profile_picture_media_object_id) = media.id::text
                              AND kept.id NOT IN (SELECT id FROM removed_users))) THEN
     RAISE EXCEPTION 'Hotel data or a kept user still uses creator media';
+  END IF;
+  IF EXISTS (SELECT 1 FROM removed_media WHERE storage_kind = 'vayada_managed'
+             AND NULLIF(source_metadata ->> 'retiredPurgeCompletedAt', '') IS NULL) THEN
+    RAISE EXCEPTION 'Creator media stored by Vayada without the purge marker';
+  END IF;
+  -- The rollback cleanup finds its copies through these rows; without them the copies would stay.
+  IF EXISTS (SELECT 1 FROM removed_media WHERE NULLIF(source_metadata ->> 'rollbackStorageKey', '') IS NOT NULL
+             AND COALESCE(source_metadata ->> 'rollbackCleanupStatus', '') <> 'completed') THEN
+    RAISE EXCEPTION 'Creator media with a rollback copy still stored';
   END IF;
   IF EXISTS (SELECT 1 FROM platform.media_upload_sessions s
              WHERE s.session_status IN ('requested', 'signed', 'uploaded', 'finalizing') AND s.expires_at > now()
@@ -79,15 +88,30 @@ BEGIN
              WHERE m.organization_id IN (SELECT id FROM removed_organizations)) THEN
     RAISE EXCEPTION 'A PMS thread is assigned to a creator membership';
   END IF;
+  -- Deleting the memberships would fail on these or take them along without a word.
   IF EXISTS (SELECT 1 FROM identity.staff_invitations i WHERE i.organization_id IN (SELECT id FROM removed_organizations))
      OR EXISTS (SELECT 1 FROM identity.membership_delegations d
-                WHERE d.organization_id IN (SELECT id FROM removed_organizations)) THEN
-    RAISE EXCEPTION 'Staff invitations or membership delegations in a creator workspace';
+                WHERE d.organization_id IN (SELECT id FROM removed_organizations))
+     OR EXISTS (SELECT 1 FROM identity.account_admin_transfer_proofs p
+                JOIN identity.organization_memberships m ON m.id IN (p.actor_membership_id, p.target_membership_id)
+                WHERE p.organization_id IN (SELECT id FROM removed_organizations)
+                   OR m.organization_id IN (SELECT id FROM removed_organizations)) THEN
+    RAISE EXCEPTION 'Staff invitations, delegations or admin transfers in a creator workspace';
   END IF;
   IF EXISTS (SELECT 1 FROM pms.inbox_email_routes r
              JOIN identity.organization_memberships m ON m.id = r.approved_by_membership_id
              WHERE m.organization_id IN (SELECT id FROM removed_organizations)) THEN
     RAISE EXCEPTION 'A PMS inbox route was approved by a creator membership';
+  END IF;
+  -- The legacy catalog import reads this link as the hotel's ownership.
+  IF EXISTS (SELECT 1 FROM hotel_catalog.properties p
+             WHERE EXISTS (SELECT 1 FROM identity.organization_resource_links ml
+                           WHERE ml.product = 'marketplace' AND ml.resource_type = 'hotel_profile'
+                             AND ml.relationship = 'owner' AND ml.status = 'active' AND ml.resource_id = p.id::text)
+               AND NOT EXISTS (SELECT 1 FROM identity.organization_resource_links ol
+                               WHERE ol.product <> 'marketplace' AND ol.relationship IN ('owner', 'operator')
+                                 AND ol.status = 'active' AND ol.resource_id = p.id::text)) THEN
+    RAISE EXCEPTION 'A hotel is owned only through its Marketplace link';
   END IF;
 END $$;
 
@@ -183,7 +207,6 @@ CREATE TEMPORARY TABLE tombstone_organizations ON COMMIT DROP AS
       -- Rows that would otherwise go with the organization without a word.
       OR EXISTS (SELECT 1 FROM hotel_catalog.organization_setup_track_intents i WHERE i.organization_id = r.id)
       OR EXISTS (SELECT 1 FROM hotel_catalog.property_setup_sessions ss WHERE ss.organization_id = r.id)
-      OR EXISTS (SELECT 1 FROM identity.account_admin_transfer_proofs tp WHERE tp.organization_id = r.id)
       OR EXISTS (SELECT 1 FROM identity.account_admin_guards g WHERE g.organization_id = r.id)
       OR EXISTS (SELECT 1 FROM identity.organization_roles ro WHERE ro.organization_id = r.id));
 CREATE TEMPORARY TABLE tombstone_users ON COMMIT DROP AS
@@ -208,7 +231,7 @@ UPDATE identity.external_identities
  WHERE user_id IN (SELECT id FROM tombstone_users);
 DELETE FROM identity.external_identities
   WHERE user_id IN (SELECT id FROM removed_users) AND user_id NOT IN (SELECT id FROM tombstone_users);
-UPDATE identity.organizations SET status = 'archived', updated_at = now()
+UPDATE identity.organizations SET status = 'archived', website_url = NULL, updated_at = now()
  WHERE id IN (SELECT id FROM finance_kept_organizations);
 UPDATE identity.organizations
    SET status = 'archived', name = 'Removed workspace', slug = 'removed-' || id::text, website_url = NULL,
@@ -219,33 +242,49 @@ UPDATE identity.users
        profile_picture_url = NULL, profile_picture_media_object_id = NULL, updated_at = now()
  WHERE id IN (SELECT id FROM tombstone_users);
 
--- The rest is deleted row by row; a reference not listed above makes a blank row instead of failing.
+-- The rest is deleted. If something not listed above still names a row, the rows go one by one and
+-- that row becomes a blank row instead (23503: a foreign key; 55000: an append-only table).
 DO $$
 DECLARE target RECORD;
 BEGIN
-  FOR target IN SELECT id FROM removed_users WHERE id NOT IN (SELECT id FROM tombstone_users) ORDER BY id LOOP
-    BEGIN
-      DELETE FROM identity.users WHERE id = target.id;
-    EXCEPTION WHEN foreign_key_violation OR object_not_in_prerequisite_state THEN
-      UPDATE identity.users
-         SET status = 'deleted', email = 'removed-' || target.id::text || '@removed.invalid', name = NULL,
-             phone = NULL, profile_picture_url = NULL, profile_picture_media_object_id = NULL, updated_at = now()
-       WHERE id = target.id;
-    END;
-  END LOOP;
-  FOR target IN SELECT id FROM removed_organizations
-                WHERE id NOT IN (SELECT id FROM tombstone_organizations)
-                  AND id NOT IN (SELECT id FROM finance_kept_organizations)
-                ORDER BY id LOOP
-    BEGIN
-      DELETE FROM identity.organizations WHERE id = target.id;
-    EXCEPTION WHEN foreign_key_violation OR object_not_in_prerequisite_state THEN
-      UPDATE identity.organizations
-         SET status = 'archived', name = 'Removed workspace', slug = 'removed-' || target.id::text,
-             website_url = NULL, updated_at = now()
-       WHERE id = target.id;
-    END;
-  END LOOP;
+  BEGIN
+    DELETE FROM identity.users WHERE id IN (SELECT id FROM removed_users WHERE id NOT IN (SELECT id FROM tombstone_users));
+  EXCEPTION WHEN foreign_key_violation OR object_not_in_prerequisite_state THEN
+    IF SQLSTATE NOT IN ('23503', '55000') THEN RAISE; END IF;
+    FOR target IN SELECT id FROM removed_users WHERE id NOT IN (SELECT id FROM tombstone_users) ORDER BY id LOOP
+      BEGIN
+        DELETE FROM identity.users WHERE id = target.id;
+      EXCEPTION WHEN foreign_key_violation OR object_not_in_prerequisite_state THEN
+        IF SQLSTATE NOT IN ('23503', '55000') THEN RAISE; END IF;
+        UPDATE identity.users
+           SET status = 'deleted', email = 'removed-' || target.id::text || '@removed.invalid', name = NULL,
+               phone = NULL, profile_picture_url = NULL, profile_picture_media_object_id = NULL, updated_at = now()
+         WHERE id = target.id;
+      END;
+    END LOOP;
+  END;
+  BEGIN
+    DELETE FROM identity.organizations
+     WHERE id IN (SELECT id FROM removed_organizations
+                  WHERE id NOT IN (SELECT id FROM tombstone_organizations)
+                    AND id NOT IN (SELECT id FROM finance_kept_organizations));
+  EXCEPTION WHEN foreign_key_violation OR object_not_in_prerequisite_state THEN
+    IF SQLSTATE NOT IN ('23503', '55000') THEN RAISE; END IF;
+    FOR target IN SELECT id FROM removed_organizations
+                  WHERE id NOT IN (SELECT id FROM tombstone_organizations)
+                    AND id NOT IN (SELECT id FROM finance_kept_organizations)
+                  ORDER BY id LOOP
+      BEGIN
+        DELETE FROM identity.organizations WHERE id = target.id;
+      EXCEPTION WHEN foreign_key_violation OR object_not_in_prerequisite_state THEN
+        IF SQLSTATE NOT IN ('23503', '55000') THEN RAISE; END IF;
+        UPDATE identity.organizations
+           SET status = 'archived', name = 'Removed workspace', slug = 'removed-' || target.id::text,
+               website_url = NULL, updated_at = now()
+         WHERE id = target.id;
+      END;
+    END LOOP;
+  END;
 END $$;
 
 DO $$
@@ -255,13 +294,17 @@ BEGIN
              WHERE o.kind IN ('creator_workspace', 'affiliate_partner')) THEN
     RAISE EXCEPTION 'A membership in a creator or affiliate organization remains';
   END IF;
+  IF EXISTS (SELECT 1 FROM identity.organization_memberships m JOIN removed_users r ON r.id = m.user_id) THEN
+    RAISE EXCEPTION 'A removed user still has a membership';
+  END IF;
   IF EXISTS (SELECT 1 FROM identity.organizations
              WHERE kind IN ('creator_workspace', 'affiliate_partner') AND status <> 'archived') THEN
     RAISE EXCEPTION 'A creator or affiliate organization is still open';
   END IF;
   IF EXISTS (SELECT 1 FROM identity.users u JOIN removed_users r ON r.id = u.id
              WHERE u.status <> 'deleted' OR u.email <> 'removed-' || u.id::text || '@removed.invalid'
-                OR u.name IS NOT NULL OR u.phone IS NOT NULL) THEN
+                OR u.name IS NOT NULL OR u.phone IS NOT NULL OR u.profile_picture_url IS NOT NULL
+                OR u.profile_picture_media_object_id IS NOT NULL) THEN
     RAISE EXCEPTION 'A removed user keeps their details';
   END IF;
   IF EXISTS (SELECT 1 FROM identity.organization_resource_links WHERE product IN ('marketplace', 'affiliate'))
