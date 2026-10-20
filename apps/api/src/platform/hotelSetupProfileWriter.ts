@@ -9,6 +9,7 @@ import type {
 } from "../routes/sharedHotelSetupStatus.js";
 import {
   propertyProfileWritePayload,
+  recomputeHotelProfileCompleteness,
   toSharedPropertyProfile,
   type SharedPropertyProfileRow,
 } from "./sharedHotelSetupStatusReadModel.js";
@@ -204,6 +205,7 @@ export async function writeOrdinaryHotelSetupPropertyProfile(
          is_public=EXCLUDED.is_public, source_system=EXCLUDED.source_system, updated_at=now()`,
       [scope.propertyId, payload],
     );
+    await recomputeHotelProfileCompleteness(client, scope.propertyId);
     await projectPropertyPublicProfile(client, { propertyId: scope.propertyId });
     const after = await profileRow(client, scope.propertyId);
     const changed = Object.keys(after)

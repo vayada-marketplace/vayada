@@ -157,11 +157,19 @@ describe.skipIf(!url)(
         profile: {
           displayName: "First Run Beach Hotel",
           propertyType: "hotel",
-          contacts: [],
+          contacts: [
+            {
+              channelType: "email",
+              value: "reception@first-run.example.test",
+              purpose: "general",
+              isPublic: true,
+            },
+            { channelType: "phone", value: "+94 91 222 3344", purpose: "general", isPublic: true },
+          ],
           location: {
             countryCode: "LK",
             city: "Galle",
-            streetAddress: "",
+            streetAddress: "Lighthouse Street 12",
             postalCode: "",
             timezone: TIME_ZONE,
             latitude: null,
@@ -459,8 +467,8 @@ describe.skipIf(!url)(
         // Nothing the first run owns still blocks publishing; what's left is exactly what the held
         // wave 1 PRs relax, and each of them shortens this list.
         expect(blockerCodes(await h.readiness())).toEqual([
-          "booking.hotel_profile:hotel_profile_incomplete", // 1.4a: one "basics complete" rule
           "booking.hotel_profile:hotel_public_media_missing", // 1.4b: hotel photo optional
+          "booking.hotel_profile:hotel_setup_in_progress", // 1.5: activate at the end of the first run
           "booking.page_style:booking_design_profile_missing", // 1.4b: style without photo/description
           "booking.pricing:pricing_hotel_setup_in_progress", // 1.5: activate at the end of the first run
         ]);
