@@ -171,6 +171,9 @@ describe("QuickPropertySetup (VAY-2247 steps 3–5)", () => {
           initialStep={3}
           setup={setup}
           readCurrency={async () => "CHF"}
+          firstRun={{ run: vi.fn() } as never}
+          readCheckoutPending={async () => false}
+          openCheckout={vi.fn()}
           storage={kept}
           onSaveAndExit={vi.fn()}
           renderStep={renderStep}
@@ -189,10 +192,10 @@ describe("QuickPropertySetup (VAY-2247 steps 3–5)", () => {
       name: "Garden Suite Deluxe",
     });
     await submit(renderer!);
-    expect(renderStep).toHaveBeenLastCalledWith(
-      4,
-      expect.objectContaining({ name: "Garden Suite Deluxe" }),
-    );
+    // On to step 4 (How guests pay), with the room in its preview.
+    expect(text(renderer!)).toContain("How guests pay");
+    expect(text(renderer!)).toContain("Garden Suite Deluxe");
+    expect(renderStep).not.toHaveBeenCalled();
     renderer!.unmount();
   });
 
@@ -205,6 +208,9 @@ describe("QuickPropertySetup (VAY-2247 steps 3–5)", () => {
           initialStep={3}
           setup={setup}
           readCurrency={async () => null}
+          firstRun={{ run: vi.fn() } as never}
+          readCheckoutPending={async () => false}
+          openCheckout={vi.fn()}
           storage={storage()}
           onSaveAndExit={vi.fn()}
         />,

@@ -41,6 +41,10 @@ export type QuickSetupFlowProps = {
   saveCurrency: (propertyId: string, currency: string) => Promise<void>;
   /** The hotel's saved pricing currency, or null before the first run sets it. */
   readCurrency: (propertyId: string) => Promise<string | null>;
+  /** Whether a Fixed Fee checkout is already open in Stripe (null when unknown). */
+  readCheckoutPending: (propertyId: string) => Promise<boolean | null>;
+  /** Opens Stripe's checkout for the Fixed Fee (a full-page redirect). */
+  openCheckout: (url: string) => void;
   /** The hotel in the URL (?propertyId=), when setup resumes for one. */
   propertyId: string | null;
   onPropertyCreated: (propertyId: string) => void;
@@ -251,6 +255,9 @@ export function QuickSetupFlow(props: QuickSetupFlowProps) {
           initialStep={view.step}
           setup={setup}
           readCurrency={props.readCurrency}
+          firstRun={firstRun}
+          readCheckoutPending={props.readCheckoutPending}
+          openCheckout={props.openCheckout}
           storage={storage}
           onSaveAndExit={exit}
         />

@@ -238,6 +238,10 @@ export function SharedHotelSetupPage({
           const owners = await onboardingPricingApi.load(propertyId, { cache: "no-store" });
           await onboardingPricingApi.saveCurrency(propertyId, currency, owners);
         }}
+        readCheckoutPending={async (propertyId) =>
+          (await hotelOperationsSetupApi.getPlanStatus(propertyId)).checkoutPending
+        }
+        openCheckout={(url) => window.location.assign(url)}
         readCurrency={async (propertyId) =>
           (await onboardingPricingApi.load(propertyId, { cache: "no-store" })).pricing
             ?.pricingCurrency.currency ?? null

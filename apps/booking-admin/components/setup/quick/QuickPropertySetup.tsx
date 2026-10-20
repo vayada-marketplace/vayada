@@ -1,13 +1,21 @@
 "use client";
 
 import type { SharedHotelSetupApi } from "@vayada/product-onboarding";
+
+import { HotelFirstRunError, type HotelFirstRunClient } from "@/services/api/hotelFirstRunClient";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 
+import { QuickPayStep, type QuickPlanChoice } from "./QuickPayStep";
 import { QuickRoomStep } from "./QuickRoomStep";
 import { QuickSetupShell } from "./QuickSetupShell";
 import { currencySymbol, quickHotelCurrency } from "./quickHotelCurrency";
 import { previewBookingHost } from "./quickHotelDraft";
-import { EMPTY_QUICK_ROOM_DRAFT, type QuickRoomDraft } from "./quickRoomDraft";
+import {
+  EMPTY_QUICK_ROOM_DRAFT,
+  quickRoomErrors,
+  quickRoomRequest,
+  type QuickRoomDraft,
+} from "./quickRoomDraft";
 
 export type QuickPropertySetupProps = {
   propertyId: string;
@@ -16,10 +24,15 @@ export type QuickPropertySetupProps = {
   setup: Pick<SharedHotelSetupApi, "getPropertyProfile">;
   /** The hotel's pricing currency once saved (null before the first run sets it). */
   readCurrency: (propertyId: string) => Promise<string | null>;
+  firstRun: Pick<HotelFirstRunClient, "run">;
+  /** Whether a Fixed Fee checkout is already open in Stripe (null when unknown). */
+  readCheckoutPending: (propertyId: string) => Promise<boolean | null>;
+  /** Opens the Stripe checkout for the Fixed Fee. */
+  openCheckout: (url: string) => void;
   storage?: Pick<Storage, "getItem" | "setItem" | "removeItem"> | null;
   onSaveAndExit: () => void;
   /** Steps 4 and 5 (how guests pay, go live) until their own PRs. */
-  renderStep?: (step: 4 | 5, room: QuickRoomDraft) => ReactNode;
+  renderStep?: (step: 5, room: QuickRoomDraft) => ReactNode;
 };
 
 type Hotel = {
@@ -27,7 +40,19 @@ type Hotel = {
   place: string;
   url: string;
   currency: { code: string; symbol: string };
+  checkoutPending: boolean;
 };
+
+/** What a stopped first run means for the owner. */
+export function quickFirstRunErrorMessage(error: unknown): string {
+  if (error instanceof HotelFirstRunError) {
+    if (error.code === "first_run_in_progress")
+      return "Your hotel is being set up in another tab. Try again in a moment.";
+    if (error.code === "mandatory_charges_declaration_required")
+      return "Confirm that your prices include taxes and fees.";
+  }
+  return "We couldn't finish setting up your hotel. Try again in a minute.";
+}
 
 export const quickRoomStorageKey = (propertyId: string) =>
   `vayada.quickSetup.v1.room.${propertyId}`;
@@ -52,6 +77,9 @@ export function QuickPropertySetup({
   initialStep,
   setup,
   readCurrency,
+  firstRun,
+  readCheckoutPending,
+  openCheckout,
   storage = null,
   onSaveAndExit,
   renderStep,
@@ -63,8 +91,12 @@ export function QuickPropertySetup({
 
   useEffect(() => {
     let active = true;
-    void Promise.all([setup.getPropertyProfile(propertyId), readCurrency(propertyId)])
-      .then(([response, savedCurrency]) => {
+    void Promise.all([
+      setup.getPropertyProfile(propertyId),
+      readCurrency(propertyId),
+      readCheckoutPending(propertyId).catch(() => null),
+    ])
+      .then(([response, savedCurrency, checkoutPending]) => {
         if (!active) return;
         const { displayName, location } = response.profile;
         const code = savedCurrency ?? quickHotelCurrency(location.countryCode, "")?.code ?? "EUR";
@@ -73,6 +105,7 @@ export function QuickPropertySetup({
           place: [location.streetAddress, location.city].filter(Boolean).join(", "),
           url: previewBookingHost(displayName),
           currency: { code, symbol: currencySymbol(code) },
+          checkoutPending: checkoutPending === true,
         });
       })
       .catch(() => {
@@ -125,8 +158,55 @@ export function QuickPropertySetup({
     );
   }
 
+  if (step === 4) {
+    const name = room.name.trim();
+    const guests = Number(room.maxGuests) || 1;
+    return (
+      <QuickPayStep
+        hotel={hotel}
+        currency={hotel.currency}
+        room={
+          name && room.pricePerNight.trim()
+            ? {
+                name,
+                details: `Up to ${guests} guest${guests === 1 ? "" : "s"} · Free cancellation until 3 days before`,
+                price: `${hotel.currency.symbol}${room.pricePerNight.trim()}`,
+              }
+            : null
+        }
+        checkoutPending={hotel.checkoutPending}
+        initialPlan={hotel.checkoutPending ? "fixed_fee" : "commission"}
+        onBack={() => setStep(3)}
+        onSaveAndExit={onSaveAndExit}
+        onSubmit={async (plan: QuickPlanChoice) => {
+          // The room travels with the first run; without it on this device, ask for it again.
+          if (Object.keys(quickRoomErrors(room, hotel.currency.code)).length > 0) {
+            setStep(3);
+            return;
+          }
+          let result;
+          try {
+            result = await firstRun.run(propertyId, {
+              room: quickRoomRequest(room),
+              pricesIncludeMandatoryCharges: room.pricesIncludeMandatoryCharges,
+              guestPayment: "pay_at_property",
+              plan,
+            });
+          } catch (error) {
+            throw new Error(quickFirstRunErrorMessage(error));
+          }
+          if (result.checkoutUrl) {
+            openCheckout(result.checkoutUrl);
+            return;
+          }
+          setStep(5);
+        }}
+      />
+    );
+  }
+
   return (
-    renderStep?.(step, room) ?? (
+    renderStep?.(5, room) ?? (
       <QuickSetupShell step={step} onSaveAndExit={onSaveAndExit}>
         <p role="status" className="mt-24 text-center text-sm font-medium text-gray-600">
           {`Step ${step} comes next.`}

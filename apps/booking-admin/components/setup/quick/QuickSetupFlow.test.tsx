@@ -61,6 +61,8 @@ function props(overrides: Partial<QuickSetupFlowProps> = {}): QuickSetupFlowProp
     } as unknown as HotelFirstRunClient,
     saveCurrency: vi.fn(async () => undefined),
     readCurrency: vi.fn(async () => null),
+    readCheckoutPending: vi.fn(async () => false),
+    openCheckout: vi.fn(),
     propertyId: null,
     onPropertyCreated: vi.fn(),
     onSaveAndExit: vi.fn(),
