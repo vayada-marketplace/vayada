@@ -53,6 +53,12 @@ export type HotelFirstRunPorts = HotelFirstRunSetupPorts &
     facts: { read(actor: HotelFirstRunActor): Promise<HotelFirstRunWriteFacts> };
     /** Runs `work` while holding the property's first-run lock, or returns "busy" when another run holds it. */
     lock: { withPropertyLock<T>(propertyId: string, work: () => Promise<T>): Promise<T | "busy"> };
+    /** Makes the hotel live once its profile is complete (VAY-2247 1.5); a live hotel stays live. */
+    activation: {
+      activateWhenComplete(
+        actor: HotelFirstRunActor,
+      ): Promise<Readonly<{ ok: true; activated: boolean } | { ok: false; code: string }>>;
+    };
   }>;
 
 export type HotelFirstRunResult =
@@ -181,6 +187,18 @@ async function runSteps(
     }
     if (outcome.wrote) ran.push(step);
     if ("checkoutUrl" in outcome) checkoutUrl = outcome.checkoutUrl;
+  }
+  // VAY-2247 1.5: everything is saved, so the hotel goes live (its profile is complete with its basics);
+  // a later run finds it live already. Publishing still waits for the owner on Go live.
+  const activation = await ports.activation.activateWhenComplete(actor);
+  if (!activation.ok) {
+    return Object.freeze({
+      ok: false,
+      code: activation.code,
+      step: null,
+      state: hotelFirstRunState(await ports.facts.read(actor)),
+      ran,
+    });
   }
   return Object.freeze({
     ok: true,

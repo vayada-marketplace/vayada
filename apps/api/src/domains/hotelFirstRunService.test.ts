@@ -73,7 +73,19 @@ const facts: HotelFirstRunWriteFacts = {
   plan: "none",
 };
 
-function service(options: { busy?: boolean; facts?: HotelFirstRunWriteFacts; plan?: object } = {}) {
+function service(
+  options: {
+    busy?: boolean;
+    facts?: HotelFirstRunWriteFacts;
+    plan?: object;
+    activation?: Awaited<ReturnType<HotelFirstRunPorts["activation"]["activateWhenComplete"]>>;
+  } = {},
+) {
+  const activation = {
+    activateWhenComplete: vi.fn(
+      async () => options.activation ?? { ok: true as const, activated: true },
+    ),
+  };
   const plans = {
     getPlanStatus: vi.fn(async () => ({ plan: null })),
     selectCommissionPlan: vi.fn(async () => ({ ok: true, status: "created", value: {} })),
@@ -91,8 +103,9 @@ function service(options: { busy?: boolean; facts?: HotelFirstRunWriteFacts; pla
       withPropertyLock: async (_id: string, work: () => Promise<unknown>) =>
         options.busy ? "busy" : work(),
     },
+    activation,
   } as unknown as HotelFirstRunPorts;
-  return { first: createHotelFirstRunService(ports), plans };
+  return { first: createHotelFirstRunService(ports), plans, activation };
 }
 
 beforeEach(() => {
@@ -135,6 +148,29 @@ describe("hotel first run (VAY-2247)", () => {
     });
     expect(steps.calendar).not.toHaveBeenCalled();
     expect(steps.guestRules).not.toHaveBeenCalled();
+  });
+
+  it("makes the hotel live once every step is saved, and only then (1.5)", async () => {
+    const done = service();
+    expect(await done.first.run(actor, request, null)).toMatchObject({ ok: true });
+    expect(done.activation.activateWhenComplete).toHaveBeenCalledWith(actor);
+
+    steps.calendar.mockResolvedValue({ ok: false, code: "first_run_calendar_failed" });
+    const stopped = service();
+    await stopped.first.run(actor, request, null);
+    expect(stopped.activation.activateWhenComplete).not.toHaveBeenCalled();
+  });
+
+  it("reports a hotel it could not make live", async () => {
+    const result = await service({
+      activation: { ok: false, code: "first_run_profile_incomplete" },
+    }).first.run(actor, request, null);
+    expect(result).toMatchObject({
+      ok: false,
+      code: "first_run_profile_incomplete",
+      step: null,
+      ran: ["currency", "rooms", "payments", "pricing", "calendar", "guest_rules", "plan"],
+    });
   });
 
   it("refuses a second run for the same hotel while one is running", async () => {
