@@ -1,4 +1,4 @@
--- Migration: 0501_hotel_setup_checklist
+-- Migration: 0503_hotel_setup_checklist
 -- Owner: domain-hotels (setup checklist)
 -- See: VAY-2247 wave 2 (hotel-setup-checklist.v1, packages/domain-hotels/src/hotelSetupChecklist.ts)
 --
