@@ -67,6 +67,10 @@ function props(overrides: Partial<QuickSetupFlowProps> = {}): QuickSetupFlowProp
     onPropertyCreated: vi.fn(),
     onSaveAndExit: vi.fn(),
     storage: storage(),
+    publication: { load: vi.fn(), publish: vi.fn() },
+    organizationId: "9a8b7c6d-5e4f-4a3b-8c2d-1e0f99887766",
+    publicationStorage: storage(),
+    openPage: vi.fn(),
     ...overrides,
   };
 }
