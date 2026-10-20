@@ -32,7 +32,7 @@ export type QuickRoomStepProps = {
   currency: { code: string; symbol: string };
   hotel: { name: string; place: string; url: string };
   onSubmit: (draft: QuickRoomsDraft) => Promise<void>;
-  /** Back to "Your hotel" once it can edit a hotel that exists (follow-up); hidden until then. */
+  /** Back to "Your hotel" for this hotel; hidden when not passed. */
   onBack?: (() => void) | null;
   onSaveAndExit: () => void;
   /** VAY-2247 follow-up: shown once the first run takes these choices (cancellation, bed). */

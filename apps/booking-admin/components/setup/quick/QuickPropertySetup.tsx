@@ -50,6 +50,8 @@ export type QuickPropertySetupProps = {
   openPage: (page: QuickSetupPage) => void;
   /** Copies the booking page link (the clipboard by default). */
   copyLink?: (url: string) => Promise<void>;
+  /** Back from step 3: "Your hotel" for this hotel. */
+  onEditHotel?: (() => void) | null;
 };
 
 type Hotel = {
@@ -108,6 +110,7 @@ export function QuickPropertySetup({
   publicationStorage,
   openPage,
   copyLink = (url) => navigator.clipboard.writeText(url),
+  onEditHotel = null,
 }: QuickPropertySetupProps) {
   const [step, setStep] = useState(initialStep);
   const [hotel, setHotel] = useState<Hotel | null>(null);
@@ -176,6 +179,7 @@ export function QuickPropertySetup({
         currency={hotel.currency}
         hotel={hotel}
         onSubmit={async () => setStep(4)}
+        onBack={onEditHotel}
         onSaveAndExit={onSaveAndExit}
       />
     );

@@ -358,6 +358,38 @@ describe("QuickPropertySetup (VAY-2247 steps 3–5)", () => {
     renderer!.unmount();
   });
 
+  it("goes back to Your hotel for this hotel from step 3", async () => {
+    const onEditHotel = vi.fn();
+    let renderer: ReactTestRenderer | undefined;
+    await act(async () => {
+      renderer = create(
+        <QuickPropertySetup
+          propertyId={PROPERTY}
+          initialStep={3}
+          setup={setup}
+          readCurrency={async () => "EUR"}
+          firstRun={{ run: vi.fn() } as never}
+          readCheckoutPending={async () => false}
+          openCheckout={vi.fn()}
+          storage={storage()}
+          onSaveAndExit={vi.fn()}
+          publication={{ load: vi.fn(), publish: vi.fn() }}
+          organizationId="9a8b7c6d-5e4f-4a3b-8c2d-1e0f99887766"
+          publicationStorage={storage()}
+          openPage={vi.fn()}
+          onEditHotel={onEditHotel}
+        />,
+      );
+    });
+    const back = renderer!.root.findAll(
+      (node) => node.type === "button" && node.props.children === "Back",
+    );
+    expect(back.length).toBeGreaterThan(0);
+    await act(async () => back[0]!.props.onClick());
+    expect(onEditHotel).toHaveBeenCalledTimes(1);
+    renderer!.unmount();
+  });
+
   it("uses the country's currency until the first run saved one", async () => {
     let renderer: ReactTestRenderer | undefined;
     await act(async () => {
