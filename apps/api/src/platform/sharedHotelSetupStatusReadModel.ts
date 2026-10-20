@@ -589,6 +589,17 @@ export async function recomputeHotelProfileCompleteness(
   return updatePublicProfileCompleteness(client, propertyId, false, false);
 }
 
+/**
+ * VAY-2247 1.5: makes a provisioning hotel live when its profile is complete (the first run calls this
+ * at its end). Callers lock the property first; suspended, retired, disabled and private hotels stay.
+ */
+export async function activateCompleteHotel(
+  client: SharedHotelSetupQueryClient,
+  propertyId: string,
+): Promise<void> {
+  return updatePublicProfileCompleteness(client, propertyId, false, true);
+}
+
 async function updatePublicProfileCompleteness(
   client: SharedHotelSetupQueryClient,
   propertyId: string,
@@ -825,6 +836,9 @@ async function writePropertyProfile(
         await createInitialSocialContacts(client, propertyId, initialSettings);
       }
       await recomputeHotelProfileCompleteness(client, propertyId);
+      // VAY-2247 1.5: reserve the booking-page address now (from the name, with the hotel's id as a
+      // suffix if the name is taken) and project the public profile, as every later profile save does.
+      await projectPropertyPublicProfile(client, { propertyId });
       if (input.provisioningReference) {
         await linkProvisioningReference(client, {
           propertyId,
