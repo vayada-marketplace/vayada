@@ -25,6 +25,7 @@ import { QuickAboutYouStep } from "./QuickAboutYouStep";
 import { QuickContactsFromAccountNote, QuickUseMyDetails } from "./QuickHotelDetails";
 import { QuickHotelAddress } from "./QuickHotelAddress";
 import { QuickHotelStep } from "./QuickHotelStep";
+import { QuickPropertySetup } from "./QuickPropertySetup";
 import { QuickSetupShell } from "./QuickSetupShell";
 import { quickHotelCurrency } from "./quickHotelCurrency";
 import { EMPTY_QUICK_HOTEL_DRAFT, type QuickHotelDraft } from "./quickHotelDraft";
@@ -38,6 +39,8 @@ export type QuickSetupFlowProps = {
   setup: SharedHotelSetupApi;
   firstRun: HotelFirstRunClient;
   saveCurrency: (propertyId: string, currency: string) => Promise<void>;
+  /** The hotel's saved pricing currency, or null before the first run sets it. */
+  readCurrency: (propertyId: string) => Promise<string | null>;
   /** The hotel in the URL (?propertyId=), when setup resumes for one. */
   propertyId: string | null;
   onPropertyCreated: (propertyId: string) => void;
@@ -242,11 +245,15 @@ export function QuickSetupFlow(props: QuickSetupFlowProps) {
   if (view.kind === "property") {
     return (
       props.renderHotelStep?.(view.step, view.propertyId) ?? (
-        <QuickSetupShell step={view.step} onSaveAndExit={exit}>
-          <p role="status" className="mt-24 text-center text-sm font-medium text-gray-600">
-            {`Step ${view.step} comes next.`}
-          </p>
-        </QuickSetupShell>
+        <QuickPropertySetup
+          key={view.propertyId}
+          propertyId={view.propertyId}
+          initialStep={view.step}
+          setup={setup}
+          readCurrency={props.readCurrency}
+          storage={storage}
+          onSaveAndExit={exit}
+        />
       )
     );
   }

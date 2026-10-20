@@ -238,6 +238,10 @@ export function SharedHotelSetupPage({
           const owners = await onboardingPricingApi.load(propertyId, { cache: "no-store" });
           await onboardingPricingApi.saveCurrency(propertyId, currency, owners);
         }}
+        readCurrency={async (propertyId) =>
+          (await onboardingPricingApi.load(propertyId, { cache: "no-store" })).pricing
+            ?.pricingCurrency.currency ?? null
+        }
         propertyId={initialPropertyId}
         onPropertyCreated={handlePropertySelected}
         onSaveAndExit={(propertyId) => handleExit(propertyId)}

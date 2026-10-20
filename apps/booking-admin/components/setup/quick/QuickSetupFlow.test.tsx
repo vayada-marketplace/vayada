@@ -60,6 +60,7 @@ function props(overrides: Partial<QuickSetupFlowProps> = {}): QuickSetupFlowProp
       run: vi.fn(),
     } as unknown as HotelFirstRunClient,
     saveCurrency: vi.fn(async () => undefined),
+    readCurrency: vi.fn(async () => null),
     propertyId: null,
     onPropertyCreated: vi.fn(),
     onSaveAndExit: vi.fn(),
