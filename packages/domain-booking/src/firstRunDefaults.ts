@@ -57,6 +57,28 @@ export const FIRST_RUN_CANCELLATION_TERMS: FlexibleCancellationTerms = Object.fr
   noShowPenalty: "full_booking_amount",
 });
 
+/**
+ * VAY-2247 1.12b: the first run's cancellation choices, free cancellation until 1, 3, 7 or 14 days before
+ * arrival. Non-refundable isn't one yet: it is paid in advance (VAY-2280), and the first run only sets up
+ * paying at the property. It comes with online card payments (VAY-2205).
+ */
+export const FIRST_RUN_FREE_CANCELLATION_DAYS = Object.freeze([1, 3, 7, 14] as const);
+export type FirstRunFreeCancellationDays = (typeof FIRST_RUN_FREE_CANCELLATION_DAYS)[number];
+export const FIRST_RUN_DEFAULT_FREE_CANCELLATION_DAYS: FirstRunFreeCancellationDays = 3;
+
+export function isFirstRunFreeCancellationDays(
+  value: unknown,
+): value is FirstRunFreeCancellationDays {
+  return (FIRST_RUN_FREE_CANCELLATION_DAYS as readonly unknown[]).includes(value);
+}
+
+/** The default terms with the chosen number of days; the penalties stay the full stay. */
+export function firstRunCancellationTerms(
+  days: FirstRunFreeCancellationDays = FIRST_RUN_DEFAULT_FREE_CANCELLATION_DAYS,
+): FlexibleCancellationTerms {
+  return Object.freeze({ ...FIRST_RUN_CANCELLATION_TERMS, freeCancellationDeadlineDays: days });
+}
+
 /** Open all year with a one-night minimum; future dates keep opening through auto-open (on by default). */
 export const FIRST_RUN_OPERATING_SCHEDULE: PmsOperatingSchedule = Object.freeze({
   mode: "year_round",
@@ -68,6 +90,30 @@ export const FIRST_RUN_MINIMUM_STAY_NIGHTS = 1;
 export const FIRST_RUN_BEDS: readonly Readonly<{ type: "double"; quantity: 1 }>[] = Object.freeze([
   Object.freeze({ type: "double", quantity: 1 }),
 ]);
+
+/**
+ * VAY-2247 1.12b: the first run's bed choices, one bed per room, or two twin beds for a twin room. The
+ * owner adds the real beds per room type later; these are keys of the PMS's bed vocabulary.
+ */
+export const FIRST_RUN_BED_CHOICES = Object.freeze([
+  "double",
+  "queen",
+  "king",
+  "twin",
+  "single",
+] as const);
+export type FirstRunBedChoice = (typeof FIRST_RUN_BED_CHOICES)[number];
+export const FIRST_RUN_DEFAULT_BED: FirstRunBedChoice = "double";
+
+export function isFirstRunBedChoice(value: unknown): value is FirstRunBedChoice {
+  return (FIRST_RUN_BED_CHOICES as readonly unknown[]).includes(value);
+}
+
+export function firstRunBeds(
+  choice: FirstRunBedChoice = FIRST_RUN_DEFAULT_BED,
+): readonly Readonly<{ type: FirstRunBedChoice; quantity: 1 | 2 }>[] {
+  return Object.freeze([Object.freeze({ type: choice, quantity: choice === "twin" ? 2 : 1 })]);
+}
 
 /**
  * Names for a room type's rooms, so the calendar can open them (auto-open needs every unit labelled).
