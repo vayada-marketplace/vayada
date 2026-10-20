@@ -44,8 +44,16 @@ export type HotelFirstRunActor = Readonly<{
   requestedAt: string;
 }>;
 
-/** The fixed setup-draft id of the room type the first run creates, so a resume finds it again. */
-export const FIRST_RUN_DRAFT_ROOM_ID = "first-run-room-1";
+/** The fixed setup-draft id of the first run's room type at `index`, so a resume finds each again. */
+export function firstRunDraftRoomId(index: number): string {
+  return `first-run-room-${index + 1}`;
+}
+
+/** The first room type's draft id (the first run made only this one before VAY-2247 1.12). */
+export const FIRST_RUN_DRAFT_ROOM_ID = firstRunDraftRoomId(0);
+
+/** A first run creates up to this many room types; the rest are added later in Rooms & Rates. */
+export const FIRST_RUN_MAX_ROOM_TYPES = 10;
 
 export type HotelFirstRunStepOutcome =
   | Readonly<{ ok: true; wrote: boolean }>
@@ -82,8 +90,7 @@ function audit(actor: HotelFirstRunActor) {
   };
 }
 
-const fail = (code: string, cause?: unknown): HotelFirstRunStepOutcome =>
-  Object.freeze({ ok: false, code, cause });
+const fail = (code: string, cause?: unknown) => Object.freeze({ ok: false as const, code, cause });
 const ok = (wrote: boolean): HotelFirstRunStepOutcome => Object.freeze({ ok: true, wrote });
 
 /** Step 1: the hotel's currency from its country, unless it already has one. */
@@ -108,29 +115,74 @@ export async function runFirstRunCurrency(
 }
 
 /**
- * Step 2: the first room type, its rooms and their names. Skipped when the owner already has room types of
- * their own; resumes a half-done first run (room type created, rooms missing or not yet named).
+ * Step 2: the room types in order, their rooms and the rooms' names. Skipped when the owner already has room
+ * types of their own; resumes a half-done first run (a room type created, its rooms missing or not yet
+ * named). Room names are unique in a hotel, so they count on across room types: Room 1–8, then Room 9–12.
  */
 export async function runFirstRunRooms(
   ports: HotelFirstRunSetupPorts,
   actor: HotelFirstRunActor,
-  room: FirstRunRoomInput,
+  rooms: readonly FirstRunRoomInput[],
 ): Promise<HotelFirstRunStepOutcome> {
-  const { propertyId } = actor;
-  const draftRoomId = parseDraftRoomId(FIRST_RUN_DRAFT_ROOM_ID)!;
-  const binding = await ports.roomRead.getDraftRoomTypeBinding(propertyId, draftRoomId);
+  const ids = await Promise.all(
+    rooms.map(async (_room, index) => {
+      const draftRoomId = parseDraftRoomId(firstRunDraftRoomId(index))!;
+      return (
+        (await ports.roomRead.getDraftRoomTypeBinding(actor.propertyId, draftRoomId))?.roomTypeId ??
+        null
+      );
+    }),
+  );
+  if (
+    ids.every((id) => id === null) &&
+    (await ports.roomRead.listRoomTypeFacts(actor.propertyId)).length > 0
+  )
+    return ok(false);
   let wrote = false;
-  let roomTypeId = binding?.roomTypeId ?? null;
+  let nextNumber = 1;
+  for (const [index, room] of rooms.entries()) {
+    const outcome = await runFirstRunRoomType(
+      ports,
+      actor,
+      index,
+      room,
+      ids[index] ?? null,
+      nextNumber,
+    );
+    if (!outcome.ok) return outcome;
+    wrote ||= outcome.wrote;
+    nextNumber = outcome.nextNumber;
+  }
+  return ok(wrote);
+}
+
+const ROOM_NUMBER = /^Room (\d+)$/;
+
+async function runFirstRunRoomType(
+  ports: HotelFirstRunSetupPorts,
+  actor: HotelFirstRunActor,
+  index: number,
+  room: FirstRunRoomInput,
+  existingRoomTypeId: string | null,
+  nextNumber: number,
+): Promise<Readonly<{ ok: true; wrote: boolean; nextNumber: number }> | ReturnType<typeof fail>> {
+  const { propertyId } = actor;
+  let wrote = false;
+  let roomTypeId = existingRoomTypeId;
   if (!roomTypeId) {
-    if ((await ports.roomRead.listRoomTypeFacts(propertyId)).length > 0) return ok(false);
     const facts = firstRunRoomFacts(room);
     if (!facts) return fail("first_run_room_invalid");
     const command = parseCreateRoomTypeFactsCommand({
       organizationId: actor.organizationId,
       propertyId,
-      idempotencyKey: firstRunIdempotencyKey(propertyId, "room_type", facts),
+      // The first room type keeps the key it had when the first run made only one.
+      idempotencyKey: firstRunIdempotencyKey(
+        propertyId,
+        "room_type",
+        index === 0 ? facts : [index, facts],
+      ),
       audit: audit(actor),
-      draftRoomId,
+      draftRoomId: parseDraftRoomId(firstRunDraftRoomId(index))!,
       expectedRevision: 0,
       facts,
     });
@@ -164,25 +216,30 @@ export async function runFirstRunRooms(
     wrote = true;
   }
 
-  // Name every unnamed room "Room N", continuing after the rooms that already have a name.
+  // Name every unnamed room "Room N", after the numbers this and the earlier room types already use.
   const units = (
     await ports.roomRead.listPhysicalRoomUnitIdentities(propertyId, roomTypeId)
   ).filter((unit) => unit.lifecycle === "active");
   const unnamed = units.filter((unit) => unit.operationalLabelStatus !== "verified");
-  const labels = unnamed.length
-    ? firstRunRoomLabels(unnamed.length, units.length - unnamed.length + 1)
-    : [];
-  for (const [index, unit] of unnamed.entries()) {
+  const first = units.reduce((next, unit) => {
+    const number =
+      unit.operationalLabelStatus === "verified"
+        ? Number(ROOM_NUMBER.exec(unit.operationalLabel)?.[1] ?? 0)
+        : 0;
+    return Math.max(next, number + 1);
+  }, nextNumber);
+  const labels = unnamed.length ? firstRunRoomLabels(unnamed.length, first) : [];
+  for (const [unitIndex, unit] of unnamed.entries()) {
     const command = parseSetPhysicalRoomOperationalLabelCommand({
       organizationId: actor.organizationId,
       propertyId,
       roomTypeId,
       roomUnitId: unit.roomUnitId,
       expectedRevision: unitsRevision,
-      operationalLabel: labels[index],
+      operationalLabel: labels[unitIndex],
       idempotencyKey: firstRunIdempotencyKey(propertyId, "room_label", [
         unit.roomUnitId,
-        labels[index],
+        labels[unitIndex],
       ]),
       audit: audit(actor),
     });
@@ -192,7 +249,7 @@ export async function runFirstRunRooms(
     unitsRevision = named.response.roomUnitsRevision;
     wrote = true;
   }
-  return ok(wrote);
+  return Object.freeze({ ok: true, wrote, nextNumber: first + unnamed.length });
 }
 
 /** Step 3: pay at the property, unless payment methods are already chosen for the current currency. */

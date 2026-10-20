@@ -279,7 +279,6 @@ jobs:
           E2E_START_SERVERS: "0"
           PORT: "3164"
           AUTH_PUBLIC_ORIGIN: http://localhost:3164
-          NEXT_PUBLIC_MARKETPLACE_URL: http://marketplace.localhost:3000
           NEXT_PUBLIC_BOOKING_ADMIN_URL: http://admin.booking.localhost:3003
           E2E_PMS_BASE_URL: http://localhost:3164
 
@@ -404,7 +403,7 @@ jobs:
           dev_log="$RUNNER_TEMP/booking-admin-dev.log"
           NEXT_PUBLIC_AUTHKIT_COMPATIBILITY_TOKEN_ENABLED=true NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=e2e-google-places \
             NEXT_PUBLIC_PMS_FRONTEND_URL=http://pms.localhost:3004 \
-            NEXT_PUBLIC_MARKETPLACE_URL=http://marketplace.localhost:3000 PORT=3003 \
+            PORT=3003 \
             npm run dev:booking-admin > "$dev_log" 2>&1 &
           dev_pid=$!
           trap 'kill "$dev_pid" 2>/dev/null || true' EXIT
@@ -750,6 +749,14 @@ jobs:
         run: >-
           npm --workspace vayada-api run test -- --no-file-parallelism
           src/activeBookingPublicationProfile.integration.test.ts
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+
+      - name: Verify the operator booking page address change (VAY-2295)
+        if: matrix.shard == 'pms'
+        run: >-
+          npm --workspace vayada-api run test -- --no-file-parallelism
+          src/domains/propertySlugChange.integration.test.ts
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
