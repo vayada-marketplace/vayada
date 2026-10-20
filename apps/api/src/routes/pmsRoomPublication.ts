@@ -491,21 +491,15 @@ function completeBlockerCoverage(
     if (room["activeUnitCount"] === 0) {
       expected.add(blockerKey("room_units_required", "room_type", roomTypeId, sourceRevision));
     }
+    // VAY-2247: no photos and unreviewed amenities no longer block; photos that can't be read do.
     if ((room["media"] as unknown[]).length === 0) {
-      const photo = blockerKey("room_photo_required", "room_type", roomTypeId, sourceRevision);
       const unavailable = blockerKey(
         "room_media_unavailable",
         "room_type",
         roomTypeId,
         sourceRevision,
       );
-      if (actual.has(photo) === actual.has(unavailable)) return false;
-      expected.add(actual.has(photo) ? photo : unavailable);
-    }
-    if (room["amenities"] === null) {
-      expected.add(
-        blockerKey("room_amenities_review_required", "room_type", roomTypeId, sourceRevision),
-      );
+      if (actual.has(unavailable)) expected.add(unavailable);
     }
   }
   return actual.size === expected.size && [...actual].every((key) => expected.has(key));

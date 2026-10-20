@@ -91,7 +91,8 @@ export function createPgBookingDesignCatalogEvidenceRepository(config: {
           [input.organizationId, input.propertyId],
         );
         const row = result.rows[0];
-        if (!row || row.shortDescription === null) {
+        // VAY-2247: a hotel without a description still has a page style; only a missing hotel blocks.
+        if (!row) {
           return failure("profile", "missing", "hotel_catalog_profile_missing");
         }
         const profileRevision = parseRevision(row.profileRevision);
