@@ -134,7 +134,7 @@ describe.skipIf(!url)("nearby picks across Property saves", () => {
        FROM information_schema.columns c
        JOIN information_schema.tables t USING (table_schema, table_name)
        WHERE c.column_name='property_id' AND t.table_type='BASE TABLE'
-         AND c.table_schema IN ('hotel_catalog','booking','distribution','marketplace','pms')`,
+         AND c.table_schema IN ('hotel_catalog','booking','distribution','pms')`,
     );
     for (const { name } of tables.rows)
       await admin.query(`DELETE FROM ${name} WHERE property_id::text=$1`, [propertyId]);

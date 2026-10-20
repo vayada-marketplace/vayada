@@ -1,8 +1,11 @@
 # Hotel Onboarding Information Inventory
 
-> **Update (VAY-2270, 2026-10):** the Creator Marketplace is retired (VAY-2259), and Hotel
-> Operations is the only setup track. The Creator Marketplace sections below are kept as design
-> history; the Marketplace-only and combined flows no longer exist.
+> **Note (VAY-2272, 2026-10-20):** the Creator Marketplace is retired (VAY-2259). Its apps and
+> package are deleted, migrations 0496-0502 dropped the `marketplace` schema and removed or closed
+> the creator accounts, and Hotel Operations is the only setup track. This record no longer
+> describes Marketplace fields, steps or routes. Canonical step 2 (Marketplace preferences) and the
+> plan keys ONB-08 and ONB-09 (Marketplace preferences and submission) are retired, so the
+> numbering below skips them.
 
 _Current V1 product-decision, adaptive-flow, and implementation-plan record.
 All active screen blueprints and dependency slices are drafted; contract
@@ -22,8 +25,7 @@ document reconciles:
 - what the preserved initial onboarding asks and what the retired post-contact
   flow used to ask;
 - what the target TypeScript/PostgreSQL stack can persist;
-- what hotel owners can view or edit later in Marketplace, Booking Admin, and
-  PMS;
+- what hotel owners can view or edit later in Booking Admin and PMS;
 - fields that appear in legacy or transitional UI but are not supported by the
   target write path.
 
@@ -45,12 +47,10 @@ is collected there once and is not requested again after contact information.
 
 ### Account and hotel image decision
 
-- Creator accounts must provide a personal profile photo.
 - Hotel-manager accounts do not provide a personal profile photo during
   account setup.
 - Each hotel provides one property-owned logo in “About your hotel.”
-- Hotel-facing navigation, chat, and Marketplace use the currently selected
-  hotel’s logo.
+- Hotel-facing navigation uses the currently selected hotel’s logo.
 - Personal account menus represent hotel managers with their initials.
 - A hotel logo must not be copied into `identity.user.profile_image`; it remains
   attached to the hotel so multiple managers and multi-hotel groups share the
@@ -67,11 +67,8 @@ The discarded post-contact form renderer and its task-specific frontend
 adapters have been removed. Until the replacement is designed, the preserved
 initial flow ends after the contact information is saved.
 
-The available product selections remain:
-
-- Creator Marketplace;
-- Hotel Operations, which includes Booking Engine and PMS;
-- both.
+The only product selection is Hotel Operations, which includes Booking Engine
+and PMS.
 
 ## Source-of-Truth Decision
 
@@ -128,62 +125,56 @@ during first setup, it remains a later setting.
 1. The existing first-run flow asks only for canonical hotel identity,
    address, timezone, and three contact channels. It does **not** ask for a
    separate house number.
-2. Shared hotel content belongs to Hotel Catalog. Marketplace should not own a
-   duplicate hotel listing or duplicate public description.
-3. Marketplace onboarding stores only hotel-level collaboration preferences.
-   Exact dates, deliverables, quantities, compensation, usage rights, and other
-   terms belong to the individual collaboration after chat.
-4. Marketplace has no offer-owned media. It reuses the canonical Hotel Catalog
-   cover and gallery.
-5. Booking Admin contains substantial configuration absent from onboarding:
+2. Shared hotel content belongs to Hotel Catalog.
+3. Booking Admin contains substantial configuration absent from onboarding:
    room filters, add-ons, benefits, localization, guest-form behavior,
    last-minute discounts, and promo codes.
-6. Several fields shown in retired or transitional setup forms are false affordances on the
+4. Several fields shown in retired or transitional setup forms are false affordances on the
    target stack. Examples include raw payout bank fields and some guest-policy
    controls that the save function ignores.
-7. Hotel Operations onboarding includes enough pricing flexibility to launch:
+5. Hotel Operations onboarding includes enough pricing flexibility to launch:
    a standard price, simple seasons, weekend pricing, additional-guest pricing,
    a required flexible/refundable baseline, and an optional non-refundable rate
    derived as a discount from that baseline. One-off date overrides,
    partial-refund tiers, meal plans, booking lead time, maximum stay, and
    closed-to-arrival/departure rules remain later PMS configuration.
-8. Not every supported setting belongs in first-run onboarding. Domains,
+6. Not every supported setting belongs in first-run onboarding. Domains,
    notifications, billing preferences, operational checklists, physical room
    assignment, and the advanced rate rules listed above are post-launch
    settings.
-9. Language has three separate scopes: each employee's application interface,
+7. Language has three separate scopes: each employee's application interface,
    the guest-facing Booking Engine interface, and translated hotel content.
    They must not share one ambiguous hotel-level locale field.
-10. V1 does not calculate separate taxes, mandatory fees, deposits, or
-    multi-tier refund entitlements. The hotel supplies the final guest-facing
-    price, Vayada calculates its commission, the displayed cancellation policy
-    determines refund entitlement, and the hotel manually executes the refund
-    and remains responsible for taxes and invoicing.
-11. Direct-booking growth tools do not belong in onboarding. The basic Booking
-    Engine is published first; benefits, add-ons, promo codes, and last-minute
-    pricing are introduced afterward through a persistent checklist.
+8. V1 does not calculate separate taxes, mandatory fees, deposits, or
+   multi-tier refund entitlements. The hotel supplies the final guest-facing
+   price, Vayada calculates its commission, the displayed cancellation policy
+   determines refund entitlement, and the hotel manually executes the refund
+   and remains responsible for taxes and invoicing.
+9. Direct-booking growth tools do not belong in onboarding. The basic Booking
+   Engine is published first; benefits, add-ons, promo codes, and last-minute
+   pricing are introduced afterward through a persistent checklist.
 
 ## A. Information Collected in the Initial Flow
 
 These fields must not be requested again in the redesigned flow.
 
-| Field ID                      | Information                               | Initial form     | Target storage                            | Later surfaces                          | Product status              |
-| ----------------------------- | ----------------------------------------- | ---------------- | ----------------------------------------- | --------------------------------------- | --------------------------- |
-| `hotel.display_name`          | Hotel display name                        | Asked now        | Stored                                    | Marketplace, Booking, PMS               | Required                    |
-| `hotel.property_type`         | Property type                             | Asked now        | Stored                                    | Marketplace/PMS read models             | Required                    |
-| `profile.logo`                | Hotel logo                                | Planned addition | Schema/purpose only; usable write missing | Navigation, chat, Marketplace, Booking  | Required; API/policy/UI gap |
-| `hotel.street_address`        | Full street address                       | Asked now        | Stored                                    | Booking settings, read-only elsewhere   | Required                    |
-| `hotel.postal_code`           | Postal code                               | Asked now        | Stored                                    | Canonical profile                       | Required                    |
-| `hotel.city`                  | City                                      | Asked now        | Stored                                    | Marketplace, Booking, PMS               | Required                    |
-| `hotel.country_code`          | ISO country code                          | Asked now        | Stored                                    | Marketplace, Booking, PMS               | Required                    |
-| `hotel.locality_public`       | Consent to show city and country publicly | Planned addition | Canonical location visibility             | Marketplace and Booking public profiles | Required for public launch  |
-| `hotel.latitude`              | Map latitude                              | Captured         | Stored                                    | Location/map consumers                  | Required                    |
-| `hotel.longitude`             | Map longitude                             | Captured         | Stored                                    | Location/map consumers                  | Required                    |
-| `hotel.timezone`              | IANA timezone                             | Asked now        | Stored                                    | PMS settings                            | Required                    |
-| `hotel.contact_email`         | Guest-facing hotel/reception email        | Asked now        | Stored                                    | Booking Contact menu and settings       | Required                    |
-| `hotel.contact_phone`         | Guest-facing hotel/reception phone        | Asked now        | Stored                                    | Booking Contact menu and settings       | Required                    |
-| `contact.whatsapp`            | Guest-facing WhatsApp number              | Asked now        | Stored                                    | Booking Contact menu and settings       | Optional                    |
-| `organization.selected_track` | Marketplace, Operations, or both          | Asked now        | Setup intent                              | Drives adaptive onboarding              | Required                    |
+| Field ID                      | Information                               | Initial form     | Target storage                            | Later surfaces                        | Product status              |
+| ----------------------------- | ----------------------------------------- | ---------------- | ----------------------------------------- | ------------------------------------- | --------------------------- |
+| `hotel.display_name`          | Hotel display name                        | Asked now        | Stored                                    | Booking, PMS                          | Required                    |
+| `hotel.property_type`         | Property type                             | Asked now        | Stored                                    | PMS read models                       | Required                    |
+| `profile.logo`                | Hotel logo                                | Planned addition | Schema/purpose only; usable write missing | Navigation, Booking                   | Required; API/policy/UI gap |
+| `hotel.street_address`        | Full street address                       | Asked now        | Stored                                    | Booking settings, read-only elsewhere | Required                    |
+| `hotel.postal_code`           | Postal code                               | Asked now        | Stored                                    | Canonical profile                     | Required                    |
+| `hotel.city`                  | City                                      | Asked now        | Stored                                    | Booking, PMS                          | Required                    |
+| `hotel.country_code`          | ISO country code                          | Asked now        | Stored                                    | Booking, PMS                          | Required                    |
+| `hotel.locality_public`       | Consent to show city and country publicly | Planned addition | Canonical location visibility             | Booking public profile                | Required for public launch  |
+| `hotel.latitude`              | Map latitude                              | Captured         | Stored                                    | Location/map consumers                | Required                    |
+| `hotel.longitude`             | Map longitude                             | Captured         | Stored                                    | Location/map consumers                | Required                    |
+| `hotel.timezone`              | IANA timezone                             | Asked now        | Stored                                    | PMS settings                          | Required                    |
+| `hotel.contact_email`         | Guest-facing hotel/reception email        | Asked now        | Stored                                    | Booking Contact menu and settings     | Required                    |
+| `hotel.contact_phone`         | Guest-facing hotel/reception phone        | Asked now        | Stored                                    | Booking Contact menu and settings     | Required                    |
+| `contact.whatsapp`            | Guest-facing WhatsApp number              | Asked now        | Stored                                    | Booking Contact menu and settings     | Optional                    |
+| `organization.selected_track` | Hotel Operations, the only track          | Asked now        | Setup intent                              | Drives adaptive onboarding            | Required                    |
 
 Canonical contact storage additionally supports website, Instagram, Facebook,
 and X, plus contact purpose and public/private visibility. The initial form
@@ -194,8 +185,8 @@ see them.
 
 #### Employee interface language
 
-The language used by PMS, Booking Admin, and Marketplace belongs to the
-individual employee—not to the hotel or Booking Engine.
+The language used by PMS and Booking Admin belongs to the individual
+employee—not to the hotel or Booking Engine.
 
 | Field ID                | Information                              | Prior evidence            | Target storage                  | Onboarding treatment                              | Product status |
 | ----------------------- | ---------------------------------------- | ------------------------- | ------------------------------- | ------------------------------------------------- | -------------- |
@@ -208,8 +199,7 @@ individual employee—not to the hotel or Booking Engine.
   personal settings.
 - Persist an explicit change per user so employees at the same hotel can use
   different interface languages.
-- Only show languages that PMS, Booking Admin, and Marketplace actually
-  support.
+- Only show languages that PMS and Booking Admin actually support.
 - The current database has no persisted per-user locale destination. Add the
   backend contract before treating a language change as saved.
 
@@ -223,10 +213,9 @@ only apply when Hotel Operations is selected.
 - Additional guest-facing languages are optional.
 - Offer an additional language only when both the public booking interface and
   the relevant hotel content can support it.
-- Marketplace-only onboarding asks no guest-booking language questions.
 
 The corresponding fields are inventoried under
-[Guest Booking Experience](#g-guest-booking-experience).
+[Guest Booking Experience](#f-guest-booking-experience).
 
 #### Translated hotel content
 
@@ -242,26 +231,21 @@ the future translation design.
 
 ## B. Shared Hotel Presentation
 
-Hotel Catalog is the canonical owner. Marketplace and Booking consume these
-values.
+Hotel Catalog is the canonical owner. Booking consumes these values.
 
-| Field ID                    | Information                          | Prior evidence                  | Target storage | Later surfaces                    | Product status                             |
-| --------------------------- | ------------------------------------ | ------------------------------- | -------------- | --------------------------------- | ------------------------------------------ |
-| `profile.short_description` | Canonical public hotel summary       | Not asked                       | Stored         | Marketplace and Booking Engine    | Required                                   |
-| `profile.hero_image`        | Main public hotel image              | Asked before removal indirectly | Stored         | Marketplace and Booking consumers | Recommended                                |
-| `profile.gallery_images`    | Additional public hotel images       | Asked before removal partially  | Stored         | Public profile                    | Recommended; Marketplace upload-policy gap |
-| `profile.media_alt_text`    | Accessible description per image     | Generated                       | Stored         | Public profile                    | Derived/generated                          |
-| `profile.amenities`         | Hotel-level facilities and amenities | Not asked                       | Stored         | Public profile                    | Recommended; API gap                       |
+| Field ID                    | Information                          | Prior evidence                  | Target storage | Later surfaces    | Product status       |
+| --------------------------- | ------------------------------------ | ------------------------------- | -------------- | ----------------- | -------------------- |
+| `profile.short_description` | Canonical public hotel summary       | Not asked                       | Stored         | Booking Engine    | Required             |
+| `profile.hero_image`        | Main public hotel image              | Asked before removal indirectly | Stored         | Booking consumers | Recommended          |
+| `profile.gallery_images`    | Additional public hotel images       | Asked before removal partially  | Stored         | Public profile    | Recommended          |
+| `profile.media_alt_text`    | Accessible description per image     | Generated                       | Stored         | Public profile    | Derived/generated    |
+| `profile.amenities`         | Hotel-level facilities and amenities | Not asked                       | Stored         | Public profile    | Recommended; API gap |
 
 `hotel.property_type`, collected in the initial flow, is the only hotel
 classification field. The redesign does not ask for a separate category or
 star rating. If Vayada later needs descriptors such as boutique, luxury, or
 family-friendly, they should be optional discovery tags rather than another
 category field.
-
-Do not introduce another generic “creator-facing introduction.” Marketplace
-has separate fields for collaboration context, but the hotel description itself
-should remain canonical.
 
 The replacement asks for one concise hotel summary only. It does not ask for a
 separate full description.
@@ -272,18 +256,16 @@ The hotel uploads each photo once into one shared hotel media library. Product
 surfaces reference those existing media objects instead of asking for separate
 copies.
 
-| Media role                | Customer-facing use                                            | Onboarding behavior                                      |
-| ------------------------- | -------------------------------------------------------------- | -------------------------------------------------------- |
-| Hotel cover               | First image on the Marketplace profile and public booking page | Select one uploaded hotel photo                          |
-| Hotel gallery             | Hotel gallery on Marketplace and the public booking page       | Select any additional uploaded hotel photos              |
-| Room photos               | Booking room cards, room details, and room-selection galleries | Assign existing photos to room types; new upload allowed |
-| Marketplace profile media | Hotel cards and hotel details in Marketplace discovery         | Reuse the hotel cover/gallery; no separate upload        |
+| Media role    | Customer-facing use                                            | Onboarding behavior                                      |
+| ------------- | -------------------------------------------------------------- | -------------------------------------------------------- |
+| Hotel cover   | First image on the public booking page                         | Select one uploaded hotel photo                          |
+| Hotel gallery | Hotel gallery on the public booking page                       | Select any additional uploaded hotel photos              |
+| Room photos   | Booking room cards, room details, and room-selection galleries | Assign existing photos to room types; new upload allowed |
 
 The cover and gallery are optional but strongly encouraged. Every published
 room type must have at least one assigned photo before the Booking Engine can
 be published; three to five are recommended. The hotel may reuse shared media
-or upload room-specific media. The first version does not ask for a separate
-Marketplace upload.
+or upload room-specific media.
 
 ### Additional contact and discoverability fields
 
@@ -298,76 +280,7 @@ Marketplace upload.
 TikTok and YouTube appear in transitional Booking settings, but the target
 profile write path explicitly does not support them.
 
-## C. Creator Marketplace
-
-Only relevant when Creator Marketplace is selected.
-
-### Marketplace onboarding decision
-
-Selecting Creator Marketplace already means the hotel accepts creator
-collaborations. The onboarding does not ask for that confirmation again and
-does not create a public offer or campaign.
-
-It collects only these general hotel-level preferences:
-
-| Field ID                                     | Information                                       | Requirement |
-| -------------------------------------------- | ------------------------------------------------- | ----------- |
-| `marketplace.preferences.compensation_types` | Free stay, payment, discount, or commission       | Required    |
-| `marketplace.preferences.content_platforms`  | Platforms the hotel is interested in              | Required    |
-| `marketplace.preferences.content_types`      | Reels, Stories, posts, photos, videos, etc.       | Required    |
-| `marketplace.preferences.availability`       | Year-round or selected generally available months | Required    |
-
-The approved target model stores these values once per Marketplace hotel
-profile. Onboarding must use the hotel-level preferences contract and must not
-create a fake offer.
-
-Specific stay dates, exact deliverables, quantities, deadlines, compensation,
-usage rights, and special requirements are negotiated in chat and confirmed
-per collaboration.
-
-### Later Marketplace profile settings
-
-| Field ID                               | Information                              | Prior evidence             | Target storage | Later surfaces           | Product status                       |
-| -------------------------------------- | ---------------------------------------- | -------------------------- | -------------- | ------------------------ | ------------------------------------ |
-| `marketplace.host_summary`             | Why the hotel wants creator partnerships | Conflated with description | Stored         | Marketplace profile      | Optional later; self-service API gap |
-| `marketplace.collaboration_guidelines` | General rules across collaborations      | Not asked                  | Stored         | Limited current exposure | Optional later; self-service API gap |
-
-Neither field belongs in first-run onboarding. The canonical hotel summary
-already introduces the property; any later partnership context must not become
-a second generic hotel description.
-
-### Explicitly excluded legacy offer fields
-
-The deleted offer model is not an onboarding or persistence source. Do not ask
-for an offer title, offer summary, offer images, campaign dates, stay length,
-maximum payment, currency, discount or commission percentage, minimum follower
-count, included perks, or other offer terms.
-
-General availability and acceptable compensation types now live in the
-hotel-level preferences above. Everything specific to one partnership is
-negotiated in chat and saved on the collaboration.
-
-### Exact deliverable fields for confirmed collaboration terms
-
-| Field ID                      | Information                         | Prior evidence               | Target storage          | Later surfaces      | Product status          |
-| ----------------------------- | ----------------------------------- | ---------------------------- | ----------------------- | ------------------- | ----------------------- |
-| `deliverable.platform`        | Platform where content is published | Asked before removal broadly | Confirmed collaboration | Collaboration terms | Required when agreed    |
-| `deliverable.type`            | Reel, post, story, video, etc.      | Not asked explicitly         | Confirmed collaboration | Collaboration terms | Required when agreed    |
-| `deliverable.quantity`        | Number of each deliverable          | Not asked                    | Confirmed collaboration | Collaboration terms | Required when agreed    |
-| `deliverable.timing_guidance` | When content should be delivered    | Not asked                    | Confirmed collaboration | Collaboration terms | Recommended when agreed |
-
-The replacement onboarding does not ask for exact quantities or timing. Those
-values belong only to confirmed collaboration terms after chat. A future
-campaign product would require a separate model and product decision rather
-than restoring the deleted offer fields.
-
-### Creator fit exclusions
-
-The onboarding asks which content platforms interest the hotel. It does not ask
-for creator niches, follower minimums, audience countries, or audience age
-ranges.
-
-## D. Rooms and Physical Inventory
+## C. Rooms and Physical Inventory
 
 Only relevant when Hotel Operations is selected. Room-type fields repeat.
 
@@ -416,7 +329,7 @@ controls whether the Booking Engine offers child selection at all.
 amenities, has no stable vocabulary, and is currently ignored by the target
 write and public-read contracts.
 
-## E. Rates, Rules, and Availability
+## D. Rates, Rules, and Availability
 
 Only relevant when Hotel Operations is selected.
 
@@ -476,7 +389,7 @@ guest-facing price, including all predictable mandatory charges. Vayada still
 stores the simple flexible and non-refundable cancellation terms above;
 advanced financial policies remain a future capability.
 
-## F. Booking Page Appearance
+## E. Booking Page Appearance
 
 Only relevant when Hotel Operations is selected.
 
@@ -496,7 +409,7 @@ canonical cover, hotel name, and short summary without asking the owner to
 enter them again. Heading, subtext, and hero overrides remain optional
 post-launch Design Studio controls.
 
-## G. Guest Booking Experience
+## F. Guest Booking Experience
 
 Only relevant when Hotel Operations is selected.
 
@@ -540,7 +453,7 @@ phone, country, arrival time, and requests—are not hotel onboarding data.
 | `filters.custom`           | Custom filter keys and labels      | Not asked      | Stored         | Booking Flow          | Optional later |
 | `filters.room_assignments` | Filters assigned to each room type | Not asked      | Stored         | Booking Flow          | Optional later |
 
-## H. Direct-Booking Growth
+## G. Direct-Booking Growth
 
 Only relevant when Hotel Operations is selected. None of this group belongs in
 the replacement first-run onboarding. Every status in this section is a
@@ -615,7 +528,7 @@ fields.
 
 Separate booking/stay date ranges and a promo minimum stay are not supported.
 
-## I. Guest Policies and PMS Operations
+## H. Guest Policies and PMS Operations
 
 Only relevant when Hotel Operations is selected.
 
@@ -666,7 +579,7 @@ are UI defaults and are not persisted.
 | Import existing reservations      | No target onboarding flow | Defer          |
 | PMS notification preferences      | Legacy/unsupported        | Defer          |
 
-## J. Payments, Payouts, and Financial Details
+## I. Payments, Payouts, and Financial Details
 
 Only relevant when Hotel Operations is selected.
 
@@ -725,8 +638,8 @@ blocked as one unit.
 | Direct guest bank transfer      | Disabled until VAY-1041; then collect a secure destination  | The destination and secured post-booking reveal path are ready      |
 | Pay at hotel                    | No external provider connection                             | The committed Finance settings enable the method                    |
 
-Pending provider verification does not block room, policy, Marketplace, PMS,
-or other Booking Engine setup. Online cards remain disabled until the provider
+Pending provider verification does not block room, policy, PMS, or other
+Booking Engine setup. Online cards remain disabled until the provider
 is ready.
 
 The Booking Engine may be published when at least one selected payment method
@@ -765,7 +678,7 @@ conditional bank-transfer form is treated as supported.
 Legal invoice identity and structured financial policy configuration remain
 future capabilities rather than V1 onboarding fields.
 
-## K. Later Settings That Should Not Automatically Become Onboarding
+## J. Later Settings That Should Not Automatically Become Onboarding
 
 The audit found these post-setup surfaces, but their presence does not justify
 adding them to first-run onboarding.
@@ -784,16 +697,14 @@ adding them to first-run onboarding.
 | Structured taxes, fees, deposits, and refunds | Generic policy storage exists; V1 does not configure it | Future concern                   |
 | Direct-booking growth tools                   | Supported in Booking Admin                              | Persistent post-launch checklist |
 
-## L. Review and Launch Decisions
+## K. Review and Launch Decisions
 
 These are launch actions rather than hotel information.
 
-| Decision ID                 | Decision                                          | Applies to  |
-| --------------------------- | ------------------------------------------------- | ----------- |
-| `launch.marketplace_submit` | Submit the Creator Marketplace profile for review | Marketplace |
-| `launch.booking_publish`    | Publish the direct-booking page                   | Booking     |
+| Decision ID              | Decision                        | Applies to |
+| ------------------------ | ------------------------------- | ---------- |
+| `launch.booking_publish` | Publish the direct-booking page | Booking    |
 
-Marketplace submission and Booking publication remain separate decisions.
 Recommended but skippable work does not require another launch acknowledgment.
 
 ## Final Reconciliation
@@ -805,10 +716,6 @@ Recommended but skippable work does not require another launch acknowledgment.
   the hotel classification;
 - `profile.star_rating`;
 - separate full hotel description;
-- duplicate creator-facing hotel description;
-- all legacy Marketplace offer and campaign fields;
-- exact collaboration dates, deliverables, compensation, and audience
-  requirements;
 - benefit title/description/icon objects;
 - add-on stock limit, per-room, and per-item pricing;
 - separate promo booking/stay dates and promo minimum stay;
@@ -823,7 +730,6 @@ Recommended but skippable work does not require another launch acknowledgment.
 
 - one canonical hotel summary and media alt text;
 - social/contact channels and custom domains as later settings;
-- hotel-level Marketplace collaboration preferences;
 - automatically generated physical room units, later room labels, optional
   floors, and room status;
 - base, seasonal, weekend, additional-guest, required flexible, and optional
@@ -847,15 +753,14 @@ decisions.
 - Ask for hotel identity, address, timezone, and initial contacts only once.
 - Do not ask for a separate hotel category or star rating after collecting
   `hotel.property_type`.
-- Do not ask Marketplace-only hotels for guest-booking language configuration.
 - Do not turn employee interface language into a required onboarding field;
   derive it from the browser and let the employee switch it.
 - Ask for the hotel logo in the initial hotel-details form only once.
-- Require personal profile photos only for creator accounts.
+- Do not ask hotel managers for a personal profile photo.
 - Use manager initials—not a hotel logo copied onto the user—as the personal
   hotel-account avatar.
 - Store one canonical hotel summary and one canonical media library.
-- Let Marketplace profiles and Booking design reference shared hotel media.
+- Let Booking design reference shared hotel media.
 - Generate physical room records from each room type's unit count.
 - Require unique room labels before PMS room assignment, housekeeping, or
   check-in—not before Booking Engine publication.
@@ -881,21 +786,17 @@ decisions.
 
 ## V1 Adaptive Onboarding Flow
 
-This flow begins after the preserved hotel-contact page. The canonical order
-has nine possible positions, but the UI numbers only the active steps. A
-Marketplace-only hotel sees three steps—not “step 2 of 9” with six invisible
-gaps.
+This flow begins after the preserved hotel-contact page. The canonical steps
+below keep their numbers 1 to 9, but the UI numbers only the active steps.
+Position 2 was the retired Marketplace preferences step, so the UI shows eight
+steps, `Step 1 of 8` to `Step 8 of 8`.
 
-| Selected products              | Active canonical steps    | Displayed total |
-| ------------------------------ | ------------------------- | --------------- |
-| Creator Marketplace only       | 1, 2, 9                   | 3               |
-| Hotel Operations only          | 1, 3, 4, 5, 6, 7, 8, 9    | 8               |
-| Marketplace + Hotel Operations | 1, 2, 3, 4, 5, 6, 7, 8, 9 | 9               |
+| Selected products | Active canonical steps | Displayed total |
+| ----------------- | ---------------------- | --------------- |
+| Hotel Operations  | 1, 3, 4, 5, 6, 7, 8, 9 | 8               |
 
 The target behavior is that every step saves a resumable draft before
-continuing. Hiding a product-specific step after a product-selection change
-must not silently delete already saved data. Marketplace and Booking
-launch lifecycles remain independent at review.
+continuing.
 
 Each owner-entered field is collected in one step only. Later steps may display
 or derive from an earlier value—for example, currencies derive from the pricing
@@ -907,13 +808,13 @@ The database contains many of the final domain fields, but it does not yet
 provide the orchestration needed by this flow. These gaps must not be hidden
 behind a generic “write API exists” claim:
 
-| Gap                          | Current constraint                                                                                                                                                    | Replacement requirement                                                                                                    |
-| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| Draft and progress state     | Setup tracks store selected products and property identity, not nine-step drafts, validation, or product-scoped readiness                                             | Add resumable step state without making it a second owner of canonical hotel data                                          |
-| Shared property media        | Logo has a registered purpose but no usable approve/promote/project write path; Marketplace-only gallery uploads are blocked by Booking-specific policy               | Add product-neutral canonical-property upload, approval, assignment, and safe replacement behavior                         |
-| Room/pricing/calendar writes | The PMS create command requires the room, base rate, operating periods, and at least one priced season together; its update command cannot edit the onboarding fields | Split or extend commands so Steps 4, 5, and 6 can save, resume, and edit independently                                     |
-| Publication readiness        | Booking publication exists but does not enforce all rules below; Marketplace has no distinct hotel-owner submission lifecycle                                         | Implement product-scoped readiness, Marketplace submission, and Booking publication from the target rules in this document |
-| Cross-domain derivations     | Currency sync, cancellation/payment summaries, media alt text, and several readiness acknowledgments are not composed today                                           | Make each derivation explicit, deterministic, and retry-safe                                                               |
+| Gap                          | Current constraint                                                                                                                                                    | Replacement requirement                                                                            |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| Draft and progress state     | Setup tracks store selected products and property identity, not nine-step drafts, validation, or product-scoped readiness                                             | Add resumable step state without making it a second owner of canonical hotel data                  |
+| Shared property media        | Logo has a registered purpose but no usable approve/promote/project write path                                                                                        | Add product-neutral canonical-property upload, approval, assignment, and safe replacement behavior |
+| Room/pricing/calendar writes | The PMS create command requires the room, base rate, operating periods, and at least one priced season together; its update command cannot edit the onboarding fields | Split or extend commands so Steps 4, 5, and 6 can save, resume, and edit independently             |
+| Publication readiness        | Booking publication exists but does not enforce all rules below                                                                                                       | Implement product-scoped readiness and Booking publication from the target rules in this document  |
+| Cross-domain derivations     | Currency sync, cancellation/payment summaries, media alt text, and several readiness acknowledgments are not composed today                                           | Make each derivation explicit, deterministic, and retry-safe                                       |
 
 Canonical domain tables remain the source of truth. Draft state may reference
 unsaved input while a step is in progress, but it must not become a parallel
@@ -966,36 +867,31 @@ product-neutral canonical-property write path in addition to the missing logo
 control.
 
 `user.interface_locale` is not a hotel step. It is a browser-derived,
-non-blocking control in the global setup chrome. Marketplace-only hotels may
-see that interface control, but it must never be presented as a hotel or
-guest-booking language question. Persisting an explicit selection remains a
-backend gap.
+non-blocking control in the global setup chrome, and it must never be presented
+as a hotel or guest-booking language question. Persisting an explicit selection
+remains a backend gap.
 
 ### Step 1 — Present your hotel
 
-Applies to both product selections. Hotel Catalog owns the content; Marketplace
-and Booking consume it.
+Hotel Catalog owns the content; Booking consumes it.
 
-| Field ID                    | Treatment                                     | Publication effect                                                | Target owner and current contract                                                                           |
-| --------------------------- | --------------------------------------------- | ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `profile.short_description` | Required                                      | Blocks each selected public product                               | `hotel_catalog.property_profiles`; canonical write exists                                                   |
-| `profile.default_locale`    | Required supported content-language choice    | Blocks each selected public product                               | Hotel Catalog locale key for the canonical summary; narrow Step 1 write required                            |
-| `profile.public_slug`       | Required, generated from `hotel.display_name` | Generation or storage failure blocks each selected public product | `hotel_catalog.property_slugs`; publication-time generation/write support exists                            |
-| `profile.hero_image`        | Recommended                                   | Does not block publication                                        | Platform Media → `hotel_catalog.property_media`; replacement step wiring required                           |
-| `profile.gallery_images`    | Recommended                                   | Does not block publication                                        | Platform Media → `hotel_catalog.property_media`; Marketplace-only upload policy and step wiring are missing |
-| `profile.media_alt_text`    | Generated; editable later                     | Generation failure must not discard an uploaded image             | `hotel_catalog.property_media.alt_text`; generation behavior still needs implementation                     |
-| `profile.amenities`         | Recommended                                   | Does not block publication                                        | `hotel_catalog.property_amenities`; hotel-owner write API and step wiring are missing                       |
+| Field ID                    | Treatment                                     | Publication effect                                                | Target owner and current contract                                                       |
+| --------------------------- | --------------------------------------------- | ----------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `profile.short_description` | Required                                      | Blocks each selected public product                               | `hotel_catalog.property_profiles`; canonical write exists                               |
+| `profile.default_locale`    | Required supported content-language choice    | Blocks each selected public product                               | Hotel Catalog locale key for the canonical summary; narrow Step 1 write required        |
+| `profile.public_slug`       | Required, generated from `hotel.display_name` | Generation or storage failure blocks each selected public product | `hotel_catalog.property_slugs`; publication-time generation/write support exists        |
+| `profile.hero_image`        | Recommended                                   | Does not block publication                                        | Platform Media → `hotel_catalog.property_media`; replacement step wiring required       |
+| `profile.gallery_images`    | Recommended                                   | Does not block publication                                        | Platform Media → `hotel_catalog.property_media`; step wiring is missing                 |
+| `profile.media_alt_text`    | Generated; editable later                     | Generation failure must not discard an uploaded image             | `hotel_catalog.property_media.alt_text`; generation behavior still needs implementation |
+| `profile.amenities`         | Recommended                                   | Does not block publication                                        | `hotel_catalog.property_amenities`; hotel-owner write API and step wiring are missing   |
 
 The step asks for one concise public summary. It does not ask for a full
-description, Marketplace-specific description, another logo, category, or star
-rating.
+description, another logo, category, or star rating.
 
 The current public-profile media write replaces the full media set. The
 replacement must always carry forward the preserved property logo and any
 existing media so saving this step cannot unapprove or remove omitted items.
-Alt text storage exists, but automatic generation does not. The current gallery
-upload policy is also Booking-specific, so Marketplace-only hotels need the
-same product-neutral canonical-property routing as the logo.
+Alt text storage exists, but automatic generation does not.
 
 #### Step 1 screen blueprint
 
@@ -1003,11 +899,11 @@ The screen should feel like the existing hotel-details flow: one focused task,
 one centered form, and the progress indicator kept outside the form.
 
 ```text
-Back                  Vayada logo · Step 1 of 3                  Exit setup
-                       [filled][empty][empty]
+Back                  Vayada logo · Step 1 of 8                  Exit setup
+                       [filled][empty]...
 
                          Present your hotel
-             Give guests and creators a clear first impression.
+                   Give guests a clear first impression.
 
 ┌─────────────────────────────────────────────────────────────────────────┐
 │ Content language * [ Select language... ]                               │
@@ -1032,8 +928,7 @@ Back                  Vayada logo · Step 1 of 3                  Exit setup
 
 - Keep Back on the top left, the Vayada logo and active-route progress in the
   center, and Exit setup on the top right.
-- Show `Step 1 of 3`, `Step 1 of 8`, or `Step 1 of 9` according to the selected
-  products. Render only the active number of progress segments.
+- Show `Step 1 of 8`. Render only the active number of progress segments.
 - Place the page title and supporting sentence below the progress header, not
   inside the form surface.
 - Use one centered form column with a maximum width around 1,040 pixels. If the
@@ -1055,8 +950,7 @@ Back                  Vayada logo · Step 1 of 3                  Exit setup
    - Require 50-500 trimmed characters.
    - Placeholder:
      `Describe what guests can expect from your hotel, location, and atmosphere.`
-   - Do not ask for a second full description or a Marketplace-specific
-     introduction.
+   - Do not ask for a second full description.
 3. **Hotel photos**
    - Recommended and skippable.
    - Use one uploader for both cover and gallery photos.
@@ -1113,175 +1007,6 @@ unless separately authorized.
   drag and drop is never the only interaction.
 - Keep `Save and continue` full width and on one line.
 
-### Step 2 — Marketplace preferences
-
-Shown only when Creator Marketplace is selected.
-
-| Field ID                                     | Treatment | Publication effect            | Target owner and current contract                                               |
-| -------------------------------------------- | --------- | ----------------------------- | ------------------------------------------------------------------------------- |
-| `marketplace.preferences.compensation_types` | Required  | Blocks Marketplace submission | New `marketplace.hotel_collaboration_preferences` replacement contract required |
-| `marketplace.preferences.content_platforms`  | Required  | Blocks Marketplace submission | Same new preference contract                                                    |
-| `marketplace.preferences.content_types`      | Required  | Blocks Marketplace submission | Same new preference contract                                                    |
-| `marketplace.preferences.availability`       | Required  | Blocks Marketplace submission | Same new preference contract                                                    |
-
-No target migration, domain contract, or API currently owns these four groups.
-The replacement must add canonical DDL, strict expected-versioned read/write
-commands, a readiness projection, and a reviewed transform from any retained
-offer-shaped source. Partial answers remain draft-only and never imply a
-canonical `year_round` value.
-
-This step never creates an offer. Exact dates, compensation, deliverables,
-quantities, deadlines, usage rights, and special requirements are negotiated
-in chat and saved when a collaboration is confirmed.
-
-#### Step 2 screen blueprint
-
-The screen should make the distinction between broad preferences and negotiated
-terms obvious without adding an explanatory banner or a second workflow. It
-uses the same page shell and single-form treatment as Step 1.
-
-```text
-Back                  Vayada logo | Step 2 of 3                  Exit setup
-                       [filled][filled][empty]
-
-                   Tell creators what you are open to
-           Choose broad preferences. Agree specific terms together in chat.
-
-┌─────────────────────────────────────────────────────────────────────────┐
-│ What could you generally provide? *                                    │
-│ Select all that you may be open to discussing.                          │
-│ [ ] Complimentary stay      [ ] Paid collaboration                      │
-│ [ ] Discounted stay         [ ] Affiliate commission                    │
-│                                                                          │
-│ Which creator platforms interest you? *                                 │
-│ [Instagram] [TikTok] [YouTube] [Facebook] [Blog] [X] [Other]            │
-│                                                                          │
-│ What kinds of content interest you? *                                   │
-│ [Post] [Story] [Short-form video] [Long-form video] [Photography]        │
-│ [Other]                                                                 │
-│                                                                          │
-│ When are you generally open to collaborations? *                        │
-│ ( ) Year-round                 ( ) Selected months                       │
-│ If selected: [Jan] [Feb] [Mar] [Apr] [May] [Jun] ... [Dec]              │
-└─────────────────────────────────────────────────────────────────────────┘
-
-                                                     Save and continue
-```
-
-##### Page shell
-
-- Reuse the Step 1 setup header, spacing, form width, and action placement.
-- Show `Step 2 of 3` for Marketplace-only setup and `Step 2 of 9` for the
-  combined route. This screen never appears in the Hotel Operations-only route.
-- Use the page title `Tell creators what you are open to`.
-- Use the supporting sentence
-  `Choose broad preferences. Agree specific terms together in chat.`
-- Keep all four groups inside one form surface. Do not turn them into separate
-  task cards, accordions, or another internal stepper.
-- Let the form start below the header and scroll normally because all four
-  required groups will usually exceed the remaining viewport height.
-
-##### Visible fields
-
-Use semantic `fieldset` and `legend` groups. Every group is required and allows
-multiple selections except availability mode.
-
-1. **What could you generally provide?**
-   - Supporting text:
-     `Select all that you may be open to discussing.`
-   - Show four two-column selection rows on desktop and one column on mobile.
-   - Map the visible choices to the approved values:
-
-     | Visible label        | Stored value |
-     | -------------------- | ------------ |
-     | Complimentary stay   | `free_stay`  |
-     | Paid collaboration   | `paid`       |
-     | Discounted stay      | `discount`   |
-     | Affiliate commission | `affiliate`  |
-
-   - Require at least one selection.
-   - Do not ask for an amount, percentage, stay length, or exact benefit.
-
-2. **Which creator platforms interest you?**
-   - Supporting text:
-     `Select the platforms where you would like to build visibility.`
-   - Use compact multi-select buttons for Instagram, TikTok, YouTube, Facebook,
-     Blog, X, and Other.
-   - Require at least one selection.
-   - Selecting Other does not open a free-text field. Any exact platform can be
-     clarified in chat until the preference contract supports named additions.
-3. **What kinds of content interest you?**
-   - Supporting text:
-     `Keep this broad. You will agree exact deliverables with each creator.`
-   - Use compact multi-select buttons for Post, Story, Short-form video,
-     Long-form video, Photography, and Other.
-   - Require at least one selection.
-   - Do not ask for quantities, deadlines, usage rights, or platform-specific
-     deliverables such as an Instagram Reel.
-4. **When are you generally open to collaborations?**
-   - Supporting text:
-     `This is a planning signal, not a confirmed travel window.`
-   - Present Year-round and Selected months as one radio group.
-   - Do not preselect a mode for a new setup. The hotel must make an explicit
-     choice so a database default cannot be mistaken for a confirmed answer.
-   - Prefill availability only from an explicit onboarding draft or a complete
-     canonical preference document. Ignore the canonical `year_round` default
-     while its three required preference lists are still empty.
-   - When Selected months is chosen, reveal a twelve-month multi-select grid
-     and require at least one month.
-   - Persist Year-round as `year_round` with an empty month list. Persist
-     Selected months as `selected_months` with unique month numbers from 1 to 12.
-
-Use native checkbox and radio inputs with visible focus indicators. Selected
-controls need a check or radio mark in addition to the blue selected state so
-color is never the only signal. Every choice must be reachable and toggleable
-with a keyboard.
-
-##### Actions and save behavior
-
-- Use the same single `Save and continue` action as Step 1.
-- Keep the button enabled unless a save is in progress. On submit, validate all
-  four groups and move focus to the first invalid control.
-- A successful continue sends the complete canonical preference document
-  through the existing Marketplace hotel-preference `PUT` contract.
-- Back and Exit setup save the incomplete selections only to the future
-  onboarding-draft contract. The canonical preference API must remain strict
-  because it intentionally rejects partial replacement documents.
-- If the owner resumes after a canonical save, prefill every group and allow
-  edits in place. Do not show a separate completion screen.
-- The next active screen is Review and launch for Marketplace-only setup, or
-  Design booking page for the combined route.
-
-The current database row defaults availability to `year_round`, and the current
-write API accepts only a complete preference document. Neither contract can
-represent an explicitly unanswered availability choice or a partially
-completed screen. Resumable Step 2 drafts therefore depend on the shared
-onboarding-draft backend gap already identified in this inventory.
-
-##### Validation and states
-
-- Show each missing-selection error directly below its field group, not in one
-  generic page-level error.
-- Connect each group error to its native inputs with `aria-describedby`.
-- When Selected months has no month, keep that mode selected and place the
-  error below the month grid.
-- If the canonical save fails, retain every selection and show one actionable
-  error above the form with a Retry action.
-- During saving, keep the fields visible and disable only duplicate submission.
-- Do not use a success toast as navigation. Advance only after the canonical
-  save succeeds.
-
-##### Mobile behavior
-
-- Reuse the compact two-row progress header from Step 1.
-- Stack compensation choices into one column.
-- Allow platform and content controls to wrap without truncating their labels.
-- Show the month selector in three columns with full month names when space
-  permits. If a month is visibly abbreviated, preserve its full accessible name
-  with an `aria-label` or screen-reader text. Do not rely on drag, hover, or
-  horizontal scrolling.
-- Keep `Save and continue` full width and on one line.
-
 ### Step 3 — Design booking page
 
 Shown only when Hotel Operations is selected. Every field has a usable default,
@@ -1307,8 +1032,8 @@ chooses the two settings that materially change the whole Booking Engine while
 a real preview uses the hotel content already collected.
 
 ```text
-Back            Vayada logo | Step 3 of 9        Review setup   Exit setup
-                 [filled][filled][filled][empty]...
+Back            Vayada logo | Step 2 of 8                       Exit setup
+                 [filled][filled][empty]...
 
                      Style your booking page
              Choose a color and typography. Change them anytime.
@@ -1331,14 +1056,9 @@ Back            Vayada logo | Step 3 of 9        Review setup   Exit setup
 
 ##### Page shell
 
-- Reuse the setup header from Steps 1 and 2, with progress outside the settings
-  and preview workspace.
-- Show `Step 2 of 8` in the Hotel Operations-only route and `Step 3 of 9` in
-  the combined route. This screen never appears in Marketplace-only setup.
-- In the combined route, show the subtle `Review setup` link beside
-  `Exit setup` from this screen onward. It preserves the current draft and lets
-  the hotel submit its completed Marketplace profile for review without first
-  completing Hotel Operations. Omit it in the Hotel Operations-only route.
+- Reuse the setup header from Step 1, with progress outside the settings and
+  preview workspace.
+- Show `Step 2 of 8`.
 - Use the page title `Style your booking page`.
 - Use the supporting sentence
   `Choose a color and typography. Change them anytime.`
@@ -1469,9 +1189,7 @@ accessible radio-group implementation with complete keyboard support.
 
 ##### Mobile behavior
 
-- Reuse the compact two-row progress header from Steps 1 and 2.
-- In the combined route, place `Review setup` below the progress segments,
-  aligned to the end, instead of crowding the first header row.
+- Reuse the compact two-row progress header from Step 1.
 - Show the controls as one full-width column.
 - Replace the cramped side-by-side preview with a `Preview booking page` button
   that opens the same production-backed preview in a full-screen dialog.
@@ -1517,8 +1235,8 @@ This step collects one complete form per bookable room type. It does not expose
 the old PMS tabs or ask for prices and calendar rules early.
 
 ```text
-Back            Vayada logo | Step 4 of 9        Review setup   Exit setup
-              [filled][filled][filled][filled][empty]...
+Back            Vayada logo | Step 3 of 8                       Exit setup
+              [filled][filled][filled][empty]...
 
                        Add your room types
        Create one entry for each kind of room or unit guests can book.
@@ -1561,12 +1279,7 @@ Your room types
 ##### Page shell
 
 - Reuse the setup header and active-route progress from the earlier screens.
-- In the combined route, keep the subtle `Review setup` link beside
-  `Exit setup`. It preserves the current draft and opens the final readiness
-  screen even when this required step is incomplete. Omit it in the Hotel
-  Operations-only route.
-- Show `Step 3 of 8` in the Hotel Operations-only route and `Step 4 of 9` in
-  the combined route. This screen never appears in Marketplace-only setup.
+- Show `Step 3 of 8`.
 - Use the page title `Add your room types`.
 - Use the supporting sentence
   `Create one entry for each kind of room or unit guests can book.`
@@ -1762,9 +1475,9 @@ or public consumer.
   PMS safety checks and is not an onboarding shortcut.
 - `Save and continue` requires at least one complete room type and no partially
   completed room drafts, then moves to Set your room prices.
-- Back, Review setup, and Exit setup preserve every dirty active-room field in
-  the resumable onboarding draft, whether the room is incomplete or a valid
-  unsaved edit. Previously completed canonical room types remain intact.
+- Back and Exit setup preserve every dirty active-room field in the resumable
+  onboarding draft, whether the room is incomplete or a valid unsaved edit.
+  Previously completed canonical room types remain intact.
 - If one room save fails, keep that room expanded with all input and uploads
   preserved. Previously saved rooms must not be rolled back or duplicated.
 - Saving room facts never changes the live Booking page. Review and launch
@@ -1823,8 +1536,6 @@ empty/default behavior do not satisfy this screen.
 ##### Mobile behavior
 
 - Reuse the compact two-row progress header from the earlier steps.
-- In the combined route, place `Review setup` below the progress segments,
-  aligned to the end, instead of crowding the first header row.
 - Stack summary rows and the active form into one column.
 - Keep all text and number inputs full width. Bed type and quantity may share a
   row only when both labels remain visible.
@@ -1868,8 +1579,8 @@ This is one pricing form across all completed room types. It is not another
 room editor, calendar, payment setup, or revenue-management tool.
 
 ```text
-Back            Vayada logo | Step 5 of 9        Review setup   Exit setup
-              [filled][filled][filled][filled][filled][empty]...
+Back            Vayada logo | Step 4 of 8                       Exit setup
+              [filled][filled][filled][filled][empty]...
 
                          Set your room prices
           Choose the prices and cancellation terms guests will see.
@@ -1912,10 +1623,7 @@ Seasonal prices, weekend prices, and additional-guest prices
 ##### Page shell
 
 - Reuse the setup header and active-route progress from the earlier screens.
-- In the combined route, keep the subtle `Review setup` link beside
-  `Exit setup`. Omit it in the Hotel Operations-only route.
-- Show `Step 4 of 8` in the Hotel Operations-only route and `Step 5 of 9` in
-  the combined route. This screen never appears in Marketplace-only setup.
+- Show `Step 4 of 8`.
 - Use the page title `Set your room prices`.
 - Use the supporting sentence
   `Choose the prices and cancellation terms guests will see.`
@@ -2051,9 +1759,9 @@ Every optional group has one explicit state:
   ineligible, such as a non-refundable plan awaiting payment readiness or a
   season outside the open calendar.
 
-Never silently omit an enabled incomplete option. Back, Review setup, and Exit
-setup may preserve it as draft data, but the canonical pricing upsert receives
-only complete enabled rules.
+Never silently omit an enabled incomplete option. Back and Exit setup may
+preserve it as draft data, but the canonical pricing upsert receives only
+complete enabled rules.
 
 ###### Seasonal prices
 
@@ -2232,8 +1940,8 @@ silently mutates the monetary terms inside an already accepted booking.
   a new revision whose manifest includes the Finance capability version and
   payment-summary version. Losing readiness suppresses that rate immediately
   for safety while leaving flexible offers available.
-- Back, Review setup, and Exit setup preserve dirty pricing fields in the
-  resumable onboarding draft. Review and launch later asks Booking to create an
+- Back and Exit setup preserve dirty pricing fields in the resumable
+  onboarding draft. Review and launch later asks Booking to create an
   immutable attempt manifest; Distribution builds and atomically activates the
   public revision from the selected room, pricing, policy, and page-design
   versions. Distribution records the initial fully materialized calendar
@@ -2333,8 +2041,6 @@ it must not be treated as a supported contract.
 ##### Mobile behavior
 
 - Reuse the compact two-row progress header from the earlier steps.
-- In the combined route, place `Review setup` below the progress segments,
-  aligned to the end, instead of crowding the first header row.
 - Stack each room summary above its full-width nightly-price input. Do not use a
   horizontally scrolling table.
 - Stack season dates and room-price inputs in reading order, with the season
@@ -2368,8 +2074,8 @@ This is an initialization form, not a monthly calendar or a reduced version of
 the PMS. The owner makes three decisions and continues.
 
 ```text
-Back            Vayada logo | Step 6 of 9        Review setup   Exit setup
-              [filled][filled][filled][filled][filled][filled]...
+Back            Vayada logo | Step 5 of 8                       Exit setup
+              [filled][filled][filled][filled][filled]...
 
                            Open your calendar
       Choose which nights guests can stay and confirm your starting availability.
@@ -2409,10 +2115,7 @@ Minimum stay *                                            [ 1 ] night
 ##### Page shell
 
 - Reuse the setup header and active-route progress from the earlier screens.
-- In the combined route, keep the subtle `Review setup` link beside
-  `Exit setup`. Omit it in the Hotel Operations-only route.
-- Show `Step 5 of 8` in the Hotel Operations-only route and `Step 6 of 9` in
-  the combined route. This screen never appears in Marketplace-only setup.
+- Show `Step 5 of 8`.
 - Use the page title `Open your calendar`.
 - Use the supporting sentence
   `Choose which nights guests can stay and confirm your starting availability.`
@@ -2593,8 +2296,7 @@ For each materialized date:
   room and inventory state between steps.
 - `Save and continue` moves to Configure the guest experience. It does not make
   the Booking Engine public.
-- Back, Review setup, and Exit setup preserve dirty fields in the resumable
-  onboarding draft.
+- Back and Exit setup preserve dirty fields in the resumable onboarding draft.
 
 ##### Publication and post-launch behavior
 
@@ -2746,8 +2448,6 @@ channel override owns the date.
 ##### Mobile behavior
 
 - Reuse the compact two-row progress header from the earlier steps.
-- In the combined route, place `Review setup` below the progress segments,
-  aligned to the end, instead of crowding the first header row.
 - Stack the operating-period start and end controls with their labels. Keep the
   remove action beside the period heading rather than shrinking the fields.
 - Stack each room summary above a full-width availability input.
@@ -2784,8 +2484,8 @@ Use one calm, single-column policy form. Do not split this work into internal
 tabs or another stepper.
 
 ```text
-Back            Vayada logo | Step 7 of 9        Review setup   Exit setup
-              [filled][filled][filled][filled][filled][filled][filled]...
+Back            Vayada logo | Step 6 of 8                       Exit setup
+              [filled][filled][filled][filled][filled][filled]...
 
                     Configure the guest experience
            Set who can book, what guests enter, and the policies they see.
@@ -2840,10 +2540,9 @@ Each additional adult or child costs EUR 30 per night.
 
 ##### Page shell
 
-- Reuse the same setup header, progress segments, Back, Review setup, and Exit
-  setup behavior as Step 6.
-- Show `Step 6 of 8` for Hotel Operations-only setup and `Step 7 of 9` for the
-  combined route.
+- Reuse the same setup header, progress segments, Back, and Exit setup behavior
+  as Step 6.
+- Show `Step 6 of 8`.
 - Use the title `Configure the guest experience`.
 - Use the supporting sentence
   `Set who can book, what guests enter, and the policies they see.`
@@ -2981,8 +2680,7 @@ Each additional adult or child costs EUR 30 per night.
   `Reload latest settings`. It never overwrites another employee's changes.
 - `Save and continue` moves to Choose payments. It does not publish the
   Booking Engine.
-- Back, Review setup, and Exit setup preserve dirty fields in the resumable
-  onboarding draft.
+- Back and Exit setup preserve dirty fields in the resumable onboarding draft.
 
 ##### Publication readiness
 
@@ -3073,8 +2771,8 @@ The owner chooses payment methods and can start provider setup without turning
 this screen into a banking or payout form.
 
 ```text
-Back            Vayada logo | Step 8 of 9        Review setup   Exit setup
-              [filled][filled][filled][filled][filled][filled][filled][filled]...
+Back            Vayada logo | Step 7 of 8                       Exit setup
+              [filled][filled][filled][filled][filled][filled][filled]...
 
                      Choose how guests can pay
  Choose one or more methods. You can continue while a payment provider reviews
@@ -3106,8 +2804,7 @@ Choose and save at least one payment method.
 ##### Page shell
 
 - Reuse the setup shell and active-route progress from Step 7.
-- Show `Step 7 of 8` for Hotel Operations-only setup and `Step 8 of 9` for the
-  combined route.
+- Show `Step 7 of 8`.
 - Use the title `Choose how guests can pay`.
 - Use the supporting sentence
   `Choose one or more methods. You can continue while a payment provider reviews your account.`
@@ -3315,34 +3012,24 @@ has an unsafe plaintext bank-instruction path.
 
 This step collects publication decisions, not more hotel information.
 
-| Decision ID                 | Treatment                               | Effect                                                                                                  |
-| --------------------------- | --------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| `launch.marketplace_submit` | Shown when Marketplace is selected      | Submits a complete Marketplace profile for review; admin verification remains a separate lifecycle step |
-| `launch.booking_publish`    | Shown when Hotel Operations is selected | Publishes the complete Booking revision only when its blockers are resolved                             |
+| Decision ID              | Treatment                               | Effect                                                                      |
+| ------------------------ | --------------------------------------- | --------------------------------------------------------------------------- |
+| `launch.booking_publish` | Shown when Hotel Operations is selected | Publishes the complete Booking revision only when its blockers are resolved |
 
 Recommended but skippable work remains non-blocking. Step 9 may surface it as a
 later improvement, but it never asks the owner to confirm the same skip again.
 
 #### Step 9 screen blueprint
 
-Step 9 is a launch dashboard with one independent section for each selected
-product. It is not another data-entry form.
+Step 9 is a launch dashboard with one section for the Booking Engine. It is
+not another data-entry form.
 
 ```text
-Back            Vayada logo | Step 9 of 9                       Exit setup
-              [filled][filled][filled][filled][filled][filled][filled][filled][filled]
+Back            Vayada logo | Step 8 of 8                       Exit setup
+              [filled][filled][filled][filled][filled][filled][filled][filled]
 
                          Review and launch
-             Submit Marketplace or publish Booking when each is ready.
-
-Creator Marketplace
-Ready to submit
-
-[complete] Hotel profile
-[complete] Collaboration preferences
-
-Your profile will be reviewed before it becomes public.
-                                                   Submit to Marketplace
+             Check what is ready, then publish your booking page.
 
 Booking Engine
 Needs attention
@@ -3362,21 +3049,12 @@ Resolve 1 required item before publishing.
 ##### Page shell
 
 - Reuse the setup header with Back, the Vayada logo, active-route progress, and
-  Exit setup. Omit the Review setup link because this is the review screen.
-- Show `Step 3 of 3` for Marketplace-only, `Step 8 of 8` for Hotel
-  Operations-only, and `Step 9 of 9` for the combined route.
+  Exit setup.
+- Show `Step 8 of 8`.
 - Use the title `Review and launch`.
-- Adapt the supporting sentence to the selected route:
-  - Marketplace-only:
-    `Check what is ready, then submit your Marketplace profile.`
-  - Hotel Operations-only:
-    `Check what is ready, then publish your booking page.`
-  - Combined:
-    `Submit Marketplace or publish Booking when each is ready.`
-- Use one centered page column around 1,120 pixels wide with the selected
-  product sections stacked vertically.
-- Do not add a combined `Launch all` action. Each product has its own
-  readiness, command, result, and retry lifecycle.
+- Use the supporting sentence
+  `Check what is ready, then publish your booking page.`
+- Use one centered page column around 1,120 pixels wide.
 - Do not collect new hotel, room, pricing, policy, payment, PMS-label,
   growth-tool, consent, or legal fields.
 
@@ -3401,37 +3079,6 @@ Resolve 1 required item before publishing.
   missing fields.
 - An Edit action returns to the exact owning step and entity, preserving the
   active route. Returning to Step 9 reloads authoritative readiness.
-
-##### Creator Marketplace section
-
-Group Marketplace readiness into:
-
-- Hotel profile
-- Collaboration preferences
-
-Use these states:
-
-- `Needs attention`: show the missing groups and an Edit action to Step 1 or
-  Step 2.
-- `Ready to submit`: enable `Submit to Marketplace`.
-- `Submitting`: disable repeat submission and restore the operation after a
-  reload.
-- `Pending review`: explain that Vayada is reviewing the profile. Do not show a
-  second Submit action.
-- `Changes requested`: show the moderation reason that is safe for the owner
-  and the exact step to edit before resubmission.
-- `Published`: show `Open Marketplace profile`.
-- `Suspended`: explain that the profile is not public and show the supported
-  next action without implying that editing alone will restore it.
-
-Use `Submit to Marketplace`, not `Publish Marketplace`. The existing public
-Marketplace lifecycle requires admin verification, so direct-publication copy
-would be false.
-
-The target lifecycle needs distinct Draft, Submitted, Pending review, Changes
-requested, Verified/Published, and Suspended states. A generic `pending` value
-must not represent both an unfinished profile and a submitted profile awaiting
-review.
 
 ##### Booking Engine section
 
@@ -3484,9 +3131,8 @@ block only room assignment, housekeeping, and check-in workflows in PMS.
 
 ##### Publication commands and conflicts
 
-- Marketplace submission and Booking publication use separate idempotent,
-  expected-versioned commands.
-- Each command includes the readiness revision and the complete source-revision
+- Booking publication uses an idempotent, expected-versioned command.
+- The command includes the readiness revision and the complete source-revision
   manifest used by its card.
 - The server rechecks authorization, entitlements, target property,
   completeness, provider capabilities, and source revisions inside the final
@@ -3494,15 +3140,11 @@ block only room assignment, housekeeping, and check-in workflows in PMS.
 - A stale command never publishes an older draft. Reload readiness, explain
   which step changed, and preserve the previous live version.
 - If the client times out, return or recover an operation identifier. Poll the
-  existing operation rather than creating another submission or publication.
+  existing operation rather than creating another publication.
 - A failed publication leaves the previous live revision untouched.
-- When both products are selected, one successful action remains successful
-  when the other fails. Retry only the failed product.
 - Booking publication first builds and validates the complete public
   projection, then atomically changes the active revision pointer. Public
   reads fail closed when a required projection watermark is missing.
-- Marketplace submission creates a moderation snapshot. Later owner edits
-  belong to a new draft and do not mutate the snapshot already under review.
 - A capability loss after Booking publication immediately suppresses only the
   unsafe payment method or dependent rate. It does not roll the whole product
   back to onboarding.
@@ -3513,15 +3155,11 @@ Before this screen can ship, the target stack needs:
 
 - one read-only cross-product launch-readiness aggregate with structured,
   step-addressable blockers and independent product states;
-- `marketplace.profile.manage` plus active Marketplace entitlement and linked
-  property authorization for Marketplace submission, and
-  `booking.settings.manage` plus active Hotel Operations entitlement and
+- `booking.settings.manage` plus active Hotel Operations entitlement and
   linked property authorization for Booking publication;
-- a real Marketplace owner submission command and moderation lifecycle that
-  separates Draft from Pending review;
 - an idempotent, expected-versioned Booking publication command instead of a
   POST that can return success while still reporting missing readiness;
-- operation status/recovery for uncertain submission and publication responses;
+- operation status/recovery for uncertain publication responses;
 - readiness predicates that validate the exact target fields rather than
   accepting a long description for the required short summary or arbitrary
   public media for the required property logo;
@@ -3529,50 +3167,31 @@ Before this screen can ship, the target stack needs:
   honors per-method capability state;
 - Booking calendar readiness based on configuration, materialized revision,
   coverage, and sellable-limit invariants rather than transient availability;
-- independent Marketplace and Distribution-owned Booking activation pointers so partial success
-  is durable and retryable;
-- immutable submission/publication source manifests and audit records; and
+- a Distribution-owned Booking activation pointer;
+- immutable publication source manifests and audit records; and
 - explicit system-error states so service or projection failures never appear
   as owner omissions.
 
 The current Booking command mixes projection and publication, has no
 idempotency or expected source revision, and can return an HTTP success response
-with missing readiness. Marketplace exposes status reads and admin
-verification, but no distinct hotel-owner submission lifecycle.
+with missing readiness.
 
 ##### Accessibility and mobile behavior
 
 - Use sections with real headings for each product. Readiness items are lists,
   and each Edit action includes the affected group in its accessible name.
-- Announce state transitions such as submission accepted, publication
-  complete, conflict, or external review pending through a restrained live
-  region.
+- Announce state transitions such as publication complete, conflict, or
+  external review pending through a restrained live region.
 - Never communicate Ready, Pending, or Needs attention through color alone.
 - Keep product actions one line, at least 44 by 44 pixels, and disabled only
   for a documented blocker or active operation.
-- Do not steal focus when an asynchronous submission or publication succeeds.
+- Do not steal focus when an asynchronous publication succeeds.
   Move focus only to an actionable error or conflict summary.
-- On mobile, stack both product sections and every readiness row. Keep the
-  group label, state, and Edit action readable without horizontal scrolling.
-- Keep each product's primary action full width and directly below that
-  product. Do not create a sticky action that could be mistaken for a combined
-  launch.
+- On mobile, stack every readiness row. Keep the group label, state, and Edit
+  action readable without horizontal scrolling.
+- Keep the primary action full width and directly below its section.
 
 ### Target launch-readiness rules
-
-Marketplace submission requires:
-
-- the preserved hotel identity, location, contact, and property logo;
-- explicit `hotel.locality_public` consent for the city/country used by the
-  public profile, with street address and coordinates still private;
-- `profile.short_description`;
-- generated `profile.public_slug`;
-- all four `marketplace.preferences.*` groups;
-- a current Marketplace draft revision; and
-- an explicit, idempotent Marketplace submission action.
-
-Marketplace publication then requires a successful moderation outcome for that
-submitted snapshot. Owner submission must not bypass admin verification.
 
 Booking publication requires:
 
@@ -3609,19 +3228,7 @@ publication.
 
 ### Route walkthroughs
 
-#### Creator Marketplace only — three displayed steps
-
-1. **Present your hotel:** save the canonical summary and optional shared
-   media/amenities.
-2. **Marketplace preferences:** choose general compensation,
-   platforms, content types, and availability.
-3. **Review and launch:** submit the Marketplace profile for review when its
-   blockers are complete.
-
-The route never asks about rooms, prices, room inventory or calendar
-availability, guest languages, policies, or payments.
-
-#### Hotel Operations only — eight displayed steps
+#### Hotel Operations — eight displayed steps
 
 1. **Present your hotel.**
 2. **Design booking page.**
@@ -3633,18 +3240,8 @@ availability, guest languages, policies, or payments.
 8. **Review and launch.**
 
 The route creates the public Booking foundation and the initial PMS inventory
-together. It does not ask Marketplace questions. After launch, the PMS prompts
-for actual physical-room labels before operational workflows begin.
-
-#### Marketplace + Hotel Operations — nine displayed steps
-
-The default route presents all nine canonical steps in order. Shared hotel
-content and media are entered once. Marketplace preferences come before
-Booking/PMS setup, as previously decided. `Review setup` may open Step 9 early
-so a ready Marketplace profile can be submitted without completing Booking/PMS
-setup. Review calculates Marketplace submission and Booking publication
-readiness separately so either lifecycle can progress without waiting for the
-other.
+together. After launch, the PMS prompts for actual physical-room labels before
+operational workflows begin.
 
 #### Validation scenarios
 
@@ -3655,9 +3252,7 @@ other.
   only method, Booking waits.
 - **Recommended work skipped:** the owner can continue without another
   acknowledgment; the post-launch checklist can surface the work again.
-- **Resume or go back:** saved domain data pre-populates every step and the
-  active route is recalculated from the selected products without erasing
-  hidden product-specific drafts.
+- **Resume or go back:** saved domain data pre-populates every step.
 
 ## Evidence Sources
 
@@ -3665,17 +3260,15 @@ The audit used the target migrations and current application surfaces,
 including:
 
 - `packages/backend-migration/migrations/0004_property_catalog.sql`;
-- `0006_pms_operations.sql`, `0007_finance.sql`, `0008_marketplace.sql`,
-  `0012_booking_settings.sql`, and subsequent booking-setting migrations;
+- `0006_pms_operations.sql`, `0007_finance.sql`, `0012_booking_settings.sql`,
+  and subsequent booking-setting migrations;
 - `packages/product-onboarding/src`;
-- `packages/domain-hotels/src`, `packages/domain-marketplace/src`;
-- Marketplace discovery, profile, and hotel-preference surfaces, plus Git
-  history for the retired offer editor;
+- `packages/domain-hotels/src`;
 - Booking Admin Design Studio, Booking Flow, and Settings;
 - PMS room, property-settings, check-in checklist, and checkout inspection
   surfaces;
-- the TypeScript API routes for property profile, Marketplace, Booking settings,
-  Finance, and PMS operations.
+- the TypeScript API routes for property profile, Booking settings, Finance,
+  and PMS operations.
 
 ## Dependency-Ordered Implementation Plan
 
@@ -3713,7 +3306,7 @@ prerequisite contracts are approved.
   without rejecting canonical drift. Resume may flag stale source data; a
   step-owned canonical apply must compare that stored manifest against current
   revisions in the same transaction before writing.
-- Back, Exit, and Review may save a partial step draft. `Save and continue`
+- Back and Exit may save a partial step draft. `Save and continue`
   calls one step-owned application command that commits the canonical write and
   progress outcome together; the browser must not sequence a canonical write
   followed by a generic progress write. Step 3 is the intentional exception
@@ -3752,11 +3345,6 @@ flowchart TD
   A --> C["Canonical property profile and media"]
   A --> Q["Source-manifest, readiness-port, and publication-revision contracts"]
   B --> D["Adaptive setup shell"]
-  B --> E["Marketplace preferences"]
-  C --> E
-  E --> F["Marketplace revision and readiness"]
-  Q --> F
-  F --> S["Marketplace submission and moderation snapshot"]
   B --> G["Booking design draft and preview"]
   C --> G
   Q --> G
@@ -3768,7 +3356,6 @@ flowchart TD
   I --> K["Booking guest experience and policy confirmation"]
   I --> L["Finance payment-method readiness"]
   Q --> M["Product-scoped launch readiness"]
-  F --> M
   G --> M
   H --> M
   I --> M
@@ -3778,8 +3365,6 @@ flowchart TD
   M --> N["Booking publication"]
   N --> R["Active-revision quote and checkout"]
   D --> O["Screen-by-screen UI integration"]
-  F --> O
-  S --> O
   G --> O
   H --> O
   I --> O
@@ -3794,19 +3379,19 @@ Pricing and calendar can proceed in parallel once the room-type contract is
 stable. Booking design can proceed in parallel with PMS work after canonical
 media is available. Guest experience and payment readiness can proceed in
 parallel after the pricing currency and structured rate-policy contracts are
-stable. Marketplace does not depend on any PMS, Booking, or Finance slice.
+stable.
 
 ### Delivery waves
 
 | Wave | Outcome                                                                          | Parallel work after the wave                                                                                          |
 | ---- | -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
 | 0    | Freeze target contracts and reconcile the current stack                          | None; later tickets must not guess table or command ownership                                                         |
-| 1    | Add draft/progress, source-manifest/publication, and canonical-media foundations | Adaptive shell, Marketplace, Booking design, and PMS room contracts can separate                                      |
-| 2    | Complete shared hotel presentation and Marketplace submission                    | Booking design and PMS room implementation continue independently                                                     |
+| 1    | Add draft/progress, source-manifest/publication, and canonical-media foundations | Adaptive shell, Booking design, and PMS room contracts can separate                                                   |
+| 2    | Complete shared hotel presentation                                               | Booking design and PMS room implementation continue independently                                                     |
 | 3    | Complete Booking design and PMS room authoring                                   | Pricing and calendar become independent parallel lanes                                                                |
 | 4    | Complete pricing/rate-policy and calendar/inventory foundations                  | Guest-experience and Finance payment lanes can run in parallel                                                        |
 | 5    | Complete guest-policy confirmation and at least Pay at hotel readiness           | Product readiness providers and public projection can integrate stable source revisions                               |
-| 6    | Add independent Marketplace submission and Booking publication                   | Full browser, migration, and cutover validation                                                                       |
+| 6    | Add Booking publication                                                          | Full browser, migration, and cutover validation                                                                       |
 | 7    | Rehearse the target-schema route and perform the coordinated cutover             | Stripe may be enabled separately when charge execution is ready; bank transfer remains gated by its separate contract |
 
 ### Candidate issue and PR stack
@@ -3822,43 +3407,41 @@ row that still needs several layers, use this PR order:
 
 Do not bundle all five layers into one large PR.
 
-| Key                                                                                                        | Review question / deliverable                                                                                                                                                                                                                                           | Depends on                                                                                   | Completion signal                                                                                                                                                                                                                                                                  |
-| ---------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [ONB-00](https://linear.app/vayadacom/issue/VAY-1044/map-onboarding-fields-to-target-domain-owners)        | Does the current target schema and API map every approved onboarding field to exactly one owner, command, and read model? Reconcile existing setup-track, property revision, Marketplace preference, media, PMS, Booking, and Finance work before adding new contracts. | Approved inventory                                                                           | One checked field-to-owner matrix; existing PMS migration/parity work is marked extend rather than greenfield; stale migration-coverage claims and every remaining legacy wizard consumer are identified; no unresolved product-field decision.                                    |
-| [ONB-01](https://linear.app/vayadacom/issue/VAY-1045/add-resumable-onboarding-drafts-and-progress)         | Can setup store one active organization/property session with incomplete per-step input, active-track progress, base revisions, and dirty-field manifests without duplicating canonical domain records?                                                                 | ONB-00                                                                                       | Target DDL and typed contracts define retention/PII and per-step allowlists, round-trip incomplete drafts, retain hidden-track data, reject unknown/excessive/secret input, preserve source manifests, block stale canonical overwrites, and never authorize from a draft.         |
-| [ONB-02](https://linear.app/vayadacom/issue/VAY-1046/standardize-onboarding-command-safety)                | Do setup commands consistently reuse full-request fingerprinting, expected revisions, and atomic domain/idempotency/audit/outbox writes, with recoverable status only for long-running or externally uncertain operations?                                              | ONB-00                                                                                       | Exact retries replay the original result; key reuse with different input returns `409`; uncertain external operations have a safe status read; no second idempotency or generic job framework is introduced.                                                                       |
-| [ONB-02A](https://linear.app/vayadacom/issue/VAY-1048/define-onboarding-revision-and-lifecycle-contracts)  | Does every producer use one typed source-manifest/revision vocabulary, one readiness-port result, and explicit immutable submission/publication revision plus active-pointer contracts?                                                                                 | ONB-00, ONB-02                                                                               | A deterministic manifest/readiness hash and structured product/group/step/entity/blocker result are fixture-tested; Marketplace submission and Booking request lifecycles are independent; Distribution's public revision/active pointer and live-ARI watermark are distinct.      |
-| [ONB-03](https://linear.app/vayadacom/issue/VAY-1049/build-the-adaptive-onboarding-route-model)            | Can one read model calculate active steps and progress from selected tracks plus canonical and draft state without deciding product readiness itself?                                                                                                                   | ONB-01                                                                                       | Marketplace-only, Hotel Operations-only, and combined route fixtures return the approved active order, stable step IDs, resumable status, and no invisible numbering gaps.                                                                                                         |
-| [ONB-04](https://linear.app/vayadacom/issue/VAY-1051/build-the-adaptive-onboarding-shell)                  | Can a separate adaptive controller and shared shell render routing, progress, Back, Exit setup, conflict recovery, and browser-derived interface locale without owning any form data?                                                                                   | ONB-03                                                                                       | Marketplace hosts the canonical `/setup`; Booking Admin and PMS preserve their redirects; keyboard/mobile tests cover all routes, resume, Back, Exit, stale draft, network recovery, and no calls to deleted endpoints.                                                            |
-| [ONB-04A](https://linear.app/vayadacom/issue/VAY-1050/remove-retired-onboarding-fields-from-admin-invites) | Can Vayada Admin create or invite a hotel account using product-track intent without importing retired onboarding steps or raw bank fields?                                                                                                                             | ONB-00, ONB-03                                                                               | Invite creation is reduced to identity, organization, property, and selected tracks or rebuilt against target contracts; retired product-onboarding exports can then be deleted safely.                                                                                            |
-| [ONB-05](https://linear.app/vayadacom/issue/VAY-1047/create-a-canonical-hotel-media-contract)              | Can a property logo and one reusable hotel media library be uploaded, finalized, approved, assigned, reordered, replaced, and projected through a product-neutral Hotel Catalog contract?                                                                               | ONB-00, ONB-02                                                                               | Hotel Catalog/property authorization replaces the current Booking-only policy; finalized uploads remain private until a CAS assignment succeeds; safe variants, purpose preservation, replacement/reference rules, and one shared canonical cover pass.                            |
-| ONB-06                                                                                                     | Does the preserved prerequisite flow collect one property logo and explicit public-locality consent while removing the hotel-manager personal-photo requirement?                                                                                                        | ONB-05                                                                                       | Hotel accounts finish with a property-owned logo and explicit city/country visibility choice; street/coordinates remain private; creator accounts still require their personal photo; manager menus use initials.                                                                  |
-| ONB-07                                                                                                     | Can Step 1 save content locale, short summary, optional amenities, and canonical media while preserving incomplete input and deterministic slug/alt-text generation?                                                                                                    | ONB-01, ONB-05                                                                               | Canonical writes bind summary to an explicit supported locale and expected profile revision; draft-only partial input resumes; explicit empty amenities are valid; Step 1 browser flow passes.                                                                                     |
-| ONB-08                                                                                                     | Can Step 2 create the approved complete Marketplace preference replacement contract while drafts represent unanswered and partial groups safely?                                                                                                                        | ONB-01, ONB-07                                                                               | Additive DDL, a strict expected-versioned command/read model/readiness projection, and reviewed legacy offer transform exist; incomplete draft does not create false `year_round` readiness; all four groups and selected-month validation pass with route-policy denial coverage. |
-| ONB-09                                                                                                     | Can a hotel owner submit one immutable Marketplace profile/preference snapshot for moderation without creating an offer or mutating an in-review snapshot?                                                                                                              | ONB-02A, ONB-07, ONB-08                                                                      | Draft, pending-review, approved, rejected, and superseded states are explicit; submission is idempotent and expected-versioned; admin moderation and owner resubmission tests pass.                                                                                                |
-| ONB-10                                                                                                     | Can Step 3 store only allowlisted booking design choices, preview them through the production renderer, and keep them private until publication?                                                                                                                        | ONB-02A, ONB-05, ONB-07                                                                      | Settings support create/upsert and expected revisions; preview uses the saved canonical summary/cover and scoped tokens; the live Booking page reads only an active published revision.                                                                                            |
-| ONB-11                                                                                                     | Does PMS expose typed, independently editable room-type facts and an opaque physical-unit identity with a nullable, explicitly unverified operational label instead of the current combined command and required fake room number?                                      | ONB-00, ONB-02, ONB-02A                                                                      | Additive DDL and create/update/read/safe-delete contracts cover room facts and stable IDs; target fixtures prove unlabeled generated units are valid while public-looking fake labels and coupled pricing/calendar writes are impossible.                                          |
-| ONB-12                                                                                                     | Can PMS reconcile unit count into physical rooms with unverified generated labels while preserving the operational capacity invariant?                                                                                                                                  | ONB-11                                                                                       | Increasing/decreasing unit count is safe, assigned units are protected, opaque units may remain unlabeled, and assignment/housekeeping/check-in reject unverified labels without blocking Booking.                                                                                 |
-| ONB-13                                                                                                     | Can room photos and reviewed-empty amenities be assigned through typed room contracts and serialized into the Booking draft projection?                                                                                                                                 | ONB-05, ONB-11                                                                               | Media authorization and public-variant checks pass; at least one photo is enforced for publish; empty amenities require persisted review; projection includes every approved room fact.                                                                                            |
-| ONB-14                                                                                                     | Does the complete Step 4 UI save, resume, add, edit, and safely remove multiple room types against ONB-11–13?                                                                                                                                                           | ONB-11, ONB-12, ONB-13                                                                       | Desktop/mobile/keyboard tests cover multiple room types, uploads, empty-amenity review, conflicts, generated unit count, and no coupled pricing/calendar request.                                                                                                                  |
-| ONB-15                                                                                                     | Is there one PMS-owned property pricing currency and one stable flexible rate plan with authoritative base amounts and structured cancellation terms for every room type?                                                                                               | ONB-02, ONB-02A, ONB-11                                                                      | Currency consistency and safe currency changes are enforced; flexible plans can be independently read/upserted; no duplicate base-price write owner remains; cancellation snapshots are structured.                                                                                |
-| ONB-16                                                                                                     | Can recurring seasons, weekend surcharge, additional-guest pricing, and discount-derived non-refundable plans be independently created, edited, disabled, validated, and materialized from source configuration separate from dated rate rows?                          | ONB-15                                                                                       | Stable source IDs/revisions and explicit lifecycle states survive rematerialization; overlap/capacity/payment-timing rules pass; invalid optional rules remain visible and cannot silently disappear from readiness.                                                               |
-| ONB-17                                                                                                     | Does one decimal-safe pricing engine create deterministic previews, quote inputs, immutable booking-price snapshots, guest disclosures, and source fingerprints from ONB-15–16?                                                                                         | ONB-15, ONB-16                                                                               | Named rounding and currency rules match fixtures; every component/revision is snapshotted; price-affecting changes invalidate confirmation; non-refundable offers fail closed without charge-ready cards.                                                                          |
-| ONB-18                                                                                                     | Does the complete Step 5 UI expose the approved core and optional pricing controls without writing calendar state or relying on JavaScript floating point?                                                                                                              | ONB-15, ONB-16, ONB-17                                                                       | Multi-room, locale-decimal, season, weekend, additional-guest, non-refundable, disclosure, confirmation, conflict, and mobile browser cases pass.                                                                                                                                  |
-| ONB-19                                                                                                     | Can PMS save an independent year-round/recurring operating calendar, default minimum stay, and per-room starting sellable limits with expected revisions?                                                                                                               | ONB-02, ONB-02A, ONB-11, ONB-12                                                              | Complete editable read/write contract exists; property timezone and physical capacity fail closed; pricing coverage is not required to create calendar configuration.                                                                                                              |
-| ONB-20                                                                                                     | Can a rolling-horizon materializer and provider-neutral PMS reserve/release lifecycle preserve source precedence, manual/channel/block/booking changes, sellable-limit invariants, and idempotent reservation receipts under property locking?                          | ONB-19                                                                                       | The root PMS port chooses explicit hold/confirm/release or saga semantics, returns a durable opaque receipt, leaks no `pg` transaction or Distribution access, stays separate from confirmed-reservation handoff, and passes retry/release/capacity/watermark fixtures.            |
-| ONB-21                                                                                                     | Does Step 6 preview impact, require version-matched confirmation, save calendar configuration, and distinguish launch configuration from transient availability?                                                                                                        | ONB-19, ONB-20                                                                               | Preview/final recomputation catches stale accepted bookings and overrides; no booking is implied cancelled; public availability refreshes while room/pricing/design publication remains explicit.                                                                                  |
-| ONB-22                                                                                                     | Can one Booking-owned guest-experience aggregate manage default guest language, child policy, optional guest fields, and property check-in/out times while composing structured per-rate disclosures?                                                                   | ONB-02A, ONB-13, ONB-15, ONB-17                                                              | Language capability is server-owned; employee locale stays separate; cross-domain writes are narrow; room-capacity and policy confirmation bind every source revision; missing timezone/policy data fails closed.                                                                  |
-| ONB-23                                                                                                     | Does Step 7 make the generated policy bundle understandable, invalidate stale confirmation, and save only private working configuration until launch?                                                                                                                   | ONB-22                                                                                       | Child-capacity, time, language, cancellation, additional-guest, optional-field, accessibility, mobile, stale-source, and conflict tests pass.                                                                                                                                      |
-| ONB-24                                                                                                     | Can Finance return and update per-method selection/readiness safely, with Pay at hotel distinct from direct bank transfer?                                                                                                                                              | ONB-02, ONB-02A, ONB-15                                                                      | Pay at hotel can become ready without bank details; selections are expected-versioned and idempotent; safe next actions and blockers come from Finance; masked/secret data never enters setup events.                                                                              |
-| ONB-25                                                                                                     | Can Stripe hosted onboarding and authoritative webhook/API reconciliation represent account connection, charges, payouts, restrictions, actions, and capability loss without claiming guest card readiness?                                                             | ONB-24                                                                                       | Provider redirects resume safely; return parameters never imply success; reconciled target state and safe actions are authoritative; account connection remains distinct from Booking card-execution readiness.                                                                    |
-| ONB-25A                                                                                                    | Can PaymentIntent execution, quote and booking linkage, retries, failure recovery, and capability revalidation make Online card truthfully charge-ready?                                                                                                                | ONB-17, ONB-25                                                                               | Online card remains unavailable until an end-to-end booking payment succeeds in test; stale quote and duplicate charge cases fail safely; capability loss immediately suppresses only dependent methods/rates.                                                                     |
-| ONB-26                                                                                                     | Does Step 8 render only methods the backend can support, allow Pay at hotel launch, resume provider redirects, and explain pending/blocking state without reconstructing readiness in the browser?                                                                      | ONB-24, ONB-25; ONB-25A for card readiness                                                   | Pay at hotel passes independently; Stripe may be selected and connected before ONB-25A but never becomes ready or public; bank transfer is absent until VAY-1041; stale currency/settings and provider-return cases pass.                                                          |
-| ONB-27                                                                                                     | Can each domain contribute typed, structured, step-addressable blockers and source revisions to one read-only product-scoped launch aggregate without extending the current raw cross-domain publication SQL?                                                           | ONB-02A, ONB-09, ONB-10, ONB-13, ONB-17, ONB-20, ONB-22, ONB-24                              | Marketplace and Booking readiness are independent; typed ports separate service/projection errors from owner omissions; temporary sold-out state and recommended work do not become configuration blockers.                                                                        |
-| ONB-28                                                                                                     | Can Booking request publication from typed producer ports while Distribution builds and validates the complete immutable public revision and atomically advances its active pointer through an idempotent, expected-manifest operation?                                 | ONB-02A, ONB-10, ONB-13, ONB-17, ONB-20, ONB-22, ONB-24, ONB-27                              | Booking owns request/attempt manifests and checkout configuration; Distribution owns public revisions, projection, active pointer, and live ARI watermark; failed/stale builds leave the old page live and readiness loss fails closed.                                            |
-| ONB-28A                                                                                                    | Can public Booking reads, quotes, and checkout consume only the active content revision plus sufficiently fresh live ARI and revalidate every commercial invariant at quote creation and consumption?                                                                   | ONB-17, ONB-20, ONB-24, ONB-28; ONB-25A for cards                                            | Price fingerprint, minimum stay, availability, currency, payment timing, and Finance capability are revalidated; parity, timeout/retry, concurrent reservation, stale quote, and oversell fixtures pass.                                                                           |
-| ONB-29                                                                                                     | Does Step 9 submit Marketplace and publish Booking independently, recover uncertain operations, retain partial success, and route every blocker back to its owning step?                                                                                                | ONB-04, ONB-09, ONB-27, ONB-28, ONB-28A                                                      | Marketplace-only, Hotel Operations-only, and combined browser flows pass; one product failure does not undo the other; there is no combined launch action or false HTTP-success state.                                                                                             |
-| ONB-30                                                                                                     | Is the complete replacement safe to expose and cut over?                                                                                                                                                                                                                | ONB-00–29, including ONB-02A, ONB-04A, and ONB-28A; ONB-25A only when Online card is enabled | Target migrations/parity, authorization denial suites, build/typecheck, browser/mobile/accessibility, public/private audit, staging rehearsal, and rollback gates pass; Pay-at-hotel cutover may precede card execution; admin invite dependencies and retired routes are removed. |
+| Key                                                                                                        | Review question / deliverable                                                                                                                                                                                                                   | Depends on                                                                                                                        | Completion signal                                                                                                                                                                                                                                                                  |
+| ---------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [ONB-00](https://linear.app/vayadacom/issue/VAY-1044/map-onboarding-fields-to-target-domain-owners)        | Does the current target schema and API map every approved onboarding field to exactly one owner, command, and read model? Reconcile existing setup-track, property revision, media, PMS, Booking, and Finance work before adding new contracts. | Approved inventory                                                                                                                | One checked field-to-owner matrix; existing PMS migration/parity work is marked extend rather than greenfield; stale migration-coverage claims and every remaining legacy wizard consumer are identified; no unresolved product-field decision.                                    |
+| [ONB-01](https://linear.app/vayadacom/issue/VAY-1045/add-resumable-onboarding-drafts-and-progress)         | Can setup store one active organization/property session with incomplete per-step input, active-track progress, base revisions, and dirty-field manifests without duplicating canonical domain records?                                         | ONB-00                                                                                                                            | Target DDL and typed contracts define retention/PII and per-step allowlists, round-trip incomplete drafts, retain hidden-track data, reject unknown/excessive/secret input, preserve source manifests, block stale canonical overwrites, and never authorize from a draft.         |
+| [ONB-02](https://linear.app/vayadacom/issue/VAY-1046/standardize-onboarding-command-safety)                | Do setup commands consistently reuse full-request fingerprinting, expected revisions, and atomic domain/idempotency/audit/outbox writes, with recoverable status only for long-running or externally uncertain operations?                      | ONB-00                                                                                                                            | Exact retries replay the original result; key reuse with different input returns `409`; uncertain external operations have a safe status read; no second idempotency or generic job framework is introduced.                                                                       |
+| [ONB-02A](https://linear.app/vayadacom/issue/VAY-1048/define-onboarding-revision-and-lifecycle-contracts)  | Does every producer use one typed source-manifest/revision vocabulary, one readiness-port result, and explicit immutable publication revision plus active-pointer contracts?                                                                    | ONB-00, ONB-02                                                                                                                    | A deterministic manifest/readiness hash and structured product/group/step/entity/blocker result are fixture-tested; Distribution's public revision/active pointer and live-ARI watermark are distinct.                                                                             |
+| [ONB-03](https://linear.app/vayadacom/issue/VAY-1049/build-the-adaptive-onboarding-route-model)            | Can one read model calculate active steps and progress from selected tracks plus canonical and draft state without deciding product readiness itself?                                                                                           | ONB-01                                                                                                                            | Hotel Operations route fixtures return the approved active order, stable step IDs, resumable status, and no invisible numbering gaps.                                                                                                                                              |
+| [ONB-04](https://linear.app/vayadacom/issue/VAY-1051/build-the-adaptive-onboarding-shell)                  | Can a separate adaptive controller and shared shell render routing, progress, Back, Exit setup, conflict recovery, and browser-derived interface locale without owning any form data?                                                           | ONB-03                                                                                                                            | Booking Admin hosts the canonical `/setup` (VAY-2261) and PMS keeps a setup alias that hands off to it; keyboard/mobile tests cover all routes, resume, Back, Exit, stale draft, network recovery, and no calls to deleted endpoints.                                              |
+| [ONB-04A](https://linear.app/vayadacom/issue/VAY-1050/remove-retired-onboarding-fields-from-admin-invites) | Can Vayada Admin create or invite a hotel account using product-track intent without importing retired onboarding steps or raw bank fields?                                                                                                     | ONB-00, ONB-03                                                                                                                    | Invite creation is reduced to identity, organization, property, and selected tracks or rebuilt against target contracts; retired product-onboarding exports can then be deleted safely.                                                                                            |
+| [ONB-05](https://linear.app/vayadacom/issue/VAY-1047/create-a-canonical-hotel-media-contract)              | Can a property logo and one reusable hotel media library be uploaded, finalized, approved, assigned, reordered, replaced, and projected through a product-neutral Hotel Catalog contract?                                                       | ONB-00, ONB-02                                                                                                                    | Hotel Catalog/property authorization replaces the current Booking-only policy; finalized uploads remain private until a CAS assignment succeeds; safe variants, purpose preservation, replacement/reference rules, and one shared canonical cover pass.                            |
+| ONB-06                                                                                                     | Does the preserved prerequisite flow collect one property logo and explicit public-locality consent while removing the hotel-manager personal-photo requirement?                                                                                | ONB-05                                                                                                                            | Hotel accounts finish with a property-owned logo and explicit city/country visibility choice; street/coordinates remain private; manager menus use initials.                                                                                                                       |
+| ONB-07                                                                                                     | Can Step 1 save content locale, short summary, optional amenities, and canonical media while preserving incomplete input and deterministic slug/alt-text generation?                                                                            | ONB-01, ONB-05                                                                                                                    | Canonical writes bind summary to an explicit supported locale and expected profile revision; draft-only partial input resumes; explicit empty amenities are valid; Step 1 browser flow passes.                                                                                     |
+| ONB-10                                                                                                     | Can Step 3 store only allowlisted booking design choices, preview them through the production renderer, and keep them private until publication?                                                                                                | ONB-02A, ONB-05, ONB-07                                                                                                           | Settings support create/upsert and expected revisions; preview uses the saved canonical summary/cover and scoped tokens; the live Booking page reads only an active published revision.                                                                                            |
+| ONB-11                                                                                                     | Does PMS expose typed, independently editable room-type facts and an opaque physical-unit identity with a nullable, explicitly unverified operational label instead of the current combined command and required fake room number?              | ONB-00, ONB-02, ONB-02A                                                                                                           | Additive DDL and create/update/read/safe-delete contracts cover room facts and stable IDs; target fixtures prove unlabeled generated units are valid while public-looking fake labels and coupled pricing/calendar writes are impossible.                                          |
+| ONB-12                                                                                                     | Can PMS reconcile unit count into physical rooms with unverified generated labels while preserving the operational capacity invariant?                                                                                                          | ONB-11                                                                                                                            | Increasing/decreasing unit count is safe, assigned units are protected, opaque units may remain unlabeled, and assignment/housekeeping/check-in reject unverified labels without blocking Booking.                                                                                 |
+| ONB-13                                                                                                     | Can room photos and reviewed-empty amenities be assigned through typed room contracts and serialized into the Booking draft projection?                                                                                                         | ONB-05, ONB-11                                                                                                                    | Media authorization and public-variant checks pass; at least one photo is enforced for publish; empty amenities require persisted review; projection includes every approved room fact.                                                                                            |
+| ONB-14                                                                                                     | Does the complete Step 4 UI save, resume, add, edit, and safely remove multiple room types against ONB-11–13?                                                                                                                                   | ONB-11, ONB-12, ONB-13                                                                                                            | Desktop/mobile/keyboard tests cover multiple room types, uploads, empty-amenity review, conflicts, generated unit count, and no coupled pricing/calendar request.                                                                                                                  |
+| ONB-15                                                                                                     | Is there one PMS-owned property pricing currency and one stable flexible rate plan with authoritative base amounts and structured cancellation terms for every room type?                                                                       | ONB-02, ONB-02A, ONB-11                                                                                                           | Currency consistency and safe currency changes are enforced; flexible plans can be independently read/upserted; no duplicate base-price write owner remains; cancellation snapshots are structured.                                                                                |
+| ONB-16                                                                                                     | Can recurring seasons, weekend surcharge, additional-guest pricing, and discount-derived non-refundable plans be independently created, edited, disabled, validated, and materialized from source configuration separate from dated rate rows?  | ONB-15                                                                                                                            | Stable source IDs/revisions and explicit lifecycle states survive rematerialization; overlap/capacity/payment-timing rules pass; invalid optional rules remain visible and cannot silently disappear from readiness.                                                               |
+| ONB-17                                                                                                     | Does one decimal-safe pricing engine create deterministic previews, quote inputs, immutable booking-price snapshots, guest disclosures, and source fingerprints from ONB-15–16?                                                                 | ONB-15, ONB-16                                                                                                                    | Named rounding and currency rules match fixtures; every component/revision is snapshotted; price-affecting changes invalidate confirmation; non-refundable offers fail closed without charge-ready cards.                                                                          |
+| ONB-18                                                                                                     | Does the complete Step 5 UI expose the approved core and optional pricing controls without writing calendar state or relying on JavaScript floating point?                                                                                      | ONB-15, ONB-16, ONB-17                                                                                                            | Multi-room, locale-decimal, season, weekend, additional-guest, non-refundable, disclosure, confirmation, conflict, and mobile browser cases pass.                                                                                                                                  |
+| ONB-19                                                                                                     | Can PMS save an independent year-round/recurring operating calendar, default minimum stay, and per-room starting sellable limits with expected revisions?                                                                                       | ONB-02, ONB-02A, ONB-11, ONB-12                                                                                                   | Complete editable read/write contract exists; property timezone and physical capacity fail closed; pricing coverage is not required to create calendar configuration.                                                                                                              |
+| ONB-20                                                                                                     | Can a rolling-horizon materializer and provider-neutral PMS reserve/release lifecycle preserve source precedence, manual/channel/block/booking changes, sellable-limit invariants, and idempotent reservation receipts under property locking?  | ONB-19                                                                                                                            | The root PMS port chooses explicit hold/confirm/release or saga semantics, returns a durable opaque receipt, leaks no `pg` transaction or Distribution access, stays separate from confirmed-reservation handoff, and passes retry/release/capacity/watermark fixtures.            |
+| ONB-21                                                                                                     | Does Step 6 preview impact, require version-matched confirmation, save calendar configuration, and distinguish launch configuration from transient availability?                                                                                | ONB-19, ONB-20                                                                                                                    | Preview/final recomputation catches stale accepted bookings and overrides; no booking is implied cancelled; public availability refreshes while room/pricing/design publication remains explicit.                                                                                  |
+| ONB-22                                                                                                     | Can one Booking-owned guest-experience aggregate manage default guest language, child policy, optional guest fields, and property check-in/out times while composing structured per-rate disclosures?                                           | ONB-02A, ONB-13, ONB-15, ONB-17                                                                                                   | Language capability is server-owned; employee locale stays separate; cross-domain writes are narrow; room-capacity and policy confirmation bind every source revision; missing timezone/policy data fails closed.                                                                  |
+| ONB-23                                                                                                     | Does Step 7 make the generated policy bundle understandable, invalidate stale confirmation, and save only private working configuration until launch?                                                                                           | ONB-22                                                                                                                            | Child-capacity, time, language, cancellation, additional-guest, optional-field, accessibility, mobile, stale-source, and conflict tests pass.                                                                                                                                      |
+| ONB-24                                                                                                     | Can Finance return and update per-method selection/readiness safely, with Pay at hotel distinct from direct bank transfer?                                                                                                                      | ONB-02, ONB-02A, ONB-15                                                                                                           | Pay at hotel can become ready without bank details; selections are expected-versioned and idempotent; safe next actions and blockers come from Finance; masked/secret data never enters setup events.                                                                              |
+| ONB-25                                                                                                     | Can Stripe hosted onboarding and authoritative webhook/API reconciliation represent account connection, charges, payouts, restrictions, actions, and capability loss without claiming guest card readiness?                                     | ONB-24                                                                                                                            | Provider redirects resume safely; return parameters never imply success; reconciled target state and safe actions are authoritative; account connection remains distinct from Booking card-execution readiness.                                                                    |
+| ONB-25A                                                                                                    | Can PaymentIntent execution, quote and booking linkage, retries, failure recovery, and capability revalidation make Online card truthfully charge-ready?                                                                                        | ONB-17, ONB-25                                                                                                                    | Online card remains unavailable until an end-to-end booking payment succeeds in test; stale quote and duplicate charge cases fail safely; capability loss immediately suppresses only dependent methods/rates.                                                                     |
+| ONB-26                                                                                                     | Does Step 8 render only methods the backend can support, allow Pay at hotel launch, resume provider redirects, and explain pending/blocking state without reconstructing readiness in the browser?                                              | ONB-24, ONB-25; ONB-25A for card readiness                                                                                        | Pay at hotel passes independently; Stripe may be selected and connected before ONB-25A but never becomes ready or public; bank transfer is absent until VAY-1041; stale currency/settings and provider-return cases pass.                                                          |
+| ONB-27                                                                                                     | Can each domain contribute typed, structured, step-addressable blockers and source revisions to one read-only product-scoped launch aggregate without extending the current raw cross-domain publication SQL?                                   | ONB-02A, ONB-10, ONB-13, ONB-17, ONB-20, ONB-22, ONB-24                                                                           | Typed ports separate service/projection errors from owner omissions; temporary sold-out state and recommended work do not become configuration blockers.                                                                                                                           |
+| ONB-28                                                                                                     | Can Booking request publication from typed producer ports while Distribution builds and validates the complete immutable public revision and atomically advances its active pointer through an idempotent, expected-manifest operation?         | ONB-02A, ONB-10, ONB-13, ONB-17, ONB-20, ONB-22, ONB-24, ONB-27                                                                   | Booking owns request/attempt manifests and checkout configuration; Distribution owns public revisions, projection, active pointer, and live ARI watermark; failed/stale builds leave the old page live and readiness loss fails closed.                                            |
+| ONB-28A                                                                                                    | Can public Booking reads, quotes, and checkout consume only the active content revision plus sufficiently fresh live ARI and revalidate every commercial invariant at quote creation and consumption?                                           | ONB-17, ONB-20, ONB-24, ONB-28; ONB-25A for cards                                                                                 | Price fingerprint, minimum stay, availability, currency, payment timing, and Finance capability are revalidated; parity, timeout/retry, concurrent reservation, stale quote, and oversell fixtures pass.                                                                           |
+| ONB-29                                                                                                     | Does Step 9 publish Booking, recover uncertain operations, and route every blocker back to its owning step?                                                                                                                                     | ONB-04, ONB-27, ONB-28, ONB-28A                                                                                                   | Hotel Operations browser flows pass; there is no false HTTP-success state.                                                                                                                                                                                                         |
+| ONB-30                                                                                                     | Is the complete replacement safe to expose and cut over?                                                                                                                                                                                        | ONB-00–29 except the retired ONB-08 and ONB-09, including ONB-02A, ONB-04A, and ONB-28A; ONB-25A only when Online card is enabled | Target migrations/parity, authorization denial suites, build/typecheck, browser/mobile/accessibility, public/private audit, staging rehearsal, and rollback gates pass; Pay-at-hotel cutover may precede card execution; admin invite dependencies and retired routes are removed. |
 
 ### Parallel lanes after the shared foundation
 
@@ -3866,7 +3449,7 @@ Once ONB-00–05 are stable, use separate owners for these lanes:
 
 | Lane                   | Ordered work                                             | Synchronization point                                                                                                |
 | ---------------------- | -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| Shared/Marketplace     | ONB-06 → ONB-07 → ONB-08 → ONB-09                        | Supplies the Marketplace side of ONB-27 and ONB-29                                                                   |
+| Shared                 | ONB-06 → ONB-07                                          | Supplies the canonical summary and cover that ONB-10 previews                                                        |
 | Booking presentation   | ONB-07 → ONB-10                                          | Supplies design revision and preview inputs to ONB-28                                                                |
 | PMS rooms              | ONB-11 → ONB-12 → ONB-13 → ONB-14                        | Freezes room IDs, capacity, and public room facts before pricing/calendar integration                                |
 | PMS pricing            | ONB-15 → ONB-16 → ONB-17 → ONB-18                        | Supplies cancellation/disclosure and currency contracts to guest experience, Finance, and publication                |
@@ -3905,23 +3488,19 @@ DDL or routes:
   nullable, verifiable operational label in ONB-11;
 - store recurring pricing rules as versioned source configuration separate
   from dated materialization in ONB-16; and
-- create immutable Marketplace submission and Booking publication revisions
-  plus independent active pointers in ONB-02A before changing a live projector
-  or publish route.
+- create immutable Booking publication revisions plus their active pointer in
+  ONB-02A before changing a live projector or publish route.
 
 ### Safe delivery cutlines
 
-1. **Marketplace-only internal pilot:** ONB-00–09, the shared shell, the
-   Marketplace part of ONB-27/29, and the relevant ONB-30 gates. It has no PMS,
-   guest, pricing, calendar, or payment dependency.
-2. **Hotel Operations internal pilot with Pay at hotel:** all shared, Booking,
+1. **Hotel Operations internal pilot with Pay at hotel:** all shared, Booking,
    PMS, guest, Pay-at-hotel, Stripe connection, readiness, publication, and
    ONB-30 work except ONB-25A. Online card may be selected and connected, but
    stays unavailable to guests and does not satisfy readiness.
-3. **Online-card enablement:** ONB-25A plus its Step 8, quote, checkout,
+2. **Online-card enablement:** ONB-25A plus its Step 8, quote, checkout,
    failure, webhook, and publication tests. Connecting a Stripe account alone
    is not this cutline.
-4. **Direct bank transfer:** a separate VAY-1041 stack after encrypted
+3. **Direct bank transfer:** a separate VAY-1041 stack after encrypted
    destination storage, masked reads, narrow reveal authorization, secure
    lifecycle commands, and secret-safe email jobs exist. It is not on the V1
    critical path.
@@ -3949,7 +3528,7 @@ schema a partial production source of truth.
   versions, and outcomes—not bank secrets, guest-policy prose, or unrelated
   property data.
 - **Ownership:** no product route opens another product's raw tables or pool.
-  Booking/PMS and Hotel Catalog/Marketplace/Finance integrations use their
+  Booking/PMS and Hotel Catalog/Finance integrations use their
   approved typed ports, read models, or events.
 - **Migration and parity:** use additive forward migrations rather than
   rewriting existing migration files. Target DDL passes both a clean rebuild
@@ -3986,5 +3565,5 @@ Do not pull these back into the critical path:
 
 Create only the remaining Linear child issues in dependency order as their
 prerequisite contracts are approved. Start implementation with the scheduled
-ONB-00–05 foundation; do not begin by drawing all nine frontend screens against
+ONB-00–05 foundation; do not begin by drawing all eight frontend screens against
 mock or legacy payloads.

@@ -110,8 +110,8 @@ worker-created scheduler jobs do not supply one.
    column, function, and sequence matrix and negative cases first.
 2. Land application credential routing and protected, non-owner role/secret
    provisioning in small PRs. Add a worker-role preflight that rejects owner,
-   migration/evidence, identity, booking, finance, marketplace, unrelated PMS,
-   and cross-queue writes. Preserve the general runtime preflight.
+   migration/evidence, identity, booking, finance, unrelated PMS, and
+   cross-queue writes. Preserve the general runtime preflight.
 3. Apply grants through a reviewed, bounded owner-only runner. Verify the
    actual ECS task definition's secret references and immutable image digest;
    testing an independently supplied URL does not verify deployed wiring.

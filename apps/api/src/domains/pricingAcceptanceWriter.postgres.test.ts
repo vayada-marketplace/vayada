@@ -3406,7 +3406,7 @@ async function setupFixture(
            JOIN information_schema.tables table_info USING(table_schema,table_name)
            WHERE c.column_name='property_id' AND table_info.table_type='BASE TABLE'
              AND c.table_schema IN
-             ('booking','distribution','finance','hotel_catalog','identity','marketplace','platform','pms')
+             ('booking','distribution','finance','hotel_catalog','identity','platform','pms')
            ORDER BY c.table_schema,c.table_name`,
         )
       ).rows as { table_schema: string; table_name: string }[];

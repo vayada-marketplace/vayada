@@ -38,7 +38,7 @@ Field-level ownership for hotel identity, location, media, amenities, public
 contacts, locale, currency, timezone, and public policy projection is defined
 in [`public-hotel-profile-ownership.md`](public-hotel-profile-ownership.md).
 Distribution consumes those normalized catalog/profile fields; it does not
-publish PMS, Marketplace, Booking, Finance, or Channex-shaped payloads directly.
+publish PMS, Booking, Finance, or Channex-shaped payloads directly.
 
 Consumers:
 
@@ -77,7 +77,7 @@ GET /api/ai/hotels/{slug}
 
 Implementation owner: TypeScript `apps/api` route backed by a
 `domain-distribution` public profile read model. The route must not assemble
-Booking, PMS, Marketplace, Finance, or Channex-shaped payloads directly. Legacy
+Booking, PMS, Finance, or Channex-shaped payloads directly. Legacy
 product systems may feed the read model through compatibility adapters during
 the rewrite, but the HTTP response is the distribution projection.
 `apps/api` now always serves this contract from `TARGET_DATABASE_URL`, using
@@ -251,7 +251,7 @@ Request shape:
 | `currency`      | No       | Defaults to hotel currency. Unsupported values fail clearly. |
 | `locale`        | No       | Defaults to hotel default locale.                            |
 | `promo_code`    | No       | Public promo input. Never exposes private promo internals.   |
-| `referral_code` | No       | Public referral/affiliate attribution input.                 |
+| `referral_code` | No       | Public referral attribution input.                           |
 
 Response shape:
 

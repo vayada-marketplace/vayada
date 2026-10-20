@@ -2,6 +2,11 @@
 
 _VAY-1194 decision record. WorkOS documentation checked on 2026-08-07._
 
+> **Note (VAY-2272, 2026-10-20):** `marketplace-web` and `affiliate-dashboard` are deleted, the
+> API refuses their auth surfaces (VAY-2271), and migration 0501 removes both surfaces from the
+> session handoff table. The Marketplace and Affiliate mentions in the reasons and rollout below
+> are history.
+
 ## Decision
 
 Serve browser-facing `/auth/*` routes through each authenticated frontend's own
@@ -323,7 +328,7 @@ remove it after all surfaces pass the final gate.
 A surface is ready only when all applicable checks pass:
 
 - password login and signup establish a host-local sealed session;
-- Marketplace signup can submit onboarding without `csrf_rejected`;
+- signup can submit onboarding without `csrf_rejected`;
 - Google login/signup starts and returns on the same app origin without
   `missing_session` or OAuth state mismatch;
 - verification, reset, organization switch, CSRF writes, compatibility-token

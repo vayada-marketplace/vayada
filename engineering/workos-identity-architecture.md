@@ -20,9 +20,9 @@ In practice:
   requirements were satisfied, and which coarse organization role claims belong
   in the session.
 - Vayada answers: which internal user exists, which internal organization owns
-  which hotel/property/creator/affiliate resource, which product permissions
-  that membership grants, what the user can do to a specific resource, and which
-  product/billing state is active.
+  which hotel/property resource, which product permissions that membership
+  grants, what the user can do to a specific resource, and which product/billing
+  state is active.
 
 Do not replace Vayada internal IDs with WorkOS IDs in product tables. Preserve
 `users.id` as the internal principal and add explicit WorkOS mapping columns or
@@ -63,15 +63,12 @@ Vayada should own these application concerns:
 - Internal users: stable `auth-db.users.id`, product-visible name/email cache,
   status needed for product moderation/suspension, consent fields, and legacy
   compatibility during migration.
-- Internal organizations: Vayada tenant/business containers such as platform,
-  hotel group, creator workspace, and affiliate partner.
-- Resource links: mappings from an internal organization to marketplace hotel
-  profiles/offers, booking hotels, PMS hotels/properties, creator profiles,
-  affiliate records, payouts, and future product resources.
+- Internal organizations: Vayada tenant/business containers such as platform
+  and hotel group.
+- Resource links: mappings from an internal organization to properties, booking
+  hotels, PMS hotels/properties, payout accounts, and future product resources.
 - Product roles and permissions: fine-grained permissions like
-  `pms.booking.update`, `booking.settings.manage`,
-  `marketplace.collaboration.review`, `affiliate.payout.manage`, and
-  `platform.user.suspend`.
+  `pms.booking.update`, `booking.settings.manage`, and `platform.user.suspend`.
 - Authorization decisions: endpoint and repository checks that combine
   authenticated user, selected organization, active membership, product
   permission, resource link, billing entitlement, and resource state.
@@ -140,8 +137,9 @@ organizations when that organization needs authenticated members.
 Recommended schema shape:
 
 - `organizations.id`: Vayada UUID.
-- `organizations.kind`: `platform`, `hotel_group`, `creator_workspace`,
-  `affiliate_partner`.
+- `organizations.kind`: `platform`, `hotel_group`. The retired
+  `creator_workspace` and `affiliate_partner` kinds remain only on closed, blank
+  rows that kept records or WorkOS still name (migration 0500, VAY-2272).
 - `organizations.name`, optional `website_url`, `slug`, `status`, timestamps.
 - `organizations.workos_org_id`: WorkOS `org_*` ID, nullable during backfill.
 - `organizations.workos_external_id`: normally the same value as
@@ -164,8 +162,6 @@ Default organization mapping:
 - `platform`: one Vayada staff organization.
 - `hotel_group`: one hotel business account that can own one or many product
   hotel/property records.
-- `creator_workspace`: one creator business or solo creator workspace.
-- `affiliate_partner`: one affiliate account, agency, or partner workspace.
 
 The default for hotels should be hotel group, not individual property. Product
 resources can still model individual properties through resource links.
@@ -211,14 +207,9 @@ permissions in Vayada. Suggested WorkOS role slugs are broad:
 - `hotel_owner`
 - `hotel_admin`
 - `hotel_member`
-- `creator_owner`
-- `creator_member`
-- `affiliate_owner`
-- `affiliate_member`
 
 Vayada can map those to finer product roles such as `pms_manager`,
-`front_desk`, `booking_manager`, `finance`, `content_review`, or
-`affiliate_payout_manager`.
+`front_desk`, `booking_manager`, `finance`, or `content_review`.
 
 ### Resource links
 
@@ -228,11 +219,12 @@ resources.
 Recommended schema shape:
 
 - `organization_id`: FK to `organizations.id`.
-- `product`: `marketplace`, `booking`, `pms`, `platform`.
-- `resource_type`: `hotel_profile`, `marketplace_offer`, `booking_hotel`,
-  `pms_hotel`, `creator_profile`, `affiliate`, `payout_account`.
+- `product`: `platform`, `hotel_catalog`, `booking`, `pms`.
+- `resource_type`: `platform`, `property`, `booking_hotel`, `pms_hotel`,
+  `pms_property`, `payout_account`.
 - `resource_id`: UUID or product-native ID.
-- `relationship`: `owner`, `operator`, `promotes`, `billing_account`.
+- `relationship`: `owner`, `operator`, `front_desk`, `finance_manager`,
+  `billing_account`.
 - unique key on `(organization_id, product, resource_type, resource_id,
 relationship)`.
 
@@ -265,22 +257,6 @@ resource, not just `X-Hotel-Id` checked against `booking_hotels.user_id` or
 
 During migration, keep `X-Hotel-Id` and direct `user_id` checks as compatibility
 fallbacks while adding membership/resource-link checks.
-
-### Marketplace hotel and creator flows
-
-> Retired with the Creator Marketplace (VAY-2259). The Marketplace app and its auth
-> surface are gone (VAY-2270, VAY-2271). Creator workspace rows stay stored until the
-> Marketplace data is dropped (VAY-2272), but since migration 0493 no role is granted any
-> permission in them. Kept as design history.
-
-Move registration from "create local user with password, then create profile" to
-"authenticate with WorkOS, then create or select internal organization and
-product profile." Existing `creators.user_id` and `hotel_profiles.user_id`
-remain owner compatibility fields until resource links are in place.
-
-Creator workspaces can start as solo organizations but should use the same
-membership model so agencies or assistants can be added later without another
-identity rewrite.
 
 ### Custom AuthKit UI contract
 
@@ -361,18 +337,6 @@ Product-specific profile setup still belongs to the destination app's setup
 guard. Custom auth endpoints must not recreate legacy password registration
 behavior or store/verify Vayada-owned password hashes.
 
-### Affiliates
-
-> Retired: the affiliate portal source was removed (VAY-1498) and its auth surface went with
-> VAY-2271 (#3422). `affiliate_partner` organization rows stay stored until the Marketplace data
-> is dropped (VAY-2272), but since migration 0493 no role is granted any permission in them. Kept
-> as design history.
-
-Affiliate dashboard login should use WorkOS and an `affiliate_partner`
-organization. Public referral links, click attribution, and unauthenticated
-booking attribution remain public product flows. Payout settings and affiliate
-admin actions require membership checks.
-
 ### Guests
 
 Do not add booking guests to WorkOS by default. Guest identity belongs to booking
@@ -439,15 +403,15 @@ provider_user_id -> internal_user_id -> active_organization_id -> permissions ->
 - Local password login is the primary session authority.
 - Local TOTP is the long-term MFA authority.
 - Email address is a stable authorization identifier.
-- Guest booking identity should share the same account model as staff, hotels,
-  creators, and affiliates.
+- Guest booking identity should share the same account model as staff and
+  hotels.
 
 ## Assumptions to keep only as transition compatibility
 
 - `users.type` for routing old profile/onboarding flows.
 - `users.is_superadmin` for old admin dependencies.
-- Existing `user_id` columns on `creators`, `hotel_profiles`, `booking_hotels`,
-  `pms.hotels`, affiliate records, notes, and audit rows.
+- Existing `user_id` columns on `hotel_profiles`, `booking_hotels`,
+  `pms.hotels`, notes, and audit rows.
 - `access_token` cookie shape for FastAPI surfaces that have not moved to
   WorkOS-aware verification.
 - Local password/reset/TOTP tables for rollback and not-yet-linked users.

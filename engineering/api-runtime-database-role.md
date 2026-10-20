@@ -4,6 +4,10 @@ _Architecture note, 2026-10-07. Records the human decision taken after the
 VAY-965 investigation. The grant itself is applied by the platform repo's
 owner-checked task; nothing in this document grants anything._
 
+> **Note (VAY-2272, 2026-10-20):** migrations 0497–0499 drop the `marketplace` schema and the
+> affiliate tables and functions. Platform P2 (vayada-platform #594) and its app mirror (#3564)
+> take them out of the lists below; where a list still names one, it no longer exists.
+
 ## Decision
 
 The public TypeScript API keeps connecting as the separate, non-owner login
@@ -128,9 +132,9 @@ list and pattern; the preflight asserts both.
 
 The ordinary API never writes identity rows; identity writes go through
 `AUTH_DATABASE_URL`. It does take `FOR SHARE` / `FOR KEY SHARE` / `FOR UPDATE`
-locks on six identity tables (the shared scope-lock clause in 13 files, the
-onboarding draft path, pricing authorization, creator self-service), and
-PostgreSQL requires an `UPDATE` privilege on at least one column for that.
+locks on six identity tables (the shared scope-lock clause in 11 files, the
+onboarding draft path and pricing authorization), and PostgreSQL requires an
+`UPDATE` privilege on at least one column for that.
 
 - The grant task grants `UPDATE (created_at)` on `identity.organizations`,
   `identity.users`, `identity.organization_memberships`,

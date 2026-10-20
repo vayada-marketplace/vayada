@@ -82,8 +82,8 @@ property; it ignores client claims of ownership.
 
 Hotel-profile changes require catalog write permission and an owner/operator
 link. Room changes additionally require the appropriate active PMS entitlement
-and room-management permission. Marketplace-only invitations may prefill hotel
-details, but cannot grant PMS access merely because prepared data contains rooms.
+and room-management permission. Invitations may prefill hotel details, but
+cannot grant PMS access merely because prepared data contains rooms.
 Front-desk import permission is not inferred from ordinary room-edit permissions;
 the initial bulk-import flow is restricted to authorized owners/operators.
 
