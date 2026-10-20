@@ -98,6 +98,17 @@ describe.skipIf(!TEST_DATABASE_URL)("active Booking publication reads in Postgre
         propertyId: propertyA,
       });
     }
+    // Another hotel's localized address with the same text never answers for it.
+    await admin.query(
+      `INSERT INTO hotel_catalog.property_slugs
+         (property_id, slug, locale, purpose, status, redirects_to_id)
+       SELECT $1::uuid, 'former-alpenrose', 'de', 'redirect', 'redirected', id
+       FROM hotel_catalog.property_slugs WHERE slug = 'hotel-alpenrose'`,
+      [propertyB],
+    );
+    await expect(
+      resolveTargetHistoricalBookingProperty(pool, "former-alpenrose"),
+    ).resolves.toMatchObject({ propertyId: propertyA });
     await admin.query(
       `UPDATE hotel_catalog.property_slugs SET status = 'retired', redirects_to_id = NULL
        WHERE slug = 'former-alpenrose'`,

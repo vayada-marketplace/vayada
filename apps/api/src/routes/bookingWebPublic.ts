@@ -2797,7 +2797,7 @@ export async function resolveTargetHistoricalBookingProperty(
      JOIN hotel_catalog.properties p ON p.id = s.property_id
      LEFT JOIN distribution.public_hotel_bookability_profiles profile
        ON profile.property_id = p.id
-     WHERE s.slug = $1 AND ${hotelAddressSql("s")}
+     WHERE s.slug = $1 AND s.locale IS NULL AND ${hotelAddressSql("s")}
      LIMIT 1`,
     [slug],
   );
