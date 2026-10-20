@@ -9,11 +9,15 @@
 -- 9: the marketplace_overlay page address goes too. Two keys that only dropped tables used go as
 -- well: the (id, organization_id) keys of commission rules (Marketplace collaborations) and of payouts
 -- (affiliate payment evidence).
--- Kept: the organization kinds (0500 keeps closed creator and payee rows), billing entitlement and
--- commission rule values (decision 2), media purposes (the purge job still reads them), the creator
--- contact purpose (decision 9), and the marketplace source and product values of kept history rows.
+-- 0498 deleted the affiliate program's commission rules and billing entitlements (Flamur's yes to
+-- question 10), so their affiliate values go too: the affiliate scope and product, the affiliate_id
+-- column and the two indexes for affiliate rules.
+-- Kept: the organization kinds (0500 keeps closed creator and payee rows), media purposes (the purge
+-- job still reads them), the creator contact purpose (decision 9), and the marketplace source and
+-- product values of kept rows, commission rules and billing entitlements included.
 -- 0499 drops the Marketplace matching-event payload check, since it locks platform.domain_events anyway.
--- Rollback: any image from the 0500 release on; none of them writes these values.
+-- Rollback: any image from the 0500 release on; none of them writes these values. The legacy finance
+-- import and cutover need an image with this migration: older ones still name affiliate_id.
 
 SET LOCAL lock_timeout = '5s';
 -- Each lock waits at most 5 seconds, and the LOCK statement at most 15.
@@ -21,13 +25,14 @@ SET LOCAL statement_timeout = '15s';
 
 -- Every table this changes, in one statement and one order.
 LOCK TABLE
-  finance.commission_rules, finance.finance_visibility_read_model, finance.payouts,
-  hotel_catalog.property_slugs, identity.auth_session_handoffs, identity.organization_resource_links,
-  identity.permission_catalog, identity.product_entitlements, identity.role_permission_grants
+  finance.billing_entitlements, finance.commission_rules, finance.finance_visibility_read_model,
+  finance.payouts, hotel_catalog.property_slugs, identity.auth_session_handoffs,
+  identity.organization_resource_links, identity.permission_catalog, identity.product_entitlements,
+  identity.role_permission_grants
   IN ACCESS EXCLUSIVE MODE;
 
--- Rows that still carry a removed value. 0493 and 0500 removed such grants, links, entitlements and
--- visibility rows, so each check expects none.
+-- Rows that still carry a removed value. 0493, 0498 and 0500 removed such grants, finance rows, links,
+-- entitlements and visibility rows, so each check expects none.
 DO $$
 DECLARE
   retired_keys CONSTANT TEXT[] := ARRAY[
@@ -76,6 +81,16 @@ BEGIN
     WHERE overlay.purpose = 'marketplace_overlay'
   ) THEN
     RAISE EXCEPTION 'A page address redirects to a Marketplace overlay address';
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM finance.commission_rules
+    WHERE product = 'affiliate' OR rule_scope = 'affiliate' OR affiliate_id IS NOT NULL
+  ) OR EXISTS (SELECT 1 FROM finance.billing_entitlements WHERE product = 'affiliate') THEN
+    RAISE EXCEPTION 'An affiliate commission rule or billing entitlement remains';
+  END IF;
+  -- pg_depend does not see plpgsql bodies: a trigger reading NEW.affiliate_id would break every write.
+  IF EXISTS (SELECT 1 FROM pg_catalog.pg_proc WHERE prosrc ~ '\maffiliate_id\M') THEN
+    RAISE EXCEPTION 'A function still names affiliate_id';
   END IF;
 END $$;
 
@@ -155,6 +170,28 @@ ALTER TABLE hotel_catalog.property_slugs
 ALTER TABLE finance.commission_rules DROP CONSTRAINT uq_finance_commission_rules_id_organization;
 ALTER TABLE finance.payouts DROP CONSTRAINT uq_finance_payouts_id_organization;
 
+-- The affiliate values of commission rules (0007, 0087) and billing entitlements (0007).
+DROP INDEX finance.uq_finance_active_property_affiliate_default,
+  finance.uq_finance_active_property_affiliate_override;
+ALTER TABLE finance.commission_rules
+  DROP CONSTRAINT chk_finance_commission_rules_scope,
+  DROP COLUMN affiliate_id,
+  DROP CONSTRAINT commission_rules_rule_scope_check,
+  ADD CONSTRAINT commission_rules_rule_scope_check
+    CHECK (rule_scope IN ('property', 'organization', 'marketplace', 'platform', 'migration')),
+  DROP CONSTRAINT commission_rules_product_check,
+  ADD CONSTRAINT commission_rules_product_check
+    CHECK (product IN ('platform', 'marketplace', 'booking', 'pms')),
+  ADD CONSTRAINT chk_finance_commission_rules_scope CHECK (
+    (rule_scope = 'property' AND property_id IS NOT NULL)
+    OR (rule_scope IN ('organization', 'marketplace') AND organization_id IS NOT NULL)
+    OR (rule_scope = 'platform' AND property_id IS NULL AND organization_id IS NULL)
+    OR rule_scope = 'migration');
+ALTER TABLE finance.billing_entitlements
+  DROP CONSTRAINT billing_entitlements_product_check,
+  ADD CONSTRAINT billing_entitlements_product_check
+    CHECK (product IN ('platform', 'marketplace', 'booking', 'pms'));
+
 DO $$
 BEGIN
   IF EXISTS (
@@ -164,6 +201,17 @@ BEGIN
         'identity.role_permission_grants'::regclass, 'identity.organization_resource_links'::regclass,
         'identity.product_entitlements'::regclass, 'hotel_catalog.property_slugs'::regclass)
       AND pg_catalog.pg_get_constraintdef(constraint_row.oid) ~ 'marketplace|affiliate|creator|promotes|hotel_profile'
+  ) OR EXISTS (
+    -- Their marketplace values stay.
+    SELECT 1 FROM pg_catalog.pg_constraint constraint_row
+    WHERE constraint_row.conrelid IN (
+        'finance.commission_rules'::regclass, 'finance.billing_entitlements'::regclass)
+      AND pg_catalog.pg_get_constraintdef(constraint_row.oid) ~ 'affiliate'
+  ) OR EXISTS (
+    SELECT 1 FROM pg_catalog.pg_attribute
+    WHERE attrelid = 'finance.commission_rules'::regclass AND attname = 'affiliate_id' AND NOT attisdropped
+  ) OR EXISTS (
+    SELECT 1 FROM pg_catalog.pg_indexes WHERE schemaname = 'finance' AND indexname LIKE '%affiliate%'
   ) OR EXISTS (
     SELECT 1 FROM identity.permission_catalog WHERE product IN ('marketplace', 'affiliate')
   ) OR EXISTS (

@@ -11,6 +11,7 @@ import { assertSafeTestDatabase } from "./testUtils.js";
 const URL = process.env["TEST_DATABASE_URL"];
 const MIGRATIONS = join(import.meta.dirname, "../migrations");
 const DATABASE = "vayada_marketplace_shared_value_cleanup_test";
+const FINANCE_DATABASE = "vayada_affiliate_finance_value_cleanup_test";
 const MIGRATION = 501;
 const RETIRED_KEYS = [
   "affiliate.payout.manage",
@@ -302,6 +303,217 @@ describe.skipIf(!URL)("Marketplace shared value cleanup 0501", () => {
     } finally {
       await target?.end();
       await admin.query(`DROP DATABASE IF EXISTS ${DATABASE} WITH (FORCE)`).catch(() => undefined);
+      await admin.end();
+      await rm(before, { recursive: true, force: true });
+    }
+  }, 240_000);
+
+  // Flamur's yes to question 10: 0498 deleted the affiliate program's commission rules and billing
+  // entitlements, so 0501 also removes their affiliate values.
+  it("removes the affiliate values of commission rules and billing entitlements", async () => {
+    assertSafeTestDatabase(URL!);
+    const admin = new pg.Client({ connectionString: URL });
+    const targetUrl = new globalThis.URL(URL!);
+    targetUrl.pathname = `/${FINANCE_DATABASE}`;
+    const before = await mkdtemp(join(tmpdir(), "vayada-2272-affiliate-finance-values-"));
+    const run = (dir: string) =>
+      runMigrations({ connectionString: targetUrl.href, migrationsDir: dir, environment: "local" });
+    let target: pg.Client | undefined;
+    await admin.connect();
+    try {
+      await admin.query(`DROP DATABASE IF EXISTS ${FINANCE_DATABASE} WITH (FORCE)`);
+      await admin.query(`CREATE DATABASE ${FINANCE_DATABASE}`);
+      let file = "";
+      for (const name of await readdir(MIGRATIONS)) {
+        if (!/^\d{4}_/.test(name)) continue;
+        if (Number(name.slice(0, 4)) < MIGRATION)
+          await cp(join(MIGRATIONS, name), join(before, name));
+        if (Number(name.slice(0, 4)) === MIGRATION) file = name;
+      }
+      expect((await run(before)).failed).toBeNull();
+      target = new pg.Client({ connectionString: targetUrl.href });
+      await target.connect();
+      const db = target;
+
+      const organization = randomUUID();
+      const property = randomUUID();
+      const hotelRule = randomUUID();
+      await db.query(
+        `INSERT INTO identity.organizations (id, kind, name, slug)
+         VALUES ($1, 'hotel_group', 'Finance hotel', $2)`,
+        [organization, `finance-${organization}`],
+      );
+      await db.query(
+        `INSERT INTO hotel_catalog.properties (id, public_id, display_name)
+         VALUES ($1::uuid, $1::text, 'Finance hotel')`,
+        [property],
+      );
+      // The hotel's commission rule, its rate change and its billing entitlement.
+      await db.query(
+        replica(`
+          INSERT INTO finance.commission_rules
+            (id, property_id, organization_id, rule_scope, product, commission_type, percentage_rate,
+             source_system, source_rule_id)
+          VALUES ('${hotelRule}', '${property}', '${organization}', 'property', 'booking', 'percentage',
+                  5, 'finance', 'onboarding-booking:${property}');
+          INSERT INTO finance.commission_rate_changes
+            (commission_rule_id, previous_percentage_rate, new_percentage_rate, effective_at)
+          VALUES ('${hotelRule}', 4, 5, now());
+          INSERT INTO finance.billing_entitlements
+            (organization_id, property_id, product, entitlement_key)
+          VALUES ('${organization}', '${property}', 'booking', 'direct-booking-finance')`),
+      );
+      const state = async () =>
+        (
+          await db.query(
+            `SELECT (SELECT array_agg(id::text || ':' || product || ':' || rule_scope ORDER BY id)
+                     FROM finance.commission_rules) AS rules,
+                    (SELECT count(*)::int FROM finance.commission_rate_changes) AS "rateChanges",
+                    (SELECT array_agg(product ORDER BY product) FROM finance.billing_entitlements) AS billing,
+                    (SELECT count(*)::int FROM pg_catalog.pg_attribute
+                     WHERE attrelid = 'finance.commission_rules'::regclass
+                       AND attname = 'affiliate_id' AND NOT attisdropped) AS "affiliateColumn",
+                    (SELECT count(*)::int FROM pg_catalog.pg_indexes
+                     WHERE schemaname = 'finance' AND indexname LIKE '%affiliate%') AS "affiliateIndexes"`,
+          )
+        ).rows[0];
+      const seeded = await state();
+      expect(seeded).toEqual({
+        rules: [`${hotelRule}:booking:property`],
+        rateChanges: 1,
+        billing: ["booking"],
+        affiliateColumn: 1,
+        affiliateIndexes: 2,
+      });
+
+      // An affiliate product, scope or affiliate_id on a rule, an affiliate billing entitlement, or a
+      // trigger function that reads the column each stops 0501 before it changes anything.
+      await cp(join(MIGRATIONS, file), join(before, file));
+      const rowMessage = "An affiliate commission rule or billing entitlement remains";
+      const gates: [string, string, string][] = [
+        [
+          `INSERT INTO finance.commission_rules
+             (property_id, rule_scope, product, commission_type, percentage_rate)
+           VALUES ('${property}', 'property', 'affiliate', 'percentage', 10)`,
+          `DELETE FROM finance.commission_rules WHERE product = 'affiliate'`,
+          rowMessage,
+        ],
+        [
+          `INSERT INTO finance.commission_rules
+             (organization_id, rule_scope, product, commission_type, percentage_rate)
+           VALUES ('${organization}', 'affiliate', 'booking', 'percentage', 10)`,
+          `DELETE FROM finance.commission_rules WHERE rule_scope = 'affiliate'`,
+          rowMessage,
+        ],
+        [
+          `INSERT INTO finance.commission_rules
+             (organization_id, rule_scope, product, commission_type, percentage_rate, affiliate_id)
+           VALUES ('${organization}', 'organization', 'booking', 'percentage', 10, 'gate-affiliate')`,
+          `DELETE FROM finance.commission_rules WHERE affiliate_id IS NOT NULL`,
+          rowMessage,
+        ],
+        [
+          `INSERT INTO finance.billing_entitlements (organization_id, product, entitlement_key)
+           VALUES ('${organization}', 'affiliate', 'affiliate-program')`,
+          `DELETE FROM finance.billing_entitlements WHERE product = 'affiliate'`,
+          rowMessage,
+        ],
+        [
+          `CREATE FUNCTION public.affiliate_rule_guard() RETURNS trigger LANGUAGE plpgsql
+             AS 'BEGIN IF NEW.affiliate_id IS NOT NULL THEN RETURN NULL; END IF; RETURN NEW; END';
+           CREATE TRIGGER affiliate_rule_guard BEFORE INSERT ON finance.commission_rules
+             FOR EACH ROW EXECUTE FUNCTION public.affiliate_rule_guard()`,
+          `DROP TRIGGER affiliate_rule_guard ON finance.commission_rules;
+           DROP FUNCTION public.affiliate_rule_guard()`,
+          "A function still names affiliate_id",
+        ],
+      ];
+      for (const [trip, undo, message] of gates) {
+        await db.query(replica(trip));
+        expect({ trip, failed: (await run(before)).failed }).toEqual({ trip, failed: "0501" });
+        expect(
+          (
+            await db.query(
+              `SELECT failure_reason FROM platform.schema_migrations
+               WHERE version = '0501' ORDER BY id DESC LIMIT 1`,
+            )
+          ).rows,
+        ).toEqual([{ failure_reason: message }]);
+        await db.query(replica(undo));
+        expect({ trip, state: await state() }).toEqual({ trip, state: seeded });
+      }
+
+      expect((await run(before)).failed).toBeNull();
+
+      // The column and both indexes are gone; the hotel's rows stay.
+      expect(await state()).toEqual({ ...seeded, affiliateColumn: 0, affiliateIndexes: 0 });
+      // The four replaced checks are back, without the affiliate values.
+      const checks = (
+        await db.query<{ name: string; definition: string }>(
+          `SELECT conname AS name, pg_get_constraintdef(oid) AS definition
+           FROM pg_catalog.pg_constraint
+           WHERE conrelid IN ('finance.commission_rules'::regclass, 'finance.billing_entitlements'::regclass)
+             AND conname IN ('billing_entitlements_product_check', 'chk_finance_commission_rules_scope',
+                             'commission_rules_product_check', 'commission_rules_rule_scope_check')
+           ORDER BY conname`,
+        )
+      ).rows;
+      expect(checks.map((check) => check.name)).toEqual([
+        "billing_entitlements_product_check",
+        "chk_finance_commission_rules_scope",
+        "commission_rules_product_check",
+        "commission_rules_rule_scope_check",
+      ]);
+      for (const check of checks) expect(check.definition, check.name).not.toMatch(/affiliate/);
+      // PostgreSQL tests checks in name order, so the scope check refuses an affiliate scope first.
+      const refused: [string, string][] = [
+        [
+          `INSERT INTO finance.commission_rules
+             (property_id, rule_scope, product, commission_type, percentage_rate)
+           VALUES ('${property}', 'property', 'affiliate', 'percentage', 10)`,
+          "commission_rules_product_check",
+        ],
+        [
+          `INSERT INTO finance.commission_rules
+             (organization_id, rule_scope, product, commission_type, percentage_rate)
+           VALUES ('${organization}', 'affiliate', 'booking', 'percentage', 10)`,
+          "chk_finance_commission_rules_scope",
+        ],
+        // The rewritten scope check still requires the property of a property rule.
+        [
+          `INSERT INTO finance.commission_rules
+             (organization_id, rule_scope, product, commission_type, percentage_rate)
+           VALUES ('${organization}', 'property', 'booking', 'percentage', 10)`,
+          "chk_finance_commission_rules_scope",
+        ],
+        [
+          `INSERT INTO finance.billing_entitlements (organization_id, product, entitlement_key)
+           VALUES ('${organization}', 'affiliate', 'refused')`,
+          "billing_entitlements_product_check",
+        ],
+      ];
+      for (const [statement, constraint] of refused) {
+        await expect(db.query(replica(statement)), statement).rejects.toMatchObject({
+          code: "23514",
+          constraint,
+        });
+        // The failed statement leaves its transaction open and aborted.
+        await db.query("ROLLBACK");
+      }
+      // The Marketplace values of kept finance rows stay allowed.
+      await db.query(
+        replica(`
+          INSERT INTO finance.commission_rules
+            (organization_id, rule_scope, product, commission_type, percentage_rate)
+          VALUES ('${organization}', 'marketplace', 'marketplace', 'percentage', 10);
+          INSERT INTO finance.billing_entitlements (organization_id, product, entitlement_key)
+          VALUES ('${organization}', 'marketplace', 'marketplace-listing')`),
+      );
+    } finally {
+      await target?.end();
+      await admin
+        .query(`DROP DATABASE IF EXISTS ${FINANCE_DATABASE} WITH (FORCE)`)
+        .catch(() => undefined);
       await admin.end();
       await rm(before, { recursive: true, force: true });
     }
