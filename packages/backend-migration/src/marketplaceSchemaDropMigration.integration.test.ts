@@ -135,12 +135,23 @@ describe.skipIf(!URL)("marketplace schema drop 0499", () => {
           )
         ).rows[0];
       expect(await kept()).toEqual({ properties: 1, invites: 1, rules: 1, provenance: 1 });
+      const matchingCheck = async () =>
+        (
+          await db.query(
+            `SELECT count(*)::int AS n FROM pg_catalog.pg_constraint
+             WHERE conrelid = 'platform.domain_events'::regclass
+               AND conname = 'chk_platform_matching_event_private_payload'`,
+          )
+        ).rows[0].n;
+      expect(await matchingCheck()).toBe(1);
 
       // Later migrations may change what this checks, so it stops at 0499.
       await cp(join(MIGRATIONS, file), join(before, file));
       expect((await run(before)).failed).toBeNull();
 
       expect(await kept()).toEqual({ properties: 1, invites: 1, rules: 1, provenance: 1 });
+      // The Marketplace matching-event check (0142) went too.
+      expect(await matchingCheck()).toBe(0);
       const leftovers = await db.query<{ name: string }>(
         `SELECT 'schema ' || nspname AS name FROM pg_catalog.pg_namespace WHERE nspname = 'marketplace'
          UNION ALL

@@ -7,6 +7,8 @@
 -- marketplace tables, the legacy Marketplace import's quarantine table, 20 marketplace functions and
 -- the quarantine guard, then the marketplace schema itself. The staged legacy copies
 -- (migration_source_*) stay: the hotel import reads the Marketplace hotel profiles there (decision 8).
+-- It also drops the Marketplace matching-event payload check on platform.domain_events (0142), which it
+-- locks anyway; the matching events that exist keep their payloads.
 -- Rollback: any image from the 0496 release on (older images read marketplace.invite_codes). The data
 -- is gone and no rollback restores it.
 
@@ -64,6 +66,8 @@ DROP FUNCTION
 -- Without CASCADE: anything left in the schema (an object made outside the migrations) fails the
 -- migration. The schema's default-privilege entries depend on it automatically and go with it.
 DROP SCHEMA marketplace;
+
+ALTER TABLE platform.domain_events DROP CONSTRAINT chk_platform_matching_event_private_payload;
 
 DO $$
 BEGIN
