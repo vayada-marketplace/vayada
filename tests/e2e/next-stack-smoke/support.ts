@@ -243,7 +243,8 @@ function syntheticIdentity(
 /**
  * Signs a hotel owner up the way a new hotel does (VAY-2270): Booking Admin /signup, the email
  * code (read from WorkOS, which sent it), then the account details step of /setup. The signup
- * creates the owner's hotel group. Stops on the setup wizard's track choice.
+ * creates the owner's hotel group. Stops on the setup wizard's track choice, or, where Booking
+ * Admin runs the new first run (VAY-2247, ONBOARDING_V2_ENABLED), on its "Your hotel" step.
  */
 export async function signUpSyntheticHotelOwner(
   page: Page,
@@ -294,11 +295,19 @@ export async function signUpSyntheticHotelOwner(
 
   await page.getByLabel("First name").fill(identity.firstName, { timeout: 60_000 });
   await page.getByLabel("Last name").fill(identity.lastName);
-  await page.getByLabel("Phone number").fill(phone);
-  await page.getByRole("button", { name: "Continue to hotel setup" }).click();
-  await page
-    .getByRole("heading", { name: "Choose how you’ll use vayada" })
-    .waitFor({ timeout: 45_000 });
+  // The first run asks for the same details on its own first step, then opens "Your hotel"
+  // instead of the wizard's track choice. Either way the hotel is provisioned through the API below.
+  if (await page.getByRole("heading", { name: "Hi! Who's setting up the hotel?" }).isVisible()) {
+    await page.getByLabel("Your phone").fill(phone);
+    await page.getByRole("button", { name: "Continue", exact: true }).click();
+    await page.getByRole("heading", { name: "Your hotel", level: 1 }).waitFor({ timeout: 45_000 });
+  } else {
+    await page.getByLabel("Phone number").fill(phone);
+    await page.getByRole("button", { name: "Continue to hotel setup" }).click();
+    await page
+      .getByRole("heading", { name: "Choose how you’ll use vayada" })
+      .waitFor({ timeout: 45_000 });
+  }
 
   const session = await readAuthSession(page, "booking-admin");
   const userIds = await workosUserIdsForEmail(request, environment.workosApiKey, identity.email);

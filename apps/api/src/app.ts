@@ -168,6 +168,10 @@ import {
   type PlatformPropertyLifecycleRoutesOptions,
 } from "./routes/platform/admin/propertyLifecycle.js";
 import { registerPlatformPropertyMediaRoutes } from "./routes/platform/admin/propertyMedia.js";
+import {
+  registerPlatformPropertySlugRoutes,
+  type PlatformPropertySlugRoutesOptions,
+} from "./routes/platform/admin/propertySlug.js";
 import { registerPmsOperationsRoutes } from "./routes/pmsOperations.js";
 import type {
   PmsInboxAssistancePort,
@@ -396,6 +400,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   platformAdminDashboardRepository?: PlatformAdminDashboardRepository;
   platformAdminSmokeRecovery?: PlatformAdminDashboardRoutesOptions["smokeRecovery"];
   platformPropertyLifecycle?: PlatformPropertyLifecycleRoutesOptions;
+  platformPropertySlug?: PlatformPropertySlugRoutesOptions;
   identityPrivacyAllowedOrigins?: string[];
   bookingWebCalendarRepository?: BookingWebCalendarRepository;
   bookingWebCheckoutAdapter?: BookingWebCheckoutAdapter;
@@ -1011,6 +1016,12 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     app.register(registerPlatformPropertyLifecycleRoutes, {
       prefix: "/api/platform/admin",
       ...options.platformPropertyLifecycle,
+    });
+  }
+  if (options.platformPropertySlug) {
+    app.register(registerPlatformPropertySlugRoutes, {
+      prefix: "/api/platform/admin",
+      ...options.platformPropertySlug,
     });
   }
   if (options.platformMedia) {

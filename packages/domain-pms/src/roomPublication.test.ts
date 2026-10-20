@@ -346,18 +346,13 @@ describe("room publication contract", () => {
         reviewedAt: null,
       })!,
     });
-    const blocked = createRoomPublicationSnapshot(publicationInput([untouched]));
-    expect(blocked.rooms[0]?.amenities).toBeNull();
-    expect(blocked.blockers).toContainEqual(
-      expect.objectContaining({
-        code: "room_amenities_review_required",
-        affectedEntity: { entityType: "room_type", entityId: firstRoomId },
-        owningStepId: "rooms",
-      }),
-    );
+    // VAY-2247: unreviewed amenities stay private (none shown to guests) and no longer block.
+    const unreviewed = createRoomPublicationSnapshot(publicationInput([untouched]));
+    expect(unreviewed.rooms[0]?.amenities).toBeNull();
+    expect(unreviewed).toMatchObject({ status: "ready", blockers: [] });
   });
 
-  it("blocks missing units, photos, unavailable media, and an empty property", async () => {
+  it("blocks missing units, unavailable media and an empty property, not missing photos", async () => {
     const noUnits = await roomSource(firstRoomId, {
       capacity: {
         contractVersion: PMS_ROOM_FACTS_CONTRACT_VERSION,
@@ -371,7 +366,7 @@ describe("room publication contract", () => {
     });
     expect(
       createRoomPublicationSnapshot(publicationInput([noUnits])).blockers.map(({ code }) => code),
-    ).toEqual(["room_photo_required", "room_units_required"]);
+    ).toEqual(["room_units_required"]);
 
     const unsafe = createRoomPublicationSnapshot(
       publicationInput([
