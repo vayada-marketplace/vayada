@@ -10,9 +10,8 @@
 -- whose files the purge already deleted (decision 5). An account that kept rows still name is closed
 -- with blank details instead of deleted (decision 3): finance payees keep only their name and slug,
 -- and anything WorkOS knows keeps a blank row, so a late WorkOS message lands there instead of
--- creating a new account. Law variant (decision 2): the affiliate archive 0498 kept names its payees
--- and the people who recorded it, so they stay too. The staged legacy copies (migration_source_*)
--- are not touched (decision 8).
+-- creating a new account. The staged legacy copies (migration_source_*) are not touched (decision 8);
+-- 0498 already dropped the affiliate money records (decision 2: delete everything).
 -- Rollback: any image that has PR 7 (older ones let WorkOS updates rewrite closed accounts). Deleted
 -- rows and purged files do not come back.
 
@@ -177,7 +176,7 @@ DELETE FROM platform.media_upload_sessions
 DELETE FROM platform.media_objects WHERE id IN (SELECT id FROM removed_media);
 
 -- Who stays, decided after the deletes above.
--- Payees of records kept by law; with the 0498 archive, its payees too.
+-- Payees of records kept by law.
 CREATE TEMPORARY TABLE finance_kept_organizations ON COMMIT DROP AS
   SELECT r.id FROM removed_organizations r
   WHERE EXISTS (SELECT 1 FROM finance.payouts p WHERE p.organization_id = r.id)
@@ -186,11 +185,7 @@ CREATE TEMPORARY TABLE finance_kept_organizations ON COMMIT DROP AS
      OR EXISTS (SELECT 1 FROM finance.commission_rules c WHERE c.organization_id = r.id)
      OR EXISTS (SELECT 1 FROM finance.payout_settings s WHERE s.organization_id = r.id)
      OR EXISTS (SELECT 1 FROM finance.payment_provider_accounts a WHERE a.organization_id = r.id)
-     OR EXISTS (SELECT 1 FROM finance.online_card_execution_evidence oc WHERE oc.accepted_by_organization_id = r.id)
-     OR EXISTS (SELECT 1 FROM finance.affiliate_earning_journal j WHERE j.organization_id = r.id)
-     OR EXISTS (SELECT 1 FROM finance.affiliate_earning_allocations al WHERE al.organization_id = r.id)
-     OR EXISTS (SELECT 1 FROM finance.affiliate_payout_payment_evidence ev
-                WHERE ev.organization_id = r.id OR ev.recorded_by_organization_id = r.id);
+     OR EXISTS (SELECT 1 FROM finance.online_card_execution_evidence oc WHERE oc.accepted_by_organization_id = r.id);
 CREATE TEMPORARY TABLE tombstone_organizations ON COMMIT DROP AS
   SELECT r.id FROM removed_organizations r
   WHERE r.id NOT IN (SELECT id FROM finance_kept_organizations)
@@ -219,10 +214,7 @@ CREATE TEMPORARY TABLE tombstone_users ON COMMIT DROP AS
      OR EXISTS (SELECT 1 FROM finance.commission_rate_changes c WHERE c.changed_by_user_id = r.id)
      OR EXISTS (SELECT 1 FROM pms.booking_notes_private n WHERE n.edited_by_user_id = r.id)
      OR EXISTS (SELECT 1 FROM distribution.external_api_clients x WHERE x.created_by_user_id = r.id OR x.revoked_by_user_id = r.id)
-     OR EXISTS (SELECT 1 FROM hotel_catalog.hotel_account_invites h WHERE h.created_by_user_id = r.id OR h.redeemed_by_user_id = r.id)
-     -- The 0498 archive names who calculated or recorded the money.
-     OR EXISTS (SELECT 1 FROM finance.affiliate_earning_journal j WHERE j.actor_user_id = r.id)
-     OR EXISTS (SELECT 1 FROM finance.affiliate_payout_payment_evidence ev WHERE ev.recorded_by_user_id = r.id);
+     OR EXISTS (SELECT 1 FROM hotel_catalog.hotel_account_invites h WHERE h.created_by_user_id = r.id OR h.redeemed_by_user_id = r.id);
 
 -- The WorkOS user id stays for the lookup; nothing else about the person does.
 UPDATE identity.external_identities

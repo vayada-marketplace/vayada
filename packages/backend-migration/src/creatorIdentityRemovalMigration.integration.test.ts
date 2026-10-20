@@ -17,14 +17,12 @@ const CLOSED_ORG = id(1); // creator workspace WorkOS knows: kept as a blank row
 const EMPTY_ORG = id(2); // creator workspace nothing kept names: deleted, with its unused finance rows
 const PAYEE_ORG = id(3); // affiliate partner with a payout and billing: archived, name kept
 const HOTEL_ORG = id(4);
-const ARCHIVE_ORG = id(5); // affiliate partner the 0498 archive pays: archived, name kept
 const FALLBACK_ORG = id(6); // creator workspace a retired hotel still names: blank row, one by one
 const WORKOS_USER = id(11); // creator only, WorkOS knows them: blank row, WorkOS link kept
 const PLAIN_USER = id(12); // creator only, nothing kept names them: deleted
 const LEGACY_TYPE_USER = id(13); // created as a creator, no membership: deleted
 const AUDITED_USER = id(14); // creator only, named by an audit event: blank row
 const DUAL_USER = id(15); // creator and hotel member: stays
-const ARCHIVE_USER = id(16); // affiliate the 0498 archive names as its actor: blank row
 const INVITER_USER = id(17); // creator who created a hotel invite (set-null column): blank row
 const FALLBACK_USER = id(18); // creator a retired hotel still names: blank row, one by one
 const PROPERTY = id(21);
@@ -36,7 +34,6 @@ const HOTEL_MEDIA = id(33);
 const UNMARKED_MEDIA = id(34);
 const SESSION = id(41);
 const OLD_SESSION = id(42);
-const JOURNAL = id(51);
 const KEPT_ACCOUNT = id(71);
 const KEPT_SETTING = id(72);
 const UNUSED_ACCOUNT = id(73);
@@ -54,7 +51,6 @@ const SEED = `
     ('${EMPTY_ORG}', 'creator_workspace', 'Empty creator', 'empty-creator', NULL, NULL),
     ('${PAYEE_ORG}', 'affiliate_partner', 'Paid affiliate', 'paid-affiliate', NULL, 'https://affiliate.example.test'),
     ('${HOTEL_ORG}', 'hotel_group', 'Kept hotel', 'kept-hotel', NULL, NULL),
-    ('${ARCHIVE_ORG}', 'affiliate_partner', 'Archived affiliate', 'archived-affiliate', NULL, NULL),
     ('${FALLBACK_ORG}', 'creator_workspace', 'Fallback creator', 'fallback-creator', NULL, NULL);
   INSERT INTO identity.users (id, email, name) VALUES
     ('${WORKOS_USER}', 'workos-creator@example.test', 'WorkOS Creator'),
@@ -62,7 +58,6 @@ const SEED = `
     ('${LEGACY_TYPE_USER}', 'legacy-type@example.test', 'Legacy Type'),
     ('${AUDITED_USER}', 'audited-creator@example.test', 'Audited Creator'),
     ('${DUAL_USER}', 'dual@example.test', 'Dual Member'),
-    ('${ARCHIVE_USER}', 'archive-affiliate@example.test', 'Archive Affiliate'),
     ('${INVITER_USER}', 'inviter-creator@example.test', 'Inviter Creator'),
     ('${FALLBACK_USER}', 'fallback-creator@example.test', 'Fallback Creator');
   INSERT INTO identity.organization_memberships
@@ -73,14 +68,12 @@ const SEED = `
     ('${EMPTY_ORG}', '${INVITER_USER}', 'creator_owner', 'agency', 'all'),
     ('${CLOSED_ORG}', '${DUAL_USER}', 'creator_owner', 'agency', 'all'),
     ('${HOTEL_ORG}', '${DUAL_USER}', 'hotel_owner', 'agency', 'all'),
-    ('${ARCHIVE_ORG}', '${ARCHIVE_USER}', 'affiliate_owner', 'agency', 'all'),
     ('${FALLBACK_ORG}', '${FALLBACK_USER}', 'creator_owner', 'agency', 'all');
   INSERT INTO identity.external_identities
     (user_id, provider, provider_user_id, provider_email, provider_email_verified, raw_profile) VALUES
     ('${WORKOS_USER}', 'workos', 'user_workos_creator', 'workos-creator@example.test', TRUE,
      '{"first_name": "WorkOS"}'),
     ('${AUDITED_USER}', 'workos', NULL, 'audited-creator@example.test', FALSE, NULL),
-    ('${ARCHIVE_USER}', 'workos', NULL, 'archive-affiliate@example.test', FALSE, NULL),
     ('${FALLBACK_USER}', 'workos', NULL, 'fallback-creator@example.test', FALSE, NULL);
   INSERT INTO identity.auth_reconciliation_events
     (event_type, provider, provider_event_id, user_id, organization_id, payload) VALUES
@@ -132,12 +125,6 @@ const SEED = `
      payout_status, amount, fee_amount, net_amount, currency)
     VALUES ('organization', '${PAYEE_ORG}', '${KEPT_SETTING}', '${KEPT_ACCOUNT}', 'finance', 'paid', 100, 0, 100,
             'EUR');
-  INSERT INTO finance.affiliate_earning_journal
-    (id, property_id, booking_id, stay_item_id, revision, source_revision, input_digest,
-     calculation_input, outcome, actor_user_id, organization_id, request_id)
-    VALUES ('${JOURNAL}', '${PROPERTY}', 'booking-1', 'stay-1', 1, 1,
-            'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', '{}',
-            '{"status": "calculated"}', '${ARCHIVE_USER}', '${ARCHIVE_ORG}', 'request-1');
   INSERT INTO platform.product_audit_events
     (audit_key, product, action, occurred_at, tenant_scope, actor_type, actor_user_id,
      target_resource_product, target_resource_type, target_resource_id)
@@ -341,8 +328,7 @@ const REFERENCES = [
   "platform.media_objects <- platform.media_variants(media_object_id,visibility) c deferred",
 ];
 
-// VAY-2272: the creator and affiliate side of identity goes; hotels, payees, the people the 0498
-// archive names and WorkOS links stay.
+// VAY-2272: the creator and affiliate side of identity goes; hotels, payees and WorkOS links stay.
 describe.skipIf(!URL)("creator identity and media removal 0500", () => {
   it("stops on each gate, then removes creators and keeps what others still name", async () => {
     assertSafeTestDatabase(URL!);
@@ -414,11 +400,11 @@ describe.skipIf(!URL)("creator identity and media removal 0500", () => {
           )
         ).rows[0];
       const seeded = {
-        organizations: 6,
-        users: 8,
-        memberships: 8,
+        organizations: 5,
+        users: 7,
+        memberships: 7,
         links: 2,
-        identities: 4,
+        identities: 3,
         events: 3,
         consents: 1,
         requests: 1,
@@ -492,14 +478,6 @@ describe.skipIf(!URL)("creator identity and media removal 0500", () => {
           website_url: null,
           workos_org_id: null,
         },
-        {
-          id: ARCHIVE_ORG,
-          status: "archived",
-          name: "Archived affiliate",
-          slug: "archived-affiliate",
-          website_url: null,
-          workos_org_id: null,
-        },
         { ...blankOrganization(FALLBACK_ORG), workos_org_id: null },
       ]);
       const blankUser = (userId: string) => ({
@@ -526,7 +504,6 @@ describe.skipIf(!URL)("creator identity and media removal 0500", () => {
           name: "Dual Member",
           picture: HOTEL_MEDIA,
         },
-        blankUser(ARCHIVE_USER),
         blankUser(INVITER_USER),
         blankUser(FALLBACK_USER),
       ]);
@@ -544,7 +521,6 @@ describe.skipIf(!URL)("creator identity and media removal 0500", () => {
         [
           [WORKOS_USER, "user_workos_creator"],
           [AUDITED_USER, null],
-          [ARCHIVE_USER, null],
         ].map(([userId, workosUserId]) => ({
           user_id: userId,
           provider_user_id: workosUserId,
@@ -593,8 +569,6 @@ describe.skipIf(!URL)("creator identity and media removal 0500", () => {
                (SELECT array_agg(id::text) FROM finance.payout_settings) AS "payoutSettings",
                (SELECT array_agg(id::text) FROM finance.payment_provider_accounts) AS "providerAccounts",
                (SELECT count(*)::int FROM finance.payouts) AS payouts,
-               (SELECT array_agg(organization_id::text || ' ' || actor_user_id::text)
-                FROM finance.affiliate_earning_journal) AS journal,
                (SELECT count(*)::int FROM identity.consent_history) AS "consentHistory",
                (SELECT count(*)::int FROM identity.cookie_consents) AS cookies,
                (SELECT array_agg(id::text) FROM platform.media_objects) AS media,
@@ -618,7 +592,6 @@ describe.skipIf(!URL)("creator identity and media removal 0500", () => {
           payoutSettings: [KEPT_SETTING],
           providerAccounts: [KEPT_ACCOUNT],
           payouts: 1,
-          journal: [`${ARCHIVE_ORG} ${ARCHIVE_USER}`],
           consentHistory: 0,
           cookies: 0,
           media: [HOTEL_MEDIA],
