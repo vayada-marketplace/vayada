@@ -98,7 +98,8 @@ describe("Booking design renderer evidence contract", () => {
         profileRevision: number;
         displayName: string;
         contentLocale: string;
-        shortDescription: string;
+        // VAY-2247: null when the hotel has no description yet.
+        shortDescription: string | null;
       }>
     >();
     expectTypeOf<

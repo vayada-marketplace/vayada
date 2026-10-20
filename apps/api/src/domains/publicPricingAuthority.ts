@@ -1,6 +1,7 @@
 import type { PoolClient } from "pg";
 import {
   activeBookingPublicationGateConfig,
+  hotelAddressSql,
   lockActiveBookingPublication,
 } from "./activeBookingPublicationGate.js";
 import { lockPmsInventoryMutationScope } from "./pmsInventoryMutationLock.js";
@@ -16,12 +17,14 @@ import { lockCurrentPmsPricingEntitlement } from "./replacementPricingAuthorizat
 export async function lockPublicPricingAuthority(client: PoolClient, slug: unknown) {
   if (typeof slug !== "string" || !slug.length || slug.length > 200 || slug !== slug.trim())
     return null;
-  // Distribution reserves locale-less canonical slugs. Their existing unique index
-  // provides one URL identity; localized catalog slugs are not public booking targets.
+  // Distribution reserves locale-less slugs. Their existing unique index provides one URL
+  // identity; localized catalog slugs are not public booking targets. A former address that
+  // redirects still prices a published page, so open tabs survive an address change (VAY-2295);
+  // legacy profiles below stay on the canonical address.
   const candidates = (
     await client.query(
-      `SELECT property_id FROM hotel_catalog.property_slugs
-    WHERE slug=$1 AND locale IS NULL AND purpose='canonical' AND status='active'`,
+      `SELECT property_id FROM hotel_catalog.property_slugs s
+    WHERE s.slug=$1 AND s.locale IS NULL AND ${hotelAddressSql("s")}`,
       [slug],
     )
   ).rows;

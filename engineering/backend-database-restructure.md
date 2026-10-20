@@ -4,6 +4,10 @@ _VAY-605 decision record. Inputs: VAY-600 WorkOS identity architecture,
 VAY-601 Ask Intelligence architecture, VAY-602 target TypeScript backend
 structure, VAY-604 AI-agent bookability, and the VAY-605 schema audit._
 
+> **Note (VAY-2259, 2026-10-19):** `apps/marketplace-api`, the old Python Marketplace API, is switched
+> off (api.vayada.com answers 410) and its source is deleted. Paths into it below refer to its last
+> source at commit `897d64c6e`.
+
 > **Retirement update:** VAY-601 is a historical input only. Migration `0090`
 > removes the retired Ask Intelligence schema and data. Any future hotel
 > employee agent starts from VAY-1091 with a new design and storage model.
