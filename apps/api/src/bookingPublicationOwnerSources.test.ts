@@ -131,6 +131,24 @@ describe("production Booking publication owner sources", () => {
     expect(missing.entities[0]?.blockers.map(({ code }) => code)).toEqual([
       "hotel_public_locality_missing",
     ]);
+    // VAY-2292: a blank city is missing too; the page trims it to nothing.
+    row.city = " ";
+    const blank = await source.getBookingLaunchEvidence(scope);
+    if (blank.outcome !== "evidence") throw new Error("Expected Catalog evidence");
+    expect(blank.entities[0]?.blockers.map(({ code }) => code)).toEqual([
+      "hotel_public_locality_missing",
+    ]);
+    // VAY-2292: an address or time zone the page can't use is a setup item, not a failed publish.
+    row.city = "Alpenstadt";
+    row.localityPublic = true;
+    row.canonicalSlug = "Hotel_Alpenrose";
+    row.timezone = "Europe/Atlantis";
+    const unusable = await source.getBookingLaunchEvidence(scope);
+    if (unusable.outcome !== "evidence") throw new Error("Expected Catalog evidence");
+    expect(unusable.entities[0]?.blockers.map(({ code }) => code)).toEqual([
+      "hotel_canonical_slug_invalid",
+      "hotel_timezone_invalid",
+    ]);
   });
 
   it.each([

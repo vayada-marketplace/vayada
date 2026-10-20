@@ -246,7 +246,8 @@ function sanitizeRooms(
   readyMethods: readonly string[],
 ): readonly BookingPublicRoom[] | null {
   const roomIds = new Set<string>();
-  const rooms = input.map((room) => {
+  const rooms = input.map((value) => {
+    const room = cleanRoomFacts(value);
     if (!validRoomFacts(room) || roomIds.has(room.roomTypeId)) return null;
     roomIds.add(room.roomTypeId);
     const rateIds = new Set<string>();
@@ -308,6 +309,25 @@ function sanitizeRooms(
   return rooms.length > 0 && !rooms.some((room) => !room) ? (rooms as BookingPublicRoom[]) : null;
 }
 
+/** Room details the page can't show are left off rather than failing it: a bathroom count other
+ * than whole or half numbers, a photo used twice and blank photo text (VAY-2292). Content that
+ * was already valid comes back unchanged, because reads compare stored content with a rebuild. */
+function cleanRoomFacts(room: BookingPublicRoom): BookingPublicRoom {
+  if (!record(room) || !Array.isArray(room.images)) return room;
+  const urls = new Set<unknown>();
+  return {
+    ...room,
+    bathrooms:
+      room.bathroomType === "private" && bathroomCount(room.bathrooms) ? room.bathrooms : null,
+    images: room.images.flatMap((image) => {
+      if (!image || typeof image !== "object" || urls.has(image.url)) return [];
+      urls.add(image.url);
+      const alt = typeof image.alt === "string" && !image.alt.trim() ? null : image.alt;
+      return [{ url: image.url, ...(alt === undefined ? {} : { alt }) }];
+    }),
+  };
+}
+
 function validRoomFacts(room: BookingPublicRoom): boolean {
   if (
     !record(room) ||
@@ -333,7 +353,7 @@ function validRoomFacts(room: BookingPublicRoom): boolean {
     new Set(room.beds.map(({ type }) => type)).size === room.beds.length &&
     room.beds.every(({ type, quantity }) => nonEmpty(type) && integer(quantity, 1)) &&
     (room.bedrooms === null || (Number.isInteger(room.bedrooms) && room.bedrooms >= 0)) &&
-    (room.bathrooms === null || integer(room.bathrooms, 1)) &&
+    (room.bathrooms === null || bathroomCount(room.bathrooms)) &&
     (room.bathroomType === "private" ||
       (room.bathroomType === "shared" && room.bathrooms === null)) &&
     (room.size === null ||
@@ -473,6 +493,9 @@ const validHttpsUrl = (value: unknown) => {
 
 const integer = (value: number, minimum: number, maximum = 100) =>
   Number.isInteger(value) && value >= minimum && value <= maximum;
+// Setup offers half bathrooms (VAY-2292).
+const bathroomCount = (value: unknown): value is number =>
+  typeof value === "number" && Number.isInteger(value * 2) && value >= 0.5 && value <= 100;
 const nonEmpty = (value: unknown): value is string =>
   typeof value === "string" && value.trim().length > 0;
 const record = (value: unknown): value is Record<string, unknown> =>
