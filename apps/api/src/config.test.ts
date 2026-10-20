@@ -522,6 +522,7 @@ describe("api config", () => {
         AUTH_FIRST_PARTY_SURFACES: "booking-admin,pms-web,booking-admin",
         AUTH_COOKIE_SECURE: "true",
         AUTH_COOKIE_DOMAIN: "localhost",
+        // VAY-2259: still set in production until the platform mapping goes; now ignored.
         AUTH_LEGACY_MARKETPLACE_JWT_SECRET: "legacy-secret",
       }).authSession,
     ).toEqual({
@@ -545,7 +546,6 @@ describe("api config", () => {
       authFirstPartySurfaces: ["booking-admin", "pms-web"],
       authCookieSecure: true,
       authCookieDomain: "localhost",
-      authLegacyMarketplaceJwtSecret: "legacy-secret",
     });
   });
 
@@ -757,12 +757,25 @@ describe("api config", () => {
     ).toBe(true);
   });
 
+  it("keeps deposit quote acceptance off unless explicitly enabled (VAY-2205)", () => {
+    expect(loadConfig({}).replacementPricingDepositAcceptanceEnabled).toBe(false);
+    expect(
+      loadConfig({ REPLACEMENT_PRICING_DEPOSIT_ACCEPTANCE_ENABLED: "true" })
+        .replacementPricingDepositAcceptanceEnabled,
+    ).toBe(true);
+  });
+
   it("keeps bank-transfer and PayPal quote acceptance off unless explicitly enabled", () => {
     expect(loadConfig({}).replacementPricingManualPaymentAcceptanceEnabled).toBe(false);
     expect(
       loadConfig({ REPLACEMENT_PRICING_MANUAL_PAYMENT_ACCEPTANCE_ENABLED: "true" })
         .replacementPricingManualPaymentAcceptanceEnabled,
     ).toBe(true);
+  });
+
+  it("keeps the hotel first run (VAY-2247) unmounted unless explicitly enabled", () => {
+    expect(loadConfig({}).hotelFirstRunEnabled).toBe(false);
+    expect(loadConfig({ HOTEL_FIRST_RUN_ENABLED: "true" }).hotelFirstRunEnabled).toBe(true);
   });
 
   it("rejects next API runtime when source selectors would default to legacy or disabled", () => {
@@ -1050,6 +1063,22 @@ describe("api config", () => {
     ).toEqual(["https://admin.booking.localhost"]);
   });
 
+  it("keeps the contact form origins apart from the identity privacy origins", () => {
+    // VAY-2286: production sets CONTACT_INTAKE_ALLOWED_ORIGINS=https://vayada.com.
+    expect(
+      loadConfig({ CONTACT_INTAKE_ALLOWED_ORIGINS: "https://vayada.com, " })
+        .contactIntakeAllowedOrigins,
+    ).toEqual(["https://vayada.com"]);
+    expect(loadConfig({}).contactIntakeAllowedOrigins).toEqual([
+      "https://landing.localhost",
+      "http://localhost:3006",
+    ]);
+    expect(
+      loadConfig({ IDENTITY_PRIVACY_ALLOWED_ORIGINS: "https://admin.localhost" })
+        .contactIntakeAllowedOrigins,
+    ).not.toContain("https://admin.localhost");
+  });
+
   it("requires booking email delivery for checkout in production", () => {
     expect(() =>
       loadConfig({
@@ -1138,6 +1167,36 @@ describe("api config", () => {
     );
   });
 
+  it("keeps the retired-media purge off unless it is switched on with the CDN and media config (VAY-2272)", () => {
+    const media = {
+      PLATFORM_MEDIA_BUCKET: "vayada-media-staging",
+      PLATFORM_MEDIA_CDN_BASE_URL: "https://cdn.staging.vayada.com",
+      PLATFORM_MEDIA_CDN_ORIGIN_HOST: "vayada-media-staging.s3.us-east-1.amazonaws.com",
+    };
+    const runtime = completeCreatorMarketplaceEnv;
+    const distribution = { PLATFORM_MEDIA_CDN_DISTRIBUTION_ID: "E2EXAMPLE12345" };
+    const on = { PLATFORM_MEDIA_RETIRED_PURGE_ENABLED: "true" };
+
+    expect(loadConfig({ ...media, ...distribution }).platformMediaRetiredPurge).toBeUndefined();
+    expect(loadConfig({ ...runtime, ...distribution, ...on }).platformMediaRetiredPurge).toEqual({
+      cdnDistributionId: "E2EXAMPLE12345",
+    });
+    expect(
+      loadConfig({ ...runtime, ...distribution, ...on, API_BACKGROUND_WORKERS_ENABLED: "false" })
+        .platformMediaRetiredPurge,
+    ).toEqual({ cdnDistributionId: "E2EXAMPLE12345" });
+    expect(() => loadConfig({ ...media, ...on })).toThrow("PLATFORM_MEDIA_CDN_DISTRIBUTION_ID");
+    expect(() => loadConfig({ ...distribution, ...on })).toThrow(
+      "complete PLATFORM_MEDIA_* config",
+    );
+    expect(() => loadConfig({ ...media, ...distribution, ...on })).toThrow(
+      "TARGET_DATABASE_URL and complete auth config",
+    );
+    expect(() =>
+      loadConfig({ ...runtime, ...distribution, ...on, PLATFORM_MEDIA_CLEANUP_ENABLED: "false" }),
+    ).toThrow("PLATFORM_MEDIA_CLEANUP_ENABLED must stay on");
+  });
+
   it("runs the calendar auto-open scheduler hourly unless switched off", () => {
     expect(loadConfig({})).toMatchObject({
       pmsCalendarAutoOpenSchedulerEnabled: true,
@@ -1195,6 +1254,21 @@ describe("api config", () => {
       loadConfig({ PRICING_PUBLICATION_FRESHNESS_ALERT_EMAIL: "ops@example.test" }),
     ).toThrow(
       "PRICING_PUBLICATION_FRESHNESS_ALERT_EMAIL requires RESEND_API_KEY and BOOKING_EMAIL_FROM",
+    );
+  });
+
+  it("reads the contact notification recipient (VAY-2286)", () => {
+    const email = { RESEND_API_KEY: "test-key", BOOKING_EMAIL_FROM: "sender@example.test" };
+    expect(loadConfig(email).contactNotificationRecipient).toBeUndefined();
+    expect(
+      loadConfig({ ...email, CONTACT_NOTIFICATION_RECIPIENT: " team@example.test " })
+        .contactNotificationRecipient,
+    ).toBe("team@example.test");
+    expect(() =>
+      loadConfig({ ...email, CONTACT_NOTIFICATION_RECIPIENT: "Team <team@example.test>" }),
+    ).toThrow("CONTACT_NOTIFICATION_RECIPIENT must be one email address");
+    expect(() => loadConfig({ CONTACT_NOTIFICATION_RECIPIENT: "team@example.test" })).toThrow(
+      "CONTACT_NOTIFICATION_RECIPIENT requires RESEND_API_KEY and BOOKING_EMAIL_FROM",
     );
   });
 

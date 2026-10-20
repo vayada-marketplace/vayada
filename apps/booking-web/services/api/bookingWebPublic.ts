@@ -2,7 +2,6 @@ import type { Hotel } from "@/lib/types";
 
 import { bookingWebPublic, type ApiRequestInit } from "./client";
 
-const FALLBACK_IMAGE = "/vayada-logo.png";
 export const PUBLIC_BOOKING_HOST_REVALIDATE_SECONDS = 60;
 
 export type BookingWebPublicHotelResponse = {
@@ -123,7 +122,8 @@ export const bookingWebPublicApi = {
 export function toLegacyHotel(data: BookingWebPublicHotelResponse): Hotel {
   const hotel = data.hotel;
   const images = hotel.images.map((image) => image.url).filter(Boolean);
-  const heroImage = hotel.branding?.heroImage || FALLBACK_IMAGE;
+  // A hotel can publish before it has photos (VAY-2247): no Vayada logo as a stand-in, the pages draw a placeholder.
+  const heroImage = hotel.branding?.heroImage || images[0] || null;
   const contacts = publicContactValues(hotel.publicContacts);
   const address = uniqueNonEmpty([
     hotel.location.city,

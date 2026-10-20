@@ -169,7 +169,7 @@ describe("property media assignment routes", () => {
       authorization: "Bearer valid-token",
       permissions: ["hotel_catalog.setup.manage"] as PermissionKey[],
       links: [propertyLink("owner", "active")],
-      kind: "creator_workspace" as const,
+      kind: "platform" as const,
       status: 403,
       code: "invalid_organization_scope",
     },
@@ -402,7 +402,7 @@ function buildPropertyMediaApp(options: {
   roleKey?: string;
   permissions?: PermissionKey[];
   linkedResources?: LinkedResource[];
-  organizationKind?: "hotel_group" | "creator_workspace" | "platform";
+  organizationKind?: "hotel_group" | "platform";
 }): FastifyInstance {
   return buildApp({
     logger: false,
@@ -448,7 +448,7 @@ function commandRepository(
 function identityRepository(options: {
   roleKey?: string;
   linkedResources?: LinkedResource[];
-  organizationKind?: "hotel_group" | "creator_workspace" | "platform";
+  organizationKind?: "hotel_group" | "platform";
 }): IdentityRepository {
   return {
     async findUserByProviderUserId() {

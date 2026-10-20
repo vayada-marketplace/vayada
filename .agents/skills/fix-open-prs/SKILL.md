@@ -149,14 +149,13 @@ gh pr checks {number} --json name,status,conclusion,detailsUrl
 
 For each check with `conclusion: FAILURE`:
 
-| Check name                        | Fix strategy                                                                              |
-| --------------------------------- | ----------------------------------------------------------------------------------------- |
-| `Frontend Test, Typecheck, Lint`  | Run `npm run typecheck` and `npm run lint` in each affected Next.js app; fix errors.      |
-| `Frontend Build and App Tests`    | Run `npm run build`, then the failing app's `npm --workspace <app> run test`; fix errors. |
-| `Backend Tests (marketplace-api)` | Run `pytest` in `apps/marketplace-api`; fix failing tests.                                |
-| `Backend Tests (booking-api)`     | Run `pytest` in `apps/booking-api`; fix failing tests.                                    |
-| `Backend Tests (pms-api)`         | Run `pytest` in `apps/pms-api`; fix failing tests.                                        |
-| `Playwright Smoke`                | Check for obvious structural breaks (missing routes, missing env vars); fix or skip.      |
+| Check name                       | Fix strategy                                                                              |
+| -------------------------------- | ----------------------------------------------------------------------------------------- |
+| `Frontend Test, Typecheck, Lint` | Run `npm run typecheck` and `npm run lint` in each affected Next.js app; fix errors.      |
+| `Frontend Build and App Tests`   | Run `npm run build`, then the failing app's `npm --workspace <app> run test`; fix errors. |
+| `Backend Tests (booking-api)`    | Run `pytest` in `apps/booking-api`; fix failing tests.                                    |
+| `Backend Tests (pms-api)`        | Run `pytest` in `apps/pms-api`; fix failing tests.                                        |
+| `Playwright Smoke`               | Check for obvious structural breaks (missing routes, missing env vars); fix or skip.      |
 
 To get failure details, fetch the check's log output:
 

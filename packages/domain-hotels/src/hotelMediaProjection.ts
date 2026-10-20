@@ -152,7 +152,6 @@ export type PropertyMediaProjectionInput = {
   })[];
 };
 
-export type MarketplaceHotelMediaProjectionInput = PropertyMediaProjectionInput;
 export type BookingHotelMediaProjectionInput = PropertyMediaProjectionInput;
 
 export type RoomMediaProjectionDraft = {

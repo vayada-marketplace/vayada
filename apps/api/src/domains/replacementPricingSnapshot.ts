@@ -6,6 +6,7 @@ import {
   pricingObject,
   type PricingConfiguration,
 } from "@vayada/domain-pms";
+import type { PricingPaymentWriteProblem } from "@vayada/domain-booking";
 import type { QueryResultRow } from "pg";
 
 export type PricingStorageSources = Readonly<Record<string, string>>;
@@ -25,7 +26,11 @@ export class PricingStorageError extends Error {
       | "idempotency_conflict"
       | "currency_conversion_required"
       /** A non-refundable stay is paid in advance, so its terms can't accept pay at property (VAY-2280). */
-      | "non_refundable_pay_at_property",
+      | "non_refundable_pay_at_property"
+      /** A changed payment breaks the "Paid when booking" write rules (VAY-2205). */
+      | PricingPaymentWriteProblem
+      /** A new deposit while this hotel can't take deposits yet (card off or deposits switched off). */
+      | "deposits_unavailable",
     /** Owner readiness reason the caller may act on (Finance readiness on prepare). */
     readonly reason?: string,
   ) {

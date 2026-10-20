@@ -21,10 +21,6 @@ import {
   type ProductionIdentityMigrationReport,
 } from "./productionIdentityMigration.js";
 import {
-  runProductionMarketplaceMigration,
-  type ProductionMarketplaceMigrationReport,
-} from "./productionMarketplaceMigration.js";
-import {
   runProductionPmsMigration,
   type ProductionPmsMigrationReport,
 } from "./productionPmsMigration.js";
@@ -36,7 +32,6 @@ export const PRODUCTION_PARITY_DOMAINS = [
   "catalog",
   "booking",
   "pms",
-  "marketplace",
   "finance",
 ] as const;
 
@@ -104,7 +99,6 @@ type DomainReport =
   | ProductionCatalogMigrationReport
   | ProductionBookingMigrationReport
   | ProductionPmsMigrationReport
-  | ProductionMarketplaceMigrationReport
   | ProductionFinanceMigrationReport;
 
 export type ProductionParityDomainResult = {
@@ -207,7 +201,6 @@ const defaultServices: ProductionParityServices = {
     catalog: (config) => domainDryRun(config, runProductionCatalogMigration),
     booking: (config) => domainDryRun(config, runProductionBookingMigration),
     pms: (config) => domainDryRun(config, runProductionPmsMigration),
-    marketplace: (config) => domainDryRun(config, runProductionMarketplaceMigration),
     finance: (config) => domainDryRun(config, runProductionFinanceMigration),
   },
   now: () => new Date().toISOString(),
@@ -384,8 +377,8 @@ export async function withProductionParityTargetWriteFreeze<T>(
       `SELECT format('%I.%I', schemaname, tablename) AS "tableName"
          FROM pg_tables
         WHERE schemaname IN (
-          'identity', 'hotel_catalog', 'booking', 'pms', 'finance', 'marketplace',
-          'distribution', 'platform', 'migration_source_auth', 'migration_source_booking',
+          'identity', 'hotel_catalog', 'booking', 'pms', 'finance', 'distribution',
+          'platform', 'migration_source_auth', 'migration_source_booking',
           'migration_source_marketplace', 'migration_source_pms'
         )
         ORDER BY schemaname, tablename`,
@@ -496,7 +489,7 @@ export async function readProductionParityEvidence(
          FROM (
            SELECT target_product AS marker
              FROM platform.production_migration_source_links
-            WHERE target_product IN ('booking', 'pms', 'marketplace', 'finance')
+            WHERE target_product IN ('booking', 'pms', 'finance')
               AND last_run_id <> $1
            UNION ALL
            SELECT source_system AS marker
@@ -1374,20 +1367,6 @@ const PII_EXPOSURE_QUERY = `
     SELECT 'finance.finance_visibility_read_model', id::text, to_jsonb(visibility)
       FROM finance.finance_visibility_read_model visibility
     UNION ALL
-    SELECT 'marketplace.marketplace_offer_read_model', offer_id::text,
-           jsonb_build_object(
-             'offerTitle', offer_title,
-             'offerSummary', offer_summary,
-             'accommodationType', accommodation_type,
-             'location', location,
-             'imageUrls', image_urls,
-             'publicCompensationSummary', public_compensation_summary,
-             'publicCreatorRequirements', public_creator_requirements,
-             'sourceFreshness', source_freshness
-           )
-      FROM marketplace.marketplace_offer_read_model offer_read_model
-     WHERE visibility_status = 'public'
-    UNION ALL
     SELECT 'distribution.public_quote_read_models', quote_session_id::text, to_jsonb(quote)
       FROM distribution.public_quote_read_models quote
     UNION ALL
@@ -1413,11 +1392,7 @@ const PII_EXPOSURE_QUERY = `
   )
   SELECT count(*)::text AS count
     FROM exposure
-   WHERE CASE
-           WHEN source = 'marketplace.marketplace_offer_read_model'
-             THEN marketplace.jsonb_has_marketplace_private_key(payload)
-           ELSE distribution.jsonb_has_distribution_private_key(payload)
-         END
+   WHERE distribution.jsonb_has_distribution_private_key(payload)
       OR payload::text ~* '[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}'`;
 
 const RAW_LEGACY_MEDIA_QUERY = `
@@ -1604,62 +1579,6 @@ const RAW_LEGACY_MEDIA_QUERY = `
               AND approved.url = addon.metadata ->> 'imageUrl'
          )
        )
-  ), invalid_marketplace_private_attachment AS (
-    SELECT message.id
-      FROM marketplace.marketplace_chat_messages message
-      JOIN marketplace.collaborations collaboration
-        ON collaboration.id = message.collaboration_id
-       AND collaboration.property_id = message.property_id
-      LEFT JOIN platform.media_objects media
-        ON media.id::text = message.message_metadata ->> 'mediaObjectId'
-       AND media.property_id = message.property_id
-     WHERE message.message_type = 'image'
-       AND (
-         message.body ~* 'https?://'
-         OR message.message_metadata::text ~* 'https?://'
-         OR media.id IS NULL
-         OR media.purpose <> 'marketplace.collaboration_chat.attachment'
-         OR media.visibility <> 'private'
-         OR media.public_approved IS TRUE
-         OR media.lifecycle_status <> 'active'
-         OR media.deleted_at IS NOT NULL
-         OR media.storage_kind <> 'vayada_managed'
-         OR media.storage_key NOT LIKE
-              'private/media/' || media.id::text || '/provider_original/%'
-         OR media.resource_product <> 'marketplace'
-         OR media.owner_organization_id IS DISTINCT FROM CASE message.sender_type
-              WHEN 'creator' THEN collaboration.creator_organization_id
-              WHEN 'hotel' THEN collaboration.hotel_organization_id
-              ELSE NULL
-            END
-         OR media.retained_until IS NULL
-         OR media.retained_until <= now()
-         OR NOT EXISTS (
-           SELECT 1
-             FROM platform.media_variants variant
-            WHERE variant.media_object_id = media.id
-              AND variant.variant_name = 'provider_original'
-              AND variant.visibility = 'private'
-              AND variant.public_cdn_url IS NULL
-              AND variant.storage_key = media.storage_key
-              AND variant.storage_key LIKE
-                    'private/media/' || media.id::text || '/provider_original/%'
-         )
-         OR (
-           (
-             message.message_metadata ->> 'attachmentSource' = 'platform_media_migration'
-             AND media.source_metadata ->> 'migrationCase' = 'media-url-migration'
-             AND media.resource_type = 'collaboration_chat_message'
-             AND media.resource_id = message.id::text
-           )
-           OR (
-             media.resource_type = 'collaboration'
-             AND media.resource_id = message.collaboration_id::text
-             AND media.source_metadata ->> 'attachmentState' = 'claimed'
-             AND media.source_metadata ->> 'claimedByMessageId' = message.id::text
-           )
-         ) IS NOT TRUE
-       )
   ), invalid_private_attachment AS (
     SELECT attachment.id
       FROM pms.message_attachments attachment
@@ -1707,18 +1626,6 @@ const RAW_LEGACY_MEDIA_QUERY = `
       FROM booking.addon_definitions
      WHERE metadata ->> 'imageUrl' IS NOT NULL
     UNION ALL
-    SELECT 'marketplace.creator_profiles', id::text, profile_picture_url
-      FROM marketplace.creator_profiles
-     WHERE profile_picture_url IS NOT NULL
-    UNION ALL
-    SELECT 'marketplace.marketplace_offers', offer.id::text, image.url
-      FROM marketplace.marketplace_offers offer
-      CROSS JOIN LATERAL unnest(offer.image_urls) AS image(url)
-    UNION ALL
-    SELECT 'marketplace.marketplace_offer_read_model', offer.offer_id::text, image.url
-      FROM marketplace.marketplace_offer_read_model offer
-      CROSS JOIN LATERAL unnest(offer.image_urls) AS image(url)
-    UNION ALL
     SELECT 'pms.room_types', room.id::text, item.value #>> '{}'
       FROM pms.room_types room
       CROSS JOIN LATERAL jsonb_path_query(room.media_snapshot, '$.** ? (@.type() == "string")') AS item(value)
@@ -1760,8 +1667,6 @@ const RAW_LEGACY_MEDIA_QUERY = `
     (SELECT count(*) FROM invalid_booking_header_logo)
     +
     (SELECT count(*) FROM invalid_booking_addon_assignment)
-    +
-    (SELECT count(*) FROM invalid_marketplace_private_attachment)
     +
     (SELECT count(*) FROM invalid_private_attachment)
     +

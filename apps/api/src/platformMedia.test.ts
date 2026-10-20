@@ -2776,7 +2776,7 @@ function buildMediaApp(
     organizationId?: string;
     workosOrgId?: string;
     userId?: string;
-    organizationKind?: "creator_workspace" | "hotel_group" | "platform";
+    organizationKind?: "hotel_group" | "platform";
   } = {},
 ): ReturnType<typeof buildApp> {
   const workosOrgId = options.workosOrgId ?? session.workosOrgId ?? "workos_media_org";
@@ -2888,7 +2888,7 @@ function identityRepository(
   organization: {
     organizationId: string;
     workosOrgId: string;
-    kind: "creator_workspace" | "hotel_group" | "platform";
+    kind: "hotel_group" | "platform";
   } = {
     organizationId: "org_media",
     workosOrgId: "workos_media_org",

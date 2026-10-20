@@ -18,6 +18,9 @@ export {
 } from "@vayada/domain-pms";
 
 export * from "./onboardingPublication.js";
+export * from "./defaultGuestTerms.js";
+export * from "./firstRunDefaults.js";
+export * from "./firstRunBuilders.js";
 export * from "./bookingLaunchEvidence.js";
 export * from "./bookingLaunchReadiness.js";
 export * from "./bookingDesign.js";
@@ -672,9 +675,8 @@ export * from "./roomCombinationSearch.js";
 
 export * from "./replacementPricingEvidence.js";
 export * from "./pricingPaymentMethods.js";
+export * from "./pricingPaidWhenBooking.js";
 export * from "./pricingOfferNames.js";
 export * from "./publicPricingSelection.js";
 
 export * from "./storedPricingQuote.js";
-// Marketplace hotel profile editor (apps/marketplace-web) still reads this; it goes in step 3b.
-export * from "./affiliateBookingDestination.js";

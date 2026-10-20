@@ -1,7 +1,8 @@
 // The contact form's API client. Landing has no sign-in, so it sends no token. Moved here from
-// the Marketplace shared package (VAY-2270) with only what the contact form uses.
+// the Marketplace shared package (VAY-2270) with only what the contact form uses. It posts to
+// the TypeScript API's contact intake (VAY-2286); production builds pass next-api.vayada.com.
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.marketplace.localhost";
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.localhost";
 
 export interface ApiError {
   detail?: unknown;

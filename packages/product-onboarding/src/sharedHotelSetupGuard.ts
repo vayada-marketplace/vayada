@@ -137,6 +137,8 @@ export function buildSharedHotelSetupRedirectPath(input: {
   mode?: "add";
   /** Opens setup on this step, e.g. to fix a Booking readiness item (VAY-2187). */
   step?: PropertySetupStepId;
+  /** Opens the hotel details form on its location step instead (VAY-2288). */
+  focus?: "location";
 }): string {
   const query = new URLSearchParams({ entryProduct: input.entryProduct });
   if (input.returnProduct) query.set("returnProduct", input.returnProduct);
@@ -145,6 +147,7 @@ export function buildSharedHotelSetupRedirectPath(input: {
   if (input.mode === "add") query.set("mode", "add");
   if (input.step && PROPERTY_SETUP_STEP_DEFINITIONS.some(({ stepId }) => stepId === input.step))
     query.set("step", input.step);
+  if (input.focus === "location") query.set("focus", "location");
   const path = `/setup?${query.toString()}`;
   return input.setupBaseUrl ? new URL(path, input.setupBaseUrl).toString() : path;
 }

@@ -38,6 +38,13 @@ const TYPESCRIPT_JOBS = [
 // The mocked Playwright projects that gate PRs (one dev server each, no backend).
 export const BROWSER_E2E_JOBS = ["pms_web_e2e", "booking_web_e2e", "booking_admin_e2e"];
 
+// A pull request into another pull request's branch (a stack) runs only these quick jobs of its
+// selection: typecheck, lint, build, unit suites and the auth contracts. Main is gated by its own
+// pull request, which runs the full selection once the stack collapses into it, and by the merge
+// queue, which runs again before main moves. The label runs the full selection on a stacked PR.
+export const STACKED_PR_JOBS = ["frontend", "frontend_build", "first_party_auth", "api_unit"];
+export const FULL_CI_LABEL = "full-ci";
+
 // Packages that neither apps/api nor any backend package depends on, with the extra jobs their
 // changes need: the browser projects of the apps that use them, and api_unit when
 // test:unit-suites runs their tests. frontend, frontend_build and first_party_auth always run too. The guard
@@ -82,7 +89,7 @@ export const RULES = [
   },
   {
     name: "python-backend",
-    test: /^apps\/(marketplace-api|booking-api|pms-api)\//,
+    test: /^apps\/(booking-api|pms-api)\//,
     jobs: ["backend"],
   },
   // pms_web_e2e, booking_web_e2e and booking_admin_e2e run each app's mocked Playwright project.
@@ -239,6 +246,18 @@ export function selectJobs(files, { workflowJobs = null } = {}) {
   return { jobs: SELECTABLE_JOBS.filter((job) => selected.has(job)), reasons };
 }
 
+// Narrows a pull request's selection to STACKED_PR_JOBS when its base is another branch than main.
+// An unknown base, the label, and every other event keep the full selection.
+export function stackedSelection(jobs, { event, baseRef, fullCi }) {
+  if (event !== "pull_request" || !baseRef || baseRef === "main" || fullCi) {
+    return { jobs, reason: null };
+  }
+  return {
+    jobs: jobs.filter((job) => STACKED_PR_JOBS.includes(job)),
+    reason: `stacked on ${baseRef}: only ${STACKED_PR_JOBS.join(", ")} (label ${FULL_CI_LABEL} runs every selected job)`,
+  };
+}
+
 // `needs` is the workflow's needs context. A job passes only when it succeeded, or when it was
 // skipped because the "changes" job set run_<job>=false. Failure, cancellation (which is how a
 // timed-out job reports), an unexpected skip, a missing job and a failed "changes" job all fail.
@@ -298,27 +317,16 @@ export async function waitWhileHeld({ listHolds, sleep, now, maxWaitMs, pollMs, 
   }
 }
 
-// The changed files and the pr-checks.yml job-block change, diffed from one base commit per event:
-//   pull_request: HEAD is GitHub's merge commit, so HEAD^1 is the base branch tip and diffing from
-//     it is exactly the PR's "Files changed" view. Needs fetch-depth >= 2.
-//   merge_group: HEAD is the queue's commit for this entry, stacked on the entries ahead of it
-//     (merge_group.base_sha is the entry ahead, not main). Diffing from the merge-base with the
-//     base branch (`base`, fetched by the workflow) covers this entry and every entry ahead that
-//     has not landed yet: a superset of each queued PR's own diff.
-// Any git failure throws, and the caller runs every job.
-export function changedFiles({ event = "pull_request", base, cwd } = {}) {
+// The changed files and the pr-checks.yml job-block change of a pull request: HEAD is GitHub's
+// merge commit, so HEAD^1 is the base branch tip and diffing from it is exactly the PR's "Files
+// changed" view. Needs fetch-depth >= 2. Any git failure throws, and the caller runs every job.
+export function changedFiles({ cwd } = {}) {
   const git = (args) =>
     execFileSync("git", args, { cwd, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
-  let from = "HEAD^1";
-  if (event === "merge_group") {
-    if (!base) throw new Error("merge_group selection needs the fetched base branch ref");
-    from = git(["merge-base", base, "HEAD"]).trim();
-  } else {
-    const parents =
-      git(["rev-list", "--parents", "-n", "1", "HEAD"]).trim().split(/\s+/).length - 1;
-    if (parents !== 2)
-      throw new Error(`HEAD has ${parents} parent(s); expected a pull request merge commit`);
-  }
+  const from = "HEAD^1";
+  const parents = git(["rev-list", "--parents", "-n", "1", "HEAD"]).trim().split(/\s+/).length - 1;
+  if (parents !== 2)
+    throw new Error(`HEAD has ${parents} parent(s); expected a pull request merge commit`);
   const files = git(["diff", "--name-only", "--no-renames", "-z", from, "HEAD"])
     .split("\0")
     .filter(Boolean);
@@ -344,21 +352,28 @@ function emit(line) {
 
 function runSelect() {
   let changes = { files: null };
-  // Only a pull_request merge commit and a merge queue entry have a meaningful diff (see
-  // changedFiles). Any other event (a manual run, or a trigger added later) runs every job.
+  // Only a pull request is narrowed to its changed files (see changedFiles). Every other event runs
+  // every job: a manual run, a trigger added later, and the merge queue (VAY-2287), whose run on
+  // the exact commit main fast-forwards to then serves as the release precheck.
   const event = process.env.GITHUB_EVENT_NAME || "pull_request";
-  if (event !== "pull_request" && event !== "merge_group") {
+  if (event !== "pull_request") {
     console.error(`${event} event: running every job`);
   } else {
     try {
-      changes = changedFiles({ event, base: process.env.MERGE_GROUP_BASE });
+      changes = changedFiles();
     } catch (error) {
       console.error(
         `::warning::Could not determine changed files, running every job: ${error.message}`,
       );
     }
   }
-  const { jobs, reasons } = selectJobs(changes.files, changes);
+  const selection = selectJobs(changes.files, changes);
+  const { jobs, reason } = stackedSelection(selection.jobs, {
+    event,
+    baseRef: process.env.GITHUB_BASE_REF,
+    fullCi: process.env.PR_FULL_CI === "true",
+  });
+  const reasons = reason ? [...selection.reasons, reason] : selection.reasons;
   for (const line of [...reasons, `selected jobs: ${jobs.join(", ") || "none"}`])
     console.error(line);
   for (const job of SELECTABLE_JOBS) emit(`run_${job}=${jobs.includes(job)}`);

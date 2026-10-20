@@ -82,6 +82,7 @@ describe("createPricingPublicationFreshnessAlert", () => {
         idempotencyKey: expect.stringMatching(
           /^pricing-publication-freshness:2026-10-10:[0-9a-f]{32}$/,
         ),
+        emailProduct: "platform",
       }),
     );
     const { text } = send.mock.calls[0]![0];

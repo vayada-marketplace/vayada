@@ -9,7 +9,10 @@ export type BookingEmailDelivery = {
     subject: string;
     text: string;
     idempotencyKey: string;
-    emailProduct?: "booking";
+    /** Resend tag `vayada_product`: the webhook acknowledges these events without Inbox matching. */
+    emailProduct?: "booking" | "platform";
+    /** VAY-2286: contact-form notifications are answered straight to the visitor. */
+    replyTo?: string;
   }): Promise<void>;
 };
 
@@ -50,8 +53,9 @@ export function createResendBookingEmailDelivery(config: {
           to: [input.to],
           subject: input.subject,
           text: input.text,
-          ...(input.emailProduct === "booking"
-            ? { tags: [{ name: "vayada_product", value: "booking" }] }
+          ...(input.replyTo ? { reply_to: input.replyTo } : {}),
+          ...(input.emailProduct
+            ? { tags: [{ name: "vayada_product", value: input.emailProduct }] }
             : {}),
         }),
       });

@@ -7,10 +7,6 @@ const migration = await readFile(
   join(import.meta.dirname, "../migrations/0086_finance_affiliate_payout_payment_evidence.sql"),
   "utf8",
 );
-const financeTransform = await readFile(
-  join(import.meta.dirname, "cases/finance/transform.ts"),
-  "utf8",
-);
 
 describe("Finance affiliate payout evidence migration", () => {
   it("adds the Platform Finance command grant and scoped entitlement", () => {
@@ -35,9 +31,6 @@ describe("Finance affiliate payout evidence migration", () => {
     expect(migration).toContain("SUM(item.amount) = evidence.amount");
     expect(migration).toContain("BOOL_AND(item.currency = evidence.currency)");
     expect(migration.match(/DEFERRABLE INITIALLY DEFERRED/g)).toHaveLength(2);
-    expect(financeTransform).toContain(
-      "payout_metadata || jsonb_build_object('affiliateId', affiliate_resource_id)",
-    );
   });
 
   it("blocks update, delete, and truncate for evidence and item rows", () => {

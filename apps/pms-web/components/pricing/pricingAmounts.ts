@@ -36,17 +36,34 @@ export class PricingError extends SetupPricingError {
 export const nonRefundablePayAtProperty = (cause: unknown) =>
   cause instanceof Error &&
   (cause as { data?: { code?: unknown } }).data?.code === "non_refundable_pay_at_property";
+/** The "Paid when booking" rule the server named when it refused a changed payment (VAY-2205). */
+const paymentRuleKeys = {
+  payment_methods_required: "pricing.error.paymentMethodRequired",
+  deposit_card_only: "pricing.error.depositCardOnly",
+  deposit_rest_at_property: "pricing.error.depositRestAtProperty",
+  deposit_below_full_stay: "pricing.error.depositBelowFullStay",
+  deposits_unavailable: "pricing.error.depositsUnavailable",
+} as const satisfies Record<string, MessageKey>;
+export const paymentRuleKey = (cause: unknown): MessageKey | null => {
+  const code =
+    cause instanceof Error ? (cause as { data?: { code?: unknown } }).data?.code : undefined;
+  return typeof code === "string" && Object.hasOwn(paymentRuleKeys, code)
+    ? paymentRuleKeys[code as keyof typeof paymentRuleKeys]
+    : null;
+};
 /** Translates pricing errors raised in the frontend; other messages, such as API errors, pass through unchanged. */
 export const errorText = (cause: unknown, t: Translate, fallback: MessageKey) =>
   nonRefundablePayAtProperty(cause)
     ? t("pricing.error.nonRefundablePayAtProperty")
-    : cause instanceof SetupPricingError
-      ? t(cause.key)
-      : cause instanceof PricingResponseError
-        ? t("pricing.error.unverified")
-        : cause instanceof Error
-          ? localizedErrorText(cause, cause.message, t)
-          : t(fallback);
+    : paymentRuleKey(cause)
+      ? t(paymentRuleKey(cause)!)
+      : cause instanceof SetupPricingError
+        ? t(cause.key)
+        : cause instanceof PricingResponseError
+          ? t("pricing.error.unverified")
+          : cause instanceof Error
+            ? localizedErrorText(cause, cause.message, t)
+            : t(fallback);
 
 type Base = Extract<
   PricingConfiguration["offers"][number]["price"],

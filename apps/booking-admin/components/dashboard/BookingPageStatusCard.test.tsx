@@ -103,6 +103,22 @@ describe("BookingPageStatusView", () => {
     expect(buttons(markup)).toEqual([{ label: "Publish booking page", disabled: true }]);
   });
 
+  it("links a hotel location item to the location form (VAY-2288)", () => {
+    const markup = render({
+      kind: "not_ready",
+      readyGroups: [],
+      items: [
+        {
+          groupId: "booking.hotel_profile",
+          message: "Turn on 'Show city and country publicly' so guests see where you are.",
+          step: "present_hotel",
+          focus: "location",
+        },
+      ],
+    });
+    expect(markup).toContain("step=present_hotel&amp;focus=location");
+  });
+
   it("does not link items that only need waiting", () => {
     const markup = render({
       kind: "waiting",
@@ -123,12 +139,45 @@ describe("BookingPageStatusView", () => {
     expect(buttons(stalled)).toEqual([{ label: "Check again", disabled: false }]);
   });
 
-  it("lets the hotel try again after a failed publication", () => {
-    const markup = render({ kind: "failed", readyGroups: ALL });
-    expect(markup).toContain("Publishing failed");
-    expect(markup).toContain("Nothing changed for guests.");
-    expect(buttons(markup)).toEqual([{ label: "Try again", disabled: false }]);
-  });
+  const operationId = "3f2a9c1b-0000-4000-8000-000000000001";
+  it.each([
+    [
+      { kind: "operation", code: "projection_failed", operationId },
+      "Some of your hotel details can&#x27;t be shown on your booking page yet",
+      "Reference: projection_failed · 3f2a9c1b",
+    ],
+    [
+      { kind: "operation", code: "source_content_changed", operationId },
+      "Your hotel details changed while we were publishing",
+      "Reference: source_content_changed · 3f2a9c1b",
+    ],
+    [
+      { kind: "operation", code: "external_result_unconfirmed", operationId },
+      "We couldn&#x27;t confirm that your booking page went live.",
+      "Reference: external_result_unconfirmed · 3f2a9c1b",
+    ],
+    [
+      { kind: "request", reason: "setup_changed" },
+      "Your setup changed after this page loaded.",
+      null,
+    ],
+    [
+      { kind: "request", reason: "already_publishing" },
+      "Your booking page is already being published.",
+      null,
+    ],
+    [{ kind: "request", reason: "unreachable" }, "Nothing changed for guests.", null],
+  ] as const)(
+    "says why publishing failed and offers Try again (%#, VAY-2292)",
+    (failure, detail, reference) => {
+      const markup = render({ kind: "failed", readyGroups: ALL, failure });
+      expect(markup).toContain("Publishing failed");
+      expect(markup).toContain(detail);
+      if (reference) expect(markup).toContain(reference);
+      else expect(markup).not.toContain("Reference:");
+      expect(buttons(markup)).toEqual([{ label: "Try again", disabled: false }]);
+    },
+  );
 
   it("asks to check again when the status can't be read", () => {
     const markup = render({ kind: "unavailable" });

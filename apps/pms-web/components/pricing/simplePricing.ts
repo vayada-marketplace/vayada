@@ -2,6 +2,7 @@ import {
   parsePricingConfiguration,
   pricingCurrencyScale,
   type PricingConfiguration,
+  type PricingOfferSale,
 } from "@vayada/domain-pms/replacement-pricing";
 import type { PricingPaymentMethod } from "@vayada/domain-booking/replacement-pricing";
 import { decimalAmount, PricingError } from "./pricingAmounts";
@@ -15,6 +16,7 @@ import {
   weekendChoice,
   type OptionTerms,
 } from "./stepPricing";
+import { seasonRules } from "./nightActions";
 
 /** The simple Prices card (VAY-2188): a lens over the same pricing-v2 room and terms. It reads the main option, its
  * cancellation and the two options its switches stand for; everything else is listed under More options, unchanged.
@@ -178,6 +180,22 @@ export function setDiscount(room: Room, offerId: string, percent: string): Room 
     throw new PricingError("pricing.steps.preset.errorDiscount");
   return changeLinkedAdjustment(room, offerId, { kind: "percentage", value: `-${value}` });
 }
+/** Where an option is sold (VAY-2285): without `sale` on the booking page and channels (the key is left out, never
+ * written as a default), "channels_only" off the booking page, "not_sold" nowhere. The option and its terms stay, so
+ * options linked to it keep their price. Every room keeps one option on the booking page. */
+export function setOfferSale(room: Room, offerId: string, sale: PricingOfferSale | null): Room {
+  const next = parsePricingConfiguration({
+    ...room,
+    offers: room.offers.map((offer) => {
+      if (offer.id !== offerId) return offer;
+      const next: Record<string, unknown> = { ...offer };
+      delete next.sale;
+      return sale ? { ...next, sale } : next;
+    }),
+  });
+  if (!next) throw new PricingError("pricing.rates.keepOne");
+  return next;
+}
 /** The breakfast option's price per room or per adult; children's breakfast stays as it is. */
 export function setBreakfastAmount(room: Room, offerId: string, amount: string): Room {
   const offer = room.offers.find((value) => value.id === offerId);
@@ -193,6 +211,22 @@ export function setBreakfastAmount(room: Room, offerId: string, amount: string):
       ? charge.childBandAmountsMinor.map((minor) => decimalAmount(minor, scale))
       : []),
   ]);
+}
+/** What guests read about an option's meal (VAY-2281): one line of plain text, trimmed, up to 200 characters; empty
+ * leaves the key out. Not priced. */
+export function setMealDescription(room: Room, offerId: string, text: string): Room {
+  const value = text.trim();
+  const next = parsePricingConfiguration({
+    ...room,
+    offers: room.offers.map((offer) => {
+      if (offer.id !== offerId) return offer;
+      const meal: Record<string, unknown> = { ...offer.meal };
+      delete meal.description;
+      return { ...offer, meal: value ? { ...meal, description: value } : meal };
+    }),
+  });
+  if (!next) throw new PricingError("pricing.mealText.invalid");
+  return next;
 }
 
 /** New terms for the options the card's cancellation covers: the main option and the breakfast option that follows
@@ -290,8 +324,9 @@ export function onePriceAgain(room: Room): Room | null {
 
 /** Whether the room has settings the card's top doesn't show (other options, prices by guests, own cancellation or
  * weekday rules, month prices, stay rules for periods that are no season): the card then says they are kept.
- * Single-date prices and date stay rules show in "Prices by date" and its night panel, closed periods in "When guests
- * can book" and a season's minimum stay in its row (VAY-2280), so they don't count. */
+ * Single-date prices and a date's closing, arrival rule and minimum stay show in "Prices by date" and its night panel,
+ * closed periods in "When guests can book" and a season's minimum stay in its row (VAY-2280), so they don't count.
+ * A date's own "no departures" or maximum stay (unlike its season's) shows nowhere on the calendar, so it does. */
 export function hasKeptSettings(room: Room, simple: SimpleRoom): boolean {
   const { main } = simple;
   const calendar = main.price.kind === "independent" ? main.price.calendar : null;
@@ -304,6 +339,13 @@ export function hasKeptSettings(room: Room, simple: SimpleRoom): boolean {
     otherWeekdays(main).length > 0 ||
     weekendChoice(main) === "other" ||
     !restrictions ||
+    restrictions.dates.some(({ date, rules }) => {
+      const base = seasonRules(main, date);
+      return (
+        rules.closedToDeparture !== base.closedToDeparture ||
+        rules.maxStayNights !== base.maxStayNights
+      );
+    }) ||
     restrictions.seasons.some(
       (rule) =>
         !rule.rules.stopSell &&

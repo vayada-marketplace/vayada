@@ -89,6 +89,7 @@ import {
 } from "./routes/hotelAccountInvites.js";
 import { registerPropertyNearbyRoutes } from "./routes/propertyNearby.js";
 import type { PropertyNearbyRepository } from "./domains/propertyNearbyRepository.js";
+import { registerHotelFirstRunRoutes } from "./routes/hotelFirstRun.js";
 import {
   registerSharedHotelSetupStatusRoutes,
   type SharedHotelSetupStatusRepository,
@@ -167,6 +168,10 @@ import {
   type PlatformPropertyLifecycleRoutesOptions,
 } from "./routes/platform/admin/propertyLifecycle.js";
 import { registerPlatformPropertyMediaRoutes } from "./routes/platform/admin/propertyMedia.js";
+import {
+  registerPlatformPropertySlugRoutes,
+  type PlatformPropertySlugRoutesOptions,
+} from "./routes/platform/admin/propertySlug.js";
 import { registerPmsOperationsRoutes } from "./routes/pmsOperations.js";
 import type {
   PmsInboxAssistancePort,
@@ -268,6 +273,8 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   >;
   /** Owner-only hotel-detail edits on the ordinary login; unset keeps the sparse writer. */
   hotelSetupProfileCommand?: import("./routes/sharedHotelSetupStatus.js").HotelSetupPropertyProfileUpdate;
+  /** VAY-2247 first run (GET/POST /api/hotel-setup/properties/:id/first-run); unset: not mounted. */
+  hotelFirstRun?: import("./routes/hotelFirstRun.js").HotelFirstRunRouteOptions["createService"];
   /** Owner-only Feature Hub Financials on the ordinary login; unset keeps the shared repository. */
   hotelSetupFeatureHubCommands?: Pick<
     import("./routes/pmsModuleActivations.js").PmsModuleActivationRepository,
@@ -393,6 +400,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   platformAdminDashboardRepository?: PlatformAdminDashboardRepository;
   platformAdminSmokeRecovery?: PlatformAdminDashboardRoutesOptions["smokeRecovery"];
   platformPropertyLifecycle?: PlatformPropertyLifecycleRoutesOptions;
+  platformPropertySlug?: PlatformPropertySlugRoutesOptions;
   identityPrivacyAllowedOrigins?: string[];
   bookingWebCalendarRepository?: BookingWebCalendarRepository;
   bookingWebCheckoutAdapter?: BookingWebCheckoutAdapter;
@@ -587,6 +595,16 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       launchSettingsCommand: options.hotelSetupLaunchSettingsCommand,
       profileCommand: options.hotelSetupProfileCommand,
       refreshPublicPage: options.publicPageRefresh,
+    });
+  }
+  if (options.hotelFirstRun) {
+    if (!options.auth?.propertyAccessRepository) {
+      throw new Error("auth.propertyAccessRepository is required with hotelFirstRun");
+    }
+    app.register(registerHotelFirstRunRoutes, {
+      prefix: "/api/hotel-setup",
+      createService: options.hotelFirstRun,
+      propertyAccessRepository: options.auth.propertyAccessRepository,
     });
   }
   if (options.propertySetupRouteStateReadPort) {
@@ -998,6 +1016,12 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     app.register(registerPlatformPropertyLifecycleRoutes, {
       prefix: "/api/platform/admin",
       ...options.platformPropertyLifecycle,
+    });
+  }
+  if (options.platformPropertySlug) {
+    app.register(registerPlatformPropertySlugRoutes, {
+      prefix: "/api/platform/admin",
+      ...options.platformPropertySlug,
     });
   }
   if (options.platformMedia) {

@@ -64,7 +64,7 @@ type TrackAuthorizationCase = {
   given: {
     authentication: "missing" | "invalid" | "valid";
     permissions: PermissionKey[];
-    organizationKind: "hotel_group" | "creator_workspace";
+    organizationKind: "hotel_group" | "platform";
     revokePermissionBeforeExactRetry?: boolean;
   };
   expected: {
@@ -204,7 +204,7 @@ describe("shared hotel setup status route", () => {
 
   it("rejects non-hotel organizations for the property-type catalog", async () => {
     app = buildSharedSetupApp({
-      organizationKind: "creator_workspace",
+      organizationKind: "platform",
       linkedResources: [],
       repository: repositoryWith([]),
     });
@@ -2276,7 +2276,7 @@ describe("shared hotel setup status route", () => {
     expect(publicUpdateResponse.body.code).toBe("missing_property_resource_link");
   });
 
-  it("reads and writes launch settings for a creator-only property without Booking access", async () => {
+  it("reads and writes launch settings for a property without Booking access", async () => {
     const stored = {
       id: propertyId,
       propertyId,
@@ -2293,10 +2293,7 @@ describe("shared hotel setup status route", () => {
     const updatePropertySettingsByHotelId = vi.fn(async () => stored);
     app = buildSharedSetupApp({
       permissions: ["hotel_catalog.setup.read", "hotel_catalog.setup.manage"],
-      linkedResources: [
-        propertyLink(propertyId),
-        productLink("marketplace", "hotel_profile", propertyId),
-      ],
+      linkedResources: [propertyLink(propertyId)],
       repository: repositoryWith([]),
       launchSettingsRepository: {
         findPropertySettingsByHotelId,
@@ -2434,6 +2431,58 @@ describe("shared hotel setup status route", () => {
     expect(getPropertyProfile).not.toHaveBeenCalled();
     expect(updatePropertyProfile).not.toHaveBeenCalled();
     app = owner();
+  });
+
+  it("creates and edits a hotel without a postal code (VAY-2289)", async () => {
+    const input = minimalHotelInput();
+    input.location.postalCode = "";
+    const createPropertyProfile = vi.fn(
+      async ({ profile }: { profile: SharedPropertyProfileInput }) =>
+        profileResponse(propertyId, profile),
+    );
+    app = buildSharedSetupApp({
+      linkedResources: [],
+      permissions: ["hotel_catalog.setup.read", "hotel_catalog.setup.manage"],
+      repository: {
+        ...unusedStatusMethods(),
+        ...unusedPropertyProfileMethods(),
+        createPropertyProfile,
+      },
+    });
+    const locationWithoutPostalCode: Record<string, unknown> = { ...input.location };
+    delete locationWithoutPostalCode["postalCode"];
+    const created = await injectJson<SharedPropertyProfile>(app, {
+      method: "POST",
+      url: "/api/hotel-setup/properties",
+      headers: { authorization: "Bearer valid-token", "idempotency-key": "create-no-postcode" },
+      payload: { ...input, location: locationWithoutPostalCode },
+    });
+    expect(created.statusCode).toBe(201);
+    expect(createPropertyProfile).toHaveBeenCalledWith(expect.objectContaining({ profile: input }));
+    await app.close();
+
+    const command = vi
+      .fn<import("./routes/sharedHotelSetupStatus.js").HotelSetupPropertyProfileUpdate>()
+      .mockResolvedValue({ status: "updated", profile: profileResponse(propertyId, input) });
+    app = buildSharedSetupApp({
+      permissions: ["hotel_catalog.setup.manage", "booking.settings.manage"],
+      linkedResources: [propertyLink(propertyId)],
+      repository: repositoryWith([]),
+      profileCommand: command,
+    });
+    const edited = await injectJson(app, {
+      method: "PUT",
+      url: `/api/hotel-setup/properties/${propertyId}/profile`,
+      headers: { authorization: "Bearer valid-token", "idempotency-key": "tick-locality" },
+      payload: { expectedProfileRevision: 1, patch: { location: { localityPublic: true } } },
+    });
+    expect(edited.statusCode).toBe(200);
+    // A stored hotel without a postal code can still save other location changes.
+    const { merge } = command.mock.calls[0]![2];
+    expect(merge(input)).toEqual({
+      expectedProfileRevision: 1,
+      profile: { ...input, location: { ...input.location, localityPublic: true } },
+    });
   });
 
   it("saves launch settings through the Owner-only ordinary command, never the broad writer", async () => {
@@ -3157,7 +3206,7 @@ function buildSharedSetupApp(options: {
   propertyAccessRepository?: PropertyAccessRepository;
   permissions?: PermissionKey[];
   linkedResources?: LinkedResource[];
-  organizationKind?: "hotel_group" | "creator_workspace" | "affiliate_partner" | "platform";
+  organizationKind?: "hotel_group" | "platform";
   membershipStatus?: RequestContext["membership"]["status"];
   roleKey?: string;
   includePropertyManifestPermission?: boolean;
@@ -3248,7 +3297,7 @@ function unusedTrackCommandRepository(): HotelSetupTrackCommandRepository {
 
 function identityRepository(options: {
   linkedResources?: LinkedResource[];
-  organizationKind?: "hotel_group" | "creator_workspace" | "affiliate_partner" | "platform";
+  organizationKind?: "hotel_group" | "platform";
   membershipStatus?: RequestContext["membership"]["status"];
   roleKey?: string;
 }): IdentityRepository {
@@ -3283,7 +3332,6 @@ function identityRepository(options: {
           propertyLink(propertyId),
           productLink("booking", "booking_hotel", propertyId),
           productLink("pms", "pms_property", propertyId),
-          productLink("marketplace", "hotel_profile", propertyId),
         ]
       );
     },
@@ -3688,8 +3736,8 @@ function propertyLink(resourceId: string): LinkedResource {
 }
 
 function productLink(
-  product: "booking" | "pms" | "marketplace",
-  resourceType: "booking_hotel" | "pms_property" | "hotel_profile",
+  product: "booking" | "pms",
+  resourceType: "booking_hotel" | "pms_property",
   resourceId: string,
 ): LinkedResource {
   return { product, resourceType, resourceId, relationship: "owner", status: "active" };

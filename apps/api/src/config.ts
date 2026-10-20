@@ -30,7 +30,6 @@ export type ApiAuthSessionConfig = {
   authFirstPartySurfaces: ApiAuthSurface[];
   authCookieSecure: boolean;
   authCookieDomain?: string;
-  authLegacyMarketplaceJwtSecret?: string;
   authBookingAdminLogoutUrl?: string;
   authLegacyBookingJwtSecret?: string;
   authPmsWebLogoutUrl?: string;
@@ -156,8 +155,10 @@ export type ApiConfig = {
   };
   financeFolioRecipientKms?: FinanceFolioRecipientKmsConfig;
   financeBankTransferKms?: { currentKeyArn: string; allowedKeyArns: string[]; region: string };
-  /** Browser origins allowed on the identity privacy and contact intake routes. */
+  /** Browser origins allowed on the identity privacy routes. */
   identityPrivacyAllowedOrigins: string[];
+  /** Browser origins allowed to post the public contact form (VAY-2286: vayada.com). */
+  contactIntakeAllowedOrigins: string[];
   pmsOperationsAllowedOrigins: string[];
   financialsActivationPropertyIds: string[];
   bookingWebEventSink: BookingWebEventSink;
@@ -170,14 +171,22 @@ export type ApiConfig = {
   /** Request-mode pay-at-property quotes in public acceptance: the hotel confirms each booking.
    * Off until host accept, decline and expiry handle these bookings. */
   replacementPricingRequestAcceptanceEnabled: boolean;
+  /** Deposit quotes in public acceptance: a share by card when booking, the rest at the property
+   * (VAY-2205). Needs card acceptance too. Off until a deposit booking is checked on the test hotel. */
+  replacementPricingDepositAcceptanceEnabled: boolean;
   /** Bank-transfer and PayPal quotes in public acceptance: the guest pays the hotel directly and
    * the hotel confirms receipt. Off until acceptance, payment confirmation, decline and expiry
    * handle these bookings (VAY-2139). */
   replacementPricingManualPaymentAcceptanceEnabled: boolean;
+  /** VAY-2247: mounts GET/POST /api/hotel-setup/properties/:id/first-run for the new setup. Off by default. */
+  hotelFirstRunEnabled: boolean;
   bookingHostBase?: string;
   platformMediaServing?: PlatformMediaServingConfig;
   platformMediaCleanupEnabled: boolean;
   platformMediaCleanupIntervalMs: number;
+  /** VAY-2272: the one-time purge of retired Marketplace and creator media runs with the cleanup
+   * while set, clearing the images.vayada.com distribution for deleted public files. Off by default. */
+  platformMediaRetiredPurge?: { cdnDistributionId: string };
   propertySetupDraftRetentionEnabled: boolean;
   propertySetupDraftRetentionIntervalMs: number;
   propertySetupDraftRetentionBatchSize: number;
@@ -195,6 +204,8 @@ export type ApiConfig = {
   pricingPublicationFreshnessIntervalMs: number;
   /** Recipient of the at-most-daily stale-pricing email; unset sends none (log line only). */
   pricingPublicationFreshnessAlertEmail?: string;
+  /** VAY-2286: vayada.com contact-form messages are emailed here (Reply-To: the visitor). */
+  contactNotificationRecipient?: string;
   providerWebhooks: ProviderWebhookConfig;
   airbnbImport?: ReturnType<typeof loadAirbnbImportConfig>;
   airbnbAlterations?: { propertyIds: readonly string[] };
@@ -216,6 +227,27 @@ type NextRuntimeSourceRequirement = {
   allowedValues?: readonly string[];
   allowExplicitDisabled?: boolean;
 };
+
+function loadPlatformMediaRetiredPurgeConfig(
+  env: NodeJS.ProcessEnv,
+  input: { platformMediaServing: boolean; targetDatabaseWithAuth: boolean },
+): ApiConfig["platformMediaRetiredPurge"] {
+  if (!readBooleanEnv(env, "PLATFORM_MEDIA_RETIRED_PURGE_ENABLED")) return undefined;
+  const cdnDistributionId = readOptionalEnv(env, "PLATFORM_MEDIA_CDN_DISTRIBUTION_ID");
+  // The purge runs in the media runtime, which needs the target database and auth. Tasks
+  // without background workers share the service environment and simply skip it.
+  if (!cdnDistributionId || !input.platformMediaServing || !input.targetDatabaseWithAuth) {
+    throw new Error(
+      "PLATFORM_MEDIA_RETIRED_PURGE_ENABLED requires PLATFORM_MEDIA_CDN_DISTRIBUTION_ID, complete PLATFORM_MEDIA_* config, TARGET_DATABASE_URL and complete auth config",
+    );
+  }
+  if (!readBooleanEnv(env, "PLATFORM_MEDIA_CLEANUP_ENABLED", true)) {
+    throw new Error(
+      "PLATFORM_MEDIA_RETIRED_PURGE_ENABLED runs with the media cleanup; PLATFORM_MEDIA_CLEANUP_ENABLED must stay on",
+    );
+  }
+  return { cdnDistributionId };
+}
 
 function readOptionalEnv(env: NodeJS.ProcessEnv, key: string): string | undefined {
   const value = env[key]?.trim();
@@ -486,11 +518,11 @@ function readCalendarAutoOpenSchedulerIntervalEnv(env: NodeJS.ProcessEnv): numbe
 }
 
 // One recipient; the email goes through the booking email provider and sender.
-function readPricingPublicationFreshnessAlertEmail(
+function readSingleRecipientEnv(
   env: NodeJS.ProcessEnv,
+  key: "PRICING_PUBLICATION_FRESHNESS_ALERT_EMAIL" | "CONTACT_NOTIFICATION_RECIPIENT",
   emailConfigured: boolean,
 ): string | undefined {
-  const key = "PRICING_PUBLICATION_FRESHNESS_ALERT_EMAIL";
   const value = readOptionalEnv(env, key);
   if (!value) return undefined;
   if (!/^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+$/.test(value)) {
@@ -591,7 +623,6 @@ function loadAuthSessionConfig(env: NodeJS.ProcessEnv): ApiAuthSessionConfig | u
     authFirstPartySurfaces,
     authCookieSecure,
     authCookieDomain: readOptionalEnv(env, "AUTH_COOKIE_DOMAIN"),
-    authLegacyMarketplaceJwtSecret: readOptionalEnv(env, "AUTH_LEGACY_MARKETPLACE_JWT_SECRET"),
     authBookingAdminLogoutUrl: readOptionalEnv(env, "AUTH_BOOKING_ADMIN_LOGOUT_URL"),
     authLegacyBookingJwtSecret: readOptionalEnv(env, "AUTH_LEGACY_BOOKING_JWT_SECRET"),
     authPmsWebLogoutUrl: readOptionalEnv(env, "AUTH_PMS_WEB_LOGOUT_URL"),
@@ -903,6 +934,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       "Target database with complete auth requires complete PLATFORM_MEDIA_* config because hotel profile photos are required",
     );
   }
+  const platformMediaRetiredPurge = loadPlatformMediaRetiredPurgeConfig(env, {
+    platformMediaServing: Boolean(platformMediaServing),
+    targetDatabaseWithAuth: Boolean(targetDatabaseUrl && auth),
+  });
   if (env.NODE_ENV === "production" && !bookingEmailDelivery) {
     throw new Error(
       "Target booking checkout requires RESEND_API_KEY and BOOKING_EMAIL_FROM in production",
@@ -1101,6 +1136,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       "IDENTITY_PRIVACY_ALLOWED_ORIGINS",
       readOptionalCsvEnv(env, "MARKETPLACE_DISCOVERY_ALLOWED_ORIGINS"),
     ),
+    // VAY-2286: its own list, so the landing origin stays out of the identity and app CORS lists.
+    contactIntakeAllowedOrigins: readOptionalCsvEnv(env, "CONTACT_INTAKE_ALLOWED_ORIGINS", [
+      "https://landing.localhost",
+      "http://localhost:3006",
+    ]),
     pmsOperationsAllowedOrigins: readOptionalCsvEnv(env, "PMS_OPERATIONS_ALLOWED_ORIGINS", [
       "https://pms.localhost",
       "https://admin.booking.localhost",
@@ -1123,10 +1163,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       env,
       "REPLACEMENT_PRICING_REQUEST_ACCEPTANCE_ENABLED",
     ),
+    replacementPricingDepositAcceptanceEnabled: readBooleanEnv(
+      env,
+      "REPLACEMENT_PRICING_DEPOSIT_ACCEPTANCE_ENABLED",
+    ),
     replacementPricingManualPaymentAcceptanceEnabled: readBooleanEnv(
       env,
       "REPLACEMENT_PRICING_MANUAL_PAYMENT_ACCEPTANCE_ENABLED",
     ),
+    hotelFirstRunEnabled: readBooleanEnv(env, "HOTEL_FIRST_RUN_ENABLED"),
     bookingHostBase: readOptionalEnv(env, "BOOKING_HOST_BASE"),
     platformMediaServing,
     platformMediaCleanupEnabled: readBooleanEnv(env, "PLATFORM_MEDIA_CLEANUP_ENABLED", true),
@@ -1135,6 +1180,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       "PLATFORM_MEDIA_CLEANUP_INTERVAL_MS",
       15 * 60 * 1000,
     ),
+    platformMediaRetiredPurge,
     propertySetupDraftRetentionEnabled: readBooleanEnv(
       env,
       "PROPERTY_SETUP_DRAFT_RETENTION_ENABLED",
@@ -1187,8 +1233,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       true,
     ),
     pricingPublicationFreshnessIntervalMs: readPricingPublicationFreshnessIntervalEnv(env),
-    pricingPublicationFreshnessAlertEmail: readPricingPublicationFreshnessAlertEmail(
+    pricingPublicationFreshnessAlertEmail: readSingleRecipientEnv(
       env,
+      "PRICING_PUBLICATION_FRESHNESS_ALERT_EMAIL",
+      Boolean(bookingEmailDelivery),
+    ),
+    contactNotificationRecipient: readSingleRecipientEnv(
+      env,
+      "CONTACT_NOTIFICATION_RECIPIENT",
       Boolean(bookingEmailDelivery),
     ),
     providerWebhooks: prospectiveConfig.providerWebhooks,

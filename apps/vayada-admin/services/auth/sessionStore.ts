@@ -20,7 +20,6 @@ const LEGACY_EXPIRES_AT_KEY = "token_expires_at";
 let authKitSession: AuthKitSessionResponse | null = null;
 let authKitAccessTokenExpiresAt: number | null = null;
 let authKitRefreshPromise: Promise<string | null> | null = null;
-let legacyCompatibilityToken: { token: string; expiresAt: number } | null = null;
 // Refreshes may only commit to the login/logout state they started against.
 let authStateGeneration = 0;
 
@@ -30,10 +29,6 @@ setVayadaApiBearerTokenProvider((signal, forceRefresh) =>
 
 export function isAuthKitLoginEnabled(): boolean {
   return process.env.NEXT_PUBLIC_AUTHKIT_LOGIN_ENABLED !== "false";
-}
-
-export function isCompatibilityTokenEnabled(): boolean {
-  return process.env.NEXT_PUBLIC_AUTHKIT_COMPATIBILITY_TOKEN_ENABLED === "true";
 }
 
 export function getAuthStateGeneration(): number {
@@ -51,11 +46,6 @@ export function setAuthKitSession(
     authStateGeneration += 1;
     authKitRefreshPromise = null;
   }
-  const replacesIdentity =
-    expectedGeneration === undefined ||
-    authKitSession?.user.id !== session.user.id ||
-    authKitSession?.organizationId !== session.organizationId;
-  if (replacesIdentity) legacyCompatibilityToken = null;
   authKitSession = session;
   authKitAccessTokenExpiresAt = readJwtExpiresAt(session.accessToken);
   if (typeof window === "undefined") return authStateGeneration;
@@ -75,21 +65,6 @@ export function setAuthKitSession(
     }),
   );
   return authStateGeneration;
-}
-
-export function setLegacyCompatibilityToken(
-  token: string,
-  expiresIn: number,
-  expectedGeneration?: number,
-): boolean {
-  if (expectedGeneration !== undefined && expectedGeneration !== authStateGeneration) {
-    return false;
-  }
-  legacyCompatibilityToken = {
-    token,
-    expiresAt: Date.now() + expiresIn * 1000,
-  };
-  return true;
 }
 
 export function setLegacyPasswordSession(input: {
@@ -126,7 +101,6 @@ export function clearAuthData(expectedGeneration?: number): boolean {
   authKitSession = null;
   authKitAccessTokenExpiresAt = null;
   authKitRefreshPromise = null;
-  legacyCompatibilityToken = null;
   if (typeof window === "undefined") return true;
 
   localStorage.removeItem(LEGACY_TOKEN_KEY);
@@ -186,17 +160,8 @@ export function getAuthCsrfToken(): string | null {
 }
 
 export function getAuthBearerToken(): string | null {
-  const compatibilityToken = getLegacyCompatibilityToken();
-  if (isCompatibilityTokenEnabled() && compatibilityToken) return compatibilityToken;
   if (authKitSession?.accessToken) return authKitSession.accessToken;
   return getLegacyPasswordToken();
-}
-
-function getLegacyCompatibilityToken(): string | null {
-  if (legacyCompatibilityToken && Date.now() < legacyCompatibilityToken.expiresAt - 30_000) {
-    return legacyCompatibilityToken.token;
-  }
-  return null;
 }
 
 export function getLegacyPasswordToken(): string | null {

@@ -13,21 +13,11 @@ import {
 } from "react";
 import {
   ArrowRightIcon,
-  BuildingOffice2Icon,
-  BuildingOfficeIcon,
-  BuildingStorefrontIcon,
-  CakeIcon,
   CheckIcon,
-  EllipsisHorizontalIcon,
   ExclamationCircleIcon,
-  HomeModernIcon,
-  KeyIcon,
   MagnifyingGlassIcon,
   MapPinIcon,
-  PhotoIcon,
   PlusIcon,
-  SunIcon,
-  UsersIcon,
 } from "@heroicons/react/24/outline";
 import type {
   AdaptiveHotelSetupStatus,
@@ -48,12 +38,7 @@ import {
   POPULAR_CURRENCY_CODES,
   POPULAR_LANGUAGE_CODES,
 } from "@vayada/locale-constants";
-import {
-  getCountries,
-  getCountryCallingCode,
-  parsePhoneNumberFromString,
-  type CountryCode,
-} from "libphonenumber-js/min";
+import { type CountryCode } from "libphonenumber-js/min";
 
 import { HotelIcon } from "./HotelIcon";
 import { LocalizationMultiSelect } from "./LocalizationMultiSelect";
@@ -74,6 +59,16 @@ import {
   type SharedSetupProperty,
 } from "./sharedFirstRunSetupFlow";
 import type { SharedHotelSetupApi, SharedPropertyTypeOption } from "./sharedHotelSetupApi";
+import {
+  isValidInternationalPhone,
+  normalizedPhoneNumber,
+  PhoneField,
+  PropertyLogoField,
+  PropertyTypeField,
+  SelectField,
+  SUPPORTED_PHONE_COUNTRIES,
+  TextField,
+} from "./setupProfileFields";
 import {
   clearPendingPropertyLogo,
   readPendingPropertyLogo,
@@ -105,6 +100,10 @@ export type SharedFirstRunPropertySetupWizardProps = {
   renderSetupActions?: (propertyId: string) => ReactNode;
   /** The tracks a new hotel can choose from; every setup track by default. */
   availableTracks?: readonly SetupTrack[];
+  /** Opens the selected hotel's details on this field, e.g. from a Booking readiness item. */
+  editFocus?: "location";
+  /** Called after a save that `editFocus` opened, instead of returning to the setup plan. */
+  onEditFocusSaved?: (propertyId: string) => void;
 };
 
 type ProfileDraft = {
@@ -148,7 +147,6 @@ export function canConfirmLocation(
 ): boolean {
   return Boolean(
     location.streetAddress.trim() &&
-    location.postalCode.trim() &&
     location.city.trim() &&
     COUNTRY_OPTIONS.some((country) => country.code === location.countryCode) &&
     isValidIanaTimezone(location.timezone.trim()),
@@ -244,20 +242,6 @@ const PROFILE_STEP_TITLES_WITH_LAUNCH = [
   "Contact information",
 ] as const;
 
-const PROPERTY_TYPE_ICONS = new Map<string, IconComponent>([
-  ["hotel", HotelIcon],
-  ["resort", SunIcon],
-  ["hostel", UsersIcon],
-  ["apartment", BuildingOffice2Icon],
-  ["aparthotel", BuildingOfficeIcon],
-  ["guesthouse", BuildingStorefrontIcon],
-  ["bed_and_breakfast", CakeIcon],
-  ["villa", HomeModernIcon],
-  ["vacation_rental", KeyIcon],
-  ["motel", MapPinIcon],
-  ["other", EllipsisHorizontalIcon],
-]);
-
 const TIMEZONE_PICKER_OPTIONS = availableTimezones();
 
 export default function SharedFirstRunPropertySetupWizard({
@@ -273,12 +257,16 @@ export default function SharedFirstRunPropertySetupWizard({
   initialProfileSuggestions,
   propertyCreateIdempotencyKey,
   availableTracks = ALL_SETUP_TRACKS,
+  editFocus,
+  onEditFocusSaved,
 }: SharedFirstRunPropertySetupWizardProps) {
   const [status, setStatus] = useState<AdaptiveHotelSetupStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [statusReloadToken, setStatusReloadToken] = useState(0);
   const [forceCreateProperty, setForceCreateProperty] = useState(initialAddProperty);
   const [editPropertyProfile, setEditPropertyProfile] = useState(false);
+  // A "Fix in setup" link opens the location form directly and saves from there (VAY-2288).
+  const [pendingEditFocus, setPendingEditFocus] = useState(editFocus ?? null);
   const [profileLoadFailed, setProfileLoadFailed] = useState(false);
   const [profileReloadToken, setProfileReloadToken] = useState(0);
   const [loadedProfile, setLoadedProfile] = useState<PropertyProfileResponse | null>(null);
@@ -326,12 +314,14 @@ export default function SharedFirstRunPropertySetupWizard({
 
   useEffect(() => {
     setForceCreateProperty(initialAddProperty);
-    setEditPropertyProfile(false);
-  }, [initialAddProperty]);
+    setEditPropertyProfile(!initialAddProperty && Boolean(editFocus));
+    setPendingEditFocus(initialAddProperty ? null : (editFocus ?? null));
+  }, [editFocus, initialAddProperty]);
 
+  const focusedEdit = view.profileMode === "update" && pendingEditFocus === "location";
   useEffect(() => {
-    setProfileStep(0);
-  }, [view.profileMode, view.selectedPropertyId]);
+    setProfileStep(focusedEdit ? 1 : 0);
+  }, [focusedEdit, view.profileMode, view.selectedPropertyId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -451,6 +441,7 @@ export default function SharedFirstRunPropertySetupWizard({
     setError("");
     setForceCreateProperty(false);
     setEditPropertyProfile(false);
+    setPendingEditFocus(null);
     setLoading(true);
     try {
       await reloadStatus(propertyId);
@@ -467,7 +458,8 @@ export default function SharedFirstRunPropertySetupWizard({
     setError("");
     setFieldErrors({});
     const nextFieldErrors = validateProfileDraft(draft);
-    if (launchSettingsEnabled && !skipLaunchSettings) {
+    // A focused location edit never shows the guest preferences, so it leaves them as saved.
+    if (launchSettingsEnabled && !skipLaunchSettings && !focusedEdit) {
       Object.assign(nextFieldErrors, validatePropertyLaunchSettings(launchSettings));
     }
     if (Object.keys(nextFieldErrors).length > 0) {
@@ -565,16 +557,24 @@ export default function SharedFirstRunPropertySetupWizard({
         view.profileMode === "update" &&
         launchSettingsEnabled &&
         propertyLaunchSettingsApi &&
-        !skipLaunchSettings
+        !skipLaunchSettings &&
+        !focusedEdit
       ) {
         await propertyLaunchSettingsApi.update(
           saved.propertyId,
           normalizedPropertyLaunchSettings(launchSettings),
         );
       }
+      if (focusedEdit && onEditFocusSaved) {
+        logoUploadKey.current = null;
+        logoAssignmentKey.current = null;
+        onEditFocusSaved(saved.propertyId);
+        return;
+      }
       await reloadStatus(saved.propertyId);
       setForceCreateProperty(false);
       setEditPropertyProfile(false);
+      setPendingEditFocus(null);
       if (view.profileMode === "create") {
         await onPropertySelected?.(saved.propertyId);
       }
@@ -688,7 +688,10 @@ export default function SharedFirstRunPropertySetupWizard({
     return (
       <>
         {renderSetupActions?.(view.selectedPropertyId)}
-        {renderAfterHotelDetails(view.selectedPropertyId, () => setEditPropertyProfile(true))}
+        {renderAfterHotelDetails(view.selectedPropertyId, () => {
+          setPendingEditFocus(null);
+          setEditPropertyProfile(true);
+        })}
       </>
     );
   }
@@ -776,9 +779,14 @@ export default function SharedFirstRunPropertySetupWizard({
           onConfirmLaunchSettings={() => setSkipLaunchSettings(false)}
           onSkipLaunchSettings={() => setSkipLaunchSettings(true)}
           onStepChange={setProfileStep}
+          saveStep={focusedEdit ? 1 : undefined}
+          highlightLocality={focusedEdit}
           onCancel={
             editPropertyProfile
-              ? () => setEditPropertyProfile(false)
+              ? () => {
+                  setPendingEditFocus(null);
+                  setEditPropertyProfile(false);
+                }
               : status.propertySelection.availableProperties.length > 0 &&
                   view.profileMode === "create"
                 ? () => setForceCreateProperty(false)
@@ -1131,6 +1139,8 @@ function ProfileForm({
   onCancel,
   cancelLabel = "Back to properties",
   onSave,
+  saveStep,
+  highlightLocality = false,
 }: {
   draft: ProfileDraft;
   launchSettings: PropertyLaunchSettings | null;
@@ -1154,6 +1164,10 @@ function ProfileForm({
   onCancel?: () => void;
   cancelLabel?: string;
   onSave: () => void;
+  /** Saves from this step instead of the last one (a focused edit). */
+  saveStep?: number;
+  /** Points the hotel at "Show city and country publicly" while it is off. */
+  highlightLocality?: boolean;
 }) {
   const profileStepFields = launchSettings
     ? PROFILE_STEP_FIELDS_WITH_LAUNCH
@@ -1162,7 +1176,12 @@ function ProfileForm({
     ? PROFILE_STEP_TITLES_WITH_LAUNCH
     : BASE_PROFILE_STEP_TITLES;
   const contactStep = launchSettings ? 3 : 2;
-  const finalStep = profileStepFields.length - 1;
+  // A focused edit saves from its step, and from any later step a field error sends it to.
+  const savesHere =
+    saveStep === undefined ? step === profileStepFields.length - 1 : step >= saveStep;
+  // A focused edit doesn't save guest preferences, so Back doesn't offer them.
+  const previousStep =
+    saveStep !== undefined && launchSettings && step === contactStep ? saveStep : step - 1;
   const googleMapsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY?.trim();
   const LocationHeading = embedded ? "h2" : "h1";
   const [showAddressFields, setShowAddressFields] = useState(
@@ -1204,6 +1223,18 @@ function ProfileForm({
   const stepHeading = useRef<HTMLHeadingElement>(null);
   const timezoneWasAutoDetected = useRef(false);
   const [whatsappFollowsPhone, setWhatsappFollowsPhone] = useState<boolean | null>(null);
+  const localityCheckbox = useRef<HTMLInputElement>(null);
+  const localityHighlighted = highlightLocality && step === 1 && !draft.localityPublic;
+  const localityShown = useRef(false);
+
+  useEffect(() => {
+    if (!localityHighlighted || loading || localityShown.current) return;
+    localityShown.current = true;
+    requestAnimationFrame(() => {
+      localityCheckbox.current?.scrollIntoView({ block: "center" });
+      localityCheckbox.current?.focus({ preventScroll: true });
+    });
+  }, [loading, localityHighlighted]);
 
   useEffect(() => {
     const errorStep = profileStepFields.findIndex((fields) =>
@@ -1440,7 +1471,7 @@ function ProfileForm({
         <button
           type="button"
           disabled={saving}
-          onClick={() => (step > 0 ? changeStep(step - 1) : onCancel?.())}
+          onClick={() => (step > 0 ? changeStep(previousStep) : onCancel?.())}
           className={`w-full rounded-full border border-gray-200 bg-white px-5 py-3 text-sm font-medium text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto ${
             step === 1 ? "sm:min-w-32" : ""
           }`}
@@ -1450,23 +1481,19 @@ function ProfileForm({
       )}
       <button
         type="submit"
-        disabled={step === finalStep && saving}
+        disabled={savesHere && saving}
         className={`inline-flex w-full items-center justify-center gap-2 rounded-full bg-primary-600 px-6 py-3 text-sm font-semibold text-white transition hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto ${
           step === 1 ? "sm:min-w-32" : ""
         }`}
       >
-        {step === finalStep && saving && (
+        {savesHere && saving && (
           <span
             className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white"
             aria-hidden="true"
           />
         )}
-        <span>
-          {step === finalStep ? (saving ? "Saving..." : "Save and continue") : "Continue"}
-        </span>
-        {!(step === finalStep && saving) && (
-          <ArrowRightIcon className="h-4 w-4" aria-hidden="true" />
-        )}
+        <span>{savesHere ? (saving ? "Saving..." : "Save and continue") : "Continue"}</span>
+        {!(savesHere && saving) && <ArrowRightIcon className="h-4 w-4" aria-hidden="true" />}
       </button>
     </div>
   );
@@ -1477,7 +1504,7 @@ function ProfileForm({
       aria-busy={saving}
       onSubmit={(event) => {
         event.preventDefault();
-        if (step === finalStep) onSave();
+        if (savesHere) onSave();
         else continueToNextStep();
       }}
       className={`mx-auto ${step === 1 ? "max-w-none" : "max-w-7xl space-y-8"}`}
@@ -1943,10 +1970,9 @@ function ProfileForm({
                         onChange={(value) => setField("streetAddress", value)}
                       />
                       <TextField
-                        label="Postal code"
+                        label="Postal code (optional)"
                         value={draft.postalCode}
                         placeholder="80331"
-                        required
                         error={fieldErrors["location.postalCode"]?.[0]}
                         onChange={(value) => setField("postalCode", value)}
                       />
@@ -2052,8 +2078,15 @@ function ProfileForm({
                     </div>
                   </div>
                 )}
-                <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-xl border border-gray-200 bg-gray-50 p-3 text-left">
+                <label
+                  className={`mt-4 flex cursor-pointer items-start gap-3 rounded-xl border p-3 text-left ${
+                    localityHighlighted
+                      ? "border-amber-300 bg-amber-50 ring-2 ring-amber-300"
+                      : "border-gray-200 bg-gray-50"
+                  }`}
+                >
                   <input
+                    ref={localityCheckbox}
                     type="checkbox"
                     checked={draft.localityPublic}
                     onChange={(event) =>
@@ -2067,9 +2100,14 @@ function ProfileForm({
                     </span>
                     <span className="mt-1 block text-xs leading-5 text-gray-600">
                       {mode === "update"
-                        ? "Existing location visibility is preserved. If you edit the location, street address, postal code, and map coordinates stay private."
-                        : "Street address, postal code, and map coordinates stay private."}
+                        ? "Guests see your city and country on your booking page. Street address and postal code stay private, and changing the address turns off your guest map."
+                        : "Guests see your city and country on your booking page. Street address, postal code, and map pin stay private."}
                     </span>
+                    {localityHighlighted && (
+                      <span className="mt-1 block text-xs font-medium leading-5 text-amber-800">
+                        Your booking page needs this before it can go live.
+                      </span>
+                    )}
                   </span>
                 </label>
               </div>
@@ -2355,9 +2393,6 @@ export function validateProfileDraft(draft: ProfileDraft): Record<string, string
   if (!draft.streetAddress.trim()) {
     errors["location.streetAddress"] = ["Street address is required."];
   }
-  if (!draft.postalCode.trim()) {
-    errors["location.postalCode"] = ["Postal code is required."];
-  }
   if (!draft.city.trim()) {
     errors["location.city"] = ["City is required."];
   }
@@ -2394,449 +2429,7 @@ function focusFirstIncompleteAddressField(container: HTMLDivElement | null) {
   (fields.find((field) => !field.value.trim()) ?? fields[0])?.focus();
 }
 
-function TextField({
-  label,
-  value,
-  onChange,
-  error,
-  helper,
-  placeholder,
-  type = "text",
-  readOnly = false,
-  required = false,
-  listOptions,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  error?: string;
-  helper?: string;
-  placeholder?: string;
-  type?: string;
-  readOnly?: boolean;
-  required?: boolean;
-  listOptions?: string[];
-}) {
-  const generatedId = useId();
-  const inputId = `setup-${generatedId}`;
-  const helperId = helper ? `${inputId}-helper` : undefined;
-  const errorId = error ? `${inputId}-error` : undefined;
-  const describedBy = [helperId, errorId].filter(Boolean).join(" ") || undefined;
-
-  return (
-    <div>
-      <label
-        htmlFor={inputId}
-        className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-medium text-gray-700"
-      >
-        <span>{label}</span>
-        {!required && (
-          <span aria-hidden="true" className="text-xs text-gray-400">
-            Optional
-          </span>
-        )}
-      </label>
-      {helper && (
-        <p id={helperId} className="mt-1 text-xs text-gray-500">
-          {helper}
-        </p>
-      )}
-      <input
-        id={inputId}
-        type={type}
-        value={value}
-        placeholder={placeholder}
-        readOnly={readOnly}
-        aria-invalid={Boolean(error)}
-        aria-describedby={describedBy}
-        aria-required={required}
-        list={listOptions ? `${inputId}-options` : undefined}
-        onChange={(event) => onChange(event.target.value)}
-        className={`mt-2 w-full rounded-xl border px-4 py-2.5 text-base outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-100 sm:text-sm ${
-          error ? "border-red-300 bg-red-50" : "border-gray-200"
-        } ${readOnly ? "bg-gray-50 text-gray-600" : ""}`}
-      />
-      {listOptions && (
-        <datalist id={`${inputId}-options`}>
-          {listOptions.map((option) => (
-            <option key={option} value={option} />
-          ))}
-        </datalist>
-      )}
-      {error && (
-        <p id={errorId} className="mt-1 text-xs text-red-600" role="alert">
-          {error}
-        </p>
-      )}
-    </div>
-  );
-}
-
-const SUPPORTED_PHONE_COUNTRIES = new Set(getCountries());
-const PHONE_COUNTRY_OPTIONS = COUNTRY_OPTIONS.filter(({ code }) =>
-  SUPPORTED_PHONE_COUNTRIES.has(code as CountryCode),
-).map((country) => ({
-  ...country,
-  callingCode: `+${getCountryCallingCode(country.code as CountryCode)}`,
-}));
-
-function phoneCountry(value: string, fallback: string): CountryCode {
-  const parsed = parsePhoneNumberFromString(value);
-  if (parsed?.country) return parsed.country;
-  const normalizedFallback = fallback.trim().toUpperCase() as CountryCode;
-  return SUPPORTED_PHONE_COUNTRIES.has(normalizedFallback) ? normalizedFallback : "US";
-}
-
-export function normalizedPhoneNumber(value: string, countryCode?: CountryCode): string {
-  const parsed = parsePhoneNumberFromString(value, countryCode);
-  return parsed?.isValid() ? parsed.formatInternational() : value;
-}
-
-function isValidInternationalPhone(value: string): boolean {
-  return value.trim().startsWith("+") && Boolean(parsePhoneNumberFromString(value)?.isValid());
-}
-
-export function phoneWithCountryCallingCode(
-  value: string,
-  countryCode: CountryCode,
-  previousCountryCode?: CountryCode,
-): string {
-  const callingCode = `+${getCountryCallingCode(countryCode)}`;
-  const parsed = parsePhoneNumberFromString(value);
-  if (parsed?.nationalNumber) return `${callingCode} ${parsed.nationalNumber}`;
-
-  const digits = value.replace(/\D/g, "");
-  const previousCallingCode = previousCountryCode
-    ? getCountryCallingCode(previousCountryCode)
-    : undefined;
-  const nationalNumber =
-    previousCallingCode && digits.startsWith(previousCallingCode)
-      ? digits.slice(previousCallingCode.length)
-      : digits.replace(/^0+/, "");
-  return nationalNumber ? `${callingCode} ${nationalNumber}` : `${callingCode} `;
-}
-
-function PhoneField({
-  label,
-  value,
-  countryCode,
-  onChange,
-  error,
-  helper,
-  placeholder,
-  required = false,
-}: {
-  label: string;
-  value: string;
-  countryCode: string;
-  onChange: (value: string) => void;
-  error?: string;
-  helper?: string;
-  placeholder: string;
-  required?: boolean;
-}) {
-  const generatedId = useId();
-  const inputId = `setup-${generatedId}`;
-  const helperId = helper ? `${inputId}-helper` : undefined;
-  const errorId = error ? `${inputId}-error` : undefined;
-  const describedBy = [helperId, errorId].filter(Boolean).join(" ") || undefined;
-  const [selectedCountry, setSelectedCountry] = useState<CountryCode>(() =>
-    phoneCountry(value, countryCode),
-  );
-
-  useEffect(() => {
-    const parsedCountry = parsePhoneNumberFromString(value)?.country;
-    if (parsedCountry) {
-      setSelectedCountry((current) => (current === parsedCountry ? current : parsedCountry));
-    } else if (!value.trim()) {
-      const fallbackCountry = phoneCountry("", countryCode);
-      setSelectedCountry((current) => (current === fallbackCountry ? current : fallbackCountry));
-    }
-  }, [countryCode, value]);
-
-  return (
-    <div>
-      <label
-        htmlFor={inputId}
-        className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-medium text-gray-700"
-      >
-        <span>{label}</span>
-        {!required && (
-          <span aria-hidden="true" className="text-xs text-gray-400">
-            Optional
-          </span>
-        )}
-      </label>
-      {helper && (
-        <p id={helperId} className="mt-1 text-xs text-gray-500">
-          {helper}
-        </p>
-      )}
-      <div
-        className={`mt-2 flex overflow-hidden rounded-xl border transition focus-within:border-primary-500 focus-within:ring-2 focus-within:ring-primary-100 ${
-          error ? "border-red-300 bg-red-50" : "border-gray-200 bg-white"
-        }`}
-      >
-        <select
-          aria-label={`${label} country code`}
-          value={selectedCountry}
-          onChange={(event) => {
-            const nextCountry = event.target.value as CountryCode;
-            const previousCountry = selectedCountry;
-            setSelectedCountry(nextCountry);
-            onChange(phoneWithCountryCallingCode(value, nextCountry, previousCountry));
-          }}
-          className="w-32 shrink-0 border-0 border-r border-gray-200 bg-gray-50 px-3 py-2.5 text-sm outline-none"
-        >
-          {PHONE_COUNTRY_OPTIONS.map((country) => (
-            <option key={country.code} value={country.code}>
-              {country.flag} {country.callingCode}
-            </option>
-          ))}
-        </select>
-        <input
-          id={inputId}
-          type="tel"
-          value={value}
-          placeholder={placeholder}
-          aria-invalid={Boolean(error)}
-          aria-describedby={describedBy}
-          aria-required={required}
-          onChange={(event) => onChange(normalizedPhoneNumber(event.target.value, selectedCountry))}
-          onBlur={() => {
-            const normalized = normalizedPhoneNumber(value, selectedCountry);
-            if (normalized !== value) onChange(normalized);
-          }}
-          className="min-w-0 flex-1 border-0 bg-transparent px-4 py-2.5 text-base outline-none sm:text-sm"
-        />
-      </div>
-      {error && (
-        <p id={errorId} role="alert" className="mt-1.5 text-xs text-red-600">
-          {error}
-        </p>
-      )}
-    </div>
-  );
-}
-
-function PropertyLogoField({
-  previewUrl,
-  pending,
-  error,
-  onChange,
-}: {
-  previewUrl: string;
-  pending: boolean;
-  error?: string;
-  onChange: (file: File) => void;
-}) {
-  const inputId = `property-logo-${useId()}`;
-  const errorId = error ? `${inputId}-error` : undefined;
-
-  return (
-    <div>
-      <p className="text-sm font-medium text-gray-700">
-        Hotel logo
-        <span className="ml-1 text-red-500" aria-hidden="true">
-          *
-        </span>
-        <span className="sr-only"> (required)</span>
-      </p>
-      <label
-        htmlFor={inputId}
-        className={`mt-2 flex cursor-pointer items-center gap-4 rounded-xl border bg-white p-3 transition hover:border-primary-300 focus-within:ring-2 focus-within:ring-primary-500 focus-within:ring-offset-2 ${
-          error ? "border-red-300 bg-red-50" : "border-gray-200"
-        }`}
-      >
-        <span className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-gray-100 text-gray-500">
-          {previewUrl ? (
-            <img
-              src={previewUrl}
-              alt="Hotel logo preview"
-              className="h-full w-full object-contain"
-            />
-          ) : pending ? (
-            <CheckIcon className="h-7 w-7 text-primary-700" aria-hidden="true" />
-          ) : (
-            <PhotoIcon className="h-7 w-7" aria-hidden="true" />
-          )}
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="block text-sm font-semibold text-gray-900">
-            {previewUrl
-              ? "Change hotel logo"
-              : pending
-                ? "Logo ready to finish"
-                : "Choose hotel logo"}
-          </span>
-          <span className="mt-1 block text-xs leading-5 text-gray-500">
-            JPG, PNG, or WebP. Max 10 MB. The logo is published only after assignment.
-          </span>
-        </span>
-        <input
-          id={inputId}
-          type="file"
-          aria-label="Hotel logo file"
-          accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
-          aria-invalid={Boolean(error)}
-          aria-describedby={errorId}
-          className="sr-only"
-          onChange={(event) => {
-            const file = event.target.files?.[0];
-            if (file) onChange(file);
-            event.target.value = "";
-          }}
-        />
-      </label>
-      {error && (
-        <p id={errorId} className="mt-1 text-xs text-red-600" role="alert">
-          {error}
-        </p>
-      )}
-    </div>
-  );
-}
-
-function PropertyTypeField({
-  value,
-  options,
-  onChange,
-  error,
-  required = false,
-}: {
-  value: string;
-  options: SharedPropertyTypeOption[];
-  onChange: (value: string) => void;
-  error?: string;
-  required?: boolean;
-}) {
-  const generatedId = useId();
-  const groupName = `property-type-${generatedId}`;
-  const errorId = error ? `${groupName}-error` : undefined;
-
-  return (
-    <fieldset aria-describedby={errorId} aria-invalid={Boolean(error)}>
-      <legend className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-medium text-gray-700">
-        <span>Property type</span>
-        {!required && (
-          <span aria-hidden="true" className="text-xs text-gray-400">
-            Optional
-          </span>
-        )}
-      </legend>
-      <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
-        {options.map((option) => {
-          const checked = value === option.value;
-          const Icon = PROPERTY_TYPE_ICONS.get(option.value) ?? EllipsisHorizontalIcon;
-
-          return (
-            <label key={option.value} className="relative block cursor-pointer">
-              <input
-                type="radio"
-                name={groupName}
-                value={option.value}
-                checked={checked}
-                required={required}
-                aria-invalid={Boolean(error)}
-                aria-describedby={errorId}
-                onChange={(event) => onChange(event.target.value)}
-                className="peer absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0"
-              />
-              <span
-                className={`relative flex min-h-16 items-center gap-2 rounded-xl border p-2.5 transition peer-focus-visible:outline-none peer-focus-visible:ring-2 peer-focus-visible:ring-primary-600 peer-focus-visible:ring-offset-2 ${
-                  checked
-                    ? "border-primary-500 bg-primary-50 shadow-[0_12px_30px_-24px_rgba(30,62,219,0.8)]"
-                    : "border-gray-200 bg-white hover:border-primary-300 hover:bg-primary-50/40"
-                }`}
-              >
-                <span
-                  className={`relative flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
-                    checked ? "bg-primary-600 text-white" : "bg-gray-100 text-gray-700"
-                  }`}
-                >
-                  <Icon className="h-4 w-4" aria-hidden="true" />
-                  {checked && (
-                    <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-primary-700 text-white ring-2 ring-white">
-                      <CheckIcon className="h-3 w-3" aria-hidden="true" />
-                    </span>
-                  )}
-                </span>
-                <span className="text-sm font-medium leading-5 text-gray-900">{option.label}</span>
-              </span>
-            </label>
-          );
-        })}
-      </div>
-      {error && (
-        <p id={errorId} className="mt-2 text-xs text-red-600" role="alert">
-          {error}
-        </p>
-      )}
-    </fieldset>
-  );
-}
-
-function SelectField({
-  label,
-  value,
-  placeholder,
-  options,
-  onChange,
-  error,
-  required = false,
-}: {
-  label: string;
-  value: string;
-  placeholder: string;
-  options: Array<{ value: string; label: string }>;
-  onChange: (value: string) => void;
-  error?: string;
-  required?: boolean;
-}) {
-  const generatedId = useId();
-  const inputId = `setup-${generatedId}`;
-  const errorId = error ? `${inputId}-error` : undefined;
-
-  return (
-    <div>
-      <label
-        htmlFor={inputId}
-        className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-medium text-gray-700"
-      >
-        <span>{label}</span>
-        {!required && (
-          <span aria-hidden="true" className="text-xs text-gray-400">
-            Optional
-          </span>
-        )}
-      </label>
-      <select
-        id={inputId}
-        value={value}
-        required={required}
-        aria-invalid={Boolean(error)}
-        aria-describedby={errorId}
-        aria-required={required}
-        onChange={(event) => onChange(event.target.value)}
-        className={`mt-2 w-full rounded-xl border bg-white px-4 py-2.5 text-base outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-100 sm:text-sm ${
-          error ? "border-red-300 bg-red-50" : "border-gray-200"
-        }`}
-      >
-        <option value="">{placeholder}</option>
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-      {error && (
-        <p id={errorId} className="mt-1 text-xs text-red-600" role="alert">
-          {error}
-        </p>
-      )}
-    </div>
-  );
-}
+export { normalizedPhoneNumber, phoneWithCountryCallingCode } from "./setupProfileFields";
 
 export function draftFromProfile(
   response: PropertyProfileResponse,
@@ -2911,9 +2504,12 @@ export function profileUpdateFromDraft(
     ),
   ) as NonNullable<PropertyProfilePatch["location"]>;
   if (Object.keys(locationPatch).length > 0) {
-    // Consent for an existing location does not publish newly entered location details.
-    if (profile.location.geoPublic) locationPatch.geoPublic = false;
-    if (profile.location.mapDisplayMode !== "hidden") locationPatch.mapDisplayMode = "hidden";
+    // Consent for an existing location does not publish newly entered location details. The city
+    // and country box alone changes no address, so a public guest map stays on (VAY-2288).
+    if (Object.keys(locationPatch).some((key) => key !== "localityPublic")) {
+      if (profile.location.geoPublic) locationPatch.geoPublic = false;
+      if (profile.location.mapDisplayMode !== "hidden") locationPatch.mapDisplayMode = "hidden";
+    }
     patch.location = locationPatch;
   }
 
@@ -2941,7 +2537,9 @@ function newPropertyDraft(timezone = ""): ProfileDraft {
     contactEmail: "",
     phone: "",
     whatsapp: "",
-    localityPublic: false,
+    // A booking page needs a public city and country; street, postal code and pin stay private
+    // (VAY-2288). Existing hotels keep the choice they saved.
+    localityPublic: true,
     logoFile: null,
     logoMediaObjectId: null,
     logoPublicUrl: "",

@@ -200,10 +200,16 @@ const publicationOf = (revision: number, rooms: Room[]) => ({
 });
 
 /** An in-memory pricing-v2 store: published rooms, terms per offer (saved through drafts), and every publish. */
+/** Every option's stored payment, unless a test gives another. */
+const storedPayment: Record<string, unknown> = {
+  kind: "full",
+  acceptedMethods: ["card", "pay_at_property"],
+};
 async function mockPricing(
   page: Page,
   initial: ReturnType<typeof publicationOf> | null,
   readyMethods: ("bank_transfer" | "paypal")[] = [],
+  { cardReady = false, payment = storedPayment } = {},
 ) {
   const terms = new Map<string, Record<string, unknown>>([
     ["flexible", { revision: TERMS, cancellation: flexible }],
@@ -226,6 +232,12 @@ async function mockPricing(
     // Bank-transfer and PayPal acceptance is off, as in production today (VAY-2139), unless a test makes them ready.
     if (suffix === "/payment-methods" && method === "GET")
       return ok(route, { acceptanceEnabled: readyMethods.length > 0, readyMethods });
+    // Card isn't ready on the booking page, as in production today (VAY-2205), unless a test makes it ready.
+    if (suffix === "/card-readiness" && method === "GET")
+      return ok(route, {
+        card: { ready: cardReady, reason: cardReady ? null : "switch_off", charge: "at_booking" },
+        deposits: { ready: false },
+      });
     if (suffix === "" && method === "GET") {
       if (!state.publication) return route.fulfill({ status: 404, json: { code: "not_found" } });
       return ok(route, state.publication);
@@ -244,7 +256,7 @@ async function mockPricing(
         offerId,
         revision: saved.revision,
         cancellation: saved.cancellation,
-        payment: { kind: "full", acceptedMethods: ["card", "pay_at_property"] },
+        payment,
       });
     }
     if (offerTerms && method === "PUT") {
@@ -393,8 +405,9 @@ test("edits a priced room on the simple card and publishes only what changed (VA
     "aria-pressed",
     "true",
   );
-  await expect(main(page).getByRole("region", { name: "Flexible rate" })).toContainText(
-    "Always on",
+  await expect(main(page).getByRole("switch", { name: "Offer “Flexible rate”" })).toHaveAttribute(
+    "aria-checked",
+    "true",
   );
   // The Save bar: the lowest night is the Low season's €80, 10% less on the Non-refundable rate.
   await expect(main(page).getByText("Guests pay from €72 a night", { exact: true })).toBeVisible();
@@ -480,6 +493,66 @@ test("edits a priced room on the simple card and publishes only what changed (VA
   ]);
   // The other room goes out exactly as it was read, at the new revision.
   expect(published.find((value) => value.roomTypeId === GARDEN)).toEqual(complexRoom(4));
+  await assertHealthy();
+});
+
+test("writes what guests read about breakfast and shows it in the guest card (VAY-2281)", async ({
+  page,
+}, testInfo) => {
+  await openPms(page);
+  const pricing = await mockPricing(page, publicationOf(3, [designRoom(3), complexRoom(3)]));
+  const assertHealthy = watchPageHealth(page, testInfo);
+  await prices(page, DELUXE);
+  const text = "Buffet breakfast in the Stube, 7:00–10:30";
+  // Step "Meals" (each option's window has the same field, hidden until opened).
+  await main(page).getByRole("textbox", { name: "What guests read" }).fill(`${text} `);
+  await expect(
+    main(page)
+      .getByRole("radiogroup", { name: "Options for this stay" })
+      .getByRole("radio")
+      .filter({ hasText: text }),
+  ).toHaveCount(1);
+  await main(page).getByRole("button", { name: "Save prices" }).click();
+  await expect(main(page).getByText("Prices saved.", { exact: false })).toBeVisible();
+  const deluxe = (pricing.publishes[0].snapshot.rooms as Room[]).find(
+    (value) => value.roomTypeId === DELUXE,
+  )!;
+  const breakfast = deluxe.offers.find((offer: Room) => offer.meal.kind === "breakfast");
+  expect(breakfast.meal.description).toBe(text);
+  expect(deluxe.offers.filter((offer: Room) => "description" in offer.meal)).toHaveLength(1);
+  await assertHealthy();
+});
+
+test("writes what guests read about a half board option in its window (VAY-2281)", async ({
+  page,
+}, testInfo) => {
+  await openPms(page);
+  const pricing = await mockPricing(page, publicationOf(3, [designRoom(3), complexRoom(3)]));
+  const assertHealthy = watchPageHealth(page, testInfo);
+  await prices(page, DELUXE);
+  await main(page).getByRole("button", { name: "Half board", exact: true }).click();
+  await dialog(page).getByLabel("Half board price").fill("25");
+  await dialog(page).getByRole("button", { name: "Add option" }).click();
+  await main(page)
+    .getByRole("button", { name: /^Edit Half board/ })
+    .click();
+  const text = "Three-course dinner from 18:30";
+  await dialog(page).getByRole("textbox", { name: "What guests read" }).fill(text);
+  await dialog(page).getByRole("button", { name: "Close" }).click();
+  await expect(
+    main(page)
+      .getByRole("radiogroup", { name: "Options for this stay" })
+      .getByRole("radio")
+      .filter({ hasText: text }),
+  ).toHaveCount(1);
+  await main(page).getByRole("button", { name: "Save prices" }).click();
+  await expect(main(page).getByText("Prices saved.", { exact: false })).toBeVisible();
+  const deluxe = (pricing.publishes[0].snapshot.rooms as Room[]).find(
+    (value) => value.roomTypeId === DELUXE,
+  )!;
+  expect(deluxe.offers.find((offer: Room) => offer.meal.kind === "half_board").meal).toMatchObject({
+    description: text,
+  });
   await assertHealthy();
 });
 
@@ -833,5 +906,70 @@ test("shows the whole year and closes dates picked in the Year view (VAY-2284)",
   await expect(months).toHaveCount(0);
   for (const element of [calendar, main(page)])
     expect(await element.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
+  await assertHealthy();
+});
+
+test("offers Card online on both rates once the booking page can take card (VAY-2205)", async ({
+  page,
+}, testInfo) => {
+  await openPms(page);
+  // The rates take only pay at property, so Card online shows because card is ready, not because a rate has it.
+  await mockPricing(page, publicationOf(3, [designRoom(3), complexRoom(3)]), [], {
+    cardReady: true,
+    payment: { kind: "full", acceptedMethods: ["pay_at_property"] },
+  });
+  const assertHealthy = watchPageHealth(page, testInfo);
+  await prices(page, DELUXE);
+  for (const rate of ["Flexible rate", "Non-refundable rate"]) {
+    const region = main(page).getByRole("region", { name: rate });
+    await expect(region.getByRole("checkbox", { name: "Card online" })).not.toBeChecked();
+    await expect(region).toContainText("Charged at booking");
+  }
+  await assertHealthy();
+});
+
+test("turns the Flexible rate off and sells an option on channels only, keeping one rate on (VAY-2285)", async ({
+  page,
+}, testInfo) => {
+  await openPms(page);
+  const pricing = await mockPricing(page, publicationOf(3, [designRoom(3), complexRoom(3)]));
+  const assertHealthy = watchPageHealth(page, testInfo);
+  await prices(page, DELUXE);
+  const flexibleOn = main(page).getByRole("switch", { name: "Offer “Flexible rate”" });
+  await flexibleOn.click();
+  await expect(flexibleOn).toHaveAttribute("aria-checked", "false");
+  await expect(main(page).getByRole("region", { name: "Flexible rate" })).toContainText(
+    "Off. Non-refundable is the only rate guests can book.",
+  );
+  // Non-refundable is now the rate guests book, so it stays on.
+  await expect(main(page).getByRole("region", { name: "Non-refundable rate" })).toContainText(
+    "Keep at least one rate on. Turn on the Flexible rate before you turn this one off.",
+  );
+  await expect(extra(page, "Non-refundable")).toBeDisabled();
+  // The calendar and the guest card show only what guests can book.
+  await expect(main(page).getByRole("button", { name: "Show prices for Flexible" })).toHaveCount(0);
+  const guests = main(page).getByRole("radiogroup", { name: "Options for this stay" });
+  await expect(guests.getByRole("radio")).toHaveCount(2);
+  await expect(guests.getByRole("radio", { checked: true })).toContainText("Non-refundable");
+  await main(page).getByRole("button", { name: "Save prices" }).click();
+  await expect(main(page).getByText("Prices saved.", { exact: false })).toBeVisible();
+  const deluxe = (pricing.publishes[0].snapshot.rooms as Room[]).find(
+    (value) => value.roomTypeId === DELUXE,
+  )!;
+  expect(deluxe.offers[0]).toMatchObject({ id: "flexible", sale: "not_sold" });
+  expect(deluxe.offers.slice(1).every((offer: Room) => !("sale" in offer))).toBe(true);
+
+  // Another room: an option sold on channels only says it isn't on the booking page.
+  await prices(page, GARDEN);
+  const channels = main(page).getByRole("switch", { name: /on channels only$/ });
+  await channels.first().click();
+  await expect(channels.first()).toHaveAttribute("aria-checked", "true");
+  await expect(main(page).getByText("not on your booking page", { exact: false })).toBeVisible();
+  await main(page).getByRole("button", { name: "Save prices" }).click();
+  await expect(main(page).getByText("Prices saved.", { exact: false })).toBeVisible();
+  const garden = (pricing.publishes[1].snapshot.rooms as Room[]).find(
+    (value) => value.roomTypeId === GARDEN,
+  )!;
+  expect(garden.offers.filter((offer: Room) => offer.sale === "channels_only")).toHaveLength(1);
   await assertHealthy();
 });

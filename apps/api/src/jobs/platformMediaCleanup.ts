@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import pg from "pg";
 
+import type { PlatformMediaCdnInvalidator } from "../platform/platformMediaCdnInvalidation.js";
+
 export const PLATFORM_MEDIA_CLEANUP_CONTRACT_VERSION = "platform-media-cleanup-jobs.v1";
 export const PLATFORM_MEDIA_CLEANUP_QUEUE = "platform.media.cleanup";
 export const DEFAULT_PLATFORM_MEDIA_CLEANUP_LIMIT = 100;
@@ -17,14 +19,16 @@ export type PlatformMediaCleanupRunName =
   | "abandonedStagingUploads"
   | "replacedPublicImages"
   | "privateAttachmentRetention"
-  | "rollbackWindowCleanup";
+  | "rollbackWindowCleanup"
+  | "retiredMarketplacePurge";
 
 export type PlatformMediaCleanupAction =
   | "abandoned-staging-upload"
   | "delete-replaced-public-image"
   | "delete-private-attachment-after-retention"
   | "delete-expired-financials-export"
-  | "cleanup-rollback-window-object";
+  | "cleanup-rollback-window-object"
+  | "purge-retired-marketplace-media";
 
 export type PlatformMediaCleanupCandidate = {
   mediaObjectId?: string;
@@ -47,6 +51,8 @@ export type PlatformMediaCleanupCandidate = {
   rollbackBucket?: string | null;
   rollbackStorageKey?: string | null;
   replacedByMediaObjectId?: string | null;
+  /** Retired-media purge only: hotel data or a kept user still uses the object; a person decides. */
+  blockedByKeptReference?: boolean;
 };
 
 export type PlatformMediaCleanupContext = {
@@ -103,6 +109,8 @@ export type PlatformMediaCleanupRunResult = {
   failed: number;
   mutations: PlatformMediaCleanupMutationResult[];
   failures: PlatformMediaCleanupFailureResult[];
+  /** Retired-media purge only: ids of objects still in use, left for a person. */
+  blocked?: string[];
 };
 
 export type PlatformMediaCleanupSchedulerResult = {
@@ -122,6 +130,10 @@ export type PlatformMediaCleanupStore = {
     limit: number,
   ): Promise<PlatformMediaCleanupCandidate[]>;
   findRollbackWindowCleanupCandidates(
+    now: Date,
+    limit: number,
+  ): Promise<PlatformMediaCleanupCandidate[]>;
+  findRetiredMarketplacePurgeCandidates(
     now: Date,
     limit: number,
   ): Promise<PlatformMediaCleanupCandidate[]>;
@@ -149,6 +161,8 @@ type PgPlatformMediaCleanupStoreConfig = {
   connectionString: string;
   max?: number;
   objectDeleter: PlatformMediaObjectDeleter;
+  /** Needed by the retired-media purge for public objects; the other runs never call it. */
+  cdnInvalidator?: PlatformMediaCdnInvalidator;
 };
 
 export type PlatformMediaObjectDeleter = {
@@ -158,6 +172,7 @@ export type PlatformMediaObjectDeleter = {
 type Queryable = Pick<pg.Pool | pg.PoolClient, "query">;
 
 type CandidateRow = {
+  blockedByKeptReference?: boolean | null;
   mediaObjectId?: string | null;
   uploadSessionId?: string | null;
   ownerOrganizationId?: string | null;
@@ -180,7 +195,8 @@ type CandidateRow = {
   replacedByMediaObjectId?: string | null;
 };
 
-const CLEANUP_RUNS: readonly PlatformMediaCleanupRunName[] = [
+// The retired-media purge (VAY-2272) is not a default run: it runs only while its switch is on.
+export const DEFAULT_PLATFORM_MEDIA_CLEANUP_RUNS: readonly PlatformMediaCleanupRunName[] = [
   "abandonedStagingUploads",
   "replacedPublicImages",
   "privateAttachmentRetention",
@@ -219,6 +235,13 @@ const MUTATIONS: Record<
     eventType: "platform_media.rollback_window.cleaned",
     auditAction: "platform_media.cleanup.rollback_window_object_deleted",
   },
+  retiredMarketplacePurge: {
+    action: "purge-retired-marketplace-media",
+    runName: "retiredMarketplacePurge",
+    jobType: "platform.media.cleanup.retired-marketplace-purge",
+    eventType: "platform_media.retired_marketplace.purged",
+    auditAction: "platform_media.cleanup.retired_marketplace_media_purged",
+  },
 };
 const FINANCE_EXPORT_MUTATION: Omit<PlatformMediaCleanupMutation, "deadlineOrWindow"> = {
   action: "delete-expired-financials-export",
@@ -228,6 +251,53 @@ const FINANCE_EXPORT_MUTATION: Omit<PlatformMediaCleanupMutation, "deadlineOrWin
   auditAction: "platform_media.cleanup.expired_financials_export_deleted",
 };
 
+// VAY-2272: a removed user as migration 0500 defines one: a member of a creator or affiliate
+// workspace, or created as a creator or affiliate account, and never a member of anything else.
+const removedUserSql = (
+  user: string,
+) => `((EXISTS (SELECT 1 FROM identity.organization_memberships membership
+                 JOIN identity.organizations org ON org.id = membership.organization_id
+                 WHERE membership.user_id = ${user}.id
+                   AND org.kind IN ('creator_workspace', 'affiliate_partner'))
+      OR EXISTS (SELECT 1 FROM identity.auth_reconciliation_events event
+                 WHERE event.user_id = ${user}.id
+                   AND event.event_type = 'identity.user.created'
+                   AND event.payload -> 'payload' ->> 'legacyUserType' IN ('creator', 'affiliate')))
+    AND NOT EXISTS (SELECT 1 FROM identity.organization_memberships other
+                    JOIN identity.organizations org ON org.id = other.organization_id
+                    WHERE other.user_id = ${user}.id
+                      AND org.kind NOT IN ('creator_workspace', 'affiliate_partner')))`;
+
+// The same set as 0500's removed media: stored objects with a Marketplace purpose, owned by a
+// creator or affiliate workspace, or created by a removed user. 0500 refuses to run while one of
+// them lacks the marker the purge writes.
+const RETIRED_MARKETPLACE_MEDIA_SQL = `media.storage_kind = 'vayada_managed'
+       AND NULLIF(media.source_metadata ->> 'retiredPurgeCompletedAt', '') IS NULL
+       AND (media.purpose LIKE 'marketplace.%'
+         OR EXISTS (SELECT 1 FROM identity.organizations owner_org
+                    WHERE owner_org.id = media.owner_organization_id
+                      AND owner_org.kind IN ('creator_workspace', 'affiliate_partner'))
+         OR EXISTS (SELECT 1 FROM identity.users creator
+                    WHERE creator.id = media.created_by_user_id AND ${removedUserSql("creator")}))`;
+
+// Hotel data or a kept user that still uses an object. The purge leaves such objects for a person.
+const KEPT_MEDIA_REFERENCE_SQL = `(EXISTS (SELECT 1 FROM hotel_catalog.property_media ref
+                WHERE ref.platform_media_object_id = media.id)
+         OR EXISTS (SELECT 1 FROM pms.room_type_media ref WHERE ref.platform_media_object_id = media.id)
+         OR EXISTS (SELECT 1 FROM pms.message_attachments ref
+                    WHERE ref.platform_media_object_id = media.id)
+         OR EXISTS (SELECT 1 FROM finance.expenses ref WHERE ref.receipt_media_id = media.id)
+         OR EXISTS (SELECT 1 FROM booking.booking_settings ref
+                    WHERE ref.header_logo_media_object_id = media.id)
+         OR EXISTS (SELECT 1 FROM booking.addon_definitions ref
+                    WHERE ref.metadata ->> 'mediaObjectId' = media.id::text
+                       OR (jsonb_typeof(ref.metadata -> 'photos') = 'array'
+                           AND ref.metadata -> 'photos' @> jsonb_build_array(
+                             jsonb_build_object('mediaObjectId', media.id::text))))
+         OR EXISTS (SELECT 1 FROM identity.users kept
+                    WHERE lower(kept.profile_picture_media_object_id) = media.id::text
+                      AND NOT ${removedUserSql("kept")}))`;
+
 export function createPgPlatformMediaCleanupStore(
   config: PgPlatformMediaCleanupStoreConfig,
 ): PlatformMediaCleanupStore & { close(): Promise<void> } {
@@ -236,6 +306,7 @@ export function createPgPlatformMediaCleanupStore(
     max: config.max,
   });
   const objectDeleter = config.objectDeleter;
+  const cdnInvalidator = config.cdnInvalidator;
 
   return {
     async findAbandonedStagingUploads(now, limit) {
@@ -250,13 +321,24 @@ export function createPgPlatformMediaCleanupStore(
     async findRollbackWindowCleanupCandidates(now, limit) {
       return selectRollbackWindowCleanupCandidates(pool, now, limit);
     },
+    async findRetiredMarketplacePurgeCandidates(now, limit) {
+      return selectRetiredMarketplacePurgeCandidates(pool, now, limit);
+    },
     async applyCleanupMutation(candidate, mutation, context) {
-      return applyPgCleanupMutation(pool, objectDeleter, candidate, mutation, context);
+      return applyPgCleanupMutation(
+        pool,
+        objectDeleter,
+        candidate,
+        mutation,
+        context,
+        cdnInvalidator,
+      );
     },
     async recordCleanupFailure(candidate, mutation, error, context) {
       return recordPgCleanupFailure(pool, candidate, mutation, error, context);
     },
     async close() {
+      cdnInvalidator?.close();
       await pool.end();
     },
   };
@@ -273,7 +355,7 @@ export async function runPlatformMediaCleanupJobs(
     workerId: options.workerId ?? "platform-media-cleanup-scheduler",
   };
   const limit = options.limit ?? DEFAULT_PLATFORM_MEDIA_CLEANUP_LIMIT;
-  const selectedRuns = options.run ?? CLEANUP_RUNS;
+  const selectedRuns = options.run ?? DEFAULT_PLATFORM_MEDIA_CLEANUP_RUNS;
   const runs: PlatformMediaCleanupRunResult[] = [];
 
   for (const runName of selectedRuns) {
@@ -333,6 +415,17 @@ export function platformMediaCleanupRetry(
   return { deadLettered: false, runAfter: new Date(now.getTime() + delayMs) };
 }
 
+// The retired-media purge never gives up: 0500 waits for every marker, so after the usual back-off an
+// item keeps retrying once a day until storage and the CDN accept it (VAY-2272).
+export function platformMediaRetiredPurgeRetry(
+  attempt: number,
+  now: Date,
+): { deadLettered: false; runAfter: Date } {
+  const delays = PLATFORM_MEDIA_CLEANUP_RETRY_DELAYS_MS;
+  const delayMs = delays[Math.min(Math.max(attempt, 1), delays.length) - 1]!;
+  return { deadLettered: false, runAfter: new Date(now.getTime() + delayMs) };
+}
+
 // Skips items whose cleanup job is backing off or dead-lettered under the bounded retry policy.
 function cleanupRetryHoldSql(
   runName: PlatformMediaCleanupRunName,
@@ -363,8 +456,13 @@ async function runPlatformMediaCleanupJob(
   const candidates = await selectCandidatesForRun(store, runName, input);
   const mutations: PlatformMediaCleanupMutationResult[] = [];
   const failures: PlatformMediaCleanupFailureResult[] = [];
+  const blocked: string[] = [];
 
   for (const candidate of candidates) {
+    if (candidate.blockedByKeptReference) {
+      blocked.push(requiredCandidateId(candidate));
+      continue;
+    }
     const mutationTemplate =
       runName === "privateAttachmentRetention" && candidate.purpose === "finance.financials_export"
         ? FINANCE_EXPORT_MUTATION
@@ -389,6 +487,7 @@ async function runPlatformMediaCleanupJob(
     failed: failures.length,
     mutations,
     failures,
+    ...(runName === "retiredMarketplacePurge" ? { blocked } : {}),
   };
 }
 
@@ -406,6 +505,8 @@ function selectCandidatesForRun(
       return store.findPrivateAttachmentsPastRetention(input.now, input.limit);
     case "rollbackWindowCleanup":
       return store.findRollbackWindowCleanupCandidates(input.now, input.limit);
+    case "retiredMarketplacePurge":
+      return store.findRetiredMarketplacePurgeCandidates(input.now, input.limit);
   }
 }
 
@@ -571,12 +672,54 @@ async function selectRollbackWindowCleanupCandidates(
   return result.rows.map(candidateFromRow);
 }
 
+async function selectRetiredMarketplacePurgeCandidates(
+  queryable: Queryable,
+  now: Date,
+  limit: number,
+): Promise<PlatformMediaCleanupCandidate[]> {
+  const result = await queryable.query<CandidateRow>(
+    // Platform scope: the purge's own job, event and audit rows name no creator organization (0500
+    // can then delete it) and hold no hotel property lock while storage and the CDN are called.
+    `SELECT
+       media.id::text AS "mediaObjectId",
+       NULL::text AS "uploadSessionId",
+       NULL::text AS "ownerOrganizationId",
+       NULL::text AS "propertyId",
+       media.resource_product AS "resourceProduct",
+       media.resource_type AS "resourceType",
+       media.id::text AS "resourceId",
+       media.purpose,
+       media.visibility,
+       media.lifecycle_status AS "lifecycleStatus",
+       media.bucket,
+       media.storage_key AS "storageKey",
+       NULL::text AS "stagingPrefix",
+       media.retained_until AS "retainedUntil",
+       media.deletion_requested_at AS "deletionRequestedAt",
+       NULL::timestamptz AS "expiresAt",
+       NULL::timestamptz AS "rollbackWindowEndsAt",
+       NULL::text AS "rollbackBucket",
+       NULL::text AS "rollbackStorageKey",
+       NULL::text AS "replacedByMediaObjectId",
+       ${KEPT_MEDIA_REFERENCE_SQL} AS "blockedByKeptReference"
+     FROM platform.media_objects media
+     WHERE media.created_at <= $1::timestamptz
+       AND ${RETIRED_MARKETPLACE_MEDIA_SQL}
+       AND ${cleanupRetryHoldSql("retiredMarketplacePurge", "media_object", "media.id")}
+     ORDER BY "blockedByKeptReference" ASC, media.created_at ASC, media.id ASC
+     LIMIT $2`,
+    [now.toISOString(), limit],
+  );
+  return result.rows.map(candidateFromRow);
+}
+
 async function applyPgCleanupMutation(
   pool: pg.Pool,
   objectDeleter: PlatformMediaObjectDeleter,
   candidate: PlatformMediaCleanupCandidate,
   mutation: PlatformMediaCleanupMutation,
   context: PlatformMediaCleanupContext,
+  cdnInvalidator: PlatformMediaCdnInvalidator | undefined,
 ): Promise<PlatformMediaCleanupMutationResult> {
   const client = await pool.connect();
   try {
@@ -584,7 +727,14 @@ async function applyPgCleanupMutation(
     const result =
       mutation.action === "abandoned-staging-upload"
         ? await expireUploadSession(client, candidate, mutation, context)
-        : await updateMediaObjectLifecycle(client, objectDeleter, candidate, mutation, context);
+        : await updateMediaObjectLifecycle(
+            client,
+            objectDeleter,
+            candidate,
+            mutation,
+            context,
+            cdnInvalidator,
+          );
     await client.query("COMMIT");
     return result;
   } catch (error) {
@@ -624,6 +774,7 @@ async function updateMediaObjectLifecycle(
   candidate: PlatformMediaCleanupCandidate,
   mutation: PlatformMediaCleanupMutation,
   context: PlatformMediaCleanupContext,
+  cdnInvalidator?: PlatformMediaCdnInvalidator,
 ): Promise<PlatformMediaCleanupMutationResult> {
   if (mutation.action === "abandoned-staging-upload") {
     throw new Error("Upload-session cleanup cannot mutate a media object");
@@ -641,6 +792,7 @@ async function updateMediaObjectLifecycle(
   );
   if (!storage) return skippedCleanupMutation(candidate, mutation);
 
+  let invalidationId: string | null = null;
   if (mutation.action === "cleanup-rollback-window-object") {
     if (storage.rollbackStorageKey) {
       await deleteStorageObjectForCandidate(
@@ -655,33 +807,60 @@ async function updateMediaObjectLifecycle(
       storage.storageKey,
       storage.variantStorageKeys,
     );
+    // Public files stay cached at the CDN for up to a year after the delete.
+    const publicKeys = storageKeys.filter((storageKey) => storageKey.startsWith("public/"));
+    const purge = mutation.action === "purge-retired-marketplace-media";
+    if (purge && publicKeys.length > 0 && !cdnInvalidator) {
+      throw new Error("Retired media purge needs the CDN invalidator");
+    }
     if (storageKeys.length > 0) {
       const bucket = requiredBucket(storage.bucket, candidate);
       for (const storageKey of storageKeys) {
         await deleteStorageObjectForCandidate(objectDeleter, candidate, bucket, storageKey);
       }
     }
+    if (purge && publicKeys.length > 0) {
+      ({ invalidationId } = await cdnInvalidator!.invalidatePublicObjects(publicKeys));
+    }
   }
   const updated =
-    mutation.action === "cleanup-rollback-window-object"
+    mutation.action === "purge-retired-marketplace-media"
       ? await client.query<{ resourceId: string }>(
+          // The row stays as it is (0500 deletes it); the marker records that the files are gone.
           `UPDATE platform.media_objects
               SET source_metadata = source_metadata || $3::jsonb,
                   updated_at = $2::timestamptz
             WHERE id = $1::uuid
-              AND COALESCE(source_metadata ->> 'rollbackCleanupStatus', '') <> 'completed'
+              AND NULLIF(source_metadata ->> 'retiredPurgeCompletedAt', '') IS NULL
             RETURNING COALESCE(resource_id, id::text) AS "resourceId"`,
           [
             requiredCandidateId(candidate),
             context.now.toISOString(),
             JSON.stringify({
-              rollbackCleanupStatus: "completed",
-              rollbackCleanupCompletedAt: context.now.toISOString(),
+              retiredPurgeCompletedAt: context.now.toISOString(),
+              retiredPurgeInvalidationId: invalidationId,
             }),
           ],
         )
-      : await client.query<{ resourceId: string }>(
-          `UPDATE platform.media_objects
+      : mutation.action === "cleanup-rollback-window-object"
+        ? await client.query<{ resourceId: string }>(
+            `UPDATE platform.media_objects
+              SET source_metadata = source_metadata || $3::jsonb,
+                  updated_at = $2::timestamptz
+            WHERE id = $1::uuid
+              AND COALESCE(source_metadata ->> 'rollbackCleanupStatus', '') <> 'completed'
+            RETURNING COALESCE(resource_id, id::text) AS "resourceId"`,
+            [
+              requiredCandidateId(candidate),
+              context.now.toISOString(),
+              JSON.stringify({
+                rollbackCleanupStatus: "completed",
+                rollbackCleanupCompletedAt: context.now.toISOString(),
+              }),
+            ],
+          )
+        : await client.query<{ resourceId: string }>(
+            `UPDATE platform.media_objects
               SET lifecycle_status = 'deleted',
                   deletion_requested_at = COALESCE(deletion_requested_at, $2::timestamptz),
                   deleted_at = COALESCE(deleted_at, $2::timestamptz),
@@ -690,12 +869,12 @@ async function updateMediaObjectLifecycle(
             WHERE id = $1::uuid
               AND lifecycle_status <> 'deleted'
             RETURNING COALESCE(resource_id, id::text) AS "resourceId"`,
-          [
-            requiredCandidateId(candidate),
-            context.now.toISOString(),
-            JSON.stringify({ cleanupAction: mutation.action }),
-          ],
-        );
+            [
+              requiredCandidateId(candidate),
+              context.now.toISOString(),
+              JSON.stringify({ cleanupAction: mutation.action }),
+            ],
+          );
   return insertCleanupSideEffects(client, candidate, mutation, context, {
     applied: Boolean(updated.rows[0]),
   });
@@ -767,6 +946,10 @@ function mediaCleanupEligibilitySql(
        AND NULLIF(media.source_metadata ->> 'rollbackWindowEndsAt', '')::timestamptz <= $2::timestamptz
        AND NULLIF(media.source_metadata ->> 'rollbackStorageKey', '') IS NOT NULL
        AND COALESCE(media.source_metadata ->> 'rollbackCleanupStatus', '') <> 'completed'`;
+    case "purge-retired-marketplace-media":
+      return `media.created_at <= $2::timestamptz
+       AND ${RETIRED_MARKETPLACE_MEDIA_SQL}
+       AND NOT ${KEPT_MEDIA_REFERENCE_SQL}`;
   }
 }
 
@@ -958,7 +1141,10 @@ async function insertCleanupFailureRows(
   // without counting it again, so the attempt cap and the single warning still hold.
   if (previous.rows[0]?.held) return failureResult(previous.rows[0].attemptsCount, false);
   const attempt = (previous.rows[0]?.attemptsCount ?? 0) + 1;
-  const retry = platformMediaCleanupRetry(attempt, context.now);
+  const retry =
+    mutation.action === "purge-retired-marketplace-media"
+      ? platformMediaRetiredPurgeRetry(attempt, context.now)
+      : platformMediaCleanupRetry(attempt, context.now);
   const jobId = await upsertFailedCleanupJob(client, {
     candidate,
     mutation,
@@ -1567,6 +1753,7 @@ function candidateFromRow(row: CandidateRow): PlatformMediaCleanupCandidate {
     rollbackBucket: row.rollbackBucket ?? undefined,
     rollbackStorageKey: row.rollbackStorageKey ?? undefined,
     replacedByMediaObjectId: row.replacedByMediaObjectId ?? undefined,
+    ...(row.blockedByKeptReference ? { blockedByKeptReference: true } : {}),
   };
 }
 
@@ -1584,6 +1771,8 @@ function deadlineOrWindowForCandidate(
       return candidate.retainedUntil ?? `retained-until-${now.toISOString()}`;
     case "rollbackWindowCleanup":
       return candidate.rollbackWindowEndsAt ?? `rollback-ended-before-${now.toISOString()}`;
+    case "retiredMarketplacePurge":
+      return "retired-marketplace";
   }
 }
 

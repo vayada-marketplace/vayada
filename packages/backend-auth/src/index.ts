@@ -35,8 +35,6 @@ export {
   validateStaffInviteAccess,
   validateStaffPermissionOverrides,
   type ConsentCommandInput,
-  type CreateAffiliateInviteCommand,
-  type CreateAffiliateInvitePayload,
   type CreateCustomerInviteCommand,
   type CreateCustomerInvitePayload,
   type CreateStaffInviteCommand,

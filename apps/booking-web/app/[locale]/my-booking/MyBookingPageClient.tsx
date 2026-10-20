@@ -6,7 +6,7 @@ import { Link } from "@/i18n/navigation";
 import ApproximateAmountsNote from "@/components/booking/ApproximateAmountsNote";
 import RoomSelectionSummary from "@/components/booking/RoomSelectionSummary";
 import { useState, useEffect } from "react";
-import Image from "next/image";
+import HotelHeroImage from "@/components/booking/HotelHeroImage";
 import { useSearchParams } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import BookingNavigation from "@/components/layout/BookingNavigation";
@@ -32,6 +32,10 @@ function todayIn(timeZone?: string): string {
     return new Date().toISOString().slice(0, 10);
   }
 }
+
+/** The whole card payment goes back: decided on the amounts, never on a rounded percentage. */
+const fullRefund = (preview: { amountPaid?: number; refundAmount: number }) =>
+  (preview.amountPaid ?? 0) > 0 && preview.refundAmount >= (preview.amountPaid ?? 0);
 
 export default function MyBookingPageClient() {
   const t = useTranslations("myBooking");
@@ -187,14 +191,7 @@ export default function MyBookingPageClient() {
     <div className="min-h-screen bg-surface flex flex-col">
       {/* Mini Hero */}
       <div className="relative h-48 w-full">
-        <Image
-          src={hotel.heroImage}
-          alt={hotel.name}
-          fill
-          className="object-cover"
-          priority
-          sizes={bookingImageSizes.hero}
-        />
+        <HotelHeroImage src={hotel.heroImage} alt={hotel.name} sizes={bookingImageSizes.hero} />
         <div className="absolute inset-0 bg-gradient-to-b from-black/40 to-black/60" />
         <BookingNavigation />
         <div className="absolute inset-0 flex items-center justify-center">
@@ -425,16 +422,14 @@ export default function MyBookingPageClient() {
               <div className="mb-4 space-y-2">
                 <div
                   className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium ${
-                    cancelPreview.cancellationFeeAmount === 0 ||
-                    cancelPreview.refundPercentage >= 100
+                    cancelPreview.cancellationFeeAmount === 0 || fullRefund(cancelPreview)
                       ? "bg-green-100 text-green-700"
-                      : cancelPreview.refundPercentage > 0
+                      : cancelPreview.refundAmount > 0
                         ? "bg-yellow-100 text-yellow-700"
                         : "bg-red-100 text-red-700"
                   }`}
                 >
-                  {cancelPreview.cancellationFeeAmount === 0 ||
-                  cancelPreview.refundPercentage >= 100
+                  {cancelPreview.cancellationFeeAmount === 0 || fullRefund(cancelPreview)
                     ? t("freeCancellation")
                     : t("cancellationFeeApplies")}
                 </div>
@@ -449,17 +444,18 @@ export default function MyBookingPageClient() {
                             cancelPreview.currency,
                           ),
                         })
-                      : cancelPreview.refundPercentage >= 100
+                      : fullRefund(cancelPreview)
                         ? t("fullRefund", {
                             amount: formatPrice(cancelPreview.refundAmount, cancelPreview.currency),
                           })
-                        : cancelPreview.refundPercentage > 0
+                        : cancelPreview.refundAmount > 0
                           ? t("partialRefund", {
                               amount: formatPrice(
                                 cancelPreview.refundAmount,
                                 cancelPreview.currency,
                               ),
-                              percentage: cancelPreview.refundPercentage,
+                              // A part refund never reads 0% or 100% (VAY-2205).
+                              percentage: Math.min(99, Math.max(1, cancelPreview.refundPercentage)),
                             })
                           : t("noRefund")}
                 </p>

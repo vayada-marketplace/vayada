@@ -702,6 +702,15 @@ describe("target PMS operations command repository", () => {
         expect(idempotencyKey).toContain(`pms-booking-capture:${propertyId}:${guestBookingId}:`);
         return requestCardIntent("succeeded");
       },
+      async createRefund() {
+        throw new Error("not used");
+      },
+      async listRefunds() {
+        throw new Error("not used");
+      },
+      async retrieveRefund() {
+        throw new Error("not used");
+      },
       async cancelPaymentIntent() {
         throw new Error("not used");
       },
@@ -989,6 +998,9 @@ describe("target PMS operations command repository", () => {
       createPaymentIntent: vi.fn(),
       retrievePaymentIntent: vi.fn(),
       capturePaymentIntent: vi.fn(),
+      createRefund: vi.fn(),
+      listRefunds: vi.fn(),
+      retrieveRefund: vi.fn(),
       cancelPaymentIntent: vi.fn(),
     };
     const { client, repository } = createRepository((text) => {

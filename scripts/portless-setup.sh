@@ -6,7 +6,7 @@
 #
 # This script:
 #   1. Installs the portless local CA into the system trust store (sudo prompt).
-#   2. Registers the three FastAPI backends as static aliases so portless
+#   2. Registers the two FastAPI backends as static aliases so portless
 #      proxies the named URL to the existing uvicorn port. The TypeScript
 #      apps/api and Next.js apps register themselves via package.json when
 #      launched through portless.
@@ -24,7 +24,6 @@
 #     landing.localhost                  landing                (port 3006)
 #
 #   Backends (FastAPI, registered here as static aliases):
-#     api.marketplace.localhost          marketplace-api        (port 8000)
 #     api.booking.localhost              booking-api            (port 8001)
 #     api.pms.localhost                  pms-api                (port 8002)
 #
@@ -43,7 +42,6 @@ echo "==> Trusting portless local CA (may prompt for sudo)"
 portless trust
 
 echo "==> Registering FastAPI backends as static aliases"
-portless alias api.marketplace 8000
 portless alias api.booking 8001
 portless alias api.pms 8002
 

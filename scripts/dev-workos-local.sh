@@ -7,7 +7,6 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT_DIR/scripts/lib/workos-local-config.sh"
 COMPOSE_FILES=(-f docker-compose.yml -f docker-compose.portless.yml)
 BACKEND_SERVICES=(
-  marketplace-postgres
   booking-postgres
   auth-postgres
   pms-postgres
@@ -15,12 +14,10 @@ BACKEND_SERVICES=(
   minio
   minio-setup
   media-cdn
-  marketplace-backend
   booking-backend
   pms-backend
 )
 COMPOSE_CONTAINERS=(
-  vayada-marketplace-postgres
   vayada-booking-postgres
   vayada-auth-postgres
   vayada-pms-postgres
@@ -28,7 +25,6 @@ COMPOSE_CONTAINERS=(
   vayada-minio
   vayada-minio-setup
   vayada-media-cdn
-  vayada-marketplace-backend
   vayada-booking-backend
   vayada-pms-backend
 )
@@ -138,7 +134,6 @@ get_portless_origin() {
 echo "==> Ensuring WorkOS local role slugs exist"
 ensure_workos_role platform_admin "Platform Admin"
 ensure_workos_role hotel_owner "Hotel Owner"
-ensure_workos_role creator_owner "Creator Owner"
 
 unset BOOKING_PUBLIC_API_URL
 unset PMS_API_URL
@@ -153,7 +148,6 @@ portless proxy start --wildcard
 
 echo "==> Ensuring portless API aliases exist"
 portless alias api 8003
-portless alias api.marketplace 8000
 portless alias api.booking 8001
 portless alias api.pms 8002
 portless alias media 9002
@@ -170,9 +164,7 @@ ADMIN_ORIGIN="$(get_portless_origin admin)"
 BOOKING_ADMIN_ORIGIN="$(get_portless_origin admin.booking)"
 BOOKING_ORIGIN="$(get_portless_origin booking)"
 PMS_ORIGIN="$(get_portless_origin pms)"
-MARKETPLACE_ORIGIN="$(get_portless_origin marketplace)"
 LANDING_ORIGIN="$(get_portless_origin landing)"
-MARKETPLACE_API_ORIGIN="$(get_portless_origin api.marketplace)"
 BOOKING_API_ORIGIN="$(get_portless_origin api.booking)"
 PMS_API_ORIGIN="$(get_portless_origin api.pms)"
 # Keep media canonical because Next image allowlists use this exact local host.
@@ -188,17 +180,14 @@ export PUBLIC_HOTEL_PROFILE_SOURCE="${PUBLIC_HOTEL_PROFILE_SOURCE:-target}"
 export FINANCE_SOURCE="${FINANCE_SOURCE:-target}"
 export BOOKING_HOST_BASE="${BOOKING_HOST_BASE:-${BOOKING_PORTLESS_HOST}}"
 export PMS_OPERATIONS_SOURCE="${PMS_OPERATIONS_SOURCE:-target}"
-export PMS_OPERATIONS_ALLOWED_ORIGINS="${PMS_OPERATIONS_ALLOWED_ORIGINS:-${PMS_ORIGIN},${BOOKING_ADMIN_ORIGIN},${MARKETPLACE_ORIGIN}}"
-export HOTEL_SETUP_BASE_URL="${HOTEL_SETUP_BASE_URL:-${MARKETPLACE_ORIGIN}/setup}"
-export HOTEL_SETUP_MARKETPLACE_ORIGIN="${HOTEL_SETUP_MARKETPLACE_ORIGIN:-${MARKETPLACE_ORIGIN}}"
+export PMS_OPERATIONS_ALLOWED_ORIGINS="${PMS_OPERATIONS_ALLOWED_ORIGINS:-${PMS_ORIGIN},${BOOKING_ADMIN_ORIGIN}}"
 export HOTEL_SETUP_BOOKING_ADMIN_ORIGIN="${HOTEL_SETUP_BOOKING_ADMIN_ORIGIN:-${BOOKING_ADMIN_ORIGIN}}"
 export HOTEL_SETUP_PMS_ORIGIN="${HOTEL_SETUP_PMS_ORIGIN:-${PMS_ORIGIN}}"
 export AUTH_LOGOUT_URL="${AUTH_LOGOUT_URL:-${ADMIN_ORIGIN}/login}"
-export AUTH_ALLOWED_ORIGINS="${API_ORIGIN},${ADMIN_ORIGIN},${BOOKING_ADMIN_ORIGIN},${BOOKING_ORIGIN},${PMS_ORIGIN},${MARKETPLACE_ORIGIN},${LANDING_ORIGIN}"
+export AUTH_ALLOWED_ORIGINS="${API_ORIGIN},${ADMIN_ORIGIN},${BOOKING_ADMIN_ORIGIN},${BOOKING_ORIGIN},${PMS_ORIGIN},${LANDING_ORIGIN}"
 export AUTH_COOKIE_SECURE=true
 export AUTH_COMPATIBILITY_CALLBACK_ORIGIN="$API_ORIGIN"
 export AUTH_PLATFORM_ADMIN_ORIGIN="$ADMIN_ORIGIN"
-export AUTH_MARKETPLACE_WEB_ORIGIN="$MARKETPLACE_ORIGIN"
 export AUTH_BOOKING_ADMIN_ORIGIN="$BOOKING_ADMIN_ORIGIN"
 export AUTH_PMS_WEB_ORIGIN="$PMS_ORIGIN"
 # Remaining browser surfaces use first-party gateways.
@@ -207,8 +196,6 @@ export AUTH_PMS_WEB_ORIGIN="$PMS_ORIGIN"
 export AUTH_FIRST_PARTY_SURFACES="${AUTH_FIRST_PARTY_SURFACES-booking-admin,pms-web,platform-admin}"
 export AUTH_BOOKING_ADMIN_LOGOUT_URL="${AUTH_BOOKING_ADMIN_LOGOUT_URL:-${BOOKING_ADMIN_ORIGIN}/login}"
 export AUTH_PMS_WEB_LOGOUT_URL="${AUTH_PMS_WEB_LOGOUT_URL:-${PMS_ORIGIN}/login}"
-export AUTH_MARKETPLACE_WEB_LOGOUT_URL="${AUTH_MARKETPLACE_WEB_LOGOUT_URL:-${MARKETPLACE_ORIGIN}/login}"
-export AUTH_LEGACY_MARKETPLACE_JWT_SECRET="${AUTH_LEGACY_MARKETPLACE_JWT_SECRET:-your-secret-key-change-in-production}"
 export AUTH_LEGACY_BOOKING_JWT_SECRET="${AUTH_LEGACY_BOOKING_JWT_SECRET:-local-legacy-booking-secret}"
 export AUTH_LEGACY_PMS_JWT_SECRET="${AUTH_LEGACY_PMS_JWT_SECRET:-local-legacy-pms-secret}"
 export PLATFORM_MEDIA_BUCKET="vayada-media-local"
@@ -225,8 +212,7 @@ for origin in \
   "$API_ORIGIN" \
   "$ADMIN_ORIGIN" \
   "$BOOKING_ADMIN_ORIGIN" \
-  "$PMS_ORIGIN" \
-  "$MARKETPLACE_ORIGIN"; do
+  "$PMS_ORIGIN"; do
   ensure_workos_redirect "$(workos_local_callback_url "WorkOS callback" "$origin")"
 done
 for origin in \
@@ -235,7 +221,6 @@ for origin in \
   "$BOOKING_ADMIN_ORIGIN" \
   "$BOOKING_ORIGIN" \
   "$PMS_ORIGIN" \
-  "$MARKETPLACE_ORIGIN" \
   "$LANDING_ORIGIN"; do
   ensure_workos_cors "$origin"
 done
@@ -294,10 +279,9 @@ COMMON_FRONTEND_ENV=(
   "NEXT_PUBLIC_AUTHKIT_COMPATIBILITY_TOKEN_ENABLED=true"
   "NEXT_PUBLIC_PMS_URL=${PMS_ORIGIN}"
   "NEXT_PUBLIC_PMS_FRONTEND_URL=${PMS_ORIGIN}"
-  "NEXT_PUBLIC_MARKETPLACE_URL=${MARKETPLACE_ORIGIN}"
   "NEXT_PUBLIC_MARKETING_URL=${LANDING_ORIGIN}"
   "NEXT_PUBLIC_BOOKING_ADMIN_URL=${BOOKING_ADMIN_ORIGIN}"
-  "NEXT_PUBLIC_APP_URL=${MARKETPLACE_ORIGIN}"
+  "NEXT_PUBLIC_APP_URL=${BOOKING_ADMIN_ORIGIN}"
 )
 
 echo
@@ -327,6 +311,6 @@ start_app apps/pms-web 3004 "${COMMON_FRONTEND_ENV[@]}" \
   "AUTH_GATEWAY_UPSTREAM_ORIGIN=${AUTH_GATEWAY_UPSTREAM_ORIGIN}" \
   "NEXT_PUBLIC_PMS_API_URL=${PMS_API_ORIGIN}" \
   "NEXT_PUBLIC_PMS_OPERATIONS_API_URL=${API_ORIGIN}"
-start_app apps/landing 3006 "${COMMON_FRONTEND_ENV[@]}" "NEXT_PUBLIC_API_URL=${MARKETPLACE_API_ORIGIN}"
+start_app apps/landing 3006 "${COMMON_FRONTEND_ENV[@]}" "NEXT_PUBLIC_API_URL=${API_ORIGIN}"
 
 wait

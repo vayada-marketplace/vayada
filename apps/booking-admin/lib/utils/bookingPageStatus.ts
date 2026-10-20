@@ -8,14 +8,31 @@ export type BookingPageItem = {
   groupId: string;
   message: string | null;
   step: Blocker["owningStepId"] | null;
+  /** The setup field to open on that step, e.g. the location form (VAY-2288). */
+  focus?: "location";
 };
+
+// City, country and time zone live in the hotel details form, not on the Present your hotel step.
+const LOCATION_BLOCKERS = new Set([
+  "hotel_public_locality_hidden",
+  "hotel_public_locality_missing",
+  "hotel_timezone_missing",
+  "hotel_timezone_invalid",
+]);
+
+type FailureCode = NonNullable<BookingPublicationReview["latestOperation"]>["failureCode"];
+
+/** Why the last publish didn't go live, so the card can say so (VAY-2292). */
+export type BookingPageFailure =
+  | { kind: "operation"; code: FailureCode; operationId: string }
+  | { kind: "request"; reason: "setup_changed" | "already_publishing" | "unreachable" };
 
 export type BookingPageStatus =
   | { kind: "online"; url: string; items: BookingPageItem[] }
   | { kind: "hidden"; items: BookingPageItem[] }
   | { kind: "publishing" }
   | { kind: "ready"; readyGroups: string[] }
-  | { kind: "failed"; readyGroups: string[] }
+  | { kind: "failed"; readyGroups: string[]; failure: BookingPageFailure }
   | { kind: "not_ready"; items: BookingPageItem[]; readyGroups: string[] }
   | { kind: "waiting"; items: BookingPageItem[]; readyGroups: string[] }
   | { kind: "unavailable" };
@@ -39,7 +56,15 @@ export function bookingPageStatus(review: BookingPublicationReview): BookingPage
     .map(({ groupId }) => groupId);
   if (readiness.status === "ready")
     return operation?.status === "failed"
-      ? { kind: "failed", readyGroups }
+      ? {
+          kind: "failed",
+          readyGroups,
+          failure: {
+            kind: "operation",
+            code: operation.failureCode,
+            operationId: operation.operationId,
+          },
+        }
       : { kind: "ready", readyGroups };
   if (readiness.status === "pending") return { kind: "waiting", items, readyGroups };
   // One item's readiness error must not hide the items the hotel can fix.
@@ -60,6 +85,7 @@ function missingItems(readiness: Readiness): BookingPageItem[] {
         groupId: group.groupId,
         message: (fixable ?? blockers[0])?.message ?? null,
         step: fixable?.owningStepId ?? null,
+        ...(fixable && LOCATION_BLOCKERS.has(fixable.code) ? { focus: "location" as const } : {}),
       };
     });
 }

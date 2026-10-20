@@ -210,6 +210,8 @@ export type PmsOperationalReservation = {
   additionalGuestCount: number;
   /** What the booked terms kept when the guest cancelled (VAY-2100), as recorded. */
   cancellationOutcome?: BookedCancellationOutcome | null;
+  /** The stay's latest automatic card refund (VAY-2205): failed ones need the hotel. */
+  cardRefund?: PmsCardRefund;
   mealDescription?: string | null;
   bookedOffer?: { roomTypeId: string; roomName: string };
   roomLines?: ReturnType<typeof projectBookingRoomSelection>["roomLines"];
@@ -908,6 +910,7 @@ type TargetPmsOperationalReservationRow = {
   privateNoteCount: string | number;
   additionalGuestCount: string | number;
   cancellationOutcome?: unknown;
+  cardRefund?: unknown;
   bookedRoomTypeId: string;
   selectedRoomOffer?: unknown;
   bookedRoomName: string;
@@ -973,6 +976,31 @@ const BOOKED_OFFER_CANCELLATION_JOIN_SQL = `LEFT JOIN LATERAL (
       AND term.value->>'offerId' = room.value->>'offerId'
     LIMIT 1
   ) accepted_offer ON TRUE`;
+
+// VAY-2205: the stay's latest automatic card refund, for the reservation page.
+/** The stay's latest card refund (VAY-2205): its status, amount and Stripe's reason, with who
+ * cancelled and when from the first attempt (a retry is the hotel asking again, not a new cancel),
+ * and what the card payment was. Reads `booking` from the enclosing query. */
+export const CARD_REFUND_SQL = `(
+  SELECT jsonb_build_object(
+    'status', command.status, 'amount', command.amount::text, 'currency', trim(command.currency),
+    'requestedBy', first_attempt.requested_by, 'failureReason', command.failure_reason,
+    'createdAt', first_attempt.created_at, 'settledAt', command.settled_at,
+    'paidAmount', payment.amount::text)
+  FROM finance.card_refund_commands command
+  JOIN LATERAL (
+    SELECT earliest.requested_by, earliest.created_at
+    FROM finance.card_refund_commands earliest
+    WHERE earliest.payment_id = command.payment_id AND earliest.property_id = command.property_id
+    ORDER BY earliest.created_at, earliest.id
+    LIMIT 1
+  ) first_attempt ON TRUE
+  LEFT JOIN finance.payments payment
+    ON payment.id = command.payment_id AND payment.property_id = command.property_id
+  WHERE command.property_id = booking.property_id AND command.guest_booking_id = booking.id
+  ORDER BY command.created_at DESC, command.id DESC
+  LIMIT 1
+)`;
 
 const CANCELLATION_OUTCOME_SQL = `(
   SELECT event.event_payload->'cancellationOutcome'
@@ -1051,7 +1079,8 @@ function pmsOperationalReservationSelectSql(
   COALESCE(checkout.pending_flags, '[]'::jsonb) AS "checkoutPendingFlags",
   COALESCE(private_notes.note_count, 0) AS "privateNoteCount",
   COALESCE(additional_guests.guest_count, 0) AS "additionalGuestCount",
-  ${bookedCancellation ? CANCELLATION_OUTCOME_SQL : "NULL::jsonb"} AS "cancellationOutcome"
+  ${bookedCancellation ? CANCELLATION_OUTCOME_SQL : "NULL::jsonb"} AS "cancellationOutcome",
+  ${bookedCancellation ? CARD_REFUND_SQL : "NULL::jsonb"} AS "cardRefund"
 FROM booking.guest_bookings booking
 LEFT JOIN booking.quote_sessions quote
   ON quote.id = booking.quote_session_id
@@ -1535,6 +1564,7 @@ function toPmsOperationalReservation(
     ...(row.cancellationOutcome
       ? { cancellationOutcome: toCancellationOutcome(row.cancellationOutcome) }
       : {}),
+    ...(toCardRefund(row.cardRefund) ? { cardRefund: toCardRefund(row.cardRefund)! } : {}),
     ...(bookedRoomTypeId && bookedRoomName
       ? { bookedOffer: { roomTypeId: bookedRoomTypeId, roomName: bookedRoomName } }
       : {}),
@@ -1610,6 +1640,41 @@ function toRoomBlockSummaries(value: unknown): PmsRoomBlockSummary[] {
 
 function toRoomBlockKind(value: unknown): PmsRoomBlockKind {
   return value === "linked_booking" || value === "linked_manual_block" ? value : "manual";
+}
+
+export type PmsCardRefund = {
+  status: "pending" | "succeeded" | "failed";
+  amount: string;
+  currency: string;
+  requestedBy: "guest" | "host";
+  failureReason: string | null;
+  createdAt: string;
+  settledAt: string | null;
+  /** What the guest paid by card, refunded or not (two decimals). */
+  paidAmount: string | null;
+};
+function toCardRefund(value: unknown): PmsCardRefund | null {
+  const row = value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+  if (
+    !row ||
+    !["pending", "succeeded", "failed"].includes(row["status"] as string) ||
+    typeof row["amount"] !== "string" ||
+    typeof row["currency"] !== "string" ||
+    !["guest", "host"].includes(row["requestedBy"] as string) ||
+    typeof row["createdAt"] !== "string"
+  )
+    return null;
+  return {
+    status: row["status"] as PmsCardRefund["status"],
+    amount: row["amount"],
+    currency: row["currency"],
+    requestedBy: row["requestedBy"] as PmsCardRefund["requestedBy"],
+    failureReason: typeof row["failureReason"] === "string" ? row["failureReason"] : null,
+    createdAt: new Date(row["createdAt"]).toISOString(),
+    settledAt:
+      typeof row["settledAt"] === "string" ? new Date(row["settledAt"]).toISOString() : null,
+    paidAmount: typeof row["paidAmount"] === "string" ? row["paidAmount"] : null,
+  };
 }
 
 function toCancellationOutcome(value: unknown): BookedCancellationOutcome | null {

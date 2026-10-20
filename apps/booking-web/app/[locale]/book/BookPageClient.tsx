@@ -642,7 +642,13 @@ function RoomQuoteForm({ slug }: { slug: string }) {
           // As the server would answer: a card is paid when booked, or only held for a request,
           // and what isn't paid yet is still owed.
           paymentStatus:
-            quote.paymentMethod === "card" ? (requested ? "authorized" : "paid") : "unpaid",
+            quote.paymentMethod === "card"
+              ? requested
+                ? "authorized"
+                : quote.dueLaterMinor === "0"
+                  ? "paid"
+                  : "partially_paid"
+              : "unpaid",
           balanceAmount: quoteMoneyAmount(
             requested ? quote.totalMinor : quote.dueLaterMinor,
             quote.currency,
@@ -1110,6 +1116,14 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                 termsText={pagePayment.termsText}
                 quote={quote}
                 total={quote ? money(quote.totalMinor, quote.currency) : ""}
+                split={
+                  quote && quote.paymentMethod === "card" && quote.dueLaterMinor !== "0"
+                    ? {
+                        now: money(quote.dueNowMinor, quote.currency),
+                        later: money(quote.dueLaterMinor, quote.currency),
+                      }
+                    : undefined
+                }
                 notice={
                   error && quote && !attemptOpen ? (
                     <Notice

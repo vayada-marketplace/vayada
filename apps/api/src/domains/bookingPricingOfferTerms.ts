@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { RequestContext } from "@vayada/backend-auth";
 import type { ReplacementOfferTerms } from "@vayada/domain-booking";
 import { pricingInteger, pricingKeys, pricingObject } from "@vayada/domain-pms";
-import { parseBookingPricingOfferTerms } from "@vayada/domain-booking/replacement-pricing";
+import { parseBookingPricingOfferTerms, pricingPaymentWriteProblem } from "@vayada/domain-booking/replacement-pricing";
 export { parseBookingPricingOfferTerms } from "@vayada/domain-booking/replacement-pricing";
 import type { Pool, PoolClient } from "pg";
 import { lockReplacementPricingAuthorization } from "./replacementPricingAuthorization.js";
@@ -92,15 +92,12 @@ export function createBookingPricingOfferTermsStore(pool: Pool) {
     } catch (error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); }
   }
   async function write(context: RequestContext | null, scope: PricingStorageScope,
-      input: TermsCommand, candidate?: BookingPricingDraft): Promise<ReplacementOfferTerms> {
+      input: TermsCommand, candidate?: BookingPricingDraft, paymentRules = false, depositsReady = true): Promise<ReplacementOfferTerms> {
       if ((candidate !== undefined && !draftValid(candidate)) || !text(input.requestId) || !(input.expectedRevision === null || uuid(input.expectedRevision)) ||
           !pricingObject(input.terms) || !pricingKeys(input.terms, ["roomTypeId", "offerId", "cancellation", "payment"])) return fail("invalid");
       scope = { propertyId: scope.propertyId.toLowerCase(), organizationId: scope.organizationId.toLowerCase(), actorUserId: scope.actorUserId.toLowerCase() };
       const terms = parseBookingPricingOfferTerms({ ...input.terms, revision: randomUUID() });
       if (!terms) return fail("invalid");
-      // New writes only: stored terms that still accept it keep loading, and quotes and bookings are unchanged (VAY-2280).
-      if (terms.cancellation.kind === "non_refundable" && terms.payment.acceptedMethods?.includes("pay_at_property"))
-        throw new PricingStorageError("non_refundable_pay_at_property");
       const draft = candidate ? { ...candidate, draftId: candidate.draftId.toLowerCase() } : null;
       const requestId = input.requestId, expected = input.expectedRevision?.toLowerCase() ?? null;
       const hash = createHash("sha256").update(canonical({ scope, requestId, expected, ...(draft ? { draft } : {}), terms: { ...terms, revision: null } })).digest("hex");
@@ -108,9 +105,19 @@ export function createBookingPricingOfferTermsStore(pool: Pool) {
         if (!await lockPmsPricingRoomScope(client, scope.propertyId, terms.roomTypeId)) return fail("denied");
         const prior = (await client.query("SELECT terms,request_hash FROM booking.pricing_v2_offer_terms WHERE property_id=$1 AND request_id=$2", [scope.propertyId, requestId])).rows[0];
         if (prior) { if (prior.request_hash !== hash) return fail("idempotency_conflict"); return parseBookingPricingOfferTerms(prior.terms) ?? fail("invalid"); }
+        // New writes only: a replayed request returns what it stored, stored terms that still accept it keep loading,
+        // and quotes and bookings are unchanged (VAY-2280).
+        if (terms.cancellation.kind === "non_refundable" && terms.payment.acceptedMethods?.includes("pay_at_property"))
+          throw new PricingStorageError("non_refundable_pay_at_property");
         if (draft && !await lockPmsPricingBaseRevision(client, scope.propertyId, draft.baseRevision)) return fail("stale");
         const head = (await client.query("SELECT revision FROM booking.pricing_v2_offer_term_heads WHERE property_id=$1 AND room_type_id=$2 AND offer_id=$3 FOR UPDATE", [scope.propertyId, terms.roomTypeId, terms.offerId])).rows[0];
         if ((head?.revision ?? null) !== expected) return fail("stale");
+        // The hotel's writes keep the "Paid when booking" rules (VAY-2205), for a changed payment only, so other edits
+        // of older terms still save.
+        const current = paymentRules && expected && (await client.query("SELECT terms->'payment' AS payment FROM booking.pricing_v2_offer_terms WHERE property_id=$1 AND revision=$2", [scope.propertyId, expected])).rows[0];
+        const problem = !paymentRules || (current && canonical(current.payment) === canonical(terms.payment)) ? null
+          : pricingPaymentWriteProblem(terms.payment) ?? (terms.payment.kind === "deposit" && !depositsReady ? "deposits_unavailable" : null);
+        if (problem) throw new PricingStorageError(problem);
         await client.query(`INSERT INTO booking.pricing_v2_offer_terms
           (property_id,room_type_id,offer_id,revision,terms,request_id,request_hash,actor_user_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,
         [scope.propertyId, terms.roomTypeId, terms.offerId, terms.revision, canonical(terms), requestId, hash, scope.actorUserId]);
@@ -125,7 +132,12 @@ export function createBookingPricingOfferTermsStore(pool: Pool) {
     }
   return {
     save: (context: RequestContext | null, scope: PricingStorageScope, input: TermsCommand) => write(context, scope, input),
-    stage: (context: RequestContext | null, scope: PricingStorageScope, input: TermsCommand, draft: BookingPricingDraft) => draftValid(draft) ? write(context, scope, input, draft) : Promise.reject(new PricingStorageError("invalid")),
+    /** `paymentRules`: a hotel's write, held to the "Paid when booking" rules; a new deposit also needs `depositsReady`
+     * (card ready and deposits switched on, VAY-2205), so no deposit rate is published that guests can't book. */
+    stage: (context: RequestContext | null, scope: PricingStorageScope, input: TermsCommand, draft: BookingPricingDraft,
+      options: { paymentRules?: boolean; depositsReady?: boolean } = {}) => draftValid(draft)
+      ? write(context, scope, input, draft, options.paymentRules, options.depositsReady ?? !options.paymentRules)
+      : Promise.reject(new PricingStorageError("invalid")),
     read(context: RequestContext | null, scope: PricingStorageScope, roomTypeId: string, offerId: string) {
       if (!uuid(roomTypeId) || !text(offerId)) return Promise.reject(new PricingStorageError("invalid"));
       return transaction(context, scope, "read", async (client) => {

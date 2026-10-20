@@ -11,6 +11,7 @@ import {
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { createReplacementPricingCommands } from "../domains/replacementPricingCommands.js";
 import type { FinanceManualPaymentMethodsReadPort } from "../domains/financeManualPaymentReadiness.js";
+import type { PricingCardReadinessReadPort } from "../domains/pricingCardReadiness.js";
 import {
   PricingStorageError,
   type PricingStorageSnapshot,
@@ -23,6 +24,8 @@ export type ReplacementPricingRoutesOptions = {
   commands(context: RequestContext): Commands;
   /** Present only while bank-transfer and PayPal acceptance is on (VAY-2139). */
   manualPayments?: FinanceManualPaymentMethodsReadPort;
+  /** Whether rates can take card and deposits on the booking page now (VAY-2205). */
+  cardReadiness?: PricingCardReadinessReadPort;
 };
 type Params = { propertyId: string; draftId?: string; roomTypeId?: string; offerId?: string };
 const uuid = (v: unknown): v is string =>
@@ -52,6 +55,12 @@ const snapshot = (v: unknown): v is PricingStorageSnapshot =>
   v.rooms.length > 0 &&
   v.rooms.every((r) => parsePricingConfiguration(r) !== null) &&
   owners(v.ownerReferences);
+/** Terms the hotel can fix: they break a payment rule (VAY-2280, VAY-2205). */
+const payloadRule = (code: string): boolean =>
+  code === "non_refundable_pay_at_property" ||
+  code === "payment_methods_required" ||
+  code === "deposits_unavailable" ||
+  code.startsWith("deposit_");
 const invalid = (): never => {
   throw new PricingStorageError("invalid");
 };
@@ -143,7 +152,7 @@ export async function registerReplacementPricingRoutes(
           if (error instanceof PricingStorageError)
             return reply
               .code(
-                error.code === "invalid" || error.code === "non_refundable_pay_at_property"
+                error.code === "invalid" || payloadRule(error.code)
                   ? 400
                   : error.code === "denied"
                     ? 403
@@ -166,6 +175,17 @@ export async function registerReplacementPricingRoutes(
         }
       : { acceptanceEnabled: false, readyMethods: [] };
   });
+  // Card and deposits for the rate screens' "Paid when booking" (VAY-2205); none without the read.
+  route("GET", "/card-readiness", async (commands, id, request) => {
+    if (!(await commands.authorizeRead(id))) throw new PricingStorageError("denied");
+    const organizationId = authorized.get(request)!.selectedOrganization.organizationId;
+    return options.cardReadiness
+      ? options.cardReadiness.read({ organizationId, propertyId: id })
+      : {
+          card: { ready: false, reason: "switch_off", charge: "at_booking" },
+          deposits: { ready: false },
+        };
+  });
   route("GET", "/rooms/:roomTypeId/offers/:offerId/terms", (commands, id, request) =>
     commands.readTerms(id, request.params.roomTypeId!, request.params.offerId!),
   );
@@ -175,7 +195,7 @@ export async function registerReplacementPricingRoutes(
   route(
     "PUT",
     "/drafts/:draftId/rooms/:roomTypeId/offers/:offerId/terms",
-    (commands, id, request) => {
+    async (commands, id, request) => {
       const requestId = key(request),
         body = request.body;
       if (
@@ -193,10 +213,21 @@ export async function registerReplacementPricingRoutes(
       });
       if (!parsed) return invalid();
       const { revision: _revision, ...terms } = parsed;
+      // A deposit needs the hotel's card ready and deposits switched on (VAY-2205).
+      const depositsReady =
+        terms.payment.kind === "deposit" && options.cardReadiness
+          ? (
+              await options.cardReadiness.read({
+                organizationId: authorized.get(request)!.selectedOrganization.organizationId,
+                propertyId: id,
+              })
+            ).deposits.ready
+          : false;
       return commands.stageTerms(
         id,
         { requestId, expectedRevision: body.expectedRevision, terms },
         { draftId: request.params.draftId!, baseRevision: body.baseRevision as number },
+        depositsReady,
       );
     },
   );

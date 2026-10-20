@@ -20,6 +20,7 @@
     "./returnTo": "./src/returnTo.ts",
     "./SharedHotelLoginForm": "./src/SharedHotelLoginForm.tsx",
     "./SharedSignupPage": "./src/SharedSignupPage.tsx",
+    "./HotelIcon": "./src/HotelIcon.tsx",
     "./bankTransferDestination": "./src/bankTransferDestination.ts",
     "./AddonEditor": "./src/AddonEditor.tsx",
     "./PreparedHotelEditor": "./src/PreparedHotelEditor.tsx",
@@ -30,7 +31,8 @@
     "./AcceptedPaymentMethods": "./src/AcceptedPaymentMethods.tsx",
     "./pricingSetupAmounts": "./src/pricingSetupAmounts.ts",
     "./firstPricingSetupMessages": "./src/firstPricingSetupMessages.ts",
-    "./bookingPublicationReviewApi": "./src/bookingPublicationReviewApi.ts"
+    "./bookingPublicationReviewApi": "./src/bookingPublicationReviewApi.ts",
+    "./setupProfileFields": "./src/setupProfileFields.tsx"
   },
   "dependencies": {
     "@vayada/domain-booking": "*",

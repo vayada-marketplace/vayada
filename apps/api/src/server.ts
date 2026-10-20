@@ -191,6 +191,12 @@ import {
   createBookingPublicationProductionRuntime,
   startBookingPublicationWorker,
 } from "./domains/bookingPublicationProductionRuntime.js";
+import { runPendingPricingCardRefunds } from "./domains/pricingCardRefund.js";
+import {
+  createPricingCardReconciliationAlert,
+  reconcilePricingCardPayments,
+} from "./domains/pricingCardReconciliation.js";
+import { createPricingCardReadinessReader } from "./domains/pricingCardReadiness.js";
 import { createFinanceManualPaymentReadinessReader } from "./domains/financeManualPaymentReadiness.js";
 import { createTargetFinanceBillingConfigReadPort } from "./domains/financeBillingConfigReadModel.js";
 import { createFinanceSubscriptionService } from "./domains/financeSubscriptionService.js";
@@ -209,6 +215,7 @@ import { createPropertySetupFinanceStateProvider } from "./platform/propertySetu
 import { createPropertySetupReviewLifecycleStateProvider } from "./platform/propertySetupReviewLifecycleState.js";
 import { createPropertySetupRouteStateReadPort } from "./platform/propertySetupRouteState.js";
 import {
+  PLATFORM_MEDIA_CLEANUP_MAX_ATTEMPTS,
   platformMediaCleanupFailureLogEntries,
   runPlatformMediaCleanupJobs,
 } from "./jobs/platformMediaCleanup.js";
@@ -282,7 +289,11 @@ import { createPgTargetBookingPromoCodesRepository } from "./routes/bookingPromo
 import { promotePulledChannexBookingRevision } from "./routes/providerWebhooks.js";
 import { createTargetBookingWebCheckoutAdapter } from "./routes/bookingWebPublic.js";
 import { createBookingWebDisplayRates } from "./routes/bookingWebExchangeRates.js";
-import { createPgTargetBookingSettingsRepository } from "./routes/bookingSettings.js";
+import {
+  createPgTargetBookingSettingsRepository,
+  toLocalizationSettingsResponse,
+} from "./routes/bookingSettings.js";
+import { createHotelFirstRunRuntime } from "./domains/hotelFirstRunRuntime.js";
 import { createTargetBookingCustomDomainRepository } from "./routes/bookingCustomDomain.js";
 import {
   createTargetFinancePropertySettingsRepository,
@@ -309,8 +320,17 @@ import { createPgIdentityPrivacyRepository } from "./routes/identityPrivacy.js";
 import { createTargetPlatformAdminDashboardRepository } from "./routes/platform/admin/dashboard/bookingCompatible.js";
 import { createPgPlatformPropertyLifecycleCommandRepository } from "./domains/platformPropertyLifecycleCommandRepository.js";
 import { createPgPlatformPropertyLifecycleImpactRepository } from "./domains/platformPropertyLifecycleImpactRepository.js";
+import { createPropertySlugChangeCommand } from "./domains/propertySlugChange.js";
 import { createPgPlatformPropertyProvisioningRepository } from "./domains/platformPropertyProvisioningRepository.js";
 import { createPgPlatformContactIntakeRepository } from "./routes/platformContactIntake.js";
+import {
+  createPgContactIntakeRetentionStore,
+  startContactIntakeRetentionWorker,
+} from "./jobs/contactIntakeRetention.js";
+import {
+  contactNotificationSender,
+  runContactNotificationJobs,
+} from "./jobs/contactNotificationDelivery.js";
 
 const postgresRuntime = installPostgresPoolRuntime(pg);
 const config = loadConfig();
@@ -469,6 +489,7 @@ const bookingWebCheckoutAdapter = createTargetBookingWebCheckoutAdapter({
   mixedRoomSelectionsEnabled: true,
   replacementPricingAcceptanceEnabled: config.replacementPricingAcceptanceEnabled,
   replacementPricingCardAcceptanceEnabled: config.replacementPricingCardAcceptanceEnabled,
+  replacementPricingDepositAcceptanceEnabled: config.replacementPricingDepositAcceptanceEnabled,
   replacementPricingRequestAcceptanceEnabled: config.replacementPricingRequestAcceptanceEnabled,
   replacementPricingManualPaymentAcceptanceEnabled:
     config.replacementPricingManualPaymentAcceptanceEnabled,
@@ -924,6 +945,7 @@ const platformMediaRuntime = composePlatformMediaRuntime({
   pmsInboxEnabled: Boolean(pmsOperationsRepository),
   targetDatabaseUrl,
   platformMediaServing: config.platformMediaServing,
+  retiredPurge: config.platformMediaRetiredPurge,
   allowedOrigins: config.authSession?.authAllowedOrigins,
 });
 const pmsInboxRuntime = pmsOperationsRepository
@@ -1528,6 +1550,72 @@ const airbnbImportRuntime = config.airbnbImport
       allowedOrigins: config.authSession!.authAllowedOrigins,
     })
   : undefined;
+// VAY-2247: the server's first run for the new setup in Booking Admin, behind HOTEL_FIRST_RUN_ENABLED.
+// It only reuses runtimes built above; when one is missing the route stays unmounted (fail closed).
+const hotelFirstRun = (() => {
+  if (!config.hotelFirstRunEnabled) return undefined;
+  const ordinary =
+    "hotelSetupProfileCommand" in hotelSetupOrdinaryOptions ? hotelSetupOrdinaryOptions : undefined;
+  const currency = ordinary?.hotelSetupCurrencyCommandPort;
+  const profileCommand = ordinary?.hotelSetupProfileCommand;
+  const readiness = bookingPublicationRuntime?.routes.readinessProvider;
+  const calendarRuntime = pmsOperatingCalendarRuntime;
+  const materialization = calendarRuntime?.routes.materializationPort;
+  if (
+    !hotelSetupOrdinaryPool ||
+    !currency ||
+    !profileCommand ||
+    !pmsRoomSetupRuntime ||
+    !financeSubscriptionService ||
+    !readiness ||
+    !calendarRuntime ||
+    !materialization
+  ) {
+    process.emitWarning(
+      "HOTEL_FIRST_RUN_ENABLED is on, but a runtime it needs is not configured; the first-run route stays unmounted",
+    );
+    return undefined;
+  }
+  const hotelFirstRunTerms = createBookingGuestTermsStore(propertySetupOwnerPool, (client) =>
+    createPgBookingGuestPolicyScopeAuthorizationPort({ pool: client }),
+  );
+  return createHotelFirstRunRuntime({
+    lockPool: hotelSetupOrdinaryPool,
+    pricingPool: propertySetupOwnerPool,
+    profile: sharedHotelSetupStatusRepository,
+    profileCommand,
+    launchSettings: {
+      async readDefaultLanguage(propertyId) {
+        const settings = await findPropertyLaunchSettings(propertyId);
+        return settings ? toLocalizationSettingsResponse(settings).defaultLanguage : null;
+      },
+    },
+    pricingRead: pmsPricingReadModel,
+    currency,
+    roomRead: propertySetupPmsRuntime.roomFacts,
+    roomFacts: pmsRoomSetupRuntime.roomFactsCommands,
+    units: pmsRoomSetupRuntime.physicalUnits,
+    labels: pmsRoomSetupRuntime.operationalLabels,
+    paymentRead: financePaymentSetupRuntime.routes.readPort,
+    payments: financePaymentSetupRuntime.routes.commandPort,
+    calendarRead: calendarRuntime.routes.readPort,
+    preview: calendarRuntime.routes.impactPreviewPort,
+    calendar: calendarRuntime.routes.commandPort,
+    materialization,
+    guestRules: bookingGuestChoiceStore,
+    terms: {
+      read: (scope) => hotelFirstRunTerms.read(scope),
+      // The first run only saves the non-empty default text, so the saved text is never null here.
+      save: async (scope, text, expected) => ({
+        termsText: (await hotelFirstRunTerms.save(scope, text, expected)).termsText ?? "",
+      }),
+    },
+    designRead: bookingDesignRepository,
+    design: bookingDesignRepository,
+    plans: financeSubscriptionService,
+    readiness,
+  });
+})();
 const app = buildApp({
   airbnbImports: airbnbImportRuntime?.routes,
   databaseHealth: postgresRuntime.healthCheck(targetDatabaseUrl),
@@ -1566,8 +1654,6 @@ const app = buildApp({
             "platform-admin": {
               requiredOrganizationKind: "platform",
               logoutReturnUrl: config.authSession.authLogoutUrl,
-              legacyJwtSecret: config.authSession.authLegacyMarketplaceJwtSecret,
-              legacyJwtUserType: "admin",
               requiredMembershipRoleKey: "platform_admin",
               publicOrigin: config.authSession.authSurfaceOrigins["platform-admin"],
               firstPartySession:
@@ -1605,7 +1691,6 @@ const app = buildApp({
           },
           cookieSecure: config.authSession.authCookieSecure,
           cookieDomain: config.authSession.authCookieDomain,
-          legacyMarketplaceJwtSecret: config.authSession.authLegacyMarketplaceJwtSecret,
           adminTransfer: adminTransferRuntime,
         }
       : undefined,
@@ -1679,6 +1764,7 @@ const app = buildApp({
           ...targetBookingHostActionGuards,
           payment: createFinanceHostBookingPayments(stripeBookingPaymentProvider),
         },
+        cardRefunds: stripeBookingPaymentProvider,
       })
     : undefined,
   pmsConfirmationEmails:
@@ -1734,6 +1820,16 @@ const app = buildApp({
       ? {
           commands: (context) => createReplacementPricingCommands(propertySetupOwnerPool, context),
           manualPayments: financeManualPaymentReadiness,
+          cardReadiness: createPricingCardReadinessReader({
+            pool: propertySetupOwnerPool,
+            finance: financePaymentReadinessReadModel,
+            // As the booking page's card acceptance: acceptance and card switched on, Stripe configured.
+            cardAcceptanceEnabled:
+              config.replacementPricingAcceptanceEnabled === true &&
+              config.replacementPricingCardAcceptanceEnabled === true &&
+              !!stripeBookingPaymentProvider,
+            depositAcceptanceEnabled: config.replacementPricingDepositAcceptanceEnabled === true,
+          }),
         }
       : undefined,
   pmsPricing: pmsGuestPolicySetupCommands
@@ -1778,6 +1874,7 @@ const app = buildApp({
   pmsNavigationModuleRepository,
   bookingModuleRepository,
   ...hotelSetupOrdinaryOptions,
+  hotelFirstRun,
   financialsActivationPropertyIds: config.financialsActivationPropertyIds,
   pmsReviewRepository: createPgPmsReviewRepository({
     connectionString: targetDatabaseUrl,
@@ -1878,7 +1975,7 @@ const app = buildApp({
     repository: createPgPlatformContactIntakeRepository({
       connectionString: targetDatabaseUrl,
     }),
-    allowedOrigins: config.identityPrivacyAllowedOrigins,
+    allowedOrigins: config.contactIntakeAllowedOrigins,
   },
   platformAdminDashboardRepository,
   platformAdminSmokeRecovery:
@@ -1898,6 +1995,18 @@ const app = buildApp({
     provisioningRepository: createPgPlatformPropertyProvisioningRepository({
       connectionString: targetDatabaseUrl,
       setupRepository: sharedHotelSetupStatusRepository,
+    }),
+  },
+  platformPropertySlug: {
+    command: createPropertySlugChangeCommand({
+      connectionString: targetDatabaseUrl,
+      // A live page is republished only where the public site serves setup publications.
+      ...(config.publicHotelProfileSource === "active_publication" && bookingPublicationRuntime
+        ? {
+            refresh: bookingPublicationRuntime.refresh.bind(bookingPublicationRuntime),
+            readiness: bookingPublicationRuntime.routes.readinessProvider,
+          }
+        : {}),
     }),
   },
   pmsOperationsAllowedOrigins: config.pmsOperationsAllowedOrigins,
@@ -2782,8 +2891,15 @@ if (platformMediaRuntime) {
   const runCleanup = () => {
     if (!config.backgroundWorkersEnabled) return;
     if (activeCleanup) return;
-    activeCleanup = runPlatformMediaCleanupJobs(platformMediaRuntime.cleanupStore)
+    activeCleanup = runPlatformMediaCleanupJobs(platformMediaRuntime.cleanupStore, {
+      run: platformMediaRuntime.cleanupRuns,
+    })
       .then((result) => {
+        // VAY-2272: objects a hotel still uses are left for a person; 0500 waits until none is left.
+        const blocked = result.runs.flatMap((run) => run.blocked ?? []);
+        if (blocked.length > 0) {
+          app.log.warn({ mediaObjectIds: blocked }, "Retired media purge skipped objects in use");
+        }
         const failures = platformMediaCleanupFailureLogEntries(result);
         const deadLettered = failures.filter((failure) => failure.deadLettered);
         const retrying = failures.filter((failure) => !failure.deadLettered);
@@ -2796,6 +2912,13 @@ if (platformMediaRuntime) {
         }
         if (retrying.length > 0) {
           app.log.info({ failures: retrying }, "Platform media cleanup will retry failed items");
+        }
+        // Only the retired-media purge (VAY-2272) retries past the cap: it never dead-letters.
+        const stuck = retrying.filter(
+          (failure) => failure.attempt >= PLATFORM_MEDIA_CLEANUP_MAX_ATTEMPTS,
+        );
+        if (stuck.length > 0) {
+          app.log.warn({ failures: stuck }, "Retired media purge keeps failing for items");
         }
       })
       .catch((error: unknown) => {
@@ -2878,6 +3001,64 @@ const bookingLifecycleTimer = setInterval(runBookingLifecycle, 60_000);
 bookingLifecycleTimer.unref();
 runBookingLifecycle();
 
+// Card refunds of cancelled pricing-v2 stays (VAY-2205): retries Stripe errors and follows refunds
+// still pending at Stripe. Commands exist only once a hotel takes card.
+let activePricingCardRefundRun: Promise<void> | undefined;
+const runPricingCardRefunds = () => {
+  if (!config.backgroundWorkersEnabled || !stripeBookingPaymentProvider) return;
+  if (activePricingCardRefundRun) return;
+  activePricingCardRefundRun = runPendingPricingCardRefunds(
+    propertySetupOwnerPool,
+    stripeBookingPaymentProvider,
+  )
+    .then((result) => {
+      if (result.errors > 0 || result.failed > 0)
+        app.log.warn({ ...result }, "Pricing card refund sweep: refunds failed or need a retry");
+    })
+    .catch((error: unknown) => app.log.warn({ err: error }, "Pricing card refund sweep failed"))
+    .finally(() => {
+      activePricingCardRefundRun = undefined;
+    });
+};
+const pricingCardRefundTimer = setInterval(runPricingCardRefunds, 60_000);
+pricingCardRefundTimer.unref();
+
+// VAY-2205: a daily read-only check of pricing-v2 card payments and refunds against Stripe; each
+// difference is logged (ids only) and emailed to the pricing alert recipient at most once a day.
+const pricingCardReconciliationAlert =
+  config.pricingPublicationFreshnessAlertEmail && config.bookingEmailDelivery
+    ? createPricingCardReconciliationAlert({
+        to: config.pricingPublicationFreshnessAlertEmail,
+        delivery: createResendBookingEmailDelivery(config.bookingEmailDelivery),
+      })
+    : undefined;
+let activePricingCardReconciliation: Promise<void> | undefined;
+const runPricingCardReconciliation = () => {
+  if (!config.backgroundWorkersEnabled || !stripeBookingPaymentProvider) return;
+  if (activePricingCardReconciliation) return;
+  activePricingCardReconciliation = reconcilePricingCardPayments(
+    propertySetupOwnerPool,
+    stripeBookingPaymentProvider,
+  )
+    .then(async ({ payments, refunds, mismatches }) => {
+      app.log[mismatches.length ? "warn" : "info"](
+        { payments, refunds, mismatches },
+        "Pricing card reconciliation",
+      );
+      await pricingCardReconciliationAlert?.(mismatches).catch((error: unknown) =>
+        app.log.warn({ err: error }, "Pricing card reconciliation alert failed"),
+      );
+    })
+    .catch((error: unknown) => app.log.warn({ err: error }, "Pricing card reconciliation failed"))
+    .finally(() => {
+      activePricingCardReconciliation = undefined;
+    });
+};
+const pricingCardReconciliationTimer = setInterval(runPricingCardReconciliation, 86_400_000);
+pricingCardReconciliationTimer.unref();
+const pricingCardReconciliationStart = setTimeout(runPricingCardReconciliation, 300_000);
+pricingCardReconciliationStart.unref();
+
 const pmsInboxDeliveryWorker =
   config.backgroundWorkersEnabled && pmsInboxDeliveryStore && pmsInboxDeliveryPool
     ? startPmsInboxDeliveryWorker({
@@ -2935,12 +3116,64 @@ app.addHook("preClose", async () => {
 });
 app.addHook("onClose", async () => {
   clearInterval(bookingLifecycleTimer);
+  clearInterval(pricingCardRefundTimer);
+  clearInterval(pricingCardReconciliationTimer);
+  clearTimeout(pricingCardReconciliationStart);
   if (bookingEmailDeliveryTimer) clearInterval(bookingEmailDeliveryTimer);
   await activeBookingLifecycleRun;
+  await activePricingCardRefundRun;
+  await activePricingCardReconciliation;
   await activeBookingEmailDelivery;
   await bookingLifecycleStore.close();
   await pmsInboxDeliveryStore?.close();
   await pmsInboxDeliveryPool?.end();
+});
+
+// VAY-2286: each vayada.com contact-form message is emailed to the team (Reply-To: the visitor).
+const contactNotificationRecipient = config.contactNotificationRecipient;
+const contactNotificationDelivery =
+  config.bookingEmailDelivery && contactNotificationRecipient
+    ? createResendBookingEmailDelivery({
+        ...config.bookingEmailDelivery,
+        from: contactNotificationSender(config.bookingEmailDelivery.from),
+      })
+    : undefined;
+let activeContactNotificationDelivery: Promise<void> | undefined;
+const runContactNotificationDelivery = () => {
+  if (!config.backgroundWorkersEnabled) return;
+  if (!contactNotificationDelivery || !contactNotificationRecipient) return;
+  if (activeContactNotificationDelivery) return;
+  activeContactNotificationDelivery = runContactNotificationJobs(
+    targetDatabaseUrl,
+    contactNotificationDelivery,
+    { recipient: contactNotificationRecipient },
+  )
+    .then((result) => {
+      if (result.deadLettered > 0) {
+        app.log.error(
+          { deadLettered: result.deadLettered, lastError: result.lastError },
+          "Contact form messages could not be emailed after all retries",
+        );
+      } else if (result.failed > 0) {
+        app.log.warn(
+          { failed: result.failed, lastError: result.lastError },
+          "Contact notification delivery had failures",
+        );
+      }
+    })
+    .catch((error: unknown) => app.log.warn({ err: error }, "Contact notification delivery failed"))
+    .finally(() => {
+      activeContactNotificationDelivery = undefined;
+    });
+};
+const contactNotificationTimer = contactNotificationDelivery
+  ? setInterval(runContactNotificationDelivery, 15_000)
+  : undefined;
+contactNotificationTimer?.unref();
+runContactNotificationDelivery();
+app.addHook("onClose", async () => {
+  if (contactNotificationTimer) clearInterval(contactNotificationTimer);
+  await activeContactNotificationDelivery;
 });
 
 const propertySetupDraftRetentionWorker = startPropertySetupDraftRetentionWorker({
@@ -2967,6 +3200,17 @@ const bookingWebEventRetentionWorker = startBookingWebEventRetentionWorker({
 
 app.addHook("onClose", async () => {
   await bookingWebEventRetentionWorker.close();
+});
+
+// VAY-2286: contact-form and in-app support messages are emptied 90 days after they arrive.
+const contactIntakeRetentionWorker = startContactIntakeRetentionWorker({
+  store: createPgContactIntakeRetentionStore({ connectionString: targetDatabaseUrl, max: 1 }),
+  enabled: config.backgroundWorkersEnabled,
+  logger: app.log,
+});
+
+app.addHook("onClose", async () => {
+  await contactIntakeRetentionWorker.close();
 });
 
 if (authSessionHandoffRepository) {

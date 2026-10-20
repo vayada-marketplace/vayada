@@ -8,6 +8,12 @@ import { acceptanceFixture } from "./pricingAcceptanceHistory.fixtures.js";
 import { readPricingCheckInPlace } from "./pricingManualPaymentLead.js";
 import { writePricingAcceptance } from "./pricingAcceptanceWriter.js";
 import {
+  previewPricingCardRefund,
+  runPendingPricingCardRefunds,
+  stagePricingCardRefund,
+} from "./pricingCardRefund.js";
+import { reconcilePricingCardPayments } from "./pricingCardReconciliation.js";
+import {
   completePricingCardPayment,
   expirePricingCardBooking,
 } from "./pricingCardPaymentCompletion.js";
@@ -144,11 +150,18 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
     accountRef = "acct_writer_test",
     currency?: string,
     acceptanceMode: "instant" | "request" = "instant",
+    changeQuote?: (quote: Fixture["f"]["current"]["quote"]) => void,
+    futureStay: boolean | number = false,
   ) {
-    const fixture = await setupFixture((quote) => {
-      cardQuote(quote);
-      Object.assign(quote, { acceptanceMode });
-    }, currency);
+    const fixture = await setupFixture(
+      (quote) => {
+        cardQuote(quote);
+        Object.assign(quote, { acceptanceMode });
+        changeQuote?.(quote);
+      },
+      currency,
+      futureStay,
+    );
     const slug = `writer-${fixture.propertyId}`;
     fixture.input.slug = slug;
     await fixture.observer.query(
@@ -392,6 +405,478 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
     }
   });
 
+  it("takes a deposit by card and leaves the rest to pay at the property, with deposits on (VAY-2205)", async () => {
+    const { fixture, slug, createPaymentIntent, retrievePaymentIntent, provider } =
+      await cardFixture(undefined, "EUR", "instant", (quote) => {
+        const total = BigInt(quote.evidence.totalMinor),
+          dueNow = (total * 3000n + 5000n) / 10000n;
+        Object.assign(quote.evidence, {
+          dueNowMinor: String(dueNow),
+          dueLaterMinor: String(total - dueNow),
+        });
+        Object.assign(quote.evidence.terms[0], {
+          payment: {
+            kind: "deposit",
+            basisPoints: 3000,
+            balanceDaysBeforeArrival: 0,
+            acceptedMethods: ["card"],
+          },
+        });
+      });
+    const { dueNowMinor, dueLaterMinor } = fixture.f.current.quote.evidence;
+    const decimal = (minor: string) => (Number(minor) / 100).toFixed(2);
+    try {
+      // With card on but deposits off, a deposit is unavailable, not a stale price.
+      await expect(
+        writePricingAcceptance(fixture.pool, fixture.input, { provider }),
+      ).rejects.toMatchObject({ code: "card_unavailable" });
+      expect(createPaymentIntent).not.toHaveBeenCalled();
+
+      const result = await writePricingAcceptance(fixture.pool, fixture.input, {
+        provider,
+        deposits: true,
+      });
+      expect(result).toMatchObject({ kind: "payment_required" });
+      // Only the deposit is charged now.
+      expect(createPaymentIntent).toHaveBeenCalledWith(
+        expect.objectContaining({ amountMinor: Number(dueNowMinor), captureMethod: "automatic" }),
+      );
+      expect(
+        (
+          await fixture.observer.query(
+            "SELECT payment_kind,amount::text AS amount FROM finance.payments WHERE property_id=$1",
+            [fixture.propertyId],
+          )
+        ).rows,
+      ).toEqual([{ payment_kind: "deposit", amount: decimal(dueNowMinor) }]);
+
+      const intent = await createPaymentIntent({
+        amountMinor: Number(dueNowMinor),
+        currency: "EUR",
+      });
+      retrievePaymentIntent.mockResolvedValue({
+        ...intent,
+        bookingReference: (result as { bookingReference: string }).bookingReference,
+        status: "succeeded",
+      });
+      await expect(
+        completePricingCardPayment(fixture.pool, provider, {
+          slug,
+          quoteId: fixture.f.current.quote.quoteId,
+          requestId: fixture.f.command.requestId,
+        }),
+      ).resolves.toMatchObject({ kind: "accepted", replayed: false });
+      // Confirmed with the deposit paid; the rest stays due at the property.
+      expect(
+        (
+          await fixture.observer.query(
+            `SELECT b.lifecycle_status,b.payment_status,b.total_amount::text AS total,b.balance_amount::text AS balance,
+               p.status AS payment
+             FROM booking.guest_bookings b JOIN finance.payments p ON p.id=b.active_card_payment_id
+             WHERE b.property_id=$1`,
+            [fixture.propertyId],
+          )
+        ).rows,
+      ).toEqual([
+        {
+          lifecycle_status: "confirmed",
+          payment_status: "partially_paid",
+          total: decimal(fixture.f.current.quote.evidence.totalMinor),
+          balance: decimal(dueLaterMinor),
+          payment: "paid",
+        },
+      ]);
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("holds only a request's deposit and captures it when the hotel accepts, leaving the rest due (VAY-2205)", async () => {
+    const { fixture, slug, createPaymentIntent, retrievePaymentIntent, cancelPaymentIntent } =
+      await cardFixture(undefined, "EUR", "request", (quote) => {
+        const total = BigInt(quote.evidence.totalMinor),
+          dueNow = (total * 3000n + 5000n) / 10000n;
+        Object.assign(quote.evidence, {
+          dueNowMinor: String(dueNow),
+          dueLaterMinor: String(total - dueNow),
+        });
+        Object.assign(quote.evidence.terms[0], {
+          payment: {
+            kind: "deposit",
+            basisPoints: 3000,
+            balanceDaysBeforeArrival: 0,
+            acceptedMethods: ["card"],
+          },
+        });
+      });
+    const { dueNowMinor, dueLaterMinor } = fixture.f.current.quote.evidence;
+    const decimal = (minor: string) => (Number(minor) / 100).toFixed(2);
+    const capturePaymentIntent = vi.fn();
+    const provider = {
+      createPaymentIntent,
+      retrievePaymentIntent,
+      cancelPaymentIntent,
+      capturePaymentIntent,
+    } as never;
+    const pmsPool = new pg.Pool({ connectionString: url, max: 2 });
+    const pms = createTargetPmsOperationsCommandRepository({
+      connectionString: url!,
+      pool: pmsPool,
+      stripePaymentProvider: provider,
+      readRepository: {
+        findReservationByGuestBookingId: async () => ({}),
+      } as unknown as PmsOperationsReadRepository,
+    });
+    const hotelUser = randomUUID();
+    try {
+      await fixture.observer.query(
+        "INSERT INTO identity.users (id,email,status) VALUES ($1,$2,'active')",
+        [hotelUser, `${hotelUser}@example.test`],
+      );
+      const accepted = (await writePricingAcceptance(
+        fixture.pool,
+        fixture.input,
+        { provider, deposits: true },
+        true,
+      )) as { bookingId: string; bookingReference: string };
+      // Only the deposit is held, to be captured when the hotel accepts.
+      expect(createPaymentIntent).toHaveBeenCalledWith(
+        expect.objectContaining({ amountMinor: Number(dueNowMinor), captureMethod: "manual" }),
+      );
+      const intent = {
+        ...(await createPaymentIntent({ amountMinor: Number(dueNowMinor), currency: "EUR" })),
+        bookingReference: accepted.bookingReference,
+      };
+      retrievePaymentIntent.mockResolvedValue({ ...intent, status: "requires_capture" });
+      await completePricingCardPayment(fixture.pool, provider, {
+        slug,
+        quoteId: fixture.f.current.quote.quoteId,
+        requestId: fixture.f.command.requestId,
+      });
+      capturePaymentIntent.mockResolvedValue({ ...intent, status: "succeeded" });
+      await expect(
+        pms.acceptBooking({
+          propertyId: fixture.propertyId,
+          guestBookingId: accepted.bookingId,
+          commandId: randomUUID(),
+          idempotencyKey: randomUUID(),
+          audit: {
+            actor: { kind: "user", userId: hotelUser, organizationId: fixture.organizationId },
+            requestId: randomUUID(),
+            reason: "Request accepted",
+            requestedAt: new Date().toISOString(),
+          },
+        }),
+      ).resolves.toMatchObject({ ok: true });
+      expect(capturePaymentIntent).toHaveBeenCalledOnce();
+      expect(
+        (
+          await fixture.observer.query(
+            `SELECT b.lifecycle_status,b.payment_status,b.balance_amount::text AS balance,p.status AS payment,
+               p.amount::text AS paid,p.payment_kind
+             FROM booking.guest_bookings b JOIN finance.payments p ON p.id=b.active_card_payment_id
+             WHERE b.id=$1`,
+            [accepted.bookingId],
+          )
+        ).rows,
+      ).toEqual([
+        {
+          lifecycle_status: "confirmed",
+          payment_status: "partially_paid",
+          balance: decimal(dueLaterMinor),
+          payment: "paid",
+          paid: decimal(dueNowMinor),
+          payment_kind: "deposit",
+        },
+      ]);
+    } finally {
+      await pmsPool.end();
+      await fixture.close();
+    }
+  });
+
+  /** A confirmed instant stay that paid a 30% deposit by card (VAY-2205). */
+  async function paidDeposit(cancellation?: unknown, commission = false) {
+    const card = await cardFixture(undefined, "EUR", "instant", (quote) => {
+      const total = BigInt(quote.evidence.totalMinor),
+        dueNow = (total * 3000n + 5000n) / 10000n;
+      Object.assign(quote.evidence, {
+        dueNowMinor: String(dueNow),
+        dueLaterMinor: String(total - dueNow),
+      });
+      Object.assign(quote.evidence.terms[0], {
+        payment: {
+          kind: "deposit",
+          basisPoints: 3000,
+          balanceDaysBeforeArrival: 0,
+          acceptedMethods: ["card"],
+        },
+        ...(cancellation ? { cancellation } : {}),
+      });
+    });
+    const { fixture, slug, provider, createPaymentIntent, retrievePaymentIntent } = card;
+    // A commission plan (the fixture's plan is fixed, which takes no commission).
+    if (commission) Object.assign(fixture.f.finance, { billingPlanSnapshot: "commission" });
+    const result = (await writePricingAcceptance(fixture.pool, fixture.input, {
+      provider,
+      deposits: true,
+    })) as { bookingId: string; bookingReference: string };
+    const intent = await createPaymentIntent({
+      amountMinor: Number(fixture.f.current.quote.evidence.dueNowMinor),
+      currency: "EUR",
+    });
+    retrievePaymentIntent.mockResolvedValue({
+      ...intent,
+      bookingReference: result.bookingReference,
+      status: "succeeded",
+    });
+    await completePricingCardPayment(fixture.pool, provider, {
+      slug,
+      quoteId: fixture.f.current.quote.quoteId,
+      requestId: fixture.f.command.requestId,
+    });
+    const hotelUser = randomUUID();
+    await fixture.observer.query(
+      "INSERT INTO identity.users (id,email,status) VALUES ($1,$2,'active')",
+      [hotelUser, `${hotelUser}@example.test`],
+    );
+    const createRefund = vi.fn(
+      async (input: { amountMinor: number; commandId: string; paymentIntentId: string }) => ({
+        refundId: "re_deposit",
+        status: "succeeded",
+        amountMinor: input.amountMinor,
+        currency: "EUR",
+        paymentIntentId: input.paymentIntentId,
+        commandId: input.commandId,
+        failureReason: null,
+      }),
+    );
+    const stripe = {
+      ...(provider as object),
+      createRefund,
+      listRefunds: vi.fn(async () => []),
+      retrieveRefund: vi.fn(),
+    } as never;
+    const hostPool = new pg.Pool({ connectionString: url, max: 2 });
+    const actions = createBookingHostActions({
+      pool: hostPool,
+      guards: {
+        ...targetBookingHostActionGuards,
+        payment: createFinanceHostBookingPayments(stripe),
+      },
+      inventory: { reserve: async () => null, release: async () => undefined },
+      cardRefunds: stripe,
+    });
+    const scope = {
+      propertyId: fixture.propertyId,
+      bookingId: result.bookingId,
+      actorUserId: hotelUser,
+    };
+    const money = async () =>
+      (
+        await fixture.observer.query(
+          `SELECT b.lifecycle_status,b.payment_status,p.status AS payment,p.refunded_amount::text AS refunded,
+             (SELECT string_agg(c.status||':'||c.amount::text,',') FROM finance.card_refund_commands c
+              WHERE c.guest_booking_id=b.id) AS refunds
+           FROM booking.guest_bookings b JOIN finance.payments p ON p.id=b.active_card_payment_id
+           WHERE b.id=$1`,
+          [result.bookingId],
+        )
+      ).rows[0];
+    const close = async () => {
+      await actions.close();
+      await hostPool.end().catch(() => undefined);
+      await fixture.close();
+    };
+    return { fixture, actions, scope, createRefund, money, close };
+  }
+
+  it("refunds the whole deposit when the hotel cancels a deposit stay for its own reason (VAY-2205)", async () => {
+    const stay = await paidDeposit();
+    const deposit = (Number(stay.fixture.f.current.quote.evidence.dueNowMinor) / 100).toFixed(2);
+    try {
+      const preview = await stay.actions.preview(stay.scope, {
+        action: "cancel",
+        reason: "Overbooked",
+      });
+      expect(preview.impact).toMatchObject({
+        payment: "card_refund",
+        cardRefund: {
+          paidMinor: stay.fixture.f.current.quote.evidence.dueNowMinor,
+          refundMinor: stay.fixture.f.current.quote.evidence.dueNowMinor,
+        },
+      });
+      await stay.actions.apply(stay.scope, preview.previewId, "host-deposit");
+      await vi.waitFor(async () =>
+        expect(await stay.money()).toEqual({
+          lifecycle_status: "canceled",
+          payment_status: "refunded",
+          payment: "refunded",
+          refunded: deposit,
+          refunds: `succeeded:${deposit}`,
+        }),
+      );
+      expect(stay.createRefund).toHaveBeenCalledOnce();
+    } finally {
+      await stay.close();
+    }
+  });
+
+  it("keeps a non-refundable deposit as retained revenue, as its share of the stay (VAY-2205)", async () => {
+    const stay = await paidDeposit({ kind: "non_refundable" });
+    const { totalMinor, dueNowMinor } = stay.fixture.f.current.quote.evidence;
+    try {
+      const preview = await stay.actions.preview(stay.scope, {
+        action: "cancel",
+        reason: "Guest emailed",
+        cancellationKind: "guest_request",
+      });
+      expect(preview.impact).toMatchObject({
+        payment: "card_refund",
+        cardRefund: { paidMinor: dueNowMinor, refundMinor: "0" },
+      });
+      await stay.actions.apply(stay.scope, preview.previewId, "host-deposit-kept");
+      // Nothing goes back, and the rest is never charged: the stay stays partly paid.
+      expect(await stay.money()).toMatchObject({
+        lifecycle_status: "canceled",
+        payment_status: "partially_paid",
+        payment: "paid",
+        refunded: "0.00",
+      });
+      expect(stay.createRefund).not.toHaveBeenCalled();
+      // The deposit is 30% of the stay, so the nights keep 30% of their room value, not all of it.
+      const cents = async (event: string) =>
+        BigInt(
+          (
+            await stay.fixture.observer.query(
+              `SELECT COALESCE(SUM(gross_room_amount)*100,0)::bigint::text AS cents
+               FROM booking.nightly_revenue_evidence WHERE guest_booking_id=$1 AND economic_event=$2`,
+              [stay.scope.bookingId, event],
+            )
+          ).rows[0].cents,
+        );
+      const room = await cents("room_night");
+      expect(room).toBeGreaterThan(0n);
+      const total = BigInt(totalMinor),
+        kept = BigInt(dueNowMinor);
+      expect(await cents("retained_charge")).toBe((room * kept * 2n + total) / (total * 2n));
+    } finally {
+      await stay.close();
+    }
+  });
+
+  it("records the rest of a card deposit paid at the property, once, without counting the deposit twice (VAY-2205)", async () => {
+    const stay = await paidDeposit(undefined, true);
+    const { dueLaterMinor } = stay.fixture.f.current.quote.evidence;
+    const rest = (Number(dueLaterMinor) / 100).toFixed(2);
+    const pmsPool = new pg.Pool({ connectionString: url, max: 2 });
+    const pms = createTargetPmsOperationsCommandRepository({
+      connectionString: url!,
+      pool: pmsPool,
+      readRepository: {
+        findReservationByGuestBookingId: async () => ({}),
+      } as unknown as PmsOperationsReadRepository,
+    });
+    const command = (): PmsBookingLifecycleCommand => ({
+      propertyId: stay.fixture.propertyId,
+      guestBookingId: stay.scope.bookingId,
+      commandId: randomUUID(),
+      idempotencyKey: randomUUID(),
+      audit: {
+        actor: { kind: "system", service: "apps/api" },
+        requestId: randomUUID(),
+        reason: "Rest paid at the hotel",
+        requestedAt: new Date().toISOString(),
+      },
+    });
+    try {
+      // The guest's confirmation says what the card paid and what is due at the hotel.
+      const deposit = (Number(stay.fixture.f.current.quote.evidence.dueNowMinor) / 100).toFixed(2);
+      const emails = (
+        await stay.fixture.observer.query(
+          "SELECT payload->>'text' AS text FROM platform.jobs WHERE property_id=$1 AND payload->>'recipientRole'='guest'",
+          [stay.fixture.propertyId],
+        )
+      ).rows.map((row) => row.text as string);
+      expect(emails.some((text) => text.includes(`Paid by card: ${deposit} EUR`))).toBe(true);
+      expect(emails.some((text) => text.includes(`Due at the hotel: ${rest} EUR`))).toBe(true);
+      // The balance is only the rest: the card deposit isn't taken off it a second time.
+      await expect(pms.markBookingPaid(command())).resolves.toMatchObject({ ok: true });
+      const state = (
+        await stay.fixture.observer.query(
+          `SELECT b.lifecycle_status,b.payment_status,b.balance_amount::text AS balance,
+             (SELECT string_agg(p.payment_method||':'||p.amount::text,',' ORDER BY p.payment_method)
+              FROM finance.payments p WHERE p.guest_booking_id=b.id AND p.status='paid') AS payments,
+             (SELECT count(*)::int FROM booking.booking_status_events e
+              WHERE e.guest_booking_id=b.id AND e.public_message='Remaining balance received.') AS events
+           FROM booking.guest_bookings b WHERE b.id=$1`,
+          [stay.scope.bookingId],
+        )
+      ).rows[0];
+      expect(state).toMatchObject({
+        lifecycle_status: "confirmed",
+        payment_status: "paid",
+        balance: "0.00",
+        events: 1,
+      });
+      expect(state.payments).toContain(`:${rest}`);
+      expect(state.payments).toMatch(/^card:/);
+      // Finance's 5% commission on the rest, once; the card deposit's row is unchanged.
+      const fees = (
+        await stay.fixture.observer.query(
+          `SELECT payment_method,amount::text AS amount,fee_amount::text AS fee,net_amount::text AS net
+           FROM finance.payments WHERE guest_booking_id=$1 AND status='paid' ORDER BY payment_method`,
+          [stay.scope.bookingId],
+        )
+      ).rows;
+      const cents = (v: string) => Math.round(Number(v) * 100);
+      expect(fees).toHaveLength(2);
+      const restRow = fees.find((row) => row.payment_method === "pay_at_property")!;
+      expect(restRow.amount).toBe(rest);
+      expect(cents(restRow.fee)).toBe(Math.round(cents(rest) * 0.05));
+      expect(cents(restRow.fee)).toBeGreaterThan(0);
+      expect(cents(restRow.net)).toBe(cents(rest) - cents(restRow.fee));
+      // Paid in full now: a second record is refused.
+      await expect(pms.markBookingPaid(command())).resolves.toMatchObject({
+        ok: false,
+        code: "invalid_status_transition",
+      });
+      // Part was paid at the property, so a cancel is the hotel's to settle: no automatic card
+      // refund for the guest online, and the PMS asks for a payment adjustment.
+      expect(
+        await previewPricingCardRefund(stay.fixture.observer, {
+          propertyId: stay.fixture.propertyId,
+          guestBookingId: stay.scope.bookingId,
+          retainedMinor: "0",
+        }),
+      ).toBeNull();
+      const client = await stay.fixture.pool.connect();
+      try {
+        // The guest's cancel stages no card refund either.
+        await client.query("BEGIN");
+        await expect(
+          stagePricingCardRefund(client, {
+            propertyId: stay.fixture.propertyId,
+            guestBookingId: stay.scope.bookingId,
+            retainedMinor: "0",
+            requestedBy: "guest",
+            commandKey: "cancel-after-rest",
+            occurredAt: new Date(),
+          }),
+        ).rejects.toMatchObject({ code: "unavailable" });
+      } finally {
+        await client.query("ROLLBACK");
+        client.release();
+      }
+      await expect(
+        stay.actions.preview(stay.scope, { action: "cancel", reason: "Overbooked" }),
+      ).rejects.toMatchObject({ code: "payment_adjustment_required" });
+    } finally {
+      await pmsPool.end();
+      await stay.close();
+    }
+  });
+
   // Stripe test mode (VAY-1543 K5). Runs only with STRIPE_TEST_SECRET_KEY (a test-mode key) and
   // STRIPE_TEST_CONNECTED_ACCOUNT; CI has neither, so it never calls Stripe there. Optional
   // STRIPE_TEST_CURRENCY (EUR, USD or IDR) prices the quote in that currency.
@@ -535,6 +1020,376 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
         await fixture.close();
       }
     },
+  );
+
+  // K5 for VAY-2205: refunds, holds and deposits against Stripe test mode, same gate as above.
+  // Each stay is 30 days out, so a rate's cancellation tiers apply as they would for a guest.
+  /** A K5 stay the guest paid (instant) or authorised (request) with a Stripe test card. */
+  async function stripeTestStay(
+    options: {
+      mode?: "instant" | "request";
+      deposit?: boolean;
+      cancellation?: unknown;
+      card?: string;
+    } = {},
+  ) {
+    const mode = options.mode ?? "instant";
+    const { fixture, slug } = await cardFixture(
+      stripeAccount!,
+      stripeCurrency,
+      mode,
+      (quote) => {
+        if (options.deposit) {
+          const total = BigInt(quote.evidence.totalMinor),
+            dueNow = (total * 3000n + 5000n) / 10000n;
+          Object.assign(quote.evidence, {
+            dueNowMinor: String(dueNow),
+            dueLaterMinor: String(total - dueNow),
+          });
+          Object.assign(quote.evidence.terms[0], {
+            payment: {
+              kind: "deposit",
+              basisPoints: 3000,
+              balanceDaysBeforeArrival: 0,
+              acceptedMethods: ["card"],
+            },
+          });
+        }
+        if (options.cancellation)
+          Object.assign(quote.evidence.terms[0], { cancellation: options.cancellation });
+      },
+      30,
+    );
+    const provider = createStripeBookingPaymentProvider({ secretKey: stripeKey! });
+    const required = (await writePricingAcceptance(
+      fixture.pool,
+      fixture.input,
+      { provider, deposits: options.deposit },
+      mode === "request",
+    )) as { bookingId: string; bookingReference: string; payment: { paymentIntentId: string } };
+    const intentId = required.payment.paymentIntentId;
+    const confirmed = await confirmWithTestCard(intentId, options.card ?? "pm_card_visa");
+    const complete = () =>
+      completePricingCardPayment(fixture.pool, provider, {
+        slug,
+        quoteId: fixture.f.current.quote.quoteId,
+        requestId: fixture.f.command.requestId,
+      });
+    if (confirmed.status === "succeeded" || confirmed.status === "requires_capture")
+      await complete();
+    const hotelUser = randomUUID();
+    await fixture.observer.query(
+      "INSERT INTO identity.users (id,email,status) VALUES ($1,$2,'active')",
+      [hotelUser, `${hotelUser}@example.test`],
+    );
+    const hostPool = new pg.Pool({ connectionString: url, max: 2 });
+    const actions = createBookingHostActions({
+      pool: hostPool,
+      guards: {
+        ...targetBookingHostActionGuards,
+        payment: createFinanceHostBookingPayments(provider),
+      },
+      inventory: { reserve: async () => null, release: async () => undefined },
+      cardRefunds: provider,
+    });
+    const pmsPool = new pg.Pool({ connectionString: url, max: 2 });
+    const pms = createTargetPmsOperationsCommandRepository({
+      connectionString: url!,
+      pool: pmsPool,
+      stripePaymentProvider: provider,
+      readRepository: {
+        findReservationByGuestBookingId: async () => ({}),
+      } as unknown as PmsOperationsReadRepository,
+    });
+    const scope = {
+      propertyId: fixture.propertyId,
+      bookingId: required.bookingId,
+      actorUserId: hotelUser,
+    };
+    const accept = () =>
+      pms.acceptBooking({
+        propertyId: fixture.propertyId,
+        guestBookingId: required.bookingId,
+        commandId: randomUUID(),
+        idempotencyKey: randomUUID(),
+        audit: {
+          actor: { kind: "user", userId: hotelUser, organizationId: fixture.organizationId },
+          requestId: randomUUID(),
+          reason: "Request accepted",
+          requestedAt: new Date().toISOString(),
+        },
+      });
+    const cancel = async (cancellationKind?: "guest_request") => {
+      const preview = await actions.preview(scope, {
+        action: "cancel",
+        reason: cancellationKind ? "Guest emailed" : "Overbooked",
+        ...(cancellationKind ? { cancellationKind } : {}),
+      });
+      await actions.apply(scope, preview.previewId, `k5-${randomUUID()}`);
+      return preview.impact as { cardRefund?: { paidMinor: string; refundMinor: string } };
+    };
+    const state = async () =>
+      (
+        await fixture.observer.query(
+          `SELECT b.lifecycle_status,b.payment_status,p.status AS payment,p.payment_kind,
+             p.refunded_amount::text AS refunded,
+             (SELECT string_agg(c.status,',') FROM finance.card_refund_commands c
+              WHERE c.guest_booking_id=b.id) AS refunds
+           FROM booking.guest_bookings b JOIN finance.payments p ON p.id=b.active_card_payment_id
+           WHERE b.id=$1`,
+          [required.bookingId],
+        )
+      ).rows[0];
+    const stripe = () => provider.retrievePaymentIntent(intentId, stripeAccount!);
+    const close = async () => {
+      await actions.close();
+      await hostPool.end().catch(() => undefined);
+      await pmsPool.end().catch(() => undefined);
+      await fixture.close();
+    };
+    return {
+      fixture,
+      pool: hostPool,
+      provider,
+      required,
+      intentId,
+      confirmed,
+      complete,
+      accept,
+      actions,
+      scope,
+      cancel,
+      state,
+      stripe,
+      close,
+    };
+  }
+  const stripeTestTimeout = 120_000;
+  const settled = { timeout: 30_000, interval: 1_000 };
+
+  it.skipIf(!stripeTestMode)(
+    "Stripe test mode: the hotel cancels a paid card stay for its own reason; Stripe refunds all of it, once",
+    async () => {
+      const stay = await stripeTestStay();
+      try {
+        const paid = (await stay.stripe()).amountMinor;
+        const impact = await stay.cancel();
+        expect(impact.cardRefund).toEqual({ paidMinor: String(paid), refundMinor: String(paid) });
+        await vi.waitFor(async () => {
+          expect(await stay.state()).toMatchObject({
+            lifecycle_status: "canceled",
+            payment_status: "refunded",
+            payment: "refunded",
+            refunds: "succeeded",
+          });
+        }, settled);
+        expect((await stay.stripe()).amountRefundedMinor).toBe(paid);
+        // A second cancel is refused, and neither it nor the sweep asks Stripe again.
+        await expect(stay.cancel()).rejects.toMatchObject({ code: expect.any(String) });
+        await runPendingPricingCardRefunds(stay.pool, stay.provider);
+        const refunds = await stay.provider.listRefunds(stay.intentId, stripeAccount!);
+        expect(refunds).toHaveLength(1);
+        expect(refunds[0]).toMatchObject({ status: "succeeded", amountMinor: paid });
+        expect(refunds[0]!.commandId).toMatch(/^[0-9a-f-]{36}$/);
+      } finally {
+        await stay.close();
+      }
+    },
+    stripeTestTimeout,
+  );
+
+  it.skipIf(!stripeTestMode)(
+    "Stripe test mode: a guest's cancel under a 50% partial-refund rate refunds half at Stripe",
+    async () => {
+      const stay = await stripeTestStay({
+        cancellation: {
+          kind: "flexible",
+          terms: {
+            type: "free_until_days_before_arrival",
+            freeCancellationDeadlineDays: 60,
+            afterDeadlinePenalty: "full_booking_amount",
+            noShowPenalty: "full_booking_amount",
+            flexibleCancellationType: "partial_refund",
+            text: "Half back until arrival",
+            partialRefundTiers: [{ minDaysBeforeCheckIn: 0, refundPercent: 50 }],
+          },
+        },
+      });
+      try {
+        const paid = (await stay.stripe()).amountMinor;
+        const impact = await stay.cancel("guest_request");
+        const refund = Number(impact.cardRefund!.refundMinor);
+        expect(refund).toBeGreaterThan(0);
+        expect(refund).toBeLessThan(paid);
+        expect(Math.abs(refund - paid / 2)).toBeLessThanOrEqual(paid / 100);
+        await vi.waitFor(async () => {
+          expect(await stay.state()).toMatchObject({
+            lifecycle_status: "canceled",
+            payment: "partially_refunded",
+            refunds: "succeeded",
+          });
+        }, settled);
+        expect((await stay.stripe()).amountRefundedMinor).toBe(refund);
+      } finally {
+        await stay.close();
+      }
+    },
+    stripeTestTimeout,
+  );
+
+  it.skipIf(!stripeTestMode)(
+    "Stripe test mode: a refund Stripe fails later shows up in the daily card check",
+    async () => {
+      // Stripe's test card whose refunds succeed first and fail a little later.
+      const stay = await stripeTestStay({ card: "pm_card_refundFail" });
+      try {
+        await stay.cancel();
+        await vi.waitFor(async () => {
+          expect((await stay.state()).refunds).toBe("succeeded");
+        }, settled);
+        const [refund] = await stay.provider.listRefunds(stay.intentId, stripeAccount!);
+        await vi.waitFor(
+          async () => {
+            expect(
+              (await stay.provider.retrieveRefund(refund!.refundId, stripeAccount!)).status,
+            ).toBe("failed");
+          },
+          { timeout: 90_000, interval: 5_000 },
+        );
+        const { mismatches } = await reconcilePricingCardPayments(
+          stay.fixture.observer,
+          stay.provider,
+          1,
+        );
+        const kinds = mismatches
+          .filter((m) => m.guestBookingId === stay.required.bookingId)
+          .map((m) => m.kind);
+        expect(kinds).toContain("refund_failed_later");
+      } finally {
+        await stay.close();
+      }
+    },
+    180_000,
+  );
+
+  it.skipIf(!stripeTestMode)(
+    "Stripe test mode: a card request's hold is captured when the hotel accepts",
+    async () => {
+      const stay = await stripeTestStay({ mode: "request" });
+      try {
+        expect(stay.confirmed.status).toBe("requires_capture");
+        expect(await stay.state()).toMatchObject({ payment: "authorized" });
+        await expect(stay.accept()).resolves.toMatchObject({ ok: true });
+        expect(await stay.stripe()).toMatchObject({
+          status: "succeeded",
+          amountMinor: Number(stay.fixture.f.current.quote.evidence.dueNowMinor),
+        });
+        expect(await stay.state()).toMatchObject({
+          lifecycle_status: "confirmed",
+          payment_status: "paid",
+          payment: "paid",
+        });
+      } finally {
+        await stay.close();
+      }
+    },
+    stripeTestTimeout,
+  );
+
+  it.skipIf(!stripeTestMode)(
+    "Stripe test mode: declining a card request voids the hold at Stripe",
+    async () => {
+      const stay = await stripeTestStay({ mode: "request" });
+      try {
+        const preview = await stay.actions.preview(stay.scope, {
+          action: "reject",
+          reason: "Fully booked",
+        });
+        await expect(
+          stay.actions.apply(stay.scope, preview.previewId, "k5-decline"),
+        ).resolves.toMatchObject({ lifecycleStatus: "declined" });
+        expect((await stay.stripe()).status).toBe("canceled");
+        expect(await stay.state()).toMatchObject({
+          lifecycle_status: "declined",
+          payment: "canceled",
+        });
+      } finally {
+        await stay.close();
+      }
+    },
+    stripeTestTimeout,
+  );
+
+  it.skipIf(!stripeTestMode)(
+    "Stripe test mode: a 30% card deposit is charged alone, and the hotel's own cancel refunds exactly it",
+    async () => {
+      const stay = await stripeTestStay({ deposit: true });
+      const { dueNowMinor } = stay.fixture.f.current.quote.evidence;
+      try {
+        expect(await stay.stripe()).toMatchObject({
+          status: "succeeded",
+          amountMinor: Number(dueNowMinor),
+        });
+        expect(await stay.state()).toMatchObject({
+          lifecycle_status: "confirmed",
+          payment_status: "partially_paid",
+          payment_kind: "deposit",
+        });
+        const impact = await stay.cancel();
+        expect(impact.cardRefund).toEqual({ paidMinor: dueNowMinor, refundMinor: dueNowMinor });
+        await vi.waitFor(async () => {
+          expect(await stay.state()).toMatchObject({
+            lifecycle_status: "canceled",
+            payment: "refunded",
+            refunds: "succeeded",
+          });
+        }, settled);
+        expect((await stay.stripe()).amountRefundedMinor).toBe(Number(dueNowMinor));
+      } finally {
+        await stay.close();
+      }
+    },
+    stripeTestTimeout,
+  );
+
+  it.skipIf(!stripeTestMode)(
+    "Stripe test mode: a card request holds only its deposit and the hotel's accept captures that",
+    async () => {
+      const stay = await stripeTestStay({ mode: "request", deposit: true });
+      const { dueNowMinor } = stay.fixture.f.current.quote.evidence;
+      try {
+        expect(stay.confirmed.status).toBe("requires_capture");
+        await expect(stay.accept()).resolves.toMatchObject({ ok: true });
+        expect(await stay.stripe()).toMatchObject({
+          status: "succeeded",
+          amountMinor: Number(dueNowMinor),
+        });
+        expect(await stay.state()).toMatchObject({
+          lifecycle_status: "confirmed",
+          payment_status: "partially_paid",
+          payment: "paid",
+          payment_kind: "deposit",
+        });
+      } finally {
+        await stay.close();
+      }
+    },
+    stripeTestTimeout,
+  );
+
+  it.skipIf(!stripeTestMode)(
+    "Stripe test mode: a card that needs 3-D Secure leaves the booking waiting for the guest",
+    async () => {
+      const stay = await stripeTestStay({ card: "pm_card_threeDSecure2Required" });
+      try {
+        expect(stay.confirmed.status).toBe("requires_action");
+        await expect(stay.complete()).rejects.toMatchObject({ code: "pending" });
+        expect(await stay.state()).toMatchObject({ lifecycle_status: "pending_payment" });
+      } finally {
+        await stay.close();
+      }
+    },
+    stripeTestTimeout,
   );
 
   it("records a card request the guest authorised and starts the hotel's 24 hours", async () => {
