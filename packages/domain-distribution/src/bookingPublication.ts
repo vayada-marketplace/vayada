@@ -362,7 +362,6 @@ function validRoomFacts(room: BookingPublicRoom): boolean {
         Number.isFinite(room.size.value) &&
         room.size.value > 0 &&
         room.size.unit === "sqm")) &&
-    room.images.length > 0 &&
     new Set(room.images.map(({ url }) => url)).size === room.images.length &&
     room.images.every(
       (image) =>
