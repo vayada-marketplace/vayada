@@ -146,9 +146,12 @@ describe("Booking Web former hotel addresses (VAY-2295)", () => {
   it("permanently redirects a former address to the hotel's current one, keeping path and query", async () => {
     resolvesTo("alpenrose-lodge");
     const response = await middleware(
-      new NextRequest("https://hotel-alpenrose.next-booking.vayada.com/de/book?checkIn=2026-11-12", {
-        headers: { host: "hotel-alpenrose.next-booking.vayada.com" },
-      }),
+      new NextRequest(
+        "https://hotel-alpenrose.next-booking.vayada.com/de/book?checkIn=2026-11-12",
+        {
+          headers: { host: "hotel-alpenrose.next-booking.vayada.com" },
+        },
+      ),
     );
     expect(response.status).toBe(308);
     expect(response.headers.get("location")).toBe(
