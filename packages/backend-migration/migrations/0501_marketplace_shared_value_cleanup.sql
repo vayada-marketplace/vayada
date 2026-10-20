@@ -11,9 +11,8 @@
 -- (affiliate payment evidence).
 -- Kept: the organization kinds (0500 keeps closed creator and payee rows), billing entitlement and
 -- commission rule values (decision 2), media purposes (the purge job still reads them), the creator
--- contact purpose (decision 9), the marketplace source and product values of kept history rows, and
--- the Marketplace matching-event payload check: dropping it would lock platform.domain_events, which
--- nearly every command writes, for a check that no longer matches any new row.
+-- contact purpose (decision 9), and the marketplace source and product values of kept history rows.
+-- 0499 drops the Marketplace matching-event payload check, since it locks platform.domain_events anyway.
 -- Rollback: any image from the 0500 release on; none of them writes these values.
 
 SET LOCAL lock_timeout = '5s';
