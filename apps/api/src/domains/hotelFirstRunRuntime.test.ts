@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   HOTEL_FIRST_RUN_LOCK_NAMESPACE,
+  createHotelFirstRunActivation,
   createHotelFirstRunLocality,
   createHotelFirstRunLock,
 } from "./hotelFirstRunRuntime.js";
@@ -128,6 +129,37 @@ describe("first-run 'show city and country' (VAY-2247)", () => {
     ).toEqual({
       ok: false,
       code: "first_run_locality_conflict",
+    });
+  });
+});
+
+describe("first-run activation (VAY-2247 1.5)", () => {
+  it("makes the hotel live through the owner's activation and tells a live one apart", async () => {
+    const context = {} as RequestContext;
+    const activate = vi.fn(async () => ({ status: "activated" as const }));
+    const port = createHotelFirstRunActivation(context, activate);
+    expect(await port.activateWhenComplete(actor)).toEqual({ ok: true, activated: true });
+    expect(activate).toHaveBeenCalledWith(context, propertyId);
+    activate.mockResolvedValueOnce({ status: "already_active" } as never);
+    expect(await port.activateWhenComplete(actor)).toEqual({ ok: true, activated: false });
+  });
+
+  it("refuses an incomplete hotel and one that is suspended or retired", async () => {
+    const incomplete = createHotelFirstRunActivation({} as RequestContext, async () => ({
+      status: "incomplete",
+      reasons: ["missing_phone_contact"],
+    }));
+    expect(await incomplete.activateWhenComplete(actor)).toEqual({
+      ok: false,
+      code: "first_run_profile_incomplete",
+    });
+    const suspended = createHotelFirstRunActivation({} as RequestContext, async () => ({
+      status: "not_provisioning",
+      lifecycleStatus: "suspended",
+    }));
+    expect(await suspended.activateWhenComplete(actor)).toEqual({
+      ok: false,
+      code: "first_run_hotel_not_provisioning",
     });
   });
 });
