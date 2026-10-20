@@ -29,9 +29,13 @@ describe.skipIf(!URL)("retire Marketplace role grants 0493", () => {
     try {
       await admin.query(`DROP DATABASE IF EXISTS ${DATABASE} WITH (FORCE)`);
       await admin.query(`CREATE DATABASE ${DATABASE}`);
-      for (const file of await readdir(MIGRATIONS))
-        if (/^\d{4}_/.test(file) && Number(file.slice(0, 4)) < MIGRATION)
-          await cp(join(MIGRATIONS, file), join(before, file));
+      let file = "";
+      for (const name of await readdir(MIGRATIONS)) {
+        if (!/^\d{4}_/.test(name)) continue;
+        if (Number(name.slice(0, 4)) < MIGRATION)
+          await cp(join(MIGRATIONS, name), join(before, name));
+        if (Number(name.slice(0, 4)) === MIGRATION) file = name;
+      }
       expect((await run(before)).failed).toBeNull();
       target = new pg.Client({ connectionString: targetUrl.href });
       await target.connect();
@@ -57,7 +61,9 @@ describe.skipIf(!URL)("retire Marketplace role grants 0493", () => {
         ),
       ).toBe(true);
 
-      expect((await run(MIGRATIONS)).failed).toBeNull();
+      // Later migrations change what this checks (0501 deletes the catalog keys), so it stops at 0493.
+      await cp(join(MIGRATIONS, file), join(before, file));
+      expect((await run(before)).failed).toBeNull();
 
       const afterGrants = await grants();
       expect(afterGrants.filter(({ permissionKey }) => isMarketplace(permissionKey))).toEqual([]);
@@ -80,7 +86,7 @@ describe.skipIf(!URL)("retire Marketplace role grants 0493", () => {
             roleKey === "hotel_owner" && permissionKey === "hotel_catalog.setup.manage",
         ),
       ).toBe(true);
-      // The catalog keys stay until the Marketplace data is deleted (step 5).
+      // The catalog keys stay until 0501.
       const catalog = await db.query(
         `SELECT 1 FROM identity.permission_catalog WHERE key = 'marketplace.profile.manage'`,
       );
