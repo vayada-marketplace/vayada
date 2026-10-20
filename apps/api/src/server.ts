@@ -294,6 +294,8 @@ import {
   toLocalizationSettingsResponse,
 } from "./routes/bookingSettings.js";
 import { createHotelFirstRunRuntime } from "./domains/hotelFirstRunRuntime.js";
+import { createPgHotelSetupChecklistRepository } from "./domains/hotelSetupChecklistRepository.js";
+import { createHotelSetupChecklistService } from "./domains/hotelSetupChecklistService.js";
 import { createTargetBookingCustomDomainRepository } from "./routes/bookingCustomDomain.js";
 import {
   createTargetFinancePropertySettingsRepository,
@@ -1616,6 +1618,22 @@ const hotelFirstRun = (() => {
     readiness,
   });
 })();
+// VAY-2247 wave 2: the setup checklist both dashboards show, with the first run (it reads its state).
+const hotelSetupChecklist = (() => {
+  if (!hotelFirstRun) return undefined;
+  const checklist = createPgHotelSetupChecklistRepository(propertySetupOwnerPool);
+  // As the booking page's card acceptance: until it is on, online cards say "Later" (VAY-2205).
+  const onlineCardsOffered =
+    config.replacementPricingAcceptanceEnabled === true &&
+    config.replacementPricingCardAcceptanceEnabled === true &&
+    !!stripeBookingPaymentProvider;
+  return (context: Parameters<typeof hotelFirstRun>[0]) =>
+    createHotelSetupChecklistService({
+      firstRun: hotelFirstRun(context),
+      ...checklist,
+      onlineCardsOffered,
+    });
+})();
 const app = buildApp({
   airbnbImports: airbnbImportRuntime?.routes,
   databaseHealth: postgresRuntime.healthCheck(targetDatabaseUrl),
@@ -1875,6 +1893,7 @@ const app = buildApp({
   bookingModuleRepository,
   ...hotelSetupOrdinaryOptions,
   hotelFirstRun,
+  hotelSetupChecklist,
   financialsActivationPropertyIds: config.financialsActivationPropertyIds,
   pmsReviewRepository: createPgPmsReviewRepository({
     connectionString: targetDatabaseUrl,
