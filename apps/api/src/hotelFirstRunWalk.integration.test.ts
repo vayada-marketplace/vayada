@@ -463,8 +463,6 @@ describe.skipIf(!url)(
           "booking.hotel_profile:hotel_public_media_missing", // 1.4b: hotel photo optional
           "booking.page_style:booking_design_profile_missing", // 1.4b: style without photo/description
           "booking.pricing:pricing_hotel_setup_in_progress", // 1.5: activate at the end of the first run
-          "booking.rooms:room_amenities_review_required", // 1.3: amenities review stops blocking
-          "booking.rooms:room_photo_required", // 1.3: room photo stops blocking
         ]);
 
         // A second run finds everything in place.
