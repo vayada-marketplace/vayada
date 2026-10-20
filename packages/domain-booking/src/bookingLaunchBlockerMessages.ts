@@ -3,12 +3,17 @@
 export const BOOKING_LAUNCH_BLOCKER_MESSAGES: Readonly<Record<string, string>> = Object.freeze({
   // Present your hotel
   hotel_setup_in_progress: "Your hotel is being set up. Try again in a moment.",
+  hotel_setup_content_missing:
+    "To go live, add a description and at least one hotel photo in Present your hotel.",
   hotel_profile_incomplete: "Finish your hotel profile in Present your hotel.",
   hotel_public_locality_missing: "Add your hotel's city and country and show them to guests.",
   hotel_public_locality_hidden:
     "Turn on 'Show city and country publicly' so guests see where you are.",
   hotel_canonical_slug_missing: "Your hotel needs a booking page address.",
-  hotel_timezone_missing: "Add your hotel's time zone in Present your hotel.",
+  hotel_canonical_slug_invalid:
+    "Your booking page address can't be used. Contact support to change it.",
+  hotel_timezone_missing: "Add your hotel's time zone in your hotel details.",
+  hotel_timezone_invalid: "Choose your hotel's time zone again in your hotel details.",
   hotel_public_media_missing: "Add at least one hotel photo in Present your hotel.",
   hotel_public_media_processing: "Your hotel photos are still being processed.",
   hotel_public_media_unavailable:

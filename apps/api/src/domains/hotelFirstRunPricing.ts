@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { firstRunPricing } from "@vayada/domain-booking";
+import { firstRunPricing, type FirstRunFreeCancellationDays } from "@vayada/domain-booking";
 import type { PricingCapacity } from "@vayada/domain-pms";
 
 import {
@@ -42,6 +42,8 @@ export type HotelFirstRunPricingInput = Readonly<{
   pricePerNight: string;
   /** The tick under the price; the declaration is the hotel's own and is never assumed. */
   pricesIncludeMandatoryCharges: boolean;
+  /** The owner's cancellation choice (1.12b); 3 when not given. */
+  freeCancellationDays?: FirstRunFreeCancellationDays;
 }>;
 
 /** A stable UUID (v4 layout) from the parts, for draft and offer ids the pricing store requires to be UUIDs. */
@@ -85,11 +87,14 @@ async function publish(
   const offerId = firstRunUuid(propertyId, "first_run_offer", input.roomTypeId);
   const built = firstRunPricing({ propertyId, offerId, ...input });
   if (!built) return fail("first_run_price_invalid");
+  // The terms are part of the draft: a retry with another cancellation choice stages a new draft rather
+  // than replaying the first one's terms request with different terms.
   const draftId = firstRunUuid(
     propertyId,
     "first_run_pricing_draft",
     baseRevision,
     built.configuration,
+    built.terms.cancellation,
   );
   const draftContext = { draftId, baseRevision };
   const key = (step: string) => firstRunIdempotencyKey(propertyId, step, [draftId]);
