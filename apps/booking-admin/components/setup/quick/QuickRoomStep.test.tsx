@@ -162,7 +162,6 @@ describe("QuickPropertySetup (VAY-2247 steps 3–5)", () => {
     const kept = storage({
       [quickRoomStorageKey(PROPERTY)]: JSON.stringify({ ...FILLED, name: "Garden Suite" }),
     });
-    const renderStep = vi.fn((step: number) => <p>{`step ${step}`}</p>);
     let renderer: ReactTestRenderer | undefined;
     await act(async () => {
       renderer = create(
@@ -176,7 +175,10 @@ describe("QuickPropertySetup (VAY-2247 steps 3–5)", () => {
           openCheckout={vi.fn()}
           storage={kept}
           onSaveAndExit={vi.fn()}
-          renderStep={renderStep}
+          publication={{ load: vi.fn(), publish: vi.fn() }}
+          organizationId="9a8b7c6d-5e4f-4a3b-8c2d-1e0f99887766"
+          publicationStorage={storage()}
+          openPage={vi.fn()}
         />,
       );
     });
@@ -195,7 +197,6 @@ describe("QuickPropertySetup (VAY-2247 steps 3–5)", () => {
     // On to step 4 (How guests pay), with the room in its preview.
     expect(text(renderer!)).toContain("How guests pay");
     expect(text(renderer!)).toContain("Garden Suite Deluxe");
-    expect(renderStep).not.toHaveBeenCalled();
     renderer!.unmount();
   });
 
@@ -213,6 +214,10 @@ describe("QuickPropertySetup (VAY-2247 steps 3–5)", () => {
           openCheckout={vi.fn()}
           storage={storage()}
           onSaveAndExit={vi.fn()}
+          publication={{ load: vi.fn(), publish: vi.fn() }}
+          organizationId="9a8b7c6d-5e4f-4a3b-8c2d-1e0f99887766"
+          publicationStorage={storage()}
+          openPage={vi.fn()}
         />,
       );
     });

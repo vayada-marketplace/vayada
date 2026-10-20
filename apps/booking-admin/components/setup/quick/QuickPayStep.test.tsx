@@ -116,7 +116,13 @@ describe("step 4 sends the first run (VAY-2247 3.7)", () => {
   } as never;
 
   async function mount(run: ReturnType<typeof vi.fn>, room: object | null, openCheckout = vi.fn()) {
-    const renderStep = vi.fn((step: number) => <p>{`step ${step}`}</p>);
+    // Step 5 loads the booking page review; here it fails, which step 5 shows in its own words.
+    const publication = {
+      load: vi.fn(async () => {
+        throw new Error("Review unavailable in this test.");
+      }),
+      publish: vi.fn(),
+    };
     let renderer: ReactTestRenderer | undefined;
     await act(async () => {
       renderer = create(
@@ -130,16 +136,19 @@ describe("step 4 sends the first run (VAY-2247 3.7)", () => {
           openCheckout={openCheckout}
           storage={storage(room)}
           onSaveAndExit={vi.fn()}
-          renderStep={renderStep}
+          publication={publication}
+          organizationId="9a8b7c6d-5e4f-4a3b-8c2d-1e0f99887766"
+          publicationStorage={storage(null)}
+          openPage={vi.fn()}
         />,
       );
     });
-    return { renderer: renderer!, renderStep, openCheckout };
+    return { renderer: renderer!, openCheckout };
   }
 
   it("runs the first run with the room and Commission, then goes live (step 5)", async () => {
     const run = vi.fn(async () => ({ state: {}, ran: [], checkoutUrl: null }));
-    const { renderer, renderStep } = await mount(run, ROOM);
+    const { renderer } = await mount(run, ROOM);
     await submit(renderer);
     expect(run).toHaveBeenCalledWith(PROPERTY, {
       room: { name: "Classic Double", numberOfRooms: 8, maxGuests: 2, pricePerNight: "145" },
@@ -147,10 +156,9 @@ describe("step 4 sends the first run (VAY-2247 3.7)", () => {
       guestPayment: "pay_at_property",
       plan: "commission",
     });
-    expect(renderStep).toHaveBeenLastCalledWith(
-      5,
-      expect.objectContaining({ name: "Classic Double" }),
-    );
+    // On to step 5, "Does this look right?", with the room in the preview.
+    expect(text(renderer)).toContain("Does this look right?");
+    expect(text(renderer)).toContain("Classic Double");
     renderer.unmount();
   });
 
@@ -160,10 +168,10 @@ describe("step 4 sends the first run (VAY-2247 3.7)", () => {
       ran: [],
       checkoutUrl: "https://checkout.stripe.com/c/pay/cs_test",
     }));
-    const { renderer, openCheckout, renderStep } = await mount(run, ROOM);
+    const { renderer, openCheckout } = await mount(run, ROOM);
     await submit(renderer);
     expect(openCheckout).toHaveBeenCalledWith("https://checkout.stripe.com/c/pay/cs_test");
-    expect(renderStep).not.toHaveBeenCalled();
+    expect(text(renderer)).not.toContain("Does this look right?");
     renderer.unmount();
   });
 

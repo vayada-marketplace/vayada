@@ -25,11 +25,12 @@ import { QuickAboutYouStep } from "./QuickAboutYouStep";
 import { QuickContactsFromAccountNote, QuickUseMyDetails } from "./QuickHotelDetails";
 import { QuickHotelAddress } from "./QuickHotelAddress";
 import { QuickHotelStep } from "./QuickHotelStep";
-import { QuickPropertySetup } from "./QuickPropertySetup";
+import { QuickPropertySetup, type QuickSetupPage } from "./QuickPropertySetup";
 import { QuickSetupShell } from "./QuickSetupShell";
 import { quickHotelCurrency } from "./quickHotelCurrency";
 import { EMPTY_QUICK_HOTEL_DRAFT, type QuickHotelDraft } from "./quickHotelDraft";
 import { saveQuickHotel } from "./quickHotelSave";
+import type { QuickPublicationClient } from "./useQuickPublication";
 
 const DRAFT_STORAGE_KEY = "vayada.quickSetup.v1.hotel";
 
@@ -53,6 +54,13 @@ export type QuickSetupFlowProps = {
   storage?: Pick<Storage, "getItem" | "setItem" | "removeItem"> | null;
   /** Steps 3–5 (first room and price, how guests pay, go live) for a hotel that exists. */
   renderHotelStep?: (step: 3 | 4 | 5, propertyId: string) => ReactNode;
+  /** Step 5: the setup "Booking Engine" card's review and publish API. */
+  publication: QuickPublicationClient;
+  organizationId: string;
+  /** Where step 5 keeps its publish request for recovery (the browser's local storage). */
+  publicationStorage: Pick<Storage, "getItem" | "setItem" | "removeItem">;
+  /** Opens a page setup hands over to, for this hotel. */
+  openPage: (page: QuickSetupPage, propertyId: string) => void;
 };
 
 /** The hotel draft kept on this device, and whether its contacts came from "Use my details". */
@@ -260,6 +268,10 @@ export function QuickSetupFlow(props: QuickSetupFlowProps) {
           openCheckout={props.openCheckout}
           storage={storage}
           onSaveAndExit={exit}
+          publication={props.publication}
+          organizationId={props.organizationId}
+          publicationStorage={props.publicationStorage}
+          openPage={(page) => props.openPage(page, view.propertyId)}
         />
       )
     );
