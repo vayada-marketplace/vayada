@@ -6,27 +6,29 @@
 -- the retired login surfaces, the affiliate and Marketplace finance visibility scopes and keys, the 9
 -- Marketplace and affiliate permission keys, the creator and affiliate kinds in role grants, and the
 -- retired products, resource types and the promotes relationship in links and entitlements. Decision
--- 9: the marketplace_overlay page address goes too. Three constraints that only dropped tables used
--- go as well: the (id, organization_id) keys of commission rules (Marketplace collaborations) and of
--- payouts (affiliate payment evidence), and the Marketplace matching-event payload check.
+-- 9: the marketplace_overlay page address goes too. Two keys that only dropped tables used go as
+-- well: the (id, organization_id) keys of commission rules (Marketplace collaborations) and of payouts
+-- (affiliate payment evidence).
 -- Kept: the organization kinds (0500 keeps closed creator and payee rows), billing entitlement and
 -- commission rule values (decision 2), media purposes (the purge job still reads them), the creator
--- contact purpose (decision 9), and the marketplace source and product values of kept history rows.
+-- contact purpose (decision 9), the marketplace source and product values of kept history rows, and
+-- the Marketplace matching-event payload check: dropping it would lock platform.domain_events, which
+-- nearly every command writes, for a check that no longer matches any new row.
 -- Rollback: any image from the 0500 release on; none of them writes these values.
 
 SET LOCAL lock_timeout = '5s';
--- Each lock waits at most 5 seconds; together they may not hold the API up for more than 15.
+-- Each lock waits at most 5 seconds, and the LOCK statement at most 15.
 SET LOCAL statement_timeout = '15s';
 
 -- Every table this changes, in one statement and one order.
 LOCK TABLE
   finance.commission_rules, finance.finance_visibility_read_model, finance.payouts,
   hotel_catalog.property_slugs, identity.auth_session_handoffs, identity.organization_resource_links,
-  identity.permission_catalog, identity.product_entitlements, identity.role_permission_grants,
-  platform.domain_events
+  identity.permission_catalog, identity.product_entitlements, identity.role_permission_grants
   IN ACCESS EXCLUSIVE MODE;
 
--- Rows that still carry a removed value: 0500 deleted them, so each check expects none.
+-- Rows that still carry a removed value. 0493 and 0500 removed such grants, links, entitlements and
+-- visibility rows, so each check expects none.
 DO $$
 DECLARE
   retired_keys CONSTANT TEXT[] := ARRAY[
@@ -153,8 +155,6 @@ ALTER TABLE hotel_catalog.property_slugs
 -- Only Marketplace collaborations (0008) and affiliate payment evidence items (0086) referenced these.
 ALTER TABLE finance.commission_rules DROP CONSTRAINT uq_finance_commission_rules_id_organization;
 ALTER TABLE finance.payouts DROP CONSTRAINT uq_finance_payouts_id_organization;
--- Marketplace matching events stopped with the Marketplace; the rows that exist keep their payloads.
-ALTER TABLE platform.domain_events DROP CONSTRAINT chk_platform_matching_event_private_payload;
 
 DO $$
 BEGIN
@@ -164,13 +164,13 @@ BEGIN
         'identity.auth_session_handoffs'::regclass, 'finance.finance_visibility_read_model'::regclass,
         'identity.role_permission_grants'::regclass, 'identity.organization_resource_links'::regclass,
         'identity.product_entitlements'::regclass, 'hotel_catalog.property_slugs'::regclass)
-      AND pg_catalog.pg_get_constraintdef(constraint_row.oid) ~ 'marketplace|affiliate|creator|promotes'
+      AND pg_catalog.pg_get_constraintdef(constraint_row.oid) ~ 'marketplace|affiliate|creator|promotes|hotel_profile'
   ) OR EXISTS (
     SELECT 1 FROM identity.permission_catalog WHERE product IN ('marketplace', 'affiliate')
   ) OR EXISTS (
     SELECT 1 FROM pg_catalog.pg_constraint
-    WHERE conname IN ('uq_finance_commission_rules_id_organization', 'uq_finance_payouts_id_organization',
-                      'chk_platform_matching_event_private_payload')
+    WHERE (conrelid = 'finance.commission_rules'::regclass AND conname = 'uq_finance_commission_rules_id_organization')
+       OR (conrelid = 'finance.payouts'::regclass AND conname = 'uq_finance_payouts_id_organization')
   ) THEN
     RAISE EXCEPTION 'Marketplace or affiliate values remain';
   END IF;

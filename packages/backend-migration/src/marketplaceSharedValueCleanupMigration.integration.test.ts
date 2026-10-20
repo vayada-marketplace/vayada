@@ -137,8 +137,7 @@ describe.skipIf(!URL)("Marketplace shared value cleanup 0501", () => {
           await db.query(
             `SELECT count(*)::int AS n FROM pg_catalog.pg_constraint
              WHERE conname IN ('uq_finance_commission_rules_id_organization',
-                               'uq_finance_payouts_id_organization',
-                               'chk_platform_matching_event_private_payload')`,
+                               'uq_finance_payouts_id_organization')`,
           )
         ).rows[0].n,
       });
@@ -148,7 +147,7 @@ describe.skipIf(!URL)("Marketplace shared value cleanup 0501", () => {
         handoffs: ["booking-admin>pms-web", "marketplace-web>booking-admin"],
         slugs: ["canonical", "marketplace_overlay", "redirect"],
         rows: { links: 1, entitlements: 1, visibility: 1 },
-        retiredConstraints: 3,
+        retiredConstraints: 2,
       });
 
       // Each gate stops 0501 before it changes anything. Later migrations may change what this
@@ -177,6 +176,13 @@ describe.skipIf(!URL)("Marketplace shared value cleanup 0501", () => {
           "A product entitlement still names a Marketplace or affiliate value",
         ],
         [
+          `INSERT INTO identity.product_entitlements
+             (organization_id, product, entitlement_key, resource_product, resource_type, resource_id)
+           VALUES ('${organization}', 'booking', 'creator-link', 'booking', 'creator_profile', 'gate-1')`,
+          `DELETE FROM identity.product_entitlements WHERE resource_type = 'creator_profile'`,
+          "A product entitlement still names a Marketplace or affiliate value",
+        ],
+        [
           `INSERT INTO finance.finance_visibility_read_model
              (organization_id, visibility_scope, resource_type, resource_id, required_permission_key,
               currency)
@@ -190,6 +196,12 @@ describe.skipIf(!URL)("Marketplace shared value cleanup 0501", () => {
           `INSERT INTO identity.role_permission_grants (organization_kind, role_key, permission_key)
            VALUES ('hotel_group', 'hotel_owner', 'marketplace.trip.read')`,
           `DELETE FROM identity.role_permission_grants WHERE permission_key = 'marketplace.trip.read'`,
+          "A role grant still names a creator or affiliate kind or a retired permission",
+        ],
+        [
+          `INSERT INTO identity.role_permission_grants (organization_kind, role_key, permission_key)
+           VALUES ('affiliate_partner', 'affiliate_owner', 'pms.read')`,
+          `DELETE FROM identity.role_permission_grants WHERE organization_kind = 'affiliate_partner'`,
           "A role grant still names a creator or affiliate kind or a retired permission",
         ],
         [
@@ -246,6 +258,9 @@ describe.skipIf(!URL)("Marketplace shared value cleanup 0501", () => {
         `INSERT INTO identity.organization_resource_links
            (organization_id, product, resource_type, resource_id, relationship)
          VALUES ('${organization}', 'booking', 'booking_hotel', 'refused-3', 'promotes')`,
+        `INSERT INTO identity.organization_resource_links
+           (organization_id, product, resource_type, resource_id, relationship)
+         VALUES ('${organization}', 'booking', 'hotel_profile', 'refused-6', 'owner')`,
         `INSERT INTO identity.product_entitlements (organization_id, product, entitlement_key)
          VALUES ('${organization}', 'marketplace', 'marketplace-listing')`,
         `INSERT INTO identity.product_entitlements
@@ -258,7 +273,10 @@ describe.skipIf(!URL)("Marketplace shared value cleanup 0501", () => {
                  'platform.finance.read', 'EUR')`,
         `INSERT INTO identity.role_permission_grants (organization_kind, role_key, permission_key)
          VALUES ('creator_workspace', 'creator_owner', 'pms.read')`,
+        `INSERT INTO identity.role_permission_grants (organization_kind, role_key, permission_key)
+         VALUES ('affiliate_partner', 'affiliate_owner', 'pms.read')`,
         handoff("c", "marketplace-web", "booking-admin"),
+        handoff("e", "booking-admin", "affiliate-dashboard"),
         `INSERT INTO hotel_catalog.property_slugs (property_id, slug, purpose)
          VALUES ('${property}', 'refused-overlay', 'marketplace_overlay')`,
       ];
