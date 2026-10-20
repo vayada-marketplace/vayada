@@ -295,6 +295,16 @@ export function createPgBookingPublicationCommandRepository(config: {
   };
 }
 
+/** Whether this user may publish the hotel's booking page now. Read-only, takes no locks
+ * (VAY-2295: an operator's address change republishes as the user who made the page live). */
+export async function canPublishBookingPage(
+  client: Pick<CommandClient, "query">,
+  scope: AuthorizedScopeInput,
+  at: Date,
+): Promise<boolean> {
+  return (await lockAuthorizedScope(client as CommandClient, scope, at, true, true)) !== null;
+}
+
 async function lockAuthorizedScope(
   client: CommandClient,
   command: AuthorizedScopeInput,

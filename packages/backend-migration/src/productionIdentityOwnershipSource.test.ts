@@ -20,18 +20,18 @@ describe("production ownership source mapping", () => {
 
   it.each([
     ["booking.booking_hotels", "live", "active"],
-    ["marketplace.hotel_profiles", "pending", "suspended"],
-    ["pms.affiliates", "rejected", "archived"],
     ["booking.booking_hotels", "retired", null],
-    ["marketplace.hotel_profiles", "approved", null],
+    ["pms.hotels", null, "active"],
+    ["marketplace.hotel_profiles", "verified", null],
   ] as const)("maps %s %s to %s", (source, status, expected) => {
     expect(mapOwnershipStatus(source, status)).toBe(expected);
   });
 
-  it("maps changed product tables into one explicit ownership shape", () => {
+  it("maps Booking and PMS hotels into one explicit ownership shape", () => {
     const rows = [
       row("booking", "booking_hotels", { platform_status: "live" }),
       row("pms", "hotels"),
+      // VAY-2272: the retired Marketplace and affiliate program own nothing any more.
       row("marketplace", "hotel_profiles", { status: "verified" }),
       row("marketplace", "creators"),
       row("pms", "affiliates", { status: "approved", full_name: "Affiliate Owner" }),
@@ -40,9 +40,6 @@ describe("production ownership source mapping", () => {
     const result = parseIdentityOwnershipRows(rows);
 
     expect(result.blockers).toEqual([]);
-    expect(result.owners.find((owner) => owner.source === "pms.affiliates")?.name).toBe(
-      "Affiliate Owner",
-    );
     expect(
       result.owners.map(({ source, kind, product, resourceType, relationship }) => ({
         source,
@@ -60,27 +57,6 @@ describe("production ownership source mapping", () => {
         relationship: "owner",
       },
       {
-        source: "marketplace.creators",
-        kind: "creator_workspace",
-        product: "marketplace",
-        resourceType: "creator_profile",
-        relationship: "owner",
-      },
-      {
-        source: "marketplace.hotel_profiles",
-        kind: "hotel_group",
-        product: "marketplace",
-        resourceType: "hotel_profile",
-        relationship: "owner",
-      },
-      {
-        source: "pms.affiliates",
-        kind: "affiliate_partner",
-        product: "affiliate",
-        resourceType: "affiliate",
-        relationship: "owner",
-      },
-      {
         source: "pms.hotels",
         kind: "hotel_group",
         product: "pms",
@@ -90,20 +66,27 @@ describe("production ownership source mapping", () => {
     ]);
   });
 
-  it("skips unclaimed affiliates and blocks invalid required ownership", () => {
+  it("ignores retired product rows and blocks invalid required ownership", () => {
     const result = parseIdentityOwnershipRows([
       row("pms", "affiliates", { user_id: null, status: "pending" }),
       row("booking", "booking_hotels", { user_id: null, platform_status: "live" }),
+      row("booking", "booking_hotels", { id: USER_ID, platform_status: "mystery" }),
       row("marketplace", "hotel_profiles", { status: "mystery" }),
     ]);
 
     expect(result.owners).toEqual([]);
     expect(result.blockers).toEqual([
-      expect.objectContaining({ code: "INVALID_SOURCE_ROW", source: "booking.booking_hotels" }),
       expect.objectContaining({
         code: "INVALID_SOURCE_ROW",
-        source: "marketplace.hotel_profiles",
+        source: "booking.booking_hotels",
+        sourceId: USER_ID,
         message: "status is unsupported",
+      }),
+      expect.objectContaining({
+        code: "INVALID_SOURCE_ROW",
+        source: "booking.booking_hotels",
+        sourceId: RESOURCE_ID,
+        message: "user_id is required for an owned product row",
       }),
     ]);
     expect(JSON.stringify(result.blockers)).not.toContain("mystery");

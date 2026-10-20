@@ -3,6 +3,10 @@
 _VAY-609 contract record, extended by VAY-1044 for adaptive hotel onboarding.
 Builds on VAY-600, VAY-602, VAY-603, VAY-605, VAY-607, and VAY-608._
 
+> **Note (VAY-2259, 2026-10-19):** `apps/marketplace-api`, the old Python Marketplace API, is switched
+> off (api.vayada.com answers 410) and its source is deleted. Paths into it below refer to its last
+> source at commit `897d64c6e`.
+
 ## Purpose
 
 This document converts the VAY-605 database restructure plan into a table-level
