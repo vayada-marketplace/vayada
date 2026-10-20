@@ -50,7 +50,8 @@ export interface Hotel {
   currency: string;
   /** Display-only currencies a guest may switch to, the hotel currency first. */
   displayCurrencies: string[];
-  heroImage: string;
+  /** The hero photo, else the first gallery photo; null when the hotel has no photos yet (VAY-2247). */
+  heroImage: string | null;
   images: string[];
   amenities: string[];
   checkInTime: string;

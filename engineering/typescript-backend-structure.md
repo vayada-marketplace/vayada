@@ -5,6 +5,10 @@ VAY-601 Ask Intelligence architecture, and VAY-604 AI-agent bookability
 recommendation. Updated after VAY-605 selected a planned big-bang database
 rewrite._
 
+> **Note (VAY-2259, 2026-10-19):** `apps/marketplace-api`, the old Python Marketplace API, is switched
+> off (api.vayada.com answers 410) and its source is deleted. Paths into it below refer to its last
+> source at commit `897d64c6e`.
+
 > **Retirement update:** VAY-601 is a historical input only. Migration `0090`
 > removes the retired Ask Intelligence schema. Any future hotel employee agent
 > starts with the VAY-1091 design spike and must define a new runtime and

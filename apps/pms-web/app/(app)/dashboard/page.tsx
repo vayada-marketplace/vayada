@@ -24,6 +24,12 @@ import {
 import { useTranslation } from "@/lib/i18n";
 import { usePmsAccess } from "@/lib/settings/PmsAccessContext";
 import { pmsSetupExitPropertyId } from "@vayada/product-onboarding";
+import {
+  PmsDashboardSetupBanner,
+  PmsDashboardSetupCard,
+  PmsDashboardSetupChip,
+  usePmsSetupChecklist,
+} from "@/components/dashboard/PmsDashboardSetup";
 
 const AVATAR_COLORS = [
   "bg-blue-500",
@@ -118,6 +124,8 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [inventoryRefresh, setInventoryRefresh] = useState(0);
   const [incompleteSetupPropertyId, setIncompleteSetupPropertyId] = useState<string | null>(null);
+  // VAY-2247 wave 2: the setup checklist, where the server offers it; else today's banner.
+  const setupChecklist = usePmsSetupChecklist();
   const [weekOffset, setWeekOffset] = useState(0);
   const [arrivalDay, setArrivalDay] = useState<string | null>(null);
   const [departureDay, setDepartureDay] = useState<string | null>(null);
@@ -341,27 +349,22 @@ export default function DashboardPage() {
 
   return (
     <div className="p-4 md:p-6 space-y-4 md:space-y-5 overflow-x-hidden">
-      {incompleteSetupPropertyId && (
-        <div
-          className="flex flex-col gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950 sm:flex-row sm:items-center sm:justify-between"
-          role="status"
-        >
-          <p>{t("dashboard.setupIncomplete")}</p>
-          <Link
-            href={`/setup?entryProduct=pms&returnTo=%2Fdashboard&propertyId=${encodeURIComponent(incompleteSetupPropertyId)}`}
-            className="shrink-0 font-semibold text-amber-950 underline decoration-amber-400 underline-offset-4 hover:decoration-amber-700"
-          >
-            {t("dashboard.resumeSetup")}
-          </Link>
-        </div>
-      )}
+      <PmsDashboardSetupBanner
+        setup={setupChecklist}
+        incompleteSetupPropertyId={incompleteSetupPropertyId}
+      />
       {/* Title */}
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <h1 className="text-2xl md:text-xl font-bold text-gray-900">{t("dashboard.title")}</h1>
           <p className="text-sm text-gray-500 mt-1">{dateLabel}</p>
         </div>
+        <PmsDashboardSetupChip setup={setupChecklist} />
       </div>
+      <PmsDashboardSetupCard
+        setup={setupChecklist}
+        roomCount={tonightOccupancy.sellableUnits || null}
+      />
 
       {/* Stat cards */}
       <div

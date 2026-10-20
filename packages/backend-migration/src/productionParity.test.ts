@@ -439,6 +439,9 @@ function domainReports(): {
         users: 1,
         preservedNewerUsers: 0,
         retiredDuplicateUsers: 0,
+        retiredProductUsers: 0,
+        retiredProductUsersInTarget: 0,
+        retiredProductUserRows: 0,
         quarantinedUsers: 0,
         quarantinedOrganizations: 0,
         quarantinedResourceLinks: 0,
@@ -456,6 +459,7 @@ function domainReports(): {
         retiredAuthRows: 0,
       },
       retiredAuthRows: {},
+      retiredProductUserRows: {},
       blockers: [],
     },
     catalog: {
