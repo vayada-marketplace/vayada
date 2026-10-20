@@ -88,6 +88,8 @@ type AdaptiveHotelSetupFactsRow = {
   bookabilityMissingEmpty: boolean;
   bookabilityExpired: boolean;
   bookabilityUpdatedAt: unknown;
+  activePublicationRevisionId: string | null;
+  activePublicationActivatedAt: unknown;
 };
 
 export type SharedPropertyProfileRow = {
@@ -1213,6 +1215,21 @@ function paymentFact(row: AdaptiveHotelSetupFactsRow): AdaptiveSetupTaskFact {
 }
 
 function publicationFact(row: AdaptiveHotelSetupFactsRow): AdaptiveSetupTaskFact {
+  // Guests see the setup publication since the switch to active publications. The legacy row
+  // below is frozen, so it only describes hotels that never published (VAY-2292).
+  if (row.activePublicationRevisionId) {
+    return {
+      taskId: "direct_booking_publication",
+      ownerProgress: "owner_complete",
+      readiness: "complete",
+      reasonCodes: [],
+      sourceRevision: taskRevision(
+        row.activePublicationRevisionId,
+        toIsoString(row.activePublicationActivatedAt),
+      ),
+      freshness: "fresh",
+    };
+  }
   const status = row.bookabilityStatus;
   const isPublic = status === "public";
   const projectionFresh = row.bookabilityFreshness === "fresh" && !row.bookabilityExpired;
@@ -1882,7 +1899,9 @@ function adaptiveHotelSetupFactsSql(): string {
         bookability.expires_at IS NOT NULL
         AND bookability.expires_at <= now()
       ) AS "bookabilityExpired",
-      bookability.updated_at AS "bookabilityUpdatedAt"
+      bookability.updated_at AS "bookabilityUpdatedAt",
+      active_publication.content_revision_id::text AS "activePublicationRevisionId",
+      active_publication.activated_at AS "activePublicationActivatedAt"
     FROM unnest($2::uuid[]) AS scoped(property_id)
     JOIN hotel_catalog.properties property
       ON property.id = scoped.property_id
@@ -2016,6 +2035,8 @@ function adaptiveHotelSetupFactsSql(): string {
      AND payment_provider.property_id = property.id
     LEFT JOIN distribution.public_hotel_bookability_profiles bookability
       ON bookability.property_id = property.id
+    LEFT JOIN distribution.active_public_booking_revision active_publication
+      ON active_publication.property_id = property.id
     ORDER BY array_position($2::uuid[], property.id)
   `;
 }

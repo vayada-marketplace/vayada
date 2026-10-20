@@ -29,7 +29,6 @@ export async function readProductionMediaTargetState(
        FROM identity.organization_resource_links
       WHERE (product, resource_type) IN (
               ('booking', 'booking_hotel'),
-              ('marketplace', 'creator_profile'),
               ('marketplace', 'hotel_profile'),
               ('pms', 'pms_hotel')
             )
