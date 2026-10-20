@@ -90,7 +90,7 @@ async function main() {
     [organization, propertyId],
   );
   await db.query(
-    `INSERT INTO marketplace.invite_codes(id,code,invite_type,status,payload,redeemed_by_user_id)
+    `INSERT INTO hotel_catalog.hotel_account_invites(id,code,invite_type,status,payload,redeemed_by_user_id)
  VALUES ($1::uuid,$1::text,'hotel','redeemed',$2,$3) ON CONFLICT DO NOTHING`,
     [
       source,

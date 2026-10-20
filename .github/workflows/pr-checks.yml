@@ -946,6 +946,24 @@ jobs:
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
+      # 0496 (VAY-2272) in its own database: migrate to 0495, store invites, apply 0496.
+      - name: Verify the hotel account invite move
+        if: matrix.shard == 'hotel-setup'
+        run: >-
+          npm --workspace @vayada/backend-migration run test --
+          src/hotelAccountInvitesMigration.integration.test.ts
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+
+      # 0497 (VAY-2272) in its own database: migrate to 0496, then check slug access after 0497.
+      - name: Verify the affiliate capture guard retirement
+        if: matrix.shard == 'hotel-setup'
+        run: >-
+          npm --workspace @vayada/backend-migration run test --
+          src/affiliateCaptureBoundaryRetireMigration.integration.test.ts
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+
       # Runs 0482 again inside a rolled-back transaction on the migrated shared database.
       - name: Verify the complete-hotel activation backfill
         if: matrix.shard == 'hotel-setup'
