@@ -12,7 +12,7 @@ import {
 } from "@vayada/product-onboarding/HotelSetupChecklistCard";
 import type { HotelSetupChecklistClient } from "@vayada/product-onboarding/hotelSetupChecklistApi";
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { useTranslation } from "@/lib/i18n";
 import { hotelSetupChecklistApi } from "@/services/api/hotelSetupChecklistClient";
@@ -21,6 +21,8 @@ import {
   resolveSelectedPmsPropertyId,
 } from "@/services/api/pmsPropertyClient";
 import { getAuthCsrfToken } from "@/services/auth/sessionStore";
+
+import { pmsChecklistMessages } from "./pmsChecklistMessages";
 
 const BOOKING_ADMIN_URL =
   process.env.NEXT_PUBLIC_BOOKING_ADMIN_URL || "https://admin.booking.vayada.com";
@@ -174,6 +176,8 @@ export function PmsDashboardSetupCard({
   roomCount?: number | null;
   navigate?: (path: string) => void;
 }) {
+  const { t } = useTranslation();
+  const messages = useMemo(() => pmsChecklistMessages(t), [t]);
   const { state } = setup;
   if (state.kind !== "ready") return null;
   const open = (item: HotelSetupChecklistItemId) => {
@@ -192,15 +196,22 @@ export function PmsDashboardSetupCard({
       onLooksGood={setup.looksGood}
       onHide={setup.hide}
       onDismiss={setup.dismiss}
+      messages={messages}
     />
   );
 }
 
 /** The "Setup N of 9" pill while the checklist is hidden; it brings the card back. */
 export function PmsDashboardSetupChip({ setup }: { setup: PmsSetupChecklist }) {
+  const { t } = useTranslation();
+  const messages = useMemo(() => pmsChecklistMessages(t), [t]);
   if (setup.state.kind !== "ready") return null;
   return (
-    <HotelSetupChecklistChip checklist={setup.state.checklist} onShow={() => void setup.show()} />
+    <HotelSetupChecklistChip
+      checklist={setup.state.checklist}
+      onShow={() => void setup.show()}
+      messages={messages}
+    />
   );
 }
 

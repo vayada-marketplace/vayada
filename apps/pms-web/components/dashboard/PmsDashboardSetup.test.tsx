@@ -3,7 +3,20 @@ import React from "react";
 import { act, create, type ReactTestInstance, type ReactTestRenderer } from "react-test-renderer";
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("@/lib/i18n", () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
+const i18n = vi.hoisted(() => ({ lang: "en" as "en" | "de" }));
+vi.mock("@/lib/i18n", async () => {
+  const catalogs = {
+    en: (await import("../../messages/en.json")).default as Record<string, string>,
+    de: (await import("../../messages/de.json")).default as Record<string, string>,
+  };
+  // As the app's translate: the catalog's text with {params} filled in, English when missing.
+  const t = (key: string, params: Record<string, string | number> = {}) =>
+    Object.entries(params).reduce(
+      (text, [name, value]) => text.split(`{${name}}`).join(String(value)),
+      catalogs[i18n.lang][key] ?? catalogs.en[key] ?? key,
+    );
+  return { useTranslation: () => ({ t }) };
+});
 vi.mock("next/link", () => ({
   default: ({ href, children }: { href: string; children: React.ReactNode }) => (
     <a href={href}>{children}</a>
@@ -17,6 +30,7 @@ import {
   PmsDashboardSetupChip,
   usePmsSetupChecklist,
 } from "./PmsDashboardSetup";
+import { pmsChecklistMessages } from "./pmsChecklistMessages";
 
 const PROPERTY = "3f2c4d5e-6a7b-4c8d-9e0f-112233445566";
 const LIVE: HotelSetupChecklistFacts = {
@@ -83,8 +97,8 @@ async function mount(load: () => Promise<unknown>, navigate = vi.fn()) {
 describe("PMS dashboard setup checklist (VAY-2247 wave 2)", () => {
   it("keeps today's amber banner while the checklist API isn't mounted (404)", async () => {
     const dashboard = await mount(async () => Promise.reject(new NotFound("Not Found")));
-    expect(dashboard.text()).toContain("dashboard.setupIncomplete");
-    expect(dashboard.text()).toContain("dashboard.resumeSetup");
+    expect(dashboard.text()).toContain("Your property setup isn't complete.");
+    expect(dashboard.text()).toContain("Resume setup");
     expect(dashboard.text()).not.toContain("Finish setting up");
     expect(dashboard.renderer.root.findByType("a").props.href).toBe(
       `/setup?entryProduct=pms&returnTo=%2Fdashboard&propertyId=${PROPERTY}`,
@@ -95,7 +109,7 @@ describe("PMS dashboard setup checklist (VAY-2247 wave 2)", () => {
   it("shows the checklist instead of the banner once the server answers", async () => {
     const navigate = vi.fn();
     const dashboard = await mount(async () => checklist(), navigate);
-    expect(dashboard.text()).not.toContain("dashboard.setupIncomplete");
+    expect(dashboard.text()).not.toContain("Your property setup isn't complete.");
     expect(dashboard.text()).toContain("Finish setting up Hotel Alpenrose");
     expect(dashboard.text()).toContain("all 8 rooms bookable");
 
@@ -117,6 +131,30 @@ describe("PMS dashboard setup checklist (VAY-2247 wave 2)", () => {
     expect(dashboard.client.setViewer).toHaveBeenLastCalledWith(PROPERTY, { hidden: false });
     expect(dashboard.text()).toContain("Finish setting up");
     dashboard.renderer.unmount();
+  });
+
+  it("speaks German from the PMS catalog", async () => {
+    i18n.lang = "de";
+    try {
+      const dashboard = await mount(async () => checklist());
+      expect(dashboard.text()).toContain("Hotel Alpenrose fertig einrichten");
+      expect(dashboard.text()).toContain("4 von 9 erledigt");
+      expect(dashboard.text()).toContain("alle 8 Zimmer buchbar");
+      expect(dashboard.text()).toContain("Passt so");
+      expect(dashboard.text()).toContain("Fotos hinzufügen");
+      dashboard.renderer.unmount();
+    } finally {
+      i18n.lang = "en";
+    }
+  });
+
+  it("counts the rooms in the calendar row, one room included", async () => {
+    const { useTranslation } = await import("@/lib/i18n");
+    const { t } = useTranslation();
+    const calendar = pmsChecklistMessages(t).items.calendar.description;
+    expect(calendar({ roomCount: 8 })).toContain("all 8 rooms bookable");
+    expect(calendar({ roomCount: 1 })).toContain("Open all year · 1 room bookable");
+    expect(calendar({ roomCount: null })).toContain("all rooms bookable");
   });
 
   it("sends Booking Admin's items to Booking Admin and the PMS's to the PMS", () => {
