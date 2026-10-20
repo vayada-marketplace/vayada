@@ -955,6 +955,15 @@ jobs:
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
+      # Runs 0495 again inside a rolled-back transaction on the migrated shared database.
+      - name: Verify the basics-complete backfill (VAY-2247)
+        if: matrix.shard == 'hotel-setup'
+        run: >-
+          npm --workspace @vayada/backend-migration run test -- --no-file-parallelism
+          src/hotelCatalogBasicsCompleteBackfill.integration.test.ts
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+
       # 0493 (VAY-2270) in its own database: migrate up to 0493, add retired grants, apply 0493.
       - name: Verify the Marketplace role grant retirement migration
         if: matrix.shard == 'hotel-setup'

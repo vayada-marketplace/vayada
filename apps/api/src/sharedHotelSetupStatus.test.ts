@@ -3037,6 +3037,21 @@ describe("shared hotel setup status route", () => {
       if (text.includes("INSERT INTO hotel_catalog.properties")) {
         return { rows: [{ propertyId }] };
       }
+      // VAY-2247 1.5: creation reserves the booking-page address and projects the public profile.
+      if (text.includes('canonical_slug.slug AS "canonicalSlug"')) {
+        return {
+          rows: [
+            {
+              propertyId,
+              publicId: "pub-1",
+              displayName: "Alpenrose",
+              defaultLocale: "en",
+              canonicalSlug: "alpenrose",
+            },
+          ],
+        };
+      }
+      if (text.includes("WITH canonical_slug AS")) return { rows: [] };
       return { rows: [profileRow()] };
     });
     const repository = createPgSharedHotelSetupStatusRepository({
