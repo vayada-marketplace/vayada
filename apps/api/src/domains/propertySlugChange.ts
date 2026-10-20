@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import type {
   BookingPublicationOperationStatus,
@@ -52,6 +52,7 @@ export type PropertySlugChangeErrorCode =
   | "publication_in_progress"
   | "republish_user_unavailable"
   | "page_not_ready"
+  | "republish_unavailable"
   | "plan_changed";
 
 export class PropertySlugChangeError extends Error {
@@ -82,6 +83,8 @@ type SlugRow = {
   status: string;
 };
 type Planned = PropertySlugChangePreview & { currentId: string; formerId: string | null };
+// Booking hosts read these labels as non-hotel hosts (slugFromKnownBookingHost, booking-web).
+const RESERVED_HOST_LABELS = new Set(["www", "booking"]);
 
 /**
  * Changes a hotel's booking page address (VAY-2295): the new address becomes the active canonical
@@ -94,19 +97,21 @@ export function createPropertySlugChangeCommand(config: {
   pool?: pg.Pool;
   refresh?: BookingPublicationRefreshPort["refresh"];
   readiness?: Readiness;
-  now?: () => Date;
 }): PropertySlugChangeCommand {
   const ownsPool = !config.pool;
   const pool = config.pool ?? new pg.Pool({ connectionString: config.connectionString, max: 2 });
-  const now = config.now ?? (() => new Date());
 
   const preview = async (input: PreviewInput) => {
     const planned = await transaction(pool, "BEGIN READ ONLY", (client) =>
-      plan(client, input, false, now()),
+      plan(client, input, false, new Date()),
     );
     const live = planned.plan.livePage;
-    // Readiness owners read through their own pools, so this runs outside the transaction.
-    if (live && live.pageSlug !== input.slug && config.readiness) {
+    if (live && live.pageSlug !== input.slug) {
+      // Without the publication runtime the page can't move, and the old address would stop
+      // selling once it is no longer canonical.
+      if (!config.refresh || !config.readiness)
+        throw new PropertySlugChangeError("republish_unavailable");
+      // Readiness owners read through their own pools, so this runs outside the transaction.
       const readiness = await config.readiness.getBookingReadiness({
         organizationId: live.organizationId,
         propertyId: input.propertyId,
@@ -126,7 +131,7 @@ export function createPropertySlugChangeCommand(config: {
     async apply(input) {
       if ((await preview(input)).planSha256 !== input.expectedPlanSha256)
         throw new PropertySlugChangeError("plan_changed");
-      const at = now();
+      const at = new Date();
       const planned = await transaction(pool, "BEGIN", async (client) => {
         const locked = await plan(client, input, true, at);
         if (locked.planSha256 !== input.expectedPlanSha256)
@@ -139,7 +144,8 @@ export function createPropertySlugChangeCommand(config: {
         return locked;
       }).catch((error: unknown) => {
         // Another hotel took the free address after the plan locked its rows.
-        if ((error as { code?: unknown }).code === "23505")
+        const failure = error as { code?: unknown; constraint?: unknown };
+        if (failure.code === "23505" && failure.constraint === "uq_property_slugs_slug_locale")
           throw new PropertySlugChangeError("slug_taken");
         throw error;
       });
@@ -159,7 +165,11 @@ async function plan(
   at: Date,
 ): Promise<Planned> {
   const { propertyId, slug: toSlug } = input;
-  if (toSlug.length > 63 || !PUBLIC_BOOKABILITY_SLUG_PATTERN.test(toSlug))
+  if (
+    toSlug.length > 63 ||
+    !PUBLIC_BOOKABILITY_SLUG_PATTERN.test(toSlug) ||
+    RESERVED_HOST_LABELS.has(toSlug)
+  )
     throw new PropertySlugChangeError("invalid_slug");
   try {
     await requireAuthorizedPlatformActor(client, input.audit, { lockRows: locked });
@@ -327,7 +337,7 @@ async function recordAudit(
        $3::uuid, 'user', $4::uuid, 'hotel_catalog', 'property', $3, $5, $6,
        $7::jsonb, $8::jsonb, $9::jsonb, 'confidential')`,
     [
-      `platform-property-slug-change:${planSha256}`,
+      `platform-property-slug-change:${randomUUID()}`,
       at.toISOString(),
       change.propertyId,
       input.audit.actorUserId,

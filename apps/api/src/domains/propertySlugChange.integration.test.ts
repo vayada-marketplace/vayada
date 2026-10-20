@@ -237,7 +237,16 @@ describe.skipIf(!url)("operator booking address change in PostgreSQL (VAY-2295)"
       { slug: `lodge-${n}`, purpose: "redirect", status: "redirected", redirectsTo: `hotel-${n}` },
     ]);
     expect(await profileSlug(propertyId)).toBe(`hotel-${n}`);
-    expect(await audits(propertyId)).toHaveLength(2);
+
+    // The same moves again are new changes, each with its own audit row.
+    expect((await change(audit, propertyId, `lodge-${n}`)).plan.change).toBe("former_address");
+    expect((await change(audit, propertyId, `hotel-${n}`)).plan.change).toBe("former_address");
+    expect(await addresses(propertyId)).toEqual([
+      { slug: `former-${n}`, purpose: "redirect", status: "redirected", redirectsTo: `hotel-${n}` },
+      { slug: `hotel-${n}`, purpose: "canonical", status: "active", redirectsTo: null },
+      { slug: `lodge-${n}`, purpose: "redirect", status: "redirected", redirectsTo: `hotel-${n}` },
+    ]);
+    expect(await audits(propertyId)).toHaveLength(4);
   });
 
   it("refuses without writing anything", async () => {
@@ -256,7 +265,16 @@ describe.skipIf(!url)("operator booking address change in PostgreSQL (VAY-2295)"
       ).rejects.toMatchObject({ code });
       expect(await addresses(propertyId)).toEqual(before);
     };
-    for (const slug of ["Lodge", "-lodge", "lodge--x", "", "a".repeat(64), "lodge.example"])
+    for (const slug of [
+      "Lodge",
+      "-lodge",
+      "lodge--x",
+      "",
+      "a".repeat(64),
+      "lodge.example",
+      "www",
+      "booking",
+    ])
       await refuses("invalid_slug", slug);
     await refuses("slug_taken", `hotel-${other.n}`);
     await refuses("slug_taken", `former-${other.n}`);
@@ -336,6 +354,10 @@ describe.skipIf(!url)("operator booking address change in PostgreSQL (VAY-2295)"
 
     // A page that can't be rebuilt, or a user who lost access, stops the change before it starts.
     const before = await addresses(propertyId);
+    const withoutRuntime = createPropertySlugChangeCommand({ pool });
+    await expect(
+      withoutRuntime.preview({ propertyId, slug: `inn-${n}`, audit }),
+    ).rejects.toMatchObject({ code: "republish_unavailable" });
     ready.getBookingReadiness.mockResolvedValueOnce({
       outcome: "evaluated",
       product: "booking",
