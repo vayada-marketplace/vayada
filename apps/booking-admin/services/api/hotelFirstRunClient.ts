@@ -36,6 +36,9 @@ export type HotelFirstRunRequest = Readonly<{
   pricesIncludeMandatoryCharges: boolean;
   guestPayment: "pay_at_property";
   plan: "commission" | "fixed_fee";
+  /** The owner's choices for every room type (the server's 1.12b, #3594); its defaults when left out. */
+  cancellation?: Readonly<{ kind: "free_until_days_before_arrival"; days: 1 | 3 | 7 | 14 }>;
+  bed?: "double" | "queen" | "king" | "twin" | "single";
 }>;
 
 export type HotelFirstRunRunResult = Readonly<{

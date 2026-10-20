@@ -16,6 +16,8 @@ import { previewBookingHost } from "./quickHotelDraft";
 import {
   EMPTY_QUICK_ROOMS_DRAFT,
   parseQuickRoomsDraft,
+  quickFirstRunChoices,
+  quickRoomChoices,
   quickRoomRequest,
   quickPreviewRooms,
   quickRoomsFirstError,
@@ -211,6 +213,8 @@ export function QuickPropertySetup({
               pricesIncludeMandatoryCharges: rooms.pricesIncludeMandatoryCharges,
               guestPayment: "pay_at_property",
               plan,
+              // The owner's cancellation and bed for every room type (1.12b, #3594).
+              ...quickFirstRunChoices(rooms),
             });
           } catch (error) {
             throw new Error(quickFirstRunErrorMessage(error));
@@ -233,6 +237,7 @@ export function QuickPropertySetup({
       storage={publicationStorage}
       hotel={hotel}
       rooms={quickPreviewRooms(rooms, hotel.currency.symbol)}
+      freeCancellationDays={quickRoomChoices(rooms).freeCancellationDays}
       openPage={openPage}
       copyLink={copyLink}
       onSaveAndExit={onSaveAndExit}
@@ -248,6 +253,7 @@ function QuickPublishSteps({
   storage,
   hotel,
   rooms,
+  freeCancellationDays,
   openPage,
   copyLink,
   onSaveAndExit,
@@ -258,6 +264,7 @@ function QuickPublishSteps({
   storage: Store;
   hotel: Hotel;
   rooms: readonly QuickPreviewRoom[];
+  freeCancellationDays: number;
   openPage: (page: QuickSetupPage) => void;
   copyLink: (url: string) => Promise<void>;
   onSaveAndExit: () => void;
@@ -289,6 +296,7 @@ function QuickPublishSteps({
       hotel={hotel}
       currency={hotel.currency}
       rooms={rooms}
+      freeCancellationDays={freeCancellationDays}
       status={state}
       onPublish={() => void publish()}
       onRetry={() => void retry()}

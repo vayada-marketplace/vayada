@@ -1,7 +1,14 @@
 "use client";
 
 import { CheckIcon, MoonIcon, PlusIcon, ShieldCheckIcon } from "@heroicons/react/24/outline";
-import { useState, type ComponentType, type FormEvent, type SVGProps } from "react";
+import {
+  useId,
+  useState,
+  type ComponentType,
+  type FormEvent,
+  type ReactNode,
+  type SVGProps,
+} from "react";
 
 import { QuickBedIcon } from "./QuickBedIcon";
 import { QuickBookingPagePreview } from "./QuickBookingPagePreview";
@@ -11,9 +18,15 @@ import { QuickSetupShell } from "./QuickSetupShell";
 import { QuickSetupStepLayout } from "./QuickSetupStepLayout";
 import {
   EMPTY_QUICK_ROOM_DRAFT,
+  QUICK_BED_OPTIONS,
+  QUICK_CANCELLATION_OPTIONS,
   QUICK_MAX_ROOM_TYPES,
+  QUICK_NON_REFUNDABLE_NOTE,
   QUICK_TAXES_ERROR,
+  quickBedTitle,
+  quickCancellationTitle,
   quickPreviewRooms,
+  quickRoomChoices,
   quickRoomErrors,
   quickRoomFirstNumbers,
   quickRoomLabelsHint,
@@ -35,47 +48,103 @@ export type QuickRoomStepProps = {
   /** Back to "Your hotel" for this hotel; hidden when not passed. */
   onBack?: (() => void) | null;
   onSaveAndExit: () => void;
-  /** VAY-2247 follow-up: shown once the first run takes these choices (cancellation, bed). */
-  onChangeCancellation?: (() => void) | null;
-  onChangeBed?: (() => void) | null;
 };
 
+/** A default the first run uses, with Change opening its choices underneath (1.12b). */
 function DefaultLine({
   icon: Icon,
   title,
   note,
-  onChange,
+  open,
+  onToggle,
   tone = "gray",
+  children,
 }: {
   icon: ComponentType<SVGProps<SVGSVGElement>>;
   title: string;
   note: string;
-  onChange?: (() => void) | null;
+  open: boolean;
+  onToggle: () => void;
   tone?: "gray" | "green";
+  children: ReactNode;
 }) {
+  const choicesId = useId();
   return (
-    <div className="flex items-start gap-3 rounded-xl bg-gray-50 px-3 py-3.5">
-      <span
-        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
-          tone === "green" ? "bg-green-50 text-green-600" : "bg-white text-gray-600"
-        }`}
-      >
-        <Icon className="h-4 w-4" aria-hidden="true" />
-      </span>
-      <div className="min-w-0 flex-1">
-        <p className="text-sm font-semibold text-gray-950">{title}</p>
-        <p className="mt-0.5 text-[13px] leading-5 text-gray-500">{note}</p>
-      </div>
-      {onChange ? (
+    <div className="rounded-xl bg-gray-50 px-3 py-3.5">
+      <div className="flex items-start gap-3">
+        <span
+          className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
+            tone === "green" ? "bg-green-50 text-green-600" : "bg-white text-gray-600"
+          }`}
+        >
+          <Icon className="h-4 w-4" aria-hidden="true" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-gray-950">{title}</p>
+          <p className="mt-0.5 text-[13px] leading-5 text-gray-500">{note}</p>
+        </div>
         <button
           type="button"
-          onClick={onChange}
+          onClick={onToggle}
+          aria-expanded={open}
+          aria-controls={choicesId}
           className="rounded text-sm font-semibold text-primary-600 outline-none hover:text-primary-700 focus-visible:ring-2 focus-visible:ring-primary-600"
         >
-          Change
+          {open ? "Done" : "Change"}
         </button>
+      </div>
+      {open ? (
+        <div id={choicesId} className="mt-3 sm:pl-11">
+          {children}
+        </div>
       ) : null}
     </div>
+  );
+}
+
+/** One choice of a picker: a radio row, or a row that is shown but can't be picked yet, with why. */
+function Choice({
+  name,
+  label,
+  checked,
+  onPick,
+  unavailable,
+}: {
+  name: string;
+  label: string;
+  checked: boolean;
+  onPick?: () => void;
+  unavailable?: string;
+}) {
+  const noteId = useId();
+  return (
+    <label
+      className={`flex items-start gap-3 rounded-lg border bg-white px-3 py-2.5 text-sm ${
+        unavailable
+          ? "cursor-not-allowed border-gray-200 text-gray-400"
+          : checked
+            ? "cursor-pointer border-primary-600 text-gray-950 ring-1 ring-primary-600"
+            : "cursor-pointer border-gray-200 text-gray-800 hover:border-gray-300"
+      }`}
+    >
+      <input
+        type="radio"
+        name={name}
+        checked={checked}
+        disabled={Boolean(unavailable)}
+        onChange={() => onPick?.()}
+        aria-describedby={unavailable ? noteId : undefined}
+        className="mt-0.5 h-4 w-4 accent-primary-600"
+      />
+      <span className="min-w-0">
+        <span className="block font-medium">{label}</span>
+        {unavailable ? (
+          <span id={noteId} className="mt-0.5 block text-[13px] leading-5 text-gray-500">
+            {unavailable}
+          </span>
+        ) : null}
+      </span>
+    </label>
   );
 }
 
@@ -130,10 +199,13 @@ export function QuickRoomStep({
   onSubmit,
   onBack,
   onSaveAndExit,
-  onChangeCancellation,
-  onChangeBed,
 }: QuickRoomStepProps) {
   const [errors, setErrors] = useState<QuickRoomErrors & { taxes?: string }>({});
+  // The cancellation and bed choices for all room types (1.12b); one picker open at a time.
+  const [picker, setPicker] = useState<"cancellation" | "bed" | null>(null);
+  const choices = quickRoomChoices(draft);
+  const toggle = (which: "cancellation" | "bed") =>
+    setPicker((current) => (current === which ? null : which));
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -341,16 +413,50 @@ export function QuickRoomStep({
           <DefaultLine
             icon={ShieldCheckIcon}
             tone="green"
-            title="Free cancellation until 3 days before arrival"
-            note="Our default. After that, the full stay is charged."
-            onChange={onChangeCancellation}
-          />
+            title={quickCancellationTitle(choices.freeCancellationDays)}
+            note={`${choices.freeCancellationDays === 3 ? "Our default. " : ""}After that, the full stay is charged.`}
+            open={picker === "cancellation"}
+            onToggle={() => toggle("cancellation")}
+          >
+            <fieldset className="flex flex-col gap-2">
+              <legend className="sr-only">Free cancellation</legend>
+              {QUICK_CANCELLATION_OPTIONS.map((option) => (
+                <Choice
+                  key={option.value}
+                  name="quick-cancellation"
+                  label={option.label}
+                  checked={choices.freeCancellationDays === option.value}
+                  onPick={() => onChange({ ...draft, freeCancellationDays: option.value })}
+                />
+              ))}
+              <Choice
+                name="quick-cancellation"
+                label="Non-refundable"
+                checked={false}
+                unavailable={QUICK_NON_REFUNDABLE_NOTE}
+              />
+            </fieldset>
+          </DefaultLine>
           <DefaultLine
             icon={MoonIcon}
-            title="One double bed per room"
-            note="Our default. Add more beds later with your photos."
-            onChange={onChangeBed}
-          />
+            title={quickBedTitle(choices.bed)}
+            note={`${choices.bed === "double" ? "Our default. " : ""}For every room type. Add more beds later with your photos.`}
+            open={picker === "bed"}
+            onToggle={() => toggle("bed")}
+          >
+            <fieldset className="flex flex-col gap-2">
+              <legend className="sr-only">Beds per room</legend>
+              {QUICK_BED_OPTIONS.map((option) => (
+                <Choice
+                  key={option.value}
+                  name="quick-bed"
+                  label={option.label}
+                  checked={choices.bed === option.value}
+                  onPick={() => onChange({ ...draft, bed: option.value })}
+                />
+              ))}
+            </fieldset>
+          </DefaultLine>
           {draft.rooms.length < QUICK_MAX_ROOM_TYPES ? (
             <button
               type="button"

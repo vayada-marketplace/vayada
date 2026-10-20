@@ -156,10 +156,28 @@ describe("step 4 sends the first run (VAY-2247 3.7)", () => {
       pricesIncludeMandatoryCharges: true,
       guestPayment: "pay_at_property",
       plan: "commission",
+      // The defaults when the owner didn't change them (1.12b).
+      cancellation: { kind: "free_until_days_before_arrival", days: 3 },
+      bed: "double",
     });
     // On to step 5, "Does this look right?", with the room in the preview.
     expect(text(renderer)).toContain("Does this look right?");
     expect(text(renderer)).toContain("Classic Double");
+    renderer.unmount();
+  });
+
+  it("sends the owner's cancellation and bed choices, and step 5 says the chosen days (1.12b)", async () => {
+    const run = vi.fn(async () => ({ state: {}, ran: [], checkoutUrl: null }));
+    const { renderer } = await mount(run, { ...ROOM, freeCancellationDays: 7, bed: "twin" });
+    await submit(renderer);
+    expect(run).toHaveBeenCalledWith(
+      PROPERTY,
+      expect.objectContaining({
+        cancellation: { kind: "free_until_days_before_arrival", days: 7 },
+        bed: "twin",
+      }),
+    );
+    expect(text(renderer)).toContain("free cancellation until 7 days");
     renderer.unmount();
   });
 

@@ -47,6 +47,8 @@ function props(overrides: Partial<QuickRoomStepProps> = {}): QuickRoomStepProps 
 }
 
 const text = (renderer: ReactTestRenderer) => JSON.stringify(renderer.toJSON());
+const nodeText = (node: ReactTestInstance): string =>
+  node.children.map((child) => (typeof child === "string" ? child : nodeText(child))).join("");
 async function submit(renderer: ReactTestRenderer) {
   await act(async () => renderer.root.findByType("form").props.onSubmit({ preventDefault() {} }));
 }
@@ -64,15 +66,104 @@ describe("QuickRoomStep (VAY-2247 step 3)", () => {
     expect(markup).toContain("Up to 2 guests · Free cancellation until 3 days before");
     expect(markup).toContain("€145");
     expect(markup).toContain("Add another room type");
-    // Until the first run takes those choices (follow-up), no Change links.
-    expect(markup).not.toContain(">Change<");
+    // The first run takes both choices (1.12b): each default has its Change link.
+    expect(markup.match(/>Change</g)).toHaveLength(2);
+    expect(markup).toContain("Our default. After that, the full stay is charged.");
   });
 
-  it("shows the Change links once they are passed", () => {
-    const markup = renderToStaticMarkup(
-      <QuickRoomStep {...props({ onChangeCancellation: vi.fn(), onChangeBed: vi.fn() })} />,
+  it("changes the free cancellation for every room type; Non-refundable shows but can't be picked (1.12b)", async () => {
+    let current: QuickRoomsDraft = DRAFT;
+    const onChange = vi.fn((next: QuickRoomsDraft) => {
+      current = next;
+    });
+    function Harness() {
+      const [draft, setDraft] = useState(DRAFT);
+      return (
+        <QuickRoomStep
+          {...props({
+            draft,
+            onChange: (next) => {
+              onChange(next);
+              setDraft(next);
+            },
+          })}
+        />
+      );
+    }
+    const renderer = create(<Harness />);
+    const change = () =>
+      renderer.root.findAll((node) => node.type === "button" && nodeText(node) === "Change");
+    await act(async () => change()[0]!.props.onClick());
+    const radios = renderer.root.findAll(
+      (node) => node.type === "input" && node.props.name === "quick-cancellation",
     );
-    expect(markup.match(/>Change</g)).toHaveLength(2);
+    expect(radios.map((radio) => nodeText(radio.parent!))).toEqual([
+      "Free until 1 day before arrival",
+      "Free until 3 days before arrival",
+      "Free until 7 days before arrival",
+      "Free until 14 days before arrival",
+      "Non-refundableNeeds online card payments. Set it later in Rooms & Rates once cards are on.",
+    ]);
+    expect(radios.map((radio) => radio.props.checked)).toEqual([false, true, false, false, false]);
+    expect(radios[4]!.props.disabled).toBe(true);
+    await act(async () => radios[2]!.props.onChange());
+    expect(current.freeCancellationDays).toBe(7);
+    expect(nodeText(renderer.root)).toContain("Free cancellation until 7 days before arrival");
+    expect(nodeText(renderer.root)).toContain(
+      "Up to 2 guests · Free cancellation until 7 days before",
+    );
+    // Done closes it; the line no longer says it is our default.
+    const done = renderer.root.findAll(
+      (node) => node.type === "button" && nodeText(node) === "Done",
+    );
+    expect(done[0]!.props["aria-expanded"]).toBe(true);
+    await act(async () => done[0]!.props.onClick());
+    expect(
+      renderer.root.findAll(
+        (node) => node.type === "input" && node.props.name === "quick-cancellation",
+      ),
+    ).toHaveLength(0);
+    expect(nodeText(renderer.root)).not.toContain("Our default. After that");
+    renderer.unmount();
+  });
+
+  it("changes the beds for every room type, two twin beds for a twin room (1.12b)", async () => {
+    const onChange = vi.fn();
+    const renderer = create(<QuickRoomStep {...props({ onChange })} />);
+    const change = renderer.root.findAll(
+      (node) => node.type === "button" && nodeText(node) === "Change",
+    );
+    await act(async () => change[1]!.props.onClick());
+    const radios = renderer.root.findAll(
+      (node) => node.type === "input" && node.props.name === "quick-bed",
+    );
+    expect(radios.map((radio) => nodeText(radio.parent!))).toEqual([
+      "One double bed",
+      "One queen bed",
+      "One king bed",
+      "Two twin beds",
+      "One single bed",
+    ]);
+    await act(async () => radios[3]!.props.onChange());
+    expect(onChange).toHaveBeenLastCalledWith({ ...DRAFT, bed: "twin" });
+    renderer.unmount();
+    const twin = renderToStaticMarkup(
+      <QuickRoomStep {...props({ draft: { ...DRAFT, bed: "twin" } })} />,
+    );
+    expect(twin).toContain("Two twin beds per room");
+  });
+
+  it("keeps saved choices the first run still takes and drops the others", () => {
+    expect(
+      parseQuickRoomsDraft({ rooms: [FILLED], freeCancellationDays: 14, bed: "king" }),
+    ).toMatchObject({ freeCancellationDays: 14, bed: "king" });
+    const dropped = parseQuickRoomsDraft({
+      rooms: [FILLED],
+      freeCancellationDays: 5,
+      bed: "bunk_bed",
+    });
+    expect(dropped).not.toHaveProperty("freeCancellationDays");
+    expect(dropped).not.toHaveProperty("bed");
   });
 
   it("asks for what is missing, including the taxes tick, before going on", async () => {
