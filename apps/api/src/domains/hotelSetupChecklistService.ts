@@ -11,7 +11,7 @@ import type { HotelFirstRunActor } from "./hotelFirstRunSteps.js";
 /**
  * VAY-2247 wave 2: the setup checklist both dashboards show. Setup progress comes from the first run's own
  * state; the rest from what the hotel has, read in one query, plus the two things the checklist remembers
- * (migration 0501): "Looks good" per hotel and each person's Hide for now / Dismiss.
+ * (migration 0503): "Looks good" per hotel and each person's Hide for now / Dismiss.
  */
 
 /** What one query tells about the hotel and the signed-in person; null when the hotel isn't there. */
