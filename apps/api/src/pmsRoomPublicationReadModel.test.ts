@@ -159,7 +159,7 @@ describe("PMS room publication read model", () => {
     expect(JSON.stringify(snapshot)).not.toContain("storageKey");
   });
 
-  it("keeps unreviewed legacy amenities private and emits the Step 4 room blocker", async () => {
+  it("keeps unreviewed legacy amenities private without blocking publishing (VAY-2247)", async () => {
     const target = readTarget({
       sourceRow: {
         roomAmenitiesRevision: 1,
@@ -171,15 +171,9 @@ describe("PMS room publication read model", () => {
 
     const snapshot = await model.getRoomPublicationSnapshot({ organizationId, propertyId });
 
-    expect(snapshot.status).toBe("blocked");
+    expect(snapshot.status).toBe("ready");
     expect(snapshot.rooms[0]?.amenities).toBeNull();
-    expect(snapshot.blockers).toEqual([
-      expect.objectContaining({
-        code: "room_amenities_review_required",
-        owningStepId: "rooms",
-        affectedEntity: { entityType: "room_type", entityId: roomTypeId },
-      }),
-    ]);
+    expect(snapshot.blockers).toEqual([]);
   });
 
   it("fails closed when a reviewed stored amenity is no longer in the live vocabulary", async () => {

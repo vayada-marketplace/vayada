@@ -4,11 +4,15 @@ import {
   PUBLIC_BOOKABILITY_CONTACT_CHANNEL_TYPES,
   PUBLIC_BOOKABILITY_CONTRACT_VERSION,
   PUBLIC_BOOKABILITY_DATA_SOURCE_OWNERS,
+  PUBLIC_BOOKABILITY_EMAIL_PATTERN,
   PUBLIC_BOOKABILITY_FRESHNESS_STATUSES,
   PUBLIC_BOOKABILITY_REASON_CODES,
+  PUBLIC_BOOKABILITY_SLUG_PATTERN,
   PUBLIC_BOOKABILITY_STATUSES,
   PUBLIC_BOOKABILITY_VISIBILITY,
   assertPublicBookabilityPublicSafe,
+  isPublicHttpsUrl,
+  isValidTimeZone,
   type PublicBookabilityProfileProjection,
 } from "./index.js";
 
@@ -21,8 +25,8 @@ const instant = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/)
   .refine(validInstant);
-const httpsUrl = nonEmpty.refine((value) => validHttpsUrl(value));
-const originUrl = nonEmpty.refine((value) => validHttpsUrl(value, true));
+const httpsUrl = nonEmpty.refine((value) => isPublicHttpsUrl(value));
+const originUrl = nonEmpty.refine((value) => isPublicHttpsUrl(value, true));
 const locale = nonEmpty.refine((value) => validLocale(value));
 const currency = z.string().regex(/^[A-Z]{3}$/);
 const localTime = z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/);
@@ -47,10 +51,10 @@ const contactSchema = z
         contact.type === "instagram" ||
         contact.type === "facebook" ||
         contact.type === "x") &&
-      !validHttpsUrl(contact.value)
+      !isPublicHttpsUrl(contact.value)
     )
       issue(context, ["value"]);
-    if (contact.type === "email" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contact.value))
+    if (contact.type === "email" && !PUBLIC_BOOKABILITY_EMAIL_PATTERN.test(contact.value))
       issue(context, ["value"]);
   });
 const policiesSchema = z
@@ -155,12 +159,12 @@ const freshnessSchema = z
   });
 const hotelSchema = z.strictObject({
   propertyId: nonEmpty,
-  slug: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+  slug: z.string().regex(PUBLIC_BOOKABILITY_SLUG_PATTERN),
   name: nonEmpty,
   canonicalUrl: httpsUrl,
   bookingBaseUrl: originUrl,
   customDomainUrl: originUrl.nullable(),
-  timezone: nonEmpty.refine((value) => validTimeZone(value)),
+  timezone: nonEmpty.refine((value) => isValidTimeZone(value)),
   defaultLocale: locale,
   supportedLocales: uniqueArray(locale).min(1),
   defaultCurrency: currency,
@@ -221,7 +225,6 @@ const profileSchema: z.ZodType<PublicBookabilityProfileProjection> = z
       (!hotel.trust.profileComplete ||
         !hotel.trust.profileVerified ||
         hotel.trust.reasonCodes.length > 0 ||
-        hotel.images.length === 0 ||
         !hotel.capabilities.bookingDeepLinks)
     )
       issue(context, ["hotel", "trust"]);
@@ -280,21 +283,6 @@ function issue(context: z.RefinementCtx, path: PropertyKey[]): void {
   context.addIssue({ code: "custom", message: "Invalid public profile contract", path });
 }
 
-function validHttpsUrl(value: string, originOnly = false): boolean {
-  try {
-    const url = new URL(value);
-    return (
-      url.protocol === "https:" &&
-      !url.username &&
-      !url.password &&
-      !url.hash &&
-      (!originOnly || (url.pathname === "/" && !url.search))
-    );
-  } catch {
-    return false;
-  }
-}
-
 function validInstant(value: string): boolean {
   try {
     const canonical = value.replace(
@@ -310,15 +298,6 @@ function validInstant(value: string): boolean {
 function validLocale(value: string): boolean {
   try {
     new Intl.Locale(value);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function validTimeZone(value: string): boolean {
-  try {
-    new Intl.DateTimeFormat("en", { timeZone: value });
     return true;
   } catch {
     return false;

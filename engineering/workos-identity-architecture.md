@@ -2,6 +2,10 @@
 
 _VAY-600 decision record. WorkOS documentation checked on 2026-06-03._
 
+> **Note (VAY-2259, 2026-10-19):** `apps/marketplace-api`, the old Python Marketplace API, is switched
+> off (api.vayada.com answers 410) and its source is deleted. Paths into it below refer to its last
+> source at commit `897d64c6e`.
+
 ## Recommendation
 
 Adopt WorkOS AuthKit as Vayada's source of truth for authentication and
