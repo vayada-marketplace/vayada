@@ -364,18 +364,11 @@ function snapshotRoomSource(
       blocker("room_units_required", "room_type", roomFacts.roomTypeId, sourceRevision),
     );
   }
+  // VAY-2247: a room without photos or with its amenities not yet reviewed can be published (guests see a
+  // placeholder and no amenities); only photos that can't be read safely still block.
   if (media.assignments === null) {
     blockers.push(
       blocker("room_media_unavailable", "room_type", roomFacts.roomTypeId, sourceRevision),
-    );
-  } else if (media.assignments.length === 0) {
-    blockers.push(
-      blocker("room_photo_required", "room_type", roomFacts.roomTypeId, sourceRevision),
-    );
-  }
-  if (!roomAmenities.reviewed) {
-    blockers.push(
-      blocker("room_amenities_review_required", "room_type", roomFacts.roomTypeId, sourceRevision),
     );
   }
   return {

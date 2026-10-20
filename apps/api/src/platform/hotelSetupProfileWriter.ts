@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { RequestContext } from "@vayada/backend-auth";
 import { AuthorizationError } from "@vayada/backend-authorization";
 import type pg from "pg";
 import { projectPropertyPublicProfile } from "./propertyPublicProfileProjection.js";
@@ -8,7 +9,9 @@ import type {
   HotelSetupPropertyProfileUpdate,
 } from "../routes/sharedHotelSetupStatus.js";
 import {
+  activateCompleteHotel,
   propertyProfileWritePayload,
+  recomputeHotelProfileCompleteness,
   toSharedPropertyProfile,
   type SharedPropertyProfileRow,
 } from "./sharedHotelSetupStatusReadModel.js";
@@ -204,6 +207,7 @@ export async function writeOrdinaryHotelSetupPropertyProfile(
          is_public=EXCLUDED.is_public, source_system=EXCLUDED.source_system, updated_at=now()`,
       [scope.propertyId, payload],
     );
+    await recomputeHotelProfileCompleteness(client, scope.propertyId);
     await projectPropertyPublicProfile(client, { propertyId: scope.propertyId });
     const after = await profileRow(client, scope.propertyId);
     const changed = Object.keys(after)
@@ -268,4 +272,72 @@ export function createOrdinaryHotelSetupProfileCommand(
       (context.audit.correlationId ?? context.audit.requestId).slice(0, 200),
       command,
     );
+}
+
+export type HotelSetupPropertyActivationResult = Readonly<
+  | { status: "activated" | "already_active" }
+  | { status: "incomplete"; reasons: readonly string[] }
+  | { status: "not_provisioning"; lifecycleStatus: string }
+>;
+export type HotelSetupPropertyActivation = (
+  context: RequestContext,
+  propertyId: string,
+) => Promise<HotelSetupPropertyActivationResult>;
+
+/**
+ * VAY-2247 1.5: the end of the first run makes the hotel live when its profile is complete, in one
+ * transaction with the owner's authority locked (the same login and checks as a profile save). A
+ * second call finds it live; a suspended or retired hotel never changes.
+ */
+export async function activateOrdinaryHotelSetupProperty(
+  pool: Pick<pg.Pool, "connect">,
+  scope: ProfileScope,
+): Promise<HotelSetupPropertyActivationResult> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+    if (!(await lockHotelSetupOwnerAuthority(client, scope, PROFILE_PERMISSIONS)))
+      throw new AuthorizationError();
+    const read = async () =>
+      (
+        await client.query<{ lifecycle: string; reasons: string[] }>(
+          `SELECT lifecycle_status AS lifecycle, completeness_reasons AS reasons
+           FROM hotel_catalog.properties WHERE id=$1::uuid FOR UPDATE`,
+          [scope.propertyId],
+        )
+      ).rows[0];
+    const before = await read();
+    if (!before) throw new AuthorizationError();
+    let result: HotelSetupPropertyActivationResult;
+    if (before.lifecycle === "active") result = { status: "already_active" };
+    else if (before.lifecycle !== "provisioning")
+      result = { status: "not_provisioning", lifecycleStatus: before.lifecycle };
+    else {
+      await activateCompleteHotel(client, scope.propertyId);
+      const after = await read();
+      result =
+        after?.lifecycle === "active"
+          ? { status: "activated" }
+          : { status: "incomplete", reasons: after?.reasons ?? [] };
+    }
+    await client.query("COMMIT");
+    return Object.freeze(result);
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/** Route adapter: scope and actor come only from the verified context. */
+export function createOrdinaryHotelSetupActivation(
+  pool: Pick<pg.Pool, "connect">,
+): HotelSetupPropertyActivation {
+  return (context, propertyId) =>
+    activateOrdinaryHotelSetupProperty(pool, {
+      propertyId,
+      organizationId: context.selectedOrganization.organizationId,
+      actorUserId: context.actor.internalUserId,
+    });
 }
