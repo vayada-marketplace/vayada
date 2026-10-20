@@ -10,11 +10,12 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { buildApp } from "./app.js";
 import { agencyPropertyAccessRepository } from "./testAuthorization.js";
-import type {
-  IdentityAdminCommandResponse,
-  IdentityAdminUsersListResponse,
-  IdentityAdminUsersReadRepository,
-  IdentityAdminUserDetailResponse,
+import {
+  createPgIdentityAdminUsersReadRepository,
+  type IdentityAdminCommandResponse,
+  type IdentityAdminUsersListResponse,
+  type IdentityAdminUsersReadRepository,
+  type IdentityAdminUserDetailResponse,
 } from "./routes/identityAdminUsers.js";
 
 const session: VerifiedSession = {
@@ -78,9 +79,9 @@ describe("identity admin user routes", () => {
       url: "/api/identity/admin/users",
       headers: { authorization: "Bearer valid-token" },
       payload: {
-        email: "creator@example.com",
-        name: "Creator Example",
-        type: "creator",
+        email: "hotel@example.com",
+        name: "Hotel Example",
+        type: "hotel",
         status: "verified",
       },
     });
@@ -89,11 +90,47 @@ describe("identity admin user routes", () => {
     expect(commandBus.commands[0]).toMatchObject({
       commandType: "identity.user.create",
       payload: {
-        email: "creator@example.com",
-        legacyUserType: "creator",
+        email: "hotel@example.com",
+        legacyUserType: "hotel",
         initialStatus: "active",
       },
     });
+  });
+
+  it("refuses to create creator or affiliate users (VAY-2272)", async () => {
+    const commandBus = createRecordingCommandBus();
+    app = buildAdminApp(commandBus);
+
+    for (const type of ["creator", "affiliate"]) {
+      const response = await injectJson(app, {
+        method: "POST",
+        url: "/api/identity/admin/users",
+        headers: { authorization: "Bearer valid-token" },
+        payload: { email: `${type}@example.com`, type },
+      });
+      expect(response.statusCode).toBe(422);
+    }
+    expect(commandBus.commands).toEqual([]);
+  });
+
+  it("never lists, counts or reads deleted users (VAY-2272)", async () => {
+    const statements: string[] = [];
+    const repository = createPgIdentityAdminUsersReadRepository({
+      connectionString: "postgresql://admin-users.invalid/vayada",
+      pool: {
+        async query(text: string) {
+          statements.push(text);
+          return { rows: text.includes("count(*)") ? [{ total: "0" }] : [] };
+        },
+        async end() {},
+      } as never,
+    });
+
+    await repository.listUsers({ limit: 10, offset: 0, search: "anna" });
+    await expect(repository.findUserById("user_deleted")).resolves.toBeNull();
+
+    expect(statements).toHaveLength(3);
+    for (const statement of statements) expect(statement).toContain("status <> 'deleted'");
   });
 
   it("lists and reads users from the identity admin surface", async () => {
@@ -103,28 +140,28 @@ describe("identity admin user routes", () => {
 
     const list = await injectJson<IdentityAdminUsersListResponse>(app, {
       method: "GET",
-      url: "/api/identity/admin/users?type=creator",
+      url: "/api/identity/admin/users?type=hotel",
       headers: { authorization: "Bearer valid-token" },
     });
 
     expect(list.statusCode).toBe(200);
     expect(list.body.users).toEqual([
       expect.objectContaining({
-        id: "user_creator",
-        email: "creator@example.com",
-        type: "creator",
+        id: "user_hotel",
+        email: "hotel@example.com",
+        type: "hotel",
       }),
     ]);
 
     const detail = await injectJson<IdentityAdminUserDetailResponse>(app, {
       method: "GET",
-      url: "/api/identity/admin/users/user_creator",
+      url: "/api/identity/admin/users/user_hotel",
       headers: { authorization: "Bearer valid-token" },
     });
 
     expect(detail.statusCode).toBe(200);
     expect(detail.body).toMatchObject({
-      id: "user_creator",
+      id: "user_hotel",
       emailVerified: true,
       profile: null,
     });
@@ -207,10 +244,10 @@ function buildAdminApp(
 function createMemoryAdminUsersReadRepository(): IdentityAdminUsersReadRepository {
   const users: IdentityAdminUsersListResponse["users"] = [
     {
-      id: "user_creator",
-      email: "creator@example.com",
-      name: "Creator Example",
-      type: "creator",
+      id: "user_hotel",
+      email: "hotel@example.com",
+      name: "Hotel Example",
+      type: "hotel",
       status: "verified",
       avatar: null,
       email_verified: true,

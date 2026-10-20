@@ -266,8 +266,18 @@ export const registerProviderWebhookRoutes: FastifyPluginAsync<
 
   app.post<{ Body: string }>("/webhooks/resend", async (request, reply) => {
     const secret = options.secrets.resend;
-    if (!secret || !options.pmsInboxDeliveryReceipts)
-      return reply.code(503).send({ error: "resend_webhook_not_configured" });
+    if (!secret || !options.pmsInboxDeliveryReceipts) {
+      // VAY-2293: booking and platform (contact form, support, alert) emails need no delivery
+      // receipt, so their events are acknowledged even without the Inbox receipt path; nothing is
+      // recorded. With a secret the signature is checked first, so nothing unsigned is parsed.
+      // Signed untagged and Inbox events keep the 503 so Resend retries them.
+      if (secret && !resendSignatureValid(secret, request.headers, request.body))
+        return reply.code(400).send({ error: "invalid_resend_signature" });
+      const unconfigured = parseJsonPayload(request.body);
+      const product = unconfigured.ok ? resendNonInboxProduct(unconfigured.value) : null;
+      if (!product) return reply.code(503).send({ error: "resend_webhook_not_configured" });
+      return reply.code(200).send({ status: `ignored_${product}_notification` });
+    }
     const id = request.headers["svix-id"];
     const timestamp = request.headers["svix-timestamp"];
     const signature = request.headers["svix-signature"];
@@ -293,10 +303,10 @@ export const registerProviderWebhookRoutes: FastifyPluginAsync<
     if (!providerReference || !Number.isFinite(acknowledgedAt.getTime()))
       return reply.code(400).send({ error: "invalid_resend_delivery_receipt" });
 
-    // Only a signed, explicitly Booking-owned event bypasses Inbox correlation.
+    // Only a signed event of a non-Inbox product (booking, platform) bypasses Inbox correlation.
     // Untagged/unknown events retain retries for old sends and acceptance races.
-    if (optionalString(optionalRecord(data, "tags"), "vayada_product") === "booking")
-      return reply.code(200).send({ status: "ignored_booking_notification" });
+    const product = resendNonInboxProduct(payload.value);
+    if (product) return reply.code(200).send({ status: `ignored_${product}_notification` });
 
     const result = await options.pmsInboxDeliveryReceipts.recordTrustedProviderReceipt({
       adapter: "resend",
@@ -610,8 +620,10 @@ function channexModeFor(
     return options.channexReviewMode ?? mode;
   if (classification.family === "alert") return "observe_only";
   return mode === "mutating" &&
-    ((classification.family === "alteration" && (!options.channexAlterationPromotionEnabled ||
-        (options.channexAlterationPropertyIds !== undefined && !options.channexAlterationPropertyIds.includes(classification.propertyId)))) ||
+    ((classification.family === "alteration" &&
+      (!options.channexAlterationPromotionEnabled ||
+        (options.channexAlterationPropertyIds !== undefined &&
+          !options.channexAlterationPropertyIds.includes(classification.propertyId)))) ||
       (classification.family === "booking" && !options.channexBookingPromotionEnabled) ||
       (["booking", "message", "alteration"].includes(classification.family) &&
         classification.propertyOwnerResolved === false) ||
@@ -1529,6 +1541,37 @@ function fallbackPreview(
       rawPayload,
     },
   };
+}
+
+/** The `vayada_product` tag of a Resend event when it names a product without Inbox receipts. */
+function resendNonInboxProduct(event: Record<string, unknown>): "booking" | "platform" | null {
+  const product = optionalString(
+    optionalRecord(optionalRecord(event, "data"), "tags"),
+    "vayada_product",
+  );
+  return product === "booking" || product === "platform" ? product : null;
+}
+
+function resendSignatureValid(
+  secret: string,
+  headers: Record<string, string | string[] | undefined>,
+  body: string,
+): boolean {
+  const id = headers["svix-id"];
+  const timestamp = headers["svix-timestamp"];
+  const signature = headers["svix-signature"];
+  if (typeof id !== "string" || typeof timestamp !== "string" || typeof signature !== "string")
+    return false;
+  try {
+    new Webhook(secret).verify(body, {
+      "svix-id": id,
+      "svix-timestamp": timestamp,
+      "svix-signature": signature,
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function parseJsonPayload(

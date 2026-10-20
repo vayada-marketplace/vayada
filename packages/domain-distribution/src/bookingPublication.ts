@@ -98,32 +98,53 @@ export type BookingPublicContentBuild = Readonly<{
   publicContent: BookingPublicContent;
 }>;
 
-export function buildBookingPublicContent(input: {
+type BookingPublicContentInput = {
   sourceManifestHash: SourceManifestHash;
   readinessHash: ProductReadinessHash;
   profile: PublicBookabilityProfileProjection;
   rooms: readonly BookingPublicRoom[];
   calendar: BookingPublicCalendarSnapshot;
   finance: BookingPublicFinanceEvidence;
-}): BookingPublicContentBuild | null {
-  if (!validHash(input.sourceManifestHash) || !validHash(input.readinessHash)) return null;
+};
+
+/** Which part of the content was refused, for logs (VAY-2292). */
+export type BookingPublicContentRejection =
+  | "hashes"
+  | "profile"
+  | "rooms"
+  | "calendar"
+  | "profile_state"
+  | "payments";
+
+export function buildBookingPublicContent(
+  input: BookingPublicContentInput,
+): BookingPublicContentBuild | null {
+  const result = tryBuildBookingPublicContent(input);
+  return "rejected" in result ? null : result.build;
+}
+
+export function tryBuildBookingPublicContent(
+  input: BookingPublicContentInput,
+): { build: BookingPublicContentBuild } | { rejected: BookingPublicContentRejection } {
+  if (!validHash(input.sourceManifestHash) || !validHash(input.readinessHash))
+    return { rejected: "hashes" };
   const readyMethods = [...new Set(input.finance.readyPaymentMethods)]
     .filter((method) => BOOKING_PUBLIC_PAYMENT_METHODS.includes(method))
     .sort();
   const profile = parsePublicBookabilityProfileProjection(input.profile, {
     manualPaymentReady: publicManualPaymentReady(readyMethods),
   });
-  if (!profile) return null;
+  if (!profile) return { rejected: "profile" };
   const rooms = sanitizeRooms(input.rooms, input.finance, readyMethods);
+  if (!rooms) return { rejected: "rooms" };
   const calendar = sanitizeCalendar(input.calendar, rooms, profile);
+  if (!calendar) return { rejected: "calendar" };
+  if (!validProfile(profile, input.finance)) return { rejected: "profile_state" };
   if (
-    !rooms ||
-    !calendar ||
-    !validProfile(profile, input.finance) ||
     readyMethods.includes("card") !== input.finance.onlinePayment ||
     readyMethods.includes("pay_at_property") !== input.finance.payAtProperty
   )
-    return null;
+    return { rejected: "payments" };
 
   const publicContent = deepFreeze({
     contractVersion: BOOKING_PUBLIC_CONTENT_CONTRACT_VERSION,
@@ -133,11 +154,13 @@ export function buildBookingPublicContent(input: {
     payments: { readyMethods },
   });
   assertPublicBookabilityPublicSafe(publicContent);
-  return deepFreeze({
-    sourceManifestHash: input.sourceManifestHash,
-    readinessHash: input.readinessHash,
-    publicContent,
-  });
+  return {
+    build: deepFreeze({
+      sourceManifestHash: input.sourceManifestHash,
+      readinessHash: input.readinessHash,
+      publicContent,
+    }),
+  };
 }
 
 /** Parses stored immutable JSON into the exact public Booking content contract. Content

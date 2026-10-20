@@ -4,7 +4,6 @@ import type { ExpectedTarget, ParityFinding, ParityHandlerContext } from "../../
 
 type FinanceChecks = NonNullable<ExpectedTarget["financeChecks"]>;
 type PropertyFlowCheck = NonNullable<FinanceChecks["propertyFlows"]>[number];
-type AffiliatePayoutCheck = NonNullable<FinanceChecks["affiliatePayouts"]>[number];
 
 async function checkPropertyFinanceFlow(
   client: pg.Client,
@@ -325,157 +324,6 @@ async function checkPropertyOwnershipLinks(
   }
 }
 
-async function checkAffiliatePayout(
-  client: pg.Client,
-  payout: AffiliatePayoutCheck,
-  findings: ParityFinding[],
-): Promise<void> {
-  const result = await client.query<{
-    provider_account_id: string;
-    account_organization_id: string;
-    account_scope: string;
-    provider_account_ref: string;
-    account_status: string;
-    payouts_enabled: boolean;
-    payout_settings_id: string;
-    payout_settings_status: string;
-    payout_id: string;
-    payout_organization_id: string;
-    payout_provider_payout_id: string | null;
-    payout_amount: string;
-    payout_currency: string;
-    billing_entitlement_id: string;
-    identity_entitlement_id: string | null;
-    billing_status: string;
-    visibility_id: string;
-    visibility_scope: string;
-    visibility_resource_type: string;
-    visibility_resource_id: string;
-    required_permission_key: string;
-    visibility_payout_amount: string;
-    visibility_payout_count: number;
-    has_resource_link: boolean;
-    has_entitlement: boolean;
-  }>(
-    `SELECT
-       account.id::text AS provider_account_id,
-       account.organization_id::text AS account_organization_id,
-       account.account_scope,
-       account.provider_account_id AS provider_account_ref,
-       account.status AS account_status,
-       account.payouts_enabled,
-       payout_settings.id::text AS payout_settings_id,
-       payout_settings.status AS payout_settings_status,
-       payout.id::text AS payout_id,
-       payout.organization_id::text AS payout_organization_id,
-       payout.provider_payout_id AS payout_provider_payout_id,
-       payout.amount::text AS payout_amount,
-       payout.currency AS payout_currency,
-       billing.id::text AS billing_entitlement_id,
-       billing.identity_entitlement_id::text AS identity_entitlement_id,
-       billing.billing_status,
-       visibility.id::text AS visibility_id,
-       visibility.visibility_scope,
-       visibility.resource_type AS visibility_resource_type,
-       visibility.resource_id AS visibility_resource_id,
-       visibility.required_permission_key,
-       visibility.payout_amount::text AS visibility_payout_amount,
-       visibility.payout_count AS visibility_payout_count,
-       EXISTS(
-         SELECT 1
-         FROM identity.organization_resource_links link
-         WHERE link.organization_id = $1
-           AND link.product = 'affiliate'
-           AND link.resource_type = 'affiliate'
-           AND link.resource_id = $2
-           AND link.relationship = 'promotes'
-           AND link.status = 'active'
-       ) AS has_resource_link,
-       EXISTS(
-         SELECT 1
-         FROM identity.product_entitlements entitlement
-         WHERE entitlement.id = $6
-           AND entitlement.organization_id = $1
-           AND entitlement.product = 'affiliate'
-           AND entitlement.entitlement_key = 'affiliate-payouts'
-           AND entitlement.status = 'active'
-       ) AS has_entitlement
-     FROM finance.payment_provider_accounts account
-     JOIN finance.payout_settings payout_settings
-       ON payout_settings.organization_provider_account_id = account.id
-      AND payout_settings.organization_id = account.organization_id
-     JOIN finance.payouts payout
-       ON payout.payout_setting_id = payout_settings.id
-      AND payout.organization_provider_account_id = account.id
-      AND payout.organization_id = account.organization_id
-     JOIN finance.billing_entitlements billing
-       ON billing.id = $7
-      AND billing.organization_id = account.organization_id
-     JOIN finance.finance_visibility_read_model visibility
-       ON visibility.id = $8
-      AND visibility.organization_id = account.organization_id
-     WHERE account.organization_id = $1
-       AND account.id = $3
-       AND payout_settings.id = $4
-       AND payout.id = $5
-       AND billing.identity_entitlement_id = $6`,
-    [
-      payout.organizationId,
-      payout.affiliateResourceId,
-      payout.providerAccountId,
-      payout.payoutSettingsId,
-      payout.payoutId,
-      payout.identityEntitlementId,
-      payout.billingEntitlementId,
-      payout.visibilityReadModelId,
-    ],
-  );
-
-  const row = result.rows[0];
-  const matches =
-    row &&
-    row.provider_account_id === payout.providerAccountId &&
-    row.account_organization_id === payout.organizationId &&
-    row.account_scope === "organization" &&
-    row.provider_account_ref === payout.providerAccountRef &&
-    row.account_status === "active" &&
-    row.payouts_enabled === true &&
-    row.payout_settings_id === payout.payoutSettingsId &&
-    row.payout_settings_status === "active" &&
-    row.payout_id === payout.payoutId &&
-    row.payout_organization_id === payout.organizationId &&
-    row.payout_provider_payout_id === payout.providerPayoutId &&
-    row.payout_amount === payout.payoutAmount &&
-    row.payout_currency === payout.currency &&
-    row.billing_entitlement_id === payout.billingEntitlementId &&
-    row.identity_entitlement_id === payout.identityEntitlementId &&
-    row.billing_status === "active" &&
-    row.visibility_id === payout.visibilityReadModelId &&
-    row.visibility_scope === payout.visibilityScope &&
-    row.visibility_resource_type === "affiliate" &&
-    row.visibility_resource_id === payout.affiliateResourceId &&
-    row.required_permission_key === payout.requiredPermissionKey &&
-    row.visibility_payout_amount === payout.payoutAmount &&
-    row.visibility_payout_count === 1 &&
-    row.has_resource_link === true &&
-    row.has_entitlement === true;
-
-  if (!matches) {
-    findings.push({
-      severity: "fail",
-      code: "FINANCE_AFFILIATE_PAYOUT_MISMATCH",
-      owner: "Finance",
-      targetObject: "finance.payouts",
-      message: `Expected affiliate payout ${payout.payoutId} was not found`,
-      expected:
-        "Affiliate organization provider account, payout settings, payout, billing entitlement, resource link, and permissioned visibility row",
-      actual: row ? JSON.stringify(row) : "row missing",
-      suggestedAction:
-        "Check affiliate payout ownership/resource-link rows and organization-scoped provider account relationships.",
-    });
-  }
-}
-
 async function checkVisibilityPrivateDataBoundary(
   client: pg.Client,
   expected: ExpectedTarget,
@@ -526,10 +374,6 @@ async function checkFinanceFixtures(
   for (const flow of checks.propertyFlows ?? []) {
     await checkPropertyFinanceFlow(client, flow, findings);
     await checkPropertyOwnershipLinks(client, flow, findings);
-  }
-
-  for (const payout of checks.affiliatePayouts ?? []) {
-    await checkAffiliatePayout(client, payout, findings);
   }
 
   await checkVisibilityPrivateDataBoundary(client, expected, findings);

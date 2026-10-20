@@ -64,7 +64,7 @@ type TrackAuthorizationCase = {
   given: {
     authentication: "missing" | "invalid" | "valid";
     permissions: PermissionKey[];
-    organizationKind: "hotel_group" | "creator_workspace";
+    organizationKind: "hotel_group" | "platform";
     revokePermissionBeforeExactRetry?: boolean;
   };
   expected: {
@@ -204,7 +204,7 @@ describe("shared hotel setup status route", () => {
 
   it("rejects non-hotel organizations for the property-type catalog", async () => {
     app = buildSharedSetupApp({
-      organizationKind: "creator_workspace",
+      organizationKind: "platform",
       linkedResources: [],
       repository: repositoryWith([]),
     });
@@ -2276,7 +2276,7 @@ describe("shared hotel setup status route", () => {
     expect(publicUpdateResponse.body.code).toBe("missing_property_resource_link");
   });
 
-  it("reads and writes launch settings for a creator-only property without Booking access", async () => {
+  it("reads and writes launch settings for a property without Booking access", async () => {
     const stored = {
       id: propertyId,
       propertyId,
@@ -2293,10 +2293,7 @@ describe("shared hotel setup status route", () => {
     const updatePropertySettingsByHotelId = vi.fn(async () => stored);
     app = buildSharedSetupApp({
       permissions: ["hotel_catalog.setup.read", "hotel_catalog.setup.manage"],
-      linkedResources: [
-        propertyLink(propertyId),
-        productLink("marketplace", "hotel_profile", propertyId),
-      ],
+      linkedResources: [propertyLink(propertyId)],
       repository: repositoryWith([]),
       launchSettingsRepository: {
         findPropertySettingsByHotelId,
@@ -3209,7 +3206,7 @@ function buildSharedSetupApp(options: {
   propertyAccessRepository?: PropertyAccessRepository;
   permissions?: PermissionKey[];
   linkedResources?: LinkedResource[];
-  organizationKind?: "hotel_group" | "creator_workspace" | "affiliate_partner" | "platform";
+  organizationKind?: "hotel_group" | "platform";
   membershipStatus?: RequestContext["membership"]["status"];
   roleKey?: string;
   includePropertyManifestPermission?: boolean;
@@ -3300,7 +3297,7 @@ function unusedTrackCommandRepository(): HotelSetupTrackCommandRepository {
 
 function identityRepository(options: {
   linkedResources?: LinkedResource[];
-  organizationKind?: "hotel_group" | "creator_workspace" | "affiliate_partner" | "platform";
+  organizationKind?: "hotel_group" | "platform";
   membershipStatus?: RequestContext["membership"]["status"];
   roleKey?: string;
 }): IdentityRepository {
@@ -3335,7 +3332,6 @@ function identityRepository(options: {
           propertyLink(propertyId),
           productLink("booking", "booking_hotel", propertyId),
           productLink("pms", "pms_property", propertyId),
-          productLink("marketplace", "hotel_profile", propertyId),
         ]
       );
     },
@@ -3740,8 +3736,8 @@ function propertyLink(resourceId: string): LinkedResource {
 }
 
 function productLink(
-  product: "booking" | "pms" | "marketplace",
-  resourceType: "booking_hotel" | "pms_property" | "hotel_profile",
+  product: "booking" | "pms",
+  resourceType: "booking_hotel" | "pms_property",
   resourceId: string,
 ): LinkedResource {
   return { product, resourceType, resourceId, relationship: "owner", status: "active" };

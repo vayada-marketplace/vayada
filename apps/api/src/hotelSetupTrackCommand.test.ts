@@ -147,23 +147,8 @@ describe.skipIf(!TEST_DATABASE_URL)("hotel setup track command repository", () =
           organizationIds,
         ]);
       }
-      for (const table of [
-        "marketplace.marketplace_offer_read_model",
-        "marketplace.offer_creator_requirements",
-        "marketplace.offer_deliverables",
-        "marketplace.offer_compensation_options",
-        "marketplace.marketplace_offers",
-      ]) {
-        await client.query(`DELETE FROM ${table} WHERE property_id = ANY($1::uuid[])`, [
-          propertyIds,
-        ]);
-      }
       await client.query(
         `DELETE FROM booking.booking_settings WHERE property_id = ANY($1::uuid[])`,
-        [propertyIds],
-      );
-      await client.query(
-        `DELETE FROM marketplace.marketplace_hotel_profiles WHERE property_id = ANY($1::uuid[])`,
         [propertyIds],
       );
       await client.query(`DELETE FROM hotel_catalog.properties WHERE id = ANY($1::uuid[])`, [
@@ -332,9 +317,6 @@ describe.skipIf(!TEST_DATABASE_URL)("hotel setup track command repository", () =
       error: { code: "invalid_setup_request", currentRevision: 1 },
     });
     expect(await activeEntitlementProducts(fixture.organizationId)).toEqual(["booking", "pms"]);
-    expect(
-      await count("marketplace.marketplace_hotel_profiles", "property_id", fixture.propertyId),
-    ).toBe(0);
 
     await client.query(
       `DELETE FROM identity.organization_resource_links

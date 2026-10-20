@@ -15,7 +15,7 @@ export default function PrivacyPage() {
           <div className="mb-8">
             <h1 className="text-4xl md:text-5xl font-bold text-primary-800 mb-4">Privacy Policy</h1>
             <p className="text-gray-600">
-              <strong>Effective Date:</strong> October 17, 2026
+              <strong>Effective Date:</strong> October 20, 2026
             </p>
           </div>
 
@@ -121,9 +121,9 @@ export default function PrivacyPage() {
                       <tr>
                         <td className={`${TD} font-medium`}>Business and Payout Data</td>
                         <td className={TD}>
-                          Company details, VAT number, invoice address, the plan you chose, invoices,
-                          and the Stripe account used for card payouts. Bank and identity details for
-                          payouts are collected and held by Stripe, not by vayada.
+                          Company details, VAT number, invoice address, the plan you chose,
+                          invoices, and the Stripe account used for card payouts. Bank and identity
+                          details for payouts are collected and held by Stripe, not by vayada.
                         </td>
                         <td className={TD}>
                           To bill you, pay out card payments and meet tax and accounting rules
@@ -216,8 +216,8 @@ export default function PrivacyPage() {
                           actions and settings, with the time of the change.
                         </td>
                         <td className={TD}>
-                          To let Hotels trace changes, resolve disputes and prevent misuse
-                          (Article 6(1) lit. f GDPR).
+                          To let Hotels trace changes, resolve disputes and prevent misuse (Article
+                          6(1) lit. f GDPR).
                         </td>
                       </tr>
                     </tbody>
@@ -285,19 +285,24 @@ export default function PrivacyPage() {
                 </p>
                 <ul className="list-disc list-inside ml-4 space-y-2">
                   <li>
-                    <strong>Hosting:</strong> Amazon Web Services, European Union (Ireland), for
-                    the applications, databases, file storage and server logs.
+                    <strong>Hosting:</strong> Amazon Web Services, European Union (Ireland), for the
+                    applications, databases, file storage and server logs.
                   </li>
                   <li>
                     <strong>Sign-in:</strong> WorkOS, for your account login, password reset, email
                     verification and Google sign-in.
                   </li>
                   <li>
-                    <strong>Payments:</strong> Stripe, for card payments on your booking site,
-                    your payout account and our own invoicing.
+                    <strong>Payments:</strong> Stripe, for card payments on your booking site, your
+                    payout account and our own invoicing.
                   </li>
                   <li>
-                    <strong>Email:</strong> Resend, for the service and booking emails we send.
+                    <strong>Email:</strong> Resend, for the service and booking emails we send and
+                    to deliver contact form messages and support requests to our team.
+                  </li>
+                  <li>
+                    <strong>Team mailboxes:</strong> Google Workspace, where contact form messages
+                    and support requests arrive and where we keep our email correspondence with you.
                   </li>
                   <li>
                     <strong>Channel connections:</strong> Channex, the channel manager behind the
@@ -310,8 +315,8 @@ export default function PrivacyPage() {
                     requests under Google&apos;s own privacy policy.
                   </li>
                   <li>
-                    <strong>Website analytics:</strong> Cloudflare Web Analytics on vayada.com,
-                    only with your consent.
+                    <strong>Website analytics:</strong> Cloudflare Web Analytics on vayada.com, only
+                    with your consent.
                   </li>
                 </ul>
                 <p className="mt-3">
@@ -344,7 +349,9 @@ export default function PrivacyPage() {
                 for 30 days after it is closed, so that you can export it. Invoices and booking
                 records that tax and commercial law require us to keep are retained for the
                 statutory periods (usually up to ten years, Article 6(1) lit. c GDPR). Server logs
-                and support messages are deleted as described above.
+                are deleted as described above. Messages from the contact form (see Section 8) and
+                support requests from the apps are emailed to our team and deleted from our database
+                90 days after you send them.
               </p>
               <p className="mb-4">You have the following rights regarding your Personal Data:</p>
               <ul className="list-disc list-inside ml-4 space-y-2">
@@ -362,8 +369,8 @@ export default function PrivacyPage() {
                 </li>
                 <li>
                   <strong>Restriction, portability and objection:</strong> You can ask for
-                  processing to be restricted, receive your data in a portable format, and object
-                  to processing based on legitimate interests (Article 6(1) lit. f GDPR).
+                  processing to be restricted, receive your data in a portable format, and object to
+                  processing based on legitimate interests (Article 6(1) lit. f GDPR).
                 </li>
                 <li>
                   <strong>Withdraw consent:</strong> You can withdraw any consent at any time, for
@@ -424,11 +431,11 @@ export default function PrivacyPage() {
                 </p>
                 <ul className="list-disc list-inside ml-4 space-y-2">
                   <li>
-                    <strong>Required Data:</strong> Your Name, Email Address, the User Category
-                    (&quot;I am a...&quot;), and your Message.
+                    <strong>Required Data:</strong> Your Name, Email Address, and your Message.
                   </li>
                   <li>
-                    <strong>Optional Data:</strong> Your Phone Number, Company Name, and Country.
+                    <strong>Optional Data:</strong> Your Phone Number, Company Name, Country, and
+                    the User Category (&quot;I am a...&quot;).
                   </li>
                 </ul>
               </div>
@@ -450,26 +457,43 @@ export default function PrivacyPage() {
               <div className="mt-6">
                 <h3 className={H3}>C. Internal Handling and International Transfer</h3>
                 <p>
-                  Your inquiry is received by our Customer Service department. We do not transfer
-                  your inquiries or any associated personal data to third countries or organizations
-                  outside the European Union (EU).
+                  We store your inquiry in our database, hosted by Amazon Web Services in the
+                  European Union (Ireland), and send it by email to the member of our team who
+                  answers inquiries; our mailboxes are hosted by Google Workspace. That email goes
+                  through Resend, our email service provider. Resend and Google may process it in
+                  the United States; these transfers are covered by the EU–US Data Privacy Framework
+                  or the European Commission&apos;s standard contractual clauses. When you or we
+                  reply, the conversation continues by email.
                 </p>
               </div>
 
               <div className="mt-6">
                 <h3 className={H3}>D. Data Retention and Deletion</h3>
                 <p className="mb-3">
-                  We delete the data relating to your contact inquiry promptly after the inquiry has
-                  been fully handled and resolved.
+                  We delete your inquiry from our database 90 days after you send it; our automatic
+                  database backups are overwritten within seven days after that. The notification
+                  email and the emails we exchange with you are kept in our mailboxes only as long
+                  as we need them to handle your inquiry.
                 </p>
                 <p>
-                  However, statutory retention periods may prevent immediate deletion. This is
-                  particularly true if your inquiry is related to a contract, warranty, or guarantee
-                  claim. In such cases, we store your inquiry data only for the purpose of
-                  fulfilling legal retention obligations (e.g., commercial and tax law retention
-                  periods, typically up to ten years, as per Article 6(1) lit. c of the GDPR). We
-                  will delete your data at the latest when these statutory retention periods expire,
-                  without requiring a specific request from you.
+                  If your inquiry leads to a contract, warranty, or guarantee claim, we keep that
+                  correspondence for the statutory retention periods (e.g., commercial and tax law,
+                  typically up to ten years, as per Article 6(1) lit. c of the GDPR) and delete it
+                  at the latest when these periods expire, without requiring a specific request from
+                  you.
+                </p>
+              </div>
+
+              <div className="mt-6">
+                <h3 className={H3}>E. Support Requests from the Apps</h3>
+                <p>
+                  When you send a support request or bug report from Booking Admin or the PMS, we
+                  store your message, the request type, the app and page you sent it from, your
+                  name, email address and user ID, and your account&apos;s ID and name, and look up
+                  the names of the hotels in your account. We handle it like a contact form inquiry:
+                  it is emailed to our team through Resend, arrives in our Google Workspace
+                  mailboxes, and is deleted from our database 90 days after you send it (Article
+                  6(1) lit. b GDPR, to help you use the Services).
                 </p>
               </div>
             </section>
@@ -528,9 +552,9 @@ export default function PrivacyPage() {
                   </li>
                   <li>
                     <strong>Partner links:</strong> if you arrive through a link from one of the
-                    hotel&apos;s referral partners, we record the partner code, the
-                    page you arrived on and the site you came from, so the partner can be credited
-                    (Article 6(1) lit. f GDPR).
+                    hotel&apos;s referral partners, we record the partner code, the page you arrived
+                    on and the site you came from, so the partner can be credited (Article 6(1) lit.
+                    f GDPR).
                   </li>
                   <li>
                     <strong>Your browser:</strong> the booking site also keeps a few necessary items
