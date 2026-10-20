@@ -3465,6 +3465,7 @@
   "dashboard.checklist.item.calendar": "Calendar",
   "dashboard.checklist.item.calendarDescription": "Open all year · {rooms} bookable · minimum 1 night · opens PMS → Settings → Auto-open future calendar (minimum stay in Rooms & Rates)",
   "dashboard.checklist.item.calendarRooms": "all {count} rooms",
+  "dashboard.checklist.item.calendarOneRoom": "1 room",
   "dashboard.checklist.item.calendarAllRooms": "all rooms",
   "dashboard.checklist.item.guestTerms": "Guest terms",
   "dashboard.checklist.item.guestTermsDescription": "Check-in 15:00 · check-out 11:00 · vayada standard terms · opens Booking Admin → Settings → Policies",

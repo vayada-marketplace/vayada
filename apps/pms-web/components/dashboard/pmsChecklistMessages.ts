@@ -59,9 +59,12 @@ export function pmsChecklistMessages(t: Translate): HotelSetupChecklistMessages 
         title: t("dashboard.checklist.item.calendar"),
         description: ({ roomCount }) =>
           t("dashboard.checklist.item.calendarDescription", {
-            rooms: roomCount
-              ? t("dashboard.checklist.item.calendarRooms", { count: roomCount })
-              : t("dashboard.checklist.item.calendarAllRooms"),
+            rooms:
+              roomCount === 1
+                ? t("dashboard.checklist.item.calendarOneRoom")
+                : roomCount
+                  ? t("dashboard.checklist.item.calendarRooms", { count: roomCount })
+                  : t("dashboard.checklist.item.calendarAllRooms"),
           }),
       },
       guest_terms: item(

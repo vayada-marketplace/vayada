@@ -45,6 +45,10 @@ test("shows the checklist instead of the banner once the server answers (c01-1)"
   await expect(card).toBeVisible();
   await expect(card.getByText("4 of 9 done").filter({ visible: true })).toBeVisible();
   await expect(page.getByText("Your property setup isn't complete")).toHaveCount(0);
+  // The mocked hotel sells one room tonight.
+  await expect(
+    card.getByText(/Open all year · 1 room bookable/).filter({ visible: true }),
+  ).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("pms-dashboard-checklist-d.png") });
 
   await card.getByRole("button", { name: "Looks good" }).first().click();
