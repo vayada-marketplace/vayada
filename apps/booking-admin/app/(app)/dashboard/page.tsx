@@ -6,6 +6,11 @@ import { formatCurrency, formatNumber } from "@/lib/utils";
 import { settingsService, type PropertySettings } from "@/services/settings";
 import { BookingPageStatusCard } from "@/components/dashboard/BookingPageStatusCard";
 import { ResumeSetupBanner } from "@/components/dashboard/ResumeSetupBanner";
+import {
+  DashboardSetupChecklistCard,
+  DashboardSetupChecklistChip,
+  useDashboardSetupChecklist,
+} from "@/components/dashboard/DashboardSetupChecklist";
 import { ConversionFunnelCard } from "@/components/dashboard/ConversionFunnelCard";
 import { SummaryCard } from "@/components/dashboard/SummaryCard";
 import { PageHeader, PageLayout } from "@/components/layout/PageLayout";
@@ -79,6 +84,9 @@ export default function DashboardPage() {
   const [sparklines, setSparklines] = useState<Sparklines | null>(null);
   const [currency, setCurrency] = useState("EUR");
   const [propertyTimeZone, setPropertyTimeZone] = useState<string | null>(null);
+  const [hotelName, setHotelName] = useState("");
+  // VAY-2247 wave 2: the setup checklist, where the server offers it.
+  const setupChecklist = useDashboardSetupChecklist();
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [loading, setLoading] = useState(true);
   const [pageViewsModalOpen, setPageViewsModalOpen] = useState(false);
@@ -90,6 +98,7 @@ export default function DashboardPage() {
       .then((settings: PropertySettings) => {
         if (settings.default_currency) setCurrency(settings.default_currency);
         setPropertyTimeZone(settings.time_zone || null);
+        setHotelName(settings.property_name || "");
       })
       .catch(() => setPropertyTimeZone(null))
       .finally(() => setSettingsLoaded(true));
@@ -217,11 +226,16 @@ export default function DashboardPage() {
 
   return (
     <PageLayout className="space-y-3 md:space-y-4">
-      <PageHeader title={t("dashboard.title")} />
+      <PageHeader
+        title={t("dashboard.title")}
+        actions={<DashboardSetupChecklistChip setup={setupChecklist} />}
+      />
 
-      <ResumeSetupBanner />
+      <ResumeSetupBanner hidden={setupChecklist.state.kind === "ready"} />
 
       <BookingPageStatusCard />
+
+      <DashboardSetupChecklistCard setup={setupChecklist} hotelName={hotelName} />
 
       {/* Time Range Tabs */}
       <div className="flex gap-1 bg-gray-100 rounded-lg p-1 w-full sm:w-fit">
