@@ -140,7 +140,9 @@ describe.skipIf(!URL)("affiliate program drop 0498", () => {
         );
       await expect(retiredDisposition("payout-before")).rejects.toMatchObject({ code: "23514" });
 
-      expect((await run(MIGRATIONS)).failed).toBeNull();
+      // Later migrations may change what this checks, so it stops at 0498.
+      await cp(join(MIGRATIONS, file), join(before, file));
+      expect((await run(before)).failed).toBeNull();
 
       const relations = await db.query<{ name: string }>(
         `SELECT n.nspname || '.' || c.relname AS name

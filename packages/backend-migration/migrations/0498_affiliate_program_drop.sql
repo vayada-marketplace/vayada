@@ -15,6 +15,8 @@
 -- dropped data is gone and no rollback restores it.
 
 SET LOCAL lock_timeout = '5s';
+-- Each lock waits at most 5 seconds; together they may not hold the API up for more than 15.
+SET LOCAL statement_timeout = '15s';
 
 -- Every table this changes, in one statement and one order: the dropped tables, every table one of
 -- them references (dropping a foreign key removes its triggers there), the archive and the
