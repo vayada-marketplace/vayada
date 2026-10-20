@@ -53,7 +53,7 @@ export async function registerPlatformPropertySlugRoutes(
     }
     try {
       const result = await options.command.apply({ ...input, reason, expectedPlanSha256 });
-      if (result.publication.status === "failed") {
+      if ("code" in result.publication) {
         request.log.warn(
           { propertyId: input.propertyId, code: result.publication.code },
           "Booking page address changed; the republish failed",

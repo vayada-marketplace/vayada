@@ -40,7 +40,7 @@ describe("platform property address routes (VAY-2295)", () => {
   let app: ReturnType<typeof buildApp> | undefined;
   afterEach(async () => app?.close());
 
-  const post = (path: string, payload: unknown) =>
+  const post = (path: string, payload: Record<string, unknown>) =>
     injectJson(app!, {
       method: "POST",
       url: `/api/platform/admin/properties/${propertyId}/${path}`,
