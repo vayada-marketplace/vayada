@@ -23,6 +23,7 @@ import type {
   SharedPublicPropertyProfile,
   UpdatePublicPropertyProfileResult,
 } from "../routes/sharedHotelSetupStatus.js";
+import { SETUP_GO_LIVE_CONTENT_SQL } from "./hotelSetupGoLiveContent.js";
 import { projectPropertyPublicProfile } from "./propertyPublicProfileProjection.js";
 import {
   ACTIVE_PROPERTY_MEDIA_PUBLICATION_PREDICATE,
@@ -571,11 +572,18 @@ const HOTEL_BASICS_REASONS_SQL = `ARRAY_REMOVE(ARRAY[${HOTEL_BASICS_REASON_CODES
   (code) => `CASE WHEN ${HOTEL_BASICS_MISSING_SQL[code]} THEN '${code}' END`,
 ).join(", ")}]::text[], NULL)`;
 
+/** When a completeness update may make a provisioning hotel live. */
+type HotelActivation = "never" | "with_setup_content" | "on_basics";
+
+/**
+ * After an old-setup or photo save: recomputes completeness, bumps the revision, and makes the hotel
+ * live once its basics are complete and it has a description and an approved image (as before VAY-2247).
+ */
 export async function advancePublicProfileRevision(
   client: SharedHotelSetupQueryClient,
   propertyId: string,
 ): Promise<void> {
-  return updatePublicProfileCompleteness(client, propertyId, true, true);
+  return updatePublicProfileCompleteness(client, propertyId, true, "with_setup_content");
 }
 
 /**
@@ -586,7 +594,7 @@ export async function recomputeHotelProfileCompleteness(
   client: SharedHotelSetupQueryClient,
   propertyId: string,
 ): Promise<void> {
-  return updatePublicProfileCompleteness(client, propertyId, false, false);
+  return updatePublicProfileCompleteness(client, propertyId, false, "never");
 }
 
 /**
@@ -597,14 +605,14 @@ export async function activateCompleteHotel(
   client: SharedHotelSetupQueryClient,
   propertyId: string,
 ): Promise<void> {
-  return updatePublicProfileCompleteness(client, propertyId, false, true);
+  return updatePublicProfileCompleteness(client, propertyId, false, "on_basics");
 }
 
 async function updatePublicProfileCompleteness(
   client: SharedHotelSetupQueryClient,
   propertyId: string,
   advanceRevision: boolean,
-  activateWhenComplete: boolean,
+  activation: HotelActivation,
 ): Promise<void> {
   const updated = await client.query<{ activated: boolean; lifecycleRevision: number | string }>(
     `WITH completeness AS (
@@ -617,12 +625,14 @@ async function updatePublicProfileCompleteness(
      ),
      -- VAY-2140: a new hotel goes live once setup completes its profile; Vayada does not
      -- approve it. Only provisioning hotels change; suspended and retired ones stay.
+     -- VAY-2247: old-setup and photo saves also need a description and an approved image.
      transition AS (
        SELECT completeness.*, property.lifecycle_revision AS before_revision, (
          $3::boolean
          AND property.lifecycle_status = 'provisioning'
          AND property.profile_status NOT IN ('disabled', 'private')
          AND cardinality(completeness.reasons) = 0
+         ${activation === "with_setup_content" ? `AND ${SETUP_GO_LIVE_CONTENT_SQL}` : ""}
        ) AS activate
        FROM completeness
        JOIN hotel_catalog.properties property ON property.id = completeness.property_id
@@ -650,7 +660,7 @@ async function updatePublicProfileCompleteness(
      RETURNING transition.activate AND property.lifecycle_status = 'active'
          AND property.lifecycle_revision = transition.before_revision + 1 AS activated,
        property.lifecycle_revision AS "lifecycleRevision"`,
-    [propertyId, advanceRevision, activateWhenComplete],
+    [propertyId, advanceRevision, activation !== "never"],
   );
   const row = updated.rows[0];
   if (!row?.activated) return;

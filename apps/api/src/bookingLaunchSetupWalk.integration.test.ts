@@ -347,8 +347,9 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
         expect.arrayContaining([
           "booking.calendar:operating_calendar_missing",
           "booking.guest_experience:guest_policy_not_configured",
-          // VAY-2247: the basics are complete at creation; the hotel goes live with "Present your hotel".
-          "booking.hotel_profile:hotel_setup_in_progress",
+          // VAY-2247: the basics are complete at creation; the hotel goes live once "Present your
+          // hotel" adds a description and a photo, so that is what's asked for.
+          "booking.hotel_profile:hotel_setup_content_missing",
           "booking.page_style:booking_design_missing",
           "booking.payments:billing_plan_not_selected",
           "booking.payments:payment_methods_not_configured",
