@@ -524,7 +524,7 @@ function BookingPreview({
             {snapshot.profile.displayName}
           </h3>
           <p className="mt-4 max-w-lg text-sm leading-6 text-white/90 sm:text-base">
-            {snapshot.profile.shortDescription}
+            {snapshot.profile.shortDescription ?? ""}
           </p>
           <span
             className="mt-6 inline-flex min-h-11 items-center rounded-full px-5 py-2.5 text-sm font-semibold"

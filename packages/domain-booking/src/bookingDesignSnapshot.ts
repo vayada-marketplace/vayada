@@ -6,6 +6,7 @@ import type {
   SourceEntityRevision,
 } from "@vayada/domain-hotels";
 import {
+  HOTEL_CATALOG_CONTENT_LOCALES,
   HOTEL_CATALOG_STEP1_CONTRACT_VERSION,
   parsePropertyMediaLibraryItem,
   parseSaveHotelCatalogStep1Request,
@@ -41,7 +42,8 @@ export type BookingDesignCatalogProfileEvidence = Readonly<{
     profileRevision: HotelCatalogStep1ReadModel["profileRevision"];
     displayName: HotelCatalogStep1ReadModel["displayName"];
     contentLocale: HotelCatalogStep1ReadModel["profile"]["locale"];
-    shortDescription: NonNullable<HotelCatalogStep1ReadModel["profile"]["shortDescription"]>;
+    /** VAY-2247: null when the hotel has no description yet; the page shows none. */
+    shortDescription: string | null;
   }>;
 }>;
 export type BookingDesignCatalogCoverAssignmentEvidence = Readonly<{
@@ -123,13 +125,19 @@ export function parseBookingDesignCatalogProfileEvidenceResult(
   ) {
     return null;
   }
-  const parsedProfile = parseSaveHotelCatalogStep1Request({
-    expectedProfileRevision: value["profile"]["profileRevision"],
-    locale: value["profile"]["contentLocale"],
-    shortDescription: value["profile"]["shortDescription"],
-    amenities: { reviewed: true, keys: [] },
-    media: { coverMediaObjectId: null, galleryMediaObjectIds: [] },
-  });
+  const parsedProfile =
+    value["profile"]["shortDescription"] === null
+      ? profileWithoutDescription(
+          value["profile"]["profileRevision"],
+          value["profile"]["contentLocale"],
+        )
+      : parseSaveHotelCatalogStep1Request({
+          expectedProfileRevision: value["profile"]["profileRevision"],
+          locale: value["profile"]["contentLocale"],
+          shortDescription: value["profile"]["shortDescription"],
+          amenities: { reviewed: true, keys: [] },
+          media: { coverMediaObjectId: null, galleryMediaObjectIds: [] },
+        });
   const source = parseSource(value["source"], scope.propertyId);
   if (
     !parsedProfile ||
@@ -153,6 +161,20 @@ export function parseBookingDesignCatalogProfileEvidenceResult(
       shortDescription: parsedProfile.shortDescription,
     }),
   });
+}
+
+/** The same revision and locale rules as a Step 1 save, for a hotel without a description. */
+function profileWithoutDescription(revision: unknown, locale: unknown) {
+  return Number.isSafeInteger(revision) &&
+    (revision as number) >= 1 &&
+    (revision as number) <= 2_147_483_647 &&
+    (HOTEL_CATALOG_CONTENT_LOCALES as readonly unknown[]).includes(locale)
+    ? {
+        expectedProfileRevision: revision as number,
+        locale: locale as (typeof HOTEL_CATALOG_CONTENT_LOCALES)[number],
+        shortDescription: null,
+      }
+    : null;
 }
 
 export function parseBookingDesignCatalogCoverAssignmentEvidenceResult(
@@ -208,7 +230,9 @@ export function parseBookingDesignCatalogSafeMediaEvidenceResult(
   value: unknown,
   expectedScope: BookingDesignCatalogEvidenceScope & Readonly<{ mediaObjectId: string }>,
 ):
-  BookingDesignCatalogSafeMediaEvidence | BookingDesignCatalogEvidenceFailure<"safe_media"> | null {
+  | BookingDesignCatalogSafeMediaEvidence
+  | BookingDesignCatalogEvidenceFailure<"safe_media">
+  | null {
   const failure = parseFailure(value, "safe_media");
   if (failure) return failure;
   const scope = parseScope(expectedScope);
