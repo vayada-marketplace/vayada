@@ -69,7 +69,7 @@ const serving: PlatformMediaServingConfig = {
   privateDownloadMaxTtlSeconds: 900,
 };
 const request: HotelFirstRunRequest = {
-  room: { name: "Garden Suite", numberOfRooms: 3, maxGuests: 2, pricePerNight: "14500" },
+  rooms: [{ name: "Garden Suite", numberOfRooms: 3, maxGuests: 2, pricePerNight: "14500" }],
   pricesIncludeMandatoryCharges: true,
   guestPayment: "pay_at_property",
   plan: "commission",
@@ -541,6 +541,55 @@ describe.skipIf(!url)(
         // A second run finds everything in place.
         const again = await h.service().run(h.actor, request, h.email);
         expect(again).toMatchObject({ ok: true, ran: [] });
+      } finally {
+        await h.close();
+      }
+    });
+
+    it("creates several room types, numbers their rooms on across them and prices each (1.12)", async () => {
+      const h = await hotel();
+      try {
+        const rooms = [
+          ...request.rooms,
+          { name: "Ocean Villa", numberOfRooms: 2, maxGuests: 4, pricePerNight: "26000" },
+        ];
+        const result = await h.service().run(h.actor, { ...request, rooms }, h.email);
+        expect(result, JSON.stringify(result)).toMatchObject({ ok: true, checkoutUrl: null });
+        if (!result.ok) return;
+        expect(new Set(result.state.steps.map((step) => step.state))).toEqual(new Set(["done"]));
+
+        // Room names are unique in a hotel: the villas continue after the suites.
+        const { roomFacts } = h.ports;
+        const types = await roomFacts.listRoomTypeFacts(h.propertyId);
+        const byName = new Map(types.map((type) => [type.facts.name, type]));
+        expect([...byName.keys()].sort()).toEqual(["Garden Suite", "Ocean Villa"]);
+        expect(byName.get("Ocean Villa")?.facts.occupancy).toEqual({
+          maxGuests: 4,
+          maxAdults: 4,
+          maxChildren: 3,
+        });
+        const labels = async (name: string) =>
+          (
+            await roomFacts.listPhysicalRoomUnitIdentities(
+              h.propertyId,
+              byName.get(name)!.roomTypeId,
+            )
+          )
+            .map((unit) => `${unit.operationalLabel}:${unit.operationalLabelStatus}`)
+            .sort();
+        expect(await labels("Garden Suite")).toEqual([
+          "Room 1:verified",
+          "Room 2:verified",
+          "Room 3:verified",
+        ]);
+        expect(await labels("Ocean Villa")).toEqual(["Room 4:verified", "Room 5:verified"]);
+
+        // Both are priced and on the calendar, so nothing blocks publishing; a second run writes nothing.
+        expect(blockerCodes(await h.readiness())).toEqual([]);
+        expect(await h.service().run(h.actor, { ...request, rooms }, h.email)).toMatchObject({
+          ok: true,
+          ran: [],
+        });
       } finally {
         await h.close();
       }

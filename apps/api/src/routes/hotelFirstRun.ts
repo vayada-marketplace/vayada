@@ -4,11 +4,15 @@ import {
   resolveEffectivePropertyAccess,
   type PropertyAccessRepository,
 } from "@vayada/backend-authorization";
+import type { FirstRunRoomInput } from "@vayada/domain-booking";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
 import type { HotelFirstRunRequest, HotelFirstRunResult } from "../domains/hotelFirstRunService.js";
 import type { HotelFirstRunState } from "../domains/hotelFirstRunState.js";
-import type { HotelFirstRunActor } from "../domains/hotelFirstRunSteps.js";
+import {
+  FIRST_RUN_MAX_ROOM_TYPES,
+  type HotelFirstRunActor,
+} from "../domains/hotelFirstRunSteps.js";
 import { enforceRoutePolicy } from "./policy.js";
 
 /**
@@ -47,15 +51,41 @@ function exact(value: unknown, keys: readonly string[]): value is Record<string,
   return actual.length === keys.length && keys.every((key) => Object.hasOwn(value, key));
 }
 
-export function parseHotelFirstRunRequest(value: unknown): HotelFirstRunRequest | null {
-  if (!exact(value, ["room", "pricesIncludeMandatoryCharges", "guestPayment", "plan"])) return null;
-  const room = value.room;
+const ROOM_KEYS = ["name", "numberOfRooms", "maxGuests", "pricePerNight"] as const;
+
+function parseRoom(room: unknown): FirstRunRoomInput | null {
   if (
-    !exact(room, ["name", "numberOfRooms", "maxGuests", "pricePerNight"]) ||
+    !exact(room, ROOM_KEYS) ||
     typeof room.name !== "string" ||
     !Number.isInteger(room.numberOfRooms) ||
     !Number.isInteger(room.maxGuests) ||
-    typeof room.pricePerNight !== "string" ||
+    typeof room.pricePerNight !== "string"
+  )
+    return null;
+  return Object.freeze({
+    name: room.name,
+    numberOfRooms: room.numberOfRooms as number,
+    maxGuests: room.maxGuests as number,
+    pricePerNight: room.pricePerNight,
+  });
+}
+
+/**
+ * The body: `rooms` (1–10 room types, VAY-2247 1.12), or `room` for one, as the first version sent it.
+ * Room type names must differ (the PMS keeps them unique per hotel, ignoring case).
+ */
+export function parseHotelFirstRunRequest(value: unknown): HotelFirstRunRequest | null {
+  const roomsKey =
+    typeof value === "object" && value !== null && Object.hasOwn(value, "rooms") ? "rooms" : "room";
+  if (!exact(value, [roomsKey, "pricesIncludeMandatoryCharges", "guestPayment", "plan"]))
+    return null;
+  const given = roomsKey === "rooms" ? value.rooms : [value.room];
+  if (!Array.isArray(given) || given.length < 1 || given.length > FIRST_RUN_MAX_ROOM_TYPES)
+    return null;
+  const rooms = given.map(parseRoom);
+  if (
+    rooms.some((room) => room === null) ||
+    new Set(rooms.map((room) => room!.name.trim().toLowerCase())).size !== rooms.length ||
     typeof value.pricesIncludeMandatoryCharges !== "boolean" ||
     value.guestPayment !== "pay_at_property" ||
     (value.plan !== "commission" && value.plan !== "fixed_fee")
@@ -63,12 +93,7 @@ export function parseHotelFirstRunRequest(value: unknown): HotelFirstRunRequest 
     return null;
   }
   return Object.freeze({
-    room: Object.freeze({
-      name: room.name,
-      numberOfRooms: room.numberOfRooms as number,
-      maxGuests: room.maxGuests as number,
-      pricePerNight: room.pricePerNight,
-    }),
+    rooms: Object.freeze(rooms as FirstRunRoomInput[]),
     pricesIncludeMandatoryCharges: value.pricesIncludeMandatoryCharges,
     guestPayment: "pay_at_property",
     plan: value.plan,
