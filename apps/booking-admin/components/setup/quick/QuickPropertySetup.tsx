@@ -3,19 +3,32 @@
 import type { SharedHotelSetupApi } from "@vayada/product-onboarding";
 
 import { HotelFirstRunError, type HotelFirstRunClient } from "@/services/api/hotelFirstRunClient";
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState } from "react";
 
+import type { QuickPreviewRoom } from "./QuickBookingPagePreview";
+import { QuickGoLiveStep } from "./QuickGoLiveStep";
+import { QuickLiveScreen } from "./QuickLiveScreen";
 import { QuickPayStep, type QuickPlanChoice } from "./QuickPayStep";
 import { QuickRoomStep } from "./QuickRoomStep";
 import { QuickSetupShell } from "./QuickSetupShell";
 import { currencySymbol, quickHotelCurrency } from "./quickHotelCurrency";
 import { previewBookingHost } from "./quickHotelDraft";
 import {
-  EMPTY_QUICK_ROOM_DRAFT,
-  quickRoomErrors,
+  EMPTY_QUICK_ROOMS_DRAFT,
+  parseQuickRoomsDraft,
+  quickFirstRunChoices,
+  quickRoomChoices,
   quickRoomRequest,
-  type QuickRoomDraft,
+  quickPreviewRooms,
+  quickRoomsFirstError,
+  type QuickRoomsDraft,
 } from "./quickRoomDraft";
+import { useQuickPublication, type QuickPublicationClient } from "./useQuickPublication";
+
+/** The pages setup hands over to: the defaults to review, and the next steps after going live. */
+export type QuickSetupPage = "review" | "rooms_and_rates" | "design_studio" | "payment_settings";
+
+type Store = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
 export type QuickPropertySetupProps = {
   propertyId: string;
@@ -29,10 +42,18 @@ export type QuickPropertySetupProps = {
   readCheckoutPending: (propertyId: string) => Promise<boolean | null>;
   /** Opens the Stripe checkout for the Fixed Fee. */
   openCheckout: (url: string) => void;
-  storage?: Pick<Storage, "getItem" | "setItem" | "removeItem"> | null;
+  storage?: Store | null;
   onSaveAndExit: () => void;
-  /** Steps 4 and 5 (how guests pay, go live) until their own PRs. */
-  renderStep?: (step: 5, room: QuickRoomDraft) => ReactNode;
+  /** The setup "Booking Engine" card's review and publish API, for step 5. */
+  publication: QuickPublicationClient;
+  organizationId: string;
+  /** Where the publish request is kept for recovery (the browser's local storage). */
+  publicationStorage: Store;
+  openPage: (page: QuickSetupPage) => void;
+  /** Copies the booking page link (the clipboard by default). */
+  copyLink?: (url: string) => Promise<void>;
+  /** Back from step 3: "Your hotel" for this hotel. */
+  onEditHotel?: (() => void) | null;
 };
 
 type Hotel = {
@@ -57,14 +78,18 @@ export function quickFirstRunErrorMessage(error: unknown): string {
 export const quickRoomStorageKey = (propertyId: string) =>
   `vayada.quickSetup.v1.room.${propertyId}`;
 
-function readRoom(storage: QuickPropertySetupProps["storage"], propertyId: string): QuickRoomDraft {
+function readRooms(
+  storage: QuickPropertySetupProps["storage"],
+  propertyId: string,
+): QuickRoomsDraft {
   try {
-    const value = JSON.parse(storage?.getItem(quickRoomStorageKey(propertyId)) ?? "null");
-    return value && typeof value === "object"
-      ? { ...EMPTY_QUICK_ROOM_DRAFT, ...(value as Partial<QuickRoomDraft>) }
-      : EMPTY_QUICK_ROOM_DRAFT;
+    return (
+      parseQuickRoomsDraft(
+        JSON.parse(storage?.getItem(quickRoomStorageKey(propertyId)) ?? "null"),
+      ) ?? EMPTY_QUICK_ROOMS_DRAFT
+    );
   } catch {
-    return EMPTY_QUICK_ROOM_DRAFT;
+    return EMPTY_QUICK_ROOMS_DRAFT;
   }
 }
 
@@ -82,12 +107,17 @@ export function QuickPropertySetup({
   openCheckout,
   storage = null,
   onSaveAndExit,
-  renderStep,
+  publication,
+  organizationId,
+  publicationStorage,
+  openPage,
+  copyLink = (url) => navigator.clipboard.writeText(url),
+  onEditHotel = null,
 }: QuickPropertySetupProps) {
   const [step, setStep] = useState(initialStep);
   const [hotel, setHotel] = useState<Hotel | null>(null);
   const [failed, setFailed] = useState(false);
-  const [room, setRoom] = useState(() => readRoom(storage, propertyId));
+  const [rooms, setRooms] = useState(() => readRooms(storage, propertyId));
 
   useEffect(() => {
     let active = true;
@@ -118,17 +148,15 @@ export function QuickPropertySetup({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [propertyId]);
 
-  const changeRoom = useCallback(
-    (patch: Partial<QuickRoomDraft>) =>
-      setRoom((current) => {
-        const next = { ...current, ...patch };
-        try {
-          storage?.setItem(quickRoomStorageKey(propertyId), JSON.stringify(next));
-        } catch {
-          // A full or blocked storage only loses the resume.
-        }
-        return next;
-      }),
+  const changeRooms = useCallback(
+    (next: QuickRoomsDraft) => {
+      setRooms(next);
+      try {
+        storage?.setItem(quickRoomStorageKey(propertyId), JSON.stringify(next));
+      } catch {
+        // A full or blocked storage only loses the resume.
+      }
+    },
     [propertyId, storage],
   );
 
@@ -148,49 +176,45 @@ export function QuickPropertySetup({
   if (step === 3) {
     return (
       <QuickRoomStep
-        draft={room}
-        onChange={changeRoom}
+        draft={rooms}
+        onChange={changeRooms}
         currency={hotel.currency}
         hotel={hotel}
         onSubmit={async () => setStep(4)}
+        onBack={onEditHotel}
         onSaveAndExit={onSaveAndExit}
       />
     );
   }
 
   if (step === 4) {
-    const name = room.name.trim();
-    const guests = Number(room.maxGuests) || 1;
     return (
       <QuickPayStep
         hotel={hotel}
         currency={hotel.currency}
-        room={
-          name && room.pricePerNight.trim()
-            ? {
-                name,
-                details: `Up to ${guests} guest${guests === 1 ? "" : "s"} · Free cancellation until 3 days before`,
-                price: `${hotel.currency.symbol}${room.pricePerNight.trim()}`,
-              }
-            : null
-        }
+        rooms={quickPreviewRooms(rooms, hotel.currency.symbol)}
         checkoutPending={hotel.checkoutPending}
         initialPlan={hotel.checkoutPending ? "fixed_fee" : "commission"}
         onBack={() => setStep(3)}
         onSaveAndExit={onSaveAndExit}
         onSubmit={async (plan: QuickPlanChoice) => {
-          // The room travels with the first run; without it on this device, ask for it again.
-          if (Object.keys(quickRoomErrors(room, hotel.currency.code)).length > 0) {
+          // The rooms travel with the first run; without them on this device, ask for them again.
+          if (
+            quickRoomsFirstError(rooms, hotel.currency.code) ||
+            !rooms.pricesIncludeMandatoryCharges
+          ) {
             setStep(3);
             return;
           }
           let result;
           try {
             result = await firstRun.run(propertyId, {
-              room: quickRoomRequest(room),
-              pricesIncludeMandatoryCharges: room.pricesIncludeMandatoryCharges,
+              rooms: rooms.rooms.map(quickRoomRequest),
+              pricesIncludeMandatoryCharges: rooms.pricesIncludeMandatoryCharges,
               guestPayment: "pay_at_property",
               plan,
+              // The owner's cancellation and bed for every room type (1.12b, #3594).
+              ...quickFirstRunChoices(rooms),
             });
           } catch (error) {
             throw new Error(quickFirstRunErrorMessage(error));
@@ -206,12 +230,79 @@ export function QuickPropertySetup({
   }
 
   return (
-    renderStep?.(5, room) ?? (
-      <QuickSetupShell step={step} onSaveAndExit={onSaveAndExit}>
-        <p role="status" className="mt-24 text-center text-sm font-medium text-gray-600">
-          {`Step ${step} comes next.`}
-        </p>
-      </QuickSetupShell>
-    )
+    <QuickPublishSteps
+      propertyId={propertyId}
+      organizationId={organizationId}
+      publication={publication}
+      storage={publicationStorage}
+      hotel={hotel}
+      rooms={quickPreviewRooms(rooms, hotel.currency.symbol)}
+      freeCancellationDays={quickRoomChoices(rooms).freeCancellationDays}
+      openPage={openPage}
+      copyLink={copyLink}
+      onSaveAndExit={onSaveAndExit}
+    />
+  );
+}
+
+/** Step 5, "Does this look right?", and "You're live" once the booking page is published. */
+function QuickPublishSteps({
+  propertyId,
+  organizationId,
+  publication,
+  storage,
+  hotel,
+  rooms,
+  freeCancellationDays,
+  openPage,
+  copyLink,
+  onSaveAndExit,
+}: {
+  propertyId: string;
+  organizationId: string;
+  publication: QuickPublicationClient;
+  storage: Store;
+  hotel: Hotel;
+  rooms: readonly QuickPreviewRoom[];
+  freeCancellationDays: number;
+  openPage: (page: QuickSetupPage) => void;
+  copyLink: (url: string) => Promise<void>;
+  onSaveAndExit: () => void;
+}) {
+  const { state, publish, retry } = useQuickPublication({
+    propertyId,
+    organizationId,
+    client: publication,
+    storage,
+  });
+  if (state.kind === "live") {
+    return (
+      <QuickLiveScreen
+        hotel={hotel}
+        currency={hotel.currency}
+        rooms={rooms}
+        url={state.url}
+        previewHost={hotel.url}
+        copy={copyLink}
+        onRoomsAndRates={() => openPage("rooms_and_rates")}
+        onDesignStudio={() => openPage("design_studio")}
+        onPaymentSettings={() => openPage("payment_settings")}
+        onDashboard={onSaveAndExit}
+      />
+    );
+  }
+  return (
+    <QuickGoLiveStep
+      hotel={hotel}
+      currency={hotel.currency}
+      rooms={rooms}
+      freeCancellationDays={freeCancellationDays}
+      status={state}
+      onPublish={() => void publish()}
+      onRetry={() => void retry()}
+      onDashboard={onSaveAndExit}
+      onReview={() => openPage("review")}
+      onSaveAndExit={onSaveAndExit}
+    />
   );
 }
