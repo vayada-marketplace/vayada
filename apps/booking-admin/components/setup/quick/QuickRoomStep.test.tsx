@@ -68,7 +68,13 @@ describe("QuickRoomStep (VAY-2247 step 3)", () => {
     expect(markup).toContain("Add another room type");
     // The first run takes both choices (1.12b): each default has its Change link.
     expect(markup.match(/>Change</g)).toHaveLength(2);
-    expect(markup).toContain("Our default. After that, the full stay is charged.");
+    // Approved 2026-10-21: no inner header, one note under rooms, guests and price, and compact
+    // default lines whose notes show only while their choices are open.
+    expect(markup).not.toContain("Your first room type");
+    expect(markup).toContain(
+      "Prices include taxes and fees. Seasons and weekday prices come later in Rooms &amp; Rates.",
+    );
+    expect(markup).not.toContain("Our default. After that, the full stay is charged.");
   });
 
   it("changes the free cancellation for every room type; Non-refundable shows but can't be picked (1.12b)", async () => {
@@ -94,6 +100,7 @@ describe("QuickRoomStep (VAY-2247 step 3)", () => {
     const change = () =>
       renderer.root.findAll((node) => node.type === "button" && nodeText(node) === "Change");
     await act(async () => change()[0]!.props.onClick());
+    expect(nodeText(renderer.root)).toContain("Our default. After that, the full stay is charged.");
     const radios = renderer.root.findAll(
       (node) => node.type === "input" && node.props.name === "quick-cancellation",
     );
