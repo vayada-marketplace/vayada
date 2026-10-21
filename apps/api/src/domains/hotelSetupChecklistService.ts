@@ -5,13 +5,15 @@ import {
   type HotelSetupChecklistDefault,
 } from "@vayada/domain-hotels";
 
-import type { HotelFirstRunState } from "./hotelFirstRunState.js";
+import type { HotelFirstRunSetupProgress } from "./hotelFirstRunFacts.js";
 import type { HotelFirstRunActor } from "./hotelFirstRunSteps.js";
 
 /**
- * VAY-2247 wave 2: the setup checklist both dashboards show. Setup progress comes from the first run's own
- * state; the rest from what the hotel has, read in one query, plus the two things the checklist remembers
- * (migration 0503): "Looks good" per hotel and each person's Hide for now / Dismiss.
+ * VAY-2247 wave 2: the setup checklist both dashboards show. Setup progress comes from the first run's light
+ * setup-progress read (rooms, prices, payment methods and plan, one at a time; not the booking readiness,
+ * which starved the API's pools when every dashboard load ran it, 2026-10-21); the rest from what the hotel
+ * has, read in one query, plus the two things the checklist remembers (migration 0503): "Looks good" per
+ * hotel and each person's Hide for now / Dismiss.
  */
 
 /** What one query tells about the hotel and the signed-in person; null when the hotel isn't there. */
@@ -29,7 +31,8 @@ export type HotelSetupChecklistFactsRow = Readonly<{
 export type HotelSetupChecklistViewerChange = Readonly<{ hidden?: boolean; dismissed?: boolean }>;
 
 export type HotelSetupChecklistPorts = Readonly<{
-  firstRun: { read(actor: HotelFirstRunActor): Promise<HotelFirstRunState> };
+  /** Only whether the first room and price, and how guests pay, are done: the first run's light read. */
+  firstRun: { readSetupProgress(actor: HotelFirstRunActor): Promise<HotelFirstRunSetupProgress> };
   facts: { read(actor: HotelFirstRunActor): Promise<HotelSetupChecklistFactsRow | null> };
   store: {
     acknowledge(actor: HotelFirstRunActor, item: HotelSetupChecklistAcknowledgeable): Promise<void>;
@@ -41,12 +44,10 @@ export type HotelSetupChecklistPorts = Readonly<{
 
 export function createHotelSetupChecklistService(ports: HotelSetupChecklistPorts) {
   async function read(actor: HotelFirstRunActor): Promise<HotelSetupChecklist | null> {
-    const [state, facts] = await Promise.all([ports.firstRun.read(actor), ports.facts.read(actor)]);
+    // One after the other, never in parallel: each dashboard load reads this (VAY-2247 incident).
+    const facts = await ports.facts.read(actor);
     if (!facts) return null;
-    const done = (id: HotelFirstRunState["steps"][number]["id"]) =>
-      state.steps.find((step) => step.id === id)?.state === "done";
-    const firstRoom = done("rooms") && done("pricing");
-    const guestPayment = done("payments") && done("plan");
+    const { firstRoom, guestPayment } = await ports.firstRun.readSetupProgress(actor);
     return buildHotelSetupChecklist({
       propertyId: actor.propertyId,
       nextSetupStep: !firstRoom ? "first_room" : !guestPayment ? "guest_payment" : "go_live",

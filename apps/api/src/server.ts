@@ -296,7 +296,10 @@ import {
   createPgTargetBookingSettingsRepository,
   toLocalizationSettingsResponse,
 } from "./routes/bookingSettings.js";
-import { createHotelFirstRunRuntime } from "./domains/hotelFirstRunRuntime.js";
+import {
+  createDedicatedLockConnections,
+  createHotelFirstRunRuntime,
+} from "./domains/hotelFirstRunRuntime.js";
 import { createPgHotelSetupChecklistRepository } from "./domains/hotelSetupChecklistRepository.js";
 import { createHotelSetupChecklistService } from "./domains/hotelSetupChecklistService.js";
 import { createTargetBookingCustomDomainRepository } from "./routes/bookingCustomDomain.js";
@@ -1585,7 +1588,8 @@ const hotelFirstRun = (() => {
     createPgBookingGuestPolicyScopeAuthorizationPort({ pool: client }),
   );
   return createHotelFirstRunRuntime({
-    lockPool: hotelSetupOrdinaryPool,
+    // Its own connection per run, outside the shared pools (VAY-2247 incident, 2026-10-21).
+    lockPool: createDedicatedLockConnections(targetDatabaseUrl),
     pricingPool: propertySetupOwnerPool,
     profile: sharedHotelSetupStatusRepository,
     profileCommand,
