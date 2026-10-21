@@ -36,7 +36,7 @@ export async function paymentRepublishFixture(pool: pg.Pool, methods: string[], 
     [organizationId, organizationId],
   );
   await pool.query(
-    "INSERT INTO hotel_catalog.properties(id,public_id,display_name) VALUES($1::uuid,$1::text,'Republish test')",
+    "INSERT INTO hotel_catalog.properties(id,public_id,display_name,lifecycle_status) VALUES($1::uuid,$1::text,'Republish test','active')",
     [propertyId],
   );
   await pool.query("INSERT INTO pms.room_types(id,property_id,name) VALUES($1,$2,'Garden room')", [
