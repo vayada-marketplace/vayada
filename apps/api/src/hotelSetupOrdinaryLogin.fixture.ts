@@ -8,17 +8,11 @@ import pg from "pg";
  * 2026-10-15 (e8876a7, after #507/#512); update both together, notably when VAY-2057 slice 0.3 edits the
  * protected list. listOrdinaryPostureViolations re-runs the preflight's own posture queries. Production additionally keeps legacy
  * SELECT grants on identity tables, which the fixture reproduces with schema-wide SELECT.
- * No default privileges are set: the fixture is applied after migrations.
+ * No default privileges are set: the fixture is applied after migrations. Migration 0499 dropped
+ * the marketplace schema; the platform lists keep naming it until P2 (VAY-2272), and the protected
+ * names below skip relations that no longer exist.
  */
-const SCHEMAS = [
-  "hotel_catalog",
-  "booking",
-  "pms",
-  "marketplace",
-  "distribution",
-  "finance",
-  "platform",
-];
+const SCHEMAS = ["hotel_catalog", "booking", "pms", "distribution", "finance", "platform"];
 const RECEIPT = "platform.legacy_owner_bootstrap_receipts";
 const NO_READ = [
   "platform.identity_migration_provenance",
