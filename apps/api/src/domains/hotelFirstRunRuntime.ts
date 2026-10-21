@@ -37,24 +37,74 @@ export type HotelFirstRunRuntimeDependencies = Omit<
     activateProperty: HotelSetupPropertyActivation;
   };
 
+/** Every lock connection stayed in use for longer than the wait: the run answers "busy" (retry later). */
+export class HotelFirstRunLockCapacityError extends Error {
+  constructor() {
+    super("Every first-run lock connection is in use");
+    this.name = "HotelFirstRunLockCapacityError";
+  }
+}
+
+type LockClient = Pick<pg.Client, "connect" | "query" | "end" | "on">;
+
 /**
  * The lock's connections: one plain client per run, opened for the run and closed after it, outside the
  * API's shared pools (VAY-2247 incident, 2026-10-21). Taking it from a shared pool pinned one of its few
- * connections for the whole run while the run's own steps needed more from the same pool.
+ * connections for the whole run while the run's own steps needed more from the same pool. At most `max`
+ * are open at once; a run that can't get one within `waitMs` answers "busy".
  */
-export function createDedicatedLockConnections(connectionString: string): LockPool {
+export function createDedicatedLockConnections(
+  connectionString: string,
+  {
+    max = 3,
+    waitMs = 3_000,
+    createClient = () => new pg.Client({ connectionString, connectionTimeoutMillis: 5_000 }),
+  }: { max?: number; waitMs?: number; createClient?: () => LockClient } = {},
+): LockPool {
+  let open = 0;
+  const waiting: (() => void)[] = [];
+  const free = () => {
+    open -= 1;
+    waiting.shift()?.();
+  };
+  const acquire = () =>
+    new Promise<void>((resolve, reject) => {
+      if (open < max) {
+        open += 1;
+        resolve();
+        return;
+      }
+      const grant = () => {
+        clearTimeout(timer);
+        open += 1;
+        resolve();
+      };
+      const timer = setTimeout(() => {
+        waiting.splice(waiting.indexOf(grant), 1);
+        reject(new HotelFirstRunLockCapacityError());
+      }, waitMs);
+      waiting.push(grant);
+    });
   return {
     async connect() {
-      const client = new pg.Client({ connectionString, connectionTimeoutMillis: 5_000 });
+      await acquire();
+      const client = createClient();
       // A dropped connection fails the lock's queries instead of exiting the process.
       client.on("error", () => undefined);
-      await client.connect();
-      return {
-        query: client.query.bind(client) as PoolClient["query"],
-        release: () => {
-          void client.end().catch(() => undefined);
-        },
+      let released = false;
+      const release = () => {
+        if (released) return;
+        released = true;
+        free();
+        void client.end().catch(() => undefined);
       };
+      try {
+        await client.connect();
+      } catch (error) {
+        release();
+        throw error;
+      }
+      return { query: client.query.bind(client) as PoolClient["query"], release };
     },
   };
 }
@@ -63,7 +113,13 @@ export function createDedicatedLockConnections(connectionString: string): LockPo
 export function createHotelFirstRunLock(pool: LockPool): HotelFirstRunPorts["lock"] {
   return {
     async withPropertyLock(propertyId, work) {
-      const client = await pool.connect();
+      let client: Awaited<ReturnType<LockPool["connect"]>>;
+      try {
+        client = await pool.connect();
+      } catch (error) {
+        if (error instanceof HotelFirstRunLockCapacityError) return "busy";
+        throw error;
+      }
       try {
         const locked = await client.query(
           "SELECT pg_try_advisory_lock($1::int, hashtext($2)) AS locked",
