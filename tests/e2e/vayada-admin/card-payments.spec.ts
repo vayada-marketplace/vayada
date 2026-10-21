@@ -1,8 +1,8 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 
 // VAY-2205 P2.2: Vayada finance turns card payments on or off per hotel on its Payments tab (Paper
-// "VAY-2205 card refunds + card switch", approved by Flamur on 2026-10-18). Either change means the
-// hotel's prices must be saved again.
+// "VAY-2205 card refunds + card switch", approved by Flamur on 2026-10-18). Either change publishes
+// the hotel's prices again by itself (VAY-2304); only when it can't must the hotel save them.
 const propertyId = "11111111-1111-4111-8111-111111111111";
 const evidenceId = "22222222-2222-4222-8222-222222222222";
 const approverId = "33333333-3333-4333-8333-333333333333";
@@ -87,9 +87,9 @@ const off = (ready = true, prices = "current") => ({
   cardReady: false,
   prices,
 });
-// Right after a change, the server says the hotel's prices must be saved again.
+// Right after a change the server has published the hotel's prices again (VAY-2304).
 const on = {
-  ...off(true, "save_needed"),
+  ...off(),
   evidence: {
     evidenceId,
     acceptedAt: "2026-10-18T19:40:00.000Z",
@@ -99,7 +99,7 @@ const on = {
   cardReady: true,
 };
 
-test("turns card payments on as vayada's approval, then off, each time asking for prices to be saved again", async ({
+test("turns card payments on as vayada's approval, then off, each time with the prices published again", async ({
   page,
   baseURL,
 }, testInfo) => {
@@ -131,7 +131,7 @@ test("turns card payments on as vayada's approval, then off, each time asking fo
   await expect(confirmOn.getByText(/This is vayada's approval\./)).toBeVisible();
   await expect(
     confirmOn.getByText(
-      /The hotel's prices must be saved again before its booking page takes bookings\. Tell the hotel first\./,
+      /The hotel's prices are published again by themselves, now with card\. Tell the hotel that card is on\./,
     ),
   ).toBeVisible();
   await page.screenshot({
@@ -142,11 +142,11 @@ test("turns card payments on as vayada's approval, then off, each time asking fo
   await confirmOn.getByRole("button", { name: "Turn on card payments" }).click();
 
   await expect(
-    page.getByText("Card payments are on. The hotel's prices must be saved again."),
+    page.getByText("Card payments are on. The hotel's prices are published again, now with card."),
   ).toBeVisible();
   await expect(
-    page.getByRole("link", { name: /Open the hotel's Prices in the PMS/ }),
-  ).toHaveAttribute("href", /\/rooms$/);
+    page.getByText("The hotel's prices couldn't be published again by themselves."),
+  ).toHaveCount(0);
   await expect(card.getByText("On", { exact: true })).toBeVisible();
   await expect(card.getByText(/Given .* by Mara Vogel\./)).toBeVisible();
   // The page names the revisions it showed; the server records the time and the fingerprint.
@@ -165,7 +165,7 @@ test("turns card payments on as vayada's approval, then off, each time asking fo
     ),
     async (route) => {
       revoked = true;
-      current = off(true, "save_needed");
+      current = off();
       await fulfillJson(route, origin, { ok: true });
     },
   );
@@ -173,14 +173,18 @@ test("turns card payments on as vayada's approval, then off, each time asking fo
   const confirmOff = page.getByRole("dialog", {
     name: "Turn off card payments for Hotel Alpenrose Munich?",
   });
-  await expect(confirmOff.getByText(/Rates that only take card stop selling\./)).toBeVisible();
+  await expect(
+    confirmOff.getByText(/Rates that only take card stop selling; the others keep selling\./),
+  ).toBeVisible();
   await page.screenshot({
     path: testInfo.outputPath("payments-turn-off-confirm.png"),
     fullPage: true,
   });
   await confirmOff.getByRole("button", { name: "Turn off card payments" }).click();
   await expect(
-    page.getByText("Card payments are off. The hotel's prices must be saved again."),
+    page.getByText(
+      "Card payments are off. The hotel's prices are published again; rates that only take card stopped selling.",
+    ),
   ).toBeVisible();
   await expect(card.getByText("Not given. Turning card payments on gives it again.")).toBeVisible();
   expect(revoked).toBe(true);
@@ -192,7 +196,7 @@ test("says why turning card on failed, in the server's words, and keeps it after
   page,
   baseURL,
 }) => {
-  // After the failure the server says the prices must be saved again, so the reload shows.
+  // After the failure the server answers a different state (prices to save), so the reload shows.
   let failed = false;
   const origin = await openPayments(page, baseURL, () =>
     failed ? off(true, "save_needed") : off(),
@@ -217,7 +221,9 @@ test("says why turning card on failed, in the server's words, and keeps it after
       );
     },
   );
-  await expect(page.getByText("The hotel's prices must be saved again.")).toHaveCount(0);
+  await expect(
+    page.getByText("The hotel's prices couldn't be published again by themselves."),
+  ).toHaveCount(0);
   await card.getByRole("button", { name: "Turn on card payments" }).click();
   await page
     .getByRole("dialog", { name: "Turn on card payments for Hotel Alpenrose Munich?" })
@@ -227,7 +233,9 @@ test("says why turning card on failed, in the server's words, and keeps it after
     "That didn't go through: Online-card execution evidence is invalid. (invalid_command)",
   );
   // The reload after the failure has landed, and the message stayed.
-  await expect(page.getByText("The hotel's prices must be saved again.")).toBeVisible();
+  await expect(
+    page.getByText("The hotel's prices couldn't be published again by themselves."),
+  ).toBeVisible();
   await expect(card.getByRole("alert")).toHaveText(
     "That didn't go through: Online-card execution evidence is invalid. (invalid_command)",
   );
@@ -266,9 +274,14 @@ test("can't turn card on before the hotel chooses card in its payment settings",
   ).toBeVisible();
 });
 
-test("still asks for prices to be saved again after a reload", async ({ page, baseURL }) => {
-  await openPayments(page, baseURL, () => on);
-  await expect(page.getByText("The hotel's prices must be saved again.")).toBeVisible();
+test("asks for the prices to be saved when the system couldn't publish them again", async ({
+  page,
+  baseURL,
+}) => {
+  await openPayments(page, baseURL, () => ({ ...on, prices: "save_needed" }));
+  await expect(
+    page.getByText("The hotel's prices couldn't be published again by themselves."),
+  ).toBeVisible();
   await expect(
     page.getByText(
       "Card is on, but this hotel's booking page takes no bookings until its prices are saved again.",
