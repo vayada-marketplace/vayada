@@ -686,8 +686,8 @@ function commonCommand(
     uuid(command.commandId) &&
     uuid(command.idempotencyKey) &&
     command.audit.actor.kind === "user" &&
-    uuid(command.audit.actor.userId) &&
-    uuid(command.audit.actor.organizationId) &&
+    actorId(command.audit.actor.userId) &&
+    actorId(command.audit.actor.organizationId) &&
     trimmed(command.audit.requestId) &&
     (command.audit.correlationId === undefined || trimmed(command.audit.correlationId)) &&
     trimmed(command.audit.reason) &&
@@ -792,6 +792,14 @@ function validIsoDate(value: unknown): value is string {
     typeof value === "string" &&
     /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(value) &&
     !Number.isNaN(Date.parse(value))
+  );
+}
+
+/** Identity ids are any canonical UUID: Vayada Platform's seeded id is 00000000-…-0001 (VAY-2205). */
+function actorId(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)
   );
 }
 

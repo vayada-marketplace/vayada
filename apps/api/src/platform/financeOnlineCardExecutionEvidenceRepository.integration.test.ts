@@ -18,7 +18,10 @@ import { createPgProviderWebhookStore } from "./providerWebhooks.js";
 
 const TEST_DATABASE_URL = process.env["TEST_DATABASE_URL"];
 const actorUserId = randomUUID();
-const platformOrganizationId = randomUUID();
+// Vayada Platform's seeded id (platformIdentityBootstrap). It isn't an RFC 4122 v1–v5 UUID, which the
+// strict check refused, so every approval in production got 400 (VAY-2205).
+const platformOrganizationId = "00000000-0000-0000-0000-000000000001";
+let platformOrganizationCreated = false;
 const hotelGroupOrganizationId = randomUUID();
 const propertyId = randomUUID();
 const otherPropertyId = randomUUID();
@@ -51,15 +54,19 @@ describe.skipIf(!TEST_DATABASE_URL)("Online-card execution evidence PostgreSQL",
     );
     await pool.query(
       `INSERT INTO identity.organizations (id, kind, name, slug, status)
-       VALUES ($1::uuid, 'platform', 'VAY-1345 Platform', $2, 'active'),
-              ($3::uuid, 'hotel_group', 'VAY-1345 Hotel Group', $4, 'active')`,
-      [
-        platformOrganizationId,
-        `vay-1345-${platformOrganizationId}`,
-        hotelGroupOrganizationId,
-        `vay-1345-${hotelGroupOrganizationId}`,
-      ],
+       VALUES ($1::uuid, 'hotel_group', 'VAY-1345 Hotel Group', $2, 'active')`,
+      [hotelGroupOrganizationId, `vay-1345-${hotelGroupOrganizationId}`],
     );
+    // The seeded organization may already be there: then it stays, and cleanup leaves it alone.
+    platformOrganizationCreated =
+      (
+        await pool.query(
+          `INSERT INTO identity.organizations (id, kind, name, slug, status)
+           VALUES ($1::uuid, 'platform', 'VAY-1345 Platform', $2, 'active')
+           ON CONFLICT (id) DO NOTHING RETURNING id`,
+          [platformOrganizationId, `vay-1345-${platformOrganizationId}`],
+        )
+      ).rowCount === 1;
     await pool.query(
       `INSERT INTO hotel_catalog.properties (id, public_id, display_name)
        VALUES ($1::uuid, $2, 'VAY-1345 Hotel'),
@@ -1229,7 +1236,9 @@ describe.skipIf(!TEST_DATABASE_URL)("Online-card execution evidence PostgreSQL",
         ]);
       }
       await client.query("DELETE FROM identity.organizations WHERE id = ANY($1::uuid[])", [
-        [platformOrganizationId, hotelGroupOrganizationId],
+        platformOrganizationCreated
+          ? [platformOrganizationId, hotelGroupOrganizationId]
+          : [hotelGroupOrganizationId],
       ]);
       await client.query("DELETE FROM identity.users WHERE id = $1::uuid", [actorUserId]);
       await client.query("COMMIT");
