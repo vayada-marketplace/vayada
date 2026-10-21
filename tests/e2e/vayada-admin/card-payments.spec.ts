@@ -187,6 +187,50 @@ test("turns card payments on as vayada's approval, then off, each time asking fo
   await page.screenshot({ path: testInfo.outputPath("payments-turned-off.png"), fullPage: true });
 });
 
+// VAY-2205: a refused change used to vanish, because the reload after it cleared the message.
+test("says why turning card on failed, in the server's words, and keeps it after the reload", async ({
+  page,
+  baseURL,
+}) => {
+  let reads = 0;
+  const origin = await openPayments(page, baseURL, () => {
+    reads += 1;
+    return off();
+  });
+  const card = page.getByRole("region", { name: "Card payments" });
+  await expect(card.getByText("Off", { exact: true })).toBeVisible();
+  await page.route(
+    api(`/api/finance/platform/properties/${propertyId}/online-card-execution-evidence`),
+    async (route) => {
+      if (route.request().method() !== "POST") return route.fallback();
+      await fulfillJson(
+        route,
+        origin,
+        {
+          statusCode: 400,
+          code: "invalid_command",
+          category: "validation",
+          message: "Online-card execution evidence is invalid.",
+        },
+        400,
+      );
+    },
+  );
+  const readsBefore = reads;
+  await card.getByRole("button", { name: "Turn on card payments" }).click();
+  await page
+    .getByRole("dialog", { name: "Turn on card payments for Hotel Alpenrose Munich?" })
+    .getByRole("button", { name: "Turn on card payments" })
+    .click();
+  await expect(card.getByRole("alert")).toHaveText(
+    "That didn't go through: Online-card execution evidence is invalid. (invalid_command)",
+  );
+  // The page read the state again after the failure, and the message stayed.
+  await expect.poll(() => reads).toBeGreaterThan(readsBefore);
+  await expect(card.getByRole("alert")).toBeVisible();
+  await expect(card.getByText("Off", { exact: true })).toBeVisible();
+});
+
 test("can't turn card on before the hotel's Stripe account is ready", async ({
   page,
   baseURL,

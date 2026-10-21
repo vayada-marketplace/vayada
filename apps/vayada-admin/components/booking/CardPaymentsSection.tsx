@@ -21,6 +21,22 @@ const status = (value: unknown) =>
     ? (value as { status: number }).status
     : null;
 
+/** Why a turn on or off failed, in the server's words when it gave any (VAY-2205). */
+function changeError(cause: unknown): string {
+  if (status(cause) === 403)
+    return "Turning card payments on or off needs Vayada finance manage rights.";
+  if (status(cause) === 409)
+    return "The hotel's Stripe account changed meanwhile. Check it again, then retry.";
+  const data =
+    cause && typeof cause === "object" && "data" in cause
+      ? ((cause as { data?: { message?: unknown; code?: unknown } }).data ?? {})
+      : {};
+  const message = typeof data.message === "string" && data.message.trim() ? data.message : null;
+  const code = typeof data.code === "string" ? data.code : null;
+  if (!message) return "That didn't go through. Try again in a moment.";
+  return `That didn't go through: ${message}${code ? ` (${code})` : ""}`;
+}
+
 function Item({
   state,
   title,
@@ -63,6 +79,8 @@ export default function CardPaymentsSection({
 }) {
   const [state, setState] = useState<HotelCardPaymentsState | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Kept apart from the read's error: the reload after a failed change must not wipe it.
+  const [changeFailed, setChangeFailed] = useState<string | null>(null);
   const [approver, setApprover] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<"on" | "off" | null>(null);
   const [busy, setBusy] = useState(false);
@@ -111,19 +129,13 @@ export default function CardPaymentsSection({
   const change = async (to: "on" | "off") => {
     setConfirm(null);
     setBusy(true);
-    setError(null);
+    setChangeFailed(null);
     try {
       if (to === "on") await hotelCardPaymentsService.turnOn(state);
       else await hotelCardPaymentsService.turnOff(state.propertyId, state.evidence!.evidenceId);
       setChanged(to);
     } catch (cause) {
-      setError(
-        status(cause) === 403
-          ? "Turning card payments on or off needs Vayada finance manage rights."
-          : status(cause) === 409
-            ? "The hotel's Stripe account changed meanwhile. Check it again, then retry."
-            : "That didn't go through. Try again in a moment.",
-      );
+      setChangeFailed(changeError(cause));
     } finally {
       setBusy(false);
       await load();
@@ -241,9 +253,9 @@ export default function CardPaymentsSection({
             }
           />
         </ul>
-        {error && (
+        {(changeFailed ?? error) && (
           <p role="alert" className="mt-3 text-sm text-red-700">
-            {error}
+            {changeFailed ?? error}
           </p>
         )}
         <div className="mt-4 flex flex-wrap items-center gap-3">

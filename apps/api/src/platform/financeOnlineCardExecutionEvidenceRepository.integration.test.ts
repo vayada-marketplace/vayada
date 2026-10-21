@@ -18,7 +18,9 @@ import { createPgProviderWebhookStore } from "./providerWebhooks.js";
 
 const TEST_DATABASE_URL = process.env["TEST_DATABASE_URL"];
 const actorUserId = randomUUID();
-const platformOrganizationId = randomUUID();
+// Vayada Platform's seeded id (platformIdentityBootstrap). It isn't an RFC 4122 v1–v5 UUID, which the
+// strict check refused, so every approval in production got 400 (VAY-2205).
+const platformOrganizationId = "00000000-0000-0000-0000-000000000001";
 const hotelGroupOrganizationId = randomUUID();
 const propertyId = randomUUID();
 const otherPropertyId = randomUUID();
