@@ -56,7 +56,7 @@ async function submit(renderer: ReactTestRenderer) {
 describe("QuickRoomStep (VAY-2247 step 3)", () => {
   it("shows the room, its price in the hotel's currency and the defaults, with the room in the preview", () => {
     const markup = renderToStaticMarkup(<QuickRoomStep {...props()} />);
-    expect(markup).toContain("Step 3 of 5");
+    expect(markup).toContain("Step 5 of 7");
     expect(markup).toContain("Your first room and price");
     expect(markup).toContain("We create Room 1–8 in the PMS. Rename them later.");
     expect(markup).toContain(">EUR<");

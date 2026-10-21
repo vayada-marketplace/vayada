@@ -113,6 +113,8 @@ export function QuickHotelEdit({
       )}
       logoPreviewUrl={logo?.url ?? null}
       onLogoSelected={(file) => setLogo({ file, url: URL.createObjectURL(file) })}
+      // Back from the rooms step lands on the last of the three hotel screens.
+      initialPart="contacts"
       onBack={onDone}
       onSaveAndExit={onSaveAndExit}
       onSubmit={async (next) => {

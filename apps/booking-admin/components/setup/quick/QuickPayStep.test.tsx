@@ -49,7 +49,7 @@ async function submit(renderer: ReactTestRenderer) {
 describe("QuickPayStep (VAY-2247 step 4)", () => {
   it("starts with paying at the hotel and Commission, and shows the Fixed Fee in the hotel's currency", () => {
     const markup = renderToStaticMarkup(<QuickPayStep {...props()} />);
-    expect(markup).toContain("Step 4 of 5");
+    expect(markup).toContain("Step 6 of 7");
     expect(markup).toContain("Pay at the hotel");
     expect(markup).toContain("Ready now");
     expect(markup).toContain("Later");

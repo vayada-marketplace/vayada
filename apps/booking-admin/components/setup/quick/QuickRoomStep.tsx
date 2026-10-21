@@ -277,7 +277,7 @@ export function QuickRoomStep({
   }
 
   return (
-    <QuickSetupShell step={3} onSaveAndExit={onSaveAndExit} saveAndExitDisabled={submitting}>
+    <QuickSetupShell step={5} onSaveAndExit={onSaveAndExit} saveAndExitDisabled={submitting}>
       <QuickSetupStepLayout
         title="Your first room and price"
         subtitle="Start with one room type. Add the rest whenever you like."
