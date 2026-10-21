@@ -247,5 +247,16 @@ export async function paymentRepublishFixture(pool: pg.Pool, methods: string[], 
       client.release();
     }
   }
-  return { propertyId, organizationId, commands, save, cardOn, cardOff, served, changeTerms };
+  return {
+    propertyId,
+    organizationId,
+    actorUserId,
+    accountId,
+    commands,
+    save,
+    cardOn,
+    cardOff,
+    served,
+    changeTerms,
+  };
 }

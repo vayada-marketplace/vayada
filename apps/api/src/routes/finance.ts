@@ -56,6 +56,8 @@ import {
   type FinanceStripeConnectProvider,
   type IssueStripeOnboardingLinkCommand,
   type ReconcileStripePropertyAccountCommand,
+  type AcceptFinanceOnlineCardExecutionEvidenceCommand,
+  type RevokeFinanceOnlineCardExecutionEvidenceCommand,
   StripeConnectAccountNotFoundError,
   type StripeConnectProviderAccountSnapshot,
   type FinanceXenditBankValidationCommand,
@@ -1158,6 +1160,8 @@ export function createTargetFinancePropertySettingsRepository(config: {
   max?: number;
   pool?: FinancePropertySettingsReadPool;
   stripeConnectProvider?: FinanceStripeConnectProvider;
+  /** VAY-2304: runs after a payment write has committed, to re-publish the hotel's prices. */
+  afterPaymentChange?: (pool: pg.Pool, propertyId: string) => Promise<unknown>;
 }): FinancePropertyReadRepository {
   const pool: FinancePropertySettingsReadPool =
     config.pool ??
@@ -1178,6 +1182,13 @@ export function createTargetFinancePropertySettingsRepository(config: {
         },
       })
     : null;
+  const afterPaymentChange = async <T extends { ok: boolean }>(
+    propertyId: string,
+    result: T,
+  ): Promise<T> => {
+    if (result.ok) await config.afterPaymentChange?.(pool as unknown as pg.Pool, propertyId);
+    return result;
+  };
   // VAY-2205 (D3, approved 2026-10-18): a Vayada finance operator accepts the hotel's card
   // approval as an attestation and revokes it to turn card off; both need platform finance rights.
   const onlineCardEvidenceWrites = onlineCardEvidenceRepository
@@ -1193,10 +1204,21 @@ export function createTargetFinancePropertySettingsRepository(config: {
           const prices = report && cardSwitchPrices(report);
           return prices ? { ...state, prices } : state;
         },
-        acceptOnlineCardExecutionEvidence:
-          onlineCardEvidenceRepository.acceptOnlineCardExecutionEvidence,
-        revokeOnlineCardExecutionEvidence:
-          onlineCardEvidenceRepository.revokeOnlineCardExecutionEvidence,
+        // VAY-2304: either change re-publishes the hotel's prices with the new payment terms.
+        acceptOnlineCardExecutionEvidence: async (
+          command: AcceptFinanceOnlineCardExecutionEvidenceCommand,
+        ) =>
+          afterPaymentChange(
+            command.propertyId,
+            await onlineCardEvidenceRepository.acceptOnlineCardExecutionEvidence(command),
+          ),
+        revokeOnlineCardExecutionEvidence: async (
+          command: RevokeFinanceOnlineCardExecutionEvidenceCommand,
+        ) =>
+          afterPaymentChange(
+            command.propertyId,
+            await onlineCardEvidenceRepository.revokeOnlineCardExecutionEvidence(command),
+          ),
       }
     : {};
 
@@ -1219,17 +1241,18 @@ export function createTargetFinancePropertySettingsRepository(config: {
       const client = await checkoutFinanceWriteClient(pool);
       const ownsTransaction = typeof client.release === "function";
       if (!ownsTransaction) return paymentSettingsWriteUnavailable();
+      let result: Awaited<ReturnType<typeof updatePaymentSettingsInClient>>;
       try {
         await client.query("BEGIN");
-        const result = await updatePaymentSettingsInClient(client, command);
+        result = await updatePaymentSettingsInClient(client, command);
         await client.query("COMMIT");
-        return result;
       } catch (error) {
         await client.query("ROLLBACK");
         throw error;
       } finally {
         client.release?.();
       }
+      return afterPaymentChange(command.propertyId, result);
     },
     async listPayouts(propertyId, query) {
       const result = await loadPayoutRows(pool, propertyId, query);
@@ -1250,18 +1273,19 @@ export function createTargetFinancePropertySettingsRepository(config: {
       }
       const client = await checkoutFinanceWriteClient(pool);
       const ownsTransaction = typeof client.release === "function";
+      let result: Awaited<ReturnType<typeof createStripeProviderAccountInClient>>;
       try {
-        return await createStripeProviderAccountInClient(
+        result = await createStripeProviderAccountInClient(
           client,
           command,
           config.stripeConnectProvider,
           ownsTransaction,
         );
-      } catch (error) {
-        throw error;
       } finally {
         if (ownsTransaction) client.release?.();
       }
+      // Binding the account changes the hotel's payment setup.
+      return ownsTransaction ? afterPaymentChange(command.propertyId, result) : result;
     },
     async issueStripeOnboardingLink(command) {
       if (!config.stripeConnectProvider) {
@@ -1274,18 +1298,18 @@ export function createTargetFinancePropertySettingsRepository(config: {
       }
       const client = await checkoutFinanceWriteClient(pool);
       const ownsTransaction = typeof client.release === "function";
+      let result: Awaited<ReturnType<typeof issueStripeOnboardingLinkInClient>>;
       try {
-        return await issueStripeOnboardingLinkInClient(
+        result = await issueStripeOnboardingLinkInClient(
           client,
           command,
           config.stripeConnectProvider,
           ownsTransaction,
         );
-      } catch (error) {
-        throw error;
       } finally {
         if (ownsTransaction) client.release?.();
       }
+      return ownsTransaction ? afterPaymentChange(command.propertyId, result) : result;
     },
     async reconcileStripeProviderAccount(command) {
       if (!config.stripeConnectProvider) {
@@ -1296,7 +1320,10 @@ export function createTargetFinancePropertySettingsRepository(config: {
           message: "Stripe account status is unavailable.",
         };
       }
-      return reconcileStripeProviderAccount(pool, command, config.stripeConnectProvider);
+      return afterPaymentChange(
+        command.propertyId,
+        await reconcileStripeProviderAccount(pool, command, config.stripeConnectProvider),
+      );
     },
     async issueStripeDashboardLoginLink(propertyId) {
       if (!config.stripeConnectProvider) {
