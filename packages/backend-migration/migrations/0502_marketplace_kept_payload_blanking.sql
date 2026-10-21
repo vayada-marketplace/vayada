@@ -34,15 +34,16 @@ CREATE TEMP TABLE blanked_users ON COMMIT DROP AS
   SELECT id FROM identity.users WHERE email LIKE 'removed-%@removed.invalid';
 
 -- 0500 canceled the Marketplace's queued work; a job or outbox event still open would lose its input.
+-- Finance rows keep their contents below, so open finance work does not stop this.
 DO $$
 BEGIN
   IF EXISTS (
     SELECT 1 FROM platform.jobs
-    WHERE status IN ('pending', 'running')
+    WHERE status IN ('pending', 'running') AND resource_product <> 'finance'
       AND (resource_product = 'marketplace' OR organization_id IN (SELECT id FROM blanked_organizations))
   ) OR EXISTS (
     SELECT 1 FROM platform.outbox_events
-    WHERE status IN ('pending', 'leased')
+    WHERE status IN ('pending', 'leased') AND resource_product <> 'finance'
       AND (resource_product = 'marketplace' OR organization_id IN (SELECT id FROM blanked_organizations))
   ) THEN
     RAISE EXCEPTION 'Marketplace or creator jobs or outbox events are still open';

@@ -293,7 +293,19 @@ describe.skipIf(!URL)("Marketplace kept payload blanking 0502", () => {
         expect({ trip, state: await contents() }).toEqual({ trip, state: seeded });
       }
 
+      // Open finance work of a creator workspace keeps its contents, so it does not stop 0502.
+      await db.query(
+        replica(`INSERT INTO platform.jobs
+           (job_key, queue_name, job_type, tenant_scope, organization_id, resource_product, status, payload)
+         VALUES ('open-finance-job', 'identity', 'identity.sync', 'organization', '${creatorOrg}', 'finance',
+                 'pending', '{"payoutId": "payout-1"}')`),
+      );
       expect((await run(before)).failed).toBeNull();
+      expect(
+        (await db.query(`SELECT payload FROM platform.jobs WHERE job_key = 'open-finance-job'`))
+          .rows,
+      ).toEqual([{ payload: { payoutId: "payout-1" } }]);
+      await db.query(replica(`DELETE FROM platform.jobs WHERE job_key = 'open-finance-job'`));
 
       // Every row stays; exactly the expected rows keep their contents.
       expect(await contents()).toEqual({ withContents: KEPT, counts: seeded.counts });
