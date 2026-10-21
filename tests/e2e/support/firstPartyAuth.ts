@@ -137,12 +137,12 @@ export async function mockFirstPartyAuth(
   return records;
 }
 
-export function authSession(surface: FirstPartyAuthSurface, userType?: "creator" | "hotel") {
+export function authSession(surface: FirstPartyAuthSurface) {
   return {
     accessToken: `access-${surface.key}`,
     csrfToken: `csrf-${surface.key}`,
     organizationId: "11111111-1111-4111-8111-111111111111",
-    organizationKind: userType === "creator" ? "creator_workspace" : "hotel_group",
+    organizationKind: "hotel_group",
     resources: {
       "booking:booking_hotel": ["hotel-e2e"],
       "platform:platform_admin": ["platform-e2e"],
@@ -153,7 +153,6 @@ export function authSession(surface: FirstPartyAuthSurface, userType?: "creator"
       id: `user-${surface.key}`,
       name: "Auth Regression",
       status: "active",
-      ...(userType ? { type: userType } : {}),
     },
     workosOrganizationId: "org_workos_e2e",
   };

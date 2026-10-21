@@ -136,7 +136,7 @@ describe.skipIf(!URL)("identity admin user list (PostgreSQL)", () => {
 
       expect(await list({})).toEqual([
         "createdHotelWithoutOrganization:hotel",
-        "creatorOnly:creator",
+        "creatorOnly:staff",
         "formerCreatorStaff:staff",
         "hotelPending:hotel",
         "hotelSignup:hotel",
@@ -149,6 +149,7 @@ describe.skipIf(!URL)("identity admin user list (PostgreSQL)", () => {
         "platformMember:admin",
       ]);
       expect(await list({ type: "staff" })).toEqual([
+        "creatorOnly:staff",
         "formerCreatorStaff:staff",
         "invitedStaff:staff",
         "noMembership:staff",

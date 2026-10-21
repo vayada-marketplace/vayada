@@ -74,11 +74,12 @@ export const IDENTITY_ADMIN_PLATFORM_ACCESS_CONTRACT = {
 } as const;
 
 // The list labels an account by what it is now (VAY-2272): an active platform member is "admin", a
-// hotel group's owner "hotel", any other hotel group member "staff". Without such a membership the
-// type it was created as stays ("creator" until migration 0500 removes those accounts), and "staff"
-// when none was recorded (imported accounts, sign-ups WorkOS created first). Vayada Admin operators
-// create hotel or admin users only.
-export type IdentityAdminUserType = "creator" | "hotel" | "admin" | "staff";
+// hotel group's owner "hotel", any other hotel group member "staff". Without such a membership a
+// hotel or admin sign-up keeps the type it was created as, and anything else is "staff": accounts
+// without a recorded type (imported accounts, sign-ups WorkOS created first) and former creator
+// sign-ups (migration 0500 removed the creator-only ones). Vayada Admin operators create hotel or
+// admin users only.
+export type IdentityAdminUserType = "hotel" | "admin" | "staff";
 export type IdentityAdminCreatableUserType = "hotel" | "admin";
 export type LegacyAdminUserStatus = "pending" | "verified" | "rejected" | "suspended";
 
@@ -592,7 +593,7 @@ const ADMIN_USERS_SELECT_SQL = `
         WHEN platform_members.user_id IS NOT NULL THEN 'admin'
         WHEN hotel_members.owner THEN 'hotel'
         WHEN hotel_members.user_id IS NOT NULL THEN 'staff'
-        WHEN created_user_events.legacy_type IN ('hotel', 'admin', 'creator')
+        WHEN created_user_events.legacy_type IN ('hotel', 'admin')
           THEN created_user_events.legacy_type
         ELSE 'staff'
       END AS type,

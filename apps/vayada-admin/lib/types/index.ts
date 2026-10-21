@@ -8,10 +8,10 @@ export interface User {
   name: string;
   /**
    * What the account is now (VAY-2272): "hotel" owns a hotel group, "staff" is another hotel member
-   * or has no recorded type, "admin" is platform staff. "creator" rows exist until the Marketplace
-   * data is deleted (VAY-2259 step 5).
+   * or has no recorded type, "admin" is platform staff. Creator accounts are gone since migration
+   * 0500.
    */
-  type: "hotel" | "staff" | "creator" | "admin";
+  type: "hotel" | "staff" | "admin";
   status: "pending" | "verified" | "rejected" | "suspended";
   avatar?: string | null;
   email_verified?: boolean;
@@ -60,7 +60,7 @@ export interface UserDetailResponse {
   id: string;
   email: string;
   name: string;
-  type: "creator" | "hotel" | "staff" | "admin";
+  type: "hotel" | "staff" | "admin";
   status: "pending" | "verified" | "rejected" | "suspended";
   emailVerified: boolean;
   avatar: string | null;
