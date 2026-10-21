@@ -55,7 +55,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL runtime pool budget", () => {
     const postgres = { Pool: pg.Pool };
     const runtime = installPostgresPoolRuntime(postgres);
     const pool = new postgres.Pool({ connectionString: url.toString() });
-    const health = runtime.healthCheck(url.toString());
+    const health = runtime.healthCheck(url.toString()).readiness;
     const admin = new pg.Client({ connectionString: TEST_DATABASE_URL });
     await admin.connect();
     // Released in finally if an assertion fails first, so pool.end() can't wait forever.
@@ -118,7 +118,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL runtime pool budget", () => {
     }
   }, 30_000);
 
-  it("fails the health check while a pool stops handing out connections", async () => {
+  it("fails readiness, not liveness, while a pool stops handing out connections", async () => {
     assertTestDatabase();
     const postgres = { Pool: pg.Pool };
     const runtime = installPostgresPoolRuntime(postgres);
@@ -128,7 +128,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL runtime pool budget", () => {
       statement_timeout: 5_000,
       connectionTimeoutMillis: 50,
     });
-    const health = runtime.healthCheck(TEST_DATABASE_URL!);
+    const { liveness, readiness: health } = runtime.healthCheck(TEST_DATABASE_URL!);
     let held: pg.PoolClient | undefined;
     try {
       expect(await health()).toBe(true);
@@ -138,8 +138,9 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL runtime pool budget", () => {
           "timeout exceeded when trying to connect",
         );
       }
-      // The database still answers the probe, but this pool serves nobody.
+      // The database still answers the probe, but this pool serves nobody: not ready, still alive.
       expect(await health()).toBe(false);
+      expect(await liveness()).toBe(true);
       held.release();
       held = undefined;
       await expect(pool.query("SELECT 1 AS ok")).resolves.toMatchObject({ rows: [{ ok: 1 }] });

@@ -5,6 +5,8 @@ const SPECIALIZED_POOL_MAX = 1;
 const CONNECTION_TIMEOUT_MS = 3_000;
 const HEALTH_PROBE_TIMEOUT_MS = 2_000;
 const HEALTH_PROBE_CACHE_MS = 5_000;
+// Connect and query each give up after HEALTH_PROBE_TIMEOUT_MS; a probe still running after both is dropped.
+const HEALTH_PROBE_GIVE_UP_MS = 2 * HEALTH_PROBE_TIMEOUT_MS;
 const KEEP_ALIVE_INITIAL_DELAY_MS = 10_000;
 // A pool that is still full after this many waiter timeouts, with no client handed out since, has
 // stopped serving (for example every slot hung on a peer that vanished in a failover).
@@ -62,6 +64,15 @@ type ConnectionErrorReporter = (fields: { code: string | null; error: string }) 
 /** Resolves false while PostgreSQL does not answer; results are cached briefly. */
 export type DatabaseHealthCheck = () => Promise<boolean>;
 
+/**
+ * liveness answers /health, the ALB's check: whether PostgreSQL answers the probe's own connection.
+ * readiness answers /ready: also false while a shared pool has stopped handing out connections.
+ */
+export type DatabaseHealthChecks = Readonly<{
+  liveness: DatabaseHealthCheck;
+  readiness: DatabaseHealthCheck;
+}>;
+
 export type PostgresPoolSnapshot = Readonly<{
   physicalPoolCount: number;
   maxConnections: number;
@@ -74,7 +85,7 @@ export type PostgresPoolSnapshot = Readonly<{
 export function installPostgresPoolRuntime(postgres: PgModule = pg): {
   snapshot(): PostgresPoolSnapshot;
   startTelemetry(logger: Logger, intervalMs?: number): () => void;
-  healthCheck(connectionString: string): DatabaseHealthCheck;
+  healthCheck(connectionString: string): DatabaseHealthChecks;
   close(): Promise<void>;
 } {
   const OriginalPool = postgres.Pool;
@@ -213,8 +224,13 @@ export function installPostgresPoolRuntime(postgres: PgModule = pg): {
       pool.on("error", () => undefined);
       probePools.push(pool);
       const probe = cachedHealthCheck(() => pool.query("SELECT 1"), HEALTH_PROBE_CACHE_MS);
-      // The probe has its own connection, so it can't see shared pools that stopped serving.
-      return async () => ![...entries.values()].some(isStalled) && (await probe());
+      return {
+        // A pool that stopped serving doesn't fail liveness: replacing the task only moves the load
+        // to a new one and drops every request in flight (VAY-2247 incident, 2026-10-21).
+        liveness: probe,
+        // The probe has its own connection, so it can't see shared pools that stopped serving.
+        readiness: async () => ![...entries.values()].some(isStalled) && (await probe()),
+      };
     },
     async close() {
       await Promise.all(probePools.splice(0).map((pool) => pool.end()));
@@ -250,18 +266,22 @@ export function isPostgresUnavailableError(error: unknown): boolean {
   return false;
 }
 
-/** Shares one in-flight probe and reuses its result for cacheMs. */
+/**
+ * Shares one in-flight probe and reuses its result for cacheMs. A probe that hasn't settled after
+ * giveUpMs counts as down, so one stuck probe can't hold every later check.
+ */
 export function cachedHealthCheck(
   probe: () => Promise<unknown>,
   cacheMs: number,
   now: () => number = Date.now,
+  giveUpMs: number = HEALTH_PROBE_GIVE_UP_MS,
 ): DatabaseHealthCheck {
   let checkedAt = Number.NEGATIVE_INFINITY;
   let healthy = true;
   let pending: Promise<boolean> | undefined;
   return () => {
     if (now() - checkedAt < cacheMs) return Promise.resolve(healthy);
-    pending ??= probe()
+    pending ??= settledWithin(probe(), giveUpMs)
       .then(
         () => true,
         () => false,
@@ -274,6 +294,15 @@ export function cachedHealthCheck(
       });
     return pending;
   };
+}
+
+function settledWithin(work: Promise<unknown>, ms: number): Promise<unknown> {
+  let timer: NodeJS.Timeout | undefined;
+  const giveUp = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error("PostgreSQL health probe did not settle")), ms);
+    timer.unref();
+  });
+  return Promise.race([work, giveUp]).finally(() => clearTimeout(timer));
 }
 
 // Transient connect failures only: a rejected password, a missing database or a TLS mismatch
