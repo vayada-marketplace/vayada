@@ -47,6 +47,8 @@ export const usersService = {
     type?: User["type"];
     status?: "pending" | "verified" | "rejected" | "suspended";
     search?: string;
+    /** Only accounts that platform property provisioning accepts and that have no hotel yet. */
+    provisionable?: boolean;
     page?: number;
     page_size?: number;
   }): Promise<UsersListResponse> => {
@@ -58,6 +60,7 @@ export const usersService = {
     if (params?.type) queryParams.append("type", params.type);
     if (params?.status) queryParams.append("status", params.status);
     if (params?.search) queryParams.append("search", params.search);
+    if (params?.provisionable) queryParams.append("provisionable", "true");
 
     const queryString = queryParams.toString();
     const endpoint = `/api/identity/admin/users${queryString ? `?${queryString}` : ""}`;

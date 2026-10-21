@@ -37,9 +37,18 @@ import {
   type PropertyAccessRepository,
   type RolePermissionRepository,
 } from "@vayada/backend-authorization";
-import Fastify, { type FastifyInstance, type FastifyServerOptions } from "fastify";
+import Fastify, {
+  type FastifyError,
+  type FastifyInstance,
+  type FastifyReply,
+  type FastifyRequest,
+  type FastifyServerOptions,
+} from "fastify";
 
-import { isPostgresUnavailableError } from "./platform/postgresRuntime.js";
+import {
+  isPostgresLockTimeoutError,
+  isPostgresUnavailableError,
+} from "./platform/postgresRuntime.js";
 import type { HotelSetupTrackCommandRepository } from "./domains/hotelSetupTrackCommandRepository.js";
 import type { HotelCatalogStep1Repository } from "./domains/hotelCatalogStep1Repository.js";
 import type { PropertyMediaCommandRepository } from "./domains/propertyMediaCommandRepository.js";
@@ -90,6 +99,7 @@ import {
 import { registerPropertyNearbyRoutes } from "./routes/propertyNearby.js";
 import type { PropertyNearbyRepository } from "./domains/propertyNearbyRepository.js";
 import { registerHotelFirstRunRoutes } from "./routes/hotelFirstRun.js";
+import { registerHotelSetupChecklistRoutes } from "./routes/hotelSetupChecklist.js";
 import {
   registerSharedHotelSetupStatusRoutes,
   type SharedHotelSetupStatusRepository,
@@ -265,7 +275,7 @@ export type ApiAuthOptions = Omit<BackendAuthPluginOptions, "authorizationResolv
 
 type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   /** Makes /health and /ready return 503 while PostgreSQL is unreachable; unset keeps them static. */
-  databaseHealth?: import("./platform/postgresRuntime.js").DatabaseHealthCheck;
+  databaseHealth?: import("./platform/postgresRuntime.js").DatabaseHealthChecks;
   /** Public API logo assignment on the ordinary login (Owner-only); unset keeps the shared writer. */
   hotelSetupLogoAssignments?: Pick<
     import("./domains/propertyMediaCommandRepository.js").PropertyMediaCommandRepository,
@@ -275,6 +285,8 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   hotelSetupProfileCommand?: import("./routes/sharedHotelSetupStatus.js").HotelSetupPropertyProfileUpdate;
   /** VAY-2247 first run (GET/POST /api/hotel-setup/properties/:id/first-run); unset: not mounted. */
   hotelFirstRun?: import("./routes/hotelFirstRun.js").HotelFirstRunRouteOptions["createService"];
+  /** VAY-2247 wave 2: the setup checklist; mounted with the first run (it reads the first run's state). */
+  hotelSetupChecklist?: import("./routes/hotelSetupChecklist.js").HotelSetupChecklistRouteOptions["createService"];
   /** Owner-only Feature Hub Financials on the ordinary login; unset keeps the shared repository. */
   hotelSetupFeatureHubCommands?: Pick<
     import("./routes/pmsModuleActivations.js").PmsModuleActivationRepository,
@@ -423,6 +435,33 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   platformMedia?: PlatformMediaRoutesOptions;
 };
 
+/** How long a "busy, try again" answer asks the client to wait. */
+const BUSY_RETRY_AFTER_SECONDS = 3;
+
+/** The API's answers for database trouble; everything else goes to Fastify's default handler. */
+export function handleApiError(error: FastifyError, request: FastifyRequest, reply: FastifyReply) {
+  // Another request holds what this one needs and the wait gave up (lock_timeout): ask to try again
+  // instead of a 500, and keep it out of the 5xx counts (VAY-2247 incident follow-up).
+  if (isPostgresLockTimeoutError(error)) {
+    request.log.warn({ err: error }, "PostgreSQL lock wait timed out");
+    return reply.status(409).header("retry-after", String(BUSY_RETRY_AFTER_SECONDS)).send({
+      statusCode: 409,
+      error: "Conflict",
+      message: "Someone else is changing this right now. Try again in a moment.",
+      code: "busy_try_again",
+      retryAfterSeconds: BUSY_RETRY_AFTER_SECONDS,
+    });
+  }
+  if (!isPostgresUnavailableError(error)) return reply.send(error);
+  request.log.warn({ err: error }, "PostgreSQL connection unavailable");
+  return reply.status(503).send({
+    statusCode: 503,
+    error: "Service Unavailable",
+    message: "Database is temporarily unavailable",
+    code: "database_unavailable",
+  });
+}
+
 export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   const app = Fastify({
     logger: options.logger ?? {
@@ -437,16 +476,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
         request.url.split("?", 1)[0]?.endsWith("/messaging/threads") === true),
   });
 
-  app.setErrorHandler((error, request, reply) => {
-    if (!isPostgresUnavailableError(error)) return reply.send(error);
-    request.log.warn({ err: error }, "PostgreSQL connection unavailable");
-    return reply.status(503).send({
-      statusCode: 503,
-      error: "Service Unavailable",
-      message: "Database is temporarily unavailable",
-      code: "database_unavailable",
-    });
-  });
+  app.setErrorHandler(handleApiError);
 
   registerBrowserCors(app, options.browserAllowedOrigins ?? []);
 
@@ -604,6 +634,16 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     app.register(registerHotelFirstRunRoutes, {
       prefix: "/api/hotel-setup",
       createService: options.hotelFirstRun,
+      propertyAccessRepository: options.auth.propertyAccessRepository,
+    });
+  }
+  if (options.hotelSetupChecklist) {
+    if (!options.auth?.propertyAccessRepository) {
+      throw new Error("auth.propertyAccessRepository is required with hotelSetupChecklist");
+    }
+    app.register(registerHotelSetupChecklistRoutes, {
+      prefix: "/api/hotel-setup",
+      createService: options.hotelSetupChecklist,
       propertyAccessRepository: options.auth.propertyAccessRepository,
     });
   }

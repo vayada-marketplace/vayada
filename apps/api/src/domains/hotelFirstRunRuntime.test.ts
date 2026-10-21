@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   HOTEL_FIRST_RUN_LOCK_NAMESPACE,
+  createDedicatedLockConnections,
   createHotelFirstRunActivation,
   createHotelFirstRunLocality,
   createHotelFirstRunLock,
@@ -73,6 +74,89 @@ describe("first-run property lock (VAY-2247)", () => {
       "SELECT pg_advisory_unlock($1::int, hashtext($2))",
     );
     expect(fake.release).toHaveBeenCalledOnce();
+  });
+});
+
+describe("first-run lock connections (VAY-2247 incident)", () => {
+  function fakeClients() {
+    const clients: { ended: boolean }[] = [];
+    let failNext = false;
+    return {
+      clients,
+      failNextConnect: () => {
+        failNext = true;
+      },
+      createClient: () => {
+        const client = {
+          ended: false,
+          on: () => client,
+          connect: async () => {
+            if (!failNext) return;
+            failNext = false;
+            throw new Error("connect failed");
+          },
+          query: async () => ({ rows: [{ locked: true }] }),
+          end: async () => {
+            client.ended = true;
+          },
+        };
+        clients.push(client);
+        return client as never;
+      },
+    };
+  }
+
+  it("opens at most max at once; the next run waits for one to close", async () => {
+    const fake = fakeClients();
+    const pool = createDedicatedLockConnections("postgresql://test", {
+      max: 2,
+      waitMs: 1_000,
+      createClient: fake.createClient,
+    });
+    const first = await pool.connect();
+    const second = await pool.connect();
+    let third: Awaited<ReturnType<typeof pool.connect>> | undefined;
+    const waiting = pool.connect().then((client) => (third = client));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(fake.clients).toHaveLength(2);
+    expect(third).toBeUndefined();
+    first.release();
+    await waiting;
+    expect(fake.clients).toHaveLength(3);
+    expect(fake.clients[0]!.ended).toBe(true);
+    second.release();
+    third!.release();
+  });
+
+  it("answers busy when every lock connection stays in use past the wait", async () => {
+    const fake = fakeClients();
+    const pool = createDedicatedLockConnections("postgresql://test", {
+      max: 1,
+      waitMs: 20,
+      createClient: fake.createClient,
+    });
+    const held = await pool.connect();
+    const work = vi.fn();
+    expect(await createHotelFirstRunLock(pool).withPropertyLock(propertyId, work)).toBe("busy");
+    expect(work).not.toHaveBeenCalled();
+    held.release();
+    expect(
+      await createHotelFirstRunLock(pool).withPropertyLock(propertyId, async () => "ran"),
+    ).toBe("ran");
+    expect(fake.clients.map((client) => client.ended)).toEqual([true, true]);
+  });
+
+  it("frees the slot when a connection fails to open", async () => {
+    const fake = fakeClients();
+    const pool = createDedicatedLockConnections("postgresql://test", {
+      max: 1,
+      waitMs: 20,
+      createClient: fake.createClient,
+    });
+    fake.failNextConnect();
+    await expect(pool.connect()).rejects.toThrow("connect failed");
+    (await pool.connect()).release();
+    expect(fake.clients).toHaveLength(2);
   });
 });
 

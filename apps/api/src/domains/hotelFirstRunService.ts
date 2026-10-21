@@ -6,6 +6,7 @@ import {
 } from "@vayada/domain-booking";
 
 import { runFirstRunCalendar, type HotelFirstRunCalendarPorts } from "./hotelFirstRunCalendar.js";
+import type { HotelFirstRunSetupProgress } from "./hotelFirstRunFacts.js";
 import {
   runFirstRunGuestRules,
   type HotelFirstRunGuestRulesPorts,
@@ -60,7 +61,10 @@ export type HotelFirstRunPorts = HotelFirstRunSetupPorts &
   HotelFirstRunGuestRulesPorts &
   HotelFirstRunPlanPorts &
   Readonly<{
-    facts: { read(actor: HotelFirstRunActor): Promise<HotelFirstRunWriteFacts> };
+    facts: {
+      read(actor: HotelFirstRunActor): Promise<HotelFirstRunWriteFacts>;
+      readSetupProgress(actor: HotelFirstRunActor): Promise<HotelFirstRunSetupProgress>;
+    };
     /** Runs `work` while holding the property's first-run lock, or returns "busy" when another run holds it. */
     lock: { withPropertyLock<T>(propertyId: string, work: () => Promise<T>): Promise<T | "busy"> };
     /** Makes the hotel live once its profile is complete (VAY-2247 1.5); a live hotel stays live. */
@@ -90,6 +94,11 @@ export function createHotelFirstRunService(ports: HotelFirstRunPorts) {
   return {
     async read(actor: HotelFirstRunActor): Promise<HotelFirstRunState> {
       return hotelFirstRunState(await ports.facts.read(actor));
+    },
+
+    /** The light read the setup checklist uses on every dashboard load (VAY-2247 incident). */
+    readSetupProgress(actor: HotelFirstRunActor): Promise<HotelFirstRunSetupProgress> {
+      return ports.facts.readSetupProgress(actor);
     },
 
     async run(

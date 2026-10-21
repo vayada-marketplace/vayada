@@ -66,7 +66,9 @@ describe("PMS operating-calendar read model", () => {
       .map(({ text }) => text)
       .slice(fixture.calls.findIndex(({ text }) => text === "BEGIN"));
     expect(transaction[0]).toBe("BEGIN");
-    expect(transaction[1]).toContain("hashtext('pms.room_facts')");
+    // A read never waits long for the room-facts lock (VAY-2247 incident).
+    expect(transaction[1]).toBe("SET LOCAL lock_timeout = '5s'");
+    expect(transaction[2]).toContain("hashtext('pms.room_facts')");
     const physicalLocks = fixture.calls.filter(({ text }) =>
       text.includes("pms.physical-room-unit:"),
     );

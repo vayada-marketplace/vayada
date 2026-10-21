@@ -73,9 +73,13 @@ export const IDENTITY_ADMIN_PLATFORM_ACCESS_CONTRACT = {
   commandTypes: ["identity.access.grant", "identity.access.revoke"],
 } as const;
 
-// "creator" is read only: accounts created as creators before VAY-2272 until migration 0500
-// closes them. Staff create hotel or admin users only.
-export type IdentityAdminUserType = "creator" | "hotel" | "admin";
+// The list labels an account by what it is now (VAY-2272): an active platform member is "admin", a
+// hotel group's owner "hotel", any other hotel group member "staff". Without such a membership a
+// hotel or admin sign-up keeps the type it was created as, and anything else is "staff": accounts
+// without a recorded type (imported accounts, sign-ups WorkOS created first) and former creator
+// sign-ups (migration 0500 removed the creator-only ones). Vayada Admin operators create hotel or
+// admin users only.
+export type IdentityAdminUserType = "hotel" | "admin" | "staff";
 export type IdentityAdminCreatableUserType = "hotel" | "admin";
 export type LegacyAdminUserStatus = "pending" | "verified" | "rejected" | "suspended";
 
@@ -91,6 +95,8 @@ export type IdentityAdminListUsersQuery = {
   type?: IdentityAdminUserType;
   status?: LegacyAdminUserStatus;
   search?: string;
+  /** "true": only accounts platform property provisioning accepts, whose organization has no property yet. */
+  provisionable?: string;
   page?: string;
   page_size?: string;
 };
@@ -146,6 +152,7 @@ export type IdentityAdminUsersReadRepository = {
     type?: IdentityAdminUserType;
     status?: LegacyAdminUserStatus;
     search?: string;
+    provisionable?: boolean;
     limit: number;
     offset: number;
   }): Promise<IdentityAdminUsersListResponse>;
@@ -263,6 +270,7 @@ export async function registerIdentityAdminUserRoutes(
       type: request.query.type,
       status: request.query.status,
       search: request.query.search,
+      provisionable: request.query.provisionable === "true",
       limit: pageSize,
       offset: (page - 1) * pageSize,
     });
@@ -566,16 +574,29 @@ const ADMIN_USERS_SELECT_SQL = `
         ON organization.id = membership.organization_id
       WHERE organization.kind = 'platform'
         AND membership.status = 'active'
+    ),
+    hotel_members AS (
+      SELECT membership.user_id, bool_or(membership.role_key = 'hotel_owner') AS owner
+      FROM identity.organization_memberships AS membership
+      JOIN identity.organizations AS organization
+        ON organization.id = membership.organization_id
+      WHERE organization.kind = 'hotel_group'
+        AND organization.status = 'active'
+        AND membership.status = 'active'
+      GROUP BY membership.user_id
     )
     SELECT
       users.id::text AS id,
       users.email,
       COALESCE(users.name, '') AS name,
-      COALESCE(
-        CASE WHEN platform_members.user_id IS NOT NULL THEN 'admin' END,
-        created_user_events.legacy_type,
-        'creator'
-      ) AS type,
+      CASE
+        WHEN platform_members.user_id IS NOT NULL THEN 'admin'
+        WHEN hotel_members.owner THEN 'hotel'
+        WHEN hotel_members.user_id IS NOT NULL THEN 'staff'
+        WHEN created_user_events.legacy_type IN ('hotel', 'admin')
+          THEN created_user_events.legacy_type
+        ELSE 'staff'
+      END AS type,
       users.status,
       COALESCE(
         external_identity_status.provider_email_verified,
@@ -591,14 +612,41 @@ const ADMIN_USERS_SELECT_SQL = `
       ON external_identity_status.user_id = users.id
     LEFT JOIN platform_members
       ON platform_members.user_id = users.id
+    LEFT JOIN hotel_members
+      ON hotel_members.user_id = users.id
   ) AS identity_admin_users
 `;
+
+// Vayada Admin's Hotels page lists accounts that still need a hotel. Platform property provisioning
+// accepts an active account with exactly one active membership in an active hotel group; an
+// organization that already owns a property has its hotel.
+const PROVISIONABLE_ACCOUNT_SQL = `status = 'active' AND id IN (
+    SELECT membership.user_id::text
+    FROM identity.organization_memberships AS membership
+    JOIN identity.organizations AS organization
+      ON organization.id = membership.organization_id
+     AND organization.kind = 'hotel_group'
+     AND organization.status = 'active'
+    WHERE membership.status = 'active'
+    GROUP BY membership.user_id
+    HAVING count(*) = 1
+       AND NOT bool_or(EXISTS (
+         SELECT 1
+         FROM identity.organization_resource_links AS owner_link
+         WHERE owner_link.organization_id = membership.organization_id
+           AND owner_link.product = 'hotel_catalog'
+           AND owner_link.resource_type = 'property'
+           AND owner_link.relationship = 'owner'
+           AND owner_link.status = 'active'
+       ))
+  )`;
 
 function buildAdminUsersFilters(
   input: {
     type?: IdentityAdminUserType;
     status?: LegacyAdminUserStatus;
     search?: string;
+    provisionable?: boolean;
   },
   values: unknown[],
 ): { sql: string } {
@@ -616,6 +664,7 @@ function buildAdminUsersFilters(
     values.push(`%${input.search.trim()}%`);
     filters.push(`(email ILIKE $${values.length} OR name ILIKE $${values.length})`);
   }
+  if (input.provisionable) filters.push(PROVISIONABLE_ACCOUNT_SQL);
   return { sql: `WHERE ${filters.join(" AND ")}` };
 }
 
@@ -624,7 +673,7 @@ function serializeAdminUser(row: IdentityAdminUserRow): IdentityAdminUser {
     id: row.id,
     email: row.email,
     name: row.name ?? "",
-    type: row.type ?? "creator",
+    type: row.type ?? "staff",
     status: fromIdentityStatus(row.status),
     avatar: null,
     email_verified: Boolean(row.email_verified),
