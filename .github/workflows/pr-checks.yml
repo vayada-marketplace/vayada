@@ -982,6 +982,16 @@ jobs:
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
+      # 0504 (VAY-2272) in its own database: migrate to 0497, grant the old capture login what
+      # production granted it, then apply the rest.
+      - name: Verify the affiliate capture login grants revoke
+        if: matrix.shard == 'hotel-setup'
+        run: >-
+          npm --workspace @vayada/backend-migration run test --
+          src/affiliateCaptureLoginGrantsRevokeMigration.integration.test.ts
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+
       # Runs 0482 again inside a rolled-back transaction on the migrated shared database.
       - name: Verify the complete-hotel activation backfill
         if: matrix.shard == 'hotel-setup'
