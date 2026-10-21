@@ -25,7 +25,10 @@ import { createPgFinancePaymentReadinessReadModel } from "./domains/financePayme
 import { createFinanceSubscriptionService } from "./domains/financeSubscriptionService.js";
 import { createPgFinanceSubscriptionStore } from "./domains/financeSubscriptionStore.js";
 import { createPgHotelCatalogOperatingCalendarPropertyProfileEvidencePort } from "./domains/hotelCatalogOperatingCalendarPropertyProfileEvidence.js";
-import { createHotelFirstRunRuntime } from "./domains/hotelFirstRunRuntime.js";
+import {
+  createDedicatedLockConnections,
+  createHotelFirstRunRuntime,
+} from "./domains/hotelFirstRunRuntime.js";
 import type { HotelFirstRunRequest } from "./domains/hotelFirstRunService.js";
 import type { HotelFirstRunActor } from "./domains/hotelFirstRunSteps.js";
 import { createPgHotelSetupTrackCommandRepository } from "./domains/hotelSetupTrackCommandRepository.js";
@@ -313,7 +316,7 @@ describe.skipIf(!url)(
         createPgBookingGuestPolicyScopeAuthorizationPort({ pool: client }),
       );
       const createService = createHotelFirstRunRuntime({
-        lockPool: pool,
+        lockPool: createDedicatedLockConnections(cs),
         pricingPool: pool,
         profile: profiles,
         profileCommand: createOrdinaryHotelSetupProfileCommand(pool),
@@ -461,6 +464,11 @@ describe.skipIf(!url)(
         if (!result.ok) return;
         expect(result.state.nextStep).toBeNull();
         expect(new Set(result.state.steps.map((step) => step.state))).toEqual(new Set(["done"]));
+        // The checklist's light read agrees, without the booking readiness (VAY-2247 incident).
+        expect(await h.service().readSetupProgress(h.actor)).toEqual({
+          firstRoom: true,
+          guestPayment: true,
+        });
 
         // Sri Lanka → LKR; rooms named Room 1–3; pay at the hotel; the default terms; Grand Classic; the city shown.
         const scope = { organizationId: h.organizationId, propertyId: h.propertyId };
@@ -660,6 +668,10 @@ describe.skipIf(!url)(
           ran: ["currency", "rooms", "payments"],
         });
         expect((await h.service().read(h.actor)).nextStep).toBe("pricing");
+        expect(await h.service().readSetupProgress(h.actor)).toEqual({
+          firstRoom: false,
+          guestPayment: false,
+        });
         // A first run that stopped leaves the hotel being set up; finishing it makes it live.
         const lifecycle = async () =>
           (

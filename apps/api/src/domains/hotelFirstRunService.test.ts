@@ -106,7 +106,10 @@ function service(
   };
   const ports = {
     plans,
-    facts: { read: vi.fn(async () => options.facts ?? facts) },
+    facts: {
+      read: vi.fn(async () => options.facts ?? facts),
+      readSetupProgress: vi.fn(async () => ({ firstRoom: true, guestPayment: true })),
+    },
     lock: {
       withPropertyLock: async (_id: string, work: () => Promise<unknown>) =>
         options.busy ? "busy" : work(),

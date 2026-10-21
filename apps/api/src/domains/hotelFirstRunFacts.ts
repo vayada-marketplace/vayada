@@ -94,43 +94,33 @@ export function createHotelFirstRunFactsReader(ports: HotelFirstRunFactsPorts) {
     async read(actor: HotelFirstRunActor): Promise<HotelFirstRunWriteFacts> {
       const { propertyId, organizationId } = actor;
       const scope = { propertyId, organizationId, actorUserId: actor.userId };
-      const [
-        profile,
-        language,
-        currency,
-        roomTypes,
-        firstRunRoomTypes,
-        payments,
-        pricing,
-        calendar,
-        rules,
-        terms,
-        design,
-        plan,
-        codes,
-      ] = await Promise.all([
-        ports.profile.getPropertyProfile({ organizationId, propertyId }),
-        ports.language.read(propertyId),
-        ports.pricingRead.getPropertyPricingCurrency(propertyId),
-        ports.roomRead.listRoomTypeFacts(propertyId),
-        firstRunRoomTypeIds(ports, propertyId),
-        ports.paymentRead.getPaymentReadiness({ organizationId, propertyId }),
-        ports.pricing.read(propertyId),
-        ports.calendarRead.getCurrentOperatingCalendarConfiguration(propertyId),
-        ports.guestRules.read(scope),
-        ports.terms.read(scope),
-        ports.designRead.getCurrentDesign({ organizationId, propertyId }),
-        ports.plans.getPlanStatus(propertyId),
-        readinessCodes(ports, actor),
-      ]);
+      // One read at a time (VAY-2247 incident, 2026-10-21): in parallel, these ~13 reads and the per-room
+      // ones queued on the API's shared pools, several of which hold a single connection, and starved
+      // every other request. Sequential holds at most one connection per request.
+      const profile = await ports.profile.getPropertyProfile({ organizationId, propertyId });
+      const language = await ports.language.read(propertyId);
+      const currency = await ports.pricingRead.getPropertyPricingCurrency(propertyId);
+      const roomTypes = await ports.roomRead.listRoomTypeFacts(propertyId);
+      const firstRunRoomTypes = await firstRunRoomTypeIds(ports, propertyId);
+      const payments = await ports.paymentRead.getPaymentReadiness({ organizationId, propertyId });
+      const pricing = await ports.pricing.read(propertyId);
+      const calendar =
+        await ports.calendarRead.getCurrentOperatingCalendarConfiguration(propertyId);
+      const rules = await ports.guestRules.read(scope);
+      const terms = await ports.terms.read(scope);
+      const design = await ports.designRead.getCurrentDesign({ organizationId, propertyId });
+      const plan = await ports.plans.getPlanStatus(propertyId);
+      const codes = await readinessCodes(ports, actor);
 
-      const rooms: HotelFirstRunFacts["roomTypes"] = await Promise.all(
-        roomTypes.map(async (room) => {
-          const [capacity, units] = await Promise.all([
-            ports.roomRead.getRoomTypeCapacity(propertyId, room.roomTypeId),
-            ports.roomRead.listPhysicalRoomUnitIdentities(propertyId, room.roomTypeId),
-          ]);
-          return Object.freeze({
+      const rooms: HotelFirstRunFacts["roomTypes"][number][] = [];
+      for (const room of roomTypes) {
+        const capacity = await ports.roomRead.getRoomTypeCapacity(propertyId, room.roomTypeId);
+        const units = await ports.roomRead.listPhysicalRoomUnitIdentities(
+          propertyId,
+          room.roomTypeId,
+        );
+        rooms.push(
+          Object.freeze({
             roomTypeId: room.roomTypeId,
             roomFactsRevision: room.roomFactsRevision,
             roomUnitsRevision: capacity?.roomUnitsRevision ?? 0,
@@ -140,9 +130,9 @@ export function createHotelFirstRunFactsReader(ports: HotelFirstRunFactsPorts) {
                 (unit) => unit.lifecycle === "active" && unit.operationalLabelStatus !== "verified",
               )
               .map((unit) => unit.roomUnitId),
-          });
-        }),
-      );
+          }),
+        );
+      }
 
       const location = profile?.profile.location;
       const selected = new Set(
@@ -191,15 +181,50 @@ export function createHotelFirstRunFactsReader(ports: HotelFirstRunFactsPorts) {
           termsSaved: Boolean(terms.termsText),
           designSaved: Boolean(design),
         }),
-        plan:
-          plan.plan === "commission"
-            ? "commission"
-            : plan.plan === "fixed"
-              ? "fixed"
-              : plan.checkoutPending
-                ? "fixed_checkout_pending"
-                : "none",
+        plan: firstRunPlan(plan),
+      });
+    },
+
+    /**
+     * What the setup checklist shows of setup, on every dashboard load: whether the first room and its price,
+     * and how guests pay, are done. Four reads, one at a time, without the booking readiness or the
+     * per-room reads `read` needs to run the first run (VAY-2247 incident, 2026-10-21).
+     */
+    async readSetupProgress(actor: HotelFirstRunActor): Promise<HotelFirstRunSetupProgress> {
+      const { propertyId, organizationId } = actor;
+      const roomTypes = await ports.roomRead.listRoomTypeFacts(propertyId);
+      const pricing = await ports.pricing.read(propertyId);
+      const payments = await ports.paymentRead.getPaymentReadiness({ organizationId, propertyId });
+      const plan = firstRunPlan(await ports.plans.getPlanStatus(propertyId));
+      const priced = new Set(
+        (pricing?.rooms ?? [])
+          .filter((room) => room.offers.length > 0)
+          .map((room) => room.roomTypeId),
+      );
+      const payAtProperty = (payments?.methods ?? []).some(
+        (method) => method.selected && method.method === "pay_at_property",
+      );
+      const currencyMatches = payments?.pricingCurrency.matchesCurrent ?? false;
+      return Object.freeze({
+        firstRoom: roomTypes.length > 0 && roomTypes.every((room) => priced.has(room.roomTypeId)),
+        guestPayment:
+          payAtProperty && currencyMatches && (plan === "commission" || plan === "fixed"),
       });
     },
   };
+}
+
+/** The setup checklist's view of setup: room and price, and how guests pay (done or not). */
+export type HotelFirstRunSetupProgress = Readonly<{ firstRoom: boolean; guestPayment: boolean }>;
+
+function firstRunPlan(
+  plan: Awaited<ReturnType<HotelFirstRunFactsPorts["plans"]["getPlanStatus"]>>,
+) {
+  return plan.plan === "commission"
+    ? ("commission" as const)
+    : plan.plan === "fixed"
+      ? ("fixed" as const)
+      : plan.checkoutPending
+        ? ("fixed_checkout_pending" as const)
+        : ("none" as const);
 }

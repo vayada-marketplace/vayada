@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
 import type { RequestContext } from "@vayada/backend-auth";
-import type { PoolClient } from "pg";
+import pg, { type PoolClient } from "pg";
 
 import type { HotelSetupPropertyActivation } from "../platform/hotelSetupProfileWriter.js";
 import type { HotelSetupPropertyProfileUpdate } from "../routes/sharedHotelSetupStatus.js";
@@ -36,6 +36,28 @@ export type HotelFirstRunRuntimeDependencies = Omit<
     profileCommand: HotelSetupPropertyProfileUpdate;
     activateProperty: HotelSetupPropertyActivation;
   };
+
+/**
+ * The lock's connections: one plain client per run, opened for the run and closed after it, outside the
+ * API's shared pools (VAY-2247 incident, 2026-10-21). Taking it from a shared pool pinned one of its few
+ * connections for the whole run while the run's own steps needed more from the same pool.
+ */
+export function createDedicatedLockConnections(connectionString: string): LockPool {
+  return {
+    async connect() {
+      const client = new pg.Client({ connectionString, connectionTimeoutMillis: 5_000 });
+      // A dropped connection fails the lock's queries instead of exiting the process.
+      client.on("error", () => undefined);
+      await client.connect();
+      return {
+        query: client.query.bind(client) as PoolClient["query"],
+        release: () => {
+          void client.end().catch(() => undefined);
+        },
+      };
+    },
+  };
+}
 
 /** Holds a session advisory lock on its own connection for the whole run; "busy" when another run holds it. */
 export function createHotelFirstRunLock(pool: LockPool): HotelFirstRunPorts["lock"] {
