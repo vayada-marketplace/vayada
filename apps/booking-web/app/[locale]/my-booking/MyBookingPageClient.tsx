@@ -15,7 +15,9 @@ import { bookingImageSizes } from "@/components/booking/imageSizes";
 import { useHotel, useSlug } from "@/contexts/HotelContext";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { bookingService, CancelPreview, type BookingLookupResponse } from "@/services/api/booking";
+import { ApiError } from "@/services/api/client";
 import { readLastBooking } from "@/lib/storage/bookingDraft";
+import { isLastingRefusal, useGuestErrorText } from "@/lib/guestError";
 
 /** Today's date (YYYY-MM-DD) in the hotel's time zone. */
 function todayIn(timeZone?: string): string {
@@ -33,6 +35,11 @@ function todayIn(timeZone?: string): string {
   }
 }
 
+/** Pending or confirmed, with check-in today or later: the page offers withdraw or cancel. */
+const offersCancel = (booking: Pick<BookingLookupResponse, "status" | "checkIn">) =>
+  (booking.status === "pending" || booking.status === "confirmed") &&
+  booking.checkIn >= new Date().toISOString().slice(0, 10);
+
 /** The whole card payment goes back: decided on the amounts, never on a rounded percentage. */
 const fullRefund = (preview: { amountPaid?: number; refundAmount: number }) =>
   (preview.amountPaid ?? 0) > 0 && preview.refundAmount >= (preview.amountPaid ?? 0);
@@ -44,6 +51,7 @@ export default function MyBookingPageClient() {
   const tr = useTranslations("roomSelection");
   const { hotel } = useHotel();
   const { formatPrice } = useCurrency();
+  const errorText = useGuestErrorText();
   const searchParams = useSearchParams();
   const [reference, setReference] = useState("");
   const [email, setEmail] = useState("");
@@ -57,6 +65,8 @@ export default function MyBookingPageClient() {
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
+  // Why the server won't cancel this booking online; replaces the Cancel button (VAY-2308).
+  const [cancelRefusal, setCancelRefusal] = useState("");
 
   const handleSearch = async (overrideReference?: string, overrideEmail?: string) => {
     const ref = overrideReference ?? reference;
@@ -66,12 +76,29 @@ export default function MyBookingPageClient() {
     setError("");
     setBooking(null);
     setSuccessMessage("");
+    setCancelPreview(null);
+    setCancelRefusal("");
 
     try {
       const result = await bookingService.lookup(slug, ref, em);
+      // Ask before the guest clicks: a booking the server won't cancel online says why up front.
+      if (result.status === "confirmed" && offersCancel(result)) {
+        try {
+          setCancelPreview(await bookingService.cancelPreview(slug, result.id, em));
+        } catch (err) {
+          // Anything else (busy, outage) keeps the button; clicking asks again.
+          if (isLastingRefusal(err)) setCancelRefusal(errorText(err));
+        }
+      }
       setBooking(result);
-    } catch (err: any) {
-      setError(err.message || t("notFound") || "Booking not found");
+    } catch (err) {
+      setError(
+        err instanceof ApiError && err.status === 404
+          ? t("notFound")
+          : err instanceof ApiError && err.status === 429
+            ? t("tooManyAttempts")
+            : errorText(err, t("lookupUnavailable")),
+      );
     } finally {
       setSearching(false);
     }
@@ -95,10 +122,7 @@ export default function MyBookingPageClient() {
 
   const isPending = booking?.status === "pending";
   const isConfirmed = booking?.status === "confirmed";
-  const isFutureCheckIn = booking
-    ? booking.checkIn >= new Date().toISOString().slice(0, 10)
-    : false;
-  const canCancel = (isPending || isConfirmed) && isFutureCheckIn;
+  const canCancel = !!booking && offersCancel(booking);
 
   const handleCancelClick = async () => {
     if (!booking) return;
@@ -108,14 +132,20 @@ export default function MyBookingPageClient() {
       return;
     }
 
+    // The preview from the lookup; the fee is checked again when cancelling.
+    if (cancelPreview) {
+      setShowConfirmDialog(true);
+      return;
+    }
     setLoadingPreview(true);
     setError("");
     try {
       const preview = await bookingService.cancelPreview(slug, booking.id, email);
       setCancelPreview(preview);
       setShowConfirmDialog(true);
-    } catch (err: any) {
-      setError(err.message || "Failed to load cancellation details");
+    } catch (err) {
+      if (isLastingRefusal(err)) setCancelRefusal(errorText(err));
+      else setError(errorText(err));
     } finally {
       setLoadingPreview(false);
     }
@@ -143,14 +173,16 @@ export default function MyBookingPageClient() {
       }
       setShowConfirmDialog(false);
       setCancelPreview(null);
-    } catch (err: any) {
-      setError(err.message || "Cancellation failed");
+    } catch (err) {
+      setError(errorText(err));
       // The fee may have moved to another tier since the preview: show the current one here.
       if (!isPending) {
         try {
           setCancelPreview(await bookingService.cancelPreview(slug, booking.id, email));
-        } catch {
-          // Keep the shown preview; the error explains why cancelling failed.
+        } catch (previewError) {
+          // Keep the shown preview; the error explains why cancelling failed. Once the dialog
+          // closes, a lasting refusal takes the Cancel button's place.
+          if (isLastingRefusal(previewError)) setCancelRefusal(errorText(previewError));
         }
       }
     } finally {
@@ -389,16 +421,29 @@ export default function MyBookingPageClient() {
                   {tr("editRequest")}
                 </Link>
               )}
-            {/* Cancel / Withdraw Button */}
-            {canCancel && (
-              <button
-                onClick={handleCancelClick}
-                disabled={loadingPreview}
-                className="w-full mt-6 py-3 border-2 border-red-300 text-red-600 font-semibold rounded-full hover:bg-red-50 transition-colors disabled:opacity-50"
-              >
-                {loadingPreview ? "..." : isPending ? t("withdrawBooking") : t("cancelBooking")}
-              </button>
-            )}
+            {/* Cancel / Withdraw Button, or why it can't be done online */}
+            {canCancel &&
+              (cancelRefusal ? (
+                <div className="mt-6 rounded-xl border border-gray-200 bg-gray-50 p-4">
+                  <p className="text-sm text-gray-700">{cancelRefusal}</p>
+                  {hotel.contact.email && (
+                    <a
+                      href={`mailto:${hotel.contact.email}`}
+                      className="mt-4 block w-full py-3 text-center border border-gray-300 bg-white text-gray-700 font-semibold rounded-full hover:bg-gray-100 transition-colors"
+                    >
+                      {t("contactHotel")}
+                    </a>
+                  )}
+                </div>
+              ) : (
+                <button
+                  onClick={handleCancelClick}
+                  disabled={loadingPreview}
+                  className="w-full mt-6 py-3 border-2 border-red-300 text-red-600 font-semibold rounded-full hover:bg-red-50 transition-colors disabled:opacity-50"
+                >
+                  {loadingPreview ? "..." : isPending ? t("withdrawBooking") : t("cancelBooking")}
+                </button>
+              ))}
           </div>
         )}
       </div>

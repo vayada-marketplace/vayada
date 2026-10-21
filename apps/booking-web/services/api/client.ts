@@ -1,5 +1,7 @@
 /** One ApiClient class for the TypeScript public Booking Web API (bookingWebPublic). */
 
+export const GENERIC_ERROR_MESSAGE = "Something went wrong. Please try again.";
+
 class ApiError extends Error {
   status: number;
   detail: unknown;
@@ -44,8 +46,9 @@ class ApiClient {
 // `{detail: "..."}` for raised HTTPExceptions but `{detail: [{loc,msg,...}]}`
 // for request-validation (422) errors — the list shape is why the old code
 // fell back to a raw "API error: POST 422".
-function messageFromDetail(detail: unknown): string | null {
-  if (!detail || typeof detail !== "object" || !("detail" in detail)) return null;
+function messageFromDetail(detail: unknown, status: number): string | null {
+  if (!detail || typeof detail !== "object") return null;
+  if (!("detail" in detail)) return guestMessage(detail, status);
   const d = (detail as { detail: unknown }).detail;
   if (typeof d === "string") return d;
   if (Array.isArray(d)) {
@@ -59,6 +62,16 @@ function messageFromDetail(detail: unknown): string | null {
   return null;
 }
 
+// The TypeScript API answers `{statusCode, error, message, code?}` (VAY-2308). A 4xx message is
+// written for guests; Fastify's own (FST_* codes, unknown routes) and every 5xx message are not.
+function guestMessage(body: object, status: number): string | null {
+  const { message, code } = body as { message?: unknown; code?: unknown };
+  if (status >= 500 || typeof message !== "string" || !message.trim()) return null;
+  if (typeof code === "string" && code.startsWith("FST_")) return null;
+  if (/^Route \w+:\S* not found$/.test(message)) return null;
+  return message;
+}
+
 async function parse<T>(res: Response): Promise<T> {
   if (!res.ok) {
     let detail: unknown = null;
@@ -69,7 +82,7 @@ async function parse<T>(res: Response): Promise<T> {
     // render errors (e.g. the checkout payment step) classify on
     // err.status / err.detail and map to friendly localized copy; this
     // message is only the last-resort copy.
-    const message = messageFromDetail(detail) || "Something went wrong. Please try again.";
+    const message = messageFromDetail(detail, res.status) || GENERIC_ERROR_MESSAGE;
     throw new ApiError(message, res.status, detail);
   }
   return res.json();

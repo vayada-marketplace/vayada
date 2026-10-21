@@ -81,3 +81,35 @@ describe("pricing-v2 guest cancellation preview (VAY-2100)", () => {
     expect(() => preview(outcome("2026-10-01", tiered), "QQQ")).toThrow(/cannot be verified/);
   });
 });
+
+describe("guest cancellation refusals carry a code booking-web translates (VAY-2308)", () => {
+  const refusal = (run: () => unknown) => {
+    try {
+      run();
+    } catch (error) {
+      return { ...(error as object), message: (error as Error).message };
+    }
+    throw new Error("expected a refusal");
+  };
+
+  it.each([
+    [
+      "non-refundable",
+      () => preview(outcome("2026-10-01", { kind: "non_refundable" })),
+      "BOOKING_CANCEL_NON_REFUNDABLE",
+    ],
+    [
+      "past the deadline",
+      () => preview(outcome("2026-11-25", flexible())),
+      "BOOKING_CANCEL_DEADLINE_PASSED",
+    ],
+    [
+      "after check-in",
+      () => preview(outcome("2026-12-02", tiered)),
+      "BOOKING_CANCEL_CHECK_IN_PASSED",
+    ],
+    ["unreadable terms", () => preview(null), "BOOKING_CANCEL_NOT_ONLINE"],
+  ])("%s", (_name, run, code) => {
+    expect(refusal(run)).toMatchObject({ statusCode: 409, code });
+  });
+});

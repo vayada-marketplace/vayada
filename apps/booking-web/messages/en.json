@@ -356,7 +356,8 @@
     "status": "Status",
     "cancelled": "Cancelled",
     "declined": "Declined",
-    "withdrawn": "Withdrawn"
+    "withdrawn": "Withdrawn",
+    "contactHotel": "Contact the Hotel"
   },
   "confirmation": {
     "loadingDetails": "Loading booking details…",
@@ -497,5 +498,16 @@
     "allocateGuests": "Guests in each room",
     "allocationAdults": "Adults",
     "allocationChildren": "Children"
+  },
+  "guestErrors": {
+    "somethingWentWrong": "Something went wrong. Please try again.",
+    "cancelNonRefundable": "This booking is non-refundable, so it can't be cancelled online. Please contact the hotel.",
+    "cancelDeadlinePassed": "The free-cancellation period for this booking has ended, so it can't be cancelled online. Please contact the hotel.",
+    "cancelCheckInPassed": "The check-in date has passed, so this booking can't be cancelled online. Please contact the hotel.",
+    "cancelNotOnline": "This booking can't be cancelled online. Please contact the hotel.",
+    "cancelFeeChanged": "The cancellation fee has changed. Please review it before cancelling.",
+    "withdrawNotOnline": "This request can't be withdrawn online. Please contact the hotel.",
+    "bookingNotChangeable": "This booking can no longer be changed. Look it up again to see its current status.",
+    "busyTryAgain": "This booking is being updated right now. Please try again in a moment."
   }
 }

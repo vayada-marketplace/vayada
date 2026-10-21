@@ -2387,6 +2387,7 @@ export function createTargetBookingWebCheckoutAdapter(
           throw createHttpError(
             409,
             "This booking's card payment can't be refunded online. Please contact the hotel.",
+            "BOOKING_CANCEL_NOT_ONLINE",
           );
         const preview = resolveTargetCancellationPreview(
           booking,
@@ -3958,6 +3959,7 @@ async function withGuestLifecycleMutation(
         throw createHttpError(
           409,
           "This booking's card payment can't be withdrawn online. Please contact the hotel.",
+          "BOOKING_WITHDRAW_NOT_ONLINE",
         );
       }
     }
@@ -4005,6 +4007,7 @@ async function withGuestLifecycleMutation(
           throw createHttpError(
             409,
             "The cancellation fee has changed. Review it again before cancelling.",
+            "BOOKING_CANCEL_FEE_CHANGED",
           );
         // A paid card stay gets back what the terms don't keep; Stripe hears of it after commit.
         if (cardPaid(feeBooking))
@@ -4027,6 +4030,7 @@ async function withGuestLifecycleMutation(
             throw createHttpError(
               409,
               "This booking's card payment can't be refunded online. Please contact the hotel.",
+              "BOOKING_CANCEL_NOT_ONLINE",
             );
           }
       }
@@ -6261,13 +6265,17 @@ function assertLifecycleMutationAllowed(
   cardRefunds = false,
 ): void {
   if (booking.lifecycleStatus === "canceled" || booking.lifecycleStatus === "completed") {
-    throw createHttpError(409, "Booking can no longer be changed.");
+    throw createHttpError(409, "Booking can no longer be changed.", "BOOKING_NOT_CHANGEABLE");
   }
   if (action === "withdraw" && booking.lifecycleStatus !== "pending_payment") {
-    throw createHttpError(409, "Only pending bookings can be withdrawn.");
+    throw createHttpError(409, "Only pending bookings can be withdrawn.", "BOOKING_NOT_CHANGEABLE");
   }
   if (action === "cancel" && booking.lifecycleStatus !== "confirmed") {
-    throw createHttpError(409, "Only confirmed bookings can be cancelled.");
+    throw createHttpError(
+      409,
+      "Only confirmed bookings can be cancelled.",
+      "BOOKING_NOT_CHANGEABLE",
+    );
   }
   if (action === "withdraw" || action === "cancel") {
     assertTargetInventoryReleasePaymentStateSupported(booking, action, cardRefunds);
@@ -6304,6 +6312,7 @@ function assertTargetInventoryReleasePaymentStateSupported(
     throw createHttpError(
       409,
       `Paid bookings cannot be ${action === "withdraw" ? "withdrawn" : "cancelled"} online until refund processing is available.`,
+      action === "withdraw" ? "BOOKING_WITHDRAW_NOT_ONLINE" : "BOOKING_CANCEL_NOT_ONLINE",
     );
   }
 }
@@ -6374,6 +6383,7 @@ export function resolveTargetCancellationPreview(
     throw createHttpError(
       409,
       "This booked rate is non-refundable and cannot be cancelled online.",
+      "BOOKING_CANCEL_NON_REFUNDABLE",
     );
   }
 
@@ -6390,6 +6400,7 @@ export function resolveTargetCancellationPreview(
     throw createHttpError(
       409,
       "This booking's cancellation policy cannot be verified online. Contact the property.",
+      "BOOKING_CANCEL_NOT_ONLINE",
     );
   }
 
@@ -6413,6 +6424,7 @@ export function resolveTargetCancellationPreview(
     throw createHttpError(
       409,
       "This booking's free-cancellation period has expired. Contact the property.",
+      "BOOKING_CANCEL_DEADLINE_PASSED",
     );
   }
 
@@ -6442,18 +6454,25 @@ function pricingCancellationPreview(
     throw createHttpError(
       409,
       "This booking's cancellation policy cannot be verified online. Contact the property.",
+      "BOOKING_CANCEL_NOT_ONLINE",
     );
   if (outcome.daysBeforeCheckIn < 0)
-    throw createHttpError(409, "This booking's check-in date has passed. Contact the property.");
+    throw createHttpError(
+      409,
+      "This booking's check-in date has passed. Contact the property.",
+      "BOOKING_CANCEL_CHECK_IN_PASSED",
+    );
   if (outcome.rooms.some((room) => room.rule === "non_refundable"))
     throw createHttpError(
       409,
       "This booked rate is non-refundable and cannot be cancelled online.",
+      "BOOKING_CANCEL_NON_REFUNDABLE",
     );
   if (outcome.rooms.some((room) => room.rule === "free_until_deadline" && room.refundPercent < 100))
     throw createHttpError(
       409,
       "This booking's free-cancellation period has expired. Contact the property.",
+      "BOOKING_CANCEL_DEADLINE_PASSED",
     );
   const paid = cardRefund?.paidMinor ?? 0n,
     refund = cardRefund?.refundMinor ?? 0n;
@@ -6525,6 +6544,7 @@ function unverifiableFreeCancellationPeriodError(): Error {
   return createHttpError(
     409,
     "This booking's free-cancellation period cannot be verified online. Contact the property.",
+    "BOOKING_CANCEL_NOT_ONLINE",
   );
 }
 
@@ -6707,9 +6727,11 @@ export function sha256Hex(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
-export function createHttpError(statusCode: number, message: string): HttpError {
+/** `code` is a stable name booking-web translates for guests (VAY-2308); the message stays English. */
+export function createHttpError(statusCode: number, message: string, code?: string): HttpError {
   const error = new Error(message) as HttpError;
   error.statusCode = statusCode;
+  if (code) error.code = code;
   return error;
 }
 
@@ -6723,6 +6745,7 @@ function isHttpError(error: unknown): error is HttpError {
 
 type HttpError = Error & {
   statusCode: number;
+  code?: string;
 };
 
 // Temporary Booking persistence boundary while the checkout owner is extracted from

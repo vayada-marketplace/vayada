@@ -13,6 +13,7 @@ import ApproximateAmountsNote from "@/components/booking/ApproximateAmountsNote"
 import StayRange from "@/components/booking/StayRange";
 import { Booking } from "@/lib/types";
 import { readLastBooking } from "@/lib/storage/bookingDraft";
+import { useGuestErrorText } from "@/lib/guestError";
 import { bookingService, ChangeRequestPreview } from "@/services/api/booking";
 
 export default function RequestChangePage({
@@ -30,6 +31,7 @@ export default function RequestChangePage({
   const { slug } = useSlug();
   const { formatPrice } = useCurrency();
   const router = useRouter();
+  const errorText = useGuestErrorText();
 
   const [booking, setBooking] = useState<Booking | null>(null);
   const [loading, setLoading] = useState(true);
@@ -86,7 +88,7 @@ export default function RequestChangePage({
       })
       .catch((err) => {
         if (cancelled) return;
-        setLoadError(err.message || t("loadError") || "Could not load this booking.");
+        setLoadError(errorText(err, t("loadError")));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -94,7 +96,7 @@ export default function RequestChangePage({
     return () => {
       cancelled = true;
     };
-  }, [reference, guestEmail, emailResolved, slug, t]);
+  }, [reference, guestEmail, emailResolved, slug, t, errorText]);
 
   // Debounced preview fetch whenever the form changes.
   useEffect(() => {
@@ -123,9 +125,7 @@ export default function RequestChangePage({
       } catch (err: unknown) {
         if (!cancelled) {
           setPreview(null);
-          setPreviewError(
-            err instanceof Error && err.message ? err.message : t("previewUnavailable"),
-          );
+          setPreviewError(errorText(err, t("previewUnavailable")));
         }
       } finally {
         if (!cancelled) setPreviewing(false);
@@ -135,7 +135,7 @@ export default function RequestChangePage({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [booking, hasPending, slug, guestEmail, checkIn, checkOut, t]);
+  }, [booking, hasPending, slug, guestEmail, checkIn, checkOut, t, errorText]);
 
   const handleSubmit = async () => {
     if (!booking) return;
@@ -152,7 +152,7 @@ export default function RequestChangePage({
       });
       router.push(`/booking/${reference}`);
     } catch (err: unknown) {
-      setSubmitError(err instanceof Error && err.message ? err.message : t("submitError"));
+      setSubmitError(errorText(err, t("submitError")));
     } finally {
       setSubmitting(false);
     }
