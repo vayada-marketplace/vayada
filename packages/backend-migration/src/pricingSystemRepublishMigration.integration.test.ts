@@ -52,9 +52,8 @@ describe.skipIf(!URL)("pricing-v2 system re-publish 0506", () => {
         "INSERT INTO hotel_catalog.properties (id, public_id, display_name) VALUES ($1::uuid, $1::uuid::text, 'Republish test')",
         [propertyId],
       );
-      await db.query("INSERT INTO pms.pricing_v2_heads (property_id, revision) VALUES ($1, 1)", [
-        propertyId,
-      ]);
+      // Head at 0 and revisions without rooms: the deferred completeness checks pass without prices.
+      await db.query("INSERT INTO pms.pricing_v2_heads (property_id) VALUES ($1)", [propertyId]);
       const revision = (
         values: { revision: number; actor: string | null; requestId: string },
         extra = "",
@@ -63,7 +62,7 @@ describe.skipIf(!URL)("pricing-v2 system re-publish 0506", () => {
         db.query(
           `INSERT INTO pms.pricing_v2_revisions (property_id, revision, room_count, currency, source_revisions,
              owner_references, request_id, request_hash, actor_user_id${extra ? `, ${extra}` : ""})
-           VALUES ($1, $2, 1, 'EUR', '{}', '{}', $3, $4, $5${more.map((_, i) => `, $${i + 6}`).join("")})`,
+           VALUES ($1, $2, 0, 'EUR', '{}', '{}', $3, $4, $5${more.map((_, i) => `, $${i + 6}`).join("")})`,
           [propertyId, values.revision, values.requestId, HASH, values.actor, ...more],
         );
       const declaration = (
