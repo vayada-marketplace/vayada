@@ -31,6 +31,8 @@ import {
 } from "./domains/hotelFirstRunRuntime.js";
 import type { HotelFirstRunRequest } from "./domains/hotelFirstRunService.js";
 import type { HotelFirstRunActor } from "./domains/hotelFirstRunSteps.js";
+import { createPgHotelSetupChecklistRepository } from "./domains/hotelSetupChecklistRepository.js";
+import { createHotelSetupChecklistService } from "./domains/hotelSetupChecklistService.js";
 import { createPgHotelSetupTrackCommandRepository } from "./domains/hotelSetupTrackCommandRepository.js";
 import { createPgPmsCalendarAutoOpenSettingsRepository } from "./domains/pmsCalendarAutoOpenSettingsRepository.js";
 import { lockPmsInventoryMutationScope } from "./domains/pmsInventoryMutationLock.js";
@@ -55,6 +57,7 @@ import {
   createOrdinaryHotelSetupProfileCommand,
 } from "./platform/hotelSetupProfileWriter.js";
 import type { PlatformMediaServingConfig } from "./platform/mediaServing.js";
+import { installPostgresPoolRuntime } from "./platform/postgresRuntime.js";
 import {
   advancePublicProfileRevision,
   createPgSharedHotelSetupStatusRepository,
@@ -776,6 +779,63 @@ describe.skipIf(!url)(
         expect(await label()).toBe("live");
       } finally {
         await h.close();
+      }
+    });
+
+    it("a burst of dashboard loads on production pool sizes finishes without starving the pools (VAY-2247 incident)", async () => {
+      // As server.ts does: every pool goes through the API's pool runtime (a shared pool of 8 per
+      // connection string; one connection for a pool with connection options).
+      const OriginalPool = pg.Pool;
+      const runtime = installPostgresPoolRuntime(pg);
+      let h: Awaited<ReturnType<typeof hotel>> | undefined;
+      try {
+        h = await hotel();
+        const { actor, pool, readiness } = h;
+        expect((await h.service().run(actor, request, h.email)).ok).toBe(true);
+        const checklist = createHotelSetupChecklistService({
+          firstRun: h.service(),
+          ...createPgHotelSetupChecklistRepository(pool),
+          onlineCardsOffered: false,
+        });
+        let peak = runtime.snapshot();
+        const sampler = setInterval(() => {
+          const now = runtime.snapshot();
+          if (now.waitingRequests > peak.waitingRequests || now.stalledPools > peak.stalledPools)
+            peak = now;
+        }, 10);
+        // What one Booking Admin dashboard load fires at once: the checklist, the booking page status
+        // (the booking readiness) and the dashboard's other reads on the shared pool.
+        const load = () => [
+          checklist.read(actor),
+          readiness(),
+          ...Array.from({ length: 8 }, () => pool.query("SELECT pg_sleep(0.02)")),
+        ];
+        const started = Date.now();
+        // Three at once, as at 10:17:58 (the two apps and a reload): three checklist reads in parallel.
+        const results = await Promise.allSettled([...load(), ...load(), ...load()]);
+        const tookMs = Date.now() - started;
+        clearInterval(sampler);
+        const failures = results.flatMap((result) =>
+          result.status === "rejected" ? [String(result.reason)] : [],
+        );
+        expect(failures).toEqual([]);
+        expect(tookMs, JSON.stringify(peak)).toBeLessThan(10_000);
+        expect(peak.stalledPools, JSON.stringify(peak)).toBe(0);
+        // Every checklist came back with the first room and guest payment done: next is going live.
+        for (const [index, result] of results.entries())
+          if (index % 10 === 0)
+            expect(result).toMatchObject({
+              status: "fulfilled",
+              value: { setup: { next: "go_live" } },
+            });
+      } finally {
+        await h?.close();
+        await runtime.close();
+        Object.defineProperty(pg, "Pool", {
+          configurable: true,
+          writable: true,
+          value: OriginalPool,
+        });
       }
     });
 
