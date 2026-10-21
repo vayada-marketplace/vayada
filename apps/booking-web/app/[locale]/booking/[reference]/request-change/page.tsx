@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo, use } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
-import Image from "next/image";
+import HotelHeroImage from "@/components/booking/HotelHeroImage";
 import BookingNavigation from "@/components/layout/BookingNavigation";
 import BookingFooter from "@/components/layout/BookingFooter";
 import { bookingImageSizes } from "@/components/booking/imageSizes";
@@ -170,14 +170,7 @@ export default function RequestChangePage({
     return (
       <div className="min-h-screen bg-surface flex flex-col">
         <div className="relative h-32 w-full">
-          <Image
-            src={hotel.heroImage}
-            alt={hotel.name}
-            fill
-            className="object-cover"
-            priority
-            sizes={bookingImageSizes.hero}
-          />
+          <HotelHeroImage src={hotel.heroImage} alt={hotel.name} sizes={bookingImageSizes.hero} />
           <div className="absolute inset-0 bg-gradient-to-b from-black/40 to-black/60" />
           <BookingNavigation />
         </div>
@@ -192,14 +185,7 @@ export default function RequestChangePage({
   return (
     <div className="min-h-screen bg-surface flex flex-col">
       <div className="relative h-32 w-full">
-        <Image
-          src={hotel.heroImage}
-          alt={hotel.name}
-          fill
-          className="object-cover"
-          priority
-          sizes={bookingImageSizes.hero}
-        />
+        <HotelHeroImage src={hotel.heroImage} alt={hotel.name} sizes={bookingImageSizes.hero} />
         <div className="absolute inset-0 bg-gradient-to-b from-black/40 to-black/60" />
         <BookingNavigation />
       </div>

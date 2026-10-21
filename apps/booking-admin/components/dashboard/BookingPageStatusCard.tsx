@@ -13,6 +13,7 @@ import type { BookingPublicationReview } from "@vayada/product-onboarding/bookin
 import { useTranslation } from "@/lib/i18n";
 import {
   bookingPageStatus,
+  type BookingPageFailure,
   type BookingPageItem,
   type BookingPageStatus,
 } from "@/lib/utils/bookingPageStatus";
@@ -36,7 +37,7 @@ export function BookingPageStatusCard() {
   const [review, setReview] = useState<BookingPublicationReview | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const [noAccess, setNoAccess] = useState(false);
-  const [publishFailed, setPublishFailed] = useState(false);
+  const [publishFailure, setPublishFailure] = useState<BookingPageFailure | null>(null);
   const [busy, setBusy] = useState(false);
   const [polls, setPolls] = useState(0);
   const active = useRef(false);
@@ -141,7 +142,7 @@ export function BookingPageStatusCard() {
     if (active.current || !propertyId) return;
     active.current = true;
     setBusy(true);
-    setPublishFailed(false);
+    setPublishFailure(null);
     setPolls(0);
     let accepted = false;
     try {
@@ -164,9 +165,9 @@ export function BookingPageStatusCard() {
       });
       accepted = true;
       await load(propertyId);
-    } catch {
+    } catch (error) {
       if (!mounted.current) return;
-      if (!accepted) setPublishFailed(true);
+      if (!accepted) setPublishFailure(requestFailure(error));
       // A lost response may still have published; show what the server has now.
       await load(propertyId).catch(() => undefined);
     } finally {
@@ -181,8 +182,8 @@ export function BookingPageStatusCard() {
       status={
         loadFailed
           ? { kind: "unavailable" }
-          : publishFailed && status?.kind === "ready"
-            ? { kind: "failed", readyGroups: status.readyGroups }
+          : publishFailure && (status?.kind === "ready" || status?.kind === "failed")
+            ? { kind: "failed", readyGroups: status.readyGroups, failure: publishFailure }
             : status
       }
       propertyId={propertyId}
@@ -334,7 +335,7 @@ export function BookingPageStatusView({
             tone="red"
             icon={<ExclamationTriangleIcon className="h-5 w-5" />}
             pill={<Pill dot="bg-red-500">{t("dashboard.bookingPage.status.failed")}</Pill>}
-            detail={t("dashboard.bookingPage.failed.detail")}
+            detail={<FailureDetail failure={status.failure} />}
             actions={publishButton(busy, t("dashboard.bookingPage.tryAgain"))}
           />
           <ReadyGroups groups={status.readyGroups} all />
@@ -538,6 +539,44 @@ function ReadyGroups({ groups, all = false }: { groups: string[]; all?: boolean 
       ))}
     </div>
   );
+}
+
+/** Says why publishing failed; a reference lets support find the server's log line (VAY-2292). */
+function FailureDetail({ failure }: { failure: BookingPageFailure }) {
+  const { t } = useTranslation();
+  if (failure.kind === "request")
+    return (
+      <>
+        {failure.reason === "setup_changed"
+          ? t("dashboard.bookingPage.failed.setupChanged")
+          : failure.reason === "already_publishing"
+            ? t("dashboard.bookingPage.failed.alreadyPublishing")
+            : t("dashboard.bookingPage.failed.unreachable")}
+      </>
+    );
+  return (
+    <>
+      {failure.code === "source_content_changed"
+        ? t("dashboard.bookingPage.failed.changed")
+        : failure.code === "external_result_unconfirmed"
+          ? t("dashboard.bookingPage.failed.unconfirmed")
+          : t("dashboard.bookingPage.failed.refused")}
+      <span className="mt-1 block text-xs text-gray-500">
+        {t("dashboard.bookingPage.failed.reference", {
+          reference: `${failure.code ?? "failed"} · ${failure.operationId.slice(0, 8)}`,
+        })}
+      </span>
+    </>
+  );
+}
+
+function requestFailure(error: unknown): BookingPageFailure {
+  const code = error instanceof ApiErrorResponse ? error.data.code : undefined;
+  if (code === "invalid_readiness_evidence" || code === "active_content_revision_conflict")
+    return { kind: "request", reason: "setup_changed" };
+  if (code === "publication_in_progress" || code === "command_in_progress")
+    return { kind: "request", reason: "already_publishing" };
+  return { kind: "request", reason: "unreachable" };
 }
 
 function isAccessError(error: unknown) {

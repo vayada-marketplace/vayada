@@ -6,7 +6,7 @@ import { Link } from "@/i18n/navigation";
 import ApproximateAmountsNote from "@/components/booking/ApproximateAmountsNote";
 import RoomSelectionSummary from "@/components/booking/RoomSelectionSummary";
 import { useState, useEffect } from "react";
-import Image from "next/image";
+import HotelHeroImage from "@/components/booking/HotelHeroImage";
 import { useSearchParams } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import BookingNavigation from "@/components/layout/BookingNavigation";
@@ -191,14 +191,7 @@ export default function MyBookingPageClient() {
     <div className="min-h-screen bg-surface flex flex-col">
       {/* Mini Hero */}
       <div className="relative h-48 w-full">
-        <Image
-          src={hotel.heroImage}
-          alt={hotel.name}
-          fill
-          className="object-cover"
-          priority
-          sizes={bookingImageSizes.hero}
-        />
+        <HotelHeroImage src={hotel.heroImage} alt={hotel.name} sizes={bookingImageSizes.hero} />
         <div className="absolute inset-0 bg-gradient-to-b from-black/40 to-black/60" />
         <BookingNavigation />
         <div className="absolute inset-0 flex items-center justify-center">

@@ -3,6 +3,10 @@
 _VAY-610 contract record. Builds on VAY-605, VAY-607, and the target ownership
 map in `engineering/target-schema-ownership-map.md`._
 
+> **Note (VAY-2259, 2026-10-19):** `apps/marketplace-api`, the old Python Marketplace API, is switched
+> off (api.vayada.com answers 410) and its source is deleted. Paths into it below refer to its last
+> source at commit `897d64c6e`.
+
 ## Purpose
 
 The target database rewrite is a rehearsed source-to-target rebuild, not an
