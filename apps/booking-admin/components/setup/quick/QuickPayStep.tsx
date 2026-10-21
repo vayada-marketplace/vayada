@@ -202,7 +202,7 @@ export function QuickPayStep({
   );
 
   return (
-    <QuickSetupShell step={4} onSaveAndExit={onSaveAndExit} saveAndExitDisabled={submitting}>
+    <QuickSetupShell step={6} onSaveAndExit={onSaveAndExit} saveAndExitDisabled={submitting}>
       <QuickSetupStepLayout
         title="How guests pay"
         subtitle="Start with paying at the hotel. Add online cards when you're ready."

@@ -133,16 +133,28 @@ describe("QuickHotelEdit", () => {
     return { renderer: renderer!, updatePropertyProfile, saveCurrency, onDone };
   }
 
-  it("opens filled in, saves the change to the profile and goes back to step 3", async () => {
+  /** The first Back (the footer renders once for desktop and once for phones). */
+  const back = (renderer: ReactTestRenderer) =>
+    renderer.root.findAll((node) => node.type === "button" && textOf(node) === "Back")[0]!;
+
+  it("opens filled in on its last screen, saves the change to the profile and goes back to step 5", async () => {
     const { renderer, updatePropertyProfile, saveCurrency, onDone } = await mount();
-    expect(textOf(renderer.root)).toContain("Step 2 of 5");
+    // Back from the rooms step: "How guests reach you", the last of the three hotel screens.
+    expect(textOf(renderer.root)).toContain("Step 4 of 7");
+    await act(async () => back(renderer).props.onClick());
+    await act(async () => back(renderer).props.onClick());
+    expect(textOf(renderer.root)).toContain("Step 2 of 7");
     // Filled in from the profile.
     const name = renderer.root
       .findAllByType("input")
       .find((input) => input.props.value === "Hotel Alpenrose");
     expect(name).toBeDefined();
     await act(async () => name!.props.onChange({ target: { value: "Hotel Alpenrose Munich" } }));
-    await act(async () => renderer.root.findByType("form").props.onSubmit({ preventDefault() {} }));
+    // Continue through the three screens; the last one saves.
+    for (let screen = 0; screen < 3; screen += 1)
+      await act(async () =>
+        renderer.root.findByType("form").props.onSubmit({ preventDefault() {} }),
+      );
     expect(updatePropertyProfile).toHaveBeenCalledWith(
       PROPERTY,
       {
@@ -156,12 +168,10 @@ describe("QuickHotelEdit", () => {
     renderer.unmount();
   });
 
-  it("goes back to step 3 without saving on Back", async () => {
+  it("goes back to step 5 without saving on Back from its first screen", async () => {
     const { renderer, updatePropertyProfile, onDone } = await mount();
-    const back = renderer.root.findAll(
-      (node) => node.type === "button" && textOf(node) === "Back",
-    )[0]!;
-    await act(async () => back.props.onClick());
+    for (let screen = 0; screen < 3; screen += 1)
+      await act(async () => back(renderer).props.onClick());
     expect(onDone).toHaveBeenCalledTimes(1);
     expect(updatePropertyProfile).not.toHaveBeenCalled();
     renderer.unmount();

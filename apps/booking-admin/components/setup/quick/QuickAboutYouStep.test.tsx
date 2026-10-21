@@ -36,7 +36,7 @@ describe("QuickAboutYouStep (VAY-2247 step 1)", () => {
         onSubmit={vi.fn()}
       />,
     );
-    expect(markup).toContain("Step 1 of 5");
+    expect(markup).toContain("Step 1 of 7");
     expect(markup).toContain("Hi! Who&#x27;s setting up the hotel?");
     expect(markup).toContain('value="Clara"');
     expect(markup).toContain('value="Schumann"');
