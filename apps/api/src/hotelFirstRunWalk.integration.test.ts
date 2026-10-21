@@ -31,6 +31,8 @@ import {
 } from "./domains/hotelFirstRunRuntime.js";
 import type { HotelFirstRunRequest } from "./domains/hotelFirstRunService.js";
 import type { HotelFirstRunActor } from "./domains/hotelFirstRunSteps.js";
+import { createPgHotelSetupChecklistRepository } from "./domains/hotelSetupChecklistRepository.js";
+import { createHotelSetupChecklistService } from "./domains/hotelSetupChecklistService.js";
 import { createPgHotelSetupTrackCommandRepository } from "./domains/hotelSetupTrackCommandRepository.js";
 import { createPgPmsCalendarAutoOpenSettingsRepository } from "./domains/pmsCalendarAutoOpenSettingsRepository.js";
 import { lockPmsInventoryMutationScope } from "./domains/pmsInventoryMutationLock.js";
@@ -56,6 +58,7 @@ import {
   createOrdinaryHotelSetupProfileCommand,
 } from "./platform/hotelSetupProfileWriter.js";
 import type { PlatformMediaServingConfig } from "./platform/mediaServing.js";
+import { installPostgresPoolRuntime } from "./platform/postgresRuntime.js";
 import { createPgProductAuditSink } from "./platform/productAudit.js";
 import {
   advancePublicProfileRevision,
@@ -781,6 +784,65 @@ describe.skipIf(!url)(
         expect(await label()).toBe("live");
       } finally {
         await h.close();
+      }
+    });
+
+    it("a burst of dashboard loads on production pool sizes finishes without starving the pools (VAY-2247 incident)", async () => {
+      // As server.ts does: every pool goes through the API's pool runtime (a shared pool of 8 per
+      // connection string; one connection for a pool with connection options).
+      const OriginalPool = pg.Pool;
+      const runtime = installPostgresPoolRuntime(pg);
+      let h: Awaited<ReturnType<typeof hotel>> | undefined;
+      try {
+        h = await hotel();
+        const { actor, pool, readiness } = h;
+        expect((await h.service().run(actor, request, h.email)).ok).toBe(true);
+        const checklist = createHotelSetupChecklistService({
+          firstRun: h.service(),
+          ...createPgHotelSetupChecklistRepository(pool),
+          onlineCardsOffered: false,
+        });
+        // Each maximum on its own, so a later busier sample can't hide an earlier stall.
+        const peak = { waitingRequests: 0, stalledPools: 0, totalConnections: 0 };
+        const sampler = setInterval(() => {
+          const now = runtime.snapshot();
+          peak.waitingRequests = Math.max(peak.waitingRequests, now.waitingRequests);
+          peak.stalledPools = Math.max(peak.stalledPools, now.stalledPools);
+          peak.totalConnections = Math.max(peak.totalConnections, now.totalConnections);
+        }, 10);
+        // What one Booking Admin dashboard load fires at once: the checklist, the booking page status
+        // (the booking readiness) and the dashboard's other reads on the shared pool.
+        const load = () => [
+          checklist.read(actor),
+          readiness(),
+          ...Array.from({ length: 8 }, () => pool.query("SELECT pg_sleep(0.02)")),
+        ];
+        const started = Date.now();
+        // Three at once, as at 10:17:58 (the two apps and a reload): three checklist reads in parallel.
+        const results = await Promise.allSettled([...load(), ...load(), ...load()]);
+        const tookMs = Date.now() - started;
+        clearInterval(sampler);
+        const failures = results.flatMap((result) =>
+          result.status === "rejected" ? [String(result.reason)] : [],
+        );
+        expect(failures).toEqual([]);
+        expect(tookMs, JSON.stringify(peak)).toBeLessThan(10_000);
+        expect(peak.stalledPools, JSON.stringify(peak)).toBe(0);
+        // Every checklist came back with the first room and guest payment done: next is going live.
+        for (const [index, result] of results.entries())
+          if (index % 10 === 0)
+            expect(result).toMatchObject({
+              status: "fulfilled",
+              value: { setup: { next: "go_live" } },
+            });
+      } finally {
+        await h?.close();
+        await runtime.close();
+        Object.defineProperty(pg, "Pool", {
+          configurable: true,
+          writable: true,
+          value: OriginalPool,
+        });
       }
     });
 
