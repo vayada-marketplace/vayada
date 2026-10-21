@@ -883,6 +883,7 @@ jobs:
             src/domains/replacementPricingStore.integration.test.ts \
             src/domains/pmsInventoryPublicOfferProjection.integration.test.ts \
             src/domains/replacementPricingCommands.integration.test.ts \
+            src/domains/pricingPaymentRepublish.integration.test.ts \
             src/domains/pmsAcceptedPricingReservationWorker.integration.test.ts \
             src/domains/preparePricingAcceptance.postgres.test.ts \
             src/domains/storePricingAcceptance.postgres.test.ts \
