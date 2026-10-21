@@ -279,7 +279,6 @@ jobs:
           E2E_START_SERVERS: "0"
           PORT: "3164"
           AUTH_PUBLIC_ORIGIN: http://localhost:3164
-          NEXT_PUBLIC_MARKETPLACE_URL: http://marketplace.localhost:3000
           NEXT_PUBLIC_BOOKING_ADMIN_URL: http://admin.booking.localhost:3003
           E2E_PMS_BASE_URL: http://localhost:3164
 
@@ -404,7 +403,7 @@ jobs:
           dev_log="$RUNNER_TEMP/booking-admin-dev.log"
           NEXT_PUBLIC_AUTHKIT_COMPATIBILITY_TOKEN_ENABLED=true NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=e2e-google-places \
             NEXT_PUBLIC_PMS_FRONTEND_URL=http://pms.localhost:3004 \
-            NEXT_PUBLIC_MARKETPLACE_URL=http://marketplace.localhost:3000 PORT=3003 \
+            PORT=3003 \
             npm run dev:booking-admin > "$dev_log" 2>&1 &
           dev_pid=$!
           trap 'kill "$dev_pid" 2>/dev/null || true' EXIT
@@ -737,11 +736,27 @@ jobs:
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
+      - name: Verify the hotel first run on a new hotel (VAY-2247)
+        if: matrix.shard == 'pms'
+        run: >-
+          npm --workspace vayada-api run test -- --no-file-parallelism
+          src/hotelFirstRunWalk.integration.test.ts
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+
       - name: Verify public booking pages from setup publications and legacy profiles
         if: matrix.shard == 'pms'
         run: >-
           npm --workspace vayada-api run test -- --no-file-parallelism
           src/activeBookingPublicationProfile.integration.test.ts
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+
+      - name: Verify the operator booking page address change (VAY-2295)
+        if: matrix.shard == 'pms'
+        run: >-
+          npm --workspace vayada-api run test -- --no-file-parallelism
+          src/domains/propertySlugChange.integration.test.ts
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
@@ -836,6 +851,7 @@ jobs:
           src/bookingAddonLeadTimeOrdinary.integration.test.ts
           src/platform/postgresRuntime.integration.test.ts
           src/platform/workosWebhooks.integration.test.ts
+          src/identityAdminUsers.integration.test.ts
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
@@ -909,7 +925,7 @@ jobs:
         run: |
           node --input-type=module -e 'import pg from "pg"; const client=new pg.Client({connectionString:process.env.ADMIN_URL}); await client.connect(); await client.query("CREATE DATABASE vay2056_hotel_setup_test"); await client.end();'
           TARGET_DATABASE_URL="$TEST_DATABASE_URL" npm --workspace @vayada/backend-migration run target:migrate -- --env local
-          npm --workspace vayada-api run test -- --no-file-parallelism src/hotelSetupOrdinaryLogin.integration.test.ts src/hotelSetupProfileOrdinary.integration.test.ts src/hotelSetupLaunchSettingsOrdinary.integration.test.ts src/hotelSetupCurrencyOrdinary.integration.test.ts src/hotelSetupCreationOrdinary.integration.test.ts src/hotelSetupFeatureHubOrdinary.integration.test.ts src/hotelSetupLogoOrdinary.integration.test.ts src/domains/propertyMediaCommandRepository.integration.test.ts
+          npm --workspace vayada-api run test -- --no-file-parallelism src/hotelSetupOrdinaryLogin.integration.test.ts src/hotelSetupProfileOrdinary.integration.test.ts src/hotelSetupLaunchSettingsOrdinary.integration.test.ts src/hotelSetupCurrencyOrdinary.integration.test.ts src/hotelSetupCreationOrdinary.integration.test.ts src/hotelSetupFeatureHubOrdinary.integration.test.ts src/hotelSetupLogoOrdinary.integration.test.ts src/domains/propertyMediaCommandRepository.integration.test.ts src/hotelSetupChecklist.integration.test.ts
         env:
           ADMIN_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay2056_hotel_setup_test
@@ -966,12 +982,31 @@ jobs:
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
+      # 0504 (VAY-2272) in its own database: migrate to 0497, grant the old capture login what
+      # production granted it, then apply the rest.
+      - name: Verify the affiliate capture login grants revoke
+        if: matrix.shard == 'hotel-setup'
+        run: >-
+          npm --workspace @vayada/backend-migration run test --
+          src/affiliateCaptureLoginGrantsRevokeMigration.integration.test.ts
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+
       # Runs 0482 again inside a rolled-back transaction on the migrated shared database.
       - name: Verify the complete-hotel activation backfill
         if: matrix.shard == 'hotel-setup'
         run: >-
           npm --workspace @vayada/backend-migration run test -- --no-file-parallelism
           src/hotelCatalogActivateCompleteHotels.integration.test.ts
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+
+      # Runs 0495 again inside a rolled-back transaction on the migrated shared database.
+      - name: Verify the basics-complete backfill (VAY-2247)
+        if: matrix.shard == 'hotel-setup'
+        run: >-
+          npm --workspace @vayada/backend-migration run test -- --no-file-parallelism
+          src/hotelCatalogBasicsCompleteBackfill.integration.test.ts
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 

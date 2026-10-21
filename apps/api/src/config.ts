@@ -178,6 +178,8 @@ export type ApiConfig = {
    * the hotel confirms receipt. Off until acceptance, payment confirmation, decline and expiry
    * handle these bookings (VAY-2139). */
   replacementPricingManualPaymentAcceptanceEnabled: boolean;
+  /** VAY-2247: mounts GET/POST /api/hotel-setup/properties/:id/first-run for the new setup. Off by default. */
+  hotelFirstRunEnabled: boolean;
   bookingHostBase?: string;
   platformMediaServing?: PlatformMediaServingConfig;
   platformMediaCleanupEnabled: boolean;
@@ -1169,6 +1171,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       env,
       "REPLACEMENT_PRICING_MANUAL_PAYMENT_ACCEPTANCE_ENABLED",
     ),
+    hotelFirstRunEnabled: readBooleanEnv(env, "HOTEL_FIRST_RUN_ENABLED"),
     bookingHostBase: readOptionalEnv(env, "BOOKING_HOST_BASE"),
     platformMediaServing,
     platformMediaCleanupEnabled: readBooleanEnv(env, "PLATFORM_MEDIA_CLEANUP_ENABLED", true),

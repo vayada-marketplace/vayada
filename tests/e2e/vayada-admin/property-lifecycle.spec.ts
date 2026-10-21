@@ -171,16 +171,19 @@ test("suppresses bound accounts and reuses the provisioning workflow after a los
         ],
       }),
   );
+  const userListQueries: string[] = [];
   await page.route(
     /https:\/\/api\.localhost(?::\d+)?\/api\/identity\/admin\/users(?:\?|$)/,
-    (route) =>
-      fulfillJson(route, pageOrigin, {
+    (route) => {
+      userListQueries.push(new URL(route.request().url()).search);
+      return fulfillJson(route, pageOrigin, {
         users: [
           { id: boundAccountId, name: "Bound Owner", email: "bound@example.test" },
           { id: newAccountId, name: "New Hotel", email: "new@example.test" },
         ],
         total: 2,
-      }),
+      });
+    },
   );
   await page.route(
     /https:\/\/api\.localhost(?::\d+)?\/api\/platform\/admin\/properties\/provision$/,
@@ -193,6 +196,8 @@ test("suppresses bound accounts and reuses the provisioning workflow after a los
   await page.goto(new URL("/dashboard/hotels", adminBaseURL).toString());
   await expect(page.getByText("Already Provisioned")).toBeVisible();
   await expect(page.getByRole("button", { name: "Set Up" })).toHaveCount(1);
+  // VAY-2272: only hotel accounts that provisioning accepts.
+  expect(userListQueries).toContain("?page=1&page_size=100&type=hotel&provisionable=true");
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
     await page.getByRole("button", { name: "Set Up" }).click();

@@ -1,12 +1,14 @@
 -- Migration: 0499_marketplace_schema_drop
--- Owner: platform / VAY-2272 (Marketplace removal step 5, M-D, window W2 with 0498, barrier). HOLD:
--- merge only with Flamur's yes, after the counts-0499 before-runs, with platform P1 applied and its
+-- Owner: platform / VAY-2272 (Marketplace removal step 5, M-D, window W2 with 0498). Held by hand:
+-- merged with Flamur's yes, after the counts-0499 before-runs, with platform P1 applied and its
 -- inspect passing (the runtime preflight and product DML grant tolerate the dropped schema).
 --
 -- Drops what is left of the Marketplace: the 0496 hotel-invite compatibility view, the 31 remaining
 -- marketplace tables, the legacy Marketplace import's quarantine table, 20 marketplace functions and
 -- the quarantine guard, then the marketplace schema itself. The staged legacy copies
 -- (migration_source_*) stay: the hotel import reads the Marketplace hotel profiles there (decision 8).
+-- It also drops the Marketplace matching-event payload check on platform.domain_events (0142), which it
+-- locks anyway; the matching events that exist keep their payloads.
 -- Rollback: any image from the 0496 release on (older images read marketplace.invite_codes). The data
 -- is gone and no rollback restores it.
 
@@ -64,6 +66,8 @@ DROP FUNCTION
 -- Without CASCADE: anything left in the schema (an object made outside the migrations) fails the
 -- migration. The schema's default-privilege entries depend on it automatically and go with it.
 DROP SCHEMA marketplace;
+
+ALTER TABLE platform.domain_events DROP CONSTRAINT chk_platform_matching_event_private_payload;
 
 DO $$
 BEGIN
