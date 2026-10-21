@@ -1025,6 +1025,15 @@ jobs:
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
+      # 0506 (VAY-2304) in its own database: migrate to 0505, add user rows, apply 0506, check the system rows.
+      - name: Verify the pricing system re-publish columns
+        if: matrix.shard == 'hotel-setup'
+        run: >-
+          npm --workspace @vayada/backend-migration run test --
+          src/pricingSystemRepublishMigration.integration.test.ts
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+
       # Runs 0482 again inside a rolled-back transaction on the migrated shared database.
       - name: Verify the complete-hotel activation backfill
         if: matrix.shard == 'hotel-setup'
