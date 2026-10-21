@@ -12,6 +12,7 @@ const URL = process.env["TEST_DATABASE_URL"];
 const MIGRATIONS = join(import.meta.dirname, "../migrations");
 const DATABASE = "vayada_hotel_account_invites_test";
 const MIGRATION = 496;
+const VIEW_DROPPED = 499;
 
 // VAY-2272: hotel account invites leave the Marketplace schema; older images keep working through
 // the marketplace.invite_codes view until 0499 drops it.
@@ -87,7 +88,11 @@ describe.skipIf(!URL)("hotel account invites out of the Marketplace schema 0496"
         [[pending, redeemed]],
       );
 
-      expect((await run(MIGRATIONS)).failed).toBeNull();
+      // The compatibility view lives until 0499 drops it, so the rest of this test stops before 0499.
+      for (const file of await readdir(MIGRATIONS))
+        if (/^\d{4}_/.test(file) && Number(file.slice(0, 4)) < VIEW_DROPPED)
+          await cp(join(MIGRATIONS, file), join(before, file));
+      expect((await run(before)).failed).toBeNull();
 
       // Only the hotel invites remain, unchanged, in their new home.
       expect(
