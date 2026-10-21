@@ -1,23 +1,23 @@
 "use client";
 
-import { EnvelopeIcon, InformationCircleIcon, LockClosedIcon } from "@heroicons/react/24/outline";
+import { InformationCircleIcon } from "@heroicons/react/24/outline";
 import {
   isValidSharedAccountPhone,
   normalizeSharedAccountName,
-  sharedAccountInitials,
   splitSharedAccountName,
   type SharedAccountDetailsInput,
 } from "@vayada/product-onboarding";
+import { CountryPhoneField } from "@vayada/product-onboarding/CountryPhoneField";
 import { useState, type FormEvent } from "react";
 
 import { QuickSetupField } from "./QuickSetupField";
-import { QuickSetupPreviewCard } from "./QuickSetupPreviewCard";
 import { QuickSetupShell } from "./QuickSetupShell";
 import { QuickSetupStepLayout } from "./QuickSetupStepLayout";
 
 const FORM_ID = "quick-setup-about-you";
 
 export type QuickAboutYouStepProps = {
+  /** The signed-in email (no longer shown here since the step became one card, 2026-10-21). */
   email: string;
   /** The hotel group, shown on the card ("Owner · Alpenrose Hotel Group"). */
   organizationName?: string | null;
@@ -45,11 +45,10 @@ export function aboutYouErrors(input: { firstName: string; lastName: string; pho
 }
 
 /**
- * VAY-2247 step 1, "About you" (Paper rev 4): shown only when the account's name or phone is
- * missing. The card on the right shows how the team sees the person setting up the hotel.
+ * VAY-2247 step 1, "About you": shown only when the account's name or phone is missing. One centred card
+ * with the phone as country + number (Flamur, 2026-10-21; Paper "7 steps · approved").
  */
 export function QuickAboutYouStep({
-  email,
   organizationName,
   initialName,
   initialPhone,
@@ -85,7 +84,6 @@ export function QuickAboutYouStep({
     }
   }
 
-  const name = normalizeSharedAccountName(firstName, lastName);
   return (
     <QuickSetupShell step={1} onSaveAndExit={onSaveAndExit} saveAndExitDisabled={submitting}>
       <QuickSetupStepLayout
@@ -110,33 +108,6 @@ export function QuickAboutYouStep({
           primaryBusy: submitting,
           primaryBusyLabel: "Saving…",
         }}
-        preview={
-          <QuickSetupPreviewCard caption="How your team sees you">
-            <div className="flex flex-col items-center pb-2 pt-3 text-center">
-              <div
-                role="img"
-                aria-label={`Initials: ${sharedAccountInitials(firstName, lastName)}`}
-                className="flex h-24 w-24 items-center justify-center rounded-full bg-primary-600 text-[28px] font-bold text-white"
-              >
-                {sharedAccountInitials(firstName, lastName)}
-              </div>
-              <p className="mt-4 text-xl font-bold text-gray-950">{name || "Your name"}</p>
-              <p className="mt-1 text-sm text-gray-600">
-                {organizationName ? `Owner · ${organizationName}` : "Owner"}
-              </p>
-              {email ? (
-                <p className="mt-4 flex items-center gap-2 text-[13px] text-gray-700">
-                  <EnvelopeIcon className="h-4 w-4 text-gray-500" aria-hidden="true" />
-                  {email}
-                </p>
-              ) : null}
-              <p className="mt-2 flex items-center gap-2 text-[13px] text-gray-700">
-                <LockClosedIcon className="h-4 w-4 text-gray-500" aria-hidden="true" />
-                Your phone stays private — guests never see it.
-              </p>
-            </div>
-          </QuickSetupPreviewCard>
-        }
       >
         <form id={FORM_ID} noValidate onSubmit={handleSubmit} className="flex flex-col gap-6">
           <div className="grid gap-6 lg:grid-cols-2 lg:gap-4">
@@ -163,13 +134,12 @@ export function QuickAboutYouStep({
               }}
             />
           </div>
-          <QuickSetupField
+          <CountryPhoneField
             label="Your phone"
             required
             value={phone}
             error={errors.phone}
             helper="So we can reach you about your account. Not shown to guests."
-            inputProps={{ type: "tel", autoComplete: "tel", inputMode: "tel", maxLength: 32 }}
             onChange={(value) => {
               setPhone(value);
               setErrors((current) => ({ ...current, phone: undefined }));

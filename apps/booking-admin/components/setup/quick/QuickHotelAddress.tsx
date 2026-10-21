@@ -277,11 +277,7 @@ export function QuickHotelAddress({
               </button>
             ) : null}
           </div>
-          <div
-            className={`relative overflow-hidden rounded-xl border border-gray-200 bg-gray-100 ${
-              adjusting || !hasPin(draft) ? "h-56" : "h-24"
-            }`}
-          >
+          <div className="relative h-[200px] overflow-hidden rounded-xl border border-gray-200 bg-gray-100 lg:h-[280px]">
             <GoogleAddressMap
               active
               apiKey={key}
@@ -298,10 +294,10 @@ export function QuickHotelAddress({
         </div>
       ) : null}
 
-      <div className="grid gap-5 lg:grid-cols-2 lg:gap-4">
-        <div>
-          <p className="text-sm font-semibold text-gray-950">Time zone</p>
-          {changingTimezone ? (
+      <div className="flex flex-col gap-2.5">
+        {changingTimezone ? (
+          <div>
+            <p className="text-sm font-semibold text-gray-950">Time zone</p>
             <div className="mt-2">
               <TimezoneField
                 value={draft.timezone}
@@ -313,19 +309,18 @@ export function QuickHotelAddress({
                 }}
               />
             </div>
-          ) : draft.timezone ? (
-            <ReadOnlyBox
-              value={draft.timezone}
-              note="Detected from your address"
-              onChange={() => setChangingTimezone(true)}
-            />
-          ) : (
-            <p className="mt-2 text-[13px] text-gray-400">Set from your address</p>
-          )}
-        </div>
-        <div>
-          <p className="text-sm font-semibold text-gray-950">Currency</p>
-          {currency && changingCurrency && onCurrencyChange ? (
+          </div>
+        ) : (
+          <AutoLine
+            name="Time zone"
+            value={draft.timezone || "Set from your address"}
+            note={draft.timezone ? "Detected from your address" : null}
+            onChange={draft.timezone ? () => setChangingTimezone(true) : null}
+          />
+        )}
+        {currency && changingCurrency && onCurrencyChange ? (
+          <div>
+            <p className="text-sm font-semibold text-gray-950">Currency</p>
             <QuickCurrencyPicker
               value={currency.code}
               onChange={(code) => {
@@ -333,45 +328,51 @@ export function QuickHotelAddress({
                 setChangingCurrency(false);
               }}
             />
-          ) : currency ? (
-            <ReadOnlyBox
-              value={currency.label}
-              note={`${currency.note} · used for every price`}
-              onChange={onCurrencyChange ? () => setChangingCurrency(true) : null}
-            />
-          ) : (
-            <p className="mt-2 text-[13px] text-gray-400">Set from your country</p>
-          )}
-        </div>
+          </div>
+        ) : (
+          <AutoLine
+            name="Currency"
+            value={currency ? currency.label : "Set from your country"}
+            note={currency ? `${currency.note} · used for every price` : null}
+            onChange={currency && onCurrencyChange ? () => setChangingCurrency(true) : null}
+          />
+        )}
       </div>
     </div>
   );
 }
 
-function ReadOnlyBox({
+/** Time zone or currency on one line (Paper "7 steps · approved"): name and value, why, then Change. */
+function AutoLine({
+  name,
   value,
   note,
   onChange,
 }: {
+  name: string;
   value: string;
-  note: string;
+  note: string | null;
   onChange: (() => void) | null;
 }) {
   return (
-    <>
-      <div className="mt-2 flex h-11 items-center justify-between rounded-[10px] border border-dashed border-gray-300 bg-gray-50 px-3.5">
-        <span className="truncate text-[15px] text-gray-950">{value}</span>
-        {onChange ? (
-          <button
-            type="button"
-            onClick={onChange}
-            className="rounded text-[13px] font-semibold text-primary-600 outline-none hover:text-primary-700 focus-visible:ring-2 focus-visible:ring-primary-600"
-          >
-            Change
-          </button>
-        ) : null}
+    <div className="flex items-center gap-3 rounded-xl bg-gray-50 px-3.5 py-3">
+      <div className="min-w-0 flex-1">
+        <p className="text-[13px] font-semibold text-gray-500">{name}</p>
+        <p className={`truncate text-base ${note ? "font-medium text-gray-950" : "text-gray-400"}`}>
+          {value}
+        </p>
       </div>
-      <p className="mt-2 text-[13px] text-gray-500">{note}</p>
-    </>
+      {note ? <p className="hidden shrink-0 text-xs text-gray-500 lg:block">{note}</p> : null}
+      {onChange ? (
+        <button
+          type="button"
+          onClick={onChange}
+          aria-label={`Change ${name.toLowerCase()}`}
+          className="shrink-0 rounded text-sm font-semibold text-primary-600 outline-none hover:text-primary-700 focus-visible:ring-2 focus-visible:ring-primary-600"
+        >
+          Change
+        </button>
+      ) : null}
+    </div>
   );
 }

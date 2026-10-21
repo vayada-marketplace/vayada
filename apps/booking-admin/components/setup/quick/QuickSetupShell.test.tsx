@@ -28,7 +28,7 @@ function step(footer: Partial<QuickSetupFooterProps> = {}) {
 }
 
 describe("QuickSetupShell (VAY-2247, header C2)", () => {
-  it("shows the step over five segments and a Save & exit link", async () => {
+  it("shows the step over seven segments and a Save & exit link", async () => {
     const onSaveAndExit = vi.fn();
     const renderer = create(
       <QuickSetupShell step={3} onSaveAndExit={onSaveAndExit}>
@@ -36,13 +36,13 @@ describe("QuickSetupShell (VAY-2247, header C2)", () => {
       </QuickSetupShell>,
     );
     const progress = renderer.root.findByProps({ role: "progressbar" });
-    expect(progress.props).toMatchObject({ "aria-valuenow": 3, "aria-valuemax": 5 });
-    expect(progress.findAll((node) => node.type === "span")).toHaveLength(5);
+    expect(progress.props).toMatchObject({ "aria-valuenow": 3, "aria-valuemax": 7 });
+    expect(progress.findAll((node) => node.type === "span")).toHaveLength(7);
     expect(
       progress
         .findAll((node) => node.type === "span")
         .map((node) => (String(node.props.className).includes("bg-primary-600") ? 1 : 0)),
-    ).toEqual([1, 1, 1, 0, 0]);
+    ).toEqual([1, 1, 1, 0, 0, 0, 0]);
     const exit = renderer.root.findAll(
       (node) => node.type === "button" && node.children.join("") === "Save & exit",
     );
@@ -63,9 +63,9 @@ describe("QuickSetupShell (VAY-2247, header C2)", () => {
     expect(markup).not.toContain("Save &amp; exit");
   });
 
-  it("keeps the step within 1 to 5", () => {
+  it("keeps the step within 1 to 7", () => {
     expect(renderToStaticMarkup(<QuickSetupShell step={9}>{null}</QuickSetupShell>)).toContain(
-      "Step 5 of 5",
+      "Step 7 of 7",
     );
   });
 });

@@ -25,14 +25,14 @@ export type QuickSetupStepLayoutProps = {
   /** The form fields. */
   children: ReactNode;
   footer: QuickSetupFooterProps;
-  /** The right-hand card; under the form on phones. */
-  preview: ReactNode;
+  /** The right-hand card; under the form on phones. Without one, the form card sits centred (About you). */
+  preview?: ReactNode;
 };
 
 /**
- * VAY-2247 setup step (Paper rev 3/4 cards): the form in a white card on the page background, the
- * preview in its own card centred next to it. On phones the cards stack and the buttons move into a
- * white bar under them.
+ * VAY-2247 setup step (Paper rev 3/4 cards; 7 steps, approved 2026-10-21): the form in a white card on the
+ * page background, the preview in its own card centred next to it, or the form card alone and centred. On
+ * phones the cards stack and the buttons move into a white bar under them.
  */
 export function QuickSetupStepLayout({
   title,
@@ -44,10 +44,14 @@ export function QuickSetupStepLayout({
 }: QuickSetupStepLayoutProps) {
   return (
     <>
-      <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-4 px-4 pb-6 pt-4 lg:flex-row lg:items-stretch lg:gap-8 lg:px-12 lg:pb-16 lg:pt-10">
+      <div
+        className={`mx-auto flex w-full max-w-[1440px] flex-col gap-4 px-4 pb-6 pt-4 lg:flex-row lg:items-stretch lg:gap-8 lg:px-12 lg:pb-16 lg:pt-10 ${
+          preview ? "" : "lg:justify-center"
+        }`}
+      >
         <section
           aria-labelledby="quick-setup-heading"
-          className="flex min-w-0 flex-col gap-6 rounded-2xl border border-gray-200 bg-white px-[23px] py-6 lg:w-[658px] lg:shrink-0 lg:gap-8 lg:p-10"
+          className="flex min-w-0 flex-col gap-6 rounded-2xl border border-gray-200 bg-white px-[23px] py-6 lg:w-[642px] lg:shrink-0 lg:gap-8 lg:p-8"
         >
           {banner}
           <header>
@@ -67,7 +71,9 @@ export function QuickSetupStepLayout({
             <QuickSetupFooter {...footer} />
           </div>
         </section>
-        <div className="flex min-w-0 flex-col lg:flex-1 lg:justify-center">{preview}</div>
+        {preview ? (
+          <div className="flex min-w-0 flex-col lg:flex-1 lg:justify-center">{preview}</div>
+        ) : null}
       </div>
       <div className="lg:hidden">
         <QuickSetupMobileFooter {...footer} />

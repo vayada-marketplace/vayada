@@ -92,13 +92,15 @@ describe("QuickSetupFlow (VAY-2247, ONBOARDING_V2)", () => {
       props({ account: { email: "clara@example.com", name: "Clara Schumann", phone: null } }),
     );
     expect(text(renderer)).toContain("Hi! Who's setting up the hotel?");
-    expect(text(renderer)).toContain("Owner · Alpenrose Hotel Group");
+    // One card since 2026-10-21: the phone field, no team preview.
+    expect(text(renderer)).toContain("Your phone");
+    expect(text(renderer)).not.toContain("How your team sees you");
     renderer.unmount();
   });
 
   it("goes to Your hotel for a group without a hotel, and welcomes a draft back", async () => {
     const fresh = await mount(props());
-    expect(text(fresh)).toContain("Step 2 of 5");
+    expect(text(fresh)).toContain("Step 2 of 7");
     expect(text(fresh)).not.toContain("Welcome back");
     fresh.unmount();
 
@@ -110,21 +112,49 @@ describe("QuickSetupFlow (VAY-2247, ONBOARDING_V2)", () => {
     });
     const resumed = await mount(props({ storage: saved }));
     expect(text(resumed)).toContain(
-      "Welcome back, Clara. Everything you entered is saved — you're on step 2 of 5.",
+      "Welcome back, Clara. Everything you entered is saved — you're on step 2 of 7.",
     );
     expect(text(resumed)).toContain("hotel-alpenrose.booking.vayada.com");
-    expect(text(resumed)).toContain("Use my details");
     resumed.unmount();
+
+    // "Use my details" lives on step 4, How guests reach you (since the split, 2026-10-21).
+    const FULL = {
+      displayName: "Hotel Alpenrose",
+      propertyType: "hotel",
+      streetAddress: "Sendlinger Straße 12",
+      postalCode: "80331",
+      city: "Munich",
+      countryCode: "DE",
+      timezone: "Europe/Berlin",
+    };
+    const toContacts = async (renderer: ReactTestRenderer) => {
+      for (let screen = 0; screen < 2; screen += 1)
+        await act(async () =>
+          renderer.root.findByType("form").props.onSubmit({ preventDefault() {} }),
+        );
+    };
+    const offered = await mount(
+      props({
+        storage: storage({
+          "vayada.quickSetup.v1.hotel": JSON.stringify({ draftKey: "draft-3", draft: FULL }),
+        }),
+      }),
+    );
+    await toContacts(offered);
+    expect(text(offered)).toContain("Step 4 of 7");
+    expect(text(offered)).toContain("Use my details");
+    offered.unmount();
 
     // Contacts copied with "Use my details" keep their note after a reload.
     const copied = storage({
       "vayada.quickSetup.v1.hotel": JSON.stringify({
         draftKey: "draft-2",
-        draft: { contactEmail: "clara@example.com", phone: "+49 30 0000 0000" },
+        draft: { ...FULL, contactEmail: "clara@example.com", phone: "+49 30 0000 0000" },
         contactsFromAccount: true,
       }),
     });
     const withNote = await mount(props({ storage: copied }));
+    await toContacts(withNote);
     expect(text(withNote)).toContain("Filled from your account.");
     expect(text(withNote)).not.toContain("Use my details");
     withNote.unmount();
@@ -167,7 +197,7 @@ describe("QuickSetupFlow (VAY-2247, ONBOARDING_V2)", () => {
     );
     await act(async () => retry.props.onClick());
     await act(async () => undefined);
-    expect(text(renderer)).toContain("Step 2 of 5");
+    expect(text(renderer)).toContain("Step 2 of 7");
     renderer.unmount();
   });
 
@@ -198,7 +228,11 @@ describe("QuickSetupFlow (VAY-2247, ONBOARDING_V2)", () => {
         setup: { ...props().setup, createPropertyProfile } as never,
       }),
     );
-    await act(async () => renderer.root.findByType("form").props.onSubmit({ preventDefault() {} }));
+    // Your hotel, Where it is, How guests reach you: the last Continue creates the hotel.
+    for (let screen = 0; screen < 3; screen += 1)
+      await act(async () =>
+        renderer.root.findByType("form").props.onSubmit({ preventDefault() {} }),
+      );
     expect(createPropertyProfile).toHaveBeenCalledWith(
       expect.objectContaining({
         displayName: "Hotel Alpenrose",

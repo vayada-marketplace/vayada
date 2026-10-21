@@ -162,7 +162,8 @@ export function QuickPropertySetup({
 
   if (failed || !hotel) {
     return (
-      <QuickSetupShell step={step} onSaveAndExit={onSaveAndExit}>
+      // Its screens are steps 5–7 of 7 (Your hotel became steps 2–4, 2026-10-21).
+      <QuickSetupShell step={step + 2} onSaveAndExit={onSaveAndExit}>
         <p
           role={failed ? "alert" : "status"}
           className="mt-24 text-center text-sm font-medium text-gray-600"
