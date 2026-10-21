@@ -1061,7 +1061,6 @@ function bookingHotelFinanceRecords(
       },
       createdAt,
       updatedAt,
-      affiliateId: null,
       otaChannel: null,
       revision: 1,
     }),

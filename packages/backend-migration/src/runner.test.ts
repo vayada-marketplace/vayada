@@ -1683,9 +1683,8 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
          ORDER BY key`,
       );
 
+      // 0501 deleted the affiliate and Marketplace finance keys.
       expect(financePermissionKeys.map((row) => row.key)).toEqual([
-        "affiliate.payout.manage",
-        "marketplace.finance.read",
         "platform.finance.read",
         "pms.finance.read",
       ]);
@@ -1858,7 +1857,7 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
          ORDER BY catalog.key`,
       );
 
-      // VAY-2270 (0493): Marketplace grants are retired; the catalog keys stay until step 5.
+      // VAY-2270 (0493): Marketplace grants are retired; 0501 deleted the catalog keys.
       expect(marketplaceTripGrants).toEqual([]);
 
       const hotelUserId = "99999999-1111-4111-8111-999999999992";

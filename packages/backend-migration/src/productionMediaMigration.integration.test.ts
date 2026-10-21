@@ -91,7 +91,7 @@ describe.skipIf(!URL)("production media migration (PostgreSQL)", () => {
     expect(first.blockers.map((blocker) => blocker.code)).toEqual(["MEDIA_SOURCE_MISSING"]);
     expect(first).toMatchObject({
       applied: false,
-      counts: { completed: 2, missing: 1, quarantined: 1 },
+      counts: { completed: 1, missing: 1, quarantined: 1 },
       quarantines: [
         expect.objectContaining({
           sourceRowId: `${ADDON}:image`,
@@ -99,17 +99,17 @@ describe.skipIf(!URL)("production media migration (PostgreSQL)", () => {
         }),
       ],
     });
-    expect(importedIds).toHaveLength(2);
+    expect(importedIds).toHaveLength(1);
 
     failGallery = false;
     const resumed = await runProductionMediaMigration(config(), services);
     expect(resumed).toMatchObject({
       applied: true,
-      counts: { completed: 3, missing: 0, corrupt: 0, failed: 0, quarantined: 1 },
+      counts: { completed: 2, missing: 0, corrupt: 0, failed: 0, quarantined: 1 },
       blockers: [],
     });
-    expect(importedIds).toHaveLength(3);
-    expect(new Set(importedIds).size).toBe(3);
+    expect(importedIds).toHaveLength(2);
+    expect(new Set(importedIds).size).toBe(2);
 
     const evidence = await client.query<{
       status: string;
@@ -120,7 +120,6 @@ describe.skipIf(!URL)("production media migration (PostgreSQL)", () => {
       quarantineRedacted: boolean;
       objects: number;
       variants: number;
-      logo: { purpose: string; visibility: string; publicApproved: boolean };
     }>(
       `SELECT run.status,
               run.planned_count AS planned,
@@ -137,29 +136,22 @@ describe.skipIf(!URL)("production media migration (PostgreSQL)", () => {
                 WHERE source_metadata ->> 'migrationRunId'=$1) AS objects,
               (SELECT count(*)::int FROM platform.media_variants variant
                 JOIN platform.media_objects media ON media.id=variant.media_object_id
-               WHERE media.source_metadata ->> 'migrationRunId'=$1) AS variants,
-              (SELECT json_build_object('purpose', purpose, 'visibility', visibility,
-                                        'publicApproved', public_approved)
-                 FROM platform.media_objects
-                WHERE source_metadata ->> 'migrationRunId'=$1
-                  AND source_system='marketplace') AS logo
+               WHERE media.source_metadata ->> 'migrationRunId'=$1) AS variants
          FROM platform.production_media_migration_runs run
         WHERE run.source_run_id=$1`,
       [RUN],
     );
     expect(evidence.rows[0]).toEqual({
       status: "completed",
-      planned: 3,
-      completed: 3,
+      planned: 2,
+      completed: 2,
       quarantined: 1,
       quarantineRows: 1,
       quarantineRedacted: true,
-      objects: 3,
-      // Two public Booking images with four variants each, and the private logo's original.
-      variants: 9,
-      // The legacy Marketplace hotel picture stays hotel content (creator and chat media are
-      // retired); its owner link is suspended, so it is kept private.
-      logo: { purpose: "property.logo", visibility: "private", publicApproved: false },
+      objects: 2,
+      // Two public Booking images with four variants each. A legacy Marketplace hotel picture
+      // needs a Marketplace owner link, which 0500 deleted and 0501 refuses (VAY-2272).
+      variants: 8,
     });
 
     await expect(
@@ -230,17 +222,6 @@ function sourceRows(quarantinedValue: string): IdentitySourceRow[] {
         updated_at: "2026-08-30T00:00:00Z",
       },
     },
-    {
-      sourceDatabase: "marketplace",
-      sourceTable: "hotel_profiles",
-      rowOrdinal: 3,
-      data: {
-        id: HOTEL,
-        picture: "https://legacy-media-test.s3.amazonaws.com/hotels/logo.png",
-        created_at: "2026-08-01T00:00:00Z",
-        updated_at: "2026-08-30T00:00:00Z",
-      },
-    },
   ];
 }
 
@@ -305,20 +286,13 @@ async function seed(client: pg.Client): Promise<void> {
   await client.query(
     `INSERT INTO hotel_catalog.property_source_links
        (property_id, source_system, source_table, source_id, relationship, metadata)
-     VALUES ($1, 'marketplace', 'hotel_profiles', $2, 'profile_input', $3::jsonb)`,
-    [PROPERTY, HOTEL, JSON.stringify({ migrationRunId: RUN })],
-  );
-  await client.query(
-    `INSERT INTO hotel_catalog.property_source_links
-       (property_id, source_system, source_table, source_id, relationship, metadata)
      VALUES ($1, 'booking', 'booking_hotels', $2, 'canonical_input', $3::jsonb)`,
     [PROPERTY, HOTEL, JSON.stringify({ migrationRunId: RUN })],
   );
   await client.query(
     `INSERT INTO identity.organization_resource_links
        (organization_id, product, resource_type, resource_id, relationship, status)
-     VALUES ($1, 'booking', 'booking_hotel', $2, 'owner', 'active'),
-            ($1, 'marketplace', 'hotel_profile', $2, 'owner', 'suspended')`,
+     VALUES ($1, 'booking', 'booking_hotel', $2, 'owner', 'active')`,
     [ORGANIZATION, HOTEL],
   );
 }
