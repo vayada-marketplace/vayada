@@ -17,10 +17,10 @@ import {
 } from "@heroicons/react/24/outline";
 import { Modal } from "@/components/ui/Modal";
 
-type FilterType = "all" | "hotel" | "creator" | "admin";
+type FilterType = "all" | "hotel" | "staff" | "creator" | "admin";
 type FilterStatus = "all" | "pending" | "verified" | "rejected" | "suspended";
 
-const VALID_TYPES: FilterType[] = ["all", "hotel", "creator", "admin"];
+const VALID_TYPES: FilterType[] = ["all", "hotel", "staff", "creator", "admin"];
 const VALID_STATUSES: FilterStatus[] = ["all", "pending", "verified", "rejected", "suspended"];
 
 const SCROLL_STORAGE_KEY = "admin:users-list:scroll";
@@ -283,6 +283,8 @@ function DashboardContent() {
         return "bg-purple-100 text-purple-800";
       case "hotel":
         return "bg-blue-100 text-blue-800";
+      case "staff":
+        return "bg-teal-100 text-teal-800";
       case "creator":
         return "bg-indigo-100 text-indigo-800";
       default:
@@ -336,6 +338,7 @@ function DashboardContent() {
               >
                 <option value="all">All Types</option>
                 <option value="hotel">Hotels</option>
+                <option value="staff">Staff</option>
                 <option value="admin">Admins</option>
               </select>
               <select

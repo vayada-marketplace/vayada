@@ -39,6 +39,16 @@ describe("usersService", () => {
     );
   });
 
+  it("asks only for accounts provisioning accepts on the Hotels page (VAY-2272)", async () => {
+    mocks.get.mockResolvedValue({ users: [], total: 0 });
+
+    await usersService.getAllUsers({ type: "hotel", provisionable: true, page: 1, page_size: 100 });
+
+    expect(mocks.get).toHaveBeenCalledWith(
+      "/api/identity/admin/users?page=1&page_size=100&type=hotel&provisionable=true",
+    );
+  });
+
   it("reads the identity user and converts snake_case fields", async () => {
     mocks.get.mockResolvedValue({
       id: "user-1",
