@@ -38,6 +38,16 @@ export type HotelFirstRunFactsPorts = Readonly<{
   roomRead: HotelFirstRunSetupPorts["roomRead"];
   paymentRead: FinancePaymentReadinessReadPort;
   pricing: Pick<HotelFirstRunPricingPorts["pricing"], "read">;
+  /**
+   * The current prices without the pricing commands' owner locks, for the checklist's light read. The
+   * locking read can wait forever on the booking readiness, which the dashboard runs at the same moment
+   * (VAY-2247 incident, 2026-10-21).
+   */
+  unlockedPricing: {
+    read(propertyId: string): Promise<{
+      rooms: readonly { roomTypeId: string; offers: readonly unknown[] }[];
+    } | null>;
+  };
   calendarRead: Pick<PmsOperatingCalendarReadPort, "getCurrentOperatingCalendarConfiguration">;
   guestRules: { read(scope: Scope): Promise<unknown | null> };
   terms: { read(scope: Scope): Promise<{ termsText: string | null }> };
@@ -188,12 +198,12 @@ export function createHotelFirstRunFactsReader(ports: HotelFirstRunFactsPorts) {
     /**
      * What the setup checklist shows of setup, on every dashboard load: whether the first room and its price,
      * and how guests pay, are done. Four reads, one at a time, without the booking readiness or the
-     * per-room reads `read` needs to run the first run (VAY-2247 incident, 2026-10-21).
+     * per-room reads `read` needs to run the first run, and without any lock (VAY-2247 incident, 2026-10-21).
      */
     async readSetupProgress(actor: HotelFirstRunActor): Promise<HotelFirstRunSetupProgress> {
       const { propertyId, organizationId } = actor;
       const roomTypes = await ports.roomRead.listRoomTypeFacts(propertyId);
-      const pricing = await ports.pricing.read(propertyId);
+      const pricing = await ports.unlockedPricing.read(propertyId);
       const payments = await ports.paymentRead.getPaymentReadiness({ organizationId, propertyId });
       const plan = firstRunPlan(await ports.plans.getPlanStatus(propertyId));
       const priced = new Set(

@@ -67,6 +67,9 @@ function ports(hotel: Hotel = {}): HotelFirstRunFactsPorts {
           : null,
     },
     pricing: { read: async () => (set ? { rooms: [{ roomTypeId, offers: [{}] }] } : null) },
+    unlockedPricing: {
+      read: async () => (set ? { rooms: [{ roomTypeId, offers: [{}] }] } : null),
+    },
     calendarRead: {
       getCurrentOperatingCalendarConfiguration: async () =>
         set ? { sourceStatus: "current" } : null,
@@ -206,13 +209,19 @@ describe("first-run setup progress for the checklist (VAY-2247 incident)", () =>
     expect(await progress()).toEqual({ firstRoom: false, guestPayment: false });
   });
 
-  it("says both are done after a complete first run, without the booking readiness", async () => {
+  it("says both are done after a complete first run, without the readiness or the locking pricing read", async () => {
     const readiness = {
       getBookingReadiness: async () => {
         throw new Error("the checklist must not evaluate the booking readiness");
       },
     } as unknown as HotelFirstRunFactsPorts["readiness"];
-    expect(await progress({ set: true }, { readiness })).toEqual({
+    // The pricing commands' read takes owner locks that can wait forever on the readiness (incident).
+    const pricing = {
+      read: async () => {
+        throw new Error("the checklist must not take the pricing owner locks");
+      },
+    } as unknown as HotelFirstRunFactsPorts["pricing"];
+    expect(await progress({ set: true }, { readiness, pricing })).toEqual({
       firstRoom: true,
       guestPayment: true,
     });

@@ -12,6 +12,7 @@ import {
 import { createHotelFirstRunService, type HotelFirstRunPorts } from "./hotelFirstRunService.js";
 import { firstRunIdempotencyKey, type HotelFirstRunActor } from "./hotelFirstRunSteps.js";
 import { createReplacementPricingCommands } from "./replacementPricingCommands.js";
+import { readCurrentPricingSnapshot } from "./replacementPricingSnapshot.js";
 
 /**
  * VAY-2247: puts the first run together from the API's existing runtimes, per request (the pricing
@@ -29,7 +30,7 @@ export type HotelFirstRunRuntimeDependencies = Omit<
   HotelFirstRunPorts,
   "facts" | "lock" | "locality" | "pricing" | "activation"
 > &
-  Omit<HotelFirstRunFactsPorts, "language" | "pricing"> & {
+  Omit<HotelFirstRunFactsPorts, "language" | "pricing" | "unlockedPricing"> & {
     lockPool: LockPool;
     pricingPool: PricingPool;
     launchSettings: { readDefaultLanguage(propertyId: string): Promise<string | null> };
@@ -105,6 +106,31 @@ export function createDedicatedLockConnections(
         throw error;
       }
       return { query: client.query.bind(client) as PoolClient["query"], release };
+    },
+  };
+}
+
+/**
+ * The current prices in a read-only snapshot: no advisory lock and no row lock, unlike the pricing commands'
+ * read (VAY-2247 incident, 2026-10-21). The checklist route has already checked the owner's access.
+ */
+export function createUnlockedPricingRead(
+  pool: Pick<PricingPool, "connect">,
+): HotelFirstRunFactsPorts["unlockedPricing"] {
+  return {
+    async read(propertyId) {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+        const current = await readCurrentPricingSnapshot(client, propertyId.toLowerCase());
+        await client.query("COMMIT");
+        return current;
+      } catch (error) {
+        await client.query("ROLLBACK").catch(() => undefined);
+        throw error;
+      } finally {
+        client.release();
+      }
     },
   };
 }
@@ -204,7 +230,12 @@ export function createHotelFirstRunRuntime(deps: HotelFirstRunRuntimeDependencie
   };
   return function createService(context: RequestContext) {
     const pricing = createReplacementPricingCommands(deps.pricingPool, context);
-    const facts = createHotelFirstRunFactsReader({ ...deps, language, pricing });
+    const facts = createHotelFirstRunFactsReader({
+      ...deps,
+      language,
+      pricing,
+      unlockedPricing: createUnlockedPricingRead(deps.pricingPool),
+    });
     return createHotelFirstRunService({
       ...deps,
       pricing,
