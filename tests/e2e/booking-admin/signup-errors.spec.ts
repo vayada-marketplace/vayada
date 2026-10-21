@@ -8,22 +8,28 @@ async function submitSignup(page: Page) {
   await page.getByRole("button", { name: /create account/i }).click();
 }
 
-test("an email that already has an account says so", async ({ page }, testInfo) => {
+test("an email that already has an account says so and offers to sign in", async ({
+  page,
+}, testInfo) => {
   await page.route("**/auth/password/signup", (route) =>
     route.fulfill({
       status: 409,
       json: {
-        state: "auth_failed",
+        state: "account_exists",
         message: "This email already has a vayada account. Sign in instead.",
       },
     }),
   );
   await submitSignup(page);
-  await expect(
-    page.getByText("This email already has a vayada account. Sign in instead."),
-  ).toBeVisible();
+  const alert = page
+    .getByRole("alert")
+    .filter({ hasText: "This email already has a vayada account." });
+  await expect(alert).toBeVisible();
   await expect(page.getByText("An unexpected error occurred")).toHaveCount(0);
   await page.screenshot({ path: testInfo.outputPath("signup-email-exists.png") });
+
+  await alert.getByRole("link", { name: "Sign in" }).click();
+  await expect(page).toHaveURL(/\/login$/);
 });
 
 test("a weak password is explained", async ({ page }) => {
@@ -66,9 +72,11 @@ test("other rejected sign-ups ask to check the details, server errors stay gener
 
 test("a Google sign-up for an existing account explains it", async ({ page }) => {
   await page.goto(
-    `/signup?auth_error=${encodeURIComponent("This email already has a vayada account. Sign in instead.")}`,
+    `/signup?auth_error=${encodeURIComponent("This email already has a vayada account. Sign in instead.")}&auth_error_code=account_exists`,
   );
-  await expect(
-    page.getByText("This email already has a vayada account. Sign in instead."),
-  ).toBeVisible();
+  const alert = page
+    .getByRole("alert")
+    .filter({ hasText: "This email already has a vayada account." });
+  await expect(alert).toBeVisible();
+  await expect(alert.getByRole("link", { name: "Sign in" })).toHaveAttribute("href", "/login");
 });

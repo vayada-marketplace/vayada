@@ -48,7 +48,7 @@
   "auth.register.subtitle": "Neues Admin-Konto erstellen",
   "auth.register.errorValidation": "Validierungsfehler.",
   "auth.register.errorUnexpected": "Ein unerwarteter Fehler ist aufgetreten. Bitte versuchen Sie es erneut.",
-  "auth.register.errorEmailExists": "Für diese E-Mail-Adresse gibt es bereits ein vayada-Konto. Bitte melden Sie sich an.",
+  "auth.register.errorEmailExists": "Für diese E-Mail-Adresse gibt es bereits ein vayada-Konto.",
   "auth.register.errorPasswordWeak": "Dieses Passwort ist nicht sicher genug. Verwenden Sie mehrere unzusammenhängende Wörter oder ein Passwort aus einem Passwort-Manager.",
   "auth.register.errorSignupFailed": "Die Registrierung ist fehlgeschlagen. Bitte prüfen Sie Ihre Angaben und versuchen Sie es erneut.",
   "auth.forgotPassword.emailLabel": "E-Mail-Adresse",

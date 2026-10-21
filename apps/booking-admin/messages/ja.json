@@ -48,7 +48,7 @@
   "auth.register.subtitle": "新しい管理者アカウントを作成",
   "auth.register.errorValidation": "入力エラーです。",
   "auth.register.errorUnexpected": "予期しないエラーが発生しました。もう一度お試しください。",
-  "auth.register.errorEmailExists": "このメールアドレスにはすでにvayadaアカウントがあります。ログインしてください。",
+  "auth.register.errorEmailExists": "このメールアドレスにはすでにvayadaアカウントがあります。",
   "auth.register.errorPasswordWeak": "このパスワードは十分に安全ではありません。関連のない複数の単語か、パスワードマネージャーのパスワードをお使いください。",
   "auth.register.errorSignupFailed": "登録できませんでした。入力内容を確認して、もう一度お試しください。",
   "auth.forgotPassword.emailLabel": "メールアドレス",

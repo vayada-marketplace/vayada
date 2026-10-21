@@ -514,11 +514,7 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
         session.user.id,
       );
       if (existingUser) {
-        return redirectWithOAuthError(
-          reply,
-          state.value,
-          "This email already has a vayada account. Sign in instead.",
-        );
+        return redirectWithOAuthError(reply, state.value, ACCOUNT_EXISTS_MESSAGE, ACCOUNT_EXISTS);
       }
       if (state.value.intent) {
         try {
@@ -799,11 +795,8 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
         { workos: workosErrorDiagnostics(error), surface: parsed.surface },
         "WorkOS password signup failed",
       );
-      if (isConflictError(error)) {
-        return reply.code(409).send({
-          state: "auth_failed",
-          message: "This email already has a vayada account. Sign in instead.",
-        });
+      if (isEmailTakenError(error)) {
+        return reply.code(409).send({ state: ACCOUNT_EXISTS, message: ACCOUNT_EXISTS_MESSAGE });
       }
       return reply.code(400).send({
         state: "auth_failed",
@@ -3551,6 +3544,9 @@ class AuthAuthorizationError extends Error {
 
 // The account signed in but has no hotel workspace yet. Login pages offer hotel setup.
 const HOTEL_WORKSPACE_REQUIRED = "hotel_workspace_required";
+// Sign-up with an email that already has an account; the sign-up pages offer to sign in instead.
+const ACCOUNT_EXISTS = "account_exists";
+const ACCOUNT_EXISTS_MESSAGE = "This email already has a vayada account. Sign in instead.";
 
 class HotelWorkspaceRequiredError extends AuthAuthorizationError {}
 
@@ -3733,10 +3729,17 @@ function sendOrganizationSelectionResponse(
   });
 }
 
-function isConflictError(error: unknown): boolean {
+function isEmailTakenError(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
-  const candidate = error as { status?: unknown; name?: unknown };
-  return candidate.status === 409 || candidate.name === "ConflictException";
+  const { status, name, code, errors } = error as Record<string, unknown>;
+  if (status === 409 || name === "ConflictException") return true;
+  // WorkOS answers a taken email with 400 user_creation_error and names the reason in `errors`,
+  // never with 409 (VAY-2250).
+  return (
+    code === "user_creation_error" &&
+    Array.isArray(errors) &&
+    errors.some((detail) => (detail as { code?: unknown } | null)?.code === "email_not_available")
+  );
 }
 
 function organizationAccessOptionsFromRequest(

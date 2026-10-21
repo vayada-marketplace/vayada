@@ -12,6 +12,15 @@ describe("signupErrorKey (VAY-2250)", () => {
     ).toBe("auth.register.errorEmailExists");
   });
 
+  it("reads the account_exists code without relying on the English text", () => {
+    expect(signupErrorKey({ state: "account_exists", message: "Reworded." })).toBe(
+      "auth.register.errorEmailExists",
+    );
+    expect(signupRedirectErrorKey("Reworded.", "account_exists")).toBe(
+      "auth.register.errorEmailExists",
+    );
+  });
+
   it("explains a password that is too weak", () => {
     expect(
       signupErrorKey({

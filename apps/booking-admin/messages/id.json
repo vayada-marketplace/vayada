@@ -48,7 +48,7 @@
   "auth.register.subtitle": "Buat akun admin baru",
   "auth.register.errorValidation": "Kesalahan validasi.",
   "auth.register.errorUnexpected": "Terjadi kesalahan tak terduga. Silakan coba lagi.",
-  "auth.register.errorEmailExists": "Email ini sudah memiliki akun vayada. Silakan masuk.",
+  "auth.register.errorEmailExists": "Email ini sudah memiliki akun vayada.",
   "auth.register.errorPasswordWeak": "Kata sandi ini kurang kuat. Gunakan beberapa kata yang tidak berhubungan atau kata sandi dari pengelola kata sandi.",
   "auth.register.errorSignupFailed": "Pendaftaran gagal. Periksa data Anda dan coba lagi.",
   "auth.forgotPassword.emailLabel": "Alamat email",

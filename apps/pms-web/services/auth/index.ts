@@ -45,6 +45,7 @@ export type AuthStateResponse = {
     | "mfa_required"
     | "sso_required"
     | "hotel_workspace_required"
+    | "account_exists"
     | "auth_failed";
   message: string;
   pendingAuthenticationToken?: string;

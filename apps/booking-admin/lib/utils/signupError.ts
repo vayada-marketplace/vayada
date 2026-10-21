@@ -1,4 +1,4 @@
-/** Which sign-up message to show for a failed sign-up (VAY-2250). The API answers in English only, so match its cases. */
+/** Which sign-up message to show for a failed sign-up (VAY-2250). The API's text is English only, so match its codes and statuses first. */
 export type SignupErrorKey =
   | "auth.register.errorEmailExists"
   | "auth.register.errorPasswordWeak"
@@ -7,9 +7,14 @@ export type SignupErrorKey =
 
 export function signupErrorKey(error: unknown): SignupErrorKey {
   if (typeof error !== "object" || error === null) return "auth.register.errorUnexpected";
-  const { status, message } = error as { status?: unknown; message?: unknown };
+  const { status, state, message } = error as {
+    status?: unknown;
+    state?: unknown;
+    message?: unknown;
+  };
   const text = typeof message === "string" ? message : "";
-  if (status === 409 || /already has a vayada account/i.test(text))
+  // account_exists is the API's code; the status and text cover older API builds.
+  if (state === "account_exists" || status === 409 || /already has a vayada account/i.test(text))
     return "auth.register.errorEmailExists";
   if (status === 400) {
     return /strong enough/i.test(text)
@@ -19,7 +24,10 @@ export function signupErrorKey(error: unknown): SignupErrorKey {
   return "auth.register.errorUnexpected";
 }
 
-/** Google sign-up returns here with ?auth_error=<English message>. */
-export function signupRedirectErrorKey(authError: string): SignupErrorKey {
-  return signupErrorKey({ message: authError });
+/** Google sign-up returns here with ?auth_error=<English message>&auth_error_code=<code>. */
+export function signupRedirectErrorKey(
+  authError: string,
+  authErrorCode?: string | null,
+): SignupErrorKey {
+  return signupErrorKey({ state: authErrorCode, message: authError });
 }

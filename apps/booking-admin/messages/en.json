@@ -47,7 +47,7 @@
   "auth.register.subtitle": "Create a new admin account",
   "auth.register.errorValidation": "Validation error.",
   "auth.register.errorUnexpected": "An unexpected error occurred. Please try again.",
-  "auth.register.errorEmailExists": "This email already has a vayada account. Sign in instead.",
+  "auth.register.errorEmailExists": "This email already has a vayada account.",
   "auth.register.errorPasswordWeak": "This password isn't strong enough. Try several unrelated words or a password from a password manager.",
   "auth.register.errorSignupFailed": "Sign-up failed. Please check your details and try again.",
   "auth.forgotPassword.emailLabel": "Email address",
