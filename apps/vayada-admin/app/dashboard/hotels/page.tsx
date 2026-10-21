@@ -62,12 +62,14 @@ export default function HotelsPage() {
       setLoading(true);
       setError("");
 
+      // Only hotel sign-ups that provisioning accepts and that have no hotel yet (VAY-2272).
       const marketplaceParams: {
         type: "hotel";
+        provisionable: true;
         page: number;
         page_size: number;
         search?: string;
-      } = { type: "hotel", page: 1, page_size: 100 };
+      } = { type: "hotel", provisionable: true, page: 1, page_size: 100 };
       if (searchTerm) marketplaceParams.search = searchTerm;
 
       // Fetch both sources in parallel
@@ -171,6 +173,10 @@ export default function HotelsPage() {
         <div className="px-6 py-4">
           <h1 className="text-xl font-bold text-gray-900">Hotels</h1>
           <p className="text-sm text-gray-500">Browse and configure hotel booking engines</p>
+          <p className="text-xs text-gray-500">
+            Hotel accounts that can&apos;t be set up yet are not listed: the account must be active
+            and belong to exactly one hotel organization that has no hotel.
+          </p>
         </div>
       </header>
 

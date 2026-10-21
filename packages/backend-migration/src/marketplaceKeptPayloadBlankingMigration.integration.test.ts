@@ -61,9 +61,11 @@ describe.skipIf(!URL)("Marketplace kept payload blanking 0502", () => {
       let file = "";
       for (const name of await readdir(MIGRATIONS)) {
         if (!/^\d{4}_/.test(name)) continue;
-        if (Number(name.slice(0, 4)) < MIGRATION)
+        const version = Number(name.slice(0, 4));
+        // Production applies 0502 after 0503 and 0504, which were live before W3.
+        if (version < MIGRATION || version > 502)
           await cp(join(MIGRATIONS, name), join(before, name));
-        if (Number(name.slice(0, 4)) === MIGRATION) file = name;
+        if (version === MIGRATION) file = name;
       }
       expect((await run(before)).failed).toBeNull();
       target = new pg.Client({ connectionString: targetUrl.href });

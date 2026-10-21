@@ -4,6 +4,7 @@ import type {
   BookingLaunchCatalogEvidencePort,
   BookingLaunchOwnerBlocker,
 } from "@vayada/domain-booking";
+import { PUBLIC_BOOKABILITY_SLUG_PATTERN, isValidTimeZone } from "@vayada/domain-distribution";
 import {
   BOOKING_OWNER_SNAPSHOT_VERSION,
   type BookingPublicationOwnerSnapshotPort,
@@ -15,6 +16,8 @@ import type {
   SourceEntityRevision,
 } from "@vayada/domain-hotels";
 import pg, { type QueryResult, type QueryResultRow } from "pg";
+
+import { SETUP_GO_LIVE_CONTENT_SQL } from "../platform/hotelSetupGoLiveContent.js";
 
 type CatalogPool = {
   query<Row extends QueryResultRow = QueryResultRow>(
@@ -31,6 +34,7 @@ type CatalogRow = QueryResultRow & {
   supportedLocales: string[];
   profileStatus: string;
   lifecycleStatus: string;
+  setupGoLiveContent: boolean;
   profileRevision: number | string;
   sourceUpdatedAt: Date | string;
   timezone: string | null;
@@ -255,18 +259,29 @@ async function load(
   );
   const blockers: BookingLaunchOwnerBlocker[] = [];
   // Setup activates a hotel once its profile is complete (VAY-2140); until then the profile
-  // blockers explain the gap, so this only covers a complete hotel not activated yet.
+  // blockers explain the gap, so this only covers a complete hotel not activated yet. Setup's
+  // saves also need a description and an approved image (VAY-2247), so that is what's asked for.
   if (first.lifecycleStatus !== "active" && content.profileComplete) {
-    blockers.push(blocker("hotel_setup_in_progress", "external_pending"));
+    blockers.push(
+      first.setupGoLiveContent
+        ? blocker("hotel_setup_in_progress", "external_pending")
+        : blocker("hotel_setup_content_missing"),
+    );
   }
   if (!content.profileComplete) blockers.push(blocker("hotel_profile_incomplete"));
   // A city and country the hotel keeps private need the box ticked, not new data (VAY-2288).
-  if (!first.countryCode || !first.city) blockers.push(blocker("hotel_public_locality_missing"));
+  if (!first.countryCode?.trim() || !first.city?.trim())
+    blockers.push(blocker("hotel_public_locality_missing"));
   else if (!localityPublic) blockers.push(blocker("hotel_public_locality_hidden"));
+  // The page can't be built from an address or time zone it can't use (VAY-2292).
   if (!content.slug) blockers.push(blocker("hotel_canonical_slug_missing"));
+  else if (!PUBLIC_BOOKABILITY_SLUG_PATTERN.test(content.slug))
+    blockers.push(blocker("hotel_canonical_slug_invalid"));
   if (!content.timezone) blockers.push(blocker("hotel_timezone_missing"));
+  else if (!isValidTimeZone(content.timezone)) blockers.push(blocker("hotel_timezone_invalid"));
+  // VAY-2247: hotel photos are optional (guests see a placeholder); photos still processing or
+  // unavailable block until they are ready.
   if (mediaBlocker) blockers.push(mediaBlocker);
-  else if (content.images.length === 0) blockers.push(blocker("hotel_public_media_missing"));
   return {
     sources: [profileSource, assignmentSource, ...mediaSources, aggregateSource].sort(
       compareSource,
@@ -292,6 +307,7 @@ const CATALOG_SQL = `
 SELECT property.id::text AS "propertyId", property.display_name AS "displayName",
        property.default_locale AS "defaultLocale", property.supported_locales AS "supportedLocales",
        property.profile_status AS "profileStatus", property.lifecycle_status AS "lifecycleStatus",
+       ${SETUP_GO_LIVE_CONTENT_SQL} AS "setupGoLiveContent",
        property.profile_revision AS "profileRevision",
        GREATEST(property.updated_at, COALESCE(location.updated_at, property.updated_at),
          COALESCE((SELECT max(profile.updated_at) FROM hotel_catalog.property_profiles profile WHERE profile.property_id = property.id), property.updated_at),

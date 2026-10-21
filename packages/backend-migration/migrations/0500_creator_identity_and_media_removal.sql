@@ -1,7 +1,7 @@
 -- Migration: 0500_creator_identity_and_media_removal
--- Owner: platform / VAY-2272 (Marketplace removal step 5, M-E, window W3, barrier). HOLD: merge only
+-- Owner: platform / VAY-2272 (Marketplace removal step 5, M-E, window W3). Held by hand: merged
 -- with Flamur's yes, after the counts-0500 before-runs, with PR 7 live, the WorkOS clean-up done and
--- the PR 9 purge finished (barrier vay2272-0500-creator-removal).
+-- the PR 9 purge finished (MD06 = 0).
 --
 -- Removes the creator and affiliate side of identity: creator workspaces and affiliate partners, the
 -- users who only belonged to them or were created as creators or affiliates (decision 4), their
