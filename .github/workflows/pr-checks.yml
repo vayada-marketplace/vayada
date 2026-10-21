@@ -1016,6 +1016,15 @@ jobs:
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
+      # 0505 (VAY-2205) in its own database: migrate to 0504, add platform organizations, apply 0505.
+      - name: Verify the platform finance-admin entitlement
+        if: matrix.shard == 'hotel-setup'
+        run: >-
+          npm --workspace @vayada/backend-migration run test --
+          src/platformFinanceAdminEntitlementMigration.integration.test.ts
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+
       # Runs 0482 again inside a rolled-back transaction on the migrated shared database.
       - name: Verify the complete-hotel activation backfill
         if: matrix.shard == 'hotel-setup'

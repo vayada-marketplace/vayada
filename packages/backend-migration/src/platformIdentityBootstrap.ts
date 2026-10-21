@@ -279,20 +279,23 @@ async function applyPlatformIdentityBootstrap(
       [PLATFORM_ORGANIZATION_ID, PLATFORM_RESOURCE_ID, PLATFORM_RESOURCE_RELATIONSHIP],
     );
 
-    await client.query(
-      `INSERT INTO identity.product_entitlements
-         (organization_id, product, entitlement_key, status, resource_product, resource_type, resource_id)
-       VALUES ($1, 'platform', 'platform-admin', 'active', 'platform', 'platform', $2)
-       ON CONFLICT (
-         organization_id,
-         product,
-         entitlement_key,
-         COALESCE(resource_product, ''),
-         COALESCE(resource_type, ''),
-         COALESCE(resource_id, '')
-       ) DO UPDATE SET status = EXCLUDED.status, updated_at = now()`,
-      [PLATFORM_ORGANIZATION_ID, PLATFORM_RESOURCE_ID],
-    );
+    // finance-admin opens the platform Finance routes, e.g. Vayada Admin's Payments tab (VAY-2205).
+    for (const entitlementKey of ["platform-admin", "finance-admin"]) {
+      await client.query(
+        `INSERT INTO identity.product_entitlements
+           (organization_id, product, entitlement_key, status, resource_product, resource_type, resource_id)
+         VALUES ($1, 'platform', $3, 'active', 'platform', 'platform', $2)
+         ON CONFLICT (
+           organization_id,
+           product,
+           entitlement_key,
+           COALESCE(resource_product, ''),
+           COALESCE(resource_type, ''),
+           COALESCE(resource_id, '')
+         ) DO UPDATE SET status = EXCLUDED.status, updated_at = now()`,
+        [PLATFORM_ORGANIZATION_ID, PLATFORM_RESOURCE_ID, entitlementKey],
+      );
+    }
 
     await client.query("COMMIT");
   } catch (error) {
