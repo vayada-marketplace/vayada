@@ -4,9 +4,9 @@ _Architecture note, 2026-10-07. Records the human decision taken after the
 VAY-965 investigation. The grant itself is applied by the platform repo's
 owner-checked task; nothing in this document grants anything._
 
-> **Note (VAY-2272, 2026-10-20):** migrations 0497–0499 drop the `marketplace` schema and the
+> **Note (VAY-2272, 2026-10-21):** migrations 0497–0499 dropped the `marketplace` schema and the
 > affiliate tables and functions. Platform P2 (vayada-platform #594) and its app mirror (#3564)
-> take them out of the lists below; where a list still names one, it no longer exists.
+> took them out of the lists below.
 
 ## Decision
 
