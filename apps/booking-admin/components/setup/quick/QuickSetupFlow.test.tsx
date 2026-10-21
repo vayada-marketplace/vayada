@@ -92,7 +92,9 @@ describe("QuickSetupFlow (VAY-2247, ONBOARDING_V2)", () => {
       props({ account: { email: "clara@example.com", name: "Clara Schumann", phone: null } }),
     );
     expect(text(renderer)).toContain("Hi! Who's setting up the hotel?");
-    expect(text(renderer)).toContain("Owner · Alpenrose Hotel Group");
+    // One card since 2026-10-21: the phone field, no team preview.
+    expect(text(renderer)).toContain("Your phone");
+    expect(text(renderer)).not.toContain("How your team sees you");
     renderer.unmount();
   });
 

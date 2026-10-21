@@ -72,7 +72,8 @@ describe("QuickAboutYouStep (VAY-2247 step 1)", () => {
     expect(phone.props["aria-invalid"]).toBe(true);
     expect(JSON.stringify(renderer.toJSON())).toContain("Enter your phone number.");
 
-    await type(renderer, 2, "030 1234 5678");
+    // Pasted with its dial code: the field takes Germany from it (whatever the test machine's region).
+    await type(renderer, 2, "+49 30 1234 5678");
     expect(inputs(renderer)[2]!.props["aria-invalid"]).toBeUndefined();
     await type(renderer, 0, "  Clara  ");
     await submit(renderer);
