@@ -1031,6 +1031,8 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
       deposit?: boolean;
       cancellation?: unknown;
       card?: string;
+      /** A commission plan: the charge carries Vayada's application fee (the fixture's fixed plan has none). */
+      commission?: boolean;
     } = {},
   ) {
     const mode = options.mode ?? "instant";
@@ -1060,6 +1062,7 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
       },
       30,
     );
+    if (options.commission) Object.assign(fixture.f.finance, { billingPlanSnapshot: "commission" });
     const provider = createStripeBookingPaymentProvider({ secretKey: stripeKey! });
     const required = (await writePricingAcceptance(
       fixture.pool,
@@ -1137,12 +1140,16 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
       for (let waited = 0; ; waited += 5) {
         const command = (
           await fixture.observer.query(
-            `SELECT id,status,provider_status,failure_reason,attempts FROM finance.card_refund_commands
-             WHERE guest_booking_id=$1 ORDER BY created_at DESC LIMIT 1`,
+            `SELECT id,status,provider_status,provider_refund_id,failure_reason,attempts,amount::text AS amount
+             FROM finance.card_refund_commands WHERE guest_booking_id=$1 ORDER BY created_at DESC LIMIT 1`,
             [required.bookingId],
           )
         ).rows[0];
-        if (!command || command.status !== "pending") return command;
+        const settled = !command || command.status !== "pending";
+        // Kept in the K5 log (the fixture deletes the rows when it closes): ids and statuses only.
+        if (settled || waited >= seconds)
+          console.info(`K5 refund command ${JSON.stringify(command ?? null)}`);
+        if (settled) return command;
         if (waited >= seconds)
           throw new Error(
             `Refund still pending after ${seconds} s: Stripe status ${command.provider_status ?? "none"}, ` +
@@ -1228,6 +1235,43 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
         expect(refunds).toHaveLength(1);
         expect(refunds[0]).toMatchObject({ status: "succeeded", amountMinor: paid });
         expect(refunds[0]!.commandId).toMatch(/^[0-9a-f-]{36}$/);
+      } finally {
+        await stay.close();
+      }
+    },
+    stripeTestTimeout,
+  );
+
+  it.skipIf(!stripeTestMode)(
+    "Stripe test mode: a commission-plan stay's refund also returns Vayada's fee, in proportion",
+    async () => {
+      const stay = await stripeTestStay({ card: availableNow, commission: true });
+      try {
+        const fee = (
+          await stay.fixture.observer.query(
+            "SELECT payment_metadata->>'applicationFeeAmount' AS fee FROM finance.payments WHERE guest_booking_id=$1",
+            [stay.required.bookingId],
+          )
+        ).rows[0].fee as string;
+        const feeMinor = Math.round(Number(fee) * 100);
+        expect(feeMinor).toBeGreaterThan(0);
+        const paid = await stay.stripe();
+        await stay.cancel();
+        expect((await stay.followRefund()).status).toBe("succeeded");
+        expect((await stay.stripe()).amountRefundedMinor).toBe(paid.amountMinor);
+        // The fee lives on the platform account: all of it went back with the full refund.
+        const response = await fetch(
+          `https://api.stripe.com/v1/application_fees?charge=${encodeURIComponent(paid.feeBreakdown!.chargeId)}`,
+          {
+            headers: { Authorization: `Basic ${Buffer.from(`${stripeKey}:`).toString("base64")}` },
+          },
+        );
+        const fees = (await response.json()) as {
+          data?: { amount: number; amount_refunded: number }[];
+          error?: { message?: string };
+        };
+        expect(fees.error?.message).toBeUndefined();
+        expect(fees.data?.[0]).toMatchObject({ amount: feeMinor, amount_refunded: feeMinor });
       } finally {
         await stay.close();
       }
