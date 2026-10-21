@@ -33,7 +33,13 @@ function review({
   return {
     activeContentRevisionId: published ? "11111111-1111-4111-8111-111111111111" : null,
     publishedUrl: published && !hidden ? "https://hotel-alpenrose.booking.vayada.com" : null,
-    latestOperation: operation ? { status: operation } : null,
+    latestOperation: operation
+      ? {
+          status: operation,
+          operationId: "3f2a9c1b-0000-4000-8000-000000000001",
+          failureCode: operation === "failed" ? "projection_failed" : null,
+        }
+      : null,
     readiness: readinessFailed
       ? { outcome: "provider_failure", status: "error" }
       : {
@@ -105,28 +111,31 @@ describe("bookingPageStatus", () => {
     });
   });
 
-  it.each(["hotel_public_locality_hidden", "hotel_public_locality_missing"])(
-    "sends %s to the location form (VAY-2288)",
-    (code) => {
-      const status = bookingPageStatus(
-        review({
-          status: "blocked",
-          blocked: {
-            "booking.hotel_profile": {
-              kind: "user_fixable",
-              step: "present_hotel",
-              message: "Turn on 'Show city and country publicly' so guests see where you are.",
-              code,
-            },
+  it.each([
+    "hotel_public_locality_hidden",
+    "hotel_public_locality_missing",
+    // The time zone sits next to the country (VAY-2292).
+    "hotel_timezone_missing",
+    "hotel_timezone_invalid",
+  ])("sends %s to the location form (VAY-2288)", (code) => {
+    const status = bookingPageStatus(
+      review({
+        status: "blocked",
+        blocked: {
+          "booking.hotel_profile": {
+            kind: "user_fixable",
+            step: "present_hotel",
+            message: "Turn on 'Show city and country publicly' so guests see where you are.",
+            code,
           },
-        }),
-      );
-      expect(status).toMatchObject({
-        kind: "not_ready",
-        items: [{ groupId: "booking.hotel_profile", step: "present_hotel", focus: "location" }],
-      });
-    },
-  );
+        },
+      }),
+    );
+    expect(status).toMatchObject({
+      kind: "not_ready",
+      items: [{ groupId: "booking.hotel_profile", step: "present_hotel", focus: "location" }],
+    });
+  });
 
   it("is hidden, not online, when a published page has no guest URL", () => {
     expect(bookingPageStatus(review({ published: true, hidden: true }))).toEqual({
@@ -143,6 +152,11 @@ describe("bookingPageStatus", () => {
     expect(bookingPageStatus(review({ operation: "failed" }))).toEqual({
       kind: "failed",
       readyGroups: GROUPS,
+      failure: {
+        kind: "operation",
+        code: "projection_failed",
+        operationId: "3f2a9c1b-0000-4000-8000-000000000001",
+      },
     });
   });
 

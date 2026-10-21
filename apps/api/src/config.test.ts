@@ -773,6 +773,11 @@ describe("api config", () => {
     ).toBe(true);
   });
 
+  it("keeps the hotel first run (VAY-2247) unmounted unless explicitly enabled", () => {
+    expect(loadConfig({}).hotelFirstRunEnabled).toBe(false);
+    expect(loadConfig({ HOTEL_FIRST_RUN_ENABLED: "true" }).hotelFirstRunEnabled).toBe(true);
+  });
+
   it("rejects next API runtime when source selectors would default to legacy or disabled", () => {
     expect(() =>
       loadConfig({

@@ -85,11 +85,8 @@ describe("production identity ownership planning", () => {
     ambiguous.resourceLinks.push({ ...ambiguous.resourceLinks[0]!, organizationId: RESOURCE_ID });
     const orphan = bookingOwner();
     orphan.data["user_id"] = ORG_ID;
-    const wrongType = {
-      ...hotelUser(),
-      type: "creator",
-      status: "deleted",
-    } as PlannedIdentityUser;
+    // An admin also gets the platform organization; the hotel it owns is still quarantined.
+    const wrongType: PlannedIdentityUser = { ...hotelUser(), type: "admin", status: "deleted" };
     expect(planIdentityOwnership([bookingOwner()], [hotelUser()], ambiguous).blockers).toEqual(
       expect.arrayContaining([expect.objectContaining({ code: "AMBIGUOUS_OWNER" })]),
     );
@@ -97,9 +94,12 @@ describe("production identity ownership planning", () => {
       planIdentityOwnership([orphan], []),
       planIdentityOwnership([bookingOwner()], [wrongType]),
     ]) {
+      const hotelGroups = plan.organizations.filter((row) => row.kind === "hotel_group");
       expect(plan.blockers).toEqual([]);
-      expect(plan.organizations).toEqual([expect.objectContaining({ status: "archived" })]);
-      expect(plan.memberships).toEqual([]);
+      expect(hotelGroups).toEqual([expect.objectContaining({ status: "archived" })]);
+      expect(plan.memberships.filter((row) => row.organizationId === hotelGroups[0]!.id)).toEqual(
+        [],
+      );
       expect(plan.resourceLinks).toEqual([expect.objectContaining({ status: "archived" })]);
       expect(plan.quarantinedOrganizations).toBe(1);
       expect(plan.quarantinedResourceLinks).toBe(1);
