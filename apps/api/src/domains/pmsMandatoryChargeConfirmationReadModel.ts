@@ -99,12 +99,14 @@ LIMIT 1
 /* pms_mandatory_charge_confirmation_scope */`;
 
 /** With a pricing-v2 publication, the head revision's charge declaration ("all mandatory charges
- * included", made for exactly the published prices) is the property's final-price confirmation. */
+ * included", made for exactly the published prices) is the property's final-price confirmation.
+ * A system copy, carried onto the same prices after a payment change (VAY-2304), keeps the hotel's
+ * own time. */
 const PUBLISHED_CONFIRMATION_SQL = `SELECT
   $1::uuid::text AS "organizationId",
   head.property_id::text AS "propertyId",
   head.revision AS "confirmationRevision",
-  declaration.created_at AS "confirmedAt",
+  COALESCE(hotel.created_at, declaration.created_at) AS "confirmedAt",
   revision.source_revisions AS "sourceRevisions"
 FROM pms.pricing_v2_heads head
 JOIN pms.pricing_v2_revisions revision
@@ -112,6 +114,8 @@ JOIN pms.pricing_v2_revisions revision
 JOIN pms.pricing_v2_charge_declarations declaration
   ON declaration.property_id = head.property_id
  AND declaration.id::text = revision.owner_references->>'charges'
+LEFT JOIN pms.pricing_v2_charge_declarations hotel
+  ON hotel.property_id = declaration.property_id AND hotel.id = declaration.carried_from
 WHERE head.property_id = $2::uuid
   AND ${SCOPE_SQL}`;
 

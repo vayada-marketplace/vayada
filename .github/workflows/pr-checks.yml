@@ -883,6 +883,8 @@ jobs:
             src/domains/replacementPricingStore.integration.test.ts \
             src/domains/pmsInventoryPublicOfferProjection.integration.test.ts \
             src/domains/replacementPricingCommands.integration.test.ts \
+            src/domains/pricingPaymentRepublish.integration.test.ts \
+            src/domains/pricingPaymentRepublishTriggers.integration.test.ts \
             src/domains/pmsAcceptedPricingReservationWorker.integration.test.ts \
             src/domains/preparePricingAcceptance.postgres.test.ts \
             src/domains/storePricingAcceptance.postgres.test.ts \
@@ -1022,6 +1024,15 @@ jobs:
         run: >-
           npm --workspace @vayada/backend-migration run test --
           src/platformFinanceAdminEntitlementMigration.integration.test.ts
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+
+      # 0506 (VAY-2304) in its own database: migrate to 0505, add user rows, apply 0506, check the system rows.
+      - name: Verify the pricing system re-publish columns
+        if: matrix.shard == 'hotel-setup'
+        run: >-
+          npm --workspace @vayada/backend-migration run test --
+          src/pricingSystemRepublishMigration.integration.test.ts
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 

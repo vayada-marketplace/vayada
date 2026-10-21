@@ -92,7 +92,8 @@ export async function lockPublicPricingAuthority(client: PoolClient, slug: unkno
 
 /** The one organization with active owner/operator links to both the PMS and catalog
  * property, or null when there is none or more than one. Discovery only: callers lock. */
-async function owningOrganization(client: PoolClient, propertyId: string) {
+/** The single organization linked as owner/operator to both the PMS and the catalog property. */
+export async function owningOrganization(client: PoolClient, propertyId: string) {
   const owners = (
     await client.query(
       `SELECT organization_id FROM identity.organization_resource_links
