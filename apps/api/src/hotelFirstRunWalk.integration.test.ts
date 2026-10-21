@@ -802,11 +802,13 @@ describe.skipIf(!url)(
           ...createPgHotelSetupChecklistRepository(pool),
           onlineCardsOffered: false,
         });
-        let peak = runtime.snapshot();
+        // Each maximum on its own, so a later busier sample can't hide an earlier stall.
+        const peak = { waitingRequests: 0, stalledPools: 0, totalConnections: 0 };
         const sampler = setInterval(() => {
           const now = runtime.snapshot();
-          if (now.waitingRequests > peak.waitingRequests || now.stalledPools > peak.stalledPools)
-            peak = now;
+          peak.waitingRequests = Math.max(peak.waitingRequests, now.waitingRequests);
+          peak.stalledPools = Math.max(peak.stalledPools, now.stalledPools);
+          peak.totalConnections = Math.max(peak.totalConnections, now.totalConnections);
         }, 10);
         // What one Booking Admin dashboard load fires at once: the checklist, the booking page status
         // (the booking readiness) and the dashboard's other reads on the shared pool.
