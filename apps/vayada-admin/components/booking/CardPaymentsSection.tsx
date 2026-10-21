@@ -23,16 +23,19 @@ const status = (value: unknown) =>
 
 /** Why a turn on or off failed, in the server's words when it gave any (VAY-2205). */
 function changeError(cause: unknown): string {
-  if (status(cause) === 403)
-    return "Turning card payments on or off needs Vayada finance manage rights.";
-  if (status(cause) === 409)
-    return "The hotel's Stripe account changed meanwhile. Check it again, then retry.";
   const data =
     cause && typeof cause === "object" && "data" in cause
       ? ((cause as { data?: { message?: unknown; code?: unknown } }).data ?? {})
       : {};
   const message = typeof data.message === "string" && data.message.trim() ? data.message : null;
   const code = typeof data.code === "string" ? data.code : null;
+  if (status(cause) === 403)
+    return "Turning card payments on or off needs Vayada finance manage rights.";
+  // The two revision conflicts in operator words; any other conflict as the server put it.
+  if (code === "property_readiness_revision_conflict")
+    return "The hotel's payment settings changed meanwhile. Check them again, then retry.";
+  if (code === "provider_capability_revision_conflict" || (status(cause) === 409 && !message))
+    return "The hotel's Stripe account changed meanwhile. Check it again, then retry.";
   if (!message) return "That didn't go through. Try again in a moment.";
   return `That didn't go through: ${message}${code ? ` (${code})` : ""}`;
 }

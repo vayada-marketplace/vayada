@@ -192,17 +192,18 @@ test("says why turning card on failed, in the server's words, and keeps it after
   page,
   baseURL,
 }) => {
-  let reads = 0;
-  const origin = await openPayments(page, baseURL, () => {
-    reads += 1;
-    return off();
-  });
+  // After the failure the server says the prices must be saved again, so the reload shows.
+  let failed = false;
+  const origin = await openPayments(page, baseURL, () =>
+    failed ? off(true, "save_needed") : off(),
+  );
   const card = page.getByRole("region", { name: "Card payments" });
   await expect(card.getByText("Off", { exact: true })).toBeVisible();
   await page.route(
     api(`/api/finance/platform/properties/${propertyId}/online-card-execution-evidence`),
     async (route) => {
       if (route.request().method() !== "POST") return route.fallback();
+      failed = true;
       await fulfillJson(
         route,
         origin,
@@ -216,7 +217,7 @@ test("says why turning card on failed, in the server's words, and keeps it after
       );
     },
   );
-  const readsBefore = reads;
+  await expect(page.getByText("The hotel's prices must be saved again.")).toHaveCount(0);
   await card.getByRole("button", { name: "Turn on card payments" }).click();
   await page
     .getByRole("dialog", { name: "Turn on card payments for Hotel Alpenrose Munich?" })
@@ -225,9 +226,11 @@ test("says why turning card on failed, in the server's words, and keeps it after
   await expect(card.getByRole("alert")).toHaveText(
     "That didn't go through: Online-card execution evidence is invalid. (invalid_command)",
   );
-  // The page read the state again after the failure, and the message stayed.
-  await expect.poll(() => reads).toBeGreaterThan(readsBefore);
-  await expect(card.getByRole("alert")).toBeVisible();
+  // The reload after the failure has landed, and the message stayed.
+  await expect(page.getByText("The hotel's prices must be saved again.")).toBeVisible();
+  await expect(card.getByRole("alert")).toHaveText(
+    "That didn't go through: Online-card execution evidence is invalid. (invalid_command)",
+  );
   await expect(card.getByText("Off", { exact: true })).toBeVisible();
 });
 
