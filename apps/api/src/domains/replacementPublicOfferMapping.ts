@@ -3,6 +3,11 @@ import type { BookingPublicQuotedOffer } from "@vayada/domain-distribution/booki
 import { pricingOfferOnBookingPage } from "@vayada/domain-pms";
 import type { lockCurrentPricingPublication } from "./currentPricingPublication.js";
 import { publicPricingOfferBindings } from "./publicPricingRoomStay.js";
+import {
+  pricingPaymentsNow,
+  pricingRateSells,
+  type PricingPaymentSwitches,
+} from "./pricingRatePayability.js";
 
 type Owner = NonNullable<Awaited<ReturnType<typeof lockCurrentPricingPublication>>>;
 
@@ -84,4 +89,30 @@ export function publicOfferCancellations(
         cancellations.set(binding.publicOfferKey, publicOfferCancellation(terms.cancellation));
     }
   return cancellations;
+}
+
+/** VAY-2304: the public offer keys of the rates guests can pay now (pricingRateSells), with the
+ * booking page's switches applied to Finance's ready methods. A rate nobody can pay stops selling;
+ * the others keep selling. */
+export function sellingPublicOfferKeys(
+  owner: Owner,
+  switches: PricingPaymentSwitches,
+): ReadonlySet<string> {
+  const now = pricingPaymentsNow(owner.finance.methods, switches);
+  const bindings = publicPricingOfferBindings(owner);
+  const selling = new Set<string>();
+  for (const room of owner.publication.rooms)
+    for (const offer of room.offers) {
+      const terms = owner.terms.find(
+        (t) =>
+          t.roomTypeId === room.roomTypeId &&
+          t.offerId === offer.id &&
+          t.revision === offer.termsRevision,
+      );
+      const binding = bindings.find(
+        (b) => b.roomTypeId === room.roomTypeId && b.offerId === offer.id,
+      );
+      if (terms && binding && pricingRateSells(terms, now)) selling.add(binding.publicOfferKey);
+    }
+  return selling;
 }

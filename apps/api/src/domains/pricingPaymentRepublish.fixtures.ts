@@ -18,7 +18,13 @@ const flexible = {
 
 /** VAY-2304 tests: a hotel that publishes through the real "Save prices" commands, with a payment
  * setup to change. Card hotels get a ready synthetic Stripe account; cardOn() is Vayada's approval. */
-export async function paymentRepublishFixture(pool: pg.Pool, methods: string[], card = false) {
+export async function paymentRepublishFixture(
+  pool: pg.Pool,
+  methods: string[],
+  card = false,
+  /** More rates next to "flex", each with its own terms (VAY-2304 payability). */
+  extraRates: readonly { offerId: string; cancellation?: unknown; payment: unknown }[] = [],
+) {
   const actorUserId = randomUUID(),
     organizationId = randomUUID(),
     propertyId = randomUUID(),
@@ -124,6 +130,20 @@ export async function paymentRepublishFixture(pool: pg.Pool, methods: string[], 
     expectedRevision: null,
     terms: termsInput,
   });
+  const rates = [{ offerId: "flex", revision: terms.revision }];
+  for (const extra of extraRates) {
+    const saved = await booking.save(context, scope, {
+      requestId: randomUUID(),
+      expectedRevision: null,
+      terms: {
+        roomTypeId,
+        offerId: extra.offerId,
+        cancellation: extra.cancellation ?? flexible,
+        payment: extra.payment,
+      },
+    });
+    rates.push({ offerId: extra.offerId, revision: saved.revision });
+  }
   /** A rate terms edit saved straight to the rate (not through "Save prices"). */
   const changeTerms = () =>
     booking.save(context, scope, {
@@ -152,35 +172,33 @@ export async function paymentRepublishFixture(pool: pg.Pool, methods: string[], 
           adultFromAge: 12,
           bands: [{ fromAge: 0, throughAge: 11, nightlyMinor: "0", countsTowardCapacity: true }],
         },
-        offers: [
-          {
-            id: "flex",
-            termsRevision: terms.revision,
-            meal: { kind: "room_only", charge: { kind: "room", amountMinor: "0" } },
-            price: {
-              kind: "independent",
-              calendar: {
-                base: { mode: "flat", amountMinor },
-                months: [],
-                seasons: [],
-                weekdays: [],
-                dates: [],
-              },
-            },
-            restrictions: {
-              kind: "own",
-              rules: {
-                minArrivalNights: 1,
-                maxStayNights: null,
-                closedToArrival: false,
-                closedToDeparture: false,
-                stopSell: false,
-              },
+        offers: rates.map((rate) => ({
+          id: rate.offerId,
+          termsRevision: rate.revision,
+          meal: { kind: "room_only", charge: { kind: "room", amountMinor: "0" } },
+          price: {
+            kind: "independent",
+            calendar: {
+              base: { mode: "flat", amountMinor },
+              months: [],
               seasons: [],
+              weekdays: [],
               dates: [],
             },
           },
-        ],
+          restrictions: {
+            kind: "own",
+            rules: {
+              minArrivalNights: 1,
+              maxStayNights: null,
+              closedToArrival: false,
+              closedToDeparture: false,
+              stopSell: false,
+            },
+            seasons: [],
+            dates: [],
+          },
+        })),
       },
     ],
   });
@@ -248,6 +266,7 @@ export async function paymentRepublishFixture(pool: pg.Pool, methods: string[], 
     }
   }
   return {
+    context,
     propertyId,
     organizationId,
     actorUserId,

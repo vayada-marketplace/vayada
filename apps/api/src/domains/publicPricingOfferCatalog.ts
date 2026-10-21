@@ -8,7 +8,9 @@ import {
   mapReplacementPublicOffers,
   publicOfferCancellations,
   publicOfferMealDescriptions,
+  sellingPublicOfferKeys,
 } from "./replacementPublicOfferMapping.js";
+import type { PricingPaymentSwitches } from "./pricingRatePayability.js";
 import { readPmsRoomOperatingEligibility } from "./pmsRoomOperatingEligibility.js";
 import { toPublicPmsRoomAmenityLabelsV1 } from "./pmsRoomAmenityVocabulary.js";
 
@@ -31,11 +33,18 @@ type RoomRow = {
 /** Public offer choices only; no date-specific price, inventory hold or booking authority.
  * The hotel's first booking-page publication is its go-live (VAY-2129). After that, the
  * catalog follows what is saved now: priced, operating rooms with their current content and
- * offers. Offer keys always bind the current pricing revision. */
+ * offers. Offer keys always bind the current pricing revision. Only rates guests can pay now
+ * are offered, with the booking page's `payments` switches (VAY-2304); a room left with none is
+ * left out. Without switches, Finance's ready methods alone decide. */
 export function createPublicPricingOfferCatalog(
   pool: Pool,
-  options: { mediaServing?: MediaServing } = {},
+  options: { mediaServing?: MediaServing; payments?: PricingPaymentSwitches } = {},
 ) {
+  const payments = options.payments ?? {
+    card: true,
+    deposits: true,
+    manual: ["bank_transfer", "paypal"],
+  };
   return {
     async read(slug: string) {
       const client = await pool.connect();
@@ -58,7 +67,14 @@ export function createPublicPricingOfferCatalog(
             .filter((room) => room.state === "operating")
             .map((room) => room.roomTypeId),
         );
-        const offered = mapped.filter((room) => operating.has(room.roomTypeId));
+        const selling = sellingPublicOfferKeys(owner, payments);
+        const offered = mapped
+          .filter((room) => operating.has(room.roomTypeId))
+          .map((room) => ({
+            ...room,
+            offers: room.offers.filter((rate) => selling.has(rate.ratePlanId)),
+          }))
+          .filter((room) => room.offers.length > 0);
         const content = await readRoomContent(client, propertyId, offered);
         const rooms = [];
         for (const room of offered) {

@@ -1,5 +1,10 @@
 import type { RequestContext } from "@vayada/backend-auth";
-import { parsePricingConfiguration, pricingKeys, pricingObject } from "@vayada/domain-pms";
+import {
+  parsePricingConfiguration,
+  pricingKeys,
+  pricingObject,
+  pricingOfferOnBookingPage,
+} from "@vayada/domain-pms";
 import type { Pool } from "pg";
 import {
   createBookingPricingOfferTermsStore,
@@ -24,6 +29,7 @@ import {
   type PricingStorageScope,
   type PricingStorageSnapshot,
 } from "./replacementPricingStore.js";
+import { readCurrentPricingSnapshot } from "./replacementPricingSnapshot.js";
 
 type Store = ReturnType<typeof createReplacementPricingStore>;
 type Publication = Parameters<Store["save"]>[1] & { draft: { id: string; revision: number } };
@@ -264,6 +270,59 @@ export function createReplacementPricingCommands(pool: Pool, context: RequestCon
         throw e;
       } finally {
         client.release();
+      }
+    },
+    /** VAY-2304: the published booking-page rates with the methods the hotel can take now, for
+     * GET …/not-selling. Nothing published: no rates. Read-only. */
+    async publishedRatePayments(propertyId: string) {
+      const currentScope = scope(propertyId),
+        client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query("SET LOCAL lock_timeout = '5s'");
+        if (!(await lockReplacementPricingSources(client, trustedContext, currentScope, "read")))
+          return fail("denied");
+        const stored = await readCurrentPricingSnapshot(client, currentScope.propertyId);
+        if (!stored) return { publishedRevision: null, rates: [], methods: [], cardChosen: false };
+        const terms = await lockBookingPricingOfferTerms(
+          client,
+          currentScope.propertyId,
+          stored.rooms.flatMap((room) =>
+            room.offers.filter(pricingOfferOnBookingPage).map((offer) => ({
+              roomTypeId: room.roomTypeId,
+              offerId: offer.id,
+              revision: offer.termsRevision,
+            })),
+          ),
+        );
+        if (!terms) return fail("invalid");
+        const finance = await lockFinanceReplacementPricingReadiness(client, {
+          propertyId: currentScope.propertyId,
+          currency: stored.currency,
+          pricingRevision: stored.revision,
+          terms,
+        });
+        const settings = (
+          await client.query(
+            "SELECT payments_enabled, accepted_methods FROM finance.payment_settings WHERE property_id=$1",
+            [currentScope.propertyId],
+          )
+        ).rows[0];
+        return {
+          publishedRevision: stored.revision,
+          rates: terms,
+          methods: finance.kind === "ready" ? finance.methods : [],
+          cardChosen:
+            settings?.payments_enabled === true &&
+            Array.isArray(settings.accepted_methods) &&
+            settings.accepted_methods.includes("card"),
+        };
+      } finally {
+        try {
+          await client.query("ROLLBACK");
+        } finally {
+          client.release();
+        }
       }
     },
     async readTerms(propertyId: string, roomTypeId: string, offerId: string) {

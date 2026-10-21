@@ -13,6 +13,11 @@ import type { createReplacementPricingCommands } from "../domains/replacementPri
 import type { FinanceManualPaymentMethodsReadPort } from "../domains/financeManualPaymentReadiness.js";
 import type { PricingCardReadinessReadPort } from "../domains/pricingCardReadiness.js";
 import {
+  pricingPaymentsNow,
+  pricingRateNotSelling,
+  type PricingCardState,
+} from "../domains/pricingRatePayability.js";
+import {
   PricingStorageError,
   type PricingStorageSnapshot,
   type PricingStorageSources,
@@ -185,6 +190,38 @@ export async function registerReplacementPricingRoutes(
           card: { ready: false, reason: "switch_off", charge: "at_booking" },
           deposits: { ready: false },
         };
+  });
+  // VAY-2304: the published rates guests can't pay now, why, and what fixes each, main fix first
+  // (pricing-rates-not-selling.v1; the PMS rate cards show it). Every other rate sells.
+  route("GET", "/not-selling", async (commands, id, request) => {
+    const organizationId = authorized.get(request)!.selectedOrganization.organizationId;
+    const published = await commands.publishedRatePayments(id);
+    const ready = options.cardReadiness
+      ? await options.cardReadiness.read({ organizationId, propertyId: id })
+      : null;
+    const now = pricingPaymentsNow(published.methods, {
+      card: ready?.card.ready === true,
+      deposits: ready?.deposits.ready === true,
+      manual: options.manualPayments
+        ? await options.manualPayments.acceptedMethods({ propertyId: id })
+        : [],
+    });
+    const card: PricingCardState =
+      ready?.card.ready === true
+        ? "ready"
+        : !published.cardChosen
+          ? "not_chosen"
+          : ready?.card.reason === "not_connected"
+            ? "setup_incomplete"
+            : "off";
+    return {
+      version: "pricing-rates-not-selling.v1",
+      publishedRevision: published.publishedRevision,
+      rates: published.rates.flatMap((terms) => {
+        const why = pricingRateNotSelling(terms, { ...now, card });
+        return why ? [{ roomTypeId: terms.roomTypeId, offerId: terms.offerId, ...why }] : [];
+      }),
+    };
   });
   route("GET", "/rooms/:roomTypeId/offers/:offerId/terms", (commands, id, request) =>
     commands.readTerms(id, request.params.roomTypeId!, request.params.offerId!),
