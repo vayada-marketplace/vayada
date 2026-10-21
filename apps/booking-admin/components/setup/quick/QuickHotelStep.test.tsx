@@ -1,8 +1,13 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { act, create, type ReactTestRenderer } from "react-test-renderer";
+import { act, create, type ReactTestInstance, type ReactTestRenderer } from "react-test-renderer";
 import { describe, expect, it, vi } from "vitest";
 
-import { QuickHotelStep, orderedPropertyTypes, type QuickHotelStepProps } from "./QuickHotelStep";
+import {
+  QuickHotelStep,
+  orderedPropertyTypes,
+  quickHotelPartErrors,
+  type QuickHotelStepProps,
+} from "./QuickHotelStep";
 import {
   EMPTY_QUICK_HOTEL_DRAFT,
   previewBookingHost,
@@ -55,69 +60,114 @@ async function submit(renderer: ReactTestRenderer) {
 
 const text = (renderer: ReactTestRenderer) => JSON.stringify(renderer.toJSON());
 
-describe("QuickHotelStep (VAY-2247 step 2, fields)", () => {
-  it("shows step 2 with the three sections, the address slot and the live preview", () => {
+/** A node's visible text, nested elements included. */
+function label(node: ReactTestInstance | string): string {
+  return typeof node === "string" ? node : node.children.map(label).join("");
+}
+
+/** The first button with this text (the footer renders once for desktop and once for phones). */
+function button(renderer: ReactTestRenderer, name: string) {
+  return renderer.root.findAll((node) => node.type === "button" && label(node) === name)[0]!;
+}
+
+describe("QuickHotelStep (VAY-2247 steps 2–4, the approved split)", () => {
+  it("opens on Your hotel: the name, the logo upload strip, type cards and the live preview", () => {
     const markup = renderToStaticMarkup(<QuickHotelStep {...props({ draft: FILLED })} />);
-    expect(markup).toContain("Step 2 of 5");
-    for (const heading of ["Your hotel", "Where it is", "How guests reach you"])
-      expect(markup).toContain(`>${heading}</h2>`);
-    expect(markup).toContain("address slot");
-    expect(markup).toContain("Logo optional — you can add it later.");
+    expect(markup).toContain("Step 2 of 7");
+    expect(markup).toContain(">Your hotel</h1>");
+    expect(markup).toContain("Guests see it on your booking page and in emails.");
+    expect(markup).toContain("Upload your logo");
+    expect(markup).toContain("PNG or SVG · optional");
+    expect(markup).toContain("Choose file");
     expect(markup).toContain("Your booking page, live as you type");
     expect(markup).toContain("hotel-alpenrose.booking.vayada.com");
-    expect(markup).toContain("Sendlinger Straße 12, Munich");
-    expect(markup).toContain("Your first room");
-    expect(renderToStaticMarkup(<QuickHotelStep {...props()} />)).toContain("Your hotel name");
     expect(markup).toContain("Saved as you type");
+    // The other two screens come after it.
+    expect(markup).not.toContain("address slot");
+    expect(markup).not.toContain("Reception email");
+    const empty = renderToStaticMarkup(<QuickHotelStep {...props()} />);
+    expect(empty).toContain("Your hotel name");
+    expect(empty).toContain("Your address comes next");
   });
 
-  it("offers Hotel first and keeps the rarer types behind More…", async () => {
+  it("shows the property types as cards, Hotel first, the rarer ones behind More…", async () => {
     const onChange = vi.fn();
     const renderer = create(<QuickHotelStep {...props({ onChange })} />);
     const radios = () => renderer.root.findAll((node) => node.props.role === "radio");
-    expect(radios().map((radio) => radio.children.join(""))).toEqual([
-      "Hotel",
-      "Guesthouse",
-      "Apartment",
-    ]);
-    const more = renderer.root.findAll(
-      (node) => node.type === "button" && node.children.join("") === "More…",
-    );
-    await act(async () => more[0]!.props.onClick());
-    expect(radios().map((radio) => radio.children.join(""))).toEqual([
-      "Hotel",
-      "Guesthouse",
-      "Apartment",
-      "Motel",
-      "Other",
-    ]);
+    expect(radios().map(label)).toEqual(["Hotel", "Guesthouse", "Apartment"]);
+    await act(async () => button(renderer, "More…").props.onClick());
+    expect(radios().map(label)).toEqual(["Hotel", "Guesthouse", "Apartment", "Motel", "Other"]);
     await act(async () => radios()[0]!.props.onClick());
     expect(onChange).toHaveBeenCalledWith({ propertyType: "hotel" });
     renderer.unmount();
   });
 
-  it("names every missing field and saves nothing until they are filled", async () => {
+  it("goes screen by screen, each checking its own fields, and Back returns", async () => {
+    const empty = create(<QuickHotelStep {...props()} />);
+    await submit(empty);
+    expect(text(empty)).toContain("Enter your hotel's name.");
+    expect(text(empty)).toContain("Choose a property type.");
+    expect(text(empty)).not.toContain("Enter an email guests can write to.");
+    empty.unmount();
+
+    const onBack = vi.fn();
     const onSubmit = vi.fn(async () => undefined);
-    const renderer = create(<QuickHotelStep {...props({ onSubmit })} />);
+    const renderer = create(<QuickHotelStep {...props({ draft: FILLED, onBack, onSubmit })} />);
     await submit(renderer);
+    expect(text(renderer)).toContain("Step 3 of 7");
+    expect(text(renderer)).toContain("Where it is");
+    expect(text(renderer)).toContain("address slot");
+    await submit(renderer);
+    expect(text(renderer)).toContain("Step 4 of 7");
+    expect(text(renderer)).toContain("How guests reach you");
+    expect(text(renderer)).toContain("Reception email");
+    // The reception phone is country + number, in the hotel's country.
+    expect(renderer.root.findByProps({ "aria-haspopup": "listbox" }).props["aria-label"]).toBe(
+      "Reception phone country: Germany +49",
+    );
     expect(onSubmit).not.toHaveBeenCalled();
-    for (const message of [
-      "Enter your hotel's name.",
-      "Choose a property type.",
-      "Choose your address from the list, or enter it manually.",
-      "Enter an email guests can write to.",
-      "Enter a phone number guests can call.",
-    ])
-      expect(text(renderer)).toContain(message);
+    await act(async () => button(renderer, "Back").props.onClick());
+    expect(text(renderer)).toContain("Step 3 of 7");
+    await act(async () => button(renderer, "Back").props.onClick());
+    expect(text(renderer)).toContain("Step 2 of 7");
+    await act(async () => button(renderer, "Back").props.onClick());
+    expect(onBack).toHaveBeenCalledOnce();
     renderer.unmount();
   });
 
-  it("saves a complete hotel and shows why a save failed", async () => {
+  it("checks the contacts before the save, and sends a gap on an earlier screen back there", async () => {
+    const onSubmit = vi.fn(async () => undefined);
+    const noContacts = { ...FILLED, contactEmail: "", phone: "" };
+    const renderer = create(
+      <QuickHotelStep {...props({ draft: noContacts, onSubmit, initialPart: "contacts" })} />,
+    );
+    await submit(renderer);
+    expect(text(renderer)).toContain("Enter an email guests can write to.");
+    expect(text(renderer)).toContain("Enter a phone number guests can call.");
+    expect(onSubmit).not.toHaveBeenCalled();
+    renderer.unmount();
+
+    const noName = create(
+      <QuickHotelStep
+        {...props({ draft: { ...FILLED, displayName: "" }, onSubmit, initialPart: "contacts" })}
+      />,
+    );
+    await submit(noName);
+    expect(text(noName)).toContain("Step 2 of 7");
+    expect(text(noName)).toContain("Enter your hotel's name.");
+    expect(onSubmit).not.toHaveBeenCalled();
+    noName.unmount();
+  });
+
+  it("saves a complete hotel on the last screen and shows why a save failed", async () => {
     const onSubmit = vi
       .fn<(draft: QuickHotelDraft) => Promise<void>>()
       .mockRejectedValueOnce(new Error("That hotel name is already taken."))
       .mockResolvedValueOnce(undefined);
-    const renderer = create(<QuickHotelStep {...props({ draft: FILLED, onSubmit })} />);
+    const renderer = create(
+      <QuickHotelStep {...props({ draft: FILLED, onSubmit, initialPart: "contacts" })} />,
+    );
+    expect(text(renderer)).toContain("clara@example.com");
     await submit(renderer);
     expect(renderer.root.findByProps({ role: "alert" }).children.join("")).toBe(
       "That hotel name is already taken.",
@@ -152,6 +202,16 @@ describe("quickHotelDraft", () => {
     expect(quickHotelErrors({ ...FILLED, timezone: "" })).toHaveProperty("address");
   });
 
+  it("splits the checks by screen", () => {
+    const empty = EMPTY_QUICK_HOTEL_DRAFT;
+    expect(Object.keys(quickHotelPartErrors("hotel", empty))).toEqual([
+      "displayName",
+      "propertyType",
+    ]);
+    expect(Object.keys(quickHotelPartErrors("where", empty))).toEqual(["address"]);
+    expect(Object.keys(quickHotelPartErrors("contacts", empty))).toEqual(["contactEmail", "phone"]);
+  });
+
   it("shows the address the server reserves: the name, URL-safe", () => {
     expect(previewBookingHost("Hotel Alpenrose")).toBe("hotel-alpenrose.booking.vayada.com");
     expect(previewBookingHost("  Gästehaus  Weiß & Co. ")).toBe(
@@ -160,7 +220,7 @@ describe("quickHotelDraft", () => {
     expect(previewBookingHost("")).toBe("yourhotel.booking.vayada.com");
   });
 
-  it("orders the property types for the pills", () => {
+  it("orders the property types for the cards", () => {
     expect(orderedPropertyTypes(TYPES).shown.map((option) => option.value)).toEqual([
       "hotel",
       "guesthouse",
