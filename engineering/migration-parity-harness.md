@@ -138,7 +138,7 @@ in review but rich enough to prove cross-domain transforms.
 ```json
 {
   "caseId": "representative-hotel",
-  "description": "One hotel with booking profile, PMS inventory, payments, creator listing, and WorkOS-linked owner.",
+  "description": "One hotel with booking profile, PMS inventory, payments, and WorkOS-linked owner.",
   "sourceDatabases": ["auth", "marketplace", "booking", "pms"],
   "expectedOwners": {
     "identity.users": 1,
@@ -161,14 +161,13 @@ Minimum fixture cases:
 
 | Case                              | Source areas                    | Purpose                                                                                                               |
 | --------------------------------- | ------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| `identity-organization-links`     | Auth, booking, PMS, marketplace | Maps users, organizations, memberships, resource links, and entitlements.                                             |
+| `identity-organization-links`     | Auth, booking, PMS              | Maps users, organizations, memberships, resource links, and entitlements.                                             |
 | `hotel-catalog-merge`             | Booking, PMS, marketplace       | Creates one canonical property from product-specific hotel/profile rows.                                              |
 | `direct-booking-lifecycle`        | Booking, PMS                    | Migrates guest booking lifecycle, guests, add-ons, public status events.                                              |
 | `pms-operations-and-channel-sync` | PMS                             | Covers rooms, rate rules, inventory, room blocks, Channex mappings.                                                   |
-| `marketplace-collaboration`       | Marketplace, PMS where needed   | Covers creators, listings, collaborations, deliverables, affiliate links.                                             |
-| `finance-reconciliation`          | Booking, PMS, marketplace       | Reconciles payment settings, payments, payouts, commissions, entitlements.                                            |
+| `finance-reconciliation`          | Booking, PMS                    | Reconciles payment settings, payments, payouts, commissions, entitlements.                                            |
 | `public-bookability`              | Booking, PMS, catalog           | Proves public-safe profile, room offer, quote, and deep-link read models.                                             |
-| `jobs-events-audit`               | Auth, booking, PMS, marketplace | Proves event, job, webhook, idempotency, and audit transforms.                                                        |
+| `jobs-events-audit`               | Auth, booking, PMS              | Proves event, job, webhook, idempotency, and audit transforms.                                                        |
 | `retired-or-deferred-sources`     | Auth, booking, PMS, marketplace | Confirms retired local auth, Lodgify, Beds24, and dropped tables are retained only as allowed audit/source snapshots. |
 
 ## Source-To-Target Coverage
@@ -176,12 +175,12 @@ Minimum fixture cases:
 The harness must cover every current database area from VAY-609 or explicitly
 defer it with rationale in the report.
 
-| Source area                       | Required checks                                                                                                      | Deferral posture                                                  |
-| --------------------------------- | -------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| `auth-db/migrations`              | User count, stable internal IDs, external identity uniqueness, membership/resource-link parity, privacy rows.        | Retired password/TOTP/email-token tables can be snapshot-only.    |
-| `apps/marketplace-api/migrations` | Creator/listing/collaboration/chat/trip counts, status distributions, listing owner links, notification disposition. | Removed local auth tables are historical only.                    |
-| `apps/booking-api/migrations`     | Hotel profile/config counts, slug uniqueness, add-on/promo mapping, commission history, platform/billing fields.     | Dropped Lodgify state is audit-only unless a dependency is found. |
-| `apps/pms-api/migrations`         | Hotel/room/rate/inventory/booking/payment/payout/channel/message/note/setup counts and ownership links.              | Dropped Beds24 and old messaging tables are audit-only.           |
+| Source area                       | Required checks                                                                                                  | Deferral posture                                                                        |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `auth-db/migrations`              | User count, stable internal IDs, external identity uniqueness, membership/resource-link parity, privacy rows.    | Retired password/TOTP/email-token tables can be snapshot-only.                          |
+| `apps/marketplace-api/migrations` | Hotel profile counts feeding the Hotel Catalog.                                                                  | The other tables are retired (VAY-2272); removed local auth tables are historical only. |
+| `apps/booking-api/migrations`     | Hotel profile/config counts, slug uniqueness, add-on/promo mapping, commission history, platform/billing fields. | Dropped Lodgify state is audit-only unless a dependency is found.                       |
+| `apps/pms-api/migrations`         | Hotel/room/rate/inventory/booking/payment/payout/channel/message/note/setup counts and ownership links.          | Dropped Beds24 and old messaging tables are audit-only.                                 |
 
 ## Parity Checks
 
@@ -191,8 +190,8 @@ Core checks:
 - uniqueness for internal IDs, external provider IDs, slugs, resource links,
   booking references, payment provider IDs, channel mappings, and WorkOS IDs;
 - checksums where rows have stable ordered projections;
-- status distribution parity for bookings, collaborations, payouts, payments,
-  platform status, channel sync, jobs, and audit events;
+- status distribution parity for bookings, payouts, payments, platform status,
+  channel sync, jobs, and audit events;
 - ownership parity from source `user_id`-style fields into organizations,
   memberships, entitlements, and resource links;
 - financial totals for payments, payouts, commissions, deposits, and balances;
@@ -207,21 +206,21 @@ provider webhook receipt metadata that is intentionally normalized.
 
 ## Failures Versus Warnings
 
-| Finding type                                                                                                               | Severity | Result                                              |
-| -------------------------------------------------------------------------------------------------------------------------- | -------- | --------------------------------------------------- |
-| Ambiguous ownership for a migrated user, organization, property, booking, creator, affiliate, payment, or channel mapping. | Fail     | Stop run and require transform or source cleanup.   |
-| Any critical source row missing from a non-deferred target owner group.                                                    | Fail     | Block rehearsal/cutover.                            |
-| Target uniqueness violation or duplicate external provider ID.                                                             | Fail     | Block rehearsal/cutover.                            |
-| Public read model exposes guest PII, private owner settings, payout data, internal notes, or unpublished inventory.        | Fail     | Block rehearsal/cutover.                            |
-| Finance total mismatch outside configured zero/rounding tolerance.                                                         | Fail     | Block rehearsal/cutover.                            |
-| Booking status distribution mismatch for active/future bookings.                                                           | Fail     | Block rehearsal/cutover.                            |
-| WorkOS/internal identity link cannot be resolved for active users.                                                         | Fail     | Block rehearsal/cutover.                            |
-| SQL migration checksum differs from the applied ledger.                                                                    | Fail     | Refuse migration application.                       |
-| Missing optional profile/media/amenity fields with no product-critical behavior.                                           | Warn     | Include owner and source row IDs in report.         |
-| Retired source rows present only in allowed audit/snapshot disposition.                                                    | Warn     | Confirm retention owner and do not block.           |
-| Checksum unavailable because the source table has unstable projection.                                                     | Warn     | Require count and domain-specific parity instead.   |
-| Non-critical historical status distribution mismatch on canceled/archived records.                                         | Warn     | Requires explicit owner sign-off before cutover.    |
-| Rows skipped due to documented source corruption or deleted external dependency.                                           | Warn     | Requires linked cleanup issue or accepted deferral. |
+| Finding type                                                                                                        | Severity | Result                                              |
+| ------------------------------------------------------------------------------------------------------------------- | -------- | --------------------------------------------------- |
+| Ambiguous ownership for a migrated user, organization, property, booking, payment, or channel mapping.              | Fail     | Stop run and require transform or source cleanup.   |
+| Any critical source row missing from a non-deferred target owner group.                                             | Fail     | Block rehearsal/cutover.                            |
+| Target uniqueness violation or duplicate external provider ID.                                                      | Fail     | Block rehearsal/cutover.                            |
+| Public read model exposes guest PII, private owner settings, payout data, internal notes, or unpublished inventory. | Fail     | Block rehearsal/cutover.                            |
+| Finance total mismatch outside configured zero/rounding tolerance.                                                  | Fail     | Block rehearsal/cutover.                            |
+| Booking status distribution mismatch for active/future bookings.                                                    | Fail     | Block rehearsal/cutover.                            |
+| WorkOS/internal identity link cannot be resolved for active users.                                                  | Fail     | Block rehearsal/cutover.                            |
+| SQL migration checksum differs from the applied ledger.                                                             | Fail     | Refuse migration application.                       |
+| Missing optional profile/media/amenity fields with no product-critical behavior.                                    | Warn     | Include owner and source row IDs in report.         |
+| Retired source rows present only in allowed audit/snapshot disposition.                                             | Warn     | Confirm retention owner and do not block.           |
+| Checksum unavailable because the source table has unstable projection.                                              | Warn     | Require count and domain-specific parity instead.   |
+| Non-critical historical status distribution mismatch on canceled/archived records.                                  | Warn     | Requires explicit owner sign-off before cutover.    |
+| Rows skipped due to documented source corruption or deleted external dependency.                                    | Warn     | Requires linked cleanup issue or accepted deferral. |
 
 Staging and production dry-run commands should exit non-zero on any `Fail`.
 Warnings exit zero only when they are below the configured warning budget and

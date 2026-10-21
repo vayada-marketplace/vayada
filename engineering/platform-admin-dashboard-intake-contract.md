@@ -13,9 +13,9 @@ This contract narrows the first non-media slice so implementation can proceed
 without overlapping the platform media work in VAY-821/VAY-826.
 
 This slice does not migrate image uploads, media serving, media imports, or
-storage ownership. `POST /upload/images`, Booking design image upload, and
-marketplace `/upload/*` remain owned by the platform media track. PMS listing
-import routes are retired with the listing import feature.
+storage ownership. `POST /upload/images` and Booking design image upload remain
+owned by the platform media track. PMS listing import routes are retired with
+the listing import feature.
 
 Fixture cases live in:
 
@@ -56,17 +56,14 @@ directly from that flag.
 
 Route families:
 
-| Legacy route                                                   | Target owner                                                     | Target authorization                                                      |
-| -------------------------------------------------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| `GET /super-admin/bookings`                                    | Platform admin read model over Booking/PMS/Finance projections   | `platform.admin.read` on platform organization                            |
-| `GET /super-admin/affiliate-payouts`                           | Platform finance read model                                      | `platform.finance.read` on platform organization                          |
-| `GET /super-admin/affiliate-payouts/{affiliate_id}`            | Platform finance read model scoped to affiliate resource         | `platform.finance.read` plus affiliate payout visibility                  |
-| `POST /super-admin/affiliate-payouts/{affiliate_id}/mark-paid` | Finance command, exposed through platform admin facade if needed | `platform.finance.command` or another explicit write-scoped finance grant |
-| `GET /platform-admin/growth`                                   | Platform growth read model over public-safe aggregates           | `platform.admin.read` on platform organization                            |
-| `PATCH /platform-admin/properties/{property_id}/status`        | Catalog/entitlement command                                      | `platform.property.status.manage` on platform organization                |
+| Legacy route                                            | Target owner                                                   | Target authorization                                       |
+| ------------------------------------------------------- | -------------------------------------------------------------- | ---------------------------------------------------------- |
+| `GET /super-admin/bookings`                             | Platform admin read model over Booking/PMS/Finance projections | `platform.admin.read` on platform organization             |
+| `GET /platform-admin/growth`                            | Platform growth read model over public-safe aggregates         | `platform.admin.read` on platform organization             |
+| `PATCH /platform-admin/properties/{property_id}/status` | Catalog/entitlement command                                    | `platform.property.status.manage` on platform organization |
 
-Platform read models must not open legacy Booking, PMS, Marketplace, or Auth DB
-pools as normal route integration. Before cutover, a compatibility adapter may
+Platform read models must not open legacy Booking, PMS, or Auth DB pools as
+normal route integration. Before cutover, a compatibility adapter may
 read legacy sources, but the route contract is target-shaped and must hide
 legacy table names and provider secrets.
 
@@ -124,14 +121,13 @@ Allowed transitions are:
 - `retired` to `suspended` as the guarded recovery step.
 
 Moving to `active` requires a complete canonical profile. A suspended or
-retired property is not public. Recovery does not republish it: Marketplace and
-Distribution owners must run their normal reviewed publication commands.
+retired property is not public. Recovery does not republish it: Distribution
+owners must run their normal reviewed publication commands.
 Retirement preserves Catalog facts, organization links, entitlements, Booking
 history, PMS inventory, Finance records, media, and immutable publication
-revisions. It suspends the active Marketplace submission and hotel profile,
-disables public offer projections, marks the Distribution profile unavailable,
-and clears the mutable active public Booking revision pointer in the same
-transaction as the lifecycle update and audit.
+revisions. It marks the Distribution profile unavailable and clears the mutable
+active public Booking revision pointer in the same transaction as the lifecycle
+update and audit.
 
 Retirement is blocked while any active guest booking, unresolved payment, open
 payout, or connected/degraded channel connection exists. The impact response
@@ -212,7 +208,7 @@ IDs, or legacy database/table names.
 
 ## Public Contact Intake
 
-Legacy marketplace `POST /contact` is a public email side effect. Target
+Legacy marketplace `POST /contact` was a public email side effect. Target
 ownership is platform intake via jobs/events:
 
 1. Validate and normalize public form input.

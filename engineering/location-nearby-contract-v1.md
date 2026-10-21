@@ -24,7 +24,7 @@ keep our hide/favorite/note controls outside the Google element. This is one
 proposed rendering path for all accounts, avoiding a second EEA-specific UI.
 
 The repository has a GitHub secret named `GOOGLE_MAPS_BROWSER_API_KEY`, wired
-into next Marketplace, Booking Admin and PMS deploy workflows. Secret presence
+into next Booking Admin and PMS deploy workflows. Secret presence
 does not prove enabled APIs, billing, restrictions, quota, or working access.
 The checked local app env files provided no configured Maps/Places credentials.
 No server Places key or usable billing-account metadata was verified.

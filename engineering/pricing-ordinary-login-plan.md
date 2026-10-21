@@ -6,6 +6,11 @@ nothing here grants, deploys, merges or activates anything. Evidence:
 (`inventory-api.md`, `migrations-and-rls.md`, `platform-apparatus.md`,
 `open-pricing-prs.md`, `vay1543-comments-export.md`)._
 
+> **Note (VAY-2272, 2026-10-20):** Marketplace Web and the affiliate program are
+> gone. Slice B's setup wizard now lives in Booking Admin (VAY-2261), and
+> `domains/affiliateCaptureRoleBoundary.ts` (section 3.3) was deleted (VAY-2263);
+> paths below are as of `702f777c6`.
+
 ## 0. Decision
 
 2026-10-07, Flamur: "yes proceed". Pricing writes rely on application-level

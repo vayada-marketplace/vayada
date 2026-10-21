@@ -10,7 +10,7 @@ _VAY-655 contract record. Builds on `engineering/booking-pms-coupling-audit.md`,
 Booking Web currently renders one guest-facing flow while calling both Booking
 API and PMS API public routes. That makes Vayada PMS look like the Booking Web
 backend for room search, payment settings, direct booking lifecycle, guest
-lookup, cancellation, change requests, and affiliate clicks.
+lookup, cancellation, and change requests.
 
 This document defines the target public API split for Booking Web. It is a
 contract/design slice only: it does not refactor the current Next.js runtime,
@@ -23,7 +23,7 @@ Booking Web must call Booking-owned and Distribution-owned public contracts.
 Vayada PMS may produce inventory, room/rate, and operational reservation facts
 through adapters or read models, but Booking Web must not call PMS public routes
 directly in the TypeScript target path.
-Where a target route triggers Marketplace, Finance, PMS, or Jobs/events/audit
+Where a target route triggers Finance, PMS, or Jobs/events/audit
 work, the public HTTP boundary still stays behind the Booking/Distribution
 route family and delegates to the owning domain behind that boundary.
 
@@ -36,8 +36,6 @@ Booking Web
   -> Distribution/bookability public API for hotel page projection, room offers,
      unavailable dates, quote/deep links, host resolution, canonical URLs, and
      public attribution context
-  -> Booking/Distribution public attribution endpoint that delegates affiliate
-     click processing to Marketplace attribution plus Jobs/events/audit
 
 Distribution/read models
   <- Hotel catalog public profile facts
@@ -51,8 +49,7 @@ Forbidden target call shape:
 ```text
 Booking Web
   -> PMS public routes for rooms, unavailable dates, payment settings,
-     bookings, booking status, lookup, cancellation, change requests, or
-     affiliate clicks
+     bookings, booking status, lookup, cancellation, or change requests
 ```
 
 ## Current Surface Inventory
@@ -79,7 +76,6 @@ Booking Web
 | `bookingService.previewChangeRequest` | PMS API             | `POST /api/hotels/{slug}/bookings/{bookingId}/change-request/preview` | Booking/checkout plus Distribution      | `POST /api/booking-web/hotels/{slug}/bookings/{bookingId}/change-request/preview`              |
 | `bookingService.submitChangeRequest`  | PMS API             | `POST /api/hotels/{slug}/bookings/{bookingId}/change-request`         | Booking/checkout plus PMS sink          | `POST /api/booking-web/hotels/{slug}/bookings/{bookingId}/change-request`                      |
 | `bookingService.getChangeRequest`     | PMS API             | `GET /api/hotels/{slug}/bookings/{bookingId}/change-request`          | Booking/checkout                        | `GET /api/booking-web/hotels/{slug}/bookings/{bookingId}/change-request`                       |
-| `hotelService.recordAffiliateClick`   | PMS API             | `POST /api/hotels/{slug}/affiliates/{referralCode}/click`             | Marketplace plus Jobs/events/audit      | `POST /api/booking-web/hotels/{slug}/attribution/clicks`                                       |
 | `trackEvent`                          | Booking API         | `POST /api/events`                                                    | Jobs/events/audit via Booking telemetry | `POST /api/booking-web/events`; no legacy Booking forwarding                                   |
 
 The target route family is intentionally Booking Web specific. Public AI and
@@ -162,22 +158,12 @@ Booking Web must treat `guestBookingId` and booking reference as Booking
 identities. Any PMS reservation reference returned to Booking must stay opaque
 and must not be required by the frontend for guest actions.
 
-### Affiliate Click Tracking and Public Events
+### Public Events
 
-Target owner: Marketplace plus Jobs/events/audit.
+Target owner: Jobs/events/audit.
 
-Marketplace owns collaboration and affiliate attribution rules. Jobs/events/audit
-owns durable event intake, retries, abuse/rate-limit signals, and audit
-visibility. Finance consumes attribution outcomes for commission rules when a
-booking converts.
-
-Booking Web should submit click/session data to a Booking/Distribution public
-route family endpoint owned by Marketplace attribution plus Jobs/events/audit.
-Distribution may provide read-only public attribution context on page and quote
-responses, but it does not own the click write. The intake endpoint may emit
-marketplace attribution events and telemetry jobs, but Booking Web must not
-write PMS affiliate click rows or know which PMS adapter will eventually receive
-commission context.
+Jobs/events/audit owns durable event intake, retries, abuse/rate-limit signals,
+and audit visibility.
 
 Dashboard source after VAY-769: Booking Web page/funnel telemetry is target-only
 when `BOOKING_WEB_EVENT_SINK=target` and `AUTH_DATABASE_URL`/WorkOS auth config
@@ -206,7 +192,6 @@ stay available until Booking Web has target API parity:
 - `POST /api/hotels/{slug}/bookings/{bookingId}/change-request/preview`
 - `POST /api/hotels/{slug}/bookings/{bookingId}/change-request`
 - `GET /api/hotels/{slug}/bookings/{bookingId}/change-request`
-- `POST /api/hotels/{slug}/affiliates/{referralCode}/click`
 
 Compatibility rules:
 
@@ -217,7 +202,7 @@ Compatibility rules:
    calls. Temporary PMS reads for rooms, unavailable dates, payment-readiness
    inputs, and operational lookup inputs are allowed only inside server-side
    compatibility adapters that emit Booking, Distribution, Finance,
-   Marketplace, or Jobs/events/audit contracts.
+   or Jobs/events/audit contracts.
 3. Compatibility adapters may preserve current frontend response field names
    while the frontend is migrated, but the owning contract must name the target
    domain owner and data-source owner separately.
@@ -239,8 +224,7 @@ Compatibility rules:
 
 ## Recorded Migration Sequence
 
-The migration followed this order. Steps 1–5 are complete; step 6 remains for
-the separately tracked affiliate compatibility surface:
+The migration followed this order. Steps 1–5 are complete; step 6 remains:
 
 1. Added Booking Web public route adapters in the TypeScript API with no direct
    frontend changes. The active adapters are target-backed; stale Python API
@@ -251,13 +235,13 @@ the separately tracked affiliate compatibility surface:
    create/confirm/status/lookup, cancel, change request, and affiliate click
    behavior.
 3. Switched `apps/booking-web/services/api` from `pms` to the
-   Booking/distribution API for page, offer, and calendar reads. The remaining
-   affiliate facade is tracked separately.
+   Booking/distribution API for page, offer, and calendar reads.
 4. Moved booking create/confirm/status/lookup/cancel/change calls behind
    Booking/checkout route adapters and wired PMS handoff through the PMS
    reservation sink.
 5. Replaced affiliate click writes with marketplace attribution events and
-   durable telemetry/audit intake.
+   durable telemetry/audit intake. The click route was later deleted with the
+   affiliate program (VAY-2263).
 6. Remove `NEXT_PUBLIC_PMS_URL` from Booking Web and retire the remaining PMS
    public compatibility routes after production parity and smoke coverage are
    accepted.
@@ -272,8 +256,6 @@ Future implementation PRs that touch Booking Web public API calls should answer:
 - Are PMS reservation references opaque and absent from frontend business logic?
 - Are payment settings public checkout capabilities rather than provider or
   payout settings?
-- Are affiliate clicks represented as marketplace attribution events with
-  durable audit/telemetry, rather than PMS table writes?
 - Are custom-domain resolution and canonical URL policy served by catalog and
   Distribution projections instead of legacy Booking API profile routes?
 - Are manual-payment instructions returned from a booking-scoped Finance output

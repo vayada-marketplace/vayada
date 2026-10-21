@@ -7,8 +7,9 @@ Vayada is a hospitality platform with two connected products:
   reservations, and channel connectivity.
 
 The Creator Marketplace is retired (VAY-2259). Its web app is gone; its legacy
-API is switched off (api.vayada.com answers 410) and its source is deleted, and
-the Marketplace tables in the new database are dropped in VAY-2272.
+API is switched off (api.vayada.com answers 410) and its source is deleted.
+VAY-2272 removed its data from the new database: the `marketplace` schema, the
+affiliate program and the creator accounts (migrations 0496–0502).
 
 This repository is the product application monorepo. It contains every web app,
 the target TypeScript API, the legacy FastAPI services still used during
@@ -315,10 +316,11 @@ Migration ownership is split across three paths:
 | TypeScript target schema | `packages/backend-migration/migrations/` | `dev:workos-local` applies migrations to `TARGET_DATABASE_URL` | Follow the reviewed target migration and cutover runbook; `apps/api` does not auto-migrate on startup |
 
 The target database is organized into domain schemas for platform, identity,
-hotel catalog, booking, PMS, finance, marketplace, and distribution. The local
-launcher uses `AUTH_DATABASE_URL` as the target URL when `TARGET_DATABASE_URL`
-is not set. The retired `intelligence` schema is removed by migration `0090`;
-future hotel employee agent design starts from VAY-1091.
+hotel catalog, booking, PMS, finance, and distribution. The local launcher uses
+`AUTH_DATABASE_URL` as the target URL when `TARGET_DATABASE_URL` is not set. The
+retired `marketplace` schema is removed by migration `0499` (VAY-2272). The
+retired `intelligence` schema is removed by migration `0090`; future hotel
+employee agent design starts from VAY-1091.
 
 To apply target migrations manually to a configured local database:
 

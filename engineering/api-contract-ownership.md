@@ -58,13 +58,13 @@ ticket that changes the frontend contract and route response together.
 
 ## Remaining Compatibility Shapes
 
-| Shape                                                                        | Owner                                        | Removal condition                                                                                                       |
-| ---------------------------------------------------------------------------- | -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| Booking Admin reservation list `bookings` response and legacy field defaults | Booking route adapter / Booking Admin client | Booking Admin accepts a renamed reservations response and typed empty/null states.                                      |
-| Auth compatibility tokens for legacy surfaces                                | Auth/session route adapter                   | Each frontend uses AuthKit/RequestContext directly and no FastAPI bridge needs scoped tokens.                           |
-| Booking Web public compatibility routes under `/api/booking-web/...`         | Booking Web public adapter                   | Guest booking, affiliate, payment settings, and lookup commands use target Booking/Finance/Marketplace routes directly. |
-| PMS compatibility aliases for old admin operations                           | PMS operations route adapter                 | PMS Web uses only `/api/pms/properties/:propertyId/...` typed clients and accepted smokes cover the screens.            |
-| Legacy product database read-model adapters                                  | Owning route adapter                         | Target read model exists, parity passes, and runtime config no longer needs legacy product DB URLs.                     |
+| Shape                                                                        | Owner                                        | Removal condition                                                                                            |
+| ---------------------------------------------------------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Booking Admin reservation list `bookings` response and legacy field defaults | Booking route adapter / Booking Admin client | Booking Admin accepts a renamed reservations response and typed empty/null states.                           |
+| Auth compatibility tokens for legacy surfaces                                | Auth/session route adapter                   | Each frontend uses AuthKit/RequestContext directly and no FastAPI bridge needs scoped tokens.                |
+| Booking Web public compatibility routes under `/api/booking-web/...`         | Booking Web public adapter                   | Guest booking, payment settings, and lookup commands use target Booking/Finance routes directly.             |
+| PMS compatibility aliases for old admin operations                           | PMS operations route adapter                 | PMS Web uses only `/api/pms/properties/:propertyId/...` typed clients and accepted smokes cover the screens. |
+| Legacy product database read-model adapters                                  | Owning route adapter                         | Target read model exists, parity passes, and runtime config no longer needs legacy product DB URLs.          |
 
 ## Boundary Enforcement
 

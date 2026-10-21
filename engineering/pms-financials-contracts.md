@@ -394,7 +394,7 @@ until VAY-1138 activates the replacement.
 
 Preserve payment/provider/payout/commission/entitlement rows and migrations;
 settings, cancellation, onboarding, payout, reconciliation and payment-capability
-routes; readiness/dispatch/checkout, Booking and affiliate consumers; platform
+routes; readiness/dispatch/checkout and Booking consumers; platform
 idempotency, event, job and audit infrastructure; and legacy Python Financials.
 
 No reset ticket drops a Finance table, deletes production data, changes provider
@@ -431,6 +431,6 @@ remain stable across retries or rollback.
   correction, replay, archive and accounting-export tests.
 - Every protected route passes the full authorization and inactive-module matrix.
 - CSV exports match normalized filters and neutralize spreadsheet formulas.
-- Preserved Finance/payment/affiliate suites remain green after reset/activation.
+- Preserved Finance/payment suites remain green after reset/activation.
 - PMS Web build, lint, accessibility checks and the Financials browser golden
   path pass in an activated-property fixture.

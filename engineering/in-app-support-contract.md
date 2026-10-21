@@ -4,7 +4,7 @@ Implements [VAY-1008](https://linear.app/vayadacom/issue/VAY-1008) against the
 [TypeScript backend structure](typescript-backend-structure.md). No legacy API changes.
 
 `POST /api/support` accepts `kind` (`support` or `bug`), `message` (1–4000 trimmed
-characters), `product` (marketplace, booking, pms, affiliate) and `page` (a local
+characters), `product` (booking or pms) and `page` (a local
 pathname, at most 500 characters; no query, fragment or URL). Identity and selected
 organization come only from the resolved RequestContext. This is an explicit
 identity-only exception to product route policy: support requires no paid product
@@ -25,7 +25,7 @@ an hour boundary can produce another request. Response: 201 `{status: "accepted"
 reference}`; 400 invalid input, 401 missing/invalid identity, 503 storage failure.
 Errors retain the client draft; requests time out after 20 seconds.
 
-The shared form appears in authenticated Marketplace, Booking, PMS and Affiliate navigation.
+The shared form appears in authenticated Booking Admin and PMS navigation.
 Legacy builds with `NEXT_PUBLIC_AUTHKIT_LOGIN_ENABLED=false` hide it.
 
 VAY-1007 remains Backlog and no help/docs page exists in main. The docs navigation
