@@ -155,7 +155,7 @@ export function createPgPropertySetupPmsOwnerRepository(config: {
     throw new Error("Property setup PMS owner repository connectionString must not be empty");
   }
   const ownsPool = !config.pool;
-  const pool =
+  const pool: QueryClient & { end(): Promise<void> } =
     config.pool ??
     new pg.Pool({
       connectionString: config.connectionString,
