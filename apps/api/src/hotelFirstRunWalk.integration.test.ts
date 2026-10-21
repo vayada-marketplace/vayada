@@ -33,6 +33,7 @@ import type { HotelFirstRunRequest } from "./domains/hotelFirstRunService.js";
 import type { HotelFirstRunActor } from "./domains/hotelFirstRunSteps.js";
 import { createPgHotelSetupTrackCommandRepository } from "./domains/hotelSetupTrackCommandRepository.js";
 import { createPgPmsCalendarAutoOpenSettingsRepository } from "./domains/pmsCalendarAutoOpenSettingsRepository.js";
+import { lockPmsInventoryMutationScope } from "./domains/pmsInventoryMutationLock.js";
 import { createPgPmsOperatingCalendarReadModel } from "./domains/pmsOperatingCalendarReadModel.js";
 import { createPmsOperatingCalendarProductionRuntime } from "./domains/pmsOperatingCalendarProductionRuntime.js";
 import { createPgPmsPhysicalRoomOperationalLabelRepository } from "./domains/pmsPhysicalRoomOperationalLabelRepository.js";
@@ -469,6 +470,28 @@ describe.skipIf(!url)(
           firstRoom: true,
           guestPayment: true,
         });
+        // It takes no locks either: it answers while a pricing save holds the owner locks.
+        let timer: NodeJS.Timeout | undefined;
+        await h.admin.query("BEGIN");
+        try {
+          await lockPmsInventoryMutationScope(h.admin, h.propertyId);
+          await h.admin.query("SELECT 1 FROM identity.organizations WHERE id=$1 FOR UPDATE", [
+            h.organizationId,
+          ]);
+          const late = new Promise<never>((_resolve, reject) => {
+            timer = setTimeout(
+              () => reject(new Error("the light read waited on the pricing locks")),
+              3_000,
+            );
+          });
+          expect(await Promise.race([h.service().readSetupProgress(h.actor), late])).toEqual({
+            firstRoom: true,
+            guestPayment: true,
+          });
+        } finally {
+          clearTimeout(timer);
+          await h.admin.query("ROLLBACK");
+        }
 
         // Sri Lanka → LKR; rooms named Room 1–3; pay at the hotel; the default terms; Grand Classic; the city shown.
         const scope = { organizationId: h.organizationId, propertyId: h.propertyId };
