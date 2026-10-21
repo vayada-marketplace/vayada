@@ -14,7 +14,8 @@ import {
 } from "@/services/api/cardPayments";
 import { usersService } from "@/services/api/users";
 
-const PMS_FRONTEND_URL = process.env.NEXT_PUBLIC_PMS_FRONTEND_URL || "https://pms.vayada.com";
+// The next PMS, as the image build passes it (VAY-2205); the legacy pms.vayada.com is frozen.
+const PMS_FRONTEND_URL = process.env.NEXT_PUBLIC_PMS_FRONTEND_URL || "https://next-pms.vayada.com";
 
 const status = (value: unknown) =>
   value && typeof value === "object" && typeof (value as { status?: unknown }).status === "number"
