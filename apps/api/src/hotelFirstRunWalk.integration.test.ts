@@ -49,6 +49,7 @@ import { createPgPmsRoomFactsCommandRepository } from "./domains/pmsRoomFactsCom
 import { createPgPmsRoomFactsReadModel } from "./domains/pmsRoomFactsReadModel.js";
 import { createPmsRoomFactsVocabularyValidationPort } from "./domains/pmsRoomFactsVocabulary.js";
 import { createPgPmsRoomPublicationReadModel } from "./domains/pmsRoomPublicationReadModel.js";
+import { createReplacementPricingCommands } from "./domains/replacementPricingCommands.js";
 import { createReplacementPricingPublicationReader } from "./domains/replacementPricingPublicationReader.js";
 import { createHotelSetupOrdinaryLoginFixture } from "./hotelSetupOrdinaryLogin.fixture.js";
 import { createPgHotelMediaResolutionPort } from "./platform/hotelMediaResolver.js";
@@ -58,6 +59,7 @@ import {
 } from "./platform/hotelSetupProfileWriter.js";
 import type { PlatformMediaServingConfig } from "./platform/mediaServing.js";
 import { installPostgresPoolRuntime } from "./platform/postgresRuntime.js";
+import { createPgProductAuditSink } from "./platform/productAudit.js";
 import {
   advancePublicProfileRevision,
   createPgSharedHotelSetupStatusRepository,
@@ -435,6 +437,9 @@ describe.skipIf(!url)(
       };
       return {
         admin,
+        connectionString: cs,
+        // The pricing commands' read, as the first run and the Rates page run it for the owner.
+        pricing: () => createReplacementPricingCommands(pool, context),
         pool,
         propertyId,
         organizationId,
@@ -836,6 +841,75 @@ describe.skipIf(!url)(
           writable: true,
           value: OriginalPool,
         });
+      }
+    });
+
+    it("a pricing read and the booking readiness that wait on each other give up within seconds; a sign-in still lands (VAY-2247 incident)", async () => {
+      const h = await hotel();
+      try {
+        expect((await h.service().run(h.actor, request, h.email)).ok).toBe(true);
+        const settled = (work: Promise<unknown>) =>
+          work.then(
+            () => "done",
+            (error: unknown) => (error as { code?: string }).code ?? String(error),
+          );
+        let pricing: Promise<string> | undefined;
+        let signIn: Promise<string> | undefined;
+        let calendar: Promise<string> | undefined;
+        let waited = 0;
+        // The readiness's profile check: its transaction holds the property row while it awaits a
+        // calendar read on another connection.
+        await h.admin.query("BEGIN");
+        try {
+          await h.admin.query("SELECT 1 FROM hotel_catalog.properties WHERE id=$1 FOR SHARE", [
+            h.propertyId,
+          ]);
+          // The pricing read takes the inventory lock, the organization row and the room-facts lock,
+          // then waits for the property row.
+          pricing = settled(h.pricing().read(h.propertyId));
+          const lockWaits = async () =>
+            Number(
+              (
+                await h.admin.query(
+                  "SELECT count(*)::int AS n FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND datname = current_database()",
+                )
+              ).rows[0].n,
+            );
+          for (let attempt = 0; attempt < 60 && (await lockWaits()) < 1; attempt += 1)
+            await new Promise((resolve) => setTimeout(resolve, 50));
+          expect(await lockWaits()).toBeGreaterThan(0);
+          const started = Date.now();
+          // The readiness's calendar read needs the room-facts lock the pricing read holds: the cycle.
+          calendar = settled(
+            h.ports.operatingCalendar.getCurrentOperatingCalendarConfiguration(h.propertyId),
+          );
+          // A sign-in meanwhile writes its audit row, which references the locked organization row.
+          signIn = settled(
+            createPgProductAuditSink({ connectionString: h.connectionString }).record({
+              action: "auth.login",
+              authFlow: "login",
+              actorUserId: h.actor.userId,
+              organizationId: h.organizationId,
+              surface: "booking-admin",
+              workosSessionId: `session-cycle-${h.propertyId}`,
+              requestId: `cycle-${h.propertyId}`,
+              occurredAt: new Date().toISOString(),
+            }),
+          );
+          // Like the readiness, end the transaction only once the calendar read is back.
+          await calendar;
+          waited = Date.now() - started;
+        } finally {
+          await h.admin.query("COMMIT");
+        }
+        // The pricing read gave up on its lock (55P03) after 5 s; then the calendar read and the
+        // sign-in went through. Before the fix all three waited forever.
+        expect(await pricing).toBe("55P03");
+        expect(await calendar).toBe("done");
+        expect(await signIn).toBe("done");
+        expect(waited).toBeLessThan(8_000);
+      } finally {
+        await h.close();
       }
     });
 

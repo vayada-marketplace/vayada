@@ -7,6 +7,10 @@ const HEALTH_PROBE_TIMEOUT_MS = 2_000;
 const HEALTH_PROBE_CACHE_MS = 5_000;
 // Connect and query each give up after HEALTH_PROBE_TIMEOUT_MS; a probe still running after both is dropped.
 const HEALTH_PROBE_GIVE_UP_MS = 2 * HEALTH_PROBE_TIMEOUT_MS;
+// Requests waiting this long for a connection, without a break, is reported once (VAY-2247 incident).
+const SUSTAINED_SATURATION_MS = 30_000;
+// Waiters may clear for a second or two inside one episode; it ends after this long without any.
+const SATURATION_QUIET_MS = 5_000;
 const KEEP_ALIVE_INITIAL_DELAY_MS = 10_000;
 // A pool that is still full after this many waiter timeouts, with no client handed out since, has
 // stopped serving (for example every slot hung on a peer that vanished in a failover).
@@ -82,9 +86,21 @@ export type PostgresPoolSnapshot = Readonly<{
   stalledPools: number;
 }>;
 
+/** Requests have waited for a connection for durationMs without a break; the snapshot is the latest. */
+export type PostgresSaturationEpisode = PostgresPoolSnapshot & Readonly<{ durationMs: number }>;
+
+export type PostgresTelemetryOptions = Readonly<{
+  /** Called once per episode, when it has lasted SUSTAINED_SATURATION_MS. */
+  onSustainedSaturation?: (episode: PostgresSaturationEpisode) => void;
+}>;
+
 export function installPostgresPoolRuntime(postgres: PgModule = pg): {
   snapshot(): PostgresPoolSnapshot;
-  startTelemetry(logger: Logger, intervalMs?: number): () => void;
+  startTelemetry(
+    logger: Logger,
+    intervalMs?: number,
+    options?: PostgresTelemetryOptions,
+  ): () => void;
   healthCheck(connectionString: string): DatabaseHealthChecks;
   close(): Promise<void>;
 } {
@@ -187,7 +203,7 @@ export function installPostgresPoolRuntime(postgres: PgModule = pg): {
 
   return {
     snapshot,
-    startTelemetry(logger, intervalMs = 1_000) {
+    startTelemetry(logger, intervalMs = 1_000, options = {}) {
       reportConnectionError = (fields) =>
         logger.warn(fields, "PostgreSQL client connection failed");
       reportStalledPool = (fields) =>
@@ -201,9 +217,18 @@ export function installPostgresPoolRuntime(postgres: PgModule = pg): {
         },
         "PostgreSQL runtime pool budget configured",
       );
+      const episodes = poolSaturationEpisodes();
       const timer = setInterval(() => {
         const state = snapshot();
         if (state.waitingRequests > 0) logger.warn(state, "PostgreSQL runtime pool is saturated");
+        const sustained = episodes(state, Date.now());
+        if (!sustained) return;
+        logger.warn(sustained, "PostgreSQL runtime pool saturated for 30 s");
+        try {
+          options.onSustainedSaturation?.(sustained);
+        } catch {
+          // Alerting must never stop the telemetry.
+        }
       }, intervalMs);
       timer.unref();
       return () => clearInterval(timer);
@@ -244,6 +269,28 @@ export function installPostgresPoolRuntime(postgres: PgModule = pg): {
         }),
       );
     },
+  };
+}
+
+/**
+ * Follows the pool samples and returns an episode once, when requests have waited for a connection for
+ * sustainedMs without a break. A gap shorter than quietMs doesn't end the episode.
+ */
+export function poolSaturationEpisodes(
+  sustainedMs = SUSTAINED_SATURATION_MS,
+  quietMs = SATURATION_QUIET_MS,
+) {
+  let episode: { since: number; lastWaitingAt: number; reported: boolean } | undefined;
+  return (state: PostgresPoolSnapshot, at: number): PostgresSaturationEpisode | null => {
+    if (state.waitingRequests === 0) {
+      if (episode && at - episode.lastWaitingAt >= quietMs) episode = undefined;
+      return null;
+    }
+    episode ??= { since: at, lastWaitingAt: at, reported: false };
+    episode.lastWaitingAt = at;
+    if (episode.reported || at - episode.since < sustainedMs) return null;
+    episode.reported = true;
+    return { ...state, durationMs: at - episode.since };
   };
 }
 

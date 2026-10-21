@@ -10,9 +10,34 @@ import {
   cachedHealthCheck,
   installPostgresPoolRuntime,
   isPostgresUnavailableError,
+  poolSaturationEpisodes,
+  type PostgresPoolSnapshot,
 } from "./postgresRuntime.js";
 
 describe("PostgreSQL runtime capacity", () => {
+  it("reports a saturation episode once, after 30 s of waiting without a break (VAY-2247 incident)", () => {
+    const sample = (waitingRequests: number): PostgresPoolSnapshot => ({
+      physicalPoolCount: 2,
+      maxConnections: 9,
+      totalConnections: 9,
+      idleConnections: 1,
+      waitingRequests,
+      stalledPools: 0,
+    });
+    const episodes = poolSaturationEpisodes();
+    const reported: number[] = [];
+    // Waiting for 40 s, with a 2 s gap at 10 s that doesn't end the episode.
+    for (let second = 0; second <= 40; second += 1) {
+      const episode = episodes(sample(second === 10 || second === 11 ? 0 : 3), second * 1_000);
+      if (episode) reported.push(episode.durationMs);
+    }
+    expect(reported).toEqual([30_000]);
+    // Five quiet seconds end it; the next one is reported again after its own 30 s.
+    for (let second = 41; second <= 46; second += 1) episodes(sample(0), second * 1_000);
+    expect(episodes(sample(2), 47_000)).toBeNull();
+    expect(episodes(sample(2), 76_000)).toBeNull();
+    expect(episodes(sample(2), 77_000)).toMatchObject({ durationMs: 30_000, waitingRequests: 2 });
+  });
   it("keeps the Airbnb decision journal physically separate under server pool sharing", async () => {
     const OriginalPool = pg.Pool;
     const pools = installPostgresPoolRuntime(pg);

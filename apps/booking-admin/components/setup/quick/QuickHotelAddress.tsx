@@ -69,9 +69,11 @@ export function QuickHotelAddress({
   const timezones = useMemo(() => availableTimezones(), []);
   const timezoneFollowsAddress = useRef(!draft.timezone);
 
-  // Typed addresses are looked up once they are complete, to place the first pin.
+  // A complete address without a pin is looked up to place the first pin: a typed one, and a picked one
+  // that Google only knows as an area (a street without a number, a postcode or a town), which the
+  // suggestion leaves unpinned. Without this the map showed the whole world (VAY-2247, Flamur's test).
   const lookupFor =
-    complete && !hasPin(draft) && mode === "manual" && key ? formattedAddress(draft) : null;
+    complete && !hasPin(draft) && mode !== "search" && key ? formattedAddress(draft) : null;
   useEffect(() => {
     if (!lookupFor || !key) return;
     let current = true;
@@ -79,6 +81,8 @@ export function QuickHotelAddress({
       void findAddressOnMap(key, lookupFor)
         .then((found) => {
           if (!current || !found) return;
+          // An area isn't the entrance: the map opens to drag the pin there.
+          if (!found.precise) setAdjusting(true);
           onChange({
             latitude: found.position.lat,
             longitude: found.position.lng,
