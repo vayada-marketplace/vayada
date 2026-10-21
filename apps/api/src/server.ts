@@ -129,6 +129,7 @@ import { createAdminTransferCoordinator } from "./platform/adminTransferCoordina
 import { createWorkOSAdminReauthentication } from "./platform/workosAdminReauthentication.js";
 import { startStaffRemovalWorker } from "./platform/staffRemovalWorker.js";
 import { installPostgresPoolRuntime } from "./platform/postgresRuntime.js";
+import { createPostgresSaturationAlert } from "./platform/postgresSaturationAlert.js";
 import {
   createPgWorkosWebhookStore,
   createWorkosWebhookVerifier,
@@ -2190,7 +2191,21 @@ app.addHook("preClose", async () => {
   await pmsAcceptedPricingReservationWorker?.close();
 });
 
-const stopPostgresTelemetry = postgresRuntime.startTelemetry(app.log);
+// VAY-2247 incident: the pricing alert recipient (ops) hears when requests have waited for a database
+// connection for 30 s without a break, at most once an hour per task.
+const postgresSaturationAlert =
+  config.pricingPublicationFreshnessAlertEmail && config.bookingEmailDelivery
+    ? createPostgresSaturationAlert({
+        to: config.pricingPublicationFreshnessAlertEmail,
+        delivery: createResendBookingEmailDelivery(config.bookingEmailDelivery),
+      })
+    : undefined;
+const stopPostgresTelemetry = postgresRuntime.startTelemetry(app.log, 1_000, {
+  onSustainedSaturation: (episode) =>
+    void postgresSaturationAlert?.(episode).catch((error: unknown) =>
+      app.log.warn({ err: error }, "PostgreSQL saturation alert failed"),
+    ),
+});
 app.addHook("onReady", async () => {
   await bankTransferRepository?.assertConfigured();
 });
