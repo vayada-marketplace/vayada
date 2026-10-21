@@ -10,6 +10,7 @@ import type {
   PropertyAccessRepository,
 } from "@vayada/backend-authorization";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { BadRequestException } from "@workos-inc/node";
 
 import { buildApp } from "./app.js";
 import type {
@@ -1312,6 +1313,44 @@ describe("AuthKit session routes", () => {
     expect(location.searchParams.get("auth_error_code")).toBe("hotel_workspace_required");
   });
 
+  it("sends a Google sign-up for an existing account back with the account_exists code", async () => {
+    let state = "";
+    app = buildAuthSessionApp({
+      allowedOrigins: ["https://admin.booking.localhost"],
+      surfacePolicies: { "booking-admin": { requiredOrganizationKind: ["hotel_group"] } },
+      authKitClient: createAuthKitClient({
+        getAuthorizationUrl(input) {
+          state = input.state;
+          return "https://auth.workos.test/google";
+        },
+        async authenticateWithCode() {
+          return session;
+        },
+      }),
+    });
+    const start = await app.inject({
+      method: "GET",
+      url:
+        "/auth/oauth/google/start?surface=booking-admin&flow=signup&type=hotel" +
+        "&return_to=https%3A%2F%2Fadmin.booking.localhost%2Flogin" +
+        "&error_return_to=https%3A%2F%2Fadmin.booking.localhost%2Fsignup",
+      headers: { host: "api.localhost", "x-forwarded-proto": "https" },
+    });
+    const response = await app.inject({
+      method: "GET",
+      url: `/auth/oauth/google/callback?code=google-code&state=${encodeURIComponent(state)}`,
+      headers: { cookie: cookieHeader(start, "vayada_oauth_state") },
+    });
+
+    expect(response.statusCode).toBe(302);
+    const location = new URL(String(response.headers.location));
+    expect(location.origin + location.pathname).toBe("https://admin.booking.localhost/signup");
+    expect(location.searchParams.get("auth_error")).toBe(
+      "This email already has a vayada account. Sign in instead.",
+    );
+    expect(location.searchParams.get("auth_error_code")).toBe("account_exists");
+  });
+
   it("keeps the plain error for hotel login when the account only has a past hotel membership", async () => {
     app = buildAuthSessionApp({
       allowedOrigins: ["https://pms.localhost"],
@@ -2593,51 +2632,89 @@ describe("AuthKit session routes", () => {
     ]);
   });
 
-  it("rejects custom signup when the WorkOS email already exists", async () => {
-    let authenticateCalled = false;
-    let organizationCalled = false;
-    app = buildAuthSessionApp({
-      allowedOrigins: ["https://admin.booking.localhost"],
-      authKitClient: createAuthKitClient({
-        async createUser() {
-          throw { status: 409, name: "ConflictException" };
-        },
-        async authenticateWithPassword() {
-          authenticateCalled = true;
-          return session;
-        },
-        async createSignupOrganization() {
-          organizationCalled = true;
-          return { organizationId: "org_workos_existing_creator" };
-        },
+  const accountExists = {
+    state: "account_exists",
+    message: "This email already has a vayada account. Sign in instead.",
+  };
+
+  it.each([
+    {
+      name: "the 400 WorkOS sends for a taken email",
+      // What @workos-inc/node throws for a taken email: a 400, never a 409 (VAY-2250).
+      error: new BadRequestException({
+        code: "user_creation_error",
+        errors: [{ code: "email_not_available", message: "This email is not available." }],
+        message: "Could not create user.",
+        requestID: "req_workos_taken",
       }),
-      surfacePolicies: {
-        "booking-admin": {
-          requiredOrganizationKind: ["hotel_group"],
+      statusCode: 409,
+      body: accountExists,
+    },
+    {
+      name: "a 409 conflict",
+      error: { status: 409, name: "ConflictException" },
+      statusCode: 409,
+      body: accountExists,
+    },
+    {
+      name: "a creation error for another reason",
+      error: new BadRequestException({
+        code: "user_creation_error",
+        errors: [{ code: "another_reason", message: "Some other reason." }],
+        message: "Could not create user.",
+        requestID: "req_workos_other",
+      }),
+      statusCode: 400,
+      body: {
+        state: "auth_failed",
+        message: "Signup failed. Please check your details and try again.",
+      },
+    },
+  ])(
+    "answers custom signup when WorkOS refuses with $name",
+    async ({ error, statusCode, body }) => {
+      let authenticateCalled = false;
+      let organizationCalled = false;
+      app = buildAuthSessionApp({
+        allowedOrigins: ["https://admin.booking.localhost"],
+        authKitClient: createAuthKitClient({
+          async createUser() {
+            throw error;
+          },
+          async authenticateWithPassword() {
+            authenticateCalled = true;
+            return session;
+          },
+          async createSignupOrganization() {
+            organizationCalled = true;
+            return { organizationId: "org_workos_existing_creator" };
+          },
+        }),
+        surfacePolicies: {
+          "booking-admin": {
+            requiredOrganizationKind: ["hotel_group"],
+          },
         },
-      },
-    });
+      });
 
-    const response = await app.inject({
-      method: "POST",
-      url: "/auth/password/signup",
-      headers: { origin: "https://admin.booking.localhost" },
-      payload: {
-        email: "existing@example.test",
-        password: "correct-password",
-        surface: "booking-admin",
-        type: "hotel",
-      },
-    });
+      const response = await app.inject({
+        method: "POST",
+        url: "/auth/password/signup",
+        headers: { origin: "https://admin.booking.localhost" },
+        payload: {
+          email: "existing@example.test",
+          password: "correct-password",
+          surface: "booking-admin",
+          type: "hotel",
+        },
+      });
 
-    expect(response.statusCode).toBe(409);
-    expect(response.json()).toMatchObject({
-      state: "auth_failed",
-      message: "This email already has a vayada account. Sign in instead.",
-    });
-    expect(authenticateCalled).toBe(false);
-    expect(organizationCalled).toBe(false);
-  });
+      expect(response.statusCode).toBe(statusCode);
+      expect(response.json()).toEqual(body);
+      expect(authenticateCalled).toBe(false);
+      expect(organizationCalled).toBe(false);
+    },
+  );
 
   it("returns verification-required state from custom signup without resending the WorkOS email", async () => {
     const commands: IdentityLifecycleCommand[] = [];

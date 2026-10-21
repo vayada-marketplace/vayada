@@ -48,7 +48,7 @@
   "auth.register.subtitle": "Crear una nueva cuenta de administrador",
   "auth.register.errorValidation": "Error de validación.",
   "auth.register.errorUnexpected": "Ha ocurrido un error inesperado. Por favor, inténtelo de nuevo.",
-  "auth.register.errorEmailExists": "Este correo ya tiene una cuenta de vayada. Inicie sesión.",
+  "auth.register.errorEmailExists": "Este correo ya tiene una cuenta de vayada.",
   "auth.register.errorPasswordWeak": "Esta contraseña no es lo bastante segura. Use varias palabras sin relación o una contraseña de un gestor de contraseñas.",
   "auth.register.errorSignupFailed": "No se pudo crear la cuenta. Revise sus datos e inténtelo de nuevo.",
   "auth.forgotPassword.emailLabel": "Correo electrónico",

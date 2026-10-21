@@ -7,18 +7,24 @@ import { useTranslation } from "@/lib/i18n";
 import { resolveBookingSetupGuard } from "@/lib/utils/sharedSetupGuard";
 import { hasPendingHotelAccountInvite } from "@/services/api/hotelAccountInvites";
 import { AuthStateError, authService, storePendingEmailVerification } from "@/services/auth";
-import { signupErrorKey, signupRedirectErrorKey } from "@/lib/utils/signupError";
+import {
+  signupErrorKey,
+  signupRedirectErrorKey,
+  type SignupErrorKey,
+} from "@/lib/utils/signupError";
 
 export default function SignupPage() {
   const { t } = useTranslation();
   const router = useRouter();
-  const [submitError, setSubmitError] = useState("");
+  const [submitError, setSubmitError] = useState<SignupErrorKey | "">("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
-    const authError = new URLSearchParams(window.location.search).get("auth_error");
-    if (authError !== null) setSubmitError(t(signupRedirectErrorKey(authError)));
-  }, [t]);
+    const params = new URLSearchParams(window.location.search);
+    const authError = params.get("auth_error");
+    if (authError !== null)
+      setSubmitError(signupRedirectErrorKey(authError, params.get("auth_error_code")));
+  }, []);
 
   async function handleSignup(data: { email: string; password: string }) {
     setSubmitError("");
@@ -45,7 +51,7 @@ export default function SignupPage() {
         router.push("/verify-email");
         return;
       }
-      setSubmitError(t(signupErrorKey(error)));
+      setSubmitError(signupErrorKey(error));
     } finally {
       setIsSubmitting(false);
     }
@@ -56,7 +62,12 @@ export default function SignupPage() {
       translate={t}
       onSubmit={handleSignup}
       isSubmitting={isSubmitting}
-      submitError={submitError}
+      submitError={submitError && t(submitError)}
+      submitErrorAction={
+        submitError === "auth.register.errorEmailExists"
+          ? { label: t("signup.signIn"), href: "/login" }
+          : undefined
+      }
       onErrorClear={() => setSubmitError("")}
       onGoogleSignup={() => authService.startGoogleSignup("/dashboard")}
     />

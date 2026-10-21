@@ -8,6 +8,8 @@ export type SharedSignupPageProps = {
   translate?: (key: string, params?: Record<string, string | number>) => string;
   isSubmitting: boolean;
   submitError: string;
+  /** A next step shown under the error, such as signing in when the email already has an account. */
+  submitErrorAction?: { label: string; href: string };
   onErrorClear: () => void;
   onSubmit: (input: { email: string; password: string }) => Promise<void>;
   loginHref?: string;
@@ -23,6 +25,7 @@ export default function SharedSignupPage({
   translate,
   isSubmitting,
   submitError,
+  submitErrorAction,
   onErrorClear,
   onSubmit,
   loginHref = "/login",
@@ -202,6 +205,14 @@ export default function SharedSignupPage({
               {submitError && (
                 <div role="alert" className="rounded-lg border-2 border-red-300 bg-red-50 p-4">
                   <p className="text-sm font-semibold text-red-800">{submitError}</p>
+                  {submitErrorAction && (
+                    <a
+                      href={submitErrorAction.href}
+                      className="mt-2 inline-block text-sm font-semibold text-primary-600 hover:text-primary-700"
+                    >
+                      {submitErrorAction.label}
+                    </a>
+                  )}
                 </div>
               )}
 

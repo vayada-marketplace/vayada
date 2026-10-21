@@ -48,7 +48,7 @@
   "auth.register.subtitle": "Maak een nieuw beheerdersaccount aan",
   "auth.register.errorValidation": "Validatiefout.",
   "auth.register.errorUnexpected": "Er is een onverwachte fout opgetreden. Probeer het opnieuw.",
-  "auth.register.errorEmailExists": "Dit e-mailadres heeft al een vayada-account. Log in.",
+  "auth.register.errorEmailExists": "Dit e-mailadres heeft al een vayada-account.",
   "auth.register.errorPasswordWeak": "Dit wachtwoord is niet sterk genoeg. Gebruik meerdere losse woorden of een wachtwoord uit een wachtwoordmanager.",
   "auth.register.errorSignupFailed": "Registreren is mislukt. Controleer je gegevens en probeer het opnieuw.",
   "auth.forgotPassword.emailLabel": "E-mailadres",
