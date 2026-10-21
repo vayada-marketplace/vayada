@@ -87,6 +87,78 @@ export async function republishPricingAfterPaymentChange(
   }
 }
 
+type RepublishLog = {
+  info(details: object, message: string): void;
+  warn(details: object, message: string): void;
+};
+
+/** Right after a payment write has committed, in the same request. Best-effort: a failure is
+ * logged, never fails the payment write, and the sweep retries it. */
+export async function republishPricingAfterCommit(
+  pool: Pool,
+  propertyId: string,
+  log?: RepublishLog,
+): Promise<PricingPaymentRepublish | null> {
+  try {
+    const result = await republishPricingAfterPaymentChange(pool, propertyId);
+    if (result.outcome === "republished")
+      log?.info(result, "Pricing re-published after a payment change");
+    return result;
+  } catch (error) {
+    log?.warn({ err: error, propertyId }, "Pricing re-publish after a payment change failed");
+    return null;
+  }
+}
+
+/** The sweep (VAY-2304): every published hotel, one transaction each. It catches what the
+ * after-commit call missed, and any hotel a release staled (a Finance fingerprint change). Its
+ * first run after a release is the one-time catch-up. */
+export async function republishPricingAfterPaymentChanges(
+  pool: Pool,
+  /** Only these hotels (tests); every published hotel when absent. */
+  propertyIds?: readonly string[],
+) {
+  const heads = (
+    await pool.query(
+      `SELECT property_id::text AS id FROM pms.pricing_v2_heads
+      WHERE revision > 0 AND ($1::uuid[] IS NULL OR property_id = ANY($1::uuid[]))
+      ORDER BY property_id`,
+      [propertyIds ?? null],
+    )
+  ).rows as { id: string }[];
+  const results: PricingPaymentRepublish[] = [];
+  let failed = 0;
+  for (const { id } of heads) {
+    try {
+      results.push(await republishPricingAfterPaymentChange(pool, id));
+    } catch {
+      failed += 1;
+    }
+  }
+  const skipped: Record<string, string[]> = {};
+  for (const row of results)
+    if (row.outcome === "skipped") (skipped[row.reason] ??= []).push(row.propertyId);
+  return {
+    checked: heads.length,
+    republished: results.filter((row) => row.outcome === "republished").length,
+    republishedProperties: results
+      .filter((row) => row.outcome === "republished")
+      .slice(0, 20)
+      .map((row) => row.propertyId),
+    skipped: Object.fromEntries(
+      Object.entries(skipped).map(([reason, ids]) => [reason, ids.length]),
+    ),
+    // Hotels whose prices stay off until someone saves them (or the setup changes again).
+    skippedProperties: Object.fromEntries(
+      Object.entries(skipped)
+        .filter(([reason]) => reason !== "not_published")
+        .map(([reason, ids]) => [reason, ids.slice(0, 20)]),
+    ),
+    lockTimeouts: results.filter((row) => row.outcome === "lock_timeout").length,
+    failed,
+  };
+}
+
 async function republish(client: PoolClient, propertyId: string): Promise<PricingPaymentRepublish> {
   const skipped = (
     reason: Extract<PricingPaymentRepublish, { outcome: "skipped" }>["reason"],

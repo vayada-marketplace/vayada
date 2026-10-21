@@ -204,6 +204,10 @@ export type ApiConfig = {
   pricingPublicationFreshnessIntervalMs: number;
   /** Recipient of the at-most-daily stale-pricing email; unset sends none (log line only). */
   pricingPublicationFreshnessAlertEmail?: string;
+  /** Kill switch for re-publishing prices after a payment change (VAY-2304): right after each
+   * payment write, and a sweep a minute after start and then every interval. On by default. */
+  pricingPaymentRepublishEnabled: boolean;
+  pricingPaymentRepublishIntervalMs: number;
   /** VAY-2286: vayada.com contact-form messages are emailed here (Reply-To: the visitor). */
   contactNotificationRecipient?: string;
   providerWebhooks: ProviderWebhookConfig;
@@ -537,6 +541,15 @@ function readPricingPublicationFreshnessIntervalEnv(env: NodeJS.ProcessEnv): num
   const key = "PRICING_PUBLICATION_FRESHNESS_INTERVAL_MS";
   const value = readTimerIntervalEnv(env, key, 60 * 60 * 1000);
   if (value < 600_000) throw new Error(`${key} must be at least 600000`);
+  return value;
+}
+
+// Every five minutes by default, never more than once a minute: each run locks every published
+// property in turn, briefly.
+function readPricingPaymentRepublishIntervalEnv(env: NodeJS.ProcessEnv): number {
+  const key = "PRICING_PAYMENT_REPUBLISH_INTERVAL_MS";
+  const value = readTimerIntervalEnv(env, key, 5 * 60 * 1000);
+  if (value < 60_000) throw new Error(`${key} must be at least 60000`);
   return value;
 }
 
@@ -1233,6 +1246,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       true,
     ),
     pricingPublicationFreshnessIntervalMs: readPricingPublicationFreshnessIntervalEnv(env),
+    pricingPaymentRepublishEnabled: readBooleanEnv(env, "PRICING_PAYMENT_REPUBLISH_ENABLED", true),
+    pricingPaymentRepublishIntervalMs: readPricingPaymentRepublishIntervalEnv(env),
     pricingPublicationFreshnessAlertEmail: readSingleRecipientEnv(
       env,
       "PRICING_PUBLICATION_FRESHNESS_ALERT_EMAIL",
