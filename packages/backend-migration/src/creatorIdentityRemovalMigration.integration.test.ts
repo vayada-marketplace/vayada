@@ -320,6 +320,8 @@ const REFERENCES = [
   "identity.users <- finance.commission_rate_changes(changed_by_user_id) n",
   "identity.users <- hotel_catalog.hotel_account_invites(created_by_user_id) n",
   "identity.users <- hotel_catalog.hotel_account_invites(redeemed_by_user_id) n",
+  // 0503 (VAY-2247, live before W3): a removed user's own checklist view state goes with the user.
+  "identity.users <- hotel_catalog.setup_checklist_viewer_states(user_id) c",
   "identity.users <- identity.consent_history(user_id) n",
   "identity.users <- identity.cookie_consents(user_id) n",
   "identity.users <- identity.gdpr_requests(user_id) c",
