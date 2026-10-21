@@ -67,6 +67,9 @@ function ports(hotel: Hotel = {}): HotelFirstRunFactsPorts {
           : null,
     },
     pricing: { read: async () => (set ? { rooms: [{ roomTypeId, offers: [{}] }] } : null) },
+    unlockedPricing: {
+      read: async () => (set ? { rooms: [{ roomTypeId, offers: [{}] }] } : null),
+    },
     calendarRead: {
       getCurrentOperatingCalendarConfiguration: async () =>
         set ? { sourceStatus: "current" } : null,
@@ -170,5 +173,64 @@ describe("first-run facts reader (VAY-2247)", () => {
       "fixed_checkout_pending",
     );
     expect((await read({ plan: { plan: "fixed", checkoutPending: false } })).plan).toBe("fixed");
+  });
+
+  it("reads one thing at a time, never in parallel (incident 2026-10-21)", async () => {
+    let inFlight = 0;
+    let most = 0;
+    const counted = ports({ set: true }) as unknown as Record<string, Record<string, unknown>>;
+    for (const port of Object.values(counted)) {
+      for (const [name, fn] of Object.entries(port)) {
+        if (typeof fn !== "function") continue;
+        port[name] = async (...args: unknown[]) => {
+          inFlight += 1;
+          most = Math.max(most, inFlight);
+          await new Promise((resolve) => setTimeout(resolve, 1));
+          try {
+            return await (fn as (...a: unknown[]) => Promise<unknown>)(...args);
+          } finally {
+            inFlight -= 1;
+          }
+        };
+      }
+    }
+    const reader = createHotelFirstRunFactsReader(counted as unknown as HotelFirstRunFactsPorts);
+    expect((await reader.read(actor)).roomTypes).toHaveLength(1);
+    await reader.readSetupProgress(actor);
+    expect(most).toBe(1);
+  });
+});
+
+describe("first-run setup progress for the checklist (VAY-2247 incident)", () => {
+  const progress = (hotel?: Hotel, override: Partial<HotelFirstRunFactsPorts> = {}) =>
+    createHotelFirstRunFactsReader({ ...ports(hotel), ...override }).readSetupProgress(actor);
+
+  it("says neither is done on a fresh hotel", async () => {
+    expect(await progress()).toEqual({ firstRoom: false, guestPayment: false });
+  });
+
+  it("says both are done after a complete first run, without the readiness or the locking pricing read", async () => {
+    const readiness = {
+      getBookingReadiness: async () => {
+        throw new Error("the checklist must not evaluate the booking readiness");
+      },
+    } as unknown as HotelFirstRunFactsPorts["readiness"];
+    // The pricing commands' read takes owner locks that can wait forever on the readiness (incident).
+    const pricing = {
+      read: async () => {
+        throw new Error("the checklist must not take the pricing owner locks");
+      },
+    } as unknown as HotelFirstRunFactsPorts["pricing"];
+    expect(await progress({ set: true }, { readiness, pricing })).toEqual({
+      firstRoom: true,
+      guestPayment: true,
+    });
+  });
+
+  it("keeps how guests pay open while the Fixed Fee checkout is pending", async () => {
+    expect(await progress({ set: true, plan: { plan: null, checkoutPending: true } })).toEqual({
+      firstRoom: true,
+      guestPayment: false,
+    });
   });
 });

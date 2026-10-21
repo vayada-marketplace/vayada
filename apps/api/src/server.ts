@@ -129,6 +129,7 @@ import { createAdminTransferCoordinator } from "./platform/adminTransferCoordina
 import { createWorkOSAdminReauthentication } from "./platform/workosAdminReauthentication.js";
 import { startStaffRemovalWorker } from "./platform/staffRemovalWorker.js";
 import { installPostgresPoolRuntime } from "./platform/postgresRuntime.js";
+import { createPostgresSaturationAlert } from "./platform/postgresSaturationAlert.js";
 import {
   createPgWorkosWebhookStore,
   createWorkosWebhookVerifier,
@@ -296,7 +297,12 @@ import {
   createPgTargetBookingSettingsRepository,
   toLocalizationSettingsResponse,
 } from "./routes/bookingSettings.js";
-import { createHotelFirstRunRuntime } from "./domains/hotelFirstRunRuntime.js";
+import {
+  createDedicatedLockConnections,
+  createHotelFirstRunRuntime,
+} from "./domains/hotelFirstRunRuntime.js";
+import { createPgHotelSetupChecklistRepository } from "./domains/hotelSetupChecklistRepository.js";
+import { createHotelSetupChecklistService } from "./domains/hotelSetupChecklistService.js";
 import { createTargetBookingCustomDomainRepository } from "./routes/bookingCustomDomain.js";
 import {
   createTargetFinancePropertySettingsRepository,
@@ -1583,7 +1589,8 @@ const hotelFirstRun = (() => {
     createPgBookingGuestPolicyScopeAuthorizationPort({ pool: client }),
   );
   return createHotelFirstRunRuntime({
-    lockPool: hotelSetupOrdinaryPool,
+    // Its own connection per run, outside the shared pools (VAY-2247 incident, 2026-10-21).
+    lockPool: createDedicatedLockConnections(targetDatabaseUrl),
     pricingPool: propertySetupOwnerPool,
     profile: sharedHotelSetupStatusRepository,
     profileCommand,
@@ -1619,6 +1626,22 @@ const hotelFirstRun = (() => {
     plans: financeSubscriptionService,
     readiness,
   });
+})();
+// VAY-2247 wave 2: the setup checklist both dashboards show, with the first run (it reads its state).
+const hotelSetupChecklist = (() => {
+  if (!hotelFirstRun) return undefined;
+  const checklist = createPgHotelSetupChecklistRepository(propertySetupOwnerPool);
+  // As the booking page's card acceptance: until it is on, online cards say "Later" (VAY-2205).
+  const onlineCardsOffered =
+    config.replacementPricingAcceptanceEnabled === true &&
+    config.replacementPricingCardAcceptanceEnabled === true &&
+    !!stripeBookingPaymentProvider;
+  return (context: Parameters<typeof hotelFirstRun>[0]) =>
+    createHotelSetupChecklistService({
+      firstRun: hotelFirstRun(context),
+      ...checklist,
+      onlineCardsOffered,
+    });
 })();
 const app = buildApp({
   airbnbImports: airbnbImportRuntime?.routes,
@@ -1879,6 +1902,7 @@ const app = buildApp({
   bookingModuleRepository,
   ...hotelSetupOrdinaryOptions,
   hotelFirstRun,
+  hotelSetupChecklist,
   financialsActivationPropertyIds: config.financialsActivationPropertyIds,
   pmsReviewRepository: createPgPmsReviewRepository({
     connectionString: targetDatabaseUrl,
@@ -2167,7 +2191,21 @@ app.addHook("preClose", async () => {
   await pmsAcceptedPricingReservationWorker?.close();
 });
 
-const stopPostgresTelemetry = postgresRuntime.startTelemetry(app.log);
+// VAY-2247 incident: the pricing alert recipient (ops) hears when requests have waited for a database
+// connection for 30 s without a break, at most once an hour per task.
+const postgresSaturationAlert =
+  config.pricingPublicationFreshnessAlertEmail && config.bookingEmailDelivery
+    ? createPostgresSaturationAlert({
+        to: config.pricingPublicationFreshnessAlertEmail,
+        delivery: createResendBookingEmailDelivery(config.bookingEmailDelivery),
+      })
+    : undefined;
+const stopPostgresTelemetry = postgresRuntime.startTelemetry(app.log, 1_000, {
+  onSustainedSaturation: (episode) =>
+    void postgresSaturationAlert?.(episode).catch((error: unknown) =>
+      app.log.warn({ err: error }, "PostgreSQL saturation alert failed"),
+    ),
+});
 app.addHook("onReady", async () => {
   await bankTransferRepository?.assertConfigured();
 });

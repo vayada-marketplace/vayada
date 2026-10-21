@@ -25,11 +25,17 @@ import { createPgFinancePaymentReadinessReadModel } from "./domains/financePayme
 import { createFinanceSubscriptionService } from "./domains/financeSubscriptionService.js";
 import { createPgFinanceSubscriptionStore } from "./domains/financeSubscriptionStore.js";
 import { createPgHotelCatalogOperatingCalendarPropertyProfileEvidencePort } from "./domains/hotelCatalogOperatingCalendarPropertyProfileEvidence.js";
-import { createHotelFirstRunRuntime } from "./domains/hotelFirstRunRuntime.js";
+import {
+  createDedicatedLockConnections,
+  createHotelFirstRunRuntime,
+} from "./domains/hotelFirstRunRuntime.js";
 import type { HotelFirstRunRequest } from "./domains/hotelFirstRunService.js";
 import type { HotelFirstRunActor } from "./domains/hotelFirstRunSteps.js";
+import { createPgHotelSetupChecklistRepository } from "./domains/hotelSetupChecklistRepository.js";
+import { createHotelSetupChecklistService } from "./domains/hotelSetupChecklistService.js";
 import { createPgHotelSetupTrackCommandRepository } from "./domains/hotelSetupTrackCommandRepository.js";
 import { createPgPmsCalendarAutoOpenSettingsRepository } from "./domains/pmsCalendarAutoOpenSettingsRepository.js";
+import { lockPmsInventoryMutationScope } from "./domains/pmsInventoryMutationLock.js";
 import { createPgPmsOperatingCalendarReadModel } from "./domains/pmsOperatingCalendarReadModel.js";
 import { createPmsOperatingCalendarProductionRuntime } from "./domains/pmsOperatingCalendarProductionRuntime.js";
 import { createPgPmsPhysicalRoomOperationalLabelRepository } from "./domains/pmsPhysicalRoomOperationalLabelRepository.js";
@@ -43,6 +49,7 @@ import { createPgPmsRoomFactsCommandRepository } from "./domains/pmsRoomFactsCom
 import { createPgPmsRoomFactsReadModel } from "./domains/pmsRoomFactsReadModel.js";
 import { createPmsRoomFactsVocabularyValidationPort } from "./domains/pmsRoomFactsVocabulary.js";
 import { createPgPmsRoomPublicationReadModel } from "./domains/pmsRoomPublicationReadModel.js";
+import { createReplacementPricingCommands } from "./domains/replacementPricingCommands.js";
 import { createReplacementPricingPublicationReader } from "./domains/replacementPricingPublicationReader.js";
 import { createHotelSetupOrdinaryLoginFixture } from "./hotelSetupOrdinaryLogin.fixture.js";
 import { createPgHotelMediaResolutionPort } from "./platform/hotelMediaResolver.js";
@@ -51,6 +58,8 @@ import {
   createOrdinaryHotelSetupProfileCommand,
 } from "./platform/hotelSetupProfileWriter.js";
 import type { PlatformMediaServingConfig } from "./platform/mediaServing.js";
+import { installPostgresPoolRuntime } from "./platform/postgresRuntime.js";
+import { createPgProductAuditSink } from "./platform/productAudit.js";
 import {
   advancePublicProfileRevision,
   createPgSharedHotelSetupStatusRepository,
@@ -313,7 +322,7 @@ describe.skipIf(!url)(
         createPgBookingGuestPolicyScopeAuthorizationPort({ pool: client }),
       );
       const createService = createHotelFirstRunRuntime({
-        lockPool: pool,
+        lockPool: createDedicatedLockConnections(cs),
         pricingPool: pool,
         profile: profiles,
         profileCommand: createOrdinaryHotelSetupProfileCommand(pool),
@@ -428,6 +437,9 @@ describe.skipIf(!url)(
       };
       return {
         admin,
+        connectionString: cs,
+        // The pricing commands' read, as the first run and the Rates page run it for the owner.
+        pricing: () => createReplacementPricingCommands(pool, context),
         pool,
         propertyId,
         organizationId,
@@ -461,6 +473,33 @@ describe.skipIf(!url)(
         if (!result.ok) return;
         expect(result.state.nextStep).toBeNull();
         expect(new Set(result.state.steps.map((step) => step.state))).toEqual(new Set(["done"]));
+        // The checklist's light read agrees, without the booking readiness (VAY-2247 incident).
+        expect(await h.service().readSetupProgress(h.actor)).toEqual({
+          firstRoom: true,
+          guestPayment: true,
+        });
+        // It takes no locks either: it answers while a pricing save holds the owner locks.
+        let timer: NodeJS.Timeout | undefined;
+        await h.admin.query("BEGIN");
+        try {
+          await lockPmsInventoryMutationScope(h.admin, h.propertyId);
+          await h.admin.query("SELECT 1 FROM identity.organizations WHERE id=$1 FOR UPDATE", [
+            h.organizationId,
+          ]);
+          const late = new Promise<never>((_resolve, reject) => {
+            timer = setTimeout(
+              () => reject(new Error("the light read waited on the pricing locks")),
+              3_000,
+            );
+          });
+          expect(await Promise.race([h.service().readSetupProgress(h.actor), late])).toEqual({
+            firstRoom: true,
+            guestPayment: true,
+          });
+        } finally {
+          clearTimeout(timer);
+          await h.admin.query("ROLLBACK");
+        }
 
         // Sri Lanka → LKR; rooms named Room 1–3; pay at the hotel; the default terms; Grand Classic; the city shown.
         const scope = { organizationId: h.organizationId, propertyId: h.propertyId };
@@ -660,6 +699,10 @@ describe.skipIf(!url)(
           ran: ["currency", "rooms", "payments"],
         });
         expect((await h.service().read(h.actor)).nextStep).toBe("pricing");
+        expect(await h.service().readSetupProgress(h.actor)).toEqual({
+          firstRoom: false,
+          guestPayment: false,
+        });
         // A first run that stopped leaves the hotel being set up; finishing it makes it live.
         const lifecycle = async () =>
           (
@@ -739,6 +782,134 @@ describe.skipIf(!url)(
         await advancePublicProfileRevision(h.pool, h.propertyId);
         expect(await state()).toEqual({ lifecycle: "active", profile: "complete", activations: 1 });
         expect(await label()).toBe("live");
+      } finally {
+        await h.close();
+      }
+    });
+
+    it("a burst of dashboard loads on production pool sizes finishes without starving the pools (VAY-2247 incident)", async () => {
+      // As server.ts does: every pool goes through the API's pool runtime (a shared pool of 8 per
+      // connection string; one connection for a pool with connection options).
+      const OriginalPool = pg.Pool;
+      const runtime = installPostgresPoolRuntime(pg);
+      let h: Awaited<ReturnType<typeof hotel>> | undefined;
+      try {
+        h = await hotel();
+        const { actor, pool, readiness } = h;
+        expect((await h.service().run(actor, request, h.email)).ok).toBe(true);
+        const checklist = createHotelSetupChecklistService({
+          firstRun: h.service(),
+          ...createPgHotelSetupChecklistRepository(pool),
+          onlineCardsOffered: false,
+        });
+        // Each maximum on its own, so a later busier sample can't hide an earlier stall.
+        const peak = { waitingRequests: 0, stalledPools: 0, totalConnections: 0 };
+        const sampler = setInterval(() => {
+          const now = runtime.snapshot();
+          peak.waitingRequests = Math.max(peak.waitingRequests, now.waitingRequests);
+          peak.stalledPools = Math.max(peak.stalledPools, now.stalledPools);
+          peak.totalConnections = Math.max(peak.totalConnections, now.totalConnections);
+        }, 10);
+        // What one Booking Admin dashboard load fires at once: the checklist, the booking page status
+        // (the booking readiness) and the dashboard's other reads on the shared pool.
+        const load = () => [
+          checklist.read(actor),
+          readiness(),
+          ...Array.from({ length: 8 }, () => pool.query("SELECT pg_sleep(0.02)")),
+        ];
+        const started = Date.now();
+        // Three at once, as at 10:17:58 (the two apps and a reload): three checklist reads in parallel.
+        const results = await Promise.allSettled([...load(), ...load(), ...load()]);
+        const tookMs = Date.now() - started;
+        clearInterval(sampler);
+        const failures = results.flatMap((result) =>
+          result.status === "rejected" ? [String(result.reason)] : [],
+        );
+        expect(failures).toEqual([]);
+        expect(tookMs, JSON.stringify(peak)).toBeLessThan(10_000);
+        expect(peak.stalledPools, JSON.stringify(peak)).toBe(0);
+        // Every checklist came back with the first room and guest payment done: next is going live.
+        for (const [index, result] of results.entries())
+          if (index % 10 === 0)
+            expect(result).toMatchObject({
+              status: "fulfilled",
+              value: { setup: { next: "go_live" } },
+            });
+      } finally {
+        await h?.close();
+        await runtime.close();
+        Object.defineProperty(pg, "Pool", {
+          configurable: true,
+          writable: true,
+          value: OriginalPool,
+        });
+      }
+    });
+
+    it("a pricing read and the booking readiness that wait on each other give up within seconds; a sign-in still lands (VAY-2247 incident)", async () => {
+      const h = await hotel();
+      try {
+        expect((await h.service().run(h.actor, request, h.email)).ok).toBe(true);
+        const settled = (work: Promise<unknown>) =>
+          work.then(
+            () => "done",
+            (error: unknown) => (error as { code?: string }).code ?? String(error),
+          );
+        let pricing: Promise<string> | undefined;
+        let signIn: Promise<string> | undefined;
+        let calendar: Promise<string> | undefined;
+        let waited = 0;
+        // The readiness's profile check: its transaction holds the property row while it awaits a
+        // calendar read on another connection.
+        await h.admin.query("BEGIN");
+        try {
+          await h.admin.query("SELECT 1 FROM hotel_catalog.properties WHERE id=$1 FOR SHARE", [
+            h.propertyId,
+          ]);
+          // The pricing read takes the inventory lock, the organization row and the room-facts lock,
+          // then waits for the property row.
+          pricing = settled(h.pricing().read(h.propertyId));
+          const lockWaits = async () =>
+            Number(
+              (
+                await h.admin.query(
+                  "SELECT count(*)::int AS n FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND datname = current_database()",
+                )
+              ).rows[0].n,
+            );
+          for (let attempt = 0; attempt < 60 && (await lockWaits()) < 1; attempt += 1)
+            await new Promise((resolve) => setTimeout(resolve, 50));
+          expect(await lockWaits()).toBeGreaterThan(0);
+          const started = Date.now();
+          // The readiness's calendar read needs the room-facts lock the pricing read holds: the cycle.
+          calendar = settled(
+            h.ports.operatingCalendar.getCurrentOperatingCalendarConfiguration(h.propertyId),
+          );
+          // A sign-in meanwhile writes its audit row, which references the locked organization row.
+          signIn = settled(
+            createPgProductAuditSink({ connectionString: h.connectionString }).record({
+              action: "auth.login",
+              authFlow: "login",
+              actorUserId: h.actor.userId,
+              organizationId: h.organizationId,
+              surface: "booking-admin",
+              workosSessionId: `session-cycle-${h.propertyId}`,
+              requestId: `cycle-${h.propertyId}`,
+              occurredAt: new Date().toISOString(),
+            }),
+          );
+          // Like the readiness, end the transaction only once the calendar read is back.
+          await calendar;
+          waited = Date.now() - started;
+        } finally {
+          await h.admin.query("COMMIT");
+        }
+        // The pricing read gave up on its lock (55P03) after 5 s; then the calendar read and the
+        // sign-in went through. Before the fix all three waited forever.
+        expect(await pricing).toBe("55P03");
+        expect(await calendar).toBe("done");
+        expect(await signIn).toBe("done");
+        expect(waited).toBeLessThan(8_000);
       } finally {
         await h.close();
       }

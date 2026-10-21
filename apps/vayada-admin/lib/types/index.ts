@@ -6,8 +6,12 @@ export interface User {
   id: string;
   email: string;
   name: string;
-  /** "creator" rows exist until the Marketplace data is deleted (VAY-2259 step 5). */
-  type: "hotel" | "creator" | "admin";
+  /**
+   * What the account is now (VAY-2272): "hotel" owns a hotel group, "staff" is another hotel member
+   * or has no recorded type, "admin" is platform staff. "creator" rows exist until the Marketplace
+   * data is deleted (VAY-2259 step 5).
+   */
+  type: "hotel" | "staff" | "creator" | "admin";
   status: "pending" | "verified" | "rejected" | "suspended";
   avatar?: string | null;
   email_verified?: boolean;
@@ -56,7 +60,7 @@ export interface UserDetailResponse {
   id: string;
   email: string;
   name: string;
-  type: "creator" | "hotel" | "admin";
+  type: "creator" | "hotel" | "staff" | "admin";
   status: "pending" | "verified" | "rejected" | "suspended";
   emailVerified: boolean;
   avatar: string | null;

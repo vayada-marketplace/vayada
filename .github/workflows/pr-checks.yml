@@ -851,6 +851,7 @@ jobs:
           src/bookingAddonLeadTimeOrdinary.integration.test.ts
           src/platform/postgresRuntime.integration.test.ts
           src/platform/workosWebhooks.integration.test.ts
+          src/identityAdminUsers.integration.test.ts
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
@@ -924,7 +925,7 @@ jobs:
         run: |
           node --input-type=module -e 'import pg from "pg"; const client=new pg.Client({connectionString:process.env.ADMIN_URL}); await client.connect(); await client.query("CREATE DATABASE vay2056_hotel_setup_test"); await client.end();'
           TARGET_DATABASE_URL="$TEST_DATABASE_URL" npm --workspace @vayada/backend-migration run target:migrate -- --env local
-          npm --workspace vayada-api run test -- --no-file-parallelism src/hotelSetupOrdinaryLogin.integration.test.ts src/hotelSetupProfileOrdinary.integration.test.ts src/hotelSetupLaunchSettingsOrdinary.integration.test.ts src/hotelSetupCurrencyOrdinary.integration.test.ts src/hotelSetupCreationOrdinary.integration.test.ts src/hotelSetupFeatureHubOrdinary.integration.test.ts src/hotelSetupLogoOrdinary.integration.test.ts src/domains/propertyMediaCommandRepository.integration.test.ts
+          npm --workspace vayada-api run test -- --no-file-parallelism src/hotelSetupOrdinaryLogin.integration.test.ts src/hotelSetupProfileOrdinary.integration.test.ts src/hotelSetupLaunchSettingsOrdinary.integration.test.ts src/hotelSetupCurrencyOrdinary.integration.test.ts src/hotelSetupCreationOrdinary.integration.test.ts src/hotelSetupFeatureHubOrdinary.integration.test.ts src/hotelSetupLogoOrdinary.integration.test.ts src/domains/propertyMediaCommandRepository.integration.test.ts src/hotelSetupChecklist.integration.test.ts
         env:
           ADMIN_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay2056_hotel_setup_test
@@ -943,6 +944,67 @@ jobs:
         run: >-
           npm --workspace @vayada/backend-migration run test --
           src/setupTracksHotelOperationsOnlyMigration.integration.test.ts
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+
+      # 0496 (VAY-2272) in its own database: migrate to 0495, store invites, apply 0496.
+      - name: Verify the hotel account invite move
+        if: matrix.shard == 'hotel-setup'
+        run: >-
+          npm --workspace @vayada/backend-migration run test --
+          src/hotelAccountInvitesMigration.integration.test.ts
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+
+      # 0497 (VAY-2272) in its own database: migrate to 0496, then check slug access after 0497.
+      - name: Verify the affiliate capture guard retirement
+        if: matrix.shard == 'hotel-setup'
+        run: >-
+          npm --workspace @vayada/backend-migration run test --
+          src/affiliateCaptureBoundaryRetireMigration.integration.test.ts
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+
+      # 0498 (VAY-2272) in its own database: migrate to 0497, then drop the affiliate program.
+      - name: Verify the affiliate program drop
+        if: matrix.shard == 'hotel-setup'
+        run: >-
+          npm --workspace @vayada/backend-migration run test --
+          src/affiliateProgramDropMigration.integration.test.ts
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+
+      - name: Verify the marketplace schema drop
+        if: matrix.shard == 'hotel-setup'
+        run: >-
+          npm --workspace @vayada/backend-migration run test --
+          src/marketplaceSchemaDropMigration.integration.test.ts
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+
+      # 0504 (VAY-2272) in its own database: migrate to 0497, grant the old capture login what
+      # production granted it, then apply the rest.
+      - name: Verify the affiliate capture login grants revoke
+        if: matrix.shard == 'hotel-setup'
+        run: >-
+          npm --workspace @vayada/backend-migration run test --
+          src/affiliateCaptureLoginGrantsRevokeMigration.integration.test.ts
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+
+      - name: Verify the creator identity and media removal
+        if: matrix.shard == 'hotel-setup'
+        run: >-
+          npm --workspace @vayada/backend-migration run test --
+          src/creatorIdentityRemovalMigration.integration.test.ts
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+
+      - name: Verify the Marketplace kept payload blanking
+        if: matrix.shard == 'hotel-setup'
+        run: >-
+          npm --workspace @vayada/backend-migration run test --
+          src/marketplaceKeptPayloadBlankingMigration.integration.test.ts
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 

@@ -45,6 +45,11 @@ const PROPERTY_TYPE_ICONS = new Map<string, IconComponent>([
   ["other", EllipsisHorizontalIcon],
 ]);
 
+/** The icon a property type is shown with (the first run's type cards and the wizard's chips). */
+export function propertyTypeIcon(value: string): IconComponent {
+  return PROPERTY_TYPE_ICONS.get(value) ?? EllipsisHorizontalIcon;
+}
+
 export function TextField({
   label,
   value,

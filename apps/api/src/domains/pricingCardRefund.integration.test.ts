@@ -70,7 +70,9 @@ describe.skipIf(!url)("pricing card refunds (VAY-2205)", () => {
   const pool = new pg.Pool({ connectionString: url, max: 6 });
   afterAll(() => pool.end());
 
-  async function paidCardStay(amount = "100.00") {
+  /** A paid pricing-v2 card stay. `applicationFee` is Vayada's fee on the charge: none on a fixed
+   * plan, a share of the stay on a commission plan. */
+  async function paidCardStay(amount = "100.00", applicationFee = "0.00") {
     if (!url || !/(^|[_-])test([_-]|$)/i.test(new URL(url).pathname.slice(1)))
       throw new Error("test database required");
     const propertyId = randomUUID(),
@@ -104,10 +106,11 @@ describe.skipIf(!url)("pricing card refunds (VAY-2205)", () => {
     );
     await pool.query(
       `INSERT INTO finance.payments(id,property_id,guest_booking_id,provider_account_id,payment_kind,payment_method,
-         status,amount,net_amount,currency,provider_payment_intent_id,visibility_class,paid_at,payment_metadata)
-       VALUES($1,$2,$3,$4,'full','card','paid',$5::numeric,$5::numeric,'EUR',$6,'pms_finance',now(),
-         '{"chargeType":"direct"}')`,
-      [paymentId, propertyId, guestBookingId, accountId, amount, intent],
+         status,amount,fee_amount,net_amount,currency,provider_payment_intent_id,visibility_class,paid_at,
+         payment_metadata)
+       VALUES($1,$2,$3,$4,'full','card','paid',$5::numeric,$7::numeric,$5::numeric-$7::numeric,'EUR',$6,
+         'pms_finance',now(),jsonb_build_object('chargeType','direct','applicationFeeAmount',$7::text))`,
+      [paymentId, propertyId, guestBookingId, accountId, amount, intent, applicationFee],
     );
     await pool.query(
       "UPDATE booking.guest_bookings SET active_card_payment_id=$1 WHERE id=$2 AND property_id=$3",
@@ -176,6 +179,20 @@ describe.skipIf(!url)("pricing card refunds (VAY-2205)", () => {
       commandId,
     ]);
 
+  it("refunds Vayada's fee in proportion only when the charge carries one (commission plan)", async () => {
+    const f = await paidCardStay("100.00", "3.00"),
+      stripe = fakeStripe();
+    const staged = await f.stage("0", "cancel-commission", "host");
+    expect(await executePricingCardRefund(pool, stripe.provider, staged!.commandId)).toBe(
+      "succeeded",
+    );
+    expect(stripe.provider.createRefund).toHaveBeenCalledOnce();
+    expect(stripe.provider.createRefund.mock.calls[0]![0]).toMatchObject({
+      amountMinor: 10000,
+      refundApplicationFee: true,
+    });
+  });
+
   it("records the refund the terms owe in the cancel transaction, once, and money moves only when Stripe succeeds", async () => {
     const f = await paidCardStay(),
       stripe = fakeStripe();
@@ -199,6 +216,8 @@ describe.skipIf(!url)("pricing card refunds (VAY-2205)", () => {
       paymentIntentId: f.intent,
       providerAccountRef: f.accountRef,
       amountMinor: 7000,
+      // A fixed-plan charge has no application fee, and Stripe refuses to refund one it doesn't have.
+      refundApplicationFee: false,
       commandId: staged!.commandId,
       propertyId: f.propertyId,
     });

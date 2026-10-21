@@ -222,6 +222,10 @@ async function readCurrentWithOwnerEvidence(
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    // A read never waits long for the room-facts lock: the booking readiness calls this while its own
+    // transaction holds the property row, and a pricing transaction holding that lock can wait on the
+    // row, a cycle PostgreSQL can't see (VAY-2247 incident, 2026-10-21).
+    await client.query("SET LOCAL lock_timeout = '5s'");
     const result = await lockPmsOperatingCalendarWithOwnerEvidence(
       client,
       propertyId,

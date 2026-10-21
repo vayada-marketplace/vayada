@@ -37,6 +37,8 @@ export function createReplacementPricingStore(pool: Pool, guard: PricingStorageG
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
+      // Reads give up on a lock after 5 s instead of waiting forever (VAY-2247 incident, 2026-10-21).
+      if (access === "read") await client.query("SET LOCAL lock_timeout = '5s'");
       await lockPmsInventoryMutationScope(client, scope.propertyId);
       const sources = await guard.lock(client, scope, access);
       if (!sources) return fail("denied");

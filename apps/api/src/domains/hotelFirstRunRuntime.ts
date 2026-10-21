@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
 import type { RequestContext } from "@vayada/backend-auth";
-import type { PoolClient } from "pg";
+import pg, { type PoolClient } from "pg";
 
 import type { HotelSetupPropertyActivation } from "../platform/hotelSetupProfileWriter.js";
 import type { HotelSetupPropertyProfileUpdate } from "../routes/sharedHotelSetupStatus.js";
@@ -12,6 +12,7 @@ import {
 import { createHotelFirstRunService, type HotelFirstRunPorts } from "./hotelFirstRunService.js";
 import { firstRunIdempotencyKey, type HotelFirstRunActor } from "./hotelFirstRunSteps.js";
 import { createReplacementPricingCommands } from "./replacementPricingCommands.js";
+import { readCurrentPricingSnapshot } from "./replacementPricingSnapshot.js";
 
 /**
  * VAY-2247: puts the first run together from the API's existing runtimes, per request (the pricing
@@ -29,7 +30,7 @@ export type HotelFirstRunRuntimeDependencies = Omit<
   HotelFirstRunPorts,
   "facts" | "lock" | "locality" | "pricing" | "activation"
 > &
-  Omit<HotelFirstRunFactsPorts, "language" | "pricing"> & {
+  Omit<HotelFirstRunFactsPorts, "language" | "pricing" | "unlockedPricing"> & {
     lockPool: LockPool;
     pricingPool: PricingPool;
     launchSettings: { readDefaultLanguage(propertyId: string): Promise<string | null> };
@@ -37,11 +38,114 @@ export type HotelFirstRunRuntimeDependencies = Omit<
     activateProperty: HotelSetupPropertyActivation;
   };
 
+/** Every lock connection stayed in use for longer than the wait: the run answers "busy" (retry later). */
+export class HotelFirstRunLockCapacityError extends Error {
+  constructor() {
+    super("Every first-run lock connection is in use");
+    this.name = "HotelFirstRunLockCapacityError";
+  }
+}
+
+type LockClient = Pick<pg.Client, "connect" | "query" | "end" | "on">;
+
+/**
+ * The lock's connections: one plain client per run, opened for the run and closed after it, outside the
+ * API's shared pools (VAY-2247 incident, 2026-10-21). Taking it from a shared pool pinned one of its few
+ * connections for the whole run while the run's own steps needed more from the same pool. At most `max`
+ * are open at once; a run that can't get one within `waitMs` answers "busy".
+ */
+export function createDedicatedLockConnections(
+  connectionString: string,
+  {
+    max = 3,
+    waitMs = 3_000,
+    createClient = () => new pg.Client({ connectionString, connectionTimeoutMillis: 5_000 }),
+  }: { max?: number; waitMs?: number; createClient?: () => LockClient } = {},
+): LockPool {
+  let open = 0;
+  const waiting: (() => void)[] = [];
+  const free = () => {
+    open -= 1;
+    waiting.shift()?.();
+  };
+  const acquire = () =>
+    new Promise<void>((resolve, reject) => {
+      if (open < max) {
+        open += 1;
+        resolve();
+        return;
+      }
+      const grant = () => {
+        clearTimeout(timer);
+        open += 1;
+        resolve();
+      };
+      const timer = setTimeout(() => {
+        waiting.splice(waiting.indexOf(grant), 1);
+        reject(new HotelFirstRunLockCapacityError());
+      }, waitMs);
+      waiting.push(grant);
+    });
+  return {
+    async connect() {
+      await acquire();
+      const client = createClient();
+      // A dropped connection fails the lock's queries instead of exiting the process.
+      client.on("error", () => undefined);
+      let released = false;
+      const release = () => {
+        if (released) return;
+        released = true;
+        free();
+        void client.end().catch(() => undefined);
+      };
+      try {
+        await client.connect();
+      } catch (error) {
+        release();
+        throw error;
+      }
+      return { query: client.query.bind(client) as PoolClient["query"], release };
+    },
+  };
+}
+
+/**
+ * The current prices in a read-only snapshot: no advisory lock and no row lock, unlike the pricing commands'
+ * read (VAY-2247 incident, 2026-10-21). The checklist route has already checked the owner's access.
+ */
+export function createUnlockedPricingRead(
+  pool: Pick<PricingPool, "connect">,
+): HotelFirstRunFactsPorts["unlockedPricing"] {
+  return {
+    async read(propertyId) {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+        const current = await readCurrentPricingSnapshot(client, propertyId.toLowerCase());
+        await client.query("COMMIT");
+        return current;
+      } catch (error) {
+        await client.query("ROLLBACK").catch(() => undefined);
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
+  };
+}
+
 /** Holds a session advisory lock on its own connection for the whole run; "busy" when another run holds it. */
 export function createHotelFirstRunLock(pool: LockPool): HotelFirstRunPorts["lock"] {
   return {
     async withPropertyLock(propertyId, work) {
-      const client = await pool.connect();
+      let client: Awaited<ReturnType<LockPool["connect"]>>;
+      try {
+        client = await pool.connect();
+      } catch (error) {
+        if (error instanceof HotelFirstRunLockCapacityError) return "busy";
+        throw error;
+      }
       try {
         const locked = await client.query(
           "SELECT pg_try_advisory_lock($1::int, hashtext($2)) AS locked",
@@ -126,7 +230,12 @@ export function createHotelFirstRunRuntime(deps: HotelFirstRunRuntimeDependencie
   };
   return function createService(context: RequestContext) {
     const pricing = createReplacementPricingCommands(deps.pricingPool, context);
-    const facts = createHotelFirstRunFactsReader({ ...deps, language, pricing });
+    const facts = createHotelFirstRunFactsReader({
+      ...deps,
+      language,
+      pricing,
+      unlockedPricing: createUnlockedPricingRead(deps.pricingPool),
+    });
     return createHotelFirstRunService({
       ...deps,
       pricing,

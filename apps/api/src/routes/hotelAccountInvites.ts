@@ -323,7 +323,7 @@ export function createPgHotelAccountInviteRepository(config: {
 
         if (!trackBinding && new Date(row.expiresAt) <= input.now) {
           await client.query(
-            `UPDATE marketplace.invite_codes
+            `UPDATE hotel_catalog.hotel_account_invites
              SET status = 'expired'
              WHERE id = $1::uuid
                AND status = 'pending'`,
@@ -345,7 +345,7 @@ export function createPgHotelAccountInviteRepository(config: {
           }
         }
         const redeemed = await client.query(
-          `UPDATE marketplace.invite_codes
+          `UPDATE hotel_catalog.hotel_account_invites
            SET status = 'redeemed',
                redeemed_by_user_id = $2::uuid,
                redeemed_at = $3::timestamptz,
@@ -642,4 +642,4 @@ const INVITE_SELECT = `SELECT
   invite.redeemed_by_user_id::text AS "redeemedByUserId",
   invite.payload -> 'redemption' ->> 'organizationId' AS "redemptionOrganizationId",
   invite.expires_at AS "expiresAt"
-FROM marketplace.invite_codes invite`;
+FROM hotel_catalog.hotel_account_invites invite`;

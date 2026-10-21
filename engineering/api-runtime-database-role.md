@@ -56,7 +56,7 @@ Applied by `scripts/run-target-database-runtime-preflight.sh
 transaction:
 
 ```sql
--- product schemas: hotel_catalog, booking, pms, marketplace, distribution, finance, platform
+-- product schemas: hotel_catalog, booking, pms, distribution, finance, platform (VAY-2272 dropped marketplace)
 GRANT USAGE ON SCHEMA <s> TO vayada_next_api_runtime;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA <s> TO vayada_next_api_runtime;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA <s> TO vayada_next_api_runtime;
@@ -76,13 +76,13 @@ execution stay forbidden and are asserted by the preflight.
 
 ### Narrowings inside the product schemas
 
-| Relation                                                                                                                                                                                                                                                                   | Granted          | Why                                                                                                                                              |
-| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `platform.product_audit_events`                                                                                                                                                                                                                                            | `SELECT, INSERT` | append-only audit sink; no code updates or deletes it                                                                                            |
-| `platform.domain_events`                                                                                                                                                                                                                                                   | `SELECT, INSERT` | append-only event log; no code updates or deletes it                                                                                             |
-| `hotel_catalog.properties`                                                                                                                                                                                                                                                 | no `DELETE`      | no code path deletes a property; deleting one is unrecoverable                                                                                   |
-| `booking.pricing_quotes`                                                                                                                                                                                                                                                   | `SELECT, INSERT` | append-only quote ledger (trigger, 0309); no code path row-locks a quote                                                                         |
-| `booking.addon_revenue_evidence`, `pms.channex_offer_ari_receipts`, `pms.channex_offer_create_receipts`, `pms.channex_offer_target_versions`, `finance.commission_rate_changes`, `distribution.external_api_usage_events`, `finance.affiliate_percentage_policy_approvals` | `SELECT, INSERT` | insert-only evidence without database-enforced immutability (`finance.ota_commission_evidence` keeps `UPDATE` only because the API row-locks it) |
+| Relation                                                                                                                                                                                                                  | Granted          | Why                                                                                                                                              |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `platform.product_audit_events`                                                                                                                                                                                           | `SELECT, INSERT` | append-only audit sink; no code updates or deletes it                                                                                            |
+| `platform.domain_events`                                                                                                                                                                                                  | `SELECT, INSERT` | append-only event log; no code updates or deletes it                                                                                             |
+| `hotel_catalog.properties`                                                                                                                                                                                                | no `DELETE`      | no code path deletes a property; deleting one is unrecoverable                                                                                   |
+| `booking.pricing_quotes`                                                                                                                                                                                                  | `SELECT, INSERT` | append-only quote ledger (trigger, 0309); no code path row-locks a quote                                                                         |
+| `booking.addon_revenue_evidence`, `pms.channex_offer_ari_receipts`, `pms.channex_offer_create_receipts`, `pms.channex_offer_target_versions`, `finance.commission_rate_changes`, `distribution.external_api_usage_events` | `SELECT, INSERT` | insert-only evidence without database-enforced immutability (`finance.ota_commission_evidence` keeps `UPDATE` only because the API row-locks it) |
 
 Default privileges are set by and for the executing migration owner, which the
 grant task requires to own every product schema and relation. A table created
@@ -91,32 +91,28 @@ until the grant mode is re-run.
 
 Tables where the role's `UPDATE` exists only so row locks work (the API inserts
 or reads them but never updates them): `pms.channel_rate_plan_mappings`,
-`pms.channel_binding_claims`, `marketplace.affiliate_agreement_lifecycle_events`,
-and the identity lock set below.
+`pms.channel_binding_claims`, and the identity lock set below.
 
 ## Protected list
 
 The role must never write these. "no read" means it must not have `SELECT`
 either (table or column level, including PUBLIC or inherited grants).
 
-| Relation                                                                                                                                                                                                                              | Read                         | Why                                                                                          |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- | -------------------------------------------------------------------------------------------- |
-| `platform.hotel_setup_property_scopes`, `platform.hotel_setup_creation_scopes`, `platform.hotel_setup_linked_properties`, `platform.hotel_setup_reconciliation_cursors`, `hotel_catalog.hotel_setup_effective_creation_scopes` (view) | no                           | hotel-setup credential scope evidence, private to the setup authority                        |
-| `platform.identity_migration_provenance`, `platform.legacy_historical_binding_transitions`                                                                                                                                            | no                           | migration before/after evidence                                                              |
-| `platform.finance_expense_worker_properties`, `platform.finance_export_worker_properties`                                                                                                                                             | no                           | owner-managed Finance worker allowlists                                                      |
-| `marketplace.affiliate_click_quota_windows`                                                                                                                                                                                           | no                           | state of the guarded affiliate quota command                                                 |
-| `pms.inventory_coverage_validation_queue`                                                                                                                                                                                             | no                           | managed only by `SECURITY DEFINER` inventory routines                                        |
-| `platform.legacy_owner_bootstrap_receipts`                                                                                                                                                                                            | `owner_user_ids` column only | legacy Owner bootstrap authority                                                             |
-| `vayada_migration_evidence.*` (schema)                                                                                                                                                                                                | no                           | migration attestations                                                                       |
-| `platform.schema_migrations`                                                                                                                                                                                                          | yes                          | migration ledger                                                                             |
-| `platform.pricing_runtime_property_scopes`, `platform.channex_management_worker_properties`                                                                                                                                           | yes                          | owner-managed credential scope tables                                                        |
-| `platform.legacy_owner_approval_records`, `platform.legacy_owner_approval_revocations`                                                                                                                                                | yes                          | approval registry                                                                            |
-| `platform.channex_adoption_*` (6), `platform.production_*` (12), `platform.source_extraction_*` (3)                                                                                                                                   | yes                          | cutover and migration evidence                                                               |
-| `booking.pricing_runtime_effective_*` (views)                                                                                                                                                                                         | yes                          | per-property pricing login scope, dropped with the scope table in slice E of VAY-2057        |
-| `marketplace.affiliate_click_occurrences`, `booking.affiliate_click_contexts`, `booking.affiliate_click_admissions`, `booking.affiliate_original_booking_bindings`                                                                    | yes                          | affiliate evidence; written only through the guarded `SECURITY DEFINER` commands (0417–0419) |
-| `finance.expense_generation_dispatches`                                                                                                                                                                                               | yes                          | Finance worker discovery state, written by source-writer triggers and the worker             |
-| `pms.channex_room_availability_attempts`, `pms.channex_room_availability_receipts`, `pms.channex_room_availability_reconciliation_attestations`, `pms.channex_ari_schedule_sources`, `pms.channel_sync_status`                        | yes                          | Channex management worker-only state                                                         |
-| `booking.affiliate_referral_production_preflight_revocations`                                                                                                                                                                         | yes                          | revocation evidence with no API writer                                                       |
+| Relation                                                                                                                                                                                                                              | Read                         | Why                                                                                   |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- | ------------------------------------------------------------------------------------- |
+| `platform.hotel_setup_property_scopes`, `platform.hotel_setup_creation_scopes`, `platform.hotel_setup_linked_properties`, `platform.hotel_setup_reconciliation_cursors`, `hotel_catalog.hotel_setup_effective_creation_scopes` (view) | no                           | hotel-setup credential scope evidence, private to the setup authority                 |
+| `platform.identity_migration_provenance`, `platform.legacy_historical_binding_transitions`                                                                                                                                            | no                           | migration before/after evidence                                                       |
+| `platform.finance_expense_worker_properties`, `platform.finance_export_worker_properties`                                                                                                                                             | no                           | owner-managed Finance worker allowlists                                               |
+| `pms.inventory_coverage_validation_queue`                                                                                                                                                                                             | no                           | managed only by `SECURITY DEFINER` inventory routines                                 |
+| `platform.legacy_owner_bootstrap_receipts`                                                                                                                                                                                            | `owner_user_ids` column only | legacy Owner bootstrap authority                                                      |
+| `vayada_migration_evidence.*` (schema)                                                                                                                                                                                                | no                           | migration attestations                                                                |
+| `platform.schema_migrations`                                                                                                                                                                                                          | yes                          | migration ledger                                                                      |
+| `platform.pricing_runtime_property_scopes`, `platform.channex_management_worker_properties`                                                                                                                                           | yes                          | owner-managed credential scope tables                                                 |
+| `platform.legacy_owner_approval_records`, `platform.legacy_owner_approval_revocations`                                                                                                                                                | yes                          | approval registry                                                                     |
+| `platform.channex_adoption_*` (6), `platform.production_*` (12), `platform.source_extraction_*` (3)                                                                                                                                   | yes                          | cutover and migration evidence                                                        |
+| `booking.pricing_runtime_effective_*` (views)                                                                                                                                                                                         | yes                          | per-property pricing login scope, dropped with the scope table in slice E of VAY-2057 |
+| `finance.expense_generation_dispatches`                                                                                                                                                                                               | yes                          | Finance worker discovery state, written by source-writer triggers and the worker      |
+| `pms.channex_room_availability_attempts`, `pms.channex_room_availability_receipts`, `pms.channex_room_availability_reconciliation_attestations`, `pms.channex_ari_schedule_sources`, `pms.channel_sync_status`                        | yes                          | Channex management worker-only state                                                  |
 
 Name patterns are a safety net for future tables: in `platform`, anything
 matching `^(production_|source_extraction_|legacy_|channex_adoption_|channex_management_worker_|identity_migration_)`
@@ -124,8 +120,8 @@ is write-protected, and `^(identity_migration_|legacy_historical_binding_)`
 or `^finance_.*_worker_properties$` is also read-protected (the Channex worker
 allowlist stays readable: the API reads it today). Outside `platform`,
 `^pms\.channex_room_availability_`, `^pms\.channex_ari_schedule_`,
-`^pms\.channex_offer_ari_deliver`, `^(marketplace|booking)\.affiliate_click_` and
-`^finance\.expense_generation_` are write-protected (platform main e8876a7). The grant task revokes by
+`^pms\.channex_offer_ari_deliver` and `^finance\.expense_generation_` are
+write-protected (platform main e8876a7). The grant task revokes by
 list and pattern; the preflight asserts both.
 
 ## Identity: lock capability only
@@ -161,8 +157,9 @@ onboarding draft path and pricing authorization), and PostgreSQL requires an
 resource_id)` and `UPDATE (metadata)` for Financials module activation
   (`routes/pmsModuleActivations.ts`) and the new-hotel Financials default
   (`platform/sharedHotelSetupStatusReadModel.ts`); `organization_resource_links`
-  gets `UPDATE (status, updated_at)` for marketplace offer operator grant and
-  archive (`platform/marketplaceOfferIdentityAccess.ts`). No `DELETE`, and no
+  keeps `UPDATE (status, updated_at)`, which served the Marketplace offer
+  operator grant and archive (removed in VAY-2272; narrowing it back is a
+  follow-up). No `DELETE`, and no
   other identity table gains a write. The matrix's `UPDATE (id)` on `organization_resource_links`
   is a live production grant that only serves locks; narrowing it to
   `created_at` is a candidate for the follow-up that re-pins the hotel-setup
@@ -179,11 +176,9 @@ each write transaction. The rule below is unchanged; the native hotel-setup
 logins in "Who connects as what" retire with the VAY-2056 decommission steps.
 
 Nothing moves. The role keeps **no** `EXECUTE` on any `SECURITY DEFINER`
-routine (preflight `runtime_security_definer_execute_forbidden`). The guarded
-affiliate commands (`marketplace.capture_affiliate_click`,
-`booking.admit_affiliate_click`, `booking.bind_live_affiliate_original`,
-`marketplace.consume_affiliate_click_quota`), the inventory coverage routines
-and the hotel-setup scope helpers remain owner- or purpose-role-only.
+routine (preflight `runtime_security_definer_execute_forbidden`). The inventory
+coverage routines and the hotel-setup scope helpers remain owner- or
+purpose-role-only; the guarded affiliate commands went with VAY-2272.
 
 ## Accepted trade-offs
 
@@ -202,10 +197,10 @@ and the hotel-setup scope helpers remain owner- or purpose-role-only.
 ## Preflight contract
 
 `scripts/target-database-runtime-preflight.mjs` (platform) accepts one
-posture, read from `pg_default_acl` for the migration owner in the seven
+posture, read from `pg_default_acl` for the migration owner in the six
 product schemas:
 
-- **product DML**: default privileges exist in all seven schemas; the preflight
+- **product DML**: default privileges exist in all six schemas; the preflight
   then requires `SELECT, INSERT, UPDATE, DELETE` on every non-protected
   relation in those schemas (`runtime_product_dml_missing`), the narrowings,
   the protected list and patterns (`runtime_protected_relation_write_forbidden`,

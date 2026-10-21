@@ -5,6 +5,12 @@ const SPECIALIZED_POOL_MAX = 1;
 const CONNECTION_TIMEOUT_MS = 3_000;
 const HEALTH_PROBE_TIMEOUT_MS = 2_000;
 const HEALTH_PROBE_CACHE_MS = 5_000;
+// Connect and query each give up after HEALTH_PROBE_TIMEOUT_MS; a probe still running after both is dropped.
+const HEALTH_PROBE_GIVE_UP_MS = 2 * HEALTH_PROBE_TIMEOUT_MS;
+// Requests waiting this long for a connection, without a break, is reported once (VAY-2247 incident).
+const SUSTAINED_SATURATION_MS = 30_000;
+// Waiters may clear for a second or two inside one episode; it ends after this long without any.
+const SATURATION_QUIET_MS = 5_000;
 const KEEP_ALIVE_INITIAL_DELAY_MS = 10_000;
 // A pool that is still full after this many waiter timeouts, with no client handed out since, has
 // stopped serving (for example every slot hung on a peer that vanished in a failover).
@@ -62,6 +68,15 @@ type ConnectionErrorReporter = (fields: { code: string | null; error: string }) 
 /** Resolves false while PostgreSQL does not answer; results are cached briefly. */
 export type DatabaseHealthCheck = () => Promise<boolean>;
 
+/**
+ * liveness answers /health, the ALB's check: whether PostgreSQL answers the probe's own connection.
+ * readiness answers /ready: also false while a shared pool has stopped handing out connections.
+ */
+export type DatabaseHealthChecks = Readonly<{
+  liveness: DatabaseHealthCheck;
+  readiness: DatabaseHealthCheck;
+}>;
+
 export type PostgresPoolSnapshot = Readonly<{
   physicalPoolCount: number;
   maxConnections: number;
@@ -71,10 +86,22 @@ export type PostgresPoolSnapshot = Readonly<{
   stalledPools: number;
 }>;
 
+/** Requests have waited for a connection for durationMs without a break; the snapshot is the latest. */
+export type PostgresSaturationEpisode = PostgresPoolSnapshot & Readonly<{ durationMs: number }>;
+
+export type PostgresTelemetryOptions = Readonly<{
+  /** Called once per episode, when it has lasted SUSTAINED_SATURATION_MS. */
+  onSustainedSaturation?: (episode: PostgresSaturationEpisode) => void;
+}>;
+
 export function installPostgresPoolRuntime(postgres: PgModule = pg): {
   snapshot(): PostgresPoolSnapshot;
-  startTelemetry(logger: Logger, intervalMs?: number): () => void;
-  healthCheck(connectionString: string): DatabaseHealthCheck;
+  startTelemetry(
+    logger: Logger,
+    intervalMs?: number,
+    options?: PostgresTelemetryOptions,
+  ): () => void;
+  healthCheck(connectionString: string): DatabaseHealthChecks;
   close(): Promise<void>;
 } {
   const OriginalPool = postgres.Pool;
@@ -176,7 +203,7 @@ export function installPostgresPoolRuntime(postgres: PgModule = pg): {
 
   return {
     snapshot,
-    startTelemetry(logger, intervalMs = 1_000) {
+    startTelemetry(logger, intervalMs = 1_000, options = {}) {
       reportConnectionError = (fields) =>
         logger.warn(fields, "PostgreSQL client connection failed");
       reportStalledPool = (fields) =>
@@ -190,9 +217,18 @@ export function installPostgresPoolRuntime(postgres: PgModule = pg): {
         },
         "PostgreSQL runtime pool budget configured",
       );
+      const episodes = poolSaturationEpisodes();
       const timer = setInterval(() => {
         const state = snapshot();
         if (state.waitingRequests > 0) logger.warn(state, "PostgreSQL runtime pool is saturated");
+        const sustained = episodes(state, Date.now());
+        if (!sustained) return;
+        logger.warn(sustained, "PostgreSQL runtime pool saturated for 30 s");
+        try {
+          options.onSustainedSaturation?.(sustained);
+        } catch {
+          // Alerting must never stop the telemetry.
+        }
       }, intervalMs);
       timer.unref();
       return () => clearInterval(timer);
@@ -213,8 +249,13 @@ export function installPostgresPoolRuntime(postgres: PgModule = pg): {
       pool.on("error", () => undefined);
       probePools.push(pool);
       const probe = cachedHealthCheck(() => pool.query("SELECT 1"), HEALTH_PROBE_CACHE_MS);
-      // The probe has its own connection, so it can't see shared pools that stopped serving.
-      return async () => ![...entries.values()].some(isStalled) && (await probe());
+      return {
+        // A pool that stopped serving doesn't fail liveness: replacing the task only moves the load
+        // to a new one and drops every request in flight (VAY-2247 incident, 2026-10-21).
+        liveness: probe,
+        // The probe has its own connection, so it can't see shared pools that stopped serving.
+        readiness: async () => ![...entries.values()].some(isStalled) && (await probe()),
+      };
     },
     async close() {
       await Promise.all(probePools.splice(0).map((pool) => pool.end()));
@@ -229,6 +270,43 @@ export function installPostgresPoolRuntime(postgres: PgModule = pg): {
       );
     },
   };
+}
+
+/**
+ * Follows the pool samples and returns an episode once, when requests have waited for a connection for
+ * sustainedMs without a break. A gap shorter than quietMs doesn't end the episode.
+ */
+export function poolSaturationEpisodes(
+  sustainedMs = SUSTAINED_SATURATION_MS,
+  quietMs = SATURATION_QUIET_MS,
+) {
+  let episode: { since: number; lastWaitingAt: number; reported: boolean } | undefined;
+  return (state: PostgresPoolSnapshot, at: number): PostgresSaturationEpisode | null => {
+    if (state.waitingRequests === 0) {
+      if (episode && at - episode.lastWaitingAt >= quietMs) episode = undefined;
+      return null;
+    }
+    episode ??= { since: at, lastWaitingAt: at, reported: false };
+    episode.lastWaitingAt = at;
+    if (episode.reported || at - episode.since < sustainedMs) return null;
+    episode.reported = true;
+    return { ...state, durationMs: at - episode.since };
+  };
+}
+
+/**
+ * A lock wait that gave up (SQLSTATE 55P03: lock_timeout, or NOWAIT): another connection holds what this one
+ * needs. Looks through `cause`, as wrapped provider errors keep the original there. The API answers it with
+ * 409 busy_try_again (VAY-2247 incident follow-up, 2026-10-21).
+ */
+export function isPostgresLockTimeoutError(error: unknown): boolean {
+  let current = error;
+  for (let depth = 0; depth < 3 && current && typeof current === "object"; depth += 1) {
+    const candidate = current as { code?: unknown; cause?: unknown };
+    if (candidate.code === "55P03") return true;
+    current = candidate.cause;
+  }
+  return false;
 }
 
 export function isPostgresUnavailableError(error: unknown): boolean {
@@ -250,18 +328,22 @@ export function isPostgresUnavailableError(error: unknown): boolean {
   return false;
 }
 
-/** Shares one in-flight probe and reuses its result for cacheMs. */
+/**
+ * Shares one in-flight probe and reuses its result for cacheMs. A probe that hasn't settled after
+ * giveUpMs counts as down, so one stuck probe can't hold every later check.
+ */
 export function cachedHealthCheck(
   probe: () => Promise<unknown>,
   cacheMs: number,
   now: () => number = Date.now,
+  giveUpMs: number = HEALTH_PROBE_GIVE_UP_MS,
 ): DatabaseHealthCheck {
   let checkedAt = Number.NEGATIVE_INFINITY;
   let healthy = true;
   let pending: Promise<boolean> | undefined;
   return () => {
     if (now() - checkedAt < cacheMs) return Promise.resolve(healthy);
-    pending ??= probe()
+    pending ??= settledWithin(probe(), giveUpMs)
       .then(
         () => true,
         () => false,
@@ -274,6 +356,15 @@ export function cachedHealthCheck(
       });
     return pending;
   };
+}
+
+function settledWithin(work: Promise<unknown>, ms: number): Promise<unknown> {
+  let timer: NodeJS.Timeout | undefined;
+  const giveUp = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error("PostgreSQL health probe did not settle")), ms);
+    timer.unref();
+  });
+  return Promise.race([work, giveUp]).finally(() => clearTimeout(timer));
 }
 
 // Transient connect failures only: a rejected password, a missing database or a TLS mismatch
