@@ -28,6 +28,7 @@ import type {
   FinanceSubscriptionEntitlementRow,
   FinanceSubscriptionStore,
 } from "./financeSubscriptionStore.js";
+import { isPostgresLockTimeoutError } from "../platform/postgresRuntime.js";
 
 export function createFinanceSubscriptionService(config: {
   store: FinanceSubscriptionStore;
@@ -726,6 +727,8 @@ function stripeNotConfigured<T>(): FinanceSubscriptionCommandResult<T> {
 }
 
 function providerFailure<T>(error: unknown): FinanceSubscriptionCommandResult<T> {
+  // A lock wait that gave up is not Stripe's failure: the API answers it with busy, try again.
+  if (isPostgresLockTimeoutError(error)) throw error;
   if (
     error &&
     typeof error === "object" &&
