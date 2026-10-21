@@ -1,7 +1,6 @@
 import pg from "pg";
 import { afterAll, describe, expect, it } from "vitest";
 import { lockPmsInventoryMutationScope } from "./pmsInventoryMutationLock.js";
-import { createPgPmsMandatoryChargeConfirmationReadModel } from "./pmsMandatoryChargeConfirmationReadModel.js";
 import { readPricingPublicationFreshness } from "./pricingPublicationFreshness.js";
 import { paymentRepublishFixture } from "./pricingPaymentRepublish.fixtures.js";
 import { republishPricingAfterPaymentChange } from "./pricingPaymentRepublish.js";
@@ -40,15 +39,6 @@ describe.skipIf(!url)("re-publishing prices after a payment change", () => {
       id = f.propertyId;
     expect(await (await f.save(0))()).toEqual({ revision: 1, replayed: false });
     const [hotel] = await revisions(id);
-    const confirmation = createPgPmsMandatoryChargeConfirmationReadModel({
-      connectionString: url!,
-      pool,
-    });
-    const confirmedBefore = await confirmation.getMandatoryChargeConfirmation({
-      organizationId: f.organizationId,
-      propertyId: id,
-    });
-    expect(confirmedBefore).toMatchObject({ outcome: "available" });
 
     await pool.query(
       "UPDATE finance.payment_settings SET accepted_methods=ARRAY['pay_at_property','paypal'] WHERE property_id=$1",
@@ -94,19 +84,6 @@ describe.skipIf(!url)("re-publishing prices after a payment change", () => {
     ).toEqual([
       { actor_type: "system", actor_user_id: null, draft_id: null, carried_from: hotel.charges },
     ]);
-    expect(
-      await confirmation.getMandatoryChargeConfirmation({
-        organizationId: f.organizationId,
-        propertyId: id,
-      }),
-    ).toMatchObject({
-      outcome: "available",
-      evidence: {
-        confirmationRevision: 2,
-        confirmedAt: (confirmedBefore as { evidence: { confirmedAt: string } }).evidence
-          .confirmedAt,
-      },
-    });
     expect(
       (
         await pool.query(

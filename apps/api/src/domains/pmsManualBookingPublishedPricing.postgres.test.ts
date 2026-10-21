@@ -21,6 +21,7 @@ import { lockFinanceReplacementPricingReadiness } from "./financeReplacementPric
 import { lockFinanceReplacementPricingSource } from "./financeReplacementPricingSource.js";
 import { createPgPmsManualBookingPlatformOwnerPort } from "./pmsManualBookingCommandEvidence.js";
 import { createPgPmsManualBookingCommandRepository } from "./pmsManualBookingCommandRepository.js";
+import { republishPricingAfterPaymentChange } from "./pricingPaymentRepublish.js";
 import {
   createPgPmsManualBookingBookingOwnerPort,
   createPgPmsManualBookingOperationsOwnerPort,
@@ -521,6 +522,35 @@ describe.skipIf(!url)("manual booking priced from the published offers", () => {
           pool,
         }).getMandatoryChargeConfirmation({ organizationId, propertyId }),
       ).toMatchObject({ outcome: "missing" });
+    });
+
+    // VAY-2304: with payments on again the system publishes the same prices again, carrying the
+    // hotel's charges declaration; they confirm final prices again, at the hotel's own time.
+    it("confirms final prices again after the system re-publishes them", async () => {
+      await pool.query(
+        "UPDATE finance.payment_settings SET payments_enabled=true WHERE property_id=$1",
+        [propertyId],
+      );
+      expect(await republishPricingAfterPaymentChange(pool, propertyId)).toMatchObject({
+        outcome: "republished",
+      });
+      const declared = (
+        await pool.query(
+          `SELECT hotel.created_at FROM pms.pricing_v2_heads head
+          JOIN pms.pricing_v2_revisions revision USING (property_id, revision)
+          JOIN pms.pricing_v2_charge_declarations copy
+            ON copy.id::text = revision.owner_references->>'charges' AND copy.actor_type = 'system'
+          JOIN pms.pricing_v2_charge_declarations hotel ON hotel.id = copy.carried_from
+          WHERE head.property_id = $1`,
+          [propertyId],
+        )
+      ).rows[0]?.created_at as Date;
+      expect(
+        await createPgPmsMandatoryChargeConfirmationReadModel({
+          connectionString: url!,
+          pool,
+        }).getMandatoryChargeConfirmation({ organizationId, propertyId }),
+      ).toMatchObject({ outcome: "available", evidence: { confirmedAt: declared.toISOString() } });
     });
   });
 
