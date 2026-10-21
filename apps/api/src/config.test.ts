@@ -1257,6 +1257,25 @@ describe("api config", () => {
     );
   });
 
+  it("re-publishes prices after payment changes every five minutes unless switched off (VAY-2304)", () => {
+    expect(loadConfig({})).toMatchObject({
+      pricingPaymentRepublishEnabled: true,
+      pricingPaymentRepublishIntervalMs: 5 * 60 * 1000,
+    });
+    expect(
+      loadConfig({
+        PRICING_PAYMENT_REPUBLISH_ENABLED: "false",
+        PRICING_PAYMENT_REPUBLISH_INTERVAL_MS: "60000",
+      }),
+    ).toMatchObject({
+      pricingPaymentRepublishEnabled: false,
+      pricingPaymentRepublishIntervalMs: 60_000,
+    });
+    expect(() => loadConfig({ PRICING_PAYMENT_REPUBLISH_INTERVAL_MS: "59999" })).toThrow(
+      "PRICING_PAYMENT_REPUBLISH_INTERVAL_MS must be at least 60000",
+    );
+  });
+
   it("reads the contact notification recipient (VAY-2286)", () => {
     const email = { RESEND_API_KEY: "test-key", BOOKING_EMAIL_FROM: "sender@example.test" };
     expect(loadConfig(email).contactNotificationRecipient).toBeUndefined();

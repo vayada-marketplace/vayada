@@ -22,6 +22,10 @@ import {
   readPricingPublicationFreshness,
   summarizePricingPublicationFreshness,
 } from "./domains/pricingPublicationFreshness.js";
+import {
+  republishPricingAfterCommit,
+  republishPricingAfterPaymentChanges,
+} from "./domains/pricingPaymentRepublish.js";
 import { createNoShowReportingStore } from "./domains/pmsNoShowReporting.js";
 import { runNoShowReport } from "./jobs/pmsNoShowReporting.js";
 import { withPmsHostDateCredit } from "./domains/pmsHostDateAmendment.js";
@@ -622,11 +626,16 @@ const stripeConnectProvider = config.stripeSubscriptions.secretKey
     })
   : undefined;
 
+// VAY-2304: a payment change re-publishes the hotel's last published prices right after it commits.
+const afterPaymentChange = config.pricingPaymentRepublishEnabled
+  ? (pool: pg.Pool, propertyId: string) => republishPricingAfterCommit(pool, propertyId, app.log)
+  : undefined;
 const financeRepository =
   config.financeSource === "target"
     ? createTargetFinancePropertySettingsRepository({
         connectionString: targetDatabaseUrl,
         stripeConnectProvider,
+        afterPaymentChange,
       })
     : undefined;
 
@@ -1755,6 +1764,7 @@ const app = buildApp({
           connectionString: targetDatabaseUrl,
           stripeConnectProvider,
           stripePaymentProvider: stripeBookingPaymentProvider,
+          afterPaymentChange,
         }),
         pmsInboxDeliveryReceipts,
       }
@@ -2658,6 +2668,46 @@ app.addHook("onClose", async () => {
   if (pricingFreshnessStart) clearTimeout(pricingFreshnessStart);
   await activePricingFreshnessCheck;
   await pricingFreshnessPool?.end();
+});
+
+// VAY-2304: the sweep behind the after-commit re-publish. It re-publishes every hotel whose prices
+// only a payment change staled (including a release that changed the Finance fingerprint); its
+// first run after a release is the one-time catch-up. One log line per run.
+const pricingRepublishPool =
+  config.backgroundWorkersEnabled &&
+  config.pmsOperationsSource === "target" &&
+  config.pricingPaymentRepublishEnabled
+    ? new pg.Pool({ connectionString: targetDatabaseUrl, connectionTimeoutMillis: 5_000, max: 1 })
+    : undefined;
+let activePricingRepublish: Promise<void> | undefined;
+const runPricingRepublish = () => {
+  if (!pricingRepublishPool || activePricingRepublish) return;
+  const startedAt = Date.now();
+  activePricingRepublish = republishPricingAfterPaymentChanges(pricingRepublishPool)
+    .then((summary) =>
+      app.log[summary.failed > 0 ? "warn" : "info"](
+        { ...summary, durationMs: Date.now() - startedAt },
+        "Pricing payment re-publish",
+      ),
+    )
+    .catch((error: unknown) => app.log.warn({ err: error }, "Pricing payment re-publish failed"))
+    .finally(() => {
+      activePricingRepublish = undefined;
+    });
+};
+const pricingRepublishTimer = pricingRepublishPool
+  ? setInterval(runPricingRepublish, config.pricingPaymentRepublishIntervalMs)
+  : undefined;
+pricingRepublishTimer?.unref();
+const pricingRepublishStart = pricingRepublishPool
+  ? setTimeout(runPricingRepublish, 60_000)
+  : undefined;
+pricingRepublishStart?.unref();
+app.addHook("onClose", async () => {
+  if (pricingRepublishTimer) clearInterval(pricingRepublishTimer);
+  if (pricingRepublishStart) clearTimeout(pricingRepublishStart);
+  await activePricingRepublish;
+  await pricingRepublishPool?.end();
 });
 
 let activeFinanceSubscriptionBatch: Promise<void> | undefined;
