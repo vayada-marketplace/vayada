@@ -166,7 +166,7 @@ describe.skipIf(!url)("identity migration provenance (real PostgreSQL)", () => {
     ).toBe(1);
   });
 
-  it("excludes other memberships and Marketplace links sharing the PMS owner's organization", async () => {
+  it("excludes other memberships and links sharing the PMS owner's organization", async () => {
     const plan = buildProductionIdentityPlan(rows);
     const other = "33333333-3333-4333-8333-333333333333";
     const organization = plan.organizations[0]!.id;
@@ -181,14 +181,14 @@ describe.skipIf(!url)("identity migration provenance (real PostgreSQL)", () => {
     await client.query(
       `INSERT INTO identity.organization_resource_links
       (organization_id,product,resource_type,resource_id,relationship)
-      VALUES($1,'marketplace','hotel_profile',$2,'owner')`,
+      VALUES($1,'booking','booking_hotel',$2,'owner')`,
       [organization, HOTEL],
     );
     plan.memberships.push({ ...plan.memberships[0]!, userId: other });
     plan.resourceLinks.push({
       ...plan.resourceLinks[0]!,
-      product: "marketplace",
-      resourceType: "hotel_profile",
+      product: "booking",
+      resourceType: "booking_hotel",
       relationship: "owner",
     });
     const observed = await readProductionIdentityProvenance(client, plan, rows);

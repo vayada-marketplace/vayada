@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
-import Image from "next/image";
+import HotelHeroImage from "@/components/booking/HotelHeroImage";
 import { Link, useRouter } from "@/i18n/navigation";
 import BookingNavigation from "@/components/layout/BookingNavigation";
 import BookingFooter from "@/components/layout/BookingFooter";
@@ -221,15 +221,7 @@ function HomePageContent() {
 
       {/* Hero Section */}
       <div className="relative h-[520px] w-full">
-        <Image
-          src={heroImage}
-          alt={hotel.name}
-          fill
-          className="object-cover"
-          priority
-          quality={90}
-          sizes="100vw"
-        />
+        <HotelHeroImage src={heroImage} alt={hotel.name} quality={90} sizes="100vw" />
         <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-black/30 to-black/60" />
 
         <BookingNavigation />

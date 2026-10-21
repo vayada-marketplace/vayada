@@ -1,6 +1,6 @@
 -- Migration: 0499_marketplace_schema_drop
--- Owner: platform / VAY-2272 (Marketplace removal step 5, M-D, window W2 with 0498, barrier). HOLD:
--- merge only with Flamur's yes, after the counts-0499 before-runs, with platform P1 applied and its
+-- Owner: platform / VAY-2272 (Marketplace removal step 5, M-D, window W2 with 0498). Held by hand:
+-- merged with Flamur's yes, after the counts-0499 before-runs, with platform P1 applied and its
 -- inspect passing (the runtime preflight and product DML grant tolerate the dropped schema).
 --
 -- Drops what is left of the Marketplace: the 0496 hotel-invite compatibility view, the 31 remaining

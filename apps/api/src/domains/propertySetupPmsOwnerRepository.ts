@@ -45,10 +45,15 @@ export type PropertySetupPmsOwnerRepository = PropertySetupPmsOwnerReadPort & {
 
 type QueryClient = {
   query<Row extends QueryResultRow = QueryResultRow>(
-    text: string,
-    values?: readonly unknown[],
+    config: Readonly<{ text: string; values: unknown[]; query_timeout: number }>,
   ): Promise<Pick<QueryResult<Row>, "rows" | "rowCount">>;
 };
+
+/**
+ * Per query, not as a connection option: a pool with connection options gets a single connection of its
+ * own under the API's pool runtime, and every owner read then queued on it (VAY-2247 incident).
+ */
+const OWNER_READ_TIMEOUT_MS = 5_000;
 
 type RoomRow = {
   authorized: boolean;
@@ -150,20 +155,19 @@ export function createPgPropertySetupPmsOwnerRepository(config: {
     throw new Error("Property setup PMS owner repository connectionString must not be empty");
   }
   const ownsPool = !config.pool;
-  const pool =
+  const pool: QueryClient & { end(): Promise<void> } =
     config.pool ??
     new pg.Pool({
       connectionString: config.connectionString,
       max: 4,
       connectionTimeoutMillis: 5_000,
-      options: "-c statement_timeout=5000",
     });
 
   return {
     async getRoomOwnerSnapshot(input) {
       const scope = parseScope(input);
-      const result = await pool.query<RoomRow>(
-        `WITH authorized_scope AS (${AUTHORIZED_SCOPE})
+      const result = await pool.query<RoomRow>({
+        text: `WITH authorized_scope AS (${AUTHORIZED_SCOPE})
          SELECT scope.authorized,
                 room_type.property_id::text AS "propertyId",
                 room_type.id::text AS "roomTypeId",
@@ -201,8 +205,9 @@ export function createPgPropertySetupPmsOwnerRepository(config: {
             AND media.room_type_id = room_type.id
        GROUP BY scope.authorized, room_type.id
        ORDER BY room_type.id::text COLLATE "C"`,
-        [scope.organizationId, scope.propertyId],
-      );
+        values: [scope.organizationId, scope.propertyId],
+        query_timeout: OWNER_READ_TIMEOUT_MS,
+      });
       if (result.rows.length === 0 || result.rows.some((row) => row.authorized !== true)) {
         throw new Error("Property setup PMS room scope is unavailable");
       }
@@ -222,8 +227,8 @@ export function createPgPropertySetupPmsOwnerRepository(config: {
 
     async getInventoryOwnerSnapshot(input) {
       const scope = parseScope(input);
-      const result = await pool.query<InventoryRow>(
-        `WITH authorized_scope AS (${AUTHORIZED_SCOPE})
+      const result = await pool.query<InventoryRow>({
+        text: `WITH authorized_scope AS (${AUTHORIZED_SCOPE})
          SELECT scope.authorized,
                 coverage.organization_id::text AS "organizationId",
                 coverage.property_id::text AS "propertyId",
@@ -234,8 +239,9 @@ export function createPgPropertySetupPmsOwnerRepository(config: {
              ON scope.authorized
             AND coverage.organization_id = $1::uuid
             AND coverage.property_id = $2::uuid`,
-        [scope.organizationId, scope.propertyId],
-      );
+        values: [scope.organizationId, scope.propertyId],
+        query_timeout: OWNER_READ_TIMEOUT_MS,
+      });
       if (result.rows.length !== 1 || result.rows[0]?.authorized !== true) {
         throw new Error("Property setup PMS inventory scope is unavailable");
       }
