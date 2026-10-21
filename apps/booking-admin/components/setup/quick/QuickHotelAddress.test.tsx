@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { describe, expect, it, vi } from "vitest";
 
@@ -38,13 +39,36 @@ vi.mock("@vayada/product-onboarding/GooglePlacesAddressField", () => ({
           )
         }
       />
+      <button
+        type="button"
+        data-testid="pick-street"
+        onClick={() =>
+          // A street without a house number: Google knows only the area, so no coordinates.
+          onSelect(
+            {
+              streetAddress: "Isabella-Braun-Straße",
+              postalCode: "89343",
+              city: "Jettingen-Scheppach",
+              countryCode: "DE",
+              region: "Bavaria",
+              latitude: null,
+              longitude: null,
+            },
+            true,
+          )
+        }
+      />
       <button type="button" data-testid="fail" onClick={() => onUnavailable(false)} />
     </div>
   ),
 }));
 vi.mock("@vayada/product-onboarding/GoogleAddressMap", () => ({
-  default: (props: { onPick?: unknown }) => (
-    <div data-testid="map" data-interactive={props.onPick ? "yes" : "no"} />
+  default: (props: { onPick?: unknown; latitude: number | null; longitude: number | null }) => (
+    <div
+      data-testid="map"
+      data-interactive={props.onPick ? "yes" : "no"}
+      data-position={props.latitude === null ? "none" : `${props.latitude},${props.longitude}`}
+    />
   ),
 }));
 vi.mock("@vayada/product-onboarding/googleMaps", () => google);
@@ -182,6 +206,46 @@ describe("QuickHotelAddress (VAY-2247 'Where it is')", () => {
         longitude: 11.582,
         timezone: "Europe/Berlin",
       });
+      renderer.unmount();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("pins a picked street without a house number where Google finds it, then asks for the entrance", async () => {
+    vi.useFakeTimers();
+    google.findAddressOnMap.mockResolvedValueOnce({
+      position: { lat: 48.3897, lng: 10.4378 },
+      precise: false,
+    });
+    try {
+      const Harness = () => {
+        const [draft, setDraft] = useState<QuickHotelAddressProps["draft"]>(EMPTY);
+        return (
+          <QuickHotelAddress
+            draft={draft}
+            onChange={(patch) => setDraft((current) => ({ ...current, ...patch }))}
+            apiKey="key"
+          />
+        );
+      };
+      const renderer = create(<Harness />);
+      await act(async () => byTestId(renderer, "pick-street")[0]!.props.onClick());
+      // Before the lookup: no pin yet.
+      expect(byTestId(renderer, "map")[0]!.props["data-position"]).toBe("none");
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(700);
+      });
+      expect(google.findAddressOnMap).toHaveBeenLastCalledWith(
+        "key",
+        "Isabella-Braun-Straße, 89343 Jettingen-Scheppach, Germany",
+      );
+      // The map centres on the street with a pin, and opens to drag it to the entrance.
+      const map = byTestId(renderer, "map")[0]!;
+      expect(map.props["data-position"]).toBe("48.3897,10.4378");
+      expect(map.props["data-interactive"]).toBe("yes");
+      expect(text(renderer)).toContain("Pin placed on the map");
+      expect(text(renderer)).toContain("Drag the pin to your entrance.");
       renderer.unmount();
     } finally {
       vi.useRealTimers();
