@@ -320,6 +320,8 @@ const REFERENCES = [
   "identity.users <- finance.commission_rate_changes(changed_by_user_id) n",
   "identity.users <- hotel_catalog.hotel_account_invites(created_by_user_id) n",
   "identity.users <- hotel_catalog.hotel_account_invites(redeemed_by_user_id) n",
+  // 0503 (VAY-2247, live before W3): a removed user's own checklist view state goes with the user.
+  "identity.users <- hotel_catalog.setup_checklist_viewer_states(user_id) c",
   "identity.users <- identity.consent_history(user_id) n",
   "identity.users <- identity.cookie_consents(user_id) n",
   "identity.users <- identity.gdpr_requests(user_id) c",
@@ -346,9 +348,11 @@ describe.skipIf(!URL)("creator identity and media removal 0500", () => {
       let file = "";
       for (const name of await readdir(MIGRATIONS)) {
         if (!/^\d{4}_/.test(name)) continue;
-        if (Number(name.slice(0, 4)) < MIGRATION)
+        const version = Number(name.slice(0, 4));
+        // Production applies 0500 after 0503 and 0504, which were live before W3.
+        if (version < MIGRATION || version > 502)
           await cp(join(MIGRATIONS, name), join(before, name));
-        if (Number(name.slice(0, 4)) === MIGRATION) file = name;
+        if (version === MIGRATION) file = name;
       }
       expect((await run(before)).failed).toBeNull();
       target = new pg.Client({ connectionString: targetUrl.href });
@@ -414,7 +418,7 @@ describe.skipIf(!URL)("creator identity and media removal 0500", () => {
       };
       expect(await state()).toEqual(seeded);
 
-      // Later migrations may change what this checks, so it stops at 0500.
+      // 0501 and 0502 may change what this checks, so it applies 0500 alone.
       await cp(join(MIGRATIONS, file), join(before, file));
       for (const [label, trip, undo, message] of GATES) {
         await write(trip);

@@ -87,8 +87,35 @@ export function activeBookingPublicationGateConfig(): ActiveBookingPublicationGa
   return gateConfig;
 }
 
+/** A hotel's booking addresses: its active canonical slug, and former ones that now redirect to it
+ * (VAY-2295). Slugs are unique for good, so a former address never belongs to another hotel. */
+export const hotelAddressSql = (row: string) =>
+  `((${row}.purpose='canonical' AND ${row}.status='active')` +
+  ` OR (${row}.purpose='redirect' AND ${row}.status='redirected'))`;
+
+/** Whether the live page still sells under `slug`, an address of the property the caller has
+ * already locked: the page must carry one of the hotel's addresses. Between an address change and
+ * its republish the page carries the former one; open tabs keep either (VAY-2295). */
+export async function publicationServesAddress(
+  queryable: Queryable,
+  propertyId: string,
+  slug: string,
+  content: BookingPublicContent | null,
+): Promise<boolean> {
+  const pageSlug = content?.profile.hotel.slug;
+  if (!pageSlug) return false;
+  if (pageSlug === slug) return true;
+  const result = await queryable.query(
+    `SELECT 1 FROM hotel_catalog.property_slugs s
+     WHERE s.property_id=$1::uuid AND s.slug=$2 AND s.locale IS NULL AND ${hotelAddressSql("s")}
+     FOR SHARE`,
+    [propertyId, pageSlug],
+  );
+  return result.rows.length === 1;
+}
+
 /**
- * Locks the active Booking publication under a property's canonical, locale-less slug (slug,
+ * Locks the active Booking publication under one of a property's locale-less addresses (slug,
  * property, location, then the active row, like the legacy profile read) and says whether the
  * property has none, has one the public site hides, or has a visible one. A hotel that published
  * in setup is judged by its page, not by a legacy bookability profile (VAY-2134).
@@ -108,8 +135,7 @@ export async function lockActiveBookingPublication(
      JOIN distribution.active_public_booking_revision active ON active.property_id=p.id
      JOIN distribution.public_booking_content_revisions revision
        ON revision.id=active.content_revision_id AND revision.property_id=active.property_id
-     WHERE s.slug=$1 AND s.locale IS NULL AND s.property_id=$2::uuid
-       AND s.purpose='canonical' AND s.status='active'
+     WHERE s.slug=$1 AND s.locale IS NULL AND s.property_id=$2::uuid AND ${hotelAddressSql("s")}
      FOR SHARE OF s,p,location,active`,
     [slug, propertyId],
   );
@@ -123,7 +149,9 @@ export async function lockActiveBookingPublication(
   }
   if (result.rows.length !== 1 || row.propertyActive !== true) return "hidden";
   const content = await visibleActiveBookingPublication(queryable, row, context);
-  return content?.profile.hotel.slug === slug ? "visible" : "hidden";
+  return (await publicationServesAddress(queryable, propertyId, slug, content))
+    ? "visible"
+    : "hidden";
 }
 
 export const normalizedDomain = (value: string) => {

@@ -315,6 +315,11 @@ describe.skipIf(!TEST_DATABASE_URL)("canonical property profile repository", () 
       correlationId: "profile-revision-integration-create",
       profile,
     });
+    // VAY-2247: complete from creation, because the basics are there (photos and a description are optional).
+    await expect(readProfileCompleteness(created.propertyId)).resolves.toEqual({
+      profileStatus: "complete",
+      completenessReasons: [],
+    });
     expect(created).toMatchObject({
       profileRevision: 1,
       profile: {
@@ -517,8 +522,8 @@ describe.skipIf(!TEST_DATABASE_URL)("canonical property profile repository", () 
       },
     });
     await expect(readProfileCompleteness(created.propertyId)).resolves.toEqual({
-      profileStatus: "incomplete",
-      completenessReasons: ["media"],
+      profileStatus: "complete",
+      completenessReasons: [],
     });
 
     await expect(
@@ -660,8 +665,8 @@ describe.skipIf(!TEST_DATABASE_URL)("canonical property profile repository", () 
       },
     });
     await expect(readProfileCompleteness(created.propertyId)).resolves.toEqual({
-      profileStatus: "incomplete",
-      completenessReasons: ["media"],
+      profileStatus: "complete",
+      completenessReasons: [],
     });
     await expect(
       repository.updatePublicPropertyProfile({

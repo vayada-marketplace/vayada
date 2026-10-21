@@ -59,7 +59,7 @@ function publicHotelResponse(
 }
 
 describe("Booking Web public hotel adapter", () => {
-  it("maps the Booking header logo without changing the image fallback", () => {
+  it("maps the Booking header logo and never uses it as the hero (VAY-2247)", () => {
     const response = publicHotelResponse();
     response.hotel.branding = {
       logoUrl: "https://cdn.vayada.example/alpenrose/logo.webp",
@@ -73,7 +73,7 @@ describe("Booking Web public hotel adapter", () => {
     const hotel = toLegacyHotel(response);
 
     expect(hotel.branding?.logoUrl).toBe("https://cdn.vayada.example/alpenrose/logo.webp");
-    expect(hotel.heroImage).toBe("/vayada-logo.png");
+    expect(hotel.heroImage).toBeNull();
   });
 
   it("offers the published display currencies, else only the hotel currency", () => {
@@ -198,8 +198,10 @@ describe("Booking Web public hotel adapter", () => {
       "https://cdn.vayada.example/pool.jpg",
       "https://cdn.vayada.example/lobby.jpg",
     ]);
+    // Without a hero photo the first gallery photo leads; without any photo the pages draw a placeholder.
     response.hotel.branding = undefined;
-    expect(toLegacyHotel(response).heroImage).toBe("/vayada-logo.png");
+    expect(toLegacyHotel(response).heroImage).toBe("https://cdn.vayada.example/pool.jpg");
     expect(toLegacyHotel(publicHotelResponse()).images).toEqual([]);
+    expect(toLegacyHotel(publicHotelResponse()).heroImage).toBeNull();
   });
 });

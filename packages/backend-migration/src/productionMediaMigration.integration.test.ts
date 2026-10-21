@@ -149,8 +149,8 @@ describe.skipIf(!URL)("production media migration (PostgreSQL)", () => {
       quarantineRows: 1,
       quarantineRedacted: true,
       objects: 2,
-      // Two public Booking images with four variants each. Legacy Marketplace media needs a
-      // Marketplace owner link, which 0500 deleted and 0501 refuses (VAY-2272).
+      // Two public Booking images with four variants each. A legacy Marketplace hotel picture
+      // needs a Marketplace owner link, which 0500 deleted and 0501 refuses (VAY-2272).
       variants: 8,
     });
 
@@ -291,8 +291,8 @@ async function seed(client: pg.Client): Promise<void> {
   );
   await client.query(
     `INSERT INTO identity.organization_resource_links
-       (organization_id, product, resource_type, resource_id, relationship)
-     VALUES ($1, 'booking', 'booking_hotel', $2, 'owner')`,
+       (organization_id, product, resource_type, resource_id, relationship, status)
+     VALUES ($1, 'booking', 'booking_hotel', $2, 'owner', 'active')`,
     [ORGANIZATION, HOTEL],
   );
 }

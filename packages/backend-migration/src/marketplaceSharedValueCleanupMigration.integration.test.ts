@@ -53,7 +53,8 @@ describe.skipIf(!URL)("Marketplace shared value cleanup 0501", () => {
       let file = "";
       for (const name of await readdir(MIGRATIONS)) {
         if (!/^\d{4}_/.test(name)) continue;
-        if (Number(name.slice(0, 4)) < MIGRATION)
+        // Production applies 0501 last: 0500, 0502, 0503 and 0504 were live before W4.
+        if (Number(name.slice(0, 4)) !== MIGRATION)
           await cp(join(MIGRATIONS, name), join(before, name));
         if (Number(name.slice(0, 4)) === MIGRATION) file = name;
       }
@@ -326,7 +327,8 @@ describe.skipIf(!URL)("Marketplace shared value cleanup 0501", () => {
       let file = "";
       for (const name of await readdir(MIGRATIONS)) {
         if (!/^\d{4}_/.test(name)) continue;
-        if (Number(name.slice(0, 4)) < MIGRATION)
+        // Production applies 0501 last: 0500, 0502, 0503 and 0504 were live before W4.
+        if (Number(name.slice(0, 4)) !== MIGRATION)
           await cp(join(MIGRATIONS, name), join(before, name));
         if (Number(name.slice(0, 4)) === MIGRATION) file = name;
       }

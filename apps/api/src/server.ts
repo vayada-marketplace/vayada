@@ -57,7 +57,10 @@ import { createHmac } from "node:crypto";
 
 import { buildApp, type ApiAuthOptions } from "./app.js";
 import { createOrdinaryHotelSetupLogoRuntime } from "./hotelSetupLogoRuntime.js";
-import { createOrdinaryHotelSetupProfileCommand } from "./platform/hotelSetupProfileWriter.js";
+import {
+  createOrdinaryHotelSetupActivation,
+  createOrdinaryHotelSetupProfileCommand,
+} from "./platform/hotelSetupProfileWriter.js";
 import { createOrdinaryHotelSetupLaunchSettingsCommand } from "./hotelSetupLaunchSettingsRepository.js";
 import { createOrdinaryHotelSetupFeatureHubCommands } from "./hotelSetupFeatureHubOrdinary.js";
 import {
@@ -126,6 +129,7 @@ import { createAdminTransferCoordinator } from "./platform/adminTransferCoordina
 import { createWorkOSAdminReauthentication } from "./platform/workosAdminReauthentication.js";
 import { startStaffRemovalWorker } from "./platform/staffRemovalWorker.js";
 import { installPostgresPoolRuntime } from "./platform/postgresRuntime.js";
+import { createPostgresSaturationAlert } from "./platform/postgresSaturationAlert.js";
 import {
   createPgWorkosWebhookStore,
   createWorkosWebhookVerifier,
@@ -289,7 +293,16 @@ import { createPgTargetBookingPromoCodesRepository } from "./routes/bookingPromo
 import { promotePulledChannexBookingRevision } from "./routes/providerWebhooks.js";
 import { createTargetBookingWebCheckoutAdapter } from "./routes/bookingWebPublic.js";
 import { createBookingWebDisplayRates } from "./routes/bookingWebExchangeRates.js";
-import { createPgTargetBookingSettingsRepository } from "./routes/bookingSettings.js";
+import {
+  createPgTargetBookingSettingsRepository,
+  toLocalizationSettingsResponse,
+} from "./routes/bookingSettings.js";
+import {
+  createDedicatedLockConnections,
+  createHotelFirstRunRuntime,
+} from "./domains/hotelFirstRunRuntime.js";
+import { createPgHotelSetupChecklistRepository } from "./domains/hotelSetupChecklistRepository.js";
+import { createHotelSetupChecklistService } from "./domains/hotelSetupChecklistService.js";
 import { createTargetBookingCustomDomainRepository } from "./routes/bookingCustomDomain.js";
 import {
   createTargetFinancePropertySettingsRepository,
@@ -316,6 +329,7 @@ import { createPgIdentityPrivacyRepository } from "./routes/identityPrivacy.js";
 import { createTargetPlatformAdminDashboardRepository } from "./routes/platform/admin/dashboard/bookingCompatible.js";
 import { createPgPlatformPropertyLifecycleCommandRepository } from "./domains/platformPropertyLifecycleCommandRepository.js";
 import { createPgPlatformPropertyLifecycleImpactRepository } from "./domains/platformPropertyLifecycleImpactRepository.js";
+import { createPropertySlugChangeCommand } from "./domains/propertySlugChange.js";
 import { createPgPlatformPropertyProvisioningRepository } from "./domains/platformPropertyProvisioningRepository.js";
 import { createPgPlatformContactIntakeRepository } from "./routes/platformContactIntake.js";
 import {
@@ -1545,6 +1559,90 @@ const airbnbImportRuntime = config.airbnbImport
       allowedOrigins: config.authSession!.authAllowedOrigins,
     })
   : undefined;
+// VAY-2247: the server's first run for the new setup in Booking Admin, behind HOTEL_FIRST_RUN_ENABLED.
+// It only reuses runtimes built above; when one is missing the route stays unmounted (fail closed).
+const hotelFirstRun = (() => {
+  if (!config.hotelFirstRunEnabled) return undefined;
+  const ordinary =
+    "hotelSetupProfileCommand" in hotelSetupOrdinaryOptions ? hotelSetupOrdinaryOptions : undefined;
+  const currency = ordinary?.hotelSetupCurrencyCommandPort;
+  const profileCommand = ordinary?.hotelSetupProfileCommand;
+  const readiness = bookingPublicationRuntime?.routes.readinessProvider;
+  const calendarRuntime = pmsOperatingCalendarRuntime;
+  const materialization = calendarRuntime?.routes.materializationPort;
+  if (
+    !hotelSetupOrdinaryPool ||
+    !currency ||
+    !profileCommand ||
+    !pmsRoomSetupRuntime ||
+    !financeSubscriptionService ||
+    !readiness ||
+    !calendarRuntime ||
+    !materialization
+  ) {
+    process.emitWarning(
+      "HOTEL_FIRST_RUN_ENABLED is on, but a runtime it needs is not configured; the first-run route stays unmounted",
+    );
+    return undefined;
+  }
+  const hotelFirstRunTerms = createBookingGuestTermsStore(propertySetupOwnerPool, (client) =>
+    createPgBookingGuestPolicyScopeAuthorizationPort({ pool: client }),
+  );
+  return createHotelFirstRunRuntime({
+    // Its own connection per run, outside the shared pools (VAY-2247 incident, 2026-10-21).
+    lockPool: createDedicatedLockConnections(targetDatabaseUrl),
+    pricingPool: propertySetupOwnerPool,
+    profile: sharedHotelSetupStatusRepository,
+    profileCommand,
+    activateProperty: createOrdinaryHotelSetupActivation(hotelSetupOrdinaryPool),
+    launchSettings: {
+      async readDefaultLanguage(propertyId) {
+        const settings = await findPropertyLaunchSettings(propertyId);
+        return settings ? toLocalizationSettingsResponse(settings).defaultLanguage : null;
+      },
+    },
+    pricingRead: pmsPricingReadModel,
+    currency,
+    roomRead: propertySetupPmsRuntime.roomFacts,
+    roomFacts: pmsRoomSetupRuntime.roomFactsCommands,
+    units: pmsRoomSetupRuntime.physicalUnits,
+    labels: pmsRoomSetupRuntime.operationalLabels,
+    paymentRead: financePaymentSetupRuntime.routes.readPort,
+    payments: financePaymentSetupRuntime.routes.commandPort,
+    calendarRead: calendarRuntime.routes.readPort,
+    preview: calendarRuntime.routes.impactPreviewPort,
+    calendar: calendarRuntime.routes.commandPort,
+    materialization,
+    guestRules: bookingGuestChoiceStore,
+    terms: {
+      read: (scope) => hotelFirstRunTerms.read(scope),
+      // The first run only saves the non-empty default text, so the saved text is never null here.
+      save: async (scope, text, expected) => ({
+        termsText: (await hotelFirstRunTerms.save(scope, text, expected)).termsText ?? "",
+      }),
+    },
+    designRead: bookingDesignRepository,
+    design: bookingDesignRepository,
+    plans: financeSubscriptionService,
+    readiness,
+  });
+})();
+// VAY-2247 wave 2: the setup checklist both dashboards show, with the first run (it reads its state).
+const hotelSetupChecklist = (() => {
+  if (!hotelFirstRun) return undefined;
+  const checklist = createPgHotelSetupChecklistRepository(propertySetupOwnerPool);
+  // As the booking page's card acceptance: until it is on, online cards say "Later" (VAY-2205).
+  const onlineCardsOffered =
+    config.replacementPricingAcceptanceEnabled === true &&
+    config.replacementPricingCardAcceptanceEnabled === true &&
+    !!stripeBookingPaymentProvider;
+  return (context: Parameters<typeof hotelFirstRun>[0]) =>
+    createHotelSetupChecklistService({
+      firstRun: hotelFirstRun(context),
+      ...checklist,
+      onlineCardsOffered,
+    });
+})();
 const app = buildApp({
   airbnbImports: airbnbImportRuntime?.routes,
   databaseHealth: postgresRuntime.healthCheck(targetDatabaseUrl),
@@ -1803,6 +1901,8 @@ const app = buildApp({
   pmsNavigationModuleRepository,
   bookingModuleRepository,
   ...hotelSetupOrdinaryOptions,
+  hotelFirstRun,
+  hotelSetupChecklist,
   financialsActivationPropertyIds: config.financialsActivationPropertyIds,
   pmsReviewRepository: createPgPmsReviewRepository({
     connectionString: targetDatabaseUrl,
@@ -1923,6 +2023,18 @@ const app = buildApp({
     provisioningRepository: createPgPlatformPropertyProvisioningRepository({
       connectionString: targetDatabaseUrl,
       setupRepository: sharedHotelSetupStatusRepository,
+    }),
+  },
+  platformPropertySlug: {
+    command: createPropertySlugChangeCommand({
+      connectionString: targetDatabaseUrl,
+      // A live page is republished only where the public site serves setup publications.
+      ...(config.publicHotelProfileSource === "active_publication" && bookingPublicationRuntime
+        ? {
+            refresh: bookingPublicationRuntime.refresh.bind(bookingPublicationRuntime),
+            readiness: bookingPublicationRuntime.routes.readinessProvider,
+          }
+        : {}),
     }),
   },
   pmsOperationsAllowedOrigins: config.pmsOperationsAllowedOrigins,
@@ -2079,7 +2191,21 @@ app.addHook("preClose", async () => {
   await pmsAcceptedPricingReservationWorker?.close();
 });
 
-const stopPostgresTelemetry = postgresRuntime.startTelemetry(app.log);
+// VAY-2247 incident: the pricing alert recipient (ops) hears when requests have waited for a database
+// connection for 30 s without a break, at most once an hour per task.
+const postgresSaturationAlert =
+  config.pricingPublicationFreshnessAlertEmail && config.bookingEmailDelivery
+    ? createPostgresSaturationAlert({
+        to: config.pricingPublicationFreshnessAlertEmail,
+        delivery: createResendBookingEmailDelivery(config.bookingEmailDelivery),
+      })
+    : undefined;
+const stopPostgresTelemetry = postgresRuntime.startTelemetry(app.log, 1_000, {
+  onSustainedSaturation: (episode) =>
+    void postgresSaturationAlert?.(episode).catch((error: unknown) =>
+      app.log.warn({ err: error }, "PostgreSQL saturation alert failed"),
+    ),
+});
 app.addHook("onReady", async () => {
   await bankTransferRepository?.assertConfigured();
 });

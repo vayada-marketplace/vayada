@@ -31,7 +31,17 @@
     "./AcceptedPaymentMethods": "./src/AcceptedPaymentMethods.tsx",
     "./pricingSetupAmounts": "./src/pricingSetupAmounts.ts",
     "./firstPricingSetupMessages": "./src/firstPricingSetupMessages.ts",
-    "./bookingPublicationReviewApi": "./src/bookingPublicationReviewApi.ts"
+    "./bookingPublicationReviewApi": "./src/bookingPublicationReviewApi.ts",
+    "./setupProfileFields": "./src/setupProfileFields.tsx",
+    "./GooglePlacesAddressField": "./src/GooglePlacesAddressField.tsx",
+    "./GoogleAddressMap": "./src/GoogleAddressMap.tsx",
+    "./googleMaps": "./src/googleMaps.ts",
+    "./TimezoneField": "./src/TimezoneField.tsx",
+    "./timezones": "./src/timezones.ts",
+    "./HotelSetupChecklistCard": "./src/HotelSetupChecklistCard.tsx",
+    "./hotelSetupChecklistMessages": "./src/hotelSetupChecklistMessages.ts",
+    "./hotelSetupChecklistApi": "./src/hotelSetupChecklistApi.ts",
+    "./CountryPhoneField": "./src/CountryPhoneField.tsx"
   },
   "dependencies": {
     "@vayada/domain-booking": "*",

@@ -9,10 +9,36 @@ import { createPgFinanceManualExpenseRepository } from "../domains/financeManual
 import {
   cachedHealthCheck,
   installPostgresPoolRuntime,
+  isPostgresLockTimeoutError,
   isPostgresUnavailableError,
+  poolSaturationEpisodes,
+  type PostgresPoolSnapshot,
 } from "./postgresRuntime.js";
 
 describe("PostgreSQL runtime capacity", () => {
+  it("reports a saturation episode once, after 30 s of waiting without a break (VAY-2247 incident)", () => {
+    const sample = (waitingRequests: number): PostgresPoolSnapshot => ({
+      physicalPoolCount: 2,
+      maxConnections: 9,
+      totalConnections: 9,
+      idleConnections: 1,
+      waitingRequests,
+      stalledPools: 0,
+    });
+    const episodes = poolSaturationEpisodes();
+    const reported: number[] = [];
+    // Waiting for 40 s, with a 2 s gap at 10 s that doesn't end the episode.
+    for (let second = 0; second <= 40; second += 1) {
+      const episode = episodes(sample(second === 10 || second === 11 ? 0 : 3), second * 1_000);
+      if (episode) reported.push(episode.durationMs);
+    }
+    expect(reported).toEqual([30_000]);
+    // Five quiet seconds end it; the next one is reported again after its own 30 s.
+    for (let second = 41; second <= 46; second += 1) episodes(sample(0), second * 1_000);
+    expect(episodes(sample(2), 47_000)).toBeNull();
+    expect(episodes(sample(2), 76_000)).toBeNull();
+    expect(episodes(sample(2), 77_000)).toMatchObject({ durationMs: 30_000, waitingRequests: 2 });
+  });
   it("keeps the Airbnb decision journal physically separate under server pool sharing", async () => {
     const OriginalPool = pg.Pool;
     const pools = installPostgresPoolRuntime(pg);
@@ -189,12 +215,32 @@ describe("PostgreSQL runtime capacity", () => {
     expect(await check()).toBe(true);
     expect(probes).toBe(3);
   });
+  it("counts a probe that never settles as down, then probes again (VAY-2247 incident)", async () => {
+    let time = 0;
+    let probes = 0;
+    let stuck = true;
+    const check = cachedHealthCheck(
+      () => {
+        probes += 1;
+        return stuck ? new Promise<never>(() => undefined) : Promise.resolve();
+      },
+      5_000,
+      () => time,
+      20,
+    );
+    expect(await check()).toBe(false);
+    stuck = false;
+    time = 5_000;
+    expect(await check()).toBe(true);
+    expect(probes).toBe(2);
+  });
   it("reports an unreachable database through its own probe connection", async () => {
     const postgres = { Pool: pg.Pool };
     const runtime = installPostgresPoolRuntime(postgres);
     const check = runtime.healthCheck("postgresql://vayada@127.0.0.1:1/target");
     try {
-      expect(await check()).toBe(false);
+      expect(await check.liveness()).toBe(false);
+      expect(await check.readiness()).toBe(false);
       expect(runtime.snapshot().physicalPoolCount).toBe(0);
     } finally {
       await runtime.close();
@@ -281,6 +327,44 @@ describe("PostgreSQL runtime capacity", () => {
       await pool.end();
       await runtime.close();
     }
+  });
+  it("answers 409 busy_try_again with Retry-After when a lock wait gives up, wrapped or not (VAY-2247)", async () => {
+    const app = buildApp({ logger: false });
+    const lockTimeout = () =>
+      Object.assign(new Error("canceling statement due to lock timeout"), { code: "55P03" });
+    app.get("/__test/lock-timeout", async () => {
+      throw lockTimeout();
+    });
+    // As the card payment completion wraps it: a 503 with the original as its cause.
+    app.get("/__test/lock-timeout-wrapped", async () => {
+      throw Object.assign(
+        new Error("Card payment temporarily unavailable.", { cause: lockTimeout() }),
+        {
+          statusCode: 503,
+        },
+      );
+    });
+    for (const url of ["/__test/lock-timeout", "/__test/lock-timeout-wrapped"]) {
+      const response = await app.inject({ method: "GET", url });
+      expect(response.statusCode, url).toBe(409);
+      expect(response.headers["retry-after"]).toBe("3");
+      expect(response.json()).toEqual({
+        statusCode: 409,
+        error: "Conflict",
+        message: "Someone else is changing this right now. Try again in a moment.",
+        code: "busy_try_again",
+        retryAfterSeconds: 3,
+      });
+    }
+    await app.close();
+  });
+  it("tells a lock wait that gave up apart from other database errors", () => {
+    expect(isPostgresLockTimeoutError({ code: "55P03" })).toBe(true);
+    expect(isPostgresLockTimeoutError(new Error("wrapped", { cause: { code: "55P03" } }))).toBe(
+      true,
+    );
+    for (const other of [{ code: "40P01" }, { code: "53300" }, { code: "57014" }, null, "55P03"])
+      expect(isPostgresLockTimeoutError(other)).toBe(false);
   });
   it("returns a typed 503 when PostgreSQL cannot acquire a connection", async () => {
     const app = buildApp({ logger: false });

@@ -1,5 +1,5 @@
--- VAY-2272 (Marketplace removal step 5, W1). HOLD: merge only with Flamur's yes, after the
--- counts-0496 before-run, behind the release barrier vay2272-0496-invite-move.
+-- VAY-2272 (Marketplace removal step 5, W1). Held by hand: merged in release window W1 with
+-- Flamur's yes, after the counts-0496 before-run; the after-run checks the release.
 --
 -- Hotel account invites (Vayada Admin issues them, Booking Admin /invite redeems them, prepared
 -- hotel imports hang off them) leave the Marketplace schema: the table moves to

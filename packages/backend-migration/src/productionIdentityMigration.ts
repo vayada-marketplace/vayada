@@ -25,6 +25,7 @@ export type ProductionIdentityMigrationReport = {
   checksum: string;
   counts: ProductionIdentityCounts;
   retiredAuthRows: Record<string, number>;
+  retiredProductUserRows: Record<string, number>;
   blockers: IdentityMigrationBlocker[];
 };
 export type ProductionIdentityMigrationServices = {
@@ -144,6 +145,7 @@ function report(
     checksum: plan.checksum,
     counts: plan.counts,
     retiredAuthRows: plan.retiredAuthRows,
+    retiredProductUserRows: plan.retiredProductUserRows,
     blockers: plan.blockers,
   };
 }
