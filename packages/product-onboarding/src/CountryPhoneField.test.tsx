@@ -80,7 +80,10 @@ describe("CountryPhoneField", () => {
     const options = field.renderer.root.findAllByProps({ role: "option" });
     expect(options.map((option) => option.props.id.split("-").at(-1))).toEqual(["AT"]);
     act(() => search.props.onKeyDown({ key: "Enter", preventDefault: () => undefined }));
-    expect(field.onChange).toHaveBeenLastCalledWith("+43 30 1234567");
+    // Same national number, now with Austria's dial code (spacing is libphonenumber's).
+    const stored = field.onChange.mock.lastCall![0] as string;
+    expect(stored.replace(/\s/g, "")).toBe("+43301234567");
+    expect(field.button().props["aria-label"]).toBe("Your phone country: Austria +43");
     expect(field.renderer.root.findAllByProps({ role: "listbox" })).toHaveLength(0);
   });
 
