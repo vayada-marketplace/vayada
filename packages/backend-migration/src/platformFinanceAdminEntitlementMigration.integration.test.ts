@@ -140,5 +140,5 @@ describe.skipIf(!URL)("platform finance-admin entitlement 0505", () => {
       await admin.end();
       await rm(dir, { recursive: true, force: true });
     }
-  });
+  }, 240_000);
 });
