@@ -48,7 +48,7 @@ const buttonsNamed = (renderer: ReactTestRenderer, label: string) =>
 describe("QuickGoLiveStep (VAY-2247 step 5)", () => {
   it("shows the booking page, what the first run filled in and the publish choice", () => {
     const markup = renderToStaticMarkup(<QuickGoLiveStep {...props()} />);
-    expect(markup).toContain("Step 5 of 5");
+    expect(markup).toContain("Step 7 of 7");
     expect(markup).toContain("Does this look right?");
     expect(markup).toContain(
       "This is your booking page. Publish it now — you can change everything later.",

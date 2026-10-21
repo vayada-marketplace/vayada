@@ -4,7 +4,7 @@ import { ExclamationCircleIcon } from "@heroicons/react/24/outline";
 import { useId, type InputHTMLAttributes, type ReactNode } from "react";
 
 export const QUICK_SETUP_INPUT =
-  "h-11 w-full rounded-[10px] border bg-white px-3.5 text-[15px] text-gray-950 outline-none transition placeholder:text-gray-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100";
+  "h-12 w-full rounded-xl border bg-white px-3.5 text-base text-gray-950 outline-none transition placeholder:text-gray-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100";
 
 export type QuickSetupFieldProps = {
   label: string;

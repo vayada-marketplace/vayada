@@ -40,7 +40,8 @@
     "./timezones": "./src/timezones.ts",
     "./HotelSetupChecklistCard": "./src/HotelSetupChecklistCard.tsx",
     "./hotelSetupChecklistMessages": "./src/hotelSetupChecklistMessages.ts",
-    "./hotelSetupChecklistApi": "./src/hotelSetupChecklistApi.ts"
+    "./hotelSetupChecklistApi": "./src/hotelSetupChecklistApi.ts",
+    "./CountryPhoneField": "./src/CountryPhoneField.tsx"
   },
   "dependencies": {
     "@vayada/domain-booking": "*",

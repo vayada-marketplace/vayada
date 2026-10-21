@@ -128,7 +128,7 @@ export function QuickGoLiveStep({
 }: QuickGoLiveStepProps) {
   // Leaving while it publishes is fine: the request is saved and the server finishes it.
   return (
-    <QuickSetupShell step={5} onSaveAndExit={onSaveAndExit}>
+    <QuickSetupShell step={7} onSaveAndExit={onSaveAndExit}>
       <div className="mx-auto w-full max-w-[792px] px-4 pb-6 pt-4 lg:px-4 lg:pb-16 lg:pt-10">
         <section
           aria-labelledby="quick-setup-heading"

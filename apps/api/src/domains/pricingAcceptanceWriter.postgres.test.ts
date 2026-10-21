@@ -169,6 +169,13 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
       [fixture.propertyId, slug],
     );
     const accountId = randomUUID();
+    // A K5 case that timed out keeps running and still holds the real test account's row, so every
+    // later case would fail on the unique account id: rename the leftover instead.
+    await fixture.observer.query(
+      `UPDATE finance.payment_provider_accounts SET provider_account_id=provider_account_id||'_stale_'||left(id::text,8)
+       WHERE provider='stripe' AND provider_account_id=$1`,
+      [accountRef],
+    );
     await fixture.observer.query(
       `INSERT INTO finance.payment_provider_accounts(id,property_id,account_scope,provider,provider_account_id,status,
         onboarding_status,charges_enabled,payouts_enabled,capabilities,card_capability_revision,account_metadata)
@@ -885,6 +892,8 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
   const stripeTestMode =
     !!stripeKey && /^(sk|rk)_test_/.test(stripeKey) && !!stripeAccount?.startsWith("acct_");
   const stripeCurrency = process.env.STRIPE_TEST_CURRENCY?.toUpperCase();
+  // Every K5 case calls Stripe several times: vitest's 5 s default is too short (2026-10-21 run).
+  const stripeTestTimeout = 180_000;
   const confirmWithTestCard = async (paymentIntentId: string, paymentMethod: string) => {
     const response = await fetch(
       `https://api.stripe.com/v1/payment_intents/${paymentIntentId}/confirm`,
@@ -973,6 +982,7 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
         await fixture.close();
       }
     },
+    stripeTestTimeout,
   );
 
   it.skipIf(!stripeTestMode)(
@@ -1020,6 +1030,7 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
         await fixture.close();
       }
     },
+    stripeTestTimeout,
   );
 
   // K5 for VAY-2205: refunds, holds and deposits against Stripe test mode, same gate as above.
@@ -1031,6 +1042,8 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
       deposit?: boolean;
       cancellation?: unknown;
       card?: string;
+      /** A commission plan: the charge carries Vayada's application fee (the fixture's fixed plan has none). */
+      commission?: boolean;
     } = {},
   ) {
     const mode = options.mode ?? "instant";
@@ -1060,6 +1073,7 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
       },
       30,
     );
+    if (options.commission) Object.assign(fixture.f.finance, { billingPlanSnapshot: "commission" });
     const provider = createStripeBookingPaymentProvider({ secretKey: stripeKey! });
     const required = (await writePricingAcceptance(
       fixture.pool,
@@ -1137,12 +1151,16 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
       for (let waited = 0; ; waited += 5) {
         const command = (
           await fixture.observer.query(
-            `SELECT id,status,provider_status,failure_reason,attempts FROM finance.card_refund_commands
-             WHERE guest_booking_id=$1 ORDER BY created_at DESC LIMIT 1`,
+            `SELECT id,status,provider_status,provider_refund_id,failure_reason,attempts,amount::text AS amount
+             FROM finance.card_refund_commands WHERE guest_booking_id=$1 ORDER BY created_at DESC LIMIT 1`,
             [required.bookingId],
           )
         ).rows[0];
-        if (!command || command.status !== "pending") return command;
+        const settled = !command || command.status !== "pending";
+        // Kept in the K5 log (the fixture deletes the rows when it closes): ids and statuses only.
+        if (settled || waited >= seconds)
+          console.info(`K5 refund command ${JSON.stringify(command ?? null)}`);
+        if (settled) return command;
         if (waited >= seconds)
           throw new Error(
             `Refund still pending after ${seconds} s: Stripe status ${command.provider_status ?? "none"}, ` +
@@ -1193,7 +1211,6 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
       close,
     };
   }
-  const stripeTestTimeout = 180_000;
   // Stripe refunds from the hotel account's available balance, and a new test account has none:
   // the refund cases pay with Stripe's test card whose funds are available at once.
   const availableNow = "pm_card_bypassPending";
@@ -1228,6 +1245,43 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
         expect(refunds).toHaveLength(1);
         expect(refunds[0]).toMatchObject({ status: "succeeded", amountMinor: paid });
         expect(refunds[0]!.commandId).toMatch(/^[0-9a-f-]{36}$/);
+      } finally {
+        await stay.close();
+      }
+    },
+    stripeTestTimeout,
+  );
+
+  it.skipIf(!stripeTestMode)(
+    "Stripe test mode: a commission-plan stay's refund also returns Vayada's fee, in proportion",
+    async () => {
+      const stay = await stripeTestStay({ card: availableNow, commission: true });
+      try {
+        const fee = (
+          await stay.fixture.observer.query(
+            "SELECT payment_metadata->>'applicationFeeAmount' AS fee FROM finance.payments WHERE guest_booking_id=$1",
+            [stay.required.bookingId],
+          )
+        ).rows[0].fee as string;
+        const feeMinor = Math.round(Number(fee) * 100);
+        expect(feeMinor).toBeGreaterThan(0);
+        const paid = await stay.stripe();
+        await stay.cancel();
+        expect((await stay.followRefund()).status).toBe("succeeded");
+        expect((await stay.stripe()).amountRefundedMinor).toBe(paid.amountMinor);
+        // The fee lives on the platform account: all of it went back with the full refund.
+        const response = await fetch(
+          `https://api.stripe.com/v1/application_fees?charge=${encodeURIComponent(paid.feeBreakdown!.chargeId)}`,
+          {
+            headers: { Authorization: `Basic ${Buffer.from(`${stripeKey}:`).toString("base64")}` },
+          },
+        );
+        const fees = (await response.json()) as {
+          data?: { amount: number; amount_refunded: number }[];
+          error?: { message?: string };
+        };
+        expect(fees.error?.message).toBeUndefined();
+        expect(fees.data?.[0]).toMatchObject({ amount: feeMinor, amount_refunded: feeMinor });
       } finally {
         await stay.close();
       }

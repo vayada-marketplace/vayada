@@ -3,8 +3,11 @@
 import Image from "next/image";
 import type { ReactNode } from "react";
 
-/** The new first run has five steps: About you, Your hotel, First room and price, How guests pay, Go live. */
-export const QUICK_SETUP_TOTAL_STEPS = 5;
+/**
+ * The new first run has seven steps (approved 2026-10-21): About you, Your hotel, Where it is, How guests
+ * reach you, First room and price, How guests pay, Go live.
+ */
+export const QUICK_SETUP_TOTAL_STEPS = 7;
 
 export type QuickSetupShellProps = {
   /** The step shown in the header; null after setup ("You're live"): the logo only. */
@@ -18,7 +21,7 @@ export type QuickSetupShellProps = {
 
 /**
  * VAY-2247 setup shell (Paper rev 4, header C2): no top bar. The logo sits centred on the page
- * background with "Step N of 5" over five segments, and "Save & exit" is a small link top right.
+ * background with "Step N of 7" over seven segments, and "Save & exit" is a small link top right.
  */
 export function QuickSetupShell({
   step,

@@ -270,6 +270,7 @@ describe("Stripe booking payments", () => {
       paymentIntentId: "pi_booking_1",
       providerAccountRef: "acct_1",
       amountMinor: 4000,
+      refundApplicationFee: true,
       commandId: "command-1",
       propertyId: "property-1",
       bookingReference: "B-001",
@@ -304,6 +305,14 @@ describe("Stripe booking payments", () => {
         "metadata[vayada_property_id]": "property-1",
         "metadata[vayada_booking_reference]": "B-001",
       });
+    });
+
+    it("asks for no fee refund on a charge without Vayada's fee, which Stripe would refuse", async () => {
+      const { calls, provider } = recording(stripeRefund({ failure_reason: null }));
+      await provider.createRefund({ ...input, refundApplicationFee: false });
+      const body = Object.fromEntries(new URLSearchParams(calls[0]!.body));
+      expect(body).not.toHaveProperty("refund_application_fee");
+      expect(body).toMatchObject({ payment_intent: "pi_booking_1", amount: "4000" });
     });
 
     it("refuses a replay that answers for another command, payment or amount", async () => {

@@ -9,6 +9,7 @@ import { createPgFinanceManualExpenseRepository } from "../domains/financeManual
 import {
   cachedHealthCheck,
   installPostgresPoolRuntime,
+  isPostgresLockTimeoutError,
   isPostgresUnavailableError,
   poolSaturationEpisodes,
   type PostgresPoolSnapshot,
@@ -326,6 +327,44 @@ describe("PostgreSQL runtime capacity", () => {
       await pool.end();
       await runtime.close();
     }
+  });
+  it("answers 409 busy_try_again with Retry-After when a lock wait gives up, wrapped or not (VAY-2247)", async () => {
+    const app = buildApp({ logger: false });
+    const lockTimeout = () =>
+      Object.assign(new Error("canceling statement due to lock timeout"), { code: "55P03" });
+    app.get("/__test/lock-timeout", async () => {
+      throw lockTimeout();
+    });
+    // As the card payment completion wraps it: a 503 with the original as its cause.
+    app.get("/__test/lock-timeout-wrapped", async () => {
+      throw Object.assign(
+        new Error("Card payment temporarily unavailable.", { cause: lockTimeout() }),
+        {
+          statusCode: 503,
+        },
+      );
+    });
+    for (const url of ["/__test/lock-timeout", "/__test/lock-timeout-wrapped"]) {
+      const response = await app.inject({ method: "GET", url });
+      expect(response.statusCode, url).toBe(409);
+      expect(response.headers["retry-after"]).toBe("3");
+      expect(response.json()).toEqual({
+        statusCode: 409,
+        error: "Conflict",
+        message: "Someone else is changing this right now. Try again in a moment.",
+        code: "busy_try_again",
+        retryAfterSeconds: 3,
+      });
+    }
+    await app.close();
+  });
+  it("tells a lock wait that gave up apart from other database errors", () => {
+    expect(isPostgresLockTimeoutError({ code: "55P03" })).toBe(true);
+    expect(isPostgresLockTimeoutError(new Error("wrapped", { cause: { code: "55P03" } }))).toBe(
+      true,
+    );
+    for (const other of [{ code: "40P01" }, { code: "53300" }, { code: "57014" }, null, "55P03"])
+      expect(isPostgresLockTimeoutError(other)).toBe(false);
   });
   it("returns a typed 503 when PostgreSQL cannot acquire a connection", async () => {
     const app = buildApp({ logger: false });

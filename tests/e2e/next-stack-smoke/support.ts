@@ -298,7 +298,8 @@ export async function signUpSyntheticHotelOwner(
   // The first run asks for the same details on its own first step, then opens "Your hotel"
   // instead of the wizard's track choice. Either way the hotel is provisioned through the API below.
   if (await page.getByRole("heading", { name: "Hi! Who's setting up the hotel?" }).isVisible()) {
-    await page.getByLabel("Your phone").fill(phone);
+    // Exact: the phone's country button is labelled "Your phone country: …" (VAY-2247 redesign).
+    await page.getByLabel("Your phone", { exact: true }).fill(phone);
     await page.getByRole("button", { name: "Continue", exact: true }).click();
     await page.getByRole("heading", { name: "Your hotel", level: 1 }).waitFor({ timeout: 45_000 });
   } else {

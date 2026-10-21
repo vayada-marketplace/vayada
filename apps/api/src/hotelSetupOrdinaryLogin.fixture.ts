@@ -4,13 +4,12 @@ import pg from "pg";
 /**
  * Test-only login shaped like the production API role `vayada_next_api_runtime` in the
  * VAY-2054 product-DML posture (engineering/api-runtime-database-role.md). The lists below
- * mirror platform `scripts/grant-target-database-runtime-product-dml.mjs` on main as of
- * 2026-10-15 (e8876a7, after #507/#512); update both together, notably when VAY-2057 slice 0.3 edits the
+ * mirror platform `scripts/grant-target-database-runtime-product-dml.mjs` as of VAY-2272 P2
+ * (vayada-platform #594); update both together, notably when VAY-2057 slice 0.3 edits the
  * protected list. listOrdinaryPostureViolations re-runs the preflight's own posture queries. Production additionally keeps legacy
  * SELECT grants on identity tables, which the fixture reproduces with schema-wide SELECT.
- * No default privileges are set: the fixture is applied after migrations. Migration 0499 dropped
- * the marketplace schema; the platform lists keep naming it until P2 (VAY-2272), and the protected
- * names below skip relations that no longer exist.
+ * No default privileges are set: the fixture is applied after migrations. Migrations 0498 and 0499
+ * dropped the affiliate tables and the marketplace schema (VAY-2272), which P2 took off the lists.
  */
 const SCHEMAS = ["hotel_catalog", "booking", "pms", "distribution", "finance", "platform"];
 const RECEIPT = "platform.legacy_owner_bootstrap_receipts";
@@ -19,7 +18,6 @@ const NO_READ = [
   "platform.legacy_historical_binding_transitions",
   "platform.finance_expense_worker_properties",
   "platform.finance_export_worker_properties",
-  "marketplace.affiliate_click_quota_windows",
   "pms.inventory_coverage_validation_queue",
 ];
 const NO_READ_PATTERNS = [
@@ -33,24 +31,18 @@ const NO_WRITE = [
   "platform.legacy_owner_approval_records",
   "platform.legacy_owner_approval_revocations",
   "booking.pricing_runtime_effective_property_scopes",
-  "marketplace.affiliate_click_occurrences",
-  "booking.affiliate_click_contexts",
-  "booking.affiliate_click_admissions",
-  "booking.affiliate_original_booking_bindings",
   "finance.expense_generation_dispatches",
   "pms.channex_room_availability_attempts",
   "pms.channex_room_availability_receipts",
   "pms.channex_room_availability_reconciliation_attestations",
   "pms.channex_ari_schedule_sources",
   "pms.channel_sync_status",
-  "booking.affiliate_referral_production_preflight_revocations",
 ];
 const NO_WRITE_PATTERNS = [
   /^platform\.(production_|source_extraction_|legacy_|channex_adoption_|channex_management_worker_|identity_migration_)/,
   /^pms\.channex_room_availability_/,
   /^pms\.channex_ari_schedule_/,
   /^pms\.channex_offer_ari_deliver/,
-  /^(marketplace|booking)\.affiliate_click_/,
   /^finance\.expense_generation_/,
 ];
 const APPEND_ONLY = [
@@ -62,7 +54,6 @@ const APPEND_ONLY = [
   "pms.channex_offer_target_versions",
   "finance.commission_rate_changes",
   "distribution.external_api_usage_events",
-  "finance.affiliate_percentage_policy_approvals",
   "booking.pricing_quotes",
 ];
 const NO_DELETE = ["hotel_catalog.properties"];

@@ -72,6 +72,9 @@ export type StripeBookingPaymentProvider = {
     paymentIntentId: string;
     providerAccountRef: string;
     amountMinor: number;
+    /** Whether the charge carries Vayada's application fee. Stripe refuses
+     * `refund_application_fee` on a charge without one (a fixed-plan hotel's), refund and all. */
+    refundApplicationFee: boolean;
     commandId: string;
     propertyId: string;
     bookingReference: string;
@@ -200,7 +203,7 @@ export function createStripeBookingPaymentProvider(config: {
           [
             ["payment_intent", input.paymentIntentId],
             ["amount", String(input.amountMinor)],
-            ["refund_application_fee", "true"],
+            ...(input.refundApplicationFee ? [["refund_application_fee", "true"] as const] : []),
             ["reason", "requested_by_customer"],
             ["metadata[vayada_source]", "pricing_v2"],
             ["metadata[vayada_refund_command_id]", input.commandId],

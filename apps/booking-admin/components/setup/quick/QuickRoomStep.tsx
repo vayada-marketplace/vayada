@@ -70,19 +70,13 @@ function DefaultLine({
 }) {
   const choicesId = useId();
   return (
-    <div className="rounded-xl bg-gray-50 px-3 py-3.5">
-      <div className="flex items-start gap-3">
-        <span
-          className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
-            tone === "green" ? "bg-green-50 text-green-600" : "bg-white text-gray-600"
-          }`}
-        >
-          <Icon className="h-4 w-4" aria-hidden="true" />
-        </span>
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold text-gray-950">{title}</p>
-          <p className="mt-0.5 text-[13px] leading-5 text-gray-500">{note}</p>
-        </div>
+    <div className="px-3.5 py-3">
+      <div className="flex items-center gap-2.5">
+        <Icon
+          className={`h-[18px] w-[18px] shrink-0 ${tone === "green" ? "text-green-600" : "text-gray-500"}`}
+          aria-hidden="true"
+        />
+        <p className="min-w-0 flex-1 text-sm font-medium text-gray-950">{title}</p>
         <button
           type="button"
           onClick={onToggle}
@@ -94,7 +88,8 @@ function DefaultLine({
         </button>
       </div>
       {open ? (
-        <div id={choicesId} className="mt-3 sm:pl-11">
+        <div id={choicesId} className="mt-3 sm:pl-7">
+          <p className="mb-2 text-[13px] leading-5 text-gray-500">{note}</p>
           {children}
         </div>
       ) : null}
@@ -277,7 +272,7 @@ export function QuickRoomStep({
   }
 
   return (
-    <QuickSetupShell step={3} onSaveAndExit={onSaveAndExit} saveAndExitDisabled={submitting}>
+    <QuickSetupShell step={5} onSaveAndExit={onSaveAndExit} saveAndExitDisabled={submitting}>
       <QuickSetupStepLayout
         title="Your first room and price"
         subtitle="Start with one room type. Add the rest whenever you like."
@@ -303,12 +298,6 @@ export function QuickRoomStep({
         }
       >
         <form id={FORM_ID} noValidate onSubmit={handleSubmit} className="flex flex-col gap-6">
-          <div className="flex items-center gap-3">
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary-50 text-primary-600">
-              <QuickBedIcon className="h-4 w-4" aria-hidden="true" />
-            </span>
-            <h2 className="text-lg font-semibold text-gray-950">Your first room type</h2>
-          </div>
           {draft.rooms.slice(0, index).map((other, at) => (
             <QuickRoomLine
               key={at}
@@ -340,35 +329,44 @@ export function QuickRoomStep({
             inputProps={{ placeholder: "e.g. Classic Double", maxLength: 120 }}
             onChange={(name) => change({ name }, "name")}
           />
-          <div className="grid gap-6 lg:grid-cols-2 lg:gap-4">
-            <QuickSetupField
-              label="Rooms of this type"
-              required
-              value={room.numberOfRooms}
-              error={errors.numberOfRooms}
-              helper={quickRoomLabelsHint(room.numberOfRooms, firstNumbers[index])}
-              inputProps={{ inputMode: "numeric", placeholder: "e.g. 8", maxLength: 3 }}
-              onChange={(numberOfRooms) => change({ numberOfRooms }, "numberOfRooms")}
-            />
-            <QuickSetupField
-              label="Max guests"
-              required
-              value={room.maxGuests}
-              error={errors.maxGuests}
-              inputProps={{ inputMode: "numeric", maxLength: 2 }}
-              onChange={(maxGuests) => change({ maxGuests }, "maxGuests")}
-            />
+          {/* Rooms, guests and price in one row on desktop, one note under it (approved 2026-10-21). */}
+          <div>
+            <div className="grid gap-6 lg:grid-cols-3 lg:gap-4">
+              <QuickSetupField
+                label="Rooms of this type"
+                required
+                value={room.numberOfRooms}
+                error={errors.numberOfRooms}
+                inputProps={{ inputMode: "numeric", placeholder: "e.g. 8", maxLength: 3 }}
+                onChange={(numberOfRooms) => change({ numberOfRooms }, "numberOfRooms")}
+              />
+              <QuickSetupField
+                label="Max guests"
+                required
+                value={room.maxGuests}
+                error={errors.maxGuests}
+                inputProps={{ inputMode: "numeric", maxLength: 2 }}
+                onChange={(maxGuests) => change({ maxGuests }, "maxGuests")}
+              />
+              <QuickSetupField
+                label="Price per night"
+                required
+                value={room.pricePerNight}
+                error={errors.pricePerNight}
+                suffix={currency.code}
+                inputProps={{ inputMode: "decimal", placeholder: "e.g. 145" }}
+                onChange={(pricePerNight) => change({ pricePerNight }, "pricePerNight")}
+              />
+            </div>
+            <p className="mt-2 text-[13px] leading-5 text-gray-500">
+              {[
+                quickRoomLabelsHint(room.numberOfRooms, firstNumbers[index]),
+                "Prices include taxes and fees. Seasons and weekday prices come later in Rooms & Rates.",
+              ]
+                .filter(Boolean)
+                .join(" ")}
+            </p>
           </div>
-          <QuickSetupField
-            label="Price per night"
-            required
-            value={room.pricePerNight}
-            error={errors.pricePerNight}
-            suffix={currency.code}
-            helper="Includes taxes and fees. Seasons and weekday prices come later in Rooms & Rates."
-            inputProps={{ inputMode: "decimal", placeholder: "e.g. 145" }}
-            onChange={(pricePerNight) => change({ pricePerNight }, "pricePerNight")}
-          />
           {draft.rooms.slice(index + 1).map((other, offset) => (
             <QuickRoomLine
               key={index + 1 + offset}
@@ -410,53 +408,55 @@ export function QuickRoomStep({
               </span>
             </label>
           </div>
-          <DefaultLine
-            icon={ShieldCheckIcon}
-            tone="green"
-            title={quickCancellationTitle(choices.freeCancellationDays)}
-            note={`${choices.freeCancellationDays === 3 ? "Our default. " : ""}After that, the full stay is charged.`}
-            open={picker === "cancellation"}
-            onToggle={() => toggle("cancellation")}
-          >
-            <fieldset className="flex flex-col gap-2">
-              <legend className="sr-only">Free cancellation</legend>
-              {QUICK_CANCELLATION_OPTIONS.map((option) => (
+          <div className="divide-y divide-gray-200 rounded-xl border border-gray-200">
+            <DefaultLine
+              icon={ShieldCheckIcon}
+              tone="green"
+              title={quickCancellationTitle(choices.freeCancellationDays)}
+              note={`${choices.freeCancellationDays === 3 ? "Our default. " : ""}After that, the full stay is charged.`}
+              open={picker === "cancellation"}
+              onToggle={() => toggle("cancellation")}
+            >
+              <fieldset className="flex flex-col gap-2">
+                <legend className="sr-only">Free cancellation</legend>
+                {QUICK_CANCELLATION_OPTIONS.map((option) => (
+                  <Choice
+                    key={option.value}
+                    name="quick-cancellation"
+                    label={option.label}
+                    checked={choices.freeCancellationDays === option.value}
+                    onPick={() => onChange({ ...draft, freeCancellationDays: option.value })}
+                  />
+                ))}
                 <Choice
-                  key={option.value}
                   name="quick-cancellation"
-                  label={option.label}
-                  checked={choices.freeCancellationDays === option.value}
-                  onPick={() => onChange({ ...draft, freeCancellationDays: option.value })}
+                  label="Non-refundable"
+                  checked={false}
+                  unavailable={QUICK_NON_REFUNDABLE_NOTE}
                 />
-              ))}
-              <Choice
-                name="quick-cancellation"
-                label="Non-refundable"
-                checked={false}
-                unavailable={QUICK_NON_REFUNDABLE_NOTE}
-              />
-            </fieldset>
-          </DefaultLine>
-          <DefaultLine
-            icon={MoonIcon}
-            title={quickBedTitle(choices.bed)}
-            note={`${choices.bed === "double" ? "Our default. " : ""}For every room type. Add more beds later with your photos.`}
-            open={picker === "bed"}
-            onToggle={() => toggle("bed")}
-          >
-            <fieldset className="flex flex-col gap-2">
-              <legend className="sr-only">Beds per room</legend>
-              {QUICK_BED_OPTIONS.map((option) => (
-                <Choice
-                  key={option.value}
-                  name="quick-bed"
-                  label={option.label}
-                  checked={choices.bed === option.value}
-                  onPick={() => onChange({ ...draft, bed: option.value })}
-                />
-              ))}
-            </fieldset>
-          </DefaultLine>
+              </fieldset>
+            </DefaultLine>
+            <DefaultLine
+              icon={MoonIcon}
+              title={quickBedTitle(choices.bed)}
+              note={`${choices.bed === "double" ? "Our default. " : ""}For every room type. Add more beds later with your photos.`}
+              open={picker === "bed"}
+              onToggle={() => toggle("bed")}
+            >
+              <fieldset className="flex flex-col gap-2">
+                <legend className="sr-only">Beds per room</legend>
+                {QUICK_BED_OPTIONS.map((option) => (
+                  <Choice
+                    key={option.value}
+                    name="quick-bed"
+                    label={option.label}
+                    checked={choices.bed === option.value}
+                    onPick={() => onChange({ ...draft, bed: option.value })}
+                  />
+                ))}
+              </fieldset>
+            </DefaultLine>
+          </div>
           {draft.rooms.length < QUICK_MAX_ROOM_TYPES ? (
             <button
               type="button"

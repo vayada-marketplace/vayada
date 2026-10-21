@@ -268,6 +268,7 @@ type Command = {
   attempts: number;
   waiting: boolean;
   booking_reference: string;
+  has_application_fee: boolean;
 };
 
 /** After the cancel committed (and from the sweep): asks Stripe for the refund once, or finds the
@@ -290,7 +291,12 @@ export async function executePricingCardRefund(
            attempts>0 AND next_attempt_at>clock_timestamp() AS waiting,
            (SELECT public_reference FROM booking.guest_bookings booking
             WHERE booking.id=command.guest_booking_id AND booking.property_id=command.property_id)
-             AS booking_reference
+             AS booking_reference,
+           COALESCE((SELECT COALESCE((payment.payment_metadata->>'applicationFeeAmount')::numeric,
+               payment.fee_amount)>0
+             FROM finance.payments payment
+             WHERE payment.id=command.payment_id AND payment.property_id=command.property_id),false)
+             AS has_application_fee
          FROM finance.card_refund_commands command WHERE id=$1 FOR UPDATE OF command SKIP LOCKED`,
         [commandId],
       )
@@ -497,6 +503,7 @@ async function findOrCreateRefund(
           paymentIntentId: command.provider_payment_intent_id,
           providerAccountRef: command.provider_account_ref,
           amountMinor: Number(command.amount_minor),
+          refundApplicationFee: command.has_application_fee,
           commandId: command.id,
           propertyId: command.property_id,
           bookingReference: command.booking_reference,
