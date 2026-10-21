@@ -169,6 +169,13 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
       [fixture.propertyId, slug],
     );
     const accountId = randomUUID();
+    // A K5 case that timed out keeps running and still holds the real test account's row, so every
+    // later case would fail on the unique account id: rename the leftover instead.
+    await fixture.observer.query(
+      `UPDATE finance.payment_provider_accounts SET provider_account_id=provider_account_id||'_stale_'||left(id::text,8)
+       WHERE provider='stripe' AND provider_account_id=$1`,
+      [accountRef],
+    );
     await fixture.observer.query(
       `INSERT INTO finance.payment_provider_accounts(id,property_id,account_scope,provider,provider_account_id,status,
         onboarding_status,charges_enabled,payouts_enabled,capabilities,card_capability_revision,account_metadata)
@@ -885,6 +892,8 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
   const stripeTestMode =
     !!stripeKey && /^(sk|rk)_test_/.test(stripeKey) && !!stripeAccount?.startsWith("acct_");
   const stripeCurrency = process.env.STRIPE_TEST_CURRENCY?.toUpperCase();
+  // Every K5 case calls Stripe several times: vitest's 5 s default is too short (2026-10-21 run).
+  const stripeTestTimeout = 180_000;
   const confirmWithTestCard = async (paymentIntentId: string, paymentMethod: string) => {
     const response = await fetch(
       `https://api.stripe.com/v1/payment_intents/${paymentIntentId}/confirm`,
@@ -973,6 +982,7 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
         await fixture.close();
       }
     },
+    stripeTestTimeout,
   );
 
   it.skipIf(!stripeTestMode)(
@@ -1020,6 +1030,7 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
         await fixture.close();
       }
     },
+    stripeTestTimeout,
   );
 
   // K5 for VAY-2205: refunds, holds and deposits against Stripe test mode, same gate as above.
@@ -1200,7 +1211,6 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
       close,
     };
   }
-  const stripeTestTimeout = 180_000;
   // Stripe refunds from the hotel account's available balance, and a new test account has none:
   // the refund cases pay with Stripe's test card whose funds are available at once.
   const availableNow = "pm_card_bypassPending";
