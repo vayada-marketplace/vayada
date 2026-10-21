@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useRef, useState, type ReactNode } from "react";
+import { Suspense, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
@@ -117,6 +117,9 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   const [termsAcknowledgement, setTermsAcknowledgement] =
     useState<QuoteTermsAcknowledgement | null>(null);
   const [guestDisclosure, setGuestDisclosure] = useState<PublicQuoteGuestDisclosure | null>(null);
+  // The price whose Confirm was pressed before both boxes were ticked (VAY-2306).
+  const [consentMissedFor, setConsentMissedFor] = useState<string | null>(null);
+  const consentErrorId = useId();
   const [rooms, setRooms] = useState<PricingRoom[] | null>(null);
   const [catalogError, setCatalogError] = useState(false);
   const [reload, setReload] = useState(0);
@@ -364,6 +367,12 @@ function RoomQuoteForm({ slug }: { slug: string }) {
       ? guestRulesQuote.disclosure?.choices
       : undefined) ??
     null;
+  const consentError =
+    !!quote &&
+    consentMissedFor === quote.quoteId &&
+    !(
+      termsAcknowledgement?.quoteId === quote.quoteId && guestDisclosure?.quoteId === quote.quoteId
+    );
   // While the rules load (after a refresh), a blank phone doesn't send the guest back a step;
   // booking itself still waits for this price's rules.
   const detailsReady =
@@ -1151,6 +1160,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                     <>
                       <ReplacementQuoteTerms
                         compact
+                        errorId={consentError ? consentErrorId : undefined}
                         quote={quote}
                         onAcknowledgementChange={setTermsAcknowledgement}
                         roomNames={Object.fromEntries(
@@ -1160,10 +1170,34 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                       <ReplacementGuestRules
                         key={quote.quoteId}
                         compact
+                        errorId={consentError ? consentErrorId : undefined}
                         slug={slug}
                         quote={quote}
                         onAcknowledgementChange={setGuestDisclosure}
                       />
+                      {consentError && (
+                        <p
+                          id={consentErrorId}
+                          role="alert"
+                          className="flex items-start gap-2 text-sm font-medium text-red-700"
+                        >
+                          <svg
+                            className="mt-0.5 h-4 w-4 shrink-0"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                            aria-hidden="true"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                            />
+                          </svg>
+                          Read and accept both the room terms and guest rules to book.
+                        </p>
+                      )}
                     </>
                   )
                 }
@@ -1195,6 +1229,20 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                       attempt={attempt}
                       onAttemptChange={setAttempt}
                       onBooked={openConfirmation}
+                      onConsentMissing={
+                        // Only while both boxes can be ticked: an expired price or rules that
+                        // didn't load keep Confirm off, as before.
+                        !error && guestRulesQuote.disclosure?.quoteId === quote.quoteId
+                          ? () => {
+                              setConsentMissedFor(quote.quoteId);
+                              document
+                                .querySelector<HTMLInputElement>(
+                                  "input[data-consent]:not(:checked):not(:disabled)",
+                                )
+                                ?.focus();
+                            }
+                          : undefined
+                      }
                     />
                   )
                 }

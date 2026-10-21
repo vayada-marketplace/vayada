@@ -13,6 +13,8 @@ const cardIcon =
 const hotelIcon =
   "M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4";
 const bankIcon = "M3 10l9-6 9 6M5 10v8m4-8v8m6-8v8m4-8v8M3 20h18";
+const documentIcon =
+  "M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z";
 const icon = (d: string, size = "w-5 h-5 text-gray-700") => (
   <svg className={size} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={d} />
@@ -201,18 +203,24 @@ export default function PaymentStep({
       </section>
       {/* What the guest agrees to belongs to a price: without one there is nothing to accept. */}
       {quote && (
-        <section aria-label="Before you book" className={`${card} space-y-4`}>
+        <section aria-label="Before you book" className={`${card} space-y-3`}>
           <h2 className="text-base font-bold text-gray-900">Before you book</h2>
           {acknowledgements}
           {termsText && (
             <div className="space-y-2">
+              {/* In the tiles' text column above it (VAY-2306). */}
               <button
                 type="button"
-                className="text-xs font-medium text-primary-600 underline"
+                className="flex items-center gap-3 pl-[18px] text-[13px] font-medium text-primary-600"
                 aria-expanded={showTerms}
                 onClick={() => setShowTerms((value) => !value)}
               >
-                {showTerms ? "Hide our terms & conditions" : "Read our terms & conditions"}
+                <span className="flex w-5 justify-center">
+                  {icon(documentIcon, "w-4 h-4 text-gray-500")}
+                </span>
+                <span className="underline">
+                  {showTerms ? "Hide our terms & conditions" : "Read our terms & conditions"}
+                </span>
               </button>
               {showTerms && <BookingPageTerms text={termsText} />}
             </div>

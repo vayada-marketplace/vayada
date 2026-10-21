@@ -290,13 +290,38 @@ for (const width of [1440, 390]) {
     await expect(paymentOption(page, "pay_at_property")).toHaveAttribute("aria-checked", "true");
     await expect(orderTotal(page)).toHaveText("€370");
     const confirm = page.getByRole("button", { name: "Confirm booking" });
-    await expect(confirm).toBeDisabled();
-    await page.getByLabel("I have read the room and rate terms for this price").check();
-    await page.getByLabel("guest rules for this price").check();
+    const terms = page.getByLabel("I have read the room and rate terms for this price");
+    const rules = page.getByLabel("guest rules for this price");
+    const missing = page
+      .getByRole("alert")
+      .filter({ hasText: "Read and accept both the room terms and guest rules to book." });
+    // VAY-2306: Confirm before ticking books nothing; it marks both boxes and goes to the first.
+    await confirm.click();
+    await expect(missing).toBeVisible();
+    await expect(terms).toHaveAttribute("aria-invalid", "true");
+    await expect(rules).toHaveAttribute("aria-invalid", "true");
+    await expect(terms).toBeFocused();
+    await page.screenshot({
+      path: testInfo.outputPath(`payment-missing-ticks-${width}.png`),
+      fullPage: true,
+    });
+    await page.keyboard.press("Space");
+    await expect(terms).toBeChecked();
+    await expect(terms).not.toHaveAttribute("aria-invalid", "true");
+    await expect(rules).toHaveAttribute("aria-invalid", "true");
+    // The whole tile ticks its box, not only the box itself.
+    const tile = rules.locator("xpath=ancestor::div[contains(@class, 'border-2')][1]");
+    const { width: tileWidth } = (await tile.boundingBox())!;
+    await tile.click({ position: { x: tileWidth - 12, y: 12 } });
+    await expect(rules).toBeChecked();
+    await expect(missing).toHaveCount(0);
     await page.screenshot({ path: testInfo.outputPath(`payment-${width}.png`), fullPage: true });
     // Another way to pay is a new price: its terms are ticked afresh.
     await paymentOption(page, "card").click();
-    await expect(page.getByRole("button", { name: "Continue to card payment" })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Continue to card payment" })).toBeVisible();
+    await expect(terms).not.toBeChecked();
+    await expect(rules).not.toBeChecked();
+    await expect(missing).toHaveCount(0);
     await paymentOption(page, "pay_at_property").click();
     await page.getByLabel("I have read the room and rate terms for this price").check();
     await page.getByLabel("guest rules for this price").check();

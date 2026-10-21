@@ -7,6 +7,7 @@ import {
 } from "@vayada/domain-booking/replacement-pricing";
 import { serverNow } from "@/lib/serverClock";
 import { bookingPagePaymentMethodLabels } from "@/services/api/bookingPagePaymentMethods";
+import ConsentTile from "./ConsentTile";
 
 export type QuoteTermsAcknowledgement = { quoteId: string; termsIdentity: string };
 export type ReplacementQuoteTermsProps = {
@@ -16,6 +17,8 @@ export type ReplacementQuoteTermsProps = {
   onAcknowledgementChange?: (value: QuoteTermsAcknowledgement | null) => void;
   /** The payment step's short form (VAY-2195): the tick first, the terms behind "Read". */
   compact?: boolean;
+  /** Confirm was pressed before ticking (VAY-2306): the id of the message that says so. */
+  errorId?: string;
 };
 const mealNames: Record<string, string> = {
   room_only: "Room only (no meals)",
@@ -33,6 +36,7 @@ export default function ReplacementQuoteTerms({
   stale = false,
   onAcknowledgementChange,
   compact = false,
+  errorId,
 }: ReplacementQuoteTermsProps) {
   const headingId = useId();
   const [open, setOpen] = useState(false);
@@ -74,22 +78,18 @@ export default function ReplacementQuoteTerms({
         : "Room details are unavailable. Refresh your room selection before acknowledging these terms."}
     </p>
   );
+  const acknowledge = (checked: boolean) =>
+    setAcknowledgedIdentity(checked && expiresAt > serverNow() ? identity : null);
   const tick = (
-    <label className={`flex items-start gap-3 ${compact ? "text-sm text-gray-700" : ""}`}>
+    <label className="flex items-start gap-3">
       <input
         type="checkbox"
-        className={`mt-1 h-5 w-5 shrink-0 ${compact ? "accent-primary-600" : ""}`}
+        className="mt-1 h-5 w-5 shrink-0"
         checked={agreed}
         disabled={unavailable || missingLabels}
-        onChange={(event) =>
-          setAcknowledgedIdentity(event.target.checked && expiresAt > serverNow() ? identity : null)
-        }
+        onChange={(event) => acknowledge(event.target.checked)}
       />
-      <span>
-        {compact
-          ? "I have read the room and rate terms for this price."
-          : "I have read the room and rate terms for this price preview."}
-      </span>
+      <span>I have read the room and rate terms for this price preview.</span>
     </label>
   );
   const terms = (
@@ -179,16 +179,23 @@ export default function ReplacementQuoteTerms({
   if (!compact) return terms;
   return (
     <div className="space-y-2">
-      {tick}
-      {status}
-      <button
-        type="button"
-        className="ml-8 text-xs font-medium text-primary-600 underline"
-        aria-expanded={open}
-        onClick={() => setOpen((value) => !value)}
+      {status && <div className="text-sm text-gray-600">{status}</div>}
+      <ConsentTile
+        label="I have read the room and rate terms for this price."
+        checked={agreed}
+        disabled={unavailable || missingLabels}
+        errorId={errorId}
+        onChange={acknowledge}
       >
-        {open ? "Hide the room and rate terms" : "Read the room and rate terms"}
-      </button>
+        <button
+          type="button"
+          className="text-[13px] font-medium text-primary-600 underline"
+          aria-expanded={open}
+          onClick={() => setOpen((value) => !value)}
+        >
+          {open ? "Hide the room and rate terms" : "Read the room and rate terms"}
+        </button>
+      </ConsentTile>
       {open && terms}
     </div>
   );
