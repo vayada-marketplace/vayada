@@ -189,12 +189,32 @@ describe("PostgreSQL runtime capacity", () => {
     expect(await check()).toBe(true);
     expect(probes).toBe(3);
   });
+  it("counts a probe that never settles as down, then probes again (VAY-2247 incident)", async () => {
+    let time = 0;
+    let probes = 0;
+    let stuck = true;
+    const check = cachedHealthCheck(
+      () => {
+        probes += 1;
+        return stuck ? new Promise<never>(() => undefined) : Promise.resolve();
+      },
+      5_000,
+      () => time,
+      20,
+    );
+    expect(await check()).toBe(false);
+    stuck = false;
+    time = 5_000;
+    expect(await check()).toBe(true);
+    expect(probes).toBe(2);
+  });
   it("reports an unreachable database through its own probe connection", async () => {
     const postgres = { Pool: pg.Pool };
     const runtime = installPostgresPoolRuntime(postgres);
     const check = runtime.healthCheck("postgresql://vayada@127.0.0.1:1/target");
     try {
-      expect(await check()).toBe(false);
+      expect(await check.liveness()).toBe(false);
+      expect(await check.readiness()).toBe(false);
       expect(runtime.snapshot().physicalPoolCount).toBe(0);
     } finally {
       await runtime.close();
