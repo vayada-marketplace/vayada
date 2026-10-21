@@ -84,6 +84,16 @@ describe("Finance subscription service", () => {
     expect(fixture.store.entitlement.checkoutSessionRef).toBe("cs_fixed");
   });
 
+  it("lets a lock wait that gave up surface as itself, not as Stripe unavailable (VAY-2247)", async () => {
+    const fixture = setup();
+    const lockTimeout = Object.assign(new Error("canceling statement due to lock timeout"), {
+      code: "55P03",
+    });
+    vi.spyOn(fixture.store, "recordCheckout").mockRejectedValueOnce(lockTimeout);
+    // The API's error handler answers it with 409 busy_try_again.
+    await expect(fixture.service.createFixedPlanCheckout(command())).rejects.toBe(lockTimeout);
+  });
+
   it("prices the first room at EUR 30 and additional rooms at EUR 5 without activating Fixed", async () => {
     const fixture = setup({ activeRoomCount: 4 });
     const result = await fixture.service.createFixedPlanCheckout(command());

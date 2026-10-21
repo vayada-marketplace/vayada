@@ -294,6 +294,21 @@ export function poolSaturationEpisodes(
   };
 }
 
+/**
+ * A lock wait that gave up (SQLSTATE 55P03: lock_timeout, or NOWAIT): another connection holds what this one
+ * needs. Looks through `cause`, as wrapped provider errors keep the original there. The API answers it with
+ * 409 busy_try_again (VAY-2247 incident follow-up, 2026-10-21).
+ */
+export function isPostgresLockTimeoutError(error: unknown): boolean {
+  let current = error;
+  for (let depth = 0; depth < 3 && current && typeof current === "object"; depth += 1) {
+    const candidate = current as { code?: unknown; cause?: unknown };
+    if (candidate.code === "55P03") return true;
+    current = candidate.cause;
+  }
+  return false;
+}
+
 export function isPostgresUnavailableError(error: unknown): boolean {
   let current = error;
   for (let depth = 0; depth < 3 && current && typeof current === "object"; depth += 1) {

@@ -2,7 +2,11 @@ import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { describe, expect, it } from "vitest";
 
-import { installPostgresPoolRuntime, isPostgresUnavailableError } from "./postgresRuntime.js";
+import {
+  installPostgresPoolRuntime,
+  isPostgresLockTimeoutError,
+  isPostgresUnavailableError,
+} from "./postgresRuntime.js";
 
 const TEST_DATABASE_URL = process.env["TEST_DATABASE_URL"];
 
@@ -117,6 +121,47 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL runtime pool budget", () => {
       await runtime.close();
     }
   }, 30_000);
+
+  it("a session lock_timeout turns a blocked advisory or row lock into 55P03 (VAY-2247)", async () => {
+    assertTestDatabase();
+    const holder = new pg.Client({ connectionString: TEST_DATABASE_URL });
+    const waiter = new pg.Client({ connectionString: TEST_DATABASE_URL });
+    await holder.connect();
+    await waiter.connect();
+    const table = `vay2247_lock_probe_${randomUUID().slice(0, 8)}`;
+    try {
+      // What the role default (ALTER ROLE … SET lock_timeout) gives every session of the API login.
+      await waiter.query("SET lock_timeout = '200ms'");
+      // A session advisory lock, as the plan changes and the imports take outside a transaction.
+      await holder.query("SELECT pg_advisory_lock(22472021)");
+      let started = Date.now();
+      const advisory = await waiter.query("SELECT pg_advisory_lock(22472021)").then(
+        () => null,
+        (error: unknown) => error,
+      );
+      expect(isPostgresLockTimeoutError(advisory), String(advisory)).toBe(true);
+      expect(Date.now() - started).toBeLessThan(3_000);
+      // A row another transaction holds.
+      await holder.query(`CREATE TABLE ${table} (id int PRIMARY KEY)`);
+      await holder.query(`INSERT INTO ${table} VALUES (1)`);
+      await holder.query("BEGIN");
+      await holder.query(`SELECT 1 FROM ${table} WHERE id = 1 FOR UPDATE`);
+      started = Date.now();
+      const row = await waiter.query(`UPDATE ${table} SET id = id WHERE id = 1`).then(
+        () => null,
+        (error: unknown) => error,
+      );
+      expect(isPostgresLockTimeoutError(row), String(row)).toBe(true);
+      expect(Date.now() - started).toBeLessThan(3_000);
+      await holder.query("ROLLBACK");
+    } finally {
+      await holder.query("ROLLBACK").catch(() => undefined);
+      await holder.query("SELECT pg_advisory_unlock_all()").catch(() => undefined);
+      await holder.query(`DROP TABLE IF EXISTS ${table}`).catch(() => undefined);
+      await holder.end();
+      await waiter.end();
+    }
+  });
 
   it("fails readiness, not liveness, while a pool stops handing out connections", async () => {
     assertTestDatabase();

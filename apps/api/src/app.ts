@@ -37,9 +37,18 @@ import {
   type PropertyAccessRepository,
   type RolePermissionRepository,
 } from "@vayada/backend-authorization";
-import Fastify, { type FastifyInstance, type FastifyServerOptions } from "fastify";
+import Fastify, {
+  type FastifyError,
+  type FastifyInstance,
+  type FastifyReply,
+  type FastifyRequest,
+  type FastifyServerOptions,
+} from "fastify";
 
-import { isPostgresUnavailableError } from "./platform/postgresRuntime.js";
+import {
+  isPostgresLockTimeoutError,
+  isPostgresUnavailableError,
+} from "./platform/postgresRuntime.js";
 import type { HotelSetupTrackCommandRepository } from "./domains/hotelSetupTrackCommandRepository.js";
 import type { HotelCatalogStep1Repository } from "./domains/hotelCatalogStep1Repository.js";
 import type { PropertyMediaCommandRepository } from "./domains/propertyMediaCommandRepository.js";
@@ -426,6 +435,33 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   platformMedia?: PlatformMediaRoutesOptions;
 };
 
+/** How long a "busy, try again" answer asks the client to wait. */
+const BUSY_RETRY_AFTER_SECONDS = 3;
+
+/** The API's answers for database trouble; everything else goes to Fastify's default handler. */
+export function handleApiError(error: FastifyError, request: FastifyRequest, reply: FastifyReply) {
+  // Another request holds what this one needs and the wait gave up (lock_timeout): ask to try again
+  // instead of a 500, and keep it out of the 5xx counts (VAY-2247 incident follow-up).
+  if (isPostgresLockTimeoutError(error)) {
+    request.log.warn({ err: error }, "PostgreSQL lock wait timed out");
+    return reply.status(409).header("retry-after", String(BUSY_RETRY_AFTER_SECONDS)).send({
+      statusCode: 409,
+      error: "Conflict",
+      message: "Someone else is changing this right now. Try again in a moment.",
+      code: "busy_try_again",
+      retryAfterSeconds: BUSY_RETRY_AFTER_SECONDS,
+    });
+  }
+  if (!isPostgresUnavailableError(error)) return reply.send(error);
+  request.log.warn({ err: error }, "PostgreSQL connection unavailable");
+  return reply.status(503).send({
+    statusCode: 503,
+    error: "Service Unavailable",
+    message: "Database is temporarily unavailable",
+    code: "database_unavailable",
+  });
+}
+
 export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   const app = Fastify({
     logger: options.logger ?? {
@@ -440,16 +476,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
         request.url.split("?", 1)[0]?.endsWith("/messaging/threads") === true),
   });
 
-  app.setErrorHandler((error, request, reply) => {
-    if (!isPostgresUnavailableError(error)) return reply.send(error);
-    request.log.warn({ err: error }, "PostgreSQL connection unavailable");
-    return reply.status(503).send({
-      statusCode: 503,
-      error: "Service Unavailable",
-      message: "Database is temporarily unavailable",
-      code: "database_unavailable",
-    });
-  });
+  app.setErrorHandler(handleApiError);
 
   registerBrowserCors(app, options.browserAllowedOrigins ?? []);
 
