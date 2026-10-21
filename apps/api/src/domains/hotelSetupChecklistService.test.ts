@@ -4,7 +4,6 @@ import {
   createHotelSetupChecklistService,
   type HotelSetupChecklistFactsRow,
 } from "./hotelSetupChecklistService.js";
-import type { HotelFirstRunState } from "./hotelFirstRunState.js";
 
 const propertyId = "3f2c4d5e-6a7b-4c8d-9e0f-112233445566";
 const actor = {
@@ -16,15 +15,12 @@ const actor = {
   requestedAt: "2026-10-20T09:00:00.000Z",
 };
 
-function state(done: readonly string[]): HotelFirstRunState {
+/** The first run's light setup-progress read, from the first-run steps that are done. */
+function progress(done: readonly string[]) {
   return {
-    contractVersion: "hotel-first-run.v1",
-    propertyId,
-    steps: ["currency", "rooms", "payments", "pricing", "calendar", "guest_rules", "plan"].map(
-      (id) => ({ id, state: done.includes(id) ? "done" : "todo", reasons: [] }),
-    ),
-    nextStep: null,
-  } as unknown as HotelFirstRunState;
+    firstRoom: done.includes("rooms") && done.includes("pricing"),
+    guestPayment: done.includes("payments") && done.includes("plan"),
+  };
 }
 
 const LIVE: HotelSetupChecklistFactsRow = {
@@ -50,7 +46,7 @@ function service(
   return {
     store,
     checklist: createHotelSetupChecklistService({
-      firstRun: { read: vi.fn(async () => state(done)) },
+      firstRun: { readSetupProgress: vi.fn(async () => progress(done)) },
       facts: { read: vi.fn(async () => facts) },
       store,
       onlineCardsOffered,
@@ -61,6 +57,27 @@ function service(
 const ALL = ["currency", "rooms", "payments", "pricing", "calendar", "guest_rules", "plan"];
 
 describe("hotel setup checklist service (VAY-2247 wave 2)", () => {
+  it("reads the hotel and its setup progress one after the other, never in parallel (incident 2026-10-21)", async () => {
+    let inFlight = 0;
+    let most = 0;
+    const timed = <T>(value: T) =>
+      vi.fn(async () => {
+        inFlight += 1;
+        most = Math.max(most, inFlight);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        inFlight -= 1;
+        return value;
+      });
+    const checklist = createHotelSetupChecklistService({
+      firstRun: { readSetupProgress: timed(progress(ALL)) },
+      facts: { read: timed(LIVE) },
+      store: { acknowledge: vi.fn(), setViewer: vi.fn() },
+      onlineCardsOffered: false,
+    });
+    expect(await checklist.read(actor)).toMatchObject({ done: 4 });
+    expect(most).toBe(1);
+  });
+
   it("shows a hotel that went live through the first run with 4 of 9 done", async () => {
     expect(await service(ALL).checklist.read(actor)).toMatchObject({
       phase: "live",
