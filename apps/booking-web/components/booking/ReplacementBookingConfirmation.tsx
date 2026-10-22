@@ -40,6 +40,7 @@ export default function ReplacementBookingConfirmation({
   attempt: heldAttempt,
   onAttemptChange,
   onBooked,
+  onConsentMissing,
 }: {
   slug: string;
   quote: PublicBookingQuote;
@@ -60,6 +61,9 @@ export default function ReplacementBookingConfirmation({
     requested: boolean;
     confirmationUrl?: string;
   }) => void;
+  /** The page can point at the boxes still to tick (VAY-2306): Confirm then stays pressable and
+   * a press before both are ticked calls this instead of booking. */
+  onConsentMissing?: () => void;
 }) {
   const termsNoticeId = useId();
   const [loading, setLoading] = useState(false);
@@ -83,10 +87,10 @@ export default function ReplacementBookingConfirmation({
   // Bank transfer and PayPal wait for the payment instead, in either mode.
   const request =
     quote.acceptanceMode === "request" && !isManualPricingPaymentMethod(quote.paymentMethod);
-  const ready =
-    supported &&
-    !refreshRequired &&
-    (!!pending || (!!guest && termsAccepted && disclosure?.quoteId === quote.quoteId));
+  const consented = termsAccepted && disclosure?.quoteId === quote.quoteId;
+  const ready = supported && !refreshRequired && (!!pending || (!!guest && consented));
+  const consentMissing =
+    !!onConsentMissing && supported && !refreshRequired && !pending && !!guest && !consented;
   useEffect(() => {
     if (!result) return;
     const requested = result.kind === "requested" || (result.kind === "replayed" && request);
@@ -118,6 +122,7 @@ export default function ReplacementBookingConfirmation({
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (consentMissing) return onConsentMissing?.();
     const acceptedDisclosure = pending?.disclosure ?? disclosure;
     const attempted = pending?.guest ?? guest;
     if (!ready || !acceptedDisclosure || !attempted || loading || result) return;
@@ -257,7 +262,7 @@ export default function ReplacementBookingConfirmation({
     <form className="space-y-4" onSubmit={submit}>
       {!supported ? (
         <p role="status">Online confirmation is not available for this payment option.</p>
-      ) : !ready && !refreshRequired ? (
+      ) : !ready && !refreshRequired && !consentMissing ? (
         <p role="status">
           {guest
             ? "Read and accept both the room terms and guest rules to book."
@@ -273,7 +278,7 @@ export default function ReplacementBookingConfirmation({
       <button
         className={button}
         type="submit"
-        disabled={!ready || loading}
+        disabled={!(ready || consentMissing) || loading}
         aria-describedby={hotelTerms ? termsNoticeId : undefined}
       >
         {loading

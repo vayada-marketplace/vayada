@@ -7,6 +7,7 @@ import type {
 import { serverNow } from "@/lib/serverClock";
 import { formatTimeZoneName } from "@/lib/utils";
 import { getQuoteGuestDisclosure } from "@/services/api/quoteGuestDisclosure";
+import ConsentTile from "./ConsentTile";
 
 export default function ReplacementGuestRules({
   slug,
@@ -14,6 +15,7 @@ export default function ReplacementGuestRules({
   onAcknowledgementChange,
   onRulesChange,
   compact = false,
+  errorId,
 }: {
   slug: string;
   quote: PublicBookingQuote;
@@ -22,6 +24,8 @@ export default function ReplacementGuestRules({
   onRulesChange?: (value: PublicQuoteGuestDisclosure | null) => void;
   /** The payment step's short form (VAY-2195): the tick first, the rules behind "Read". */
   compact?: boolean;
+  /** Confirm was pressed before ticking (VAY-2306): the id of the message that says so. */
+  errorId?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [disclosure, setDisclosure] = useState<PublicQuoteGuestDisclosure | null>(null);
@@ -70,22 +74,17 @@ export default function ReplacementGuestRules({
     );
   if (!disclosure) return <p role="status">Loading guest rules…</p>;
   const rules = disclosure.choices;
+  const acknowledge = (checked: boolean) =>
+    setAcknowledged(checked && Date.parse(disclosure.expiresAt) > serverNow() ? consent : null);
   const tick = (
-    <label className={`flex items-start gap-3 ${compact ? "text-sm text-gray-700" : ""}`}>
+    <label className="flex items-start gap-3">
       <input
         type="checkbox"
-        className={compact ? "mt-1 h-5 w-5 shrink-0 accent-primary-600" : undefined}
         checked={current && acknowledged === consent}
         disabled={!current}
-        onChange={(event) =>
-          setAcknowledged(
-            event.target.checked && Date.parse(disclosure.expiresAt) > serverNow() ? consent : null,
-          )
-        }
+        onChange={(event) => acknowledge(event.target.checked)}
       />
-      {compact
-        ? "I have read our guest rules for this price."
-        : "I have read the guest rules for this price preview."}
+      I have read the guest rules for this price preview.
     </label>
   );
   const section = (
@@ -129,15 +128,22 @@ export default function ReplacementGuestRules({
   if (!compact) return section;
   return (
     <div className="space-y-2">
-      {tick}
-      <button
-        type="button"
-        className="ml-8 text-xs font-medium text-primary-600 underline"
-        aria-expanded={open}
-        onClick={() => setOpen((value) => !value)}
+      <ConsentTile
+        label="I have read our guest rules for this price."
+        checked={current && acknowledged === consent}
+        disabled={!current}
+        errorId={errorId}
+        onChange={acknowledge}
       >
-        {open ? "Hide our guest rules" : "Read our guest rules"}
-      </button>
+        <button
+          type="button"
+          className="inline-flex min-h-6 items-center text-[13px] font-medium text-primary-600 underline"
+          aria-expanded={open}
+          onClick={() => setOpen((value) => !value)}
+        >
+          {open ? "Hide our guest rules" : "Read our guest rules"}
+        </button>
+      </ConsentTile>
       {open && section}
     </div>
   );

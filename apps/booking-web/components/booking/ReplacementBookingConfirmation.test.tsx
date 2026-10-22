@@ -85,6 +85,7 @@ function render(
   rules: PublicQuoteGuestDisclosure | null = disclosure,
   hotelTerms = false,
   guest: typeof ada | null = ada,
+  onConsentMissing?: () => void,
 ) {
   act(() =>
     root.render(
@@ -95,6 +96,7 @@ function render(
         guest,
         termsAccepted,
         hotelTerms,
+        onConsentMissing,
       }),
     ),
   );
@@ -110,6 +112,27 @@ it("stays blocked until both exact consent sources are present", async () => {
   expect(acceptPricingQuote).not.toHaveBeenCalled();
   render(true, { ...disclosure, quoteId: "other" });
   expect(document.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled).toBe(true);
+});
+
+it("lets the guest press Confirm before ticking and points at the boxes instead (VAY-2306)", async () => {
+  const missing = vi.fn();
+  const confirm = () => document.querySelector<HTMLButtonElement>('button[type="submit"]')!;
+  render(false, null, false, ada, missing);
+  expect(confirm().disabled).toBe(false);
+  expect(document.body.textContent).not.toContain("Read and accept both");
+  await submit();
+  expect(missing).toHaveBeenCalledTimes(1);
+  expect(acceptPricingQuote).not.toHaveBeenCalled();
+  expect(funnel()).toEqual([]);
+  // Missing details still wait for the details step.
+  render(false, null, false, null, missing);
+  expect(confirm().disabled).toBe(true);
+  expect(document.body.textContent).toContain("Fill in your details to book.");
+  // Both ticked: Confirm books.
+  render(true, disclosure, false, ada, missing);
+  await submit();
+  expect(missing).toHaveBeenCalledTimes(1);
+  expect(acceptPricingQuote).toHaveBeenCalledTimes(1);
 });
 
 it("says booking accepts the hotel's terms only when the hotel has terms (VAY-2176)", () => {
