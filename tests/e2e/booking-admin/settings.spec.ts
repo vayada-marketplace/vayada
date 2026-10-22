@@ -705,6 +705,7 @@ test.describe("booking-admin settings no-legacy guard", () => {
       ["Room Filters", "/settings/room-filters"],
       ["Guest Form", "/settings/guest-form"],
       ["Billing", "/settings/billing"],
+      ["Privacy & data", "/settings/privacy"],
       ["Account", null],
     ];
     const items = main.getByRole("listitem");

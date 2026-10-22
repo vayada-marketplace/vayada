@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { MagnifyingGlassIcon } from "@heroicons/react/24/outline";
+import { SearchResultList, searchResultOptionId } from "@vayada/settings-ui";
 import { useTranslation } from "@/lib/i18n";
 import {
   loadSearchAccess,
@@ -18,10 +19,18 @@ export default function NavigationSearch({ hotelId }: { hotelId?: string }) {
   const [active, setActive] = useState(0);
   const input = useRef<HTMLInputElement>(null);
   const root = useRef<HTMLDivElement>(null);
+  // Titles and descriptions are both searched, as in the PMS search (VAY-2202).
   const results = SEARCH_ENTRIES.filter(
-    ([label, , , permission, key]) =>
-      access?.has(permission) && matchesSearch(query, `${label} ${key ? t(key) : ""}`),
-  );
+    ([label, , , permission, key, hint]) =>
+      access?.has(permission) && matchesSearch(query, `${label} ${t(key)} ${t(hint)}`),
+  ).map(([, href, category, , key, hint, kind]) => ({
+    id: href,
+    label: t(key),
+    description: t(hint),
+    category,
+    kind,
+    href,
+  }));
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -67,7 +76,7 @@ export default function NavigationSearch({ hotelId }: { hotelId?: string }) {
   return (
     <div
       ref={root}
-      className="mx-2 min-w-0 flex-1 max-w-sm"
+      className="mx-2 min-w-0 flex-1 max-w-sm sm:relative md:min-w-[12rem]"
       onBlur={(event) => {
         if (!event.currentTarget.contains(event.relatedTarget as Node)) setOpen(false);
       }}
@@ -82,7 +91,9 @@ export default function NavigationSearch({ hotelId }: { hotelId?: string }) {
           aria-controls="navigation-search-results"
           aria-autocomplete="list"
           aria-activedescendant={
-            open && results[active] ? `navigation-search-${active}` : undefined
+            open && results[active]
+              ? searchResultOptionId("navigation-search-results", active)
+              : undefined
           }
           placeholder={t("admin.searchPagesAndSettings")}
           value={query}
@@ -106,52 +117,36 @@ export default function NavigationSearch({ hotelId }: { hotelId?: string }) {
             }
             if (open && event.key === "Enter" && results[active]) {
               event.preventDefault();
-              window.location.assign(results[active][1]);
+              window.location.assign(results[active].href);
             }
           }}
         />
         <kbd className="hidden md:block shrink-0 rounded border border-gray-200 px-1 text-[10px] text-gray-400">
-          Ctrl K
+          {open ? "Esc" : "Ctrl K"}
         </kbd>
       </div>
       {open && (
-        <div className="absolute left-2 right-2 top-full z-[100] mt-1 max-h-80 overflow-auto rounded-xl border border-gray-200 bg-white shadow-2xl sm:left-auto sm:right-auto sm:w-96">
+        <div className="absolute left-2 right-2 top-full z-[100] mt-1 max-h-[25rem] overflow-auto rounded-xl border border-gray-200 bg-white pb-1.5 shadow-2xl sm:left-auto sm:right-0 sm:w-[28rem]">
           {access === null && (
             <p role="status" className="p-4 text-sm text-gray-500">
               {t("admin.loadingSearch")}
             </p>
           )}
           {access !== null && results.length === 0 && (
-            <p role="status" className="p-4 text-sm text-gray-500">
-              {t("common.noResultsFound")}
+            <p role="status" className="px-4 py-8 text-center text-sm text-gray-400">
+              {query.trim()
+                ? t("admin.noSearchResults", { query: query.trim() })
+                : t("common.noResultsFound")}
             </p>
           )}
-          <div
+          <SearchResultList
             id="navigation-search-results"
-            role="listbox"
-            aria-label={t("admin.pagesAndSettings")}
-          >
-            {results.map(([label, href, category, , key], index) => (
-              <div key={href}>
-                {(index === 0 || results[index - 1][2] !== category) && (
-                  <div className="px-4 pt-3 pb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
-                    {t(`navigation.category.${category}`)}
-                  </div>
-                )}
-                <a
-                  id={`navigation-search-${index}`}
-                  data-result-index={index}
-                  role="option"
-                  aria-selected={active === index}
-                  href={href}
-                  onMouseEnter={() => setActive(index)}
-                  className={`block px-4 py-2.5 text-[13px] font-medium text-gray-900 ${active === index ? "bg-primary-50" : "hover:bg-gray-50"}`}
-                >
-                  {key ? t(key) : label}
-                </a>
-              </div>
-            ))}
-          </div>
+            label={t("admin.pagesAndSettings")}
+            results={results}
+            categoryLabel={(category) => t(`navigation.category.${category}`)}
+            activeIndex={active}
+            onActiveChange={setActive}
+          />
         </div>
       )}
     </div>

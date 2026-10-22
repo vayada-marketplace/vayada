@@ -44,7 +44,7 @@ for (const { enabled, save } of [
         },
       });
     });
-    await page.goto("/settings#calendar");
+    await page.goto("/settings/calendar");
     if (save) {
       if (!enabled)
         await page.getByRole("switch", { name: "Auto-open future calendar", exact: true }).click();
@@ -62,7 +62,7 @@ for (const { enabled, save } of [
     expect(Object.fromEntries(destination.searchParams)).toEqual({
       entryProduct: "pms",
       returnProduct: "pms",
-      returnTo: "/settings#calendar",
+      returnTo: "/settings/calendar",
       propertyId: PMS_WEB_PROPERTY_ID,
       recovery: "pms-calendar",
       step: "calendar",

@@ -47,7 +47,7 @@ export default function CheckoutInspectionPreviewPage() {
         </div>
         <CheckoutInspectionPreview steps={steps} />
         <Link
-          href="/settings/checkout-inspection"
+          href="/settings/guest-flows#check-out"
           className="inline-flex rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50"
         >
           {t("settings.inspection.backToEditor")}

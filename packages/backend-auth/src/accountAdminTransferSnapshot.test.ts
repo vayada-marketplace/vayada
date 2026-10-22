@@ -1,7 +1,12 @@
+import { readFile } from "node:fs/promises";
 import pg from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { lockAdminTransferSnapshot } from "./accountAdminTransferSnapshot.js";
 const url = process.env["TEST_DATABASE_URL"];
+const readyMadeRoles = new URL(
+  "../../backend-migration/fixtures/ready-made-team-roles.sql",
+  import.meta.url,
+);
 const id = (n: number) => `14390000-0000-4000-9000-${String(n).padStart(12, "0")}`;
 const input = {
   organizationId: id(1),
@@ -32,6 +37,8 @@ describe.skipIf(!url)("locked admin transfer snapshot", () => {
       VALUES ($1, 'hotel_group', 'Snapshot fixture', 'transfer-snapshot-fixture', $2)`,
       [id(1), input.workosOrgId],
     );
+    // New accounts no longer get the ready-made staff roles (VAY-2276); this fixture is an older account.
+    await client.query(await readFile(readyMadeRoles, "utf8"), [[id(1)]]);
     await client.query(
       `INSERT INTO identity.users(id, email) VALUES ($1, 'snapshot-actor@example.test'), ($2, 'snapshot-target@example.test')`,
       [id(3), id(5)],
