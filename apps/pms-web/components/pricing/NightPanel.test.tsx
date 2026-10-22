@@ -6,6 +6,7 @@ import { NightPanel } from "./NightPanel";
 import {
   addToSeason,
   MAX_PICKED_NIGHTS,
+  moveToSeason,
   nightRules,
   ownPrice,
   pickNight,
@@ -177,11 +178,11 @@ it("shows a picked night's prices and changes it from the panel (VAY-2280)", () 
   expect(text()).toContain("Oktoberfest · min. 3 nights");
   expect(text()).toContain("€180");
   expect(text()).toContain("€162");
-  act(() => button("Close this night").props.onClick());
+  act(() => button("Close this date").props.onClick());
   expect(flexDates(handlers.onChange.mock.lastCall![0])).toEqual([
     { date: "2026-09-25", rules: { ...rules, minArrivalNights: 3, stopSell: true } },
   ]);
-  act(() => button("Own price for this night").props.onClick());
+  act(() => button("Own price for this date").props.onClick());
   expect(handlers.onPending).toHaveBeenLastCalledWith(true);
   act(() =>
     view.root
@@ -195,7 +196,7 @@ it("shows a picked night's prices and changes it from the panel (VAY-2280)", () 
 
 it("changes a range of nights at once (VAY-2280)", () => {
   mount({ from: "2026-09-21", to: "2026-09-23" });
-  expect(text()).toContain("3 nights selected");
+  expect(text()).toContain("3 dates selected");
   act(() => button("Minimum stay").props.onClick());
   act(() =>
     view.root
@@ -228,7 +229,7 @@ const flexSeasons = (value: PricingConfiguration) => {
 it("adds the picked nights to a season, every year (VAY-2284)", () => {
   // A new season starts at the standard price.
   mount({ from: "2026-12-20", to: "2027-01-06" });
-  act(() => button("Add to a season").props.onClick());
+  act(() => button("Add these dates to a season").props.onClick());
   expect(text()).toContain("Add Sun 20 Dec – Wed 6 Jan to a season");
   act(() =>
     view.root
@@ -250,7 +251,7 @@ it("adds the picked nights to a season, every year (VAY-2284)", () => {
   });
   // An existing season keeps its price.
   mount({ from: "2026-10-05", to: "2026-10-10" });
-  act(() => button("Add to a season").props.onClick());
+  act(() => button("Add these dates to a season").props.onClick());
   act(() => button("Add to season").props.onClick());
   expect(flexSeasons(handlers.onChange.mock.lastCall![0]).at(-1)).toEqual({
     name: "Oktoberfest",
@@ -266,11 +267,129 @@ it("adds the picked nights to a season, every year (VAY-2284)", () => {
     rules: { ...rules, minArrivalNights: 3 },
   });
   // Seasons may not overlap.
-  mount({ from: "2026-09-25", to: "2026-09-27" });
-  act(() => button("Add to a season").props.onClick());
-  act(() => button("Add to season").props.onClick());
-  expect(text()).toContain("These days overlap another season.");
   expect(() =>
     addToSeason(room, { from: "2026-12-20", to: "2026-12-24" }, { name: " ", tier: "" }),
   ).toThrow();
+});
+
+it("moves picked dates to another season or back to the standard price, every year (VAY-2305)", () => {
+  // A date in a season moves; its season keeps the other days, each part with the 3-night minimum.
+  mount({ from: "2026-09-25", to: "2026-09-25" });
+  act(() => button("Move this date to another season").props.onClick());
+  expect(text()).toContain("Move Fri 25 Sep to another season");
+  const choices = view.root
+    .findAll((node) => node.type === "button" && node.props.role === "radio")
+    .map((node) => [textOf(node), node.props["aria-checked"]]);
+  expect(choices).toEqual([
+    ["Standard price€100 · min. 1 night", true],
+    ["New season", false],
+  ]);
+  act(() => button("Move").props.onClick());
+  const moved = handlers.onChange.mock.lastCall![0];
+  expect(flexSeasons(moved)).toEqual([
+    { name: "Oktoberfest", tier: "", from: "09-19", through: "09-24", price: flat("18000") },
+    { name: "Oktoberfest", tier: "", from: "09-26", through: "10-04", price: flat("18000") },
+  ]);
+  expect(flexRules(moved)).toEqual([
+    { from: "09-19", through: "09-24", rules: { ...rules, minArrivalNights: 3 } },
+    { from: "09-26", through: "10-04", rules: { ...rules, minArrivalNights: 3 } },
+  ]);
+  expect(nightRules(moved, "2026-09-25").minArrivalNights).toBe(1);
+  // Into another season: its price, and the dates leave every season they were in.
+  const twoSeasons = addToSeason(
+    room,
+    { from: "2026-12-20", to: "2027-01-06" },
+    { name: "Christmas", tier: "" },
+  );
+  const christmas = moveToSeason(
+    twoSeasons,
+    { from: "2026-12-24", to: "2026-12-26" },
+    { name: "Oktoberfest", tier: "" },
+  );
+  expect(flexSeasons(christmas).map(({ name, from, through }) => [name, from, through])).toEqual([
+    ["Oktoberfest", "09-19", "10-04"],
+    ["Christmas", "12-20", "12-23"],
+    ["Christmas", "12-27", "01-06"],
+    ["Oktoberfest", "12-24", "12-26"],
+  ]);
+  // Over New Year, the part left from 1 January on stays one season with the days before it.
+  const newYear = moveToSeason(twoSeasons, { from: "2027-01-01", to: "2027-01-02" }, null);
+  expect(flexSeasons(newYear).map(({ from, through }) => [from, through])).toEqual([
+    ["09-19", "10-04"],
+    ["01-03", "01-06"],
+    ["12-20", "12-31"],
+  ]);
+});
+
+it("says when an open date has no price (VAY-2305)", () => {
+  const offer = room.offers[0];
+  const unpriced = {
+    ...room,
+    offers: [
+      {
+        ...offer,
+        price: {
+          kind: "independent",
+          calendar: { base: null, months: [], seasons: [], weekdays: [], dates: [] },
+        },
+      },
+      room.offers[1],
+    ],
+  } as PricingConfiguration;
+  act(() => {
+    view = create(
+      <NightPanel
+        room={unpriced}
+        shown={unpriced}
+        selection={{ from: "2026-11-03", to: "2026-11-03" }}
+        adults={2}
+        names={{ flex: "Free cancellation", nonref: "Non-refundable" }}
+        disabled={false}
+        {...handlers}
+      />,
+    );
+  });
+  expect(text()).toContain("Open, but no price. Guests can't book it yet.");
+  expect(button("Add this date to a season")).toBeDefined();
+});
+
+it("keeps a season's price when all its days move into it, and offers the standard price only when there is one (VAY-2305)", () => {
+  // 15 Sep – 10 Oct holds all of Oktoberfest (19 Sep – 4 Oct): moving it there widens the season at its €180.
+  const wider = moveToSeason(
+    room,
+    { from: "2026-09-15", to: "2026-10-10" },
+    { name: "Oktoberfest", tier: "" },
+  );
+  expect(flexSeasons(wider)).toEqual([
+    { name: "Oktoberfest", tier: "", from: "09-15", through: "10-10", price: flat("18000") },
+  ]);
+  // Without a standard price, a date in a season can only move to another season.
+  const offer = room.offers[0];
+  if (offer.price.kind !== "independent") throw new Error("fixture");
+  const noStandard = {
+    ...room,
+    offers: [
+      { ...offer, price: { ...offer.price, calendar: { ...offer.price.calendar, base: null } } },
+      room.offers[1],
+    ],
+  } as PricingConfiguration;
+  act(() => {
+    view = create(
+      <NightPanel
+        room={noStandard}
+        shown={noStandard}
+        selection={{ from: "2026-09-25", to: "2026-09-25" }}
+        adults={2}
+        names={{ flex: "Free cancellation", nonref: "Non-refundable" }}
+        disabled={false}
+        {...handlers}
+      />,
+    );
+  });
+  act(() => button("Move this date to another season").props.onClick());
+  expect(
+    view.root
+      .findAll((node) => node.type === "button" && node.props.role === "radio")
+      .map((node) => textOf(node)),
+  ).toEqual(["New season"]);
 });

@@ -9,6 +9,8 @@ export {
   type SupportDialogHandle,
   type SupportRequest,
 } from "./SupportButton";
+export { SettingsCardGrid, type SettingsCardLink } from "./SettingsCardGrid";
+export { SettingsBreadcrumb } from "./SettingsBreadcrumb";
 export {
   SearchResultList,
   searchResultOptionId,

@@ -70,7 +70,8 @@ export function calendarYear(
 // than four 8.5rem months.
 const fourMonths = "repeat(auto-fill, minmax(max(8.5rem, calc(25% - 1rem)), 1fr))";
 
-/** The Year view of "Prices by date" (VAY-2284, approved Paper board): twelve small months, up to four in a row,
+/** The Year view of "Prices by date" (VAY-2284, approved Paper board): twelve small months, up to four in a row (two on
+ * phones, VAY-2305),
  * each headed by its prices or by how many of its nights have no price yet. Dates take their season's colour; own
  * prices get a black dot, nights that can't start a stay a red one. Picking works as in the month view. */
 export function YearCalendar({
