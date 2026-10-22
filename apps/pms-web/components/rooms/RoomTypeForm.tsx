@@ -10,6 +10,7 @@ import { parseBookingAmenities } from "@/lib/parseBookingAmenities";
 import { SELECTED_PMS_PROPERTY_ID_KEY } from "@/lib/utils/pmsPropertySelectionKeys";
 import { useTranslation } from "@/lib/i18n";
 import { actionBar } from "@/components/pricing/pricingStyles";
+import RoomLocationField from "@/components/rooms/RoomLocationField";
 
 const BED_TYPES = [
   "King Bed",
@@ -199,12 +200,8 @@ export default function RoomTypeForm({
   const activeTab = tab ?? ownTab;
   const setActiveTab = onTabChange ?? setOwnTab;
   const tabs = ROOM_TABS.filter((item) => item.key !== "prices" || onTabChange);
-  const [latitudeInput, setLatitudeInput] = useState<string>(
-    form.latitude != null ? String(form.latitude) : "",
-  );
-  const [longitudeInput, setLongitudeInput] = useState<string>(
-    form.longitude != null ? String(form.longitude) : "",
-  );
+  // False while a typed room coordinate can't be saved (VAY-2126); Save waits for a fix.
+  const [locationValid, setLocationValid] = useState(true);
   const [amenityInput, setAmenityInput] = useState("");
   const [expandedAmenityCategories, setExpandedAmenityCategories] = useState<string[]>([
     "Internet & Tech",
@@ -654,118 +651,18 @@ export default function RoomTypeForm({
           </div>
 
           {/* Location */}
-          <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50/60 p-4">
-            <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-2 mb-3">
-              <div>
-                <h3 className="text-[12px] font-bold text-gray-900 uppercase tracking-widest">
-                  {t("rooms.form.location")}
-                </h3>
-                <p className="text-[11px] text-gray-500 mt-1">
-                  {t("rooms.form.locationDescription")}
-                </p>
-              </div>
-              {!(form.latitude != null && form.longitude != null) && (
-                <span className="text-[11px] font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-3 py-1">
-                  {t("rooms.form.noLocation")}
-                </span>
-              )}
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
-              <div className="lg:col-span-3 space-y-3">
-                <div>
-                  <label className="block text-[12px] font-semibold text-gray-900 mb-1.5">
-                    {t("rooms.form.searchAddress")}
-                  </label>
-                  <input
-                    type="text"
-                    value={form.locationAddress || ""}
-                    onChange={(e) => updateForm({ locationAddress: e.target.value })}
-                    className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-gray-900"
-                    placeholder={t("rooms.form.addressPlaceholder")}
-                  />
-                  <p className="text-[10px] text-gray-400 mt-1">
-                    {t("rooms.form.geocodingDescription")}
-                  </p>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[12px] font-semibold text-gray-900 mb-1.5">
-                      {t("rooms.form.latitude")}
-                    </label>
-                    <input
-                      type="number"
-                      step="0.000001"
-                      min={-90}
-                      max={90}
-                      value={latitudeInput}
-                      onChange={(e) => setLatitudeInput(e.target.value)}
-                      onBlur={() => {
-                        if (latitudeInput === "") {
-                          updateForm({ latitude: null });
-                        } else {
-                          const v = Math.max(-90, Math.min(90, Number(latitudeInput)));
-                          setLatitudeInput(String(v));
-                          updateForm({ latitude: v });
-                        }
-                      }}
-                      className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-gray-900"
-                      placeholder="-8.670458"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[12px] font-semibold text-gray-900 mb-1.5">
-                      {t("rooms.form.longitude")}
-                    </label>
-                    <input
-                      type="number"
-                      step="0.000001"
-                      min={-180}
-                      max={180}
-                      value={longitudeInput}
-                      onChange={(e) => setLongitudeInput(e.target.value)}
-                      onBlur={() => {
-                        if (longitudeInput === "") {
-                          updateForm({ longitude: null });
-                        } else {
-                          const v = Math.max(-180, Math.min(180, Number(longitudeInput)));
-                          setLongitudeInput(String(v));
-                          updateForm({ longitude: v });
-                        }
-                      }}
-                      className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-gray-900"
-                      placeholder="115.212629"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div className="lg:col-span-2 min-h-[180px] rounded-xl border border-gray-200 bg-white relative overflow-hidden">
-                <div className="absolute inset-0 opacity-70 bg-[linear-gradient(90deg,#e5e7eb_1px,transparent_1px),linear-gradient(0deg,#e5e7eb_1px,transparent_1px)] bg-[size:28px_28px]" />
-                <div className="absolute inset-0 bg-gradient-to-br from-emerald-50 via-white to-sky-50" />
-                {form.latitude != null && form.longitude != null ? (
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <div className="relative">
-                      <div className="absolute -inset-5 rounded-full bg-primary-500/10 animate-pulse" />
-                      <div className="relative rounded-full bg-primary-600 text-white text-[11px] font-bold px-3 py-1.5 shadow-lg">
-                        {t("rooms.form.pinPreview")}
-                      </div>
-                    </div>
-                    <div className="absolute bottom-3 left-3 right-3 rounded-lg bg-white/90 border border-gray-200 px-3 py-2 text-[11px] text-gray-600 shadow-sm">
-                      {Number(form.latitude).toFixed(5)}, {Number(form.longitude).toFixed(5)}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="absolute inset-0 flex items-center justify-center px-6 text-center">
-                    <p className="text-[12px] font-medium text-gray-500">
-                      {t("rooms.form.enterCoordinates")}
-                    </p>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
+          <RoomLocationField
+            value={{
+              locationAddress: form.locationAddress || "",
+              latitude: form.latitude ?? null,
+              longitude: form.longitude ?? null,
+            }}
+            // Functional: a selected address writes its pin after Google answers, onto the form as it is then.
+            onChange={(patch) =>
+              onChange((prev: RoomTypeCreate | RoomTypeUpdate) => ({ ...prev, ...patch }))
+            }
+            onValidityChange={setLocationValid}
+          />
         </div>
       )}
 
@@ -1287,6 +1184,14 @@ export default function RoomTypeForm({
           {actionNote && (
             <p className="w-full text-[11px] text-gray-500 md:mr-auto md:w-auto">{actionNote}</p>
           )}
+          {!locationValid && (
+            <p
+              role="alert"
+              className="w-full text-[11px] font-medium text-red-600 md:mr-auto md:w-auto"
+            >
+              {t("rooms.form.fixLocationToSave")}
+            </p>
+          )}
           {onCancel ? (
             <button
               type="button"
@@ -1305,7 +1210,7 @@ export default function RoomTypeForm({
           )}
           <button
             type="submit"
-            disabled={saving}
+            disabled={saving || !locationValid}
             className="flex-1 md:flex-initial px-6 py-2.5 md:py-2 bg-primary-600 text-white text-[13px] md:text-[12px] font-medium rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
           >
             {saving ? (savingLabel ?? t("common.saving")) : (submitLabel ?? t("common.save"))}

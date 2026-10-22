@@ -111,6 +111,7 @@ export default function GoogleAddressMap({
   longitude,
   focus,
   coveredInsets,
+  markerTitle = "Hotel location",
   onPick,
   onUnavailable,
 }: {
@@ -122,6 +123,8 @@ export default function GoogleAddressMap({
   focus?: MapPosition | null;
   // Overlays hiding part of the map (narrow screens): the pin and a found area stay in the rest.
   coveredInsets?: MapCoveredInsets | null;
+  // The pin's tooltip and accessible name.
+  markerTitle?: string;
   // Makes the map interactive: placing the first pin by click (zoomed in) or dragging it.
   onPick?: (position: MapPosition) => void;
   onUnavailable?: () => void;
@@ -179,7 +182,7 @@ export default function GoogleAddressMap({
           draggable: interactive,
           map,
           ...(positionRef.current ? { position: positionRef.current } : {}),
-          title: "Hotel location",
+          title: markerTitle,
         });
         markerRef.current = marker;
         if (interactive) {
@@ -226,7 +229,7 @@ export default function GoogleAddressMap({
     return () => {
       disposed = true;
     };
-  }, [active, apiKey, interactive]);
+  }, [active, apiKey, interactive, markerTitle]);
 
   useEffect(() => {
     if (!active) return;

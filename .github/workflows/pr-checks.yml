@@ -280,6 +280,8 @@ jobs:
           PORT: "3164"
           AUTH_PUBLIC_ORIGIN: http://localhost:3164
           NEXT_PUBLIC_BOOKING_ADMIN_URL: http://admin.booking.localhost:3003
+          # A fake key: the room Location box loads Google Maps, which the specs answer with a fake (VAY-2126).
+          NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: e2e-google-places
           E2E_PMS_BASE_URL: http://localhost:3164
 
       - name: Upload the Playwright report
