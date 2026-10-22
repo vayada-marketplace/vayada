@@ -939,20 +939,29 @@ test("shows the whole year and closes dates picked in the Year view (VAY-2284)",
   await assertHealthy();
 });
 
-test("offers Card online on both rates once the booking page can take card (VAY-2205)", async ({
+test("offers Card online on both rates once the booking page can take card (VAY-2205, VAY-2305)", async ({
   page,
 }, testInfo) => {
   await openPms(page);
-  // The rates take only pay at property, so Card online shows because card is ready, not because a rate has it.
+  // The rates take only pay at property ("Nothing"): card comes with "Guest chooses" or "Full stay" once card is
+  // ready, not because a rate has it.
   await mockPricing(page, publicationOf(3, [designRoom(3), complexRoom(3)]), [], {
     cardReady: true,
     payment: { kind: "full", acceptedMethods: ["pay_at_property"] },
   });
   const assertHealthy = watchPageHealth(page, testInfo);
   await prices(page, DELUXE);
-  for (const rate of ["Flexible rate", "Non-refundable rate"]) {
+  for (const [rate, pick] of [
+    ["Flexible rate", "Guest chooses"],
+    ["Non-refundable rate", "Full stay"],
+  ] as const) {
     const region = main(page).getByRole("region", { name: rate });
-    await expect(region.getByRole("checkbox", { name: "Card online" })).not.toBeChecked();
+    await expect(region.getByRole("checkbox", { name: "Card online" })).toHaveCount(0);
+    await region
+      .getByRole("group", { name: "Paid when booking" })
+      .getByRole("button", { name: pick })
+      .click();
+    await expect(region.getByRole("checkbox", { name: "Card online" })).toBeChecked();
     await expect(region).toContainText("Charged at booking");
   }
   await assertHealthy();

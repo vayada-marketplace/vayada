@@ -131,6 +131,16 @@ const textOf = (node: ReactTestInstance): string =>
 const card = (name: string) => view.root.findByProps({ "aria-label": name });
 const checkbox = (rate: string, label: string) =>
   card(rate).findByProps({ type: "checkbox", "aria-label": label });
+const choice = (rate: string, label: string) =>
+  card(rate).find(
+    (node) =>
+      node.type === "button" && node.props["aria-pressed"] !== undefined && textOf(node) === label,
+  );
+const choices = (rate: string) =>
+  card(rate)
+    .findByProps({ role: "group", "aria-label": "Paid when booking" })
+    .findAllByType("button")
+    .map((node) => [textOf(node), node.props["aria-pressed"], node.props.disabled]);
 
 it("shows the Flexible rate always on beside the Non-refundable rate, with cancellation and how guests pay (VAY-2282)", () => {
   mount(room(), terms(["pay_at_property"], ["bank_transfer"]), ["bank_transfer"]);
@@ -172,15 +182,17 @@ it("changes the cancellation days, opens the refund steps, and sets each rate's 
       .props.onClick(),
   );
   expect(handlers.onEditOwn).toHaveBeenCalled();
-  act(() =>
-    checkbox("Flexible rate", "Bank transfer").props.onChange({ target: { checked: true } }),
-  );
+  // "Guest chooses" (VAY-2305) adds a way to pay before arrival to pay at property.
+  expect(card("Flexible rate").findAllByProps({ "aria-label": "Bank transfer" })).toHaveLength(0);
+  act(() => choice("Flexible rate", "Guest chooses").props.onClick());
   expect(
     handlers.onTerms.mock.lastCall![0].map((edit: { offerId: string; terms: OptionTerms }) => [
       edit.offerId,
-      edit.terms.payment.acceptedMethods,
+      edit.terms.payment,
     ]),
-  ).toEqual([["flexible", ["pay_at_property", "bank_transfer"]]]);
+  ).toEqual([
+    ["flexible", { kind: "full", acceptedMethods: ["pay_at_property", "bank_transfer"] }],
+  ]);
   // A rate keeps at least one method.
   act(() =>
     checkbox("Non-refundable rate", "Bank transfer").props.onChange({ target: { checked: false } }),
@@ -258,9 +270,15 @@ it("names terms from before payment methods were set, and offers Card online onc
   });
   const both = terms(["pay_at_property"], ["bank_transfer"]);
   mount(room(), both, ["bank_transfer"], ready("at_booking"));
-  expect(checkbox("Flexible rate", "Card online").props.checked).toBe(false);
+  // "Nothing" is pay at property only; card comes with a choice that takes it (VAY-2305).
+  expect(card("Flexible rate").findAllByProps({ "aria-label": "Card online" })).toHaveLength(0);
+  act(() => choice("Flexible rate", "Guest chooses").props.onClick());
+  expect(handlers.onTerms.mock.lastCall![0][0].terms.payment.acceptedMethods).toEqual([
+    "pay_at_property",
+    "card",
+  ]);
   expect(checkbox("Non-refundable rate", "Card online").props.checked).toBe(false);
-  expect(textOf(card("Flexible rate"))).toContain("Charged at booking");
+  expect(textOf(card("Non-refundable rate"))).toContain("Charged at booking");
   mount(room(), both, ["bank_transfer"], ready("on_accept"));
   expect(textOf(card("Non-refundable rate"))).toContain("Held at booking, charged when you accept");
   // Not ready (here: switched off) hides it again.
@@ -361,4 +379,85 @@ it("sells another option on channels only, but never the room's last booking-pag
   expect(() =>
     setOfferSale(setOfferSale(value, "flexible", "not_sold"), "nonrefundable", "channels_only"),
   ).toThrow();
+});
+
+it("makes Paid when booking a choice: nothing, guest chooses, a deposit while deposits are on, or the full stay (VAY-2305)", () => {
+  const ready = (deposits: boolean) => ({
+    card: { ready: true, reason: null, charge: "at_booking" as const },
+    deposits: { ready: deposits },
+  });
+  mount(room(), terms(["pay_at_property"], ["card"]), [], ready(false));
+  expect(choices("Flexible rate")).toEqual([
+    ["Nothing", true, false],
+    ["Guest chooses", false, false],
+    ["Full stay", false, false],
+  ]);
+  expect(choices("Non-refundable rate")).toEqual([["Full stay", true, false]]);
+  // Pay at property is a "Nothing" rate's only method, fixed by the choice.
+  expect(checkbox("Flexible rate", "Pay at property").props.disabled).toBe(true);
+  act(() => choice("Flexible rate", "Full stay").props.onClick());
+  expect(handlers.onTerms.mock.lastCall![0][0].terms.payment).toEqual({
+    kind: "full",
+    acceptedMethods: ["card"],
+  });
+  // Deposits show while they can be taken: card when booking, the rest at the property.
+  mount(room(), terms(["pay_at_property"], ["card"]), [], ready(true));
+  expect(choices("Flexible rate").map(([name]) => name)).toEqual([
+    "Nothing",
+    "Guest chooses",
+    "Deposit",
+    "Full stay",
+  ]);
+  expect(choices("Non-refundable rate").map(([name]) => name)).toEqual(["Deposit", "Full stay"]);
+  act(() => choice("Flexible rate", "Deposit").props.onClick());
+  const deposit = handlers.onTerms.mock.lastCall![0][0].terms.payment;
+  expect(deposit).toEqual({
+    kind: "deposit",
+    basisPoints: 3000,
+    balanceDaysBeforeArrival: 0,
+    acceptedMethods: ["card"],
+  });
+  mount(
+    room(),
+    {
+      ...terms(["pay_at_property"], ["card"]),
+      flexible: { cancellation: free(7), payment: deposit },
+    },
+    [],
+    ready(true),
+  );
+  expect(textOf(card("Flexible rate"))).toContain(
+    "Guests pay 30% by card when they book and the rest at the property.",
+  );
+  expect(checkbox("Flexible rate", "Card online").props.disabled).toBe(true);
+  expect(checkbox("Flexible rate", "Pay at property").props.checked).toBe(true);
+  act(() => card("Flexible rate").findByProps({ "aria-label": "Larger deposit" }).props.onClick());
+  expect(handlers.onTerms.mock.lastCall![0][0].terms.payment.basisPoints).toBe(3500);
+});
+
+it("greys out the full stay without a way to pay before arrival, and keeps a guest's choice as hotels take it today (VAY-2305)", () => {
+  // No card and no bank transfer: no deposit, no guest's choice, and the full stay says why it can't be picked.
+  mount(room(false), terms(["pay_at_property"]));
+  expect(choices("Flexible rate")).toEqual([
+    ["Nothing", true, false],
+    ["Full stay", false, true],
+  ]);
+  expect(textOf(card("Flexible rate"))).toContain(
+    "Full stay needs a way to pay before arrival: card online or bank transfer.",
+  );
+  // Card and pay at property together: the guest picks at checkout; card can be removed, pay at property stays.
+  mount(room(false), terms(["card", "pay_at_property"]), [], {
+    card: { ready: true, reason: null, charge: "on_accept" },
+    deposits: { ready: false },
+  });
+  expect(choices("Flexible rate")).toContainEqual(["Guest chooses", true, false]);
+  expect(checkbox("Flexible rate", "Card online").props.checked).toBe(true);
+  expect(checkbox("Flexible rate", "Card online").props.disabled).toBe(false);
+  expect(checkbox("Flexible rate", "Pay at property").props.disabled).toBe(true);
+  act(() =>
+    checkbox("Flexible rate", "Card online").props.onChange({ target: { checked: false } }),
+  );
+  expect(handlers.onTerms.mock.lastCall![0][0].terms.payment.acceptedMethods).toEqual([
+    "pay_at_property",
+  ]);
 });

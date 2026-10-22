@@ -4,8 +4,8 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { MinusIcon, PlusIcon } from "@heroicons/react/24/outline";
 import {
   paidWhenBooking,
+  PREPAID_PRICING_PAYMENT_METHODS,
   type PricingPaymentMethod,
-  type StoredPaidWhenBooking,
 } from "@vayada/domain-booking/replacement-pricing";
 import {
   pricingOfferOnBookingPage,
@@ -19,7 +19,7 @@ import {
   cancellationEdits,
   defaultDiscount,
   defaultFreeDays,
-  rateMethodEdits,
+  ratePaymentEdits,
   setDiscount,
   setOfferSale,
   switchOption,
@@ -380,12 +380,11 @@ function FlexibleParts({
           </p>
         )}
       </Part>
-      <PaidWhenBooking payment={simple.mainTerms.payment} />
-      <RateMethods
+      <RatePayment
         rate="flexible"
-        methods={simple.mainTerms.payment.acceptedMethods ?? []}
+        payment={simple.mainTerms.payment}
         disabled={disabled}
-        onChange={(methods) => onTerms(rateMethodEdits(simple, terms, "flexible", methods))}
+        onPayment={(payment) => onTerms(ratePaymentEdits(simple, terms, "flexible", payment))}
       />
     </>
   );
@@ -567,13 +566,12 @@ function NonRefundableRate({
             </div>
             {last && <p className={ui.errorText}>{t("pricing.rates.keepOneNonRefundable")}</p>}
           </Part>
-          <PaidWhenBooking payment={terms[offer.id]?.payment ?? mainTerms.payment} />
-          <RateMethods
+          <RatePayment
             rate="non_refundable"
-            methods={terms[offer.id]?.payment.acceptedMethods ?? []}
+            payment={terms[offer.id]?.payment ?? mainTerms.payment}
             disabled={disabled}
-            onChange={(methods) =>
-              onTerms(rateMethodEdits(simple, terms, "non_refundable", methods))
+            onPayment={(payment) =>
+              onTerms(ratePaymentEdits(simple, terms, "non_refundable", payment))
             }
           />
         </>
@@ -592,124 +590,258 @@ function NonRefundableRate({
   );
 }
 
-/** "Paid when booking", read from the rate's terms with the shared rule (VAY-2205): nothing for pay at property only,
- * the full stay for prepaid methods only, a deposit, "guest chooses" for older terms that take both, and Payment
- * settings for terms from before methods were set. */
-function PaidWhenBooking({ payment }: { payment: Payment }) {
-  const { t } = useTranslation();
-  const text: Record<StoredPaidWhenBooking, readonly [string, string]> = {
-    nothing: [t("pricing.rates.paid.nothing"), t("pricing.rates.paid.nothingHint")],
-    full_stay: [t("pricing.rates.paid.full"), t("pricing.rates.paid.fullHint")],
-    deposit: [
-      t("pricing.rates.paid.deposit"),
-      payment.kind === "deposit"
-        ? t("pricing.terms.deposit", {
-            percent: payment.basisPoints / 100,
-            days: payment.balanceDaysBeforeArrival,
-          })
-        : "",
-    ],
-    guest_chooses: [t("pricing.rates.paid.guestChooses"), t("pricing.rates.paid.guestChoosesHint")],
-    not_set: [t("pricing.rates.paid.settings"), t("pricing.rates.paid.settingsHint")],
-  };
-  const [value, hint] = text[paidWhenBooking(payment)];
-  return (
-    <Part label={t("pricing.rates.paid.title")} className="lg:min-h-[104px]">
-      <p className="text-[14px] font-semibold text-gray-900">{value}</p>
-      <p className="text-[12px] text-gray-500">{hint}</p>
-    </Part>
-  );
-}
+type Choice = "nothing" | "guest_chooses" | "deposit" | "full_stay";
+const choiceNames = {
+  nothing: "pricing.rates.paid.nothing",
+  guest_chooses: "pricing.rates.paid.guestChooses",
+  deposit: "pricing.rates.paid.deposit",
+  full_stay: "pricing.rates.paid.full",
+} as const;
+const choiceHints = {
+  nothing: "pricing.rates.paid.nothingHint",
+  guest_chooses: "pricing.rates.paid.guestChoosesHint",
+  full_stay: "pricing.rates.paid.fullHint",
+  not_set: "pricing.rates.paid.settingsHint",
+} as const;
 
-/** A rate's payment methods: pay at property, bank transfer and PayPal when the hotel can use them, and card once the
- * booking page can take it (VAY-2205); a method the rate already takes always shows, so it can be removed. The non-refundable rate is paid in
- * advance, so it can't take pay at property (one it already takes can still be removed). */
-function RateMethods({
+/** A rate's "Paid when booking" as a choice (VAY-2305, the CEO's design), with the payment methods that go with it:
+ * - nothing: pay at the property only;
+ * - guest chooses: the property or a way to pay before arrival, the guest picks (as many hotels take today);
+ * - deposit: a percentage by card when booking, the rest at the property; offered only while deposits can be taken;
+ * - full stay: ways to pay before arrival only (card once the booking page takes it, bank transfer and PayPal once
+ *   ready); greyed out, with why, while there is none.
+ * The non-refundable rate is paid in advance: a deposit or the full stay. A method the rate already takes always
+ * shows, so it can be removed; terms from before methods were set say so. */
+function RatePayment({
   rate,
-  methods,
+  payment,
   disabled,
-  onChange,
+  onPayment,
 }: {
   rate: "flexible" | "non_refundable";
-  methods: readonly PricingPaymentMethod[];
+  payment: Payment;
   disabled: boolean;
-  onChange: (methods: PricingPaymentMethod[]) => void;
+  onPayment: (payment: Payment) => void;
 }) {
   const { t } = useTranslation();
   const manual = usePricingManualMethods();
-  const card = usePricingCardReadiness()?.card;
+  const readiness = usePricingCardReadiness();
+  const card = readiness?.card;
   const [error, setError] = useState("");
-  const order: PricingPaymentMethod[] =
-    rate === "flexible"
-      ? ["card", "pay_at_property", "bank_transfer", "paypal"]
-      : ["card", "bank_transfer", "paypal", "pay_at_property"];
-  const shown = order.filter(
-    (method) =>
-      methods.includes(method) ||
-      method === "pay_at_property" ||
-      (method === "card" ? !!card?.ready : manual.includes(method as "bank_transfer" | "paypal")),
+  const methods = payment.acceptedMethods ?? [];
+  const stored = paidWhenBooking(payment);
+  const prepaid = PREPAID_PRICING_PAYMENT_METHODS.filter((method) =>
+    method === "card" ? !!card?.ready : manual.includes(method),
   );
-  const change = (method: PricingPaymentMethod, on: boolean) => {
-    const next = on ? [...methods, method] : methods.filter((value) => value !== method);
+  const kept = prepaid.filter((method) => methods.includes(method));
+  // The rate's own choice always shows, also one its kind doesn't offer now (old non-refundable terms that let the
+  // guest choose, or pay at the property only), so the hotel sees it and can change it.
+  const offered: Choice[] =
+    rate === "flexible"
+      ? ["nothing", "guest_chooses", "deposit", "full_stay"]
+      : ["deposit", "full_stay"];
+  const choices = [
+    ...(stored !== "not_set" && !offered.includes(stored) ? [stored] : []),
+    ...offered.filter(
+      (choice) =>
+        choice === stored ||
+        (choice === "deposit"
+          ? !!readiness?.deposits.ready
+          : choice !== "guest_chooses" || prepaid.length > 0),
+    ),
+  ];
+  const unavailable = (choice: Choice) =>
+    choice === "full_stay" && choice !== stored && !prepaid.length;
+  const apply = (next: Payment) => {
+    if (disabled) return;
     try {
-      onChange(next);
+      onPayment(next);
       setError("");
     } catch (cause) {
       setError(errorText(cause, t, "pricing.error.paymentMethodRequired"));
     }
   };
+  const deposit = (percent: number): Payment => ({
+    kind: "deposit",
+    basisPoints: percent * 100,
+    balanceDaysBeforeArrival: 0,
+    acceptedMethods: ["card"],
+  });
+  const choose = (choice: Choice) => {
+    if (choice === stored || unavailable(choice)) return;
+    apply(
+      choice === "nothing"
+        ? { kind: "full", acceptedMethods: ["pay_at_property"] }
+        : choice === "guest_chooses"
+          ? {
+              kind: "full",
+              acceptedMethods: ["pay_at_property", ...(kept.length ? kept : prepaid.slice(0, 1))],
+            }
+          : choice === "deposit"
+            ? deposit(payment.kind === "deposit" ? payment.basisPoints / 100 : 30)
+            : { kind: "full", acceptedMethods: [...(kept.length ? kept : prepaid)] },
+    );
+  };
+  const percent = payment.kind === "deposit" ? payment.basisPoints / 100 : 0;
+  const hint =
+    payment.kind === "deposit"
+      ? payment.balanceDaysBeforeArrival === 0
+        ? t("pricing.rates.paid.depositHint", { percent })
+        : t("pricing.terms.deposit", { percent, days: payment.balanceDaysBeforeArrival })
+      : t(choiceHints[stored as Exclude<typeof stored, "deposit">]);
+  const order: PricingPaymentMethod[] =
+    rate === "flexible"
+      ? ["card", "pay_at_property", "bank_transfer", "paypal"]
+      : ["card", "bank_transfer", "paypal", "pay_at_property"];
+  // Pay at property comes with nothing, guest chooses and (for the rest) a deposit; ways to pay before arrival with
+  // guest chooses and full stay; the non-refundable rate says why it doesn't take pay at property.
+  const shown = order.filter((method) => {
+    if (methods.includes(method)) return true;
+    if (method === "pay_at_property") return rate === "non_refundable" || stored !== "full_stay";
+    return (
+      (stored === "guest_chooses" || stored === "full_stay" || stored === "not_set") &&
+      prepaid.includes(method)
+    );
+  });
+  const toggle = (method: PricingPaymentMethod, on: boolean) =>
+    apply({
+      ...payment,
+      acceptedMethods: on ? [...methods, method] : methods.filter((value) => value !== method),
+    });
   return (
-    <Part label={t("pricing.rates.methods")}>
-      <fieldset className="space-y-2">
-        <legend className="sr-only">{t("pricing.paymentMethods.legend")}</legend>
-        {shown.map((method) => {
-          const on = methods.includes(method);
-          const notOffered = rate === "non_refundable" && method === "pay_at_property";
-          const blocked = notOffered && !on;
-          return (
-            <label
-              key={method}
-              className={`flex items-start gap-2.5 rounded-[10px] border px-3 py-2.5 ${
-                blocked
-                  ? "border-gray-200 bg-gray-50"
-                  : on
-                    ? "border-primary-200 bg-primary-50"
-                    : "border-gray-200 bg-white"
+    <>
+      <Part label={t("pricing.rates.paid.title")} className="lg:min-h-[104px]">
+        <div
+          role="group"
+          aria-label={t("pricing.rates.paid.title")}
+          className="flex gap-0.5 rounded-lg bg-gray-100 p-[3px]"
+        >
+          {choices.map((choice) => (
+            <button
+              key={choice}
+              type="button"
+              aria-pressed={choice === stored}
+              disabled={disabled || unavailable(choice)}
+              onClick={() => choose(choice)}
+              className={`min-h-8 min-w-0 flex-1 rounded-md px-2 py-1 text-[13px] font-medium leading-4 disabled:cursor-not-allowed ${
+                choice === stored
+                  ? "bg-white text-gray-900 shadow-sm"
+                  : unavailable(choice)
+                    ? "text-gray-400"
+                    : "text-gray-500"
               }`}
             >
-              <input
-                type="checkbox"
-                aria-label={t(methodNames[method])}
-                checked={on}
-                disabled={disabled || blocked}
-                onChange={(event) => change(method, event.target.checked)}
-                className="mt-0.5 h-4 w-4 shrink-0 rounded border-gray-300 text-primary-600 disabled:opacity-50"
-              />
-              <span className="min-w-0">
-                <span
-                  className={`block text-[14px] font-medium ${blocked ? "text-gray-400" : "text-gray-900"}`}
-                >
-                  {t(methodNames[method])}
+              {t(choiceNames[choice])}
+            </button>
+          ))}
+        </div>
+        {stored === "not_set" && (
+          <p className="text-[14px] font-semibold text-gray-900">
+            {t("pricing.rates.paid.settings")}
+          </p>
+        )}
+        {payment.kind === "deposit" && (
+          <div className="flex h-10 w-fit items-center gap-1 rounded-[10px] border border-gray-300 bg-white px-1.5">
+            <button
+              type="button"
+              aria-label={t("pricing.rates.paid.depositLess")}
+              disabled={disabled || percent <= 5}
+              onClick={() => apply(deposit(Math.max(5, Math.ceil(percent / 5) * 5 - 5)))}
+              className="rounded-md p-1 text-gray-500 hover:bg-gray-100 disabled:opacity-40"
+            >
+              <MinusIcon aria-hidden="true" className="h-3.5 w-3.5" />
+            </button>
+            <output
+              aria-live="polite"
+              className="w-12 text-center text-[14px] font-semibold text-gray-900"
+            >
+              {percent}%
+            </output>
+            <button
+              type="button"
+              aria-label={t("pricing.rates.paid.depositMore")}
+              disabled={disabled || percent >= 95}
+              onClick={() => apply(deposit(Math.min(95, Math.floor(percent / 5) * 5 + 5)))}
+              className="rounded-md p-1 text-gray-500 hover:bg-gray-100 disabled:opacity-40"
+            >
+              <PlusIcon aria-hidden="true" className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
+        <p className="text-[12px] text-gray-500">{hint}</p>
+        {choices.some(unavailable) && (
+          <p className="text-[12px] text-gray-500">{t("pricing.rates.paid.fullNeedsPrepaid")}</p>
+        )}
+      </Part>
+      <Part label={t("pricing.rates.methods")}>
+        <fieldset className="space-y-2">
+          <legend className="sr-only">{t("pricing.paymentMethods.legend")}</legend>
+          {shown.map((method) => {
+            const taken = methods.includes(method);
+            const rest = stored === "deposit" && method === "pay_at_property";
+            // The Non-refundable rate says it doesn't take pay at property, also while old terms still do (then the
+            // hotel can untick it); only an unticked one is greyed out.
+            const notOffered = rate === "non_refundable" && method === "pay_at_property" && !rest;
+            const blocked = notOffered && !taken;
+            // The choice fixes these: a deposit's card and rest, and the Flexible rate's pay at property with
+            // "nothing" or "guest chooses". The Non-refundable rate's old pay at property can always be removed.
+            const fixed =
+              rest ||
+              (stored === "deposit" && method === "card") ||
+              (rate === "flexible" &&
+                method === "pay_at_property" &&
+                taken &&
+                (stored === "nothing" || stored === "guest_chooses"));
+            const on = taken || rest;
+            return (
+              <label
+                key={method}
+                className={`flex items-start gap-2.5 rounded-[10px] border px-3 py-2.5 ${
+                  blocked
+                    ? "border-gray-200 bg-gray-50"
+                    : on
+                      ? "border-primary-200 bg-primary-50"
+                      : "border-gray-200 bg-white"
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  aria-label={t(methodNames[method])}
+                  checked={on}
+                  disabled={disabled || blocked || fixed}
+                  onChange={(event) => toggle(method, event.target.checked)}
+                  className="mt-0.5 h-4 w-4 shrink-0 rounded border-gray-300 text-primary-600 disabled:opacity-50"
+                />
+                <span className="min-w-0">
+                  <span
+                    className={`block text-[14px] font-medium ${blocked ? "text-gray-400" : "text-gray-900"}`}
+                  >
+                    {t(methodNames[method])}
+                  </span>
+                  <span
+                    className={`block text-[12px] ${notOffered ? "text-amber-700" : "text-gray-500"}`}
+                  >
+                    {notOffered
+                      ? t("pricing.rates.notOffered")
+                      : rest
+                        ? t("pricing.rates.method.depositRest")
+                        : stored === "deposit" && method === "card"
+                          ? t("pricing.rates.method.depositCard")
+                          : method === "card" && card?.charge === "at_booking"
+                            ? t("pricing.rates.method.cardAtBooking")
+                            : t(methodHints[method])}
+                  </span>
                 </span>
-                <span
-                  className={`block text-[12px] ${notOffered ? "text-amber-700" : "text-gray-500"}`}
-                >
-                  {notOffered
-                    ? t("pricing.rates.notOffered")
-                    : method === "card" && card?.charge === "at_booking"
-                      ? t("pricing.rates.method.cardAtBooking")
-                      : t(methodHints[method])}
-                </span>
-              </span>
-            </label>
-          );
-        })}
-      </fieldset>
-      {error && (
-        <p role="alert" className={ui.errorText}>
-          {error}
-        </p>
-      )}
-    </Part>
+              </label>
+            );
+          })}
+        </fieldset>
+        {error && (
+          <p role="alert" className={ui.errorText}>
+            {error}
+          </p>
+        )}
+      </Part>
+    </>
   );
 }
