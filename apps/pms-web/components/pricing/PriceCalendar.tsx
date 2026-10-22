@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { ChevronLeftIcon, ChevronRightIcon, LockClosedIcon } from "@heroicons/react/24/outline";
 import type { PricingConfiguration } from "@vayada/domain-pms/replacement-pricing";
 import { useTranslation } from "@/lib/i18n";
@@ -75,26 +75,15 @@ export function PriceCalendar({
   onPick: (date: string) => void;
 }) {
   const { t } = useTranslation();
+  // Month or Year view, on phones too (VAY-2305: the Year view shows two months a row there).
   const [view, setView] = useState<"month" | "year">("month");
-  // The approved phone board has no Year view: under 640px the calendar shows the month (VAY-2284).
-  const [wide, setWide] = useState(false);
-  useEffect(() => {
-    const query = globalThis.matchMedia?.("(min-width: 640px)");
-    if (!query) return;
-    const update = () => setWide(query.matches);
-    update();
-    query.addEventListener("change", update);
-    return () => query.removeEventListener("change", update);
-  }, []);
   const guests = room
     ? adults !== null && adults <= room.capacity.adults
       ? adults
       : sampleAdults(room)
     : 2;
   const months =
-    room && view === "year" && wide
-      ? calendarYear(room, offerId, guests, month.slice(0, 4), today)
-      : null;
+    room && view === "year" ? calendarYear(room, offerId, guests, month.slice(0, 4), today) : null;
   const nights = room && !months ? calendarNights(room, offerId, month, guests, today, stay) : [];
   // The Year view has no minimum-stay badges, so its legend doesn't explain them.
   const legendNights = months
@@ -158,7 +147,7 @@ export function PriceCalendar({
         <div
           role="group"
           aria-label={t("pricing.calendar.view.label")}
-          className="hidden shrink-0 gap-0.5 rounded-lg bg-gray-100 p-[3px] sm:flex"
+          className="flex shrink-0 gap-0.5 rounded-lg bg-gray-100 p-[3px]"
         >
           {views.map((value) => (
             <button

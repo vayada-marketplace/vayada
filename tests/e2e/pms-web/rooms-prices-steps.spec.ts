@@ -891,6 +891,17 @@ test("shows the whole year and closes dates picked in the Year view (VAY-2284)",
   expect(new Set(tops.slice(0, 4)).size).toBe(1);
   expect(tops[4]).toBeGreaterThan(tops[0]);
   expect(await calendar.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
+  // Phones show the Year view too, two months a row (VAY-2305).
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(toggle.getByRole("button", { name: "Year" })).toBeVisible();
+  await expect(months).toHaveCount(12);
+  const phoneTops = await months.evaluateAll((nodes) =>
+    nodes.map((node) => Math.round(node.getBoundingClientRect().top)),
+  );
+  expect(phoneTops[0]).toBe(phoneTops[1]);
+  expect(phoneTops[2]).toBeGreaterThan(phoneTops[1]);
+  expect(await calendar.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
+  await page.setViewportSize({ width: 1440, height: 900 });
 
   // Click a date, then a second one: the side panel closes everything in between.
   await calendar.getByRole("button", { name: new RegExp(`^10 March ${year}, €`) }).click();
@@ -915,11 +926,10 @@ test("shows the whole year and closes dates picked in the Year view (VAY-2284)",
     })),
   );
 
-  // Phones get the month view only (the approved 390px board): the toggle hides and the picked month shows.
+  // Phones keep the Year view too (VAY-2305: the approved 390px boards), and nothing scrolls sideways.
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect(toggle).toBeHidden();
-  await expect(title).toHaveText(`March ${year}`);
-  await expect(months).toHaveCount(0);
+  await expect(toggle).toBeVisible();
+  await expect(months).toHaveCount(12);
   for (const element of [calendar, main(page)])
     expect(await element.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
   await assertHealthy();
