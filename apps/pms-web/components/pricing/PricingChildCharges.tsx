@@ -28,6 +28,25 @@ export function changeChildCharges(
   return result;
 }
 
+/** "Children under {age}" (VAY-2305): a room's one age band from 0 moves with the age guests count as adults from. */
+export function changeChildAge(room: PricingConfiguration, age: string): PricingConfiguration {
+  const [band] = room.children.bands;
+  if (room.children.bands.length !== 1 || band.fromAge !== 0)
+    throw new PricingError("pricing.childCharges.errorInvalid");
+  if (!/^\d{1,2}$/.test(age.trim())) throw new PricingError("pricing.seasonTable.childrenAgeError");
+  const adultFromAge = Number(age.trim());
+  const result = parsePricingConfiguration({
+    ...room,
+    children: {
+      ...room.children,
+      adultFromAge,
+      bands: [{ ...band, throughAge: adultFromAge - 1 }],
+    },
+  });
+  if (!result) throw new PricingError("pricing.seasonTable.childrenAgeError");
+  return result;
+}
+
 export function PricingChildCharges({
   room,
   label,

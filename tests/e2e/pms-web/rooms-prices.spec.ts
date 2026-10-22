@@ -97,6 +97,13 @@ async function mockPricing(page: Page, initial: ReturnType<typeof publicationOf>
         card: { ready: false, reason: "switch_off", charge: "at_booking" },
         deposits: { ready: false },
       });
+    // Every published rate sells (VAY-2304).
+    if (suffix === "/not-selling" && method === "GET")
+      return ok(route, {
+        version: "pricing-rates-not-selling.v1",
+        publishedRevision: null,
+        rates: [],
+      });
     if (suffix === "" && method === "GET") {
       if (!state.publication) return route.fulfill({ status: 404, json: { code: "not_found" } });
       return ok(route, state.publication);
