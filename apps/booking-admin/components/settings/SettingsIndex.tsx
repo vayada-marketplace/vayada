@@ -1,11 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   AdjustmentsHorizontalIcon,
-  ArrowRightIcon,
   BoltIcon,
   ClipboardDocumentListIcon,
   Cog6ToothIcon,
@@ -17,19 +15,13 @@ import {
   ShieldCheckIcon,
   UserCircleIcon,
 } from "@heroicons/react/24/outline";
+import { SettingsCardGrid, type SettingsCardLink } from "@vayada/settings-ui";
 import { useTranslation } from "@/lib/i18n";
-import { cn } from "@/lib/utils";
 import { PageHeader, PageLayout } from "@/components/layout/PageLayout";
 import { legacySettingsPageUrl } from "@/lib/utils/settingsSectionUrl";
 
-type SettingsCardLink = {
-  title: string;
-  description: string;
-  icon: React.ComponentType<{ className?: string }>;
-  // Cards without a page have no backend yet (VAY-2095, VAY-2096).
-  href?: string;
-};
-
+// Titles and descriptions are translation keys. Cards without a page have no backend yet
+// (VAY-2095, VAY-2096).
 const FEATURE_HUB = {
   title: "layout.sidebar.featureHub",
   description: "settings.cards.featureHub.description",
@@ -100,41 +92,6 @@ const CARDS: SettingsCardLink[] = [
   },
 ];
 
-function CardBody({ card, wide = false }: { card: SettingsCardLink; wide?: boolean }) {
-  const { t } = useTranslation();
-  const Icon = card.icon;
-  return (
-    <>
-      <span className="flex items-center gap-4">
-        <span
-          className={cn(
-            "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl",
-            wide ? "bg-white text-primary-600" : "bg-primary-50 text-primary-600",
-          )}
-        >
-          <Icon className="h-5 w-5" />
-        </span>
-        <span className="text-[15px] font-semibold text-gray-900">{t(card.title)}</span>
-      </span>
-      <span className="mt-4 block flex-1 text-[13px] leading-5 text-gray-600">
-        {t(card.description)}
-      </span>
-      {card.href ? (
-        <span className="mt-4 inline-flex items-center gap-1.5 text-[13px] font-medium text-primary-600">
-          {t("settings.index.open")}
-          <ArrowRightIcon className="h-3.5 w-3.5" />
-        </span>
-      ) : (
-        <span className="mt-4 inline-flex w-fit rounded-full bg-gray-100 px-2.5 py-0.5 text-[11px] font-medium text-gray-600">
-          {t("settings.index.comingSoon")}
-        </span>
-      )}
-    </>
-  );
-}
-
-const cardClass = "flex h-full flex-col rounded-2xl border bg-white p-5 transition-colors md:p-6";
-
 export function SettingsIndex() {
   const { t } = useTranslation();
   const router = useRouter();
@@ -148,39 +105,21 @@ export function SettingsIndex() {
 
   if (!legacyChecked) return null;
 
+  const translate = <T extends SettingsCardLink>(card: T): T => ({
+    ...card,
+    title: t(card.title),
+    description: t(card.description),
+  });
+
   return (
     <PageLayout>
       <PageHeader title={t("settings.index.title")} />
-      <Link
-        href={FEATURE_HUB.href}
-        className={cn(
-          cardClass,
-          "mt-6 border-primary-200 bg-primary-50/60 hover:border-primary-300 hover:bg-primary-50",
-        )}
-      >
-        <CardBody card={FEATURE_HUB} wide />
-      </Link>
-      <ul className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {CARDS.map((card) => (
-          <li key={card.title}>
-            {card.href ? (
-              <Link
-                href={card.href}
-                className={cn(
-                  cardClass,
-                  "border-gray-200 hover:border-primary-200 hover:bg-primary-50/40",
-                )}
-              >
-                <CardBody card={card} />
-              </Link>
-            ) : (
-              <div aria-disabled="true" className={cn(cardClass, "border-gray-200 opacity-70")}>
-                <CardBody card={card} />
-              </div>
-            )}
-          </li>
-        ))}
-      </ul>
+      <SettingsCardGrid
+        featured={translate(FEATURE_HUB)}
+        cards={CARDS.map(translate)}
+        openLabel={t("settings.index.open")}
+        comingSoonLabel={t("settings.index.comingSoon")}
+      />
     </PageLayout>
   );
 }
