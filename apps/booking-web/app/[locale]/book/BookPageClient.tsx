@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { flushSync } from "react-dom";
 import { useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
@@ -119,6 +120,8 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   const [guestDisclosure, setGuestDisclosure] = useState<PublicQuoteGuestDisclosure | null>(null);
   // The price whose Confirm was pressed before both boxes were ticked (VAY-2306).
   const [consentMissedFor, setConsentMissedFor] = useState<string | null>(null);
+  // The guest rules the payment step's own tick shows (null while they load or if they failed).
+  const [shownRules, setShownRules] = useState<PublicQuoteGuestDisclosure | null>(null);
   const consentErrorId = useId();
   const [rooms, setRooms] = useState<PricingRoom[] | null>(null);
   const [catalogError, setCatalogError] = useState(false);
@@ -367,8 +370,10 @@ function RoomQuoteForm({ slug }: { slug: string }) {
       ? guestRulesQuote.disclosure?.choices
       : undefined) ??
     null;
+  // Until the price runs out: its notice then asks for a new price instead.
   const consentError =
     !!quote &&
+    !error &&
     consentMissedFor === quote.quoteId &&
     !(
       termsAcknowledgement?.quoteId === quote.quoteId && guestDisclosure?.quoteId === quote.quoteId
@@ -422,6 +427,8 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     // go reads the current URL.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settled, step, wanted, attemptOpen]);
+  // Another price or step starts without the mark of an earlier press.
+  useEffect(() => setConsentMissedFor(null), [quote?.quoteId, step]);
   // VAY-2197: the funnel counts the Extras stage for every hotel with extras, so a stay without
   // the step still passes it.
   const passMissingExtras = () => {
@@ -579,6 +586,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
         ]
       : [];
   });
+  const roomNames = Object.fromEntries(summaryRooms.map((room) => [room.selectionId, room.name]));
   const adultCount = choices.reduce((sum, choice) => sum + (Number(choice.adults) || 0), 0);
   const childCount = choices.reduce((sum, choice) => sum + choice.childAges.length, 0);
   const guestsLine = [
@@ -1163,9 +1171,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                         errorId={consentError ? consentErrorId : undefined}
                         quote={quote}
                         onAcknowledgementChange={setTermsAcknowledgement}
-                        roomNames={Object.fromEntries(
-                          summaryRooms.map((room) => [room.selectionId, room.name]),
-                        )}
+                        roomNames={roomNames}
                       />
                       <ReplacementGuestRules
                         key={quote.quoteId}
@@ -1174,6 +1180,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                         slug={slug}
                         quote={quote}
                         onAcknowledgementChange={setGuestDisclosure}
+                        onRulesChange={setShownRules}
                       />
                       {consentError && (
                         <p
@@ -1230,11 +1237,14 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                       onAttemptChange={setAttempt}
                       onBooked={openConfirmation}
                       onConsentMissing={
-                        // Only while both boxes can be ticked: an expired price or rules that
-                        // didn't load keep Confirm off, as before.
-                        !error && guestRulesQuote.disclosure?.quoteId === quote.quoteId
+                        // Only while both boxes can be ticked: an expired price, rules that
+                        // didn't load or a room without its name keep Confirm off, as before.
+                        !error &&
+                        shownRules?.quoteId === quote.quoteId &&
+                        quote.rooms.every((room) => roomNames[room.selectionId]?.trim())
                           ? () => {
-                              setConsentMissedFor(quote.quoteId);
+                              // The boxes are marked before focus lands, so it is announced.
+                              flushSync(() => setConsentMissedFor(quote.quoteId));
                               document
                                 .querySelector<HTMLInputElement>(
                                   "input[data-consent]:not(:checked):not(:disabled)",

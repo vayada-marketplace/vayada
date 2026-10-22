@@ -189,7 +189,7 @@ export default function ReplacementQuoteTerms({
       >
         <button
           type="button"
-          className="text-[13px] font-medium text-primary-600 underline"
+          className="inline-flex min-h-6 items-center text-[13px] font-medium text-primary-600 underline"
           aria-expanded={open}
           onClick={() => setOpen((value) => !value)}
         >

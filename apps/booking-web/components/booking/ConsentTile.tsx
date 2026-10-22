@@ -2,7 +2,8 @@ import type { ReactNode } from "react";
 
 /** A tick on the payment step (VAY-2306), drawn like the ways to pay above it: the whole tile
  * ticks the box, and the hotel's colour shows it ticked. `children` (the "Read …" button) sits
- * above the tile's click area, so it opens the text without ticking. */
+ * above the tile's click area, so it opens the text without ticking. The ring sits on the tile;
+ * a browser without :has() keeps the box's own focus outline. */
 export default function ConsentTile({
   label,
   checked,
@@ -38,7 +39,7 @@ export default function ConsentTile({
           <input
             type="checkbox"
             data-consent
-            className="peer h-5 w-5 cursor-pointer appearance-none rounded-md border-[1.5px] border-gray-500 bg-white focus:outline-none checked:border-primary-600 checked:bg-primary-600 disabled:cursor-not-allowed disabled:border-gray-300 disabled:bg-gray-100 aria-[invalid=true]:border-red-600 aria-[invalid=true]:bg-red-50"
+            className="peer h-5 w-5 cursor-pointer appearance-none rounded-md border-[1.5px] border-gray-500 bg-white [@supports_selector(:has(*))]:focus:outline-none checked:border-primary-600 checked:bg-primary-600 disabled:cursor-not-allowed disabled:border-gray-300 disabled:bg-gray-100 aria-[invalid=true]:border-red-600 aria-[invalid=true]:bg-red-50"
             checked={checked}
             disabled={disabled}
             aria-invalid={invalid || undefined}
@@ -57,7 +58,7 @@ export default function ConsentTile({
         </span>
         <span>{label}</span>
       </label>
-      {children && <div className="relative z-10 ml-8 mt-1 w-fit">{children}</div>}
+      {children && <div className="relative z-10 ml-8 mt-0.5 w-fit">{children}</div>}
     </div>
   );
 }

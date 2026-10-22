@@ -305,6 +305,15 @@ for (const width of [1440, 390]) {
       path: testInfo.outputPath(`payment-missing-ticks-${width}.png`),
       fullPage: true,
     });
+    // Back to the details and on again: the boxes start without the mark until the next press.
+    await page.getByRole("button", { name: "Change", exact: true }).click();
+    await page.getByRole("button", { name: "Continue to payment" }).click();
+    await expect(terms).toBeVisible();
+    await expect(missing).toHaveCount(0);
+    await expect(terms).not.toHaveAttribute("aria-invalid", "true");
+    await confirm.click();
+    await expect(missing).toBeVisible();
+    await expect(terms).toBeFocused();
     await page.keyboard.press("Space");
     await expect(terms).toBeChecked();
     await expect(terms).not.toHaveAttribute("aria-invalid", "true");

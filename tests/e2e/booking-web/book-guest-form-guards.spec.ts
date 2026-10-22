@@ -39,10 +39,18 @@ test("keeps the hotel's guest rules in the form when the price expires", async (
     fullPage: true,
   });
   await page.getByRole("button", { name: "Continue to payment" }).click();
+  // VAY-2306: Confirm before ticking marks the boxes; once the price runs out that mark goes.
+  const missing = page
+    .getByRole("alert")
+    .filter({ hasText: "Read and accept both the room terms and guest rules to book." });
+  await page.getByRole("button", { name: "Confirm booking" }).click();
+  await expect(missing).toBeVisible();
   await acknowledge(page);
+  await expect(missing).toHaveCount(0);
   await page.clock.fastForward("05:05");
   await expect(page.getByText(/This price has expired/)).toBeVisible();
   await expect(page.getByRole("button", { name: "Confirm booking" })).toBeDisabled();
+  await expect(missing).toHaveCount(0);
   // VAY-2195: the details are a step of their own; they stay as typed after the price expires.
   await page.getByRole("button", { name: "Change", exact: true }).click();
   await page.screenshot({
