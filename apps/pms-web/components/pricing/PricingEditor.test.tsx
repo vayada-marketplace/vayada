@@ -4134,7 +4134,7 @@ const mountRoom = async (rooms = [{ roomTypeId: "room", name: "Existing", capaci
 const familyInput = (base: string) => firstPricingInput("property", familySetup, familyId, { mode: "flat", occupancy: [], included: { adults: "", adjustments: [] }, methods: ["card"], room: familyId, currency: "EUR", base, adultAge: "12", childPrice: "0", countChildren: "yes", minimum: "1", maximum: "", cancellation: "non_refundable", freeDays: "", payment: "full" });
 it("on a room page, edits only that room, publishes every other room exactly as read and continues from the new publication (VAY-2093)", async () => {
   client.read.mockResolvedValue(published()); await mountRoom();
-  expect(view.root.findAllByProps({ inputMode: "decimal" }).filter((node) => node.type === "input" && !["How much cheaper, in percent", "Breakfast price"].includes(node.props["aria-label"]))).toHaveLength(1);
+  expect(view.root.findAllByProps({ inputMode: "decimal" }).filter((node) => node.type === "input" && !["How much cheaper, in percent", "Breakfast price", "Price a night for each child"].includes(node.props["aria-label"]))).toHaveLength(1);
   expect(input().props["aria-label"]).toContain("Family"); expect(button("Add another room")).toBeUndefined();
   await act(async () => {});
   expect(view.root.findByProps({ "aria-label": "Preview room and offer" }).findAllByType("option").map((node) => node.children.join(""))).toEqual(["Family · Breakfast included, non-refundable"]);

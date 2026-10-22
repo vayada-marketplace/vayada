@@ -197,9 +197,10 @@ const dayIndex = (monthDay: string) =>
       Date.UTC(2000, 0, 1)) /
       86400000,
   );
-const monthDayOf = (index: number) =>
+export const monthDayOf = (index: number) =>
   new Date(Date.UTC(2000, 0, 1 + index)).toISOString().slice(5, 10);
-const covers = (range: Range, index: number) => {
+/** Whether an MM-DD range (one may run over New Year) holds this day of the engine's year. */
+export const coversDay = (range: Range, index: number) => {
   const from = dayIndex(range.from),
     through = dayIndex(range.through);
   return from <= through ? index >= from && index <= through : index >= from || index <= through;
@@ -208,7 +209,7 @@ const covers = (range: Range, index: number) => {
 function outside(season: Range, range: Range): Range[] {
   const kept = Array.from(
     { length: 366 },
-    (_, index) => covers(season, index) && !covers(range, index),
+    (_, index) => coversDay(season, index) && !coversDay(range, index),
   );
   const runs: Range[] = [];
   let start = -1;

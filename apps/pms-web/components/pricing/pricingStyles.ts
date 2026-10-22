@@ -64,6 +64,8 @@ export const setupStepIntro = "mb-4 space-y-2.5 xl:mb-0 xl:w-[220px] xl:shrink-0
 export const setupStepTitle = "text-[18px] font-bold leading-6 text-gray-900";
 export const setupStepCard =
   "min-w-0 flex-1 space-y-4 rounded-2xl border border-gray-200 bg-white p-5 md:p-6";
+/** A card of a step that holds several (step 2's year, season table and weekend cards). */
+export const setupCard = "rounded-2xl border border-gray-200 bg-white p-5";
 /** A blue line saying the room keeps settings the card's top doesn't show. */
 export const infoBanner =
   "rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-[14px] leading-5 text-blue-800";
