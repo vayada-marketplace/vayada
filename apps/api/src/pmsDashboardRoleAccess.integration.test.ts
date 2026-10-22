@@ -137,7 +137,7 @@ describe.skipIf(!url)("PMS dashboard reads per preset role (VAY-2152)", () => {
        VALUES ($1::uuid, 'hotel_group', 'VAY-2152 account', $1::text, $2)`,
       [organizationId, workosOrgId],
     );
-    // New accounts get only Account admin (VAY-2276); the ready-made roles live on older accounts.
+    // New accounts no longer get the ready-made staff roles (VAY-2276); older accounts still may.
     await admin.query(await readFile(readyMadeRoles, "utf8"), [[organizationId]]);
     await admin.query(
       `INSERT INTO hotel_catalog.properties (id, public_id, display_name) VALUES ($1::uuid, $1::text, 'VAY-2152')`,

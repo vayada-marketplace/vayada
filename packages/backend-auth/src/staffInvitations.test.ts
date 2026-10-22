@@ -280,7 +280,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
               'staff@example.com', true)
       ON CONFLICT (id) DO UPDATE SET provider_user_id = EXCLUDED.provider_user_id;
     `);
-    // New accounts get only Account admin (VAY-2276); these fixtures are older accounts.
+    // New accounts no longer get the ready-made staff roles (VAY-2276); these fixtures are older accounts.
     await client.query(await readFile(readyMadeRoles, "utf8"), [[org, otherOrg]]);
   });
 

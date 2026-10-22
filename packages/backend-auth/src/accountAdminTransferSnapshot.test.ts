@@ -37,7 +37,7 @@ describe.skipIf(!url)("locked admin transfer snapshot", () => {
       VALUES ($1, 'hotel_group', 'Snapshot fixture', 'transfer-snapshot-fixture', $2)`,
       [id(1), input.workosOrgId],
     );
-    // New accounts get only Account admin (VAY-2276); this fixture is an older account.
+    // New accounts no longer get the ready-made staff roles (VAY-2276); this fixture is an older account.
     await client.query(await readFile(readyMadeRoles, "utf8"), [[id(1)]]);
     await client.query(
       `INSERT INTO identity.users(id, email) VALUES ($1, 'snapshot-actor@example.test'), ($2, 'snapshot-target@example.test')`,

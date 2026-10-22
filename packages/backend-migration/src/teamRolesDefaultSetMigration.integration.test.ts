@@ -10,13 +10,14 @@ import { assertSafeTestDatabase } from "./testUtils.js";
 
 const URL = process.env["TEST_DATABASE_URL"];
 const MIGRATIONS = join(import.meta.dirname, "../migrations");
-const DATABASE = "vayada_team_roles_admin_only_test";
+const DATABASE = "vayada_team_roles_default_set_test";
 const MIGRATION = 508;
 
-// VAY-2276: hosts create their own roles. New accounts get only Account admin, and existing accounts
-// lose the ready-made roles that the host never edited and nobody uses.
-describe.skipIf(!URL)("team roles: Account admin only 0508", () => {
-  it("deletes only untouched, unused ready-made roles and seeds new accounts with Account admin", async () => {
+// VAY-2276: hosts create their own staff roles. New accounts get Account admin, Property owner and
+// Agency manager; existing accounts lose the ready-made staff roles that the host never edited and
+// nobody uses.
+describe.skipIf(!URL)("team roles: default set 0508", () => {
+  it("deletes only untouched, unused staff presets and seeds new accounts with the default set", async () => {
     assertSafeTestDatabase(URL!);
     const admin = new pg.Client({ connectionString: URL });
     const targetUrl = new globalThis.URL(URL!);
@@ -132,9 +133,11 @@ describe.skipIf(!URL)("team roles: Account admin only 0508", () => {
       // Account A: every ready-made role untouched.
       const a = await account();
       const aOwner = await member(a, "hotel_owner", "active");
-      // Agency manager: only an inactive member left, so it goes and the member loses the link.
+      // Agency manager is in the default set: it stays, even with only an inactive member.
       const aInactive = await member(a, "hotel_manager", "inactive");
-      await assign(aInactive.id, await role(a, "agency_manager"));
+      const aAgency = await role(a, "agency_manager");
+      await assign(aInactive.id, aAgency);
+      // Property owner is in the default set: it stays unused.
       // Reservation manager: a pending invitation that is still valid keeps it.
       await invite(a, aOwner, await role(a, "reservation_manager"), "hotel_custom", "pending");
       // Front desk: an active member keeps it.
@@ -148,9 +151,8 @@ describe.skipIf(!URL)("team roles: Account admin only 0508", () => {
         "pending",
         "expired",
       );
-      // Property owner: unused, so it goes.
 
-      // Account B: the host edited Agency manager and made a role of their own.
+      // Account B: the host renamed Agency manager and made a role of their own.
       const b = await account();
       const bOwner = await member(b, "hotel_owner", "active");
       await db.query(
@@ -181,10 +183,24 @@ describe.skipIf(!URL)("team roles: Account admin only 0508", () => {
         "pending",
         "valid",
       );
-      // Account C: a pending (not yet joined) member keeps Front desk; the other four go.
+
+      // Account C: a pending (not yet joined) member keeps Front desk; Reservation manager has only an
+      // inactive member, so it goes and the member loses the link; Housekeeping is unused and goes.
       const c = await account();
       await member(c, "hotel_owner", "active");
       await assign((await member(c, "front_desk", "pending")).id, await role(c, "front_desk"));
+      const cInactive = await member(c, "hotel_custom", "inactive");
+      await assign(cInactive.id, await role(c, "reservation_manager"));
+      const permissions = async (organization: string) =>
+        (
+          await db.query<{ preset_key: string; default_permissions: string[] }>(
+            `SELECT preset_key, default_permissions FROM identity.organization_roles
+             WHERE organization_id = $1 AND preset_key IN ('account_admin', 'agency_manager', 'property_owner')
+             ORDER BY preset_key`,
+            [organization],
+          )
+        ).rows;
+      const presetsBefore = await permissions(a);
       const before = await triggerObjects();
 
       await cp(join(MIGRATIONS, file), join(dir, file));
@@ -194,7 +210,9 @@ describe.skipIf(!URL)("team roles: Account admin only 0508", () => {
 
       expect(await presets(a)).toEqual([
         { preset_key: "account_admin", name: "Account admin" },
+        { preset_key: "agency_manager", name: "Agency manager" },
         { preset_key: "front_desk", name: "Front desk" },
+        { preset_key: "property_owner", name: "Property owner" },
         { preset_key: "reservation_manager", name: "Reservation manager" },
       ]);
       expect(await presets(b)).toEqual([
@@ -203,19 +221,27 @@ describe.skipIf(!URL)("team roles: Account admin only 0508", () => {
         { preset_key: "housekeeping", name: "Housekeeping" },
         { preset_key: null, name: "Night audit" },
         { preset_key: "agency_manager", name: "Our agency" },
+        { preset_key: "property_owner", name: "Property owner" },
       ]);
       expect(await presets(c)).toEqual([
         { preset_key: "account_admin", name: "Account admin" },
+        { preset_key: "agency_manager", name: "Agency manager" },
         { preset_key: "front_desk", name: "Front desk" },
+        { preset_key: "property_owner", name: "Property owner" },
       ]);
-      expect(
+      const roleLinks = async (ids: string[]) =>
         (
           await db.query(
-            "SELECT role_definition_id FROM identity.organization_memberships WHERE id = $1",
-            [aInactive.id],
+            "SELECT id, role_definition_id FROM identity.organization_memberships WHERE id = ANY($1::uuid[]) ORDER BY id",
+            [ids],
           )
-        ).rows,
-      ).toEqual([{ role_definition_id: null }]);
+        ).rows;
+      expect(await roleLinks([aInactive.id, cInactive.id])).toEqual(
+        [
+          { id: aInactive.id, role_definition_id: aAgency },
+          { id: cInactive.id, role_definition_id: null },
+        ].sort((x, y) => x.id.localeCompare(y.id)),
+      );
       expect(
         (
           await db.query(
@@ -251,24 +277,18 @@ describe.skipIf(!URL)("team roles: Account admin only 0508", () => {
           )
         ).rows;
       const events = await audits();
-      expect(events).toHaveLength(9);
-      expect(events.filter((event) => event.organization_id === a)).toEqual([
-        {
-          organization_id: a,
-          preset: "agency_manager",
-          memberships: [aInactive.id],
-          invitations: [],
-        },
+      expect(events).toHaveLength(4);
+      const of = (organization: string) =>
+        events.filter((event) => event.organization_id === organization);
+      expect(of(a)).toEqual([
         {
           organization_id: a,
           preset: "housekeeping",
           memberships: [],
           invitations: [{ id: aExpired, status: "pending" }],
         },
-        { organization_id: a, preset: "property_owner", memberships: [], invitations: [] },
       ]);
-      expect(events.filter((event) => event.organization_id === b)).toEqual([
-        { organization_id: b, preset: "property_owner", memberships: [], invitations: [] },
+      expect(of(b)).toEqual([
         {
           organization_id: b,
           preset: "reservation_manager",
@@ -276,12 +296,25 @@ describe.skipIf(!URL)("team roles: Account admin only 0508", () => {
           invitations: [{ id: bRevoked, status: "revoked" }],
         },
       ]);
-
-      // New accounts get Account admin only, through the same trigger as before.
-      expect(await triggerObjects()).toEqual(before);
-      expect(await presets(await account())).toEqual([
-        { preset_key: "account_admin", name: "Account admin" },
+      expect(of(c)).toEqual([
+        { organization_id: c, preset: "housekeeping", memberships: [], invitations: [] },
+        {
+          organization_id: c,
+          preset: "reservation_manager",
+          memberships: [cInactive.id],
+          invitations: [],
+        },
       ]);
+
+      // New accounts get the default set, through the same trigger as before, with 0203's exact rows.
+      expect(await triggerObjects()).toEqual(before);
+      const fresh = await account();
+      expect(await presets(fresh)).toEqual([
+        { preset_key: "account_admin", name: "Account admin" },
+        { preset_key: "agency_manager", name: "Agency manager" },
+        { preset_key: "property_owner", name: "Property owner" },
+      ]);
+      expect(await permissions(fresh)).toEqual(presetsBefore);
       expect(await presets(await account("platform"))).toEqual([]);
 
       // Running it again deletes nothing more.
@@ -289,7 +322,7 @@ describe.skipIf(!URL)("team roles: Account admin only 0508", () => {
       await db.query("BEGIN");
       await db.query(await readFile(join(MIGRATIONS, file), "utf8"));
       expect([await presets(a), await presets(b), await presets(c)]).toEqual(after);
-      expect(await audits()).toHaveLength(9);
+      expect(await audits()).toHaveLength(4);
       await db.query("ROLLBACK");
     } finally {
       await target?.end().catch(() => undefined);

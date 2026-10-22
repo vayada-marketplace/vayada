@@ -1,6 +1,7 @@
 -- Test fixture (VAY-2276): the five ready-made roles that 0203 gave every hotel account, copied from
--- its VALUES. Since 0508 a new account gets only Account admin; suites that exercise these roles on
--- older accounts add them with this statement. $1 is a uuid[] of hotel_group organization ids.
+-- its VALUES. Since 0508 a new account gets only Account admin, Agency manager and Property owner;
+-- suites that exercise the ready-made staff roles on older accounts add them with this statement
+-- (the two already there are skipped). $1 is a uuid[] of hotel_group organization ids.
 INSERT INTO identity.organization_roles
   (organization_id, name, description, security_class, base_role_key, preset_key, default_permissions)
 SELECT account.id, preset.* FROM identity.organizations account

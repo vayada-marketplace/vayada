@@ -605,18 +605,21 @@ not invented to match illustrative mock counts. Existing members are unaffected
 until an explicit saved-role assignment. Validation covers all six presets through
 the runtime policy validator and checks legacy preservation and deletion behavior.
 
-### Account admin only (migration 0508, VAY-2276)
+### Default role set (migration 0508, VAY-2276)
 
-Hosts now create their own roles, so a new hotel account gets only Account admin.
-The insert trigger and its trigger function are unchanged (the Channex worker's
-catalog digest hashes them); only `identity.initialize_team_role_presets` changed.
-On existing accounts, 0508 deleted each ready-made role the host never edited
-(revision 1) that had no member other than inactive ones and no valid pending
-invitation, using the "Delete role" command's rules. Edited or used ready-made
-roles stay and keep their class, so Property owner, Housekeeping and Agency manager
-roles keep working where they exist. Roles made with "Create role" are always Staff
-class (Flamur, 2026-10-22: no role-type choice). Suites that exercise the old
-ready-made roles add them with `packages/backend-migration/fixtures/ready-made-team-roles.sql`.
+Hosts now create their own staff roles. A new hotel account gets Account admin,
+Property owner and Agency manager: the only roles that carry the external-owner
+class and team management, which "Create role" (always Staff class) cannot make
+(Flamur, 2026-10-22). The insert trigger and its trigger function are unchanged
+(the Channex worker's catalog digest hashes them); only
+`identity.initialize_team_role_presets` changed. On existing accounts, 0508 deleted
+each ready-made staff role (Reservation manager, Front desk, Housekeeping) the host
+never edited (revision 1) that had no member other than inactive ones and no valid
+pending invitation, with the "Delete role" command's rules and one
+`identity.team_role.deleted` audit event per role. Edited or used roles stay.
+Follow-up: let "Create role" make owner and team-manager roles, so the last two
+presets can go. Suites that exercise the ready-made staff roles add them with
+`packages/backend-migration/fixtures/ready-made-team-roles.sql`.
 
 ### External-owner agency management (migration 0204)
 

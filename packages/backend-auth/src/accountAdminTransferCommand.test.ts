@@ -53,7 +53,7 @@ describe.skipIf(!url)("atomic administrator transfer", () => {
         "INSERT INTO identity.organizations(id,kind,name,slug,workos_org_id) VALUES($1,'hotel_group','Transfer fixture',$1::uuid::text,$2)",
         [source.organizationId, source.workosOrgId],
       );
-      // New accounts get only Account admin (VAY-2276); this fixture is an older account.
+      // New accounts no longer get the ready-made staff roles (VAY-2276); this fixture is an older account.
       await client.query(await readFile(readyMadeRoles, "utf8"), [[source.organizationId]]);
       await client.query(
         "INSERT INTO identity.users(id,email) VALUES($1,$1::uuid::text||'@example.test'),($2,$2::uuid::text||'@example.test')",
