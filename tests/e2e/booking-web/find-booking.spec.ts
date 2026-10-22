@@ -69,22 +69,26 @@ test("finds a booking from the shared footer on mobile", async ({ page }) => {
   await expect(page).toHaveURL(
     new RegExp(`/confirmation\\?booking=VAY-1268&token=${confirmationToken}$`),
   );
-  await expect(page.getByRole("heading", { name: "Your booking is confirmed!" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "You're all set, Ada." })).toBeVisible();
   await expect(page.getByText("2× Alpine Suite")).toBeVisible();
   await expect(page.getByText("Suite 204, Suite 205")).toBeVisible();
   // Stay dates read as days, not as raw YYYY-MM-DD.
-  await expect(page.getByText(/^Sat, 12 Sept? 2026, /)).toBeVisible();
-  await expect(page.getByText(/^Tue, 15 Sept? 2026, /)).toBeVisible();
-  await expect(page.getByText("Payment Status")).toBeVisible();
-  await expect(page.getByRole("link", { name: "Contact Property" })).toHaveAttribute(
+  await expect(page.getByText(/^Sat, 12 Sept? 2026$/)).toBeVisible();
+  await expect(page.getByText(/^Tue, 15 Sept? 2026$/)).toBeVisible();
+  await expect(page.getByText("Paid with Visa •••• 4242", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Email", exact: true })).toHaveAttribute(
     "href",
     "mailto:stay@alpenrose.test",
   );
-  await expect(page.getByRole("link", { name: "Manage Booking" })).not.toHaveAttribute(
+  await expect(page.getByRole("link", { name: "Call", exact: true })).toHaveAttribute(
+    "href",
+    "tel:+41440000000",
+  );
+  await expect(page.getByRole("link", { name: /^Manage or cancel/ })).not.toHaveAttribute(
     "href",
     /email=/,
   );
-  await expect(page.getByRole("link", { name: "Request Changes" })).not.toHaveAttribute(
+  await expect(page.getByRole("link", { name: /^Request changes/ })).not.toHaveAttribute(
     "href",
     /email=/,
   );
@@ -97,7 +101,7 @@ test("finds a booking from the shared footer on mobile", async ({ page }) => {
     confirmationToken,
   });
 
-  await page.getByRole("link", { name: "Manage Booking" }).click();
+  await page.getByRole("link", { name: /^Manage or cancel/ }).click();
   await expect(page).toHaveURL(/\/my-booking\?reference=VAY-1268$/);
   await expect(page.getByText("Booking Found")).toBeVisible();
   await expect(page.getByText(/^Sat, 12 Sept? 2026, /)).toBeVisible();
@@ -122,7 +126,7 @@ for (const [paymentMethod, label] of [
 
     await page.goto(`/confirmation?booking=VAY-1268&token=${confirmationToken}`);
 
-    await expect(page.getByText("Payment", { exact: true }).locator("..")).toContainText(label);
+    await expect(page.getByText(label, { exact: true })).toBeVisible();
     await expect(page.getByText(paymentMethod, { exact: true })).toHaveCount(0);
   });
 }
@@ -164,26 +168,16 @@ for (const status of ["pending", "confirmed"] as const) {
 
     await page.goto(`/confirmation?booking=VAY-1268&token=${confirmationToken}`);
 
-    const label = page.getByText("Add-ons", { exact: true });
-    const row = label.locator("..");
-    const values = row.locator(":scope > div");
-    const items = values.locator(":scope > div");
-    await expect(row).toHaveCSS("display", "flex");
-    await expect(values).toHaveCSS("text-align", "right");
+    // VAY-2307: the add-ons list under their label in the ticket, one per line.
+    const addons = page.getByTestId("confirmation-addons");
+    await expect(addons.getByText("Add-ons", { exact: true })).toBeVisible();
+    const items = addons.getByRole("listitem");
     await expect(items).toHaveText(["Airport Transfer", /Scooter Rental.*× 2/]);
-
-    const rowBox = await row.boundingBox();
-    const labelBox = await label.boundingBox();
-    const valueBox = await values.boundingBox();
     const itemBoxes = await items.evaluateAll((elements) =>
       elements.map((element) => element.getBoundingClientRect().toJSON()),
     );
-    expect(rowBox).not.toBeNull();
-    expect(labelBox).not.toBeNull();
-    expect(valueBox).not.toBeNull();
-    expect(valueBox!.x).toBeGreaterThan(labelBox!.x + labelBox!.width);
-    expect(valueBox!.x + valueBox!.width).toBeCloseTo(rowBox!.x + rowBox!.width, 0);
     expect(itemBoxes[1]!.y).toBeGreaterThan(itemBoxes[0]!.y);
+    expect(Math.abs(itemBoxes[1]!.x - itemBoxes[0]!.x)).toBeLessThanOrEqual(1);
   });
 }
 
@@ -291,12 +285,12 @@ test("shows a neutral recovery state for an invalid confirmation token", async (
 
   await page.goto(`/confirmation?booking=VAY-1268&token=${confirmationToken}`);
   await expect(page.getByText(/Booking details are unavailable/)).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Booking Request Submitted" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: /^Request sent/ })).toHaveCount(0);
 });
 
 for (const [status, heading] of [
-  ["pending", "Booking Request Submitted"],
-  ["cancelled", "Booking Cancelled"],
+  ["pending", "Request sent, Ada."],
+  ["cancelled", "Your booking is cancelled."],
   ["declined", "Booking Request Declined"],
   ["expired", "Booking Request Expired"],
   ["checked_in", "You're checked in"],
@@ -321,7 +315,7 @@ for (const [status, heading] of [
     await expect(page.getByRole("heading", { name: heading })).toBeVisible();
     await expect(page.getByText("VAY-1268", { exact: true })).toBeVisible();
     if (status === "cancelled") {
-      await expect(page.getByText(/Cancelled on: 5 Sept? 2026/)).toBeVisible();
+      await expect(page.getByText(/^Cancelled on 5 Sept? 2026\.$/)).toBeVisible();
     }
   });
 }
@@ -376,7 +370,7 @@ test("does not request a bank transfer after a booking ends", async ({ page }) =
   );
 
   await page.goto(`/confirmation?booking=VAY-1268&token=${confirmationToken}`);
-  await expect(page.getByRole("heading", { name: "Booking Cancelled" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Your booking is cancelled." })).toBeVisible();
   await expect(page.getByText("Bank transfer pending")).toHaveCount(0);
   await expect(page.getByText(/IBAN:/)).toHaveCount(0);
 });
@@ -406,10 +400,41 @@ test("keeps polling statuses in the public status vocabulary", async ({ page }) 
   );
 
   await page.goto(`/confirmation?booking=VAY-1268&token=${confirmationToken}`);
-  await expect(page.getByRole("heading", { name: "Booking Request Submitted" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Request sent, Ada." })).toBeVisible();
   await page.clock.fastForward(30_000);
   await expect.poll(() => statusReads).toBe(1);
-  await expect(page.getByRole("heading", { name: "Booking Request Submitted" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Request sent, Ada." })).toBeVisible();
   await page.clock.fastForward(30_000);
-  await expect(page.getByRole("heading", { name: "Booking Cancelled" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Your booking is cancelled." })).toBeVisible();
+});
+
+// VAY-2307: once a polled request is answered, the payment line shows what was charged, not the hold.
+test("reloads what was paid once a polled request is accepted", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-09-01T10:00:00.000Z") });
+  await mockBookingApis(page);
+  const hotelApi = `**/api/booking-web/hotels/${SEEDED_BOOKING_SLUG}`;
+  await page.route(`${hotelApi}/bookings/confirmation`, (route) =>
+    route.fulfill({
+      json: { ...booking, status: "pending", paymentStatus: "authorized", balanceAmount: 720 },
+    }),
+  );
+  await page.route(`${hotelApi}/bookings/status**`, (route) =>
+    route.fulfill({
+      json: {
+        bookingReference: booking.bookingReference,
+        status: "confirmed",
+        paymentStatus: "paid",
+      },
+    }),
+  );
+  await page.route(`${hotelApi}/bookings/lookup`, (route) =>
+    route.fulfill({ json: { ...booking, paymentStatus: "paid", balanceAmount: 0 } }),
+  );
+
+  await page.goto(`/confirmation?booking=VAY-1268&token=${confirmationToken}`);
+  await expect(page.getByText("Held on Visa •••• 4242", { exact: true })).toBeVisible();
+  await page.clock.fastForward(30_000);
+  await expect(page.getByRole("heading", { name: "You're all set, Ada." })).toBeVisible();
+  await expect(page.getByText("Paid with Visa •••• 4242", { exact: true })).toBeVisible();
+  await expect(page.getByText("Held on Visa •••• 4242", { exact: true })).toHaveCount(0);
 });

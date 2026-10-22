@@ -4,8 +4,9 @@ import RoomSelectionSummary from "@/components/booking/RoomSelectionSummary";
 import StayRange from "@/components/booking/StayRange";
 
 import { formatCheckInTime, formatCheckOutTime } from "@/lib/arrivalTimes";
+import { groupReference, paymentLine, type PaymentWay } from "@/lib/confirmationDisplay";
 import { formatStayDate, resolveLocale } from "@/lib/utils";
-import { useState, useEffect, useId, useRef } from "react";
+import { useState, useEffect, useId, useRef, type ReactNode } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { paymentMethodLabelKey, type PaymentMethodLabelKey } from "@vayada/locale-constants";
 import { Link, useRouter } from "@/i18n/navigation";
@@ -25,20 +26,26 @@ import {
   toConfirmationBooking,
 } from "@/lib/storage/bookingDraft";
 
-function CountdownTimer({ deadline }: { deadline: string }) {
-  const [timeLeft, setTimeLeft] = useState("");
+/** "Waiting for our reply · 17h 59m 58s left"; it ticks on its own so the page doesn't re-render. */
+function PendingStatus({
+  deadline,
+  label,
+  left,
+}: {
+  deadline?: string | null;
+  label: string;
+  left: (time: string) => string;
+}) {
+  const [timeLeft, setTimeLeft] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!deadline) return;
     const update = () => {
-      const now = new Date().getTime();
-      const end = new Date(deadline).getTime();
-      const diff = end - now;
-
-      if (diff <= 0) {
-        setTimeLeft("Expired");
+      const diff = new Date(deadline).getTime() - Date.now();
+      if (!(diff > 0)) {
+        setTimeLeft(null);
         return;
       }
-
       const hours = Math.floor(diff / (1000 * 60 * 60));
       const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
       const seconds = Math.floor((diff % (1000 * 60)) / 1000);
@@ -50,7 +57,7 @@ function CountdownTimer({ deadline }: { deadline: string }) {
     return () => clearInterval(interval);
   }, [deadline]);
 
-  return <span className="font-mono text-lg font-bold text-amber-600">{timeLeft}</span>;
+  return <>{deadline && timeLeft ? `${label} · ${left(timeLeft)}` : label}</>;
 }
 
 function displayCardBrand(brand: string): string {
@@ -91,6 +98,94 @@ function formatPropertyDate(value: string, locale: string, timeZone?: string): s
   }
 }
 
+// Heroicons (outline, 24px) for the next steps and the payment line.
+const ICONS = {
+  card: "M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 0 0 2.25-2.25V6.75A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25v10.5A2.25 2.25 0 0 0 4.5 19.5Z",
+  cash: "M2.25 18.75a60.07 60.07 0 0 1 15.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 0 1 3 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 0 0-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 0 1-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 0 0 3 15h-.75M15 10.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm3 0h.008v.008H18V10.5Zm-12 0h.008v.008H6V10.5Z",
+  mail: "M21.75 6.75v10.5a2.25 2.25 0 0 1-2.25 2.25h-15a2.25 2.25 0 0 1-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25m19.5 0v.243a2.25 2.25 0 0 1-1.07 1.916l-7.5 4.615a2.25 2.25 0 0 1-2.36 0L3.32 8.91a2.25 2.25 0 0 1-1.07-1.916V6.75",
+  pencil:
+    "m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10",
+  ticket:
+    "M16.5 6v.75m0 3v.75m0 3v.75m0 3V18m-9-5.25h5.25M7.5 15h3M3.375 5.25c-.621 0-1.125.504-1.125 1.125v3.026a2.999 2.999 0 0 1 0 5.198v3.026c0 .621.504 1.125 1.125 1.125h17.25c.621 0 1.125-.504 1.125-1.125v-3.026a2.999 2.999 0 0 1 0-5.198V6.375c0-.621-.504-1.125-1.125-1.125H3.375Z",
+  home: "m2.25 12 8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25",
+  cross: "M6 18 18 6M6 6l12 12",
+} as const;
+
+function Icon({ name, className }: { name: keyof typeof ICONS; className: string }) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.6}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      viewBox="0 0 24 24"
+    >
+      <path d={ICONS[name]} />
+    </svg>
+  );
+}
+
+const labelClass = "text-xs font-semibold uppercase tracking-[0.08em] text-gray-500";
+
+/** One next step: an icon, what it does, and a hint; a link or a button. */
+function StepRow({
+  icon,
+  title,
+  hint,
+  danger = false,
+  href,
+  onClick,
+  disabled,
+}: {
+  icon: keyof typeof ICONS;
+  title: string;
+  hint?: string;
+  danger?: boolean;
+  href?: string;
+  onClick?: () => void;
+  disabled?: boolean;
+}) {
+  const body = (
+    <>
+      <span
+        className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${danger ? "bg-error-50 text-error-700" : "bg-primary-50 text-primary-700"}`}
+      >
+        <Icon name={icon} className="h-5 w-5" />
+      </span>
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className={`font-semibold ${danger ? "text-error-700" : "text-gray-900"}`}>
+          {title}
+        </span>
+        {hint && <span className="text-sm text-gray-500">{hint}</span>}
+      </span>
+      <svg
+        aria-hidden="true"
+        className="h-4 w-4 shrink-0 text-gray-400"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={2}
+        viewBox="0 0 24 24"
+      >
+        <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
+      </svg>
+    </>
+  );
+  const className =
+    "flex w-full items-center gap-3.5 px-5 py-3 text-left transition-colors hover:bg-gray-50 disabled:opacity-50";
+  return href ? (
+    <Link href={href} className={className}>
+      {body}
+    </Link>
+  ) : (
+    <button type="button" onClick={onClick} disabled={disabled} className={className}>
+      {body}
+    </button>
+  );
+}
+
 export default function BookingConfirmationPageClient({
   reference,
   emailParam,
@@ -117,9 +212,9 @@ export default function BookingConfirmationPageClient({
   const [withdrawing, setWithdrawing] = useState(false);
   const [confirmingWithdraw, setConfirmingWithdraw] = useState(false);
   const [withdrawError, setWithdrawError] = useState("");
-  const [hydrating, setHydrating] = useState(false);
   const [hydrateError, setHydrateError] = useState(false);
   const [changeRequest, setChangeRequest] = useState<BookingChangeRequest | null>(null);
+  const [copied, setCopied] = useState(false);
   const confirmationLookup = useRef<Promise<Booking | null> | null>(null);
   const [paypalInfo, setPaypalInfo] = useState<{
     email: string;
@@ -150,7 +245,6 @@ export default function BookingConfirmationPageClient({
 
     if (tokenParam) {
       let cancelled = false;
-      setHydrating(true);
       confirmationLookup.current ??= (async () => {
         for (let attempt = 0; attempt < 15; attempt += 1) {
           try {
@@ -164,21 +258,17 @@ export default function BookingConfirmationPageClient({
         }
         return null;
       })();
-      void confirmationLookup.current
-        .then((fetched) => {
-          if (cancelled) return;
-          if (!fetched) {
-            setHydrateError(true);
-            return;
-          }
-          const normalized = toConfirmationBooking(fetched, { hotelName: hotel.name });
-          setBooking(normalized);
-          setStatus(normalized.status);
-          saveLastBooking(normalized);
-        })
-        .finally(() => {
-          if (!cancelled) setHydrating(false);
-        });
+      void confirmationLookup.current.then((fetched) => {
+        if (cancelled) return;
+        if (!fetched) {
+          setHydrateError(true);
+          return;
+        }
+        const normalized = toConfirmationBooking(fetched, { hotelName: hotel.name });
+        setBooking(normalized);
+        setStatus(normalized.status);
+        saveLastBooking(normalized);
+      });
       return () => {
         cancelled = true;
       };
@@ -187,10 +277,13 @@ export default function BookingConfirmationPageClient({
     // A confirmation-email link carries the guest email so the stored booking
     // can be hydrated on another device without exposing it by reference alone.
     const email = emailParam;
-    if (!email) return;
+    if (!email) {
+      // Nothing to load the booking with: say so instead of an empty ticket.
+      setHydrateError(true);
+      return;
+    }
 
     let cancelled = false;
-    setHydrating(true);
     bookingService
       .lookup(slug, reference, email)
       .then((fetched) => {
@@ -206,9 +299,6 @@ export default function BookingConfirmationPageClient({
       .catch(() => {
         if (cancelled) return;
         setHydrateError(true);
-      })
-      .finally(() => {
-        if (!cancelled) setHydrating(false);
       });
 
     return () => {
@@ -258,15 +348,28 @@ export default function BookingConfirmationPageClient({
         const result = await bookingService.getStatus(slug, reference, booking.guestEmail);
         if (result.status !== status || result.canEditRequest !== booking.canEditRequest) {
           setStatus(result.status);
-          // Update stored booking
-          if (booking) {
-            const updated = {
-              ...booking,
-              status: result.status as Booking["status"],
-              canEditRequest: result.canEditRequest,
-            };
-            setBooking(updated);
-            saveLastBooking(updated);
+          const updated = {
+            ...booking,
+            status: result.status as Booking["status"],
+            canEditRequest: result.canEditRequest,
+          };
+          setBooking(updated);
+          saveLastBooking(updated);
+          // VAY-2307: an answered request may have charged or released the card, so reload what
+          // the payment line says; the polled status stays if that fails.
+          if (result.status !== status) {
+            void bookingService
+              .lookup(slug, reference, booking.guestEmail)
+              .then((fetched) => {
+                const reloaded = toConfirmationBooking(fetched, {
+                  hotelName: hotel.name,
+                  guestEmail: booking.guestEmail,
+                });
+                setStatus(reloaded.status);
+                setBooking(reloaded);
+                saveLastBooking(reloaded);
+              })
+              .catch(() => {});
           }
         }
       } catch {
@@ -276,7 +379,7 @@ export default function BookingConfirmationPageClient({
 
     const interval = setInterval(poll, 30000);
     return () => clearInterval(interval);
-  }, [status, booking, slug, reference]);
+  }, [status, booking, slug, reference, hotel.name]);
 
   const handleWithdraw = async () => {
     if (!booking) return;
@@ -299,13 +402,43 @@ export default function BookingConfirmationPageClient({
     }
   };
 
+  const handleEdit = async () => {
+    if (!booking) return;
+    setEditing(true);
+    setWithdrawError("");
+    try {
+      const token =
+        tokenParam ||
+        (await bookingService.lookup(slug, reference, booking.guestEmail)).confirmationToken;
+      router.push(
+        `/booking/${encodeURIComponent(reference)}/edit-request?token=${encodeURIComponent(token)}`,
+      );
+    } catch (error) {
+      setWithdrawError(error instanceof Error ? error.message : "Unable to edit request.");
+    } finally {
+      setEditing(false);
+    }
+  };
+
+  const copyReference = () => {
+    void navigator.clipboard
+      ?.writeText(reference)
+      .then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      })
+      .catch(() => {
+        // The reference stays on screen to copy by hand.
+      });
+  };
+
   const isPending = status === "pending";
   const isConfirmed = status === "confirmed";
   const isCheckedIn = status === "checked_in";
   const isCheckedOut = status === "checked_out";
   const isCancelled = status === "cancelled";
-  // VAY-404: host-rejected request. Shares the red-X visual with cancelled
-  // but uses different copy so the guest doesn't think they cancelled.
+  // VAY-404: host-rejected request. Shares the cancelled look but uses different copy so the guest
+  // doesn't think they cancelled.
   const isDeclined = status === "declined";
   const isExpired = status === "expired";
   const isEnded = isCancelled || isDeclined || isExpired;
@@ -328,18 +461,19 @@ export default function BookingConfirmationPageClient({
       ? booking.numberOfRooms
       : 1;
   const guestEmail = (booking?.guestEmail || emailParam || "").trim();
+  const guestName = booking?.guestFirstName?.trim();
   const manageBookingHref = `/my-booking?reference=${encodeURIComponent(reference)}`;
   const requestChangesHref = guestEmail
     ? `/booking/${encodeURIComponent(reference)}/request-change`
     : null;
   const paymentMethodLabels: Record<PaymentMethodLabelKey, string> = {
-    card: tp("payWithCard"),
+    card: t("manualCard"),
     creditCard: t("creditCard"),
     payAtProperty: tp("payAtProperty"),
     bankTransfer: tp("bankTransfer"),
     cash: t("cash"),
     manualCard: t("manualCard"),
-    paypal: tp("paypalLabel"),
+    paypal: "PayPal",
     xendit: tp("xenditTitle"),
     other: t("otherPayment"),
   };
@@ -364,344 +498,500 @@ export default function BookingConfirmationPageClient({
     waived: t("paymentWaived"),
   };
   const paymentStatusKey = partlyPaid ? "partially_paid" : paid ? "paid" : booking?.paymentStatus;
-  // An ended booking says only what was paid or refunded: "Not paid yet" or a released card hold
-  // ("Payment failed") would read as money still owed.
-  const paymentStatusLabel =
-    paymentStatusKey &&
-    (!isEnded || ["paid", "partially_paid", "refunded"].includes(paymentStatusKey))
-      ? paymentStatusLabels[paymentStatusKey]
-      : undefined;
+  const methodKey = booking?.paymentMethod
+    ? paymentMethodLabelKey(booking.paymentMethod)
+    : undefined;
+  const way: PaymentWay =
+    !methodKey || methodKey === "other"
+      ? null
+      : methodKey === "card"
+        ? "card"
+        : methodKey === "payAtProperty"
+          ? "at_hotel"
+          : "named";
+  const cardDetails =
+    way === "card" && booking?.cardBrand && booking.cardLast4
+      ? `${displayCardBrand(booking.cardBrand)} •••• ${booking.cardLast4}`
+      : null;
+  const method = cardDetails ?? (methodKey ? paymentMethodLabels[methodKey] : "");
+  const payment = paymentLine({
+    ended: isEnded,
+    pending: isPending,
+    arrived: isCheckedIn || isCheckedOut,
+    way,
+    status: paymentStatusKey,
+  });
+  // A card without brand and last four digits gets its own sentence ("Paid by card").
+  const cardTitles = {
+    paidWith: "paidByCard",
+    partlyPaidWith: "partlyPaidByCard",
+    heldOn: "heldOnCard",
+    refundedTo: "refundedToCard",
+  } as const;
+  const statusText = paymentStatusKey ? paymentStatusLabels[paymentStatusKey] : undefined;
+  const paymentTitle =
+    payment.title === "status"
+      ? statusText
+      : payment.title === "method"
+        ? method
+        : payment.title === "payAtHotel"
+          ? tp("payAtProperty")
+          : payment.title && way === "card" && !cardDetails && payment.title in cardTitles
+            ? t(cardTitles[payment.title as keyof typeof cardTitles])
+            : payment.title
+              ? t(payment.title, { method })
+              : undefined;
+  const paymentDetail =
+    payment.detail === "status" ? statusText : payment.detail ? t(payment.detail) : undefined;
+  const amount = payment.amountLabel === "total" ? booking?.totalAmount : displayedTotal;
+  const amountLabel = payment.amountLabel
+    ? t(payment.amountLabel)
+    : isEnded || partlyPaid
+      ? t("total")
+      : isTotalPaid
+        ? t("totalPaid")
+        : t("totalDue");
+
+  const statusPill = isPending
+    ? {
+        tone: "bg-warning-100 text-warning-800",
+        dot: "bg-warning-600",
+        text: (
+          <PendingStatus
+            deadline={booking?.hostResponseDeadline}
+            label={t("statusPending")}
+            left={(time) => t("timeLeft", { time })}
+          />
+        ),
+      }
+    : isConfirmed || isCheckedIn || isCheckedOut
+      ? {
+          tone: "bg-success-100 text-success-800",
+          dot: "bg-success-600",
+          text: t(
+            isConfirmed ? "statusConfirmed" : isCheckedIn ? "statusCheckedIn" : "statusCheckedOut",
+          ),
+        }
+      : isEnded
+        ? {
+            tone: "bg-error-100 text-error-800",
+            dot: "bg-error-600",
+            text: t(
+              isCancelled ? "statusCancelled" : isDeclined ? "statusDeclined" : "statusExpired",
+            ),
+          }
+        : null;
+  const heading = isPending
+    ? guestName
+      ? t("requestSent", { name: guestName })
+      : t("requestSentNoName")
+    : isConfirmed
+      ? guestName
+        ? t("allSet", { name: guestName })
+        : t("allSetNoName")
+      : isCheckedIn
+        ? t("checkedInTitle")
+        : isCheckedOut
+          ? t("checkedOutTitle")
+          : isCancelled
+            ? t("cancelledHeading")
+            : isDeclined
+              ? t("declinedTitle")
+              : isExpired
+                ? t("expiredTitle")
+                : null;
+  // Whole sentences, so no JSX whitespace can go missing between them.
+  const subtitle = isPending
+    ? booking?.hostResponseDeadline
+      ? t("replyBy", {
+          deadline: formatPropertyDateTime(booking.hostResponseDeadline, locale, hotel.timezone),
+        })
+      : t("pendingSubtitle")
+    : isConfirmed
+      ? [
+          t("confirmedSubtitle", { hotel: hotel.name }),
+          booking && guestEmail ? t("detailsSent", { email: guestEmail }) : "",
+        ]
+          .filter(Boolean)
+          .join(" ")
+      : isCheckedIn
+        ? t("checkedInSubtitle")
+        : isCheckedOut
+          ? t("checkedOutSubtitle")
+          : isCancelled
+            ? booking?.cancelledAt
+              ? t("cancelledOnDate", {
+                  date: formatPropertyDate(booking.cancelledAt, locale, hotel.timezone),
+                })
+              : t("cancelledSubtitle")
+            : isDeclined
+              ? booking?.paymentMethod === "card"
+                ? t("declinedCardSubtitle")
+                : t("declinedSubtitle")
+              : isExpired
+                ? t("expiredSubtitle")
+                : null;
+
+  const checkInTime = formatCheckInTime(hotel);
+  const checkOutTime = formatCheckOutTime(hotel);
+  const phone = hotel.contact.phone?.trim();
+  const whatsappDigits = hotel.contact.whatsapp?.replace(/\D/g, "");
+  const contactLinks = [
+    hotel.contact.email && { label: t("contactEmail"), href: `mailto:${hotel.contact.email}` },
+    phone && { label: t("contactCall"), href: `tel:${phone.replace(/\s+/g, "")}` },
+    whatsappDigits && { label: t("contactWhatsApp"), href: `https://wa.me/${whatsappDigits}` },
+  ].filter((link): link is { label: string; href: string } => !!link);
+  const canEdit =
+    isPending &&
+    !!booking?.canEditRequest &&
+    (!booking.hostResponseDeadline || Date.parse(booking.hostResponseDeadline) > Date.now());
+  const datesClass = `font-heading text-xl leading-tight lining-nums sm:text-[28px] sm:leading-[34px] ${isEnded ? "text-gray-500 line-through" : "text-gray-900"}`;
+
+  const contact = contactLinks.length > 0 && (
+    <div className="flex items-start gap-3.5 px-5 py-3">
+      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary-50 text-primary-700">
+        <Icon name="mail" className="h-5 w-5" />
+      </span>
+      <div className="flex min-w-0 flex-1 flex-col gap-2">
+        <div className="flex flex-col">
+          <span className="font-semibold text-gray-900">
+            {t("contactHotel", { hotel: hotel.name })}
+          </span>
+          <span className="text-sm text-gray-500">{t("contactHint")}</span>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {contactLinks.map((link) => (
+            <a
+              key={link.href}
+              href={link.href}
+              {...(link.href.startsWith("https:")
+                ? { target: "_blank", rel: "noopener noreferrer" }
+                : {})}
+              className="flex h-8 items-center rounded-full border border-gray-300 px-3 text-sm font-semibold text-primary-700 transition-colors hover:bg-gray-50"
+            >
+              {link.label}
+            </a>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+
+  let steps: ReactNode;
+  if (isPending) {
+    steps = (
+      <>
+        {canEdit && (
+          <StepRow
+            icon="pencil"
+            title={editing ? t("opening") : t("editRequest")}
+            hint={t("editRequestHint")}
+            onClick={handleEdit}
+            disabled={editing || withdrawing}
+          />
+        )}
+        <StepRow
+          icon="cross"
+          danger
+          title={t("withdrawRequest")}
+          hint={booking?.paymentMethod === "card" ? t("withdrawHint") : undefined}
+          onClick={() => {
+            setWithdrawError("");
+            setConfirmingWithdraw(true);
+          }}
+          disabled={withdrawing || editing}
+        />
+        {contact}
+      </>
+    );
+  } else if (isEnded) {
+    steps = (
+      <>
+        <StepRow
+          icon="home"
+          title={t("bookAgain")}
+          hint={t("bookAgainHint", { hotel: hotel.name })}
+          href="/"
+        />
+        {contact}
+      </>
+    );
+  } else {
+    steps = (
+      <>
+        {contact}
+        {isConfirmed &&
+          booking &&
+          requestChangesHref &&
+          (!changeRequest || changeRequest.status !== "pending") && (
+            <StepRow
+              icon="pencil"
+              title={t("requestChanges")}
+              hint={t("requestChangesHint")}
+              href={requestChangesHref}
+            />
+          )}
+        <StepRow
+          icon="ticket"
+          title={isConfirmed ? t("manageOrCancel") : t("manageBooking")}
+          hint={isConfirmed ? t("manageHint") : undefined}
+          href={manageBookingHref}
+        />
+      </>
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-surface">
-      {/* Mini Hero */}
-      <div className="relative h-32 w-full">
-        <HotelHeroImage src={hotel.heroImage} alt={hotel.name} sizes={bookingImageSizes.hero} />
-        <div className="absolute inset-0 bg-gradient-to-b from-black/40 to-black/60" />
-        <BookingNavigation />
-      </div>
+    <div className="flex min-h-screen flex-col bg-accent">
+      <BookingNavigation solid />
 
-      <div className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-        <div className="bg-white rounded-2xl border border-gray-200 p-8 text-center">
-          {/* Status Icon */}
-          {isPending && (
-            <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-6">
-              <svg
-                className="w-8 h-8 text-amber-600"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
-                />
-              </svg>
-            </div>
-          )}
-          {(isConfirmed || isCheckedIn || isCheckedOut) && (
-            <div className="w-16 h-16 bg-success-100 rounded-full flex items-center justify-center mx-auto mb-6">
-              <svg
-                className="w-8 h-8 text-success-600"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M5 13l4 4L19 7"
-                />
-              </svg>
-            </div>
-          )}
-          {(isCancelled || isDeclined || isExpired) && (
-            <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-6">
-              <svg
-                className="w-8 h-8 text-red-600"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M6 18L18 6M6 6l12 12"
-                />
-              </svg>
+      <main className="mx-auto grid w-full max-w-6xl flex-1 items-start gap-8 px-4 py-8 sm:px-6 sm:py-12 lg:grid-cols-[minmax(0,1fr)_24rem] lg:gap-12 lg:px-8 lg:py-16">
+        <div className="flex min-w-0 flex-col gap-7 sm:gap-8">
+          {/* Status */}
+          {!heading && <h1 className="sr-only">{t("bookingReference")}</h1>}
+          {(statusPill || heading) && (
+            <div className="flex flex-col gap-3">
+              {statusPill && (
+                <p
+                  className={`flex items-center gap-2 self-start rounded-full px-3 py-1 text-[13px] font-semibold tracking-[0.02em] ${statusPill.tone}`}
+                >
+                  <span aria-hidden="true" className={`h-2 w-2 rounded-full ${statusPill.dot}`} />
+                  {statusPill.text}
+                </p>
+              )}
+              {heading && (
+                <h1 className="font-heading text-4xl font-medium tracking-[-0.02em] text-gray-900 sm:text-5xl lg:text-[52px] lg:leading-[60px]">
+                  {heading}
+                </h1>
+              )}
+              {subtitle && (
+                <p className="max-w-xl text-base text-gray-600 sm:text-lg sm:leading-7">
+                  {subtitle}
+                </p>
+              )}
             </div>
           )}
 
-          {/* Status Title */}
-          {isPending && (
-            <>
-              <h1 className="text-2xl font-bold text-gray-900 mb-2">
-                {t("requestSubmitted") || "Booking Request Submitted"}
-              </h1>
-              <p className="text-gray-600 mb-4">
-                {t("pendingSubtitle") ||
-                  "Your booking request has been submitted. We'll respond within 24 hours."}
+          {/* Ticket */}
+          <section className="overflow-hidden rounded-2xl border border-gray-200 bg-white sm:rounded-[20px]">
+            {!booking ? (
+              <p className="px-5 py-8 text-center text-sm text-gray-600 sm:px-9">
+                {hydrateError
+                  ? t("detailsUnavailable") || "We couldn't load your booking details here."
+                  : t("loadingDetails") || "Loading booking details…"}
               </p>
-              {booking?.hostResponseDeadline && (
-                <div className="mb-6">
-                  <p className="text-sm text-gray-500 mb-1">
-                    {t("hostResponseIn") || "We'll respond latest:"}
-                  </p>
-                  <CountdownTimer deadline={booking.hostResponseDeadline} />
-                </div>
-              )}
-            </>
-          )}
-          {isConfirmed && (
-            <>
-              <h1 className="text-2xl font-bold text-gray-900 mb-2">{t("title")}</h1>
-              <p className="text-gray-600 mb-6">{t("subtitle")}</p>
-            </>
-          )}
-          {isCheckedIn && (
-            <>
-              <h1 className="text-2xl font-bold text-gray-900 mb-2">{t("checkedInTitle")}</h1>
-              <p className="text-gray-600 mb-6">{t("checkedInSubtitle")}</p>
-            </>
-          )}
-          {isCheckedOut && (
-            <>
-              <h1 className="text-2xl font-bold text-gray-900 mb-2">{t("checkedOutTitle")}</h1>
-              <p className="text-gray-600 mb-6">{t("checkedOutSubtitle")}</p>
-            </>
-          )}
-          {isCancelled && (
-            <>
-              <h1 className="text-2xl font-bold text-gray-900 mb-2">
-                {t("cancelledTitle") || "Booking Cancelled"}
-              </h1>
-              <p className="text-gray-600 mb-6">
-                {booking?.paymentMethod === "card"
-                  ? t("cancelledCardSubtitle") ||
-                    "Your booking has been cancelled. Any authorization hold on your card has been released."
-                  : t("cancelledSubtitle") || "Your booking has been cancelled."}
-              </p>
-            </>
-          )}
-          {isDeclined && (
-            <>
-              <h1 className="text-2xl font-bold text-gray-900 mb-2">
-                {t("declinedTitle") || "Booking Request Declined"}
-              </h1>
-              <p className="text-gray-600 mb-6">
-                {booking?.paymentMethod === "card"
-                  ? t("declinedCardSubtitle") ||
-                    "We declined your booking request. Any authorization hold on your card has been released."
-                  : t("declinedSubtitle") ||
-                    "We declined your booking request. We encourage you to explore alternative dates or properties."}
-              </p>
-            </>
-          )}
-          {isExpired && (
-            <>
-              <h1 className="text-2xl font-bold text-gray-900 mb-2">
-                {t("expiredTitle") || "Booking Request Expired"}
-              </h1>
-              <p className="text-gray-600 mb-6">
-                {t("expiredSubtitle") ||
-                  "Your booking request expired because we did not respond within 24 hours. Any card hold has been released."}
-              </p>
-            </>
-          )}
-
-          {/* Booking Reference */}
-          <div className="bg-accent rounded-xl p-4 mb-8 inline-block">
-            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
-              {t("bookingReference")}
-            </p>
-            <p className="text-2xl font-bold text-primary-600 tracking-wider [overflow-wrap:anywhere]">
-              {reference}
-            </p>
-          </div>
-
-          {/* Booking Details */}
-          {hydrating && !booking ? (
-            <div className="py-8 text-center text-gray-500 text-sm">
-              {t("loadingDetails") || "Loading booking details…"}
-            </div>
-          ) : !booking && hydrateError ? (
-            <div className="py-6 text-center">
-              <p className="text-sm text-gray-600">
-                {t("detailsUnavailable") || "We couldn't load your booking details here."}
-              </p>
-            </div>
-          ) : (
-            <div className="text-left space-y-0 divide-y divide-gray-100">
-              <div className="flex justify-between py-3">
-                <span className="text-gray-600">{t("hotel")}</span>
-                <span className="font-medium text-gray-900">
-                  {booking?.hotelName || hotel.name}
-                </span>
-              </div>
-              <div className="flex justify-between py-3">
-                <span className="text-gray-600">{t("room")}</span>
-                <span className="font-medium text-gray-900">
-                  {booking
-                    ? `${!booking.roomSelection && displayedRooms > 1 ? `${displayedRooms}× ` : ""}${booking.roomName || t("room")}`
-                    : "—"}
-                </span>
-              </div>
-              {booking?.mealDescription && (
-                <p className="py-3 text-sm text-gray-700">{booking.mealDescription}</p>
-              )}
-              {booking?.roomLines && (
-                <div className="py-4">
-                  <RoomSelectionSummary
-                    lines={booking.roomLines}
-                    currency={booking.currency}
-                    checkIn={booking.checkIn}
-                    timezone={hotel.timezone}
-                  />
-                </div>
-              )}
-              {booking?.unitNames && booking.unitNames.length > 0 && (
-                <div className="flex justify-between py-3">
-                  <span className="text-gray-600">{t("unit")}</span>
-                  <span className="font-medium text-gray-900 text-right">
-                    {booking.unitNames.join(", ")}
-                  </span>
-                </div>
-              )}
-              <div className="flex justify-between py-3">
-                <span className="text-gray-600">{t("checkIn")}</span>
-                <span className="font-medium text-gray-900">
-                  {booking?.checkIn
-                    ? `${formatStayDate(booking.checkIn, locale)}, ${formatCheckInTime(hotel)}`
-                    : "—"}
-                </span>
-              </div>
-              <div className="flex justify-between py-3">
-                <span className="text-gray-600">{t("checkOut")}</span>
-                <span className="font-medium text-gray-900">
-                  {booking?.checkOut
-                    ? `${formatStayDate(booking.checkOut, locale)}, ${formatCheckOutTime(hotel)}`
-                    : "—"}
-                </span>
-              </div>
-              <div className="flex justify-between py-3">
-                <span className="text-gray-600">{t("duration")}</span>
-                <span className="font-medium text-gray-900">
-                  {displayedNights ? tc("nights", { count: displayedNights }) : "—"}
-                </span>
-              </div>
-              <div className="flex justify-between py-3">
-                <span className="text-gray-600">{t("guests")}</span>
-                <span className="font-medium text-gray-900">
-                  {displayedAdults !== null
-                    ? `${tc("adults", { count: displayedAdults })}${displayedChildren > 0 ? `, ${tc("children", { count: displayedChildren })}` : ""}`
-                    : "—"}
-                </span>
-              </div>
-              {booking?.addonIds && booking.addonIds.length > 0 && (
-                <div className="flex justify-between gap-4 py-3">
-                  <span className="text-gray-600">{t("addons") || "Add-ons"}</span>
-                  <div className="space-y-1.5 text-right">
-                    {booking.addonIds.map((addonId, idx) => {
-                      const qty =
-                        (booking.addonQuantities?.[addonId] ?? 1) *
-                        (booking.addonPackageQuantities?.[addonId] ?? 1);
-                      const name = booking.addonNames?.[idx] || addonId;
-                      return (
-                        <div key={addonId} className="font-medium text-gray-900">
-                          {name}
-                          {qty && qty > 1 ? (
-                            <span className="ml-2 font-normal text-gray-500">× {qty}</span>
-                          ) : null}
-                        </div>
-                      );
-                    })}
+            ) : (
+              <>
+                <div className="flex items-start gap-3 px-5 py-5 sm:items-center sm:gap-6 sm:px-9 sm:py-8">
+                  <div className="flex min-w-0 flex-1 flex-col gap-1">
+                    <span className={labelClass}>{t("checkIn")}</span>
+                    <span className={datesClass}>
+                      {booking.checkIn ? formatStayDate(booking.checkIn, locale) : "—"}
+                    </span>
+                    {checkInTime && (
+                      <span className="text-sm text-gray-600 sm:text-[15px]">
+                        {hotel.checkInUntil ? checkInTime : t("fromTime", { time: checkInTime })}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex w-16 shrink-0 flex-col items-center gap-1.5 pt-6 sm:w-28 sm:pt-0">
+                    {displayedNights && (
+                      <span className="whitespace-nowrap text-[13px] font-semibold text-primary-700 sm:text-sm">
+                        {tc("nights", { count: displayedNights })}
+                      </span>
+                    )}
+                    <span aria-hidden="true" className="flex w-full items-center">
+                      <span className="h-1.5 w-1.5 rounded-full bg-primary-700" />
+                      <span className="h-px flex-1 bg-primary-200" />
+                      <span className="h-1.5 w-1.5 rounded-full border border-primary-700" />
+                    </span>
+                  </div>
+                  <div className="flex min-w-0 flex-1 flex-col items-end gap-1 text-right">
+                    <span className={labelClass}>{t("checkOut")}</span>
+                    <span className={datesClass}>
+                      {booking.checkOut ? formatStayDate(booking.checkOut, locale) : "—"}
+                    </span>
+                    {checkOutTime && (
+                      <span className="text-sm text-gray-600 sm:text-[15px]">
+                        {hotel.checkOutFrom ? checkOutTime : t("untilTime", { time: checkOutTime })}
+                      </span>
+                    )}
                   </div>
                 </div>
-              )}
-              <div className="flex justify-between py-3">
-                <span className="text-gray-600">
-                  {isEnded || partlyPaid
-                    ? t("total")
-                    : isTotalPaid
-                      ? t("totalPaid")
-                      : t("totalDue")}
-                </span>
-                <span className="font-bold text-gray-900 text-lg">
-                  {booking && displayedTotal !== undefined
-                    ? formatPrice(displayedTotal, booking.currency)
-                    : "—"}
-                </span>
-              </div>
-              {booking && (isPending || isConfirmed) && (partlyPaid || booking.depositRequired) && (
-                <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 space-y-2">
-                  <div className="flex justify-between text-sm">
-                    <span className="text-gray-600">
-                      {partlyPaid || paid
-                        ? t("depositPaid")
-                        : booking.paymentStatus === "refunded"
-                          ? t("depositRefunded")
-                          : t("depositPending")}
-                    </span>
-                    <span className="font-semibold text-gray-900">
-                      {formatPrice(
-                        partlyPaid && owed !== undefined
-                          ? booking.totalAmount - owed
-                          : booking.depositAmount || 0,
-                        booking.currency,
+
+                <div className="flex flex-col gap-4 border-t border-dashed border-gray-300 px-5 py-5 sm:px-9 sm:py-6">
+                  <div className="flex flex-col gap-4 sm:flex-row sm:gap-8">
+                    <div className="flex min-w-0 flex-1 flex-col gap-1">
+                      <span className={labelClass}>{t("room")}</span>
+                      <span className="font-semibold text-gray-900 sm:text-[17px]">
+                        {`${!booking.roomSelection && displayedRooms > 1 ? `${displayedRooms}× ` : ""}${booking.roomName || t("room")}`}
+                      </span>
+                      {booking.mealDescription && (
+                        <span className="text-sm text-gray-600 sm:text-[15px]">
+                          {booking.mealDescription}
+                        </span>
                       )}
-                    </span>
+                      {booking.unitNames && booking.unitNames.length > 0 && (
+                        <span className="text-sm text-gray-600 sm:text-[15px]">
+                          {booking.unitNames.join(", ")}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex flex-col gap-1 sm:w-44 sm:shrink-0">
+                      <span className={labelClass}>{t("guests")}</span>
+                      <span className="font-semibold text-gray-900 sm:text-[17px]">
+                        {displayedAdults !== null
+                          ? `${tc("adults", { count: displayedAdults })}${displayedChildren > 0 ? `, ${tc("children", { count: displayedChildren })}` : ""}`
+                          : "—"}
+                      </span>
+                      <span className="text-sm text-gray-600 sm:text-[15px]">
+                        {tc("room", { count: displayedRooms })}
+                      </span>
+                    </div>
                   </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-gray-600">{t("balanceDueAtCheckIn")}</span>
-                    <span className="font-semibold text-gray-900">
-                      {formatPrice(booking.balanceAmount || 0, booking.currency)}
-                    </span>
+                  {booking.roomLines && (
+                    <RoomSelectionSummary
+                      lines={booking.roomLines}
+                      currency={booking.currency}
+                      checkIn={booking.checkIn}
+                      timezone={hotel.timezone}
+                    />
+                  )}
+                  {booking.addonIds && booking.addonIds.length > 0 && (
+                    <div className="flex flex-col gap-1" data-testid="confirmation-addons">
+                      <span className={labelClass}>{t("addons") || "Add-ons"}</span>
+                      <ul className="space-y-1">
+                        {booking.addonIds.map((addonId, idx) => {
+                          const qty =
+                            (booking.addonQuantities?.[addonId] ?? 1) *
+                            (booking.addonPackageQuantities?.[addonId] ?? 1);
+                          const name = booking.addonNames?.[idx] || addonId;
+                          return (
+                            <li key={addonId} className="font-medium text-gray-900">
+                              {name}
+                              {qty && qty > 1 ? (
+                                <span className="ml-2 font-normal text-gray-500">× {qty}</span>
+                              ) : null}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex flex-col gap-3 border-t border-gray-100 px-5 py-5 sm:px-9 sm:py-6">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
+                    <div className="flex items-baseline justify-between gap-3 sm:order-last sm:flex-col sm:items-end sm:gap-0.5">
+                      <span className={labelClass}>{amountLabel}</span>
+                      <span
+                        className={`font-heading text-2xl font-semibold lining-nums tabular-nums sm:text-[28px] sm:leading-[34px] ${isEnded ? "text-gray-500" : "text-gray-900"}`}
+                      >
+                        {amount !== undefined ? formatPrice(amount, booking.currency) : "—"}
+                      </span>
+                    </div>
+                    {(paymentTitle || paymentDetail) && (
+                      <div className="flex min-w-0 flex-1 items-center gap-3 sm:gap-4">
+                        <span className="flex h-8 w-11 shrink-0 items-center justify-center rounded-md bg-primary-50 text-primary-700 sm:h-9 sm:w-12">
+                          <Icon name={way === "card" ? "card" : "cash"} className="h-5 w-5" />
+                        </span>
+                        <span className="flex min-w-0 flex-col">
+                          {paymentTitle && (
+                            <span className="font-semibold text-gray-900 sm:text-[17px]">
+                              {paymentTitle}
+                            </span>
+                          )}
+                          {paymentDetail && (
+                            <span className="text-sm text-gray-600 sm:text-[15px]">
+                              {paymentDetail}
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                    )}
                   </div>
+                  {(isPending || isConfirmed) && (partlyPaid || booking.depositRequired) && (
+                    <div className="space-y-2 rounded-xl bg-gray-50 p-4 text-sm">
+                      <div className="flex justify-between gap-4">
+                        <span className="text-gray-600">
+                          {partlyPaid || paid
+                            ? t("depositPaid")
+                            : booking.paymentStatus === "refunded"
+                              ? t("depositRefunded")
+                              : t("depositPending")}
+                        </span>
+                        <span className="font-semibold text-gray-900">
+                          {formatPrice(
+                            partlyPaid && owed !== undefined
+                              ? booking.totalAmount - owed
+                              : booking.depositAmount || 0,
+                            booking.currency,
+                          )}
+                        </span>
+                      </div>
+                      <div className="flex justify-between gap-4">
+                        <span className="text-gray-600">{t("balanceDueAtCheckIn")}</span>
+                        <span className="font-semibold text-gray-900">
+                          {formatPrice(booking.balanceAmount || 0, booking.currency)}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                  <ApproximateAmountsNote currency={booking.currency} />
                 </div>
-              )}
-              {booking && <ApproximateAmountsNote currency={booking.currency} />}
-              {booking?.paymentMethod && (
-                <div className="flex justify-between py-3">
-                  <span className="text-gray-600">{t("paymentMethodLabel") || "Payment"}</span>
-                  <span className="font-medium text-gray-900">
-                    {booking.paymentMethod === "card" && booking.cardBrand && booking.cardLast4
-                      ? `${displayCardBrand(booking.cardBrand)} •••• ${booking.cardLast4}`
-                      : paymentMethodLabels[paymentMethodLabelKey(booking.paymentMethod)]}
-                  </span>
-                </div>
-              )}
-              {paymentStatusLabel && (
-                <div className="flex justify-between py-3">
-                  <span className="text-gray-600">{t("paymentStatusLabel")}</span>
-                  <span className="font-medium text-gray-900">{paymentStatusLabel}</span>
-                </div>
-              )}
+              </>
+            )}
+
+            <div className="flex items-end gap-3 border-t border-dashed border-gray-300 bg-gray-50 px-5 py-4 sm:items-center sm:gap-4 sm:px-9 sm:py-5">
+              <div className="flex min-w-0 flex-1 flex-col gap-1">
+                <span className={labelClass}>{t("bookingReference")}</span>
+                <span className="break-words text-base font-semibold tabular-nums tracking-[0.06em] text-primary-700 sm:text-lg">
+                  {groupReference(reference)}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={copyReference}
+                aria-label={t("copyReference")}
+                className="flex h-10 shrink-0 items-center gap-2 rounded-full border border-gray-300 bg-white px-4 text-sm font-semibold text-primary-700 transition-colors hover:bg-gray-50"
+              >
+                <svg
+                  aria-hidden="true"
+                  className="h-4 w-4"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  viewBox="0 0 24 24"
+                >
+                  <rect x="9" y="9" width="12" height="12" rx="2" />
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                </svg>
+                <span aria-live="polite">{copied ? t("copied") : t("copy")}</span>
+              </button>
             </div>
-          )}
+          </section>
 
           {(isPending || isConfirmed) &&
             booking?.paymentMethod === "bank_transfer" &&
             ["unpaid", "pending", "partially_paid"].includes(booking.paymentStatus ?? "") && (
-              <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-xl text-left">
-                <p className="text-sm font-semibold text-blue-900">{t("bankTransferPending")}</p>
+              <div className="rounded-2xl border border-info-200 bg-info-50 p-5">
+                <p className="text-sm font-semibold text-info-800">{t("bankTransferPending")}</p>
                 {booking.bankTransferDetails ? (
-                  <p className="text-sm text-blue-800 mt-2 whitespace-pre-line">
+                  <p className="mt-2 whitespace-pre-line text-sm text-info-800">
                     {booking.bankTransferDetails}
                   </p>
                 ) : (
                   <Link
                     href={manageBookingHref}
-                    className="inline-block text-sm text-blue-800 mt-2 underline"
+                    className="mt-2 inline-block text-sm text-info-800 underline"
                   >
                     {t("manageBooking")}
                   </Link>
                 )}
                 {booking.paymentDeadline && (
-                  <p className="text-xs text-blue-700 mt-3">
+                  <p className="mt-3 text-xs text-info-700">
                     {t("paymentDeadline")}:{" "}
                     {formatPropertyDateTime(booking.paymentDeadline, locale, hotel.timezone)}
                   </p>
@@ -709,16 +999,10 @@ export default function BookingConfirmationPageClient({
               </div>
             )}
 
-          {isCancelled && booking?.cancelledAt && (
-            <p className="mt-6 text-sm text-gray-600">
-              {t("cancelledOn")}: {formatPropertyDate(booking.cancelledAt, locale, hotel.timezone)}
-            </p>
-          )}
-
           {isPending && booking?.paymentMethod === "paypal" && paypalInfo && (
-            <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-xl text-left">
-              <p className="text-sm font-semibold text-blue-900">{t("paypalPending")}</p>
-              <p className="text-xs text-blue-700 mt-1">
+            <div className="rounded-2xl border border-info-200 bg-info-50 p-5">
+              <p className="text-sm font-semibold text-info-800">{t("paypalPending")}</p>
+              <p className="mt-1 text-xs text-info-700">
                 {t("paypalInstructions", {
                   amount: formatPrice(booking.totalAmount, booking.currency),
                   email: paypalInfo.email,
@@ -730,14 +1014,14 @@ export default function BookingConfirmationPageClient({
                 <button
                   type="button"
                   onClick={() => navigator.clipboard?.writeText(paypalInfo.email)}
-                  className="px-3 py-1.5 rounded-lg bg-white border border-blue-200 text-xs font-semibold text-blue-700"
+                  className="rounded-lg border border-info-200 bg-white px-3 py-1.5 text-xs font-semibold text-info-700"
                 >
                   {t("copyEmail")}
                 </button>
                 <button
                   type="button"
                   onClick={() => navigator.clipboard?.writeText(booking.bookingReference)}
-                  className="px-3 py-1.5 rounded-lg bg-white border border-blue-200 text-xs font-semibold text-blue-700"
+                  className="rounded-lg border border-info-200 bg-white px-3 py-1.5 text-xs font-semibold text-info-700"
                 >
                   {t("copyReference")}
                 </button>
@@ -747,15 +1031,15 @@ export default function BookingConfirmationPageClient({
 
           {/* Change request status (VAY-379) */}
           {changeRequest && changeRequest.status === "pending" && (
-            <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-xl text-left">
-              <p className="text-sm font-semibold text-blue-900">
+            <div className="rounded-2xl border border-info-200 bg-info-50 p-5">
+              <p className="text-sm font-semibold text-info-800">
                 {t("changePending") || "Change request pending approval"}
               </p>
-              <p className="text-xs text-blue-700 mt-1">
+              <p className="mt-1 text-xs text-info-700">
                 {t("changePendingDesc") ||
                   "We'll review your requested change and email you once we respond."}
               </p>
-              <p className="text-xs text-blue-700 mt-2">
+              <p className="mt-2 text-xs text-info-700">
                 <StayRange
                   checkIn={changeRequest.requestedCheckIn}
                   checkOut={changeRequest.requestedCheckOut}
@@ -769,107 +1053,60 @@ export default function BookingConfirmationPageClient({
             </div>
           )}
 
-          {/* Request Changes — only for confirmed bookings without a pending request. */}
-          {isConfirmed &&
-            (!changeRequest || changeRequest.status !== "pending") &&
-            booking &&
-            requestChangesHref && (
-              <div className="mt-6">
-                <Link
-                  href={requestChangesHref}
-                  className="inline-flex px-6 py-3 border border-primary-200 text-primary-700 font-semibold rounded-full hover:bg-primary-50 transition-colors"
-                >
-                  {t("requestChanges") || "Request Changes"}
-                </Link>
-              </div>
-            )}
-
-          {/* Pending request actions use server-owned eligibility. */}
-          {isPending && (
-            <div className="mt-8">
-              {withdrawError && !confirmingWithdraw && (
-                <p className="text-sm text-red-600 mb-3">{withdrawError}</p>
-              )}
-              <div className="flex flex-col sm:flex-row gap-3 justify-center">
-                {booking?.canEditRequest &&
-                  (!booking.hostResponseDeadline ||
-                    Date.parse(booking.hostResponseDeadline) > Date.now()) && (
-                    <button
-                      type="button"
-                      disabled={editing || withdrawing}
-                      className="px-6 py-3 border border-gray-300 font-semibold rounded-full hover:bg-gray-50 disabled:opacity-50"
-                      onClick={async () => {
-                        setEditing(true);
-                        setWithdrawError("");
-                        try {
-                          const token =
-                            tokenParam ||
-                            (await bookingService.lookup(slug, reference, booking.guestEmail))
-                              .confirmationToken;
-                          router.push(
-                            `/booking/${encodeURIComponent(reference)}/edit-request?token=${encodeURIComponent(token)}`,
-                          );
-                        } catch (error) {
-                          setWithdrawError(
-                            error instanceof Error ? error.message : "Unable to edit request.",
-                          );
-                        } finally {
-                          setEditing(false);
-                        }
-                      }}
-                    >
-                      {editing ? "Opening…" : "Edit Request"}
-                    </button>
-                  )}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setWithdrawError("");
-                    setConfirmingWithdraw(true);
-                  }}
-                  disabled={withdrawing || editing}
-                  className="px-6 py-3 border border-red-300 text-red-600 font-semibold rounded-full hover:bg-red-50 transition-colors disabled:opacity-50"
-                >
-                  {t("withdrawRequest") || "Withdraw Request"}
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Actions */}
-          <div className="mt-8 flex flex-col sm:flex-row gap-3 justify-center">
+          {!isEnded && (
             <Link
               href="/"
-              className="px-6 py-3 bg-primary-600 text-white font-semibold rounded-full hover:bg-primary-700 transition-colors"
+              className="flex items-center gap-2 self-start pl-1 font-semibold text-primary-700 hover:underline"
             >
+              <svg
+                aria-hidden="true"
+                className="h-4 w-4"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18"
+                />
+              </svg>
               {t("backToHotel", { property: hotel.name })}
             </Link>
-            <Link
-              href={manageBookingHref}
-              className="px-6 py-3 border border-gray-300 text-gray-700 font-semibold rounded-full hover:bg-gray-50 transition-colors"
-            >
-              {t("manageBooking")}
-            </Link>
-            {(isConfirmed || isCheckedIn || isCheckedOut) && hotel.contact.email && (
-              <a
-                href={`mailto:${hotel.contact.email}`}
-                className="px-6 py-3 border border-gray-300 text-gray-700 font-semibold rounded-full hover:bg-gray-50 transition-colors"
-              >
-                {t("contactProperty")}
-              </a>
-            )}
-          </div>
+          )}
         </div>
 
-        {/* Email notice, only while the booking stands (VAY-2163) */}
-        {booking && !isEnded && (
-          <p className="text-center text-sm text-gray-500 mt-6">
-            {guestEmail
-              ? t("emailNotice", { email: guestEmail })
-              : "A confirmation email has been sent to your email address."}
-          </p>
-        )}
-      </div>
+        <aside className="flex min-w-0 flex-col gap-6">
+          <div className="flex flex-col gap-2">
+            <h2 className={`${labelClass} px-1 pb-1`}>{t("nextSteps")}</h2>
+            <div className="flex flex-col divide-y divide-gray-100 overflow-hidden rounded-2xl border border-gray-200 bg-white py-1.5 lg:rounded-[20px]">
+              {steps}
+              {withdrawError && !confirmingWithdraw && (
+                <p role="alert" className="px-5 py-3 text-sm text-error-700">
+                  {withdrawError}
+                </p>
+              )}
+            </div>
+          </div>
+
+          <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white lg:order-first lg:rounded-[20px]">
+            <div className="relative aspect-[16/9]">
+              <HotelHeroImage
+                src={hotel.heroImage}
+                alt={hotel.name}
+                sizes={bookingImageSizes.confirmationHotel}
+              />
+            </div>
+            <div className="flex flex-col gap-0.5 px-5 py-4">
+              <p className="font-heading text-xl font-semibold text-gray-900 sm:text-[22px]">
+                {hotel.name}
+              </p>
+              {hotel.location && <p className="text-sm text-gray-600">{hotel.location}</p>}
+            </div>
+          </div>
+        </aside>
+      </main>
 
       {/* Withdraw asks first, like My Booking (VAY-2163) */}
       <dialog
