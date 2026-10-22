@@ -209,7 +209,7 @@ async function mockPricing(
   page: Page,
   initial: ReturnType<typeof publicationOf> | null,
   readyMethods: ("bank_transfer" | "paypal")[] = [],
-  { cardReady = false, payment = storedPayment } = {},
+  { cardReady = false, payment = storedPayment, notSelling = [] as Record<string, unknown>[] } = {},
 ) {
   const terms = new Map<string, Record<string, unknown>>([
     ["flexible", { revision: TERMS, cancellation: flexible }],
@@ -237,6 +237,13 @@ async function mockPricing(
       return ok(route, {
         card: { ready: cardReady, reason: cardReady ? null : "switch_off", charge: "at_booking" },
         deposits: { ready: false },
+      });
+    // Every published rate sells unless a test lists one (VAY-2304).
+    if (suffix === "/not-selling" && method === "GET")
+      return ok(route, {
+        version: "pricing-rates-not-selling.v1",
+        publishedRevision: state.publication?.revision ?? null,
+        rates: state.publication ? notSelling : [],
       });
     if (suffix === "" && method === "GET") {
       if (!state.publication) return route.fulfill({ status: 404, json: { code: "not_found" } });
@@ -387,14 +394,14 @@ test("edits a priced room on the simple card and publishes only what changed (VA
   const pricing = await mockPricing(page, publicationOf(3, [designRoom(3), complexRoom(3)]));
   const assertHealthy = watchPageHealth(page, testInfo);
   await prices(page, DELUXE);
-  // "Pricing setup" (VAY-2280, VAY-2305): opening times, prices and seasons, rates and meals; "What guests see"
-  // sits beside step Meals.
-  for (const heading of ["Pricing setup", "Prices and seasons", "Rates", "Meals"])
+  // "Pricing setup" (VAY-2280, VAY-2305): opening times, prices and seasons, rates and meal plans; "On your booking
+  // page" sits beside step Meal plans.
+  for (const heading of ["Pricing setup", "Prices and seasons", "Rates", "Meal plans"])
     await expect(main(page).getByRole("heading", { name: heading })).toBeVisible();
   await expect(
     main(page)
-      .getByRole("region", { name: /^Meals/ })
-      .getByRole("region", { name: "What guests see" }),
+      .getByRole("region", { name: /^Meal plans/ })
+      .getByRole("region", { name: "On your booking page" }),
   ).toBeVisible();
   // "Prices by date" comes first (VAY-2280), showing the main option's nightly prices.
   const calendar = main(page).getByRole("region", { name: "Prices by date" });
@@ -431,7 +438,11 @@ test("edits a priced room on the simple card and publishes only what changed (VA
   await expect(main(page).getByLabel("How much cheaper, in percent")).toHaveValue("10");
   await expect(main(page).getByText("€90 a night", { exact: true })).toBeVisible();
   await expect(extra(page, "With breakfast")).toHaveAttribute("aria-checked", "true");
-  await expect(main(page).getByText("€115 a night for 2", { exact: true })).toBeVisible();
+  await expect(
+    main(page).getByText("Adds €15 a night for the room, whatever the number of guests.", {
+      exact: true,
+    }),
+  ).toBeVisible();
   await expect(main(page).getByText("Save 10%")).toBeVisible();
 
   await main(page).getByRole("button", { name: "+10%" }).click();
@@ -519,8 +530,13 @@ test("writes what guests read about breakfast and shows it in the guest card (VA
   const assertHealthy = watchPageHealth(page, testInfo);
   await prices(page, DELUXE);
   const text = "Buffet breakfast in the Stube, 7:00–10:30";
-  // Step "Meals" (each option's window has the same field, hidden until opened).
+  // Step "Meal plans" (each option's window has the same field, hidden until opened).
   await main(page).getByRole("textbox", { name: "What guests read" }).fill(`${text} `);
+  // Breakfast for the room becomes breakfast per adult (VAY-2305); children's is free.
+  await main(page).getByRole("button", { name: "Per adult", exact: true }).click();
+  await expect(
+    main(page).getByText("2 adults add €30 a night (€15 per adult).", { exact: true }),
+  ).toBeVisible();
   await expect(
     main(page)
       .getByRole("radiogroup", { name: "Options for this stay" })
@@ -534,6 +550,11 @@ test("writes what guests read about breakfast and shows it in the guest card (VA
   )!;
   const breakfast = deluxe.offers.find((offer: Room) => offer.meal.kind === "breakfast");
   expect(breakfast.meal.description).toBe(text);
+  expect(breakfast.meal.charge).toEqual({
+    kind: "person",
+    adultMinor: "1500",
+    childBandAmountsMinor: ["0", "0"],
+  });
   expect(deluxe.offers.filter((offer: Room) => "description" in offer.meal)).toHaveLength(1);
   await assertHealthy();
 });
@@ -939,22 +960,58 @@ test("shows the whole year and closes dates picked in the Year view (VAY-2284)",
   await assertHealthy();
 });
 
-test("offers Card online on both rates once the booking page can take card (VAY-2205)", async ({
+test("offers Card online on both rates once the booking page can take card (VAY-2205, VAY-2305)", async ({
   page,
 }, testInfo) => {
   await openPms(page);
-  // The rates take only pay at property, so Card online shows because card is ready, not because a rate has it.
+  // The rates take only pay at property ("Nothing"): card comes with "Guest chooses" or "Full stay" once card is
+  // ready, not because a rate has it.
   await mockPricing(page, publicationOf(3, [designRoom(3), complexRoom(3)]), [], {
     cardReady: true,
     payment: { kind: "full", acceptedMethods: ["pay_at_property"] },
   });
   const assertHealthy = watchPageHealth(page, testInfo);
   await prices(page, DELUXE);
-  for (const rate of ["Flexible rate", "Non-refundable rate"]) {
+  for (const [rate, pick] of [
+    ["Flexible rate", "Guest chooses"],
+    ["Non-refundable rate", "Full stay"],
+  ] as const) {
     const region = main(page).getByRole("region", { name: rate });
-    await expect(region.getByRole("checkbox", { name: "Card online" })).not.toBeChecked();
+    await expect(region.getByRole("checkbox", { name: "Card online" })).toHaveCount(0);
+    await region
+      .getByRole("group", { name: "Paid when booking" })
+      .getByRole("button", { name: pick })
+      .click();
+    await expect(region.getByRole("checkbox", { name: "Card online" })).toBeChecked();
     await expect(region).toContainText("Charged at booking");
   }
+  await assertHealthy();
+});
+
+test("says on a rate's card when it isn't selling, why and how to fix it (VAY-2304)", async ({
+  page,
+}, testInfo) => {
+  await openPms(page);
+  await mockPricing(page, publicationOf(3, [designRoom(3), complexRoom(3)]), [], {
+    notSelling: [
+      {
+        roomTypeId: DELUXE,
+        offerId: "nonrefundable",
+        reason: "card_off",
+        fixes: ["turn_card_on"],
+      },
+    ],
+  });
+  const assertHealthy = watchPageHealth(page, testInfo);
+  await prices(page, DELUXE);
+  const nonRefundable = main(page).getByRole("region", { name: "Non-refundable rate" });
+  await expect(nonRefundable).toContainText("Not selling on your booking page");
+  await expect(nonRefundable).toContainText("Only card, and card payments are off for your hotel.");
+  await expect(nonRefundable).toContainText("Ask Vayada to turn card payments back on.");
+  await expect(main(page).getByRole("region", { name: "Flexible rate" })).not.toContainText(
+    "Not selling",
+  );
+  await expect(main(page).getByText(/isn't selling$/)).toBeVisible();
   await assertHealthy();
 });
 

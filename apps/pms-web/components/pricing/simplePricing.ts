@@ -242,25 +242,20 @@ export function cancellationEdits(
     terms: { ...terms[offer.id]!, cancellation },
   }));
 }
-/** New terms for one rate's options (VAY-2282), accepting `methods`: the Flexible rate is the main option and the
- * breakfast switch that follows it; the Non-refundable rate is its own option. */
-export function rateMethodEdits(
+/** New terms for one rate's options (VAY-2282), with `payment` (its "Paid when booking" and methods, VAY-2305): the
+ * Flexible rate is the main option and the breakfast switch that follows it; the Non-refundable rate is its own option. */
+export function ratePaymentEdits(
   simple: SimpleRoom,
   terms: Terms,
   rate: "flexible" | "non_refundable",
-  methods: readonly PricingPaymentMethod[],
+  payment: OptionTerms["payment"],
 ): { offerId: string; terms: OptionTerms }[] {
-  if (!methods.length) throw new PricingError("pricing.error.paymentMethodRequired");
+  if (!payment.acceptedMethods?.length)
+    throw new PricingError("pricing.error.paymentMethodRequired");
   const offers = rate === "flexible" ? [simple.main, simple.breakfast] : [simple.nonRefundable];
   return offers
     .filter((offer): offer is Offer => !!offer)
-    .map((offer) => {
-      const current = terms[offer.id]!;
-      return {
-        offerId: offer.id,
-        terms: { ...current, payment: { ...current.payment, acceptedMethods: [...methods] } },
-      };
-    });
+    .map((offer) => ({ offerId: offer.id, terms: { ...terms[offer.id]!, payment } }));
 }
 type Calendar = Extract<Offer["price"], { kind: "independent" }>["calendar"];
 type Price = NonNullable<Calendar["base"]>;
