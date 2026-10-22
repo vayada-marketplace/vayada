@@ -5,7 +5,12 @@ import StayRange from "@/components/booking/StayRange";
 
 import { formatCheckInTime, formatCheckOutTime } from "@/lib/arrivalTimes";
 import { stayCalendarFile } from "@/lib/calendarFile";
-import { groupReference, paymentLine, type PaymentWay } from "@/lib/confirmationDisplay";
+import {
+  directionsUrl,
+  groupReference,
+  paymentLine,
+  type PaymentWay,
+} from "@/lib/confirmationDisplay";
 import { formatStayDate, resolveLocale } from "@/lib/utils";
 import { useState, useEffect, useId, useRef, type ReactNode } from "react";
 import { useLocale, useTranslations } from "next-intl";
@@ -110,6 +115,7 @@ const ICONS = {
     "M16.5 6v.75m0 3v.75m0 3v.75m0 3V18m-9-5.25h5.25M7.5 15h3M3.375 5.25c-.621 0-1.125.504-1.125 1.125v3.026a2.999 2.999 0 0 1 0 5.198v3.026c0 .621.504 1.125 1.125 1.125h17.25c.621 0 1.125-.504 1.125-1.125v-3.026a2.999 2.999 0 0 1 0-5.198V6.375c0-.621-.504-1.125-1.125-1.125H3.375Z",
   home: "m2.25 12 8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25",
   cross: "M6 18 18 6M6 6l12 12",
+  pin: "M15 10.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0ZM19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1 1 15 0Z",
   calendar:
     "M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5",
 } as const;
@@ -178,7 +184,11 @@ function StepRow({
   );
   const className =
     "flex w-full items-center gap-3.5 px-5 py-3 text-left transition-colors hover:bg-gray-50 disabled:opacity-50";
-  return href ? (
+  return href?.startsWith("https:") ? (
+    <a href={href} target="_blank" rel="noopener noreferrer" className={className}>
+      {body}
+    </a>
+  ) : href ? (
     <Link href={href} className={className}>
       {body}
     </Link>
@@ -759,6 +769,14 @@ export default function BookingConfirmationPageClient({
             title={t("addToCalendar")}
             hint={`${formatStayDate(stayDates.checkIn, locale)} – ${formatStayDate(stayDates.checkOut, locale)}`}
             onClick={addToCalendar}
+          />
+        )}
+        {isConfirmed && hotel.mapPin && (
+          <StepRow
+            icon="pin"
+            title={t("getDirections")}
+            hint={t("directionsHint")}
+            href={directionsUrl(hotel.mapPin, hotel.name, hotel.location)}
           />
         )}
         {contact}

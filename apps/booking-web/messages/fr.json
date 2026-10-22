@@ -458,7 +458,9 @@
     "partlyPaidByCard": "Payé en partie par carte",
     "heldOnCard": "Bloqué sur votre carte",
     "refundedToCard": "Remboursé sur votre carte",
-    "addToCalendar": "Ajouter au calendrier"
+    "addToCalendar": "Ajouter au calendrier",
+    "getDirections": "Itinéraire",
+    "directionsHint": "Ouvre notre emplacement dans Google Maps"
   },
   "refer": {
     "title": "Parrainer un client",
