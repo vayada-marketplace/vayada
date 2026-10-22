@@ -772,8 +772,9 @@ test("sets the first price of an unpriced room with one Save, next to the other 
     "aria-invalid",
     "true",
   );
+  // Save is in the tab's bar (VAY-2305) and is the form's submit button: Enter in the price field saves.
   await main(page).getByLabel("Room price per night").fill("120");
-  await main(page).getByRole("button", { name: "Save and publish" }).click();
+  await main(page).getByLabel("Room price per night").press("Enter");
   await expect(main(page).getByText("Prices saved.", { exact: false })).toBeVisible();
   const published = pricing.publishes[0].snapshot.rooms as Room[];
   expect(published.map((value) => value.roomTypeId)).toEqual([DELUXE, LAKE]);

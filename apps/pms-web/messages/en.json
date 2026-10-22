@@ -2832,6 +2832,7 @@
   "pricing.simple.summary.childrenPrice": "Children under {age}: {amount} a night",
   "pricing.simple.roomOnly": "Room only, no meals",
   "pricing.simple.first.noPrice": "{room} has no price yet, so guests can't book it. Enter a standard price and press Save and publish. Everything else is already filled in.",
+  "pricing.simple.first.noPriceMore": "{room} has no price yet, so guests can't book it. Enter a standard price and press Save and publish; it names anything else still missing.",
   "pricing.simple.first.newRoom": "Prices are optional here. If you enter a price, it is saved together with the room when you press Create Room Type.",
   "pricing.first.openLater": "Every night of the year. Close dates once the room has a price.",
   "pricing.first.everyNight": "Every night, until you add a season",

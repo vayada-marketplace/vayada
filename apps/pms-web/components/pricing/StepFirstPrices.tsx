@@ -52,7 +52,7 @@ export function StepFirstPrices({
   onCreate,
   pending,
   calendar,
-  save,
+  id,
 }: {
   propertyId: string;
   /** The room page's room (the first; the page offers only its own room). */
@@ -69,8 +69,8 @@ export function StepFirstPrices({
   pending?: MutableRefObject<(() => FirstPrices) | null>;
   /** Shown under the first line, above the form: the empty calendar (VAY-2280). */
   calendar?: ReactNode;
-  /** Filled with this form's Save, for the tab's bar (VAY-2305), which holds Save and the declaration. */
-  save?: MutableRefObject<(() => void) | null>;
+  /** The form's id: the tab's bar holds its Save (VAY-2305), a submit button for this form. */
+  id?: string;
 }) {
   const { t } = useTranslation();
   const room = rooms[0]!;
@@ -241,13 +241,6 @@ export function StepFirstPrices({
     }
   }
   useEffect(() => {
-    if (!save) return;
-    save.current = () => submit("save");
-    return () => {
-      save.current = null;
-    };
-  });
-  useEffect(() => {
     if (!pending) return;
     pending.current = () => {
       try {
@@ -313,6 +306,7 @@ export function StepFirstPrices({
   );
   return (
     <form
+      id={id}
       className="space-y-4"
       onSubmit={(event) => {
         event.preventDefault();
@@ -329,7 +323,13 @@ export function StepFirstPrices({
       >
         {pending
           ? t("pricing.simple.first.newRoom")
-          : t("pricing.simple.first.noPrice", { room: room.name })}
+          : t(
+              // With Payment settings unread or no currency yet, Save asks for more than the price.
+              fixedCurrency && (defaultMethods !== null || values.methods.length)
+                ? "pricing.simple.first.noPrice"
+                : "pricing.simple.first.noPriceMore",
+              { room: room.name },
+            )}
       </p>
       {calendar}
       {/* "Pricing setup" (VAY-2305, the CEO's design): the editor's steps, with only the price to enter. */}

@@ -2846,6 +2846,7 @@
   "pricing.simple.summary.childrenPrice": "Kinder unter {age}: {amount} pro Nacht",
   "pricing.simple.roomOnly": "Nur Übernachtung, ohne Mahlzeiten",
   "pricing.simple.first.noPrice": "{room} hat noch keinen Preis, daher können Gäste es nicht buchen. Gib einen Standardpreis ein und klicke auf „Speichern und veröffentlichen“. Alles andere ist bereits ausgefüllt.",
+  "pricing.simple.first.noPriceMore": "{room} hat noch keinen Preis, daher können Gäste es nicht buchen. Gib einen Standardpreis ein und klicke auf „Speichern und veröffentlichen“; dort steht, was sonst noch fehlt.",
   "pricing.simple.first.newRoom": "Preise sind hier optional. Wenn Sie einen Preis eingeben, wird er zusammen mit dem Zimmer gespeichert, sobald Sie auf Zimmertyp erstellen klicken.",
   "pricing.first.openLater": "Jede Nacht des Jahres. Daten schließen kannst du, sobald das Zimmer einen Preis hat.",
   "pricing.first.everyNight": "Jede Nacht, bis du eine Saison hinzufügst",

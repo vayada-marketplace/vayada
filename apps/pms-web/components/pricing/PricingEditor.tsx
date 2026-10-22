@@ -305,7 +305,7 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
     if (then === "save" && !newRoom) publish(snapshot, Object.values(edits));
   }
   const firstPrices = useRef<(() => FirstPrices) | null>(null);
-  const saveFirst = useRef<(() => void) | null>(null); // The first-price form's Save, run from the bar (VAY-2305).
+  const firstFormId = useId(); // The first-price form, whose Save is the bar's (VAY-2305).
   /** The New room page's prices: the room as edited and its options' terms; unapplied first answers count, an open
    * window or an amount that does not parse stops the create. While loading there are none ("Remove prices" reloads). */
   function takeNewRoomPrices(): NewRoomPrices | null {
@@ -383,7 +383,7 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
             <p className="text-[14px] leading-5 text-gray-600">{t("pricing.calendar.emptyText")}</p>
           </section>
         </div>;
-      })()} propertyId={setup.propertyId} rooms={roomSetup} fixedCurrency={display?.currency} disabled={disabled} defaultMethods={defaultMethods} onDirty={() => setDirty(true)} onCreate={startFirst} pending={newRoom ? firstPrices : undefined} save={newRoom ? undefined : saveFirst} /> : <p className={ui.text}>{t(setup ? "pricing.room.notReady" : "pricing.editor.setupUnavailable")}</p>}
+      })()} propertyId={setup.propertyId} rooms={roomSetup} fixedCurrency={display?.currency} disabled={disabled} defaultMethods={defaultMethods} onDirty={() => setDirty(true)} onCreate={startFirst} pending={newRoom ? firstPrices : undefined} id={firstFormId} /> : <p className={ui.text}>{t(setup ? "pricing.room.notReady" : "pricing.editor.setupUnavailable")}</p>}
       {retry && <button disabled={busy} className={ui.secondaryButton} onClick={() => void run()}>{t("pricing.editor.retry")}</button>}</div>}
     {!loading && display && shownRooms.map(([room, ri]) => {
       const main = mainOffer(room), mi = room.offers.indexOf(main), mainLabel = offerLabel(room.roomTypeId, ri, mi);
@@ -579,7 +579,7 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
       {!loading && editing && done && <button type="button" className={ui.actionBarButton} onClick={() => void load()}>{t("pricing.room.editAgain")}</button>}
       {!loading && editing && (retry ? <button type="button" className={ui.actionBarPrimary} aria-describedby={declarationId} disabled={busy} onClick={() => void run()}>{t("pricing.editor.retry")}</button>
         : <button type="button" disabled={disabled || hasPendingEntries || !(dirty || stale)} className={ui.actionBarPrimary} aria-describedby={declarationId} onClick={save}>{t(busy ? "pricing.editor.saving" : "pricing.editor.save")}</button>)}
-      {firstForm && <button type="button" disabled={disabled || defaultMethods === undefined} className={ui.actionBarPrimary} aria-describedby={declarationId} onClick={() => saveFirst.current?.()}>{t("pricing.editor.save")}</button>}
+      {firstForm && <button type="submit" form={firstFormId} disabled={disabled || defaultMethods === undefined} className={ui.actionBarPrimary} aria-describedby={declarationId}>{t("pricing.editor.save")}</button>}
     </div>}
     {/* Last, so they open above an option's window. */}
     {reloading && <ConfirmDialog title={t(cancels ? "pricing.steps.discardTitle" : "pricing.reloadTitle")} message={t(cancels ? "pricing.steps.discardMessage" : "pricing.reloadMessage")} confirmLabel={t(cancels ? "pricing.steps.discardConfirm" : "pricing.reloadConfirm")} cancelLabel={t("common.cancel")} variant="danger" onConfirm={() => { setReloading(false); void load(); }} onCancel={() => setReloading(false)} />}

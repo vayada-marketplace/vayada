@@ -4201,12 +4201,14 @@ it("starts an unpriced room with the first setup in the property currency and pu
   const policy = vi.fn().mockResolvedValue({ revision: familyId }); client.termsAction.mockReturnValue(policy);
   await mountRoom();
   expect(view.root.findByType(StepFirstPrices).props).toMatchObject({ rooms: [familySetup], fixedCurrency: "EUR" });
-  // The bar holds the one Save (VAY-2305): it runs the first-price form's, which names the price still missing.
+  // The bar holds the one Save (VAY-2305): the first-price form's submit button, so Enter in a field saves too.
   const saves = () => view.root.findAllByType("button").filter((node) => node.children.includes("Save and publish"));
-  expect(saves()).toHaveLength(1); expect(saves()[0].props.type).toBe("button"); expect(view.root.findAllByType(PricingStayPreview)).toHaveLength(0);
-  expect(JSON.stringify(view.toJSON())).toContain("No price yet: guests can't book this room");
+  const form = view.root.findByType("form");
+  expect(saves()).toHaveLength(1); expect(saves()[0].props).toMatchObject({ type: "submit", form: form.props.id }); expect(form.props.id).toBeTruthy();
+  expect(view.root.findAllByType(PricingStayPreview)).toHaveLength(0); expect(JSON.stringify(view.toJSON())).toContain("No price yet: guests can't book this room");
   await act(async () => {}); expect(saves()[0].props.disabled).toBe(false); // Payment settings can't be read here: the form asks.
-  await act(async () => saves()[0].props.onClick()); expect(JSON.stringify(view.toJSON())).toContain("Fill in what is still missing:"); expect(client.publicationAction).not.toHaveBeenCalled();
+  expect(JSON.stringify(view.toJSON())).toContain("names anything else still missing");
+  await act(async () => form.props.onSubmit({ preventDefault() {} })); expect(JSON.stringify(view.toJSON())).toContain("Fill in what is still missing:"); expect(client.publicationAction).not.toHaveBeenCalled();
   const first = familyInput("90");
   await act(async () => view.root.findByType(StepFirstPrices).props.onCreate({ configuration: first.configuration, terms: [first.terms] }, "save"));
   expect(saved.baseRevision).toBe(3); expect(saved.snapshot.rooms.map((room) => [room.roomTypeId, room.revision])).toEqual([["room", 4], [familyId, 4]]);
