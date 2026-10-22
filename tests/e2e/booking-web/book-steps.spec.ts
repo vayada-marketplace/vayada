@@ -26,6 +26,8 @@ async function mockFlow(
         description: "Fresh bread and coffee on the terrace.",
         price: 18,
         category: "dining",
+        duration: "07:00–10:30",
+        location: "Garden terrace",
       },
       {
         id: lateCheckOut,
@@ -397,6 +399,45 @@ test("offers an extra with a lead time from its first bookable check-in date", a
   await expect(late).not.toContainText("notice");
   await page.screenshot({ path: testInfo.outputPath("extras-enough-notice.png"), fullPage: true });
 });
+
+// VAY-2231: a card's details: a popup from md up, a bottom sheet on phones.
+for (const width of [1440, 390]) {
+  test(`opens an extra's details and adds it from there at ${width}px`, async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize({ width, height: width > 400 ? 900 : 844 });
+    await mockFlow(page, { lateCheckOutNotice: { leadTimeHours: 24, bookableFrom: "2026-11-07" } });
+    await page.goto(STAY);
+    const breakfastCard = page.getByRole("article", { name: "Garden breakfast" });
+    await breakfastCard.getByRole("button", { name: "See details" }).click();
+    const details = page.getByRole("dialog", { name: "Garden breakfast" });
+    await expect(details).toBeVisible();
+    await expect(details).toContainText("07:00–10:30");
+    await expect(details).toContainText("Garden terrace");
+    await expect(details).toContainText("Fresh bread and coffee on the terrace.");
+    const box = (await details.boundingBox())!;
+    // A sheet on the phone: full width, down to the bottom of the screen.
+    if (width < 400) expect(Math.round(box.width)).toBe(width);
+    if (width < 400) expect(Math.round(box.y + box.height)).toBe(844);
+    await page.screenshot({ path: testInfo.outputPath(`extra-details-${width}.png`) });
+    await details.getByRole("button", { name: "Add", exact: true }).click();
+    await expect(details).toBeHidden();
+    await expect(
+      breakfastCard.getByRole("button", { name: "Fewer for Garden breakfast" }),
+    ).toBeVisible();
+    await expect(page.getByRole("status", { name: "Your stay total" })).toContainText("€340");
+    // An extra the stay is too soon for says why, and Escape closes the details.
+    await page.getByRole("article", { name: "Late check-out" }).getByText("Late check-out").click();
+    const late = page.getByRole("dialog", { name: "Late check-out" });
+    await expect(late).toContainText("Needs 24 hours’ notice, so it can’t be added to this stay.");
+    await expect(late.getByRole("button", { name: "Add", exact: true })).toBeDisabled();
+    await page.keyboard.press("Escape");
+    await expect(late).toBeHidden();
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+  });
+}
 
 test("prices the stay again without extras when an extra's notice ran out meanwhile", async ({
   page,

@@ -79,7 +79,14 @@ it("reads how the extras step shows each extra (VAY-2195)", async () => {
         price: 18,
         category: "dining",
         image: "",
-        images: ["https://elsewhere.example/b.jpg", "https://images.vayada.com/media/b.webp"],
+        images: [
+          "https://elsewhere.example/b.jpg",
+          "https://images.vayada.com/media/b.webp",
+          "https://images.vayada.com/media/c.webp",
+          "https://images.vayada.com/media/b.webp",
+        ],
+        duration: " 2 hours ",
+        location: "Garden terrace",
       },
       { id: "spa", price: "35.50", category: "massage", image: "javascript:alert(1)" },
       { id: 7 },
@@ -91,10 +98,22 @@ it("reads how the extras step shows each extra (VAY-2195)", async () => {
     breakfast: {
       description: "Fresh bread.",
       image: "https://images.vayada.com/media/b.webp",
+      // VAY-2231: the details show every allowed photo once, and the facts the hotel filled in.
+      photos: ["https://images.vayada.com/media/b.webp", "https://images.vayada.com/media/c.webp"],
+      duration: "2 hours",
+      location: "Garden terrace",
       category: "dining",
       price: 18,
     },
-    spa: { description: "", image: null, category: "other", price: 35.5 },
+    spa: {
+      description: "",
+      image: null,
+      photos: [],
+      duration: null,
+      location: null,
+      category: "other",
+      price: 35.5,
+    },
   });
   expect((await getBookingPagePayment("hotel")).groupExtras).toBe(false);
 });
