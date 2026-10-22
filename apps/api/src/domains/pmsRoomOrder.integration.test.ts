@@ -136,4 +136,40 @@ describe.skipIf(!url)("PMS room order PostgreSQL (VAY-2294)", () => {
     const rooms = await reads.listRoomsByPropertyId(propertyId);
     expect(rooms.items.map(({ roomNumber }) => roomNumber)).toEqual(["A2", "A1", "B1"]);
   });
+
+  it("waits for a room type that retire holds instead of deadlocking on the rooms table", async () => {
+    const alpha = await roomType("Alpha", 1);
+    const bravo = await roomType("Bravo", 2);
+    const a1 = await room(alpha, "A1", 1);
+    const b1 = await room(bravo, "B1", 2);
+    const retire = new pg.Client({ connectionString: url });
+    await retire.connect();
+    try {
+      // Room type retire locks its room type row, then the rooms table.
+      await retire.query("BEGIN");
+      await retire.query("SELECT id FROM pms.room_types WHERE id=$1 FOR UPDATE", [bravo]);
+      const saving = commands.reorderRooms!(reorder([b1, a1], pmsRoomOrderVersion([a1, b1])));
+      const deadline = Date.now() + 5_000;
+      let waiting = false;
+      while (!waiting && Date.now() < deadline) {
+        const blocked = await db.query<{ count: number }>(
+          `SELECT count(*)::int AS count FROM pg_stat_activity
+           WHERE datname = current_database() AND wait_event_type = 'Lock'
+             AND query LIKE '%FROM pms.room_types WHERE property_id%FOR UPDATE%'`,
+        );
+        waiting = blocked.rows[0]!.count > 0;
+        if (!waiting) await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      expect(waiting).toBe(true);
+      await retire.query("SET LOCAL lock_timeout = '2s'");
+      await retire.query("LOCK TABLE pms.rooms IN SHARE ROW EXCLUSIVE MODE");
+      await retire.query("COMMIT");
+      await expect(saving).resolves.toMatchObject({ ok: true });
+    } finally {
+      await retire.query("ROLLBACK").catch(() => undefined);
+      await retire.end();
+    }
+    const types = await reads.listRoomTypesByPropertyId(propertyId);
+    expect(types.items.map(({ name }) => name)).toEqual(["Bravo", "Alpha"]);
+  });
 });

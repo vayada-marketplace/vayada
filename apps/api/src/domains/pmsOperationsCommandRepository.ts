@@ -2137,6 +2137,13 @@ async function executeRoomOrderCommand(
     for (const { roomTypeId } of roomTypeIds.rows) {
       await lockPmsPhysicalRoomUnitMutationScope(client, command.propertyId, roomTypeId);
     }
+    // The room-type order is saved below. Lock room types before rooms, as room type retire,
+    // safe delete and Channex staging do, so a reorder never holds rooms while it waits for a
+    // room type row (VAY-2294).
+    await client.query(
+      `SELECT id FROM pms.room_types WHERE property_id = $1::uuid ORDER BY id FOR UPDATE`,
+      [command.propertyId],
+    );
     const current = await client.query<{ roomId: string; roomTypeId: string }>(
       `SELECT id::text AS "roomId", room_type_id::text AS "roomTypeId" FROM pms.rooms
        WHERE property_id = $1::uuid AND status <> 'retired'

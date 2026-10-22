@@ -535,11 +535,13 @@ export default function CalendarPage() {
 
   const reorderGroups = reorderMode && localRooms ? groupRoomsByType(localRooms) : [];
 
-  // Whether the user has unsaved changes during reorder mode.
+  // Whether the user has unsaved changes during reorder mode. Compared with the grouped order
+  // reorder mode starts from, so regrouping alone never counts as a change.
   const hasUnsavedOrder = useMemo(() => {
     if (!reorderMode || !localRooms || !data) return false;
-    if (localRooms.length !== data.rooms.length) return true;
-    return localRooms.some((r, i) => r.id !== data.rooms[i].id);
+    const saved = groupRoomsByType(data.rooms).flatMap(({ rooms }) => rooms);
+    if (localRooms.length !== saved.length) return true;
+    return localRooms.some((r, i) => r.id !== saved[i].id);
   }, [reorderMode, localRooms, data]);
 
   // Warn on tab close / refresh when there are unsaved order changes.
