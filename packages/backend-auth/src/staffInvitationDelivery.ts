@@ -26,6 +26,7 @@ export interface StaffInvitationProvider {
   sendInvitation(
     input: StaffInvitationDeliveryClaim & { expiresInDays: 7 },
   ): Promise<StaffInvitationProviderResponse>;
+  revokeInvitation(providerInvitationId: string): Promise<"revoked" | "not_pending">;
 }
 
 export interface StaffInvitationDeliveryRepository {
@@ -36,6 +37,8 @@ export interface StaffInvitationDeliveryRepository {
     expiresAt: Date,
   ): Promise<boolean>;
   markUnknown(invitationId: string): Promise<void>;
+  // The provider invitation of the intent this one replaced (Team "Resend"), when it was sent.
+  findReplacedProviderInvitationId(invitationId: string): Promise<string | null>;
 }
 
 type ClaimRow = {
@@ -139,6 +142,21 @@ export function createPgStaffInvitationDeliveryRepository(config: RepositoryConf
       );
     },
 
+    async findReplacedProviderInvitationId(invitationId: string): Promise<string | null> {
+      if (!uuidPattern.test(invitationId)) return null;
+      const result = await pool.query<{ provider_invitation_id: string }>(
+        `SELECT replaced.provider_invitation_id
+         FROM identity.staff_invitations invitation
+         JOIN identity.staff_invitations replaced
+           ON replaced.id = invitation.supersedes_invitation_id
+          AND replaced.organization_id = invitation.organization_id
+         WHERE invitation.id = $1::uuid AND replaced.status = 'revoked'
+           AND replaced.provider_invitation_id IS NOT NULL`,
+        [invitationId],
+      );
+      return result.rows[0]?.provider_invitation_id ?? null;
+    },
+
     close: () => pool.end(),
   } satisfies StaffInvitationDeliveryRepository & { close(): Promise<void> };
 }
@@ -167,10 +185,12 @@ export function createStaffInvitationDeliveryCoordinator(input: {
           await input.repository.markUnknown(claim.invitationId);
           return { outcome: "unknown" as const, invitationId: claim.invitationId };
         }
+        const replacedRevocation = await revokeReplacedInvitation(input, claim.invitationId);
         return {
           outcome: "delivered" as const,
           invitationId: claim.invitationId,
           providerInvitationId,
+          ...(replacedRevocation ? { replacedRevocation } : {}),
         };
       } catch {
         await input.repository.markUnknown(claim.invitationId);
@@ -178,6 +198,23 @@ export function createStaffInvitationDeliveryCoordinator(input: {
       }
     },
   };
+}
+
+// A replaced intent is already revoked in Vayada, and acceptance of it grants nothing; revoking it
+// in WorkOS too keeps its emailed link from activating a WorkOS membership. Best effort, after the
+// replacement is out, so a failure never costs the invitee their new invitation.
+async function revokeReplacedInvitation(
+  input: { repository: StaffInvitationDeliveryRepository; provider: StaffInvitationProvider },
+  invitationId: string,
+): Promise<"revoked" | "failed" | undefined> {
+  try {
+    const replaced = await input.repository.findReplacedProviderInvitationId(invitationId);
+    if (!replaced) return undefined;
+    await input.provider.revokeInvitation(replaced);
+    return "revoked";
+  } catch {
+    return "failed";
+  }
 }
 
 function matchingProviderExpiry(
