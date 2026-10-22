@@ -37,6 +37,30 @@ export type PricingCardReadiness = {
   };
   deposits: { ready: boolean };
 };
+/** Why a published rate isn't selling now, and what fixes it (VAY-2304, pricing-rates-not-selling.v1). */
+export const PRICING_RATE_NOT_SELLING_REASONS = [
+  "card_off",
+  "card_not_chosen",
+  "card_setup_incomplete",
+  "deposits_off",
+  "pay_at_property_off",
+  "no_payment_method",
+] as const;
+export const PRICING_RATE_FIXES = [
+  "turn_card_on",
+  "choose_card",
+  "finish_stripe_setup",
+  "allow_pay_at_property",
+  "change_rate_payment",
+  "turn_pay_at_property_on",
+] as const;
+/** A published rate guests can't book now, with its fixes (main fix first). */
+export type PricingRateNotSelling = {
+  roomTypeId: string;
+  offerId: string;
+  reason: (typeof PRICING_RATE_NOT_SELLING_REASONS)[number];
+  fixes: (typeof PRICING_RATE_FIXES)[number][];
+};
 export type PricingSources = { room: string; terms: string; finance: string };
 export type PricingSnapshot = {
   currency: string;
@@ -290,6 +314,33 @@ export function createReplacementPricingClient(
       )
         return bad();
       return structuredClone(value) as PricingCardReadiness;
+    },
+    /** The published rates guests can't book now, and why (VAY-2304); every other rate sells. An API without the read
+     * lists none. */
+    async notSellingRates(): Promise<PricingRateNotSelling[]> {
+      const value = await optionalRead(`${base}/not-selling`);
+      if (value === missing) return [];
+      if (
+        !exact(value, ["version", "publishedRevision", "rates"]) ||
+        value.version !== "pricing-rates-not-selling.v1" ||
+        !(value.publishedRevision === null || rev(value.publishedRevision, 1)) ||
+        !Array.isArray(value.rates)
+      )
+        return bad();
+      return value.rates.map((rate: unknown) => {
+        if (
+          !exact(rate, ["roomTypeId", "offerId", "reason", "fixes"]) ||
+          !uuid(rate.roomTypeId) ||
+          typeof rate.offerId !== "string" ||
+          !rate.offerId ||
+          !(PRICING_RATE_NOT_SELLING_REASONS as readonly unknown[]).includes(rate.reason) ||
+          !Array.isArray(rate.fixes) ||
+          !rate.fixes.length ||
+          rate.fixes.some((fix) => !(PRICING_RATE_FIXES as readonly unknown[]).includes(fix))
+        )
+          return bad();
+        return structuredClone(rate) as PricingRateNotSelling;
+      });
     },
     termsAction(input: PricingTermsInput, draftContext: PricingDraftContext) {
       const selected = context(draftContext);

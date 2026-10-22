@@ -101,6 +101,7 @@ const client = {
   readDraft: vi.fn(),
   paymentMethods: vi.fn(),
   cardReadiness: vi.fn(),
+  notSellingRates: vi.fn(),
 };
 /** A button by its text; icons beside the text (e.g. "+ Add linked offer") are ignored. */
 const button = (label: string) =>
@@ -196,6 +197,8 @@ beforeEach(() => {
     card: { ready: false, reason: "switch_off", charge: "at_booking" },
     deposits: { ready: false },
   });
+  // Every published rate sells (VAY-2304).
+  client.notSellingRates.mockResolvedValue([]);
   client.readTerms.mockImplementation(async (roomTypeId, offerId, revision) => ({
     roomTypeId,
     offerId,

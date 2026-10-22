@@ -209,7 +209,7 @@ async function mockPricing(
   page: Page,
   initial: ReturnType<typeof publicationOf> | null,
   readyMethods: ("bank_transfer" | "paypal")[] = [],
-  { cardReady = false, payment = storedPayment } = {},
+  { cardReady = false, payment = storedPayment, notSelling = [] as Record<string, unknown>[] } = {},
 ) {
   const terms = new Map<string, Record<string, unknown>>([
     ["flexible", { revision: TERMS, cancellation: flexible }],
@@ -237,6 +237,13 @@ async function mockPricing(
       return ok(route, {
         card: { ready: cardReady, reason: cardReady ? null : "switch_off", charge: "at_booking" },
         deposits: { ready: false },
+      });
+    // Every published rate sells unless a test lists one (VAY-2304).
+    if (suffix === "/not-selling" && method === "GET")
+      return ok(route, {
+        version: "pricing-rates-not-selling.v1",
+        publishedRevision: state.publication?.revision ?? null,
+        rates: state.publication ? notSelling : [],
       });
     if (suffix === "" && method === "GET") {
       if (!state.publication) return route.fulfill({ status: 404, json: { code: "not_found" } });
@@ -964,6 +971,33 @@ test("offers Card online on both rates once the booking page can take card (VAY-
     await expect(region.getByRole("checkbox", { name: "Card online" })).toBeChecked();
     await expect(region).toContainText("Charged at booking");
   }
+  await assertHealthy();
+});
+
+test("says on a rate's card when it isn't selling, why and how to fix it (VAY-2304)", async ({
+  page,
+}, testInfo) => {
+  await openPms(page);
+  await mockPricing(page, publicationOf(3, [designRoom(3), complexRoom(3)]), [], {
+    notSelling: [
+      {
+        roomTypeId: DELUXE,
+        offerId: "nonrefundable",
+        reason: "card_off",
+        fixes: ["turn_card_on"],
+      },
+    ],
+  });
+  const assertHealthy = watchPageHealth(page, testInfo);
+  await prices(page, DELUXE);
+  const nonRefundable = main(page).getByRole("region", { name: "Non-refundable rate" });
+  await expect(nonRefundable).toContainText("Not selling on your booking page");
+  await expect(nonRefundable).toContainText("Only card, and card payments are off for your hotel.");
+  await expect(nonRefundable).toContainText("Ask Vayada to turn card payments back on.");
+  await expect(main(page).getByRole("region", { name: "Flexible rate" })).not.toContainText(
+    "Not selling",
+  );
+  await expect(main(page).getByText(/isn't selling$/)).toBeVisible();
   await assertHealthy();
 });
 

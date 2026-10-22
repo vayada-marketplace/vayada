@@ -5,7 +5,11 @@ import {
   parsePricingConfiguration,
   type PricingConfiguration,
 } from "@vayada/domain-pms/replacement-pricing";
-import { PricingCardReadinessProvider, PricingManualMethodsProvider } from "./pricingManualMethods";
+import {
+  PricingCardReadinessProvider,
+  PricingManualMethodsProvider,
+  PricingNotSellingProvider,
+} from "./pricingManualMethods";
 import { setOfferSale, simpleRoom } from "./simplePricing";
 import type { OptionTerms } from "./stepPricing";
 import { StepOptions } from "./StepOptions";
@@ -460,4 +464,39 @@ it("greys out the full stay without a way to pay before arrival, and keeps a gue
   expect(handlers.onTerms.mock.lastCall![0][0].terms.payment.acceptedMethods).toEqual([
     "pay_at_property",
   ]);
+});
+
+it("shows on a rate's card that it isn't selling, why and how to fix it (VAY-2304)", () => {
+  const value = room();
+  const optionTerms = terms(["pay_at_property"], ["card"]);
+  act(() => {
+    view = create(
+      <PricingNotSellingProvider
+        value={[
+          {
+            roomTypeId: value.roomTypeId,
+            offerId: "nonrefundable",
+            reason: "card_off",
+            fixes: ["turn_card_on"],
+          },
+        ]}
+      >
+        <StepRates
+          room={value}
+          simple={simpleRoom(value, optionTerms)}
+          terms={optionTerms}
+          failed={false}
+          prices={{ flexible: "10000", nonrefundable: "9000" }}
+          disabled={false}
+          {...handlers}
+        />
+      </PricingNotSellingProvider>,
+    );
+  });
+  const nonRefundable = textOf(card("Non-refundable rate"));
+  expect(nonRefundable).toContain("Not selling on your booking page");
+  expect(nonRefundable).toContain("Only card, and card payments are off for your hotel.");
+  expect(nonRefundable).toContain("Ask Vayada to turn card payments back on.");
+  expect(nonRefundable).toContain("Its prices stay. It sells again by itself once this is fixed.");
+  expect(textOf(card("Flexible rate"))).not.toContain("Not selling");
 });
