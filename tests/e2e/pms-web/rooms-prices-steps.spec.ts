@@ -371,14 +371,9 @@ const prices = async (page: Page, id: string) => {
     main(page).getByText("Loading the cancellation terms", { exact: false }),
   ).toHaveCount(0);
   await page.goto(`/rooms/${id}?tab=prices`);
-  // An unpriced room shows the first price ("Set this room's prices", or "Price per night" for one room); a priced one
-  // "Prices and seasons" (VAY-2280).
+  // Priced or not, the room shows "Prices and seasons" (VAY-2280; the first price in the same steps since VAY-2305).
   await expect(
-    main(page)
-      .getByRole("heading", {
-        name: /^Prices and seasons$|^Price per night$|Set this room's prices/,
-      })
-      .first(),
+    main(page).getByRole("heading", { name: "Prices and seasons", exact: true }).first(),
   ).toBeVisible();
 };
 // Every option keeps a hidden Edit window mounted; the open window or form is the visible dialog.

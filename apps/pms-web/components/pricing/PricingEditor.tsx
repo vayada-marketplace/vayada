@@ -305,6 +305,7 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
     if (then === "save" && !newRoom) publish(snapshot, Object.values(edits));
   }
   const firstPrices = useRef<(() => FirstPrices) | null>(null);
+  const saveFirst = useRef<(() => void) | null>(null); // The first-price form's Save, run from the bar (VAY-2305).
   /** The New room page's prices: the room as edited and its options' terms; unapplied first answers count, an open
    * window or an amount that does not parse stops the create. While loading there are none ("Remove prices" reloads). */
   function takeNewRoomPrices(): NewRoomPrices | null {
@@ -322,7 +323,7 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
   // Edits survive a reload after a conflict; a denial (no permission) would only be refused again.
   const keepsOnReload = needsReload && dirty && !(error instanceof ApiErrorResponse && error.status === 403);
   const roomSetup = setup?.rooms.filter((room) => room.roomTypeId === focus) ?? [];
-  const firstTime = !loading && !focusRoom && roomSetup.length > 0;
+  const firstTime = !loading && !focusRoom && roomSetup.length > 0, firstForm = firstTime && !newRoom;
   useEffect(() => {
     if (!firstTime) return;
     let live = true;
@@ -343,7 +344,8 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
   } catch { guestsFrom = ""; }
   // This room's published rates guests can't book now (VAY-2304); their cards say why.
   const stopped = notSelling.filter((rate) => rate.roomTypeId === focus);
-  const status = busy ? { key: "pricing.editor.saving", tone: "text-primary-700", icon: <ArrowPathIcon aria-hidden="true" className="h-4 w-4 animate-spin" /> }
+  const status = firstForm ? { key: "pricing.bar.noPrice", tone: "text-amber-700", icon: <span aria-hidden="true" className="h-2 w-2 rounded-full bg-amber-500" /> }
+    : busy ? { key: "pricing.editor.saving", tone: "text-primary-700", icon: <ArrowPathIcon aria-hidden="true" className="h-4 w-4 animate-spin" /> }
     : done || (!dirty && !stale) ? { key: done ? "pricing.editor.statusSaved" : "pricing.editor.statusCurrent", tone: "text-green-700", icon: <CheckIcon aria-hidden="true" className="h-4 w-4" /> }
     : { key: dirty ? "pricing.editor.statusUnsaved" : "pricing.editor.statusStale", tone: "text-amber-700", icon: <span aria-hidden="true" className="h-2 w-2 rounded-full bg-amber-500" /> };
   const shownRooms = (display?.rooms ?? []).map((room, ri) => [room, ri] as const).filter(([room]) => room.roomTypeId === focus);
@@ -362,7 +364,7 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
   // While editing, the button beside Save discards this room's changes; otherwise it reloads pricing.
   const cancels = leaveRisk && !needsReload && !retry && !busy && !done;
   // No prices yet (VAY-2280): the first-price form shows the calendar of nights waiting for one, beside "Start with one price".
-  // Laid out as the Paper design's numbered steps; the other editors sit under More options. Cancel and Save at the bottom.
+  // Laid out as the editor's numbered steps (VAY-2305); the other editors sit under More options. Save is in the bar.
   return <PricingManualMethodsProvider value={manualMethods}><PricingCardReadinessProvider value={cardReadiness}><PricingNotSellingProvider value={notSelling}><section className="space-y-4">
     {error !== null && <div role="alert" className={ui.errorBanner}>{pricingSaveError(error, t)}{retry && <p className="mt-2">{t("pricing.editor.retryHint")}</p>}{keepsOnReload && <p className="mt-2">{t("pricing.room.reloadKeeps")}</p>}</div>}
     {notice && !(staleShown && notice === "pricing.room.noticeStale") && <p role="status" className={warning ? ui.warningBanner : ui.successBanner}>{t(notice)}</p>}
@@ -381,7 +383,7 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
             <p className="text-[14px] leading-5 text-gray-600">{t("pricing.calendar.emptyText")}</p>
           </section>
         </div>;
-      })()} propertyId={setup.propertyId} rooms={roomSetup} fixedCurrency={display?.currency} disabled={disabled} defaultMethods={defaultMethods} onDirty={() => setDirty(true)} onCreate={startFirst} pending={newRoom ? firstPrices : undefined} /> : <p className={ui.text}>{t(setup ? "pricing.room.notReady" : "pricing.editor.setupUnavailable")}</p>}
+      })()} propertyId={setup.propertyId} rooms={roomSetup} fixedCurrency={display?.currency} disabled={disabled} defaultMethods={defaultMethods} onDirty={() => setDirty(true)} onCreate={startFirst} pending={newRoom ? firstPrices : undefined} save={newRoom ? undefined : saveFirst} /> : <p className={ui.text}>{t(setup ? "pricing.room.notReady" : "pricing.editor.setupUnavailable")}</p>}
       {retry && <button disabled={busy} className={ui.secondaryButton} onClick={() => void run()}>{t("pricing.editor.retry")}</button>}</div>}
     {!loading && display && shownRooms.map(([room, ri]) => {
       const main = mainOffer(room), mi = room.offers.indexOf(main), mainLabel = offerLabel(room.roomTypeId, ri, mi);
@@ -565,7 +567,7 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
       {newRoom.actions}
     </div> : <div className={`flex-wrap ${ui.actionBar}`}>
       {/* The status takes the free space and its chips wrap beside it, so they never push the buttons to a second line. */}
-      {!loading && editing && <div className="w-full min-w-0 md:w-auto md:min-w-[16rem] md:flex-1">
+      {!loading && (editing || firstForm) && <div className="w-full min-w-0 md:w-auto md:min-w-[16rem] md:flex-1">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <p className={`flex items-center gap-1.5 text-[13px] font-medium ${status.tone}`}>{status.icon}{t(status.key)}</p>
           {barGaps > 0 && <span className="rounded-md bg-red-50 px-2 py-0.5 text-[12px] font-semibold text-red-700">{t(barGaps === 1 ? "pricing.bar.gaps.one" : "pricing.bar.gaps.other", { count: barGaps })}</span>}
@@ -577,6 +579,7 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
       {!loading && editing && done && <button type="button" className={ui.actionBarButton} onClick={() => void load()}>{t("pricing.room.editAgain")}</button>}
       {!loading && editing && (retry ? <button type="button" className={ui.actionBarPrimary} aria-describedby={declarationId} disabled={busy} onClick={() => void run()}>{t("pricing.editor.retry")}</button>
         : <button type="button" disabled={disabled || hasPendingEntries || !(dirty || stale)} className={ui.actionBarPrimary} aria-describedby={declarationId} onClick={save}>{t(busy ? "pricing.editor.saving" : "pricing.editor.save")}</button>)}
+      {firstForm && <button type="button" disabled={disabled || defaultMethods === undefined} className={ui.actionBarPrimary} aria-describedby={declarationId} onClick={() => saveFirst.current?.()}>{t("pricing.editor.save")}</button>}
     </div>}
     {/* Last, so they open above an option's window. */}
     {reloading && <ConfirmDialog title={t(cancels ? "pricing.steps.discardTitle" : "pricing.reloadTitle")} message={t(cancels ? "pricing.steps.discardMessage" : "pricing.reloadMessage")} confirmLabel={t(cancels ? "pricing.steps.discardConfirm" : "pricing.reloadConfirm")} cancelLabel={t("common.cancel")} variant="danger" onConfirm={() => { setReloading(false); void load(); }} onCancel={() => setReloading(false)} />}

@@ -52,6 +52,7 @@ export function StepFirstPrices({
   onCreate,
   pending,
   calendar,
+  save,
 }: {
   propertyId: string;
   /** The room page's room (the first; the page offers only its own room). */
@@ -68,6 +69,8 @@ export function StepFirstPrices({
   pending?: MutableRefObject<(() => FirstPrices) | null>;
   /** Shown under the first line, above the form: the empty calendar (VAY-2280). */
   calendar?: ReactNode;
+  /** Filled with this form's Save, for the tab's bar (VAY-2305), which holds Save and the declaration. */
+  save?: MutableRefObject<(() => void) | null>;
 }) {
   const { t } = useTranslation();
   const room = rooms[0]!;
@@ -238,6 +241,13 @@ export function StepFirstPrices({
     }
   }
   useEffect(() => {
+    if (!save) return;
+    save.current = () => submit("save");
+    return () => {
+      save.current = null;
+    };
+  });
+  useEffect(() => {
     if (!pending) return;
     pending.current = () => {
       try {
@@ -313,8 +323,8 @@ export function StepFirstPrices({
         role="status"
         className={
           pending
-            ? "rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-[14px] leading-5 text-gray-700"
-            : ui.warningBanner
+            ? ui.infoBanner
+            : "rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-[14px] leading-5 text-amber-800"
         }
       >
         {pending
@@ -322,81 +332,146 @@ export function StepFirstPrices({
           : t("pricing.simple.first.noPrice", { room: room.name })}
       </p>
       {calendar}
-      <div className={ui.pricesCard}>
-        <StepCard title={t("pricing.steps.price.title")}>
-          <div className="flex flex-wrap items-end gap-3">
-            {values.mode === "occupancy" ? (
-              Array.from({ length: room.capacity.adults }, (_, index) => {
-                const label = t(
-                  index ? "pricing.setup.occupancyPrice.other" : "pricing.setup.occupancyPrice.one",
-                  { count: index + 1 },
-                );
-                return (
-                  <label key={index} className="block">
-                    <span className="mb-1.5 block text-[13px] font-medium text-gray-700">
-                      {t(index ? "pricing.adults.other" : "pricing.adults.one", {
-                        count: index + 1,
-                      })}
-                    </span>
-                    {amountInput(
-                      label,
-                      values.occupancy[index] ?? "",
-                      `occupancy:${index}`,
-                      (value) =>
-                        change({
-                          occupancy: Array.from({ length: room.capacity.adults }, (_, i) =>
-                            i === index ? value : (values.occupancy[i] ?? ""),
-                          ),
-                        }),
-                    )}
-                  </label>
-                );
-              })
-            ) : (
-              <label className="block">
-                {amountInput(
-                  t(
-                    values.mode === "per_person"
-                      ? "pricing.setup.adultPrice"
-                      : "pricing.setup.roomPrice",
-                  ),
-                  values.base,
-                  "base",
-                  (value) => change({ base: value }),
-                )}
-              </label>
-            )}
-            <span className="flex h-12 items-center text-[15px] text-gray-700">
-              {t(
-                values.mode === "per_person"
-                  ? "pricing.steps.price.perAdultNight"
-                  : values.mode === "flat"
-                    ? "pricing.simple.perRoomNight"
-                    : "pricing.steps.price.perNight",
+      {/* "Pricing setup" (VAY-2305, the CEO's design): the editor's steps, with only the price to enter. */}
+      <div className="flex flex-wrap items-end justify-between gap-2 pt-2">
+        <div className="space-y-1">
+          <h2 className="text-[24px] font-bold text-gray-900">{t("pricing.rules.title")}</h2>
+          <p className={ui.stepHint}>{t("pricing.rules.hint")}</p>
+        </div>
+        {!pending && (
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2.5 py-1 text-[13px] font-medium text-amber-700">
+            <span aria-hidden="true" className="h-2 w-2 rounded-full bg-amber-500" />
+            {t("pricing.calendar.legend.noPrice")}
+          </span>
+        )}
+      </div>
+      <div>
+        <StepCard step={1} title={t("pricing.opening.title")} hint={t("pricing.opening.hint")}>
+          <p className="text-[15px] font-semibold text-gray-900">{t("pricing.opening.allYear")}</p>
+          <p className={ui.stepHint}>{t("pricing.first.openLater")}</p>
+        </StepCard>
+        <StepCard
+          step={2}
+          title={t("pricing.seasonTable.title")}
+          hint={t("pricing.seasonTable.hint")}
+        >
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
+            <div className="min-w-0 flex-1 basis-48">
+              <p className="text-[15px] font-semibold text-gray-900">
+                {t("pricing.seasonTable.standard")}
+              </p>
+              <p className="text-[13px] text-gray-500">{t("pricing.first.everyNight")}</p>
+            </div>
+            <div className="flex flex-wrap items-end gap-3">
+              {values.mode === "occupancy" ? (
+                Array.from({ length: room.capacity.adults }, (_, index) => {
+                  const label = t(
+                    index
+                      ? "pricing.setup.occupancyPrice.other"
+                      : "pricing.setup.occupancyPrice.one",
+                    { count: index + 1 },
+                  );
+                  return (
+                    <label key={index} className="block">
+                      <span className="mb-1.5 block text-[13px] font-medium text-gray-700">
+                        {t(index ? "pricing.adults.other" : "pricing.adults.one", {
+                          count: index + 1,
+                        })}
+                      </span>
+                      {amountInput(
+                        label,
+                        values.occupancy[index] ?? "",
+                        `occupancy:${index}`,
+                        (value) =>
+                          change({
+                            occupancy: Array.from({ length: room.capacity.adults }, (_, i) =>
+                              i === index ? value : (values.occupancy[i] ?? ""),
+                            ),
+                          }),
+                      )}
+                    </label>
+                  );
+                })
+              ) : (
+                <label className="block">
+                  {amountInput(
+                    t(
+                      values.mode === "per_person"
+                        ? "pricing.setup.adultPrice"
+                        : "pricing.setup.roomPrice",
+                    ),
+                    values.base,
+                    "base",
+                    (value) => change({ base: value }),
+                  )}
+                </label>
               )}
+              <span className="flex h-12 items-center text-[15px] text-gray-700">
+                {t(
+                  values.mode === "per_person"
+                    ? "pricing.steps.price.perAdultNight"
+                    : values.mode === "flat"
+                      ? "pricing.simple.perRoomNight"
+                      : "pricing.steps.price.perNight",
+                )}
+              </span>
+              {fixedCurrency ? (
+                !symbol && (
+                  <span className="flex h-12 items-center rounded-[10px] border border-gray-200 px-3.5 text-[14px] text-gray-700">
+                    {fixedCurrency}
+                  </span>
+                )
+              ) : (
+                <label className={ui.fieldLabel}>
+                  {t("pricing.setup.currency")}
+                  <input
+                    aria-label={t("pricing.setup.currency")}
+                    aria-invalid={missing.has("currency") || undefined}
+                    disabled={disabled}
+                    value={values.currency}
+                    onChange={(event) => change({ currency: event.target.value })}
+                    className={`mt-1.5 block w-28 ${ui.field}${mark("currency")}`}
+                  />
+                </label>
+              )}
+            </div>
+          </div>
+          <button
+            type="button"
+            disabled={disabled || loadingMethods}
+            onClick={() => submit("season")}
+            className={`inline-flex items-center gap-1.5 ${ui.stepLink}`}
+          >
+            <PlusIcon aria-hidden="true" className="h-4 w-4" /> {t("pricing.steps.seasons.add")}
+          </button>
+          <div
+            role="group"
+            aria-label={t("pricing.steps.weekends.title")}
+            className="flex flex-wrap items-center gap-2 border-t border-gray-100 pt-4"
+          >
+            <span aria-hidden="true" className="mr-2 text-[15px] text-gray-700">
+              {t("pricing.steps.weekends.title")}
             </span>
-            {fixedCurrency ? (
-              !symbol && (
-                <span className="flex h-12 items-center rounded-[10px] border border-gray-200 px-3.5 text-[14px] text-gray-700">
-                  {fixedCurrency}
-                </span>
-              )
-            ) : (
-              <label className={ui.fieldLabel}>
-                {t("pricing.setup.currency")}
-                <input
-                  aria-label={t("pricing.setup.currency")}
-                  aria-invalid={missing.has("currency") || undefined}
-                  disabled={disabled}
-                  value={values.currency}
-                  onChange={(event) => change({ currency: event.target.value })}
-                  className={`mt-1.5 block w-28 ${ui.field}${mark("currency")}`}
-                />
-              </label>
-            )}
+            {([null, ...weekendChoices] as const).map((basisPoints) => (
+              <button
+                key={String(basisPoints)}
+                type="button"
+                aria-pressed={weekend === basisPoints}
+                disabled={disabled}
+                className={ui.chip(weekend === basisPoints)}
+                onClick={() => {
+                  setWeekendChoice(basisPoints);
+                  touch();
+                }}
+              >
+                {basisPoints === null
+                  ? t("pricing.steps.weekends.no")
+                  : t("pricing.steps.weekends.percent", { percent: basisPoints / 100 })}
+              </button>
+            ))}
           </div>
         </StepCard>
-        <StepCard title={t("pricing.simple.cancellation.title")}>
+        <StepCard step={3} title={t("pricing.rates.title")} hint={t("pricing.rates.hint")}>
           <CancellationChoice
             value={cancel}
             disabled={disabled}
@@ -406,12 +481,6 @@ export function StepFirstPrices({
               touch();
             }}
           />
-        </StepCard>
-        <StepCard
-          title={t("pricing.simple.extras.title")}
-          hint={t("pricing.simple.extras.hint")}
-          optional
-        >
           <div>
             {cancel.kind === "free" && (
               <SwitchRow
@@ -442,75 +511,37 @@ export function StepFirstPrices({
                 }
               />
             )}
-            <SwitchRow
-              on={breakfast.on}
-              name={t("pricing.simple.extras.breakfast")}
-              disabled={disabled}
-              onToggle={() => {
-                setBreakfast({ ...breakfast, on: !breakfast.on });
-                touch();
-              }}
-              field={
-                <>
-                  +
-                  <input
-                    aria-label={t("pricing.simple.extras.breakfastLabel")}
-                    aria-invalid={missing.has("breakfast") || undefined}
-                    aria-describedby={errorIds("breakfast")}
-                    inputMode="decimal"
-                    disabled={disabled}
-                    value={breakfast.amount}
-                    onChange={(event) => {
-                      setBreakfast({ ...breakfast, amount: event.target.value });
-                      touch();
-                    }}
-                    className={`w-24 ${extraField}${mark("breakfast")}`}
-                  />
-                  {t("pricing.simple.extras.perAdult")}
-                </>
-              }
-            />
           </div>
         </StepCard>
-        <StepCard
-          title={t("pricing.steps.seasons.title")}
-          hint={t("pricing.steps.seasons.hint")}
-          optional
-        >
-          <button
-            type="button"
-            disabled={disabled || loadingMethods}
-            onClick={() => submit("season")}
-            className={`inline-flex items-center gap-1.5 ${ui.stepLink}`}
-          >
-            <PlusIcon aria-hidden="true" className="h-4 w-4" /> {t("pricing.steps.seasons.add")}
-          </button>
-          <div
-            role="group"
-            aria-label={t("pricing.steps.weekends.title")}
-            className="flex flex-wrap items-center gap-2 pt-2"
-          >
-            <span aria-hidden="true" className="mr-2 text-[15px] text-gray-700">
-              {t("pricing.steps.weekends.title")}
-            </span>
-            {([null, ...weekendChoices] as const).map((basisPoints) => (
-              <button
-                key={String(basisPoints)}
-                type="button"
-                aria-pressed={weekend === basisPoints}
-                disabled={disabled}
-                className={ui.chip(weekend === basisPoints)}
-                onClick={() => {
-                  setWeekendChoice(basisPoints);
-                  touch();
-                }}
-              >
-                {basisPoints === null
-                  ? t("pricing.steps.weekends.no")
-                  : t("pricing.steps.weekends.percent", { percent: basisPoints / 100 })}
-              </button>
-            ))}
-          </div>
+        <StepCard step={4} title={t("pricing.meals.title")} hint={t("pricing.meals.hint")} optional>
+          <SwitchRow
+            on={breakfast.on}
+            name={t("pricing.simple.extras.breakfast")}
+            disabled={disabled}
+            onToggle={() => {
+              setBreakfast({ ...breakfast, on: !breakfast.on });
+              touch();
+            }}
+            field={
+              <>
+                +
+                <input
+                  aria-label={t("pricing.simple.extras.breakfastLabel")}
+                  aria-invalid={missing.has("breakfast") || undefined}
+                  aria-describedby={errorIds("breakfast")}
+                  inputMode="decimal"
+                  disabled={disabled}
+                  value={breakfast.amount}
+                  onChange={(event) => {
+                    setBreakfast({ ...breakfast, amount: event.target.value });
+                    touch();
+                  }}
+                  className={`w-24 ${extraField}${mark("breakfast")}`}
+                />
+                {t("pricing.simple.extras.perAdult")}
+              </>
+            }
+          />
         </StepCard>
       </div>
       <MoreOptions keepOpen={moreMissing} summary={summary}>
@@ -627,15 +658,6 @@ export function StepFirstPrices({
               </ul>
             </>
           )}
-        </div>
-      )}
-      {/* The New room page saves with the room; here Save is the declaration. */}
-      {!pending && (
-        <div className="flex flex-wrap items-center justify-end gap-3">
-          <p className={`mr-auto ${ui.help}`}>{t("pricing.editor.saveDeclaration")}</p>
-          <button type="submit" disabled={disabled || loadingMethods} className={ui.primaryButton}>
-            {t("pricing.editor.save")}
-          </button>
         </div>
       )}
     </form>

@@ -208,7 +208,8 @@ it("on the New room page, hands the answers to the page and offers no Save of it
 
 it("waits for Payment settings before saving, and names a discount it can't use", async () => {
   const { onCreate } = await mount({ defaultMethods: undefined });
-  expect(button("Save and publish")!.props.disabled).toBe(true);
+  // Save is the tab's (VAY-2305): the form has none of its own.
+  expect(button("Save and publish")).toBeUndefined();
   expect(button("Add a season")!.props.disabled).toBe(true);
   await fill("Room price per night", "120");
   await submit();
@@ -227,7 +228,7 @@ it("waits for Payment settings before saving, and names a discount it can't use"
       />,
     ),
   );
-  expect(button("Save and publish")!.props.disabled).toBe(false);
+  expect(button("Add a season")!.props.disabled).toBe(false);
   await flip("Non-refundable");
   await fill("How much cheaper, in percent", "100");
   await submit();
