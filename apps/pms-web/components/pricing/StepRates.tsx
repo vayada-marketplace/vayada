@@ -732,12 +732,17 @@ function RatePayment({
       setError(errorText(cause, t, "pricing.error.paymentMethodRequired"));
     }
   };
-  const deposit = (percent: number): Payment => ({
-    kind: "deposit",
-    basisPoints: percent * 100,
-    balanceDaysBeforeArrival: 0,
-    acceptedMethods: ["card"],
-  });
+  // A stored deposit keeps its balance date and ways to pay when its percent steps; a new one is card now, the rest at
+  // the property.
+  const deposit = (percent: number): Payment =>
+    payment.kind === "deposit"
+      ? { ...payment, basisPoints: percent * 100 }
+      : {
+          kind: "deposit",
+          basisPoints: percent * 100,
+          balanceDaysBeforeArrival: 0,
+          acceptedMethods: ["card"],
+        };
   const choose = (choice: Choice) => {
     if (choice === stored || unavailable(choice)) return;
     apply(
