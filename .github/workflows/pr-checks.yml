@@ -800,6 +800,8 @@ jobs:
           src/pmsNavigationModules.test.ts
           src/pmsBookingModules.integration.test.ts
           src/pmsBookingModules.test.ts
+          src/bookingLocationMap.integration.test.ts
+          src/bookingLocationMapRoutes.test.ts
           src/jobs/pmsChannexScheduler.integration.test.ts
           src/jobs/pmsCalendarAutoOpenScheduler.integration.test.ts
           src/domains/pmsInboxProviderActionCommand.integration.test.ts

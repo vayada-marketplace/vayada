@@ -318,6 +318,7 @@ import {
 import { createPgPmsModuleActivationRepository } from "./routes/pmsModuleActivations.js";
 import { createPgPmsNavigationModuleRepository } from "./routes/pmsNavigationModules.js";
 import { createPgBookingModuleRepository } from "./routes/pmsBookingModules.js";
+import { createPgBookingLocationMapRepository } from "./domains/bookingLocationMap.js";
 import { createPgGuestReviewCommands } from "./domains/pmsGuestReviews.js";
 import { createChannexGuestReviews } from "./integrations/channexGuestReviews.js";
 import { createPgReviewReplyCommands } from "./domains/pmsReviewReplies.js";
@@ -617,6 +618,9 @@ const pmsNavigationModuleRepository = config.auth
   : undefined;
 const bookingModuleRepository = config.auth
   ? createPgBookingModuleRepository({ connectionString: targetDatabaseUrl })
+  : undefined;
+const bookingLocationMapRepository = config.auth
+  ? createPgBookingLocationMapRepository({ connectionString: targetDatabaseUrl })
   : undefined;
 
 const stripeConnectProvider = config.stripeSubscriptions.secretKey
@@ -1792,6 +1796,12 @@ const app = buildApp({
     ),
     propertyAccessRepository: bookingPropertyAccessRepository,
   },
+  bookingLocationMap: bookingLocationMapRepository
+    ? {
+        repository: bookingLocationMapRepository,
+        propertyAccessRepository: bookingPropertyAccessRepository,
+      }
+    : undefined,
   bookingGuestPolicy: bookingGuestPolicyApplication
     ? {
         application: bookingGuestPolicyApplication,

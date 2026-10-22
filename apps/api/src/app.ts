@@ -4,6 +4,10 @@ import {
   type BookingGuestChoiceRoutesOptions,
 } from "./routes/bookingGuestChoices.js";
 import {
+  registerBookingLocationMapRoutes,
+  type BookingLocationMapRoutesOptions,
+} from "./routes/bookingLocationMap.js";
+import {
   registerReplacementPricingRoutes,
   type ReplacementPricingRoutesOptions,
 } from "./routes/replacementPricing.js";
@@ -311,6 +315,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   bookingReservationsRepository?: BookingReservationsReadRepository;
   bookingGuestPolicy?: BookingGuestPolicyRoutesOptions;
   bookingGuestChoices?: BookingGuestChoiceRoutesOptions;
+  bookingLocationMap?: BookingLocationMapRoutesOptions;
   financePaymentSetup?: FinancePaymentReadinessRoutesOptions;
   bookingChangeRequestRepository?: BookingHotelChangeRequestRepository;
   pmsConfirmationEmails?: PmsConfirmationEmails;
@@ -752,6 +757,11 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     app.register(registerBookingGuestChoiceRoutes, {
       prefix: "/api/booking",
       ...options.bookingGuestChoices,
+    });
+  if (options.bookingLocationMap)
+    app.register(registerBookingLocationMapRoutes, {
+      prefix: "/api/booking",
+      ...options.bookingLocationMap,
     });
   if (options.bookingGuestPolicy) {
     app.register(registerBookingGuestPolicyRoutes, {
