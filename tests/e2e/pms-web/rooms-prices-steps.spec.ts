@@ -359,6 +359,10 @@ async function openPms(page: Page) {
 
 const main = (page: Page) => page.locator("main");
 const prices = async (page: Page, id: string) => {
+  // A save reads the rates' terms again (VAY-2305): leaving while they load would cut those requests off.
+  await expect(
+    main(page).getByText("Loading the cancellation terms", { exact: false }),
+  ).toHaveCount(0);
   await page.goto(`/rooms/${id}?tab=prices`);
   // An unpriced room shows the first price ("Set this room's prices", or "Price per night" for one room); a priced one
   // "Prices and seasons" (VAY-2280).
