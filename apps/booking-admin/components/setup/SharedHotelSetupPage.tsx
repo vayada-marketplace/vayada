@@ -443,6 +443,6 @@ export function isPmsSetupContext(query: string): boolean {
 export function setupExitPathForContext(query: string, propertyId: string | null): string {
   const params = new URLSearchParams(query);
   return params.get("recovery") === "pms-calendar" && params.get("returnProduct") === "pms"
-    ? safeSharedHotelSetupReturnTo(params.get("returnTo"), "/settings#calendar")
+    ? safeSharedHotelSetupReturnTo(params.get("returnTo"), "/settings/calendar")
     : setupExitPath(propertyId);
 }

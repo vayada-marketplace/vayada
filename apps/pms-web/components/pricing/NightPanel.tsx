@@ -8,6 +8,7 @@ import {
   LockOpenIcon,
   MoonIcon,
   PencilSquareIcon,
+  PlusIcon,
 } from "@heroicons/react/24/outline";
 import {
   pricingCurrencyScale,
@@ -16,7 +17,7 @@ import {
 import { useTranslation } from "@/lib/i18n";
 import { baseAmounts, decimalAmount, errorText } from "./pricingAmounts";
 import {
-  addToSeason,
+  moveToSeason,
   nightPrices,
   nightRules,
   ownPrice,
@@ -36,8 +37,10 @@ type Entry =
   | { kind: "price"; values: string[] }
   | { kind: "minimum"; value: string }
   | { kind: "arrival"; noArrival: boolean; noDeparture: boolean }
-  /** `season`: a season group's key, or "" for a new season named `name`. */
+  /** `season`: a season group's key, "" for a new season named `name`, or `STANDARD` for the standard price. */
   | { kind: "season"; season: string; name: string };
+/** The season choice that moves dates back to the standard price (season group keys are JSON arrays). */
+const STANDARD = "standard";
 const action =
   "inline-flex h-10 items-center justify-center gap-2 rounded-lg border px-3 text-[14px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50";
 
@@ -128,21 +131,67 @@ export function NightPanel({
     close();
     onClear();
   };
+  const groups = seasonGroups(main);
   // A single night says where its price comes from: its season, an own price or the standard price.
-  const season =
-    single && main.price.kind === "independent"
-      ? seasonGroups(main).find((group) =>
-          group.seasons.some((value) =>
-            value.from <= value.through
-              ? date.slice(5) >= value.from && date.slice(5) <= value.through
-              : date.slice(5) >= value.from || date.slice(5) <= value.through,
-          ),
-        )
-      : undefined;
+  const seasonOn = (value: string) =>
+    groups.find((group) =>
+      group.seasons.some((range) =>
+        range.from <= range.through
+          ? value.slice(5) >= range.from && value.slice(5) <= range.through
+          : value.slice(5) >= range.from || value.slice(5) <= range.through,
+      ),
+    );
+  const season = single ? seasonOn(date) : undefined;
+  // Dates in a season move to another one, or back to the standard price (VAY-2305); others are added to one.
+  const moving = dates.some((value) => seasonOn(value));
   const own = single ? ownPrice(room, date) : null;
   const prices = single && shown ? nightPrices(shown, date, adults) : [];
+  const unpriced =
+    single && !rules[0].stopSell && prices.length > 0 && prices.every((value) => !value.totalMinor);
   const fields = template ? baseAmounts(template, t) : [];
-  const groups = seasonGroups(main);
+  // What a season choice costs for the calendar's guests, and its minimum stay.
+  const sample = (price: Parameters<typeof baseAmounts>[0]) => {
+    const amounts = baseAmounts(price);
+    return amounts.length
+      ? money(amounts[Math.min(adults, amounts.length) - 1][1], room.currency)
+      : "—";
+  };
+  const minimumText = (nights: number) =>
+    t(nights === 1 ? "pricing.night.minOne" : "pricing.night.minOther", { count: nights });
+  // Back to the standard price only when there is one; a single date shows its month's own price, which comes first.
+  const calendar = main.price.kind === "independent" ? main.price.calendar : null;
+  const standard = calendar?.base
+    ? (single &&
+        calendar.months.find((entry) => entry.month === Number(date.slice(5, 7)))?.price) ||
+      calendar.base
+    : null;
+  const choices = [
+    ...(moving && standard
+      ? [
+          {
+            key: STANDARD,
+            name: t("pricing.night.standard"),
+            dot: "bg-gray-300",
+            sub: [
+              sample(standard),
+              ...(stayOwned ? [minimumText(stayDefaults(room).minArrivalNights)] : []),
+            ].join(" · "),
+          },
+        ]
+      : []),
+    ...groups
+      .filter((group) => !(single && group.key === season?.key))
+      .map((group) => ({
+        key: group.key,
+        name: group.name,
+        dot: seasonTones[group.tone].dot,
+        sub: [
+          sample(group.seasons[0].price),
+          ...(stayOwned ? [minimumText(rangeMinimum(room, group.seasons[0]))] : []),
+        ].join(" · "),
+      })),
+    { key: "", name: t("pricing.night.seasonNew"), dot: "", sub: "" },
+  ];
   const span = single ? day(date) : `${day(dates[0])} – ${day(dates[dates.length - 1])}`;
   return (
     <section
@@ -161,6 +210,9 @@ export function NightPanel({
           {t("pricing.night.clear")}
         </button>
       </div>
+      {unpriced && (
+        <p className="text-[13px] font-medium text-red-600">{t("pricing.night.noPrice")}</p>
+      )}
       <p className="flex items-center gap-2 text-[13px] text-gray-600">
         <span
           aria-hidden="true"
@@ -302,17 +354,14 @@ export function NightPanel({
       ) : entry?.kind === "season" ? (
         <div className={ui.draftCard}>
           <p className="text-[13px] font-semibold text-gray-900">
-            {t("pricing.night.seasonTitle", { days: span })}
+            {t(moving ? "pricing.night.moveTitle" : "pricing.night.seasonTitle", { days: span })}
           </p>
           <div
             role="radiogroup"
             aria-label={t("pricing.night.seasonChoice")}
-            className="mt-2 flex flex-wrap gap-1.5"
+            className="mt-2 space-y-1.5"
           >
-            {[
-              ...groups.map((group) => ({ key: group.key, name: group.name })),
-              { key: "", name: t("pricing.night.seasonNew") },
-            ].map((choice) => (
+            {choices.map((choice) => (
               <button
                 key={choice.key}
                 type="button"
@@ -320,13 +369,26 @@ export function NightPanel({
                 aria-checked={entry.season === choice.key}
                 disabled={disabled}
                 onClick={() => setEntry({ ...entry, season: choice.key })}
-                className={`inline-flex h-8 items-center rounded-full border px-3 text-[13px] font-medium ${
+                className={`flex w-full items-center gap-2.5 rounded-lg border px-3 py-2 text-left ${
                   entry.season === choice.key
-                    ? "border-primary-300 bg-primary-50 text-primary-700"
-                    : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
+                    ? "border-primary-300 bg-primary-50"
+                    : "border-gray-200 bg-white hover:bg-gray-50"
                 }`}
               >
-                {choice.name}
+                {choice.dot ? (
+                  <span
+                    aria-hidden="true"
+                    className={`h-2.5 w-2.5 shrink-0 rounded-[3px] ${choice.dot}`}
+                  />
+                ) : (
+                  <PlusIcon aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-primary-600" />
+                )}
+                <span className="min-w-0">
+                  <span className="block text-[13px] font-medium text-gray-900">{choice.name}</span>
+                  {choice.sub && (
+                    <span className="block text-[12px] text-gray-500">{choice.sub}</span>
+                  )}
+                </span>
               </button>
             ))}
           </div>
@@ -342,7 +404,9 @@ export function NightPanel({
               />
             </label>
           )}
-          <p className="mt-2 text-[12px] text-gray-500">{t("pricing.night.seasonHint")}</p>
+          <p className="mt-2 text-[12px] text-gray-500">
+            {t(moving ? "pricing.night.moveHint" : "pricing.night.seasonHint")}
+          </p>
           <div className="mt-3 flex flex-wrap gap-2">
             <button
               type="button"
@@ -351,10 +415,14 @@ export function NightPanel({
               onClick={() => {
                 const group = groups.find((value) => value.key === entry.season);
                 apply(() => {
-                  const next = addToSeason(
+                  const next = moveToSeason(
                     room,
                     selection,
-                    group ? { name: group.name, tier: group.tier } : { name: entry.name, tier: "" },
+                    entry.season === STANDARD
+                      ? null
+                      : group
+                        ? { name: group.name, tier: group.tier }
+                        : { name: entry.name, tier: "" },
                   );
                   // The days take the season's minimum stay too (VAY-2280 step 2).
                   const nights = group && stayOwned ? rangeMinimum(room, group.seasons[0]) : null;
@@ -368,7 +436,7 @@ export function NightPanel({
                 });
               }}
             >
-              {t("pricing.night.seasonApply")}
+              {t(moving ? "pricing.night.moveApply" : "pricing.night.seasonApply")}
             </button>
             <button
               type="button"
@@ -446,10 +514,18 @@ export function NightPanel({
               type="button"
               disabled={disabled}
               className={`${action} w-full border-gray-300 bg-white text-gray-800 hover:bg-gray-50`}
-              onClick={() => open({ kind: "season", season: groups[0]?.key ?? "", name: "" })}
+              onClick={() => open({ kind: "season", season: choices[0].key, name: "" })}
             >
               <ArrowsRightLeftIcon aria-hidden="true" className="h-4 w-4" />
-              {t("pricing.night.season")}
+              {t(
+                moving
+                  ? single
+                    ? "pricing.night.moveOne"
+                    : "pricing.night.moveMany"
+                  : single
+                    ? "pricing.night.addOne"
+                    : "pricing.night.addMany",
+              )}
             </button>
           )}
           {stayOwned && (

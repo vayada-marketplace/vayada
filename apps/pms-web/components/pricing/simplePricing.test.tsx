@@ -8,7 +8,7 @@ import {
   cancellationTerms,
   hasKeptSettings,
   onePriceAgain,
-  rateMethodEdits,
+  ratePaymentEdits,
   pricePerAdultCount,
   setBreakfastAmount,
   setDiscount,
@@ -358,7 +358,7 @@ describe("the simple card's edits", () => {
         for (const edit of cancellationEdits(simple, terms, simple.cancellation))
           expect(edit.terms).toEqual(terms[edit.offerId]);
       for (const rate of ["flexible", "non_refundable"] as const)
-        for (const edit of rateMethodEdits(simple, terms, rate, payment.acceptedMethods))
+        for (const edit of ratePaymentEdits(simple, terms, rate, payment))
           expect(edit.terms).toEqual(terms[edit.offerId]);
     }
     // Per adult count and back is the same room.
@@ -422,21 +422,26 @@ describe("the simple card's edits", () => {
     expect(cancellationTerms({ kind: "non_refundable" })).toEqual({ kind: "non_refundable" });
     // Each rate's methods are its own (VAY-2282): the Flexible rate's go to the breakfast switch too.
     expect(
-      rateMethodEdits(simple, designTerms, "flexible", ["pay_at_property"]).map((edit) => [
-        edit.offerId,
-        edit.terms.payment.acceptedMethods,
-      ]),
+      ratePaymentEdits(simple, designTerms, "flexible", {
+        kind: "full",
+        acceptedMethods: ["pay_at_property"],
+      }).map((edit) => [edit.offerId, edit.terms.payment.acceptedMethods]),
     ).toEqual([
       ["flexible", ["pay_at_property"]],
       ["breakfast", ["pay_at_property"]],
     ]);
     expect(
-      rateMethodEdits(simple, designTerms, "non_refundable", ["bank_transfer"]).map((edit) => [
-        edit.offerId,
-        edit.terms.payment.acceptedMethods,
-      ]),
+      ratePaymentEdits(simple, designTerms, "non_refundable", {
+        kind: "full",
+        acceptedMethods: ["bank_transfer"],
+      }).map((edit) => [edit.offerId, edit.terms.payment.acceptedMethods]),
     ).toEqual([["nonrefundable", ["bank_transfer"]]]);
-    expect(() => rateMethodEdits(simple, designTerms, "non_refundable", [])).toThrow();
+    expect(() =>
+      ratePaymentEdits(simple, designTerms, "non_refundable", {
+        kind: "full",
+        acceptedMethods: [],
+      }),
+    ).toThrow();
   });
 
   it("adds a switch's option that the card then recognises", () => {

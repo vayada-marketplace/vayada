@@ -13,7 +13,7 @@ export type RoomFacts = { name: string; size: number | null; photo: string | nul
 const day = (date: string, t: Translate) =>
   `${Number(date.slice(8))} ${t(`pricing.steps.monthShort.${Number(date.slice(5, 7))}`)}`;
 
-/** "What guests see": the room as a booking-page card with each option it sells there (VAY-2285) and its total for
+/** "On your booking page": the room as a booking-page card with each option it sells there (VAY-2285) and its total for
  * the sample stay, from the engine's stay calculation. Choosing an option here also picks the calendar's option. `room` is the edited room, or
  * null while an edit doesn't validate yet. */
 export function GuestPreview({

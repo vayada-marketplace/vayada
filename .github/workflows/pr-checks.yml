@@ -793,6 +793,7 @@ jobs:
           src/domains/pmsPhysicalRoomManagementRepository.integration.test.ts
           src/domains/pmsRoomPublicationCommandRepository.integration.test.ts
           src/domains/pmsCalendarAutoOpenSettingsRepository.integration.test.ts
+          src/domains/pmsRoomOrder.integration.test.ts
           src/pmsNavigationModules.integration.test.ts
           src/pmsNavigationModules.test.ts
           src/pmsBookingModules.integration.test.ts
@@ -1035,6 +1036,15 @@ jobs:
         run: >-
           npm --workspace @vayada/backend-migration run test --
           src/pricingSystemRepublishMigration.integration.test.ts
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+
+      # 0508 (VAY-2276) in its own database: migrate to 0507, add used and unused ready-made roles, apply 0508.
+      - name: Verify the team role default set
+        if: matrix.shard == 'hotel-setup'
+        run: >-
+          npm --workspace @vayada/backend-migration run test --
+          src/teamRolesDefaultSetMigration.integration.test.ts
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 

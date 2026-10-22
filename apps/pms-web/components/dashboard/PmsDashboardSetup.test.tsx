@@ -159,7 +159,7 @@ describe("PMS dashboard setup checklist (VAY-2247 wave 2)", () => {
 
   it("sends Booking Admin's items to Booking Admin and the PMS's to the PMS", () => {
     expect(PMS_CHECKLIST_PAGES.photos).toEqual({ app: "pms", path: "/rooms" });
-    expect(PMS_CHECKLIST_PAGES.calendar).toEqual({ app: "pms", path: "/settings" });
+    expect(PMS_CHECKLIST_PAGES.calendar).toEqual({ app: "pms", path: "/settings/calendar" });
     expect(PMS_CHECKLIST_PAGES.style).toEqual({ app: "booking_admin", path: "/design-studio" });
     expect(PMS_CHECKLIST_PAGES.guest_terms).toEqual({
       app: "booking_admin",
