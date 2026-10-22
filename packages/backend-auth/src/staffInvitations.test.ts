@@ -1869,7 +1869,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
     );
     const coordinator = createStaffInvitationDeliveryCoordinator({
       repository: deliveryRepository,
-      provider: { sendInvitation },
+      provider: { sendInvitation, revokeInvitation: vi.fn(async () => "revoked" as const) },
     });
 
     const outcomes = await Promise.all([
@@ -1914,7 +1914,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
       .mockRejectedValue(new Error("ambiguous provider failure"));
     const coordinator = createStaffInvitationDeliveryCoordinator({
       repository: deliveryRepository,
-      provider: { sendInvitation },
+      provider: { sendInvitation, revokeInvitation: vi.fn(async () => "revoked" as const) },
     });
 
     await expect(coordinator.deliver(failed.invitationId)).resolves.toMatchObject({
@@ -1941,7 +1941,10 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
   it("does not claim revoked, inactive, or ambiguous identity context", async () => {
     const created = await repository.persist(command());
     if (created.outcome !== "created") throw new Error("expected invitation creation");
-    const provider = { sendInvitation: vi.fn<StaffInvitationProvider["sendInvitation"]>() };
+    const provider = {
+      sendInvitation: vi.fn<StaffInvitationProvider["sendInvitation"]>(),
+      revokeInvitation: vi.fn<StaffInvitationProvider["revokeInvitation"]>(),
+    };
     const coordinator = createStaffInvitationDeliveryCoordinator({
       repository: deliveryRepository,
       provider,
@@ -2101,6 +2104,26 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
       );
       await join.close();
     }
+  });
+
+  it("finds the provider invitation a resend replaced", async () => {
+    const first = await deliveredInvitation(1);
+    const resent = await deliveredInvitation(2);
+    await expect(
+      deliveryRepository.findReplacedProviderInvitationId(resent.invitationId),
+    ).resolves.toBe(first.providerInvitationId);
+    await expect(
+      deliveryRepository.findReplacedProviderInvitationId(first.invitationId),
+    ).resolves.toBeNull();
+
+    await client.query(
+      "UPDATE identity.staff_invitations SET expires_at = now() - interval '1 minute' WHERE id = $1",
+      [resent.invitationId],
+    );
+    const afterExpiry = await deliveredInvitation(3);
+    await expect(
+      deliveryRepository.findReplacedProviderInvitationId(afterExpiry.invitationId),
+    ).resolves.toBeNull();
   });
 
   it("validates invitation property links without assignment update privilege", async () => {
@@ -2311,7 +2334,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
     );
     const delivery = createStaffInvitationDeliveryCoordinator({
       repository: deliveryRepository,
-      provider: { sendInvitation },
+      provider: { sendInvitation, revokeInvitation: vi.fn(async () => "revoked" as const) },
     });
     expect(await delivery.deliver(created.invitationId)).toMatchObject({ outcome: "delivered" });
     expect(sendInvitation).toHaveBeenCalledWith(
