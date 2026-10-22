@@ -111,15 +111,20 @@ export function setRangeMinimum(room: Room, ranges: readonly Range[], nights: nu
 /** Keeps a season range's stay rule with it when the range's days change (null: the range was removed). Rules that
  * belong to no season are left alone, under More options. */
 export function moveRangeRule(room: Room, from: Range, to: Range | null): Room {
+  return to && same(from, to) ? room : spreadRangeRule(room, from, to ? [to] : []);
+}
+/** Gives a season range's stay rule to the ranges it became, e.g. the two parts left when days in its middle move to
+ * another season (VAY-2305); none removes it. */
+export function spreadRangeRule(room: Room, from: Range, to: readonly Range[]): Room {
   const offer = owner(room);
   const rule = offer.restrictions.seasons.find(
     (season) => same(season, from) && !season.rules.stopSell,
   );
-  if (!rule || (to && same(from, to))) return room;
+  if (!rule) return room;
   const rest = offer.restrictions.seasons.filter((season) => season !== rule);
   return withSeasons(
     room,
-    to ? [...rest, { ...days(to), rules: rule.rules }] : rest,
+    [...rest, ...to.map((range) => ({ ...days(range), rules: rule.rules }))],
     "pricing.seasonTable.minStayError",
   );
 }
