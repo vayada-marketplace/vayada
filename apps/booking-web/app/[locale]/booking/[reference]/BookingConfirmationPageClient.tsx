@@ -365,6 +365,8 @@ export default function BookingConfirmationPageClient({
                   hotelName: hotel.name,
                   guestEmail: booking.guestEmail,
                 });
+                // Only a full answer for this booking replaces what the poll showed.
+                if (reloaded.bookingReference !== booking.bookingReference) return;
                 setStatus(reloaded.status);
                 setBooking(reloaded);
                 saveLastBooking(reloaded);
