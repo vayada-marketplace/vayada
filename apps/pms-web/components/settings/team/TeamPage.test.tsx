@@ -160,6 +160,53 @@ it("offers the empty roles state, and a create-a-role-first hint when inviting w
   view.unmount();
 });
 
+it("counts only the roles a host added as custom, not the default Property owner and Agency manager", () => {
+  const preset = (presetKey: string, name: string, securityClass: "staff" | "external_owner") => ({
+    id: presetKey,
+    name,
+    description: "",
+    revision: "1",
+    baseRoleKey:
+      securityClass === "staff" ? ("hotel_manager" as const) : ("external_owner" as const),
+    securityClass,
+    presetKey,
+    defaultPermissions: ["pms.dashboard.read"],
+    allowedPermissions: ["pms.dashboard.read"],
+    immutable: false,
+    memberCount: 0,
+    invitationCount: 0,
+  });
+  const defaults = [
+    preset("agency_manager", "Agency manager", "staff"),
+    preset("property_owner", "Property owner", "external_owner"),
+  ];
+  const view = create(
+    <TeamRoleCards
+      roles={defaults}
+      canManage
+      adminCount={1}
+      onCreate={vi.fn()}
+      onEdit={vi.fn()}
+      onDelete={vi.fn()}
+    />,
+  );
+  const text = () => JSON.stringify(view.toJSON());
+  expect(text()).toContain("Agency manager");
+  expect(text()).toContain("No custom roles yet");
+  view.update(
+    <TeamRoleCards
+      roles={[...defaults, { ...preset("night", "Night audit", "staff"), presetKey: null }]}
+      canManage
+      adminCount={1}
+      onCreate={vi.fn()}
+      onEdit={vi.fn()}
+      onDelete={vi.fn()}
+    />,
+  );
+  expect(text()).not.toContain("No custom roles yet");
+  view.unmount();
+});
+
 it("tells a manager that the account admin creates roles", () => {
   const view = create(
     <TeamRoleCards

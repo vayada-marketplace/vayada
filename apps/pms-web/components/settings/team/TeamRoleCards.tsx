@@ -6,6 +6,9 @@ import { sectionCounts } from "@/lib/settings/teamPermissions";
 import type { PmsTeamRole } from "@/services/api/pmsStaffClient";
 import TeamSection from "./TeamSection";
 
+// Every account starts with these (VAY-2276); "custom" roles are the ones the host adds after them.
+const defaultPresets = new Set<string | null>(["property_owner", "agency_manager"]);
+
 type Translate = (key: string, params?: Record<string, string | number>) => string;
 
 const counted = (t: Translate, count: number, key: string) =>
@@ -44,7 +47,9 @@ export default function TeamRoleCards({
   onCreate: () => void;
 }) {
   const { t } = useTranslation();
-  const hasCustomRoles = roles.some((role) => !role.immutable);
+  const hasCustomRoles = roles.some(
+    (role) => !role.immutable && !defaultPresets.has(role.presetKey),
+  );
   const reasonId = useId();
   return (
     <TeamSection
