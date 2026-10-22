@@ -143,7 +143,12 @@ intent, and shows the hotel names from the catalog. Acceptance:
   reset would. The WorkOS API does not say whether a password is set, so a
   placeholder is a user for exactly the invited address that is unverified, has
   no `lastSignInAt`, no external ID and no `auth_flow` metadata (every account
-  Vayada creates with a password carries it). Every other account must log in.
+  Vayada creates with a password carries it). It must also have been created
+  within seconds of an invitation to that address: WorkOS stamps both with the
+  same time. Every other account must log in. Once set up, the user carries
+  `auth_flow: invitation`. Its stored identity is marked verified before the
+  WorkOS sign-in, so an `invitation.accepted` webhook that arrives first can
+  already grant access.
 - Both new and existing accounts then sign in with the password plus the
   invitation token, so WorkOS accepts the invitation and scopes the session to
   the invited organization.

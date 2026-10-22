@@ -5624,7 +5624,11 @@ function createAuthKitClient(overrides: Partial<AuthKitClient> = {}): AuthKitCli
         lastSignInAt: null,
         externalId: null,
         signupFlow: null,
+        createdAt: "2026-10-01T08:00:00.000Z",
       };
+    },
+    async listInvitationCreatedAts() {
+      return [];
     },
     async activateInvitedUser() {},
     async resendVerificationEmail() {

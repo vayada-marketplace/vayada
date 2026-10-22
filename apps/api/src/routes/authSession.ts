@@ -77,6 +77,7 @@ export type AuthKitInvitee = {
   lastSignInAt: string | null;
   externalId: string | null;
   signupFlow: string | null;
+  createdAt: string;
 };
 
 export type AuthKitClient = {
@@ -123,6 +124,7 @@ export type AuthKitClient = {
   findInvitationByToken(input: { token: string }): Promise<AuthKitInvitation>;
   getInvitation(input: { invitationId: string }): Promise<AuthKitInvitation>;
   findUserByEmail(input: { email: string }): Promise<AuthKitInvitee | null>;
+  listInvitationCreatedAts(input: { email: string }): Promise<string[]>;
   activateInvitedUser(input: {
     userId: string;
     password: string;
@@ -348,10 +350,11 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
       const found = await findJoinableInvitation(options, join.repository, parsed.invitationToken);
       if (!found.ok) return reply.code(410).send(invitationUnavailable(found.reason));
       const invitee = await options.authKitClient.findUserByEmail({ email: found.details.email });
+      const placeholder = await invitationPlaceholder(options, invitee, found.details.email);
       return reply.send({
         state: "invitation_ready",
         email: found.details.email,
-        accountExists: Boolean(invitee) && !unusedInvitee(invitee, found.details.email),
+        accountExists: Boolean(invitee) && !placeholder,
         hotelNames: found.details.hotelNames,
         inviterName: found.details.inviterName,
         inviteeName: found.details.inviteeName,
@@ -381,17 +384,18 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
 
     let found: Awaited<ReturnType<typeof findJoinableInvitation>>;
     let invitee: AuthKitInvitee | null;
+    let placeholder: AuthKitInvitee | null;
     try {
       found = await findJoinableInvitation(options, join.repository, parsed.invitationToken);
       if (!found.ok) return reply.code(410).send(invitationUnavailable(found.reason));
       invitee = await client.findUserByEmail({ email: found.details.email });
+      placeholder = await invitationPlaceholder(options, invitee, found.details.email);
     } catch (error) {
       request.log.warn({ workos: workosErrorDiagnostics(error) }, "Invitation lookup failed");
       return reply.code(502).send(INVITATION_JOIN_UNAVAILABLE);
     }
     const { invitation, details } = found;
 
-    const placeholder = unusedInvitee(invitee, details.email);
     const accountExists = Boolean(invitee) && !placeholder;
     if (!accountExists) {
       if (!parsed.name) {
@@ -408,6 +412,13 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
             password: parsed.password,
             ...splitPersonName(parsed.name),
           });
+          // WorkOS now has the address verified. Mirror it before the sign-in, so an
+          // invitation.accepted webhook that beats this request can already join the user.
+          await join.repository
+            .markProviderEmailVerified({ workosUserId: placeholder.id, email: details.email })
+            .catch((error: unknown) =>
+              request.log.warn(safeErrorLog(error), "Invitee identity verification sync failed"),
+            );
         } else {
           await client.createUser({
             email: details.email,
@@ -531,7 +542,7 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
         ),
       );
     } catch (error) {
-      request.log.error({ err: error }, "Invitation join failed after WorkOS sign-in");
+      request.log.error(safeErrorLog(error), "Invitation join failed after WorkOS sign-in");
       return reply.code(403).send(notJoined);
     }
   });
@@ -4082,9 +4093,39 @@ async function findJoinableInvitation(
   return { ok: true, invitation: { ...invitation, organizationId }, details };
 }
 
+const PLACEHOLDER_CREATION_SKEW_MS = 5_000;
+
 // The WorkOS API does not say whether a password is set. A user that signed in has lastSignInAt
-// and an externalId, and every account Vayada creates carries auth_flow metadata; one with none of
-// these, still unverified, is the placeholder WorkOS made for the invitation. Anything else logs in.
+// and an externalId, and every account Vayada creates carries auth_flow metadata. One with none of
+// these, still unverified, and created in the same request as an invitation to its address (WorkOS
+// stamps both with the same time) is the placeholder WorkOS made for it. Anything else logs in.
+async function invitationPlaceholder(
+  options: AuthSessionRouteOptions,
+  invitee: AuthKitInvitee | null,
+  email: string,
+): Promise<AuthKitInvitee | null> {
+  const unused = unusedInvitee(invitee, email);
+  if (!unused) return null;
+  const createdAt = Date.parse(unused.createdAt);
+  if (!Number.isFinite(createdAt)) return null;
+  const invitedAt = await options.authKitClient.listInvitationCreatedAts({ email });
+  return invitedAt.some(
+    (at) => Math.abs(Date.parse(at) - createdAt) <= PLACEHOLDER_CREATION_SKEW_MS,
+  )
+    ? unused
+    : null;
+}
+
+// Error messages can carry addresses or SQL; log the error's kind and code only.
+function safeErrorLog(error: unknown) {
+  const code = (error as { code?: unknown } | null)?.code;
+  return {
+    errorName: error instanceof Error ? error.name : typeof error,
+    errorCode: typeof code === "string" && /^[A-Za-z0-9_]{1,40}$/.test(code) ? code : undefined,
+    workos: workosErrorDiagnostics(error),
+  };
+}
+
 function unusedInvitee(invitee: AuthKitInvitee | null, email: string): AuthKitInvitee | null {
   const unused =
     invitee !== null &&

@@ -150,8 +150,17 @@ export function createWorkOSAuthKitClient(config: WorkOSAuthKitClientConfig): Au
             lastSignInAt: user.lastSignInAt,
             externalId: user.externalId,
             signupFlow: user.metadata?.auth_flow ?? null,
+            createdAt: user.createdAt,
           }
         : null;
+    },
+
+    async listInvitationCreatedAts(input) {
+      const invitations = await workos.userManagement.listInvitations({
+        email: input.email,
+        limit: 100,
+      });
+      return invitations.data.map((invitation) => invitation.createdAt);
     },
 
     async activateInvitedUser(input) {
@@ -161,6 +170,8 @@ export function createWorkOSAuthKitClient(config: WorkOSAuthKitClientConfig): Au
         firstName: input.firstName,
         ...(input.lastName ? { lastName: input.lastName } : {}),
         emailVerified: true,
+        // From now on this is an account Vayada set up: it logs in, it is never set up again.
+        metadata: { auth_flow: "invitation", surface: "pms-web" },
       });
     },
 

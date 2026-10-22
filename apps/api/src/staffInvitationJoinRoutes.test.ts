@@ -44,9 +44,11 @@ const activeAccount = {
   lastSignInAt: "2026-10-01T08:00:00.000Z",
   externalId: "user_maria",
   signupFlow: null,
+  createdAt: "2026-09-01T08:00:00.000Z",
 };
 
-// What WorkOS creates for a new address when the invitation is sent.
+// What WorkOS creates for a new address when the invitation is sent: same creation time.
+const INVITED_AT = "2026-10-20T09:00:00.000Z";
 const placeholderUser = {
   id: "user_workos_placeholder",
   email: "maria.huber@example.com",
@@ -54,6 +56,7 @@ const placeholderUser = {
   lastSignInAt: null,
   externalId: null,
   signupFlow: null,
+  createdAt: INVITED_AT,
 };
 
 const joinedSession: AuthKitSession = {
@@ -268,7 +271,21 @@ describe("staff invitation join routes", () => {
     const createUser = vi.fn(async () => joinedSession.user);
     const activateInvitedUser = vi.fn(async () => {});
     const findUserByEmail = vi.fn(async () => placeholderUser);
-    app = buildJoinApp({ authKit: { findUserByEmail, createUser, activateInvitedUser } });
+    const calls: string[] = [];
+    app = buildJoinApp({
+      authKit: {
+        findUserByEmail,
+        createUser,
+        activateInvitedUser,
+        authenticateWithPassword: async () => {
+          calls.push("sign-in");
+          return joinedSession;
+        },
+      },
+      markProviderEmailVerified: async (input) => {
+        calls.push(`verified:${input.workosUserId}`);
+      },
+    });
 
     const preview = await post(app, "/auth/invitations/preview", {
       surface: "pms-web",
@@ -290,6 +307,8 @@ describe("staff invitation join routes", () => {
       firstName: "Maria",
       lastName: "Huber",
     });
+    // The stored identity is verified before WorkOS accepts, for a webhook that arrives first.
+    expect(calls.slice(0, 2)).toEqual(["verified:user_workos_placeholder", "sign-in"]);
   });
 
   it.each([
@@ -297,6 +316,7 @@ describe("staff invitation join routes", () => {
     ["signed up in Vayada with a password", { signupFlow: "signup" }],
     ["was linked to a Vayada user", { externalId: "user_other" }],
     ["is registered under another address", { email: "someone.else@example.com" }],
+    ["no invitation created (it predates them)", { createdAt: "2026-08-01T09:00:00.000Z" }],
   ] as const)(
     "never sets a password for an unverified user that %s; it must log in",
     async (_label, variant) => {
@@ -568,6 +588,7 @@ function buildJoinApp(input: {
     findUserByEmail: async () => activeAccount,
     authenticateWithPassword: async () => joinedSession,
     updateUserExternalId: async () => {},
+    listInvitationCreatedAts: async () => [INVITED_AT],
     ...input.authKit,
   } as AuthKitClient;
   const identityRepository: IdentityRepository = {
