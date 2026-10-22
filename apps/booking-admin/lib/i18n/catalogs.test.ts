@@ -13,8 +13,11 @@ const placeholders = (value: string) =>
     .sort();
 
 describe("admin translation catalogs", () => {
-  it("covers every search entry label", () => {
-    for (const entry of SEARCH_ENTRIES) expect(en).toHaveProperty(entry[4]!);
+  it("covers every search entry label and description", () => {
+    for (const entry of SEARCH_ENTRIES) {
+      expect(en).toHaveProperty(entry[4]);
+      expect(en).toHaveProperty(entry[5]);
+    }
   });
 
   it("covers target reservation and payment states", () => {

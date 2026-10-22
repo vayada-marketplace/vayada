@@ -1,3 +1,4 @@
+import type { SearchResultKind } from "@vayada/settings-ui";
 import { settingsService } from "@/services/settings";
 import { dashboardService } from "@/services/dashboard";
 import { moduleActivationClient } from "@/services/api/moduleActivationClient";
@@ -5,19 +6,89 @@ import { getBookingHotelPropertyLink } from "@/services/api/bookingPropertyLinkC
 import { getFinancePaymentSettings } from "@/services/api/financePaymentSettingsClient";
 import { getFinancePlanStatus } from "@/services/api/financeSubscriptionsClient";
 
+// [label, href, category, access read, label key, description key, icon kind]. Keep each
+// category's entries together: the result list starts a header at every category change.
 export const SEARCH_ENTRIES = [
-  ["Dashboard", "/", "Pages", "dashboard", "layout.sidebar.dashboard"],
-  ["Design Studio", "/design-studio", "Pages", "design", "layout.sidebar.designStudio"],
-  ["Promo Codes", "/promo-codes", "Pages", "promos", "bookingFlow.promoCodes.title"],
-  ["Settings", "/settings", "Pages", "settings", "layout.sidebar.settings"],
-  ["Feature Hub", "/settings/feature-hub", "Pages", "modules", "layout.sidebar.featureHub"],
-  ["General", "/settings/general", "Settings", "settings", "settings.cards.general.title"],
+  [
+    "Dashboard",
+    "/",
+    "Pages",
+    "dashboard",
+    "layout.sidebar.dashboard",
+    "navigation.searchHint.dashboard",
+    "dashboard",
+  ],
+  [
+    "Design Studio",
+    "/design-studio",
+    "Pages",
+    "design",
+    "layout.sidebar.designStudio",
+    "navigation.searchHint.designStudio",
+    "design",
+  ],
+  [
+    "Add-ons",
+    "/add-ons",
+    "Pages",
+    "add-ons",
+    "bookingFlow.tabs.addons",
+    "navigation.searchHint.addons",
+    "addon",
+  ],
+  [
+    "Promo Codes",
+    "/promo-codes",
+    "Pages",
+    "promos",
+    "bookingFlow.promoCodes.title",
+    "navigation.searchHint.promoCodes",
+    "promo",
+  ],
+  [
+    "Settings",
+    "/settings",
+    "Pages",
+    "settings",
+    "layout.sidebar.settings",
+    "navigation.searchHint.settings",
+    "setting",
+  ],
+  [
+    "Feature Hub",
+    "/settings/feature-hub",
+    "Pages",
+    "modules",
+    "layout.sidebar.featureHub",
+    "navigation.searchHint.featureHub",
+    "module",
+  ],
+  [
+    "General",
+    "/settings/general",
+    "Settings",
+    "settings",
+    "settings.cards.general.title",
+    "navigation.searchHint.general",
+    "setting",
+  ],
   [
     "Languages and currencies",
     "/settings/general#localization",
     "Settings",
     "settings",
     "bookingFlow.tabs.localization",
+    "navigation.searchHint.localization",
+    "setting",
+  ],
+  [
+    "Location & surroundings",
+    "/settings/location",
+    "Settings",
+    "location",
+    "admin.locationAndSurroundings",
+    "navigation.searchHint.location",
+    "location",
   ],
   [
     "Booking rules",
@@ -25,17 +96,80 @@ export const SEARCH_ENTRIES = [
     "Settings",
     "settings",
     "settings.cards.bookingRules.title",
+    "navigation.searchHint.bookingRules",
+    "setting",
   ],
-  ["Policies", "/settings/policies", "Settings", "settings", "settings.cards.policies.title"],
-  ["Billing", "/settings/billing", "Settings", "billing", "settings.tabs.billing"],
-  ["Payment Settings", "/settings/payments", "Settings", "payments", "admin.paymentSettings"],
-  ["Privacy & data", "/settings/privacy", "Settings", "settings", "settings.cards.privacy.title"],
+  [
+    "Policies",
+    "/settings/policies",
+    "Settings",
+    "settings",
+    "settings.cards.policies.title",
+    "navigation.searchHint.policies",
+    "setting",
+  ],
+  [
+    "Billing",
+    "/settings/billing",
+    "Settings",
+    "billing",
+    "settings.tabs.billing",
+    "navigation.searchHint.billing",
+    "setting",
+  ],
+  [
+    "Payment Settings",
+    "/settings/payments",
+    "Settings",
+    "payments",
+    "admin.paymentSettings",
+    "navigation.searchHint.payments",
+    "setting",
+  ],
+  [
+    "Privacy & data",
+    "/settings/privacy",
+    "Settings",
+    "settings",
+    "settings.cards.privacy.title",
+    "navigation.searchHint.privacy",
+    "setting",
+  ],
+  [
+    "Room Filters",
+    "/settings/room-filters",
+    "Settings",
+    "settings",
+    "settings.cards.roomFilters.title",
+    "navigation.searchHint.roomFilters",
+    "setting",
+  ],
+  [
+    "Book Direct Benefits",
+    "/settings/book-direct-benefits",
+    "Settings",
+    "settings",
+    "settings.cards.benefits.title",
+    "navigation.searchHint.benefits",
+    "setting",
+  ],
+  [
+    "Guest Form",
+    "/settings/guest-form",
+    "Settings",
+    "settings",
+    "settings.cards.guestForm.title",
+    "navigation.searchHint.guestForm",
+    "setting",
+  ],
   [
     "Domain Settings",
     "/design-studio?tab=domain",
     "Design Studio",
     "design",
     "admin.domainSettings",
+    "navigation.searchHint.domain",
+    "design",
   ],
   [
     "Media and images",
@@ -43,6 +177,8 @@ export const SEARCH_ENTRIES = [
     "Design Studio",
     "design",
     "admin.mediaAndImages",
+    "navigation.searchHint.media",
+    "design",
   ],
   [
     "Themes and colors",
@@ -50,26 +186,36 @@ export const SEARCH_ENTRIES = [
     "Design Studio",
     "design",
     "admin.themesAndColors",
+    "navigation.searchHint.colors",
+    "design",
   ],
-  ["Fonts", "/design-studio?tab=fonts", "Design Studio", "design", "designStudio.tabs.fonts"],
-  ["Layout", "/design-studio?tab=layout", "Design Studio", "design", "admin.layout"],
   [
-    "Room Filters",
-    "/settings/room-filters",
-    "Settings",
-    "settings",
-    "settings.cards.roomFilters.title",
+    "Fonts",
+    "/design-studio?tab=fonts",
+    "Design Studio",
+    "design",
+    "designStudio.tabs.fonts",
+    "navigation.searchHint.fonts",
+    "design",
   ],
-  ["Add-ons", "/add-ons", "Pages", "add-ons", "bookingFlow.tabs.addons"],
   [
-    "Book Direct Benefits",
-    "/settings/book-direct-benefits",
-    "Settings",
-    "settings",
-    "settings.cards.benefits.title",
+    "Layout",
+    "/design-studio?tab=layout",
+    "Design Studio",
+    "design",
+    "admin.layout",
+    "navigation.searchHint.layout",
+    "design",
   ],
-  ["Guest Form", "/settings/guest-form", "Settings", "settings", "settings.cards.guestForm.title"],
-] as const;
+] as const satisfies readonly (readonly [
+  string,
+  string,
+  string,
+  string,
+  string,
+  string,
+  SearchResultKind,
+])[];
 
 export type SearchAccess = Set<string>;
 
@@ -84,11 +230,14 @@ export async function loadSearchAccess(hotelId: string): Promise<SearchAccess> {
     modules,
     payments: property.then(({ propertyId }) => getFinancePaymentSettings({ propertyId })),
     billing: property.then(({ propertyId }) => getFinancePlanStatus(propertyId)),
+    // The Location page starts from the property link; it is a settings page too.
+    location: property,
   };
   const results = await Promise.allSettled(Object.values(checks));
   const access = new Set(
     Object.keys(checks).filter((_, index) => results[index].status === "fulfilled"),
   );
+  if (!access.has("settings")) access.delete("location");
   // Add-ons and Promos follow the settings read, unless Feature Hub says they are off (VAY-2200).
   const listed = await modules.catch(() => null);
   for (const moduleId of ["add-ons", "promos"]) {

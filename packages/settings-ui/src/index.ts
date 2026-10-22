@@ -9,3 +9,9 @@ export {
   type SupportDialogHandle,
   type SupportRequest,
 } from "./SupportButton";
+export {
+  SearchResultList,
+  searchResultOptionId,
+  type SearchResult,
+  type SearchResultKind,
+} from "./SearchResultList";

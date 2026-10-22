@@ -5,14 +5,7 @@ import { useRouter } from "next/navigation";
 import { bookingsService } from "@/services/bookings";
 import { roomsService, RoomType } from "@/services/rooms";
 import { useTranslation } from "@/lib/i18n";
-
-interface SearchResult {
-  id: string;
-  label: string;
-  sublabel: string;
-  category: "page" | "setting" | "reservation" | "room";
-  href: string;
-}
+import { SearchResultList, type SearchResult } from "@vayada/settings-ui";
 
 interface PageEntry {
   id: string;
@@ -235,8 +228,9 @@ export default function SearchModal({ open, onClose }: { open: boolean; onClose:
       }).map((p) => ({
         id: `page-${p.id}`,
         label: t(p.labelKey),
-        sublabel: t(p.sublabelKey),
+        description: t(p.sublabelKey),
         category: "page",
+        kind: "page",
         href: p.href,
       }));
 
@@ -250,8 +244,9 @@ export default function SearchModal({ open, onClose }: { open: boolean; onClose:
       }).map((s) => ({
         id: `setting-${s.id}`,
         label: t(s.labelKey),
-        sublabel: t(s.sublabelKey),
+        description: t(s.sublabelKey),
         category: "setting",
+        kind: "setting",
         href: s.href,
       }));
 
@@ -262,8 +257,9 @@ export default function SearchModal({ open, onClose }: { open: boolean; onClose:
         bookingResults = res.bookings.map((b) => ({
           id: b.id,
           label: `${b.guestFirstName} ${b.guestLastName}`,
-          sublabel: `${b.bookingReference} · ${b.roomName} · ${b.checkIn}`,
+          description: `${b.bookingReference} · ${b.roomName} · ${b.checkIn}`,
           category: "reservation",
+          kind: "reservation",
           href: `/bookings/${b.id}`,
         }));
       } catch {
@@ -277,8 +273,9 @@ export default function SearchModal({ open, onClose }: { open: boolean; onClose:
         .map((r) => ({
           id: r.id,
           label: r.name,
-          sublabel: `${r.category} · ${r.totalRooms} rooms · €${r.baseRate}/night`,
+          description: `${r.category} · ${r.totalRooms} rooms · €${r.baseRate}/night`,
           category: "room",
+          kind: "room",
           href: `/rooms`,
         }));
 
@@ -326,16 +323,6 @@ export default function SearchModal({ open, onClose }: { open: boolean; onClose:
     reservation: t("search.categoryReservations"),
     room: t("search.categoryRoomTypes"),
   };
-
-  // Group results by category
-  const grouped: { category: string; items: SearchResult[] }[] = [];
-  for (const r of results) {
-    const group = grouped.find((g) => g.category === r.category);
-    if (group) group.items.push(r);
-    else grouped.push({ category: r.category, items: [r] });
-  }
-
-  let globalIndex = 0;
 
   return (
     <div
@@ -385,101 +372,18 @@ export default function SearchModal({ open, onClose }: { open: boolean; onClose:
             </div>
           )}
 
-          {grouped.map((group) => (
-            <div key={group.category}>
-              <div className="px-4 pt-3 pb-1.5 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">
-                {CATEGORY_LABELS[group.category] || group.category}
-              </div>
-              {group.items.map((item) => {
-                const idx = globalIndex++;
-                return (
-                  <button
-                    key={item.id}
-                    onClick={() => navigate(item)}
-                    onMouseEnter={() => setActiveIndex(idx)}
-                    className={`w-full text-left px-4 py-2.5 flex items-center gap-3 transition-colors ${
-                      idx === activeIndex ? "bg-primary-50" : "hover:bg-gray-50"
-                    }`}
-                  >
-                    <div
-                      className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
-                        item.category === "page"
-                          ? "bg-violet-50 text-violet-500"
-                          : item.category === "setting"
-                            ? "bg-amber-50 text-amber-500"
-                            : item.category === "reservation"
-                              ? "bg-blue-50 text-blue-500"
-                              : "bg-emerald-50 text-emerald-500"
-                      }`}
-                    >
-                      {item.category === "page" ? (
-                        <svg
-                          className="w-3.5 h-3.5"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        >
-                          <path d="M5 12h14" />
-                          <path d="m13 18 6-6-6-6" />
-                        </svg>
-                      ) : item.category === "setting" ? (
-                        <svg
-                          className="w-3.5 h-3.5"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        >
-                          <circle cx="12" cy="12" r="3" />
-                          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-                        </svg>
-                      ) : item.category === "reservation" ? (
-                        <svg
-                          className="w-3.5 h-3.5"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        >
-                          <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
-                          <circle cx="9" cy="7" r="4" />
-                        </svg>
-                      ) : (
-                        <svg
-                          className="w-3.5 h-3.5"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        >
-                          <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-                          <polyline points="9 22 9 12 15 12 15 22" />
-                        </svg>
-                      )}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-[13px] font-medium text-gray-900 truncate">{item.label}</p>
-                      <p className="text-[11px] text-gray-400 truncate">{item.sublabel}</p>
-                    </div>
-                    {idx === activeIndex && (
-                      <kbd className="text-[10px] border border-gray-200 rounded px-1.5 py-0.5 bg-gray-50 text-gray-400 leading-none shrink-0">
-                        ↵
-                      </kbd>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          ))}
+          <SearchResultList
+            id="pms-search-results"
+            label={t("search.placeholder")}
+            results={results}
+            categoryLabel={(category) => CATEGORY_LABELS[category] || category}
+            activeIndex={activeIndex}
+            onActiveChange={setActiveIndex}
+            onSelect={(result, event) => {
+              event.preventDefault();
+              navigate(result);
+            }}
+          />
 
           {!query.trim() && (
             <div className="px-4 py-8 text-center text-sm text-gray-400">
