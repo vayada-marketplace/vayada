@@ -31,6 +31,9 @@ export type ReplacementPricingRoutesOptions = {
   manualPayments?: FinanceManualPaymentMethodsReadPort;
   /** Whether rates can take card and deposits on the booking page now (VAY-2205). */
   cardReadiness?: PricingCardReadinessReadPort;
+  /** Whether the booking page takes bank transfer bookings (its bank-transfer operations are
+   * configured), as the public catalog decides (VAY-2304). */
+  bankTransfers?: boolean;
 };
 type Params = { propertyId: string; draftId?: string; roomTypeId?: string; offerId?: string };
 const uuid = (v: unknown): v is string =>
@@ -199,12 +202,16 @@ export async function registerReplacementPricingRoutes(
     const ready = options.cardReadiness
       ? await options.cardReadiness.read({ organizationId, propertyId: id })
       : null;
+    const manual = options.manualPayments
+      ? await options.manualPayments.acceptedMethods({ propertyId: id })
+      : [];
+    // The same switches as the public catalog: bank transfer also needs the booking page's operations.
     const now = pricingPaymentsNow(published.methods, {
       card: ready?.card.ready === true,
       deposits: ready?.deposits.ready === true,
-      manual: options.manualPayments
-        ? await options.manualPayments.acceptedMethods({ propertyId: id })
-        : [],
+      manual: manual.filter(
+        (method) => method !== "bank_transfer" || options.bankTransfers === true,
+      ),
     });
     const card: PricingCardState =
       ready?.card.ready === true
