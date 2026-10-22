@@ -73,7 +73,8 @@ function Item({
 
 /** Card payments for one hotel, for Vayada finance (VAY-2205 P2.2, as drawn in Paper and approved
  * by Flamur on 2026-10-18): what the card needs, Vayada's approval, and turning card on or off.
- * Either change stales the hotel's published prices, so they must be saved again. */
+ * Either change publishes the hotel's prices again by itself, with the new payment terms
+ * (VAY-2304); only rates nobody can pay then stop selling. */
 export default function CardPaymentsSection({
   hotelId,
   hotelName,
@@ -154,11 +155,25 @@ export default function CardPaymentsSection({
       minute: "2-digit",
     });
 
-  // A card change stales the hotel's prices; the server says so until they are saved again.
-  const saveNeeded = (changed !== null && state.prices !== "current") || view.pricesSaveNeeded;
+  // The server publishes the prices again before it answers a change (VAY-2304). They stay stale
+  // only when it couldn't: rooms or rates changed too, or no way to pay is left.
+  const saveNeeded = view.pricesSaveNeeded;
 
   return (
     <div className="max-w-3xl space-y-4">
+      {changed !== null && !saveNeeded && (
+        <div
+          role="status"
+          className="flex gap-3 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm"
+        >
+          <CheckCircleIcon className="h-5 w-5 shrink-0 text-emerald-700" aria-hidden="true" />
+          <p className="font-semibold text-emerald-900">
+            {changed === "on"
+              ? "Card payments are on. The hotel's prices are published again, now with card."
+              : "Card payments are off. The hotel's prices are published again; rates that only take card stopped selling."}
+          </p>
+        </div>
+      )}
       {saveNeeded && (
         <div
           role="status"
@@ -167,14 +182,11 @@ export default function CardPaymentsSection({
           <ExclamationTriangleIcon className="h-5 w-5 shrink-0 text-amber-700" aria-hidden="true" />
           <div className="space-y-1">
             <p className="font-semibold text-amber-900">
-              {changed === "on"
-                ? "Card payments are on. The hotel's prices must be saved again."
-                : changed === "off"
-                  ? "Card payments are off. The hotel's prices must be saved again."
-                  : "The hotel's prices must be saved again."}
+              The hotel&apos;s prices couldn&apos;t be published again by themselves.
             </p>
             <p className="text-amber-800">
-              Until someone saves them, this hotel&apos;s booking page takes no bookings.
+              Its rooms or rates changed too, or it has no way left to take payment. Until the hotel
+              saves its prices, its booking page takes no bookings.
             </p>
             <a
               href={`${PMS_FRONTEND_URL}/rooms`}
@@ -323,8 +335,8 @@ export default function CardPaymentsSection({
               <ExclamationTriangleIcon className="h-5 w-5 shrink-0" aria-hidden="true" />
               <p>
                 {confirm === "on"
-                  ? "The hotel's prices must be saved again before its booking page takes bookings. Tell the hotel first."
-                  : "The hotel's prices must be saved again before its booking page takes bookings, pay at property included. Rates that only take card stop selling."}
+                  ? "The hotel's prices are published again by themselves, now with card. Tell the hotel that card is on."
+                  : "The hotel's prices are published again by themselves. Rates that only take card stop selling; the others keep selling."}
               </p>
             </div>
             <div className="mt-6 flex justify-end gap-3">

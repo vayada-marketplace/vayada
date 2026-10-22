@@ -1144,8 +1144,9 @@ export function createXenditBankValidator(config: {
   };
 }
 
-/** VAY-2205: a card change leaves the hotel's published prices stale until it saves them again
- * (option A). Unknown (undefined) when the check couldn't read them. */
+/** VAY-2205: whether the hotel's published prices are current. A card change publishes them again
+ * by itself (VAY-2304); "save_needed" remains when it couldn't. Unknown (undefined) when the check
+ * couldn't read them. */
 export function cardSwitchPrices(
   report: readonly PricingPublicationFreshness[],
 ): "current" | "save_needed" | "not_published" | undefined {
@@ -1193,7 +1194,7 @@ export function createTargetFinancePropertySettingsRepository(config: {
   // approval as an attestation and revokes it to turn card off; both need platform finance rights.
   const onlineCardEvidenceWrites = onlineCardEvidenceRepository
     ? {
-        // The switch also says whether the hotel's prices must be saved again (option A).
+        // The switch also says whether the hotel's prices must still be saved (VAY-2304).
         async readOnlineCardExecutionState(propertyId: string) {
           const state = await onlineCardEvidenceRepository.readOnlineCardExecutionState(propertyId);
           if (!state) return null;
