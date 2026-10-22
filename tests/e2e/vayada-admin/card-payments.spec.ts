@@ -131,7 +131,7 @@ test("turns card payments on as vayada's approval, then off, each time with the 
   await expect(confirmOn.getByText(/This is vayada's approval\./)).toBeVisible();
   await expect(
     confirmOn.getByText(
-      /The hotel's prices are published again by themselves, now with card\. Tell the hotel that card is on\./,
+      /The system then publishes the hotel's prices again by itself, now with card\. If it can't, this page says so and the hotel saves them\. Tell the hotel that card is on\./,
     ),
   ).toBeVisible();
   await page.screenshot({
@@ -174,7 +174,7 @@ test("turns card payments on as vayada's approval, then off, each time with the 
     name: "Turn off card payments for Hotel Alpenrose Munich?",
   });
   await expect(
-    confirmOff.getByText(/Rates that only take card stop selling; the others keep selling\./),
+    confirmOff.getByText(/Rates with no other ready payment method stop selling\./),
   ).toBeVisible();
   await page.screenshot({
     path: testInfo.outputPath("payments-turn-off-confirm.png"),
@@ -183,7 +183,7 @@ test("turns card payments on as vayada's approval, then off, each time with the 
   await confirmOff.getByRole("button", { name: "Turn off card payments" }).click();
   await expect(
     page.getByText(
-      "Card payments are off. The hotel's prices are published again; rates that only take card stopped selling.",
+      "Card payments are off. The hotel's prices are published again; rates with no other ready payment method stopped selling.",
     ),
   ).toBeVisible();
   await expect(card.getByText("Not given. Turning card payments on gives it again.")).toBeVisible();
@@ -240,6 +240,34 @@ test("says why turning card on failed, in the server's words, and keeps it after
     "That didn't go through: Online-card execution evidence is invalid. (invalid_command)",
   );
   await expect(card.getByText("Off", { exact: true })).toBeVisible();
+});
+
+// VAY-2304: the status claims re-published prices only when the server confirms them current.
+test("turning card on for a hotel that never published says nothing about its prices", async ({
+  page,
+  baseURL,
+}) => {
+  let current: unknown = off(true, "not_published");
+  const origin = await openPayments(page, baseURL, () => current);
+  const card = page.getByRole("region", { name: "Card payments" });
+  await expect(card.getByText("Off", { exact: true })).toBeVisible();
+  await page.route(
+    api(`/api/finance/platform/properties/${propertyId}/online-card-execution-evidence`),
+    async (route) => {
+      if (route.request().method() !== "POST") return route.fallback();
+      current = { ...on, prices: "not_published" };
+      await fulfillJson(route, origin, { ok: true }, 201);
+    },
+  );
+  await card.getByRole("button", { name: "Turn on card payments" }).click();
+  await page
+    .getByRole("dialog", { name: "Turn on card payments for Hotel Alpenrose Munich?" })
+    .getByRole("button", { name: "Turn on card payments" })
+    .click();
+  await expect(card.getByText("On", { exact: true })).toBeVisible();
+  await expect(page.getByRole("status").filter({ hasText: "Card payments are on." })).toHaveText(
+    "Card payments are on.",
+  );
 });
 
 test("can't turn card on before the hotel's Stripe account is ready", async ({

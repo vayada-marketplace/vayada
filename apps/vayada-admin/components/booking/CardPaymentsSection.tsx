@@ -168,9 +168,12 @@ export default function CardPaymentsSection({
         >
           <CheckCircleIcon className="h-5 w-5 shrink-0 text-emerald-700" aria-hidden="true" />
           <p className="font-semibold text-emerald-900">
-            {changed === "on"
-              ? "Card payments are on. The hotel's prices are published again, now with card."
-              : "Card payments are off. The hotel's prices are published again; rates that only take card stopped selling."}
+            {changed === "on" ? "Card payments are on." : "Card payments are off."}
+            {/* Only when the server confirms the prices are current, not for unpublished or unknown. */}
+            {state.prices === "current" &&
+              (changed === "on"
+                ? " The hotel's prices are published again, now with card."
+                : " The hotel's prices are published again; rates with no other ready payment method stopped selling.")}
           </p>
         </div>
       )}
@@ -335,8 +338,8 @@ export default function CardPaymentsSection({
               <ExclamationTriangleIcon className="h-5 w-5 shrink-0" aria-hidden="true" />
               <p>
                 {confirm === "on"
-                  ? "The hotel's prices are published again by themselves, now with card. Tell the hotel that card is on."
-                  : "The hotel's prices are published again by themselves. Rates that only take card stop selling; the others keep selling."}
+                  ? "The system then publishes the hotel's prices again by itself, now with card. If it can't, this page says so and the hotel saves them. Tell the hotel that card is on."
+                  : "The system then publishes the hotel's prices again by itself. Rates with no other ready payment method stop selling. If it can't publish them, this page says so and the hotel saves them."}
               </p>
             </div>
             <div className="mt-6 flex justify-end gap-3">
