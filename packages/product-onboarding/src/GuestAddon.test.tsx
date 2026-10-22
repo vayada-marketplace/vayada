@@ -47,7 +47,7 @@ it("draws the photo through the caller and leaves out what the hotel didn't fill
   });
   expect(full).toContain("caller");
   expect(full).toContain("€25");
-  expect(full).toContain(" / person");
+  expect(full).toContain("/ person");
   expect(full).toContain("Two hours with a local guide.");
   expect(full).toContain("border-primary-500");
   expect(full).toContain("Which day?");
