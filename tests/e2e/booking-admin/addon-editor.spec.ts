@@ -108,6 +108,8 @@ test("shared editor validates, uploads five photos, changes cover, removes and r
     "1 week",
   ]);
   await leadTime.selectOption({ label: "24 hours" });
+  // VAY-2231: the notice shows in the details guests open.
+  await dialog.getByRole("button", { name: "Detail view" }).click();
   await expect(dialog.getByText("Needs 24 hours’ notice")).toBeVisible();
   await leadTime.scrollIntoViewIfNeeded();
   await page.screenshot({ path: testInfo.outputPath("addon-editor-lead-time.png") });
@@ -219,6 +221,7 @@ test("keeps a lead time typed as text until a choice replaces it (VAY-2232)", as
   await page.getByRole("button", { name: "Edit Airport transfer", exact: true }).click();
   await dialog.getByText("More options", { exact: true }).click();
   await dialog.getByLabel("Lead time", { exact: true }).selectOption({ label: "12 hours" });
+  await dialog.getByRole("button", { name: "Detail view" }).click();
   await expect(dialog.getByText("Needs 12 hours’ notice")).toBeVisible();
   await dialog.getByLabel("Lead time", { exact: true }).scrollIntoViewIfNeeded();
   await page.screenshot({ path: testInfo.outputPath("addon-editor-after.png") });
@@ -228,3 +231,32 @@ test("keeps a lead time typed as text until a choice replaces it (VAY-2232)", as
   await expect(page.getByText("Needs 12 hours’ notice")).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("addon-list-after.png") });
 });
+
+// VAY-2231: the eye button shows a saved add-on's details as guests see them.
+for (const width of [1440, 390]) {
+  test(`previews an add-on as guests see it from the list at ${width}px`, async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize({ width, height: width > 400 ? 1000 : 844 });
+    await mockBookingAdminBookingFlow(page);
+    await page.goto("/add-ons");
+    await page.getByRole("button", { name: "Preview Airport transfer as guests see it" }).click();
+    const preview = page.getByRole("dialog", { name: "Guest preview · Airport transfer" });
+    await expect(preview).toBeVisible();
+    await expect(preview).toContainText("Transport");
+    await expect(preview).toContainText("45 min");
+    await expect(preview).toContainText("Private pickup from the airport.");
+    await expect(preview).toContainText("€45");
+    await page.screenshot({ path: testInfo.outputPath(`addon-guest-preview-${width}.png`) });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await preview.getByRole("button", { name: "Done" }).click();
+    await expect(preview).toBeHidden();
+    await page.getByRole("button", { name: "Preview Airport transfer as guests see it" }).click();
+    await preview.getByRole("button", { name: "Edit add-on" }).click();
+    await expect(
+      page.getByRole("dialog").getByRole("heading", { name: "Edit add-on" }),
+    ).toBeVisible();
+  });
+}

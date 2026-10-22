@@ -1587,9 +1587,7 @@
   "addons.editor.pricePerGuestNight": "Prix par client et par nuit ({currency}) *",
   "addons.editor.priceExample": "Exemple : 2 clients, 3 nuits → {total} au total",
   "addons.editor.moreOptions": "Plus d'options",
-  "addons.editor.checkoutPreview": "APERÇU AU PAIEMENT",
   "addons.editor.untitledAddOn": "Option sans titre",
-  "addons.editor.previewHint": "Un aperçu de l'affichage de cette option dans le parcours de réservation.",
   "admin.lastMinute": "Dernière minute",
   "admin.midweek": "En semaine",
   "admin.lastMinuteDescription": "Tarifs réduits pour les arrivées dans les prochains jours, remplit vite les chambres libres.",
@@ -1631,5 +1629,17 @@
   "admin.nights": "nuits",
   "admin.pickAtLeastOneDay": "Choisissez au moins un jour.",
   "admin.promotionDetails": "Détails de la promotion",
-  "admin.turnOffToPauseWithoutDeleting": "Désactivez pour mettre en pause sans supprimer."
+  "admin.turnOffToPauseWithoutDeleting": "Désactivez pour mettre en pause sans supprimer.",
+  "addons.editor.guestPreview": "APERÇU CLIENT",
+  "addons.editor.previewCheckoutList": "Liste du paiement",
+  "addons.editor.previewDetailView": "Vue détaillée",
+  "addons.editor.previewListHint": "Voici comment l’extra apparaît dans la liste de votre page de réservation. C’est la même carte que voient les clients.",
+  "addons.editor.previewDetailHint": "Ce que voient les clients en ouvrant l’extra, au format mobile. L’aperçu change pendant la saisie. Les champs laissés vides ne sont pas affichés.",
+  "addons.preview.title": "Aperçu client · {name}",
+  "addons.preview.subtitle": "Ce que voient les clients en ouvrant cet extra sur votre page de réservation.",
+  "addons.preview.inert": "Les boutons de l’aperçu ne font rien.",
+  "addons.preview.close": "Fermer l’aperçu client",
+  "addons.preview.done": "Terminé",
+  "addons.list.preview": "Voir {name} comme les clients",
+  "addons.list.previewAsGuest": "Voir comme un client"
 }

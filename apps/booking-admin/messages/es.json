@@ -1587,9 +1587,7 @@
   "addons.editor.pricePerGuestNight": "Precio por huésped y noche ({currency}) *",
   "addons.editor.priceExample": "Ejemplo: 2 huéspedes, 3 noches → {total} en total",
   "addons.editor.moreOptions": "Más opciones",
-  "addons.editor.checkoutPreview": "VISTA PREVIA DEL PAGO",
   "addons.editor.untitledAddOn": "Extra sin título",
-  "addons.editor.previewHint": "Una vista previa de cómo aparece este extra en el proceso de reserva.",
   "admin.lastMinute": "Última hora",
   "admin.midweek": "Entre semana",
   "admin.lastMinuteDescription": "Tarifas con descuento para llegadas en los próximos días; llena habitaciones vacías rápido.",
@@ -1631,5 +1629,17 @@
   "admin.nights": "noches",
   "admin.pickAtLeastOneDay": "Elige al menos un día.",
   "admin.promotionDetails": "Detalles de la promoción",
-  "admin.turnOffToPauseWithoutDeleting": "Desactívala para pausarla sin eliminarla."
+  "admin.turnOffToPauseWithoutDeleting": "Desactívala para pausarla sin eliminarla.",
+  "addons.editor.guestPreview": "VISTA DEL HUÉSPED",
+  "addons.editor.previewCheckoutList": "Lista del checkout",
+  "addons.editor.previewDetailView": "Vista de detalle",
+  "addons.editor.previewListHint": "Así aparece el extra en la lista de tu página de reservas. Es la misma tarjeta que ven los huéspedes.",
+  "addons.editor.previewDetailHint": "Lo que ven los huéspedes al abrir el extra, en tamaño móvil. Cambia mientras escribes. Los campos vacíos no se muestran a los huéspedes.",
+  "addons.preview.title": "Vista del huésped · {name}",
+  "addons.preview.subtitle": "Lo que ven los huéspedes al abrir este extra en tu página de reservas.",
+  "addons.preview.inert": "Los botones de la vista previa no hacen nada.",
+  "addons.preview.close": "Cerrar la vista del huésped",
+  "addons.preview.done": "Listo",
+  "addons.list.preview": "Ver {name} como lo ven los huéspedes",
+  "addons.list.previewAsGuest": "Ver como huésped"
 }

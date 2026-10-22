@@ -1587,9 +1587,7 @@
   "addons.editor.pricePerGuestNight": "Harga per tamu per malam ({currency}) *",
   "addons.editor.priceExample": "Contoh: 2 tamu, 3 malam → total {total}",
   "addons.editor.moreOptions": "Opsi lainnya",
-  "addons.editor.checkoutPreview": "PRATINJAU CHECKOUT",
   "addons.editor.untitledAddOn": "Tambahan tanpa judul",
-  "addons.editor.previewHint": "Pratinjau tampilan tambahan ini di alur pemesanan.",
   "admin.lastMinute": "Menit terakhir",
   "admin.midweek": "Tengah pekan",
   "admin.lastMinuteDescription": "Tarif diskon untuk check-in dalam beberapa hari ke depan, cepat mengisi kamar kosong.",
@@ -1631,5 +1629,17 @@
   "admin.nights": "malam",
   "admin.pickAtLeastOneDay": "Pilih setidaknya satu hari.",
   "admin.promotionDetails": "Detail promosi",
-  "admin.turnOffToPauseWithoutDeleting": "Matikan untuk menjeda tanpa menghapus."
+  "admin.turnOffToPauseWithoutDeleting": "Matikan untuk menjeda tanpa menghapus.",
+  "addons.editor.guestPreview": "PRATINJAU TAMU",
+  "addons.editor.previewCheckoutList": "Daftar checkout",
+  "addons.editor.previewDetailView": "Tampilan detail",
+  "addons.editor.previewListHint": "Begini tambahan tampil di daftar pada halaman pemesanan Anda. Ini kartu yang sama yang dilihat tamu.",
+  "addons.editor.previewDetailHint": "Yang dilihat tamu saat membuka tambahan, dalam ukuran ponsel. Berubah saat Anda mengetik. Kolom yang kosong tidak ditampilkan ke tamu.",
+  "addons.preview.title": "Pratinjau tamu · {name}",
+  "addons.preview.subtitle": "Yang dilihat tamu saat membuka tambahan ini di halaman pemesanan Anda.",
+  "addons.preview.inert": "Tombol di pratinjau tidak berfungsi.",
+  "addons.preview.close": "Tutup pratinjau tamu",
+  "addons.preview.done": "Selesai",
+  "addons.list.preview": "Lihat {name} seperti yang dilihat tamu",
+  "addons.list.previewAsGuest": "Lihat sebagai tamu"
 }

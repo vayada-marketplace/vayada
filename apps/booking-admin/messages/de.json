@@ -1587,9 +1587,7 @@
   "addons.editor.pricePerGuestNight": "Preis pro Gast und Nacht ({currency}) *",
   "addons.editor.priceExample": "Beispiel: 2 Gäste, 3 Nächte → {total} gesamt",
   "addons.editor.moreOptions": "Weitere Optionen",
-  "addons.editor.checkoutPreview": "CHECKOUT-VORSCHAU",
   "addons.editor.untitledAddOn": "Unbenanntes Extra",
-  "addons.editor.previewHint": "Eine Vorschau, wie dieses Extra im Buchungsablauf erscheint.",
   "admin.lastMinute": "Last Minute",
   "admin.midweek": "Unter der Woche",
   "admin.lastMinuteDescription": "Rabatt für Anreisen in den nächsten Tagen, füllt freie Zimmer schnell.",
@@ -1631,5 +1629,17 @@
   "admin.nights": "Nächte",
   "admin.pickAtLeastOneDay": "Wählen Sie mindestens einen Tag.",
   "admin.promotionDetails": "Aktionsdetails",
-  "admin.turnOffToPauseWithoutDeleting": "Ausschalten, um zu pausieren, ohne zu löschen."
+  "admin.turnOffToPauseWithoutDeleting": "Ausschalten, um zu pausieren, ohne zu löschen.",
+  "addons.editor.guestPreview": "GASTVORSCHAU",
+  "addons.editor.previewCheckoutList": "Checkout-Liste",
+  "addons.editor.previewDetailView": "Detailansicht",
+  "addons.editor.previewListHint": "So erscheint die Zusatzleistung in der Liste auf Ihrer Buchungsseite. Es ist dieselbe Karte, die Gäste sehen.",
+  "addons.editor.previewDetailHint": "Das sehen Gäste, wenn sie die Zusatzleistung öffnen, in Handygröße. Die Vorschau ändert sich beim Tippen. Leere Felder werden Gästen nicht angezeigt.",
+  "addons.preview.title": "Gastvorschau · {name}",
+  "addons.preview.subtitle": "Das sehen Gäste, wenn sie diese Zusatzleistung auf Ihrer Buchungsseite öffnen.",
+  "addons.preview.inert": "Die Schaltflächen in der Vorschau haben keine Funktion.",
+  "addons.preview.close": "Gastvorschau schließen",
+  "addons.preview.done": "Fertig",
+  "addons.list.preview": "{name} so ansehen, wie Gäste es sehen",
+  "addons.list.previewAsGuest": "Als Gast ansehen"
 }

@@ -1587,9 +1587,7 @@
   "addons.editor.pricePerGuestNight": "Price per guest per night ({currency}) *",
   "addons.editor.priceExample": "Example: 2 guests, 3 nights → {total} total",
   "addons.editor.moreOptions": "More options",
-  "addons.editor.checkoutPreview": "CHECKOUT PREVIEW",
   "addons.editor.untitledAddOn": "Untitled add-on",
-  "addons.editor.previewHint": "A preview of how this add-on appears in the booking flow.",
   "admin.lastMinute": "Last minute",
   "admin.midweek": "Midweek",
   "admin.lastMinuteDescription": "Discounted rates for check-ins inside the next few days, fills empty rooms fast.",
@@ -1631,5 +1629,17 @@
   "admin.nights": "nights",
   "admin.pickAtLeastOneDay": "Pick at least one day.",
   "admin.promotionDetails": "Promotion details",
-  "admin.turnOffToPauseWithoutDeleting": "Turn off to pause without deleting."
+  "admin.turnOffToPauseWithoutDeleting": "Turn off to pause without deleting.",
+  "addons.editor.guestPreview": "GUEST PREVIEW",
+  "addons.editor.previewCheckoutList": "Checkout list",
+  "addons.editor.previewDetailView": "Detail view",
+  "addons.editor.previewListHint": "How the add-on shows in the list of extras on your booking page. It is the same card guests see.",
+  "addons.editor.previewDetailHint": "What guests see when they open the add-on, at phone size. It changes as you type. Fields you leave empty are not shown to guests.",
+  "addons.preview.title": "Guest preview · {name}",
+  "addons.preview.subtitle": "What guests see when they open this add-on on your booking page.",
+  "addons.preview.inert": "Buttons in the preview don’t do anything.",
+  "addons.preview.close": "Close guest preview",
+  "addons.preview.done": "Done",
+  "addons.list.preview": "Preview {name} as guests see it",
+  "addons.list.previewAsGuest": "Preview as guest"
 }
