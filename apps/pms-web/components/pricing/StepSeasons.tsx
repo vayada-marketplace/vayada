@@ -13,7 +13,15 @@ import { changeSeasonPrice } from "./PricingSeasons";
 import { seasonGroups, seasonTones, type SeasonGroup } from "./priceCalendarModel";
 import { recurringTemplate } from "./recurringPricingInputs";
 import { onePriceAgain, pricePerAdultCount } from "./simplePricing";
-import { moveRangeRule, rangeMinimum, setRangeMinimum, stayDefaults } from "./stayRuleSeasons";
+import { coversDay, monthDayOf } from "./nightActions";
+import { changeChildAge, changeChildCharges } from "./PricingChildCharges";
+import {
+  closedPeriods,
+  moveRangeRule,
+  rangeMinimum,
+  setRangeMinimum,
+  stayDefaults,
+} from "./stayRuleSeasons";
 import {
   adjustmentText,
   childrenSummary,
@@ -87,9 +95,13 @@ export function StepSeasons({
   children?: ReactNode;
 }) {
   const { t } = useTranslation();
-  const [editing, setEditing] = useState<{ index: number | null; prefill?: SeasonGroup } | null>(
-    null,
-  );
+  const [editing, setEditing] = useState<{
+    index: number | null;
+    prefill?: SeasonGroup;
+    days?: { from: string; through: string };
+  } | null>(null);
+  const [childTyped, setChildTyped] = useState<{ age: string; price: string } | null>(null),
+    [childError, setChildError] = useState("");
   const [typed, setTyped] = useState<Record<string, string[]>>({}),
     [errors, setErrors] = useState<Record<string, string>>({});
   const [deleting, setDeleting] = useState<{ group: SeasonGroup; season?: Season } | null>(null),
@@ -100,7 +112,7 @@ export function StepSeasons({
     onAddStarted?.();
   }, [addOnMount, disabled, onAddStarted]);
   // A typed season price or an open window holds Save, like the other editors' unapplied entries.
-  const pending = Object.keys(typed).length > 0 || editing !== null,
+  const pending = Object.keys(typed).length > 0 || editing !== null || childTyped !== null,
     report = useRef(onPending);
   useEffect(() => {
     report.current = onPending;
@@ -190,7 +202,11 @@ export function StepSeasons({
       setError(errorText(cause, t, "pricing.seasons.changeFailed"));
     }
   };
-  const open = (target: { index: number | null; prefill?: SeasonGroup }) => {
+  const open = (target: {
+    index: number | null;
+    prefill?: SeasonGroup;
+    days?: { from: string; through: string };
+  }) => {
     if (!disabled) setEditing(target);
   };
   const ownRules = offer.restrictions.kind === "own" && mainOffer(room).id === offer.id;
@@ -290,10 +306,157 @@ export function StepSeasons({
   const tone = (index: number) => groups.find((group) => group.indexes.includes(index))?.tone ?? 0;
   const meal = offer.meal,
     own = ownRules ? ownRuleOptions(room) : [];
+  // Nights of the year no price covers, outside closed periods (VAY-2305: "N open nights have no price"), and the first
+  // run of them, which "Give them a season" puts in a new season.
+  const closed = ownRules ? closedPeriods(room) : [];
+  const openGaps = pieces
+    .filter((piece) => piece.source.kind === "none")
+    .flatMap((piece) => Array.from({ length: piece.days }, (_, at) => piece.start + at))
+    .filter((index) => !closed.some((range) => coversDay(range, index)));
+  let runEnd = openGaps.length ? openGaps[0] : -1;
+  while (openGaps.includes(runEnd + 1)) runEnd++;
+  const firstGap = openGaps.length
+    ? { from: monthDayOf(openGaps[0]), through: monthDayOf(runEnd) }
+    : null;
+  const guestsSwitch = guests && (
+    <div className="flex items-start gap-3 rounded-2xl border border-gray-200 bg-white p-4">
+      <div className="min-w-0 flex-1">
+        <p className="text-[14px] font-semibold text-gray-900">{t("pricing.seasonTable.guests")}</p>
+        <p className="text-[13px] text-gray-500">
+          {guests.mode === "flat"
+            ? t("pricing.seasonTable.guestsOff", { count: room.capacity.total })
+            : guests.mode === "occupancy"
+              ? t(back ? "pricing.seasonTable.guestsOn" : "pricing.seasonTable.guestsLocked", {
+                  count: room.capacity.adults,
+                })
+              : t("pricing.seasonTable.guestsOther", {
+                  summary:
+                    guests.mode === "per_person"
+                      ? `${money(guests.unitMinor, room.currency)} ${t("pricing.steps.price.perAdultNight")}`
+                      : guests.adjustments
+                          .map((adjustment, index) =>
+                            index + 1 === guests.baseGuests
+                              ? `${t(index ? "pricing.adults.other" : "pricing.adults.one", { count: index + 1 })} ${money(guests.baseMinor, room.currency)}`
+                              : `${t(index ? "pricing.adults.other" : "pricing.adults.one", { count: index + 1 })} ${adjustmentText(adjustment, room.currency)}`,
+                          )
+                          .join(" · "),
+                })}
+        </p>
+      </div>
+      {(guests.mode === "flat" || guests.mode === "occupancy") && (
+        <button
+          type="button"
+          role="switch"
+          aria-checked={guests.mode === "occupancy"}
+          aria-label={t("pricing.seasonTable.guests")}
+          disabled={disabled || !shown || (guests.mode === "occupancy" && !back)}
+          onClick={switchGuests}
+          className={ui.switchTrack(guests.mode === "occupancy")}
+        >
+          <span className="h-[18px] w-[18px] rounded-full bg-white shadow-sm" />
+        </button>
+      )}
+    </div>
+  );
+  // "Children under 12 stay for €0 a night" (the CEO's design) while one age band runs from 0 to the adult age; more
+  // bands keep their summary and the Edit window.
+  const band =
+    room.children.bands.length === 1 &&
+    room.children.bands[0].fromAge === 0 &&
+    room.children.bands[0].throughAge === room.children.adultFromAge - 1
+      ? room.children.bands[0]
+      : null;
+  const childValue =
+    childTyped ??
+    (band
+      ? { age: String(room.children.adultFromAge), price: decimalAmount(band.nightlyMinor, scale) }
+      : null);
+  const commitChild = () => {
+    if (!childTyped || disabled) return;
+    try {
+      onChange(changeChildCharges(changeChildAge(room, childTyped.age), [childTyped.price]));
+      setChildTyped(null);
+      setChildError("");
+    } catch (cause) {
+      setChildError(errorText(cause, t, "pricing.childCharges.errorInvalid"));
+    }
+  };
+  // Whether the room's children count toward its guest limit, said under either children row.
+  const countedHint = (room.children.bands.every((band) => band.countsTowardCapacity) ||
+    room.children.bands.every((band) => !band.countsTowardCapacity)) && (
+    <p className="text-[12px] text-gray-500">
+      {room.children.bands.every((band) => band.countsTowardCapacity)
+        ? t("pricing.simple.more.childrenCounted", { count: room.capacity.total })
+        : t("pricing.simple.more.childrenNotCounted")}
+    </p>
+  );
+  const childrenRow =
+    room.capacity.children > 0 &&
+    (childValue ? (
+      <div className="space-y-1">
+        <div className="flex flex-wrap items-center gap-2 text-[14px] text-gray-800">
+          <span>{t("pricing.seasonTable.childrenUnder")}</span>
+          <input
+            aria-label={t("pricing.seasonTable.childrenAge")}
+            inputMode="numeric"
+            disabled={disabled}
+            value={childValue.age}
+            onChange={(event) => setChildTyped({ ...childValue, age: event.target.value })}
+            onBlur={commitChild}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") commitChild();
+            }}
+            className="h-10 w-14 rounded-[10px] bg-gray-100 px-3 text-center text-[14px] font-semibold text-gray-900 outline-none focus:ring-2 focus:ring-primary-500 disabled:cursor-not-allowed"
+          />
+          <span>{t("pricing.seasonTable.childrenStay")}</span>
+          <span className="w-24">
+            {amountField(
+              t("pricing.seasonTable.childrenPrice"),
+              childValue.price,
+              (value) => setChildTyped({ ...childValue, price: value }),
+              !!childError,
+              commitChild,
+            )}
+          </span>
+          <span>{t("pricing.seasonTable.childrenNight")}</span>
+        </div>
+        {countedHint}
+        {childError && (
+          <p role="alert" className={ui.errorText}>
+            {childError}
+          </p>
+        )}
+      </div>
+    ) : (
+      <div className="flex min-w-0 flex-1 items-center gap-3">
+        <div className="min-w-0 flex-1">
+          <p className="text-[14px] font-semibold text-gray-900">
+            {t("pricing.steps.rules.children")}
+          </p>
+          <p className="truncate text-[13px] text-gray-500">{childrenSummary(room, t)}</p>
+          {countedHint}
+        </div>
+        <button
+          type="button"
+          aria-label={t("pricing.steps.rules.childrenEdit")}
+          disabled={disabled}
+          onClick={onEditChildren}
+          className={`shrink-0 ${ui.stepLink}`}
+        >
+          {t("pricing.steps.options.edit")}
+        </button>
+      </div>
+    ));
   return (
-    <StepCard step={2} title={t("pricing.seasonTable.title")} hint={t("pricing.seasonTable.hint")}>
+    <StepCard
+      step={2}
+      title={t("pricing.seasonTable.title")}
+      hint={t("pricing.seasonTable.hint")}
+      aside={guestsSwitch}
+      plain
+    >
       {(groups.length > 0 || gaps) && (
-        <div className="space-y-2">
+        <div className={`space-y-2 ${ui.setupCard}`}>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="text-[13px] font-semibold text-gray-700">
               {t("pricing.seasonTable.year")}
@@ -326,54 +489,45 @@ export function StepSeasons({
               </span>
             ))}
           </div>
-        </div>
-      )}
-      {guests && (
-        <div className="flex items-center gap-3 rounded-xl bg-gray-50 px-3.5 py-3">
-          <div className="min-w-0 flex-1">
-            <p className="text-[14px] font-semibold text-gray-900">
-              {t("pricing.seasonTable.guests")}
-            </p>
-            <p className="text-[13px] text-gray-500">
-              {guests.mode === "flat"
-                ? t("pricing.seasonTable.guestsOff", { count: room.capacity.total })
-                : guests.mode === "occupancy"
-                  ? t(back ? "pricing.seasonTable.guestsOn" : "pricing.seasonTable.guestsLocked", {
-                      count: room.capacity.adults,
-                    })
-                  : t("pricing.seasonTable.guestsOther", {
-                      summary:
-                        guests.mode === "per_person"
-                          ? `${money(guests.unitMinor, room.currency)} ${t("pricing.steps.price.perAdultNight")}`
-                          : guests.adjustments
-                              .map((adjustment, index) =>
-                                index + 1 === guests.baseGuests
-                                  ? `${t(index ? "pricing.adults.other" : "pricing.adults.one", { count: index + 1 })} ${money(guests.baseMinor, room.currency)}`
-                                  : `${t(index ? "pricing.adults.other" : "pricing.adults.one", { count: index + 1 })} ${adjustmentText(adjustment, room.currency)}`,
-                              )
-                              .join(" · "),
-                    })}
-            </p>
-          </div>
-          {(guests.mode === "flat" || guests.mode === "occupancy") && (
-            <button
-              type="button"
-              role="switch"
-              aria-checked={guests.mode === "occupancy"}
-              aria-label={t("pricing.seasonTable.guests")}
-              disabled={disabled || !shown || (guests.mode === "occupancy" && !back)}
-              onClick={switchGuests}
-              className={ui.switchTrack(guests.mode === "occupancy")}
-            >
-              <span className="h-[18px] w-[18px] rounded-full bg-white shadow-sm" />
-            </button>
+          {firstGap && (
+            <div className="flex flex-col gap-3 rounded-[10px] bg-red-50 px-4 py-3 sm:flex-row sm:items-center">
+              <div className="min-w-0 flex-1 text-[13px] text-red-800">
+                <p className="font-semibold">
+                  {t(
+                    openGaps.length === 1
+                      ? "pricing.seasonTable.openGaps.one"
+                      : "pricing.seasonTable.openGaps.other",
+                    { count: openGaps.length },
+                  )}
+                </p>
+                <p>
+                  {t("pricing.seasonTable.openGapsText", {
+                    days: `${day(firstGap.from)} – ${day(firstGap.through)}`,
+                  })}
+                </p>
+              </div>
+              {template && (
+                <button
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => open({ index: null, days: firstGap })}
+                  className="h-9 shrink-0 rounded-lg border border-red-300 bg-white px-3.5 text-[13px] font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {t("pricing.seasonTable.giveSeason")}
+                </button>
+              )}
+            </div>
           )}
         </div>
       )}
-      <div role="table" aria-label={t("pricing.seasonTable.title")} className="text-[14px]">
+      <div
+        role="table"
+        aria-label={t("pricing.seasonTable.title")}
+        className="overflow-hidden rounded-t-2xl border border-b-0 border-gray-200 bg-white text-[14px]"
+      >
         <div
           role="row"
-          className="hidden gap-3 border-b border-gray-200 pb-2 text-[11px] font-semibold uppercase tracking-wider text-gray-500 md:flex"
+          className="hidden gap-3 border-b border-gray-200 px-5 pb-2 pt-4 text-[11px] font-semibold uppercase tracking-wider text-gray-500 md:flex"
         >
           <span role="columnheader" className="w-[200px] shrink-0">
             {t("pricing.seasonTable.season")}
@@ -393,7 +547,10 @@ export function StepSeasons({
           ))}
           <span className="w-6 shrink-0" />
         </div>
-        <div role="row" className="flex flex-col gap-2 py-3.5 md:flex-row md:items-start md:gap-3">
+        <div
+          role="row"
+          className="flex flex-col gap-2 bg-gray-50 px-5 py-3.5 md:flex-row md:items-start md:gap-3"
+        >
           <div role="cell" className="flex w-full shrink-0 items-start gap-2.5 md:w-[200px]">
             <span
               aria-hidden="true"
@@ -444,7 +601,11 @@ export function StepSeasons({
             0,
           );
           return (
-            <div key={group.key} role="row" className="space-y-1.5 border-t border-gray-100 py-3.5">
+            <div
+              key={group.key}
+              role="row"
+              className="space-y-1.5 border-t border-gray-100 px-5 py-3.5"
+            >
               <div className="flex flex-col gap-2 md:flex-row md:items-start md:gap-3">
                 <div role="cell" className="flex w-full shrink-0 items-start gap-2.5 md:w-[200px]">
                   <span
@@ -558,18 +719,21 @@ export function StepSeasons({
           );
         })}
       </div>
-      {template ? (
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={() => open({ index: null })}
-          className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-dashed border-primary-300 px-3.5 text-[14px] font-medium text-primary-600 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          <PlusIcon aria-hidden="true" className="h-4 w-4" /> {t("pricing.steps.seasons.add")}
-        </button>
-      ) : (
-        <p className={ui.stepHint}>{t("pricing.seasons.noTemplate")}</p>
-      )}
+      <div className="!mt-0 flex flex-wrap items-center justify-between gap-3 rounded-b-2xl border border-gray-200 bg-white px-5 py-4">
+        {template ? (
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => open({ index: null })}
+            className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-dashed border-primary-300 px-3.5 text-[14px] font-medium text-primary-600 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <PlusIcon aria-hidden="true" className="h-4 w-4" /> {t("pricing.steps.seasons.add")}
+          </button>
+        ) : (
+          <p className={ui.stepHint}>{t("pricing.seasons.noTemplate")}</p>
+        )}
+        {childrenRow}
+      </div>
       {error && (
         <p role="alert" className={ui.errorText}>
           {error}
@@ -582,61 +746,38 @@ export function StepSeasons({
           })}
         </p>
       )}
-      {children}
-      {room.capacity.children > 0 && (
-        <div className="flex items-center gap-3 border-t border-gray-100 pt-4">
-          <div className="min-w-0 flex-1">
-            <p className="text-[14px] font-semibold text-gray-900">
-              {t("pricing.steps.rules.children")}
-            </p>
-            <p className="truncate text-[13px] text-gray-500">{childrenSummary(room, t)}</p>
-            {(room.children.bands.every((band) => band.countsTowardCapacity) ||
-              room.children.bands.every((band) => !band.countsTowardCapacity)) && (
-              <p className="text-[12px] text-gray-500">
-                {room.children.bands.every((band) => band.countsTowardCapacity)
-                  ? t("pricing.simple.more.childrenCounted", { count: room.capacity.total })
-                  : t("pricing.simple.more.childrenNotCounted")}
-              </p>
-            )}
-          </div>
+      <div className={`space-y-4 ${ui.setupCard}`}>
+        {children}
+        <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[14px] text-gray-600">
+          {meal.kind === "room_only"
+            ? t("pricing.simple.roomOnly")
+            : t("pricing.simple.mealIncluded", {
+                meal: t(`pricing.meal.${meal.kind}`),
+                amount: t(
+                  meal.charge.kind === "room"
+                    ? "pricing.simple.extras.perRoomAmount"
+                    : "pricing.simple.extras.perAdultAmount",
+                  {
+                    amount: money(
+                      meal.charge.kind === "room"
+                        ? meal.charge.amountMinor
+                        : meal.charge.adultMinor,
+                      room.currency,
+                    ),
+                  },
+                ),
+              })}
           <button
             type="button"
-            aria-label={t("pricing.steps.rules.childrenEdit")}
+            aria-label={t("pricing.simple.mealEdit")}
             disabled={disabled}
-            onClick={onEditChildren}
-            className={`shrink-0 ${ui.stepLink}`}
+            onClick={onEditMeal}
+            className={ui.stepLink}
           >
             {t("pricing.steps.options.edit")}
           </button>
-        </div>
-      )}
-      <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[14px] text-gray-600">
-        {meal.kind === "room_only"
-          ? t("pricing.simple.roomOnly")
-          : t("pricing.simple.mealIncluded", {
-              meal: t(`pricing.meal.${meal.kind}`),
-              amount: t(
-                meal.charge.kind === "room"
-                  ? "pricing.simple.extras.perRoomAmount"
-                  : "pricing.simple.extras.perAdultAmount",
-                {
-                  amount: money(
-                    meal.charge.kind === "room" ? meal.charge.amountMinor : meal.charge.adultMinor,
-                    room.currency,
-                  ),
-                },
-              ),
-            })}
-        <button
-          type="button"
-          aria-label={t("pricing.simple.mealEdit")}
-          disabled={disabled}
-          onClick={onEditMeal}
-          className={ui.stepLink}
-        >
-          {t("pricing.steps.options.edit")}
-        </button>
-      </p>
+        </p>
+      </div>
       {editing && (
         <SeasonWindow
           room={room}
@@ -645,13 +786,15 @@ export function StepSeasons({
           index={editing.index}
           disabled={disabled}
           prefill={
-            editing.prefill && {
-              name: editing.prefill.name,
-              tier: editing.prefill.tier,
-              values: baseAmounts(editing.prefill.seasons[0].price).map(([, minor]) =>
-                decimalAmount(minor, scale),
-              ),
-            }
+            editing.days
+              ? { name: "", tier: "", values: [], ...editing.days }
+              : editing.prefill && {
+                  name: editing.prefill.name,
+                  tier: editing.prefill.tier,
+                  values: baseAmounts(editing.prefill.seasons[0].price).map(([, minor]) =>
+                    decimalAmount(minor, scale),
+                  ),
+                }
           }
           onChange={windowChange}
           onClose={() => setEditing(null)}

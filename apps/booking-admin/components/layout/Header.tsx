@@ -16,6 +16,7 @@ import { settingsService, HotelSummary, SuperAdminHotel } from "@/services/setti
 import { useTranslation, SUPPORTED_LANGUAGES } from "@/lib/i18n";
 import { CURRENCY_OPTIONS } from "@/lib/constants/options";
 import NavigationSearch from "./NavigationSearch";
+import DailyStatsStrip from "./DailyStatsStrip";
 import ManagePropertiesModal from "./ManagePropertiesModal";
 import { buildBookingPreviewUrl } from "@/lib/utils/bookingPreviewUrl";
 import { SELECTED_HOTEL_CHANGED_EVENT } from "@/services/api/bookingHotelScope";
@@ -148,8 +149,9 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
 
   return (
     <header className="relative h-12 bg-white border-b border-gray-200 flex items-center justify-between px-4 shrink-0">
-      {/* Left section: Hamburger + Property Selector + Super Admin Badge */}
-      <div className="flex items-center gap-2 md:gap-4">
+      {/* Left section: Hamburger + Property Selector + Super Admin Badge + Today's stats.
+          min-w-0 lets the stats strip give up room before the search box does (VAY-2203). */}
+      <div className="flex min-w-0 items-center gap-2 md:gap-4">
         {/* Mobile hamburger */}
         <button
           onClick={onMenuToggle}
@@ -172,12 +174,13 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
         </button>
         {/* Property Selector Dropdown — always shown so single-hotel users
             can still reach the "Add Property" action that lives inside it. */}
-        <div className="relative" ref={dropdownRef}>
+        <div className="relative shrink-0" ref={dropdownRef}>
           <button
             onClick={() => setDropdownOpen(!dropdownOpen)}
             className="flex items-center gap-1 text-[13px] text-gray-700 hover:text-gray-900 transition-colors"
+            title={selectedHotel?.name || undefined}
           >
-            <span className="max-w-[110px] truncate font-medium sm:max-w-none">
+            <span className="max-w-[110px] truncate font-medium sm:max-w-[220px]">
               {selectedHotel?.name || t("layout.header.noProperties")}
             </span>
             <ChevronDownIcon
@@ -253,10 +256,12 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
 
         {/* Super Admin Badge */}
         {isManagingOtherHotel && (
-          <span className="inline-flex items-center px-2 py-0.5 text-[10px] font-semibold bg-amber-100 text-amber-700 rounded-full">
+          <span className="inline-flex shrink-0 items-center px-2 py-0.5 text-[10px] font-semibold bg-amber-100 text-amber-700 rounded-full">
             {t("layout.header.superAdmin")}
           </span>
         )}
+
+        <DailyStatsStrip hotelId={selectedHotel?.id} />
       </div>
 
       <NavigationSearch hotelId={selectedHotel?.id} />

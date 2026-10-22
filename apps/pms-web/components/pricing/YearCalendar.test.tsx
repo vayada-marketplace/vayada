@@ -220,19 +220,16 @@ it("moves by a year, goes back to today and picks dates in the Year view (VAY-22
   expect(text()).toContain('"October 2026"');
 });
 
-it("keeps phones on the month view, as the approved phone board has no Year view (VAY-2284)", () => {
+it("shows the Year view on phones too (VAY-2305)", () => {
   mount(false);
-  act(() => button("Year")[0].props.onClick());
-  expect(months()).toEqual([]);
-  expect(text()).toContain('"October 2026"');
-  expect(button("26 October 2026, no price")).toHaveLength(1);
-  // The toggle itself only shows from 640px on.
   const toggle = view.root.find(
     (node) => node.type === "div" && node.props["aria-label"] === "Calendar view",
   );
-  expect(toggle.props.className).toContain("hidden");
-  expect(toggle.props.className).toContain("sm:flex");
+  expect(toggle.props.className).not.toContain("hidden");
+  act(() => button("Year")[0].props.onClick());
+  expect(months()).toHaveLength(12);
   // The month view keeps its minimum-stay badges and their legend note.
+  act(() => button("Month")[0].props.onClick());
   mount(false, { month: "2026-12" });
   expect(text()).toContain("3+ nts = minimum stay for arrivals that night");
 });

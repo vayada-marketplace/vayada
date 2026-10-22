@@ -2137,8 +2137,15 @@ async function executeRoomOrderCommand(
     for (const { roomTypeId } of roomTypeIds.rows) {
       await lockPmsPhysicalRoomUnitMutationScope(client, command.propertyId, roomTypeId);
     }
-    const current = await client.query<{ roomId: string }>(
-      `SELECT id::text AS "roomId" FROM pms.rooms
+    // The room-type order is saved below. Lock room types before rooms, as room type retire,
+    // safe delete and Channex staging do, so a reorder never holds rooms while it waits for a
+    // room type row (VAY-2294).
+    await client.query(
+      `SELECT id FROM pms.room_types WHERE property_id = $1::uuid ORDER BY id FOR UPDATE`,
+      [command.propertyId],
+    );
+    const current = await client.query<{ roomId: string; roomTypeId: string }>(
+      `SELECT id::text AS "roomId", room_type_id::text AS "roomTypeId" FROM pms.rooms
        WHERE property_id = $1::uuid AND status <> 'retired'
        ORDER BY sort_order ASC, room_number ASC, id ASC FOR UPDATE`,
       [command.propertyId],
@@ -2174,7 +2181,20 @@ async function executeRoomOrderCommand(
     if (result.rowCount !== command.orderedRoomIds.length) {
       throw new Error("PMS room reorder update count mismatch");
     }
-    await insertRoomOrderAuditEvent(client, command, currentRoomIds, commandMeta, keyHash);
+    const roomTypeOrder = await reorderRoomTypesByRoomOrder(
+      client,
+      command.propertyId,
+      new Map(current.rows.map(({ roomId, roomTypeId }) => [roomId, roomTypeId])),
+      command.orderedRoomIds,
+    );
+    await insertRoomOrderAuditEvent(
+      client,
+      command,
+      currentRoomIds,
+      roomTypeOrder,
+      commandMeta,
+      keyHash,
+    );
     const orderVersion = pmsRoomOrderVersion(command.orderedRoomIds);
     await completeRoomOrderCommandIdempotency(
       client,
@@ -2287,10 +2307,43 @@ async function completeRoomOrderCommandIdempotency(
   );
 }
 
+// The calendar and Rooms & Rates group rooms by room type in room-type order (VAY-917), so a
+// saved room order also moves each room type to where its first room now stands (VAY-2294).
+// Types without active rooms keep their slots; only the types that have rooms swap places.
+async function reorderRoomTypesByRoomOrder(
+  client: PmsOperationsCommandClient,
+  propertyId: string,
+  roomTypeByRoomId: ReadonlyMap<string, string>,
+  orderedRoomIds: readonly string[],
+): Promise<{ previousRoomTypeIds: string[]; orderedRoomTypeIds: string[] }> {
+  const current = await client.query<{ roomTypeId: string }>(
+    `SELECT id::text AS "roomTypeId" FROM pms.room_types
+     WHERE property_id = $1::uuid
+     ORDER BY sort_order ASC, name ASC, id ASC`,
+    [propertyId],
+  );
+  const previousRoomTypeIds = current.rows.map(({ roomTypeId }) => roomTypeId);
+  const withRooms = [...new Set(orderedRoomIds.map((roomId) => roomTypeByRoomId.get(roomId)!))];
+  const typesWithRooms = new Set(withRooms);
+  const orderedRoomTypeIds = previousRoomTypeIds.map((roomTypeId) =>
+    typesWithRooms.has(roomTypeId) ? withRooms.shift()! : roomTypeId,
+  );
+  await client.query(
+    `UPDATE pms.room_types room_type
+     SET sort_order = desired.sort_order::integer
+     FROM unnest($2::uuid[]) WITH ORDINALITY AS desired(room_type_id, sort_order)
+     WHERE room_type.property_id = $1::uuid AND room_type.id = desired.room_type_id
+       AND room_type.sort_order IS DISTINCT FROM desired.sort_order::integer`,
+    [propertyId, orderedRoomTypeIds],
+  );
+  return { previousRoomTypeIds, orderedRoomTypeIds };
+}
+
 async function insertRoomOrderAuditEvent(
   client: PmsOperationsCommandClient,
   command: PmsRoomOrderCommand,
   previousRoomIds: string[],
+  roomTypeOrder: { previousRoomTypeIds: string[]; orderedRoomTypeIds: string[] },
   commandMeta: PmsCommandMeta,
   keyHash: string,
 ): Promise<void> {
@@ -2311,7 +2364,12 @@ async function insertRoomOrderAuditEvent(
       command.audit.actor.kind === "user" ? command.audit.actor.userId : null,
       command.audit.correlationId ?? command.audit.requestId,
       command.commandId,
-      JSON.stringify({ commandMeta, previousRoomIds, orderedRoomIds: command.orderedRoomIds }),
+      JSON.stringify({
+        commandMeta,
+        previousRoomIds,
+        orderedRoomIds: command.orderedRoomIds,
+        ...roomTypeOrder,
+      }),
       JSON.stringify({ reason: command.audit.reason, requestId: command.audit.requestId }),
     ],
   );

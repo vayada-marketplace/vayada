@@ -795,6 +795,7 @@ jobs:
           src/domains/pmsPhysicalRoomManagementRepository.integration.test.ts
           src/domains/pmsRoomPublicationCommandRepository.integration.test.ts
           src/domains/pmsCalendarAutoOpenSettingsRepository.integration.test.ts
+          src/domains/pmsRoomOrder.integration.test.ts
           src/pmsNavigationModules.integration.test.ts
           src/pmsNavigationModules.test.ts
           src/pmsBookingModules.integration.test.ts

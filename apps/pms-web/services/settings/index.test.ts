@@ -21,25 +21,10 @@ vi.mock("../api/unsupported", () => ({ unsupportedPmsNextStackFeature: vi.fn() }
 
 import { settingsService } from ".";
 
-describe("PMS booking acceptance settings", () => {
+describe("PMS same-day booking settings", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.resolvePropertyId.mockResolvedValue("property-1");
-  });
-
-  it("reads and writes the typed target acceptance control", async () => {
-    await settingsService.getBookingAcceptance();
-    await settingsService.updateBookingAcceptance("request");
-
-    expect(mocks.get).toHaveBeenCalledWith(
-      "/api/pms/properties/property-1/booking-acceptance",
-      expect.any(Object),
-    );
-    expect(mocks.put).toHaveBeenCalledWith(
-      "/api/pms/properties/property-1/booking-acceptance",
-      { acceptanceMode: "request" },
-      expect.any(Object),
-    );
   });
 
   it("reads and idempotently updates the target same-day cutoff", async () => {

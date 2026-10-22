@@ -7,6 +7,7 @@ import { changeDatePrice } from "./PricingDates";
 import { PricingError } from "./pricingAmounts";
 import { recurringTemplate } from "./recurringPricingInputs";
 import { addDays, mainOffer, restrictionOwner, seasonsOverlap } from "./stepPricing";
+import { spreadRangeRule } from "./stayRuleSeasons";
 
 type Room = PricingConfiguration;
 type Offer = Room["offers"][number];
@@ -148,6 +149,8 @@ export function addToSeason(
   room: Room,
   selection: NightSelection,
   season: { name: string; tier: string },
+  /** The season's price when it is no longer in `room` (its days moved, see `moveToSeason`). */
+  given?: Extract<Offer["price"], { kind: "independent" }>["calendar"]["seasons"][number]["price"],
 ): Room {
   const main = mainOffer(room);
   if (main.price.kind !== "independent") throw new PricingError("pricing.seasons.errorIndependent");
@@ -160,8 +163,10 @@ export function addToSeason(
   if (calendar.seasons.some((other) => seasonsOverlap(range, other)))
     throw new PricingError("pricing.steps.seasons.errorOverlap");
   const price =
+    given ??
     calendar.seasons.find((other) => seasonKey(other.name, other.tier) === seasonKey(name, tier))
-      ?.price ?? calendar.base;
+      ?.price ??
+    calendar.base;
   if (!price) throw new PricingError("pricing.night.seasonNoStandard");
   const result = parsePricingConfiguration({
     ...room,
@@ -182,4 +187,91 @@ export function addToSeason(
   });
   if (!result) throw new PricingError("pricing.seasons.errorInvalid");
   return result;
+}
+
+type Range = { from: string; through: string };
+/** A day of the engine's MM-DD year (counted through the leap year 2000), and back. */
+const dayIndex = (monthDay: string) =>
+  Math.round(
+    (Date.UTC(2000, Number(monthDay.slice(0, 2)) - 1, Number(monthDay.slice(3))) -
+      Date.UTC(2000, 0, 1)) /
+      86400000,
+  );
+export const monthDayOf = (index: number) =>
+  new Date(Date.UTC(2000, 0, 1 + index)).toISOString().slice(5, 10);
+/** Whether an MM-DD range (one may run over New Year) holds this day of the engine's year. */
+export const coversDay = (range: Range, index: number) => {
+  const from = dayIndex(range.from),
+    through = dayIndex(range.through);
+  return from <= through ? index >= from && index <= through : index >= from || index <= through;
+};
+/** The days of `season` outside `range`, as ranges; a part running over New Year stays one range. */
+function outside(season: Range, range: Range): Range[] {
+  const kept = Array.from(
+    { length: 366 },
+    (_, index) => coversDay(season, index) && !coversDay(range, index),
+  );
+  const runs: Range[] = [];
+  let start = -1;
+  for (let index = 0; index <= 366; index++) {
+    if (index < 366 && kept[index]) {
+      if (start < 0) start = index;
+    } else if (start >= 0) {
+      runs.push({ from: monthDayOf(start), through: monthDayOf(index - 1) });
+      start = -1;
+    }
+  }
+  if (runs.length > 1 && kept[0] && kept[365]) {
+    const first = runs.shift()!,
+      last = runs.pop()!;
+    runs.push({ from: last.from, through: first.through });
+  }
+  return runs;
+}
+/** "Move these dates to another season" (VAY-2305): the picked days leave every season of the main option, which
+ * keeps its other days and their minimum stay, then join `season` as "Add to a season" does, or, with null, take the
+ * standard price. Seasons are MM-DD and repeat every year. */
+export function moveToSeason(
+  room: Room,
+  selection: NightSelection,
+  season: { name: string; tier: string } | null,
+): Room {
+  const main = mainOffer(room);
+  if (main.price.kind !== "independent") throw new PricingError("pricing.seasons.errorIndependent");
+  if (selectedDates(selection).length > 365) throw new PricingError("pricing.night.seasonTooLong");
+  const range = { from: selection.from.slice(5), through: selection.to.slice(5) };
+  const calendar = main.price.calendar;
+  // The target's price before its days move: picking all of a season's days for it must keep its price.
+  const price =
+    season &&
+    calendar.seasons.find(
+      (other) => seasonKey(other.name, other.tier) === seasonKey(season.name, season.tier),
+    )?.price;
+  const split = calendar.seasons.map((value) => ({ value, parts: outside(value, range) }));
+  const changed = split.filter(
+    ({ value, parts }) =>
+      parts.length !== 1 || parts[0].from !== value.from || parts[0].through !== value.through,
+  );
+  let next = parsePricingConfiguration({
+    ...room,
+    offers: room.offers.map((offer) =>
+      offer.id === main.id
+        ? {
+            ...main,
+            price: {
+              ...main.price,
+              calendar: {
+                ...calendar,
+                seasons: split.flatMap(({ value, parts }) =>
+                  parts.map((part) => ({ ...value, ...part })),
+                ),
+              },
+            },
+          }
+        : offer,
+    ),
+  });
+  if (!next) throw new PricingError("pricing.seasons.errorInvalid");
+  for (const { value, parts } of changed) next = spreadRangeRule(next, value, parts);
+  return season ? addToSeason(next, selection, season, price || undefined) : next;
 }

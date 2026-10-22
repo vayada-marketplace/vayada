@@ -273,7 +273,7 @@ export function CalendarAutoOpenEditor() {
             href={`${buildSharedHotelSetupRedirectPath({
               entryProduct: "pms",
               returnProduct: "pms",
-              returnTo: "/settings#calendar",
+              returnTo: "/settings/calendar",
               propertyId: read.setting.propertyId,
             })}&recovery=pms-calendar&step=${read.setupError.code === "physical_room_labels_unverified" ? "rooms" : "calendar"}`}
             className="mt-2 inline-block font-medium underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"

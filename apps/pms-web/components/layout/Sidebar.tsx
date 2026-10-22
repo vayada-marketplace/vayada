@@ -4,7 +4,6 @@ import { Fragment, useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  BoltIcon,
   BanknotesIcon,
   ChatBubbleLeftRightIcon,
   ChevronLeftIcon,
@@ -483,7 +482,6 @@ export default function Sidebar({
         {navItems.map((item) => {
           const isActive = pathname.startsWith(item.href);
           const label = item.labelKey ? t(item.labelKey) : item.label || "";
-          const featureHubActive = pathname.startsWith("/settings/feature-hub");
           return (
             <Fragment key={item.href}>
               {item.unavailable ? (
@@ -537,21 +535,6 @@ export default function Sidebar({
                   {collapsed && item.badge != null && (
                     <span className="absolute top-0.5 right-0.5 w-2 h-2 bg-emerald-600 rounded-full" />
                   )}
-                </Link>
-              )}
-              {item.href === "/settings" && !collapsed && (
-                <Link
-                  href="/settings/feature-hub"
-                  onClick={onNavigate}
-                  className={cn(
-                    "ml-5 flex items-center gap-2 rounded-md px-2.5 py-1.5 text-[12px] transition-colors",
-                    featureHubActive
-                      ? "bg-emerald-50 font-semibold text-emerald-700"
-                      : "text-gray-500 hover:bg-gray-50 hover:text-gray-900",
-                  )}
-                >
-                  <BoltIcon className="h-3.5 w-3.5 shrink-0" />
-                  <span>{t("layout.sidebar.featureHub")}</span>
                 </Link>
               )}
             </Fragment>

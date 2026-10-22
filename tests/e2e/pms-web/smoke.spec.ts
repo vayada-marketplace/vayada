@@ -41,7 +41,9 @@ test.describe("pms-web smoke", () => {
     await assertHealthy();
   });
 
-  test("shows Settings and Feature Hub after Channel Manager", async ({ page }, testInfo) => {
+  test("ends the sidebar with Settings and opens Feature Hub from the Settings cards", async ({
+    page,
+  }, testInfo) => {
     const assertHealthy = watchPageHealth(page, testInfo);
 
     await mockPmsWebAuthenticatedSession(page);
@@ -51,15 +53,21 @@ test.describe("pms-web smoke", () => {
     const navigation = page.getByRole("navigation");
     const channelManager = navigation.getByText("Channel Manager", { exact: true }).locator("..");
     const settings = channelManager.locator("xpath=following-sibling::*[1]");
-    const featureHub = settings.locator("xpath=following-sibling::*[1]");
 
     await expect(settings).toHaveAttribute("href", "/settings");
-    await expect(featureHub).toHaveAttribute("href", "/settings/feature-hub");
+    // VAY-2275: Feature Hub is the top Settings card, no longer a sidebar item under Settings.
+    await expect(settings.locator("xpath=following-sibling::*")).toHaveCount(0);
+    await expect(navigation.getByRole("link", { name: "Feature Hub" })).toHaveCount(0);
 
     await settings.click();
-    await expect(page.getByRole("heading", { name: /settings/i })).toBeVisible();
-    await featureHub.click();
-    await expect(page.getByRole("heading", { name: "Feature Hub" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "Settings" })).toBeVisible();
+    await page
+      .getByRole("main")
+      .getByRole("link", { name: /^Feature Hub/ })
+      .click();
+    await expect(page.getByRole("heading", { level: 1, name: "Feature Hub" })).toBeVisible();
+    await page.getByRole("navigation", { name: "Breadcrumb" }).getByRole("link").click();
+    await expect(page).toHaveURL(/\/settings$/);
 
     await assertHealthy();
   });
@@ -86,14 +94,12 @@ test.describe("pms-web smoke", () => {
 
     await mockPmsWebAuthenticatedSession(page);
     await mockPmsWebTargetRoutes(page);
+    // An old single-page anchor opens the Calendar card's page (VAY-2275).
     await page.goto("/settings#calendar");
 
-    await expect(page.getByRole("heading", { name: /settings/i })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Calendar" }).last()).toHaveAttribute(
-      "aria-current",
-      "page",
-    );
-    const calendarSection = page.locator("section#calendar");
+    await expect(page).toHaveURL(/\/settings\/calendar$/);
+    await expect(page.getByRole("heading", { level: 1, name: "Calendar" })).toBeVisible();
+    const calendarSection = page.locator("#calendar");
     await expect(
       calendarSection.getByRole("switch", { name: "Allow same-day bookings" }),
     ).toBeVisible();
@@ -106,18 +112,7 @@ test.describe("pms-web smoke", () => {
     });
     await expect(autoOpen).not.toBeChecked();
     await expect(calendarSection.getByText(/Current horizon: Not active/)).toBeVisible();
-    await expect(
-      page
-        .locator("section#booking-engine")
-        .getByRole("switch", { name: "Allow same-day bookings" }),
-    ).toHaveCount(0);
-    await expect(page.getByText("Check-in & Check-out", { exact: true })).toHaveCount(0);
     await expect(page.getByText("No settings can be changed here yet.")).toHaveCount(0);
-    const checklistLinks = page.getByRole("link", { name: "Check-in checklist" });
-    await expect(checklistLinks.last()).toBeVisible();
-    await expect(page.getByRole("link", { name: "Check-out inspection" }).last()).toBeVisible();
-    const teamLinks = page.getByRole("link", { name: "Team & Roles" });
-    await expect(teamLinks.last()).toHaveAttribute("href", "/settings/team");
 
     await page.setViewportSize({ width: 390, height: 844 });
     await autoOpen.focus();
@@ -132,9 +127,11 @@ test.describe("pms-web smoke", () => {
     await expect(calendarSection.getByRole("alert")).toContainText(
       `${PMS_WEB_ROOM_TYPE_ID} has no positive rate`,
     );
-    await expect(checklistLinks.first()).toBeVisible();
-    await checklistLinks.first().focus();
-    await expect(checklistLinks.first()).toBeFocused();
+    // On a phone the way back to the cards is the breadcrumb.
+    const back = page.getByRole("navigation", { name: "Breadcrumb" }).getByRole("link");
+    await expect(back).toHaveText("Settings");
+    await back.focus();
+    await expect(back).toBeFocused();
 
     await assertHealthy();
   });
@@ -150,10 +147,8 @@ test.describe("pms-web smoke", () => {
     await page.goto("/settings/team");
 
     await expect(page.getByRole("heading", { name: "Team, roles & permissions" })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Team & Roles" }).last()).toHaveAttribute(
-      "aria-current",
-      "page",
-    );
+    const breadcrumb = page.getByRole("navigation", { name: "Breadcrumb" });
+    await expect(breadcrumb.getByText("Team & roles")).toHaveAttribute("aria-current", "page");
     // The page also renders a property access matrix table; the roster is the one with roles.
     const roster = page
       .getByRole("table")
@@ -165,10 +160,10 @@ test.describe("pms-web smoke", () => {
     await expect(roster.getByText("Active", { exact: true })).toBeVisible();
 
     await page.setViewportSize({ width: 390, height: 844 });
-    const mobileTeamLink = page.getByRole("link", { name: "Team & Roles" }).first();
-    await expect(mobileTeamLink).toBeVisible();
-    await mobileTeamLink.focus();
-    await expect(mobileTeamLink).toBeFocused();
+    const backToSettings = breadcrumb.getByRole("link", { name: "Settings" });
+    await expect(backToSettings).toBeVisible();
+    await backToSettings.focus();
+    await expect(backToSettings).toBeFocused();
 
     await assertHealthy();
   });
@@ -353,9 +348,33 @@ test.describe("pms-web smoke", () => {
     await expect(page.getByRole("tablist", { name: "Financials sections" })).toBeVisible();
 
     await page.goto("/settings");
-    await expect(page.getByRole("heading", { name: /settings/i })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "Settings" })).toBeVisible();
+    const cards = page.getByRole("main").getByRole("listitem");
+    // A card link's name starts with its title ("Team & roles" mentions "property" further on).
+    for (const [card, href] of [
+      ["Property", "/settings/property"],
+      ["Calendar", "/settings/calendar"],
+      ["Guest flows", "/settings/guest-flows"],
+      ["OTA commissions", "/settings/ota-commissions"],
+      ["Team & roles", "/settings/team"],
+      ["Billing", "/settings/billing"],
+    ]) {
+      await expect(cards.getByRole("link", { name: new RegExp(`^${card}`) })).toHaveAttribute(
+        "href",
+        href,
+      );
+    }
+    await expect(cards.filter({ hasText: "Account" }).getByText("Coming soon")).toBeVisible();
+    // Booking Engine settings live in Booking Admin only.
+    await expect(page.getByText("Booking Engine", { exact: true })).toHaveCount(0);
+
+    await page.goto("/settings/property");
     await expect(page.getByLabel("Timezone")).toHaveValue("Europe/Berlin");
     await expect(page.getByLabel("Country (ISO code)")).toHaveValue("DE");
+    await expect(page.getByText("Editing not available yet")).toBeVisible();
+    await expect(page.getByRole("switch", { name: "Accept bookings instantly" })).toHaveCount(0);
+
+    await page.goto("/settings/ota-commissions");
     await expect(page.getByText("Booking.com", { exact: true })).toBeVisible();
     await expect(page.getByText("Other OTA", { exact: true })).toBeVisible();
     await expect(page.getByText("Not configured")).toHaveCount(4);
@@ -366,14 +385,6 @@ test.describe("pms-web smoke", () => {
     await expect(page.getByRole("button", { name: "Configure" }).first()).toBeDisabled();
     await expect(page.getByRole("status")).toContainText("Airbnb saved at 14.25%");
     await expect(page.getByText(/14.25%.*Revision 1/)).toBeVisible();
-    await expect(page.getByText("Editing not available yet")).toBeVisible();
-    const instantAcceptance = page.getByRole("switch", {
-      name: "Accept bookings instantly",
-    });
-    await expect(instantAcceptance).toBeChecked();
-    await instantAcceptance.click();
-    await expect(instantAcceptance).not.toBeChecked();
-    await expect(page.getByText("Booking acceptance settings saved")).toBeVisible();
 
     await page.goto("/settings/feature-hub");
     // VAY-2078: Inbox and Reviews are Feature Hub modules; Financials needs finance access.
