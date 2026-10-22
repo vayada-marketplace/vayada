@@ -20,6 +20,12 @@ const fail = (code: "invalid" | "denied" | "stale" | "idempotency_conflict"): ne
 const references = (v: unknown): v is PricingStorageSources => pricingObject(v) && Object.entries(v).every(([k, x]) =>
   k.length > 0 && k === k.trim() && typeof x === "string" && x.length > 0 && x === x.trim());
 const withoutSelf = (v: PricingStorageSources) => Object.fromEntries(Object.entries(v).filter(([k]) => k !== "charges"));
+/** VAY-2086 option A: Vayada operations declare on the hotel's behalf when importing legacy prices. Fixed server-side text. */
+export const LEGACY_IMPORT_DECLARATION_NOTE = "Declared by Vayada operations on the hotel's behalf during the VAY-1362 migration: " +
+  "these are the prices guests already saw in legacy, which showed no separate mandatory charges.";
+const legacyImportReference = (v: unknown): v is { sourceRunId: string; planSha256: string } => pricingObject(v) &&
+  pricingKeys(v, ["sourceRunId", "planSha256"]) && typeof v.sourceRunId === "string" && /^vay1351-[0-9a-f]{24}$/.test(v.sourceRunId) &&
+  typeof v.planSha256 === "string" && hashPattern.test(v.planSha256);
 export type ReplacementChargeDeclaration = { id: string; fingerprint: string; declaration: typeof declaration };
 
 /** Exclude only the declaration's own reference; attaching it must not invalidate itself. */
@@ -48,13 +54,16 @@ export function createReplacementChargeDeclarationStore(pool: Pool) {
   return {
     async confirm(context: RequestContext | null, scope: PricingStorageScope, input: {
       draftId: string; expectedDraftRevision: number; claimedFingerprint: string; declaration: typeof declaration; requestId: string;
-      /** The staff member declared by pressing "Save prices" (no separate checkbox); recorded on the audit event. */
-      declaredVia?: "save_prices";
+      /** How the declaration was made, recorded on the audit event: a staff member pressing "Save prices" (no separate
+       * checkbox), or Vayada operations importing the hotel's legacy prices (VAY-2086, with the import run and plan). */
+      declaredVia?: "save_prices" | "legacy_import";
+      legacyImport?: { sourceRunId: string; planSha256: string };
     }): Promise<ReplacementChargeDeclaration> {
       if (!uuid(input.draftId) || !pricingInteger(input.expectedDraftRevision, 1) || input.expectedDraftRevision > 2147483647 ||
           !hashPattern.test(input.claimedFingerprint) || input.declaration !== declaration || typeof input.requestId !== "string" ||
           input.requestId.length < 1 || input.requestId.length > 200 || input.requestId.trim() !== input.requestId ||
-          (input.declaredVia !== undefined && input.declaredVia !== "save_prices")) return fail("invalid");
+          (input.declaredVia !== undefined && input.declaredVia !== "save_prices" && input.declaredVia !== "legacy_import") ||
+          (input.declaredVia === "legacy_import" ? !legacyImportReference(input.legacyImport) : input.legacyImport !== undefined)) return fail("invalid");
       scope = { propertyId: scope.propertyId.toLowerCase(), organizationId: scope.organizationId.toLowerCase(), actorUserId: scope.actorUserId.toLowerCase() };
       const command = structuredClone({ ...input, draftId: input.draftId.toLowerCase() }), requestHash = hash({ scope, command });
       const client = await pool.connect();
@@ -96,7 +105,9 @@ export function createReplacementChargeDeclarationStore(pool: Pool) {
         await client.query(`INSERT INTO platform.product_audit_events
           (audit_key,product,action,occurred_at,tenant_scope,property_id,actor_type,actor_user_id,target_resource_product,target_resource_type,target_resource_id,domain_event_id,audit_metadata)
           VALUES($1,'pms','pricing.v2.charges.confirmed',now(),'property',$2,'user',$3,'pms','mandatory_charge_confirmation',$4,$5,$6::jsonb)`,
-        [key, scope.propertyId, scope.actorUserId, id, event, command.declaredVia ? { declaredVia: command.declaredVia } : {}]);
+        [key, scope.propertyId, scope.actorUserId, id, event, command.declaredVia === "legacy_import"
+          ? { declaredVia: command.declaredVia, legacyImport: command.legacyImport, note: LEGACY_IMPORT_DECLARATION_NOTE }
+          : command.declaredVia ? { declaredVia: command.declaredVia } : {}]);
         await client.query(`INSERT INTO platform.outbox_events
           (domain_event_id,outbox_key,destination,event_type,tenant_scope,property_id,resource_product,resource_type,resource_id,payload)
           VALUES($1,$2,'pricing.v2','pricing.v2.charges.confirmed','property',$3,'pms','mandatory_charge_confirmation',$4,$5)`, [event, key, scope.propertyId, id, canonical({ id, fingerprint })]);
