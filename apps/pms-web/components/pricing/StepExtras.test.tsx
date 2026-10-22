@@ -214,6 +214,13 @@ it("charges breakfast per guest or for the room and says what it adds a night (V
   });
   expect(choice(view, "Per guest").props["aria-pressed"]).toBe(true);
   expect(textOf(view.root)).toContain("2 guests add €30 a night (€15 per guest).");
+  // A charge that can't change keeps its basis on show, so price edits go to the charge the room has.
+  const refusing = render(room(), terms);
+  onChange.mockImplementationOnce(() => {
+    throw new Error("refused");
+  });
+  act(() => choice(refusing, "Per guest").props.onClick());
+  expect(choice(refusing, "Per room").props["aria-pressed"]).toBe(true);
   // Off, the choice is what turning breakfast on uses.
   const roomOnly = parsePricingConfiguration({ ...room(), offers: [room().offers[0]] })!;
   const plain = render(roomOnly, { flexible });

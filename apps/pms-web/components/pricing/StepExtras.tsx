@@ -188,8 +188,7 @@ export function StepExtras({
   /** Breakfast per guest or per room; children's breakfast is free per guest (as when it is turned on). */
   const changeBasis = (next: "room" | "person") => {
     if (disabled || next === basis) return;
-    setBasis(next);
-    if (!breakfast || savedMinor === null) return;
+    if (!breakfast || savedMinor === null) return setBasis(next);
     // A typed price that doesn't parse yet gives way to the saved one.
     const value = typedMinor(amount, scale) === null ? decimalAmount(savedMinor, scale) : amount;
     try {
@@ -200,6 +199,8 @@ export function StepExtras({
           amounts: next === "room" ? [value] : [value, ...room.children.bands.map(() => "0")],
         }),
       );
+      // Only a charge that changed shows the new basis: price edits keep going to the charge the room has.
+      setBasis(next);
       setAmount(value);
       clear("breakfast");
     } catch (cause) {

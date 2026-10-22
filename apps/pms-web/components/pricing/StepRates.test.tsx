@@ -437,6 +437,26 @@ it("makes Paid when booking a choice: nothing, guest chooses, a deposit while de
   expect(checkbox("Flexible rate", "Pay at property").props.checked).toBe(true);
   act(() => card("Flexible rate").findByProps({ "aria-label": "Larger deposit" }).props.onClick());
   expect(handlers.onTerms.mock.lastCall![0][0].terms.payment.basisPoints).toBe(3500);
+  // A stored deposit keeps its balance date and ways to pay when its percent steps.
+  const dated = {
+    ...deposit,
+    balanceDaysBeforeArrival: 14,
+    acceptedMethods: ["card", "pay_at_property"],
+  };
+  mount(
+    room(),
+    {
+      ...terms(["pay_at_property"], ["card"]),
+      flexible: { cancellation: free(7), payment: dated },
+    },
+    [],
+    ready(true),
+  );
+  act(() => card("Flexible rate").findByProps({ "aria-label": "Smaller deposit" }).props.onClick());
+  expect(handlers.onTerms.mock.lastCall![0][0].terms.payment).toEqual({
+    ...dated,
+    basisPoints: 2500,
+  });
 });
 
 it("greys out the full stay without a way to pay before arrival, and keeps a guest's choice as hotels take it today (VAY-2305)", () => {
