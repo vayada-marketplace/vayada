@@ -90,6 +90,8 @@ export default function RoomLocationField({
   useEffect(() => {
     onValidityChange(coordinates.ok);
   }, [coordinates.ok, onValidityChange]);
+  // Leaving the tab drops the typed text; the form only ever holds checked values, so it can save again.
+  useEffect(() => () => onValidityChange(true), [onValidityChange]);
 
   useEffect(
     () => () => {
