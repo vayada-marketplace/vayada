@@ -2106,24 +2106,57 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
     }
   });
 
-  it("finds the provider invitation a resend replaced", async () => {
+  it("claims a replaced invitation's WorkOS revoke until it is confirmed", async () => {
     const first = await deliveredInvitation(1);
     const resent = await deliveredInvitation(2);
-    await expect(
-      deliveryRepository.findReplacedProviderInvitationId(resent.invitationId),
-    ).resolves.toBe(first.providerInvitationId);
-    await expect(
-      deliveryRepository.findReplacedProviderInvitationId(first.invitationId),
-    ).resolves.toBeNull();
+    const replaced = {
+      invitationId: first.invitationId,
+      providerInvitationId: first.providerInvitationId,
+    };
 
+    // Right after delivery: exactly the invitation this one replaced.
+    await expect(
+      deliveryRepository.claimReplacedRevocations({ replacedBy: resent.invitationId }),
+    ).resolves.toEqual([replaced]);
+    await expect(
+      deliveryRepository.claimReplacedRevocations({ replacedBy: first.invitationId }),
+    ).resolves.toEqual([]);
+    // A claim is a five-minute lease: no second attempt meanwhile, from any worker.
+    await expect(deliveryRepository.claimReplacedRevocations({})).resolves.toEqual([]);
+    await client.query(
+      `UPDATE identity.staff_invitations
+       SET provider_revoke_attempted_at = now() - interval '6 minutes' WHERE id = $1`,
+      [first.invitationId],
+    );
+    await expect(deliveryRepository.claimReplacedRevocations({})).resolves.toEqual([replaced]);
+
+    // Confirmed revoked: never claimed again.
+    await deliveryRepository.markProviderRevoked(replaced);
+    await client.query(
+      `UPDATE identity.staff_invitations
+       SET provider_revoke_attempted_at = now() - interval '6 minutes' WHERE id = $1`,
+      [first.invitationId],
+    );
+    await expect(deliveryRepository.claimReplacedRevocations({})).resolves.toEqual([]);
+
+    // Not before the replacement was delivered, and not once the old invitation has expired.
+    const third = await repository.persist(
+      command({ commandId: "c-3", idempotencyKey: "k-3", revision: 3 }),
+    );
+    if (third.outcome !== "created") throw new Error("expected invitation creation");
+    await expect(deliveryRepository.claimReplacedRevocations({})).resolves.toEqual([]);
+    await client.query(
+      `UPDATE identity.staff_invitations
+       SET delivery_state = 'delivered', delivery_attempted_at = now(),
+           provider_invitation_id = 'invitation_third', expires_at = now() + interval '7 days'
+       WHERE id = $1`,
+      [third.invitationId],
+    );
     await client.query(
       "UPDATE identity.staff_invitations SET expires_at = now() - interval '1 minute' WHERE id = $1",
       [resent.invitationId],
     );
-    const afterExpiry = await deliveredInvitation(3);
-    await expect(
-      deliveryRepository.findReplacedProviderInvitationId(afterExpiry.invitationId),
-    ).resolves.toBeNull();
+    await expect(deliveryRepository.claimReplacedRevocations({})).resolves.toEqual([]);
   });
 
   it("validates invitation property links without assignment update privilege", async () => {

@@ -486,7 +486,7 @@ export async function registerStaffInvitationRoutes(
     if ("replacedRevocation" in delivery && delivery.replacedRevocation === "failed") {
       request.log.warn(
         { invitationId: result.invitationId },
-        "The WorkOS invitation this one replaced was not revoked",
+        "The WorkOS invitation this one replaced is not revoked yet; the worker retries",
       );
     }
     return reply.status(result.outcome === "created" ? 201 : 200).send({

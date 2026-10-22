@@ -179,7 +179,10 @@ side effect.
 
 State is `pending -> accepted | expired | revoked`; one pending intent exists
 per organization/email. Idempotent resends make one provider call; replacements
-revoke the old intent. Acceptance locks the current, pending, unexpired provider
+revoke the old intent. Once the replacement is delivered, the old WorkOS
+invitation is revoked too. `provider_revoked_at` records WorkOS's confirmation
+(revoked, or no longer pending). Until then the identity worker retries every
+five minutes, until it lands or the invitation expires. Acceptance locks the current, pending, unexpired provider
 ID and, in one transaction, replaces role, validated overrides, property mode,
 and assignments from that revision before activating exactly one membership.
 Prior membership access never survives. Past-due rows atomically expire; late,

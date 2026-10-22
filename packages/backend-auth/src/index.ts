@@ -156,6 +156,7 @@ export {
   createPgStaffInvitationDeliveryRepository,
   createStaffInvitationDeliveryCoordinator,
   type StaffInvitationDeliveryClaim,
+  type ReplacedInvitationRevocation,
   type StaffInvitationDeliveryRepository,
   type StaffInvitationProvider,
   type StaffInvitationProviderResponse,
