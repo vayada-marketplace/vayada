@@ -1,5 +1,6 @@
 import { createPgTeamRoleRepository } from "./teamRoles.js";
 import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import pg from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -30,6 +31,10 @@ import type {
 } from "./lifecycle.js";
 
 const TEST_DATABASE_URL = process.env["TEST_DATABASE_URL"];
+const readyMadeRoles = new URL(
+  "../../backend-migration/fixtures/ready-made-team-roles.sql",
+  import.meta.url,
+);
 const org = "11111111-1111-4111-8111-111111111111";
 const otherOrg = "22222222-2222-4222-8222-222222222222";
 const owner = "33333333-3333-4333-8333-333333333333";
@@ -275,6 +280,8 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
               'staff@example.com', true)
       ON CONFLICT (id) DO UPDATE SET provider_user_id = EXCLUDED.provider_user_id;
     `);
+    // New accounts no longer get the ready-made staff roles (VAY-2276); these fixtures are older accounts.
+    await client.query(await readFile(readyMadeRoles, "utf8"), [[org, otherOrg]]);
   });
 
   beforeEach(async () => {
