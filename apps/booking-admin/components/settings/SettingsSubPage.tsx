@@ -1,7 +1,6 @@
 "use client";
 
-import { Fragment } from "react";
-import Link from "next/link";
+import { SettingsBreadcrumb as SharedSettingsBreadcrumb } from "@vayada/settings-ui";
 import { useTranslation } from "@/lib/i18n";
 import { PageHeader, PageLayout } from "@/components/layout/PageLayout";
 
@@ -21,43 +20,18 @@ export function SettingsSubPage({ title, children }: { title: string; children: 
  * "Settings / … / current page". `fullPageLinks` renders plain anchors for pages whose
  * unsaved-changes guard relies on a full page load (Location & surroundings).
  */
-export function SettingsBreadcrumb({
-  current,
-  trail = [],
-  fullPageLinks = false,
-  className,
-}: {
+export function SettingsBreadcrumb(props: {
   current: string;
   trail?: { label: string; href: string }[];
   fullPageLinks?: boolean;
   className?: string;
 }) {
   const { t } = useTranslation();
-  const crumbs = [{ label: t("settings.title"), href: "/settings" }, ...trail];
-  const linkClass = "hover:text-gray-900 hover:underline";
   return (
-    <nav aria-label={t("settings.breadcrumb")} className={className}>
-      <ol className="flex items-center gap-1.5 text-[13px] text-gray-500">
-        {crumbs.map((crumb) => (
-          <Fragment key={crumb.href}>
-            <li>
-              {fullPageLinks ? (
-                <a href={crumb.href} className={linkClass}>
-                  {crumb.label}
-                </a>
-              ) : (
-                <Link href={crumb.href} className={linkClass}>
-                  {crumb.label}
-                </Link>
-              )}
-            </li>
-            <li aria-hidden="true">/</li>
-          </Fragment>
-        ))}
-        <li aria-current="page" className="font-medium text-gray-900">
-          {current}
-        </li>
-      </ol>
-    </nav>
+    <SharedSettingsBreadcrumb
+      settingsLabel={t("settings.title")}
+      ariaLabel={t("settings.breadcrumb")}
+      {...props}
+    />
   );
 }

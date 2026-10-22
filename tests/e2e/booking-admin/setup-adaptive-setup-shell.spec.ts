@@ -563,11 +563,11 @@ test.describe("adaptive hotel setup shell", () => {
       page,
       baseURL,
       propertyId,
-      "/settings#calendar",
+      "/settings/calendar",
       { sourceSurface: "booking-admin" },
     );
     const url = new URL(
-      setupUrl(baseURL, { returnProduct: "pms", returnTo: "/settings#calendar" }),
+      setupUrl(baseURL, { returnProduct: "pms", returnTo: "/settings/calendar" }),
     );
     url.searchParams.set("recovery", "pms-calendar");
     await page.goto(url.toString());

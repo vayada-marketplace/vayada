@@ -294,6 +294,8 @@ it("shows a room without prices as nights waiting for one, with nothing to pick 
       (node) => node.type === "button" && /^\d+ November/.test(node.props["aria-label"] ?? ""),
     ),
   ).toHaveLength(0);
-  expect(text()).toContain("No prices yet. Enter the price per night below to fill the calendar.");
+  expect(text()).toContain(
+    "No prices yet. Enter the standard price in step 2 to fill the calendar.",
+  );
   expect(text()).not.toContain("Pick a night");
 });

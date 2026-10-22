@@ -26,15 +26,6 @@ export interface PropertySettings {
 
 export type PropertySettingsUpdate = Partial<PropertySettings>;
 
-export type BookingAcceptanceMode = "instant" | "request";
-
-export interface BookingAcceptanceSettings {
-  contractVersion: "booking-acceptance.v1";
-  propertyId: string;
-  acceptanceMode: BookingAcceptanceMode;
-  instantBook: boolean;
-}
-
 export interface SameDayBookingSettings {
   contractVersion: "same-day-booking-policy.v1";
   propertyId: string;
@@ -196,23 +187,6 @@ export const pmsSettingsService = {
 };
 
 export const settingsService = {
-  getBookingAcceptance: async () => {
-    const propertyId = await resolveSelectedPmsPropertyId("loading booking acceptance settings");
-    return pmsOperationsClient.get<BookingAcceptanceSettings>(
-      propertyTemplateEndpoint(propertyId, "booking-acceptance"),
-      pmsOperationsRequestOptions,
-    );
-  },
-
-  updateBookingAcceptance: async (acceptanceMode: BookingAcceptanceMode) => {
-    const propertyId = await resolveSelectedPmsPropertyId("saving booking acceptance settings");
-    return pmsOperationsClient.put<BookingAcceptanceSettings>(
-      propertyTemplateEndpoint(propertyId, "booking-acceptance"),
-      { acceptanceMode },
-      pmsOperationsRequestOptions,
-    );
-  },
-
   getSameDayBooking: async () => {
     const propertyId = await resolveSelectedPmsPropertyId("loading same-day booking settings");
     return pmsOperationsClient.get<SameDayBookingSettings>(

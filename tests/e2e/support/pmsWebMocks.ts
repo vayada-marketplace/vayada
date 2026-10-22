@@ -541,6 +541,14 @@ export async function mockPmsWebTargetRoutes(page: Page): Promise<void> {
         },
       }),
     );
+  // Every published rate sells (VAY-2304: nothing in the not-selling list).
+  await page
+    .context()
+    .route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/pricing-v2/not-selling`, (route) =>
+      route.fulfill({
+        json: { version: "pricing-rates-not-selling.v1", publishedRevision: null, rates: [] },
+      }),
+    );
   await page.route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/plan-limits`, (route) =>
     route.fulfill({
       json: {

@@ -164,14 +164,14 @@ test.describe("pms-web canonical setup redirect", () => {
     const handoffs = await mockSetupHandoff(page);
 
     await page.goto(
-      `/setup?entryProduct=pms&returnTo=${encodeURIComponent("/settings#calendar")}&propertyId=${PMS_WEB_PROPERTY_ID}&recovery=pms-calendar&step=calendar`,
+      `/setup?entryProduct=pms&returnTo=${encodeURIComponent("/settings/calendar")}&propertyId=${PMS_WEB_PROPERTY_ID}&recovery=pms-calendar&step=calendar`,
     );
 
     await expect.poll(() => page.url()).toBe(handoffDestination());
     expect(handoffs.map((handoff) => handoff.targetPath)).toEqual([
       `${canonicalSetupPath({
         entryProduct: "pms",
-        returnTo: "/settings#calendar",
+        returnTo: "/settings/calendar",
         propertyId: PMS_WEB_PROPERTY_ID,
       })}&step=calendar&recovery=pms-calendar`,
     ]);

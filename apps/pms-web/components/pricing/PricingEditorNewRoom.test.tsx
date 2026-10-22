@@ -142,7 +142,7 @@ it("starts empty and optional, with the page's button in place of Save prices (V
     fixedCurrency: "EUR",
   });
   expect(button("Create Room Type")).toBeDefined();
-  for (const label of ["Save prices", "Reload pricing", "Remove prices"])
+  for (const label of ["Save and publish", "Reload pricing", "Remove prices"])
     expect(button(label)).toBeUndefined();
   expect(text()).not.toContain("By creating the room type");
   expect(take.current!()).toBeNull();
@@ -319,8 +319,8 @@ it("opens the created room's Prices tab on the prices that were not saved, with 
   expect(text()).toContain(english("pricing.editor.financePaymentsDisabled"));
   expect(onHandover).toHaveBeenCalledWith(true);
   expect(shownPrice()).toBe("120.00");
-  expect(button("Save prices")!.props.disabled).toBe(false);
-  await click("Save prices");
+  expect(button("Save and publish")!.props.disabled).toBe(false);
+  await click("Save and publish");
   expect(stage).toHaveBeenCalledOnce();
   expect(client.termsAction.mock.calls[0][0]).toMatchObject({
     roomTypeId: created,
@@ -348,7 +348,7 @@ it("says the prices were saved when a save that broke off had published them aft
   await mountRoom(handedOver(new Error("Failed to fetch"), true));
   expect(text()).toContain(english("pricing.newRoom.noticeSavedAfterAll"));
   expect(text()).not.toContain("Failed to fetch");
-  expect(button("Save prices")!.props.disabled).toBe(true);
+  expect(button("Save and publish")!.props.disabled).toBe(true);
   expect(onHandover).toHaveBeenCalledWith(false);
 });
 

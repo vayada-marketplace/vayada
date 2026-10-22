@@ -138,7 +138,7 @@ export const BOOKING_ADMIN_CHECKLIST_PAGES: Record<
   booking_published: { app: "booking_admin", path: "/dashboard" },
   photos: { app: "pms", path: "/rooms" },
   style: { app: "booking_admin", path: "/design-studio" },
-  calendar: { app: "pms", path: "/settings" },
+  calendar: { app: "pms", path: "/settings/calendar" },
   guest_terms: { app: "booking_admin", path: "/settings/policies" },
   online_cards: { app: "booking_admin", path: "/settings/payments" },
 };

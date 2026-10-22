@@ -28,7 +28,9 @@ test("searches from every main page and opens Domain directly with the keyboard"
   }
   await page.keyboard.press("Meta+k");
   await page.getByRole("combobox", { name: "Search pages and settings" }).fill("domain");
-  await expect(page.getByRole("option", { name: "Domain Settings" })).toBeVisible();
+  await expect(page.getByRole("option", { name: "Domain Settings" })).toContainText(
+    "Your booking page address and custom domain",
+  );
   await page.screenshot({ path: testInfo.outputPath("search-desktop.png") });
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/\/design-studio\?tab=domain$/);
@@ -80,7 +82,7 @@ test("shows empty results, hides denied settings and inactive affiliates, and su
   const search = page.getByRole("combobox", { name: "Search pages and settings" });
   for (const query of ["zzzzzz", "payment", "billing", "affiliates", "security", "notifications"]) {
     await search.fill(query);
-    await expect(page.getByText("No results found", { exact: true })).toBeVisible();
+    await expect(page.getByText(`No results for “${query}”`, { exact: true })).toBeVisible();
   }
   await search.fill("language");
   await expect(page.getByRole("option")).toBeVisible();
@@ -92,5 +94,5 @@ test("shows empty results, hides denied settings and inactive affiliates, and su
     route.fulfill({ status: 403, json: { detail: "Forbidden" } }),
   );
   await page.getByRole("combobox", { name: "Search pages and settings" }).fill("domain");
-  await expect(page.getByText("No results found", { exact: true })).toBeVisible();
+  await expect(page.getByText("No results for “domain”", { exact: true })).toBeVisible();
 });

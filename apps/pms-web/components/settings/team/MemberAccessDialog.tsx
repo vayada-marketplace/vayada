@@ -1,5 +1,6 @@
 "use client";
 import React, { useRef, useState } from "react";
+import { InformationCircleIcon, PlusIcon } from "@heroicons/react/24/outline";
 import Modal from "@/components/Modal";
 import { useTranslation } from "@/lib/i18n";
 import {
@@ -27,6 +28,7 @@ export default function MemberAccessDialog({
   properties,
   canManageRoles,
   onClose,
+  onCreateRole,
   onSaved,
 }: {
   access?: PmsStaffAccess;
@@ -35,6 +37,7 @@ export default function MemberAccessDialog({
   properties: { id: string; name: string }[];
   canManageRoles: boolean;
   onClose: () => void;
+  onCreateRole?: () => void;
   onSaved: (result?: PmsInviteResult) => void;
 }) {
   const { t } = useTranslation();
@@ -45,6 +48,8 @@ export default function MemberAccessDialog({
   const preparedInvitation = useRef<{ key: string; input: PmsStaffInviteInput }>();
   const choices = assignableTeamRoles(roles, canManageRoles);
   const selected = choices.find((role) => role.id === draft.roleId);
+  // A new account has no roles to give until the host creates one (VAY-2276).
+  const noRoles = !access && choices.length === 0;
   const validRole = !!selected || (!!access && !access.roleDefinitionId && !draft.roleId);
   const restricted =
     !canManageRoles &&
@@ -170,14 +175,50 @@ export default function MemberAccessDialog({
             </label>
           </fieldset>
         )}
-        <TeamAccessFields
-          draft={draft}
-          onChange={setDraft}
-          roles={choices}
-          properties={properties}
-          access={access}
-          disabled={mutation.busy || restricted}
-        />
+        {noRoles ? (
+          <div className="space-y-1.5">
+            <p className="text-sm font-medium">{t("settings.team.accessRole")}</p>
+            <div className="flex flex-col gap-3 rounded-xl border border-primary-100 bg-primary-50 p-4 sm:flex-row sm:items-center">
+              <div className="flex flex-1 gap-2.5">
+                <InformationCircleIcon
+                  aria-hidden="true"
+                  className="h-5 w-5 shrink-0 text-primary-600"
+                />
+                <div>
+                  <p className="text-sm font-semibold text-gray-900">
+                    {t("settings.team.createRoleFirst")}
+                  </p>
+                  <p className="mt-0.5 text-sm text-gray-600">
+                    {t(
+                      canManageRoles && onCreateRole
+                        ? "settings.team.createRoleFirstDescription"
+                        : "settings.team.createRoleFirstAskAdmin",
+                    )}
+                  </p>
+                </div>
+              </div>
+              {canManageRoles && onCreateRole && (
+                <button
+                  type="button"
+                  onClick={onCreateRole}
+                  className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                >
+                  <PlusIcon aria-hidden="true" className="h-4 w-4" />
+                  {t("settings.team.createRole")}
+                </button>
+              )}
+            </div>
+          </div>
+        ) : (
+          <TeamAccessFields
+            draft={draft}
+            onChange={setDraft}
+            roles={choices}
+            properties={properties}
+            access={access}
+            disabled={mutation.busy || restricted}
+          />
+        )}
       </form>
     </Modal>
   );

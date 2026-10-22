@@ -244,6 +244,13 @@ async function mockPricing(page: Page) {
         card: { ready: false, reason: "switch_off", charge: "at_booking" },
         deposits: { ready: false },
       });
+    // Every published rate sells (VAY-2304).
+    if (suffix === "/not-selling" && method === "GET")
+      return ok(route, {
+        version: "pricing-rates-not-selling.v1",
+        publishedRevision: null,
+        rates: [],
+      });
     if (suffix === "" && method === "GET") return ok(route, state.publication);
     const step = suffix === "/prepare" ? "prepare" : suffix === "/publish" ? "publish" : null;
     if (step && state.refuse?.step === step) {
@@ -426,7 +433,7 @@ test("opens the new room's Prices tab with the typed prices when their save is r
   ).toBeVisible();
   await expect(main(page).getByText("Someone else saved prices at the same time.")).toBeVisible();
   await expect(main(page).getByLabel("Castrop Suite Offer 1 Per room")).toHaveValue("120.00");
-  await main(page).getByRole("button", { name: "Save prices" }).click();
+  await main(page).getByRole("button", { name: "Save and publish" }).click();
   await expect(main(page).getByText("Prices saved.", { exact: false })).toBeVisible();
   // The refused publish is not recorded; this is the Prices tab's save, from the revision it read.
   expect(pricing.publishes).toHaveLength(1);

@@ -42,7 +42,7 @@ export default function CheckinChecklistPreviewPage() {
             </h1>
           </div>
           <Link
-            href="/settings/checkin-checklist"
+            href="/settings/guest-flows#check-in"
             className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50"
           >
             <ArrowLeftIcon className="h-4 w-4" />
