@@ -201,3 +201,51 @@ it("sets a season's minimum stay on all its ranges and keeps it with a range who
     { from: "09-20", through: "09-30", rules: { ...rules, minArrivalNights: 3 } },
   ]);
 });
+
+it("warns about open nights without a price and gives them a season (VAY-2305)", () => {
+  const offer = room.offers[0];
+  if (offer.price.kind !== "independent") throw new Error("fixture");
+  const seasonsOnly = {
+    ...room,
+    offers: [
+      { ...offer, price: { ...offer.price, calendar: { ...offer.price.calendar, base: null } } },
+    ],
+  } as PricingConfiguration;
+  mount(seasonsOnly);
+  expect(text()).toContain("350 open nights a year have no price");
+  expect(text()).toContain("For example 1 Jan – 18 Sep.");
+  act(() =>
+    view.root
+      .findAll((node) => node.type === "button" && node.children.includes("Give them a season"))[0]
+      .props.onClick(),
+  );
+  expect(view.root.findByType(SeasonWindow).props.prefill).toMatchObject({
+    from: "01-01",
+    through: "09-18",
+  });
+  // With a standard price every open night has one.
+  mount();
+  expect(text()).not.toContain("Give them a season");
+});
+
+it("sets the children's age and price inline, holding Save while they're typed (VAY-2305)", () => {
+  mount();
+  expect(field("Age from which guests count as adults").props.value).toBe("12");
+  expect(field("Price a night for each child").props.value).toBe("0.00");
+  act(() =>
+    field("Age from which guests count as adults").props.onChange({ target: { value: "10" } }),
+  );
+  expect(handlers.onPending).toHaveBeenLastCalledWith(true);
+  act(() => field("Price a night for each child").props.onChange({ target: { value: "15" } }));
+  act(() => field("Price a night for each child").props.onBlur());
+  expect(handlers.onChange.mock.lastCall![0].children).toEqual({
+    adultFromAge: 10,
+    bands: [{ fromAge: 0, throughAge: 9, nightlyMinor: "1500", countsTowardCapacity: true }],
+  });
+  expect(handlers.onPending).toHaveBeenLastCalledWith(false);
+  act(() =>
+    field("Age from which guests count as adults").props.onChange({ target: { value: "x" } }),
+  );
+  act(() => field("Age from which guests count as adults").props.onBlur());
+  expect(text()).toContain("Enter the age from which guests count as adults, like 12.");
+});

@@ -63,6 +63,19 @@ describe("replacement pricing browser workflow", () => {
       await expect(client().cardReadiness()).rejects.toThrow();
     }
   });
+  it("reads the rates that aren't selling, with why and how to fix it (VAY-2304)", async () => {
+    const rate = { roomTypeId: id, offerId: "nrf", reason: "card_off", fixes: ["turn_card_on", "allow_pay_at_property"] };
+    const list = (rates: unknown[], publishedRevision: number | null = 7) => ({ version: "pricing-rates-not-selling.v1", publishedRevision, rates });
+    http.get.mockResolvedValue(list([rate])); expect(await client().notSellingRates()).toEqual([rate]);
+    expect(http.get.mock.calls[0][0]).toBe(`/api/pms/properties/${id}/pricing-v2/not-selling`);
+    http.get.mockResolvedValue(list([], null)); expect(await client().notSellingRates()).toEqual([]);
+    // An API without the read lists none.
+    http.get.mockRejectedValue(new ApiErrorResponse(404, { code: "not_found" })); expect(await client().notSellingRates()).toEqual([]);
+    for (const value of [{ ...list([]), version: "v2" }, list([], 0), list([{ ...rate, reason: "other" }]), list([{ ...rate, fixes: [] }]),
+      list([{ ...rate, fixes: ["call_us"] }]), list([{ ...rate, roomTypeId: "room" }]), list([{ ...rate, extra: 1 }])]) {
+      http.get.mockResolvedValue(value); await expect(client().notSellingRates()).rejects.toThrow();
+    }
+  });
   it("reads exact saved data and only expected missing responses become null", async () => {
     const api = client(), stored = { snapshot, sources, revision: 1, baseRevision: 0, stale: false };
     http.get.mockResolvedValue(stored); expect(await api.readDraft(draftId)).toEqual(draft);

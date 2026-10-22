@@ -86,7 +86,7 @@ test("first pricing setup asks how guests pay when Payment settings can't be rea
   ).toBeVisible();
   await expect(page.getByRole("checkbox", { name: "Pay at property" })).not.toBeChecked();
   await page.getByLabel("Room price per night").fill("120");
-  await page.getByRole("button", { name: "Save prices" }).click();
+  await page.getByRole("button", { name: "Save and publish" }).click();
   await expect(page.getByRole("listitem").filter({ hasText: "How guests pay" })).toBeVisible();
 });
 

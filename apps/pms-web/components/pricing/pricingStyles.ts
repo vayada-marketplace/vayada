@@ -64,6 +64,8 @@ export const setupStepIntro = "mb-4 space-y-2.5 xl:mb-0 xl:w-[220px] xl:shrink-0
 export const setupStepTitle = "text-[18px] font-bold leading-6 text-gray-900";
 export const setupStepCard =
   "min-w-0 flex-1 space-y-4 rounded-2xl border border-gray-200 bg-white p-5 md:p-6";
+/** A card of a step that holds several (step 2's year, season table and weekend cards). */
+export const setupCard = "rounded-2xl border border-gray-200 bg-white p-5";
 /** A blue line saying the room keeps settings the card's top doesn't show. */
 export const infoBanner =
   "rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-[14px] leading-5 text-blue-800";
@@ -79,6 +81,8 @@ export const stepTitle = "text-[17px] font-semibold leading-6 text-gray-900";
 export const sectionNumber =
   "flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gray-900 text-[13px] font-semibold text-white";
 export const stepHint = "text-[14px] leading-5 text-gray-500";
+/** A small grey capitals label over a part of a step's card ("CANCELLATION", "PRICE PER NIGHT"). */
+export const partLabel = "text-[11px] font-semibold uppercase tracking-[0.06em] text-gray-500";
 export const stepButton =
   "inline-flex h-10 items-center gap-2 rounded-[10px] border border-gray-300 bg-white px-4 text-[14px] font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50";
 export const stepLink =

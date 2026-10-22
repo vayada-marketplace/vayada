@@ -13,7 +13,7 @@ import type { NewRoomPrices } from "./newRoomPrices";
 import type { KeptNewRoomPrices } from "./keptNewRoomPrices";
 import { FirstPricingSetup, type SetupRoom, type firstPricingInput } from "./FirstPricingSetup";
 import { PricingTerms } from "./PricingTerms";
-import { PricingCardReadinessProvider, PricingManualMethodsProvider, useLoadedPricingCardReadiness, useLoadedPricingManualMethods } from "./pricingManualMethods";
+import { PricingCardReadinessProvider, PricingManualMethodsProvider, PricingNotSellingProvider, useLoadedPricingCardReadiness, useLoadedPricingManualMethods, useLoadedPricingNotSelling } from "./pricingManualMethods";
 import { PricingIncludedAdjustments } from "./PricingIncludedAdjustments";
 import { PricingStayOwnership } from "./PricingStayOwnership";
 import { PricingStaySeasons } from "./PricingStaySeasons";
@@ -47,7 +47,7 @@ import { StepFirstPrices, type FirstPrices, type FirstThen } from "./StepFirstPr
 import { paymentSettingsMethods } from "./pricingPaymentDefaults";
 import type { PaymentMethod } from "./AcceptedPaymentMethods";
 import { GuestPreview } from "./GuestPreview";
-import { CalendarDaysIcon } from "@heroicons/react/24/outline";
+import { ArrowPathIcon, CalendarDaysIcon, CheckIcon } from "@heroicons/react/24/outline";
 import { PriceCalendar } from "./PriceCalendar";
 import { NightPanel } from "./NightPanel";
 import { pickNight, type NightSelection } from "./nightActions";
@@ -94,6 +94,8 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
   const [empty, setEmpty] = useState(false);
   const [current, setCurrent] = useState<PricingSnapshot | null>(null), [baseRevision, setBaseRevision] = useState(0), [stale, setStale] = useState(false);
   const loadedRooms = useRef<readonly Room[]>([]);
+  // The rates guests can't book now (VAY-2304), read again with each publication the editor loads.
+  const notSelling = useLoadedPricingNotSelling(client, baseRevision);
   const [inputs, setInputs] = useState<Record<string, string>>({}), [dirty, setDirty] = useState(false);
   const [loading, setLoading] = useState(true), [busy, setBusy] = useState(false), [error, setError] = useState<unknown>(null), [notice, setNotice] = useState<MessageKey | "">("");
   const [needsReload, setNeedsReload] = useState(false), [done, setDone] = useState(false), [retry, setRetry] = useState(false);
@@ -113,30 +115,35 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
   // Prices the New room page could not save for this room: the first load that reads pricing starts from them and
   // says why (VAY-2147).
   const handedOver = useRef(kept);
-  const load = useCallback(async (requested?: { keep?: Kept }) => {
+  /** `published`: the revision this tab's publish created, re-read after it (VAY-2305). The prices stay on show while it
+   * reads; when it fails, or isn't that publication with this room, they stay on show for review with "Edit prices again". */
+  const load = useCallback(async (requested?: { keep?: Kept; published?: number }) => {
     const handover = requested ? undefined : handedOver.current, after = handover ? { keep: handedOverEdits(handover) } : requested;
     const seq = ++loads.current, latest = () => alive.current && seq === loads.current; // An older read never overwrites a newer one.
-    setLoading(true); setEmpty(false); setError(null);
+    const republished = after?.published; // Only the publication this save made resumes editing; a newer one keeps its review.
+    if (republished === undefined) { setLoading(true); setEmpty(false); setError(null); }
     try {
       const saved = await client.read(); if (!latest()) return;
+      if (republished !== undefined && !(saved && saved.revision === republished && saved.rooms.some((value) => value.roomTypeId === focus))) return;
       const revision = (saved?.revision ?? 0) + 1, rooms = (saved?.rooms ?? []).map((room) => ({ ...room, revision }));
       const keep = after?.keep, kept = keep && keptRoom(keep, saved), room = kept && { ...kept, revision };
       setEmpty(saved === null && !room); setPolicyEdits(room ? keep!.terms : {}); loadedRooms.current = saved?.rooms ?? [];
       policyBases.current = { ...(room ? keep!.bases : {}), ...Object.fromEntries((saved?.rooms ?? []).flatMap((r) => r.offers.map((o) => [policyKey(r.roomTypeId, o.id), o.termsRevision]))) };
       setCurrent(saved || room ? { currency: saved?.currency ?? room!.currency, ownerReferences: { finance: saved?.ownerReferences.finance ?? "" },
         rooms: !room ? rooms : rooms.some((value) => value.roomTypeId === room.roomTypeId) ? rooms.map((value) => value.roomTypeId === room.roomTypeId ? room : value) : [...rooms, room] } : null);
-      requestedTerms.current.clear(); setSavedTerms({});
+      // Read every option's terms again, also when their revisions didn't change (the effect wouldn't re-run).
+      requestedTerms.current.clear(); setSavedTerms({}); setTermsAttempt((attempt) => attempt + 1);
       setAddingOfferRoom(null); setPreset(null); setDeleting(null); setDeleteError(null); setPendingEntries({}); setBaseRevision(saved?.revision ?? 0); setStale(!!saved?.stale); setInputs({}); setDirty(!!room); setNeedsReload(false); setDone(false);
       if (handover) handedOver.current = undefined;
       // A save that broke off without an answer may have published them after all: only when the published prices
       // are exactly these (someone else may have priced the room meanwhile).
       const published = saved?.rooms.find((value) => value.roomTypeId === focus);
       const savedAfterAll = handover?.outcomeUnknown && published && samePricingValue(savedPrices(published), savedPrices(handover.room));
-      setNotice(room ? (handover ? "pricing.newRoom.noticeKept" : "pricing.room.noticeKept") : savedAfterAll ? "pricing.newRoom.noticeSavedAfterAll" : keep ? "pricing.room.noticeDropped" : saved?.stale ? "pricing.room.noticeStale" : "");
+      setNotice(room ? (handover ? "pricing.newRoom.noticeKept" : "pricing.room.noticeKept") : savedAfterAll ? "pricing.newRoom.noticeSavedAfterAll" : keep ? "pricing.room.noticeDropped" : saved?.stale ? "pricing.room.noticeStale" : republished !== undefined ? "pricing.editor.noticeSaved" : "");
       // Why they were not saved, also when they no longer apply; `onHandover` says whether they were kept.
       if (handover && !savedAfterAll) setError(handover.error);
       if (handover) callbacks.current.onHandover?.(!!room);
-    } catch (e) { if (latest()) setError(e); }
+    } catch (e) { if (latest() && republished === undefined) setError(e); }
     finally { if (latest()) setLoading(false); }
   }, [client, focus]);
   /** After a refused save (another publication, or a room, terms or payment change), reload and keep this room's
@@ -273,9 +280,10 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
     void run(async () => {
       const attached = await step();
       if (!alive.current) return;
-      // Shows the saved prices for review; "Edit prices again" reloads, so the next save starts from the new revision.
+      // Shows the saved prices, then re-reads them, so editing goes on from the new revision (VAY-2305: saved and live).
       setCurrent(attached.snapshot); setDone(true); setDirty(false); setInputs({}); setPolicyEdits({}); setNotice("pricing.editor.noticeSaved");
       callbacks.current.onPublished?.();
+      await load({ published: attached.baseRevision + 1 });
     }, financeNotReady);
   }
   /** The room's first prices (VAY-2188): added to the draft with their options' terms, then saved at once, left
@@ -324,13 +332,20 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
   const focusIndex = display ? display.rooms.findIndex((room) => room.roomTypeId === focus) : -1, editing = focusIndex >= 0;
   // The Save bar's "Guests pay from" (VAY-2280): the focused room's lowest standard or season night this year, over the
   // rates guests can book (VAY-2285).
-  let guestsFrom = "";
+  // The CEO's bar (VAY-2305) also counts the open nights no price covers, as "Pricing setup" does.
+  let guestsFrom = "", barGaps = 0;
   if (display && editing) try {
     const shown = editedSnapshot(display, inputs).rooms[focusIndex]!, rate = simpleRoom(shown, optionTerms)?.nonRefundable;
     const booked = [mainOffer(shown), ...(rate ? [rate] : [])].filter(pricingOfferOnBookingPage).map((offer) => offer.id);
     const minor = lowestNightMinor(shown, booked, sampleAdults(shown), String(new Date().getFullYear()));
     if (minor) guestsFrom = t("pricing.bar.from", { amount: money(minor, shown.currency) });
+    barGaps = nightsWithoutPrice(shown, mainOffer(shown).id, sampleAdults(shown), localToday());
   } catch { guestsFrom = ""; }
+  // This room's published rates guests can't book now (VAY-2304); their cards say why.
+  const stopped = notSelling.filter((rate) => rate.roomTypeId === focus);
+  const status = busy ? { key: "pricing.editor.saving", tone: "text-primary-700", icon: <ArrowPathIcon aria-hidden="true" className="h-4 w-4 animate-spin" /> }
+    : done || (!dirty && !stale) ? { key: done ? "pricing.editor.statusSaved" : "pricing.editor.statusCurrent", tone: "text-green-700", icon: <CheckIcon aria-hidden="true" className="h-4 w-4" /> }
+    : { key: dirty ? "pricing.editor.statusUnsaved" : "pricing.editor.statusStale", tone: "text-amber-700", icon: <span aria-hidden="true" className="h-2 w-2 rounded-full bg-amber-500" /> };
   const shownRooms = (display?.rooms ?? []).map((room, ri) => [room, ri] as const).filter(([room]) => room.roomTypeId === focus);
   const scale = display ? pricingCurrencyScale(display.currency)! : 2;
   const warning = notice === "pricing.room.noticeStale" || notice === "pricing.room.noticeDropped" || notice === "pricing.newRoom.noticeKept";
@@ -348,7 +363,7 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
   const cancels = leaveRisk && !needsReload && !retry && !busy && !done;
   // No prices yet (VAY-2280): the first-price form shows the calendar of nights waiting for one, beside "Start with one price".
   // Laid out as the Paper design's numbered steps; the other editors sit under More options. Cancel and Save at the bottom.
-  return <PricingManualMethodsProvider value={manualMethods}><PricingCardReadinessProvider value={cardReadiness}><section className="space-y-4">
+  return <PricingManualMethodsProvider value={manualMethods}><PricingCardReadinessProvider value={cardReadiness}><PricingNotSellingProvider value={notSelling}><section className="space-y-4">
     {error !== null && <div role="alert" className={ui.errorBanner}>{pricingSaveError(error, t)}{retry && <p className="mt-2">{t("pricing.editor.retryHint")}</p>}{keepsOnReload && <p className="mt-2">{t("pricing.room.reloadKeeps")}</p>}</div>}
     {notice && !(staleShown && notice === "pricing.room.noticeStale") && <p role="status" className={warning ? ui.warningBanner : ui.successBanner}>{t(notice)}</p>}
     {loading && <p role="status" className={ui.text}>{t("pricing.editor.loading")}</p>}
@@ -400,7 +415,7 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
       const gaps = edited ? nightsWithoutPrice(edited, main.id, sampleAdults(edited), today) : 0;
       const preview = <GuestPreview room={edited} facts={{ name: roomName(room.roomTypeId, ri), ...(roomFacts[room.roomTypeId] ?? { size: null, photo: null }) }} names={names} terms={optionTerms}
         stay={stay} today={today} selected={previewId} onSelect={setPreviewOffer} />;
-      // The CEO's layout (VAY-2305): "Prices by date" first, then "Pricing setup", whose step "Meals" holds "What guests see".
+      // The CEO's layout (VAY-2305): "Prices by date" first, then "Pricing setup", whose step "Meal plans" holds "On your booking page".
       return <div key={room.roomTypeId} className="space-y-6">
         <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
           <PriceCalendar room={edited} options={rates} offerId={calendarId} onOffer={setPreviewOffer}
@@ -452,7 +467,7 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
               <p className={ui.stepHint}>{t("pricing.paymentMethods.hint")}</p>
             </div>
           </StepRates>
-          {/* Step "Meals": the breakfast switch, beside "What guests see"; while the options' terms load, the preview alone. */}
+          {/* Step "Meal plans": breakfast, beside "On your booking page"; while the options' terms load, the preview alone. */}
           {simple ? <StepExtras room={room} simple={simple} prices={prices} only="breakfast" disabled={disabled || (hasPendingEntries && !pendingEntries[`extras:${ri}`])}
             onAdd={(input) => createInitial(input, true, room.roomTypeId)} onRemove={(offerId) => { if (!disabled && !pendingBesidesExtras) setDeleting(offerId); }} onChange={changeRoom(ri)} onPending={pend(`extras:${ri}`)} preview={preview} />
             : <div className="border-t border-gray-200 py-7">{preview}</div>}
@@ -549,10 +564,16 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
       {(dirty || error !== null) && <button type="button" className={ui.actionBarButton} disabled={loading || disabled} onClick={() => { if (dirty) setReloading(true); else void load(); }}>{t(dirty ? "pricing.newRoom.remove" : "pricing.editor.reload")}</button>}
       {newRoom.actions}
     </div> : <div className={`flex-wrap ${ui.actionBar}`}>
-      {!loading && editing && <p id={declarationId} className="w-full text-[11px] text-gray-500 md:mr-auto md:w-auto">{t("pricing.editor.saveDeclaration")}
-        <span className={`ml-2 font-medium ${done ? "text-green-600" : dirty ? "text-amber-600" : "text-gray-400"}`}>{t(done ? "pricing.editor.statusSaved" : dirty ? "pricing.editor.statusUnsaved" : "pricing.editor.statusCurrent")}</span></p>}
-      {!loading && editing && guestsFrom && <span className="w-full text-[13px] text-gray-600 md:w-auto">{guestsFrom}</span>}
-      <button type="button" className={ui.actionBarButton} disabled={loading || busy || retry} onClick={() => { if (keepsOnReload) reloadKeepingRoom(); else if (leaveRisk) setReloading(true); else void load(); }}>{t(cancels ? "common.cancel" : "pricing.editor.reload")}</button>
+      {/* The status takes the free space and its chips wrap beside it, so they never push the buttons to a second line. */}
+      {!loading && editing && <div className="w-full min-w-0 md:w-auto md:min-w-[16rem] md:flex-1">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <p className={`flex items-center gap-1.5 text-[13px] font-medium ${status.tone}`}>{status.icon}{t(status.key)}</p>
+          {barGaps > 0 && <span className="rounded-md bg-red-50 px-2 py-0.5 text-[12px] font-semibold text-red-700">{t(barGaps === 1 ? "pricing.bar.gaps.one" : "pricing.bar.gaps.other", { count: barGaps })}</span>}
+          {stopped.length > 0 && <span className="rounded-md bg-amber-50 px-2 py-0.5 text-[12px] font-semibold text-amber-800">{stopped.length === 1 ? t("pricing.bar.notSelling.one", { name: names[stopped[0].offerId] ?? "" }) : t("pricing.bar.notSelling.other", { count: stopped.length })}</span>}
+        </div>
+        <p id={declarationId} className="text-[11px] text-gray-500">{t("pricing.editor.saveDeclaration")}</p></div>}
+      {!loading && editing && guestsFrom && <span className="w-full text-[13px] text-gray-600 md:w-auto md:max-w-[20rem] md:text-right">{guestsFrom}</span>}
+      <button type="button" className={ui.actionBarButton} disabled={loading || busy || retry} onClick={() => { if (keepsOnReload) reloadKeepingRoom(); else if (leaveRisk) setReloading(true); else void load(); }}>{t(cancels ? "pricing.bar.discard" : "pricing.editor.reload")}</button>
       {!loading && editing && done && <button type="button" className={ui.actionBarButton} onClick={() => void load()}>{t("pricing.room.editAgain")}</button>}
       {!loading && editing && (retry ? <button type="button" className={ui.actionBarPrimary} aria-describedby={declarationId} disabled={busy} onClick={() => void run()}>{t("pricing.editor.retry")}</button>
         : <button type="button" disabled={disabled || hasPendingEntries || !(dirty || stale)} className={ui.actionBarPrimary} aria-describedby={declarationId} onClick={save}>{t(busy ? "pricing.editor.saving" : "pricing.editor.save")}</button>)}
@@ -560,8 +581,10 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
     {/* Last, so they open above an option's window. */}
     {reloading && <ConfirmDialog title={t(cancels ? "pricing.steps.discardTitle" : "pricing.reloadTitle")} message={t(cancels ? "pricing.steps.discardMessage" : "pricing.reloadMessage")} confirmLabel={t(cancels ? "pricing.steps.discardConfirm" : "pricing.reloadConfirm")} cancelLabel={t("common.cancel")} variant="danger" onConfirm={() => { setReloading(false); void load(); }} onCancel={() => setReloading(false)} />}
     {leave && <ConfirmDialog title={t("pricing.leaveTitle")} message={t("pricing.leaveMessage")} confirmLabel={t("pricing.leaveConfirm")} cancelLabel={t("common.cancel")} variant="danger" onConfirm={() => { leaving.current = true; setLeave(null); leave(); }} onCancel={() => setLeave(null)} />}
-  </section></PricingCardReadinessProvider></PricingManualMethodsProvider>;
+  </section></PricingNotSellingProvider></PricingCardReadinessProvider></PricingManualMethodsProvider>;
 }
+/** Today's date on this device (YYYY-MM-DD), as the calendar counts nights. */
+const localToday = () => { const now = new Date(); return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`; };
 /** A room's prices without what a save assigns (its revision and its options' terms revisions). */
 const savedPrices = (room: Room) => ({ ...room, revision: 0, offers: room.offers.map((offer) => ({ ...offer, termsRevision: "" })) });
 /** The New room page's kept prices as edits kept over a reload: a new room has no saved prices to compare with. */
