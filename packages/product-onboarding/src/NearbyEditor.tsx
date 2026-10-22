@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { NEARBY_CATEGORIES, projectNearbyPreview, type NearbyChoice } from "@vayada/domain-hotels";
 import type { NearbyApi } from "./nearbyApi";
 import type { SharedHotelSetupApi } from "./sharedHotelSetupApi";
@@ -18,11 +18,14 @@ export default function NearbyEditor({
   api,
   profileApi,
   apiKey,
+  intro,
 }: {
   propertyId: string;
   api: NearbyApi;
   profileApi: SharedHotelSetupApi;
   apiKey: string;
+  /** Shown under the page header, above the editor (Booking Admin's location map switch, VAY-2126). */
+  intro?: ReactNode;
 }) {
   const editor = useNearbyEditor(propertyId, api, profileApi);
   const [adding, setAdding] = useState(false);
@@ -132,6 +135,7 @@ export default function NearbyEditor({
           {editor.notice}
         </p>
       )}
+      {intro}
       {preview ? (
         <div className="mx-auto max-w-2xl">
           <p className="mb-4 text-xs text-gray-500">

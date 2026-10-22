@@ -285,5 +285,6 @@ export function hotelCatalogIdempotencyKey(
 }
 
 export * from "./nearbyView.js";
+export * from "./locationMap.js";
 
 export * from "./preparedHotelImport.js";
