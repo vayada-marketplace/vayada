@@ -1581,7 +1581,7 @@
   "rooms.form.dragPin": "Ziehen Sie die Markierung an die genaue Stelle",
   "rooms.form.mapEmpty": "Fügen Sie eine Adresse hinzu, um die Markierung auf der Karte zu sehen.",
   "rooms.form.mapUnavailableTitle": "Die Karte konnte nicht geladen werden",
-  "rooms.form.mapUnavailableBody": "Sie können die Koordinaten trotzdem eingeben. Sie werden wie gewohnt gespeichert und Gästen angezeigt.",
+  "rooms.form.mapUnavailableBody": "Sie können die Koordinaten trotzdem eingeben. Sie werden wie gewohnt gespeichert.",
   "rooms.form.mapRetry": "Erneut versuchen",
   "rooms.form.sortOrderHint": "Niedrigere Zahlen erscheinen zuerst in Ihrer Zimmerliste",
   "rooms.form.operatingPeriodsDescription": "Betriebszeiträume wiederholen sich jedes Jahr — außerhalb liegende Daten werden automatisch geschlossen",

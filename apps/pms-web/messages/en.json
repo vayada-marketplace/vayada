@@ -1574,7 +1574,7 @@
   "rooms.form.dragPin": "Drag the pin to the exact spot",
   "rooms.form.mapEmpty": "Add an address to see the pin on the map.",
   "rooms.form.mapUnavailableTitle": "The map couldn't load",
-  "rooms.form.mapUnavailableBody": "You can still type the coordinates. They are saved and shown to guests as usual.",
+  "rooms.form.mapUnavailableBody": "You can still type the coordinates. They are saved as usual.",
   "rooms.form.mapRetry": "Try again",
   "rooms.form.sortOrderHint": "Lower numbers appear first in your room list",
   "rooms.form.operatingPeriodsDescription": "Operating periods repeat every year — dates outside are automatically closed",
