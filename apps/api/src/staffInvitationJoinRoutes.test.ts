@@ -37,6 +37,25 @@ const details: StaffInvitationJoinDetails = {
   hotelNames: ["Hotel Alpenrose"],
 };
 
+const activeAccount = {
+  id: "user_workos_maria",
+  email: "maria.huber@example.com",
+  emailVerified: true,
+  lastSignInAt: "2026-10-01T08:00:00.000Z",
+  externalId: "user_maria",
+  signupFlow: null,
+};
+
+// What WorkOS creates for a new address when the invitation is sent.
+const placeholderUser = {
+  id: "user_workos_placeholder",
+  email: "maria.huber@example.com",
+  emailVerified: false,
+  lastSignInAt: null,
+  externalId: null,
+  signupFlow: null,
+};
+
 const joinedSession: AuthKitSession = {
   accessToken: "invitee-access-token",
   sealedSession: "invitee-sealed-session",
@@ -60,8 +79,8 @@ describe("staff invitation join routes", () => {
 
   it("previews the invitation with the hotel name and whether the address has an account", async () => {
     const findCurrent = vi.fn(async () => details);
-    const hasUserWithEmail = vi.fn(async () => false);
-    app = buildJoinApp({ authKit: { hasUserWithEmail }, findCurrent });
+    const findUserByEmail = vi.fn(async () => null);
+    app = buildJoinApp({ authKit: { findUserByEmail }, findCurrent });
 
     const response = await post(app, "/auth/invitations/preview", {
       surface: "pms-web",
@@ -84,7 +103,7 @@ describe("staff invitation join routes", () => {
       providerInvitationId: "invitation_alpenrose",
       workosOrganizationId: WORKOS_ORG,
     });
-    expect(hasUserWithEmail).toHaveBeenCalledWith({ email: "maria.huber@example.com" });
+    expect(findUserByEmail).toHaveBeenCalledWith({ email: "maria.huber@example.com" });
   });
 
   it.each([
@@ -160,7 +179,7 @@ describe("staff invitation join routes", () => {
     const audits: ProductAuditEvent[] = [];
     app = buildJoinApp({
       authKit: {
-        hasUserWithEmail: async () => false,
+        findUserByEmail: async () => null,
         createUser,
         authenticateWithPassword,
         updateUserExternalId,
@@ -245,9 +264,140 @@ describe("staff invitation join routes", () => {
     expect(reconcile).toHaveBeenCalledOnce();
   });
 
+  it("sets up the never-used user WorkOS created with the invitation instead of a second account", async () => {
+    const createUser = vi.fn(async () => joinedSession.user);
+    const activateInvitedUser = vi.fn(async () => {});
+    const findUserByEmail = vi.fn(async () => placeholderUser);
+    app = buildJoinApp({ authKit: { findUserByEmail, createUser, activateInvitedUser } });
+
+    const preview = await post(app, "/auth/invitations/preview", {
+      surface: "pms-web",
+      invitationToken: TOKEN,
+    });
+    const response = await post(app, "/auth/invitations/accept", {
+      surface: "pms-web",
+      invitationToken: TOKEN,
+      name: "Maria Huber",
+      password: "long enough password",
+    });
+
+    expect(preview.json()).toMatchObject({ accountExists: false });
+    expect(response.statusCode).toBe(200);
+    expect(createUser).not.toHaveBeenCalled();
+    expect(activateInvitedUser).toHaveBeenCalledWith({
+      userId: "user_workos_placeholder",
+      password: "long enough password",
+      firstName: "Maria",
+      lastName: "Huber",
+    });
+  });
+
+  it.each([
+    ["has signed in before", { lastSignInAt: "2026-09-01T10:00:00.000Z" }],
+    ["signed up in Vayada with a password", { signupFlow: "signup" }],
+    ["was linked to a Vayada user", { externalId: "user_other" }],
+    ["is registered under another address", { email: "someone.else@example.com" }],
+  ] as const)(
+    "never sets a password for an unverified user that %s; it must log in",
+    async (_label, variant) => {
+      const activateInvitedUser = vi.fn(async () => {});
+      const createUser = vi.fn(async () => joinedSession.user);
+      const authenticateWithPassword = vi.fn(async () => joinedSession);
+      const user = { ...placeholderUser, ...variant };
+      app = buildJoinApp({
+        authKit: {
+          findUserByEmail: async () => user,
+          activateInvitedUser,
+          createUser,
+          authenticateWithPassword,
+        },
+      });
+
+      const preview = await post(app, "/auth/invitations/preview", {
+        surface: "pms-web",
+        invitationToken: TOKEN,
+      });
+      const response = await post(app, "/auth/invitations/accept", {
+        surface: "pms-web",
+        invitationToken: TOKEN,
+        name: "Maria Huber",
+        password: "a guessed password",
+      });
+
+      expect(preview.json()).toMatchObject({ accountExists: true });
+      expect(response.statusCode).toBe(200);
+      expect(activateInvitedUser).not.toHaveBeenCalled();
+      expect(createUser).not.toHaveBeenCalled();
+      expect(authenticateWithPassword).toHaveBeenCalledWith(
+        expect.objectContaining({ password: "a guessed password", invitationToken: TOKEN }),
+      );
+    },
+  );
+
+  it.each([
+    ["an unknown token", { throws: 404 }],
+    ["a revoked invitation", { state: "revoked" }],
+    ["an expired invitation", { state: "expired" }],
+    ["an invitation Vayada replaced", { current: null }],
+    ["an invitation for another address", { current: { ...details, email: "x@example.com" } }],
+  ] as const)("never creates or sets up an account for %s", async (_label, variant) => {
+    const activateInvitedUser = vi.fn(async () => {});
+    const createUser = vi.fn(async () => joinedSession.user);
+    const authenticateWithPassword = vi.fn(async () => joinedSession);
+    app = buildJoinApp({
+      authKit: {
+        async findInvitationByToken() {
+          if ("throws" in variant) {
+            throw Object.assign(new Error("Not found"), { status: variant.throws });
+          }
+          return { ...pendingInvitation, ...variant } as AuthKitInvitation;
+        },
+        findUserByEmail: async () => placeholderUser,
+        activateInvitedUser,
+        createUser,
+        authenticateWithPassword,
+      },
+      findCurrent: async () => ("current" in variant ? variant.current : details),
+    });
+
+    const response = await post(app, "/auth/invitations/accept", {
+      surface: "pms-web",
+      invitationToken: TOKEN,
+      name: "Maria Huber",
+      password: "long enough password",
+    });
+
+    expect(response.statusCode).toBe(410);
+    expect(activateInvitedUser).not.toHaveBeenCalled();
+    expect(createUser).not.toHaveBeenCalled();
+    expect(authenticateWithPassword).not.toHaveBeenCalled();
+  });
+
+  it("marks an existing identity verified before reconciling, as WorkOS just confirmed it", async () => {
+    const calls: string[] = [];
+    app = buildJoinApp({
+      markProviderEmailVerified: async (input) => {
+        calls.push(`verified:${input.workosUserId}:${input.email}`);
+      },
+      reconcile: async () => {
+        calls.push("reconcile");
+        return { outcome: "accepted", invitationId: "local", membershipId: "membership_maria" };
+      },
+    });
+
+    const response = await post(app, "/auth/invitations/accept", {
+      surface: "pms-web",
+      invitationToken: TOKEN,
+      password: "existing password",
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(calls).toEqual(["verified:user_workos_maria:maria.huber@example.com", "reconcile"]);
+  });
+
   it("asks a new address for a name before creating anything", async () => {
     const createUser = vi.fn(async () => joinedSession.user);
-    app = buildJoinApp({ authKit: { hasUserWithEmail: async () => false, createUser } });
+    app = buildJoinApp({ authKit: { findUserByEmail: async () => null, createUser } });
 
     const response = await post(app, "/auth/invitations/accept", {
       surface: "pms-web",
@@ -264,7 +414,7 @@ describe("staff invitation join routes", () => {
     const authenticateWithPassword = vi.fn(async () => joinedSession);
     app = buildJoinApp({
       authKit: {
-        hasUserWithEmail: async () => false,
+        findUserByEmail: async () => null,
         async createUser() {
           throw Object.assign(new Error("weak"), { status: 422, code: "password_strength_error" });
         },
@@ -288,7 +438,7 @@ describe("staff invitation join routes", () => {
     const authenticateWithPassword = vi.fn(async () => joinedSession);
     app = buildJoinApp({
       authKit: {
-        hasUserWithEmail: async () => false,
+        findUserByEmail: async () => null,
         async createUser() {
           throw Object.assign(new Error("taken"), {
             status: 400,
@@ -403,6 +553,7 @@ function post(
 function buildJoinApp(input: {
   authKit?: Partial<AuthKitClient>;
   findCurrent?: () => Promise<StaffInvitationJoinDetails | null>;
+  markProviderEmailVerified?: (input: { workosUserId: string; email: string }) => Promise<void>;
   reconcile?: (event: StaffInvitationAcceptanceEvent) => Promise<StaffInvitationAcceptanceResult>;
   userByProviderUserId?: IdentityRepository["findUserByProviderUserId"];
   audits?: ProductAuditEvent[];
@@ -414,7 +565,7 @@ function buildJoinApp(input: {
       state: "accepted" as const,
       acceptedUserId: joinedSession.user.id,
     }),
-    hasUserWithEmail: async () => true,
+    findUserByEmail: async () => activeAccount,
     authenticateWithPassword: async () => joinedSession,
     updateUserExternalId: async () => {},
     ...input.authKit,
@@ -494,7 +645,10 @@ function buildJoinApp(input: {
         },
       },
       staffInvitationJoin: {
-        repository: { findCurrent: input.findCurrent ?? (async () => details) },
+        repository: {
+          findCurrent: input.findCurrent ?? (async () => details),
+          markProviderEmailVerified: input.markProviderEmailVerified ?? (async () => {}),
+        },
         acceptance: {
           reconcile:
             input.reconcile ??

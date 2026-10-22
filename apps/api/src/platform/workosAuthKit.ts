@@ -139,9 +139,29 @@ export function createWorkOSAuthKitClient(config: WorkOSAuthKitClientConfig): Au
       return toAuthKitInvitation(await workos.userManagement.getInvitation(input.invitationId));
     },
 
-    async hasUserWithEmail(input) {
+    async findUserByEmail(input) {
       const users = await workos.userManagement.listUsers({ email: input.email, limit: 1 });
-      return users.data.length > 0;
+      const user = users.data[0];
+      return user
+        ? {
+            id: user.id,
+            email: user.email,
+            emailVerified: user.emailVerified,
+            lastSignInAt: user.lastSignInAt,
+            externalId: user.externalId,
+            signupFlow: user.metadata?.auth_flow ?? null,
+          }
+        : null;
+    },
+
+    async activateInvitedUser(input) {
+      await workos.userManagement.updateUser({
+        userId: input.userId,
+        password: input.password,
+        firstName: input.firstName,
+        ...(input.lastName ? { lastName: input.lastName } : {}),
+        emailVerified: true,
+      });
     },
 
     async resendVerificationEmail(input) {

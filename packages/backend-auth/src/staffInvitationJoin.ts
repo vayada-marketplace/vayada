@@ -18,6 +18,8 @@ export type StaffInvitationJoinRepository = {
     providerInvitationId: string;
     workosOrganizationId: string;
   }): Promise<StaffInvitationJoinDetails | null>;
+  // Call only after WorkOS reported the address verified in a sign-in for that user.
+  markProviderEmailVerified(input: { workosUserId: string; email: string }): Promise<void>;
 };
 
 type JoinRow = {
@@ -78,6 +80,20 @@ export function createPgStaffInvitationJoinRepository(config: RepositoryConfig) 
         roleName: row.role_name,
         hotelNames: row.hotel_names,
       };
+    },
+    // WorkOS creates an invitee's user unverified; joining verifies it before the user.updated
+    // webhook may arrive, and acceptance requires a verified provider identity.
+    async markProviderEmailVerified(input): Promise<void> {
+      const workosUserId = input.workosUserId.trim();
+      const email = input.email.trim().toLowerCase();
+      if (!workosUserId || !email) return;
+      await pool.query(
+        `UPDATE identity.external_identities
+         SET provider_email_verified = true, updated_at = now()
+         WHERE provider = 'workos' AND provider_user_id = $1
+           AND lower(btrim(provider_email)) = $2 AND provider_email_verified = false`,
+        [workosUserId, email],
+      );
     },
     close: () => pool.end(),
   } satisfies StaffInvitationJoinRepository & { close(): Promise<void> };

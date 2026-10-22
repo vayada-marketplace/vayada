@@ -137,14 +137,22 @@ only when that provider ID is still the current, delivered, unexpired pending
 intent, and shows the hotel names from the catalog. Acceptance:
 
 - A new address gets a WorkOS user created with a verified email, because the
-  token reached that mailbox.
+  token reached that mailbox. WorkOS already creates an unverified,
+  never-signed-in user when it sends the invitation. That placeholder counts
+  as new: it gets the chosen password and a verified email, as a password
+  reset would. The WorkOS API does not say whether a password is set, so a
+  placeholder is a user for exactly the invited address that is unverified, has
+  no `lastSignInAt`, no external ID and no `auth_flow` metadata (every account
+  Vayada creates with a password carries it). Every other account must log in.
 - Both new and existing accounts then sign in with the password plus the
   invitation token, so WorkOS accepts the invitation and scopes the session to
   the invited organization.
 - The API reads the invitation back from WorkOS. It continues only when the
-  invitation is `accepted` by that user in that organization. It then runs the
-  same acceptance reconciler as the `invitation.accepted` webhook and sets the
-  PMS session for the invited organization.
+  invitation is `accepted` by that user in that organization. It marks the
+  stored WorkOS identity verified, as the sign-in just confirmed, because the
+  `user.updated` webhook may still be on its way. It then runs the same
+  acceptance reconciler as the `invitation.accepted` webhook and sets the PMS
+  session for the invited organization.
 - The webhook that follows is an idempotent replay.
 - If any step after the WorkOS sign-in fails, no Vayada session is set.
 

@@ -2070,6 +2070,39 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
     }
   });
 
+  it("verifies a joining WorkOS identity only for its own address", async () => {
+    const join = createPgStaffInvitationJoinRepository({ connectionString: TEST_DATABASE_URL! });
+    const verified = async () =>
+      (
+        await client.query<{ verified: boolean }>(
+          "SELECT provider_email_verified AS verified FROM identity.external_identities WHERE id = $1",
+          [staffIdentity],
+        )
+      ).rows[0]?.verified;
+    try {
+      await client.query(
+        "UPDATE identity.external_identities SET provider_email_verified = false WHERE id = $1",
+        [staffIdentity],
+      );
+      await join.markProviderEmailVerified({
+        workosUserId: "user_staff_acceptance",
+        email: "other@example.com",
+      });
+      expect(await verified()).toBe(false);
+      await join.markProviderEmailVerified({
+        workosUserId: "user_staff_acceptance",
+        email: " Staff@Example.com ",
+      });
+      expect(await verified()).toBe(true);
+    } finally {
+      await client.query(
+        "UPDATE identity.external_identities SET provider_email_verified = true WHERE id = $1",
+        [staffIdentity],
+      );
+      await join.close();
+    }
+  });
+
   it("validates invitation property links without assignment update privilege", async () => {
     const invitation = await deliveredInvitation();
     const restrictedRole = `vayada_acceptance_lock_${randomUUID().replaceAll("-", "").slice(0, 16)}`;

@@ -68,6 +68,17 @@ export type AuthKitInvitation = {
   expiresAt: string;
 };
 
+// WorkOS creates the invitee's user, unverified and without a password, when an invitation is
+// sent. `signupFlow` is the auth_flow metadata every account Vayada creates carries.
+export type AuthKitInvitee = {
+  id: string;
+  email: string;
+  emailVerified: boolean;
+  lastSignInAt: string | null;
+  externalId: string | null;
+  signupFlow: string | null;
+};
+
 export type AuthKitClient = {
   getAuthorizationUrl(input: {
     provider: "GoogleOAuth";
@@ -111,7 +122,13 @@ export type AuthKitClient = {
   }): Promise<AuthKitUser>;
   findInvitationByToken(input: { token: string }): Promise<AuthKitInvitation>;
   getInvitation(input: { invitationId: string }): Promise<AuthKitInvitation>;
-  hasUserWithEmail(input: { email: string }): Promise<boolean>;
+  findUserByEmail(input: { email: string }): Promise<AuthKitInvitee | null>;
+  activateInvitedUser(input: {
+    userId: string;
+    password: string;
+    firstName: string;
+    lastName?: string;
+  }): Promise<void>;
   resendVerificationEmail(input: { emailVerificationId: string }): Promise<{ email: string }>;
   createPasswordReset(input: { email: string }): Promise<void>;
   resetPassword(input: { token: string; newPassword: string }): Promise<AuthKitUser>;
@@ -330,13 +347,11 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
     try {
       const found = await findJoinableInvitation(options, join.repository, parsed.invitationToken);
       if (!found.ok) return reply.code(410).send(invitationUnavailable(found.reason));
-      const accountExists = await options.authKitClient.hasUserWithEmail({
-        email: found.details.email,
-      });
+      const invitee = await options.authKitClient.findUserByEmail({ email: found.details.email });
       return reply.send({
         state: "invitation_ready",
         email: found.details.email,
-        accountExists,
+        accountExists: Boolean(invitee) && !unusedInvitee(invitee, found.details.email),
         hotelNames: found.details.hotelNames,
         inviterName: found.details.inviterName,
         inviteeName: found.details.inviteeName,
@@ -365,17 +380,19 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
     const client = options.authKitClient;
 
     let found: Awaited<ReturnType<typeof findJoinableInvitation>>;
-    let accountExists: boolean;
+    let invitee: AuthKitInvitee | null;
     try {
       found = await findJoinableInvitation(options, join.repository, parsed.invitationToken);
       if (!found.ok) return reply.code(410).send(invitationUnavailable(found.reason));
-      accountExists = await client.hasUserWithEmail({ email: found.details.email });
+      invitee = await client.findUserByEmail({ email: found.details.email });
     } catch (error) {
       request.log.warn({ workos: workosErrorDiagnostics(error) }, "Invitation lookup failed");
       return reply.code(502).send(INVITATION_JOIN_UNAVAILABLE);
     }
     const { invitation, details } = found;
 
+    const placeholder = unusedInvitee(invitee, details.email);
+    const accountExists = Boolean(invitee) && !placeholder;
     if (!accountExists) {
       if (!parsed.name) {
         return reply
@@ -383,16 +400,25 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
           .send({ state: "auth_failed", code: "name_required", message: "Enter your name." });
       }
       try {
-        // The token came to this mailbox, so the address is proven like a verification code.
-        await client.createUser({
-          email: details.email,
-          password: parsed.password,
-          ...splitPersonName(parsed.name),
-          emailVerified: true,
-          ipAddress: request.ip,
-          userAgent: request.headers["user-agent"],
-          metadata: { auth_flow: "invitation", surface: "pms-web" },
-        });
+        // The token came to this mailbox, so the address is proven like a verification code, and
+        // the password is set as a reset would. Only a never-used placeholder is set up this way.
+        if (placeholder) {
+          await client.activateInvitedUser({
+            userId: placeholder.id,
+            password: parsed.password,
+            ...splitPersonName(parsed.name),
+          });
+        } else {
+          await client.createUser({
+            email: details.email,
+            password: parsed.password,
+            ...splitPersonName(parsed.name),
+            emailVerified: true,
+            ipAddress: request.ip,
+            userAgent: request.headers["user-agent"],
+            metadata: { auth_flow: "invitation", surface: "pms-web" },
+          });
+        }
       } catch (error) {
         // A parallel request may have created the account; the sign-in below decides.
         if (!isEmailTakenError(error)) {
@@ -455,6 +481,12 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
         await client.updateUserExternalId({
           workosUserId: session.user.id,
           externalId: user.userId,
+        });
+      } else if (session.user.emailVerified) {
+        // The user.updated webhook may lag behind; WorkOS has just confirmed the address.
+        await join.repository.markProviderEmailVerified({
+          workosUserId: session.user.id,
+          email: details.email,
         });
       }
       const result = await join.acceptance.reconcile({
@@ -4048,6 +4080,20 @@ async function findJoinableInvitation(
     return { ok: false, reason: "invalid" };
   }
   return { ok: true, invitation: { ...invitation, organizationId }, details };
+}
+
+// The WorkOS API does not say whether a password is set. A user that signed in has lastSignInAt
+// and an externalId, and every account Vayada creates carries auth_flow metadata; one with none of
+// these, still unverified, is the placeholder WorkOS made for the invitation. Anything else logs in.
+function unusedInvitee(invitee: AuthKitInvitee | null, email: string): AuthKitInvitee | null {
+  const unused =
+    invitee !== null &&
+    invitee.email.trim().toLowerCase() === email &&
+    !invitee.emailVerified &&
+    !invitee.lastSignInAt &&
+    !invitee.externalId &&
+    !invitee.signupFlow;
+  return unused ? invitee : null;
 }
 
 function splitPersonName(name: string): { firstName: string; lastName?: string } {
