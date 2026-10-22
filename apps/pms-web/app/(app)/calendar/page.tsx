@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import { Fragment, useState, useEffect, useMemo, useRef, useCallback } from "react";
 import {
   format,
   addDays,
@@ -31,8 +31,14 @@ import BookingDetailModal from "@/components/calendar/BookingDetailModal";
 import MiniDatePicker from "@/components/calendar/MiniDatePicker";
 import MobileCalendar, { calendarLaneTop } from "@/components/calendar/MobileCalendar";
 import MonthView from "@/components/calendar/MonthView";
+import ReorderStepper from "@/components/calendar/ReorderStepper";
 import { useTranslation } from "@/lib/i18n";
-import { orderRoomsByRoomType } from "@/lib/roomOrdering";
+import {
+  groupRoomsByType,
+  moveRoomType,
+  moveRoomWithinType,
+  orderRoomsByRoomType,
+} from "@/lib/roomOrdering";
 import { channexService } from "@/services/channex";
 import { getChannelBarColor, normalizeChannelKey } from "@/lib/constants/statusStyles";
 
@@ -77,12 +83,13 @@ const mergeRoomOrderIntent = (
 ): CalendarRoom[] => {
   const currentById = new Map(current.map((room) => [room.id, room]));
   const intendedIds = new Set(intended.map(({ id }) => id));
+  const intendedTypeIds = groupRoomsByType(intended).map(({ roomTypeId }) => roomTypeId);
   return orderRoomsByRoomType(
     [
       ...intended.flatMap(({ id }) => (currentById.has(id) ? [currentById.get(id)!] : [])),
       ...current.filter(({ id }) => !intendedIds.has(id)),
     ],
-    roomTypeIds,
+    Array.from(new Set([...intendedTypeIds, ...roomTypeIds])),
   );
 };
 
@@ -126,6 +133,8 @@ export default function CalendarPage() {
   const [savingOrder, setSavingOrder] = useState(false);
   const [roomOrderError, setRoomOrderError] = useState<string | null>(null);
   const [roomOrderNeedsRefresh, setRoomOrderNeedsRefresh] = useState(false);
+  // The room or room type moved last; its row stays tinted until the order is saved.
+  const [lastMovedId, setLastMovedId] = useState<string | null>(null);
   const roomViewMenuRef = useRef<HTMLDivElement | null>(null);
   const latestFetchRef = useRef(0);
 
@@ -424,8 +433,9 @@ export default function CalendarPage() {
     setShowRoomViewMenu(false);
     setRoomOrderError(null);
     setRoomOrderNeedsRefresh(false);
-    setLocalRooms(data.rooms.slice());
+    setLocalRooms(groupRoomsByType(data.rooms).flatMap(({ rooms }) => rooms));
     setReorderOrderVersion(data.roomOrderVersion);
+    setLastMovedId(null);
     setReorderMode(true);
   };
 
@@ -433,21 +443,22 @@ export default function CalendarPage() {
     setLocalRooms(null);
     setReorderOrderVersion(null);
     setReorderMode(false);
+    setLastMovedId(null);
     setRoomOrderError(null);
     setRoomOrderNeedsRefresh(false);
   };
 
-  const moveRoom = (idx: number, dir: -1 | 1) => {
+  // VAY-2294: rooms move within their type; a room type moves with all its rooms.
+  const moveRoom = (roomId: string, dir: -1 | 1) => {
     if (savingOrder) return;
-    setLocalRooms((rooms) => {
-      if (!rooms) return rooms;
-      const next = idx + dir;
-      if (next < 0 || next >= rooms.length) return rooms;
-      if (rooms[idx].roomTypeId !== rooms[next].roomTypeId) return rooms;
-      const copy = rooms.slice();
-      [copy[idx], copy[next]] = [copy[next], copy[idx]];
-      return copy;
-    });
+    setLocalRooms((rooms) => rooms && moveRoomWithinType(rooms, roomId, dir));
+    setLastMovedId(roomId);
+  };
+
+  const moveType = (roomTypeId: string, dir: -1 | 1) => {
+    if (savingOrder) return;
+    setLocalRooms((rooms) => rooms && moveRoomType(rooms, roomTypeId, dir));
+    setLastMovedId(roomTypeId);
   };
 
   const saveReorder = async () => {
@@ -466,6 +477,7 @@ export default function CalendarPage() {
       setReorderMode(false);
       setLocalRooms(null);
       setReorderOrderVersion(null);
+      setLastMovedId(null);
       if (!(await fetchData())) {
         setRoomOrderNeedsRefresh(true);
         setRoomOrderError("Room order saved, but the calendar could not refresh.");
@@ -520,6 +532,8 @@ export default function CalendarPage() {
     }
     setSavingOrder(false);
   };
+
+  const reorderGroups = reorderMode && localRooms ? groupRoomsByType(localRooms) : [];
 
   // Whether the user has unsaved changes during reorder mode.
   const hasUnsavedOrder = useMemo(() => {
@@ -880,7 +894,9 @@ export default function CalendarPage() {
 
         {reorderMode && (
           <div className="mb-4 px-4 py-2.5 bg-primary-50 border border-primary-200 rounded-lg text-xs text-primary-800">
-            {t("calendar.reorderHint")}
+            {reorderGroups.some(({ rooms }) => rooms.length > 1)
+              ? t("calendar.reorderHintGroups")
+              : t("calendar.reorderHint")}
           </div>
         )}
 
@@ -980,226 +996,254 @@ export default function CalendarPage() {
                     const rt = roomTypeMap[room.roomTypeId];
                     const isFirst = roomsArr[roomIdx - 1]?.roomTypeId !== room.roomTypeId;
                     const isLast = roomsArr[roomIdx + 1]?.roomTypeId !== room.roomTypeId;
+                    // Reorder mode (VAY-2294): a type with several rooms gets a header row whose
+                    // arrows move the whole type; a one-room type's row arrows move the type.
+                    const typeIdx = reorderGroups.findIndex(
+                      ({ roomTypeId }) => roomTypeId === room.roomTypeId,
+                    );
+                    const typeSize = reorderGroups[typeIdx]?.rooms.length ?? 0;
+                    const typeName = rt?.name || room.roomTypeName;
+                    const typeStepper = (
+                      <ReorderStepper
+                        upLabel={t("calendar.moveTypeUp", { name: typeName })}
+                        downLabel={t("calendar.moveTypeDown", { name: typeName })}
+                        upDisabled={savingOrder || typeIdx <= 0}
+                        downDisabled={savingOrder || typeIdx >= reorderGroups.length - 1}
+                        onUp={() => moveType(room.roomTypeId, -1)}
+                        onDown={() => moveType(room.roomTypeId, 1)}
+                      />
+                    );
+                    const typeMoved = reorderMode && lastMovedId === room.roomTypeId;
+                    const rowMoved =
+                      reorderMode && (lastMovedId === room.id || (typeMoved && typeSize === 1));
                     return (
-                      <tr
-                        key={room.id}
-                        className={`border-b border-gray-100 ${reorderMode ? "" : "hover:bg-gray-50/50"}`}
-                      >
-                        <td className="px-1.5 md:px-3 py-1.5 md:py-2 sticky left-0 bg-white z-10 border-r border-gray-200">
-                          <div className="flex items-center gap-2">
-                            {reorderMode && (
-                              <div className="flex flex-col gap-0.5">
-                                <button
-                                  onClick={() => moveRoom(roomIdx, -1)}
-                                  disabled={savingOrder || isFirst}
-                                  aria-label={t("calendar.moveUp")}
-                                  title={t("calendar.moveUp")}
-                                  className="w-5 h-5 flex items-center justify-center rounded text-gray-600 hover:bg-gray-100 disabled:text-gray-300 disabled:hover:bg-transparent disabled:cursor-not-allowed"
-                                >
-                                  <svg
-                                    className="w-3 h-3"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    viewBox="0 0 24 24"
+                      <Fragment key={room.id}>
+                        {reorderMode && isFirst && typeSize > 1 && (
+                          <tr
+                            className={`border-b border-gray-100 ${typeMoved ? "bg-primary-50" : "bg-gray-50"}`}
+                          >
+                            <td
+                              className={`px-3 py-2 sticky left-0 z-10 border-r border-gray-200 ${typeMoved ? "bg-primary-50" : "bg-gray-50"}`}
+                            >
+                              <div className="flex items-center gap-2.5">
+                                {typeStepper}
+                                <div className="min-w-0 flex-1">
+                                  <div
+                                    className="text-[13px] font-semibold text-gray-900 leading-tight truncate"
+                                    title={typeName}
                                   >
-                                    <path
-                                      strokeLinecap="round"
-                                      strokeLinejoin="round"
-                                      strokeWidth={2.5}
-                                      d="M5 15l7-7 7 7"
+                                    {typeName}
+                                  </div>
+                                  <div className="text-[11px] text-gray-500 leading-tight truncate">
+                                    {t("calendar.reorderTypeRooms", { count: typeSize })}
+                                  </div>
+                                </div>
+                              </div>
+                            </td>
+                            <td colSpan={VIEW_DAYS} className="h-12 p-0" />
+                          </tr>
+                        )}
+                        <tr
+                          className={`border-b border-gray-100 ${reorderMode ? (rowMoved ? "bg-primary-50" : "") : "hover:bg-gray-50/50"}`}
+                        >
+                          <td
+                            className={`px-1.5 md:px-3 py-1.5 md:py-2 sticky left-0 z-10 border-r border-gray-200 ${rowMoved ? "bg-primary-50" : "bg-white"}`}
+                          >
+                            <div
+                              className={`flex items-center ${reorderMode ? "gap-2.5" : "gap-2"}`}
+                            >
+                              {reorderMode &&
+                                (typeSize > 1 ? (
+                                  <>
+                                    <span
+                                      aria-hidden="true"
+                                      className="w-6 flex-shrink-0 self-stretch flex justify-center -my-1.5 md:-my-2"
+                                    >
+                                      <span
+                                        className={`w-0.5 bg-gray-200 ${isLast ? "h-1/2" : "h-full"}`}
+                                      />
+                                    </span>
+                                    <ReorderStepper
+                                      upLabel={t("calendar.moveUp")}
+                                      downLabel={t("calendar.moveDown")}
+                                      upDisabled={savingOrder || isFirst}
+                                      downDisabled={savingOrder || isLast}
+                                      onUp={() => moveRoom(room.id, -1)}
+                                      onDown={() => moveRoom(room.id, 1)}
                                     />
-                                  </svg>
-                                </button>
-                                <button
-                                  onClick={() => moveRoom(roomIdx, 1)}
-                                  disabled={savingOrder || isLast}
-                                  aria-label={t("calendar.moveDown")}
-                                  title={t("calendar.moveDown")}
-                                  className="w-5 h-5 flex items-center justify-center rounded text-gray-600 hover:bg-gray-100 disabled:text-gray-300 disabled:hover:bg-transparent disabled:cursor-not-allowed"
+                                  </>
+                                ) : (
+                                  typeStepper
+                                ))}
+                              <div className="min-w-0 flex-1">
+                                <div
+                                  className="text-[11px] md:text-sm font-semibold text-gray-900 break-words line-clamp-2 leading-tight"
+                                  title={room.roomNumber}
                                 >
-                                  <svg
-                                    className="w-3 h-3"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    viewBox="0 0 24 24"
-                                  >
-                                    <path
-                                      strokeLinecap="round"
-                                      strokeLinejoin="round"
-                                      strokeWidth={2.5}
-                                      d="M19 9l-7 7-7-7"
-                                    />
-                                  </svg>
-                                </button>
-                              </div>
-                            )}
-                            <div className="min-w-0 flex-1">
-                              <div
-                                className="text-[11px] md:text-sm font-semibold text-gray-900 break-words line-clamp-2 leading-tight"
-                                title={room.roomNumber}
-                              >
-                                #{room.roomNumber}
-                              </div>
-                              <div
-                                className="hidden md:block text-[10px] text-gray-500 leading-tight truncate"
-                                title={
-                                  rt?.category
-                                    ? `${room.roomTypeName} · ${rt.category}`
-                                    : room.roomTypeName
-                                }
-                              >
-                                {room.roomTypeName}
-                                {rt?.category && (
-                                  <span className="text-gray-400"> &middot; {rt.category}</span>
-                                )}
+                                  #{room.roomNumber}
+                                </div>
+                                <div
+                                  className="hidden md:block text-[10px] text-gray-500 leading-tight truncate"
+                                  title={
+                                    rt?.category
+                                      ? `${room.roomTypeName} · ${rt.category}`
+                                      : room.roomTypeName
+                                  }
+                                >
+                                  {room.roomTypeName}
+                                  {rt?.category && (
+                                    <span className="text-gray-400"> &middot; {rt.category}</span>
+                                  )}
+                                </div>
                               </div>
                             </div>
-                          </div>
-                        </td>
-                        <td
-                          colSpan={VIEW_DAYS}
-                          className={`relative h-12 p-0 select-none touch-none ${
-                            reorderMode ? "pointer-events-none opacity-60" : "cursor-cell"
-                          }`}
-                          onPointerDown={(e) => handleCellPointerDown(e, room.id)}
-                        >
-                          {/* Day grid lines */}
-                          <div className="absolute inset-0 flex">
-                            {dates.map((d) => {
-                              const isToday =
-                                format(d, "yyyy-MM-dd") === format(new Date(), "yyyy-MM-dd");
-                              const dow = d.getDay();
-                              const isWeekend = dow === 0 || dow === 6;
-                              const cellStyle = isToday
-                                ? { backgroundColor: "#f8fbff" }
-                                : isWeekend
-                                  ? { backgroundColor: "#fafafa" }
-                                  : undefined;
+                          </td>
+                          <td
+                            colSpan={VIEW_DAYS}
+                            className={`relative h-12 p-0 select-none touch-none ${
+                              reorderMode ? "pointer-events-none opacity-60" : "cursor-cell"
+                            }`}
+                            onPointerDown={(e) => handleCellPointerDown(e, room.id)}
+                          >
+                            {/* Day grid lines */}
+                            <div className="absolute inset-0 flex">
+                              {dates.map((d) => {
+                                const isToday =
+                                  format(d, "yyyy-MM-dd") === format(new Date(), "yyyy-MM-dd");
+                                const dow = d.getDay();
+                                const isWeekend = dow === 0 || dow === 6;
+                                const cellStyle = isToday
+                                  ? { backgroundColor: "#f8fbff" }
+                                  : isWeekend
+                                    ? { backgroundColor: "#fafafa" }
+                                    : undefined;
+                                return (
+                                  <div
+                                    key={d.toISOString()}
+                                    style={cellStyle}
+                                    className="flex-1 border-r border-gray-100"
+                                  />
+                                );
+                              })}
+                            </div>
+                            {/* Drag-selection overlay — persists while popover is open */}
+                            {(() => {
+                              let s: number | null = null;
+                              let e: number | null = null;
+                              if (drag && drag.roomId === room.id) {
+                                s = Math.min(drag.startIdx, drag.endIdx);
+                                e = Math.max(drag.startIdx, drag.endIdx);
+                              } else if (prefill && prefill.roomId === room.id) {
+                                const ps = differenceInDays(parseISO(prefill.startDate), startDate);
+                                const pe =
+                                  differenceInDays(parseISO(prefill.endDate), startDate) - 1;
+                                if (pe >= 0 && ps < VIEW_DAYS) {
+                                  s = Math.max(0, ps);
+                                  e = Math.min(VIEW_DAYS - 1, pe);
+                                }
+                              }
+                              if (s === null || e === null) return null;
                               return (
                                 <div
-                                  key={d.toISOString()}
-                                  style={cellStyle}
-                                  className="flex-1 border-r border-gray-100"
+                                  className="absolute top-1 bottom-1 bg-primary-500/20 border-2 border-primary-500 rounded-md pointer-events-none z-[2]"
+                                  style={{
+                                    left: `${(s / VIEW_DAYS) * 100}%`,
+                                    width: `${((e - s + 1) / VIEW_DAYS) * 100}%`,
+                                  }}
                                 />
                               );
-                            })}
-                          </div>
-                          {/* Drag-selection overlay — persists while popover is open */}
-                          {(() => {
-                            let s: number | null = null;
-                            let e: number | null = null;
-                            if (drag && drag.roomId === room.id) {
-                              s = Math.min(drag.startIdx, drag.endIdx);
-                              e = Math.max(drag.startIdx, drag.endIdx);
-                            } else if (prefill && prefill.roomId === room.id) {
-                              const ps = differenceInDays(parseISO(prefill.startDate), startDate);
-                              const pe = differenceInDays(parseISO(prefill.endDate), startDate) - 1;
-                              if (pe >= 0 && ps < VIEW_DAYS) {
-                                s = Math.max(0, ps);
-                                e = Math.min(VIEW_DAYS - 1, pe);
-                              }
-                            }
-                            if (s === null || e === null) return null;
-                            return (
-                              <div
-                                className="absolute top-1 bottom-1 bg-primary-500/20 border-2 border-primary-500 rounded-md pointer-events-none z-[2]"
-                                style={{
-                                  left: `${(s / VIEW_DAYS) * 100}%`,
-                                  width: `${((e - s + 1) / VIEW_DAYS) * 100}%`,
-                                }}
-                              />
-                            );
-                          })()}
-                          {/* Block bars — per-room blocks render on their own row.
+                            })()}
+                            {/* Block bars — per-room blocks render on their own row.
                           Legacy count-based blocks still fill the first N rooms of the type. */}
-                          {[
-                            ...(blocksByRoom[room.id] || []),
-                            ...(legacyBlocksByRoomType[room.roomTypeId] || []).filter(
-                              (bl) => (roomIndexInType[room.id] ?? 0) < bl.blockedCount,
-                            ),
-                          ].map((bl) => {
-                            const style = getBarStyle(bl.startDate, bl.endDate);
-                            if (!style) return null;
-                            return (
-                              <button
-                                key={`block-${bl.id}`}
-                                type="button"
-                                data-bar="block"
-                                onClick={() => setSelectedBlock(bl)}
-                                className={`absolute top-1.5 h-8 rounded-md px-2 text-[11px] font-medium leading-8 truncate z-[1] border border-dashed flex items-center gap-1 cursor-pointer ${
-                                  bl.protected
-                                    ? "bg-amber-100 border-amber-300 text-amber-700 hover:bg-amber-200"
-                                    : "bg-red-100 border-red-300 text-red-600 hover:bg-red-200"
-                                }`}
-                                style={style}
-                                title={`${bl.protected ? t("rooms.linked") : t("calendar.blocked")}: ${bl.sourceSummary || bl.reason || t("calendar.blockDetail.noReason")}\n${bl.startDate} → ${bl.endDate}${
-                                  bl.roomId
-                                    ? `\n${t("calendar.roomNumber", { room: bl.roomNumber ?? "" })}`
-                                    : `\n${t("calendar.blockDetail.roomCount", { count: bl.blockedCount })}`
-                                }`}
-                              >
-                                <svg
-                                  className="w-3.5 h-3.5 flex-shrink-0"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  viewBox="0 0 24 24"
+                            {[
+                              ...(blocksByRoom[room.id] || []),
+                              ...(legacyBlocksByRoomType[room.roomTypeId] || []).filter(
+                                (bl) => (roomIndexInType[room.id] ?? 0) < bl.blockedCount,
+                              ),
+                            ].map((bl) => {
+                              const style = getBarStyle(bl.startDate, bl.endDate);
+                              if (!style) return null;
+                              return (
+                                <button
+                                  key={`block-${bl.id}`}
+                                  type="button"
+                                  data-bar="block"
+                                  onClick={() => setSelectedBlock(bl)}
+                                  className={`absolute top-1.5 h-8 rounded-md px-2 text-[11px] font-medium leading-8 truncate z-[1] border border-dashed flex items-center gap-1 cursor-pointer ${
+                                    bl.protected
+                                      ? "bg-amber-100 border-amber-300 text-amber-700 hover:bg-amber-200"
+                                      : "bg-red-100 border-red-300 text-red-600 hover:bg-red-200"
+                                  }`}
+                                  style={style}
+                                  title={`${bl.protected ? t("rooms.linked") : t("calendar.blocked")}: ${bl.sourceSummary || bl.reason || t("calendar.blockDetail.noReason")}\n${bl.startDate} → ${bl.endDate}${
+                                    bl.roomId
+                                      ? `\n${t("calendar.roomNumber", { room: bl.roomNumber ?? "" })}`
+                                      : `\n${t("calendar.blockDetail.roomCount", { count: bl.blockedCount })}`
+                                  }`}
                                 >
-                                  <path
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    strokeWidth={2}
-                                    d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"
-                                  />
-                                </svg>
-                                <span className="truncate">
-                                  {bl.protected
-                                    ? t("rooms.linked")
-                                    : bl.reason || t("calendar.blocked")}
-                                </span>
-                              </button>
-                            );
-                          })}
-                          {/* Booking bars */}
-                          {roomBookings.map((b) => {
-                            const style = getBarStyle(b.checkIn, b.checkOut);
-                            if (!style) return null;
-                            const channelColor = getChannelBarColor(b.channel);
-                            // VAY-403: multi-room reservation spans several rows.
-                            const isMultiRoom = b.numberOfRooms > 1;
-                            const multiRoomTitle = isMultiRoom
-                              ? `\n${t("calendar.bookingRoomPosition", {
-                                  reference: b.bookingReference,
-                                  position: b.roomPosition + 1,
-                                  total: b.numberOfRooms,
-                                })}`
-                              : "";
-                            return (
-                              <div
-                                key={`${b.id}-${b.roomPosition}`}
-                                data-bar="booking"
-                                className={`absolute top-1.5 h-8 rounded-md px-2 text-[11px] font-medium leading-8 truncate cursor-pointer z-[1] text-white ${channelColor} hover:brightness-110 transition-all flex items-center gap-1.5 ${
-                                  isMultiRoom ? "ring-1 ring-inset ring-white/50" : ""
-                                }`}
-                                style={style}
-                                title={`${b.guestFirstName} ${b.guestLastName} (${b.status})\n${b.checkIn} → ${b.checkOut}\nChannel: ${b.channel}${multiRoomTitle}`}
-                                onClick={() => setSelectedBooking(b)}
-                              >
-                                <span className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center text-[9px] font-bold flex-shrink-0">
-                                  {getInitials(b.guestFirstName, b.guestLastName)}
-                                </span>
-                                <span className="truncate">
-                                  {`${b.guestFirstName} ${b.guestLastName}`.trim()}
-                                </span>
-                                {isMultiRoom && (
-                                  <span className="ml-auto pl-1 text-[9px] font-bold opacity-90 flex-shrink-0">
-                                    ×{b.numberOfRooms}
+                                  <svg
+                                    className="w-3.5 h-3.5 flex-shrink-0"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    viewBox="0 0 24 24"
+                                  >
+                                    <path
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                      strokeWidth={2}
+                                      d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"
+                                    />
+                                  </svg>
+                                  <span className="truncate">
+                                    {bl.protected
+                                      ? t("rooms.linked")
+                                      : bl.reason || t("calendar.blocked")}
                                   </span>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </td>
-                      </tr>
+                                </button>
+                              );
+                            })}
+                            {/* Booking bars */}
+                            {roomBookings.map((b) => {
+                              const style = getBarStyle(b.checkIn, b.checkOut);
+                              if (!style) return null;
+                              const channelColor = getChannelBarColor(b.channel);
+                              // VAY-403: multi-room reservation spans several rows.
+                              const isMultiRoom = b.numberOfRooms > 1;
+                              const multiRoomTitle = isMultiRoom
+                                ? `\n${t("calendar.bookingRoomPosition", {
+                                    reference: b.bookingReference,
+                                    position: b.roomPosition + 1,
+                                    total: b.numberOfRooms,
+                                  })}`
+                                : "";
+                              return (
+                                <div
+                                  key={`${b.id}-${b.roomPosition}`}
+                                  data-bar="booking"
+                                  className={`absolute top-1.5 h-8 rounded-md px-2 text-[11px] font-medium leading-8 truncate cursor-pointer z-[1] text-white ${channelColor} hover:brightness-110 transition-all flex items-center gap-1.5 ${
+                                    isMultiRoom ? "ring-1 ring-inset ring-white/50" : ""
+                                  }`}
+                                  style={style}
+                                  title={`${b.guestFirstName} ${b.guestLastName} (${b.status})\n${b.checkIn} → ${b.checkOut}\nChannel: ${b.channel}${multiRoomTitle}`}
+                                  onClick={() => setSelectedBooking(b)}
+                                >
+                                  <span className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center text-[9px] font-bold flex-shrink-0">
+                                    {getInitials(b.guestFirstName, b.guestLastName)}
+                                  </span>
+                                  <span className="truncate">
+                                    {`${b.guestFirstName} ${b.guestLastName}`.trim()}
+                                  </span>
+                                  {isMultiRoom && (
+                                    <span className="ml-auto pl-1 text-[9px] font-bold opacity-90 flex-shrink-0">
+                                      ×{b.numberOfRooms}
+                                    </span>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </td>
+                        </tr>
+                      </Fragment>
                     );
                   },
                 )}
