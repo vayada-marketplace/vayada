@@ -46,8 +46,10 @@ vi.mock("@/components/Modal", () => ({
 import Page from "@/app/(app)/settings/team/page";
 import MemberAccessDialog from "./MemberAccessDialog";
 import PropertyAccessMatrix from "./PropertyAccessMatrix";
+import RoleEditorDialog from "./RoleEditorDialog";
 import TeamAccessFields from "./TeamAccessFields";
 import TeamActionDialog from "./TeamActionDialog";
+import TeamRoleCards from "./TeamRoleCards";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -71,7 +73,7 @@ it("keeps invitation creation available with an empty roster", async () => {
   expect(api.invite).not.toHaveBeenCalled();
   view.unmount();
 });
-it("shows property access for an administrator-only account", async () => {
+it("starts the property overview with the first teammate, admin included", async () => {
   api.admins.mockResolvedValue({
     actorMembershipId: "owner",
     admins: [
@@ -89,7 +91,90 @@ it("shows property access for an administrator-only account", async () => {
   await act(async () => {
     view = create(<Page />);
   });
+  expect(view.root.findAllByType(PropertyAccessMatrix)).toHaveLength(0);
+  view.unmount();
+  api.roster.mockResolvedValue([
+    {
+      id: "member",
+      name: "Worker",
+      email: "test@example.invalid",
+      roleKey: "front_desk",
+      status: "active",
+      propertyIds: ["property"],
+      lastActiveAt: null,
+    },
+  ]);
+  await act(async () => {
+    view = create(<Page />);
+  });
   expect(view.root.findByType(PropertyAccessMatrix).props.admins).toHaveLength(1);
+  view.unmount();
+});
+
+it("offers the empty roles state, and a create-a-role-first hint when inviting without roles", async () => {
+  api.roles.mockResolvedValue({
+    roles: [
+      {
+        id: "admin-role",
+        name: "Account admin",
+        description: "Full access to every property, every section and billing.",
+        revision: "1",
+        baseRoleKey: "hotel_owner",
+        securityClass: "account_admin",
+        presetKey: "account_admin",
+        defaultPermissions: [],
+        allowedPermissions: [],
+        immutable: true,
+        memberCount: 0,
+        invitationCount: 0,
+      },
+    ],
+    canManageRoles: true,
+  });
+  let view!: ReturnType<typeof create>;
+  await act(async () => {
+    view = create(<Page />);
+  });
+  const text = () => JSON.stringify(view.toJSON());
+  expect(text()).toContain("No custom roles yet");
+  const buttonsNamed = (label: string) =>
+    view.root.findAllByType("button").filter((button) => button.children.includes(label));
+  // One Create role, inside the empty state; the one below the list is for accounts with roles.
+  expect(buttonsNamed("Create role")).toHaveLength(1);
+  await act(async () => {
+    buttonsNamed("Invite teammate")[0]!.props.onClick();
+  });
+  expect(text()).toContain("Create a role first");
+  expect(view.root.findAllByType(TeamAccessFields)).toHaveLength(0);
+  await act(async () => {
+    buttonsNamed("Create role").at(-1)!.props.onClick();
+  });
+  expect(view.root.findAllByType(MemberAccessDialog)).toHaveLength(0);
+  expect(view.root.findAllByType(RoleEditorDialog)).toHaveLength(1);
+  // Saving that role goes straight back to the invite.
+  await act(async () => {
+    view.root.findByType(RoleEditorDialog).props.onSaved();
+  });
+  expect(view.root.findAllByType(RoleEditorDialog)).toHaveLength(0);
+  expect(view.root.findAllByType(MemberAccessDialog)).toHaveLength(1);
+  view.unmount();
+});
+
+it("tells a manager that the account admin creates roles", () => {
+  const view = create(
+    <TeamRoleCards
+      roles={[]}
+      canManage={false}
+      adminCount={1}
+      onCreate={vi.fn()}
+      onEdit={vi.fn()}
+      onDelete={vi.fn()}
+    />,
+  );
+  expect(JSON.stringify(view.toJSON())).toContain("The account admin creates roles.");
+  expect(
+    view.root.findAllByType("button").filter((button) => button.children.includes("Create role")),
+  ).toHaveLength(0);
   view.unmount();
 });
 it("shows a load error instead of presenting missing properties as an empty scope", async () => {
@@ -133,6 +218,12 @@ it("captures one invitation configuration for resend and reports unconfirmed del
   let view!: ReturnType<typeof create>;
   await act(async () => {
     view = create(<Page />);
+  });
+  await act(async () => {
+    view.root
+      .findAllByType("button")
+      .find((button) => button.props["aria-label"] === "More actions for test@example.invalid")!
+      .props.onClick();
   });
   await act(async () => {
     await view.root
@@ -236,7 +327,7 @@ it("rejects mismatched role and member snapshots before opening the access edito
   await act(async () => {
     await view.root
       .findAllByType("button")
-      .find((button) => button.children.includes("Edit member access"))!
+      .find((button) => button.props["aria-label"] === "Edit access for Worker")!
       .props.onClick();
   });
   expect(api.roles).toHaveBeenCalledTimes(2);
