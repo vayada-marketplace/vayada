@@ -79,9 +79,11 @@ test("a fee that changed since the preview is shown in the dialog before cancell
   await page.route("**/api/booking-web/hotels/*/bookings/lookup", (route) =>
     route.fulfill({ json: booking }),
   );
-  let previews = 0;
+  const sent: Array<{ expectedCancellationFeeMinor?: string }> = [];
+  // The fee moves to the next tier between the preview (taken at lookup since VAY-2308) and the
+  // first "Yes, Cancel".
   await page.route("**/api/booking-web/hotels/*/bookings/*/cancel-preview", (route) => {
-    const fee = ++previews === 1 ? 200 : 400;
+    const fee = sent.length === 0 ? 200 : 400;
     return route.fulfill({
       json: {
         ...preview,
@@ -90,7 +92,6 @@ test("a fee that changed since the preview is shown in the dialog before cancell
       },
     });
   });
-  const sent: Array<{ expectedCancellationFeeMinor?: string }> = [];
   await page.route("**/api/booking-web/hotels/*/bookings/*/cancel", (route) => {
     sent.push(route.request().postDataJSON());
     return sent.length === 1
