@@ -4106,7 +4106,11 @@ async function withGuestLifecycleMutation(
     );
     const updated = result.rows[0];
     if (!updated) {
-      throw createHttpError(409, "Booking status changed. Please refresh and try again.");
+      throw createHttpError(
+        409,
+        "Booking status changed. Please refresh and try again.",
+        "BOOKING_NOT_CHANGEABLE",
+      );
     }
     await reverseTargetPromoRedemption(
       client,
@@ -5689,7 +5693,7 @@ export async function reserveTargetCheckoutCommand(
 
   const existing = await findTargetCheckoutCommand(pool, propertyId, context);
   if (existing) return existing;
-  throw createHttpError(409, "Checkout command is already in progress.");
+  throw createHttpError(409, "Checkout command is already in progress.", "busy_try_again");
 }
 
 async function findTargetCheckoutCommand(
@@ -5729,7 +5733,7 @@ async function findTargetCheckoutCommand(
     }
     throw createHttpError(409, "Completed checkout response is unavailable for replay.");
   }
-  throw createHttpError(409, "Checkout command is already in progress.");
+  throw createHttpError(409, "Checkout command is already in progress.", "busy_try_again");
 }
 
 export async function recordTargetCheckoutCommand(
@@ -6507,7 +6511,11 @@ async function loadBookedCancellationOutcome(
       ["checked_in", "in_house", "checked_out"].includes(status),
     )
   )
-    throw createHttpError(409, "This stay has already started. Contact the property.");
+    throw createHttpError(
+      409,
+      "This stay has already started. Contact the property.",
+      "BOOKING_CANCEL_CHECK_IN_PASSED",
+    );
   return loadPricingBookingCancellation(db, {
     propertyId,
     guestBookingId: booking.guestBookingId,
@@ -6555,6 +6563,7 @@ function targetDateDifference(start: string, end: string): number {
     throw createHttpError(
       409,
       "This booking's cancellation period cannot be verified online. Contact the property.",
+      "BOOKING_CANCEL_NOT_ONLINE",
     );
   }
   return Math.floor((endTime - startTime) / 86_400_000);

@@ -128,6 +128,8 @@ test("a server failure keeps Cancel and shows only the generic text", async ({ p
 test("a refusal that arrives on the click replaces Cancel too", async ({ page }) => {
   let previews = 0;
   await openMyBooking(page, { status: 503, json: { statusCode: 503, message: "down" } });
+  // The check at lookup has answered (503) and left the button usable.
+  await expect(page.getByRole("button", { name: "Cancel Booking" })).toBeEnabled();
   await page.unroute("**/api/booking-web/hotels/*/bookings/*/cancel-preview");
   await page.route("**/api/booking-web/hotels/*/bookings/*/cancel-preview", (route) => {
     previews++;
@@ -146,6 +148,55 @@ test("a refusal that arrives on the click replaces Cancel too", async ({ page })
   ).toBeVisible();
   await expect(page.getByRole("button", { name: "Cancel Booking" })).toHaveCount(0);
   expect(previews).toBe(1);
+});
+
+test("a busy answer keeps Cancel, since asking again can work", async ({ page }) => {
+  await openMyBooking(
+    page,
+    refusal("Someone else is changing this right now. Try again in a moment.", "busy_try_again"),
+  );
+  await expect(page.getByRole("button", { name: "Cancel Booking" })).toBeEnabled();
+  await expect(page.getByRole("link", { name: "Contact the Hotel" })).toHaveCount(0);
+});
+
+test("a slow check shows the booking at once and frees Cancel after 8 s", async ({ page }) => {
+  await mockBookingApis(page);
+  await page.route("**/api/booking-web/hotels/*/bookings/lookup", (route) =>
+    route.fulfill({ json: booking }),
+  );
+  // Never answers.
+  await page.route("**/api/booking-web/hotels/*/bookings/*/cancel-preview", () => {});
+  await page.goto("/en/my-booking?reference=VAY-2308&email=ada%40example.test");
+  await expect(page.getByText("Booking Found", { exact: true })).toBeVisible();
+  await expect(page.getByText("Alpine Suite")).toBeVisible();
+  await expect(page.getByRole("button", { name: "...", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Cancel Booking" })).toBeEnabled({
+    timeout: 15_000,
+  });
+});
+
+test("a refused withdraw replaces the Withdraw button with the reason", async ({ page }) => {
+  await mockBookingApis(page);
+  await page.route("**/api/booking-web/hotels/*/bookings/lookup", (route) =>
+    route.fulfill({ json: { ...booking, status: "pending", paymentStatus: "authorized" } }),
+  );
+  await page.route("**/api/booking-web/hotels/*/bookings/*/withdraw", (route) =>
+    route.fulfill(
+      refusal(
+        "This booking's card payment can't be withdrawn online. Please contact the hotel.",
+        "BOOKING_WITHDRAW_NOT_ONLINE",
+      ),
+    ),
+  );
+  await page.goto("/en/my-booking?reference=VAY-2308&email=ada%40example.test");
+  await page.getByRole("button", { name: "Withdraw Request" }).click();
+  await page.getByRole("button", { name: "Yes, Withdraw" }).click();
+  await expect(
+    page.getByText("This request can't be withdrawn online. Please contact the hotel."),
+  ).toBeVisible();
+  await expect(page.getByText("Withdraw This Request?")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Withdraw Request" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Contact the Hotel" })).toBeVisible();
 });
 
 test("an unknown reference reads as not found, not as a failure", async ({ page }) => {

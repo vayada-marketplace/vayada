@@ -97,7 +97,12 @@ test("a fee that changed since the preview is shown in the dialog before cancell
     return sent.length === 1
       ? route.fulfill({
           status: 409,
-          json: { detail: "The cancellation fee has changed. Review it again before cancelling." },
+          json: {
+            statusCode: 409,
+            error: "Conflict",
+            message: "The cancellation fee has changed. Review it again before cancelling.",
+            code: "BOOKING_CANCEL_FEE_CHANGED",
+          },
         })
       : route.fulfill({ json: { status: "cancelled" } });
   });
@@ -106,7 +111,9 @@ test("a fee that changed since the preview is shown in the dialog before cancell
   const dialog = page.getByText("Cancel This Booking?").locator("..");
   await expect(dialog.locator("p.text-gray-700")).toHaveText(/cancellation fee of .*200/);
   await page.getByRole("button", { name: "Yes, Cancel" }).click();
-  await expect(dialog.getByRole("alert")).toBeVisible();
+  await expect(dialog.getByRole("alert")).toHaveText(
+    "The cancellation fee has changed. Please review it before cancelling.",
+  );
   await expect(dialog.locator("p.text-gray-700")).toHaveText(/cancellation fee of .*400/);
   await page.getByRole("button", { name: "Yes, Cancel" }).click();
   await expect(page.getByText("Your booking has been cancelled.")).toBeVisible();

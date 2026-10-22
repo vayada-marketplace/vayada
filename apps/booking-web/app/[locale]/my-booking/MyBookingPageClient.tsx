@@ -5,7 +5,7 @@ import { formatStayDate } from "@/lib/utils";
 import { Link } from "@/i18n/navigation";
 import ApproximateAmountsNote from "@/components/booking/ApproximateAmountsNote";
 import RoomSelectionSummary from "@/components/booking/RoomSelectionSummary";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import HotelHeroImage from "@/components/booking/HotelHeroImage";
 import { useSearchParams } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
@@ -67,31 +67,29 @@ export default function MyBookingPageClient() {
   const [successMessage, setSuccessMessage] = useState("");
   // Why the server won't cancel this booking online; replaces the Cancel button (VAY-2308).
   const [cancelRefusal, setCancelRefusal] = useState("");
+  // Bumped by every lookup: an answer for an earlier lookup is ignored.
+  const lookupVersion = useRef(0);
 
   const handleSearch = async (overrideReference?: string, overrideEmail?: string) => {
     const ref = overrideReference ?? reference;
     const em = overrideEmail ?? email;
     if (!ref || !em) return;
+    const version = ++lookupVersion.current;
     setSearching(true);
     setError("");
     setBooking(null);
     setSuccessMessage("");
-    setCancelPreview(null);
     setCancelRefusal("");
+    setLoadingPreview(false);
 
     try {
       const result = await bookingService.lookup(slug, ref, em);
-      // Ask before the guest clicks: a booking the server won't cancel online says why up front.
-      if (result.status === "confirmed" && offersCancel(result)) {
-        try {
-          setCancelPreview(await bookingService.cancelPreview(slug, result.id, em));
-        } catch (err) {
-          // Anything else (busy, outage) keeps the button; clicking asks again.
-          if (isLastingRefusal(err)) setCancelRefusal(errorText(err));
-        }
-      }
+      if (version !== lookupVersion.current) return;
       setBooking(result);
+      if (result.status === "confirmed" && offersCancel(result))
+        void checkOnlineCancel(result.id, em, version);
     } catch (err) {
+      if (version !== lookupVersion.current) return;
       setError(
         err instanceof ApiError && err.status === 404
           ? t("notFound")
@@ -100,7 +98,21 @@ export default function MyBookingPageClient() {
             : errorText(err, t("lookupUnavailable")),
       );
     } finally {
-      setSearching(false);
+      if (version === lookupVersion.current) setSearching(false);
+    }
+  };
+
+  /** Asks the server before the guest clicks, so a booking it won't cancel online says why. The
+   * button waits up to 8 s; a busy answer, an outage or a slow server leaves it usable. */
+  const checkOnlineCancel = async (bookingId: string, em: string, version: number) => {
+    setLoadingPreview(true);
+    try {
+      await bookingService.cancelPreview(slug, bookingId, em, AbortSignal.timeout(8000));
+    } catch (err) {
+      if (version === lookupVersion.current && isLastingRefusal(err))
+        setCancelRefusal(errorText(err));
+    } finally {
+      if (version === lookupVersion.current) setLoadingPreview(false);
     }
   };
 
@@ -132,11 +144,6 @@ export default function MyBookingPageClient() {
       return;
     }
 
-    // The preview from the lookup; the fee is checked again when cancelling.
-    if (cancelPreview) {
-      setShowConfirmDialog(true);
-      return;
-    }
     setLoadingPreview(true);
     setError("");
     try {
@@ -174,6 +181,12 @@ export default function MyBookingPageClient() {
       setShowConfirmDialog(false);
       setCancelPreview(null);
     } catch (err) {
+      if (isPending && isLastingRefusal(err)) {
+        // Asking again won't help: the reason takes the Withdraw button's place.
+        setShowConfirmDialog(false);
+        setCancelRefusal(errorText(err));
+        return;
+      }
       setError(errorText(err));
       // The fee may have moved to another tier since the preview: show the current one here.
       if (!isPending) {
@@ -426,9 +439,13 @@ export default function MyBookingPageClient() {
               (cancelRefusal ? (
                 <div className="mt-6 rounded-xl border border-gray-200 bg-gray-50 p-4">
                   <p className="text-sm text-gray-700">{cancelRefusal}</p>
-                  {hotel.contact.email && (
+                  {(hotel.contact.email || hotel.contact.phone) && (
                     <a
-                      href={`mailto:${hotel.contact.email}`}
+                      href={
+                        hotel.contact.email
+                          ? `mailto:${hotel.contact.email}`
+                          : `tel:${hotel.contact.phone.replace(/[^\d+]/g, "")}`
+                      }
                       className="mt-4 block w-full py-3 text-center border border-gray-300 bg-white text-gray-700 font-semibold rounded-full hover:bg-gray-100 transition-colors"
                     >
                       {t("contactHotel")}
