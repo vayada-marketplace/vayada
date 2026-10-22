@@ -4162,6 +4162,14 @@ it("keeps the saved prices on show for review when the re-read after publishing 
   client.read.mockResolvedValueOnce(published([snapshot.rooms[0], { ...family, revision: 2 }], 2)); await click("Edit prices again");
   expect(input().props.disabled).toBe(false); expect(button("Save and publish").props.disabled).toBe(true);
 });
+it("keeps the saved prices on show for review when someone else published after this save (VAY-2305)", async () => {
+  client.read.mockResolvedValueOnce(published()); await mountRoom();
+  await act(async () => input().props.onChange({ target: { value: "123.45" } }));
+  // Revision 3 isn't the one this save made (2): its prices may not be these.
+  client.read.mockResolvedValueOnce(published([snapshot.rooms[0], { ...family, revision: 3 }], 3)); await click("Save and publish");
+  expect(client.read).toHaveBeenCalledTimes(2);
+  expect(JSON.stringify(view.toJSON())).toContain("Saved and published"); expect(input().props.disabled).toBe(true); expect(input().props.value).toBe("123.45");
+});
 it("keeps this room's edits over the reload after a refused save when only another room changed, and declares again", async () => {
   client.read.mockResolvedValueOnce(published()); await mountRoom();
   await act(async () => input().props.onChange({ target: { value: "123.45" } }));

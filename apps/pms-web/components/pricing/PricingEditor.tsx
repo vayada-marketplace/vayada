@@ -118,11 +118,11 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
   const load = useCallback(async (requested?: { keep?: Kept; published?: number }) => {
     const handover = requested ? undefined : handedOver.current, after = handover ? { keep: handedOverEdits(handover) } : requested;
     const seq = ++loads.current, latest = () => alive.current && seq === loads.current; // An older read never overwrites a newer one.
-    const republished = after?.published;
+    const republished = after?.published; // Only the publication this save made resumes editing; a newer one keeps its review.
     if (republished === undefined) { setLoading(true); setEmpty(false); setError(null); }
     try {
       const saved = await client.read(); if (!latest()) return;
-      if (republished !== undefined && !(saved && saved.revision >= republished && saved.rooms.some((value) => value.roomTypeId === focus))) return;
+      if (republished !== undefined && !(saved && saved.revision === republished && saved.rooms.some((value) => value.roomTypeId === focus))) return;
       const revision = (saved?.revision ?? 0) + 1, rooms = (saved?.rooms ?? []).map((room) => ({ ...room, revision }));
       const keep = after?.keep, kept = keep && keptRoom(keep, saved), room = kept && { ...kept, revision };
       setEmpty(saved === null && !room); setPolicyEdits(room ? keep!.terms : {}); loadedRooms.current = saved?.rooms ?? [];
