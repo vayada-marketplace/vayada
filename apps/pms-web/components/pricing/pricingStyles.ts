@@ -58,6 +58,12 @@ export const stepCard =
 /** The simple Prices card (VAY-2188): one white card whose sections are split by lines. */
 export const pricesCard = "rounded-2xl border border-gray-200 bg-white px-5 md:px-7";
 export const pricesSection = "space-y-4 border-gray-100 py-6 [&:not(:first-child)]:border-t";
+/** A step of "Pricing setup" (VAY-2305): a line above it, its explanation left of its card from xl. */
+export const setupStep = "border-t border-gray-200 py-7 xl:flex xl:items-start xl:gap-8";
+export const setupStepIntro = "mb-4 space-y-2.5 xl:mb-0 xl:w-[220px] xl:shrink-0";
+export const setupStepTitle = "text-[18px] font-bold leading-6 text-gray-900";
+export const setupStepCard =
+  "min-w-0 flex-1 space-y-4 rounded-2xl border border-gray-200 bg-white p-5 md:p-6";
 /** A blue line saying the room keeps settings the card's top doesn't show. */
 export const infoBanner =
   "rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-[14px] leading-5 text-blue-800";
@@ -69,9 +75,9 @@ export const switchTrack = (on: boolean) =>
 export const stepNumber =
   "flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary-600 text-[14px] font-bold text-white";
 export const stepTitle = "text-[17px] font-semibold leading-6 text-gray-900";
-/** A "Price rules" step's number (VAY-2280). */
+/** A "Pricing setup" step's number (VAY-2280, VAY-2305). */
 export const sectionNumber =
-  "flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gray-900 text-[12px] font-semibold text-white";
+  "flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gray-900 text-[13px] font-semibold text-white";
 export const stepHint = "text-[14px] leading-5 text-gray-500";
 export const stepButton =
   "inline-flex h-10 items-center gap-2 rounded-[10px] border border-gray-300 bg-white px-4 text-[14px] font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50";

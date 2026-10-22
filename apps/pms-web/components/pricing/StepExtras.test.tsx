@@ -131,3 +131,47 @@ it("shows what guests read under the meal's option in the guest card (VAY-2281)"
   expect(textOf(radios[1])).toContain("Buffet breakfast in the Stube, 7:00–10:30");
   expect(textOf(radios[0])).not.toContain("Buffet");
 });
+
+it("shows the guest card beside step Meals, and keeps it when the room has no breakfast switch (VAY-2305)", () => {
+  const value = room();
+  const preview = <p>What guests see here</p>;
+  const render = (optionTerms: typeof terms) => {
+    let view!: ReactTestRenderer;
+    act(() => {
+      view = create(
+        <StepExtras
+          room={value}
+          simple={simpleRoom(value, optionTerms)!}
+          prices={{}}
+          only="breakfast"
+          disabled={false}
+          onAdd={vi.fn()}
+          onRemove={vi.fn()}
+          onChange={vi.fn()}
+          onPending={vi.fn()}
+          preview={preview}
+        />,
+      );
+    });
+    return view;
+  };
+  const step = render(terms);
+  expect(textOf(step.root)).toContain("Meals");
+  expect(textOf(step.root)).toContain("What guests see here");
+  // A partial refund puts breakfast in the option's window, so step Meals has no switch; the guest card stays.
+  const partial = {
+    ...flexible,
+    cancellation: {
+      kind: "flexible",
+      terms: {
+        type: "free_until_days_before_arrival",
+        freeCancellationDeadlineDays: 7,
+        afterDeadlinePenalty: "full_booking_amount",
+        noShowPenalty: "full_booking_amount",
+        partialRefundCancelWindowDays: 3,
+      },
+    },
+  } as OptionTerms;
+  const own = render({ flexible: partial, breakfast: partial });
+  expect(textOf(own.root)).toBe("What guests see here");
+});

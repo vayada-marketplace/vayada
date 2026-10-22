@@ -398,7 +398,9 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
       const calendarId = rates.some((rate) => rate.id === previewId) ? previewId : rates[0]?.id ?? main.id;
       const others = simple ? simple.others : room.offers.filter((offer) => offer.id !== main.id);
       const gaps = edited ? nightsWithoutPrice(edited, main.id, sampleAdults(edited), today) : 0;
-      // The approved layout (VAY-2280): "Prices by date" first, then the price rules beside "What guests see".
+      const preview = <GuestPreview room={edited} facts={{ name: roomName(room.roomTypeId, ri), ...(roomFacts[room.roomTypeId] ?? { size: null, photo: null }) }} names={names} terms={optionTerms}
+        stay={stay} today={today} selected={previewId} onSelect={setPreviewOffer} />;
+      // The CEO's layout (VAY-2305): "Prices by date" first, then "Pricing setup", whose step "Meals" holds "What guests see".
       return <div key={room.roomTypeId} className="space-y-6">
         <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
           <PriceCalendar room={edited} options={rates} offerId={calendarId} onOffer={setPreviewOffer}
@@ -407,20 +409,19 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
           <NightPanel room={room} shown={edited} selection={selection} adults={calendarAdults ?? sampleAdults(room)} names={names} disabled={disabled || exclusiveEditPending}
             onClear={() => setSelection(null)} onChange={changeRoom(ri)} onPending={pend(`night:${ri}`)} />
         </div>
-        <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
         <div className="min-w-0 space-y-4">
         {kept && <p role="status" className={ui.infoBanner}>{t("pricing.simple.kept")}</p>}
         {/* The simple Prices card (VAY-2188): price, cancellation, the two switches and busier dates; everything else under More options. */}
-        {/* "Price rules" (VAY-2280): the four steps behind every price in the calendar, and the nights no price covers. */}
+        {/* "Pricing setup" (VAY-2280, VAY-2305): the four steps behind every price in the calendar, and the nights no price covers. */}
         <div className="flex flex-wrap items-end justify-between gap-2 pt-2">
           <div className="space-y-1">
-            <h2 className="text-[20px] font-bold text-gray-900">{t("pricing.rules.title")}</h2>
+            <h2 className="text-[24px] font-bold text-gray-900">{t("pricing.rules.title")}</h2>
             <p className={ui.stepHint}>{t("pricing.rules.hint")}</p>
           </div>
           {gaps > 0 && <span role="status" className="inline-flex items-center gap-1.5 rounded-full bg-red-50 px-2.5 py-1 text-[13px] font-medium text-red-700">
             <span aria-hidden="true" className="h-2 w-2 rounded-full bg-red-500" />{t(gaps === 1 ? "pricing.rules.gaps.one" : "pricing.rules.gaps.other", { count: gaps })}</span>}
         </div>
-        <div className={ui.pricesCard}>
+        <div>
           <StepOpening room={room} disabled={disabled || exclusiveEditPending} onChange={changeRoom(ri)} onPending={pend(`opening:${ri}`)} />
           <StepSeasons room={room} offer={main} roomIndex={ri} offerIndex={mi} label={mainLabel} inputs={inputs} disabled={disabled || exclusiveEditPending} names={names}
             onInput={(key, value) => { setInputs((previous) => ({ ...previous, [key]: value })); setDirty(true); setNotice(""); }} onEditMeal={() => setOptionOpen(main.id)}
@@ -451,9 +452,10 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
               <p className={ui.stepHint}>{t("pricing.paymentMethods.hint")}</p>
             </div>
           </StepRates>
-          {/* The breakfast switch; it becomes step "Meals" (VAY-2280 PR 6). */}
-          {simple && <StepExtras room={room} simple={simple} prices={prices} only="breakfast" disabled={disabled || (hasPendingEntries && !pendingEntries[`extras:${ri}`])}
-            onAdd={(input) => createInitial(input, true, room.roomTypeId)} onRemove={(offerId) => { if (!disabled && !pendingBesidesExtras) setDeleting(offerId); }} onChange={changeRoom(ri)} onPending={pend(`extras:${ri}`)} />}
+          {/* Step "Meals": the breakfast switch, beside "What guests see"; while the options' terms load, the preview alone. */}
+          {simple ? <StepExtras room={room} simple={simple} prices={prices} only="breakfast" disabled={disabled || (hasPendingEntries && !pendingEntries[`extras:${ri}`])}
+            onAdd={(input) => createInitial(input, true, room.roomTypeId)} onRemove={(offerId) => { if (!disabled && !pendingBesidesExtras) setDeleting(offerId); }} onChange={changeRoom(ri)} onPending={pend(`extras:${ri}`)} preview={preview} />
+            : <div className="border-t border-gray-200 py-7">{preview}</div>}
         </div>
         <OptionWindow open={childrenOpen} title={t("pricing.steps.rules.childrenTitle")} closable={!pendingEntries[`children:${ri}`]} onClose={() => setChildrenOpen(false)}>
           <PricingChildCharges room={room} label={roomName(room.roomTypeId, ri)} disabled={disabled || exclusiveEditPending} onPending={pend(`children:${ri}`)} onChange={changeRoom(ri)} />
@@ -536,11 +538,6 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
           <div className="mt-4">{independentOffer === true ? <FirstPricingSetup propertyId={room.propertyId} rooms={[{ roomTypeId: room.roomTypeId, name: roomName(room.roomTypeId, ri), capacity: room.capacity }]} existingRoom={room} fixedCurrency={room.currency} disabled={disabled} onDirty={() => {}} onCreate={(input) => createInitial(input, true)} />
             : independentOffer === false ? <NewLinkedOffer room={room} names={names} disabled={disabled} onCreate={(input) => createInitial(input, true)} /> : <p className={ui.help}>{t("pricing.steps.own.choose")}</p>}</div>
         </Modal>}
-        </div>
-        <aside className="min-w-0 space-y-4">
-          <GuestPreview room={edited} facts={{ name: roomName(room.roomTypeId, ri), ...(roomFacts[room.roomTypeId] ?? { size: null, photo: null }) }} names={names} terms={optionTerms}
-            stay={stay} today={today} selected={previewId} onSelect={setPreviewOffer} />
-        </aside>
         </div>
       </div>;
     })}
