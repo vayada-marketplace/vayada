@@ -460,7 +460,8 @@
     "paidByCard": "Paid by card",
     "partlyPaidByCard": "Partly paid by card",
     "heldOnCard": "Held on your card",
-    "refundedToCard": "Refunded to your card"
+    "refundedToCard": "Refunded to your card",
+    "addToCalendar": "Add to calendar"
   },
   "requestChange": {
     "title": "Request Booking Changes",

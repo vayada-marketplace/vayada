@@ -457,7 +457,8 @@
     "paidByCard": "Pagado con tarjeta",
     "partlyPaidByCard": "Pagado en parte con tarjeta",
     "heldOnCard": "Retenido en tu tarjeta",
-    "refundedToCard": "Reembolsado a tu tarjeta"
+    "refundedToCard": "Reembolsado a tu tarjeta",
+    "addToCalendar": "Añadir al calendario"
   },
   "refer": {
     "title": "Referir un Huésped",

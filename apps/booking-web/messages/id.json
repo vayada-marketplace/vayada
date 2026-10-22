@@ -457,7 +457,8 @@
     "paidByCard": "Dibayar dengan kartu",
     "partlyPaidByCard": "Dibayar sebagian dengan kartu",
     "heldOnCard": "Ditahan di kartu Anda",
-    "refundedToCard": "Dikembalikan ke kartu Anda"
+    "refundedToCard": "Dikembalikan ke kartu Anda",
+    "addToCalendar": "Tambahkan ke kalender"
   },
   "refer": {
     "title": "Referensikan Tamu",

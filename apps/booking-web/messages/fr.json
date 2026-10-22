@@ -457,7 +457,8 @@
     "paidByCard": "Payé par carte",
     "partlyPaidByCard": "Payé en partie par carte",
     "heldOnCard": "Bloqué sur votre carte",
-    "refundedToCard": "Remboursé sur votre carte"
+    "refundedToCard": "Remboursé sur votre carte",
+    "addToCalendar": "Ajouter au calendrier"
   },
   "refer": {
     "title": "Parrainer un client",
