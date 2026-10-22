@@ -156,7 +156,7 @@ it("shows the guest card beside step Meals, and keeps it when the room has no br
     return view;
   };
   const step = render(terms);
-  expect(textOf(step.root)).toContain("Meals");
+  expect(textOf(step.root)).toContain("Meal plans");
   expect(textOf(step.root)).toContain("What guests see here");
   // A partial refund puts breakfast in the option's window, so step Meals has no switch; the guest card stays.
   const partial = {
@@ -174,4 +174,59 @@ it("shows the guest card beside step Meals, and keeps it when the room has no br
   } as OptionTerms;
   const own = render({ flexible: partial, breakfast: partial });
   expect(textOf(own.root)).toBe("What guests see here");
+});
+
+it("charges breakfast per guest or for the room and says what it adds a night (VAY-2305)", () => {
+  const onChange = vi.fn(),
+    onAdd = vi.fn();
+  const render = (value: ReturnType<typeof room>, optionTerms: Record<string, OptionTerms>) => {
+    let view!: ReactTestRenderer;
+    act(() => {
+      view = create(
+        <StepExtras
+          room={value}
+          simple={simpleRoom(value, optionTerms)!}
+          prices={{}}
+          only="breakfast"
+          disabled={false}
+          onAdd={onAdd}
+          onRemove={vi.fn()}
+          onChange={onChange}
+          onPending={vi.fn()}
+        />,
+      );
+    });
+    return view;
+  };
+  const choice = (view: ReactTestRenderer, label: string) =>
+    view.root.find((node) => node.type === "button" && textOf(node) === label);
+  const view = render(room(), terms);
+  expect(choice(view, "Per room").props["aria-pressed"]).toBe(true);
+  expect(textOf(view.root)).toContain(
+    "Adds €15 a night for the room, whatever the number of guests.",
+  );
+  act(() => choice(view, "Per guest").props.onClick());
+  const next = onChange.mock.lastCall![0];
+  expect(next.offers[1].meal.charge).toEqual({
+    kind: "person",
+    adultMinor: "1500",
+    childBandAmountsMinor: ["0"],
+  });
+  expect(choice(view, "Per guest").props["aria-pressed"]).toBe(true);
+  expect(textOf(view.root)).toContain("2 guests add €30 a night (€15 per guest).");
+  // Off, the choice is what turning breakfast on uses.
+  const roomOnly = parsePricingConfiguration({ ...room(), offers: [room().offers[0]] })!;
+  const plain = render(roomOnly, { flexible });
+  expect(textOf(plain.root)).toContain("Turn breakfast on to offer it with your rates.");
+  act(() => choice(plain, "Per room").props.onClick());
+  act(() =>
+    plain.root
+      .findByProps({ "aria-label": "Breakfast price" })
+      .props.onChange({ target: { value: "12" } }),
+  );
+  act(() => plain.root.findByProps({ role: "switch" }).props.onClick());
+  expect(onAdd.mock.lastCall![0].configuration.offers[1].meal.charge).toEqual({
+    kind: "room",
+    amountMinor: "1200",
+  });
 });
