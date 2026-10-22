@@ -67,7 +67,7 @@ export default function NavigationSearch({ hotelId }: { hotelId?: string }) {
   return (
     <div
       ref={root}
-      className="mx-2 min-w-0 flex-1 max-w-sm"
+      className="mx-2 min-w-0 flex-1 max-w-sm md:min-w-[12rem]"
       onBlur={(event) => {
         if (!event.currentTarget.contains(event.relatedTarget as Node)) setOpen(false);
       }}
