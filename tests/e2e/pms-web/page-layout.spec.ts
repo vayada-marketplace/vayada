@@ -19,12 +19,18 @@ const TOP_LEVEL = [
   "/financials",
   "/reviews",
   "/settings",
+];
+// Settings sub-pages (one per card, VAY-2275) put a breadcrumb line above the title: same left
+// edge, one shared lower top.
+const SUB_PAGES = [
+  "/settings/feature-hub",
+  "/settings/property",
+  "/settings/calendar",
+  "/settings/guest-flows",
+  "/settings/ota-commissions",
   "/settings/team",
   "/settings/billing",
-  "/settings/feature-hub",
 ];
-// Settings sub-pages put a breadcrumb line above the title: same left edge, one shared lower top.
-const SUB_PAGES = ["/settings/checkin-checklist", "/settings/checkout-inspection"];
 // Detail pages open with a back link or guest details before the title, so their title sits a
 // little further in, but never moves with the screen width.
 const DETAIL_PAGES = [

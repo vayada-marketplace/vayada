@@ -147,8 +147,6 @@
   "search.settingCheckInOutHint": "Временные окна прибытия и отъезда",
   "search.settingPropertyDetails": "Изменить данные объекта",
   "search.settingPropertyDetailsHint": "Адрес, тип, часовой пояс, контакты",
-  "search.settingInstantBooking": "Изменить мгновенное бронирование",
-  "search.settingInstantBookingHint": "Автопринятие новых броней или ручное подтверждение",
   "search.settingSameDayCutoff": "Редактировать срок бронирования на сегодня",
   "search.settingSameDayCutoffHint": "Настройте время окончания приема броней на текущий день",
   "search.settingCalendar": "Редактировать настройки календаря",

@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { SettingsCard, SettingsLayout, SettingsSection } from "@vayada/settings-ui";
+import { SettingsCard, SettingsSection } from "@vayada/settings-ui";
 
 import ConfirmDialog from "@/components/ConfirmDialog";
+import { SettingsSubPage } from "@/components/settings/SettingsSubPage";
 import AccountAdminCard from "@/components/settings/team/AccountAdminCard";
 import AdminTransferDialog from "@/components/settings/team/AdminTransferDialog";
 import PropertyAccessMatrix from "@/components/settings/team/PropertyAccessMatrix";
@@ -11,9 +12,7 @@ import MemberAccessDialog from "@/components/settings/team/MemberAccessDialog";
 import RoleEditorDialog from "@/components/settings/team/RoleEditorDialog";
 import TeamRoleCards from "@/components/settings/team/TeamRoleCards";
 import TeamActionDialog, { type TeamAction } from "@/components/settings/team/TeamActionDialog";
-import { getPmsSettingsSections } from "@/lib/settings/navigation";
 import { useTranslation } from "@/lib/i18n";
-import { usePmsAccess } from "@/lib/settings/PmsAccessContext";
 import {
   clearPendingAdminTransfer,
   completePendingAdminTransfer,
@@ -48,8 +47,6 @@ const roleLabelKeys: Record<PmsStaffMember["roleKey"], string> = {
 
 export default function TeamSettingsPage() {
   const { t, locale } = useTranslation();
-  const access = usePmsAccess();
-  const sections = getPmsSettingsSections(false, t, access);
   const [admins, setAdmins] = useState<PmsAccountAdmin[]>([]);
   const [actorMembershipId, setActorMembershipId] = useState("");
   const [roles, setRoles] = useState<PmsTeamRole[]>([]);
@@ -234,12 +231,12 @@ export default function TeamSettingsPage() {
   const propertyNames = new Map(properties.map((property) => [property.id, property.name]));
 
   return (
-    <SettingsLayout title={t("settings.title")} sections={sections} activeId="team">
-      <SettingsSection
-        id="team"
-        title={t("settings.team.pageTitle")}
-        description={t("settings.team.description")}
-      >
+    <SettingsSubPage
+      title={t("settings.team.pageTitle")}
+      breadcrumb={t("settings.navigation.team")}
+      description={t("settings.team.description")}
+    >
+      <SettingsSection id="team">
         {feedback && (
           <div
             role={transferCompletion === "retry" ? "alert" : "status"}
@@ -545,7 +542,7 @@ export default function TeamSettingsPage() {
           />
         )}
       </SettingsSection>
-    </SettingsLayout>
+    </SettingsSubPage>
   );
 }
 

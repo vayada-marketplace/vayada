@@ -147,8 +147,6 @@
   "search.settingCheckInOutHint": "Finestre orarie di arrivo e partenza",
   "search.settingPropertyDetails": "Modifica dettagli della struttura",
   "search.settingPropertyDetailsHint": "Indirizzo, tipo, fuso orario, contatto",
-  "search.settingInstantBooking": "Modifica prenotazione immediata",
-  "search.settingInstantBookingHint": "Accetta automaticamente o richiedi approvazione",
   "search.settingSameDayCutoff": "Modifica scadenza prenotazione in giornata",
   "search.settingSameDayCutoffHint": "Orario limite per prenotazioni dello stesso giorno",
   "search.settingCalendar": "Modifica impostazioni calendario",

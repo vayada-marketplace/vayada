@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import {
   ArrowPathIcon,
   CheckCircleIcon,
@@ -28,6 +28,8 @@ interface FeatureHubPageProps {
    * in a ref so refresh callbacks stay stable across renders.
    */
   activationClient: FeatureActivationClient;
+  /** Rendered above the title, e.g. the PMS "Settings / Feature Hub" breadcrumb. */
+  breadcrumb?: ReactNode;
 }
 
 function cx(...classes: Array<string | false | null | undefined>): string {
@@ -37,7 +39,7 @@ function cx(...classes: Array<string | false | null | undefined>): string {
 const PREVIEW_PRODUCTS: FeatureProduct[] = ["pms", "booking_engine"];
 
 /** One list of every module, whichever app shows it (VAY-2200). */
-export function FeatureHubPage({ translate, activationClient }: FeatureHubPageProps) {
+export function FeatureHubPage({ translate, activationClient, breadcrumb }: FeatureHubPageProps) {
   // Module copy the host catalog lacks falls back to the English defaults, not to the raw key.
   const t = useMemo<Translate>(
     () =>
@@ -116,6 +118,7 @@ export function FeatureHubPage({ translate, activationClient }: FeatureHubPagePr
     <div className="min-h-full bg-gray-50 p-4 text-gray-950 md:p-6">
       <header className="flex flex-col gap-3 pb-5 sm:flex-row sm:items-end sm:justify-between">
         <div className="min-w-0">
+          {breadcrumb}
           <h1 className="text-xl font-semibold text-gray-900 md:text-2xl">
             {t("featureHub.copy.featureHub")}
           </h1>

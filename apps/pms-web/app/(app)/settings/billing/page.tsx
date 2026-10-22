@@ -1,10 +1,11 @@
 "use client";
 
 import { ArrowPathIcon, BuildingLibraryIcon, CreditCardIcon } from "@heroicons/react/24/outline";
-import { SettingsCard, SettingsLayout, SettingsSection } from "@vayada/settings-ui";
+import { SettingsCard, SettingsSection } from "@vayada/settings-ui";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 
 import Modal from "@/components/Modal";
+import { SettingsSubPage } from "@/components/settings/SettingsSubPage";
 import {
   BillingSkeleton,
   Field,
@@ -18,8 +19,6 @@ import {
 import { formatBillingAmount, formatInvoiceDate } from "@/lib/settings/billing";
 import { useTranslation } from "@/lib/i18n";
 import { localizedErrorText } from "@/lib/i18n/localizedErrorText";
-import { getPmsSettingsSections } from "@/lib/settings/navigation";
-import { usePmsAccess } from "@/lib/settings/PmsAccessContext";
 import {
   activateFixedPlanByCard,
   activateFixedPlanByInvoice,
@@ -35,7 +34,6 @@ import {
 } from "@/services/api/financeBillingClient";
 
 export default function BillingSettingsPage() {
-  const access = usePmsAccess();
   const { t } = useTranslation();
   const [billing, setBilling] = useState<BillingOverview | null>(null);
   const [loading, setLoading] = useState(true);
@@ -172,11 +170,9 @@ export default function BillingSettingsPage() {
   };
 
   return (
-    <SettingsLayout
-      title={t("settings.title")}
-      description="Manage your property, operations, and account preferences."
-      sections={getPmsSettingsSections(false, t, access)}
-      activeId="billing"
+    <SettingsSubPage
+      title={t("settings.navigation.billing")}
+      description={t("settings.cards.billing.description")}
     >
       {error && (
         <div
@@ -442,7 +438,7 @@ export default function BillingSettingsPage() {
           </div>
         </Modal>
       )}
-    </SettingsLayout>
+    </SettingsSubPage>
   );
 }
 

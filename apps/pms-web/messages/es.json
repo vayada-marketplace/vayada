@@ -148,8 +148,6 @@
   "search.settingCheckInOutHint": "Ventanas horarias de llegada y salida",
   "search.settingPropertyDetails": "Editar datos del alojamiento",
   "search.settingPropertyDetailsHint": "Direccion, tipo, zona horaria, contacto",
-  "search.settingInstantBooking": "Editar reserva instantanea",
-  "search.settingInstantBookingHint": "Aceptar reservas automaticamente o requerir aprobacion",
   "search.settingSameDayCutoff": "Editar corte de reserva del mismo dia",
   "search.settingSameDayCutoffHint": "Hora limite para reservas del mismo dia",
   "search.settingCalendar": "Editar configuracion del calendario",

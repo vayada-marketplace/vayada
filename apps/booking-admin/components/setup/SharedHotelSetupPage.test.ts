@@ -79,10 +79,10 @@ describe("calendar recovery exit", () => {
   it("returns to calendar settings after repair without an incomplete marker", () => {
     expect(
       setupExitPathForContext(
-        "recovery=pms-calendar&returnProduct=pms&returnTo=%2Fsettings%23calendar",
+        "recovery=pms-calendar&returnProduct=pms&returnTo=%2Fsettings%2Fcalendar",
         "property-1",
       ),
-    ).toBe("/settings#calendar");
+    ).toBe("/settings/calendar");
   });
   it("rejects an external return destination", () => {
     expect(
@@ -90,7 +90,7 @@ describe("calendar recovery exit", () => {
         "recovery=pms-calendar&returnProduct=pms&returnTo=https%3A%2F%2Fevil.example",
         "property-1",
       ),
-    ).toBe("/settings#calendar");
+    ).toBe("/settings/calendar");
   });
   it("preserves the ordinary incomplete-setup exit", () => {
     expect(setupExitPathForContext("returnProduct=pms", "property-1")).toBe(

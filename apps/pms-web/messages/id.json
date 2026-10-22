@@ -148,8 +148,6 @@
   "search.settingCheckInOutHint": "Rentang waktu kedatangan dan keberangkatan",
   "search.settingPropertyDetails": "Edit detail properti",
   "search.settingPropertyDetailsHint": "Alamat, tipe, zona waktu, kontak",
-  "search.settingInstantBooking": "Edit pemesanan instan",
-  "search.settingInstantBookingHint": "Terima reservasi otomatis atau perlu persetujuan",
   "search.settingSameDayCutoff": "Edit batas pemesanan hari yang sama",
   "search.settingSameDayCutoffHint": "Atur waktu batas reservasi di hari yang sama",
   "search.settingCalendar": "Edit pengaturan kalender",
