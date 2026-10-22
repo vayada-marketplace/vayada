@@ -1455,6 +1455,18 @@ export function createTargetBookingWebCheckoutAdapter(
 
   const pricingOffers = createPublicPricingOfferCatalog(pool, {
     mediaServing: config.mediaServing,
+    // VAY-2304: only rates guests can pay with what this booking page accepts now.
+    payments: {
+      card:
+        config.replacementPricingAcceptanceEnabled === true &&
+        config.replacementPricingCardAcceptanceEnabled === true &&
+        !!config.stripePaymentProvider,
+      deposits: config.replacementPricingDepositAcceptanceEnabled === true,
+      manual:
+        config.replacementPricingManualPaymentAcceptanceEnabled === true
+          ? ["paypal", ...(config.bankTransfers ? (["bank_transfer"] as const) : [])]
+          : [],
+    },
   });
   const pricingAddons = createPublicPricingAddonCatalog(pool);
   // Room cards price every offer for each page view (VAY-2190). A small pool of their own keeps

@@ -600,8 +600,9 @@ export type FinanceOnlineCardExecutionState = {
     current: boolean;
   } | null;
   cardReady: boolean;
-  /** Whether the hotel's published prices are up to date. A card change leaves them stale until the
-   * hotel saves them again; until then its booking page takes no bookings. Absent when unknown. */
+  /** Whether the hotel's published prices are up to date. A card change publishes them again by
+   * itself (VAY-2304); they stay stale, and the booking page takes no bookings, only when that
+   * couldn't run until the hotel saves them. Absent when unknown. */
   prices?: "current" | "save_needed" | "not_published";
 };
 

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { pricingPaymentWriteProblem, type PricingPaymentMethod, type ReplacementOfferTerms } from "@vayada/domain-booking";
+import type { PricingPaymentMethod, ReplacementOfferTerms } from "@vayada/domain-booking";
 import { resolveFinanceOnlineCardReadiness } from "@vayada/domain-finance";
 import { pricingCurrencyScale, pricingInteger, pricingObject } from "@vayada/domain-pms";
 import type { PoolClient } from "pg";
@@ -9,7 +9,7 @@ type Method = PricingPaymentMethod;
 export type FinanceReplacementPricingReadiness =
   | { kind: "ready"; evidenceId: string; propertyId: string; currency: string; pricingRevision: number; methods: readonly Method[] }
   | { kind: "unavailable"; reason: "invalid" | "settings_missing" | "payments_disabled" | "currency_mismatch" |
-      "method_unavailable" | "deposit_execution_unavailable" | "stale" };
+      "method_unavailable" | "stale" };
 
 /** Finance-owned, read-only port inside the caller's authorized property transaction.
  * Pricing and terms must be loaded/verified through their owners before calling.
@@ -30,11 +30,9 @@ export async function lockFinanceReplacementPricingReadiness(client: PoolClient,
   if (!settings.payments_enabled) return unavailable("payments_disabled");
   if (settings.default_currency !== request.currency) return unavailable("currency_mismatch");
   if (!Array.isArray(settings.accepted_methods) || new Set(settings.accepted_methods).size !== settings.accepted_methods.length) return unavailable("invalid");
-  // VAY-2205: deposits run only as a share by card when booking with the rest at the property; other deposit shapes
-  // (a later balance, other methods) have no execution. Without card a deposit rate just can't sell: the quote needs
-  // card among the methods, as for any card-only rate, so a card lapse never takes the hotel's other rates down.
-  if (request.terms.some((t) => t.payment.kind === "deposit" && pricingPaymentWriteProblem(t.payment)))
-    return unavailable("deposit_execution_unavailable");
+  // VAY-2205: deposits run only as a share by card when booking with the rest at the property. A deposit rate in
+  // another shape, or without card, just doesn't sell (pricingRateSells), like any rate nobody can pay; it never
+  // takes the hotel's other rates down (VAY-2304).
   const methods: Method[] = [];
   if (settings.accepted_methods.includes("pay_at_property")) methods.push("pay_at_property");
   let cardSource: unknown = null;

@@ -5472,7 +5472,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     });
     expect(await f.read()).toMatchObject({ reason: "terms_stale" });
   });
-  it("rejects foreign/stale Finance evidence, disabled payments and requested deposits", async () => {
+  it("rejects foreign/stale Finance evidence and disabled payments, but not a deposit rate (VAY-2304)", async () => {
     const f = await fixture(),
       other = await fixture();
     expect(
@@ -5517,7 +5517,9 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
         ...f.sources,
         terms: await f.currentTermsSource(),
       }),
-    ).toMatchObject({ financeReason: "deposit_execution_unavailable" });
+      // VAY-2304: a deposit the booking page can't run only stops its own rate; Finance stays ready and
+      // the read stops at the evidence, which was made for the terms before the change.
+    ).toMatchObject({ financeReason: "stale" });
   });
   it("holds live owner locks until transaction end, then rejects the replaced terms", async () => {
     const f = await fixture(),
@@ -5808,6 +5810,11 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       client.release();
     }
   });
+  /** VAY-2304: the public catalog lists only rates guests can pay; these take pay at property. */
+  const payable: TermsSetup = (terms) => ({
+    ...terms,
+    payment: { ...terms.payment, acceptedMethods: ["pay_at_property"] },
+  });
   async function publicFixture(
     publish = true,
     configure?: (snapshot: PricingStorageSnapshot) => PricingStorageSnapshot,
@@ -6012,7 +6019,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     expect(await f.readPublic(randomUUID())).toBeNull();
   });
   it("publishes current database offers through PMS and final Distribution content", async () => {
-    const f = await publicFixture(),
+    const f = await publicFixture(true, undefined, undefined, payable),
       scope = f.scope;
     const single = new pg.Pool({ connectionString: url, max: 1 });
     try {
@@ -6364,7 +6371,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     return mapped;
   }
   it("makes a hotel with saved prices and free rooms ready and serves its offers (VAY-2123)", async () => {
-    const f = await publicFixture(false, undefined, undefined, undefined, false, true),
+    const f = await publicFixture(false, undefined, undefined, payable, false, true),
       id = f.scope.propertyId;
     const publisher = createTargetPublicBookabilityPublicationCommandPort({
       connectionString: url!,
@@ -6491,7 +6498,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       },
     } as const;
     const f = await publicFixture(true, undefined, undefined, (terms) =>
-      terms.offerId === "other" ? { ...terms, cancellation: flexible } : terms,
+      payable(terms.offerId === "other" ? { ...terms, cancellation: flexible } : terms),
     );
     await publishBookingPage(f.scope);
     const read = await createPublicPricingOfferCatalog(pool).read(f.scope.propertyId);
@@ -6514,24 +6521,29 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
   });
   it("tells guests a meal in the hotel's own words only where it wrote one (VAY-2281)", async () => {
     const text = "Buffet breakfast in the Stube, 7:00–10:30";
-    const f = await publicFixture(true, (snapshot) => ({
-      ...snapshot,
-      rooms: snapshot.rooms.map((room, index) => ({
-        ...room,
-        offers: room.offers.map((offer) =>
-          index === 0 && offer.id === "other"
-            ? {
-                ...offer,
-                meal: {
-                  kind: "breakfast",
-                  charge: { kind: "room", amountMinor: "0" },
-                  description: text,
-                },
-              }
-            : offer,
-        ),
-      })),
-    }));
+    const f = await publicFixture(
+      true,
+      (snapshot) => ({
+        ...snapshot,
+        rooms: snapshot.rooms.map((room, index) => ({
+          ...room,
+          offers: room.offers.map((offer) =>
+            index === 0 && offer.id === "other"
+              ? {
+                  ...offer,
+                  meal: {
+                    kind: "breakfast",
+                    charge: { kind: "room", amountMinor: "0" },
+                    description: text,
+                  },
+                }
+              : offer,
+          ),
+        })),
+      }),
+      undefined,
+      payable,
+    );
     await publishBookingPage(f.scope);
     const read = await createPublicPricingOfferCatalog(pool).read(f.scope.propertyId);
     const bindings = publicPricingOfferBindings((await f.readPublic())!);
@@ -6546,7 +6558,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       else expect(offer).not.toHaveProperty("mealDescription");
   });
   it("serves every saved change after go-live without republishing (VAY-2129)", async () => {
-    const f = await publicFixture(),
+    const f = await publicFixture(true, undefined, undefined, payable),
       id = f.scope.propertyId,
       secondRoomId = f.snapshot.rooms[1]!.roomTypeId;
     const catalog = createPublicPricingOfferCatalog(pool);
@@ -6709,10 +6721,10 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       ["Terms room", ["breakfast"]],
     ]);
     for (const key of beforeDelete!) expect(await nightPrice(key)).toBeNull();
-    const late = await f.booking.save(f.context, f.scope, {
+    const late = await saveTerms(f.booking, f.context, f.scope, {
       requestId: randomUUID(),
       expectedRevision: null,
-      terms: { ...f.termsInput, roomTypeId: secondRoomId, offerId: "late" },
+      terms: payable({ ...f.termsInput, roomTypeId: secondRoomId, offerId: "late" }),
     });
     await savePrices(
       f,

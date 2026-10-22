@@ -55,10 +55,11 @@ describe.skipIf(!url)("replacement pricing Finance owner readiness", () => {
     expect(await f.read({ terms: [{ ...f.input.terms[0], revision: randomUUID() }], expectedEvidenceId: first.evidenceId })).toMatchObject({ reason: "stale" });
     expect(await f.read({ propertyId: randomUUID() })).toMatchObject({ reason: "settings_missing" });
   });
-  it("fails explicitly for disabled payments, currency mismatch, unsupported methods and deposit execution", async () => {
+  it("fails explicitly for disabled payments, currency mismatch and unsupported methods", async () => {
     const f = await fixture();
     expect(await f.read({ currency: "USD" })).toMatchObject({ reason: "currency_mismatch" });
-    expect(await f.read({ terms: [{ ...f.input.terms[0], payment: { kind: "deposit", basisPoints: 3000, balanceDaysBeforeArrival: 7 } }] })).toMatchObject({ reason: "deposit_execution_unavailable" });
+    // VAY-2304: a deposit the booking page can't run only stops its own rate, not the hotel.
+    expect(await f.read({ terms: [{ ...f.input.terms[0], payment: { kind: "deposit", basisPoints: 3000, balanceDaysBeforeArrival: 7 } }] })).toMatchObject({ kind: "ready", methods: ["pay_at_property"] });
     expect(await f.read({ terms: [] })).toMatchObject({ reason: "invalid" });
     await pool.query("UPDATE finance.payment_settings SET accepted_methods=ARRAY['bank_transfer'] WHERE property_id=$1", [f.propertyId]);
     expect(await f.read()).toMatchObject({ reason: "method_unavailable" });
@@ -74,14 +75,15 @@ describe.skipIf(!url)("replacement pricing Finance owner readiness", () => {
     expect(await deposit(cardDeposit)).toMatchObject({ kind: "ready", methods: ["pay_at_property"] });
     await f.executionEvidence();
     expect(await deposit(cardDeposit)).toMatchObject({ kind: "ready", methods: ["pay_at_property", "card"] });
-    // No other deposit shape runs: a later balance, other methods, none named, or the whole stay.
+    // No other deposit shape runs (a later balance, other methods, none named, or the whole stay), but
+    // such a rate only stops itself (pricingRateSells); the hotel stays ready (VAY-2304).
     for (const payment of [
       { ...cardDeposit, balanceDaysBeforeArrival: 7 },
       { ...cardDeposit, acceptedMethods: ["card", "pay_at_property"] },
       { kind: "deposit", basisPoints: 3000, balanceDaysBeforeArrival: 0 },
       { ...cardDeposit, basisPoints: 10000 },
     ])
-      expect(await deposit(payment)).toMatchObject({ reason: "deposit_execution_unavailable" });
+      expect(await deposit(payment)).toMatchObject({ kind: "ready", methods: ["pay_at_property", "card"] });
     // Card lapses with the deposit rate among the saved ones: the hotel stays publishable, without card.
     await pool.query("UPDATE finance.payment_provider_accounts SET charges_enabled=false WHERE id=$1", [f.accountId]);
     expect(await deposit(cardDeposit)).toMatchObject({ kind: "ready", methods: ["pay_at_property"] });

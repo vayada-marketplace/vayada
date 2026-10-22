@@ -18,7 +18,8 @@ export type HotelCardPaymentsState = {
     current: boolean;
   } | null;
   cardReady: boolean;
-  /** Whether the hotel's published prices must be saved again (a card change stales them). */
+  /** Whether the hotel's published prices must be saved again: only when the system couldn't
+   * publish them again after a change (VAY-2304). */
   prices?: "current" | "save_needed" | "not_published";
 };
 

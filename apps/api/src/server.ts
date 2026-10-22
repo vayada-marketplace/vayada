@@ -1857,6 +1857,7 @@ const app = buildApp({
       ? {
           commands: (context) => createReplacementPricingCommands(propertySetupOwnerPool, context),
           manualPayments: financeManualPaymentReadiness,
+          bankTransfers: !!bankTransferBookings,
           cardReadiness: createPricingCardReadinessReader({
             pool: propertySetupOwnerPool,
             finance: financePaymentReadinessReadModel,
