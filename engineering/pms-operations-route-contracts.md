@@ -247,6 +247,10 @@ type PmsOperationalReservation = {
 | Create/update/release room block         | `POST/PATCH/DELETE` | `/api/pms/properties/:propertyId/room-blocks*`                              | enqueue `pms.inventory.ari_changed`                                            |
 | Assign/move/unassign/swap room           | `PATCH`             | `/api/pms/properties/:propertyId/reservations/:guestBookingId/assignments*` | enqueue calendar projection refresh; ARI only when availability changes        |
 
+Reorder rooms also saves the room-type order (VAY-2294). The calendar and Rooms
+& Rates group rooms by room type, so each room type takes the slot of its first
+room in `orderedRoomIds`. Room types without active rooms keep their slots.
+
 Each write command accepts `commandId`, `idempotencyKey`, and `expectedVersion`
 when updating an existing resource. Successful command responses return the
 updated read model plus:
