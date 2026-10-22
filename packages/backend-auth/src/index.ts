@@ -161,6 +161,11 @@ export {
   type StaffInvitationProviderResponse,
   type StaffInvitationProviderRole,
 } from "./staffInvitationDelivery.js";
+export {
+  createPgStaffInvitationJoinRepository,
+  type StaffInvitationJoinDetails,
+  type StaffInvitationJoinRepository,
+} from "./staffInvitationJoin.js";
 
 // RequestContext resolution
 export {

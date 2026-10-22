@@ -37,6 +37,7 @@ import { createBankTransferBookingOperations } from "./domains/financeBankTransf
 import {
   createPgIdentityRepository,
   createPgStaffInvitationAcceptanceRepository,
+  createPgStaffInvitationJoinRepository,
   createPgStaffInvitationDeliveryRepository,
   createPgStaffInvitationRepository,
   createPgTeamRoleRepository,
@@ -1481,6 +1482,10 @@ const authSessionHandoffRepository =
     ? createPgAuthSessionHandoffRepository({ connectionString: config.auth.databaseUrl })
     : undefined;
 
+const staffInvitationAcceptance = config.auth
+  ? createPgStaffInvitationAcceptanceRepository({ connectionString: config.auth.databaseUrl })
+  : undefined;
+
 const staffInvitationRuntime =
   config.auth && config.authSession
     ? (() => {
@@ -1728,6 +1733,12 @@ const app = buildApp({
           cookieSecure: config.authSession.authCookieSecure,
           cookieDomain: config.authSession.authCookieDomain,
           adminTransfer: adminTransferRuntime,
+          staffInvitationJoin: staffInvitationAcceptance && {
+            repository: createPgStaffInvitationJoinRepository({
+              connectionString: config.auth.databaseUrl,
+            }),
+            acceptance: staffInvitationAcceptance,
+          },
         }
       : undefined,
   workosWebhooks:
@@ -1741,9 +1752,7 @@ const app = buildApp({
           store: createPgWorkosWebhookStore({
             connectionString: config.auth.databaseUrl,
           }),
-          staffInvitationAcceptance: createPgStaffInvitationAcceptanceRepository({
-            connectionString: config.auth.databaseUrl,
-          }),
+          staffInvitationAcceptance,
         }
       : undefined,
   providerWebhooks: hasProviderWebhookSecret

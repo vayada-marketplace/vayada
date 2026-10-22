@@ -19,6 +19,7 @@ import {
   createPgStaffInvitationRepository,
   enqueueInboxAssignmentReconciliation,
 } from "./staffInvitations.js";
+import { createPgStaffInvitationJoinRepository } from "./staffInvitationJoin.js";
 import { createStaffRemovalCoordinator, type StaffRemovalProvider } from "./staffRemoval.js";
 import { createPgStaffRemovalJobRepository } from "./staffRemovalJobs.js";
 import type {
@@ -2015,6 +2016,59 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
     );
     return { ...created, providerInvitationId };
   }
+
+  it("shows the invitee only the current invitation, with catalog hotel names", async () => {
+    const join = createPgStaffInvitationJoinRepository({ connectionString: TEST_DATABASE_URL! });
+    try {
+      const assigned = await deliveredInvitation();
+      const current = { providerInvitationId: assigned.providerInvitationId };
+      await expect(
+        join.findCurrent({ ...current, workosOrganizationId: "org_staff_delivery" }),
+      ).resolves.toEqual({
+        email: "staff@example.com",
+        inviteeName: "Staff Example",
+        inviterName: "Owner Example",
+        roleKey: "front_desk",
+        roleName: null,
+        hotelNames: ["Owner Property"],
+      });
+      await expect(
+        join.findCurrent({ ...current, workosOrganizationId: "org_other" }),
+      ).resolves.toBeNull();
+      await client.query(
+        "UPDATE identity.staff_invitations SET expires_at = now() - interval '1 minute' WHERE id = $1",
+        [assigned.invitationId],
+      );
+      await expect(
+        join.findCurrent({ ...current, workosOrganizationId: "org_staff_delivery" }),
+      ).resolves.toBeNull();
+      await client.query("UPDATE identity.staff_invitations SET status = 'revoked' WHERE id = $1", [
+        assigned.invitationId,
+      ]);
+
+      const allProperties = await deliveredInvitation(2, undefined, "all");
+      await expect(
+        join.findCurrent({
+          providerInvitationId: allProperties.providerInvitationId,
+          workosOrganizationId: "org_staff_delivery",
+        }),
+      ).resolves.toMatchObject({ hotelNames: ["Owner Property", "Second Property"] });
+      await client.query("UPDATE identity.organizations SET status = 'suspended' WHERE id = $1", [
+        org,
+      ]);
+      await expect(
+        join.findCurrent({
+          providerInvitationId: allProperties.providerInvitationId,
+          workosOrganizationId: "org_staff_delivery",
+        }),
+      ).resolves.toBeNull();
+    } finally {
+      await client.query("UPDATE identity.organizations SET status = 'active' WHERE id = $1", [
+        org,
+      ]);
+      await join.close();
+    }
+  });
 
   it("validates invitation property links without assignment update privilege", async () => {
     const invitation = await deliveredInvitation();

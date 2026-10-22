@@ -1,6 +1,6 @@
 import { WorkOS } from "@workos-inc/node";
 
-import type { AuthKitClient, AuthKitSession } from "../routes/authSession.js";
+import type { AuthKitClient, AuthKitInvitation, AuthKitSession } from "../routes/authSession.js";
 import type { MembershipStatus } from "@vayada/backend-auth";
 
 type WorkOSAuthKitClientConfig = {
@@ -75,6 +75,7 @@ export function createWorkOSAuthKitClient(config: WorkOSAuthKitClientConfig): Au
       const response = await workos.userManagement.authenticateWithPassword({
         email: input.email,
         password: input.password,
+        ...(input.invitationToken ? { invitationToken: input.invitationToken } : {}),
         clientId: config.clientId,
         ipAddress: input.ipAddress,
         userAgent: input.userAgent,
@@ -120,11 +121,27 @@ export function createWorkOSAuthKitClient(config: WorkOSAuthKitClientConfig): Au
       const user = await workos.userManagement.createUser({
         email: input.email,
         password: input.password,
+        ...(input.firstName ? { firstName: input.firstName } : {}),
+        ...(input.lastName ? { lastName: input.lastName } : {}),
+        ...(input.emailVerified !== undefined ? { emailVerified: input.emailVerified } : {}),
         ipAddress: input.ipAddress,
         userAgent: input.userAgent,
         metadata: input.metadata,
       });
       return toAuthKitUser(user);
+    },
+
+    async findInvitationByToken(input) {
+      return toAuthKitInvitation(await workos.userManagement.findInvitationByToken(input.token));
+    },
+
+    async getInvitation(input) {
+      return toAuthKitInvitation(await workos.userManagement.getInvitation(input.invitationId));
+    },
+
+    async hasUserWithEmail(input) {
+      const users = await workos.userManagement.listUsers({ email: input.email, limit: 1 });
+      return users.data.length > 0;
     },
 
     async resendVerificationEmail(input) {
@@ -299,6 +316,17 @@ function membershipStatus(status: string | undefined): MembershipStatus | undefi
     return status;
   }
   return undefined;
+}
+
+function toAuthKitInvitation(invitation: AuthKitInvitation): AuthKitInvitation {
+  return {
+    id: invitation.id,
+    email: invitation.email,
+    state: invitation.state,
+    organizationId: invitation.organizationId,
+    acceptedUserId: invitation.acceptedUserId,
+    expiresAt: invitation.expiresAt,
+  };
 }
 
 function toAuthKitUser(user: {

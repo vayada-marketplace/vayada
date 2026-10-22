@@ -647,11 +647,12 @@ jobs:
         env:
           TARGET_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
-      - name: Verify restricted identity PMS Inbox enqueue
+      - name: Verify restricted identity PMS Inbox enqueue and the invitation join read
         if: matrix.shard == 'platform'
         run: >-
           npm --workspace @vayada/backend-auth run test -- --no-file-parallelism
-          src/staffInvitations.test.ts -t "enqueues an unreadable PMS Inbox job"
+          src/staffInvitations.test.ts
+          -t "enqueues an unreadable PMS Inbox job|shows the invitee only the current invitation"
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 

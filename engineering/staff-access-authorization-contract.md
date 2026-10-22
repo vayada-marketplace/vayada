@@ -129,14 +129,30 @@ name, inviter, role, overrides, property scope, provider ID/expiry, state,
 configuration revision, idempotency key, and accepted user/membership IDs—never
 provider tokens or acceptance URLs.
 
-WorkOS-hosted invitation and password-reset journeys return to the WorkOS
-application callback at `/auth/workos/callback`. The API exchanges the one-time
-authorization code to finish the provider flow, then redirects to the configured
-PMS login origin without forwarding the code or creating a Vayada browser
-session. The invitee signs in through the first-party PMS form using the invited
-email; Vayada grants access only after the `invitation.accepted` webhook has
-activated the local membership. A provider exchange failure returns to PMS
-login with a retry message, not an authenticated session.
+Invitation emails link to the PMS `/invite` page (VAY-2274; the WorkOS "User
+invitation URL" setting). That page sends the token to
+`POST /auth/invitations/preview` and `POST /auth/invitations/accept`, in the
+body, never in a URL the API logs. WorkOS resolves the token. Vayada answers
+only when that provider ID is still the current, delivered, unexpired pending
+intent, and shows the hotel names from the catalog. Acceptance:
+
+- A new address gets a WorkOS user created with a verified email, because the
+  token reached that mailbox.
+- Both new and existing accounts then sign in with the password plus the
+  invitation token, so WorkOS accepts the invitation and scopes the session to
+  the invited organization.
+- The API reads the invitation back from WorkOS. It continues only when the
+  invitation is `accepted` by that user in that organization. It then runs the
+  same acceptance reconciler as the `invitation.accepted` webhook and sets the
+  PMS session for the invited organization.
+- The webhook that follows is an idempotent replay.
+- If any step after the WorkOS sign-in fails, no Vayada session is set.
+
+Invitation emails sent before that setting, and WorkOS-hosted password resets,
+still return to `/auth/workos/callback`. There the API exchanges the one-time
+code and redirects to PMS login without creating a Vayada session. Access then
+waits for the `invitation.accepted` webhook. A provider exchange failure returns
+to PMS login with a retry message, not an authenticated session.
 
 WorkOS does not deduplicate invitation writes by `Idempotency-Key`. Delivery is
 therefore at-most-once: claim only `status = pending AND delivery_state = ready`,
