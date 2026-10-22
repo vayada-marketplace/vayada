@@ -179,7 +179,14 @@ it("keeps the room cards' content and drops malformed parts without failing sele
 });
 
 it("reads the location map flag and each room's pin, dropping a pin out of range (VAY-2126)", async () => {
-  const offers = rooms[0].offers;
+  // Offer keys are unique across the catalog.
+  const offers = (digit: string) => [
+    {
+      publicOfferKey: `pricing-offer.v2:${digit.repeat(64)}`,
+      currency: "EUR",
+      mealPlan: "room_only",
+    },
+  ];
   const catalog = (body: Record<string, unknown>) =>
     vi.stubGlobal(
       "fetch",
@@ -196,11 +203,16 @@ it("reads the location map flag and each room's pin, dropping a pin out of range
         ...rooms[0],
         location: { latitude: 48.15634, longitude: 11.58242, address: "Leopoldstraße 12" },
       },
-      { roomTypeId: "loft", name: "Loft", offers, location: { latitude: 91, longitude: 11.5 } },
+      {
+        roomTypeId: "loft",
+        name: "Loft",
+        offers: offers("b"),
+        location: { latitude: 91, longitude: 11.5 },
+      },
       {
         roomTypeId: "studio",
         name: "Studio",
-        offers,
+        offers: offers("c"),
         location: { latitude: "48", longitude: 11.5 },
       },
     ],
@@ -212,8 +224,8 @@ it("reads the location map flag and each room's pin, dropping a pin out of range
         ...rooms[0],
         location: { latitude: 48.15634, longitude: 11.58242, address: "Leopoldstraße 12" },
       },
-      { roomTypeId: "loft", name: "Loft", offers },
-      { roomTypeId: "studio", name: "Studio", offers },
+      { roomTypeId: "loft", name: "Loft", offers: offers("b") },
+      { roomTypeId: "studio", name: "Studio", offers: offers("c") },
     ],
   });
   catalog({ rooms });

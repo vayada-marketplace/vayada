@@ -36,6 +36,8 @@ const villas = [
 /** The Google Maps calls the section makes, kept on window.__locationMap: the markers, the popup's text, and
  * clickMarker(index) to tap a pin. */
 const GOOGLE_FAKE = `
+  // An IIFE: a top-level "class Map" would replace the browser's own Map for the whole page.
+  (() => {
   const state = (window.__locationMap = { markers: [], popup: null, fitted: 0 });
   class Map { constructor(element, options) { state.options = options; } fitBounds() { state.fitted += 1; } panTo() {} }
   class InfoWindow {
@@ -58,6 +60,7 @@ const GOOGLE_FAKE = `
     library === "maps" ? { Map, InfoWindow } : library === "marker" ? { Marker }
     : library === "core" ? { LatLngBounds, Point } : {} } };
   window.__vayadaGoogleMapsReady?.();
+  })();
 `;
 
 async function setup(
