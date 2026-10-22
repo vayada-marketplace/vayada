@@ -29,6 +29,11 @@ import {
   withCount,
   type ExtraItem,
 } from "@/lib/extrasChoices";
+import {
+  GuestAddonCard,
+  guestAddonAddClass,
+  guestAddonUnit,
+} from "@vayada/product-onboarding/GuestAddon";
 
 type Selection = PublicBookingQuoteRequest["selection"];
 const categoryLabels: Record<ExtraDisplay["category"], string> = {
@@ -49,15 +54,7 @@ const minus = "M20 12H4";
 const plus = "M12 4v16m8-8H4";
 const cross = "M6 18L18 6M6 6l12 12";
 
-function unit(addon: PricingAddon) {
-  return addonPerPerson(addon)
-    ? addonPerNight(addon)
-      ? "/ person / night"
-      : "/ person"
-    : addonPerNight(addon)
-      ? "/ night"
-      : "/ stay";
-}
+const unit = (addon: PricingAddon) => guestAddonUnit(addonPerPerson(addon), addonPerNight(addon));
 
 /** The old add-ons page on pricing v2 (VAY-2195): the hotel's extras as cards with photo, words
  * and price; a counter for guests or items, night chips (all nights to begin with) and, for a
@@ -166,142 +163,119 @@ export default function ExtrasStep({
             const missingDay = !!item && item.dates.length === 0;
             const price = unitMinor(facts?.price, addon.currency);
             return (
-              <article
+              <GuestAddonCard
                 key={addon.id}
-                aria-label={addon.name}
-                className={`bg-white border rounded-2xl overflow-hidden transition-shadow ${
-                  item
-                    ? missingDay
-                      ? "border-amber-400 shadow-md"
-                      : "border-primary-500 shadow-md"
-                    : "border-gray-200"
-                }`}
-              >
-                <div className="relative h-48 bg-gray-100 flex items-center justify-center">
-                  {facts?.image ? (
-                    <Image
-                      src={facts.image}
-                      alt=""
-                      fill
-                      className="object-cover"
-                      sizes="(min-width: 1024px) 33vw, (min-width: 768px) 50vw, 100vw"
-                    />
-                  ) : (
-                    icon(
-                      "M12 8v13m0-13V6a2 2 0 112 2h-2zm0 0V5.5A2.5 2.5 0 109.5 8H12zm-7 4h14M5 12a2 2 0 110-4h14a2 2 0 110 4M5 12v7a2 2 0 002 2h10a2 2 0 002-2v-7",
-                      "w-10 h-10 text-gray-300",
-                    )
-                  )}
-                </div>
-                <div className="p-4">
-                  <h3 className="text-base font-bold text-gray-900 mb-1">{addon.name}</h3>
-                  {facts?.description && (
-                    <p className="text-sm text-gray-500 mb-4 line-clamp-2">{facts.description}</p>
-                  )}
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="text-lg font-bold text-gray-900">
-                      {price !== null && (
-                        <>
-                          {formatMoney(String(price), addon.currency)}
-                          <span className="text-xs font-normal text-gray-500"> {unit(addon)}</span>
-                        </>
-                      )}
-                    </p>
-                    {item ? (
-                      <div className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          className={round}
-                          aria-label={`Fewer for ${addon.name}`}
-                          disabled={count <= 1}
-                          onClick={() => replace(withCount(item, addon, selection, count - 1))}
-                        >
-                          {icon(minus)}
-                        </button>
-                        <span className="w-12 text-center text-sm font-semibold text-gray-900">
-                          {addonPerPerson(addon) ? `${count}/${guests}` : count}
-                        </span>
-                        <button
-                          type="button"
-                          className={round}
-                          aria-label={`More for ${addon.name}`}
-                          disabled={count >= limit}
-                          onClick={() => replace(withCount(item, addon, selection, count + 1))}
-                        >
-                          {icon(plus)}
-                        </button>
-                        <button
-                          type="button"
-                          className="ml-1 w-7 h-7 rounded-full border border-gray-200 flex items-center justify-center text-gray-400 hover:text-red-500 hover:border-red-200 transition-colors"
-                          aria-label={`Remove ${addon.name}`}
-                          onClick={() => set(items.filter((current) => current.id !== addon.id))}
-                        >
-                          {icon(cross, "w-3.5 h-3.5")}
-                        </button>
-                      </div>
-                    ) : (
+                name={addon.name}
+                description={facts?.description ?? ""}
+                photo={facts?.image ?? null}
+                price={price !== null ? formatMoney(String(price), addon.currency) : null}
+                unit={unit(addon)}
+                tone={item ? (missingDay ? "attention" : "chosen") : "idle"}
+                renderPhoto={(src) => (
+                  <Image
+                    src={src}
+                    alt=""
+                    fill
+                    className="object-cover"
+                    sizes="(min-width: 1024px) 33vw, (min-width: 768px) 50vw, 100vw"
+                  />
+                )}
+                action={
+                  item ? (
+                    <div className="flex items-center gap-1">
                       <button
                         type="button"
-                        disabled={!fits || tooSoon || items.length >= 99}
-                        aria-label={`Add ${addon.name}`}
-                        aria-describedby={tooSoon ? `extra-notice-${addon.id}` : undefined}
-                        onClick={() => set([...items, newExtraItem(addon, selection)])}
-                        className="px-5 py-1.5 rounded-full text-sm font-semibold border-2 transition-colors bg-white text-gray-700 border-gray-300 hover:border-gray-400 disabled:opacity-40"
+                        className={round}
+                        aria-label={`Fewer for ${addon.name}`}
+                        disabled={count <= 1}
+                        onClick={() => replace(withCount(item, addon, selection, count - 1))}
                       >
-                        Add
+                        {icon(minus)}
                       </button>
-                    )}
-                  </div>
-                  {!fits && (
-                    <p className="mt-2 text-xs text-gray-500">
-                      For groups of up to {addon.maxGuests} guests.
-                    </p>
-                  )}
-                  {tooSoon && addon.leadTimeHours !== null && (
-                    <p id={`extra-notice-${addon.id}`} className="mt-2 text-xs text-gray-500">
-                      {formatNotice(addon.leadTimeHours)}
-                    </p>
-                  )}
-                  {item && (
-                    <fieldset className="mt-3 pt-3 border-t border-gray-100">
-                      <legend
-                        className={`text-xs mb-2 ${missingDay ? "text-amber-700 font-medium" : "text-gray-500"}`}
+                      <span className="w-12 text-center text-sm font-semibold text-gray-900">
+                        {addonPerPerson(addon) ? `${count}/${guests}` : count}
+                      </span>
+                      <button
+                        type="button"
+                        className={round}
+                        aria-label={`More for ${addon.name}`}
+                        disabled={count >= limit}
+                        onClick={() => replace(withCount(item, addon, selection, count + 1))}
                       >
-                        {addonPerNight(addon)
-                          ? "Which nights?"
-                          : missingDay
-                            ? "Choose a day for this extra"
-                            : "Which day?"}
-                      </legend>
-                      <div className="flex flex-wrap gap-1.5">
-                        {days.map((date) => {
-                          const on = item.dates.includes(date);
-                          const { weekday, day } = formatDay(date);
-                          return (
-                            <button
-                              key={date}
-                              type="button"
-                              aria-pressed={on}
-                              aria-label={`${addon.name} on ${weekday} ${day}`}
-                              onClick={() => replace(toggleExtraDate(addon, item, date))}
-                              className={`px-2 py-1 rounded-lg text-xs font-medium border transition-colors ${
-                                on
-                                  ? "bg-primary-50 text-primary-700 border-primary-300"
-                                  : missingDay
-                                    ? "bg-white text-gray-600 border-amber-300"
-                                    : "bg-gray-50 text-gray-400 border-gray-200 hover:border-gray-300"
-                              }`}
-                            >
-                              <span className="block leading-tight">{weekday}</span>
-                              <span className="block leading-tight text-[10px]">{day}</span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </fieldset>
-                  )}
-                </div>
-              </article>
+                        {icon(plus)}
+                      </button>
+                      <button
+                        type="button"
+                        className="ml-1 w-7 h-7 rounded-full border border-gray-200 flex items-center justify-center text-gray-400 hover:text-red-500 hover:border-red-200 transition-colors"
+                        aria-label={`Remove ${addon.name}`}
+                        onClick={() => set(items.filter((current) => current.id !== addon.id))}
+                      >
+                        {icon(cross, "w-3.5 h-3.5")}
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={!fits || tooSoon || items.length >= 99}
+                      aria-label={`Add ${addon.name}`}
+                      aria-describedby={tooSoon ? `extra-notice-${addon.id}` : undefined}
+                      onClick={() => set([...items, newExtraItem(addon, selection)])}
+                      className={guestAddonAddClass}
+                    >
+                      Add
+                    </button>
+                  )
+                }
+              >
+                {!fits && (
+                  <p className="mt-2 text-xs text-gray-500">
+                    For groups of up to {addon.maxGuests} guests.
+                  </p>
+                )}
+                {tooSoon && addon.leadTimeHours !== null && (
+                  <p id={`extra-notice-${addon.id}`} className="mt-2 text-xs text-gray-500">
+                    {formatNotice(addon.leadTimeHours)}
+                  </p>
+                )}
+                {item && (
+                  <fieldset className="mt-3 pt-3 border-t border-gray-100">
+                    <legend
+                      className={`text-xs mb-2 ${missingDay ? "text-amber-700 font-medium" : "text-gray-500"}`}
+                    >
+                      {addonPerNight(addon)
+                        ? "Which nights?"
+                        : missingDay
+                          ? "Choose a day for this extra"
+                          : "Which day?"}
+                    </legend>
+                    <div className="flex flex-wrap gap-1.5">
+                      {days.map((date) => {
+                        const on = item.dates.includes(date);
+                        const { weekday, day } = formatDay(date);
+                        return (
+                          <button
+                            key={date}
+                            type="button"
+                            aria-pressed={on}
+                            aria-label={`${addon.name} on ${weekday} ${day}`}
+                            onClick={() => replace(toggleExtraDate(addon, item, date))}
+                            className={`px-2 py-1 rounded-lg text-xs font-medium border transition-colors ${
+                              on
+                                ? "bg-primary-50 text-primary-700 border-primary-300"
+                                : missingDay
+                                  ? "bg-white text-gray-600 border-amber-300"
+                                  : "bg-gray-50 text-gray-400 border-gray-200 hover:border-gray-300"
+                            }`}
+                          >
+                            <span className="block leading-tight">{weekday}</span>
+                            <span className="block leading-tight text-[10px]">{day}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </fieldset>
+                )}
+              </GuestAddonCard>
             );
           })}
       </div>

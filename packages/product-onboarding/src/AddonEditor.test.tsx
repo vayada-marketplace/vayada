@@ -1,6 +1,7 @@
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { describe, expect, it, vi } from "vitest";
 import { AddonEditor, emptyAddonValues } from "./AddonEditor";
+import { GuestAddonCard } from "./GuestAddon";
 
 describe("shared add-on editor", () => {
   it("shows inline errors on submit and leaves the save button enabled", async () => {
@@ -139,6 +140,34 @@ it("picks a category chip, labels the price by pricing model and opens More opti
     perNight: true,
     maxQuantity: "2",
   });
+});
+
+it("previews the add-on with the booking page's own card as the host types (VAY-2231)", async () => {
+  let view: ReactTestRenderer;
+  await act(async () => {
+    view = create(
+      <AddonEditor
+        initialValues={{ ...emptyAddonValues("USD"), price: "30.00", perPerson: true }}
+        currency="USD"
+        editing={false}
+        onSave={() => {}}
+        onCancel={() => {}}
+      />,
+    );
+  });
+  const card = () => view!.root.findByType(GuestAddonCard).props;
+  expect(card()).toMatchObject({
+    name: "Untitled add-on",
+    description: "",
+    photo: null,
+    price: "US$30",
+    unit: "/ person",
+  });
+  const name = view!.root.findAllByType("input").find((i) => i.props["aria-label"] === "Name *")!;
+  await act(async () => {
+    name.props.onChange({ target: { value: "Airport transfer" } });
+  });
+  expect(card().name).toBe("Airport transfer");
 });
 
 it("offers the fixed lead times and shows the guests' notice in the preview (VAY-2232)", async () => {

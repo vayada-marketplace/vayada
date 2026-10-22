@@ -82,8 +82,8 @@ test("shared editor validates, uploads five photos, changes cover, removes and r
   await page.getByRole("button", { name: "New add-on" }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog.getByRole("heading", { name: "New add-on" })).toBeVisible();
-  await expect(dialog.getByText("No photo yet")).toBeVisible();
-  await expect(dialog.getByText("Untitled add-on")).toBeVisible();
+  // VAY-2231: the preview is the booking page's own card.
+  await expect(dialog.locator("article", { hasText: "Untitled add-on" })).toBeVisible();
   await dialog.getByRole("button", { name: "Create add-on", exact: true }).click();
   await expect(dialog.getByText("Name is required.")).toBeVisible();
   await expect(dialog.getByRole("button", { name: "Create add-on", exact: true })).toBeEnabled();
@@ -93,7 +93,7 @@ test("shared editor validates, uploads five photos, changes cover, removes and r
   await dialog.getByLabel(/^Price per guest per night \(EUR\) \*/).fill("15.00");
   // 2 guests × 3 nights × €15.00 in the price example, and the preview follows the form.
   await expect(dialog.getByText(/Example: 2 guests, 3 nights → €90\.00 total/)).toBeVisible();
-  await expect(dialog.getByText("per guest per night", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("/ person / night", { exact: true })).toBeVisible();
   await expect(dialog.getByLabel("Max quantity", { exact: true })).toBeHidden();
   await dialog.getByText("More options", { exact: true }).click();
   await dialog.getByLabel("Max quantity", { exact: true }).fill("2");
