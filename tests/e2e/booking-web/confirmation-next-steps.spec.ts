@@ -28,8 +28,12 @@ const booking = {
   createdAt: "2026-09-01T10:00:00.000Z",
 };
 
-async function openConfirmation(page: Page, fields: Record<string, unknown> = {}) {
-  await mockBookingApis(page);
+async function openConfirmation(
+  page: Page,
+  fields: Record<string, unknown> = {},
+  options: Parameters<typeof mockBookingApis>[1] = {},
+) {
+  await mockBookingApis(page, options);
   await page.route(`${hotelApi}/bookings/confirmation`, (route) =>
     route.fulfill({ json: { ...booking, ...fields } }),
   );
@@ -60,3 +64,25 @@ for (const status of ["pending", "cancelled"] as const) {
     await expect(page.getByRole("button", { name: /^Add to calendar/ })).toHaveCount(0);
   });
 }
+
+for (const [pin, destination] of [
+  [{ latitude: 46.0207, longitude: 7.7491 }, "46.0207,7.7491"],
+  // An "approximate" pin is rounded off on purpose: look the hotel up by name instead.
+  [{ latitude: 46.02, longitude: 7.75 }, "Hotel%20Alpenrose%2C%20Zermatt"],
+] as const) {
+  test(`opens directions to ${destination}`, async ({ page }) => {
+    await openConfirmation(page, {}, { mapPin: pin });
+    const directions = page.getByRole("link", { name: /^Get directions/ });
+    await expect(directions).toHaveAttribute(
+      "href",
+      `https://www.google.com/maps/dir/?api=1&destination=${destination}`,
+    );
+    await expect(directions).toHaveAttribute("target", "_blank");
+  });
+}
+
+test("offers no directions when the hotel hides its location", async ({ page }) => {
+  await openConfirmation(page);
+  await expect(page.getByRole("button", { name: /^Add to calendar/ })).toBeVisible();
+  await expect(page.getByRole("link", { name: /^Get directions/ })).toHaveCount(0);
+});

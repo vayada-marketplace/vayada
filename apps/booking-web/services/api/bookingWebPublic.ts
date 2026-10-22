@@ -119,6 +119,15 @@ export const bookingWebPublicApi = {
   },
 };
 
+function publicMapPin(latitude: number | null, longitude: number | null) {
+  return typeof latitude === "number" &&
+    typeof longitude === "number" &&
+    Math.abs(latitude) <= 90 &&
+    Math.abs(longitude) <= 180
+    ? { latitude, longitude }
+    : undefined;
+}
+
 export function toLegacyHotel(data: BookingWebPublicHotelResponse): Hotel {
   const hotel = data.hotel;
   const images = hotel.images.map((image) => image.url).filter(Boolean);
@@ -153,6 +162,7 @@ export function toLegacyHotel(data: BookingWebPublicHotelResponse): Hotel {
     checkInUntil: hotel.policies.checkInUntil || undefined,
     checkOutFrom: hotel.policies.checkOutFrom || undefined,
     timezone: hotel.timezone,
+    mapPin: publicMapPin(hotel.location.latitude, hotel.location.longitude),
     contact: {
       address,
       phone: contacts.phone || "",

@@ -461,7 +461,9 @@
     "partlyPaidByCard": "Partly paid by card",
     "heldOnCard": "Held on your card",
     "refundedToCard": "Refunded to your card",
-    "addToCalendar": "Add to calendar"
+    "addToCalendar": "Add to calendar",
+    "getDirections": "Get directions",
+    "directionsHint": "Opens our location in Google Maps"
   },
   "requestChange": {
     "title": "Request Booking Changes",
