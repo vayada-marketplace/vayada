@@ -3,6 +3,7 @@ import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { FirstPricingSetup, firstPricingInput } from "./FirstPricingSetup";
 import { StepFirstPrices } from "./StepFirstPrices";
+import { bookingsService } from "@/services/bookings";
 import { PricingEditor } from "./PricingEditor";
 import { PricingStayPreview } from "./PricingStayPreview";
 import { OptionWindow } from "./OptionWindow";
@@ -4195,12 +4196,19 @@ it("drops this room's edits when someone else changed the room, so a later save 
   expect(input().props.value).toBe("100.00"); expect(JSON.stringify(view.toJSON())).toContain("Someone else changed this room"); expect(button("Save and publish").props.disabled).toBe(true);
 });
 it("starts an unpriced room with the first setup in the property currency and publishes it next to the other rooms", async () => {
+  vi.spyOn(bookingsService, "getPaymentSettings").mockRejectedValueOnce(new Error("offline"));
   client.read.mockResolvedValue({ ...snapshot, revision: 3, sources, stale: false });
   const policy = vi.fn().mockResolvedValue({ revision: familyId }); client.termsAction.mockReturnValue(policy);
   await mountRoom();
   expect(view.root.findByType(StepFirstPrices).props).toMatchObject({ rooms: [familySetup], fixedCurrency: "EUR" });
-  // The first-price form has its own Save; the bar's comes with prices.
-  expect(view.root.findAllByType("button").filter((node) => node.props.type !== "submit" && node.children.includes("Save and publish"))).toHaveLength(0); expect(view.root.findAllByType(PricingStayPreview)).toHaveLength(0);
+  // The bar holds the one Save (VAY-2305): the first-price form's submit button, so Enter in a field saves too.
+  const saves = () => view.root.findAllByType("button").filter((node) => node.children.includes("Save and publish"));
+  const form = view.root.findByType("form");
+  expect(saves()).toHaveLength(1); expect(saves()[0].props).toMatchObject({ type: "submit", form: form.props.id }); expect(form.props.id).toBeTruthy();
+  expect(view.root.findAllByType(PricingStayPreview)).toHaveLength(0); expect(JSON.stringify(view.toJSON())).toContain("No price yet: guests can't book this room");
+  await act(async () => {}); expect(saves()[0].props.disabled).toBe(false); // Payment settings can't be read here: the form asks.
+  expect(JSON.stringify(view.toJSON())).toContain("names anything else still missing");
+  await act(async () => form.props.onSubmit({ preventDefault() {} })); expect(JSON.stringify(view.toJSON())).toContain("Fill in what is still missing:"); expect(client.publicationAction).not.toHaveBeenCalled();
   const first = familyInput("90");
   await act(async () => view.root.findByType(StepFirstPrices).props.onCreate({ configuration: first.configuration, terms: [first.terms] }, "save"));
   expect(saved.baseRevision).toBe(3); expect(saved.snapshot.rooms.map((room) => [room.roomTypeId, room.revision])).toEqual([["room", 4], [familyId, 4]]);
