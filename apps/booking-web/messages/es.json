@@ -353,7 +353,8 @@
     "status": "Estado",
     "cancelled": "Cancelada",
     "declined": "Rechazada",
-    "withdrawn": "Retirada"
+    "withdrawn": "Retirada",
+    "contactHotel": "Contactar con el alojamiento"
   },
   "confirmation": {
     "loadingDetails": "Cargando los detalles de la reserva…",
@@ -494,5 +495,16 @@
     "allocateGuests": "Huéspedes en cada habitación",
     "allocationAdults": "Adultos",
     "allocationChildren": "Niños"
+  },
+  "guestErrors": {
+    "somethingWentWrong": "Algo salió mal. Vuelve a intentarlo.",
+    "cancelNonRefundable": "Esta reserva no es reembolsable, por lo que no se puede cancelar en línea. Ponte en contacto con el alojamiento.",
+    "cancelDeadlinePassed": "El plazo de cancelación gratuita de esta reserva ha terminado, por lo que no se puede cancelar en línea. Ponte en contacto con el alojamiento.",
+    "cancelCheckInPassed": "La fecha de llegada ya pasó, por lo que esta reserva no se puede cancelar en línea. Ponte en contacto con el alojamiento.",
+    "cancelNotOnline": "Esta reserva no se puede cancelar en línea. Ponte en contacto con el alojamiento.",
+    "cancelFeeChanged": "El cargo por cancelación ha cambiado. Revísalo antes de cancelar.",
+    "withdrawNotOnline": "Esta solicitud no se puede retirar en línea. Ponte en contacto con el alojamiento.",
+    "bookingNotChangeable": "Esta reserva ya no se puede modificar. Vuelve a buscarla para ver su estado actual.",
+    "busyTryAgain": "Esta reserva se está actualizando en este momento. Vuelve a intentarlo en un momento."
   }
 }

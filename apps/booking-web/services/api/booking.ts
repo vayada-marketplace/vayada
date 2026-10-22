@@ -140,11 +140,17 @@ export const bookingService = {
     );
   },
 
-  async cancelPreview(slug: string, bookingId: string, guestEmail: string): Promise<CancelPreview> {
+  async cancelPreview(
+    slug: string,
+    bookingId: string,
+    guestEmail: string,
+    signal?: AbortSignal,
+  ): Promise<CancelPreview> {
     const body = { guestEmail };
     return bookingWebPublic.post(
       `/api/booking-web/hotels/${encodeURIComponent(slug)}/bookings/${encodeURIComponent(bookingId)}/cancel-preview`,
       body,
+      { signal },
     );
   },
 

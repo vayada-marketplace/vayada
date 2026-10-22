@@ -356,7 +356,8 @@
     "status": "Status",
     "cancelled": "Storniert",
     "declined": "Abgelehnt",
-    "withdrawn": "Zurückgezogen"
+    "withdrawn": "Zurückgezogen",
+    "contactHotel": "Unterkunft kontaktieren"
   },
   "confirmation": {
     "loadingDetails": "Buchungsdetails werden geladen…",
@@ -497,5 +498,16 @@
     "allocateGuests": "Gäste pro Zimmer",
     "allocationAdults": "Erwachsene",
     "allocationChildren": "Kinder"
+  },
+  "guestErrors": {
+    "somethingWentWrong": "Etwas ist schiefgelaufen. Bitte versuchen Sie es erneut.",
+    "cancelNonRefundable": "Diese Buchung ist nicht erstattungsfähig und kann daher nicht online storniert werden. Bitte kontaktieren Sie die Unterkunft.",
+    "cancelDeadlinePassed": "Die Frist für die kostenlose Stornierung dieser Buchung ist abgelaufen, daher kann sie nicht online storniert werden. Bitte kontaktieren Sie die Unterkunft.",
+    "cancelCheckInPassed": "Das Anreisedatum ist bereits vorbei, daher kann diese Buchung nicht online storniert werden. Bitte kontaktieren Sie die Unterkunft.",
+    "cancelNotOnline": "Diese Buchung kann nicht online storniert werden. Bitte kontaktieren Sie die Unterkunft.",
+    "cancelFeeChanged": "Die Stornogebühr hat sich geändert. Bitte prüfen Sie sie vor der Stornierung.",
+    "withdrawNotOnline": "Diese Anfrage kann nicht online zurückgezogen werden. Bitte kontaktieren Sie die Unterkunft.",
+    "bookingNotChangeable": "Diese Buchung kann nicht mehr geändert werden. Rufen Sie sie erneut ab, um den aktuellen Status zu sehen.",
+    "busyTryAgain": "Diese Buchung wird gerade aktualisiert. Bitte versuchen Sie es gleich noch einmal."
   }
 }

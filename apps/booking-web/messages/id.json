@@ -353,7 +353,8 @@
     "status": "Status",
     "cancelled": "Dibatalkan",
     "declined": "Ditolak",
-    "withdrawn": "Ditarik"
+    "withdrawn": "Ditarik",
+    "contactHotel": "Hubungi Properti"
   },
   "confirmation": {
     "loadingDetails": "Memuat detail pemesanan…",
@@ -494,5 +495,16 @@
     "allocateGuests": "Tamu di setiap kamar",
     "allocationAdults": "Dewasa",
     "allocationChildren": "Anak-anak"
+  },
+  "guestErrors": {
+    "somethingWentWrong": "Terjadi kesalahan. Silakan coba lagi.",
+    "cancelNonRefundable": "Pemesanan ini tidak dapat dikembalikan dananya, jadi tidak dapat dibatalkan secara online. Silakan hubungi properti.",
+    "cancelDeadlinePassed": "Masa pembatalan gratis untuk pemesanan ini telah berakhir, jadi tidak dapat dibatalkan secara online. Silakan hubungi properti.",
+    "cancelCheckInPassed": "Tanggal check-in sudah lewat, jadi pemesanan ini tidak dapat dibatalkan secara online. Silakan hubungi properti.",
+    "cancelNotOnline": "Pemesanan ini tidak dapat dibatalkan secara online. Silakan hubungi properti.",
+    "cancelFeeChanged": "Biaya pembatalan telah berubah. Silakan periksa kembali sebelum membatalkan.",
+    "withdrawNotOnline": "Permintaan ini tidak dapat ditarik secara online. Silakan hubungi properti.",
+    "bookingNotChangeable": "Pemesanan ini tidak dapat diubah lagi. Cari kembali untuk melihat statusnya saat ini.",
+    "busyTryAgain": "Pemesanan ini sedang diperbarui. Silakan coba lagi sebentar lagi."
   }
 }
