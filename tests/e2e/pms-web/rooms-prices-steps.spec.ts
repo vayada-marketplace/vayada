@@ -394,14 +394,14 @@ test("edits a priced room on the simple card and publishes only what changed (VA
   const pricing = await mockPricing(page, publicationOf(3, [designRoom(3), complexRoom(3)]));
   const assertHealthy = watchPageHealth(page, testInfo);
   await prices(page, DELUXE);
-  // "Pricing setup" (VAY-2280, VAY-2305): opening times, prices and seasons, rates and meals; "What guests see"
-  // sits beside step Meals.
-  for (const heading of ["Pricing setup", "Prices and seasons", "Rates", "Meals"])
+  // "Pricing setup" (VAY-2280, VAY-2305): opening times, prices and seasons, rates and meal plans; "On your booking
+  // page" sits beside step Meal plans.
+  for (const heading of ["Pricing setup", "Prices and seasons", "Rates", "Meal plans"])
     await expect(main(page).getByRole("heading", { name: heading })).toBeVisible();
   await expect(
     main(page)
-      .getByRole("region", { name: /^Meals/ })
-      .getByRole("region", { name: "What guests see" }),
+      .getByRole("region", { name: /^Meal plans/ })
+      .getByRole("region", { name: "On your booking page" }),
   ).toBeVisible();
   // "Prices by date" comes first (VAY-2280), showing the main option's nightly prices.
   const calendar = main(page).getByRole("region", { name: "Prices by date" });
@@ -438,7 +438,11 @@ test("edits a priced room on the simple card and publishes only what changed (VA
   await expect(main(page).getByLabel("How much cheaper, in percent")).toHaveValue("10");
   await expect(main(page).getByText("€90 a night", { exact: true })).toBeVisible();
   await expect(extra(page, "With breakfast")).toHaveAttribute("aria-checked", "true");
-  await expect(main(page).getByText("€115 a night for 2", { exact: true })).toBeVisible();
+  await expect(
+    main(page).getByText("Adds €15 a night for the room, whatever the number of guests.", {
+      exact: true,
+    }),
+  ).toBeVisible();
   await expect(main(page).getByText("Save 10%")).toBeVisible();
 
   await main(page).getByRole("button", { name: "+10%" }).click();
@@ -526,8 +530,13 @@ test("writes what guests read about breakfast and shows it in the guest card (VA
   const assertHealthy = watchPageHealth(page, testInfo);
   await prices(page, DELUXE);
   const text = "Buffet breakfast in the Stube, 7:00–10:30";
-  // Step "Meals" (each option's window has the same field, hidden until opened).
+  // Step "Meal plans" (each option's window has the same field, hidden until opened).
   await main(page).getByRole("textbox", { name: "What guests read" }).fill(`${text} `);
+  // Breakfast for the room becomes breakfast per adult (VAY-2305); children's is free.
+  await main(page).getByRole("button", { name: "Per adult", exact: true }).click();
+  await expect(
+    main(page).getByText("2 adults add €30 a night (€15 per adult).", { exact: true }),
+  ).toBeVisible();
   await expect(
     main(page)
       .getByRole("radiogroup", { name: "Options for this stay" })
@@ -541,6 +550,11 @@ test("writes what guests read about breakfast and shows it in the guest card (VA
   )!;
   const breakfast = deluxe.offers.find((offer: Room) => offer.meal.kind === "breakfast");
   expect(breakfast.meal.description).toBe(text);
+  expect(breakfast.meal.charge).toEqual({
+    kind: "person",
+    adultMinor: "1500",
+    childBandAmountsMinor: ["0", "0"],
+  });
   expect(deluxe.offers.filter((offer: Room) => "description" in offer.meal)).toHaveLength(1);
   await assertHealthy();
 });

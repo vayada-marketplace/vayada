@@ -50,7 +50,6 @@ const methodNames = {
   bank_transfer: "pricing.paymentMethods.bankTransfer",
   paypal: "pricing.paymentMethods.paypal",
 } as const;
-const sectionLabel = "text-[11px] font-semibold uppercase tracking-[0.06em] text-gray-500";
 const discountOf = (offer: SimpleRoom["nonRefundable"]) =>
   offer?.price.kind === "linked" && offer.price.adjustment.kind === "percentage"
     ? -offer.price.adjustment.basisPoints
@@ -253,7 +252,7 @@ function Part({
 }) {
   return (
     <div className={`space-y-2.5 border-t border-gray-100 pt-3.5 ${className}`}>
-      <p className={sectionLabel}>{label}</p>
+      <p className={ui.partLabel}>{label}</p>
       {children}
     </div>
   );
