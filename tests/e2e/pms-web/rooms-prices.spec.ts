@@ -255,7 +255,7 @@ test("prices a room in its Prices tab and publishes the other rooms unchanged", 
   ).toBeVisible();
   await expect(main(page).getByText("Garden Room")).toHaveCount(0);
   await priceInput(page, "Alpine Suite").fill("135.50");
-  await main(page).getByRole("button", { name: "Save prices" }).click();
+  await main(page).getByRole("button", { name: "Save and publish" }).click();
   await expect(main(page).getByText("Prices saved.", { exact: false })).toBeVisible();
 
   expect(pricing.publishes).toHaveLength(1);
@@ -271,7 +271,7 @@ test("prices a room in its Prices tab and publishes the other rooms unchanged", 
     pricedRoom(GARDEN, "9000", 4),
   );
   await expect(priceInput(page, "Alpine Suite")).toHaveValue("135.50");
-  await expect(main(page).getByRole("button", { name: "Save prices" })).toBeDisabled();
+  await expect(main(page).getByRole("button", { name: "Save and publish" })).toBeDisabled();
 
   await page.goto(`/rooms/${LAKE}?tab=prices`);
   // VAY-2188: the first price is the simple card; the property's currency is fixed, so no currency field.
@@ -297,13 +297,13 @@ test("keeps this room's edits over a reload when someone else published another 
     pricedRoom(SUITE, "12000", 4),
     pricedRoom(GARDEN, "9500", 4),
   ]);
-  await main(page).getByRole("button", { name: "Save prices" }).click();
+  await main(page).getByRole("button", { name: "Save and publish" }).click();
   await expect(
     main(page).getByText("Your changes to this room are kept if nobody else changed this room."),
   ).toBeVisible();
   await main(page).getByRole("button", { name: "Reload pricing" }).click();
   await expect(priceInput(page, "Alpine Suite")).toHaveValue("140.00");
-  await main(page).getByRole("button", { name: "Save prices" }).click();
+  await main(page).getByRole("button", { name: "Save and publish" }).click();
   await expect(main(page).getByText("Prices saved.", { exact: false })).toBeVisible();
 
   const published = pricing.publishes.at(-1)!;

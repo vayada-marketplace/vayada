@@ -426,7 +426,7 @@ test("opens the new room's Prices tab with the typed prices when their save is r
   ).toBeVisible();
   await expect(main(page).getByText("Someone else saved prices at the same time.")).toBeVisible();
   await expect(main(page).getByLabel("Castrop Suite Offer 1 Per room")).toHaveValue("120.00");
-  await main(page).getByRole("button", { name: "Save prices" }).click();
+  await main(page).getByRole("button", { name: "Save and publish" }).click();
   await expect(main(page).getByText("Prices saved.", { exact: false })).toBeVisible();
   // The refused publish is not recorded; this is the Prices tab's save, from the revision it read.
   expect(pricing.publishes).toHaveLength(1);

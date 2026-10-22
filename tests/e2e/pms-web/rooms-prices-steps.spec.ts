@@ -416,7 +416,9 @@ test("edits a priced room on the simple card and publishes only what changed (VA
     "true",
   );
   // The Save bar: the lowest night is the Low season's €80, 10% less on the Non-refundable rate.
-  await expect(main(page).getByText("Guests pay from €72 a night", { exact: true })).toBeVisible();
+  await expect(
+    main(page).getByText("Guests from €72 a night on your booking page.", { exact: true }),
+  ).toBeVisible();
   // Non-refundable stays are paid in advance; the mock's old "pay at property" shows as not offered (VAY-2282).
   await expect(main(page).getByRole("region", { name: "Non-refundable rate" })).toContainText(
     "Not offered: non-refundable stays are paid in advance",
@@ -461,8 +463,11 @@ test("edits a priced room on the simple card and publishes only what changed (VA
   await page.getByRole("button", { name: "Delete option" }).last().click();
   await expect(extra(page, "With breakfast")).toHaveAttribute("aria-checked", "false");
 
-  await main(page).getByRole("button", { name: "Save prices" }).click();
+  await main(page).getByRole("button", { name: "Save and publish" }).click();
   await expect(main(page).getByText("Prices saved.", { exact: false })).toBeVisible();
+  // Editing goes on from the publication: the rates come back with their terms (VAY-2305).
+  await expect(main(page).getByRole("region", { name: "Flexible rate" })).toBeVisible();
+  await expect(main(page).getByText("Loading the cancellation terms")).toHaveCount(0);
   expect(pricing.publishes).toHaveLength(1);
   const published = pricing.publishes[0].snapshot.rooms as Room[];
   const deluxe = published.find((value) => value.roomTypeId === DELUXE)!;
@@ -518,7 +523,7 @@ test("writes what guests read about breakfast and shows it in the guest card (VA
       .getByRole("radio")
       .filter({ hasText: text }),
   ).toHaveCount(1);
-  await main(page).getByRole("button", { name: "Save prices" }).click();
+  await main(page).getByRole("button", { name: "Save and publish" }).click();
   await expect(main(page).getByText("Prices saved.", { exact: false })).toBeVisible();
   const deluxe = (pricing.publishes[0].snapshot.rooms as Room[]).find(
     (value) => value.roomTypeId === DELUXE,
@@ -551,7 +556,7 @@ test("writes what guests read about a half board option in its window (VAY-2281)
       .getByRole("radio")
       .filter({ hasText: text }),
   ).toHaveCount(1);
-  await main(page).getByRole("button", { name: "Save prices" }).click();
+  await main(page).getByRole("button", { name: "Save and publish" }).click();
   await expect(main(page).getByText("Prices saved.", { exact: false })).toBeVisible();
   const deluxe = (pricing.publishes[0].snapshot.rooms as Room[]).find(
     (value) => value.roomTypeId === DELUXE,
@@ -612,7 +617,7 @@ test("closes a night and gives another its own price from the calendar (VAY-2280
   await expect(panel.getByRole("radio", { name: "New season" })).toBeVisible();
   await panel.getByRole("button", { name: "Cancel" }).click();
 
-  await main(page).getByRole("button", { name: "Save prices" }).click();
+  await main(page).getByRole("button", { name: "Save and publish" }).click();
   await expect(main(page).getByText("Prices saved.", { exact: false })).toBeVisible();
   const deluxe = (pricing.publishes[0].snapshot.rooms as Room[]).find(
     (value) => value.roomTypeId === DELUXE,
@@ -663,7 +668,7 @@ test("edits a season's price in the table and adds dates to a season (VAY-2280)"
   await opening.getByRole("button", { name: "Close these days" }).click();
   await expect(opening.getByText("350 nights a year open, 15 closed")).toBeVisible();
 
-  await main(page).getByRole("button", { name: "Save prices" }).click();
+  await main(page).getByRole("button", { name: "Save and publish" }).click();
   await expect(main(page).getByText("Prices saved.", { exact: false })).toBeVisible();
   const deluxe = (pricing.publishes[0].snapshot.rooms as Room[]).find(
     (value) => value.roomTypeId === DELUXE,
@@ -708,7 +713,7 @@ test("keeps a setup the simple card can't show unchanged through a save", async 
   ).toBeVisible();
   // Typing the same amount differently ("90" for "90.00") is a change React sees, with nothing to publish.
   await main(page).getByLabel("Garden Room Offer 1 1 adult").fill("90");
-  await main(page).getByRole("button", { name: "Save prices" }).click();
+  await main(page).getByRole("button", { name: "Save and publish" }).click();
   await expect(main(page).getByText("Prices saved.", { exact: false })).toBeVisible();
   const published = pricing.publishes[0].snapshot.rooms as Room[];
   expect(published.find((value) => value.roomTypeId === GARDEN)).toEqual(complexRoom(4));
@@ -734,7 +739,7 @@ test("sets the first price of an unpriced room with one Save, next to the other 
   ).toBeVisible();
   await expect(main(page).getByLabel("Room type")).toHaveCount(0);
   // Save without a price names what is missing; nothing else needs an answer.
-  await main(page).getByRole("button", { name: "Save prices" }).click();
+  await main(page).getByRole("button", { name: "Save and publish" }).click();
   await expect(
     main(page).getByRole("listitem").filter({ hasText: "Room price per night" }),
   ).toHaveCount(1);
@@ -743,7 +748,7 @@ test("sets the first price of an unpriced room with one Save, next to the other 
     "true",
   );
   await main(page).getByLabel("Room price per night").fill("120");
-  await main(page).getByRole("button", { name: "Save prices" }).click();
+  await main(page).getByRole("button", { name: "Save and publish" }).click();
   await expect(main(page).getByText("Prices saved.", { exact: false })).toBeVisible();
   const published = pricing.publishes[0].snapshot.rooms as Room[];
   expect(published.map((value) => value.roomTypeId)).toEqual([DELUXE, LAKE]);
@@ -791,7 +796,7 @@ test("adds the switches and a season to a first price before saving it (VAY-2188
   await dialog(page).getByRole("button", { name: "Save season" }).click();
   await expect(extra(page, "Non-refundable")).toHaveAttribute("aria-checked", "true");
   await expect(extra(page, "With breakfast")).toHaveAttribute("aria-checked", "true");
-  await main(page).getByRole("button", { name: "Save prices" }).click();
+  await main(page).getByRole("button", { name: "Save and publish" }).click();
   await expect(main(page).getByText("Prices saved.", { exact: false })).toBeVisible();
   const lake = (pricing.publishes[0].snapshot.rooms as Room[]).find(
     (value) => value.roomTypeId === LAKE,
@@ -893,7 +898,7 @@ test("shows the whole year and closes dates picked in the Year view (VAY-2284)",
       calendar.getByRole("button", { name: new RegExp(`^${day} March ${year}, €\\d+, closed`) }),
     ).toHaveAttribute("aria-pressed", "true");
   await expect(calendar.getByText("Closed on this date")).toBeVisible();
-  await main(page).getByRole("button", { name: "Save prices" }).click();
+  await main(page).getByRole("button", { name: "Save and publish" }).click();
   await expect(main(page).getByText("Prices saved.", { exact: false })).toBeVisible();
   const deluxe = (pricing.publishes[0].snapshot.rooms as Room[]).find(
     (value) => value.roomTypeId === DELUXE,
@@ -957,7 +962,7 @@ test("turns the Flexible rate off and sells an option on channels only, keeping 
   const guests = main(page).getByRole("radiogroup", { name: "Options for this stay" });
   await expect(guests.getByRole("radio")).toHaveCount(2);
   await expect(guests.getByRole("radio", { checked: true })).toContainText("Non-refundable");
-  await main(page).getByRole("button", { name: "Save prices" }).click();
+  await main(page).getByRole("button", { name: "Save and publish" }).click();
   await expect(main(page).getByText("Prices saved.", { exact: false })).toBeVisible();
   const deluxe = (pricing.publishes[0].snapshot.rooms as Room[]).find(
     (value) => value.roomTypeId === DELUXE,
@@ -971,7 +976,7 @@ test("turns the Flexible rate off and sells an option on channels only, keeping 
   await channels.first().click();
   await expect(channels.first()).toHaveAttribute("aria-checked", "true");
   await expect(main(page).getByText("not on your booking page", { exact: false })).toBeVisible();
-  await main(page).getByRole("button", { name: "Save prices" }).click();
+  await main(page).getByRole("button", { name: "Save and publish" }).click();
   await expect(main(page).getByText("Prices saved.", { exact: false })).toBeVisible();
   const garden = (pricing.publishes[1].snapshot.rooms as Room[]).find(
     (value) => value.roomTypeId === GARDEN,
