@@ -229,34 +229,42 @@ test.describe("pms-web smoke", () => {
       .filter({ has: page.getByRole("columnheader", { name: "Role" }) });
     const adaRow = roster.getByRole("row").filter({ hasText: "Ada Lovelace" });
     const graceRow = roster.getByRole("row").filter({ hasText: "grace@example.com" });
-    // A pending invite can only be resent, not deactivated.
+    // A pending invite can only be resent, not deactivated: its only action is the ··· menu.
     await expect(graceRow.getByText("Pending invite")).toBeVisible();
-    await expect(graceRow.getByText("Pending", { exact: true })).toBeVisible();
-    await expect(graceRow.getByRole("button")).toHaveText(["Resend invitation"]);
-    // Deactivation asks for an in-app confirmation (VAY-908).
+    await expect(graceRow.getByText("Invited", { exact: true })).toBeVisible();
+    await expect(graceRow.getByRole("button")).toHaveCount(1);
+    await graceRow.getByRole("button", { name: "More actions for grace@example.com" }).click();
+    await expect(graceRow.getByRole("menuitem")).toHaveText(["Resend invitation"]);
+    await page.keyboard.press("Escape");
+    await expect(graceRow.getByRole("menuitem")).toHaveCount(0);
+    // Suspending asks for an in-app confirmation (VAY-908).
     const confirmDeactivation = async () => {
-      const dialog = page.getByRole("dialog", { name: "Deactivate Ada Lovelace" });
-      await dialog.getByRole("button", { name: "Deactivate", exact: true }).click();
+      const dialog = page.getByRole("dialog", { name: "Suspend access for Ada Lovelace" });
+      await dialog.getByRole("button", { name: "Suspend", exact: true }).click();
     };
 
     await page.setViewportSize({ width: 390, height: 844 });
-    const deactivate = adaRow.getByRole("button", { name: "Deactivate Ada Lovelace" });
-    await deactivate.focus();
-    await expect(deactivate).toBeFocused();
-    await deactivate.click();
+    const more = adaRow.getByRole("button", { name: "More actions for Ada Lovelace" });
+    const deactivate = async () => {
+      await more.click();
+      await adaRow.getByRole("menuitem", { name: "Suspend access for Ada Lovelace" }).click();
+    };
+    await more.focus();
+    await expect(more).toBeFocused();
+    await deactivate();
     await confirmDeactivation();
     await expect(
-      adaRow.getByRole("button", { name: "Saving status for Ada Lovelace" }),
+      adaRow.getByRole("status", { name: "Saving status for Ada Lovelace" }),
     ).toHaveAttribute("aria-busy", "true");
     releaseFirstRequest();
     await expect(adaRow.getByRole("alert")).toHaveText("Couldn’t update Ada Lovelace. Try again.");
     await expect(adaRow.getByText("Active", { exact: true })).toBeVisible();
 
-    await deactivate.click();
+    await deactivate();
     await confirmDeactivation();
-    await expect(adaRow.getByText("Deactivated", { exact: true })).toBeVisible();
-    const reactivate = adaRow.getByRole("button", { name: "Reactivate Ada Lovelace" });
-    await reactivate.click();
+    await expect(adaRow.getByText("Suspended", { exact: true })).toBeVisible();
+    await more.click();
+    await adaRow.getByRole("menuitem", { name: "Reactivate access for Ada Lovelace" }).click();
     await expect(adaRow.getByText("Active", { exact: true })).toBeVisible();
 
     expect(requests.map((request) => request.status)).toEqual([
