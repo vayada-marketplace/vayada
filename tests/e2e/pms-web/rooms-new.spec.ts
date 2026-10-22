@@ -244,6 +244,13 @@ async function mockPricing(page: Page) {
         card: { ready: false, reason: "switch_off", charge: "at_booking" },
         deposits: { ready: false },
       });
+    // Every published rate sells (VAY-2304).
+    if (suffix === "/not-selling" && method === "GET")
+      return ok(route, {
+        version: "pricing-rates-not-selling.v1",
+        publishedRevision: null,
+        rates: [],
+      });
     if (suffix === "" && method === "GET") return ok(route, state.publication);
     const step = suffix === "/prepare" ? "prepare" : suffix === "/publish" ? "publish" : null;
     if (step && state.refuse?.step === step) {

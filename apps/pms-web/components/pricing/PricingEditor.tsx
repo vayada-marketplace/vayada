@@ -13,7 +13,7 @@ import type { NewRoomPrices } from "./newRoomPrices";
 import type { KeptNewRoomPrices } from "./keptNewRoomPrices";
 import { FirstPricingSetup, type SetupRoom, type firstPricingInput } from "./FirstPricingSetup";
 import { PricingTerms } from "./PricingTerms";
-import { PricingCardReadinessProvider, PricingManualMethodsProvider, useLoadedPricingCardReadiness, useLoadedPricingManualMethods } from "./pricingManualMethods";
+import { PricingCardReadinessProvider, PricingManualMethodsProvider, PricingNotSellingProvider, useLoadedPricingCardReadiness, useLoadedPricingManualMethods, useLoadedPricingNotSelling } from "./pricingManualMethods";
 import { PricingIncludedAdjustments } from "./PricingIncludedAdjustments";
 import { PricingStayOwnership } from "./PricingStayOwnership";
 import { PricingStaySeasons } from "./PricingStaySeasons";
@@ -94,6 +94,8 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
   const [empty, setEmpty] = useState(false);
   const [current, setCurrent] = useState<PricingSnapshot | null>(null), [baseRevision, setBaseRevision] = useState(0), [stale, setStale] = useState(false);
   const loadedRooms = useRef<readonly Room[]>([]);
+  // The rates guests can't book now (VAY-2304), read again with each publication the editor loads.
+  const notSelling = useLoadedPricingNotSelling(client, baseRevision);
   const [inputs, setInputs] = useState<Record<string, string>>({}), [dirty, setDirty] = useState(false);
   const [loading, setLoading] = useState(true), [busy, setBusy] = useState(false), [error, setError] = useState<unknown>(null), [notice, setNotice] = useState<MessageKey | "">("");
   const [needsReload, setNeedsReload] = useState(false), [done, setDone] = useState(false), [retry, setRetry] = useState(false);
@@ -339,6 +341,8 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
     if (minor) guestsFrom = t("pricing.bar.from", { amount: money(minor, shown.currency) });
     barGaps = nightsWithoutPrice(shown, mainOffer(shown).id, sampleAdults(shown), localToday());
   } catch { guestsFrom = ""; }
+  // This room's published rates guests can't book now (VAY-2304); their cards say why.
+  const stopped = notSelling.filter((rate) => rate.roomTypeId === focus);
   const status = busy ? { key: "pricing.editor.saving", tone: "text-primary-700", icon: <ArrowPathIcon aria-hidden="true" className="h-4 w-4 animate-spin" /> }
     : done || (!dirty && !stale) ? { key: done ? "pricing.editor.statusSaved" : "pricing.editor.statusCurrent", tone: "text-green-700", icon: <CheckIcon aria-hidden="true" className="h-4 w-4" /> }
     : { key: dirty ? "pricing.editor.statusUnsaved" : "pricing.editor.statusStale", tone: "text-amber-700", icon: <span aria-hidden="true" className="h-2 w-2 rounded-full bg-amber-500" /> };
@@ -359,7 +363,7 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
   const cancels = leaveRisk && !needsReload && !retry && !busy && !done;
   // No prices yet (VAY-2280): the first-price form shows the calendar of nights waiting for one, beside "Start with one price".
   // Laid out as the Paper design's numbered steps; the other editors sit under More options. Cancel and Save at the bottom.
-  return <PricingManualMethodsProvider value={manualMethods}><PricingCardReadinessProvider value={cardReadiness}><section className="space-y-4">
+  return <PricingManualMethodsProvider value={manualMethods}><PricingCardReadinessProvider value={cardReadiness}><PricingNotSellingProvider value={notSelling}><section className="space-y-4">
     {error !== null && <div role="alert" className={ui.errorBanner}>{pricingSaveError(error, t)}{retry && <p className="mt-2">{t("pricing.editor.retryHint")}</p>}{keepsOnReload && <p className="mt-2">{t("pricing.room.reloadKeeps")}</p>}</div>}
     {notice && !(staleShown && notice === "pricing.room.noticeStale") && <p role="status" className={warning ? ui.warningBanner : ui.successBanner}>{t(notice)}</p>}
     {loading && <p role="status" className={ui.text}>{t("pricing.editor.loading")}</p>}
@@ -411,7 +415,7 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
       const gaps = edited ? nightsWithoutPrice(edited, main.id, sampleAdults(edited), today) : 0;
       const preview = <GuestPreview room={edited} facts={{ name: roomName(room.roomTypeId, ri), ...(roomFacts[room.roomTypeId] ?? { size: null, photo: null }) }} names={names} terms={optionTerms}
         stay={stay} today={today} selected={previewId} onSelect={setPreviewOffer} />;
-      // The CEO's layout (VAY-2305): "Prices by date" first, then "Pricing setup", whose step "Meals" holds "What guests see".
+      // The CEO's layout (VAY-2305): "Prices by date" first, then "Pricing setup", whose step "Meal plans" holds "On your booking page".
       return <div key={room.roomTypeId} className="space-y-6">
         <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
           <PriceCalendar room={edited} options={rates} offerId={calendarId} onOffer={setPreviewOffer}
@@ -463,7 +467,7 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
               <p className={ui.stepHint}>{t("pricing.paymentMethods.hint")}</p>
             </div>
           </StepRates>
-          {/* Step "Meals": the breakfast switch, beside "What guests see"; while the options' terms load, the preview alone. */}
+          {/* Step "Meal plans": breakfast, beside "On your booking page"; while the options' terms load, the preview alone. */}
           {simple ? <StepExtras room={room} simple={simple} prices={prices} only="breakfast" disabled={disabled || (hasPendingEntries && !pendingEntries[`extras:${ri}`])}
             onAdd={(input) => createInitial(input, true, room.roomTypeId)} onRemove={(offerId) => { if (!disabled && !pendingBesidesExtras) setDeleting(offerId); }} onChange={changeRoom(ri)} onPending={pend(`extras:${ri}`)} preview={preview} />
             : <div className="border-t border-gray-200 py-7">{preview}</div>}
@@ -565,6 +569,7 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <p className={`flex items-center gap-1.5 text-[13px] font-medium ${status.tone}`}>{status.icon}{t(status.key)}</p>
           {barGaps > 0 && <span className="rounded-md bg-red-50 px-2 py-0.5 text-[12px] font-semibold text-red-700">{t(barGaps === 1 ? "pricing.bar.gaps.one" : "pricing.bar.gaps.other", { count: barGaps })}</span>}
+          {stopped.length > 0 && <span className="rounded-md bg-amber-50 px-2 py-0.5 text-[12px] font-semibold text-amber-800">{stopped.length === 1 ? t("pricing.bar.notSelling.one", { name: names[stopped[0].offerId] ?? "" }) : t("pricing.bar.notSelling.other", { count: stopped.length })}</span>}
         </div>
         <p id={declarationId} className="text-[11px] text-gray-500">{t("pricing.editor.saveDeclaration")}</p></div>}
       {!loading && editing && guestsFrom && <span className="w-full text-[13px] text-gray-600 md:w-auto md:max-w-[20rem] md:text-right">{guestsFrom}</span>}
@@ -576,7 +581,7 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
     {/* Last, so they open above an option's window. */}
     {reloading && <ConfirmDialog title={t(cancels ? "pricing.steps.discardTitle" : "pricing.reloadTitle")} message={t(cancels ? "pricing.steps.discardMessage" : "pricing.reloadMessage")} confirmLabel={t(cancels ? "pricing.steps.discardConfirm" : "pricing.reloadConfirm")} cancelLabel={t("common.cancel")} variant="danger" onConfirm={() => { setReloading(false); void load(); }} onCancel={() => setReloading(false)} />}
     {leave && <ConfirmDialog title={t("pricing.leaveTitle")} message={t("pricing.leaveMessage")} confirmLabel={t("pricing.leaveConfirm")} cancelLabel={t("common.cancel")} variant="danger" onConfirm={() => { leaving.current = true; setLeave(null); leave(); }} onCancel={() => setLeave(null)} />}
-  </section></PricingCardReadinessProvider></PricingManualMethodsProvider>;
+  </section></PricingNotSellingProvider></PricingCardReadinessProvider></PricingManualMethodsProvider>;
 }
 /** Today's date on this device (YYYY-MM-DD), as the calendar counts nights. */
 const localToday = () => { const now = new Date(); return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`; };

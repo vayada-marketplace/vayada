@@ -2,7 +2,10 @@
 
 import { createContext, useContext, useEffect, useState } from "react";
 import type { ManualPaymentMethod } from "@vayada/product-onboarding/AcceptedPaymentMethods";
-import type { PricingCardReadiness } from "@vayada/product-onboarding/replacementPricingClient";
+import type {
+  PricingCardReadiness,
+  PricingRateNotSelling,
+} from "@vayada/product-onboarding/replacementPricingClient";
 
 const ManualMethods = createContext<readonly ManualPaymentMethod[]>([]);
 
@@ -58,4 +61,35 @@ export function useLoadedPricingCardReadiness(client: {
     };
   }, [client]);
   return readiness;
+}
+
+const NotSelling = createContext<readonly PricingRateNotSelling[]>([]);
+
+/** The published rates guests can't book now, and why (VAY-2304), read once per editor and again after each
+ * publication (`revision`). Unknown reads as none: the rate cards say nothing. */
+export const PricingNotSellingProvider = NotSelling.Provider;
+export const usePricingNotSelling = () => useContext(NotSelling);
+
+export function useLoadedPricingNotSelling(
+  client: { notSellingRates(): Promise<PricingRateNotSelling[]> },
+  revision: number,
+): readonly PricingRateNotSelling[] {
+  const [rates, setRates] = useState<readonly PricingRateNotSelling[]>([]);
+  useEffect(() => {
+    let current = true;
+    void Promise.resolve()
+      .then(() => client.notSellingRates())
+      .then(
+        (value) => {
+          if (current) setRates(value ?? []);
+        },
+        () => {
+          if (current) setRates([]);
+        },
+      );
+    return () => {
+      current = false;
+    };
+  }, [client, revision]);
+  return rates;
 }
