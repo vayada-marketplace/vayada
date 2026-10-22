@@ -14,6 +14,10 @@ import type {
   PermissionKey,
   Product,
   ResourceType,
+  StaffInvitationAcceptanceEvent,
+  StaffInvitationAcceptanceResult,
+  StaffInvitationJoinDetails,
+  StaffInvitationJoinRepository,
   TokenVerifier,
 } from "@vayada/backend-auth";
 import { membershipPropertyAccessModeForProvisioning } from "@vayada/backend-auth";
@@ -55,6 +59,27 @@ export type AuthKitSession = {
   sessionId?: string;
 };
 
+export type AuthKitInvitation = {
+  id: string;
+  email: string;
+  state: "pending" | "accepted" | "expired" | "revoked";
+  organizationId: string | null;
+  acceptedUserId: string | null;
+  expiresAt: string;
+};
+
+// WorkOS creates the invitee's user, unverified and without a password, when an invitation is
+// sent. `signupFlow` is the auth_flow metadata every account Vayada creates carries.
+export type AuthKitInvitee = {
+  id: string;
+  email: string;
+  emailVerified: boolean;
+  lastSignInAt: string | null;
+  externalId: string | null;
+  signupFlow: string | null;
+  createdAt: string;
+};
+
 export type AuthKitClient = {
   getAuthorizationUrl(input: {
     provider: "GoogleOAuth";
@@ -70,6 +95,7 @@ export type AuthKitClient = {
   authenticateWithPassword(input: {
     email: string;
     password: string;
+    invitationToken?: string;
     ipAddress?: string;
     userAgent?: string;
   }): Promise<AuthKitSession>;
@@ -88,10 +114,23 @@ export type AuthKitClient = {
   createUser(input: {
     email: string;
     password: string;
+    firstName?: string;
+    lastName?: string;
+    emailVerified?: boolean;
     ipAddress?: string;
     userAgent?: string;
     metadata?: Record<string, string>;
   }): Promise<AuthKitUser>;
+  findInvitationByToken(input: { token: string }): Promise<AuthKitInvitation>;
+  getInvitation(input: { invitationId: string }): Promise<AuthKitInvitation>;
+  findUserByEmail(input: { email: string }): Promise<AuthKitInvitee | null>;
+  listInvitationCreatedAts(input: { email: string }): Promise<string[]>;
+  activateInvitedUser(input: {
+    userId: string;
+    password: string;
+    firstName: string;
+    lastName?: string;
+  }): Promise<void>;
   resendVerificationEmail(input: { emailVerificationId: string }): Promise<{ email: string }>;
   createPasswordReset(input: { email: string }): Promise<void>;
   resetPassword(input: { token: string; newPassword: string }): Promise<AuthKitUser>;
@@ -186,6 +225,12 @@ export type AuthSessionRouteOptions = {
   handoffRepository?: AuthSessionHandoffRepository;
   propertyAccessRepository?: PropertyAccessRepository;
   adminTransfer?: AdminTransferCoordinator;
+  staffInvitationJoin?: {
+    repository: StaffInvitationJoinRepository;
+    acceptance: {
+      reconcile(input: StaffInvitationAcceptanceEvent): Promise<StaffInvitationAcceptanceResult>;
+    };
+  };
 };
 
 const SESSION_COOKIE = "vayada_workos_session";
@@ -250,8 +295,9 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
 ) => {
   const emailSendCooldowns = new Map<string, number>();
 
-  // WorkOS-hosted invitations and password recovery still return here. Exchange
-  // the one-time code, then use Vayada's first-party login for PMS.
+  // WorkOS-hosted password recovery, and invitation emails sent before the invitation URL pointed
+  // at PMS /invite, still return here. Exchange the one-time code, then use Vayada's first-party
+  // login for PMS.
   app.get("/workos/callback", async (request, reply) => {
     reply.header("Cache-Control", "private, no-store").header("Referrer-Policy", "no-referrer");
     const pmsOrigin = options.surfacePolicies?.["pms-web"]?.publicOrigin;
@@ -283,6 +329,222 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
       }
     }
     return reply.redirect(returnUrl.toString());
+  });
+
+  // VAY-2274: the PMS /invite page. WorkOS stays the authority: it checks the invitation token
+  // and accepts the invitation during sign-in. Access then comes from the same reconciler the
+  // invitation.accepted webhook runs, so the new member lands in the hotel without waiting for it.
+  app.post("/invitations/preview", async (request, reply) => {
+    reply.header("Cache-Control", "private, no-store");
+    if (!writeCorsHeaders(request, reply, options)) {
+      return reply.code(403).send({
+        state: "auth_failed",
+        message: "Authentication request origin is not allowed.",
+      });
+    }
+    const parsed = parseInvitationJoinBody(request.body, false);
+    if (!parsed.ok) return reply.code(400).send(parsed.error);
+    const join = options.staffInvitationJoin;
+    if (!join) return reply.code(503).send(INVITATION_JOIN_UNAVAILABLE);
+    try {
+      const found = await findJoinableInvitation(options, join.repository, parsed.invitationToken);
+      if (!found.ok) return reply.code(410).send(invitationUnavailable(found.reason));
+      const invitee = await options.authKitClient.findUserByEmail({ email: found.details.email });
+      const placeholder = await invitationPlaceholder(options, invitee, found.details.email);
+      return reply.send({
+        state: "invitation_ready",
+        email: found.details.email,
+        accountExists: Boolean(invitee) && !placeholder,
+        hotelNames: found.details.hotelNames,
+        inviterName: found.details.inviterName,
+        inviteeName: found.details.inviteeName,
+        roleKey: found.details.roleKey,
+        roleName: found.details.roleName,
+      });
+    } catch (error) {
+      request.log.warn({ workos: workosErrorDiagnostics(error) }, "Invitation preview failed");
+      return reply.code(502).send(INVITATION_JOIN_UNAVAILABLE);
+    }
+  });
+
+  app.post("/invitations/accept", async (request, reply) => {
+    reply.header("Cache-Control", "private, no-store");
+    if (!writeCorsHeaders(request, reply, options)) {
+      return reply.code(403).send({
+        state: "auth_failed",
+        message: "Authentication request origin is not allowed.",
+      });
+    }
+    const parsed = parseInvitationJoinBody(request.body, true);
+    if (!parsed.ok) return reply.code(400).send(parsed.error);
+    const join = options.staffInvitationJoin;
+    if (!join) return reply.code(503).send(INVITATION_JOIN_UNAVAILABLE);
+    const surfacePolicy = getSurfacePolicy("pms-web", options);
+    const client = options.authKitClient;
+
+    let found: Awaited<ReturnType<typeof findJoinableInvitation>>;
+    let invitee: AuthKitInvitee | null;
+    let placeholder: AuthKitInvitee | null;
+    try {
+      found = await findJoinableInvitation(options, join.repository, parsed.invitationToken);
+      if (!found.ok) return reply.code(410).send(invitationUnavailable(found.reason));
+      invitee = await client.findUserByEmail({ email: found.details.email });
+      placeholder = await invitationPlaceholder(options, invitee, found.details.email);
+    } catch (error) {
+      request.log.warn({ workos: workosErrorDiagnostics(error) }, "Invitation lookup failed");
+      return reply.code(502).send(INVITATION_JOIN_UNAVAILABLE);
+    }
+    const { invitation, details } = found;
+
+    const accountExists = Boolean(invitee) && !placeholder;
+    if (!accountExists) {
+      if (!parsed.name) {
+        return reply
+          .code(400)
+          .send({ state: "auth_failed", code: "name_required", message: "Enter your name." });
+      }
+      try {
+        // The token came to this mailbox, so the address is proven like a verification code, and
+        // the password is set as a reset would. Only a never-used placeholder is set up this way.
+        if (placeholder) {
+          await client.activateInvitedUser({
+            userId: placeholder.id,
+            password: parsed.password,
+            ...splitPersonName(parsed.name),
+          });
+          // WorkOS now has the address verified. Mirror it before the sign-in, so an
+          // invitation.accepted webhook that beats this request can already join the user.
+          await join.repository
+            .markProviderEmailVerified({ workosUserId: placeholder.id, email: details.email })
+            .catch((error: unknown) =>
+              request.log.warn(safeErrorLog(error), "Invitee identity verification sync failed"),
+            );
+        } else {
+          await client.createUser({
+            email: details.email,
+            password: parsed.password,
+            ...splitPersonName(parsed.name),
+            emailVerified: true,
+            ipAddress: request.ip,
+            userAgent: request.headers["user-agent"],
+            metadata: { auth_flow: "invitation", surface: "pms-web" },
+          });
+        }
+      } catch (error) {
+        // A parallel request may have created the account; the sign-in below decides.
+        if (!isEmailTakenError(error)) {
+          request.log.warn({ workos: workosErrorDiagnostics(error) }, "Invitation signup failed");
+          return reply.code(400).send(
+            workosErrorDiagnostics(error).code === "password_strength_error"
+              ? {
+                  state: "auth_failed",
+                  code: "password_too_weak",
+                  message:
+                    "This password isn't strong enough. Try several unrelated words or generate a unique password with a password manager.",
+                }
+              : {
+                  state: "auth_failed",
+                  message: "We could not create your account. Please check your details.",
+                },
+          );
+        }
+      }
+    }
+
+    let session: AuthKitSession;
+    try {
+      session = await client.authenticateWithPassword({
+        email: details.email,
+        password: parsed.password,
+        invitationToken: parsed.invitationToken,
+        ipAddress: request.ip,
+        userAgent: request.headers["user-agent"],
+      });
+    } catch (error) {
+      const mapped = mapWorkOSAuthError(error);
+      await recordPasswordLoginFailure(options, request, "pms-web", mapped.state);
+      if (mapped.state === "auth_failed") {
+        request.log.error({ workos: workosErrorDiagnostics(error) }, "Invitation sign-in failed");
+      }
+      // Pending tokens would continue a sign-in without the invitation; send only the state.
+      return reply
+        .code(statusForPasswordAuthFailure(mapped.state))
+        .send({ state: mapped.state, message: mapped.message });
+    }
+
+    const notJoined = { state: "auth_failed", code: "invitation_not_joined", message: NOT_JOINED };
+    if (session.organizationId !== invitation.organizationId) {
+      request.log.error("Invitation sign-in returned a session outside the invited organization");
+      return reply.code(403).send(notJoined);
+    }
+    try {
+      const accepted = await client.getInvitation({ invitationId: invitation.id });
+      if (
+        accepted.state !== "accepted" ||
+        accepted.acceptedUserId !== session.user.id ||
+        accepted.organizationId !== invitation.organizationId
+      ) {
+        request.log.error({ state: accepted.state }, "WorkOS did not accept the invitation");
+        return reply.code(403).send(notJoined);
+      }
+      const { user, created } = await findOrCreateIdentityUser(session, request, options);
+      if (created) {
+        await client.updateUserExternalId({
+          workosUserId: session.user.id,
+          externalId: user.userId,
+        });
+      } else if (session.user.emailVerified) {
+        // The user.updated webhook may lag behind; WorkOS has just confirmed the address.
+        await join.repository.markProviderEmailVerified({
+          workosUserId: session.user.id,
+          email: details.email,
+        });
+      }
+      const result = await join.acceptance.reconcile({
+        providerEventId: `vayada-invite-accept:${invitation.id}`,
+        providerInvitationId: invitation.id,
+        providerUserId: session.user.id,
+        providerOrganizationId: invitation.organizationId,
+        invitationEmail: details.email,
+      });
+      if (result.outcome !== "accepted" && result.outcome !== "idempotent_replay") {
+        request.log.error({ result }, "Invitation acceptance was not reconciled");
+        return reply.code(403).send(notJoined);
+      }
+      const access = await resolveOrganizationAccess(session, user, options, surfacePolicy, {
+        ...organizationAccessOptionsFromRequest(request, surfacePolicy),
+        explicitOrganizationSelection: true,
+      });
+      await options.productAuditSink.record({
+        action: "auth.login",
+        authFlow: accountExists ? "login" : "signup",
+        actorUserId: user.userId,
+        organizationId: access.organizationId,
+        surface: "pms-web",
+        workosUserId: session.user.id,
+        workosOrgId: access.session.organizationId,
+        workosSessionId: access.session.sessionId,
+        requestId: request.id,
+        occurredAt: new Date().toISOString(),
+      });
+      const csrfToken = randomBytes(24).toString("base64url");
+      reply.headers({
+        "set-cookie": authSessionCookieHeaders(access.session, csrfToken, surfacePolicy, options),
+      });
+      return reply.send(
+        toSessionResponse(
+          access.session,
+          user,
+          csrfToken,
+          access.organizationId,
+          access.organizationKind,
+          access.resourceScope,
+        ),
+      );
+    } catch (error) {
+      request.log.error(safeErrorLog(error), "Invitation join failed after WorkOS sign-in");
+      return reply.code(403).send(notJoined);
+    }
   });
 
   if (options.adminTransfer) {
@@ -3077,46 +3339,12 @@ async function resolveOrCreateIdentity(
   accessOptions: OrganizationAccessOptions = {},
   signupContext?: AuthSignupContext,
 ): Promise<IdentityResolution> {
-  let user = await options.identityRepository.findUserByProviderUserId("workos", session.user.id);
-  const shouldSyncExternalId = !user || Boolean(signupContext);
-  if (!user) {
-    const result = await options.lifecycleCommandBus.execute({
-      commandType: "identity.user.create",
-      commandId: randomUUID(),
-      idempotencyKey: `workos-jit:${session.user.id}`,
-      audit: {
-        actor: { kind: "system", service: "apps/api-authkit" },
-        source: "web",
-        requestId: request.id,
-        correlationId: session.sessionId,
-        reason: "AuthKit SSO/JIT first arrival",
-        requestedAt: new Date().toISOString(),
-      },
-      payload: {
-        email: session.user.email,
-        name: session.user.name ?? undefined,
-        initialStatus: "active",
-        ...(signupContext
-          ? {
-              legacyUserType: signupContext.intent,
-            }
-          : {}),
-        providerIdentity: {
-          provider: "workos",
-          providerUserId: session.user.id,
-          providerEmailVerified: session.user.emailVerified,
-        },
-      },
-    });
-    if (signupContext) {
-      user = await options.identityRepository.findUserByProviderUserId("workos", session.user.id);
-      if (!user) {
-        throw new Error("Identity lifecycle command did not create a resolvable signup user");
-      }
-    } else {
-      user = await findUserAfterLifecycle(options.identityRepository, session, result);
-    }
-  }
+  const { user, created } = await findOrCreateIdentityUser(
+    session,
+    request,
+    options,
+    signupContext,
+  );
   if (signupContext) {
     if (!isMatchingSignupIdentity(user, session.user)) {
       throw new Error("Signup identity conflicts with the existing account.");
@@ -3139,7 +3367,7 @@ async function resolveOrCreateIdentity(
       },
     });
   }
-  if (shouldSyncExternalId) {
+  if (created || signupContext) {
     await options.authKitClient.updateUserExternalId({
       workosUserId: session.user.id,
       externalId: user.userId,
@@ -3153,6 +3381,58 @@ async function resolveOrCreateIdentity(
     accessOptions,
   );
   return { user, ...access };
+}
+
+async function findOrCreateIdentityUser(
+  session: AuthKitSession,
+  request: FastifyRequest,
+  options: AuthSessionRouteOptions,
+  signupContext?: AuthSignupContext,
+): Promise<{ user: IdentityUser; created: boolean }> {
+  const existing = await options.identityRepository.findUserByProviderUserId(
+    "workos",
+    session.user.id,
+  );
+  if (existing) return { user: existing, created: false };
+  const result = await options.lifecycleCommandBus.execute({
+    commandType: "identity.user.create",
+    commandId: randomUUID(),
+    idempotencyKey: `workos-jit:${session.user.id}`,
+    audit: {
+      actor: { kind: "system", service: "apps/api-authkit" },
+      source: "web",
+      requestId: request.id,
+      correlationId: session.sessionId,
+      reason: "AuthKit SSO/JIT first arrival",
+      requestedAt: new Date().toISOString(),
+    },
+    payload: {
+      email: session.user.email,
+      name: session.user.name ?? undefined,
+      initialStatus: "active",
+      ...(signupContext
+        ? {
+            legacyUserType: signupContext.intent,
+          }
+        : {}),
+      providerIdentity: {
+        provider: "workos",
+        providerUserId: session.user.id,
+        providerEmailVerified: session.user.emailVerified,
+      },
+    },
+  });
+  if (!signupContext) {
+    return {
+      user: await findUserAfterLifecycle(options.identityRepository, session, result),
+      created: true,
+    };
+  }
+  const user = await options.identityRepository.findUserByProviderUserId("workos", session.user.id);
+  if (!user) {
+    throw new Error("Identity lifecycle command did not create a resolvable signup user");
+  }
+  return { user, created: true };
 }
 
 function isMatchingSignupIdentity(user: IdentityUser, workosUser: AuthKitUser): boolean {
@@ -3727,6 +4007,140 @@ function sendOrganizationSelectionResponse(
       workosUserId: error.session.user.id,
     },
   });
+}
+
+const INVITATION_JOIN_UNAVAILABLE = {
+  state: "auth_failed",
+  message: "Invitations are temporarily unavailable. Please try again.",
+};
+const NOT_JOINED =
+  "We could not finish joining this team. Ask the person who invited you to send a new invitation.";
+
+type InvitationUnavailableReason = "invalid" | "expired" | "accepted" | "revoked" | "replaced";
+
+function invitationUnavailable(reason: InvitationUnavailableReason) {
+  return {
+    state: "invitation_unavailable",
+    reason,
+    message: "This invitation link no longer works.",
+  };
+}
+
+function parseInvitationJoinBody(
+  body: unknown,
+  requirePassword: boolean,
+):
+  | { ok: true; invitationToken: string; password: string; name?: string }
+  | { ok: false; error: { state: "auth_failed"; message: string } } {
+  const input = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
+  const invitationToken =
+    typeof input.invitationToken === "string" ? input.invitationToken.trim() : "";
+  const password = typeof input.password === "string" ? input.password : "";
+  const name = typeof input.name === "string" ? input.name.trim().replace(/\s+/g, " ") : "";
+  if (input.surface !== "pms-web" || !invitationToken || invitationToken.length > 512) {
+    return {
+      ok: false,
+      error: { state: "auth_failed", message: "This invitation link is not valid." },
+    };
+  }
+  if (requirePassword && (!password || password.length > 1024)) {
+    return { ok: false, error: { state: "auth_failed", message: "Enter your password." } };
+  }
+  if (name.length > 200) {
+    return { ok: false, error: { state: "auth_failed", message: "Your name is too long." } };
+  }
+  return { ok: true, invitationToken, password, ...(name ? { name } : {}) };
+}
+
+// Only the current pending invitation of an active hotel group can be joined. WorkOS answers for
+// the token; Vayada answers for whether that provider invitation is still the current intent.
+async function findJoinableInvitation(
+  options: AuthSessionRouteOptions,
+  repository: StaffInvitationJoinRepository,
+  token: string,
+): Promise<
+  | {
+      ok: true;
+      invitation: AuthKitInvitation & { organizationId: string };
+      details: StaffInvitationJoinDetails;
+    }
+  | { ok: false; reason: InvitationUnavailableReason }
+> {
+  let invitation: AuthKitInvitation;
+  try {
+    invitation = await options.authKitClient.findInvitationByToken({ token });
+  } catch (error) {
+    const status = workosErrorDiagnostics(error).status;
+    if (status === 400 || status === 404 || status === 422) return { ok: false, reason: "invalid" };
+    throw error;
+  }
+  if (invitation.state === "accepted" || invitation.state === "revoked") {
+    return { ok: false, reason: invitation.state };
+  }
+  if (invitation.state === "expired" || !(Date.parse(invitation.expiresAt) > Date.now())) {
+    return { ok: false, reason: "expired" };
+  }
+  const organizationId = invitation.organizationId;
+  if (invitation.state !== "pending" || !organizationId) return { ok: false, reason: "invalid" };
+  const details = await repository.findCurrent({
+    providerInvitationId: invitation.id,
+    workosOrganizationId: organizationId,
+  });
+  if (!details) return { ok: false, reason: "replaced" };
+  if (details.email !== invitation.email.trim().toLowerCase()) {
+    return { ok: false, reason: "invalid" };
+  }
+  return { ok: true, invitation: { ...invitation, organizationId }, details };
+}
+
+const PLACEHOLDER_CREATION_SKEW_MS = 5_000;
+
+// The WorkOS API does not say whether a password is set. A user that signed in has lastSignInAt
+// and an externalId, and every account Vayada creates carries auth_flow metadata. One with none of
+// these, still unverified, and created in the same request as an invitation to its address (WorkOS
+// stamps both with the same time) is the placeholder WorkOS made for it. Anything else logs in.
+async function invitationPlaceholder(
+  options: AuthSessionRouteOptions,
+  invitee: AuthKitInvitee | null,
+  email: string,
+): Promise<AuthKitInvitee | null> {
+  const unused = unusedInvitee(invitee, email);
+  if (!unused) return null;
+  const createdAt = Date.parse(unused.createdAt);
+  if (!Number.isFinite(createdAt)) return null;
+  const invitedAt = await options.authKitClient.listInvitationCreatedAts({ email });
+  return invitedAt.some(
+    (at) => Math.abs(Date.parse(at) - createdAt) <= PLACEHOLDER_CREATION_SKEW_MS,
+  )
+    ? unused
+    : null;
+}
+
+// Error messages can carry addresses or SQL; log the error's kind and code only.
+function safeErrorLog(error: unknown) {
+  const code = (error as { code?: unknown } | null)?.code;
+  return {
+    errorName: error instanceof Error ? error.name : typeof error,
+    errorCode: typeof code === "string" && /^[A-Za-z0-9_]{1,40}$/.test(code) ? code : undefined,
+    workos: workosErrorDiagnostics(error),
+  };
+}
+
+function unusedInvitee(invitee: AuthKitInvitee | null, email: string): AuthKitInvitee | null {
+  const unused =
+    invitee !== null &&
+    invitee.email.trim().toLowerCase() === email &&
+    !invitee.emailVerified &&
+    !invitee.lastSignInAt &&
+    !invitee.externalId &&
+    !invitee.signupFlow;
+  return unused ? invitee : null;
+}
+
+function splitPersonName(name: string): { firstName: string; lastName?: string } {
+  const [firstName = name, ...rest] = name.split(" ");
+  const lastName = rest.join(" ");
+  return lastName ? { firstName, lastName } : { firstName };
 }
 
 function isEmailTakenError(error: unknown): boolean {

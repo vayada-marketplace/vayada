@@ -5,6 +5,7 @@ export const bookingImageSizes = {
     "(max-width: 767px) calc(100vw - 2rem), (max-width: 1023px) calc((100vw - 4rem) / 2), 600px",
   addonCard:
     "(max-width: 767px) calc(100vw - 2rem), (max-width: 1023px) calc((100vw - 4rem) / 2), 390px",
+  confirmationHotel: "(max-width: 1023px) calc(100vw - 2rem), 384px",
   addonModal: "(max-width: 767px) 100vw, 768px",
   roomModal: "(max-width: 767px) 100vw, 512px",
   roomThumb: "64px",

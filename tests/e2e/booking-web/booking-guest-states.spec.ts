@@ -29,7 +29,7 @@ const booking = {
   totalAmount: 720,
   createdAt: "2026-09-01T10:00:00.000Z",
 };
-const emailNotice = /confirmation email has been sent/;
+const emailNotice = /sent the details to/;
 const row = (page: Page, label: string) => page.getByText(label, { exact: true }).locator("..");
 
 for (const width of [1440, 390]) {
@@ -69,10 +69,10 @@ for (const width of [1440, 390]) {
     });
 
     await page.goto(`/booking/VAY-1268?email=${encodeURIComponent(email)}`);
-    const heading = page.getByRole("heading", { name: "Booking Request Submitted" });
+    const heading = page.getByRole("heading", { name: "Request sent, Ada." });
     await expect(heading).toBeVisible();
-    const edit = page.getByRole("button", { name: "Edit Request" });
-    const withdraw = page.getByRole("button", { name: "Withdraw Request" });
+    const edit = page.getByRole("button", { name: /^Edit request/ });
+    const withdraw = page.getByRole("button", { name: /^Withdraw request/ });
     await withdraw.scrollIntoViewIfNeeded();
     await page.screenshot({ path: testInfo.outputPath(`booking-actions-${width}.png`) });
     await withdraw.click();
@@ -91,19 +91,19 @@ for (const width of [1440, 390]) {
     await expect(heading).toBeVisible();
     expect(withdrawals).toBe(0);
 
-    await expectCentred(page.locator("div.rounded-2xl").filter({ has: heading }), [edit, withdraw]);
+    await expectStacked(edit, withdraw);
 
     await withdraw.click();
     await dialog.getByRole("button", { name: "Yes, Withdraw" }).click();
-    await expect(page.getByRole("heading", { name: "Booking Cancelled" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Your booking is cancelled." })).toBeVisible();
     expect(withdrawals).toBe(1);
   });
 }
 
-for (const [status, heading, paymentStatus, paymentLabel] of [
-  ["cancelled", "Booking Cancelled", "refunded", "Refunded"],
-  ["declined", "Booking Request Declined", "unpaid", null],
-  ["expired", "Booking Request Expired", "unpaid", null],
+for (const [status, heading, paymentStatus, paymentText] of [
+  ["cancelled", "Your booking is cancelled.", "refunded", "Refunded"],
+  ["declined", "Booking Request Declined", "unpaid", "Nothing was charged"],
+  ["expired", "Booking Request Expired", "unpaid", "Nothing was charged"],
 ] as const) {
   test(`shows a ${status} booking without an amount due or a confirmation email`, async ({
     page,
@@ -119,9 +119,9 @@ for (const [status, heading, paymentStatus, paymentLabel] of [
     await expect(page.getByText("Total Due")).toHaveCount(0);
     await expect(row(page, "Total")).toContainText("€720");
     await expect(page.getByText(emailNotice)).toHaveCount(0);
-    // An ended booking says what was refunded, never "Not paid yet".
-    if (paymentLabel) await expect(row(page, "Payment Status")).toContainText(paymentLabel);
-    else await expect(page.getByText("Payment Status")).toHaveCount(0);
+    // An ended booking says what was refunded or that nothing was charged, never "Not paid yet".
+    await expect(page.getByText(paymentText, { exact: true })).toBeVisible();
+    await expect(page.getByText("Not paid yet")).toHaveCount(0);
   });
 }
 
@@ -165,7 +165,7 @@ for (const [shape, payment] of [
       await page.setViewportSize({ width, height: 900 });
       await mockConfirmation(page, { ...booking, totalAmount: 765, ...payment });
       await page.goto(`/confirmation?booking=VAY-1268&token=${token}`);
-      await expect(page.getByRole("heading", { name: "Your booking is confirmed!" })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "You're all set, Ada." })).toBeVisible();
       await page.screenshot({
         path: testInfo.outputPath(`confirmation-deposit-${shape}-${width}.png`),
         fullPage: true,
@@ -175,7 +175,7 @@ for (const [shape, payment] of [
       await expect(row(page, "Total")).toContainText("€765");
       await expect(row(page, "Deposit paid")).toContainText("€230");
       await expect(row(page, "Remaining balance due at check-in")).toContainText("€535");
-      await expect(row(page, "Payment Status")).toContainText("Partly paid");
+      await expect(page.getByText("Partly paid by card", { exact: true })).toBeVisible();
     }
   });
 }
@@ -184,8 +184,31 @@ test("shows a fully paid booking as paid in guest wording", async ({ page }) => 
   await mockConfirmation(page, { ...booking, paymentMethod: "card", paymentStatus: "captured" });
   await page.goto(`/confirmation?booking=VAY-1268&token=${token}`);
   await expect(row(page, "Total Paid")).toContainText("€720");
-  await expect(row(page, "Payment Status")).toContainText("Paid");
+  await expect(page.getByText("Paid by card", { exact: true })).toBeVisible();
+  await expect(page.getByText("Nothing more to pay", { exact: true })).toBeVisible();
   await expect(page.getByText(/captured/i)).toHaveCount(0);
+});
+
+// VAY-2307: a card request's hold can be only the part due now, so the page names the card and
+// shows the booking's total, never an amount "on hold".
+test("shows a held card request with the booking's total", async ({ page }) => {
+  await mockConfirmation(page, {
+    ...booking,
+    status: "pending",
+    paymentMethod: "card",
+    paymentStatus: "authorized",
+    cardBrand: "visa",
+    cardLast4: "4242",
+    totalAmount: 765,
+    balanceAmount: 765,
+  });
+  await page.goto(`/confirmation?booking=VAY-1268&token=${token}`);
+  await expect(page.getByRole("heading", { name: "Request sent, Ada." })).toBeVisible();
+  await expect(page.getByText("Held on Visa •••• 4242", { exact: true })).toBeVisible();
+  await expect(page.getByText(/only charge it if we accept your request/)).toBeVisible();
+  await expect(row(page, "Total")).toContainText("€765");
+  await expect(page.getByText(/on hold/i)).toHaveCount(0);
+  await expect(page.getByText("Total Due")).toHaveCount(0);
 });
 
 test("shows a pending change request's dates the way guests read them", async ({ page }) => {
@@ -241,17 +264,10 @@ async function mockConfirmation(page: Page, json: Record<string, unknown>) {
   await page.route(`${hotelApi}/bookings/confirmation`, (route) => route.fulfill({ json }));
 }
 
-/** Both buttons sit centred in the card: as one row, or each on its own stacked row. */
-async function expectCentred(card: Locator, buttons: Locator[]) {
-  const cardBox = (await card.boundingBox())!;
-  const centre = cardBox.x + cardBox.width / 2;
-  const boxes = await Promise.all(buttons.map(async (button) => (await button.boundingBox())!));
-  if (boxes.every((box) => Math.abs(box.y - boxes[0]!.y) < 1)) {
-    const left = Math.min(...boxes.map((box) => box.x));
-    const right = Math.max(...boxes.map((box) => box.x + box.width));
-    expect(Math.abs((left + right) / 2 - centre)).toBeLessThanOrEqual(1);
-  } else {
-    for (const box of boxes)
-      expect(Math.abs(box.x + box.width / 2 - centre)).toBeLessThanOrEqual(1);
-  }
+/** VAY-2307: the request's actions are full-width rows of the next-steps list, one under the other. */
+async function expectStacked(first: Locator, second: Locator) {
+  const [a, b] = [(await first.boundingBox())!, (await second.boundingBox())!];
+  expect(Math.abs(a.x - b.x)).toBeLessThanOrEqual(1);
+  expect(Math.abs(a.width - b.width)).toBeLessThanOrEqual(1);
+  expect(b.y).toBeGreaterThanOrEqual(a.y + a.height - 1);
 }

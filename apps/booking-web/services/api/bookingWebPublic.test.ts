@@ -154,6 +154,17 @@ describe("Booking Web public hotel adapter", () => {
     });
   });
 
+  it("passes the public map pin on only when it has both coordinates (VAY-2307)", () => {
+    const response = publicHotelResponse();
+    expect(toLegacyHotel(response).mapPin).toBeUndefined();
+    response.hotel.location = { ...response.hotel.location, latitude: 47.27, longitude: 11.39 };
+    expect(toLegacyHotel(response).mapPin).toEqual({ latitude: 47.27, longitude: 11.39 });
+    response.hotel.location = { ...response.hotel.location, latitude: 47.27, longitude: null };
+    expect(toLegacyHotel(response).mapPin).toBeUndefined();
+    response.hotel.location = { ...response.hotel.location, latitude: 147.27, longitude: 11.39 };
+    expect(toLegacyHotel(response).mapPin).toBeUndefined();
+  });
+
   it("keeps missing contacts empty and rejects unsafe public-link schemes", () => {
     const empty = toLegacyHotel(publicHotelResponse([]));
     const omitted = toLegacyHotel(publicHotelResponse());
