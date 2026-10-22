@@ -118,11 +118,11 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
   const load = useCallback(async (requested?: { keep?: Kept; published?: number }) => {
     const handover = requested ? undefined : handedOver.current, after = handover ? { keep: handedOverEdits(handover) } : requested;
     const seq = ++loads.current, latest = () => alive.current && seq === loads.current; // An older read never overwrites a newer one.
-    const republished = after?.published;
+    const republished = after?.published; // Only the publication this save made resumes editing; a newer one keeps its review.
     if (republished === undefined) { setLoading(true); setEmpty(false); setError(null); }
     try {
       const saved = await client.read(); if (!latest()) return;
-      if (republished !== undefined && !(saved && saved.revision >= republished && saved.rooms.some((value) => value.roomTypeId === focus))) return;
+      if (republished !== undefined && !(saved && saved.revision === republished && saved.rooms.some((value) => value.roomTypeId === focus))) return;
       const revision = (saved?.revision ?? 0) + 1, rooms = (saved?.rooms ?? []).map((room) => ({ ...room, revision }));
       const keep = after?.keep, kept = keep && keptRoom(keep, saved), room = kept && { ...kept, revision };
       setEmpty(saved === null && !room); setPolicyEdits(room ? keep!.terms : {}); loadedRooms.current = saved?.rooms ?? [];
@@ -560,11 +560,14 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
       {(dirty || error !== null) && <button type="button" className={ui.actionBarButton} disabled={loading || disabled} onClick={() => { if (dirty) setReloading(true); else void load(); }}>{t(dirty ? "pricing.newRoom.remove" : "pricing.editor.reload")}</button>}
       {newRoom.actions}
     </div> : <div className={`flex-wrap ${ui.actionBar}`}>
-      {!loading && editing && <div className="w-full min-w-0 md:mr-auto md:w-auto">
-        <p className={`flex items-center gap-1.5 text-[13px] font-medium ${status.tone}`}>{status.icon}{t(status.key)}</p>
+      {/* The status takes the free space and its chips wrap beside it, so they never push the buttons to a second line. */}
+      {!loading && editing && <div className="w-full min-w-0 md:w-auto md:min-w-[16rem] md:flex-1">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <p className={`flex items-center gap-1.5 text-[13px] font-medium ${status.tone}`}>{status.icon}{t(status.key)}</p>
+          {barGaps > 0 && <span className="rounded-md bg-red-50 px-2 py-0.5 text-[12px] font-semibold text-red-700">{t(barGaps === 1 ? "pricing.bar.gaps.one" : "pricing.bar.gaps.other", { count: barGaps })}</span>}
+        </div>
         <p id={declarationId} className="text-[11px] text-gray-500">{t("pricing.editor.saveDeclaration")}</p></div>}
-      {!loading && editing && barGaps > 0 && <span className="rounded-lg bg-red-50 px-3 py-1.5 text-[13px] font-semibold text-red-700">{t(barGaps === 1 ? "pricing.bar.gaps.one" : "pricing.bar.gaps.other", { count: barGaps })}</span>}
-      {!loading && editing && guestsFrom && <span className="w-full text-[13px] text-gray-600 md:w-auto">{guestsFrom}</span>}
+      {!loading && editing && guestsFrom && <span className="w-full text-[13px] text-gray-600 md:w-auto md:max-w-[20rem] md:text-right">{guestsFrom}</span>}
       <button type="button" className={ui.actionBarButton} disabled={loading || busy || retry} onClick={() => { if (keepsOnReload) reloadKeepingRoom(); else if (leaveRisk) setReloading(true); else void load(); }}>{t(cancels ? "pricing.bar.discard" : "pricing.editor.reload")}</button>
       {!loading && editing && done && <button type="button" className={ui.actionBarButton} onClick={() => void load()}>{t("pricing.room.editAgain")}</button>}
       {!loading && editing && (retry ? <button type="button" className={ui.actionBarPrimary} aria-describedby={declarationId} disabled={busy} onClick={() => void run()}>{t("pricing.editor.retry")}</button>
