@@ -32,6 +32,8 @@ export type RoomContent = {
   size?: { value: number; unit: "sqm" };
   category?: string;
   amenities?: string[];
+  /** The room's own pin; sent only while the hotel shows the location map (VAY-2126). */
+  location?: { latitude: number; longitude: number; address?: string };
 };
 export type PricingRoom = RoomContent & {
   roomTypeId: string;
@@ -51,7 +53,7 @@ const photoUrl = (v: unknown): v is string => {
   }
 };
 function roomContent(room: Record<string, unknown>): RoomContent {
-  const { occupancy: o, size, images, amenities } = room;
+  const { occupancy: o, size, images, amenities, location: l } = room;
   return {
     ...(text(room.description) && { description: room.description }),
     ...(object(o) &&
@@ -73,6 +75,17 @@ function roomContent(room: Record<string, unknown>): RoomContent {
       size.unit === "sqm" && { size: { value: size.value, unit: "sqm" as const } }),
     ...(text(room.category) && { category: room.category }),
     ...(Array.isArray(amenities) && { amenities: amenities.filter(text) }),
+    ...(object(l) &&
+      typeof l.latitude === "number" &&
+      Math.abs(l.latitude) <= 90 &&
+      typeof l.longitude === "number" &&
+      Math.abs(l.longitude) <= 180 && {
+        location: {
+          latitude: l.latitude,
+          longitude: l.longitude,
+          ...(text(l.address) && { address: l.address }),
+        },
+      }),
   };
 }
 function offerCancellation(v: unknown): OfferCancellation | undefined {
@@ -87,6 +100,14 @@ export async function getReplacementOffers(
   slug: string,
   signal?: AbortSignal,
 ): Promise<PricingRoom[]> {
+  return (await getReplacementCatalog(slug, signal)).rooms;
+}
+
+/** The catalog's rooms, and whether the hotel shows its location map (VAY-2126, read live). */
+export async function getReplacementCatalog(
+  slug: string,
+  signal?: AbortSignal,
+): Promise<{ rooms: PricingRoom[]; locationMap: boolean }> {
   const raw = await bookingWebPublic.get<unknown>(
     `/api/booking-web/hotels/${encodeURIComponent(slug)}/pricing-offers`,
     { signal, cache: "no-store" },
@@ -96,7 +117,7 @@ export async function getReplacementOffers(
     throw new Error("Room options could not be verified.");
   const ids = new Set<string>(),
     keys = new Set<string>();
-  return raw.rooms.map((room) => {
+  const rooms = raw.rooms.map((room) => {
     if (
       !object(room) ||
       typeof room.roomTypeId !== "string" ||
@@ -138,6 +159,7 @@ export async function getReplacementOffers(
       }),
     };
   });
+  return { rooms, locationMap: raw.locationMap === true };
 }
 export type RoomChoice = {
   selectionId: string;

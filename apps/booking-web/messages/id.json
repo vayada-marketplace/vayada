@@ -547,5 +547,15 @@
     "withdrawNotOnline": "Permintaan ini tidak dapat ditarik secara online. Silakan hubungi properti.",
     "bookingNotChangeable": "Pemesanan ini tidak dapat diubah lagi. Cari kembali untuk melihat statusnya saat ini.",
     "busyTryAgain": "Pemesanan ini sedang diperbarui. Silakan coba lagi sebentar lagi."
+  },
+  "locationMap": {
+    "title": "Lokasi",
+    "severalPlaces": "Kamar kami ada di {count} tempat. Pilih penanda untuk melihat kamar mana yang ada di sana.",
+    "viewDetails": "Lihat detail",
+    "placesLabel": "Tempat di peta",
+    "mapLabel": "Peta lokasi kamar",
+    "showMap": "Tampilkan peta",
+    "mapNote": "Memuat Google Maps. Google menerima permintaan Anda.",
+    "mapFailed": "Peta tidak dapat dimuat saat ini."
   }
 }

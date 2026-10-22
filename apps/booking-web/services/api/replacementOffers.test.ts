@@ -1,6 +1,7 @@
 import { afterEach, expect, it, vi } from "vitest";
 import {
   displayQuoteMoney,
+  getReplacementCatalog,
   getReplacementOffers,
   roomQuoteRequest,
   type PricingRoom,
@@ -175,4 +176,46 @@ it("keeps the room cards' content and drops malformed parts without failing sele
       ],
     },
   ]);
+});
+
+it("reads the location map flag and each room's pin, dropping a pin out of range (VAY-2126)", async () => {
+  const offers = rooms[0].offers;
+  const catalog = (body: Record<string, unknown>) =>
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response(JSON.stringify({ version: "public-pricing-offers.v1", ...body })),
+        ),
+    );
+  catalog({
+    locationMap: true,
+    rooms: [
+      {
+        ...rooms[0],
+        location: { latitude: 48.15634, longitude: 11.58242, address: "Leopoldstraße 12" },
+      },
+      { roomTypeId: "loft", name: "Loft", offers, location: { latitude: 91, longitude: 11.5 } },
+      {
+        roomTypeId: "studio",
+        name: "Studio",
+        offers,
+        location: { latitude: "48", longitude: 11.5 },
+      },
+    ],
+  });
+  expect(await getReplacementCatalog("hotel")).toEqual({
+    locationMap: true,
+    rooms: [
+      {
+        ...rooms[0],
+        location: { latitude: 48.15634, longitude: 11.58242, address: "Leopoldstraße 12" },
+      },
+      { roomTypeId: "loft", name: "Loft", offers },
+      { roomTypeId: "studio", name: "Studio", offers },
+    ],
+  });
+  catalog({ rooms });
+  expect(await getReplacementCatalog("hotel")).toEqual({ rooms, locationMap: false });
 });

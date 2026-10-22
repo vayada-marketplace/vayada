@@ -550,5 +550,15 @@
     "withdrawNotOnline": "Diese Anfrage kann nicht online zurückgezogen werden. Bitte kontaktieren Sie die Unterkunft.",
     "bookingNotChangeable": "Diese Buchung kann nicht mehr geändert werden. Rufen Sie sie erneut ab, um den aktuellen Status zu sehen.",
     "busyTryAgain": "Diese Buchung wird gerade aktualisiert. Bitte versuchen Sie es gleich noch einmal."
+  },
+  "locationMap": {
+    "title": "Lage",
+    "severalPlaces": "Unsere Zimmer liegen an {count} Orten. Wählen Sie eine Markierung, um zu sehen, welches Zimmer dort ist.",
+    "viewDetails": "Details ansehen",
+    "placesLabel": "Orte auf der Karte",
+    "mapLabel": "Karte mit der Lage der Zimmer",
+    "showMap": "Karte anzeigen",
+    "mapNote": "Lädt Google Maps. Google erhält Ihre Anfrage.",
+    "mapFailed": "Die Karte konnte gerade nicht geladen werden."
   }
 }
