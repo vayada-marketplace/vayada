@@ -605,6 +605,19 @@ not invented to match illustrative mock counts. Existing members are unaffected
 until an explicit saved-role assignment. Validation covers all six presets through
 the runtime policy validator and checks legacy preservation and deletion behavior.
 
+### Account admin only (migration 0508, VAY-2276)
+
+Hosts now create their own roles, so a new hotel account gets only Account admin.
+The insert trigger and its trigger function are unchanged (the Channex worker's
+catalog digest hashes them); only `identity.initialize_team_role_presets` changed.
+On existing accounts, 0508 deleted each ready-made role the host never edited
+(revision 1) that had no member other than inactive ones and no valid pending
+invitation, using the "Delete role" command's rules. Edited or used ready-made
+roles stay and keep their class, so Property owner, Housekeeping and Agency manager
+roles keep working where they exist. Roles made with "Create role" are always Staff
+class (Flamur, 2026-10-22: no role-type choice). Suites that exercise the old
+ready-made roles add them with `packages/backend-migration/fixtures/ready-made-team-roles.sql`.
+
 ### External-owner agency management (migration 0204)
 
 Account admins can invite external owners through saved roles, read their access,

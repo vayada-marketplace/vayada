@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { createFakeVerifier, createPgIdentityRepository } from "@vayada/backend-auth";
 import {
   createPgEntitlementRepository,
@@ -19,6 +20,10 @@ import type {
 // What each preset role receives from the routes the PMS dashboard reads (VAY-2152), with identity,
 // role presets, grants, entitlements and property scope resolved from real PostgreSQL.
 const url = process.env.TEST_DATABASE_URL;
+const readyMadeRoles = new URL(
+  "../../../packages/backend-migration/fixtures/ready-made-team-roles.sql",
+  import.meta.url,
+);
 const propertyId = randomUUID();
 const organizationId = randomUUID();
 const workosOrgId = `wk-org-${organizationId}`;
@@ -132,6 +137,8 @@ describe.skipIf(!url)("PMS dashboard reads per preset role (VAY-2152)", () => {
        VALUES ($1::uuid, 'hotel_group', 'VAY-2152 account', $1::text, $2)`,
       [organizationId, workosOrgId],
     );
+    // New accounts get only Account admin (VAY-2276); the ready-made roles live on older accounts.
+    await admin.query(await readFile(readyMadeRoles, "utf8"), [[organizationId]]);
     await admin.query(
       `INSERT INTO hotel_catalog.properties (id, public_id, display_name) VALUES ($1::uuid, $1::text, 'VAY-2152')`,
       [propertyId],
