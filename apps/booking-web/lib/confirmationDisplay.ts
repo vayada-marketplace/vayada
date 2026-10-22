@@ -83,3 +83,22 @@ export function paymentLine({
   if (named) return line("method", status ? "status" : null);
   return line(status ? "status" : null);
 }
+
+/**
+ * Google Maps directions to the hotel (VAY-2307). A pin with at most two decimals is a hotel's
+ * "approximate" location, rounded about a kilometre off on purpose, so those directions look the
+ * hotel up by name and place instead.
+ */
+export function directionsUrl(
+  pin: { latitude: number; longitude: number },
+  name: string,
+  place?: string,
+): string {
+  const precise = [pin.latitude, pin.longitude].some(
+    (value) => (String(value).split(".")[1] ?? "").length > 2,
+  );
+  const destination = precise
+    ? `${pin.latitude},${pin.longitude}`
+    : encodeURIComponent([name, place].filter(Boolean).join(", "));
+  return `https://www.google.com/maps/dir/?api=1&destination=${destination}`;
+}

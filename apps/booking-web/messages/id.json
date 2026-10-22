@@ -457,7 +457,10 @@
     "paidByCard": "Dibayar dengan kartu",
     "partlyPaidByCard": "Dibayar sebagian dengan kartu",
     "heldOnCard": "Ditahan di kartu Anda",
-    "refundedToCard": "Dikembalikan ke kartu Anda"
+    "refundedToCard": "Dikembalikan ke kartu Anda",
+    "addToCalendar": "Tambahkan ke kalender",
+    "getDirections": "Petunjuk arah",
+    "directionsHint": "Membuka lokasi kami di Google Maps"
   },
   "refer": {
     "title": "Referensikan Tamu",

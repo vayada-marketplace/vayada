@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { groupReference, paymentLine } from "./confirmationDisplay";
+import { directionsUrl, groupReference, paymentLine } from "./confirmationDisplay";
 
 describe("booking reference grouping", () => {
   it("groups a long reference in fours and leaves short ones alone", () => {
@@ -78,5 +78,19 @@ describe("confirmation payment line", () => {
       detail: null,
       amountLabel: null,
     });
+  });
+});
+
+describe("directions to the hotel", () => {
+  it("routes to a precise pin and looks an approximate one up by name", () => {
+    expect(directionsUrl({ latitude: 46.0207, longitude: 7.7491 }, "Hotel Alpenrose")).toBe(
+      "https://www.google.com/maps/dir/?api=1&destination=46.0207,7.7491",
+    );
+    expect(directionsUrl({ latitude: 46.02, longitude: 7.75 }, "Hotel Alpenrose", "Zermatt")).toBe(
+      "https://www.google.com/maps/dir/?api=1&destination=Hotel%20Alpenrose%2C%20Zermatt",
+    );
+    expect(directionsUrl({ latitude: 46, longitude: 7.7 }, "Hotel Alpenrose")).toBe(
+      "https://www.google.com/maps/dir/?api=1&destination=Hotel%20Alpenrose",
+    );
   });
 });

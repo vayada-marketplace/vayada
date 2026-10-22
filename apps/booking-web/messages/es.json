@@ -457,7 +457,10 @@
     "paidByCard": "Pagado con tarjeta",
     "partlyPaidByCard": "Pagado en parte con tarjeta",
     "heldOnCard": "Retenido en tu tarjeta",
-    "refundedToCard": "Reembolsado a tu tarjeta"
+    "refundedToCard": "Reembolsado a tu tarjeta",
+    "addToCalendar": "Añadir al calendario",
+    "getDirections": "Cómo llegar",
+    "directionsHint": "Abre nuestra ubicación en Google Maps"
   },
   "refer": {
     "title": "Referir un Huésped",

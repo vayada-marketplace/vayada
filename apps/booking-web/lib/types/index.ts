@@ -59,6 +59,8 @@ export interface Hotel {
   checkInUntil?: string;
   checkOutFrom?: string;
   timezone?: string;
+  /** The public map pin, only when the hotel shows its location (rounded when "approximate"). */
+  mapPin?: { latitude: number; longitude: number };
   contact: HotelContact;
   bookingFilters: string[];
   customFilters?: Record<string, string>;

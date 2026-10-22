@@ -460,7 +460,10 @@
     "paidByCard": "Mit Karte bezahlt",
     "partlyPaidByCard": "Teilweise mit Karte bezahlt",
     "heldOnCard": "Auf Ihrer Karte reserviert",
-    "refundedToCard": "Auf Ihre Karte erstattet"
+    "refundedToCard": "Auf Ihre Karte erstattet",
+    "addToCalendar": "Zum Kalender hinzufügen",
+    "getDirections": "Route planen",
+    "directionsHint": "Öffnet unseren Standort in Google Maps"
   },
   "refer": {
     "title": "Gast empfehlen",
