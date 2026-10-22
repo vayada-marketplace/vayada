@@ -147,8 +147,6 @@
   "search.settingCheckInOutHint": "到达和离开的时间窗口",
   "search.settingPropertyDetails": "编辑房产详情",
   "search.settingPropertyDetailsHint": "地址、类型、时区、联系方式",
-  "search.settingInstantBooking": "编辑即时预订",
-  "search.settingInstantBookingHint": "自动接受新预订或需要审批",
   "search.settingSameDayCutoff": "编辑当日预订截止时间",
   "search.settingSameDayCutoffHint": "设置当日预订的截止时间",
   "search.settingCalendar": "编辑日历设置",

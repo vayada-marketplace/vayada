@@ -75,7 +75,7 @@ const SETTINGS: SettingEntry[] = [
     id: "change-language",
     labelKey: "search.settingChangeLanguage",
     sublabelKey: "search.settingChangeLanguageHint",
-    href: "/settings#language",
+    href: "/settings/property#language",
     keywords: [
       "language",
       "locale",
@@ -93,14 +93,14 @@ const SETTINGS: SettingEntry[] = [
     id: "change-currency",
     labelKey: "search.settingChangeCurrency",
     sublabelKey: "search.settingChangeCurrencyHint",
-    href: "/settings#currency",
+    href: "/settings/property#currency",
     keywords: ["currency", "money", "price", "eur", "usd", "gbp", "idr", "fx"],
   },
   {
     id: "property-details",
     labelKey: "search.settingPropertyDetails",
     sublabelKey: "search.settingPropertyDetailsHint",
-    href: "/settings#property-details",
+    href: "/settings/property",
     keywords: [
       "property",
       "property details",
@@ -120,26 +120,10 @@ const SETTINGS: SettingEntry[] = [
     ],
   },
   {
-    id: "instant-booking",
-    labelKey: "search.settingInstantBooking",
-    sublabelKey: "search.settingInstantBookingHint",
-    href: "/settings#booking-engine",
-    keywords: [
-      "instant book",
-      "instant booking",
-      "auto accept",
-      "request to book",
-      "booking request",
-      "accept",
-      "booking engine",
-      "booking settings",
-    ],
-  },
-  {
     id: "calendar-settings",
     labelKey: "search.settingCalendar",
     sublabelKey: "search.settingCalendarHint",
-    href: "/settings#calendar",
+    href: "/settings/calendar",
     keywords: [
       "auto-rearrange",
       "auto rearrange",
@@ -155,7 +139,7 @@ const SETTINGS: SettingEntry[] = [
     id: "checkin-checklist",
     labelKey: "search.settingCheckinChecklist",
     sublabelKey: "search.settingCheckinChecklistHint",
-    href: "/settings/checkin-checklist",
+    href: "/settings/guest-flows#check-in",
     keywords: [
       "checklist",
       "check-in checklist",
@@ -168,7 +152,7 @@ const SETTINGS: SettingEntry[] = [
     id: "checkout-inspection",
     labelKey: "search.settingCheckoutInspection",
     sublabelKey: "search.settingCheckoutInspectionHint",
-    href: "/settings/checkout-inspection",
+    href: "/settings/guest-flows#check-out",
     keywords: [
       "checkout inspection",
       "check-out inspection",
@@ -181,7 +165,7 @@ const SETTINGS: SettingEntry[] = [
     id: "localization",
     labelKey: "search.settingLocalization",
     sublabelKey: "search.settingLocalizationHint",
-    href: "/settings#localization",
+    href: "/settings/property#localization",
     keywords: ["localization", "localisation", "locale settings", "regional"],
   },
 ];

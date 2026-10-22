@@ -147,8 +147,6 @@
   "search.settingCheckInOutHint": "Plages horaires d'arrivee et de depart",
   "search.settingPropertyDetails": "Modifier les details de l'etablissement",
   "search.settingPropertyDetailsHint": "Adresse, type, fuseau horaire, contact",
-  "search.settingInstantBooking": "Modifier la reservation instantanee",
-  "search.settingInstantBookingHint": "Accepter automatiquement ou demander une validation",
   "search.settingSameDayCutoff": "Modifier le delai de reservation du jour",
   "search.settingSameDayCutoffHint": "Heure limite pour les reservations du jour meme",
   "search.settingCalendar": "Modifier les parametres du calendrier",

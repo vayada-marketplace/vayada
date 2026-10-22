@@ -193,7 +193,7 @@ describe("calendar auto-open editor", () => {
       entryProduct: "pms",
       returnProduct: "pms",
       propertyId: "property-1",
-      returnTo: "/settings#calendar",
+      returnTo: "/settings/calendar",
       recovery: "pms-calendar",
       step,
     });
