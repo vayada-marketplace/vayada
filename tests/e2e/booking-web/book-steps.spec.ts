@@ -337,10 +337,13 @@ for (const width of [1440, 390]) {
     await confirm.click();
 
     await expect(page).toHaveURL(new RegExp(`/booking/${reference}$`));
-    await expect(page.getByText(reference)).toBeVisible();
+    // VAY-2307: the long reference reads in groups of four.
+    await expect(page.getByText("VAY-6666 6666 6666 4666 8666 6666 6666 6666")).toBeVisible();
     // The choice keeps the name the steps showed (VAY-2190 plain names).
     await expect(page.getByText("Deluxe Double Room · Room only")).toBeVisible();
-    await expect(page.getByText("Total Due", { exact: true }).locator("..")).toContainText("€370");
+    await expect(page.getByText("Due at the hotel", { exact: true }).locator("..")).toContainText(
+      "€370",
+    );
     // The page shows the server's answer, not the fallback this booking knows (its id is empty).
     expect(
       await page.evaluate(() => JSON.parse(sessionStorage.getItem("lastBooking") ?? "{}").id),
