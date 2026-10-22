@@ -575,12 +575,12 @@ test("closes a night and gives another its own price from the calendar (VAY-2280
   const assertHealthy = watchPageHealth(page, testInfo);
   await prices(page, DELUXE);
   const calendar = main(page).getByRole("region", { name: "Prices by date" });
-  const panel = main(page).getByRole("region", { name: "Picked nights" });
+  const panel = main(page).getByRole("region", { name: "Picked dates" });
   await expect(panel.getByText("Click a date to change it")).toBeVisible();
   // The 1st of the shown month: close it.
   await calendar.getByRole("button", { name: /^1 \w+ \d{4}, €/ }).click();
-  await panel.getByRole("button", { name: "Close this night" }).click();
-  await expect(panel.getByRole("button", { name: "Open this night" })).toBeVisible();
+  await panel.getByRole("button", { name: "Close this date" }).click();
+  await expect(panel.getByRole("button", { name: "Open this date" })).toBeVisible();
   await expect(calendar.getByRole("button", { name: /^1 \w+ \d{4}, €\d+, closed/ })).toBeVisible();
   // The 3rd of July, in the High season: its own price keeps the season's colour and gets the dot (VAY-2284).
   await panel.getByRole("button", { name: "Clear" }).click();
@@ -603,17 +603,22 @@ test("closes a night and gives another its own price from the calendar (VAY-2280
     await calendar.getByRole("button", { name: "Next month" }).click();
   await expect(calendar.getByText(/^July \d{4}$/)).toBeVisible();
   await expect(calendar.getByRole("button", { name: /^3 July \d{4}, €/ })).toHaveClass(
-    /bg-amber-50/,
+    /bg-amber-100/,
   );
   await calendar.getByRole("button", { name: /^3 July \d{4}, €/ }).click();
-  await panel.getByRole("button", { name: "Own price for this night" }).click();
+  await panel.getByRole("button", { name: "Own price for this date" }).click();
   await panel.getByLabel("Own price: Per room").fill("130");
   await panel.getByRole("button", { name: "Apply" }).click();
   const owned = calendar.getByRole("button", { name: /^3 July \d{4}, €130, own price/ });
-  await expect(owned).toHaveClass(/bg-amber-50/);
+  await expect(owned).toHaveClass(/bg-amber-100/);
   await expect(owned.locator("span.bg-gray-900")).toBeVisible();
-  // VAY-2284: picked days can join a season, or start a new one (opened and left here: it depends on the month).
-  await panel.getByRole("button", { name: "Add to a season" }).click();
+  // VAY-2284, VAY-2305: a date in a season can move to another one, back to the standard price, or to a new one
+  // (opened and left here: it depends on the month).
+  await panel.getByRole("button", { name: "Move this date to another season" }).click();
+  await expect(panel.getByRole("radio", { name: /^Standard price/ })).toHaveAttribute(
+    "aria-checked",
+    "true",
+  );
   await expect(panel.getByRole("radio", { name: "New season" })).toBeVisible();
   await panel.getByRole("button", { name: "Cancel" }).click();
 
@@ -890,9 +895,9 @@ test("shows the whole year and closes dates picked in the Year view (VAY-2284)",
   // Click a date, then a second one: the side panel closes everything in between.
   await calendar.getByRole("button", { name: new RegExp(`^10 March ${year}, €`) }).click();
   await calendar.getByRole("button", { name: new RegExp(`^12 March ${year}, €`) }).click();
-  const panel = main(page).getByRole("region", { name: "Picked nights" });
-  await expect(panel.getByText("3 nights selected")).toBeVisible();
-  await panel.getByRole("button", { name: "Close these nights" }).click();
+  const panel = main(page).getByRole("region", { name: "Picked dates" });
+  await expect(panel.getByText("3 dates selected")).toBeVisible();
+  await panel.getByRole("button", { name: "Close these dates" }).click();
   for (const day of [10, 11, 12])
     await expect(
       calendar.getByRole("button", { name: new RegExp(`^${day} March ${year}, €\\d+, closed`) }),

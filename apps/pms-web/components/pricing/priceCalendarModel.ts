@@ -5,43 +5,43 @@ type Room = PricingConfiguration;
 type Offer = Room["offers"][number];
 type Season = Extract<Offer["price"], { kind: "independent" }>["calendar"]["seasons"][number];
 
-/** Season colours of the price calendar (VAY-2280), in the order seasons first appear; `year` fills the Year view's
+/** Season colours of the price calendar (VAY-2280; the CEO's solid fills, VAY-2305), in the order seasons first appear; `year` fills the Year view's
  * small date cells (VAY-2284). Literal classes, so Tailwind keeps them. */
 export const seasonTones = [
   {
-    cell: "bg-sky-50 border-sky-200",
+    cell: "bg-sky-100 border-sky-100",
     year: "bg-sky-200 border-sky-200",
-    swatch: "bg-sky-50 border-sky-300",
+    swatch: "bg-sky-100 border-sky-300",
     dot: "bg-sky-500",
   },
   {
-    cell: "bg-amber-50 border-amber-200",
+    cell: "bg-amber-100 border-amber-100",
     year: "bg-amber-200 border-amber-200",
-    swatch: "bg-amber-50 border-amber-300",
+    swatch: "bg-amber-100 border-amber-300",
     dot: "bg-amber-500",
   },
   {
-    cell: "bg-pink-50 border-pink-200",
+    cell: "bg-pink-100 border-pink-100",
     year: "bg-pink-200 border-pink-200",
-    swatch: "bg-pink-50 border-pink-300",
+    swatch: "bg-pink-100 border-pink-300",
     dot: "bg-pink-500",
   },
   {
-    cell: "bg-emerald-50 border-emerald-200",
+    cell: "bg-emerald-100 border-emerald-100",
     year: "bg-emerald-200 border-emerald-200",
-    swatch: "bg-emerald-50 border-emerald-300",
+    swatch: "bg-emerald-100 border-emerald-300",
     dot: "bg-emerald-600",
   },
   {
-    cell: "bg-violet-50 border-violet-200",
+    cell: "bg-violet-100 border-violet-100",
     year: "bg-violet-200 border-violet-200",
-    swatch: "bg-violet-50 border-violet-300",
+    swatch: "bg-violet-100 border-violet-300",
     dot: "bg-violet-500",
   },
   {
-    cell: "bg-teal-50 border-teal-200",
+    cell: "bg-teal-100 border-teal-100",
     year: "bg-teal-200 border-teal-200",
-    swatch: "bg-teal-50 border-teal-300",
+    swatch: "bg-teal-100 border-teal-300",
     dot: "bg-teal-600",
   },
 ] as const;

@@ -319,7 +319,7 @@ function EmptyMonth({ month, lead, title }: { month: string; lead: number; title
           key={index}
           role="img"
           aria-label={`${index + 1} ${title}, ${t("pricing.calendar.noPriceState")}`}
-          className="flex h-[52px] min-w-0 flex-col justify-between rounded-lg border border-dashed border-gray-300 bg-white px-1 py-1.5 md:h-[72px] md:rounded-[10px] md:px-2.5 md:py-2"
+          className="flex h-[52px] min-w-0 flex-col justify-between rounded-lg border border-dashed border-gray-300 bg-white px-1 py-1.5 md:h-[76px] md:rounded-[10px] md:px-2.5 md:py-2"
         >
           <span className="text-[11px] font-medium text-gray-400 md:text-[12px]">{index + 1}</span>
           <span className="truncate text-[11px] font-medium text-gray-400 md:text-[12px]">
@@ -373,7 +373,7 @@ function Night({
           : undefined
       }
       onClick={() => onPick(night.date)}
-      className={`flex h-[52px] min-w-0 flex-col justify-between rounded-lg border px-1 py-1.5 text-left md:h-[72px] md:rounded-[10px] md:px-2.5 md:py-2 ${tone} ${
+      className={`flex h-[52px] min-w-0 flex-col justify-between rounded-lg border px-1 py-1.5 text-left md:h-[76px] md:rounded-[10px] md:px-2.5 md:py-2 ${tone} ${
         selected
           ? "ring-2 ring-inset ring-primary-600"
           : night.inStay
@@ -426,7 +426,7 @@ function Night({
           {t("pricing.calendar.noPrice")}
         </span>
       ) : (
-        <span className="truncate text-[12px] font-semibold text-gray-900 md:text-[15px]">
+        <span className="truncate text-[12px] font-semibold text-gray-900 md:text-[16px]">
           {price}
         </span>
       )}
