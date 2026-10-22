@@ -2,6 +2,7 @@ import type { Page, Route } from "@playwright/test";
 import { createAdaptiveHotelSetupStatusMock } from "./sharedHotelSetupMocks";
 import { mockBookingModules } from "./featureHubModuleMocks";
 import { mockSetupChecklistUnavailable } from "./setupChecklistMocks";
+import { mockGoogleMaps } from "./googleMapsFake";
 
 export const PMS_WEB_PROPERTY_ID = "f6853000-0000-4000-8000-000000000001";
 export const PMS_WEB_ROOM_TYPE_ID = "room_type_alpine_suite";
@@ -293,6 +294,9 @@ export async function mockPmsWebTargetRoutes(page: Page): Promise<void> {
     .route("**/api/finance/properties/*/financials/access", (route) =>
       route.fulfill({ status: 204 }),
     );
+  // The room Location box loads Google Maps when the dev server has a key (CI's is a fake, VAY-2126): never the
+  // real script. A context route, so a spec's own mockGoogleMaps(page, ...) wins.
+  await mockGoogleMaps(page.context());
 
   await page.route("**/api/pms/properties/*/reservations/*/no-show-report", (route) =>
     route.fulfill({
