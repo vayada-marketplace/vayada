@@ -15,7 +15,8 @@ import {
   switchOption,
   type SimpleRoom,
 } from "./simplePricing";
-import { money, sampleAdults } from "./stepPricing";
+import { changeMealPlan } from "./PricingMealPlan";
+import { currencySymbol, money, sampleAdults } from "./stepPricing";
 import { StepCard } from "./StepCard";
 import * as ui from "./pricingStyles";
 
@@ -80,6 +81,8 @@ export function StepExtras({
   const [amount, setAmount] = useState(savedMinor === null ? "" : decimalAmount(savedMinor, scale));
   const savedText = breakfast?.meal.description ?? "";
   const [mealText, setMealText] = useState(savedText);
+  // Per guest (adult) or per room: breakfast's charge, or what turning it on uses.
+  const [basis, setBasis] = useState<"room" | "person">(charge?.kind ?? "person");
   const [errors, setErrors] = useState<Partial<Record<Field, string>>>({});
   const errorId = useId();
   // A reload or a reset brings the saved values back. Typing changes the saved value too, so text that already
@@ -102,6 +105,10 @@ export function StepExtras({
     () => setMealText((typed) => (typed.trim() === savedText ? typed : savedText)),
     [savedText],
   );
+  const savedBasis = charge?.kind;
+  useEffect(() => {
+    if (savedBasis) setBasis(savedBasis);
+  }, [savedBasis]);
   // The editor's callback is new on every render, so it is read through a ref.
   const pendingRef = useRef(onPending);
   useEffect(() => {
@@ -168,9 +175,7 @@ export function StepExtras({
           room,
           crypto.randomUUID(),
           kind,
-          kind === "non_refundable"
-            ? { percent: discount }
-            : { amount, basis: charge?.kind ?? "person" },
+          kind === "non_refundable" ? { percent: discount } : { amount, basis },
           mainTerms,
         ),
       );
@@ -178,6 +183,27 @@ export function StepExtras({
       else clear(kind);
     } catch (cause) {
       fail(kind, cause);
+    }
+  };
+  /** Breakfast per guest or per room; children's breakfast is free per guest (as when it is turned on). */
+  const changeBasis = (next: "room" | "person") => {
+    if (disabled || next === basis) return;
+    setBasis(next);
+    if (!breakfast || savedMinor === null) return;
+    // A typed price that doesn't parse yet gives way to the saved one.
+    const value = typedMinor(amount, scale) === null ? decimalAmount(savedMinor, scale) : amount;
+    try {
+      onChange(
+        changeMealPlan(room, breakfast.id, {
+          kind: breakfast.meal.kind,
+          basis: next,
+          amounts: next === "room" ? [value] : [value, ...room.children.bands.map(() => "0")],
+        }),
+      );
+      setAmount(value);
+      clear("breakfast");
+    } catch (cause) {
+      fail("breakfast", cause);
     }
   };
   const adults = sampleAdults(room);
@@ -220,12 +246,133 @@ export function StepExtras({
     showBreakfast = only !== "non_refundable" && simple.cancellation.kind !== "own";
   if (!showNonRefundable && !showBreakfast)
     return preview ? <div className="border-t border-gray-200 py-7">{preview}</div> : null;
-  // Just breakfast is step "Meals" of "Price rules" (VAY-2280); the non-refundable switch is a rate.
+  // Just breakfast is step "Meal plans" of "Pricing setup" (VAY-2280, the CEO's design in VAY-2305): its switch, its
+  // price a night per guest or for the room, what guests read, and what it adds for the sample guests.
+  if (only === "breakfast") {
+    const minor = typedMinor(amount, scale) ?? savedMinor,
+      symbol = currencySymbol(room.currency),
+      who = room.capacity.children > 0 ? "adult" : "guest";
+    const each = minor === null ? null : money(minor, room.currency);
+    const adds = !breakfast
+      ? t("pricing.meals.off")
+      : each === null
+        ? null
+        : basis === "room"
+          ? t("pricing.meals.adds.room", { amount: each })
+          : t(`pricing.meals.adds.${who}.${adults === 1 ? "one" : "other"}`, {
+              count: adults,
+              amount: each,
+              total: money(String(Number(minor) * adults), room.currency),
+            });
+    return (
+      <StepCard
+        step={4}
+        title={t("pricing.meals.title")}
+        hint={t("pricing.meals.hint")}
+        optional
+        side={preview}
+      >
+        <div className="flex items-center gap-3.5">
+          <button
+            type="button"
+            role="switch"
+            aria-checked={!!breakfast}
+            aria-label={t("pricing.simple.extras.turnOn", {
+              name: t("pricing.simple.extras.breakfast"),
+            })}
+            disabled={disabled}
+            onClick={() => toggle("breakfast")}
+            className={ui.switchTrack(!!breakfast)}
+          >
+            <span
+              aria-hidden="true"
+              className="h-[18px] w-[18px] rounded-full bg-white shadow-sm"
+            />
+          </button>
+          <span className="text-[15px] font-semibold text-gray-900">
+            {t("pricing.meals.breakfast")}
+          </span>
+        </div>
+        <div className="flex flex-wrap gap-x-5 gap-y-4">
+          <div className="space-y-2">
+            <p className={ui.partLabel}>{t("pricing.meals.price")}</p>
+            <span
+              className={`flex h-10 w-32 items-center gap-1.5 rounded-[10px] bg-gray-100 px-3 focus-within:ring-2 ${errors.breakfast ? "ring-2 ring-red-500" : "focus-within:ring-primary-500"}`}
+            >
+              {symbol && (
+                <span aria-hidden="true" className="text-[14px] text-gray-500">
+                  {symbol}
+                </span>
+              )}
+              <input
+                aria-label={t("pricing.simple.extras.breakfastLabel")}
+                aria-invalid={!!errors.breakfast || undefined}
+                aria-describedby={errors.breakfast ? `${errorId}-breakfast` : undefined}
+                inputMode="decimal"
+                disabled={disabled}
+                value={amount}
+                onChange={(event) => edit("breakfast", event.target.value)}
+                className="min-w-0 grow bg-transparent text-[15px] font-semibold text-gray-900 outline-none disabled:cursor-not-allowed disabled:text-gray-500"
+              />
+            </span>
+          </div>
+          <div className="space-y-2">
+            <p id={`${errorId}-charged`} className={ui.partLabel}>
+              {t("pricing.meals.charged")}
+            </p>
+            <div
+              role="group"
+              aria-labelledby={`${errorId}-charged`}
+              className="flex w-56 gap-0.5 rounded-lg bg-gray-100 p-[3px]"
+            >
+              {(["person", "room"] as const).map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  aria-pressed={basis === value}
+                  disabled={disabled}
+                  onClick={() => changeBasis(value)}
+                  className={`h-8 min-w-0 flex-1 rounded-md px-2 text-[13px] font-medium disabled:cursor-not-allowed ${
+                    basis === value ? "bg-white text-gray-900 shadow-sm" : "text-gray-500"
+                  }`}
+                >
+                  {t(value === "room" ? "pricing.meals.perRoom" : `pricing.meals.per.${who}`)}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+        {/* What guests read about breakfast (VAY-2281). */}
+        {breakfast && (
+          <label className="block space-y-2">
+            <span className={`block ${ui.partLabel}`}>{t("pricing.mealText.label")}</span>
+            <input
+              aria-invalid={!!errors.mealText || undefined}
+              aria-describedby={errors.mealText ? `${errorId}-mealText` : undefined}
+              maxLength={200}
+              disabled={disabled}
+              value={mealText}
+              placeholder={t("pricing.mealText.placeholder")}
+              onChange={(event) => editText(event.target.value)}
+              className={`w-full ${ui.field}`}
+            />
+          </label>
+        )}
+        {adds && <p className="text-[14px] text-gray-600">{adds}</p>}
+        {(errors.breakfast || errors.mealText) && (
+          <div role="alert" className={ui.errorText}>
+            {errors.breakfast && <p id={`${errorId}-breakfast`}>{errors.breakfast}</p>}
+            {errors.mealText && <p id={`${errorId}-mealText`}>{errors.mealText}</p>}
+          </div>
+        )}
+      </StepCard>
+    );
+  }
+  // The card's switches, outside "Pricing setup".
   return (
     <StepCard
-      step={only === "breakfast" ? 4 : undefined}
-      title={t(only === "breakfast" ? "pricing.meals.title" : "pricing.simple.extras.title")}
-      hint={t(only === "breakfast" ? "pricing.meals.hint" : "pricing.simple.extras.hint")}
+      title={t("pricing.simple.extras.title")}
+      hint={t("pricing.simple.extras.hint")}
       optional
       side={preview}
     >
@@ -256,22 +403,6 @@ export function StepExtras({
             </>,
             night(breakfast?.id, true),
           )}
-        {/* What guests read about breakfast (VAY-2281), in the Meals step. */}
-        {only === "breakfast" && breakfast && (
-          <label className="block space-y-1.5 pb-1">
-            <span className="block text-[13px] text-gray-600">{t("pricing.mealText.label")}</span>
-            <input
-              aria-invalid={!!errors.mealText || undefined}
-              aria-describedby={errors.mealText ? `${errorId}-mealText` : undefined}
-              maxLength={200}
-              disabled={disabled}
-              value={mealText}
-              placeholder={t("pricing.mealText.placeholder")}
-              onChange={(event) => editText(event.target.value)}
-              className={`w-full ${ui.field}`}
-            />
-          </label>
-        )}
       </div>
       {(errors.non_refundable || errors.breakfast || errors.mealText) && (
         <div role="alert" className={ui.errorText}>

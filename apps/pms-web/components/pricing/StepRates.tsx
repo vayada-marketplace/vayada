@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { MinusIcon, PlusIcon } from "@heroicons/react/24/outline";
+import { ArrowRightIcon, MinusIcon, PauseCircleIcon, PlusIcon } from "@heroicons/react/24/outline";
 import {
   paidWhenBooking,
   PREPAID_PRICING_PAYMENT_METHODS,
@@ -12,8 +12,13 @@ import {
   type PricingConfiguration,
 } from "@vayada/domain-pms/replacement-pricing";
 import { useTranslation } from "@/lib/i18n";
+import type { PricingRateNotSelling } from "@/services/api/replacementPricingClient";
 import { errorText } from "./pricingAmounts";
-import { usePricingCardReadiness, usePricingManualMethods } from "./pricingManualMethods";
+import {
+  usePricingCardReadiness,
+  usePricingManualMethods,
+  usePricingNotSelling,
+} from "./pricingManualMethods";
 import {
   cancellationDays,
   cancellationEdits,
@@ -45,7 +50,6 @@ const methodNames = {
   bank_transfer: "pricing.paymentMethods.bankTransfer",
   paypal: "pricing.paymentMethods.paypal",
 } as const;
-const sectionLabel = "text-[11px] font-semibold uppercase tracking-[0.06em] text-gray-500";
 const discountOf = (offer: SimpleRoom["nonRefundable"]) =>
   offer?.price.kind === "linked" && offer.price.adjustment.kind === "percentage"
     ? -offer.price.adjustment.basisPoints
@@ -147,14 +151,18 @@ function RateCard({
   sub,
   control,
   off = false,
+  notSelling,
   children,
 }: {
   name: string;
   sub: string;
   control: ReactNode;
   off?: boolean;
+  /** The published rate isn't selling now (VAY-2304): a badge beside the name and the note first. */
+  notSelling?: PricingRateNotSelling;
   children: ReactNode;
 }) {
+  const { t } = useTranslation();
   return (
     <section
       aria-label={name}
@@ -162,13 +170,72 @@ function RateCard({
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h4 className="text-[15px] font-semibold text-gray-900">{name}</h4>
+          <h4 className="flex flex-wrap items-center gap-2 text-[15px] font-semibold text-gray-900">
+            {name}
+            {notSelling && (
+              <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[12px] font-semibold text-amber-800">
+                {t("pricing.notSelling.badge")}
+              </span>
+            )}
+          </h4>
           <p className="text-[12px] text-gray-500">{sub}</p>
         </div>
         {control}
       </div>
+      {notSelling && <NotSellingNote rate={notSelling} />}
       {children}
     </section>
+  );
+}
+
+/** This room's rate in the not-selling list (VAY-2304), if it is there. */
+const useNotSelling = (room: PricingConfiguration, offerId: string | undefined) => {
+  const rates = usePricingNotSelling();
+  return offerId === undefined
+    ? undefined
+    : rates.find(
+        (rate) => rate.roomTypeId === room.roomTypeId.toLowerCase() && rate.offerId === offerId,
+      );
+};
+const notSellingReasons = {
+  card_off: "pricing.notSelling.reason.cardOff",
+  card_not_chosen: "pricing.notSelling.reason.cardNotChosen",
+  card_setup_incomplete: "pricing.notSelling.reason.cardSetupIncomplete",
+  deposits_off: "pricing.notSelling.reason.depositsOff",
+  pay_at_property_off: "pricing.notSelling.reason.payAtPropertyOff",
+  no_payment_method: "pricing.notSelling.reason.noPaymentMethod",
+} as const;
+const rateFixes = {
+  turn_card_on: "pricing.notSelling.fix.turnCardOn",
+  choose_card: "pricing.notSelling.fix.chooseCard",
+  finish_stripe_setup: "pricing.notSelling.fix.finishStripeSetup",
+  allow_pay_at_property: "pricing.notSelling.fix.allowPayAtProperty",
+  change_rate_payment: "pricing.notSelling.fix.changeRatePayment",
+  turn_pay_at_property_on: "pricing.notSelling.fix.turnPayAtPropertyOn",
+} as const;
+/** Why a published rate isn't selling and how to fix it (VAY-2304): its prices stay, and it sells again by itself. */
+function NotSellingNote({ rate }: { rate: PricingRateNotSelling }) {
+  const { t } = useTranslation();
+  return (
+    <div className="space-y-1.5 rounded-[10px] border border-amber-200 bg-amber-50 px-3.5 py-3">
+      <p className="flex items-center gap-2 text-[14px] font-semibold text-amber-800">
+        <PauseCircleIcon aria-hidden="true" className="h-4 w-4 shrink-0" />
+        {t("pricing.notSelling.title")}
+      </p>
+      <p className="text-[13px] text-gray-800">{t(notSellingReasons[rate.reason])}</p>
+      <ul className="space-y-1">
+        {rate.fixes.map((fix) => (
+          <li
+            key={fix}
+            className="flex items-start gap-1.5 text-[13px] font-medium text-primary-700"
+          >
+            <ArrowRightIcon aria-hidden="true" className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            {t(rateFixes[fix])}
+          </li>
+        ))}
+      </ul>
+      <p className="text-[12px] text-gray-500">{t("pricing.notSelling.prices")}</p>
+    </div>
   );
 }
 
@@ -185,7 +252,7 @@ function Part({
 }) {
   return (
     <div className={`space-y-2.5 border-t border-gray-100 pt-3.5 ${className}`}>
-      <p className={sectionLabel}>{label}</p>
+      <p className={ui.partLabel}>{label}</p>
       {children}
     </div>
   );
@@ -210,6 +277,7 @@ function FlexibleRate({
 }) {
   const { t } = useTranslation();
   const [error, setError] = useState("");
+  const notSelling = useNotSelling(room, simple.main.id);
   const on = pricingOfferOnBookingPage(simple.main);
   const otherRate = !!simple.nonRefundable && pricingOfferOnBookingPage(simple.nonRefundable);
   // Off keeps the option and its terms (sale "not_sold"); on again drops the key (VAY-2285).
@@ -242,6 +310,7 @@ function FlexibleRate({
       name={t("pricing.rates.flexible")}
       sub={sub}
       off={!on}
+      notSelling={notSelling}
       control={
         <button
           type="button"
@@ -418,6 +487,7 @@ function NonRefundableRate({
   const { t } = useTranslation();
   const manual = usePricingManualMethods();
   const { nonRefundable: offer, mainTerms } = simple;
+  const notSelling = useNotSelling(room, offer?.id);
   const saved = discountOf(offer);
   const [typed, setTyped] = useState(saved === null ? defaultDiscount : String(saved / 100));
   const [error, setError] = useState("");
@@ -495,6 +565,7 @@ function NonRefundableRate({
   return (
     <RateCard
       name={name}
+      notSelling={notSelling}
       sub={
         offer && saved !== null
           ? t("pricing.rates.nonRefundableSub", { percent: saved / 100 })
