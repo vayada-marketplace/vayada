@@ -253,11 +253,12 @@ export default function GoogleAddressMap({
     markerRef.current?.setPosition(nextPosition);
     const picked = pickedRef.current;
     pickedRef.current = null;
+    // The pin the hotel just placed, perhaps rounded by the caller (about 10 cm): keep the hotel's view.
     if (
       picked &&
       nextPosition &&
-      picked.lat === nextPosition.lat &&
-      picked.lng === nextPosition.lng
+      Math.abs(picked.lat - nextPosition.lat) < 1e-6 &&
+      Math.abs(picked.lng - nextPosition.lng) < 1e-6
     ) {
       return;
     }

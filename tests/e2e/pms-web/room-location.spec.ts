@@ -38,9 +38,14 @@ test.describe("pms-web room location", () => {
     await expect(location.getByText("No location yet")).toBeVisible();
     await expect(location.getByText("Add an address to see the pin on the map.")).toBeVisible();
 
+    // Keyboard: the arrow highlights the suggestion and Enter takes it.
     const address = page.getByRole("combobox", { name: "Address" });
     await address.fill("Leopold");
-    await page.getByRole("option", { name: /Leopoldstraße 12/ }).click();
+    const suggestion = page.getByRole("option", { name: /Leopoldstraße 12/ });
+    await expect(suggestion).toBeVisible();
+    await address.press("ArrowDown");
+    await expect(suggestion).toHaveAttribute("aria-selected", "true");
+    await address.press("Enter");
 
     await expect(address).toHaveValue("Leopoldstraße 12, 80802 München, Germany");
     await expect(page.getByLabel("Latitude")).toHaveValue("48.156341");
@@ -56,13 +61,20 @@ test.describe("pms-web room location", () => {
       ),
     ).toEqual(["suggest:Leopold", "fields:made-up-leopoldstrasse-12:formattedAddress,location"]);
 
+    await expect(map).toHaveAttribute("data-center", "48.156341,11.58242");
+    await expect(map).toHaveAttribute("data-zoom", "17");
+
+    // Google reports a dragged pin with full precision; it is kept to six decimals, and the map stays where the
+    // host zoomed and panned.
     await map.evaluate((element) =>
       (
         element as HTMLElement & { vayadaE2eDragMarker: (lat: number, lng: number) => void }
-      ).vayadaE2eDragMarker(48.1565, 11.583),
+      ).vayadaE2eDragMarker(48.15651234, 11.58301234),
     );
-    await expect(page.getByLabel("Latitude")).toHaveValue("48.1565");
-    await expect(page.getByLabel("Longitude")).toHaveValue("11.583");
+    await expect(page.getByLabel("Latitude")).toHaveValue("48.156512");
+    await expect(page.getByLabel("Longitude")).toHaveValue("11.583012");
+    await expect(map).toHaveAttribute("data-center", "48.156341,11.58242");
+    await expect(map).toHaveAttribute("data-zoom", "17");
 
     await page.getByRole("button", { name: "Save Changes" }).click();
     await expect
@@ -70,12 +82,42 @@ test.describe("pms-web room location", () => {
       .toEqual([
         expect.objectContaining({
           locationAddress: "Leopoldstraße 12, 80802 München, Germany",
-          latitude: 48.1565,
-          longitude: 11.583,
+          latitude: 48.156512,
+          longitude: 11.583012,
         }),
       ]);
     await expect(page.getByText("Room type updated successfully")).toBeVisible();
     await assertHealthy();
+  });
+
+  test("keeps the cursor and the typed address when address search stops working", async ({
+    page,
+  }) => {
+    test.skip(!hasMapsKey, "needs the dev server's fake Google Maps key");
+    await mockRoomBackend(page);
+    await mockGoogleMaps(page, { places: [leopoldstrasse], placesUnavailable: true });
+
+    await page.goto(`/rooms/${roomTypeId}`);
+    const address = page.getByRole("combobox", { name: "Address" });
+    // One failed request is treated as a blip; the second turns search off.
+    await address.fill("Leop");
+    await expect
+      .poll(() =>
+        page.evaluate(() => (window as { vayadaE2ePlaceQueries?: string[] }).vayadaE2ePlaceQueries),
+      )
+      .toEqual(["suggest:Leop"]);
+    await address.pressSequentially("old");
+    await expect(
+      page.getByText(
+        "Address search isn't available right now. Type the address and place the pin on the map.",
+      ),
+    ).toBeVisible();
+    const typed = page.getByLabel("Address shown to guests");
+    await expect(typed).toBeFocused();
+    await typed.pressSequentially("straße 12");
+    await expect(typed).toHaveValue("Leopoldstraße 12");
+    // The map still works: the pin can be placed by hand.
+    await expect(page.getByTestId("google-address-map-canvas")).toBeVisible();
   });
 
   test("takes typed coordinates with a comma and a pasted pair, and holds Save while one is out of range", async ({
@@ -88,6 +130,8 @@ test.describe("pms-web room location", () => {
     await page.goto(`/rooms/${roomTypeId}`);
     await expect(page.getByText("The map couldn't load")).toBeVisible();
     await expect(page.getByRole("combobox", { name: "Address" })).toHaveCount(0);
+    // Google rejected the key: trying again can't help, so it isn't offered.
+    await expect(page.getByRole("button", { name: "Try again" })).toHaveCount(0);
     await page.getByLabel("Address shown to guests").fill("Leopoldstraße 12, Munich");
 
     const latitude = page.getByLabel("Latitude");
@@ -99,7 +143,6 @@ test.describe("pms-web room location", () => {
     await expect(longitude).toHaveAttribute("aria-invalid", "true");
     const save = page.getByRole("button", { name: "Save Changes" });
     await expect(save).toBeDisabled();
-    await expect(page.getByText("Fix the room's location on Room Details to save.")).toBeVisible();
 
     await longitude.fill("11,58242");
     await longitude.press("Tab");
@@ -122,6 +165,22 @@ test.describe("pms-web room location", () => {
           longitude: 11.583,
         }),
       ]);
+  });
+
+  test("still saves a room stored earlier with half a coordinate pair", async ({ page }) => {
+    const backend = await mockRoomBackend(page, { latitude: 48.1565 });
+
+    await page.goto(`/rooms/${roomTypeId}`);
+    await expect(page.getByLabel("Latitude")).toHaveValue("48.1565");
+    await expect(page.getByLabel("Longitude")).toHaveValue("");
+    await expect(
+      page.getByText("Enter both latitude and longitude, or leave both empty."),
+    ).toBeVisible();
+    const save = page.getByRole("button", { name: "Save Changes" });
+    await expect(save).toBeEnabled();
+    await save.click();
+    await expect(page.getByText("Room type updated successfully")).toBeVisible();
+    expect(backend.locationWrites).toEqual([]);
   });
 
   test("removes a saved location", async ({ page }) => {
@@ -167,7 +226,7 @@ async function paste(field: Locator, text: string) {
 
 async function mockRoomBackend(
   page: Page,
-  location: { locationAddress: string; latitude: number; longitude: number } | null = null,
+  location: { locationAddress?: string; latitude?: number; longitude?: number } | null = null,
 ) {
   const state = {
     room: {

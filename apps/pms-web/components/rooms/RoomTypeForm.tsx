@@ -200,7 +200,7 @@ export default function RoomTypeForm({
   const activeTab = tab ?? ownTab;
   const setActiveTab = onTabChange ?? setOwnTab;
   const tabs = ROOM_TABS.filter((item) => item.key !== "prices" || onTabChange);
-  // False while a typed room coordinate can't be saved (VAY-2126); Save waits for a fix.
+  // False while the Location box holds something Save would lose (VAY-2126): Save waits.
   const [locationValid, setLocationValid] = useState(true);
   const [amenityInput, setAmenityInput] = useState("");
   const [expandedAmenityCategories, setExpandedAmenityCategories] = useState<string[]>([
@@ -1183,14 +1183,6 @@ export default function RoomTypeForm({
         <div className={`flex-wrap ${actionBar}`}>
           {actionNote && (
             <p className="w-full text-[11px] text-gray-500 md:mr-auto md:w-auto">{actionNote}</p>
-          )}
-          {!locationValid && (
-            <p
-              role="alert"
-              className="w-full text-[11px] font-medium text-red-600 md:mr-auto md:w-auto"
-            >
-              {t("rooms.form.fixLocationToSave")}
-            </p>
           )}
           {onCancel ? (
             <button

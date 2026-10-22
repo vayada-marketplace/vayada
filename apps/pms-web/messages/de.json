@@ -1583,7 +1583,6 @@
   "rooms.form.mapUnavailableTitle": "Die Karte konnte nicht geladen werden",
   "rooms.form.mapUnavailableBody": "Sie können die Koordinaten trotzdem eingeben. Sie werden wie gewohnt gespeichert und Gästen angezeigt.",
   "rooms.form.mapRetry": "Erneut versuchen",
-  "rooms.form.fixLocationToSave": "Korrigieren Sie den Zimmerstandort unter Zimmerdetails, um zu speichern.",
   "rooms.form.sortOrderHint": "Niedrigere Zahlen erscheinen zuerst in Ihrer Zimmerliste",
   "rooms.form.operatingPeriodsDescription": "Betriebszeiträume wiederholen sich jedes Jahr — außerhalb liegende Daten werden automatisch geschlossen",
   "rooms.form.periodNumber": "Zeitraum {number}",
