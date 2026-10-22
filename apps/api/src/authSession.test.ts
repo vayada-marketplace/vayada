@@ -5610,6 +5610,27 @@ function createAuthKitClient(overrides: Partial<AuthKitClient> = {}): AuthKitCli
     async createUser() {
       return session.user;
     },
+    async findInvitationByToken() {
+      throw Object.assign(new Error("Invitation not found"), { status: 404 });
+    },
+    async getInvitation() {
+      throw Object.assign(new Error("Invitation not found"), { status: 404 });
+    },
+    async findUserByEmail() {
+      return {
+        id: session.user.id,
+        email: session.user.email,
+        emailVerified: true,
+        lastSignInAt: null,
+        externalId: null,
+        signupFlow: null,
+        createdAt: "2026-10-01T08:00:00.000Z",
+      };
+    },
+    async listInvitationCreatedAts() {
+      return [];
+    },
+    async activateInvitedUser() {},
     async resendVerificationEmail() {
       return { email: session.user.email };
     },

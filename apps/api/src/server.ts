@@ -37,6 +37,7 @@ import { createBankTransferBookingOperations } from "./domains/financeBankTransf
 import {
   createPgIdentityRepository,
   createPgStaffInvitationAcceptanceRepository,
+  createPgStaffInvitationJoinRepository,
   createPgStaffInvitationDeliveryRepository,
   createPgStaffInvitationRepository,
   createPgTeamRoleRepository,
@@ -132,6 +133,7 @@ import { createWorkOSAdminRoleProvider } from "./platform/workosAdminRoleProvide
 import { createAdminTransferCoordinator } from "./platform/adminTransferCoordinator.js";
 import { createWorkOSAdminReauthentication } from "./platform/workosAdminReauthentication.js";
 import { startStaffRemovalWorker } from "./platform/staffRemovalWorker.js";
+import { startReplacedInvitationRevocationWorker } from "./platform/replacedInvitationRevocationWorker.js";
 import { installPostgresPoolRuntime } from "./platform/postgresRuntime.js";
 import { createPostgresSaturationAlert } from "./platform/postgresSaturationAlert.js";
 import {
@@ -1481,6 +1483,10 @@ const authSessionHandoffRepository =
     ? createPgAuthSessionHandoffRepository({ connectionString: config.auth.databaseUrl })
     : undefined;
 
+const staffInvitationAcceptance = config.auth
+  ? createPgStaffInvitationAcceptanceRepository({ connectionString: config.auth.databaseUrl })
+  : undefined;
+
 const staffInvitationRuntime =
   config.auth && config.authSession
     ? (() => {
@@ -1728,6 +1734,12 @@ const app = buildApp({
           cookieSecure: config.authSession.authCookieSecure,
           cookieDomain: config.authSession.authCookieDomain,
           adminTransfer: adminTransferRuntime,
+          staffInvitationJoin: staffInvitationAcceptance && {
+            repository: createPgStaffInvitationJoinRepository({
+              connectionString: config.auth.databaseUrl,
+            }),
+            acceptance: staffInvitationAcceptance,
+          },
         }
       : undefined,
   workosWebhooks:
@@ -1741,9 +1753,7 @@ const app = buildApp({
           store: createPgWorkosWebhookStore({
             connectionString: config.auth.databaseUrl,
           }),
-          staffInvitationAcceptance: createPgStaffInvitationAcceptanceRepository({
-            connectionString: config.auth.databaseUrl,
-          }),
+          staffInvitationAcceptance,
         }
       : undefined,
   providerWebhooks: hasProviderWebhookSecret
@@ -2173,6 +2183,14 @@ const staffRemovalWorker =
       })
     : undefined;
 
+const replacedInvitationRevocationWorker =
+  config.backgroundWorkersEnabled && staffInvitationRuntime
+    ? startReplacedInvitationRevocationWorker({
+        delivery: staffInvitationRuntime.delivery,
+        warn: (error, message) => app.log.warn(error, message),
+      })
+    : undefined;
+
 const pmsInboxAssignmentReconciliationWorker =
   config.backgroundWorkersEnabled && pmsInboxRuntime
     ? startPmsInboxAssignmentReconciliationWorker({
@@ -2249,6 +2267,7 @@ const bookingGuestPolicyProjectionWorker =
 app.addHook("onClose", async () => {
   await adminRoleWorker?.close();
   await staffRemovalWorker?.close();
+  await replacedInvitationRevocationWorker?.close();
   await pmsInboxAssignmentReconciliationWorker?.close();
   await pmsInboxFollowUpReleaseWorker?.close();
   await bookingPublicationWorker?.close();
