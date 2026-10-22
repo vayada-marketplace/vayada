@@ -78,6 +78,10 @@ export default function TeamRowMenu({
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}
+        // Safari doesn't focus buttons on click: keep focus in the menu so it isn't closed by blur first.
+        onMouseDown={(event) => {
+          if (open) event.preventDefault();
+        }}
         onClick={() => setOpen((value) => !value)}
         className="flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600 disabled:cursor-not-allowed disabled:opacity-50"
       >
@@ -88,6 +92,8 @@ export default function TeamRowMenu({
           id={menuId}
           role="menu"
           aria-label={label}
+          // Same Safari reason: a click on an item must not blur the menu (and unmount it) before it runs.
+          onMouseDown={(event) => event.preventDefault()}
           className="absolute right-0 z-10 mt-1 w-52 rounded-lg border border-gray-200 bg-white p-1.5 shadow-lg"
         >
           {items.map((item) => (

@@ -3469,7 +3469,7 @@
   "settings.team.roleSaved": "Role saved.",
   "settings.team.accessSaved": "Member access saved.",
   "settings.team.matrixHeading": "Property access overview",
-  "settings.team.matrixDescription": "Who can open which property. Invited and suspended users get no access until they are active.",
+  "settings.team.matrixDescription": "The properties each person is assigned to. Invited and suspended people have no access until they are active, and their role further limits what they can open.",
   "settings.team.propertyAssigned": "Assigned",
   "settings.team.propertyUnassigned": "Not assigned",
   "settings.team.invitationAlreadyPending": "An invitation is already pending for this address. Close this dialog and resend it from the team list.",

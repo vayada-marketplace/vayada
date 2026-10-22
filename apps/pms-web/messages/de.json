@@ -3483,7 +3483,7 @@
   "settings.team.roleSaved": "Rolle gespeichert.",
   "settings.team.accessSaved": "Mitgliederzugriff gespeichert.",
   "settings.team.matrixHeading": "Übersicht Unterkunftszugriff",
-  "settings.team.matrixDescription": "Wer welche Unterkunft öffnen kann. Eingeladene und gesperrte Benutzer haben erst Zugriff, wenn sie aktiv sind.",
+  "settings.team.matrixDescription": "Die Unterkünfte, die jeder Person zugewiesen sind. Eingeladene und gesperrte Personen haben erst Zugriff, wenn sie aktiv sind, und ihre Rolle schränkt zusätzlich ein, was sie öffnen können.",
   "settings.team.propertyAssigned": "Zugewiesen",
   "settings.team.propertyUnassigned": "Nicht zugewiesen",
   "settings.team.invitationAlreadyPending": "Für diese Adresse steht bereits eine Einladung aus. Schließe diesen Dialog und sende sie über die Teamliste erneut.",
