@@ -6,6 +6,7 @@ import {
   mockBookingAdminAuthenticatedSession,
   mockBookingAdminShellRoutes,
 } from "../support/bookingAdminMocks";
+import { corsHeaders, fulfillCorsPreflight } from "../support/cors";
 
 // VAY-2126: Settings → Location & surroundings → "Location map on your booking page".
 const nearby = `/api/hotel-setup/properties/${BOOKING_ADMIN_PROPERTY_ID}/nearby`;
@@ -64,16 +65,25 @@ async function setup(
     route.fulfill({ status: 503, json: { code: "not_configured" } }),
   );
   const state = { ...summary, property, saves: [] as unknown[] };
+  // The API is another origin: the browser asks first (OPTIONS) and needs CORS headers.
   await page.route(`**${locationMap}`, async (route) => {
-    if (route.request().method() === "PUT") {
+    const method = route.request().method();
+    if (method === "OPTIONS") return fulfillCorsPreflight(route);
+    const headers = corsHeaders(route);
+    if (method === "PUT") {
       const body = route.request().postDataJSON() as { enabled: boolean };
       state.saves.push(body);
       if (saveStatus !== 200)
-        return route.fulfill({ status: saveStatus, json: { code: "location_map_unavailable" } });
+        return route.fulfill({
+          status: saveStatus,
+          headers,
+          json: { code: "location_map_unavailable" },
+        });
       state.enabled = body.enabled;
-      return route.fulfill({ json: { enabled: body.enabled } });
+      return route.fulfill({ headers, json: { enabled: body.enabled } });
     }
-    return route.fulfill({ json: state });
+    const { enabled, canSwitch, rooms } = state;
+    return route.fulfill({ headers, json: { enabled, canSwitch, rooms, property } });
   });
   return state;
 }
