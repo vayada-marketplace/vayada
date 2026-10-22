@@ -383,9 +383,15 @@ test("edits a priced room on the simple card and publishes only what changed (VA
   const pricing = await mockPricing(page, publicationOf(3, [designRoom(3), complexRoom(3)]));
   const assertHealthy = watchPageHealth(page, testInfo);
   await prices(page, DELUXE);
-  // "Price rules" (VAY-2280): opening times, prices and seasons, rates and meals.
-  for (const heading of ["Price rules", "Prices and seasons", "Rates", "Meals"])
+  // "Pricing setup" (VAY-2280, VAY-2305): opening times, prices and seasons, rates and meals; "What guests see"
+  // sits beside step Meals.
+  for (const heading of ["Pricing setup", "Prices and seasons", "Rates", "Meals"])
     await expect(main(page).getByRole("heading", { name: heading })).toBeVisible();
+  await expect(
+    main(page)
+      .getByRole("region", { name: /^Meals/ })
+      .getByRole("region", { name: "What guests see" }),
+  ).toBeVisible();
   // "Prices by date" comes first (VAY-2280), showing the main option's nightly prices.
   const calendar = main(page).getByRole("region", { name: "Prices by date" });
   await expect(calendar).toBeVisible();

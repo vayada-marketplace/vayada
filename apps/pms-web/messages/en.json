@@ -2744,7 +2744,7 @@
   "pricing.rates.channelsOnly": "Channels only",
   "pricing.rates.channelsOnlyAria": "Sell “{name}” on channels only",
   "pricing.rates.notOnPage": "not on your booking page",
-  "pricing.rules.title": "Price rules",
+  "pricing.rules.title": "Pricing setup",
   "pricing.rules.hint": "The rules behind every price in the calendar. They repeat every year. For one-off changes, pick nights in the calendar.",
   "pricing.rules.gaps.one": "1 night without a price in the next 12 months",
   "pricing.rules.gaps.other": "{count} nights without a price in the next 12 months",

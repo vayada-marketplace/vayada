@@ -36,7 +36,8 @@ const typedMinor = (text: string, scale: number) => {
 
 /** The card's two switches: a non-refundable option some percent cheaper, and an option with breakfast. On adds the
  * option (based on the main option, with its stay rules and payment); off asks to delete it. An amount that doesn't
- * parse holds Save until it does, while its option is on. */
+ * parse holds Save until it does, while its option is on. `preview` (step "Meals") sits beside the card, and stays when
+ * the room offers no breakfast switch. */
 export function StepExtras({
   room,
   simple,
@@ -47,6 +48,7 @@ export function StepExtras({
   onRemove,
   onChange,
   onPending,
+  preview,
 }: {
   room: PricingConfiguration;
   simple: SimpleRoom;
@@ -60,6 +62,7 @@ export function StepExtras({
   onRemove: (offerId: string) => void;
   onChange: (room: PricingConfiguration) => void;
   onPending: (pending: boolean) => void;
+  preview?: ReactNode;
 }) {
   const { t } = useTranslation();
   const scale = pricingCurrencyScale(room.currency)!;
@@ -215,7 +218,8 @@ export function StepExtras({
   );
   const showNonRefundable = only !== "breakfast" && simple.cancellation.kind === "free",
     showBreakfast = only !== "non_refundable" && simple.cancellation.kind !== "own";
-  if (!showNonRefundable && !showBreakfast) return null;
+  if (!showNonRefundable && !showBreakfast)
+    return preview ? <div className="border-t border-gray-200 py-7">{preview}</div> : null;
   // Just breakfast is step "Meals" of "Price rules" (VAY-2280); the non-refundable switch is a rate.
   return (
     <StepCard
@@ -223,6 +227,7 @@ export function StepExtras({
       title={t(only === "breakfast" ? "pricing.meals.title" : "pricing.simple.extras.title")}
       hint={t(only === "breakfast" ? "pricing.meals.hint" : "pricing.simple.extras.hint")}
       optional
+      side={preview}
     >
       <div>
         {showNonRefundable &&
