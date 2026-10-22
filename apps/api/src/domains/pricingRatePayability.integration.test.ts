@@ -192,4 +192,53 @@ describe.skipIf(!url)("rates guests can't pay", () => {
       await h.close();
     }
   });
+
+  it("counts bank transfer only while the booking page takes bank transfer bookings, as the catalog", async () => {
+    const h = await hotel(["pay_at_property", "bank_transfer"], false, [
+      { offerId: "bank", payment: { kind: "full", acceptedMethods: ["bank_transfer"] } },
+    ]);
+    try {
+      await pool.query(
+        `INSERT INTO finance.bank_transfer_destinations (property_id,revision,ciphertext,key_arn,account_last4)
+        VALUES($1,1,$2,'key','3000')`,
+        [h.propertyId, Buffer.alloc(40)],
+      );
+      await (
+        await h.save(0)
+      )();
+      const note = async (bankTransfers: boolean) => {
+        const app = Fastify();
+        app.decorateRequest("authContext", null);
+        app.addHook("onRequest", async (request) => {
+          request.authContext = h.context;
+        });
+        await app.register(registerReplacementPricingRoutes, {
+          commands: (context) => createReplacementPricingCommands(pool, context),
+          manualPayments: { acceptedMethods: async () => ["bank_transfer"] as const },
+          bankTransfers,
+        });
+        try {
+          return (
+            await app.inject({ url: `/properties/${h.propertyId}/pricing-v2/not-selling` })
+          ).json().rates;
+        } finally {
+          await app.close();
+        }
+      };
+      // Bank transfer acceptance is on, but the booking page has no bank transfer operations.
+      expect(await h.selling({ ...switches, manual: ["paypal"] })).toEqual(["flex"]);
+      expect(await note(false)).toEqual([
+        {
+          roomTypeId: expect.any(String),
+          offerId: "bank",
+          reason: "no_payment_method",
+          fixes: ["change_rate_payment"],
+        },
+      ]);
+      expect(await h.selling({ ...switches, manual: ["bank_transfer"] })).toEqual(["bank", "flex"]);
+      expect(await note(true)).toEqual([]);
+    } finally {
+      await h.close();
+    }
+  });
 });
