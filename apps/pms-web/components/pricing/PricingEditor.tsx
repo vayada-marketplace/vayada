@@ -415,7 +415,7 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
       const gaps = edited ? nightsWithoutPrice(edited, main.id, sampleAdults(edited), today) : 0;
       const preview = <GuestPreview room={edited} facts={{ name: roomName(room.roomTypeId, ri), ...(roomFacts[room.roomTypeId] ?? { size: null, photo: null }) }} names={names} terms={optionTerms}
         stay={stay} today={today} selected={previewId} onSelect={setPreviewOffer} />;
-      // The CEO's layout (VAY-2305): "Prices by date" first, then "Pricing setup", whose step "Meals" holds "What guests see".
+      // The CEO's layout (VAY-2305): "Prices by date" first, then "Pricing setup", whose step "Meal plans" holds "On your booking page".
       return <div key={room.roomTypeId} className="space-y-6">
         <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
           <PriceCalendar room={edited} options={rates} offerId={calendarId} onOffer={setPreviewOffer}
@@ -467,7 +467,7 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
               <p className={ui.stepHint}>{t("pricing.paymentMethods.hint")}</p>
             </div>
           </StepRates>
-          {/* Step "Meals": the breakfast switch, beside "What guests see"; while the options' terms load, the preview alone. */}
+          {/* Step "Meal plans": breakfast, beside "On your booking page"; while the options' terms load, the preview alone. */}
           {simple ? <StepExtras room={room} simple={simple} prices={prices} only="breakfast" disabled={disabled || (hasPendingEntries && !pendingEntries[`extras:${ri}`])}
             onAdd={(input) => createInitial(input, true, room.roomTypeId)} onRemove={(offerId) => { if (!disabled && !pendingBesidesExtras) setDeleting(offerId); }} onChange={changeRoom(ri)} onPending={pend(`extras:${ri}`)} preview={preview} />
             : <div className="border-t border-gray-200 py-7">{preview}</div>}
