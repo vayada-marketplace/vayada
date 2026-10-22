@@ -6221,8 +6221,9 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
         ],
       );
       expect(await catalog.read(scope.propertyId)).toEqual(offers);
+      // This fixture has no booking settings: add a row with the switch on, then remove it again.
       await pool.query(
-        "UPDATE booking.booking_settings SET location_map_enabled = TRUE WHERE property_id = $1",
+        "INSERT INTO booking.booking_settings (property_id, location_map_enabled) VALUES ($1, TRUE)",
         [scope.propertyId],
       );
       const mapped = await catalog.read(scope.propertyId);
@@ -6233,10 +6234,9 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
         "Terms room": { latitude: 48.15634, longitude: 11.58242, address: "Leopoldstraße 12" },
         "Second room": null,
       });
-      await pool.query(
-        "UPDATE booking.booking_settings SET location_map_enabled = FALSE WHERE property_id = $1",
-        [scope.propertyId],
-      );
+      await pool.query("DELETE FROM booking.booking_settings WHERE property_id = $1", [
+        scope.propertyId,
+      ]);
       const app = Fastify({ logger: false });
       await app.register(registerBookingWebPublicRoutes, {
         profileRepository: {

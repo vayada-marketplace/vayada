@@ -261,7 +261,9 @@ async function roomImages(
 }
 
 /** A room's own pin for the guest location map, with its address when the hotel wrote one. */
-function roomLocation(row: RoomRow) {
+function roomLocation(row: RoomRow): {
+  location?: { latitude: number; longitude: number; address?: string };
+} {
   const pin = roomPin(row.attributes);
   if (!pin) return {};
   const address = roomAddress(row.attributes);
