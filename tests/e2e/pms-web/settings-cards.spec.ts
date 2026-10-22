@@ -8,20 +8,34 @@ import { watchPageHealth } from "../support/pageHealth";
 
 // VAY-2275: PMS Settings is the Booking Admin card grid; each card opens its own page.
 
-async function mockSettings(page: Page) {
+async function mockSettings(page: Page, { checkInSteps = 0, checkInDelayMs = 0 } = {}) {
   await mockPmsWebAuthenticatedSession(page);
   await mockPmsWebTargetRoutes(page);
-  const template = {
+  const template = (steps: unknown[]) => ({
     contractVersion: "pms-operations.v1",
     propertyId: PMS_WEB_PROPERTY_ID,
-    template: { steps: [], updatedAt: null, updatedByUserId: null },
+    template: { steps, updatedAt: null, updatedByUserId: null },
     sourceFreshness: {},
-  };
-  for (const flow of ["check-in-checklist", "check-out-inspection"]) {
-    await page.route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/${flow}`, (route) =>
-      route.fulfill({ json: template }),
-    );
-  }
+  });
+  const checkIn = Array.from({ length: checkInSteps }, (_, index) => ({
+    id: `step-${index}`,
+    label: `Step ${index + 1}`,
+    prompt: "Something staff check at arrival.",
+    type: "checkbox",
+    required: false,
+    system: false,
+    position: index,
+  }));
+  await page.route(
+    `**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/check-in-checklist`,
+    async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, checkInDelayMs));
+      await route.fulfill({ json: template(checkIn) });
+    },
+  );
+  await page.route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/check-out-inspection`, (route) =>
+    route.fulfill({ json: template([]) }),
+  );
 }
 
 test("old Settings links open the card page that holds them now", async ({ page }) => {
@@ -40,6 +54,20 @@ test("old Settings links open the card page that holds them now", async ({ page 
   }
   await page.goto("/settings#unknown");
   await expect(page.getByRole("heading", { level: 1, name: "Settings" })).toBeVisible();
+});
+
+test("a link to a lower section still lands on it after the sections above it load", async ({
+  page,
+}) => {
+  // Six check-in steps arriving late push the check-out section below the fold.
+  await mockSettings(page, { checkInSteps: 6, checkInDelayMs: 500 });
+  await page.goto("/settings/checkout-inspection");
+  await expect(page.locator("#check-in").getByText("Step 6", { exact: true })).toBeAttached();
+  await expect(page.locator("#check-out h2")).toBeInViewport();
+
+  await page.goto("/settings#language");
+  await expect(page).toHaveURL(/\/settings\/property#language$/);
+  await expect(page.getByRole("button", { name: /English/ })).toBeInViewport();
 });
 
 test("Guest flows holds the check-in and check-out editors, each with its own Save", async ({

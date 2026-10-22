@@ -20,7 +20,7 @@ export function SettingsSection({
 }: SettingsSectionProps) {
   return (
     <section id={id} className={cn("scroll-mt-20 first:pt-0 pt-6 pb-2", className)}>
-      {(title || actions) && (
+      {(title || description || actions) && (
         <div className="flex items-start justify-between gap-4 mb-4">
           <div className="min-w-0">
             {title && <h2 className="text-base md:text-lg font-semibold text-gray-900">{title}</h2>}

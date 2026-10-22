@@ -8,7 +8,7 @@ setup wizard in Booking Admin (VAY-2261, VAY-2266) and keeps the complete
 recovery return URL; without a PMS session the user signs in to the PMS first.
 Its destination is the canonical setup entry with the property ID from the
 server read, `entryProduct=pms`, `returnProduct=pms`, `recovery=pms-calendar`, and
-a rooms or calendar step. The return destination is `/settings#calendar`.
+a rooms or calendar step. The return destination is `/settings/calendar`.
 The marker is navigation intent, never authorization. The existing setup route
 read and every room/calendar command continue to enforce their property policy.
 Users without setup authority are told to ask their property administrator.
