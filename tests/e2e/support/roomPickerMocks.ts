@@ -10,7 +10,7 @@ const ROOMS = [
   {
     roomTypeId: "deluxe",
     name: "Deluxe Double Room",
-    occupancy: { maxGuests: 2, maxAdults: 2, maxChildren: 0 },
+    occupancy: { maxGuests: 2, maxAdults: 2, maxChildren: 1 },
     free: 1,
     offers: [
       { key: "a", mealPlan: "room_only", cancellation: free(3), price: "29800" },
@@ -30,7 +30,7 @@ const ROOMS = [
         key: "b",
         mealPlan: "room_only",
         cancellation: { kind: "non_refundable" },
-        price: "21400",
+        price: "24800",
         full: true,
       },
     ],
