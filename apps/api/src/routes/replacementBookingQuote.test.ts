@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
+import { buildApp } from "../app.js";
 import { PricingStorageError } from "../domains/replacementPricingStore.js";
+import { unusedBookingWebCheckoutAdapter } from "./bookingWebPublic.fixtures.js";
 import { createReplacementBookingQuoteIssuer } from "./replacementBookingQuote.js";
 
 const selection = {
@@ -100,6 +102,45 @@ describe("replacement booking quote issuer", () => {
       pricingCode: "denied",
       pricingReason: "finance_not_ready",
     });
+  });
+
+  it("writes an unnamed refusal's code and reason in the request log (VAY-2309)", async () => {
+    let logs = "";
+    const quote = createReplacementBookingQuoteIssuer({
+      issue: vi.fn().mockRejectedValue(new PricingStorageError("denied")),
+    });
+    const app = buildApp({
+      logger: { level: "info", stream: { write: (chunk: string) => (logs += chunk) } },
+      publicHotelProfileRepository: { findProfileBySlug: async () => null },
+      bookingWebCheckoutAdapter: {
+        ...unusedBookingWebCheckoutAdapter,
+        quoteBooking: (slug, body) => quote(slug, body, "key"),
+      },
+    });
+    try {
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/booking-web/hotels/hotel/bookings/quote",
+        headers: { "Idempotency-Key": "key" },
+        payload: request("card"),
+      });
+      expect(response.json()).toEqual({
+        statusCode: 404,
+        error: "Not Found",
+        message: "Quote unavailable.",
+      });
+      const entries = logs
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => JSON.parse(line) as { err?: Record<string, unknown> });
+      expect(
+        entries.find((entry) => entry.err?.message === "Quote unavailable.")?.err,
+      ).toMatchObject({ pricingCode: "denied", pricingReason: null });
+      // The quote request itself is never logged.
+      expect(logs).not.toContain("publicOfferKey");
+    } finally {
+      await app.close();
+    }
   });
 
   it("quotes part now by card, the rest at the property, only with deposits on (VAY-2205)", async () => {

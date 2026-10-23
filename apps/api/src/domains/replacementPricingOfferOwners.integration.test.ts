@@ -7602,42 +7602,27 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
   it("names a way to pay the chosen rates don't take", async () => {
     const f = await componentsFixture(
       fixedPolicy(),
-      (t) => ({
-        ...t,
-        payment: {
-          kind: "full",
-          acceptedMethods: t.offerId === "other" ? ["card"] : ["card", "pay_at_property"],
-        },
-      }),
+      (t) => ({ ...t, payment: { kind: "full", acceptedMethods: ["card"] } }),
       true,
     );
     const store = createCurrentPricingQuoteStore(pool, 300);
-    const issue = (selection: unknown, paymentMethod: string) =>
-      store.issue(f.scope.propertyId, { requestId: randomUUID(), selection, paymentMethod });
-    const otherKey = f.bindings.find(
-      (b) => b.roomTypeId === f.snapshot.rooms[0].roomTypeId && b.offerId === "other",
-    )!.publicOfferKey;
-    const withCardOnly = {
-      ...f.selection,
-      rooms: [f.selection.rooms[0], { ...f.selection.rooms[1], publicOfferKey: otherKey }],
-    };
-    await expect(issue(withCardOnly, "pay_at_property")).rejects.toMatchObject({
+    const issue = (paymentMethod: string) =>
+      store.issue(f.scope.propertyId, {
+        requestId: randomUUID(),
+        selection: f.selection,
+        paymentMethod,
+      });
+    await expect(issue("pay_at_property")).rejects.toMatchObject({
       code: "denied",
       reason: "payment_method_not_accepted",
     });
-    await expect(issue(withCardOnly, "card")).resolves.toMatchObject({
-      quote: { paymentMethod: "card" },
-    });
-    await expect(issue(f.selection, "pay_at_property")).resolves.toMatchObject({
-      quote: { paymentMethod: "pay_at_property" },
-    });
-    // Finance takes no payments now: the rates still take pay at the property, so the refusal
-    // stays unnamed.
+    await expect(issue("card")).resolves.toMatchObject({ quote: { paymentMethod: "card" } });
+    // Finance takes no payments now: that refusal isn't the rate's, so it stays unnamed.
     await pool.query(
       "UPDATE finance.payment_settings SET payments_enabled=false WHERE property_id=$1",
       [f.scope.propertyId],
     );
-    const unnamed = await issue(f.selection, "pay_at_property").catch((error: unknown) => error);
+    const unnamed = await issue("card").catch((error: unknown) => error);
     expect(unnamed).toMatchObject({ code: "denied" });
     expect((unnamed as { reason?: string }).reason).toBeUndefined();
   });

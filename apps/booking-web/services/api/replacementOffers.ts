@@ -167,7 +167,7 @@ export async function getReplacementCatalog(
             offer.mealDescription.length <= 200 && { mealDescription: offer.mealDescription }),
           ...(Array.isArray(offer.paymentMethods) &&
             offer.paymentMethods.every(isPricingPaymentMethod) && {
-              paymentMethods: [...new Set(offer.paymentMethods)],
+              paymentMethods: Array.from(new Set(offer.paymentMethods)),
             }),
         };
       }),

@@ -595,7 +595,7 @@ test("prices a rate paid by card with card from the first price", async ({ page 
   expect(prices.asked.length).toBeGreaterThan(0);
   expect(prices.asked).not.toContain("pay_at_property");
   await assertHealthy();
-  // Picking a way the rate doesn't take says so.
+  // Picking a way the rate doesn't take says so, in the guest's language too.
   Object.assign(prices, { refuse: "pay_at_property", code: "PAYMENT_METHOD_NOT_ACCEPTED" });
   await paymentOption(page, "pay_at_property").click();
   await expect(
@@ -603,17 +603,24 @@ test("prices a rate paid by card with card from the first price", async ({ page 
       hasText: "The rate you chose can't be paid this way. Please choose another way to pay.",
     }),
   ).toBeVisible();
-});
-
-test("says in the guest's language that the rate can't be paid this way", async ({ page }) => {
-  // A hotel that takes only pay at the hotel, from an API that doesn't name the rate's ways.
-  const { prices } = await mockFlow(page, { methods: ["pay_at_property"] });
   Object.assign(prices, { refuse: "pay_at_property", code: "PAYMENT_METHOD_NOT_ACCEPTED" });
-  await page.goto(`/de${STAY}`);
+  await page.goto(`/de${STAY}&step=payment`);
   await expect(
     page.getByRole("alert").filter({
       hasText:
         "Der gewählte Tarif kann nicht auf diese Weise bezahlt werden. Bitte wählen Sie eine andere Zahlungsart.",
     }),
   ).toBeVisible();
+});
+
+test("asks for another way to pay only where the guest can pick one", async ({ page }) => {
+  // A hotel that takes only pay at the hotel, from an API that doesn't name the rate's ways:
+  // another room is the way out.
+  const { prices } = await mockFlow(page, { methods: ["pay_at_property"] });
+  Object.assign(prices, { refuse: "pay_at_property", code: "PAYMENT_METHOD_NOT_ACCEPTED" });
+  await page.goto(STAY);
+  const notice = page.getByRole("alert").filter({ hasText: "We couldn't price this selection" });
+  await expect(notice).toBeVisible();
+  await expect(notice.getByRole("button", { name: "Choose another room" })).toBeVisible();
+  await expect(page.getByText("Please choose another way to pay.")).toHaveCount(0);
 });

@@ -8,10 +8,7 @@ import { republishPricingAfterPaymentChange } from "./pricingPaymentRepublish.js
 import type { PricingPaymentSwitches } from "./pricingRatePayability.js";
 import { publicPricingOfferBindings } from "./publicPricingRoomStay.js";
 import { createReplacementPricingCommands } from "./replacementPricingCommands.js";
-import {
-  publicOfferPaymentMethods,
-  sellingPublicOfferKeys,
-} from "./replacementPublicOfferMapping.js";
+import { publicOfferPaymentMethods } from "./replacementPublicOfferMapping.js";
 
 const url = process.env["TEST_DATABASE_URL"];
 const nonRefundableCardOnly = {
@@ -61,9 +58,9 @@ describe.skipIf(!url)("rates guests can't pay", () => {
       async selling(payments = switches) {
         const owner = await f.served();
         if (!owner) return null;
-        const keys = sellingPublicOfferKeys(owner, payments);
+        const methods = publicOfferPaymentMethods(owner, payments);
         return publicPricingOfferBindings(owner)
-          .filter((binding) => keys.has(binding.publicOfferKey))
+          .filter((binding) => !!methods.get(binding.publicOfferKey)?.length)
           .map((binding) => binding.offerId)
           .sort();
       },

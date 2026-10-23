@@ -95,23 +95,10 @@ export function publicOfferCancellations(
   return cancellations;
 }
 
-/** VAY-2304: the public offer keys of the rates guests can pay now (pricingRateSells), with the
- * booking page's switches applied to Finance's ready methods. A rate nobody can pay stops selling;
- * the others keep selling. */
-export function sellingPublicOfferKeys(
-  owner: Owner,
-  switches: PricingPaymentSwitches,
-): ReadonlySet<string> {
-  return new Set(
-    [...publicOfferPaymentMethods(owner, switches)]
-      .filter(([, methods]) => methods.length > 0)
-      .map(([key]) => key),
-  );
-}
-
-/** VAY-2309: the ways guests can pay each offer now (pricingRatePaymentMethods), by public offer
- * key, so the booking page prices a stay with a way its rates take. An offer without its exact
- * terms has no entry; one nobody can pay has none. */
+/** The ways guests can pay each offer now (pricingRatePaymentMethods, VAY-2309), by public offer
+ * key, with the booking page's switches applied to Finance's ready methods. A rate nobody can pay
+ * has none and stops selling; the others keep selling (VAY-2304). The booking page prices a stay
+ * with a way its rates take. An offer without its exact terms has no entry. */
 export function publicOfferPaymentMethods(
   owner: Owner,
   switches: PricingPaymentSwitches,

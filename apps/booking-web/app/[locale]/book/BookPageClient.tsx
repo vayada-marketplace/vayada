@@ -258,7 +258,12 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     paymentMethods,
     rooms && chosenRatesPaymentMethods(rooms, choices),
   );
-  const method = payment || (pagePaymentLoaded ? (defaultMethods[fallback] ?? "") : "");
+  // The chosen rates can change the list under a moved-on fallback: it stays on the last way.
+  const method =
+    payment ||
+    (pagePaymentLoaded
+      ? (defaultMethods[Math.min(fallback, defaultMethods.length - 1)] ?? "")
+      : "");
   // VAY-2200: without promo codes a code from an old link or draft is never sent.
   const promoCodesEnabled = hotel?.promoCodesEnabled !== false;
   const quotedPromoCode = promoCodesEnabled ? promoCode : "";
@@ -705,13 +710,18 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     Date.parse(seenQuote.quote.expiresAt) <= serverNow()
       ? seenQuote.quote
       : undefined);
-  // VAY-2309: a way to pay the chosen rates don't take, in the guest's language.
-  const refusal =
-    errorCode === "PAYMENT_METHOD_NOT_ACCEPTED" ? tGuestErrors("paymentMethodNotAccepted") : error;
+  // VAY-2309: a way to pay the chosen rates don't take is named, in the guest's language, where
+  // the guest can pick another; elsewhere another room is the way out.
   const priceNotice = error && !quote && (
     <Notice
       tone="red"
-      title={refusal}
+      title={
+        errorCode === "PAYMENT_METHOD_NOT_ACCEPTED" &&
+        step === "payment" &&
+        paymentMethods.length > 1
+          ? tGuestErrors("paymentMethodNotAccepted")
+          : error
+      }
       action={
         refused
           ? { label: "Choose another room", onClick: backToRooms }
