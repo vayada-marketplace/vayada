@@ -55,6 +55,7 @@ export async function loadPricingBookingCancellation(
       );
     rooms.push({
       selectionId: room.selectionId,
+      roomTypeId: room.roomTypeId,
       cancellation: terms.cancellation,
       subtotalMinor: subtotal.toString(),
     });

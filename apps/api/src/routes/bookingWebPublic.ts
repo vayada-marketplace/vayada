@@ -2422,12 +2422,29 @@ export function createTargetBookingWebCheckoutAdapter(
             "This booking's card payment can't be refunded online. Please contact the hotel.",
             "BOOKING_CANCEL_NOT_ONLINE",
           );
+        // Several rooms are each named in the preview (VAY-2320).
+        const roomTypeIds =
+          outcome && outcome.rooms.length > 1
+            ? Array.from(new Set(outcome.rooms.flatMap((room) => room.roomTypeId ?? [])))
+            : [];
+        const roomNames = roomTypeIds.length
+          ? new Map(
+              (
+                await pool.query<{ id: string; name: string }>(
+                  `SELECT id::text AS id, name FROM pms.room_types
+                   WHERE property_id=$1::uuid AND id::text = ANY($2::text[])`,
+                  [property.propertyId, roomTypeIds],
+                )
+              ).rows.map((row) => [row.id, row.name] as const),
+            )
+          : undefined;
         const preview = resolveTargetCancellationPreview(
           booking,
           property.timezone,
           occurredAt,
           outcome,
           cardRefund,
+          roomNames,
         );
         return {
           propertyId: property.propertyId,
@@ -6365,10 +6382,17 @@ export function resolveTargetCancellationPreview(
   bookedOutcome?: BookedCancellationOutcome | null,
   /** A paid card stay's money (VAY-2205): what was paid and what goes back. */
   cardRefund?: { paidMinor: bigint; refundMinor: bigint } | null,
+  /** Room type names by id, to name each of several rooms (VAY-2320). */
+  roomNames?: ReadonlyMap<string, string>,
 ): Record<string, unknown> {
   const metadata = objectValue(booking.bookingMetadata);
   if (metadata["targetSource"] === "pricing_quote_draft")
-    return pricingCancellationPreview(booking, bookedOutcome ?? null, cardRefund ?? null);
+    return pricingCancellationPreview(
+      booking,
+      bookedOutcome ?? null,
+      cardRefund ?? null,
+      roomNames,
+    );
   const selectedOffer = objectValue(metadata["selectedOffer"]);
   const selection = projectBookingRoomSelection(selectedOffer);
   if (selection.roomLines) {
@@ -6479,12 +6503,15 @@ export function resolveTargetCancellationPreview(
 
 /** Pricing-v2 stays: the terms frozen at acceptance decide (VAY-2100). Partial-refund terms can be
  * cancelled online in every tier, free cancellation only until its deadline, non-refundable never.
+ * Rooms with different terms (VAY-2320) each follow their own: the stay can be cancelled online
+ * unless every room keeps everything, and each room is listed with what it keeps.
  * Only unpaid stays get here, so no money moves: refund fields stay 0 and what the terms keep is
  * a fee the property may charge, never a refund the guest will receive. */
 function pricingCancellationPreview(
   booking: TargetBookingRow,
   outcome: BookedCancellationOutcome | null,
   cardRefund: { paidMinor: bigint; refundMinor: bigint } | null,
+  roomNames?: ReadonlyMap<string, string>,
 ): Record<string, unknown> {
   const scale = pricingCurrencyScale(booking.currency);
   if (!outcome || scale === null)
@@ -6499,13 +6526,16 @@ function pricingCancellationPreview(
       "This booking's check-in date has passed. Contact the property.",
       "BOOKING_CANCEL_CHECK_IN_PASSED",
     );
-  if (outcome.rooms.some((room) => room.rule === "non_refundable"))
+  const keepsAll = (room: BookedCancellationOutcome["rooms"][number]) =>
+    room.rule === "non_refundable" ||
+    (room.rule === "free_until_deadline" && room.refundPercent < 100);
+  if (outcome.rooms.every(keepsAll) && outcome.rooms.some((room) => room.rule === "non_refundable"))
     throw createHttpError(
       409,
       "This booked rate is non-refundable and cannot be cancelled online.",
       "BOOKING_CANCEL_NON_REFUNDABLE",
     );
-  if (outcome.rooms.some((room) => room.rule === "free_until_deadline" && room.refundPercent < 100))
+  if (outcome.rooms.every(keepsAll))
     throw createHttpError(
       409,
       "This booking's free-cancellation period has expired. Contact the property.",
@@ -6522,6 +6552,16 @@ function pricingCancellationPreview(
     daysUntilCheckIn: outcome.daysBeforeCheckIn,
     currency: booking.currency,
     bookedTermsOutcome: outcome,
+    // VAY-2320: several rooms, each with what its own terms give back and keep.
+    ...(outcome.rooms.length > 1 && {
+      rooms: outcome.rooms.map((room) => ({
+        roomName: (room.roomTypeId && roomNames?.get(room.roomTypeId)) || null,
+        rule: room.rule,
+        refundPercent: room.refundPercent,
+        refundAmount: Number(room.refundMinor) / 10 ** scale,
+        keptAmount: Number(room.retainedMinor) / 10 ** scale,
+      })),
+    }),
   };
 }
 
