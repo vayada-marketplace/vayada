@@ -696,10 +696,7 @@ test.describe("booking-admin settings no-legacy guard", () => {
     await page.getByRole("button", { name: "Save Changes" }).click();
     await expect(page.getByText(tooLight)).toHaveCount(2);
     expect(order).toEqual([]);
-    await page.screenshot({ path: testInfo.outputPath("design-studio-too-light-1440.png") });
-    await page.setViewportSize({ width: 390, height: 844 });
-    await page.screenshot({ path: testInfo.outputPath("design-studio-too-light-390.png") });
-    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.screenshot({ path: testInfo.outputPath("design-studio-too-light.png") });
     // The Tropical Gold preset is a darker, readable gold now.
     await page.getByRole("button", { name: "Tropical Gold" }).click();
     await expect(hex).toHaveValue("#A67D12");
@@ -722,15 +719,7 @@ test.describe("booking-admin settings no-legacy guard", () => {
       fontPairing: "grand-classic",
     });
     expect(order).toEqual(["settings", "design", "publish"]);
-    await page.getByRole("button", { name: "Colors" }).click();
-    await page.screenshot({
-      path: testInfo.outputPath("design-studio-brand-colour-saved-1440.png"),
-    });
-    await page.setViewportSize({ width: 390, height: 844 });
-    await page.screenshot({
-      path: testInfo.outputPath("design-studio-brand-colour-saved-390.png"),
-    });
-    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.screenshot({ path: testInfo.outputPath("design-studio-brand-colour-saved.png") });
 
     // A second Save with nothing changed does not write a new booking design revision.
     await page.getByRole("button", { name: "Save Changes" }).click();
