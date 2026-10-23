@@ -586,7 +586,20 @@ export async function registerBookingWebPublicRoutes(
         body.requestId !== request.headers["idempotency-key"]
       )
         throw createHttpError(400, "Invalid quote acceptance request.");
-      const response = await checkoutAdapter.acceptPricingQuote(request.params.slug, body);
+      let response;
+      try {
+        response = await checkoutAdapter.acceptPricingQuote(request.params.slug, body);
+      } catch (error) {
+        // The default error body has no room for which rooms sold out (VAY-2320).
+        if ((error as { code?: unknown }).code !== "ROOMS_SOLD_OUT") throw error;
+        return reply.status(409).send({
+          statusCode: 409,
+          error: "Conflict",
+          code: "ROOMS_SOLD_OUT",
+          message: (error as Error).message,
+          roomTypeIds: (error as { roomTypeIds: readonly string[] }).roomTypeIds,
+        });
+      }
       reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-quote-acceptance");
       return response;
     },
@@ -2038,6 +2051,14 @@ export function createTargetBookingWebCheckoutAdapter(
           throw Object.assign(
             createHttpError(404, "Bank transfer and PayPal bookings are unavailable."),
             { code: "MANUAL_PAYMENT_UNAVAILABLE" },
+          );
+        // VAY-2320: a chosen room type has no free room left for these dates (another booking
+        // took it, or the hotel closed the dates). Nothing was stored; the guest keeps the other
+        // rooms and chooses again for that one.
+        if (error instanceof PricingAcceptanceError && error.code === "sold_out")
+          throw Object.assign(
+            createHttpError(409, "A room you chose is no longer available for these dates."),
+            { code: "ROOMS_SOLD_OUT", roomTypeIds: error.roomTypeIds },
           );
         const statusCode =
           error instanceof PricingAcceptanceError

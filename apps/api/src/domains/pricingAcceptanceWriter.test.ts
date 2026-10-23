@@ -9,6 +9,7 @@ import { stagePricingBookingLifecycle } from "./pricingBookingLifecycle.js";
 import { stagePricingBookingRevenue } from "./pricingBookingRevenue.js";
 import { stagePmsAcceptedPricingReservationJob } from "./pricingPmsAcceptedReservationJob.js";
 import { storePricingAcceptance } from "./storePricingAcceptance.js";
+import { QuoteRoomsSoldOutError } from "./pmsInventoryReservationLifecycleRepository.js";
 
 vi.mock("./finishPricingAcceptance.js", () => ({ finishPricingAcceptance: vi.fn() }));
 vi.mock("./preparePricingAcceptance.js", () => ({ preparePricingAcceptance: vi.fn() }));
@@ -159,6 +160,21 @@ describe("pricing acceptance writer", () => {
     await expect(writePricingAcceptance(pool as never, input)).rejects.toEqual(
       expect.objectContaining({ code: "conflict" }),
     );
+  });
+
+  // VAY-2320: another booking took the last room of a chosen type while the guest decided.
+  it("names the room types that sold out and rolls back", async () => {
+    vi.mocked(stagePricingBookingLifecycle).mockRejectedValueOnce(
+      new QuoteRoomsSoldOutError(["room-type-b"]),
+    );
+    await expect(writePricingAcceptance(pool as never, input)).rejects.toEqual(
+      expect.objectContaining({ code: "sold_out", roomTypeIds: ["room-type-b"] }),
+    );
+    expect(client.query.mock.calls.map(([sql]) => sql)).toEqual([
+      "BEGIN ISOLATION LEVEL READ COMMITTED",
+      "ROLLBACK",
+    ]);
+    expect(storePricingAcceptance).not.toHaveBeenCalled();
   });
 
   it("classifies pool connection failures without attempting cleanup", async () => {

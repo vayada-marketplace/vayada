@@ -39,8 +39,15 @@ export type RoomContent = {
   size?: { value: number; unit: "sqm" };
   category?: string;
   amenities?: string[];
-  /** The room's own pin; sent only while the hotel shows the location map (VAY-2126). */
-  location?: { latitude: number; longitude: number; address?: string };
+  /** The room's own place, sent only while the hotel shows the location map (VAY-2126): its pin and address,
+   * or (VAY-2321) a pin rounded to its area with the area's name, never its street. */
+  location?:
+    | { latitude: number; longitude: number; address?: string; approximate?: undefined }
+    | { latitude: number; longitude: number; approximate: true; area?: string };
+  /** "Same as property" (VAY-2321): the room is at the property's pin. */
+  atProperty?: boolean;
+  /** The room's "Show map in room details" switch (VAY-2321). */
+  showMapInDetails?: boolean;
 };
 export type PricingRoom = RoomContent & {
   roomTypeId: string;
@@ -87,12 +94,24 @@ function roomContent(room: Record<string, unknown>): RoomContent {
       Math.abs(l.latitude) <= 90 &&
       typeof l.longitude === "number" &&
       Math.abs(l.longitude) <= 180 && {
-        location: {
-          latitude: l.latitude,
-          longitude: l.longitude,
-          ...(text(l.address) && { address: l.address }),
-        },
+        location:
+          l.approximate === true
+            ? {
+                latitude: l.latitude,
+                longitude: l.longitude,
+                approximate: true as const,
+                ...(text(l.area) && { area: l.area }),
+              }
+            : {
+                latitude: l.latitude,
+                longitude: l.longitude,
+                ...(text(l.address) && { address: l.address }),
+              },
       }),
+    ...(typeof room.atProperty === "boolean" && { atProperty: room.atProperty }),
+    ...(typeof room.showMapInDetails === "boolean" && {
+      showMapInDetails: room.showMapInDetails,
+    }),
   };
 }
 function offerCancellation(v: unknown): OfferCancellation | undefined {

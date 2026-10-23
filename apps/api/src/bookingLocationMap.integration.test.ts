@@ -90,9 +90,53 @@ describe.skipIf(!TEST_DATABASE_URL)("Booking location map (runtime login)", () =
           name: "Schwabing Loft",
           address: "Leopoldstraße 12, Munich",
           pin: { latitude: 48.15634, longitude: 11.58242 },
+          atProperty: false,
+          approximate: false,
         },
-        // Half a pair or text is no pin.
-        { roomTypeId: expect.any(String), name: "Family Apartment", address: null, pin: null },
+        // Half a pair or text is no pin: saved before VAY-2321 without one, the room is at the property.
+        {
+          roomTypeId: expect.any(String),
+          name: "Family Apartment",
+          address: null,
+          pin: null,
+          atProperty: true,
+          approximate: false,
+        },
+        // VAY-2321, as guests see it: an area gets its pin rounded and its name instead of the street.
+        {
+          roomTypeId: expect.any(String),
+          name: "Beach Villa",
+          address: "Isarvorstadt",
+          pin: { latitude: 48.13, longitude: 11.57 },
+          atProperty: false,
+          approximate: true,
+        },
+        // "Same as property" keeps the room's own place saved, unused.
+        {
+          roomTypeId: expect.any(String),
+          name: "Garden Suite",
+          address: null,
+          pin: null,
+          atProperty: true,
+          approximate: false,
+        },
+        // A place of its own without a pin yet.
+        {
+          roomTypeId: expect.any(String),
+          name: "Annex",
+          address: null,
+          pin: null,
+          atProperty: false,
+          approximate: false,
+        },
+        {
+          roomTypeId: expect.any(String),
+          name: "Lobby Room",
+          address: null,
+          pin: null,
+          atProperty: true,
+          approximate: false,
+        },
       ],
       property: {
         name: "Alpenrose Apartments",
@@ -183,6 +227,33 @@ async function seedProperty(admin: pg.Pool, withSettings: boolean): Promise<stri
     ],
     ["Family Apartment", true, 2, { latitude: 48.1, longitude: "11.5" }],
     ["Retired Studio", false, 0, { latitude: 48.2, longitude: 11.6 }],
+    [
+      "Beach Villa",
+      true,
+      3,
+      {
+        locationSource: "custom",
+        locationPrecision: "approximate",
+        locationArea: " Isarvorstadt ",
+        locationAddress: "Fraunhoferstraße 9, Munich",
+        latitude: 48.12961,
+        longitude: 11.57443,
+      },
+    ],
+    [
+      "Garden Suite",
+      true,
+      4,
+      {
+        locationSource: "property",
+        locationAddress: "Elsewhere 1",
+        latitude: 48.2,
+        longitude: 11.6,
+      },
+    ],
+    ["Annex", true, 5, { locationSource: "custom", locationAddress: "Not placed yet" }],
+    // Saved before VAY-2321 with the hotel's own pin: at the property, so its visibility still holds.
+    ["Lobby Room", true, 6, { latitude: 48.13941, longitude: 11.5835 }],
   ];
   for (const [name, active, sortOrder, attributes] of rooms)
     await admin.query(

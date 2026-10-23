@@ -19,6 +19,8 @@ const summary: LocationMapSummary = {
       name: "Schwabing Loft",
       address: "Leopoldstraße 12, Munich",
       pin: { latitude: 48.15634, longitude: 11.58242 },
+      atProperty: false,
+      approximate: false,
     },
   ],
   property: {

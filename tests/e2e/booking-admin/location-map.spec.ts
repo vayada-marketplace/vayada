@@ -17,13 +17,17 @@ const room = (
   name: string,
   address: string | null,
   at: ReturnType<typeof pin> | null,
+  // VAY-2321: "Same as property", and a place shown as an area.
+  { atProperty = at === null, approximate = false } = {},
 ) => ({
   roomTypeId: `00000000-0000-4000-8000-00000000000${n}`,
   name,
   address,
   pin: at,
+  atProperty,
+  approximate,
 });
-const property = {
+const exactProperty = {
   name: "Alpenrose Apartments",
   address: "Maximilianstraße 3, 80539 Munich",
   pin: pin(48.1394, 11.5835),
@@ -34,12 +38,15 @@ const villas = [
   room(2, "Haidhausen Garden Flat", "Wörthstraße 8, Munich", pin(48.1291, 11.5952)),
   room(3, "Isar Studio", "Erhardtstraße 21, Munich", pin(48.1302, 11.5788)),
   room(4, "Family Apartment", null, null),
+  // Its own place, without a pin yet.
+  room(5, "Garden Annex", null, null, { atProperty: false }),
 ];
 
 async function setup(
   page: Page,
   summary: { enabled: boolean; canSwitch: boolean; rooms: unknown[] },
   saveStatus = 200,
+  property = exactProperty,
 ) {
   await mockBookingAdminAuthenticatedSession(page);
   await mockBookingAdminShellRoutes(page);
@@ -100,13 +107,15 @@ test("turns the location map on and shows a pin for each room's place", async ({
   await expect(toggle).toHaveAttribute("aria-checked", "true");
   expect(state.saves).toEqual([{ enabled: true }]);
   await expect(
-    card.getByText("What guests see: 3 pins, one for each place with a room"),
+    card.getByText("What guests see: 4 pins, one for each place with a room"),
   ).toBeVisible();
   const pins = card.getByRole("listitem");
-  await expect(pins).toHaveCount(3);
-  await expect(pins.nth(0)).toContainText("Schwabing Loft");
-  await expect(pins.nth(0)).toContainText("Leopoldstraße 12, Munich");
-  await expect(card.getByText("Family Apartment has no location, so it has no pin.")).toBeVisible();
+  await expect(pins).toHaveCount(4);
+  // The room at the property shares its pin (VAY-2321).
+  await expect(pins.nth(0)).toContainText("Alpenrose Apartments");
+  await expect(pins.nth(1)).toContainText("Schwabing Loft");
+  await expect(pins.nth(1)).toContainText("Leopoldstraße 12, Munich");
+  await expect(card.getByText("Garden Annex has no location, so it has no pin.")).toBeVisible();
   await toggle.click();
   await expect(toggle).toHaveAttribute("aria-checked", "false");
   expect(state.saves).toEqual([{ enabled: true }, { enabled: false }]);
@@ -119,7 +128,38 @@ test("turns the location map on and shows a pin for each room's place", async ({
   await card.getByRole("button", { name: "Add it in Rooms & Rates" }).click();
   await expect
     .poll(() => decodeURIComponent(page.url()))
-    .toContain("/rooms/00000000-0000-4000-8000-000000000004");
+    .toContain("/rooms/00000000-0000-4000-8000-000000000005");
+});
+
+test("names the rooms at a hidden property, and tags a place shown as an area (VAY-2321)", async ({
+  page,
+}) => {
+  await setup(
+    page,
+    {
+      enabled: true,
+      canSwitch: true,
+      rooms: [
+        room(1, "Deluxe Double", null, null),
+        room(2, "Garden Suite", null, null),
+        room(3, "Beach Villa", "Isarvorstadt", pin(48.13, 11.57), { approximate: true }),
+      ],
+    },
+    200,
+    { ...exactProperty, mapDisplayMode: "hidden" as const },
+  );
+  await page.goto("/settings/location");
+  const card = page.getByRole("region", { name: "Location map on your booking page" });
+  await expect(card.getByText("What guests see: one pin")).toBeVisible();
+  await expect(card.getByRole("listitem")).toHaveText(
+    /Beach Villa\s*Isarvorstadt\s*Approximate area/,
+  );
+  await expect(
+    card.getByText(
+      "Rooms at your property aren't on the map because your property's pin is hidden: Deluxe Double, Garden Suite. Change “Guest map visibility” below.",
+    ),
+  ).toBeVisible();
+  await expect(card.getByText(/no location, so/)).toHaveCount(0);
 });
 
 test("shows one pin at the property when no room has its own location", async ({ page }) => {

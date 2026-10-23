@@ -210,8 +210,11 @@ caller transaction. The database clock supplies property-local lead days. Hotel
 off suppresses every room; room off opts out; nonempty room tiers override; empty
 or absent room tiers inherit. It returns exact basis-point decisions and the saved
 stacking choice, binding hotel/room heads/timezone/local date into source identity.
-Missing/malformed hotel state and active generalized promotions remain unavailable
-until their owner exists; this is not calendar/inventory or full quote approval.
+Missing/malformed hotel state (including malformed promotions) remains unavailable;
+this is not calendar/inventory or full quote approval. Generalized promotions have no
+evaluator yet (VAY-2333). Since VAY-2319 they change no price instead of refusing every
+stay. Once a hotel saves a promotions list, it replaces the hotel-wide tiers, so those
+stop discounting too.
 
 The existing replacement promotion input represents last-minute/code rules,
 not the full agreed early-bird/midweek/free-night feature set. Those need concrete
