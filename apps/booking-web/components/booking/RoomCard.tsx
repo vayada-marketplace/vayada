@@ -38,6 +38,10 @@ export default function RoomCard({
   onView: onViewed,
   detailsRequest = 0,
   place = null,
+  locationLine = null,
+  compact = false,
+  active = false,
+  onActivate,
 }: {
   room: PricingRoom;
   /** Stay prices for this room; null while loading, when they failed or aren't offered. */
@@ -59,6 +63,15 @@ export default function RoomCard({
   detailsRequest?: number;
   /** The hotel's location map while it shows one, for the details' "Where you'll stay" (VAY-2323). */
   place?: GuestPlace | null;
+  /** Where the room is next to the main house, while its rooms are in several places (VAY-2324). */
+  locationLine?: string | null;
+  /** The List + map view's short card (VAY-2324): photo, facts, location and the lowest price; the
+   * choices are in its details. */
+  compact?: boolean;
+  /** The room is selected on the map. */
+  active?: boolean;
+  /** The guest picked this room to see it on the map. */
+  onActivate?: () => void;
 }) {
   const t = useTranslations("home");
   const tc = useTranslations("common");
@@ -80,6 +93,8 @@ export default function RoomCard({
   }, [detailsRequest]);
 
   const images = room.images ?? [];
+  // A catalog from before VAY-2321 doesn't say: a room without a pin of its own is at the property.
+  const atMainHouse = room.atProperty ?? !room.location;
   // Without prices for this room (failed, no read, or the room missing from the answer) the
   // choices stay choosable and /book prices the stay.
   const unpricedRoom =
@@ -235,8 +250,109 @@ export default function RoomCard({
     </div>
   );
 
+  const details = detailsOpen && (
+    <RoomDetailModal
+      room={room}
+      roomCount={roomCount}
+      soldOut={soldOut}
+      place={place}
+      onClose={() => setDetailsOpen(false)}
+    >
+      {rates(true)}
+    </RoomDetailModal>
+  );
+
+  if (compact) {
+    // The cheapest bookable choice, per night.
+    const cheapest = selected?.priced ?? null;
+    const nightly =
+      cheapest &&
+      money(
+        Math.round(
+          (quoteMoneyAmount(cheapest.totalMinor, cheapest.currency) / Math.max(nights, 1)) * 100,
+        ) / 100,
+        cheapest.currency,
+      );
+    return (
+      <div
+        id={`room-card-${room.roomTypeId}`}
+        data-testid={`room-card-${room.roomTypeId}`}
+        onClick={onActivate}
+        className={`flex gap-4 rounded-2xl border-2 bg-white p-3 transition-colors ${active ? "border-primary-600" : "border-gray-100 hover:border-gray-200"} ${soldOut ? "opacity-60" : ""} ${onActivate ? "cursor-pointer" : ""}`}
+      >
+        <div className="relative h-[84px] w-28 shrink-0 overflow-hidden rounded-xl bg-gray-100">
+          {images.length > 0 && (
+            <Image
+              src={images[0]!.url}
+              alt={images[0]!.alt ?? room.name}
+              fill
+              className="object-cover"
+              sizes={bookingImageSizes.roomThumb}
+            />
+          )}
+        </div>
+        <div className="min-w-0 flex-1">
+          <h3 className="font-bold text-gray-900">
+            {onActivate ? (
+              <button
+                type="button"
+                aria-current={active ? "true" : undefined}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onActivate();
+                }}
+                className="text-left hover:underline"
+              >
+                {roomCount > 1 && <span className="text-primary-600">{roomCount}× </span>}
+                {room.name}
+              </button>
+            ) : (
+              room.name
+            )}
+          </h3>
+          <p className="mt-0.5 text-sm text-gray-500">
+            {[
+              room.category,
+              room.size && `${room.size.value} m²`,
+              room.occupancy && t("upToGuests", { count: room.occupancy.maxGuests }),
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+          </p>
+          {locationLine && <LocationLine text={locationLine} atMainHouse={atMainHouse} />}
+        </div>
+        <div className="flex shrink-0 flex-col items-end justify-between text-right">
+          {soldOut ? (
+            <span className="text-sm font-semibold text-gray-500">{t("soldOut")}</span>
+          ) : nightly ? (
+            <p className="text-sm text-gray-500">
+              <span className="block text-base font-bold text-gray-900">
+                {tc("fromPrice", { price: nightly })}
+              </span>
+              {tc("perNight")}
+            </p>
+          ) : (
+            <span />
+          )}
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onView();
+            }}
+            className="mt-2 text-sm font-semibold text-primary-600 hover:underline"
+          >
+            {t("viewDetails")}
+          </button>
+        </div>
+        {details}
+      </div>
+    );
+  }
+
   return (
     <div
+      id={`room-card-${room.roomTypeId}`}
       data-testid={`room-card-${room.roomTypeId}`}
       className={`bg-white border border-gray-200 rounded-2xl overflow-hidden transition-all ${soldOut ? "opacity-60" : "hover:shadow-lg"}`}
     >
@@ -388,6 +504,7 @@ export default function RoomCard({
                   </span>
                 )}
               </div>
+              {locationLine && <LocationLine text={locationLine} atMainHouse={atMainHouse} />}
             </div>
             <button
               type="button"
@@ -447,17 +564,38 @@ export default function RoomCard({
           {rates(false)}
         </div>
       </div>
-      {detailsOpen && (
-        <RoomDetailModal
-          room={room}
-          roomCount={roomCount}
-          soldOut={soldOut}
-          place={place}
-          onClose={() => setDetailsOpen(false)}
-        >
-          {rates(true)}
-        </RoomDetailModal>
-      )}
+      {details}
     </div>
+  );
+}
+
+/** "Main house" in grey, a place of its own in the brand colour (VAY-2324). */
+function LocationLine({ text, atMainHouse }: { text: string; atMainHouse: boolean }) {
+  return (
+    <p
+      className={`mt-1 flex items-center gap-1 text-sm ${atMainHouse ? "text-gray-500" : "text-primary-700"}`}
+    >
+      <svg
+        className="h-3.5 w-3.5 shrink-0"
+        fill="none"
+        stroke="currentColor"
+        viewBox="0 0 24 24"
+        aria-hidden="true"
+      >
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={2}
+          d="M17.657 16.657L13.414 20.9a2 2 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"
+        />
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={2}
+          d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"
+        />
+      </svg>
+      <span className="min-w-0 truncate">{text}</span>
+    </p>
   );
 }

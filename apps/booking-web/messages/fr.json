@@ -572,7 +572,15 @@
     "mapNote": "Charge Google Maps. Google reçoit votre requête.",
     "loadingMap": "Chargement de la carte…",
     "mapFailed": "La carte n'a pas pu être chargée pour le moment.",
-    "mainHouse": "Maison principale · {count, plural, one {# chambre} other {# chambres}}"
+    "mainHouse": "Maison principale · {count, plural, one {# chambre} other {# chambres}}",
+    "lineMainHouse": "Maison principale",
+    "lineOwnLocation": "Emplacement propre",
+    "lineFromMainHouse": "{place} · à {distance} de la maison principale",
+    "lineAboutFromMainHouse": "{place} · à environ {distance} de la maison principale",
+    "viewsLabel": "Afficher les hébergements en",
+    "viewList": "Liste",
+    "viewSplit": "Liste + carte",
+    "viewMap": "Carte"
   },
   "roomPlace": {
     "title": "Où vous logerez",

@@ -41,18 +41,39 @@ const villas = [
   room("family", "Family Apartment", "d"),
 ];
 
+// Two rooms in the main house, a villa of its own and one shown as an area (VAY-2324).
+const MIXED_MAP = { property: { latitude: 48.1394, longitude: 11.5835, approximate: false } };
+const mixed = [
+  room("suite", "Suite", "a", undefined, true),
+  room(
+    "loft",
+    "Schwabing Loft",
+    "b",
+    { latitude: 48.15634, longitude: 11.58242, address: "Leopoldstraße 12, Munich" },
+    false,
+  ),
+  room("double", "Double", "c", undefined, true),
+  room(
+    "villa",
+    "Beach Villa",
+    "d",
+    { latitude: 48.13, longitude: 11.57, approximate: true, area: "Isarvorstadt" },
+    false,
+  ),
+];
+
 /** The Google Maps calls the page makes, kept on window.__locationMap: the markers and area circles, the
  * popup, and clickMarker(index) to tap a room details pin. The Location section's pills (VAY-2324) are page
  * buttons drawn by an OverlayView: this fake puts each one in its own spot on the map. */
 const GOOGLE_FAKE = `
   // An IIFE: a top-level "class Map" would replace the browser's own Map for the whole page.
   (() => {
-  const state = (window.__locationMap = { markers: [], circles: [], popup: null, fitted: 0, overlays: 0, panned: [] });
+  const state = (window.__locationMap = { maps: 0, markers: [], circles: [], popup: null, fitted: 0, overlays: 0, panned: [] });
   const point = (position) =>
     typeof position.lat === "function" ? { lat: position.lat(), lng: position.lng() } : position;
   class Map {
     constructor(element, options) {
-      state.options = options; this.zoom = options.zoom;
+      state.maps += 1; state.options = options; this.zoom = options.zoom;
       this.pane = document.createElement("div"); element.append(this.pane);
     }
     fitBounds() { state.fitted += 1; this.zoom = 21; setTimeout(() => this.idle?.(), 0); }
@@ -70,7 +91,7 @@ const GOOGLE_FAKE = `
       this.map = map; this.slot = state.overlays++; this.onAdd(); this.draw();
     }
     getPanes() { return { floatPane: this.map.pane }; }
-    getProjection() { return { fromLatLngToDivPixel: () => ({ x: 140 + 220 * this.slot, y: 90 }) }; }
+    getProjection() { return { fromLatLngToDivPixel: () => ({ x: 170, y: 70 + 70 * this.slot }) }; }
   }
   class Circle {
     constructor(options) {
@@ -134,12 +155,18 @@ const markers = (page: Page) =>
       ).__locationMap?.markers.map(({ title, label }) => ({ title, label })) ?? [],
   );
 
-/** The Location section's pills, as the guest reads them. */
-const pills = (page: Page) =>
+/** A map's pills, as the guest reads them: the Location section's, or the accommodations' (VAY-2324). */
+const pills = (
+  page: Page,
+  map: "rooms-location-map" | "accommodations-map" = "rooms-location-map",
+) =>
   page
-    .getByTestId("rooms-location-map")
+    .getByTestId(map)
     .getByRole("region", { name: "Map of where the rooms are" })
     .getByRole("button");
+
+// On a phone the Location section still shows rooms in several places (VAY-2325 brings the map to the list).
+const PHONE = { width: 390, height: 844 };
 
 const circles = (page: Page) =>
   page.evaluate(
@@ -156,6 +183,7 @@ test.describe("booking page location map", () => {
 
   test("lists the rooms' places and loads Google only when the guest asks", async ({ page }) => {
     const google = await setup(page, { locationMap: { property: null }, rooms: villas });
+    await page.setViewportSize(PHONE);
     await page.goto("/");
     const section = page.getByTestId("rooms-location-map");
     await expect(section.getByRole("heading", { name: "Location" })).toBeVisible();
@@ -220,6 +248,9 @@ test.describe("booking page location map", () => {
     await page.goto("/");
     const section = page.getByTestId("rooms-location-map");
     await expect(section.getByRole("list", { name: "Places on the map" })).toHaveCount(0);
+    // Every room in one place: today's list, without the views or location lines (VAY-2324).
+    await expect(page.getByRole("group", { name: "Show the accommodations as" })).toHaveCount(0);
+    await expect(page.getByTestId("room-card-suite")).not.toContainText("Main house");
     await section.getByRole("button", { name: "Show map" }).click();
     await expect(pills(page)).toHaveText(["Hotel Alpenrose"]);
     expect(await circles(page)).toEqual([]);
@@ -288,6 +319,7 @@ test.describe("booking page location map", () => {
         room("annex", "Annex", "e", undefined, false),
       ],
     });
+    await page.setViewportSize(PHONE);
     await page.goto("/");
     const section = page.getByTestId("rooms-location-map");
     const places = section.getByRole("list", { name: "Places on the map" }).getByRole("listitem");
@@ -382,10 +414,12 @@ test.describe("booking page location map", () => {
     // "Show map" pressed earlier in this tab counts: the maps load at once.
     await page.addInitScript(() => sessionStorage.setItem("vayada.booking.showMap", "1"));
     await page.goto("/");
-    // The Location section below the list draws at once, without a new press.
-    const section = page.getByTestId("rooms-location-map");
-    await expect(pills(page)).toHaveText(["Main house · 2 rooms", "Beach Villa"]);
-    await expect(section.getByRole("button", { name: "Show map" })).toHaveCount(0);
+    // The map next to the list draws at once, without a new press (VAY-2324).
+    await expect(pills(page, "accommodations-map")).toHaveText([
+      "Main house · 2 rooms",
+      "Beach Villa",
+    ]);
+    await expect(page.getByRole("button", { name: "Show map" })).toHaveCount(0);
     const cards = page.getByRole("button", { name: "View Details", exact: true });
     await expect(cards).toHaveCount(3);
 
@@ -397,7 +431,7 @@ test.describe("booking page location map", () => {
     await expect(place).toContainText("Shown as an area, not the exact spot.");
     await expect(place).toContainText("About 1 km from the main property");
     await expect(place.getByRole("link", { name: "Directions" })).toHaveCount(0);
-    // The section's circle and the popup's own, for the same area.
+    // The accommodations map's circle and the popup's own, for the same area.
     await expect
       .poll(() => circles(page))
       .toEqual([
@@ -424,6 +458,108 @@ test.describe("booking page location map", () => {
     await cards.nth(2).click();
     await expect(page.getByRole("dialog")).toContainText("Loft");
     await expect(page.getByRole("dialog").getByText("Where you'll stay")).toHaveCount(0);
+  });
+
+  test("shows the rooms next to a map, and selects a room from its card or its pill (VAY-2324)", async ({
+    page,
+  }) => {
+    const google = await setup(page, { locationMap: MIXED_MAP, rooms: mixed });
+    await mockStayPrices(page, { villa: { [offerKey("d")]: "84000" } });
+    await page.goto("/");
+    const views = page.getByRole("group", { name: "Show the accommodations as" });
+    await expect(views.getByRole("button", { name: "List + map" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    // One map only: the views replace the Location section.
+    await expect(page.getByTestId("rooms-location-map")).toHaveCount(0);
+    await expect(page.getByTestId("room-card-suite")).toContainText("Main house");
+    await expect(page.getByTestId("room-card-loft")).toContainText(
+      "Own location · 1.9 km from the main house",
+    );
+    await expect(page.getByTestId("room-card-villa")).toContainText(
+      "Isarvorstadt · about 1 km from the main house",
+    );
+    // The short cards show the lowest price per night and keep the choices in their details.
+    await expect(page.getByTestId("room-card-villa")).toContainText(/from €[\d,.]+\/ night/);
+    await expect(page.getByTestId("select-rate-suite")).toHaveCount(0);
+    // The list works before the map: picking a card loads nothing.
+    await page
+      .getByTestId("room-card-loft")
+      .getByRole("button", { name: "Schwabing Loft" })
+      .click();
+    await page.waitForTimeout(1000);
+    expect(google).toEqual([]);
+
+    const map = page.getByTestId("accommodations-map");
+    await map.getByRole("button", { name: "Show map" }).click();
+    await expect(pills(page, "accommodations-map")).toHaveText([
+      "Main house · 2 rooms",
+      "Schwabing Loft",
+      "Beach Villa",
+    ]);
+    // The card picked before the map opened is the selected pill.
+    await expect(pills(page, "accommodations-map").nth(1)).toHaveAttribute("aria-current", "true");
+    await expect(page.getByTestId("room-card-loft")).toHaveClass(/border-primary-600/);
+
+    // The main house's pill selects its first room in the guest's order.
+    await pills(page, "accommodations-map").nth(0).click();
+    await expect(
+      page.getByTestId("room-card-suite").getByRole("button", { name: "Suite" }),
+    ).toHaveAttribute("aria-current", "true");
+    await expect(page.getByTestId("room-card-loft")).not.toHaveClass(/border-primary-600/);
+    // A card selects its pill.
+    await page.getByTestId("room-card-villa").click();
+    await expect(pills(page, "accommodations-map").nth(2)).toHaveAttribute("aria-current", "true");
+
+    await page
+      .getByTestId("room-card-villa")
+      .getByRole("button", { name: "View Details", exact: true })
+      .click();
+    await expect(page.getByRole("dialog")).toContainText("Beach Villa");
+    await expect(
+      page.getByRole("dialog").getByRole("button", { name: "Select This Rate" }),
+    ).toBeVisible();
+  });
+
+  test("keeps the map when switching to Map, shows the selected room on it, and remembers the view (VAY-2324)", async ({
+    page,
+  }) => {
+    await setup(page, { locationMap: MIXED_MAP, rooms: mixed });
+    await page.goto("/");
+    const views = page.getByRole("group", { name: "Show the accommodations as" });
+    const map = page.getByTestId("accommodations-map");
+    await map.getByRole("button", { name: "Show map" }).click();
+    await expect(pills(page, "accommodations-map")).toHaveCount(3);
+
+    await views.getByRole("button", { name: "Map", exact: true }).click();
+    await expect(page.getByTestId("room-card-suite")).toHaveCount(0);
+    await pills(page, "accommodations-map").nth(1).click();
+    // The selected room floats on the map, with its details.
+    await expect(map.getByTestId("room-card-loft")).toContainText("Schwabing Loft");
+    await expect(map.getByTestId("room-card-loft")).toContainText("Own location");
+    // Switching views moved the map, it didn't load another one.
+    expect(
+      await page.evaluate(
+        () => (window as unknown as { __locationMap: { maps: number } }).__locationMap.maps,
+      ),
+    ).toBe(1);
+
+    // This tab remembers the view and the "Show map".
+    await page.reload();
+    await expect(views.getByRole("button", { name: "Map", exact: true })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await expect(pills(page, "accommodations-map")).toHaveCount(3);
+
+    // List: today's cards with where each room is, and no map.
+    await views.getByRole("button", { name: "List", exact: true }).click();
+    await expect(map).toHaveCount(0);
+    await expect(page.getByTestId("select-rate-loft")).toBeVisible();
+    await expect(page.getByTestId("room-card-loft")).toContainText(
+      "Own location · 1.9 km from the main house",
+    );
   });
 
   test("shows no map while the hotel's switch is off", async ({ page }) => {

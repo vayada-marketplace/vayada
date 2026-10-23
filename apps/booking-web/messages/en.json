@@ -573,7 +573,15 @@
     "mapNote": "Loads Google Maps. Google receives your request.",
     "loadingMap": "Loading map…",
     "mapFailed": "The map couldn't load right now.",
-    "mainHouse": "Main house · {count, plural, one {# room} other {# rooms}}"
+    "mainHouse": "Main house · {count, plural, one {# room} other {# rooms}}",
+    "lineMainHouse": "Main house",
+    "lineOwnLocation": "Own location",
+    "lineFromMainHouse": "{place} · {distance} from the main house",
+    "lineAboutFromMainHouse": "{place} · about {distance} from the main house",
+    "viewsLabel": "Show the accommodations as",
+    "viewList": "List",
+    "viewSplit": "List + map",
+    "viewMap": "Map"
   },
   "roomPlace": {
     "title": "Where you'll stay",

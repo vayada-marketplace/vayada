@@ -19,7 +19,11 @@ import { hotelService } from "@/services/api/hotel";
 import { useBookingSteps } from "@/lib/hooks/useBookingSteps";
 import { useStayPrices } from "@/lib/hooks/useStayPrices";
 import RoomCard from "@/components/booking/RoomCard";
-import RoomsLocationMap from "@/components/booking/RoomsLocationMap";
+import RoomsLocationMap, {
+  useGuestPlaces,
+  useLocationLine,
+} from "@/components/booking/RoomsLocationMap";
+import AccommodationViews, { useWideScreen } from "@/components/booking/AccommodationViews";
 import {
   getReplacementCatalog,
   quoteMoneyAmount,
@@ -211,6 +215,17 @@ function HomePageContent() {
           ? (b.size?.value ?? 0) - (a.size?.value ?? 0)
           : 0,
   );
+  // Rooms in several places (VAY-2324): the cards say where each one is, and on wide screens the guest can see
+  // them on a map next to the list, which then replaces the Location section below.
+  const mapsKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY?.trim() ?? "";
+  const mapProperty = locationMap
+    ? { name: hotel.name, locality: hotel.location, pin: locationMap.property }
+    : null;
+  const guestPlaces = useGuestPlaces(rooms ?? [], mapProperty);
+  const severalPlaces = guestPlaces.pins.length > 1;
+  const locationLine = useLocationLine(mapProperty);
+  const wide = useWideScreen();
+  const views = severalPlaces && !!mapsKey && wide;
   const selectRoom = (publicOfferKey: string, roomCount: number) => {
     trackEvent(slug, "rate_selected", { entry: "room_card" });
     const params = new URLSearchParams(bookParams);
@@ -218,6 +233,79 @@ function HomePageContent() {
     if (roomCount > 1) params.set("rooms", String(roomCount));
     router.push(`/book?${params}`);
   };
+  const sortControl = (
+    <>
+      <svg
+        className="w-4 h-4 text-gray-400"
+        fill="none"
+        stroke="currentColor"
+        viewBox="0 0 24 24"
+        aria-hidden="true"
+      >
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={2}
+          d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"
+        />
+      </svg>
+      <select
+        aria-label={t("sortRooms")}
+        value={sortOption}
+        onChange={(event) => setSortOption(event.target.value)}
+        className="text-sm text-gray-700 border border-gray-300 rounded-lg px-3 py-2 bg-white"
+      >
+        <option value="recommended">{t("recommended")}</option>
+        <option value="priceLow">{t("priceLowHigh")}</option>
+        <option value="priceHigh">{t("priceHighLow")}</option>
+        <option value="roomSize">{t("roomSize")}</option>
+      </select>
+    </>
+  );
+  const roomCard = (
+    room: PricingRoom,
+    view: { compact: boolean; active: boolean; onActivate?: () => void } = {
+      compact: false,
+      active: false,
+    },
+  ) => (
+    <RoomCard
+      key={room.roomTypeId}
+      room={room}
+      prices={roomPrices(room)}
+      pricesState={
+        stay.failed ? "failed" : stay.missing ? "missing" : stay.loading ? "loading" : "ready"
+      }
+      checkIn={checkIn}
+      nights={nights}
+      timezone={hotel.timezone}
+      childGuests={effectiveChildren}
+      promoCode={appliedPromo?.code ?? null}
+      onSelect={selectRoom}
+      onView={() => trackEvent(slug, "room_viewed", { roomTypeId: room.roomTypeId })}
+      detailsRequest={detailsRequests[room.roomTypeId] ?? 0}
+      place={mapProperty}
+      locationLine={severalPlaces ? locationLine(room) : null}
+      compact={view.compact}
+      active={view.active}
+      onActivate={view.onActivate}
+    />
+  );
+  const notices = (
+    <>
+      {stay.failed && (
+        <div role="alert" className="mb-5 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          {t("pricesFailed")}{" "}
+          <button type="button" className="font-semibold underline" onClick={stay.retry}>
+            {t("retryPrices")}
+          </button>
+        </div>
+      )}
+      {effectiveChildren > 0 && (
+        <p className="mb-5 text-sm text-gray-500">{t("childrenPricedLater")}</p>
+      )}
+    </>
+  );
 
   const heroImage = hotel.heroImage;
   const heroHeading = hotel.branding?.heroHeading || hotel.name;
@@ -544,80 +632,13 @@ function HomePageContent() {
           </div>
         ) : rooms?.length ? (
           <>
-            <div className="flex items-center justify-end gap-2 mb-5">
-              <svg
-                className="w-4 h-4 text-gray-400"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-                aria-hidden="true"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"
-                />
-              </svg>
-              <select
-                aria-label={t("sortRooms")}
-                value={sortOption}
-                onChange={(event) => setSortOption(event.target.value)}
-                className="text-sm text-gray-700 border border-gray-300 rounded-lg px-3 py-2 bg-white"
-              >
-                <option value="recommended">{t("recommended")}</option>
-                <option value="priceLow">{t("priceLowHigh")}</option>
-                <option value="priceHigh">{t("priceHighLow")}</option>
-                <option value="roomSize">{t("roomSize")}</option>
-              </select>
-            </div>
-            {stay.failed && (
-              <div
-                role="alert"
-                className="mb-5 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800"
-              >
-                {t("pricesFailed")}{" "}
-                <button type="button" className="font-semibold underline" onClick={stay.retry}>
-                  {t("retryPrices")}
-                </button>
-              </div>
-            )}
-            {effectiveChildren > 0 && (
-              <p className="mb-5 text-sm text-gray-500">{t("childrenPricedLater")}</p>
-            )}
-            <div className="space-y-6">
-              {shownRooms.map((room) => (
-                <RoomCard
-                  key={room.roomTypeId}
-                  room={room}
-                  prices={roomPrices(room)}
-                  pricesState={
-                    stay.failed
-                      ? "failed"
-                      : stay.missing
-                        ? "missing"
-                        : stay.loading
-                          ? "loading"
-                          : "ready"
-                  }
-                  checkIn={checkIn}
-                  nights={nights}
-                  timezone={hotel.timezone}
-                  childGuests={effectiveChildren}
-                  promoCode={appliedPromo?.code ?? null}
-                  onSelect={selectRoom}
-                  onView={() => trackEvent(slug, "room_viewed", { roomTypeId: room.roomTypeId })}
-                  detailsRequest={detailsRequests[room.roomTypeId] ?? 0}
-                  place={
-                    locationMap && {
-                      name: hotel.name,
-                      locality: hotel.location,
-                      pin: locationMap.property,
-                    }
-                  }
-                />
-              ))}
-            </div>
+            <AccommodationViews
+              rooms={shownRooms}
+              map={views ? { ...guestPlaces, apiKey: mapsKey } : null}
+              toolbar={sortControl}
+              notices={notices}
+              renderCard={roomCard}
+            />
             <p className="mt-8 text-center text-gray-600">
               {t("severalRooms")}{" "}
               <Link href={bookTarget} className="font-semibold text-primary-600 underline">
@@ -636,11 +657,11 @@ function HomePageContent() {
         )}
       </div>
 
-      {locationMap && rooms?.length ? (
+      {mapProperty && rooms?.length && !views ? (
         <RoomsLocationMap
           rooms={rooms}
-          property={{ name: hotel.name, locality: hotel.location, pin: locationMap.property }}
-          apiKey={process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY?.trim() ?? ""}
+          property={mapProperty}
+          apiKey={mapsKey}
           onViewDetails={(roomTypeId) =>
             setDetailsRequests((requests) => ({
               ...requests,
