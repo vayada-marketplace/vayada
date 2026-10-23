@@ -7,6 +7,7 @@ import { getSelectedBookingHotelId } from "@/services/api/bookingHotelScope";
 import { PageLayout } from "@/components/layout/PageLayout";
 import { SettingsBreadcrumb } from "@/components/settings/SettingsSubPage";
 import { useTranslation } from "@/lib/i18n";
+import { LocationMapCard } from "@/components/settings/LocationMapCard";
 
 export default function LocationPage() {
   const { t } = useTranslation();
@@ -46,6 +47,10 @@ export default function LocationPage() {
           api={nearbyApi}
           profileApi={sharedHotelSetupApi}
           apiKey={process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? ""}
+          // A saved location (pin, visibility) changes what guests see: re-read the card then.
+          intro={(profileRevision) => (
+            <LocationMapCard key={profileRevision} propertyId={propertyId} />
+          )}
         />
       ) : (
         <div role={error ? "alert" : "status"}>
