@@ -255,7 +255,7 @@ test.describe("booking-admin add-ons settings cutover", () => {
           currency: "EUR",
           category: "wellness",
           photos: [],
-          leadTime: null,
+          // No lead time chosen, so the body has none (VAY-2232).
           location: null,
           maxGuests: null,
           maxQuantity: 1,
@@ -278,7 +278,6 @@ test.describe("booking-admin add-ons settings cutover", () => {
           currency: "EUR",
           category: "wellness",
           photos: [],
-          leadTime: null,
           location: null,
           maxGuests: null,
           maxQuantity: 1,

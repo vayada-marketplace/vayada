@@ -524,7 +524,8 @@ test.describe("booking-admin settings no-legacy guard", () => {
     await expect(heroImageHeading).toBeVisible();
     await expect(page.getByRole("heading", { name: "Custom Domain" })).toHaveCount(0);
     await expect(page.getByRole("switch", { name: "Contact button" })).toBeChecked();
-    await expect(page.getByRole("switch", { name: "Refer a Guest button" })).toBeDisabled();
+    // The Refer a Guest button went with the affiliate program (VAY-2263).
+    await expect(page.getByRole("switch", { name: "Refer a Guest button" })).toHaveCount(0);
     await expect(page.getByRole("switch", { name: "Language selector" })).toBeChecked();
     await expect(page.getByRole("switch", { name: "Currency selector" })).toBeDisabled();
     await expect(page.getByRole("switch", { name: "Currency selector" })).not.toBeChecked();

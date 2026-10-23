@@ -323,12 +323,16 @@ Currently covered surface:
 - `booking-admin-benefits-settings` bans legacy production API hosts and
   `/admin/benefits`, plus `X-Hotel-Id` routing scope.
 
-The booking-admin migrated surface specs require a production build:
+The booking-admin migrated surface specs require a production build (`E2E_BOOKING_ADMIN_PROD=1`).
+PR Checks runs the whole booking-admin project that way (VAY-2316), so check a booking-admin
+change against a production build too. Build with the `webServer` env above:
 
 ```bash
-cd apps/booking-admin && npm run build && PORT=3013 npx next start -p 3013 &
+NEXT_PUBLIC_AUTHKIT_COMPATIBILITY_TOKEN_ENABLED=true NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=e2e-google-places \
+  NEXT_PUBLIC_PMS_FRONTEND_URL=http://pms.localhost:3004 npm run build:booking-admin
+(cd apps/booking-admin && npx next start -p 3013) &
 E2E_BOOKING_ADMIN_PROD=1 E2E_BOOKING_ADMIN_BASE_URL=http://127.0.0.1:3013 \
-  npm run e2e:booking-admin -- tests/e2e/booking-admin/benefits.spec.ts
+  NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=e2e-google-places npm run e2e:booking-admin
 ```
 
 ## Debugging
