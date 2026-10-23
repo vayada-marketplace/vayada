@@ -602,7 +602,15 @@
     "mapNote": "Lädt Google Maps. Google erhält Ihre Anfrage.",
     "loadingMap": "Karte wird geladen …",
     "mapFailed": "Die Karte konnte gerade nicht geladen werden.",
-    "mainHouse": "Haupthaus · {count, plural, one {# Zimmer} other {# Zimmer}}"
+    "mainHouse": "Haupthaus · {count, plural, one {# Zimmer} other {# Zimmer}}",
+    "lineMainHouse": "Haupthaus",
+    "lineOwnLocation": "Separater Standort",
+    "lineFromMainHouse": "{place} · {distance} vom Haupthaus",
+    "lineAboutFromMainHouse": "{place} · etwa {distance} vom Haupthaus",
+    "viewsLabel": "Unterkünfte anzeigen als",
+    "viewList": "Liste",
+    "viewSplit": "Liste + Karte",
+    "viewMap": "Karte"
   },
   "roomPlace": {
     "title": "Hier wohnen Sie",

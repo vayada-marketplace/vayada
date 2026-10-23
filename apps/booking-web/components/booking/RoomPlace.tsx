@@ -119,11 +119,9 @@ export default function RoomPlace({
   const distance =
     place.distance === null
       ? null
-      : place.distanceApproximate
-        ? t("distanceAbout", {
-            distance: `${new Intl.NumberFormat(locale).format(Math.max(1, Math.round(place.distance / 1000)))} km`,
-          })
-        : t("distance", { distance: formatDistance(place.distance, locale) });
+      : t(place.distanceApproximate ? "distanceAbout" : "distance", {
+          distance: formatDistance(place.distance, locale, place.distanceApproximate),
+        });
   const directions = place.approximate
     ? null
     : `https://www.google.com/maps/dir/?api=1&destination=${place.pin.latitude},${place.pin.longitude}`;
@@ -490,8 +488,11 @@ function PlaceMap({
   );
 }
 
-/** "350 m" or "2.2 km" in the guest's language. */
-function formatDistance(metres: number, locale: string): string {
+/** "350 m" or "2.2 km" in the guest's language; measured from or to a rounded spot, whole kilometres ("2 km"). */
+export function formatDistance(metres: number, locale: string, approximate = false): string {
+  if (approximate) {
+    return `${new Intl.NumberFormat(locale).format(Math.max(1, Math.round(metres / 1000)))} km`;
+  }
   if (metres < 1000) {
     return `${new Intl.NumberFormat(locale).format(Math.max(10, Math.round(metres / 10) * 10))} m`;
   }

@@ -49,7 +49,7 @@ const MAX_FITTED_ZOOM = 16;
 // A map that hasn't drawn by then (a hanging script) counts as failed.
 const LOAD_TIMEOUT_MS = 12_000;
 const PILL =
-  "absolute max-w-[220px] truncate rounded-full px-3 py-1.5 text-[13px] font-bold shadow-[0_2px_6px_rgb(0_0_0_/_22%)] " +
+  "absolute inline-flex max-w-[220px] items-center gap-1 whitespace-nowrap rounded-full px-3 py-1.5 text-[13px] font-bold shadow-[0_2px_6px_rgb(0_0_0_/_22%)] " +
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2";
 const PILL_IDLE = "border border-gray-200 bg-white text-gray-900";
 const PILL_SELECTED = "border-2 border-white bg-primary-600 text-white";
@@ -177,7 +177,11 @@ export default function GuestMap({
           const button = document.createElement("button");
           button.type = "button";
           button.className = `${PILL} ${PILL_IDLE}`;
-          button.textContent = place.label;
+          const text = document.createElement("span");
+          text.className = "truncate";
+          text.textContent = place.label;
+          // A pin icon for an exact place; an area's name sits on its circle.
+          button.replaceChildren(...(place.approximate ? [] : [pinIcon()]), text);
           button.title = place.label;
           button.addEventListener("click", () => onSelectRef.current(index));
           // Dragging or double-clicking a pill doesn't move or zoom the map under it.
@@ -221,7 +225,8 @@ export default function GuestMap({
   }, [draws, selected]);
 
   return (
-    <div className={`relative overflow-hidden bg-gray-100 ${className}`}>
+    // Its own stacking layer: Google's panes and the pills stay under cards drawn over the map.
+    <div className={`relative isolate overflow-hidden bg-gray-100 ${className}`}>
       <span ref={brandRef} className="hidden text-primary-600" aria-hidden="true" />
       <div
         ref={mapRef}
@@ -239,6 +244,30 @@ export default function GuestMap({
       )}
     </div>
   );
+}
+
+const SVG = "http://www.w3.org/2000/svg";
+
+function pinIcon(): SVGSVGElement {
+  const icon = document.createElementNS(SVG, "svg");
+  for (const [name, value] of Object.entries({
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    "stroke-width": "2",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true",
+    class: "h-3.5 w-3.5 shrink-0",
+  }))
+    icon.setAttribute(name, value);
+  const path = document.createElementNS(SVG, "path");
+  path.setAttribute(
+    "d",
+    "M17.657 16.657L13.414 20.9a2 2 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0zM15 11a3 3 0 11-6 0 3 3 0 016 0z",
+  );
+  icon.append(path);
+  return icon;
 }
 
 /** Before the guest asks for the map: no Google request until "Show map" (VAY-2216). */

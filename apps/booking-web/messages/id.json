@@ -601,7 +601,15 @@
     "mapNote": "Memuat Google Maps. Google menerima permintaan Anda.",
     "loadingMap": "Memuat peta…",
     "mapFailed": "Peta tidak dapat dimuat saat ini.",
-    "mainHouse": "Rumah utama · {count, plural, other {# kamar}}"
+    "mainHouse": "Rumah utama · {count, plural, other {# kamar}}",
+    "lineMainHouse": "Rumah utama",
+    "lineOwnLocation": "Lokasi sendiri",
+    "lineFromMainHouse": "{place} · {distance} dari rumah utama",
+    "lineAboutFromMainHouse": "{place} · sekitar {distance} dari rumah utama",
+    "viewsLabel": "Tampilkan akomodasi sebagai",
+    "viewList": "Daftar",
+    "viewSplit": "Daftar + peta",
+    "viewMap": "Peta"
   },
   "roomPlace": {
     "title": "Tempat Anda menginap",

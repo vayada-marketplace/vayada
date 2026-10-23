@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useTranslations } from "next-intl";
-import { locationMapPins, type LocationMapPin } from "@vayada/domain-hotels";
+import { useLocale, useTranslations } from "next-intl";
+import { locationMapPins, metresBetween, type LocationMapPin } from "@vayada/domain-hotels";
 import type { PricingRoom } from "@/services/api/replacementOffers";
 import { chooseMaps, mapsChosen } from "@/lib/mapsChoice";
 import GuestMap, { MapGate, type GuestMapPlace } from "./GuestMap";
+import { formatDistance } from "./RoomPlace";
 
 /** The property's pin as the live catalog sends it (VAY-2126), with the hotel's name and locality. */
 export type MapProperty = {
@@ -18,9 +19,11 @@ export type MapProperty = {
  * elsewhere, VAY-2321 D8), rooms elsewhere get their own, an "Approximate area" is a circle. */
 export function useGuestPlaces(
   rooms: PricingRoom[],
-  property: MapProperty,
+  property: MapProperty | null,
 ): { pins: LocationMapPin[]; places: GuestMapPlace[] } {
   const t = useTranslations("locationMap");
+  // The hotel's location map is off.
+  if (!property) return { pins: [], places: [] };
   const { pins } = locationMapPins(
     rooms.map(({ roomTypeId, name, location, atProperty }) => ({
       roomTypeId,
@@ -51,6 +54,56 @@ export function useGuestPlaces(
       longitude: pin.longitude,
       approximate: pin.approximate,
     })),
+  };
+}
+
+/** Where a room is next to the main house, for its card's location line (VAY-2324): null for a place of its
+ * own without a pin yet. */
+export function roomLocation(
+  room: PricingRoom,
+  propertyPin: MapProperty["pin"],
+):
+  | { atProperty: true }
+  | { atProperty: false; area: string | null; distance: number | null; about: boolean }
+  | null {
+  // A catalog from before VAY-2321 doesn't say: a room without a pin of its own is at the property.
+  if (room.atProperty ?? !room.location) return { atProperty: true };
+  const own = room.location;
+  if (!own) return null;
+  return {
+    atProperty: false,
+    area: own.approximate ? (own.area ?? null) : null,
+    distance: propertyPin ? metresBetween(own, propertyPin) : null,
+    // Measured from or to a rounded spot: "about", in whole kilometres.
+    about: own.approximate === true || propertyPin?.approximate === true,
+  };
+}
+
+/** A room card's location line: "Main house", "Own location · 2.2 km from the main house", or an area's name
+ * with "about 1 km". */
+export function useLocationLine(
+  property: MapProperty | null,
+  pins: LocationMapPin[],
+): (room: PricingRoom) => { text: string; mainHouse: boolean } | null {
+  const t = useTranslations("locationMap");
+  const locale = useLocale();
+  return (room) => {
+    const where = property && roomLocation(room, property.pin);
+    if (!where) return null;
+    // A place of its own a few metres from the main house shares its pill, so it reads the same.
+    const onMainHousePin = pins.some(
+      (pin) => pin.kind === "property" && pin.roomTypeIds.includes(room.roomTypeId),
+    );
+    if (where.atProperty || onMainHousePin) return { text: t("lineMainHouse"), mainHouse: true };
+    const place = where.area ?? t("lineOwnLocation");
+    if (where.distance === null) return { text: place, mainHouse: false };
+    return {
+      text: t(where.about ? "lineAboutFromMainHouse" : "lineFromMainHouse", {
+        place,
+        distance: formatDistance(where.distance, locale, where.about),
+      }),
+      mainHouse: false,
+    };
   };
 }
 

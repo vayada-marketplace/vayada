@@ -17,3 +17,24 @@ export function chooseMaps(): void {
     // Private mode or storage blocked: the guest presses "Show map" again on the next map.
   }
 }
+
+/** The accommodations view the guest picked (VAY-2324), remembered for this browser tab only. */
+export type AccommodationView = "list" | "split" | "map";
+const VIEW_KEY = "vayada.booking.accommodationView";
+
+export function chosenView(): AccommodationView | null {
+  try {
+    const view = sessionStorage.getItem(VIEW_KEY);
+    return view === "list" || view === "split" || view === "map" ? view : null;
+  } catch {
+    return null;
+  }
+}
+
+export function chooseView(view: AccommodationView): void {
+  try {
+    sessionStorage.setItem(VIEW_KEY, view);
+  } catch {
+    // Storage blocked: the page opens on the default view next time.
+  }
+}
