@@ -706,7 +706,7 @@ test("the release identity hashes the exact publication bytes and binds the sha"
   assert.throws(() => readPublication(directory, OTHER), /not bbbb/);
 });
 
-test("train options default to a dry run with the admission PR", () => {
+test("train options default to a dry run with push admission", () => {
   const base = {
     GITHUB_REPOSITORY: REPO,
     GITHUB_RUN_ID: "42",
@@ -715,7 +715,8 @@ test("train options default to a dry run with the admission PR", () => {
   };
   const options = readOptions(base);
   assert.equal(options.dryRun, true);
-  assert.equal(options.admission, "pr");
+  assert.equal(options.admission, "push");
+  assert.equal(readOptions({ ...base, TRAIN_ADMISSION: "pr" }).admission, "pr");
   assert.equal(options.keepHold, false);
   assert.equal(options.runUrl, `https://github.com/${REPO}/actions/runs/42`);
   assert.throws(() => readOptions({ ...base, TRAIN_SHA: "abc" }), /full 40-character sha/);
@@ -928,7 +929,7 @@ test("the workflow dry-runs by default, runs real releases only from main, and n
   );
   const inputs = workflow.on.workflow_dispatch.inputs;
   assert.equal(inputs.dry_run.default, true);
-  assert.equal(inputs.admission.default, "pr");
+  assert.equal(inputs.admission.default, "push");
   assert.equal(inputs.keep_hold.default, false);
   assert.deepEqual(workflow.concurrency, { group: "release-train", "cancel-in-progress": false });
   const job = workflow.jobs.train;
