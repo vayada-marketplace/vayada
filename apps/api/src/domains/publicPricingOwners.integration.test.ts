@@ -508,27 +508,40 @@ describe.skipIf(!url)("Public pricing access and booking pricing owners PostgreS
     );
     expect((await price())?.remainingRoomAndEligibleAddonMinor).toBe("8000");
   });
-  it("prices without active automatic promotions it can't apply yet (VAY-2319)", async () => {
+  it("prices at the normal price while automatic promotions can't apply yet (VAY-2319)", async () => {
     const f = await currentLastMinuteFixture();
     const before = await f.readLastMinute();
-    const promotion = {
-      type: "EARLY_BIRD",
-      active: true,
+    expect(before?.rooms.every((r) => r.lastMinute !== null)).toBe(true);
+    const promotion = (type: string, active: boolean) => ({
+      type,
+      active,
       roomTypeIds: [],
       discountPercent: 10,
       threshold: 30,
       freeNights: 0,
       weekdays: [],
-      tiers: [],
-    };
-    await pool.query(
-      "UPDATE booking.booking_settings SET last_minute_discount=$2 WHERE property_id=$1",
-      [f.scope.propertyId, { ...f.hotel, promotions: [promotion] }],
-    );
-    const after = await f.readLastMinute();
-    // The hotel's own last-minute tiers still apply; the promotion changes no price.
-    expect(after?.rooms).toEqual(before?.rooms);
-    expect(after?.sourceRevision).not.toBe(before?.sourceRevision);
+      tiers:
+        type === "LAST_MINUTE" ? [{ daysBeforeMin: 0, daysBeforeMax: 5, discountPercent: 5 }] : [],
+    });
+    const revisions = new Set([before?.sourceRevision]);
+    for (const promotions of [
+      [promotion("EARLY_BIRD", true)],
+      // Booking Admin shows the hotel-wide tiers as "Last minute escape"; edited or paused there,
+      // the saved list replaces them, so the old tiers stop discounting too.
+      [promotion("LAST_MINUTE", true)],
+      [promotion("LAST_MINUTE", false)],
+      [],
+    ]) {
+      await pool.query(
+        "UPDATE booking.booking_settings SET last_minute_discount=$2 WHERE property_id=$1",
+        [f.scope.propertyId, { ...f.hotel, promotions }],
+      );
+      const after = await f.readLastMinute();
+      expect(after?.rooms.map((r) => r.lastMinute)).toEqual([null, null, null]);
+      revisions.add(after?.sourceRevision);
+    }
+    // Every change re-quotes.
+    expect(revisions.size).toBe(5);
   });
   it("rejects missing, malformed and unsupported hotel policy evidence", async () => {
     const f = await currentLastMinuteFixture();
