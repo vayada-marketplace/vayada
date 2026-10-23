@@ -584,5 +584,16 @@
     "mapNote": "Lädt Google Maps. Google erhält Ihre Anfrage.",
     "loadingMap": "Karte wird geladen …",
     "mapFailed": "Die Karte konnte gerade nicht geladen werden."
+  },
+  "roomPlace": {
+    "title": "Hier wohnen Sie",
+    "distance": "{distance} von der Hauptunterkunft",
+    "distanceAbout": "Etwa {distance} von der Hauptunterkunft",
+    "mapLabel": "Karte Ihrer Unterkunft",
+    "expandMap": "Karte vergrößern",
+    "closeMap": "Karte schließen",
+    "directions": "Route",
+    "areaNote": "Als Gebiet gezeigt, nicht die genaue Stelle.",
+    "reception": "Rezeption"
   }
 }

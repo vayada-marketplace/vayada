@@ -3,7 +3,13 @@
 import { useState, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
-import { bookingsService, Booking, BookingAdditionalGuest, BookingNote } from "@/services/bookings";
+import {
+  assignedRoomName,
+  bookingsService,
+  Booking,
+  BookingAdditionalGuest,
+  BookingNote,
+} from "@/services/bookings";
 import { calendarService, CalendarInventoryDay } from "@/services/calendar";
 import { pmsSettingsService } from "@/services/settings";
 import { formatCurrency } from "@/lib/formatCurrency";
@@ -61,7 +67,9 @@ function guestName(b: Booking) {
 function roomLabel(b: Booking) {
   const assigned = b.assignedRooms?.length
     ? b.assignedRooms
-        .map((r) => (r.roomNumber ? `${b.roomName} ${r.roomNumber}` : b.roomName))
+        .map((r) =>
+          r.roomNumber ? `${assignedRoomName(b, r)} ${r.roomNumber}` : assignedRoomName(b, r),
+        )
         .join(", ")
     : b.roomNumber
       ? `${b.roomName} ${b.roomNumber}`

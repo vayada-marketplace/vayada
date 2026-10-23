@@ -95,6 +95,51 @@ export function publicOfferCancellations(
   return cancellations;
 }
 
+export type PublicOfferPaymentSchedule =
+  | { kind: "full" }
+  | { kind: "deposit"; percent: number; key: string };
+
+/** How each offer is paid, by public offer key (VAY-2320). One booking is paid one way, as the
+ * quote's payment amounts require: rooms combine when all are paid in full or all take the same
+ * deposit (`key`), AND they share a way to pay (the catalog's `paymentMethods`). An offer without
+ * its exact terms has no entry. */
+export function publicOfferPaymentSchedules(
+  owner: Owner,
+): ReadonlyMap<string, PublicOfferPaymentSchedule> {
+  const bindings = publicPricingOfferBindings(owner);
+  const schedules = new Map<string, PublicOfferPaymentSchedule>();
+  for (const room of owner.publication.rooms)
+    for (const offer of room.offers) {
+      const terms = owner.terms.find(
+        (t) =>
+          t.roomTypeId === room.roomTypeId &&
+          t.offerId === offer.id &&
+          t.revision === offer.termsRevision,
+      );
+      const binding = bindings.find(
+        (b) => b.roomTypeId === room.roomTypeId && b.offerId === offer.id,
+      );
+      if (!terms || !binding) continue;
+      const payment = terms.payment;
+      schedules.set(
+        binding.publicOfferKey,
+        payment.kind === "deposit"
+          ? {
+              kind: "deposit",
+              percent: payment.basisPoints / 100,
+              key: [
+                "deposit",
+                payment.basisPoints,
+                payment.balanceDaysBeforeArrival,
+                [...(payment.acceptedMethods ?? [])].sort().join(","),
+              ].join(":"),
+            }
+          : { kind: "full" },
+      );
+    }
+  return schedules;
+}
+
 /** The ways guests can pay each offer now (pricingRatePaymentMethods, VAY-2309), by public offer
  * key, with the booking page's switches applied to Finance's ready methods. A rate nobody can pay
  * has none and stops selling; the others keep selling (VAY-2304). The booking page prices a stay

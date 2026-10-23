@@ -6,6 +6,7 @@ import Image from "next/image";
 import { useTranslations } from "next-intl";
 import { bookingImageSizes } from "@/components/booking/imageSizes";
 import type { PricingRoom } from "@/services/api/replacementOffers";
+import RoomPlace, { type GuestPlace } from "./RoomPlace";
 
 const AMENITIES_PREVIEW_COUNT = 10;
 
@@ -15,12 +16,15 @@ export default function RoomDetailModal({
   room,
   roomCount,
   soldOut,
+  place = null,
   onClose,
   children,
 }: {
   room: PricingRoom;
   roomCount: number;
   soldOut: boolean;
+  /** The hotel's location map while it shows one (VAY-2126), for "Where you'll stay" (VAY-2323). */
+  place?: GuestPlace | null;
   onClose: () => void;
   /** The card's choices and "Select This Rate", so both offer the same selection. */
   children: ReactNode;
@@ -258,6 +262,11 @@ export default function RoomDetailModal({
                   )}
                 </div>
               )}
+              <RoomPlace
+                room={room}
+                property={place}
+                apiKey={process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY?.trim() ?? ""}
+              />
               {children}
             </div>
           </div>

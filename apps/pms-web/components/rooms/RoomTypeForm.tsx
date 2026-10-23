@@ -652,10 +652,15 @@ export default function RoomTypeForm({
 
           {/* Location */}
           <RoomLocationField
+            roomName={form.name || ""}
             value={{
               locationAddress: form.locationAddress || "",
               latitude: form.latitude ?? null,
               longitude: form.longitude ?? null,
+              locationSource: form.locationSource,
+              locationPrecision: form.locationPrecision,
+              locationArea: form.locationArea,
+              showMapInDetails: form.showMapInDetails,
             }}
             // Functional: a selected address writes its pin after Google answers, onto the form as it is then.
             onChange={(patch) =>
