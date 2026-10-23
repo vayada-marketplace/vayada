@@ -36,6 +36,9 @@ export async function openHold(gh, repo, { reason, marker, now = () => new Date(
       { title: `Merge queue hold: ${reason}`, body, labels: [HOLD_LABEL] },
       { retry: false },
     );
+    // GitHub drops labels a token may not set; without the label the issue holds nothing.
+    if (!issue.labels?.some((label) => (label.name ?? label) === HOLD_LABEL))
+      await gh.post(`/repos/${repo}/issues/${issue.number}/labels`, { labels: [HOLD_LABEL] });
     return { number: issue.number, url: issue.html_url, reused: false };
   } catch (error) {
     // The issue may exist even though the reply was lost.

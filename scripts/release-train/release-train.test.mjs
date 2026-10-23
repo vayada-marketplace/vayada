@@ -145,6 +145,20 @@ test("a new hold carries the label and the run marker and is created once", asyn
   assert.equal(hold.number, 9);
 });
 
+test("a hold whose label GitHub dropped gets the label added", async () => {
+  const gh = fakeGitHub((method, path, body) => {
+    if (method === "GET" && path.includes("/issues?")) return [];
+    if (method === "POST" && path === `/repos/${REPO}/issues`)
+      return { ...holdIssue(9, holdMarker(42)), labels: [] };
+    if (method === "POST" && path === `/repos/${REPO}/issues/9/labels`) {
+      assert.deepEqual(body, { labels: ["release-train-hold"] });
+      return [];
+    }
+  });
+  assert.equal((await openHold(gh, REPO, { reason: "r", marker: holdMarker(42) })).number, 9);
+  assert.ok(gh.calls.some((call) => call.path.endsWith("/issues/9/labels")));
+});
+
 test("closing a hold comments, then closes the issue", async () => {
   const gh = fakeGitHub((method, path) =>
     method === "POST" || method === "PATCH" ? {} : undefined,
@@ -636,6 +650,7 @@ function trainWorld({ main = () => SHA, buildConclusion = "success" } = {}) {
           body.body.split("\n").find((line) => line.startsWith("release-train-run")),
           "2026-10-23T11:00:00Z",
         ),
+        labels: body.labels.map((name) => ({ name })),
         open: true,
       };
       holds.push(issue);
@@ -730,6 +745,7 @@ test("a release holds, settles, prechecks, closes the hold at publish, then hand
   );
   assert.equal(world.holds.length, 1);
   assert.equal(world.holds[0].open, false);
+  assert.equal(result.steps[0].detail.includes("reused"), false);
   const payload = world.platform.calls[0].body.client_payload;
   assert.equal(payload.dryRun, false);
   assert.equal(payload.admission, "push");
