@@ -32,6 +32,7 @@ describe("where you'll stay (VAY-2323)", () => {
       approximate: false,
       reception: { latitude: 48.1394, longitude: 11.5835 },
       distance: expect.closeTo(1885, -1),
+      distanceApproximate: false,
     });
   });
 
@@ -43,7 +44,22 @@ describe("where you'll stay (VAY-2323)", () => {
       }),
       { ...property, pin: { latitude: 48.14, longitude: 11.58, approximate: true } },
     );
-    expect(place).toMatchObject({ address: "Isarvorstadt", approximate: true, reception: null });
+    expect(place).toMatchObject({
+      address: "Isarvorstadt",
+      approximate: true,
+      reception: null,
+      distanceApproximate: true,
+    });
+    // An exact room measured to a rounded property pin is an "About" distance too.
+    expect(
+      roomPlace(
+        room({ atProperty: false, location: { latitude: 48.15634, longitude: 11.58242 } }),
+        {
+          ...property,
+          pin: { latitude: 48.14, longitude: 11.58, approximate: true },
+        },
+      )?.distanceApproximate,
+    ).toBe(true);
   });
 
   it("puts a room at the property on the property's public pin, without a distance", () => {
@@ -54,6 +70,7 @@ describe("where you'll stay (VAY-2323)", () => {
       approximate: false,
       reception: null,
       distance: null,
+      distanceApproximate: false,
     });
     // A catalog from before VAY-2321 doesn't say: no pin of its own means at the property.
     expect(roomPlace(room({}), property)?.name).toBe("Hotel Alpenrose");

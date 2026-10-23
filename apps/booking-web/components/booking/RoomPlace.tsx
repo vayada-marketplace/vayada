@@ -50,6 +50,8 @@ type Place = {
   /** The main property, to place a room at its own address by. */
   reception: { latitude: number; longitude: number } | null;
   distance: number | null;
+  /** Measured from or to a rounded spot: shown as "About …", in whole kilometres. */
+  distanceApproximate: boolean;
 };
 
 /** Where the room is, as guests may see it: its own place (exact, or an area without its street), or the property's
@@ -68,6 +70,7 @@ export function roomPlace(room: PricingRoom, property: GuestPlace | null): Place
       approximate: own.approximate === true,
       reception: reception && { latitude: reception.latitude, longitude: reception.longitude },
       distance: property.pin ? metresBetween(pin, property.pin) : null,
+      distanceApproximate: own.approximate === true || property.pin?.approximate === true,
     };
   }
   // A catalog from before VAY-2321 doesn't say: a room without a pin of its own is at the property.
@@ -79,6 +82,7 @@ export function roomPlace(room: PricingRoom, property: GuestPlace | null): Place
       approximate: property.pin.approximate,
       reception: null,
       distance: null,
+      distanceApproximate: false,
     };
   }
   return null;
@@ -102,6 +106,8 @@ export default function RoomPlace({
   const locale = useLocale();
   const [requested, setRequested] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [mapFailed, setMapFailed] = useState(false);
+  const expandRef = useRef<HTMLButtonElement>(null);
   const place = roomPlace(room, property);
 
   useEffect(() => {
@@ -112,9 +118,11 @@ export default function RoomPlace({
   const distance =
     place.distance === null
       ? null
-      : t(place.approximate ? "distanceAbout" : "distance", {
-          distance: formatDistance(place.distance, locale),
-        });
+      : place.distanceApproximate
+        ? t("distanceAbout", {
+            distance: `${new Intl.NumberFormat(locale).format(Math.max(1, Math.round(place.distance / 1000)))} km`,
+          })
+        : t("distance", { distance: formatDistance(place.distance, locale) });
   const directions = place.approximate
     ? null
     : `https://www.google.com/maps/dir/?api=1&destination=${place.pin.latitude},${place.pin.longitude}`;
@@ -132,7 +140,12 @@ export default function RoomPlace({
       </div>
       <div className="relative h-[210px] overflow-hidden rounded-xl border border-gray-200 bg-gray-100">
         {requested ? (
-          <PlaceMap place={place} apiKey={apiKey} label={t("mapLabel")} />
+          <PlaceMap
+            place={place}
+            apiKey={apiKey}
+            label={t("mapLabel")}
+            onFailed={() => setMapFailed(true)}
+          />
         ) : (
           <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
             <button
@@ -148,8 +161,9 @@ export default function RoomPlace({
             <p className="max-w-xs text-sm text-gray-500">{tm("mapNote")}</p>
           </div>
         )}
-        {requested && (
+        {requested && !mapFailed && (
           <button
+            ref={expandRef}
             type="button"
             onClick={() => setExpanded(true)}
             className="absolute right-2 top-2 inline-flex items-center gap-1.5 rounded-lg bg-white px-2.5 py-1.5 text-sm font-semibold text-gray-700 shadow"
@@ -258,17 +272,25 @@ function FullScreenMap({
 }) {
   const titleId = useId();
   const closeRef = useRef<HTMLButtonElement>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  // Once per opening (not on every render of the page behind): focus the close button, and give the focus back
+  // to "Expand map" when the map closes.
   useEffect(() => {
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     closeRef.current?.focus();
     // Escape closes the map only, not the room's details underneath.
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       event.stopImmediatePropagation();
-      onClose();
+      onCloseRef.current();
     };
     document.addEventListener("keydown", onKey, true);
-    return () => document.removeEventListener("keydown", onKey, true);
-  }, [onClose]);
+    return () => {
+      document.removeEventListener("keydown", onKey, true);
+      opener?.focus();
+    };
+  }, []);
   return createPortal(
     <div
       role="dialog"
@@ -325,11 +347,13 @@ function PlaceMap({
   apiKey,
   label,
   large = false,
+  onFailed,
 }: {
   place: Place;
   apiKey: string;
   label: string;
   large?: boolean;
+  onFailed?: () => void;
 }) {
   const tm = useTranslations("locationMap");
   const t = useTranslations("roomPlace");
@@ -339,6 +363,11 @@ function PlaceMap({
   const [failed, setFailed] = useState(false);
   const placeKey = JSON.stringify(place);
   const reception = t("reception");
+  const onFailedRef = useRef(onFailed);
+  onFailedRef.current = onFailed;
+  useEffect(() => {
+    if (failed) onFailedRef.current?.();
+  }, [failed]);
 
   useEffect(() => {
     if (!mapRef.current) return;

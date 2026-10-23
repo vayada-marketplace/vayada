@@ -298,9 +298,9 @@ test.describe("booking page location map", () => {
     });
     await page.goto("/");
     await expect(page.getByRole("heading", { name: "Available Accommodations" })).toBeVisible();
-    await page.getByRole("button", { name: "View Details" }).nth(1).click();
+    await page.getByRole("button", { name: "View Details", exact: true }).nth(1).click();
     const details = page.getByRole("dialog");
-    const place = details.getByRole("region", { name: "Where you'll stay" });
+    const place = details.getByRole("region", { name: "Where you'll stay", exact: true });
     await expect(place).toBeVisible();
     await expect(place).toContainText("1.9 km from the main property");
     await expect(place).toContainText("Beach Villa");
@@ -323,12 +323,13 @@ test.describe("booking page location map", () => {
     expect(google.length).toBeGreaterThan(0);
 
     await place.getByRole("button", { name: "Expand map" }).click();
-    const full = page.getByRole("dialog", { name: "Where you'll stay" });
+    const full = page.getByRole("dialog", { name: "Where you'll stay", exact: true });
     await expect(full).toContainText("Beach Villa · Leopoldstraße 12, Munich");
     await page.keyboard.press("Escape");
     await expect(full).toHaveCount(0);
-    // Escape closed the map, not the room's details.
+    // Escape closed the map, not the room's details, and the focus is back on "Expand map".
     await expect(details).toBeVisible();
+    await expect(place.getByRole("button", { name: "Expand map" })).toBeFocused();
   });
 
   test("shows an area without its street or Directions, the property's own place, or nothing (VAY-2323)", async ({
@@ -351,25 +352,36 @@ test.describe("booking page location map", () => {
     // "Show map" pressed earlier in this tab counts: the maps load at once.
     await page.addInitScript(() => sessionStorage.setItem("vayada.booking.showMap", "1"));
     await page.goto("/");
-    const cards = page.getByRole("button", { name: "View Details" });
+    // The Location section below the list draws at once, without a new press.
+    const section = page.getByTestId("rooms-location-map");
+    await expect.poll(() => markers(page)).toEqual([{ title: "Hotel Alpenrose", label: "1" }]);
+    await expect(section.getByRole("button", { name: "Show map" })).toHaveCount(0);
+    const cards = page.getByRole("button", { name: "View Details", exact: true });
     await expect(cards).toHaveCount(3);
 
     await cards.nth(0).click();
-    let place = page.getByRole("dialog").getByRole("region", { name: "Where you'll stay" });
+    let place = page
+      .getByRole("dialog")
+      .getByRole("region", { name: "Where you'll stay", exact: true });
     await expect(place).toContainText("Isarvorstadt");
     await expect(place).toContainText("Shown as an area, not the exact spot.");
-    await expect(place).toContainText("About 1.4 km from the main property");
+    await expect(place).toContainText("About 1 km from the main property");
     await expect(place.getByRole("link", { name: "Directions" })).toHaveCount(0);
-    // The Location section below the room list loads at once too, with its own circle for the same area.
+    // The section's circle and the popup's own, for the same area.
     await expect
       .poll(() => circles(page))
-      .toEqual(expect.arrayContaining([{ lat: 48.13, lng: 11.57, radius: 1000 }]));
+      .toEqual([
+        { lat: 48.13, lng: 11.57, radius: 1000 },
+        { lat: 48.13, lng: 11.57, radius: 1000 },
+      ]);
     await expect(page.getByTestId("room-place-map")).toBeVisible();
     await page.getByRole("button", { name: "Close room details" }).click();
 
     // "Same as property": the hotel's own place, no distance.
     await cards.nth(1).click();
-    place = page.getByRole("dialog").getByRole("region", { name: "Where you'll stay" });
+    place = page
+      .getByRole("dialog")
+      .getByRole("region", { name: "Where you'll stay", exact: true });
     await expect(place).toContainText("Hotel Alpenrose");
     await expect(place).not.toContainText("from the main property");
     await expect(place.getByRole("link", { name: "Directions" })).toHaveAttribute(
