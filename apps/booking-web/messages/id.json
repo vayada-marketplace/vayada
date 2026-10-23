@@ -556,7 +556,8 @@
     "cancelFeeChanged": "Biaya pembatalan telah berubah. Silakan periksa kembali sebelum membatalkan.",
     "withdrawNotOnline": "Permintaan ini tidak dapat ditarik secara online. Silakan hubungi properti.",
     "bookingNotChangeable": "Pemesanan ini tidak dapat diubah lagi. Cari kembali untuk melihat statusnya saat ini.",
-    "busyTryAgain": "Pemesanan ini sedang diperbarui. Silakan coba lagi sebentar lagi."
+    "busyTryAgain": "Pemesanan ini sedang diperbarui. Silakan coba lagi sebentar lagi.",
+    "paymentMethodNotAccepted": "Tarif yang Anda pilih tidak dapat dibayar dengan cara ini. Silakan pilih metode pembayaran lain."
   },
   "locationMap": {
     "title": "Lokasi",

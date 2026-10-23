@@ -13,6 +13,7 @@ import { lockPricingManualPaymentTerms } from "./pricingManualPayment.js";
 import { pricingManualLeadTimeAllows } from "./pricingManualPaymentLead.js";
 import { lockPublicPricingAuthority } from "./publicPricingAuthority.js";
 import { PricingStorageError } from "./replacementPricingStore.js";
+import { selectedRatesTakePaymentMethod } from "./selectedRatePaymentMethods.js";
 const fail = (code: PricingStorageError["code"]): never => {
   throw new PricingStorageError(code);
 };
@@ -101,7 +102,7 @@ export function createCurrentPricingQuoteStore(pool: Pool, lifetimeSeconds: numb
         );
         if (!record) {
           // VAY-2232: an extra needs more notice than this stay gives (the guest page may have
-          // listed it before its notice ran out). Other refusals stay unnamed.
+          // listed it before its notice ran out).
           if (
             !(await selectedAddonLeadTimesAllow(
               client,
@@ -111,6 +112,10 @@ export function createCurrentPricingQuoteStore(pool: Pool, lifetimeSeconds: numb
             ))
           )
             throw new PricingStorageError("denied", "addon_lead_time");
+          // VAY-2309: a chosen rate doesn't take this way to pay (a non-refundable rate never
+          // takes pay at the property). Other refusals stay unnamed.
+          if (!(await selectedRatesTakePaymentMethod(client, slug, selection, method)))
+            throw new PricingStorageError("denied", "payment_method_not_accepted");
           return fail("denied");
         }
         if (record.quote.stay.propertyId !== scope.propertyId) return fail("denied");

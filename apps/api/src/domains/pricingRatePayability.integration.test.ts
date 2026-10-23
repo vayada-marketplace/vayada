@@ -8,7 +8,7 @@ import { republishPricingAfterPaymentChange } from "./pricingPaymentRepublish.js
 import type { PricingPaymentSwitches } from "./pricingRatePayability.js";
 import { publicPricingOfferBindings } from "./publicPricingRoomStay.js";
 import { createReplacementPricingCommands } from "./replacementPricingCommands.js";
-import { sellingPublicOfferKeys } from "./replacementPublicOfferMapping.js";
+import { publicOfferPaymentMethods } from "./replacementPublicOfferMapping.js";
 
 const url = process.env["TEST_DATABASE_URL"];
 const nonRefundableCardOnly = {
@@ -58,11 +58,23 @@ describe.skipIf(!url)("rates guests can't pay", () => {
       async selling(payments = switches) {
         const owner = await f.served();
         if (!owner) return null;
-        const keys = sellingPublicOfferKeys(owner, payments);
+        const methods = publicOfferPaymentMethods(owner, payments);
         return publicPricingOfferBindings(owner)
-          .filter((binding) => keys.has(binding.publicOfferKey))
+          .filter((binding) => !!methods.get(binding.publicOfferKey)?.length)
           .map((binding) => binding.offerId)
           .sort();
+      },
+      /** VAY-2309: each rate's ways to pay as the catalog names them. */
+      async payingWith(payments = switches) {
+        const owner = await f.served();
+        if (!owner) return null;
+        const methods = publicOfferPaymentMethods(owner, payments);
+        return Object.fromEntries(
+          publicPricingOfferBindings(owner).map((binding) => [
+            binding.offerId,
+            [...(methods.get(binding.publicOfferKey) ?? [])].sort(),
+          ]),
+        );
       },
       async notSelling() {
         const response = await app.inject({
@@ -84,6 +96,8 @@ describe.skipIf(!url)("rates guests can't pay", () => {
         await h.save(0)
       )();
       expect(await h.selling()).toEqual(["flex", "nrf"]);
+      // VAY-2309: the catalog names each rate's ways to pay: the non-refundable rate only card.
+      expect(await h.payingWith()).toEqual({ flex: ["card", "pay_at_property"], nrf: ["card"] });
       expect(await h.notSelling()).toEqual({
         version: "pricing-rates-not-selling.v1",
         publishedRevision: 1,
@@ -91,6 +105,10 @@ describe.skipIf(!url)("rates guests can't pay", () => {
       });
       // Vayada's card acceptance switched off: the same, without touching the hotel.
       expect(await h.selling({ ...switches, card: false })).toEqual(["flex"]);
+      expect(await h.payingWith({ ...switches, card: false })).toEqual({
+        flex: ["pay_at_property"],
+        nrf: [],
+      });
 
       await h.cardOff(approval);
       h.cardReady(false, "not_approved");

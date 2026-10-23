@@ -16,6 +16,9 @@ async function mockFlow(
   {
     extras = true,
     lateCheckOutNotice = null as { leadTimeHours: number; bookableFrom: string | null } | null,
+    methods = ["pay_at_property", "card"],
+    // The ways the rate takes, as the catalog names them (VAY-2309); older APIs send none.
+    offerPaymentMethods = undefined as string[] | undefined,
   } = {},
 ) {
   await mockBookingApis(page);
@@ -37,7 +40,7 @@ async function mockFlow(
       },
     ],
     payAtPropertyEnabled: true,
-    bookingPagePaymentMethods: ["pay_at_property", "card"],
+    bookingPagePaymentMethods: methods,
     termsText: "Quiet hours are 22:00–07:00.",
   };
   await page.route(`**/api/booking-web/hotels/${SEEDED_BOOKING_SLUG}/checkout-config`, (route) =>
@@ -51,7 +54,14 @@ async function mockFlow(
           {
             roomTypeId: "deluxe",
             name: "Deluxe Double Room",
-            offers: [{ publicOfferKey: offerKey, currency: "EUR", mealPlan: "room_only" }],
+            offers: [
+              {
+                publicOfferKey: offerKey,
+                currency: "EUR",
+                mealPlan: "room_only",
+                ...(offerPaymentMethods && { paymentMethods: offerPaymentMethods }),
+              },
+            ],
           },
         ],
       },
@@ -564,4 +574,53 @@ test("a way to pay the new choices don't take goes back to the hotel's own", asy
   await page.getByRole("button", { name: "Continue to your details" }).click();
   await page.getByRole("button", { name: "Continue to payment" }).click();
   await expect(paymentOption(page, "pay_at_property")).toHaveAttribute("aria-checked", "true");
+});
+
+// VAY-2309: the first price used to pay at the hotel before the guest picked a way, so a rate
+// paid by card was refused once ("Quote unavailable.", 404 in the console) before card worked.
+test("prices a rate paid by card with card from the first price", async ({ page }, testInfo) => {
+  const assertHealthy = watchPageHealth(page, testInfo, {
+    expectedMissingUrls: [/\/change-request/],
+  });
+  const { prices } = await mockFlow(page, { offerPaymentMethods: ["card"] });
+  // As the API does for a non-refundable rate paid by card.
+  prices.refuse = "pay_at_property";
+  await page.goto(STAY);
+  await expect(page.getByRole("status", { name: "Your stay total" })).toContainText("€268");
+  await page.getByRole("button", { name: "Continue to your details" }).click();
+  await fillGuestDetails(page);
+  await page.getByRole("button", { name: "Continue to payment" }).click();
+  await expect(paymentOption(page, "card")).toHaveAttribute("aria-checked", "true");
+  await expect(orderTotal(page)).toHaveText("€268");
+  expect(prices.asked.length).toBeGreaterThan(0);
+  expect(prices.asked).not.toContain("pay_at_property");
+  await assertHealthy();
+  // Picking a way the rate doesn't take says so, in the guest's language too.
+  Object.assign(prices, { refuse: "pay_at_property", code: "PAYMENT_METHOD_NOT_ACCEPTED" });
+  await paymentOption(page, "pay_at_property").click();
+  await expect(
+    page.getByRole("alert").filter({
+      hasText: "The rate you chose can't be paid this way. Please choose another way to pay.",
+    }),
+  ).toBeVisible();
+  Object.assign(prices, { refuse: "pay_at_property", code: "PAYMENT_METHOD_NOT_ACCEPTED" });
+  await page.goto(`/de${STAY}&step=payment`);
+  await expect(
+    page.getByRole("alert").filter({
+      hasText:
+        "Der gewählte Tarif kann nicht auf diese Weise bezahlt werden. Bitte wählen Sie eine andere Zahlungsart.",
+    }),
+  ).toBeVisible();
+});
+
+test("asks for another way to pay only where the guest can pick one", async ({ page }) => {
+  // A hotel that takes only pay at the hotel, from an API that doesn't name the rate's ways:
+  // another room is the way out.
+  const { prices } = await mockFlow(page, { methods: ["pay_at_property"] });
+  Object.assign(prices, { refuse: "pay_at_property", code: "PAYMENT_METHOD_NOT_ACCEPTED" });
+  await page.goto(STAY);
+  const notice = page.getByRole("alert").filter({ hasText: "We couldn't price this selection" });
+  await expect(notice).toBeVisible();
+  await expect(notice.getByRole("button", { name: "Choose another room" })).toBeVisible();
+  await expect(page.getByText("Please choose another way to pay.")).toHaveCount(0);
 });

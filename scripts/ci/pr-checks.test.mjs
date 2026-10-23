@@ -782,6 +782,8 @@ test("nothing that a skipped job runs reaches a frontend-only package", () => {
 const WORKFLOW_READERS = {
   "scripts/ci/": "npm run test:pr-checks",
   "scripts/coordinated-release/": "npm run test:coordinated-release",
+  // The release train's tests (VAY-2311) run in the same root script.
+  "scripts/release-train/": "npm run test:coordinated-release",
   "tests/e2e/first-party-auth/": "npm run e2e:first-party-auth",
 };
 

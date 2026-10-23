@@ -759,6 +759,16 @@ one trimmed line of up to 200 characters) also carries it as `mealDescription`; 
 offers have no such key and the booking page keeps its own meal wording. It is shown
 as written (not translated), is not priced and is not sent to channels.
 
+Since VAY-2309 each catalogue offer also carries `paymentMethods`: the ways guests can
+pay that rate now (its terms' accepted methods that Finance and the booking page's
+switches take; a deposit only by card). It is read live, like the rest of the
+catalogue, and is not part of the booking page publication. Until the guest picks a
+way to pay, /book prices the stay with the first way, in the hotel's order, that
+every chosen rate takes, so a non-refundable or card-only rate is not priced at the
+hotel first. A quote whose rate doesn't take the chosen way is refused with 422
+`PAYMENT_METHOD_NOT_ACCEPTED`; any other unnamed refusal stays 404 "Quote
+unavailable." and its storage code and reason are logged with the request.
+
 The browser room-selection step reads the unpriced catalogue, requires an explicit
 current offer for every physical room, and collects adults and each child's age
 at check-in. Blank ages cannot become zero. Mixed currencies cannot be combined.
