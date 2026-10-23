@@ -590,7 +590,9 @@ for (const width of [1440, 390]) {
     const assertHealthy = watchPageHealth(page, testInfo, {
       expectedMissingUrls: [/\/change-request/],
     });
-    if (width === 390) await page.setViewportSize({ width: 390, height: 844 });
+    await page.setViewportSize(
+      width === 390 ? { width: 390, height: 844 } : { width, height: 900 },
+    );
     const { prices } = await mockFlow(page, { offerPaymentMethods: ["card"] });
     // As the API does for a non-refundable rate paid by card.
     prices.refuse = "pay_at_property";
@@ -656,7 +658,9 @@ for (const width of [1440, 390]) {
   test(`says so when no way to pay is left for the chosen rate at ${width}px`, async ({
     page,
   }, testInfo) => {
-    if (width === 390) await page.setViewportSize({ width: 390, height: 844 });
+    await page.setViewportSize(
+      width === 390 ? { width: 390, height: 844 } : { width, height: 900 },
+    );
     const { prices, catalog } = await mockFlow(page, { offerPaymentMethods: ["card"] });
     const noWay = page.getByRole("alert").filter({
       hasText:
@@ -672,6 +676,8 @@ for (const width of [1440, 390]) {
     catalog.paymentMethods = ["paypal"];
     const asked = prices.asked.length;
     await page.reload();
+    // The analytics question opens on every load until it's answered.
+    await page.getByRole("button", { name: "Reject analytics" }).click();
     const ways = page.getByRole("region", { name: "How would you like to pay?" });
     await expect(ways.getByRole("alert")).toContainText(
       "The rooms you chose can't be paid for in any way this hotel offers.",
