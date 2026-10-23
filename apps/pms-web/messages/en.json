@@ -1559,6 +1559,7 @@
   "rooms.form.propertyNoPin": "Your property has no pin yet",
   "rooms.form.propertyNoPinBody": "Your property has no pin yet. Place it in Booking Admin and this room shows there.",
   "rooms.form.propertyUnavailable": "Your property's address couldn't load.",
+  "rooms.form.propertyUnavailableChip": "Couldn't load your property",
   "rooms.form.editPropertyAddress": "Edit property address",
   "rooms.form.editPropertyAddressHint": "Opens Booking Admin in a new tab, so this room's changes stay.",
   "rooms.form.editPropertyAddressFailed": "Booking Admin couldn't open right now. Try again.",

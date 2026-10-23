@@ -928,9 +928,11 @@ function changedRoomLocation(next: RoomTypeUpdate, saved: RoomType): RoomTypeUpd
   }
   if ((next.latitude ?? null) !== saved.latitude) location.latitude = next.latitude ?? null;
   if ((next.longitude ?? null) !== saved.longitude) location.longitude = next.longitude ?? null;
-  // Only choices the host made: a default shown but never touched is not written (VAY-2321).
+  // Only choices that change what is saved: a default shown, or a choice made and undone, is not written, so
+  // room_attributes (which older published prices fingerprint) stays as it was (VAY-2321).
   for (const key of ROOM_LOCATION_DISPLAY_KEYS) {
-    if (next[key] !== undefined && next[key] !== saved[key]) {
+    const effective = (room: RoomTypeUpdate) => room[key] ?? ROOM_LOCATION_DISPLAY_DEFAULTS[key];
+    if (next[key] !== undefined && effective(next) !== effective(saved)) {
       Object.assign(location, { [key]: next[key] });
     }
   }
@@ -1418,6 +1420,14 @@ const ROOM_LOCATION_DISPLAY_KEYS = [
   "locationArea",
   "showMapInDetails",
 ] as const;
+// What a key the host never chose means. A missing locationSource is derived from the pin (the field restores
+// it to undefined when the host goes back to the derived choice), so it has no default here.
+const ROOM_LOCATION_DISPLAY_DEFAULTS = {
+  locationSource: undefined,
+  locationPrecision: "exact",
+  locationArea: "",
+  showMapInDetails: true,
+} as const;
 
 /** The VAY-2321 choices as saved; a key the host never chose stays undefined, so a save leaves it unwritten. */
 function roomLocationDisplay(attributes: Record<string, unknown>): Partial<RoomType> {

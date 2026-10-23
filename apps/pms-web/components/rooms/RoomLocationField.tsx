@@ -3,6 +3,7 @@
 import {
   useEffect,
   useId,
+  useMemo,
   useRef,
   useState,
   type ClipboardEvent,
@@ -139,11 +140,24 @@ export default function RoomLocationField({
   const edited =
     latitudeText !== formatCoordinate(value.latitude) ||
     longitudeText !== formatCoordinate(value.longitude);
-  const valid = !picking && (coordinates.ok || !edited);
   const hasPin = value.latitude != null && value.longitude != null;
   const error = !coordinates.ok && focusedAxis === null ? coordinates.error : null;
   const place = typeof property === "object" ? property : null;
   const separate = roomLocationSource(value, place?.pin ?? null) === "custom";
+  // The coordinate fields only exist for a separate location; "Same as property" never holds Save.
+  const valid = !separate || (!picking && (coordinates.ok || !edited));
+  // As saved: going back to the choice a room had without one restores "no choice", so nothing is written.
+  const savedSource = useRef(value.locationSource);
+  // With no pin of its own yet, the map opens on the property's area, close enough to place the pin by click.
+  const focusLatitude = place?.pin?.latitude;
+  const focusLongitude = place?.pin?.longitude;
+  const focus = useMemo(
+    () =>
+      focusLatitude !== undefined && focusLongitude !== undefined
+        ? { lat: focusLatitude, lng: focusLongitude }
+        : null,
+    [focusLatitude, focusLongitude],
+  );
   const approximate = separate && value.locationPrecision === "approximate";
   // Typing needs the fields; a half pair saved earlier shows what is wrong with it.
   const advancedShown = advancedOpen || map !== "ready" || !coordinates.ok;
@@ -156,11 +170,20 @@ export default function RoomLocationField({
 
   useEffect(() => {
     let disposed = false;
-    getPmsPropertyPlace()
-      .then((found) => !disposed && setProperty(found))
-      .catch(() => !disposed && setProperty("failed"));
+    const load = () =>
+      getPmsPropertyPlace()
+        .then((found) => !disposed && setProperty(found))
+        // A failed re-read keeps the place already shown.
+        .catch(
+          () => !disposed && setProperty((current) => (current === "loading" ? "failed" : current)),
+        );
+    void load();
+    // Back from editing the address in Booking Admin's tab: show the address saved there.
+    const onVisible = () => document.visibilityState === "visible" && void load();
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       disposed = true;
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, []);
 
@@ -168,6 +191,17 @@ export default function RoomLocationField({
    * pin (saved before VAY-2321) stays one when its pin is cleared. */
   function edit(patch: Partial<RoomLocation>) {
     onChange(value.locationSource ? patch : { locationSource: "custom", ...patch });
+  }
+
+  function chooseSource(source: RoomLocationSource) {
+    // A pick still loading or coordinates half typed belong to the place being left.
+    cancelPick();
+    setLatitudeText(formatCoordinate(value.latitude));
+    setLongitudeText(formatCoordinate(value.longitude));
+    const derived = roomLocationSource({ ...value, locationSource: undefined }, place?.pin ?? null);
+    onChange({
+      locationSource: savedSource.current === undefined && source === derived ? undefined : source,
+    });
   }
 
   function setPin(
@@ -227,24 +261,27 @@ export default function RoomLocationField({
   /** Booking Admin's Location page, in a new tab so the room's unsaved edits stay (until VAY-2322's modal). */
   async function openPropertyAddress() {
     setPropertyLinkFailed(false);
-    // Opened before the handoff resolves: a tab opened after an await is a blocked popup.
+    // Opened before the handoff resolves: a tab opened after an await is a blocked popup. Without a tab the
+    // room page stays, so its unsaved edits do too.
     const tab = window.open("", "_blank");
-    const handoff = await resolveSharedHotelSetupHandoff({
-      targetPath: "/settings/location",
-      csrfToken: getAuthCsrfToken(),
-      ...(place ? { propertyId: place.propertyId } : {}),
-    });
-    if (handoff.kind === "retryable") {
-      tab?.close();
+    if (!tab) {
       setPropertyLinkFailed(true);
       return;
     }
-    if (!tab) {
-      window.location.assign(handoff.destination);
-      return;
+    try {
+      const handoff = await resolveSharedHotelSetupHandoff({
+        targetPath: "/settings/location",
+        csrfToken: getAuthCsrfToken(),
+        ...(place ? { propertyId: place.propertyId } : {}),
+      });
+      if (handoff.kind === "retryable")
+        throw new Error("The Booking Admin handoff is unavailable.");
+      tab.opener = null;
+      tab.location.href = handoff.destination;
+    } catch {
+      tab.close();
+      setPropertyLinkFailed(true);
     }
-    tab.opener = null;
-    tab.location.href = handoff.destination;
   }
 
   const coordinateField = (axis: CoordinateAxis) => {
@@ -285,6 +322,13 @@ export default function RoomLocationField({
 
   const status = (() => {
     if (!separate && property === "loading") return null;
+    if (!separate && property === "failed") {
+      return (
+        <span className="shrink-0 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-700">
+          {t("rooms.form.propertyUnavailableChip")}
+        </span>
+      );
+    }
     if (separate ? hasPin : place?.pin) {
       return (
         <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-green-200 bg-green-50 px-2.5 py-1 text-[11px] font-medium text-green-700">
@@ -375,6 +419,16 @@ export default function RoomLocationField({
           <div
             role="radiogroup"
             aria-label={t("rooms.form.locationSource")}
+            onKeyDown={(event) => {
+              // Arrow keys move between the two choices, as in a native radio group.
+              if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) return;
+              event.preventDefault();
+              const group = event.currentTarget;
+              chooseSource(separate ? "property" : "custom");
+              requestAnimationFrame(() =>
+                group.querySelector<HTMLElement>('[role="radio"][aria-checked="true"]')?.focus(),
+              );
+            }}
             className="grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3"
           >
             <SourceCard
@@ -382,14 +436,14 @@ export default function RoomLocationField({
               icon={<BuildingOffice2Icon className="h-4 w-4" />}
               title={t("rooms.form.sameAsProperty")}
               hint={t("rooms.form.sameAsPropertyHint")}
-              onSelect={() => onChange({ locationSource: "property" })}
+              onSelect={() => separate && chooseSource("property")}
             />
             <SourceCard
               selected={separate}
               icon={<MapPinIcon className="h-4 w-4" />}
               title={t("rooms.form.separateLocation")}
               hint={t("rooms.form.separateLocationHint")}
-              onSelect={() => onChange({ locationSource: "custom" })}
+              onSelect={() => !separate && chooseSource("custom")}
             />
           </div>
 
@@ -455,7 +509,11 @@ export default function RoomLocationField({
                     inputId={`${id}-maps-link`}
                     onPin={(pin) => {
                       cancelPick();
-                      setPin(pin.latitude, pin.longitude);
+                      // A new place: the previous address and area no longer describe it.
+                      setPin(pin.latitude, pin.longitude, {
+                        locationAddress: "",
+                        locationArea: "",
+                      });
                     }}
                     onClose={() => setPasting(false)}
                   />
@@ -512,8 +570,9 @@ export default function RoomLocationField({
                             if (place.pin)
                               setPin(place.pin.latitude, place.pin.longitude, {
                                 locationAddress: place.address,
+                                locationArea: "",
                               });
-                            else edit({ locationAddress: place.address });
+                            else edit({ locationAddress: place.address, locationArea: "" });
                           }}
                           className={linkClass}
                         >
@@ -545,6 +604,7 @@ export default function RoomLocationField({
                         mapType={mapType}
                         area={approximate}
                         recenter={recenter}
+                        focus={hasPin ? null : focus}
                       />
                       {!hasPin && (
                         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2.5 bg-gray-50/70 px-6 text-center">
@@ -772,6 +832,7 @@ function SourceCard({
       type="button"
       role="radio"
       aria-checked={selected}
+      tabIndex={selected ? 0 : -1}
       onClick={onSelect}
       className={`flex items-start gap-2.5 rounded-xl border px-3.5 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 ${
         selected ? "border-primary-200 bg-primary-50" : "border-gray-200 bg-white hover:bg-gray-50"
@@ -829,7 +890,8 @@ function GoogleMapsLink({
         <LinkIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
         <input
           id={inputId}
-          type="url"
+          type="text"
+          inputMode="url"
           autoFocus
           autoComplete="off"
           spellCheck={false}
@@ -907,6 +969,8 @@ function RoomAddressSearch({
   // Only the newest search may show its suggestions.
   const sequence = useRef(0);
   const failures = useRef(0);
+  // The last search found nothing: the hint to drop the pin instead still shows.
+  const [noResults, setNoResults] = useState(false);
   const listId = `${inputId}-suggestions`;
   const open = search && suggestions.length > 0;
 
@@ -943,6 +1007,7 @@ function RoomAddressSearch({
     if (timer.current) clearTimeout(timer.current);
     const current = ++sequence.current;
     setActive(-1);
+    setNoResults(false);
     if (!search || text.trim().length < 3) {
       setSuggestions([]);
       return;
@@ -959,9 +1024,11 @@ function RoomAddressSearch({
           });
         failures.current = 0;
         if (current !== sequence.current) return;
-        setSuggestions(
-          found.flatMap((item) => (item.placePrediction ? [item.placePrediction] : [])).slice(0, 5),
-        );
+        const predictions = found
+          .flatMap((item) => (item.placePrediction ? [item.placePrediction] : []))
+          .slice(0, 5);
+        setSuggestions(predictions);
+        setNoResults(predictions.length === 0);
       } catch {
         if (current === sequence.current) setSuggestions([]);
         failed();
@@ -1109,6 +1176,12 @@ function RoomAddressSearch({
             powered by <span className="font-bold text-[#5F6368]">Google</span>
           </p>
         </div>
+      )}
+      {search && noResults && !open && (
+        <p className="mt-1 flex items-center gap-1.5 text-[12px] font-medium text-gray-600">
+          <MapPinIcon className="h-3.5 w-3.5 shrink-0 text-gray-500" />
+          {t("rooms.form.cantFindAddress")}
+        </p>
       )}
       <p id={`${inputId}-hint`} className="text-[11px] text-gray-400 mt-1">
         {hint}

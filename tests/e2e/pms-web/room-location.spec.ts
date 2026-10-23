@@ -300,6 +300,45 @@ test.describe("pms-web room location", () => {
     ]);
   });
 
+  test("switching back to Same as property keeps the room's own place but stops using it (VAY-2321)", async ({
+    page,
+  }) => {
+    const backend = await mockRoomBackend(page, {
+      locationAddress: "Leopoldstraße 12, 80802 München, Germany",
+      latitude: 48.1565,
+      longitude: 11.583,
+    });
+    await page.goto(`/rooms/${roomTypeId}`);
+    const same = page.getByRole("radio", { name: /Same as property/ });
+    const separate = page.getByRole("radio", { name: /Separate location/ });
+    const save = page.getByRole("button", { name: "Save Changes" });
+    await expect(separate).toHaveAttribute("aria-checked", "true");
+
+    // A choice undone, or a switch turned off and on again, writes nothing.
+    await same.click();
+    await separate.click();
+    const detailsMap = page.getByRole("switch", { name: "Show map in room details" });
+    await detailsMap.click();
+    await detailsMap.click();
+    await save.click();
+    await expect(page.getByText("Room type updated successfully")).toBeVisible();
+    expect(backend.locationWrites).toEqual([]);
+
+    // The keyboard moves between the choices too.
+    await separate.focus();
+    await page.keyboard.press("ArrowLeft");
+    await expect(same).toHaveAttribute("aria-checked", "true");
+    await expect(same).toBeFocused();
+    await save.click();
+    await expect.poll(() => backend.locationWrites).toHaveLength(1);
+    expect(Object.keys(backend.locationWrites[0]).sort()).toEqual([
+      "commandId",
+      "idempotencyKey",
+      "locationSource",
+    ]);
+    expect(backend.locationWrites[0]).toMatchObject({ locationSource: "property" });
+  });
+
   test("opens Booking Admin's Location page in a new tab to edit the property's address", async ({
     page,
   }) => {

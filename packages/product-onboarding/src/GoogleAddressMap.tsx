@@ -193,6 +193,9 @@ export default function GoogleAddressMap({
   const coveredInsetsRef = useRef(coveredInsets);
   // The area "Find on map" moved to, kept in view like a pin until a pin replaces it.
   const focusRef = useRef<MapPosition | null>(null);
+  // An area to open on when there is no pin yet (a focus given before the map loads).
+  const initialFocusRef = useRef(focus ?? null);
+  initialFocusRef.current = focus ?? null;
   // The map already shows a position the hotel picked on it; don't recenter for that one.
   const pickedRef = useRef<MapPosition | null>(null);
   const [status, setStatus] = useState<"idle" | "loading" | "ready" | "unavailable">("idle");
@@ -217,8 +220,8 @@ export default function GoogleAddressMap({
       .then(([{ Map, Circle }, { Marker }, { ControlPosition }]) => {
         if (disposed || !containerRef.current) return;
         const map = new Map(containerRef.current, {
-          center: positionRef.current ?? WORLD_CENTER,
-          zoom: positionRef.current ? PINNED_ZOOM : 2,
+          center: positionRef.current ?? initialFocusRef.current ?? WORLD_CENTER,
+          zoom: positionRef.current ? PINNED_ZOOM : initialFocusRef.current ? AREA_ZOOM : 2,
           clickableIcons: false,
           disableDefaultUI: true,
           ...(interactive ? { draggableCursor: "crosshair" } : {}),
@@ -420,9 +423,9 @@ export default function GoogleAddressMap({
         ? { center: areaCenter(point), zoom: AREA_VIEW_ZOOM }
         : { center: point, zoom: PINNED_ZOOM },
     );
-    // Only a new request recenters; moving the pin keeps the hotel's view.
+    // Only a new request recenters (or one made while the map loaded); moving the pin keeps the hotel's view.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [recenter]);
+  }, [recenter, status]);
 
   return (
     <div

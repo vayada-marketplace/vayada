@@ -1566,6 +1566,7 @@
   "rooms.form.propertyNoPin": "Ihre Unterkunft hat noch keine Markierung",
   "rooms.form.propertyNoPinBody": "Ihre Unterkunft hat noch keine Markierung. Setzen Sie sie im Booking Admin, dann erscheint dieses Zimmer dort.",
   "rooms.form.propertyUnavailable": "Die Adresse Ihrer Unterkunft konnte nicht geladen werden.",
+  "rooms.form.propertyUnavailableChip": "Unterkunft konnte nicht geladen werden",
   "rooms.form.editPropertyAddress": "Adresse der Unterkunft bearbeiten",
   "rooms.form.editPropertyAddressHint": "Öffnet den Booking Admin in einem neuen Tab, damit Ihre Änderungen an diesem Zimmer erhalten bleiben.",
   "rooms.form.editPropertyAddressFailed": "Der Booking Admin konnte gerade nicht geöffnet werden. Versuchen Sie es erneut.",
