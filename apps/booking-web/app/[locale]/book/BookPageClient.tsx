@@ -4,6 +4,7 @@ import { Suspense, useEffect, useId, useRef, useState, type ReactNode } from "re
 import { flushSync } from "react-dom";
 import { useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
+import { decodePicks } from "@/lib/roomPicker";
 import { useRouter } from "@/i18n/navigation";
 import BookShell from "./BookShell";
 import ReplacementGuestRules from "@/components/booking/ReplacementGuestRules";
@@ -180,6 +181,19 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     // The hotel page hands over its party as a first room the guest can adjust or split;
     // child ages stay blank until chosen. A room card also hands over its choice and the rooms
     // the party needs (VAY-2190): adults spread evenly, children in the first room.
+    // VAY-2320: a group chose each room on the hotel page: its rate and its guests.
+    const picks = decodePicks(params.getAll("pick"));
+    if (picks) {
+      setChoices(
+        picks.map((pick) => ({
+          ...newRoom(),
+          publicOfferKey: pick.publicOfferKey,
+          adults: String(pick.adults),
+          childAges: Array(pick.children).fill(""),
+        })),
+      );
+      return;
+    }
     const adults = Number(params.get("adults"));
     if (Number.isInteger(adults) && adults >= 1 && adults <= 99) {
       const children = Math.trunc(Number(params.get("children")) || 0);

@@ -129,6 +129,16 @@ export interface CancelPreview {
   currency: string;
   /** Pricing-v2 stays: what the booked terms keep, in minor units; sent back to confirm the fee. */
   bookedTermsOutcome?: { retainedMinor: string };
+  /** VAY-2320: a booking's several rooms, each with what its own terms give back and keep. */
+  rooms?: CancelPreviewRoom[];
+}
+
+export interface CancelPreviewRoom {
+  roomName: string | null;
+  rule: "non_refundable" | "free_until_deadline" | "partial_refund";
+  refundPercent: number;
+  refundAmount: number;
+  keptAmount: number;
 }
 
 export const bookingService = {
