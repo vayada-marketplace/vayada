@@ -178,6 +178,12 @@ export default function RoomLocationField({
           () => !disposed && setProperty((current) => (current === "loading" ? "failed" : current)),
         );
     void load();
+    // Rendered without a browser (unit tests): nothing to listen to.
+    if (typeof document === "undefined") {
+      return () => {
+        disposed = true;
+      };
+    }
     // Back from editing the address in Booking Admin's tab: show the address saved there.
     const onVisible = () => document.visibilityState === "visible" && void load();
     document.addEventListener("visibilitychange", onVisible);
