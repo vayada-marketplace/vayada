@@ -107,6 +107,8 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
     "wrong-selection",
     "wrong-ages",
     "repository-complete",
+    // VAY-2320: the same room type at two rates in one booking.
+    "repository-complete-two-rates",
     "repository-released",
     "repository-wrong-organization",
     "repository-missing-acceptance",
@@ -115,11 +117,15 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
     "repository-stay-cancel-before-adoption",
     "repository-stay-cancel-after-adoption",
     "repository-stay-cancel-guest-route",
+    // VAY-2320: rooms with different cancellation terms in one booking.
+    "repository-stay-cancel-guest-route-mixed-terms",
     "repository-stay-cancel-guest-paid-card",
     "repository-stay-cancel-host-guest-request",
     "repository-stay-cancel-host-paid-card",
     "repository-stay-cancel-host-reject",
     "repository-date-change",
+    // VAY-2320: a room type booked at two rates keeps a line per rate in the policy impact.
+    "repository-date-change-two-rates",
     "repository-stay-cancel-amended",
     "repository-stay-cancel-undecodable",
     // VAY-2110: a date-change amendment rebinds the stay to its repriced quote.
@@ -169,18 +175,57 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
             },
           },
         });
+      const twoRates = scenario.endsWith("-two-rates");
       const selections = [types[0]!, types[1]!, types[0]!].map((roomTypeId, i) => ({
         ...selected,
         selectionId: `selection-${i}`,
         roomTypeId,
+        ...(twoRates && i === 2 && { offerId: "second-rate" }),
         guests: { adults: 2, childAgesAtCheckIn: [6 + i] },
       }));
       Object.assign(q.stay, { rooms: selections });
       Object.assign(q, {
-        rooms: selections.map((s) => ({ ...priced, selectionId: s.selectionId })),
+        rooms: selections.map((s) => ({
+          ...priced,
+          selectionId: s.selectionId,
+          // A room at another rate is priced from that rate's own terms and nights.
+          ...(s.offerId !== selected.offerId && {
+            termsRevisions: { [s.offerId]: term.revision },
+            nights: priced.nights.map((night) => ({
+              ...night,
+              sources: night.sources.map((source) => ({ ...source, offerId: s.offerId })),
+            })),
+          }),
+        })),
       });
+      // Free cancellation for the second room type, partial refunds for the first.
+      const freeUntilWeek = {
+        kind: "flexible",
+        terms: {
+          type: "free_until_days_before_arrival",
+          freeCancellationDeadlineDays: 7,
+          afterDeadlinePenalty: "full_booking_amount",
+          noShowPenalty: "full_booking_amount",
+        },
+      };
       Object.assign(q.evidence, {
-        terms: types.map((roomTypeId) => ({ ...term, roomTypeId })),
+        terms: [
+          ...types.map((roomTypeId, i) => ({
+            ...term,
+            roomTypeId,
+            ...(scenario.endsWith("-mixed-terms") && i === 1 && { cancellation: freeUntilWeek }),
+          })),
+          ...(twoRates
+            ? [
+                {
+                  ...term,
+                  roomTypeId: types[0]!,
+                  offerId: "second-rate",
+                  cancellation: freeUntilWeek,
+                },
+              ]
+            : []),
+        ],
         lines: selections.flatMap((s) => [
           {
             id: `r-${s.selectionId}`,
@@ -259,7 +304,7 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
         [
           propertyId,
           types,
-          amended || scenario === "repository-date-change"
+          amended || scenario.startsWith("repository-date-change")
             ? ["2026-10-01", "2026-10-02", "2026-10-03", "2026-10-04"]
             : ["2026-10-01", "2026-10-02"],
         ],
@@ -737,6 +782,7 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
           "legacy-initial",
           "legacy-amendment",
           "repository-complete",
+          "repository-complete-two-rates",
           "worker-complete",
           "amended-complete",
         ].includes(scenario)
@@ -811,6 +857,23 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
             { position: 2, status: "pending", adults: 2, children: 1 },
             { position: 3, status: "pending", adults: 2, children: 1 },
           ]);
+        if (scenario.endsWith("-two-rates"))
+          // Each room keeps its own rate: the third room is the first type at the second rate.
+          expect(
+            (
+              await db.query(
+                `SELECT position,room_type_id::text AS "roomTypeId",
+                   assignment_payload->'pricingAcceptance'->>'offerId' AS "offerId"
+                 FROM pms.operational_booking_assignments
+                 WHERE property_id=$1 AND guest_booking_id=$2 ORDER BY position`,
+                [propertyId, bookingId],
+              )
+            ).rows,
+          ).toEqual([
+            { position: 1, roomTypeId: types[0], offerId: quote.stay.rooms[0]!.offerId },
+            { position: 2, roomTypeId: types[1], offerId: quote.stay.rooms[1]!.offerId },
+            { position: 3, roomTypeId: types[0], offerId: "second-rate" },
+          ]);
         if (repository && !worker) {
           expect(await adopt()).toEqual({
             outcome: "replayed",
@@ -859,7 +922,9 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
       ) {
         await expect(adopt()).rejects.toBeInstanceOf(PmsAcceptedPricingReservationConflict);
         expect(await snapshot()).toEqual(before);
-      } else if (scenario === "repository-stay-cancel-guest-route") {
+      } else if (scenario.startsWith("repository-stay-cancel-guest-route")) {
+        // The two partial-refund rooms keep 75% of 36000 each; the free one gives everything back.
+        const fee = scenario.endsWith("-mixed-terms") ? "54000" : "81000";
         // VAY-2100: the guest cancels an adopted v2 stay online, end to end on real PostgreSQL.
         expect(await adopt()).toMatchObject({ outcome: "adopted" });
         await db.query(
@@ -906,8 +971,8 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
           amountPaid: 0,
           refundAmount: 0,
           refundPercentage: 0,
-          cancellationFeeAmount: 810,
-          bookedTermsOutcome: { retainedMinor: "81000", refundMinor: "27000" },
+          cancellationFeeAmount: Number(fee) / 100,
+          bookedTermsOutcome: { retainedMinor: fee, refundMinor: String(108000 - Number(fee)) },
         });
         await expect(
           adapter.cancel(
@@ -920,7 +985,7 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
         await adapter.cancel(
           propertyId,
           bookingId,
-          { ...guest, expected_cancellation_fee_minor: "81000" },
+          { ...guest, expected_cancellation_fee_minor: fee },
           context("c"),
         );
         // The adapter commit became a savepoint release: run the deferred checks a commit would.
@@ -932,7 +997,7 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
            WHERE booking.id=$1`,
           [bookingId],
         );
-        expect(event.rows).toEqual([{ status: "canceled", fee: "81000" }]);
+        expect(event.rows).toEqual([{ status: "canceled", fee }]);
         const assignments = await db.query(
           "SELECT DISTINCT assignment_status AS status FROM pms.operational_booking_assignments WHERE guest_booking_id=$1",
           [bookingId],
@@ -1281,7 +1346,7 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
           requestedBy: "host",
           failureReason: null,
         });
-      } else if (scenario === "repository-date-change") {
+      } else if (scenario.startsWith("repository-date-change")) {
         // VAY-2110: PMS staff move an adopted v2 stay to new dates at its booked terms.
         expect(await adopt()).toMatchObject({ outcome: "adopted" });
         await db.query(
@@ -1427,6 +1492,21 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
           newTotalAmount: "540.00",
           inventory: "replace",
         });
+        if (scenario.endsWith("-two-rates")) {
+          // The first type's two rooms are on two rates with different terms: one line each.
+          const policy = hostPreview.impact.cancellationPolicy as unknown as {
+            type: string;
+            lines: { roomTypeId: string; roomCount: number }[];
+          };
+          expect(policy.type).toBe("mixed_room");
+          expect(policy.lines.map((line) => [line.roomTypeId, line.roomCount]).sort()).toEqual(
+            [
+              [types[0], 1],
+              [types[0], 1],
+              [types[1], 1],
+            ].sort(),
+          );
+        }
         // A preview proves the new nights can be held and keeps nothing.
         expect(await holds()).toEqual(heldBefore);
         expect(await occupied()).toEqual(occupiedBefore);

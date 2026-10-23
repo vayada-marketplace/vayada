@@ -21,8 +21,9 @@ vi.mock("../domains/currentQuoteGuestDisclosure.js", () => ({
 vi.mock("../domains/pricingAcceptanceWriter.js", () => ({
   PricingAcceptanceError: class PricingAcceptanceError extends Error {
     constructor(
-      readonly code: "conflict" | "storage" | "unexpected",
+      readonly code: "conflict" | "storage" | "unexpected" | "sold_out",
       _cause?: unknown,
+      readonly roomTypeIds: readonly string[] = [],
     ) {
       super("Pricing acceptance failed");
     }
@@ -257,6 +258,41 @@ it("forwards the request switch and answers a refused request with 404", async (
   const refused = await accept();
   expect(refused.statusCode).toBe(404);
   expect(refused.json()).toMatchObject({ code: "REQUEST_ACCEPTANCE_UNAVAILABLE" });
+});
+
+// VAY-2320: the guest's page can say which room went and keep the others.
+it("answers a room sold out at the last step with 409 ROOMS_SOLD_OUT naming the room types", async () => {
+  const payload = { version: "booking-quote-acceptance.v1", requestId: "accept-1", quoteId: id };
+  const roomTypeId = "44444444-4444-4444-8444-444444444444";
+  vi.mocked(writePricingAcceptance).mockRejectedValue(
+    new PricingAcceptanceError("sold_out", null, [roomTypeId]),
+  );
+  await mount(true, true);
+  const response = await app.inject({
+    method: "POST",
+    url: `/api/booking-web/hotels/hotel/bookings/quotes/${id}/accept`,
+    headers: { "idempotency-key": "accept-1" },
+    payload,
+  });
+  expect(response.statusCode).toBe(409);
+  expect(response.headers["cache-control"]).toBe("no-store");
+  expect(response.json()).toEqual({
+    statusCode: 409,
+    error: "Conflict",
+    code: "ROOMS_SOLD_OUT",
+    message: "A room you chose is no longer available for these dates.",
+    roomTypeIds: [roomTypeId],
+  });
+  // Other conflicts keep the plain answer.
+  vi.mocked(writePricingAcceptance).mockRejectedValue(new PricingAcceptanceError("conflict", null));
+  const conflict = await app.inject({
+    method: "POST",
+    url: `/api/booking-web/hotels/hotel/bookings/quotes/${id}/accept`,
+    headers: { "idempotency-key": "accept-1" },
+    payload,
+  });
+  expect(conflict.statusCode).toBe(409);
+  expect(conflict.json()).not.toHaveProperty("roomTypeIds");
 });
 
 it("completes a card payment only when card acceptance is switched on", async () => {
