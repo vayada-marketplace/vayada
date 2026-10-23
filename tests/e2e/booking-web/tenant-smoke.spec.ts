@@ -62,6 +62,24 @@ test.describe("booking-web tenant smoke", () => {
     await assertHealthy();
   });
 
+  test("paints the published brand colour on the guest page (VAY-2318)", async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await mockBookingApis(page, { primaryColor: "#5E0000" });
+    await page.goto("/");
+    const contact = page.locator("nav").getByRole("button", { name: "Contact", exact: true });
+    // primary-600 is the colour 12% darker, as the Booking Admin preview draws it.
+    await expect(contact).toHaveCSS("background-color", "rgb(83, 0, 0)");
+    await expect(page.getByRole("button", { name: /Check Availability/i })).toHaveCSS(
+      "background-color",
+      "rgb(83, 0, 0)",
+    );
+    const reject = page.getByRole("button", { name: "Reject analytics" });
+    if (await reject.isVisible()) await reject.click();
+    await page.screenshot({ path: testInfo.outputPath("brand-colour-5e0000-1440.png") });
+  });
+
   test("shows WhatsApp only when the hotel publishes a WhatsApp number", async ({ page }) => {
     await mockBookingApis(page, {
       publicContacts: [

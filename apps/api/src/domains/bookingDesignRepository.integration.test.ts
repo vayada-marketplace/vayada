@@ -160,6 +160,30 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Booking design repository", () =
     ]);
   });
 
+  it("stores a Design Studio colour outside the setup swatches (VAY-2318)", async () => {
+    await expect(
+      repository.upsertDesign(command("studio-red", 0, "#5E0000", "grand-classic")),
+    ).resolves.toMatchObject({
+      ok: true,
+      outcome: "created",
+      design: { revision: 1, choices: { primaryColor: "#5E0000", fontPairing: "grand-classic" } },
+    });
+    await expect(
+      repository.getCurrentDesign({ organizationId, propertyId }),
+    ).resolves.toMatchObject({
+      revision: 1,
+      choices: { primaryColor: "#5E0000", fontPairing: "grand-classic" },
+    });
+    // The domain refuses unreadable colours; the table still takes only uppercase hex.
+    const constraint = await admin.query<{ definition: string }>(
+      `SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
+       WHERE conname = 'chk_booking_design_primary_color'`,
+    );
+    expect(constraint.rows).toEqual([
+      { definition: "CHECK ((primary_color ~ '^#[0-9A-F]{6}$'::text))" },
+    ]);
+  });
+
   it("re-authorizes and exactly replays without duplicate audit or emission", async () => {
     const first = await repository.upsertDesign(
       command("exact-replay", 0, "#2D6A4F", "grand-classic"),

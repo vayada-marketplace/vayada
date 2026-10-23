@@ -141,6 +141,20 @@ export interface BookingAdminDesignSettingsRequest {
   body: Partial<BookingAdminDesignSettingsFixture> | null;
 }
 
+/** The booking design revision guests' colour and font come from (VAY-2318). */
+export interface BookingAdminBookingDesignFixture {
+  contractVersion: "booking-design.v1";
+  propertyId: string;
+  revision: number;
+  choices: { primaryColor: string; fontPairing: string };
+  createdAt: string;
+}
+
+export interface BookingAdminBookingDesignRequest {
+  method: string;
+  body: { expectedRevision: number; primaryColor: string; fontPairing: string } | null;
+}
+
 export interface BookingAdminLastMinuteSettingsFixture {
   enabled: boolean;
   stackWithPromo: boolean;
@@ -330,6 +344,16 @@ export const defaultBookingAdminDesignSettings: BookingAdminDesignSettingsFixtur
   fontPairing: "modern-minimalist",
 };
 
+export const BOOKING_ADMIN_BOOKING_DESIGN_PATH = `/api/booking/properties/${BOOKING_ADMIN_PROPERTY_ID}/booking-design`;
+
+export const defaultBookingAdminBookingDesign: BookingAdminBookingDesignFixture = {
+  contractVersion: "booking-design.v1",
+  propertyId: BOOKING_ADMIN_PROPERTY_ID,
+  revision: 1,
+  choices: { primaryColor: "#0077B6", fontPairing: "modern-minimalist" },
+  createdAt: "2026-09-01T10:00:00.000Z",
+};
+
 const defaultLastMinuteSettings: BookingAdminLastMinuteSettingsFixture = {
   enabled: false,
   stackWithPromo: false,
@@ -473,6 +497,9 @@ export async function mockBookingAdminShellRoutes(
   );
   await page.route("**/api/booking/hotels/*/settings/design", (route) =>
     route.fulfill({ json: defaultBookingAdminDesignSettings }),
+  );
+  await page.route(`**${BOOKING_ADMIN_BOOKING_DESIGN_PATH}`, (route) =>
+    route.fulfill({ json: defaultBookingAdminBookingDesign }),
   );
   await page.route("**/api/hotel-setup/status**", (route) =>
     route.fulfill({
@@ -679,9 +706,38 @@ export async function mockBookingAdminShellRoutes(
 export async function mockBookingAdminDesignSettings(
   page: Page,
   initial: BookingAdminDesignSettingsFixture = defaultBookingAdminDesignSettings,
-): Promise<{ requests: BookingAdminDesignSettingsRequest[] }> {
+  initialDesign: BookingAdminBookingDesignFixture = defaultBookingAdminBookingDesign,
+): Promise<{
+  requests: BookingAdminDesignSettingsRequest[];
+  bookingDesignRequests: BookingAdminBookingDesignRequest[];
+}> {
   const settings = { ...initial };
   const requests: BookingAdminDesignSettingsRequest[] = [];
+  let design = initialDesign;
+  const bookingDesignRequests: BookingAdminBookingDesignRequest[] = [];
+
+  await page.route(`**${BOOKING_ADMIN_BOOKING_DESIGN_PATH}`, (route) => {
+    const request = route.request();
+    if (request.method() !== "PUT") {
+      bookingDesignRequests.push({ method: request.method(), body: null });
+      return route.fulfill({ json: design });
+    }
+    const body = request.postDataJSON() as NonNullable<BookingAdminBookingDesignRequest["body"]>;
+    bookingDesignRequests.push({ method: "PUT", body });
+    if (body.expectedRevision !== design.revision) {
+      return route.fulfill({
+        status: 409,
+        json: { code: "design_revision_conflict", currentRevision: design.revision },
+      });
+    }
+    design = {
+      ...design,
+      revision: design.revision + 1,
+      choices: { primaryColor: body.primaryColor, fontPairing: body.fontPairing },
+      createdAt: "2026-10-23T10:00:00.000Z",
+    };
+    return route.fulfill({ json: { outcome: "updated", design } });
+  });
 
   await page.route("**/api/booking/hotels/*/settings/design", (route) => {
     const request = route.request();
@@ -698,7 +754,7 @@ export async function mockBookingAdminDesignSettings(
     return route.fulfill({ json: settings });
   });
 
-  return { requests };
+  return { requests, bookingDesignRequests };
 }
 
 function fakeBookingAdminJwt(hotelIds: string[] = [BOOKING_ADMIN_HOTEL_ID]): string {

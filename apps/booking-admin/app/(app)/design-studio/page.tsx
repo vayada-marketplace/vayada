@@ -3,8 +3,10 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { EyeIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { BOOKING_GUEST_LANGUAGE_CODES } from "@vayada/locale-constants";
+import type { BookingDesignFontPairing, BookingDesignRevision } from "@vayada/domain-booking";
 import { BookingPagePreview } from "@vayada/product-onboarding";
 import { settingsService, type CustomDomainStatus } from "@/services/settings";
+import { bookingDesignClient } from "@/services/api/bookingDesignClient";
 import { requireSelectedBookingHotelId } from "@/services/api/bookingHotelScope";
 import { getBookingHotelPropertyLink } from "@/services/api/bookingPropertyLinkClient";
 import { publishPublicBookabilityProfile } from "@/services/api/publicBookabilityPublicationClient";
@@ -81,6 +83,7 @@ export default function DesignStudioPage() {
   const logoInputRef = useRef<HTMLInputElement>(null);
   const designHotelIdRef = useRef<string | null>(null);
   const propertyIdRef = useRef<string | null>(null);
+  const designRef = useRef<BookingDesignRevision | null>(null);
   const profileRevisionRef = useRef<number | null>(null);
   const galleryOverflowRef = useRef<PropertyGalleryImage[]>([]);
   const galleryWriteInFlightRef = useRef(false);
@@ -163,6 +166,7 @@ export default function DesignStudioPage() {
     setLoadFailed(false);
     setDomainStatus(null);
     propertyIdRef.current = null;
+    designRef.current = null;
     profileRevisionRef.current = null;
     try {
       designHotelIdRef.current ??= requireSelectedBookingHotelId();
@@ -190,10 +194,11 @@ export default function DesignStudioPage() {
         return Promise.all([
           sharedHotelSetupApi.getPropertyProfile(propertyId),
           sharedHotelSetupApi.getPublicPropertyProfile(propertyId),
+          bookingDesignClient.load(propertyId, { cache: "no-store" }),
         ]);
       }),
     ])
-      .then(([settings, property, [canonicalProfile, publicProfile]]) => {
+      .then(([settings, property, [canonicalProfile, publicProfile, design]]) => {
         applyPublicGallery(publicProfile);
         setHeaderLogo(settings.header_logo || "");
         setHeaderLogoMediaObjectId(settings.header_logo_media_object_id);
@@ -207,8 +212,13 @@ export default function DesignStudioPage() {
         if (savedHero) setHeroImage(savedHero);
         if (settings.hero_heading) setHeroHeading(settings.hero_heading);
         if (settings.hero_subtext) setHeroSubtext(settings.hero_subtext);
-        if (settings.primary_color) setPrimaryColor(settings.primary_color);
-        if (settings.font_pairing) setSelectedFont(settings.font_pairing);
+        // Guests get the booking design's colour and font (VAY-2318); the settings row only
+        // covers hotels that have no booking design yet.
+        designRef.current = design;
+        const savedColor = design?.choices.primaryColor ?? settings.primary_color;
+        if (savedColor) setPrimaryColor(savedColor);
+        const savedFont = design?.choices.fontPairing ?? settings.font_pairing;
+        if (savedFont) setSelectedFont(savedFont);
         setPropertyName(property?.property_name || canonicalProfile.profile.displayName);
         if (property?.slug) setPropertySlug(property.slug);
         if (property?.default_currency) setDefaultCurrency(property.default_currency);
@@ -675,6 +685,27 @@ export default function DesignStudioPage() {
     }
   };
 
+  // The booking page takes its colour and font from the booking design, which the setup design
+  // step also writes, so Save writes them there too (VAY-2318).
+  const saveBookingDesign = async () => {
+    const propertyId = propertyIdRef.current;
+    if (!propertyId) throw new Error("The booking design property is not loaded.");
+    const current = designRef.current;
+    const choices = {
+      primaryColor: primaryColor.toUpperCase(),
+      fontPairing: selectedFont as BookingDesignFontPairing,
+    };
+    if (
+      current?.choices.primaryColor === choices.primaryColor &&
+      current.choices.fontPairing === choices.fontPairing
+    )
+      return;
+    designRef.current = await bookingDesignClient.save(propertyId, {
+      expectedRevision: current?.revision ?? 0,
+      choices,
+    });
+  };
+
   const handleSave = async () => {
     const hotelId = designHotelIdRef.current;
     if (!hotelId) return;
@@ -695,6 +726,7 @@ export default function DesignStudioPage() {
         },
         hotelId,
       );
+      await saveBookingDesign();
       try {
         await publishPublicBookabilityProfile(hotelId);
       } catch {

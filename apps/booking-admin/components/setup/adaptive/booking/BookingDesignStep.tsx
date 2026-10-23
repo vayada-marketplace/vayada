@@ -7,7 +7,9 @@ import {
   BOOKING_DESIGN_FONT_PAIRINGS,
   BOOKING_DESIGN_PRIMARY_COLORS,
   createBookingDesignButtonColors,
+  isBookingDesignPrimaryColor,
   type BookingDesignFontPairing,
+  type BookingDesignPresetColor,
   type BookingDesignPrimaryColor,
   type BookingDesignReadinessResult,
   type BookingDesignRendererSnapshot,
@@ -46,7 +48,7 @@ type BookingDesignForm = {
   fontPairing: BookingDesignFontPairing;
 };
 
-const COLOR_LABELS: Record<BookingDesignPrimaryColor, string> = {
+const COLOR_LABELS: Record<BookingDesignPresetColor, string> = {
   "#4F46E5": "vayada indigo",
   "#0077B6": "Ocean blue",
   "#2D6A4F": "Forest green",
@@ -75,6 +77,7 @@ export function BookingDesignStep(props: AdaptiveSetupStepComponentProps) {
     reportRevisionConflict,
   } = props;
   const [form, setForm] = useState<BookingDesignForm | null>(null);
+  const [savedColor, setSavedColor] = useState<BookingDesignPrimaryColor | null>(null);
   const formRef = useRef<BookingDesignForm | null>(null);
   const designRef = useRef<BookingDesignRevision | null>(null);
   const readinessRef = useRef<BookingDesignReadinessResult | null>(null);
@@ -117,6 +120,7 @@ export function BookingDesignStep(props: AdaptiveSetupStepComponentProps) {
           throw new Error("The private Booking preview did not match the saved design.");
         }
         designRef.current = design;
+        setSavedColor(design?.choices.primaryColor ?? null);
         readinessRef.current = readiness;
         savedThisSessionRef.current = null;
         if (preserveLocalOnReloadRef.current && formRef.current) {
@@ -339,13 +343,20 @@ export function BookingDesignStep(props: AdaptiveSetupStepComponentProps) {
               Choose a curated, contrast-safe color for primary actions.
             </p>
             <div className="mt-4 flex flex-wrap gap-3">
-              {BOOKING_DESIGN_PRIMARY_COLORS.map((color) => {
+              {/* A colour picked in Design Studio stays selectable here (VAY-2318). */}
+              {[
+                ...new Set<BookingDesignPrimaryColor>([
+                  ...BOOKING_DESIGN_PRIMARY_COLORS,
+                  ...(savedColor ? [savedColor] : []),
+                  form.primaryColor,
+                ]),
+              ].map((color) => {
                 const checked = form.primaryColor === color;
                 return (
                   <label
                     key={color}
                     className="relative cursor-pointer rounded-full outline-none focus-within:ring-2 focus-within:ring-primary-600 focus-within:ring-offset-2"
-                    title={COLOR_LABELS[color]}
+                    title={colorLabel(color)}
                   >
                     <input
                       type="radio"
@@ -354,7 +365,7 @@ export function BookingDesignStep(props: AdaptiveSetupStepComponentProps) {
                       checked={checked}
                       onChange={() => update({ primaryColor: color }, "booking.primary_color")}
                       className="sr-only"
-                      aria-label={COLOR_LABELS[color]}
+                      aria-label={colorLabel(color)}
                     />
                     <span
                       className="flex h-11 w-11 items-center justify-center rounded-full border-2 border-white shadow ring-1 ring-gray-300"
@@ -369,7 +380,7 @@ export function BookingDesignStep(props: AdaptiveSetupStepComponentProps) {
               })}
             </div>
             <p className="mt-3 text-sm font-medium text-gray-700">
-              {COLOR_LABELS[form.primaryColor]}
+              {colorLabel(form.primaryColor)}
             </p>
           </fieldset>
 
@@ -554,11 +565,9 @@ function hydrate(
   if (!draft) return form;
   if (
     draft.dirtyFields.includes("booking.primary_color") &&
-    BOOKING_DESIGN_PRIMARY_COLORS.includes(
-      draft.payload["booking.primary_color"] as BookingDesignPrimaryColor,
-    )
+    isBookingDesignPrimaryColor(draft.payload["booking.primary_color"])
   )
-    form.primaryColor = draft.payload["booking.primary_color"] as BookingDesignPrimaryColor;
+    form.primaryColor = draft.payload["booking.primary_color"];
   if (
     draft.dirtyFields.includes("booking.font_pairing") &&
     Object.hasOwn(
@@ -581,6 +590,12 @@ function mergeLocalDesign(
   };
 }
 class RevisionMismatchError extends Error {}
+
+function colorLabel(color: BookingDesignPrimaryColor): string {
+  return Object.hasOwn(COLOR_LABELS, color)
+    ? COLOR_LABELS[color as BookingDesignPresetColor]
+    : color;
+}
 
 function readinessMessage(readiness: BookingDesignReadinessResult): string | null {
   if (readiness.outcome === "ready") return null;

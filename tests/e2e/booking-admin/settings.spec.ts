@@ -1,7 +1,9 @@
 import { expect, test, type Page } from "@playwright/test";
 import { stripeOnboardingPropertyKey } from "../../../apps/booking-admin/lib/utils/stripeOnboardingRefresh";
 import {
+  BOOKING_ADMIN_BOOKING_DESIGN_PATH,
   BOOKING_ADMIN_CUSTOM_DOMAIN_PATH,
+  BOOKING_ADMIN_DESIGN_SETTINGS_PATH,
   BOOKING_ADMIN_FINANCE_PLAN_STATUS_PATH,
   BOOKING_ADMIN_FINANCE_PAYMENT_SETTINGS_PATH,
   BOOKING_ADMIN_HOTEL_ID,
@@ -13,6 +15,7 @@ import {
   BOOKING_ADMIN_PUBLIC_PROPERTY_PROFILE_PATH,
   defaultBookingAdminPropertyProfile,
   defaultBookingAdminPublicPropertyProfile,
+  defaultBookingAdminDesignSettings,
   defaultBookingAdminPropertySettings,
   defaultCustomDomain,
   mockBookingAdminDesignSettings,
@@ -649,6 +652,63 @@ test.describe("booking-admin settings no-legacy guard", () => {
     await expect
       .poll(() => designRequests.find((request) => request.method === "PATCH")?.body)
       .toMatchObject({ showCurrencySelector: false });
+    await assertHealthy();
+  });
+
+  test("saves the brand colour and font to the booking design guests see", async ({
+    page,
+  }, testInfo) => {
+    test.skip(
+      !PROD,
+      "Requires a production booking-admin build so the authenticated shell hydrates.",
+    );
+
+    const assertHealthy = watchPageHealth(page, testInfo);
+    await mockBookingAdminAuthenticatedSession(page);
+    await mockBookingAdminShellRoutes(page);
+    // The settings row holds an older colour; the live page uses the booking design (VAY-2318).
+    const { requests, bookingDesignRequests } = await mockBookingAdminDesignSettings(page, {
+      ...defaultBookingAdminDesignSettings,
+      primaryColor: "#2563EB",
+      fontPairing: "high-end-serif",
+    });
+    const order: string[] = [];
+    page.on("request", (request) => {
+      const path = new URL(request.url()).pathname;
+      if (request.method() === "PATCH" && path === BOOKING_ADMIN_DESIGN_SETTINGS_PATH)
+        order.push("settings");
+      if (request.method() === "PUT" && path === BOOKING_ADMIN_BOOKING_DESIGN_PATH)
+        order.push("design");
+      if (request.method() === "POST" && path === BOOKING_ADMIN_PUBLIC_BOOKABILITY_PATH)
+        order.push("publish");
+    });
+
+    await page.goto("/design-studio?tab=colors");
+    const hex = page.getByRole("textbox", { name: "Primary brand color", exact: true });
+    await expect(hex).toHaveValue("#0077B6");
+    await hex.fill("#5e0000");
+    await page.getByRole("button", { name: "Typography" }).click();
+    await page.getByRole("button", { name: /Grand Classic/ }).click();
+    await page.getByRole("button", { name: "Save Changes" }).click();
+
+    await expect(page.getByText("Design settings saved successfully")).toBeVisible();
+    expect(bookingDesignRequests.filter(({ method }) => method === "PUT")).toEqual([
+      {
+        method: "PUT",
+        body: { expectedRevision: 1, primaryColor: "#5E0000", fontPairing: "grand-classic" },
+      },
+    ]);
+    expect(requests.find(({ method }) => method === "PATCH")?.body).toMatchObject({
+      primaryColor: "#5e0000",
+      fontPairing: "grand-classic",
+    });
+    expect(order).toEqual(["settings", "design", "publish"]);
+    await page.screenshot({ path: testInfo.outputPath("design-studio-brand-colour-saved.png") });
+
+    // A second Save with nothing changed does not write a new booking design revision.
+    await page.getByRole("button", { name: "Save Changes" }).click();
+    await expect.poll(() => order.filter((step) => step === "publish").length).toBe(2);
+    expect(order.filter((step) => step === "design")).toHaveLength(1);
     await assertHealthy();
   });
 
