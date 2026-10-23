@@ -41,7 +41,8 @@ export function readOptions(env) {
   const sha = (env.TRAIN_SHA ?? "").trim();
   if (sha && !/^[0-9a-f]{40}$/.test(sha))
     throw new Error("TRAIN_SHA must be a full 40-character sha");
-  const admission = (env.TRAIN_ADMISSION ?? "pr").trim();
+  // Flamur chose push admission on 2026-10-23 (VAY-2311); pr waits for a person to merge.
+  const admission = (env.TRAIN_ADMISSION || "push").trim();
   if (!["pr", "push"].includes(admission)) throw new Error("TRAIN_ADMISSION must be pr or push");
   const summary = (env.TRAIN_SUMMARY ?? "").trim();
   if (!summary) throw new Error("TRAIN_SUMMARY is required");

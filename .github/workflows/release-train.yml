@@ -24,11 +24,11 @@ on:
         type: boolean
         default: true
       admission:
-        description: "API image admission on the platform: pr (a person merges the admission PR) or push"
+        description: "API image admission on the platform: push (commit to main after the list tests; Flamur 2026-10-23) or pr (a person merges the admission PR)"
         required: true
         type: choice
-        options: [pr, push]
-        default: pr
+        options: [push, pr]
+        default: push
       keep_hold:
         description: Keep the merge queue hold open after publish (close it by hand after the deploy)
         required: true
