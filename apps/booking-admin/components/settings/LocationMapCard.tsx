@@ -91,6 +91,7 @@ export function LocationMapCard({
     summary.property,
   );
   const onePropertyPin = pins.length === 1 && pins[0].kind === "property";
+  const propertyShown = !!summary.property.pin && summary.property.mapDisplayMode !== "hidden";
   // Into PMS with this hotel selected: the sign-in handoff when available, else PMS's own sign-in.
   const openPms = async (targetPath: string) => {
     const csrfToken = getAuthCsrfToken();
@@ -162,8 +163,9 @@ export function LocationMapCard({
         <>
           <div className={`space-y-2 border-t border-gray-100 pt-3.5 ${indent}`}>
             {pins.length === 0 ? (
-              // Rooms with a place of their own but no pin get their own warning below.
-              (propertyRoomsOffMap.length > 0 || unpinnedRooms.length === 0) && (
+              // With the property's pin shown, only rooms without a pin of their own are missing: their
+              // warning is below.
+              !propertyShown && (
                 <Warning
                   text={
                     summary.property.pin
@@ -206,7 +208,7 @@ export function LocationMapCard({
                     </li>
                   ))}
                 </ol>
-                {onePropertyPin && (
+                {onePropertyPin && unpinnedRooms.length === 0 && (
                   <p className="text-xs text-gray-500">
                     {pins[0].approximate
                       ? t("settings.locationMap.approximateHint")

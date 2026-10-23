@@ -54,6 +54,11 @@ function metresBetween(a: LocationMapPoint, b: LocationMapPoint): number {
   return Math.hypot(x, y) * 6_371_000;
 }
 
+/** Two pins guests would see as one place: within SAME_PLACE_METRES of each other. */
+export function isSamePlace(a: LocationMapPoint, b: LocationMapPoint): boolean {
+  return metresBetween(a, b) < SAME_PLACE_METRES;
+}
+
 type Group = {
   pin: LocationMapPoint;
   approximate: boolean;
@@ -85,12 +90,11 @@ export function locationMapPins(
       continue;
     }
     // Each room joins the first place within SAME_PLACE_METRES shown the same way (an exact spot or an
-    // area), in room order; an exact room that close to the property's exact pin is at the property.
+    // area), in room order; an exact room that close to the property's exact pin is at the property. A room
+    // shown as an area keeps its own place: rounded, it may share the property's area by chance.
     const approximate = room.approximate === true;
-    const near = [...ownGroups, ...(propertyGroup ? [propertyGroup] : [])].find(
-      (group) =>
-        group.approximate === approximate &&
-        metresBetween(group.pin, room.pin!) < SAME_PLACE_METRES,
+    const near = [...ownGroups, ...(propertyGroup && !approximate ? [propertyGroup] : [])].find(
+      (group) => group.approximate === approximate && isSamePlace(group.pin, room.pin!),
     );
     if (near) near.rooms.push(room);
     else ownGroups.push({ pin: room.pin, approximate, rooms: [room], property: false });
@@ -99,8 +103,9 @@ export function locationMapPins(
     ...(propertyGroup && propertyGroup.rooms.length > 0 ? [propertyGroup] : []),
     ...ownGroups,
   ];
-  // One place for every room: guests see the property's name, as for a hotel at one address.
-  const everyRoomAtOneSpot = groups.length === 1 && groups[0].rooms.length === rooms.length;
+  // One exact spot for every room: guests see the property's name, as for a hotel at one address.
+  const everyRoomAtOneSpot =
+    groups.length === 1 && !groups[0].approximate && groups[0].rooms.length === rooms.length;
   return {
     pins: groups.map((group) => {
       const asProperty = group.property || everyRoomAtOneSpot;

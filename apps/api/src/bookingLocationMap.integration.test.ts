@@ -129,6 +129,14 @@ describe.skipIf(!TEST_DATABASE_URL)("Booking location map (runtime login)", () =
           atProperty: false,
           approximate: false,
         },
+        {
+          roomTypeId: expect.any(String),
+          name: "Lobby Room",
+          address: null,
+          pin: null,
+          atProperty: true,
+          approximate: false,
+        },
       ],
       property: {
         name: "Alpenrose Apartments",
@@ -244,6 +252,8 @@ async function seedProperty(admin: pg.Pool, withSettings: boolean): Promise<stri
       },
     ],
     ["Annex", true, 5, { locationSource: "custom", locationAddress: "Not placed yet" }],
+    // Saved before VAY-2321 with the hotel's own pin: at the property, so its visibility still holds.
+    ["Lobby Room", true, 6, { latitude: 48.13941, longitude: 11.5835 }],
   ];
   for (const [name, active, sortOrder, attributes] of rooms)
     await admin.query(

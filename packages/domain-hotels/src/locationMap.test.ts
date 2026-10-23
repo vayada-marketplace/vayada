@@ -178,6 +178,24 @@ describe("location map pins (VAY-2126, VAY-2321)", () => {
       }),
       expect.objectContaining({ roomTypeIds: ["d"], approximate: false }),
     ]);
+    // A property shown as an area takes no room onto its pin, not even one rounded to the same area.
+    expect(
+      locationMapPins([atProperty("a"), room("b", [48.14, 11.58], "Altstadt", area)], {
+        ...property,
+        pin: { latitude: 48.14, longitude: 11.58 },
+        mapDisplayMode: "approximate",
+      }).pins,
+    ).toEqual([
+      expect.objectContaining({ roomTypeIds: ["a"], kind: "property", approximate: true }),
+      expect.objectContaining({ roomTypeIds: ["b"], kind: "rooms", address: "Altstadt" }),
+    ]);
+    // Every room in one area: still named after its rooms, not the property.
+    expect(
+      locationMapPins(
+        [room("b", [48.14, 11.58], null, area), room("c", [48.14, 11.58], null, area)],
+        property,
+      ).pins,
+    ).toEqual([expect.objectContaining({ label: "Room b, Room c", kind: "rooms" })]);
     // A property shown as an area takes no exact room onto its pin.
     expect(
       locationMapPins([atProperty("a"), room("b", [48.1394, 11.5835])], {

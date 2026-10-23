@@ -15622,7 +15622,7 @@ describe("vayada-api", () => {
 
   it("saves how guests see a PMS room-type's place and rejects unknown values (VAY-2321)", async () => {
     const commandRepository = createPmsOperationsCommandRepository(structuredClone(pmsRoomTypes));
-    app = buildAuthenticatedApp({
+    const server = buildAuthenticatedApp({
       permissions: ["pms.operations.manage"],
       entitlements: [
         {
@@ -15638,8 +15638,9 @@ describe("vayada-api", () => {
       ],
       pmsOperationsCommandRepository: commandRepository,
     });
+    app = server;
     const patch = (key: string, payload: Record<string, unknown>) =>
-      injectJson(app, {
+      injectJson(server, {
         method: "PATCH",
         url: `/api/pms/properties/${pmsPropertyId}/room-types/${pmsRoomTypes[0].roomTypeId}`,
         payload: { commandId: `cmd-${key}`, idempotencyKey: key, ...payload },
