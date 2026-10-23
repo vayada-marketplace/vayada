@@ -10,6 +10,8 @@ import {
 import { processNextPmsAcceptedPricingReservationJob } from "./pmsAcceptedPricingReservationWorker.js";
 import { createTargetPmsInventoryReservationPort } from "./pmsInventoryReservation.js";
 import { externalBookingChanges } from "../integrations/externalBookingChanges.js";
+import { loadBookingNotificationSnapshot } from "../jobs/bookingEmails.js";
+import { createTargetBookingReservationsReadRepository } from "../platform/bookingReservations.js";
 import { createTargetBookingWebCheckoutAdapter } from "../routes/bookingWebPublic.js";
 import { createBookingHostActions } from "./bookingHostActions.js";
 import { targetBookingHostActionGuards } from "./bookingHostActionGuards.js";
@@ -857,6 +859,33 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
             { position: 2, status: "pending", adults: 2, children: 1 },
             { position: 3, status: "pending", adults: 2, children: 1 },
           ]);
+        if (scenario === "repository-complete") {
+          // VAY-2320: emails and Booking Admin name every booked room type, not the first one,
+          // in room order (the names sort the other way round).
+          await db.query(
+            "UPDATE pms.room_types SET name=CASE WHEN id=$1 THEN 'Zeta Deluxe' ELSE 'Alpha Garden' END WHERE id=ANY($2::uuid[])",
+            [types[0], types],
+          );
+          const snapshot = await loadBookingNotificationSnapshot(db, {
+            propertyId,
+            guestBookingId: bookingId,
+          });
+          expect(snapshot?.accommodation).toBe("2 × Zeta Deluxe + Alpha Garden");
+          const listed = await createTargetBookingReservationsReadRepository({
+            connectionString: url!,
+            pool: db as never,
+          }).listReservationsByPropertyId(propertyId, {
+            limit: 10,
+            offset: 0,
+            canReadGuestContact: false,
+          });
+          expect(
+            listed.reservations.find((reservation) => reservation.id === bookingId)?.roomLines,
+          ).toEqual([
+            { roomTypeId: types[0], roomName: "Zeta Deluxe", roomCount: 2 },
+            { roomTypeId: types[1], roomName: "Alpha Garden", roomCount: 1 },
+          ]);
+        }
         if (scenario.endsWith("-two-rates"))
           // Each room keeps its own rate: the third room is the first type at the second rate.
           expect(
@@ -965,6 +994,26 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
           occurredAt: new Date("2026-09-21T08:00:00Z"),
         });
         const guest = { guest_email: "jane@example.test" };
+        // VAY-2320: the guest's booking lists each room with its own type, guests, meal and terms.
+        const looked = (await adapter.lookup(
+          propertyId,
+          { bookingReference: bookingId, guestEmail: "jane@example.test" },
+          context("l"),
+        )) as { bookedRooms?: unknown };
+        // With mixed terms the second room type is free until a week before arrival.
+        expect(looked.bookedRooms).toEqual(
+          [types[0], types[1], types[0]].map((roomTypeId) => ({
+            roomTypeId,
+            roomName: roomTypeId,
+            mealPlan: quote.rooms[0]!.mealPlan,
+            adults: 2,
+            children: 1,
+            cancellation:
+              scenario.endsWith("-mixed-terms") && roomTypeId === types[1]
+                ? { kind: "free_until_days_before_arrival", days: 7 }
+                : { kind: "partial_refund" },
+          })),
+        );
         expect(
           await adapter.cancelPreview(propertyId, bookingId, guest, context("p")),
         ).toMatchObject({

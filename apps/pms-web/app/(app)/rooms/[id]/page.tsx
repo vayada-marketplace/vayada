@@ -108,7 +108,11 @@ export default function EditRoomPage({ params }: { params: Promise<{ id: string 
             current.version !== room.version ||
             current.locationAddress !== room.locationAddress ||
             current.latitude !== room.latitude ||
-            current.longitude !== room.longitude
+            current.longitude !== room.longitude ||
+            current.locationSource !== room.locationSource ||
+            current.locationPrecision !== room.locationPrecision ||
+            current.locationArea !== room.locationArea ||
+            current.showMapInDetails !== room.showMapInDetails
           ) {
             pricesChanged();
           }

@@ -592,6 +592,17 @@
     "loadingMap": "Loading map…",
     "mapFailed": "The map couldn't load right now."
   },
+  "roomPlace": {
+    "title": "Where you'll stay",
+    "distance": "{distance} from the main property",
+    "distanceAbout": "About {distance} from the main property",
+    "mapLabel": "Map of where you'll stay",
+    "expandMap": "Expand map",
+    "closeMap": "Close map",
+    "directions": "Directions",
+    "areaNote": "Shown as an area, not the exact spot.",
+    "reception": "Reception"
+  },
   "guestPicker": {
     "title": "Who's coming?",
     "adults": "Adults",
