@@ -117,6 +117,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   const t = useTranslations("home");
   const tAddons = useTranslations("addons");
   const tGuestErrors = useTranslations("guestErrors");
+  const tPayment = useTranslations("payment");
   const { hotel } = useHotel();
   const [termsAcknowledgement, setTermsAcknowledgement] =
     useState<QuoteTermsAcknowledgement | null>(null);
@@ -221,14 +222,23 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   }, [slug]);
   // Bank transfer and PayPal need their payment deadline to end before check-in (VAY-2145).
   const paymentMethods = bookingPageMethodsForArrival(pagePayment, checkIn);
-  const tooSoon = pagePayment.methods.filter((method) => !paymentMethods.includes(method));
+  // VAY-2309: once the catalog names them, only the ways every chosen rate takes are offered.
+  const rateMethods = rooms && chosenRatesPaymentMethods(rooms, choices);
+  const offeredMethods = rateMethods
+    ? paymentMethods.filter((method) => rateMethods.includes(method))
+    : paymentMethods;
+  // No way the hotel offers fits the chosen rates: no price is asked for, and the steps say so.
+  const noWayToPay = pagePaymentLoaded && !!rateMethods && !offeredMethods.length;
+  const tooSoon = pagePayment.methods.filter(
+    (method) => !paymentMethods.includes(method) && (!rateMethods || rateMethods.includes(method)),
+  );
   useEffect(() => {
     // A restored choice waits for the hotel's own methods before it is judged.
     if (!pagePaymentLoaded) return;
-    setPayment((current) => (current && !paymentMethods.includes(current) ? "" : current));
-    // paymentMethods is derived from these two.
+    setPayment((current) => (current && !offeredMethods.includes(current) ? "" : current));
+    // offeredMethods is derived from these.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pagePayment, checkIn, pagePaymentLoaded]);
+  }, [pagePayment, checkIn, pagePaymentLoaded, JSON.stringify(rateMethods)]);
   useEffect(() => {
     const controller = new AbortController();
     setRooms(null);
@@ -254,10 +264,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   // chosen rates take, paying at the hotel first (nothing is charged now); a way the rooms refuse
   // anyway moves on to the next.
   const [fallback, setFallback] = useState(0);
-  const defaultMethods = defaultQuoteMethods(
-    paymentMethods,
-    rooms && chosenRatesPaymentMethods(rooms, choices),
-  );
+  const defaultMethods = defaultQuoteMethods(paymentMethods, rateMethods);
   // The chosen rates can change the list under a moved-on fallback: it stays on the last way.
   const method =
     payment ||
@@ -308,7 +315,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   };
   const { quote, error, errorStatus, errorCode, loading, submit } = useReplacementQuote(
     slug,
-    request,
+    noWayToPay ? null : request,
   );
   const { formatPrice } = useCurrency();
   // The old pages' prices: the charged currency ("€410"), then any approximation.
@@ -495,12 +502,12 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   ]);
   // After the rooms, the price follows every change; a refused way to pay moves to the next one.
   useEffect(() => {
-    if (step === "rooms" || !request || quote || loading || error) return;
+    if (step === "rooms" || !request || noWayToPay || quote || loading || error) return;
     const timer = setTimeout(submit, 400);
     return () => clearTimeout(timer);
     // submit belongs to this request.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [JSON.stringify(request), step, quote, loading, error]);
+  }, [JSON.stringify(request), step, noWayToPay, quote, loading, error]);
   // Only a refusal of this price moves on; a failed request can be tried again.
   const refused = !!errorStatus && errorStatus >= 400 && errorStatus < 500 && errorStatus !== 429;
   useEffect(() => {
@@ -712,24 +719,35 @@ function RoomQuoteForm({ slug }: { slug: string }) {
       : undefined);
   // VAY-2309: a way to pay the chosen rates don't take is named, in the guest's language, where
   // the guest can pick another; elsewhere another room is the way out.
-  const priceNotice = error && !quote && (
+  const priceNotice = noWayToPay ? (
     <Notice
       tone="red"
-      title={
-        errorCode === "PAYMENT_METHOD_NOT_ACCEPTED" &&
-        step === "payment" &&
-        paymentMethods.length > 1
-          ? tGuestErrors("paymentMethodNotAccepted")
-          : error
-      }
-      action={
-        refused
-          ? { label: "Choose another room", onClick: backToRooms }
-          : { label: "Try again", onClick: submit }
-      }
+      title={tPayment("noWayToPay")}
+      action={{ label: tPayment("chooseAnotherRoom"), onClick: backToRooms }}
     >
       No booking was made and nothing was charged.
     </Notice>
+  ) : (
+    error &&
+    !quote && (
+      <Notice
+        tone="red"
+        title={
+          errorCode === "PAYMENT_METHOD_NOT_ACCEPTED" &&
+          step === "payment" &&
+          offeredMethods.length > 1
+            ? tGuestErrors("paymentMethodNotAccepted")
+            : error
+        }
+        action={
+          refused
+            ? { label: "Choose another room", onClick: backToRooms }
+            : { label: "Try again", onClick: submit }
+        }
+      >
+        No booking was made and nothing was charged.
+      </Notice>
+    )
   );
   const titles: Record<BookStep, string> = {
     rooms: "Choose rooms and get a price",
@@ -1152,7 +1170,8 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                 guestEmail={guest.email}
                 onChangeDetails={() => goBack("details")}
                 method={method}
-                available={paymentMethods}
+                available={offeredMethods}
+                unavailable={noWayToPay ? priceNotice : null}
                 tooSoon={
                   tooSoon.length
                     ? `${tooSoon.map((value) => bookingPagePaymentMethodLabels[value]).join(" and ")} ${

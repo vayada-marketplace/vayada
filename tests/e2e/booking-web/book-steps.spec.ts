@@ -46,6 +46,8 @@ async function mockFlow(
   await page.route(`**/api/booking-web/hotels/${SEEDED_BOOKING_SLUG}/checkout-config`, (route) =>
     route.fulfill({ json: config }),
   );
+  // A test can change the rate's ways to pay later (the hotel changed them meanwhile).
+  const catalog = { paymentMethods: offerPaymentMethods };
   await page.route("**/pricing-offers", (route) =>
     route.fulfill({
       json: {
@@ -59,7 +61,7 @@ async function mockFlow(
                 publicOfferKey: offerKey,
                 currency: "EUR",
                 mealPlan: "room_only",
-                ...(offerPaymentMethods && { paymentMethods: offerPaymentMethods }),
+                ...(catalog.paymentMethods && { paymentMethods: catalog.paymentMethods }),
               },
             ],
           },
@@ -234,7 +236,7 @@ async function mockFlow(
     }),
   );
   await page.route("**/change-request**", (route) => route.fulfill({ status: 404, json: {} }));
-  return { accepted, prices };
+  return { accepted, prices, catalog };
 }
 
 for (const width of [1440, 390]) {
@@ -578,24 +580,44 @@ test("a way to pay the new choices don't take goes back to the hotel's own", asy
 
 // VAY-2309: the first price used to pay at the hotel before the guest picked a way, so a rate
 // paid by card was refused once ("Quote unavailable.", 404 in the console) before card worked.
-test("prices a rate paid by card with card from the first price", async ({ page }, testInfo) => {
-  const assertHealthy = watchPageHealth(page, testInfo, {
-    expectedMissingUrls: [/\/change-request/],
+// Payment now offers only the ways the chosen rates take.
+for (const width of [1440, 390]) {
+  test(`prices a rate paid by card with card first and offers only card at ${width}px`, async ({
+    page,
+  }, testInfo) => {
+    const assertHealthy = watchPageHealth(page, testInfo, {
+      expectedMissingUrls: [/\/change-request/],
+    });
+    if (width === 390) await page.setViewportSize({ width: 390, height: 844 });
+    const { prices } = await mockFlow(page, { offerPaymentMethods: ["card"] });
+    // As the API does for a non-refundable rate paid by card.
+    prices.refuse = "pay_at_property";
+    await page.goto(STAY);
+    await expect(page.getByRole("status", { name: "Your stay total" })).toContainText("€268");
+    await page.getByRole("button", { name: "Continue to your details" }).click();
+    await fillGuestDetails(page);
+    await page.getByRole("button", { name: "Continue to payment" }).click();
+    await expect(paymentOption(page, "card")).toHaveAttribute("aria-checked", "true");
+    await expect(orderTotal(page)).toHaveText("€268");
+    await page.screenshot({ path: testInfo.outputPath(`payment-card-rate-${width}.png`) });
+    await expect(paymentOption(page, "pay_at_property")).toHaveCount(0);
+    expect(prices.asked.length).toBeGreaterThan(0);
+    expect(prices.asked).not.toContain("pay_at_property");
+    await assertHealthy();
   });
-  const { prices } = await mockFlow(page, { offerPaymentMethods: ["card"] });
-  // As the API does for a non-refundable rate paid by card.
-  prices.refuse = "pay_at_property";
+}
+
+test("names a way to pay the rate doesn't take on Payment, in the guest's language", async ({
+  page,
+}) => {
+  // An older API names no ways to pay, so the page offers both and the API refuses one.
+  const { prices } = await mockFlow(page);
   await page.goto(STAY);
-  await expect(page.getByRole("status", { name: "Your stay total" })).toContainText("€268");
   await page.getByRole("button", { name: "Continue to your details" }).click();
   await fillGuestDetails(page);
   await page.getByRole("button", { name: "Continue to payment" }).click();
-  await expect(paymentOption(page, "card")).toHaveAttribute("aria-checked", "true");
+  await paymentOption(page, "card").click();
   await expect(orderTotal(page)).toHaveText("€268");
-  expect(prices.asked.length).toBeGreaterThan(0);
-  expect(prices.asked).not.toContain("pay_at_property");
-  await assertHealthy();
-  // Picking a way the rate doesn't take says so, in the guest's language too.
   Object.assign(prices, { refuse: "pay_at_property", code: "PAYMENT_METHOD_NOT_ACCEPTED" });
   await paymentOption(page, "pay_at_property").click();
   await expect(
@@ -624,3 +646,47 @@ test("asks for another way to pay only where the guest can pick one", async ({ p
   await expect(notice.getByRole("button", { name: "Choose another room" })).toBeVisible();
   await expect(page.getByText("Please choose another way to pay.")).toHaveCount(0);
 });
+
+for (const width of [1440, 390]) {
+  test(`says so when no way to pay is left for the chosen rate at ${width}px`, async ({
+    page,
+  }, testInfo) => {
+    if (width === 390) await page.setViewportSize({ width: 390, height: 844 });
+    const { prices, catalog } = await mockFlow(page, { offerPaymentMethods: ["card"] });
+    const noWay = page.getByRole("alert").filter({
+      hasText:
+        "The rooms you chose can't be paid for in any way this hotel offers. Please choose other rooms.",
+    });
+    await page.goto(STAY);
+    await page.getByRole("button", { name: "Continue to your details" }).click();
+    await fillGuestDetails(page);
+    await page.getByRole("button", { name: "Continue to payment" }).click();
+    await expect(paymentOption(page, "card")).toHaveAttribute("aria-checked", "true");
+    // Meanwhile the rate takes only a way this page doesn't offer: Payment says so instead of
+    // showing no way to pay, and asks for no price.
+    catalog.paymentMethods = ["paypal"];
+    const asked = prices.asked.length;
+    await page.reload();
+    const ways = page.getByRole("region", { name: "How would you like to pay?" });
+    await expect(ways.getByRole("alert")).toContainText(
+      "The rooms you chose can't be paid for in any way this hotel offers.",
+    );
+    await expect(page.getByRole("radiogroup", { name: "Payment preference" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Confirm booking" })).toHaveCount(0);
+    await page.screenshot({ path: testInfo.outputPath(`payment-no-way-${width}.png`) });
+    expect(prices.asked.length).toBe(asked);
+    // The earlier steps say the same, with the way back to the rooms.
+    await page.goto(STAY);
+    await expect(noWay).toBeVisible();
+    await expect(noWay.getByRole("button", { name: "Choose another room" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Continue to your details" })).toBeDisabled();
+    expect(prices.asked.length).toBe(asked);
+    // In the guest's language.
+    await page.goto(`/de${STAY}`);
+    await expect(
+      page.getByRole("alert").filter({
+        hasText: "Für die gewählten Zimmer bietet diese Unterkunft keine passende Zahlungsart an.",
+      }),
+    ).toBeVisible();
+  });
+}

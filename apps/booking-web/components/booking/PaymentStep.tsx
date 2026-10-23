@@ -71,6 +71,7 @@ export default function PaymentStep({
   onChangeDetails,
   method,
   available,
+  unavailable = null,
   tooSoon,
   onMethod,
   quote,
@@ -89,6 +90,8 @@ export default function PaymentStep({
   onChangeDetails: () => void;
   method: PricingPaymentMethod | "";
   available: PricingPaymentMethod[];
+  /** Shown instead of the ways to pay when none is left for the chosen rates (VAY-2309). */
+  unavailable?: ReactNode;
   tooSoon: string | null;
   onMethod: (method: PricingPaymentMethod) => void;
   quote: PublicBookingQuote | undefined;
@@ -145,60 +148,68 @@ export default function PaymentStep({
           {icon(cardIcon)}
           <h2 className="text-lg font-bold text-gray-900">How would you like to pay?</h2>
         </div>
-        <div
-          role="radiogroup"
-          aria-label="Payment preference"
-          aria-disabled={locked || undefined}
-          className="space-y-3 mb-6"
-          onKeyDown={onKeyDown}
-        >
-          {available.map((value) => {
-            const on = value === method;
-            return (
-              <button
-                key={value}
-                type="button"
-                role="radio"
-                aria-checked={on}
-                data-method={value}
-                tabIndex={on || (!method && value === available[0]) ? 0 : -1}
-                disabled={locked}
-                onClick={() => onMethod(value)}
-                className={`w-full p-4 rounded-xl border-2 transition-colors text-left ${
-                  on ? "border-primary-600 bg-primary-50" : "border-gray-200 hover:border-gray-300"
-                }`}
-              >
-                <div className="flex items-center gap-3">
-                  <div
-                    className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${on ? "border-primary-600" : "border-gray-300"}`}
+        {!available.length && unavailable ? (
+          unavailable
+        ) : (
+          <>
+            <div
+              role="radiogroup"
+              aria-label="Payment preference"
+              aria-disabled={locked || undefined}
+              className="space-y-3 mb-6"
+              onKeyDown={onKeyDown}
+            >
+              {available.map((value) => {
+                const on = value === method;
+                return (
+                  <button
+                    key={value}
+                    type="button"
+                    role="radio"
+                    aria-checked={on}
+                    data-method={value}
+                    tabIndex={on || (!method && value === available[0]) ? 0 : -1}
+                    disabled={locked}
+                    onClick={() => onMethod(value)}
+                    className={`w-full p-4 rounded-xl border-2 transition-colors text-left ${
+                      on
+                        ? "border-primary-600 bg-primary-50"
+                        : "border-gray-200 hover:border-gray-300"
+                    }`}
                   >
-                    {on && <div className="w-2.5 h-2.5 rounded-full bg-primary-600" />}
-                  </div>
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-0.5">
-                      {icon(methods[value].icon)}
-                      <span className="font-semibold text-sm text-gray-900">
-                        {methods[value].title}
-                      </span>
+                    <div className="flex items-center gap-3">
+                      <div
+                        className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${on ? "border-primary-600" : "border-gray-300"}`}
+                      >
+                        {on && <div className="w-2.5 h-2.5 rounded-full bg-primary-600" />}
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-0.5">
+                          {icon(methods[value].icon)}
+                          <span className="font-semibold text-sm text-gray-900">
+                            {methods[value].title}
+                          </span>
+                        </div>
+                        <p className="text-xs text-gray-500 ml-7">{methods[value].note}</p>
+                      </div>
                     </div>
-                    <p className="text-xs text-gray-500 ml-7">{methods[value].note}</p>
-                  </div>
-                </div>
-              </button>
-            );
-          })}
-        </div>
-        {tooSoon && <p className="mb-4 text-sm text-gray-600">{tooSoon}</p>}
-        {method && total && (
-          <div className="p-4 bg-primary-50 border border-primary-100 rounded-xl text-sm text-primary-700">
-            {explanation(method, quote, total, split)}
-          </div>
-        )}
-        {method === "card" && (
-          <div className="mt-3 p-3 bg-gray-100 rounded-lg text-sm text-gray-600 flex items-center gap-2">
-            {icon(cardIcon, "w-4 h-4 text-gray-400")}
-            You enter your card details in the next step.
-          </div>
+                  </button>
+                );
+              })}
+            </div>
+            {tooSoon && <p className="mb-4 text-sm text-gray-600">{tooSoon}</p>}
+            {method && total && (
+              <div className="p-4 bg-primary-50 border border-primary-100 rounded-xl text-sm text-primary-700">
+                {explanation(method, quote, total, split)}
+              </div>
+            )}
+            {method === "card" && (
+              <div className="mt-3 p-3 bg-gray-100 rounded-lg text-sm text-gray-600 flex items-center gap-2">
+                {icon(cardIcon, "w-4 h-4 text-gray-400")}
+                You enter your card details in the next step.
+              </div>
+            )}
+          </>
         )}
       </section>
       {/* What the guest agrees to belongs to a price: without one there is nothing to accept. */}

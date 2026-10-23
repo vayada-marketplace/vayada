@@ -317,7 +317,8 @@
     "recoveryRetry": "Coba lagi pemesanan tertunda",
     "recoveryInProgress": "Pemesanan Anda masih diproses. Coba lagi untuk memeriksa pemesanan yang sama.",
     "termsRequired": "Harap setujui Syarat dan Ketentuan sebelum mengirim.",
-    "chooseAnotherRoom": "Pilih kamar lain"
+    "chooseAnotherRoom": "Pilih kamar lain",
+    "noWayToPay": "Properti ini tidak menyediakan metode pembayaran untuk kamar yang Anda pilih. Silakan pilih kamar lain."
   },
   "myBooking": {
     "title": "Pemesanan Saya",

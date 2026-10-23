@@ -318,7 +318,8 @@
     "recoveryRetry": "Ausstehende Buchung erneut versuchen",
     "recoveryInProgress": "Ihre Buchung wird noch verarbeitet. Versuchen Sie es erneut, um dieselbe Buchung zu prüfen.",
     "termsRequired": "Bitte akzeptieren Sie die Allgemeinen Geschäftsbedingungen vor dem Absenden.",
-    "chooseAnotherRoom": "Anderes Zimmer wählen"
+    "chooseAnotherRoom": "Anderes Zimmer wählen",
+    "noWayToPay": "Für die gewählten Zimmer bietet diese Unterkunft keine passende Zahlungsart an. Bitte wählen Sie andere Zimmer."
   },
   "myBooking": {
     "title": "Meine Buchung",
