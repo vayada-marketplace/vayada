@@ -17,6 +17,7 @@ type GoogleMap = {
     handler: (event: GoogleMapsEvent) => void,
   ) => { remove: () => void };
   getZoom: () => number | undefined;
+  setMapTypeId: (mapTypeId: MapType) => void;
   // One camera move: a pan followed by a zoom can cut the pan animation short.
   moveCamera: (camera: { center: MapPosition; zoom: number }) => void;
   // Pans by the least amount that brings the bounds inside the map minus the padding.
@@ -27,7 +28,16 @@ type GoogleMap = {
 type GoogleMarker = {
   addListener: (eventName: "dragend", handler: (event: GoogleMapsEvent) => void) => void;
   setPosition: (position: MapPosition | null) => void;
+  setTitle: (title: string) => void;
+  setVisible: (visible: boolean) => void;
 };
+type GoogleCircle = {
+  setCenter: (center: MapPosition) => void;
+  setVisible: (visible: boolean) => void;
+};
+export type MapType = "roadmap" | "satellite";
+/** A second, fixed pin to place the first one by, such as the main property next to a villa. */
+export type MapReference = { latitude: number; longitude: number; title: string };
 type GoogleMapsLibrary = {
   Map: new (
     element: HTMLElement,
@@ -43,6 +53,17 @@ type GoogleMapsLibrary = {
       zoomControlOptions?: { position: number };
     },
   ) => GoogleMap;
+  Circle: new (options: {
+    map: GoogleMap;
+    radius: number;
+    clickable: boolean;
+    fillColor: string;
+    fillOpacity: number;
+    strokeColor: string;
+    strokeOpacity: number;
+    strokeWeight: number;
+    visible: boolean;
+  }) => GoogleCircle;
 };
 type GoogleCoreLibrary = { ControlPosition?: { RIGHT_TOP: number } };
 type GoogleMarkerLibrary = {
@@ -51,6 +72,16 @@ type GoogleMarkerLibrary = {
     map: GoogleMap;
     position?: MapPosition;
     title: string;
+    clickable?: boolean;
+    zIndex?: number;
+    icon?: {
+      path: number;
+      scale: number;
+      fillColor: string;
+      fillOpacity: number;
+      strokeColor: string;
+      strokeWeight: number;
+    };
   }) => GoogleMarker;
 };
 
@@ -59,6 +90,11 @@ const PINNED_ZOOM = 17;
 // Below this zoom one pixel spans too much ground for a hotel pin, so a click zooms in instead.
 export const MIN_PIN_ZOOM = 14;
 const AREA_ZOOM = 16;
+// An "Approximate area" is rounded to about 1 km (2 decimals) for guests: drawn as a circle this big.
+const AREA_RADIUS_METRES = 1000;
+const AREA_VIEW_ZOOM = 14;
+// google.maps.SymbolPath.CIRCLE, without loading the core library for it.
+const SYMBOL_CIRCLE = 0;
 // Google's default pin is drawn above its point; keep it, plus a margin, clear of what covers the map.
 const PIN_HEIGHT = 43;
 const VISIBLE_MARGIN = 12;
@@ -114,6 +150,10 @@ export default function GoogleAddressMap({
   markerTitle = "Hotel location",
   onPick,
   onUnavailable,
+  reference = null,
+  mapType = "roadmap",
+  area = false,
+  recenter = 0,
 }: {
   active: boolean;
   apiKey: string;
@@ -128,10 +168,24 @@ export default function GoogleAddressMap({
   // Makes the map interactive: placing the first pin by click (zoomed in) or dragging it.
   onPick?: (position: MapPosition) => void;
   onUnavailable?: () => void;
+  // A fixed grey pin to place the main one by (the main property next to a villa).
+  reference?: MapReference | null;
+  mapType?: MapType;
+  // Shows the pin as guests see an "Approximate area": a circle round the rounded spot, no pin.
+  area?: boolean;
+  // Raised to bring the pin (or the area) back into view.
+  recenter?: number;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<GoogleMap | null>(null);
   const markerRef = useRef<GoogleMarker | null>(null);
+  const referenceRef = useRef<GoogleMarker | null>(null);
+  const circleRef = useRef<GoogleCircle | null>(null);
+  const mapTypeSetRef = useRef(false);
+  const librariesRef = useRef<{
+    Marker: GoogleMarkerLibrary["Marker"];
+    Circle: GoogleMapsLibrary["Circle"];
+  } | null>(null);
   const position = mapPosition(latitude, longitude);
   const positionRef = useRef(position);
   const onPickRef = useRef(onPick);
@@ -139,6 +193,9 @@ export default function GoogleAddressMap({
   const coveredInsetsRef = useRef(coveredInsets);
   // The area "Find on map" moved to, kept in view like a pin until a pin replaces it.
   const focusRef = useRef<MapPosition | null>(null);
+  // An area to open on when there is no pin yet (a focus given before the map loads).
+  const initialFocusRef = useRef(focus ?? null);
+  initialFocusRef.current = focus ?? null;
   // The map already shows a position the hotel picked on it; don't recenter for that one.
   const pickedRef = useRef<MapPosition | null>(null);
   const [status, setStatus] = useState<"idle" | "loading" | "ready" | "unavailable">("idle");
@@ -160,11 +217,11 @@ export default function GoogleAddressMap({
         ? importGoogleMapsLibrary<GoogleCoreLibrary>(apiKey, "core")
         : Promise.resolve<GoogleCoreLibrary>({}),
     ])
-      .then(([{ Map }, { Marker }, { ControlPosition }]) => {
+      .then(([{ Map, Circle }, { Marker }, { ControlPosition }]) => {
         if (disposed || !containerRef.current) return;
         const map = new Map(containerRef.current, {
-          center: positionRef.current ?? WORLD_CENTER,
-          zoom: positionRef.current ? PINNED_ZOOM : 2,
+          center: positionRef.current ?? initialFocusRef.current ?? WORLD_CENTER,
+          zoom: positionRef.current ? PINNED_ZOOM : initialFocusRef.current ? AREA_ZOOM : 2,
           clickableIcons: false,
           disableDefaultUI: true,
           ...(interactive ? { draggableCursor: "crosshair" } : {}),
@@ -185,6 +242,8 @@ export default function GoogleAddressMap({
           title: markerTitle,
         });
         markerRef.current = marker;
+        // The reference pin and the area circle are made only for callers that ask for them (below).
+        librariesRef.current = { Marker, Circle };
         if (interactive) {
           // A pan asked for before the first render can be lost: keep a saved pin in view once drawn.
           let drawn = false;
@@ -297,6 +356,77 @@ export default function GoogleAddressMap({
     keepInView(map, point, { top: coveredTop, bottom: coveredBottom });
   }, [status, latitude, longitude, focus, coveredTop, coveredBottom]);
 
+  const referenceLatitude = reference?.latitude;
+  const referenceLongitude = reference?.longitude;
+  const referenceTitle = reference?.title;
+  useEffect(() => {
+    const map = mapRef.current;
+    const libraries = librariesRef.current;
+    const point = mapPosition(referenceLatitude ?? null, referenceLongitude ?? null);
+    if (status !== "ready" || !map || !libraries || (!point && !referenceRef.current)) return;
+    referenceRef.current ??= new libraries.Marker({
+      draggable: false,
+      map,
+      title: referenceTitle ?? "",
+      clickable: false,
+      zIndex: 0,
+      icon: {
+        path: SYMBOL_CIRCLE,
+        scale: 7,
+        fillColor: "#6B7280",
+        fillOpacity: 1,
+        strokeColor: "#FFFFFF",
+        strokeWeight: 2,
+      },
+    });
+    referenceRef.current.setPosition(point);
+    referenceRef.current.setTitle(referenceTitle ?? "");
+    referenceRef.current.setVisible(point !== null);
+  }, [status, referenceLatitude, referenceLongitude, referenceTitle]);
+
+  useEffect(() => {
+    // The default needs no call, so plain address maps (and their test doubles) never see one.
+    if (status === "ready" && (mapType !== "roadmap" || mapTypeSetRef.current)) {
+      mapTypeSetRef.current = true;
+      mapRef.current?.setMapTypeId(mapType);
+    }
+  }, [status, mapType]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    const libraries = librariesRef.current;
+    const point = mapPosition(latitude, longitude);
+    const center = area && point ? areaCenter(point) : null;
+    if (status !== "ready" || !map || !libraries || (!center && !circleRef.current)) return;
+    circleRef.current ??= new libraries.Circle({
+      map,
+      radius: AREA_RADIUS_METRES,
+      clickable: false,
+      fillColor: "#1E3EDB",
+      fillOpacity: 0.15,
+      strokeColor: "#1E3EDB",
+      strokeOpacity: 0.7,
+      strokeWeight: 2,
+      visible: false,
+    });
+    if (center) circleRef.current.setCenter(center);
+    circleRef.current.setVisible(center !== null);
+    markerRef.current?.setVisible(!center);
+  }, [status, area, latitude, longitude]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    const point = mapPosition(latitude, longitude);
+    if (!recenter || status !== "ready" || !map || !point) return;
+    map.moveCamera(
+      area
+        ? { center: areaCenter(point), zoom: AREA_VIEW_ZOOM }
+        : { center: point, zoom: PINNED_ZOOM },
+    );
+    // Only a new request recenters (or one made while the map loaded); moving the pin keeps the hotel's view.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recenter, status]);
+
   return (
     <div
       className="absolute inset-0 overflow-hidden bg-slate-100"
@@ -331,4 +461,9 @@ function mapPosition(latitude: number | null, longitude: number | null): MapPosi
     longitude <= 180
     ? { lat: latitude, lng: longitude }
     : null;
+}
+
+/** Where guests see an "Approximate area": the spot rounded to 2 decimals, as the booking page gets it. */
+function areaCenter(point: MapPosition): MapPosition {
+  return { lat: Number(point.lat.toFixed(2)), lng: Number(point.lng.toFixed(2)) };
 }
