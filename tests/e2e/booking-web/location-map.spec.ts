@@ -138,7 +138,7 @@ test.describe("booking page location map", () => {
     await expect
       .poll(() =>
         page.evaluate(
-          () => (window as unknown as { __locationMap: { zoom?: number } }).__locationMap.zoom,
+          () => (window as unknown as { __locationMap?: { zoom?: number } }).__locationMap?.zoom,
         ),
       )
       .toBe(17);
@@ -147,8 +147,8 @@ test.describe("booking page location map", () => {
       .poll(() =>
         page.evaluate(
           () =>
-            (window as unknown as { __locationMap: { popup: HTMLElement | null } }).__locationMap
-              .popup?.textContent,
+            (window as unknown as { __locationMap?: { popup: HTMLElement | null } }).__locationMap
+              ?.popup?.textContent,
         ),
       )
       .toContain("Isar Studio");
@@ -185,7 +185,8 @@ test.describe("booking page location map", () => {
       .poll(() =>
         page.evaluate(
           () =>
-            (window as unknown as { __locationMap: { circles: unknown[] } }).__locationMap.circles,
+            (window as unknown as { __locationMap?: { circles: unknown[] } }).__locationMap
+              ?.circles,
         ),
       )
       .toEqual([{ lat: 48.14, lng: 11.58, radius: 1000 }]);
