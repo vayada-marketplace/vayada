@@ -6207,7 +6207,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       // VAY-2126: the location map is off by default. Switched on (read live), rooms with their own pin carry it;
       // a room pin doesn't make saved prices stale (VAY-2129).
       expect(offers).not.toHaveProperty("locationMap");
-      expect(offers?.rooms.some((room) => "location" in room)).toBe(false);
+      expect(offers?.rooms.some((room) => "location" in room || "atProperty" in room)).toBe(false);
       await pool.query(
         `UPDATE pms.room_types SET room_attributes = room_attributes || $2::jsonb
          WHERE property_id = $1 AND name = 'Terms room'`,
@@ -6228,11 +6228,52 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       );
       const mapped = await catalog.read(scope.propertyId);
       expect(mapped?.locationMap).toHaveProperty("property");
+      const placesOf = async () =>
+        Object.fromEntries(
+          ((await catalog.read(scope.propertyId))?.rooms ?? []).map((room) => [
+            room.name,
+            {
+              atProperty: room.atProperty,
+              showMapInDetails: room.showMapInDetails,
+              location: room.location ?? null,
+            },
+          ]),
+        );
+      // VAY-2321: a room without a pin of its own is at the property.
       expect(
         Object.fromEntries((mapped?.rooms ?? []).map((room) => [room.name, room.location ?? null])),
       ).toEqual({
         "Terms room": { latitude: 48.15634, longitude: 11.58242, address: "Leopoldstraße 12" },
         "Second room": null,
+      });
+      expect(await placesOf()).toMatchObject({
+        "Terms room": { atProperty: false, showMapInDetails: true },
+        "Second room": { atProperty: true, showMapInDetails: true, location: null },
+      });
+      // Shown as an area: the pin rounded to it, its name instead of the street, never the exact spot.
+      const setTermsRoom = (attributes: Record<string, unknown>) =>
+        pool.query(
+          `UPDATE pms.room_types SET room_attributes = room_attributes || $2::jsonb
+           WHERE property_id = $1 AND name = 'Terms room'`,
+          [scope.propertyId, JSON.stringify(attributes)],
+        );
+      await setTermsRoom({
+        locationSource: "custom",
+        locationPrecision: "approximate",
+        locationArea: "Schwabing",
+        showMapInDetails: false,
+      });
+      expect((await placesOf())["Terms room"]).toEqual({
+        atProperty: false,
+        showMapInDetails: false,
+        location: { latitude: 48.16, longitude: 11.58, approximate: true, area: "Schwabing" },
+      });
+      // "Same as property" keeps the room's own place saved but no longer shows it.
+      await setTermsRoom({ locationSource: "property" });
+      expect((await placesOf())["Terms room"]).toEqual({
+        atProperty: true,
+        showMapInDetails: false,
+        location: null,
       });
       await pool.query("DELETE FROM booking.booking_settings WHERE property_id = $1", [
         scope.propertyId,

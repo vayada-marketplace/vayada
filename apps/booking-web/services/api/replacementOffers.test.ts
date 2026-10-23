@@ -235,6 +235,58 @@ it("reads the location map and each room's pin, dropping a pin out of range (VAY
   expect(await getReplacementCatalog("hotel")).toEqual({ rooms, locationMap: null });
 });
 
+it("reads where each room is: at the property, or an area without its street (VAY-2321)", async () => {
+  const offers = (digit: string) => [
+    {
+      publicOfferKey: `pricing-offer.v2:${digit.repeat(64)}`,
+      currency: "EUR",
+      mealPlan: "room_only",
+    },
+  ];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          version: "public-pricing-offers.v1",
+          locationMap: { property: null },
+          rooms: [
+            { ...rooms[0], atProperty: true, showMapInDetails: true },
+            {
+              roomTypeId: "villa",
+              name: "Villa",
+              offers: offers("b"),
+              atProperty: false,
+              showMapInDetails: false,
+              // An area never carries a street, even if one were sent.
+              location: {
+                latitude: 6.02,
+                longitude: 80.27,
+                approximate: true,
+                area: "Ahangama",
+                address: "Galle Road 1",
+              },
+            },
+            { roomTypeId: "loft", name: "Loft", offers: offers("c"), atProperty: "yes" },
+          ],
+        }),
+      ),
+    ),
+  );
+  expect((await getReplacementCatalog("hotel")).rooms).toEqual([
+    { ...rooms[0], atProperty: true, showMapInDetails: true },
+    {
+      roomTypeId: "villa",
+      name: "Villa",
+      offers: offers("b"),
+      atProperty: false,
+      showMapInDetails: false,
+      location: { latitude: 6.02, longitude: 80.27, approximate: true, area: "Ahangama" },
+    },
+    { roomTypeId: "loft", name: "Loft", offers: offers("c") },
+  ]);
+});
+
 it("reads each rate's ways to pay and the ways all chosen rates take (VAY-2309)", async () => {
   const card = `pricing-offer.v2:${"d".repeat(64)}`;
   const fetcher = vi.fn().mockResolvedValue(

@@ -9,7 +9,14 @@ const room = (
   id: string,
   name: string,
   digit: string,
-  location?: { latitude: number; longitude: number; address?: string },
+  location?: {
+    latitude: number;
+    longitude: number;
+    address?: string;
+    approximate?: true;
+    area?: string;
+  },
+  atProperty?: boolean,
 ) => ({
   roomTypeId: id,
   name,
@@ -17,6 +24,7 @@ const room = (
   occupancy: { maxGuests: 2, maxAdults: 2, maxChildren: 0 },
   offers: [{ publicOfferKey: offerKey(digit), currency: "EUR", mealPlan: "room_only" }],
   ...(location && { location }),
+  ...(atProperty !== undefined && { atProperty }),
 });
 const villas = [
   room("schwabing", "Schwabing Loft", "a", {
@@ -47,9 +55,17 @@ const GOOGLE_FAKE = `
     setZoom(zoom) { this.zoom = zoom; state.zoom = zoom; }
     panTo() {}
   }
-  class Circle { constructor(options) { state.circles.push({ lat: options.center.lat, lng: options.center.lng, radius: options.radius }); } }
+  class Circle {
+    constructor(options) {
+      this.listeners = {};
+      state.circles.push({ lat: options.center.lat, lng: options.center.lng, radius: options.radius, circle: this });
+    }
+    addListener(event, handler) { this.listeners[event] = handler; }
+  }
+  window.__clickCircle = (index) => state.circles[index].circle.listeners.click();
   class InfoWindow {
     setContent(content) { this.content = content; }
+    setPosition(position) { state.popupAt = position; }
     open() { state.popup = this.content; document.body.append(this.content); }
     close() {}
   }
@@ -97,6 +113,16 @@ const markers = (page: Page) =>
           __locationMap?: { markers: { title: string; label: string | null }[] };
         }
       ).__locationMap?.markers.map(({ title, label }) => ({ title, label })) ?? [],
+  );
+
+const circles = (page: Page) =>
+  page.evaluate(
+    () =>
+      (
+        window as unknown as {
+          __locationMap?: { circles: { lat: number; lng: number; radius: number }[] };
+        }
+      ).__locationMap?.circles.map(({ lat, lng, radius }) => ({ lat, lng, radius })) ?? [],
   );
 
 test.describe("booking page location map", () => {
@@ -181,16 +207,77 @@ test.describe("booking page location map", () => {
     });
     await page.goto("/");
     await page.getByTestId("rooms-location-map").getByRole("button", { name: "Show map" }).click();
+    await expect.poll(() => circles(page)).toEqual([{ lat: 48.14, lng: 11.58, radius: 1000 }]);
+    expect(await markers(page)).toEqual([]);
+  });
+
+  test("puts the rooms at the property on the hotel's pin, and a villa shown as an area as a circle (VAY-2321)", async ({
+    page,
+  }) => {
+    await setup(page, {
+      locationMap: { property: { latitude: 48.1394, longitude: 11.5835, approximate: false } },
+      rooms: [
+        room("suite", "Suite", "a", undefined, true),
+        room(
+          "loft",
+          "Schwabing Loft",
+          "b",
+          {
+            latitude: 48.15634,
+            longitude: 11.58242,
+            address: "Leopoldstraße 12, Munich",
+          },
+          false,
+        ),
+        room("double", "Double", "c", undefined, true),
+        room(
+          "villa",
+          "Beach Villa",
+          "d",
+          {
+            latitude: 48.13,
+            longitude: 11.57,
+            approximate: true,
+            area: "Isarvorstadt",
+          },
+          false,
+        ),
+        // A place of its own without a pin yet: left off.
+        room("annex", "Annex", "e", undefined, false),
+      ],
+    });
+    await page.goto("/");
+    const section = page.getByTestId("rooms-location-map");
+    const places = section.getByRole("list", { name: "Places on the map" }).getByRole("listitem");
+    await expect(places).toHaveCount(3);
+    await expect(places.nth(0)).toContainText("Hotel Alpenrose");
+    await expect(places.nth(1)).toContainText("Schwabing Loft");
+    await expect(places.nth(2)).toContainText("Beach Villa");
+    await expect(places.nth(2)).toContainText("Isarvorstadt");
+    await expect(section.getByText("Annex")).toHaveCount(0);
+
+    await section.getByRole("button", { name: "Show map" }).click();
+    await expect
+      .poll(() => markers(page))
+      .toEqual([
+        { title: "Hotel Alpenrose", label: "1" },
+        { title: "Schwabing Loft", label: "2" },
+      ]);
+    expect(await circles(page)).toEqual([{ lat: 48.13, lng: 11.57, radius: 1000 }]);
+    // The area opens its popup where it is, and names the area, not a street.
+    await page.evaluate(() =>
+      (window as unknown as { __clickCircle: (i: number) => void }).__clickCircle(0),
+    );
+    await expect(places.nth(2)).toHaveClass(/bg-primary-50/);
     await expect
       .poll(() =>
         page.evaluate(
           () =>
-            (window as unknown as { __locationMap?: { circles: unknown[] } }).__locationMap
-              ?.circles,
+            (window as unknown as { __locationMap?: { popup: HTMLElement | null } }).__locationMap
+              ?.popup?.textContent,
         ),
       )
-      .toEqual([{ lat: 48.14, lng: 11.58, radius: 1000 }]);
-    expect(await markers(page)).toEqual([]);
+      .toBe("Beach VillaIsarvorstadtView details →");
   });
 
   test("shows no map while the hotel's switch is off", async ({ page }) => {
