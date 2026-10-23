@@ -726,3 +726,22 @@ test("says later dates would work when the rate's only way to pay opens later", 
   await page.waitForTimeout(1_000);
   expect(prices.asked).toEqual([]);
 });
+
+test("says on the room form when no way to pay fits the chosen room", async ({ page }) => {
+  const { prices } = await mockFlow(page, {
+    methods: ["pay_at_property"],
+    offerPaymentMethods: ["card"],
+  });
+  await page.goto("/book?checkIn=2026-11-06&checkOut=2026-11-08");
+  await page.getByRole("button", { name: "Add room", exact: true }).click();
+  const room = page.getByRole("group", { name: "Room 1", exact: true });
+  await room.getByLabel("Room and meal option").selectOption(offerKey);
+  await room.getByLabel(/Adults/).fill("2");
+  await expect(
+    page.getByRole("alert").filter({
+      hasText:
+        "The rooms you chose can't be paid for in any way this hotel offers. Please choose other rooms.",
+    }),
+  ).toBeVisible();
+  expect(prices.asked).toEqual([]);
+});

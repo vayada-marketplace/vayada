@@ -963,6 +963,13 @@ function RoomQuoteForm({ slug }: { slug: string }) {
             <p className="text-sm text-gray-600">
               We’ll check the price for your choices next. All rooms must use the same currency.
             </p>
+            {/* VAY-2309: said here too, where the rooms can be changed. */}
+            {noWayToPay && (
+              <Notice
+                tone="red"
+                title={tPayment(tooSoon.length ? "noWayToPayThisSoon" : "noWayToPay")}
+              />
+            )}
             <button className={button} type="submit" disabled={!roomsComplete || !settled}>
               Continue
             </button>
