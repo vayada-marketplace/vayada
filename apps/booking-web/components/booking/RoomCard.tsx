@@ -334,12 +334,11 @@ export default function RoomCard({
       <>
         {/* The details sit outside the card: clicks in them would otherwise reach the card and select it. */}
         <div
-          id={`room-card-${room.roomTypeId}`}
           data-testid={`room-card-${room.roomTypeId}`}
           onClick={onActivate}
-          className={`grid grid-cols-[112px_minmax(0,1fr)] gap-x-4 rounded-2xl border-2 bg-white p-3 transition-colors sm:grid-cols-[112px_minmax(0,1fr)_auto] ${active ? "border-primary-600" : "border-gray-100 hover:border-gray-200"} ${soldOut ? "opacity-60" : ""} ${onActivate ? "cursor-pointer" : ""}`}
+          className={`grid grid-cols-[88px_minmax(0,1fr)] gap-x-3 rounded-2xl border-2 bg-white p-3 transition-colors sm:grid-cols-[112px_minmax(0,1fr)_auto] sm:gap-x-4 ${active ? "border-primary-600" : "border-gray-100 hover:border-gray-200"} ${soldOut ? "opacity-60" : ""} ${onActivate ? "cursor-pointer" : ""}`}
         >
-          <div className="relative row-span-2 h-[84px] overflow-hidden rounded-xl bg-gray-100 sm:row-span-1">
+          <div className="relative h-[72px] overflow-hidden rounded-xl bg-gray-100 sm:h-[84px]">
             {images.length > 0 && (
               <Image
                 src={images[0]!.url}
@@ -379,8 +378,8 @@ export default function RoomCard({
             </p>
             {locationLine && <LocationLine {...locationLine} />}
           </div>
-          {/* Below the text on a phone, on the right from sm up. */}
-          <div className="col-start-2 mt-1 flex items-center justify-between gap-3 sm:col-start-3 sm:row-start-1 sm:mt-0 sm:flex-col sm:items-end sm:text-right">
+          {/* Across the card's foot on a phone, on the right from sm up. */}
+          <div className="col-span-2 mt-2 flex items-center justify-between gap-3 sm:col-span-1 sm:col-start-3 sm:row-start-1 sm:mt-0 sm:flex-col sm:items-end sm:text-right">
             {soldOut ? (
               <span className="text-sm font-semibold text-gray-500">{t("soldOut")}</span>
             ) : tooSmall || (prices && !selected) ? (
@@ -416,7 +415,6 @@ export default function RoomCard({
 
   return (
     <div
-      id={`room-card-${room.roomTypeId}`}
       data-testid={`room-card-${room.roomTypeId}`}
       className={`bg-white border border-gray-200 rounded-2xl overflow-hidden transition-all ${soldOut || usedUp ? "opacity-60" : "hover:shadow-lg"}`}
     >

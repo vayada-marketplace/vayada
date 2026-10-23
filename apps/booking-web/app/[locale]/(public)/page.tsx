@@ -35,7 +35,7 @@ import RoomsLocationMap, {
   useGuestPlaces,
   useLocationLine,
 } from "@/components/booking/RoomsLocationMap";
-import AccommodationViews, { useWideScreen } from "@/components/booking/AccommodationViews";
+import AccommodationViews from "@/components/booking/AccommodationViews";
 import {
   getReplacementCatalog,
   quoteMoneyAmount,
@@ -303,8 +303,8 @@ function HomePageContent() {
           ? (b.size?.value ?? 0) - (a.size?.value ?? 0)
           : 0,
   );
-  // Rooms in several places (VAY-2324): the cards say where each one is, and on wide screens the guest can see
-  // them on a map next to the list, which then replaces the Location section below.
+  // Rooms in several places (VAY-2324, VAY-2325): the cards say where each one is, and the guest can see them on
+  // a map next to the list (or full screen on a phone), which replaces the Location section below.
   const mapsKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY?.trim() ?? "";
   const mapProperty = locationMap
     ? { name: hotel.name, locality: hotel.location, pin: locationMap.property }
@@ -312,8 +312,7 @@ function HomePageContent() {
   const guestPlaces = useGuestPlaces(rooms ?? [], mapProperty);
   const severalPlaces = guestPlaces.pins.length > 1;
   const locationLine = useLocationLine(mapProperty, guestPlaces.pins);
-  const wide = useWideScreen();
-  const views = severalPlaces && !!mapsKey && wide;
+  const roomsMap = severalPlaces && mapsKey ? { ...guestPlaces, apiKey: mapsKey } : null;
   const selectRoom = (publicOfferKey: string, roomCount: number) => {
     trackEvent(slug, "rate_selected", { entry: "room_card" });
     const params = new URLSearchParams(bookParams);
@@ -555,7 +554,7 @@ function HomePageContent() {
       </div>
 
       {/* Search Bar — sticky on scroll */}
-      <div className="sticky top-4 z-30 max-w-5xl mx-auto px-4 -mt-10">
+      <div id="stay-search" className="sticky top-4 z-30 max-w-5xl mx-auto px-4 -mt-10">
         <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-4 md:p-6 flex flex-row flex-wrap items-center gap-4 md:gap-6">
           {/* Dates — clickable to open calendar */}
           <div className="relative flex-1 min-w-[120px]">
@@ -860,7 +859,23 @@ function HomePageContent() {
           <>
             <AccommodationViews
               rooms={shownRooms}
-              map={views ? { ...guestPlaces, apiKey: mapsKey } : null}
+              map={roomsMap}
+              stay={{
+                label: `${formatDateShort(checkIn, locale)} – ${formatDate(checkOut, locale)} · ${[
+                  tc("adults", { count: adults }),
+                  effectiveChildren > 0 && tc("children", { count: effectiveChildren }),
+                ]
+                  .filter(Boolean)
+                  .join(", ")}`,
+                // Back to the search, with the dates open and focused.
+                onEdit: () => {
+                  setGuestsOpen(false);
+                  setCalendarOpen(true);
+                  const search = document.getElementById("stay-search");
+                  search?.scrollIntoView({ block: "start" });
+                  search?.querySelector("button")?.focus({ preventScroll: true });
+                },
+              }}
               toolbar={sortControl}
               notices={notices}
               renderCard={roomCard}
@@ -883,7 +898,7 @@ function HomePageContent() {
         )}
       </div>
 
-      {mapProperty && rooms?.length && !views ? (
+      {mapProperty && rooms?.length && !severalPlaces ? (
         <RoomsLocationMap
           rooms={rooms}
           property={mapProperty}

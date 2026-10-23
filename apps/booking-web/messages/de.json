@@ -594,7 +594,6 @@
   },
   "locationMap": {
     "title": "Lage",
-    "severalPlaces": "Unsere Zimmer liegen an {count} Orten.",
     "viewDetails": "Details ansehen",
     "placesLabel": "Orte auf der Karte",
     "mapLabel": "Karte mit der Lage der Zimmer",
@@ -610,7 +609,11 @@
     "viewsLabel": "Unterkünfte anzeigen als",
     "viewList": "Liste",
     "viewSplit": "Liste + Karte",
-    "viewMap": "Karte"
+    "viewMap": "Karte",
+    "phoneMapLabel": "Unterkünfte auf der Karte",
+    "cardsLabel": "Unterkünfte",
+    "accommodationsCount": "{count, plural, one {# Unterkunft} other {# Unterkünfte}}",
+    "editStay": "Ändern"
   },
   "roomPlace": {
     "title": "Hier wohnen Sie",

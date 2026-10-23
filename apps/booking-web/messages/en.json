@@ -594,7 +594,6 @@
   },
   "locationMap": {
     "title": "Location",
-    "severalPlaces": "Our rooms are in {count} places.",
     "viewDetails": "View details",
     "placesLabel": "Places on the map",
     "mapLabel": "Map of where the rooms are",
@@ -610,7 +609,11 @@
     "viewsLabel": "Show the accommodations as",
     "viewList": "List",
     "viewSplit": "List + map",
-    "viewMap": "Map"
+    "viewMap": "Map",
+    "phoneMapLabel": "Accommodations on the map",
+    "cardsLabel": "Accommodations",
+    "accommodationsCount": "{count, plural, one {# accommodation} other {# accommodations}}",
+    "editStay": "Edit"
   },
   "roomPlace": {
     "title": "Where you'll stay",
