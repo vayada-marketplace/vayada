@@ -6,7 +6,7 @@ import { BOOKING_GUEST_LANGUAGE_CODES } from "@vayada/locale-constants";
 import type { BookingDesignFontPairing, BookingDesignRevision } from "@vayada/domain-booking";
 import { BookingPagePreview } from "@vayada/product-onboarding";
 import { settingsService, type CustomDomainStatus } from "@/services/settings";
-import { bookingDesignClient } from "@/services/api/bookingDesignClient";
+import { designStudioBookingDesignClient } from "@/services/api/bookingDesignClient";
 import { requireSelectedBookingHotelId } from "@/services/api/bookingHotelScope";
 import { getBookingHotelPropertyLink } from "@/services/api/bookingPropertyLinkClient";
 import { publishPublicBookabilityProfile } from "@/services/api/publicBookabilityPublicationClient";
@@ -194,7 +194,7 @@ export default function DesignStudioPage() {
         return Promise.all([
           sharedHotelSetupApi.getPropertyProfile(propertyId),
           sharedHotelSetupApi.getPublicPropertyProfile(propertyId),
-          bookingDesignClient.load(propertyId, { cache: "no-store" }),
+          designStudioBookingDesignClient.load(propertyId, { cache: "no-store" }),
         ]);
       }),
     ])
@@ -700,7 +700,7 @@ export default function DesignStudioPage() {
       current.choices.fontPairing === choices.fontPairing
     )
       return;
-    designRef.current = await bookingDesignClient.save(propertyId, {
+    designRef.current = await designStudioBookingDesignClient.save(propertyId, {
       expectedRevision: current?.revision ?? 0,
       choices,
     });

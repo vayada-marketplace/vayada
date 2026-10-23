@@ -7,7 +7,7 @@ import {
   type UpsertBookingDesignRequest,
 } from "@vayada/domain-booking";
 
-import { ApiErrorResponse } from "./client";
+import { ApiErrorResponse, apiClient } from "./client";
 import { targetApiClient } from "./targetClient";
 
 type HttpClient = {
@@ -88,6 +88,8 @@ export function createBookingDesignClient(http: HttpClient) {
 }
 
 export const bookingDesignClient = createBookingDesignClient(targetApiClient);
+// Design Studio's reads and saves go through the same client as its other settings calls (VAY-2318).
+export const designStudioBookingDesignClient = createBookingDesignClient(apiClient);
 
 function path(propertyId: string): string {
   return `/api/booking/properties/${encodeURIComponent(propertyId)}/booking-design`;

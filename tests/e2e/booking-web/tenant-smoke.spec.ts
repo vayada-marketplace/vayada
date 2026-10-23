@@ -76,7 +76,10 @@ test.describe("booking-web tenant smoke", () => {
       "rgb(83, 0, 0)",
     );
     const reject = page.getByRole("button", { name: "Reject analytics" });
-    if (await reject.isVisible()) await reject.click();
+    await reject.waitFor({ state: "visible", timeout: 4000 }).then(
+      () => reject.click(),
+      () => undefined,
+    );
     await page.screenshot({ path: testInfo.outputPath("brand-colour-5e0000-1440.png") });
     await page.setViewportSize({ width: 390, height: 844 });
     await expect(page.getByRole("button", { name: /Check Availability/i })).toHaveCSS(
