@@ -49,7 +49,8 @@ jobs:
     # A real release runs only from main; any branch may dry-run.
     if: github.ref == 'refs/heads/main' || inputs.dry_run
     runs-on: ubuntu-latest
-    timeout-minutes: 240
+    # Above the train step's own limit, so the cleanup below still runs after it.
+    timeout-minutes: 330
     permissions:
       contents: read
       issues: write
@@ -65,7 +66,9 @@ jobs:
         with:
           node-version-file: .nvmrc
 
+      # Worst case: settle 90 min, precheck 2 x 75 min plus dispatch and rerun, publication 45 min.
       - name: Run the release train
+        timeout-minutes: 300
         env:
           GH_TOKEN: ${{ github.token }}
           PLATFORM_DISPATCH_TOKEN: ${{ secrets.PLATFORM_DEPLOY_TOKEN }}
@@ -75,3 +78,11 @@ jobs:
           TRAIN_ADMISSION: ${{ inputs.admission }}
           TRAIN_KEEP_HOLD: ${{ inputs.keep_hold }}
         run: node scripts/release-train/train.mjs
+
+      # A cancelled or timed-out train never reached its own stop path; its hold would keep every
+      # merge waiting. Close this run's hold (found by its run marker), never another one.
+      - name: Close this run's hold if the train did not finish
+        if: ${{ (cancelled() || failure()) && !inputs.dry_run && !inputs.keep_hold }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/release-train/train.mjs cleanup

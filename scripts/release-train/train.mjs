@@ -21,6 +21,7 @@ import {
   entriesThatCanMerge,
   holdMarker,
   openHold,
+  openHolds,
   queueEntries,
   settle,
 } from "./hold.mjs";
@@ -240,7 +241,42 @@ export async function runTrain(
   }
 }
 
+// After a cancelled or timed-out train (the train's own stop path never ran): close this run's
+// hold if it is still open, so merging does not stay paused until someone notices.
+export async function cleanupHold(gh, repo, runId, runUrl) {
+  const marker = holdMarker(runId);
+  const mine = (await openHolds(gh, repo)).filter((issue) => issue.body?.includes(marker));
+  for (const issue of mine)
+    await closeHold(
+      gh,
+      repo,
+      issue.number,
+      `Release train ${runUrl} was cancelled or timed out before any deploy.`,
+    );
+  return mine.map((issue) => issue.number);
+}
+
 async function main() {
+  if (process.argv[2] === "cleanup") {
+    const {
+      GITHUB_REPOSITORY: repo,
+      GITHUB_RUN_ID: runId,
+      GITHUB_SERVER_URL: server,
+    } = process.env;
+    const gh = createGitHub({ token: process.env.GH_TOKEN, log: (line) => console.log(line) });
+    const closed = await cleanupHold(
+      gh,
+      repo,
+      runId,
+      `${server || "https://github.com"}/${repo}/actions/runs/${runId}`,
+    );
+    console.log(
+      closed.length
+        ? `closed hold ${closed.map((n) => `#${n}`).join(" ")}`
+        : "no open hold of this run",
+    );
+    return;
+  }
   const options = readOptions(process.env);
   const log = (line) => console.log(line);
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));

@@ -9,7 +9,7 @@ import { createGitHub, HttpError } from "./github.mjs";
 import { closeHold, holdMarker, openHold, settle } from "./hold.mjs";
 import { classifyFailure, failedSection, greenProblems, precheck } from "./precheck.mjs";
 import { findPublication, readPublication, waitForPublication } from "./publish.mjs";
-import { platformPayload, readOptions, renderSummary, runTrain } from "./train.mjs";
+import { cleanupHold, platformPayload, readOptions, renderSummary, runTrain } from "./train.mjs";
 
 const REPO = "vayada-marketplace/vayada";
 const SHA = "a".repeat(40);
@@ -80,18 +80,36 @@ test("a 4xx answer is final, and a write sent with retry false goes out once", a
   assert.equal(calls, 1);
 });
 
-test("a rate-limit 403 is retried, a permission 403 is not", async () => {
-  const answers = [response(403, "API rate limit exceeded"), response(200, [])];
+test("rate limits are read from GitHub's headers and their wait is honoured", async () => {
+  const limited = (status, headers) => new Response("slow down", { status, headers });
+  const slept = [];
+  const now = () => Date.parse("2026-10-23T12:00:00Z");
+  const reset = String(now() / 1000 + 90);
+  const answers = [
+    limited(403, { "x-ratelimit-remaining": "0", "x-ratelimit-reset": reset }),
+    limited(429, { "retry-after": "7" }),
+    limited(403, { "retry-after": "3600" }),
+    response(200, []),
+  ];
   const gh = createGitHub({
     token: "t",
+    now,
     fetchImpl: async () => answers.shift(),
-    sleep: async () => {},
+    sleep: async (ms) => slept.push(ms),
   });
   assert.deepEqual(await gh.get("/x"), []);
+  // The reset 90 s away; retry-after 7 s (longer than the 4 s backoff); a 1 h wait capped at 10 min.
+  assert.deepEqual(slept, [90_000, 7_000, 600_000]);
+});
+
+test("a 403 without rate-limit headers is final, whatever its body says", async () => {
   let calls = 0;
   const denied = createGitHub({
     token: "t",
-    fetchImpl: async () => (calls++, response(403, "Resource not accessible")),
+    fetchImpl: async () => (
+      calls++,
+      response(403, "API rate limit exceeded? Resource not accessible")
+    ),
     sleep: async () => {},
   });
   await assert.rejects(denied.get("/x"), /HTTP 403/);
@@ -157,6 +175,25 @@ test("a hold whose label GitHub dropped gets the label added", async () => {
   });
   assert.equal((await openHold(gh, REPO, { reason: "r", marker: holdMarker(42) })).number, 9);
   assert.ok(gh.calls.some((call) => call.path.endsWith("/issues/9/labels")));
+});
+
+test("the cleanup after a cancelled train closes only that run's open hold", async () => {
+  const gh = fakeGitHub((method, path) => {
+    if (method === "GET" && path.includes("/issues?"))
+      return [
+        holdIssue(7, holdMarker(41)),
+        holdIssue(8, holdMarker(42)),
+        holdIssue(9, "manual hold"),
+      ];
+    if (method === "POST" || method === "PATCH") return {};
+  });
+  assert.deepEqual(await cleanupHold(gh, REPO, "42", "https://run/42"), [8]);
+  assert.deepEqual(
+    gh.calls.filter((call) => call.method === "PATCH").map((call) => call.path),
+    [`/repos/${REPO}/issues/8`],
+  );
+  const none = fakeGitHub((method, path) => (path.includes("/issues?") ? [] : undefined));
+  assert.deepEqual(await cleanupHold(none, REPO, "42", "u"), []);
 });
 
 test("closing a hold comments, then closes the issue", async () => {
@@ -817,7 +854,15 @@ test("the workflow dry-runs by default, runs real releases only from main, and n
   const job = workflow.jobs.train;
   assert.equal(job.if, "github.ref == 'refs/heads/main' || inputs.dry_run");
   assert.deepEqual(workflow.permissions, { contents: "read" });
-  const run = job.steps.at(-1);
+  const run = job.steps.find((step) => step.name === "Run the release train");
   assert.equal(run.run, "node scripts/release-train/train.mjs");
   assert.equal(run.env.TRAIN_DRY_RUN, "${{ inputs.dry_run }}");
+  // The step stops before the job does, so a train that ran out of time still gets its hold closed.
+  assert.ok(run["timeout-minutes"] < job["timeout-minutes"]);
+  const cleanup = job.steps.at(-1);
+  assert.equal(cleanup.run, "node scripts/release-train/train.mjs cleanup");
+  assert.equal(
+    cleanup.if,
+    "${{ (cancelled() || failure()) && !inputs.dry_run && !inputs.keep_hold }}",
+  );
 });

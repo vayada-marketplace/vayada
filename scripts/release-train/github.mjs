@@ -2,10 +2,25 @@
 // timeout, and reads are retried: on 2026-10-21/22 API blips ("error connecting to
 // api.github.com") left the laptop scripts hanging for over an hour after a deploy finished.
 
+// The longest wait a rate limit may impose before the next try; a reset further away still
+// gets its retries, and fails if the limit outlasts them.
+const MAX_RATE_LIMIT_WAIT_MS = 10 * 60_000;
+
 export class HttpError extends Error {
-  constructor(method, path, status, detail) {
+  constructor(method, path, status, detail, headers, now = Date.now()) {
     super(`${method} ${path}: HTTP ${status}${detail ? ` ${detail}` : ""}`);
     this.status = status;
+    // GitHub marks rate limits with headers, never only in the body: retry-after (secondary
+    // limits, 429) or x-ratelimit-remaining 0 with the reset time (primary limit).
+    const retryAfter = Number(headers?.get("retry-after"));
+    const reset = Number(headers?.get("x-ratelimit-reset"));
+    this.rateLimited = retryAfter > 0 || headers?.get("x-ratelimit-remaining") === "0";
+    this.waitMs =
+      retryAfter > 0
+        ? retryAfter * 1000
+        : this.rateLimited && reset > 0
+          ? Math.max(0, reset * 1000 - now)
+          : 0;
   }
 }
 
@@ -13,7 +28,7 @@ export class HttpError extends Error {
 // timeout). Any other 4xx answer is final.
 function retryable(error) {
   if (!(error instanceof HttpError)) return true;
-  if (error.status === 403) return /rate limit/i.test(error.message);
+  if (error.status === 403) return error.rateLimited;
   return error.status === 429 || error.status >= 500;
 }
 
@@ -25,6 +40,7 @@ export function createGitHub({
   timeoutMs = 30_000,
   attempts = 6,
   log = () => {},
+  now = Date.now,
 }) {
   if (!token) throw new Error("a GitHub token is required");
 
@@ -44,7 +60,14 @@ export function createGitHub({
     });
     if (!response.ok) {
       const text = await response.text().catch(() => "");
-      throw new HttpError(method, path, response.status, text.slice(0, 200));
+      throw new HttpError(
+        method,
+        path,
+        response.status,
+        text.slice(0, 200),
+        response.headers,
+        now(),
+      );
     }
     if (raw) return Buffer.from(await response.arrayBuffer());
     const text = await response.text();
@@ -61,7 +84,8 @@ export function createGitHub({
       } catch (error) {
         if (attempt >= tries || !retryable(error)) throw error;
         log(`${method} ${path} failed (${error.message}); retry ${attempt}/${tries - 1}`);
-        await sleep(Math.min(60_000, 2_000 * 2 ** (attempt - 1)));
+        const backoff = Math.min(60_000, 2_000 * 2 ** (attempt - 1));
+        await sleep(Math.max(backoff, Math.min(error.waitMs ?? 0, MAX_RATE_LIMIT_WAIT_MS)));
       }
     }
   }
