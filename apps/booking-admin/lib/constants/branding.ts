@@ -6,7 +6,7 @@ export { BOOKING_PAGE_COLOR_PRESETS as COLOR_PRESETS } from "@vayada/product-onb
 
 /** A well-formed colour too light for the white text on guests' buttons (VAY-2318). */
 export function isTooLightBrandColor(color: string): boolean {
-  const hex = color.toUpperCase();
+  const hex = color.trim().toUpperCase();
   return /^#[0-9A-F]{6}$/.test(hex) && !isBookingDesignPrimaryColor(hex);
 }
 

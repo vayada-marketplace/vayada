@@ -739,6 +739,51 @@ test.describe("booking-admin settings no-legacy guard", () => {
     await assertHealthy();
   });
 
+  test("creates the first booking design only when the colour or font changes", async ({
+    page,
+  }, testInfo) => {
+    test.skip(
+      !PROD,
+      "Requires a production booking-admin build so the authenticated shell hydrates.",
+    );
+
+    const assertHealthy = watchPageHealth(page, testInfo, {
+      expectedMissingUrls: [new RegExp(`${BOOKING_ADMIN_BOOKING_DESIGN_PATH}$`)],
+    });
+    await mockBookingAdminAuthenticatedSession(page);
+    await mockBookingAdminShellRoutes(page);
+    // No booking design yet, and the settings row still holds the old, too-light Tropical Gold.
+    const { requests, bookingDesignRequests } = await mockBookingAdminDesignSettings(
+      page,
+      { ...defaultBookingAdminDesignSettings, primaryColor: "#D4A017" },
+      null,
+    );
+    const puts = () => bookingDesignRequests.filter(({ method }) => method === "PUT");
+
+    await page.goto("/design-studio?tab=colors");
+    const hex = page.getByRole("textbox", { name: "Primary brand color", exact: true });
+    await expect(hex).toHaveValue("#D4A017");
+    await expect(
+      page.getByText("Too light for white button text. Choose a darker shade."),
+    ).toBeVisible();
+    // Saving the other settings works and leaves the booking design alone.
+    await page.getByRole("button", { name: "Save Changes" }).click();
+    await expect(page.getByText("Design settings saved successfully")).toBeVisible();
+    expect(requests.filter(({ method }) => method === "PATCH")).toHaveLength(1);
+    expect(puts()).toEqual([]);
+
+    await page.getByRole("button", { name: "Ocean Blue" }).click();
+    await page.getByRole("button", { name: "Save Changes" }).click();
+    await expect.poll(() => puts().length).toBe(1);
+    expect(puts()[0]?.body).toEqual({
+      expectedRevision: 0,
+      primaryColor: "#0077B6",
+      fontPairing: "modern-minimalist",
+    });
+    await expect(page.getByText("Design settings saved successfully")).toBeVisible();
+    await assertHealthy();
+  });
+
   test("opens settings pages from the card grid and redirects legacy section links", async ({
     page,
   }, testInfo) => {

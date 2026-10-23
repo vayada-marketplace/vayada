@@ -3,7 +3,12 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { EyeIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { BOOKING_GUEST_LANGUAGE_CODES } from "@vayada/locale-constants";
-import type { BookingDesignFontPairing, BookingDesignRevision } from "@vayada/domain-booking";
+import {
+  BOOKING_DESIGN_DEFAULT_FONT_PAIRING,
+  BOOKING_DESIGN_DEFAULT_PRIMARY_COLOR,
+  type BookingDesignFontPairing,
+  type BookingDesignRevision,
+} from "@vayada/domain-booking";
 import { BookingPagePreview } from "@vayada/product-onboarding";
 import { settingsService, type CustomDomainStatus } from "@/services/settings";
 import { designStudioBookingDesignClient } from "@/services/api/bookingDesignClient";
@@ -84,6 +89,9 @@ export default function DesignStudioPage() {
   const designHotelIdRef = useRef<string | null>(null);
   const propertyIdRef = useRef<string | null>(null);
   const designRef = useRef<BookingDesignRevision | null>(null);
+  // The colour and font the page loaded or last saved; Save writes the booking design only when
+  // they change, so a logo-only Save never creates or rewrites a design (VAY-2318).
+  const savedChoicesRef = useRef<BookingDesignRevision["choices"] | null>(null);
   const profileRevisionRef = useRef<number | null>(null);
   const galleryOverflowRef = useRef<PropertyGalleryImage[]>([]);
   const galleryWriteInFlightRef = useRef(false);
@@ -167,6 +175,7 @@ export default function DesignStudioPage() {
     setDomainStatus(null);
     propertyIdRef.current = null;
     designRef.current = null;
+    savedChoicesRef.current = null;
     profileRevisionRef.current = null;
     try {
       designHotelIdRef.current ??= requireSelectedBookingHotelId();
@@ -215,10 +224,19 @@ export default function DesignStudioPage() {
         // Guests get the booking design's colour and font (VAY-2318); the settings row only
         // covers hotels that have no booking design yet.
         designRef.current = design;
-        const savedColor = design?.choices.primaryColor ?? settings.primary_color;
-        if (savedColor) setPrimaryColor(savedColor);
-        const savedFont = design?.choices.fontPairing ?? settings.font_pairing;
-        if (savedFont) setSelectedFont(savedFont);
+        const savedChoices = {
+          primaryColor: (
+            design?.choices.primaryColor ||
+            settings.primary_color ||
+            BOOKING_DESIGN_DEFAULT_PRIMARY_COLOR
+          ).toUpperCase(),
+          fontPairing: (design?.choices.fontPairing ||
+            settings.font_pairing ||
+            BOOKING_DESIGN_DEFAULT_FONT_PAIRING) as BookingDesignFontPairing,
+        };
+        savedChoicesRef.current = savedChoices;
+        setPrimaryColor(savedChoices.primaryColor);
+        setSelectedFont(savedChoices.fontPairing);
         setPropertyName(property?.property_name || canonicalProfile.profile.displayName);
         if (property?.slug) setPropertySlug(property.slug);
         if (property?.default_currency) setDefaultCurrency(property.default_currency);
@@ -685,31 +703,45 @@ export default function DesignStudioPage() {
     }
   };
 
-  // The booking page takes its colour and font from the booking design, which the setup design
-  // step also writes, so Save writes them there too (VAY-2318).
-  const saveBookingDesign = async () => {
-    const propertyId = propertyIdRef.current;
-    if (!propertyId) throw new Error("The booking design property is not loaded.");
-    const current = designRef.current;
+  // The colour and font to write to the booking design, or null when they are what the page
+  // loaded or last saved.
+  const changedDesignChoices = () => {
     const choices = {
-      primaryColor: primaryColor.toUpperCase(),
+      primaryColor: primaryColor.trim().toUpperCase(),
       fontPairing: selectedFont as BookingDesignFontPairing,
     };
-    if (
-      current?.choices.primaryColor === choices.primaryColor &&
-      current.choices.fontPairing === choices.fontPairing
-    )
-      return;
-    designRef.current = await designStudioBookingDesignClient.save(propertyId, {
-      expectedRevision: current?.revision ?? 0,
-      choices,
-    });
+    const saved = savedChoicesRef.current;
+    return saved?.primaryColor === choices.primaryColor && saved.fontPairing === choices.fontPairing
+      ? null
+      : choices;
+  };
+
+  // The booking page takes its colour and font from the booking design, which the setup design
+  // step also writes, so Save writes them there too (VAY-2318). Returns whether that worked.
+  const saveBookingDesign = async (choices: BookingDesignRevision["choices"]) => {
+    const propertyId = propertyIdRef.current;
+    if (!propertyId) return false;
+    try {
+      designRef.current = await designStudioBookingDesignClient.save(propertyId, {
+        expectedRevision: designRef.current?.revision ?? 0,
+        choices,
+      });
+      savedChoicesRef.current = choices;
+      return true;
+    } catch {
+      // Another tab or the setup step may have saved a newer design: Save again uses it.
+      designRef.current = await designStudioBookingDesignClient
+        .load(propertyId, { cache: "no-store" })
+        .catch(() => designRef.current);
+      return false;
+    }
   };
 
   const handleSave = async () => {
     const hotelId = designHotelIdRef.current;
     if (!hotelId) return;
-    if (isTooLightBrandColor(primaryColor)) {
+    const designChoices = changedDesignChoices();
+    if (designChoices && isTooLightBrandColor(designChoices.primaryColor)) {
       setFeedback({ type: "error", message: "designStudio.colors.tooLight" });
       return;
     }
@@ -730,7 +762,8 @@ export default function DesignStudioPage() {
         },
         hotelId,
       );
-      await saveBookingDesign();
+      const designSaved = designChoices ? await saveBookingDesign(designChoices) : true;
+      // The other settings are saved either way, so the live page still gets them.
       try {
         await publishPublicBookabilityProfile(hotelId);
       } catch {
@@ -740,7 +773,11 @@ export default function DesignStudioPage() {
         });
         return;
       }
-      setFeedback({ type: "success", message: "designStudio.feedback.saveSuccess" });
+      setFeedback(
+        designSaved
+          ? { type: "success", message: "designStudio.feedback.saveSuccess" }
+          : { type: "error", message: "designStudio.feedback.saveError" },
+      );
     } catch {
       setFeedback({ type: "error", message: "designStudio.feedback.saveError" });
     } finally {

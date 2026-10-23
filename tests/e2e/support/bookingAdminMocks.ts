@@ -706,7 +706,8 @@ export async function mockBookingAdminShellRoutes(
 export async function mockBookingAdminDesignSettings(
   page: Page,
   initial: BookingAdminDesignSettingsFixture = defaultBookingAdminDesignSettings,
-  initialDesign: BookingAdminBookingDesignFixture = defaultBookingAdminBookingDesign,
+  /** null: the hotel has no booking design yet (the API answers 404 "not configured"). */
+  initialDesign: BookingAdminBookingDesignFixture | null = defaultBookingAdminBookingDesign,
 ): Promise<{
   requests: BookingAdminDesignSettingsRequest[];
   bookingDesignRequests: BookingAdminBookingDesignRequest[];
@@ -720,23 +721,29 @@ export async function mockBookingAdminDesignSettings(
     const request = route.request();
     if (request.method() !== "PUT") {
       bookingDesignRequests.push({ method: request.method(), body: null });
-      return route.fulfill({ json: design });
+      return design
+        ? route.fulfill({ json: design })
+        : route.fulfill({ status: 404, json: { code: "booking_design_not_configured" } });
     }
     const body = request.postDataJSON() as NonNullable<BookingAdminBookingDesignRequest["body"]>;
     bookingDesignRequests.push({ method: "PUT", body });
-    if (body.expectedRevision !== design.revision) {
+    const currentRevision = design?.revision ?? 0;
+    if (body.expectedRevision !== currentRevision) {
       return route.fulfill({
         status: 409,
-        json: { code: "design_revision_conflict", currentRevision: design.revision },
+        json: { code: "design_revision_conflict", currentRevision },
       });
     }
     design = {
-      ...design,
-      revision: design.revision + 1,
+      ...defaultBookingAdminBookingDesign,
+      revision: currentRevision + 1,
       choices: { primaryColor: body.primaryColor, fontPairing: body.fontPairing },
       createdAt: "2026-10-23T10:00:00.000Z",
     };
-    return route.fulfill({ json: { outcome: "updated", design } });
+    return route.fulfill({
+      status: currentRevision === 0 ? 201 : 200,
+      json: { outcome: currentRevision === 0 ? "created" : "updated", design },
+    });
   });
 
   await page.route("**/api/booking/hotels/*/settings/design", (route) => {

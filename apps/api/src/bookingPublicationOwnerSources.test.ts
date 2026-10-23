@@ -306,6 +306,13 @@ describe("production Booking publication owner sources", () => {
       outcome: "snapshot",
       content: { branding: { heroHeading: "Stay above the clouds" } },
     });
+    // Only whitespace (tab, no-break space) counts as no heading at all.
+    pool.query.mockResolvedValue({ rows: [{ ...withHeading, heroHeading: " \t\u00a0" }] });
+    const blank = await source.getBookingLaunchEvidence(scope);
+    if (blank.outcome !== "evidence") throw new Error("Expected Booking evidence");
+    await expect(source.getSnapshot(manifestRequest(blank.sources))).resolves.toMatchObject({
+      content: { branding: { heroHeading: "Hotel Alpenrose" } },
+    });
     pool.query.mockResolvedValue({ rows: [{ ...withHeading, heroHeading: null }] });
     getCurrentGuestRules.mockResolvedValue({
       ...rules,
