@@ -6496,6 +6496,10 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       offers?.rooms.flatMap((room) => room.offers.map((offer) => offer.publicOfferKey)),
     ).toEqual(mapped.flatMap((room) => room.offers.map((offer) => offer.ratePlanId)));
     expect(offers?.rooms.flatMap((room) => room.offers)).toHaveLength(3);
+    // VAY-2320: each rate says how it is paid, so a group combines rates paid the same way.
+    expect(
+      offers?.rooms.flatMap((room) => room.offers.map((offer) => offer.paymentSchedule)),
+    ).toEqual([{ kind: "full" }, { kind: "full" }, { kind: "full" }]);
   });
   /** "Save prices" for the next revision, with its Finance evidence and charge declaration. */
   async function savePrices(

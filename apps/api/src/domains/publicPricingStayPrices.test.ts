@@ -8,6 +8,8 @@ vi.mock("./publicPricingChargeTotals.js", () => ({ lockPublicPricingChargeTotals
 
 import {
   createPublicPricingStayPrices,
+  fewestRooms,
+  oneRoomFits,
   parseStayPricesQuery,
   roomsForParty,
   splitAdults,
@@ -99,6 +101,28 @@ describe("parseStayPricesQuery", () => {
     ).toMatchObject({ children: 0, promoCode: null });
   });
 
+  // VAY-2320: a group choosing its rooms one by one asks about one room's guests at a time.
+  it("reads the guests of the one room being chosen", () => {
+    const base = { checkIn: "2026-11-06", checkOut: "2026-11-08", adults: "3", children: "1" };
+    expect(parseStayPricesQuery({ ...base, roomAdults: "1", roomChildren: "1" })).toMatchObject({
+      adults: 3,
+      children: 1,
+      room: { adults: 1, children: 1 },
+    });
+    expect(parseStayPricesQuery({ ...base, roomAdults: "2" })).toMatchObject({
+      room: { adults: 2, children: 0 },
+    });
+    expect(parseStayPricesQuery(base)).not.toHaveProperty("room");
+    for (const room of [
+      { roomAdults: "0" },
+      { roomChildren: "1" },
+      { roomAdults: "4" },
+      { roomAdults: "1", roomChildren: "2" },
+      { roomAdults: "1.5" },
+    ])
+      expect(parseStayPricesQuery({ ...base, ...room })).toBeNull();
+  });
+
   it.each([
     { checkIn: "2026-11-08", checkOut: "2026-11-06", adults: "2" },
     { checkIn: "2026-02-30", checkOut: "2026-03-02", adults: "2" },
@@ -131,6 +155,27 @@ describe("rooms for a party", () => {
     expect(roomsForParty({ maxGuests: 1, maxAdults: 1, maxChildren: 0 }, 10, 0)).toBeNull();
   });
 
+  it("fits one room's guests within every limit, with an adult", () => {
+    const room = { maxGuests: 3, maxAdults: 2, maxChildren: 1 };
+    expect(oneRoomFits(room, { adults: 2, children: 1 })).toBe(true);
+    expect(oneRoomFits(room, { adults: 3, children: 0 })).toBe(false);
+    expect(oneRoomFits(room, { adults: 1, children: 2 })).toBe(false);
+    expect(oneRoomFits({ ...room, maxGuests: 2 }, { adults: 2, children: 1 })).toBe(false);
+    expect(oneRoomFits(room, { adults: 0, children: 1 })).toBe(false);
+  });
+
+  // VAY-2320: a group may mix room types, so the starting room count uses the largest rooms.
+  it("starts a group at the fewest rooms it could need across room types", () => {
+    const big = { occupancy: { maxGuests: 4, maxAdults: 4, maxChildren: 0 } };
+    const family = { occupancy: { maxGuests: 2, maxAdults: 1, maxChildren: 1 } };
+    expect(fewestRooms([big, family], { adults: 4, children: 1 })).toBe(2);
+    expect(fewestRooms([big, family], { adults: 10, children: 1 })).toBe(3);
+    expect(fewestRooms([big], { adults: 2, children: 1 })).toBeNull();
+    expect(fewestRooms([family], { adults: 2, children: 0 })).toBe(2);
+    expect(fewestRooms([family], { adults: 10, children: 0 })).toBeNull();
+    expect(fewestRooms([], { adults: 2, children: 0 })).toBeNull();
+  });
+
   it("spreads adults evenly", () => {
     expect(splitAdults(5, 2)).toEqual([3, 2]);
     expect(splitAdults(4, 4)).toEqual([1, 1, 1, 1]);
@@ -151,6 +196,7 @@ describe("createPublicPricingStayPrices", () => {
       checkIn: "2026-11-06",
       checkOut: "2026-11-08",
       childrenPriced: true,
+      suggestedRooms: 1,
       rooms: [
         {
           roomTypeId: ROOM_A,
@@ -255,6 +301,73 @@ describe("createPublicPricingStayPrices", () => {
       { adults: 2, childAgesAtCheckIn: [] },
       { adults: 1, childAgesAtCheckIn: [] },
     ]);
+  });
+
+  // VAY-2320: room by room, a type with one free room is bookable for the room being chosen,
+  // and it is priced for that room's adults.
+  it("sizes and prices each room type for the one room being chosen", async () => {
+    const env = setup([
+      { roomTypeId: ROOM_A, nights: 2, free: 1 },
+      { roomTypeId: ROOM_B, nights: 2, free: 1 },
+    ]);
+    totals.mockResolvedValue({ totalMinor: "29800" });
+    const group = { ...stay, adults: 3, children: 1 };
+    const party = await env.reader.read("hotel", group);
+    // The whole group in rooms of one type: no type has two free.
+    expect(party!.rooms.map(({ roomCount, availability }) => [roomCount, availability])).toEqual([
+      [null, "sold_out"],
+      [2, "sold_out"],
+    ]);
+    // Free-room counts are given only to a group choosing room by room.
+    expect(party!.rooms.every((room) => !("roomsFree" in room))).toBe(true);
+    expect(party!.suggestedRooms).toBe(2);
+    totals.mockClear();
+    const adultsRoom = await env.reader.read("hotel", {
+      ...group,
+      room: { adults: 2, children: 0 },
+    });
+    expect(
+      adultsRoom!.rooms.map(({ roomCount, availability, roomsFree }) => [
+        roomCount,
+        availability,
+        roomsFree,
+      ]),
+    ).toEqual([
+      [1, "available", 1],
+      [1, "available", 1],
+    ]);
+    expect(adultsRoom!.childrenPriced).toBe(true);
+    expect(adultsRoom!.suggestedRooms).toBe(2);
+    expect(
+      totals.mock.calls.map(([, , selection]) =>
+        selection.rooms.map((room: { guests: unknown }) => room.guests),
+      ),
+    ).toEqual([
+      [{ adults: 2, childAgesAtCheckIn: [] }],
+      [{ adults: 2, childAgesAtCheckIn: [] }],
+      [{ adults: 2, childAgesAtCheckIn: [] }],
+    ]);
+    // The room with the child: only the type that takes children fits it.
+    const childRoom = await env.reader.read("hotel", {
+      ...group,
+      room: { adults: 1, children: 1 },
+    });
+    expect(
+      childRoom!.rooms.map(({ roomCount, availability }) => [roomCount, availability]),
+    ).toEqual([
+      [null, "sold_out"],
+      [1, "available"],
+    ]);
+    expect(childRoom!.childrenPriced).toBe(false);
+  });
+
+  it("suggests no room count when no type with a free room fits the group", async () => {
+    const env = setup([
+      { roomTypeId: ROOM_A, nights: 2, free: 3 },
+      { roomTypeId: ROOM_B, nights: 2, free: 0 },
+    ]);
+    const prices = await env.reader.read("hotel", { ...stay, children: 1 });
+    expect(prices!.suggestedRooms).toBeNull();
   });
 
   it("says children aren't priced and refuses rooms that take no children", async () => {

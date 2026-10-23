@@ -965,6 +965,26 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
           occurredAt: new Date("2026-09-21T08:00:00Z"),
         });
         const guest = { guest_email: "jane@example.test" };
+        // VAY-2320: the guest's booking lists each room with its own type, guests, meal and terms.
+        const looked = (await adapter.lookup(
+          propertyId,
+          { bookingReference: bookingId, guestEmail: "jane@example.test" },
+          context("l"),
+        )) as { bookedRooms?: unknown };
+        // With mixed terms the second room type is free until a week before arrival.
+        expect(looked.bookedRooms).toEqual(
+          [types[0], types[1], types[0]].map((roomTypeId) => ({
+            roomTypeId,
+            roomName: roomTypeId,
+            mealPlan: quote.rooms[0]!.mealPlan,
+            adults: 2,
+            children: 1,
+            cancellation:
+              scenario.endsWith("-mixed-terms") && roomTypeId === types[1]
+                ? { kind: "free_until_days_before_arrival", days: 7 }
+                : { kind: "partial_refund" },
+          })),
+        );
         expect(
           await adapter.cancelPreview(propertyId, bookingId, guest, context("p")),
         ).toMatchObject({
