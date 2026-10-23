@@ -13,7 +13,7 @@ import {
 import type { PricingPaymentSwitches } from "./pricingRatePayability.js";
 import { readPmsRoomOperatingEligibility } from "./pmsRoomOperatingEligibility.js";
 import { toPublicPmsRoomAmenityLabelsV1 } from "./pmsRoomAmenityVocabulary.js";
-import { readGuestLocationMap, roomAddress, roomPin } from "./bookingLocationMap.js";
+import { guestRoomLocation, readGuestLocation, type MapPin } from "./bookingLocationMap.js";
 
 type MediaServing = Pick<
   PlatformMediaServingConfig,
@@ -79,7 +79,8 @@ export function createPublicPricingOfferCatalog(
           .filter((room) => room.offers.length > 0);
         const content = await readRoomContent(client, propertyId, offered);
         // The location map switch (VAY-2126) is read live; rooms' pins are sent only while it is on.
-        const locationMap = await readGuestLocationMap(client, propertyId);
+        const guestLocation = await readGuestLocation(client, propertyId);
+        const locationMap = guestLocation?.map ?? null;
         const rooms = [];
         for (const room of offered) {
           const row = content.get(room.roomTypeId);
@@ -92,7 +93,7 @@ export function createPublicPricingOfferCatalog(
             description: facts.description,
             occupancy: facts.occupancy,
             ...roomCardFacts(row),
-            ...(locationMap && roomLocation(row)),
+            ...(guestLocation && roomLocation(row, guestLocation.propertyPin)),
             images: await roomImages(client, options.mediaServing, organizationId, row),
             offers: room.offers.map((rate) => ({
               publicOfferKey: rate.ratePlanId,
@@ -264,12 +265,28 @@ async function roomImages(
   }
 }
 
-/** A room's own pin for the guest location map, with its address when the hotel wrote one. */
-function roomLocation(row: RoomRow): {
-  location?: { latitude: number; longitude: number; address?: string };
+/** A room's place for the guest location map (VAY-2321): at the property, or its own pin with its address. A
+ * room shown as an area gets its pin rounded and its area's name, never its street. */
+function roomLocation(
+  row: RoomRow,
+  propertyPin: MapPin | null,
+): {
+  atProperty: boolean;
+  showMapInDetails: boolean;
+  location?:
+    | { latitude: number; longitude: number; address?: string }
+    | { latitude: number; longitude: number; approximate: true; area?: string };
 } {
-  const pin = roomPin(row.attributes);
-  if (!pin) return {};
-  const address = roomAddress(row.attributes);
-  return { location: { ...pin, ...(address && { address }) } };
+  const { atProperty, approximate, pin, address, showMapInDetails } = guestRoomLocation(
+    row.attributes,
+    propertyPin,
+  );
+  if (!pin) return { atProperty, showMapInDetails };
+  return {
+    atProperty,
+    showMapInDetails,
+    location: approximate
+      ? { ...pin, approximate: true, ...(address && { area: address }) }
+      : { ...pin, ...(address && { address }) },
+  };
 }

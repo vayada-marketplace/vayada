@@ -83,7 +83,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS room-type location update", () => {
 
   function locationCommand(
     suffix: string,
-    attributes: Record<string, string | number | null>,
+    attributes: Record<string, string | number | boolean | null>,
   ): PmsRoomTypeUpdateCommand {
     const commandId = `pms-room-location-${suffix}-${roomTypeId}`;
     return {
@@ -141,6 +141,25 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS room-type location update", () => {
       ...JSON.parse(before.attributes),
       locationAddress: "Seestrasse 12, Innsbruck",
     });
+  });
+
+  it("stores how guests see the room's place, and a repeated save writes nothing (VAY-2321)", async () => {
+    const display = {
+      locationSource: "custom",
+      locationPrecision: "approximate",
+      locationArea: "Wilten",
+      showMapInDetails: false,
+    };
+    await expect(
+      repository.updateRoomTypeLocation(locationCommand("display", display)),
+    ).resolves.toMatchObject({ ok: true, roomType: { attributes: display } });
+    const saved = await snapshot();
+    expect(JSON.parse(saved.attributes)).toMatchObject(display);
+
+    await expect(
+      repository.updateRoomTypeLocation(locationCommand("display-again", display)),
+    ).resolves.toMatchObject({ ok: true, roomType: { attributes: display } });
+    await expect(snapshot()).resolves.toEqual(saved);
   });
 });
 
