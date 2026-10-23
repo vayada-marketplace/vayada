@@ -31,7 +31,7 @@ for (const width of [1440, 390]) {
     await expect(deluxe).toContainText("You chose the last one for room 1.");
     const garden = page.getByTestId("room-card-garden");
     await expect(garden).toContainText("Select your rate for room 2 · 1 Adult, 1 Child");
-    const fullPayment = garden.locator(`[data-offer-key="${key("h")}"]`);
+    const fullPayment = garden.locator(`[data-offer-key="${key("b")}"]`);
     await expect(fullPayment).toBeDisabled();
     await expect(fullPayment).toContainText("Can't combine");
     await expect(fullPayment).toContainText("One booking is paid one way.");

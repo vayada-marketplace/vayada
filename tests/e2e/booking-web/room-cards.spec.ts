@@ -132,8 +132,9 @@ for (const width of [1440, 390]) {
     await expect(page.getByRole("link", { name: "Choose rooms and get a price" })).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath(`room-cards-${width}.png`), fullPage: true });
 
+    // VAY-2320: the cards are priced for one room with the whole party.
     expect(new URL(stayRequests.at(-1)!).searchParams.toString()).toBe(
-      "checkIn=2026-11-06&checkOut=2026-11-08&adults=2&children=0",
+      "checkIn=2026-11-06&checkOut=2026-11-08&adults=2&children=0&roomAdults=2&roomChildren=0",
     );
     await choices.nth(1).click();
     await expect(choices.nth(1)).toHaveAttribute("aria-pressed", "true");

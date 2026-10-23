@@ -1,6 +1,7 @@
 import type { Page } from "@playwright/test";
 
 // VAY-2320: a group too big for one room chooses its rooms one by one, mixing room types.
+/** A public offer key; its letter must be a hex digit, like the API's keys. */
 export const key = (letter: string) => `pricing-offer.v2:${letter.repeat(64)}`;
 export const STAY = "/?checkIn=2026-11-10&checkOut=2026-11-12&adults=3&children=1";
 const deposit = { kind: "deposit", percent: 30, key: "deposit:3000:0:card" };
@@ -23,10 +24,10 @@ const ROOMS = [
     free: 3,
     offers: [
       { key: "f", mealPlan: "room_only", cancellation: free(5), price: "23800" },
-      { key: "g", mealPlan: "breakfast", cancellation: free(5), price: "27800" },
+      { key: "e", mealPlan: "breakfast", cancellation: free(5), price: "27800" },
       // Paid in full by card: can't join rooms paid with a deposit.
       {
-        key: "h",
+        key: "b",
         mealPlan: "room_only",
         cancellation: { kind: "non_refundable" },
         price: "21400",
