@@ -333,7 +333,23 @@ export async function loadBookingNotificationSnapshot(
        booking.currency,
        COALESCE(booking.booking_metadata ->> 'paymentMethod', booking.expected_payment_method) AS "paymentMethod",
        booking.booking_metadata AS "bookingMetadata",
-       booking.booking_metadata #>> '{selectedOffer,roomName}' AS accommodation,
+       -- VAY-2320: a pricing booking names its booked rooms ("2 × Deluxe + Garden Room").
+       COALESCE(booking.booking_metadata #>> '{selectedOffer,roomName}', (
+         SELECT string_agg(
+                  CASE WHEN booked.count > 1 THEN booked.count || ' × ' ELSE '' END || booked.name,
+                  ' + ' ORDER BY booked.first_position)
+         FROM (
+           SELECT room_type.name, count(*) AS count, min(selection.position) AS first_position
+           FROM jsonb_array_elements(
+             CASE WHEN jsonb_typeof(booking.booking_metadata->'pricingSelections') = 'array'
+               THEN booking.booking_metadata->'pricingSelections' ELSE '[]'::jsonb END
+           ) WITH ORDINALITY AS selection(value, position)
+           JOIN pms.room_types room_type
+             ON room_type.id::text = selection.value->>'roomTypeId'
+            AND room_type.property_id = booking.property_id
+           GROUP BY room_type.id, room_type.name
+         ) booked
+       )) AS accommodation,
        booking.lifecycle_status AS status, booking.adults, booking.children, booking.room_count AS "roomCount",
        guest.special_requests AS "specialRequests",
        (SELECT string_agg(item.addon_name || ' × ' || item.quantity, ', ' ORDER BY item.created_at)
