@@ -50,6 +50,7 @@ import {
   parseBookingFlexibleCancellationTerms,
   parseBookingRoomSelection,
   parseFunnelEventMetadata,
+  publicOfferCancellation,
   SAME_DAY_BOOKING_POLICY_DEFAULTS,
   type AddonEconomicTerms,
   type BookedCancellationOutcome,
@@ -1251,6 +1252,10 @@ export type TargetBookingRow = QueryResultRow & {
   operationalStatus?: string | null;
   assignedRoomTypeName?: string | null;
   unitNames?: unknown;
+  /** VAY-2320: the accepted quote's terms and priced rooms, and the booked room types' names. */
+  bookedTerms?: unknown;
+  bookedPricedRooms?: unknown;
+  bookedRoomNames?: unknown;
   cancelledAt?: Date | string | null;
   cardBrand?: string | null;
   cardLast4?: string | null;
@@ -4250,6 +4255,9 @@ export async function loadTargetBooking(
        cancellation.occurred_at AS "cancelledAt",
        card_payment.card_brand AS "cardBrand",
        card_payment.card_last4 AS "cardLast4",
+       booked_quote.terms AS "bookedTerms",
+       booked_quote.rooms AS "bookedPricedRooms",
+       booked_names.names AS "bookedRoomNames",
        b.created_at AS "createdAt",
        (b.lifecycle_status='pending_payment' AND b.payment_status IN ('unpaid','authorized')
         AND b.booking_metadata->>'acceptedPaymentDeadlineAt' IS NULL
@@ -4309,6 +4317,35 @@ export async function loadTargetBooking(
        ORDER BY payment.created_at DESC
        LIMIT 1
      ) card_payment ON TRUE
+     -- VAY-2320: each booked room's terms and meal, from the accepted quote (a date change keeps
+     -- rooms, rates and terms), and the room types' names.
+     LEFT JOIN LATERAL (
+       SELECT (
+                SELECT jsonb_agg(jsonb_build_object('roomTypeId', term->'roomTypeId',
+                  'offerId', term->'offerId', 'cancellation', term->'cancellation'))
+                FROM jsonb_array_elements(acceptance.quote_snapshot->'evidence'->'terms') term
+              ) AS terms,
+              (
+                SELECT jsonb_agg(jsonb_build_object('selectionId', room->'selectionId',
+                  'mealPlan', room->'mealPlan'))
+                FROM jsonb_array_elements(acceptance.quote_snapshot->'rooms') room
+              ) AS rooms
+       FROM booking.pricing_quote_acceptances acceptance
+       WHERE acceptance.guest_booking_id = b.id
+         AND acceptance.property_id = b.property_id
+     ) booked_quote ON TRUE
+     LEFT JOIN LATERAL (
+       SELECT jsonb_object_agg(room_type.id::text, room_type.name) AS names
+       FROM pms.room_types room_type
+       WHERE room_type.property_id = b.property_id
+         AND room_type.id::text IN (
+           SELECT selection->>'roomTypeId'
+           FROM jsonb_array_elements(
+             CASE WHEN jsonb_typeof(b.booking_metadata->'pricingSelections') = 'array'
+               THEN b.booking_metadata->'pricingSelections' ELSE '[]'::jsonb END
+           ) selection
+         )
+     ) booked_names ON TRUE
      WHERE b.property_id = $1::uuid
        AND b.booking_metadata->>'airbnbMoneyStatus' IS DISTINCT FROM 'unverified'
        AND (b.id::text = $2 OR b.public_reference = $2)
@@ -4332,6 +4369,53 @@ export async function loadTargetBooking(
   return booking;
 }
 
+/** VAY-2320: a pricing booking's rooms, in booked order, each with its room type, guests, meal and
+ * cancellation as guests read it. Additive: rooms of several types or rates in one booking. */
+function pricingBookedRooms(booking: TargetBookingRow, metadata: Record<string, unknown>) {
+  const selections = metadata["pricingSelections"];
+  // Only loadTargetBooking reads the rooms' terms and names; other loaders leave the field out.
+  if (
+    metadata["targetSource"] !== "pricing_quote_draft" ||
+    !Array.isArray(selections) ||
+    !("bookedRoomNames" in booking)
+  )
+    return {};
+  const terms = Array.isArray(booking.bookedTerms) ? booking.bookedTerms.map(objectValue) : [];
+  const priced = Array.isArray(booking.bookedPricedRooms)
+    ? booking.bookedPricedRooms.map(objectValue)
+    : [];
+  const names = objectValue(booking.bookedRoomNames);
+  return {
+    bookedRooms: selections.map((value) => {
+      const selection = objectValue(value);
+      const guests = objectValue(selection["guests"]);
+      const term = terms.find(
+        (t) => t["roomTypeId"] === selection["roomTypeId"] && t["offerId"] === selection["offerId"],
+      );
+      const cancellation = term && objectValue(term["cancellation"]);
+      return {
+        roomTypeId: selection["roomTypeId"],
+        roomName: stringValue(names[String(selection["roomTypeId"])]) ?? null,
+        mealPlan:
+          stringValue(
+            priced.find((room) => room["selectionId"] === selection["selectionId"])?.["mealPlan"],
+          ) ?? null,
+        adults: guests["adults"],
+        children: Array.isArray(guests["childAgesAtCheckIn"])
+          ? guests["childAgesAtCheckIn"].length
+          : 0,
+        cancellation:
+          cancellation &&
+          (cancellation["kind"] === "non_refundable" || cancellation["kind"] === "flexible")
+            ? publicOfferCancellation(
+                cancellation as unknown as Parameters<typeof publicOfferCancellation>[0],
+              )
+            : null,
+      };
+    }),
+  };
+}
+
 export function serializeTargetBooking(booking: TargetBookingRow): Record<string, unknown> {
   const metadata = objectValue(booking.bookingMetadata);
   const selectedOffer = objectValue(metadata["selectedOffer"]);
@@ -4341,6 +4425,7 @@ export function serializeTargetBooking(booking: TargetBookingRow): Record<string
   const totalAmount = Number(decimalString(booking.totalAmount));
   return {
     ...projectBookingRoomSelection(selectedOffer),
+    ...pricingBookedRooms(booking, metadata),
     mealDescription: bookedMealDescription(selectedOffer),
     canEditRequest: booking.canEditRequest ?? false,
     id: booking.guestBookingId,

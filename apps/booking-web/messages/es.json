@@ -591,6 +591,17 @@
     "loadingMap": "Cargando mapa…",
     "mapFailed": "Ahora mismo no se pudo cargar el mapa."
   },
+  "roomPlace": {
+    "title": "Dónde te alojarás",
+    "distance": "A {distance} del alojamiento principal",
+    "distanceAbout": "A unos {distance} del alojamiento principal",
+    "mapLabel": "Mapa de dónde te alojarás",
+    "expandMap": "Ampliar mapa",
+    "closeMap": "Cerrar mapa",
+    "directions": "Cómo llegar",
+    "areaNote": "Se muestra como una zona, no el punto exacto.",
+    "reception": "Recepción"
+  },
   "guestPicker": {
     "title": "¿Quién viene?",
     "adults": "Adultos",

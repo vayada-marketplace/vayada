@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import {
+  assignedRoomName,
   Booking,
   BookingNote,
   CheckoutCharge,
@@ -77,8 +78,8 @@ function roomLabel(
     return b.assignedRooms
       .map((room) =>
         room.roomNumber
-          ? `${b.roomName}\n${t("checkOut.unit", { number: room.roomNumber })}`
-          : b.roomName,
+          ? `${assignedRoomName(b, room)}\n${t("checkOut.unit", { number: room.roomNumber })}`
+          : assignedRoomName(b, room),
       )
       .join("\n");
   }

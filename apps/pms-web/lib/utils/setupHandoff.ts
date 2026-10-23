@@ -40,6 +40,8 @@ export async function resolveSharedHotelSetupHandoff(input: {
   baseUrl?: string;
   signal?: AbortSignal;
   create?: typeof createBrowserAuthHandoff;
+  /** Opens Booking Admin on this property (VAY-2321: "Edit property address"). */
+  propertyId?: string;
 }): Promise<SharedHotelSetupHandoff> {
   const baseUrl = input.baseUrl ?? BOOKING_ADMIN_URL;
   const create = input.create ?? createBrowserAuthHandoff;
@@ -50,6 +52,7 @@ export async function resolveSharedHotelSetupHandoff(input: {
         sourceSurface: "pms-web",
         targetPath: input.targetPath,
         targetSurface: "booking-admin",
+        ...(input.propertyId ? { routingHints: { propertyId: input.propertyId } } : {}),
         ...(input.signal
           ? { fetcher: (url, init) => fetch(url, { ...init, signal: input.signal }) }
           : {}),

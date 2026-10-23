@@ -591,6 +591,17 @@
     "loadingMap": "Memuat peta…",
     "mapFailed": "Peta tidak dapat dimuat saat ini."
   },
+  "roomPlace": {
+    "title": "Tempat Anda menginap",
+    "distance": "{distance} dari properti utama",
+    "distanceAbout": "Sekitar {distance} dari properti utama",
+    "mapLabel": "Peta tempat Anda menginap",
+    "expandMap": "Perbesar peta",
+    "closeMap": "Tutup peta",
+    "directions": "Petunjuk arah",
+    "areaNote": "Ditampilkan sebagai area, bukan titik persisnya.",
+    "reception": "Resepsionis"
+  },
   "guestPicker": {
     "title": "Siapa yang datang?",
     "adults": "Dewasa",

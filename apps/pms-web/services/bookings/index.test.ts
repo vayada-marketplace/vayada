@@ -22,7 +22,7 @@ vi.mock("../api/unsupported", () => ({
   unsupportedPmsNextStackFeature: vi.fn(),
 }));
 
-import { bookingsService, HIDDEN_GUEST_CONTACT } from ".";
+import { assignedRoomName, bookingsService, HIDDEN_GUEST_CONTACT } from ".";
 import { calendarService } from "../calendar";
 import { createElement } from "react";
 import { create } from "react-test-renderer";
@@ -168,6 +168,13 @@ describe("PMS target booking projection", () => {
       { position: 2, roomName: "Twin", adults: 2, children: 0, ratePlanName: "Non-refundable" },
     ]);
     expect(result.assignedRooms).toEqual([]);
+    // VAY-2320: once the PMS has the rooms, their types name the booking, as they name the stays.
+    // prettier-ignore
+    mocks.get.mockImplementation(async (endpoint: string) => endpoint.endsWith("/room-types") ? { items: roomTypes } : reservationPage({ ...mixed, roomCount: 2, assignments }));
+    expect((await bookingsService.list()).bookings[0]!.roomName).toBe("1 × Suite + 1 × Studio");
+    // prettier-ignore
+    mocks.get.mockImplementation(async (endpoint: string) => endpoint.endsWith("/room-types") ? { items: roomTypes } : reservationPage({ ...mixed, roomCount: 2, assignments: [assignments[0], { ...assignments[1], roomTypeId: "type-1" }] }));
+    expect((await bookingsService.list()).bookings[0]!.roomName).toBe("Suite");
   });
 
   it("uses the booked offer and authoritative booking amounts when no PMS assignment exists", async () => {
@@ -592,6 +599,17 @@ describe("PMS target booking projection", () => {
     // prettier-ignore
     mocks.get.mockImplementation(async (endpoint: string) => endpoint.endsWith("/room-types") ? { items: roomTypes } : reservationPage(heterogeneousReservation));
     const complete = (await bookingsService.list()).bookings[0]!;
+    // VAY-2320: the booking is named by all its rooms, not the first room's type, and each room
+    // by its own type.
+    expect(complete.roomName).toBe("1 × Suite + 1 × Studio");
+    expect(complete.assignedRooms.map((room) => assignedRoomName(complete, room))).toEqual([
+      "Suite",
+      "Studio",
+    ]);
+    // A room an OTA change removed stays above the room count and isn't counted.
+    // prettier-ignore
+    mocks.get.mockImplementation(async (endpoint: string) => endpoint.endsWith("/room-types") ? { items: roomTypes } : reservationPage({ ...heterogeneousReservation, roomCount: 1, assignments: [assignments[0], { ...assignments[1], assignmentStatus: "released" }] }));
+    expect((await bookingsService.list()).bookings[0]!.roomName).toBe("Suite");
     expect(complete.expectedPaymentMethod).toBe("cash");
     // prettier-ignore
     expect(complete.stays).toMatchObject([{ position: 0, roomName: "Suite", ratePlanName: "Plan 1", checkIn: "2026-09-10", adults: 1, nightly: [{ appliedAmount: 100 }] }, { position: 1, roomName: "Studio", ratePlanName: "Plan 2", checkIn: "2026-09-12", adults: 2, nightly: [{ appliedAmount: 180 }] }]);

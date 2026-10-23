@@ -836,6 +836,13 @@ function HomePageContent() {
                   }
                   onView={() => trackEvent(slug, "room_viewed", { roomTypeId: room.roomTypeId })}
                   detailsRequest={detailsRequests[room.roomTypeId] ?? 0}
+                  place={
+                    locationMap && {
+                      name: hotel.name,
+                      locality: hotel.location,
+                      pin: locationMap.property,
+                    }
+                  }
                 />
               ))}
             </div>
