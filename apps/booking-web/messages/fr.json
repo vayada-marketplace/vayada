@@ -161,7 +161,24 @@
     "noChildren": "Cette chambre n'accueille pas d'enfants. Choisissez une autre chambre pour votre groupe.",
     "percentOff": "-{percent} %",
     "closeRoomDetails": "Fermer les détails de la chambre",
-    "soldOutForDates": "Complet pour vos dates"
+    "soldOutForDates": "Complet pour vos dates",
+    "roomsCount": "{count, plural, one {# chambre} other {# chambres}}",
+    "yourRooms": "Vos {count} chambres",
+    "roomNumber": "Chambre {number}",
+    "chooseBelow": "Choisissez une chambre ci-dessous",
+    "nextRoom": "Ensuite",
+    "changeRoom": "Modifier",
+    "totalSoFar": "pour l'instant",
+    "totalForRooms": "pour {count} chambres",
+    "chooseMoreRooms": "{count, plural, one {Choisissez encore # chambre} other {Choisissez encore # chambres}}",
+    "selectRateForRoom": "Choisissez votre tarif pour la chambre {number} · {guests}",
+    "chooseForRoom": "Choisir pour la chambre {number}",
+    "noneLeftForRoom": "Plus disponible pour la chambre {number}",
+    "inYourRoom": "Dans votre chambre {number}",
+    "lastOneChosen": "Vous avez choisi la dernière pour la chambre {number}.",
+    "cantCombine": "Non combinable",
+    "paidDifferently": "Se paie autrement que les chambres choisies. Une réservation se paie d'une seule façon.",
+    "pricesPerRoom": "Les prix sont par chambre, pour les adultes qui y dorment. Nous ajoutons les enfants dès que vous indiquez leur âge à l'étape suivante."
   },
   "rooms": {
     "title": "Nos chambres",
@@ -571,5 +588,19 @@
     "mapNote": "Charge Google Maps. Google reçoit votre requête.",
     "loadingMap": "Chargement de la carte…",
     "mapFailed": "La carte n'a pas pu être chargée pour le moment."
+  },
+  "guestPicker": {
+    "title": "Qui vient ?",
+    "adults": "Adultes",
+    "adultAges": "{age} ans et plus",
+    "children": "Enfants",
+    "childAges": "0 à {age} ans",
+    "rooms": "Chambres",
+    "roomsHint": "Ajoutez des chambres pour vous répartir",
+    "roomsNeeded": "{guests} personnes ont besoin d'au moins {count} chambres ici",
+    "splitNote": "Nous répartissons votre groupe entre les chambres. Vous choisissez une chambre pour chacune et pouvez indiquer qui dort où avant de payer.",
+    "fewer": "Retirer : {label}",
+    "more": "Ajouter : {label}",
+    "done": "Terminé"
   }
 }

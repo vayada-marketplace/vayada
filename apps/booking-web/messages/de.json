@@ -161,7 +161,24 @@
     "noChildren": "Dieses Zimmer ist nicht für Kinder geeignet. Wählen Sie bitte ein anderes Zimmer für Ihre Gruppe.",
     "percentOff": "-{percent} % RABATT",
     "closeRoomDetails": "Zimmerdetails schließen",
-    "soldOutForDates": "Für Ihre Daten ausgebucht"
+    "soldOutForDates": "Für Ihre Daten ausgebucht",
+    "roomsCount": "{count, plural, one {# Zimmer} other {# Zimmer}}",
+    "yourRooms": "Ihre {count} Zimmer",
+    "roomNumber": "Zimmer {number}",
+    "chooseBelow": "Wählen Sie unten ein Zimmer",
+    "nextRoom": "Als Nächstes",
+    "changeRoom": "Ändern",
+    "totalSoFar": "bisher",
+    "totalForRooms": "für {count} Zimmer",
+    "chooseMoreRooms": "{count, plural, one {Noch # Zimmer wählen} other {Noch # Zimmer wählen}}",
+    "selectRateForRoom": "Ihre Rate für Zimmer {number} · {guests}",
+    "chooseForRoom": "Für Zimmer {number} wählen",
+    "noneLeftForRoom": "Keins mehr für Zimmer {number}",
+    "inYourRoom": "In Ihrem Zimmer {number}",
+    "lastOneChosen": "Sie haben das letzte für Zimmer {number} gewählt.",
+    "cantCombine": "Nicht kombinierbar",
+    "paidDifferently": "Wird anders bezahlt als Ihre gewählten Zimmer. Eine Buchung wird auf eine Art bezahlt.",
+    "pricesPerRoom": "Preise gelten pro Zimmer für die Erwachsenen darin. Kinder kommen dazu, sobald Sie im nächsten Schritt ihr Alter angeben."
   },
   "rooms": {
     "title": "Unsere Zimmer",
@@ -572,5 +589,19 @@
     "mapNote": "Lädt Google Maps. Google erhält Ihre Anfrage.",
     "loadingMap": "Karte wird geladen …",
     "mapFailed": "Die Karte konnte gerade nicht geladen werden."
+  },
+  "guestPicker": {
+    "title": "Wer kommt mit?",
+    "adults": "Erwachsene",
+    "adultAges": "Ab {age} Jahren",
+    "children": "Kinder",
+    "childAges": "0–{age} Jahre",
+    "rooms": "Zimmer",
+    "roomsHint": "Mehr Zimmer, mehr Platz",
+    "roomsNeeded": "{guests} Gäste brauchen hier mindestens {count} Zimmer",
+    "splitNote": "Wir verteilen Ihre Gruppe auf die Zimmer. Sie wählen für jedes ein Zimmer und können vor dem Bezahlen angeben, wer wo schläft.",
+    "fewer": "Weniger: {label}",
+    "more": "Mehr: {label}",
+    "done": "Fertig"
   }
 }

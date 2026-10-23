@@ -161,7 +161,24 @@
     "noChildren": "This room doesn't take children. Choose another room for your group.",
     "percentOff": "-{percent}% OFF",
     "closeRoomDetails": "Close room details",
-    "soldOutForDates": "Sold out for your dates"
+    "soldOutForDates": "Sold out for your dates",
+    "roomsCount": "{count, plural, one {# room} other {# rooms}}",
+    "yourRooms": "Your {count} rooms",
+    "roomNumber": "Room {number}",
+    "chooseBelow": "Choose a room below",
+    "nextRoom": "Next",
+    "changeRoom": "Change",
+    "totalSoFar": "so far",
+    "totalForRooms": "for {count} rooms",
+    "chooseMoreRooms": "{count, plural, one {Choose # more room} other {Choose # more rooms}}",
+    "selectRateForRoom": "Select your rate for room {number} · {guests}",
+    "chooseForRoom": "Choose for room {number}",
+    "noneLeftForRoom": "None left for room {number}",
+    "inYourRoom": "In your room {number}",
+    "lastOneChosen": "You chose the last one for room {number}.",
+    "cantCombine": "Can't combine",
+    "paidDifferently": "Paid differently from the rooms you chose. One booking is paid one way.",
+    "pricesPerRoom": "Prices are per room, for the adults in it. We add children once you tell us their ages on the next step."
   },
   "rooms": {
     "title": "Our Rooms",
@@ -572,5 +589,19 @@
     "mapNote": "Loads Google Maps. Google receives your request.",
     "loadingMap": "Loading map…",
     "mapFailed": "The map couldn't load right now."
+  },
+  "guestPicker": {
+    "title": "Who's coming?",
+    "adults": "Adults",
+    "adultAges": "Ages {age}+",
+    "children": "Children",
+    "childAges": "Ages 0-{age}",
+    "rooms": "Rooms",
+    "roomsHint": "Add rooms to spread out",
+    "roomsNeeded": "{guests} guests need at least {count} rooms here",
+    "splitNote": "We split your group across the rooms. You choose a room for each one, and you can say who sleeps where before you pay.",
+    "fewer": "Fewer {label}",
+    "more": "More {label}",
+    "done": "Done"
   }
 }

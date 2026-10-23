@@ -97,9 +97,16 @@ export default function RoomCard({
   const soldOut = prices?.availability === "sold_out" && !tooSmall;
   const roomCount = pick ? 1 : (prices?.roomCount ?? 1);
   // Room by room: free rooms of this type the group's other rooms haven't taken.
-  const left =
-    pick && prices?.roomsFree != null ? prices.roomsFree - pick.takenBy.length : null;
+  const left = pick && prices?.roomsFree != null ? prices.roomsFree - pick.takenBy.length : null;
   const usedUp = !!pick && left !== null && left <= 0 && !soldOut && !tooSmall;
+  // "Only 2 left": room by room, what the group's other rooms left of this type.
+  const fewLeft = usedUp
+    ? null
+    : left !== null
+      ? left <= 3
+        ? left
+        : null
+      : (prices?.roomsLeft ?? null);
   const paidDifferently = (offer: PricingOffer) =>
     !!pick && combinable(offer, pick.chosen) === "paid_differently";
   const guestsText = pick
@@ -258,16 +265,14 @@ export default function RoomCard({
             : t("tooManyGuests", { count: room.occupancy.maxGuests })}
         </p>
       )}
-      {!soldOut && !usedUp && (left ?? prices?.roomsLeft) != null && (left ?? 4) <= 3 && (
+      {!soldOut && fewLeft !== null && (
         <p
-          className={`text-sm mt-3 flex items-center gap-1.5 font-medium ${prices.roomsLeft === 1 ? "text-red-700" : "text-amber-800"}`}
+          className={`text-sm mt-3 flex items-center gap-1.5 font-medium ${fewLeft === 1 ? "text-red-700" : "text-amber-800"}`}
         >
           <span
-            className={`w-2 h-2 rounded-full ${prices.roomsLeft === 1 ? "bg-red-500" : "bg-amber-500"}`}
+            className={`w-2 h-2 rounded-full ${fewLeft === 1 ? "bg-red-500" : "bg-amber-500"}`}
           />
-          {prices.roomsLeft === 1
-            ? tc("lastRoomLeft")
-            : tc("onlyLeft", { count: prices.roomsLeft })}
+          {fewLeft === 1 ? tc("lastRoomLeft") : tc("onlyLeft", { count: fewLeft })}
         </p>
       )}
     </div>

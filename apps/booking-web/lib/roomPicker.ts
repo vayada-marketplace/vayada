@@ -79,3 +79,36 @@ export function decodePicks(
   }
   return picks;
 }
+
+/** The group's picks for one search, kept per tab so Back from /book finds them again. */
+type PickDraft = { identity: string; picks: (RoomPick | null)[] };
+const draftKey = (slug: string) => `roomPicks:${slug}`;
+
+export function readPickDraft(slug: string, identity: string): (RoomPick | null)[] | null {
+  try {
+    const raw = JSON.parse(sessionStorage.getItem(draftKey(slug)) ?? "null") as PickDraft | null;
+    if (!raw || raw.identity !== identity || !Array.isArray(raw.picks)) return null;
+    const valid = raw.picks.every(
+      (pick) =>
+        pick === null ||
+        (typeof pick === "object" &&
+          typeof pick.roomTypeId === "string" &&
+          typeof pick.publicOfferKey === "string" &&
+          typeof pick.currency === "string" &&
+          (pick.totalMinor === null || /^(0|[1-9][0-9]*)$/.test(String(pick.totalMinor))) &&
+          Number.isSafeInteger(pick.adults) &&
+          Number.isSafeInteger(pick.children)),
+    );
+    return valid ? raw.picks : null;
+  } catch {
+    return null;
+  }
+}
+
+export function savePickDraft(slug: string, identity: string, picks: (RoomPick | null)[]) {
+  try {
+    sessionStorage.setItem(draftKey(slug), JSON.stringify({ identity, picks }));
+  } catch {
+    // Storage off (private mode): the picks live as long as the page.
+  }
+}
