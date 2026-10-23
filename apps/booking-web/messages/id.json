@@ -638,5 +638,32 @@
     "fewer": "Kurangi {label}",
     "more": "Tambah {label}",
     "done": "Selesai"
+  },
+  "groupRooms": {
+    "title": "Siapa menginap di setiap kamar",
+    "intro": "Periksa siapa tidur di mana. Anda dapat memindahkan tamu antar kamar; setiap kamar menunjukkan kapasitasnya.",
+    "roomLabel": "Kamar {number}",
+    "adults": "Dewasa",
+    "children": "Anak-anak",
+    "childAge": "Anak {number}: usia saat check-in",
+    "chooseAge": "Pilih usia",
+    "underOne": "Di bawah 1",
+    "sleepsUpTo": "Maksimal {count} orang",
+    "tooMany": "{room} maksimal {count} orang. Pindahkan tamu ke kamar lain, atau tambah kamar.",
+    "tooManyAdults": "{room} maksimal {count} orang dewasa.",
+    "noChildren": "{room} tidak menerima anak-anak.",
+    "tooManyChildren": "{room} maksimal {count} anak.",
+    "needsAdult": "Setiap kamar memerlukan minimal satu orang dewasa.",
+    "changeRooms": "Ubah kamar",
+    "continue": "Lanjutkan",
+    "soldOutTitle": "{rooms} tidak lagi tersedia untuk tanggal Anda",
+    "aRoom": "Kamar yang Anda pilih",
+    "soldOutBody": "Pemesanan lain mengambil yang terakhir, atau hotel menutup tanggal ini, jadi tidak ada yang ditagih.",
+    "othersKept": "Kamar Anda yang lain tetap terpilih.",
+    "chooseAgainFor": "Pilih kamar lain untuk kamar {number}",
+    "chooseAgain": "Pilih kamar lain",
+    "newSearch": "Mulai pencarian baru",
+    "yourRooms": "{count} kamar Anda",
+    "roomLine": "Kamar {number} · {room}"
   }
 }

@@ -639,5 +639,32 @@
     "fewer": "Fewer {label}",
     "more": "More {label}",
     "done": "Done"
+  },
+  "groupRooms": {
+    "title": "Who's staying in each room",
+    "intro": "Check who sleeps where. You can move guests between rooms; each room shows how many it sleeps.",
+    "roomLabel": "Room {number}",
+    "adults": "Adults",
+    "children": "Children",
+    "childAge": "Child {number}: age at check-in",
+    "chooseAge": "Choose age",
+    "underOne": "Under 1",
+    "sleepsUpTo": "Sleeps up to {count}",
+    "tooMany": "The {room} sleeps up to {count}. Move a guest to another room, or add a room.",
+    "tooManyAdults": "The {room} takes up to {count} adults.",
+    "noChildren": "The {room} takes no children.",
+    "tooManyChildren": "The {room} takes up to {count} children.",
+    "needsAdult": "Each room needs at least one adult.",
+    "changeRooms": "Change rooms",
+    "continue": "Continue",
+    "soldOutTitle": "{rooms} is no longer available for your dates",
+    "aRoom": "A room you chose",
+    "soldOutBody": "Another booking took the last one, or the hotel closed these dates, so nothing was charged.",
+    "othersKept": "Your other rooms stay chosen.",
+    "chooseAgainFor": "Choose another room for room {number}",
+    "chooseAgain": "Choose another room",
+    "newSearch": "Start a new search",
+    "yourRooms": "Your {count} rooms",
+    "roomLine": "Room {number} · {room}"
   }
 }

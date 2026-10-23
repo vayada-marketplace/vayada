@@ -1,5 +1,5 @@
 import type { PricingPaymentMethod } from "@vayada/domain-booking/replacement-pricing";
-import type { PricingOffer } from "@/services/api/replacementOffers";
+import type { PricingOffer, PricingRoom, RoomChoice } from "@/services/api/replacementOffers";
 
 /** VAY-2320: a group books its rooms one at a time on the hotel page, each with its own room type
  * and rate. These helpers are the picker's rules; the server still checks every room. */
@@ -111,4 +111,56 @@ export function savePickDraft(slug: string, identity: string, picks: (RoomPick |
   } catch {
     // Storage off (private mode): the picks live as long as the page.
   }
+}
+
+/** One search's identity for its picks: other dates, guests, rooms or promo start afresh. */
+export function pickIdentity(search: {
+  checkIn: string;
+  checkOut: string;
+  adults: number;
+  children: number;
+  rooms: number;
+  promoCode: string | null;
+}): string {
+  return JSON.stringify([
+    search.checkIn,
+    search.checkOut,
+    search.adults,
+    search.children,
+    search.rooms,
+    search.promoCode,
+  ]);
+}
+
+/** VAY-2320: rooms that sold out at the last step are chosen again on the hotel page; the
+ * group's other rooms stay chosen. */
+export function releaseSoldOutPicks(
+  slug: string,
+  identity: string,
+  roomTypeIds: readonly string[],
+): void {
+  const picks = readPickDraft(slug, identity);
+  if (!picks) return;
+  savePickDraft(
+    slug,
+    identity,
+    picks.map((pick) => (pick && roomTypeIds.includes(pick.roomTypeId) ? null : pick)),
+  );
+}
+
+/** What a room's guests break, against its limits (VAY-2320). */
+export function roomGuestProblem(
+  room: PricingRoom | undefined,
+  choice: RoomChoice,
+): "no_adult" | "too_many" | "too_many_adults" | "no_children" | "too_many_children" | null {
+  const adults = Number(choice.adults) || 0;
+  const children = choice.childAges.length;
+  if (adults < 1) return "no_adult";
+  const limits = room?.occupancy;
+  if (!limits) return null;
+  if (children > 0 && limits.maxChildren === 0) return "no_children";
+  if (adults + children > limits.maxGuests) return "too_many";
+  if (adults > limits.maxAdults) return "too_many_adults";
+  if (children > limits.maxChildren) return "too_many_children";
+  return null;
 }
