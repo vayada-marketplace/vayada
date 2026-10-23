@@ -9,6 +9,7 @@ import {
   BOOKING_DESIGN_PRIMARY_COLORS,
   createBookingDesignButtonColors,
   createBookingDesignSourceRevision,
+  isBookingDesignPrimaryColor,
   parseBookingDesignRevision,
   parseUpsertBookingDesignRequest,
   serializeBookingDesignCommandFingerprint,
@@ -20,7 +21,7 @@ import {
 const propertyId = "abcdef00-0000-4000-8000-000000000002";
 
 describe("Booking design contract", () => {
-  it("resolves explicit server defaults and rejects non-allowlisted choices", () => {
+  it("resolves explicit server defaults and rejects unreadable or unknown choices", () => {
     expect(
       parseUpsertBookingDesignRequest({
         expectedRevision: 0,
@@ -43,6 +44,9 @@ describe("Booking design contract", () => {
       { expectedRevision: 0, primaryColor: "#D4A017", fontPairing: null },
       { expectedRevision: 0, primaryColor: "#E76F51", fontPairing: null },
       { expectedRevision: 0, primaryColor: "#ffffff", fontPairing: null },
+      { expectedRevision: 0, primaryColor: "#FFFF00", fontPairing: null },
+      { expectedRevision: 0, primaryColor: "#5e0000", fontPairing: null },
+      { expectedRevision: 0, primaryColor: "5E0000", fontPairing: null },
       { expectedRevision: 0, primaryColor: null, fontPairing: "comic-sans" },
       { expectedRevision: 0, primaryColor: undefined, fontPairing: null },
     ])
@@ -139,6 +143,34 @@ describe("Booking design contract", () => {
     expect(BOOKING_DESIGN_CHANGED_EVENT_TYPE).toBe("booking.design.changed");
     expect(BOOKING_DESIGN_OUTBOX_DESTINATION).toBe("booking.launch-readiness");
     expectTypeOf<BookingDesignChangedEvent>().not.toHaveProperty("choices");
+  });
+
+  it("takes any readable Design Studio colour, not only the setup swatches (VAY-2318)", () => {
+    expect(
+      parseUpsertBookingDesignRequest({
+        expectedRevision: 3,
+        primaryColor: "#5E0000",
+        fontPairing: "grand-classic",
+      }),
+    ).toEqual({
+      expectedRevision: 3,
+      choices: { primaryColor: "#5E0000", fontPairing: "grand-classic" },
+    });
+    expect(
+      parseBookingDesignRevision({
+        contractVersion: "booking-design.v1",
+        propertyId,
+        revision: 4,
+        choices: { primaryColor: "#5E0000", fontPairing: "grand-classic" },
+        createdAt: "2026-10-23T12:00:00.000Z",
+      })?.choices.primaryColor,
+    ).toBe("#5E0000");
+    // The lightest setup swatch and the darker Design Studio presets pass; the old Tropical Gold
+    // and Sunset Coral did not.
+    for (const readable of ["#0077B6", "#000000", "#A67D12", "#E35734"])
+      expect(isBookingDesignPrimaryColor(readable), readable).toBe(true);
+    expect(isBookingDesignPrimaryColor("#D4A017")).toBe(false);
+    expect(isBookingDesignPrimaryColor("#E76F51")).toBe(false);
   });
 
   it("keeps every generated Booking button palette WCAG AA-safe with white text", () => {
