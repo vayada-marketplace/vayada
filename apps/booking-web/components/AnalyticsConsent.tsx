@@ -72,7 +72,7 @@ export default function AnalyticsConsent() {
         ref={trigger}
         type="button"
         onClick={() => setOpen(true)}
-        className="fixed bottom-3 left-3 z-50 rounded-full border bg-white px-3 py-2 text-xs text-gray-700 shadow-sm"
+        className="fixed bottom-[calc(0.75rem+var(--fixed-bottom-bar,0px))] left-3 z-50 rounded-full border bg-white px-3 py-2 text-xs text-gray-700 shadow-sm"
       >
         {t("settings")}
       </button>
@@ -81,7 +81,7 @@ export default function AnalyticsConsent() {
           ref={panel}
           tabIndex={-1}
           aria-labelledby="booking-analytics-title"
-          className="fixed bottom-14 left-3 right-3 z-50 max-h-[75dvh] max-w-md overflow-auto rounded-xl border bg-white p-5 text-gray-900 shadow-xl"
+          className="fixed bottom-[calc(3.5rem+var(--fixed-bottom-bar,0px))] left-3 right-3 z-50 max-h-[75dvh] max-w-md overflow-auto rounded-xl border bg-white p-5 text-gray-900 shadow-xl"
         >
           <h2 id="booking-analytics-title" className="font-semibold">
             {t("title")}

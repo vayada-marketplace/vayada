@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import { useTranslations } from "next-intl";
 import type { RoomGuests } from "@/lib/roomPicker";
 
@@ -32,6 +33,22 @@ export default function RoomsBar({
 }) {
   const t = useTranslations("home");
   const tc = useTranslations("common");
+  // The phone bar covers the bottom of the screen: other pinned buttons (Privacy choices) sit
+  // above it while it shows.
+  const mobileBar = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const bar = mobileBar.current;
+    if (!bar) return;
+    const root = document.documentElement;
+    const update = () => root.style.setProperty("--fixed-bottom-bar", `${bar.offsetHeight}px`);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(bar);
+    return () => {
+      observer.disconnect();
+      root.style.removeProperty("--fixed-bottom-bar");
+    };
+  }, []);
   const missing = slots.filter((slot) => !slot.chosen).length;
   const guests = (g: RoomGuests) =>
     [
@@ -99,6 +116,7 @@ export default function RoomsBar({
                       <button
                         type="button"
                         onClick={() => onChange(index)}
+                        aria-label={t("changeRoomNumber", { number: index + 1 })}
                         className="text-xs font-semibold text-primary-600 hover:underline flex-shrink-0"
                       >
                         {t("changeRoom")}
@@ -134,35 +152,50 @@ export default function RoomsBar({
 
       {/* Phones: pinned to the bottom of the screen. */}
       <section
+        ref={mobileBar}
         aria-label={t("yourRooms", { count: slots.length })}
         data-testid="rooms-bar-mobile"
         className="md:hidden fixed inset-x-0 bottom-0 z-40 border-t border-gray-200 bg-white px-4 pt-3 pb-5 shadow-[0_-8px_24px_rgba(17,24,39,0.10)]"
       >
         <div className="flex gap-2 overflow-x-auto">
-          {slots.map((slot, index) => (
-            <button
-              key={index}
-              type="button"
-              onClick={() => slot.chosen && onChange(index)}
-              className={`flex min-w-0 flex-1 basis-0 items-center gap-2 rounded-xl px-2.5 py-2 text-left ${slotClass(index)}`}
-            >
-              {slot.chosen && check}
-              <span className="min-w-0">
-                <span className="block text-[11px] text-gray-500 truncate">
-                  {t("roomNumber", { number: index + 1 })}
+          {slots.map((slot, index) => {
+            const label = (
+              <>
+                {slot.chosen && check}
+                <span className="min-w-0">
+                  <span className="block text-[11px] text-gray-500 truncate">
+                    {t("roomNumber", { number: index + 1 })}
+                  </span>
+                  <span
+                    className={`block text-sm font-semibold truncate ${slot.chosen ? "text-gray-900" : index === active ? "text-primary-600" : "text-gray-400"}`}
+                  >
+                    {slot.chosen
+                      ? slot.chosen.roomName
+                      : index === active
+                        ? t("chooseBelow")
+                        : t("nextRoom")}
+                  </span>
                 </span>
-                <span
-                  className={`block text-sm font-semibold truncate ${slot.chosen ? "text-gray-900" : index === active ? "text-primary-600" : "text-gray-400"}`}
-                >
-                  {slot.chosen
-                    ? slot.chosen.roomName
-                    : index === active
-                      ? t("chooseBelow")
-                      : t("nextRoom")}
-                </span>
-              </span>
-            </button>
-          ))}
+              </>
+            );
+            const className = `flex min-w-0 flex-1 basis-0 items-center gap-2 rounded-xl px-2.5 py-2 text-left ${slotClass(index)}`;
+            // A chosen room is changed by tapping it; a room still to choose is only shown.
+            return slot.chosen ? (
+              <button
+                key={index}
+                type="button"
+                onClick={() => onChange(index)}
+                aria-label={`${t("changeRoomNumber", { number: index + 1 })}: ${slot.chosen.roomName}`}
+                className={className}
+              >
+                {label}
+              </button>
+            ) : (
+              <div key={index} className={className}>
+                {label}
+              </div>
+            );
+          })}
         </div>
         <div className="mt-3 flex items-center justify-between gap-3">
           <div>

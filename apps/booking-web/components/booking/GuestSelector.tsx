@@ -75,6 +75,9 @@ export default function GuestSelector({
   const t = useTranslations("guestPicker");
   const ref = useRef<HTMLDivElement>(null);
   const childMaxAge = Math.max(0, adultAgeThreshold - 1);
+  // Every room needs an adult, so the group never takes more rooms than adults.
+  const mostRooms = Math.min(9, adults);
+  const fewestRooms = Math.min(rooms?.fewest ?? 1, mostRooms);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -120,13 +123,13 @@ export default function GuestSelector({
             <Stepper
               label={t("rooms")}
               hint={
-                rooms.fewest > 1
-                  ? t("roomsNeeded", { guests: adults + childCount, count: rooms.fewest })
+                fewestRooms > 1
+                  ? t("roomsNeeded", { guests: adults + childCount, count: fewestRooms })
                   : t("roomsHint")
               }
               value={rooms.count}
-              min={rooms.fewest}
-              max={Math.min(9, adults)}
+              min={fewestRooms}
+              max={mostRooms}
               onChange={rooms.onChange}
             />
             {rooms.count > 1 && (

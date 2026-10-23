@@ -161,6 +161,30 @@ function HomePageContent() {
   const [promoLoading, setPromoLoading] = useState(false);
   const [promoError, setPromoError] = useState("");
   const promoCodesEnabled = hotel?.promoCodesEnabled !== false;
+  // VAY-2320: a promo the guest applied comes back with the search (Back from /book, "Change
+  // rooms"), checked like a typed one, so the rooms chosen with it stay chosen.
+  useEffect(() => {
+    const code = searchParams.get("promoCode");
+    if (!code || !slug) return;
+    let live = true;
+    setPromoCode(code);
+    hotelService
+      .validatePromoCode(slug, code, { checkIn: initialDates.checkIn || undefined })
+      .then((result) => {
+        if (live && result.valid)
+          setAppliedPromo({
+            code: result.code,
+            discountType: result.discountType!,
+            discountValue: result.discountValue!,
+          });
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+    // Once per visit, from the URL it came with.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slug]);
 
   const nights = calculateNights(checkIn, checkOut);
   const { steps: STEPS } = useBookingSteps("rooms");
@@ -247,8 +271,9 @@ function HomePageContent() {
       : null,
   );
   useEffect(() => {
+    // null: no type is free for the group, so it isn't held to a minimum.
     const suggested = stay.prices?.suggestedRooms;
-    if (typeof suggested === "number") setFewestRooms(suggested);
+    if (suggested !== undefined) setFewestRooms(suggested ?? 1);
   }, [stay.prices?.suggestedRooms]);
   const [sortOption, setSortOption] = useState("recommended");
   const roomPrices = (room: PricingRoom) =>
@@ -316,6 +341,10 @@ function HomePageContent() {
   };
   const continueWithRooms = () => {
     if (picks.some((pick) => !pick)) return;
+    // This page's history entry keeps the search, so Back finds the chosen rooms again.
+    const here = new URLSearchParams(bookParams);
+    here.set("rooms", String(roomCount));
+    window.history.replaceState(null, "", `${window.location.pathname}?${here}`);
     const params = new URLSearchParams(bookParams);
     params.set("rooms", String(roomCount));
     for (const pick of picks) params.append("pick", encodePick(pick!));

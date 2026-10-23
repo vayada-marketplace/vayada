@@ -169,6 +169,7 @@
     "chooseBelow": "Pilih kamar di bawah",
     "nextRoom": "Berikutnya",
     "changeRoom": "Ubah",
+    "changeRoomNumber": "Ubah kamar {number}",
     "totalSoFar": "sejauh ini",
     "totalForRooms": "untuk {count} kamar",
     "chooseMoreRooms": "Pilih {count} kamar lagi",

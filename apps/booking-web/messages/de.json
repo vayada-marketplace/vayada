@@ -169,6 +169,7 @@
     "chooseBelow": "Wählen Sie unten ein Zimmer",
     "nextRoom": "Als Nächstes",
     "changeRoom": "Ändern",
+    "changeRoomNumber": "Zimmer {number} ändern",
     "totalSoFar": "bisher",
     "totalForRooms": "für {count} Zimmer",
     "chooseMoreRooms": "{count, plural, one {Noch # Zimmer wählen} other {Noch # Zimmer wählen}}",

@@ -46,6 +46,11 @@ for (const width of [1440, 390]) {
       await expect(bar).toContainText("Deluxe Double Room");
       await expect(bar).toContainText("Garden Double Room");
     }
+    if (width === 390) {
+      // The pinned Privacy choices button sits above the bar, never over its total.
+      const privacy = (await page.getByRole("button", { name: "Privacy choices" }).boundingBox())!;
+      expect(privacy.y + privacy.height).toBeLessThanOrEqual((await bar.boundingBox())!.y);
+    }
     await bar.getByRole("button", { name: "Continue" }).click();
     await expect(page).toHaveURL(/\/(en\/)?book\?/);
     const params = new URL(page.url()).searchParams;
@@ -80,7 +85,7 @@ test("lets the group change a chosen room and keeps its rooms on Back", async ({
     .getByRole("button", { name: "Choose for room 2" })
     .click();
   await expect(bar).toContainText("€476");
-  await bar.getByTestId("rooms-bar-slot-1").getByRole("button", { name: "Change" }).click();
+  await bar.getByTestId("rooms-bar-slot-1").getByRole("button", { name: "Change room 1" }).click();
   await expect(bar.getByTestId("rooms-bar-slot-1")).toContainText("Choose a room below");
   await page
     .getByTestId("room-card-deluxe")
@@ -108,7 +113,20 @@ test("starts at the fewest rooms the group needs and lets it add rooms", async (
   await expect(picker.getByRole("button", { name: "Fewer Rooms" })).toBeDisabled();
   await picker.getByRole("button", { name: "More Rooms" }).click();
   await picker.getByRole("button", { name: "Done" }).click();
-  await expect(page.getByTestId("rooms-bar")).toContainText("Your 3 rooms");
+  const bar = page.getByTestId("rooms-bar");
+  await expect(bar).toContainText("Your 3 rooms");
   await expect(page.getByTestId("rooms-bar-slot-3")).toBeVisible();
+  // The third room, which the link didn't ask for, is still there on Back from /book.
+  for (const number of [1, 2, 3])
+    await page
+      .getByTestId("room-card-garden")
+      .getByRole("button", { name: `Choose for room ${number}` })
+      .click();
+  await bar.getByRole("button", { name: "Continue" }).click();
+  await expect(page).toHaveURL(/\/(en\/)?book\?/);
+  expect(new URL(page.url()).searchParams.getAll("pick")).toHaveLength(3);
+  await page.goBack();
+  await expect(bar).toContainText("Your 3 rooms");
+  await expect(bar.getByRole("button", { name: "Continue" })).toBeEnabled();
   await assertHealthy();
 });
