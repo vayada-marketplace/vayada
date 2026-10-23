@@ -757,8 +757,10 @@ export default function DesignStudioPage() {
           hero_image: heroImage,
           hero_heading: heroHeading,
           hero_subtext: heroSubtext,
-          primary_color: primaryColor,
-          font_pairing: selectedFont,
+          // Unchanged, they stay as they are: a hotel still on its legacy page reads them from here.
+          ...(designChoices
+            ? { primary_color: designChoices.primaryColor, font_pairing: designChoices.fontPairing }
+            : {}),
         },
         hotelId,
       );

@@ -718,7 +718,7 @@ test.describe("booking-admin settings no-legacy guard", () => {
       },
     ]);
     expect(requests.find(({ method }) => method === "PATCH")?.body).toMatchObject({
-      primaryColor: "#5e0000",
+      primaryColor: "#5E0000",
       fontPairing: "grand-classic",
     });
     expect(order).toEqual(["settings", "design", "publish"]);
@@ -736,6 +736,11 @@ test.describe("booking-admin settings no-legacy guard", () => {
     await page.getByRole("button", { name: "Save Changes" }).click();
     await expect.poll(() => order.filter((step) => step === "publish").length).toBe(2);
     expect(order.filter((step) => step === "design")).toHaveLength(1);
+    // That Save also leaves the settings row's colour and font alone.
+    const patches = requests.filter(({ method }) => method === "PATCH");
+    expect(patches).toHaveLength(2);
+    expect(patches[1]?.body).not.toHaveProperty("primaryColor");
+    expect(patches[1]?.body).not.toHaveProperty("fontPairing");
     await assertHealthy();
   });
 
@@ -769,7 +774,10 @@ test.describe("booking-admin settings no-legacy guard", () => {
     // Saving the other settings works and leaves the booking design alone.
     await page.getByRole("button", { name: "Save Changes" }).click();
     await expect(page.getByText("Design settings saved successfully")).toBeVisible();
-    expect(requests.filter(({ method }) => method === "PATCH")).toHaveLength(1);
+    const [patch] = requests.filter(({ method }) => method === "PATCH");
+    // A hotel still on its legacy page reads its colour from the settings row: it stays.
+    expect(patch?.body).not.toHaveProperty("primaryColor");
+    expect(patch?.body).not.toHaveProperty("fontPairing");
     expect(puts()).toEqual([]);
 
     await page.getByRole("button", { name: "Ocean Blue" }).click();
