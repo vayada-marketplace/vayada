@@ -1,5 +1,6 @@
 import type { LocationMapDisplayMode, LocationMapPoint } from "@vayada/domain-hotels";
-import { targetApiClient } from "./targetClient";
+import type { ApiClient } from "./client";
+import { sharedSetupClient } from "./sharedHotelSetupClient";
 
 /** GET/PUT /api/booking/properties/:id/location-map (VAY-2126): the "Location map on your booking page" switch
  * and what guests would see. */
@@ -20,7 +21,7 @@ export type LocationMapSummary = {
   };
 };
 
-type Http = Pick<typeof targetApiClient, "get" | "put">;
+type Http = Pick<ApiClient, "get" | "put">;
 
 const uuid = (v: unknown): v is string =>
   typeof v === "string" &&
@@ -80,4 +81,5 @@ export function createBookingLocationMapClient(http: Http) {
   };
 }
 
-export const bookingLocationMapClient = createBookingLocationMapClient(targetApiClient);
+// The same client as the page's location and nearby editor: it works with either kind of session.
+export const bookingLocationMapClient = createBookingLocationMapClient(sharedSetupClient);
