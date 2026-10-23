@@ -6549,7 +6549,8 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
           ? { kind: "free_until_days_before_arrival", days: 3 }
           : { kind: "non_refundable" },
       );
-    // Only what a guest may know before a quote: no penalties, revisions or payment terms.
+    // Only what a guest may know before a quote: no penalties, revisions or payment terms (only
+    // the ways guests can pay now, VAY-2309).
     expect(JSON.stringify(read)).not.toMatch(/Penalty|termsRevision|acceptedMethods/);
   });
   it("tells guests a meal in the hotel's own words only where it wrote one (VAY-2281)", async () => {
@@ -7596,6 +7597,50 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     }));
     expect(await paymentAmounts(cardOnly, "card")).toBeNull(); // Finance does not execute card here.
   });
+  // VAY-2309: until the guest picks a way to pay, the booking page prices with pay at the
+  // property first. A rate that takes only card names that reason instead of an unnamed refusal.
+  it("names a way to pay the chosen rates don't take", async () => {
+    const f = await componentsFixture(
+      fixedPolicy(),
+      (t) => ({
+        ...t,
+        payment: {
+          kind: "full",
+          acceptedMethods: t.offerId === "other" ? ["card"] : ["card", "pay_at_property"],
+        },
+      }),
+      true,
+    );
+    const store = createCurrentPricingQuoteStore(pool, 300);
+    const issue = (selection: unknown, paymentMethod: string) =>
+      store.issue(f.scope.propertyId, { requestId: randomUUID(), selection, paymentMethod });
+    const otherKey = f.bindings.find(
+      (b) => b.roomTypeId === f.snapshot.rooms[0].roomTypeId && b.offerId === "other",
+    )!.publicOfferKey;
+    const withCardOnly = {
+      ...f.selection,
+      rooms: [f.selection.rooms[0], { ...f.selection.rooms[1], publicOfferKey: otherKey }],
+    };
+    await expect(issue(withCardOnly, "pay_at_property")).rejects.toMatchObject({
+      code: "denied",
+      reason: "payment_method_not_accepted",
+    });
+    await expect(issue(withCardOnly, "card")).resolves.toMatchObject({
+      quote: { paymentMethod: "card" },
+    });
+    await expect(issue(f.selection, "pay_at_property")).resolves.toMatchObject({
+      quote: { paymentMethod: "pay_at_property" },
+    });
+    // Finance takes no payments now: the rates still take pay at the property, so the refusal
+    // stays unnamed.
+    await pool.query(
+      "UPDATE finance.payment_settings SET payments_enabled=false WHERE property_id=$1",
+      [f.scope.propertyId],
+    );
+    const unnamed = await issue(f.selection, "pay_at_property").catch((error: unknown) => error);
+    expect(unnamed).toMatchObject({ code: "denied" });
+    expect((unnamed as { reason?: string }).reason).toBeUndefined();
+  });
   it("invalidates payment amounts when allowed methods change in the terms owner", async () => {
     const f = await componentsFixture(fixedPolicy(), propertyTerms),
       before = await paymentAmounts(f);
@@ -8162,7 +8207,13 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
         "UPDATE finance.payment_settings SET payments_enabled=false WHERE property_id=$1",
         [f.scope.propertyId],
       );
-      expect((await post(payload, { "Idempotency-Key": randomUUID() })).statusCode).toBe(404);
+      const refused = await post(payload, { "Idempotency-Key": randomUUID() });
+      // VAY-2309: the request log names the refusal; the guest gets only "Quote unavailable.".
+      expect(refused.json()).toEqual({
+        statusCode: 404,
+        error: "Not Found",
+        message: "Quote unavailable.",
+      });
       await pool.query("UPDATE hotel_catalog.properties SET profile_status='private' WHERE id=$1", [
         f.scope.propertyId,
       ]);

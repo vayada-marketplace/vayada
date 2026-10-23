@@ -53,19 +53,29 @@ export function pricingPaymentsNow(
   };
 }
 
-/** Whether guests can pay this rate now, as a quote decides (publicPricingPaymentAmounts): a rate
- * paid in full by any method its terms accept that is ready, a deposit only by card, in its
- * supported shape, with deposits on. */
-export function pricingRateSells(terms: ReplacementOfferTerms, now: PricingPaymentsNow): boolean {
+/** The ways guests can pay this rate now, as a quote decides (publicPricingPaymentAmounts), in
+ * `now`'s order: a rate paid in full by each method its terms accept that is ready, a deposit only
+ * by card, in its supported shape, with deposits on. */
+export function pricingRatePaymentMethods(
+  terms: ReplacementOfferTerms,
+  now: PricingPaymentsNow,
+): PricingPaymentMethod[] {
   const accepted = terms.payment.acceptedMethods ?? [];
   if (terms.payment.kind === "deposit")
-    return (
-      now.deposits &&
+    return now.deposits &&
       accepted.includes("card") &&
       now.methods.includes("card") &&
       pricingPaymentWriteProblem(terms.payment) === null
-    );
-  return terms.payment.kind === "full" && accepted.some((method) => now.methods.includes(method));
+      ? ["card"]
+      : [];
+  return terms.payment.kind === "full"
+    ? now.methods.filter((method) => accepted.includes(method))
+    : [];
+}
+
+/** Whether guests can pay this rate now: some way to pay it is ready (pricingRatePaymentMethods). */
+export function pricingRateSells(terms: ReplacementOfferTerms, now: PricingPaymentsNow): boolean {
+  return pricingRatePaymentMethods(terms, now).length > 0;
 }
 
 /** Card at the hotel now: ready, or the first thing missing as the hotel can act on it. */

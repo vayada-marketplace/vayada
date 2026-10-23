@@ -71,6 +71,37 @@ describe("replacement booking quote issuer", () => {
     });
   });
 
+  it("tells the guest when a chosen rate doesn't take this way to pay (VAY-2309)", async () => {
+    const issue = vi
+      .fn()
+      .mockRejectedValue(new PricingStorageError("denied", "payment_method_not_accepted"));
+    const quote = createReplacementBookingQuoteIssuer({ issue });
+    await expect(quote("hotel", request("pay_at_property"), "key")).rejects.toMatchObject({
+      statusCode: 422,
+      code: "PAYMENT_METHOD_NOT_ACCEPTED",
+    });
+  });
+
+  it("names an unnamed refusal for the log, not for the guest (VAY-2309)", async () => {
+    const issue = vi.fn().mockRejectedValue(new PricingStorageError("denied"));
+    const quote = createReplacementBookingQuoteIssuer({ issue });
+    const error = await quote("hotel", request("card"), "key").catch((e: unknown) => e);
+    expect(error).toMatchObject({
+      statusCode: 404,
+      message: "Quote unavailable.",
+      pricingCode: "denied",
+      pricingReason: null,
+    });
+    // The response is built from statusCode, code and message only.
+    expect(error).not.toHaveProperty("code");
+    issue.mockRejectedValue(new PricingStorageError("denied", "finance_not_ready"));
+    await expect(quote("hotel", request("card"), "key")).rejects.toMatchObject({
+      statusCode: 404,
+      pricingCode: "denied",
+      pricingReason: "finance_not_ready",
+    });
+  });
+
   it("quotes part now by card, the rest at the property, only with deposits on (VAY-2205)", async () => {
     const deposit = {
       kind: "deposit",

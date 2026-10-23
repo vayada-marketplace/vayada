@@ -557,7 +557,8 @@
     "cancelFeeChanged": "Die Stornogebühr hat sich geändert. Bitte prüfen Sie sie vor der Stornierung.",
     "withdrawNotOnline": "Diese Anfrage kann nicht online zurückgezogen werden. Bitte kontaktieren Sie die Unterkunft.",
     "bookingNotChangeable": "Diese Buchung kann nicht mehr geändert werden. Rufen Sie sie erneut ab, um den aktuellen Status zu sehen.",
-    "busyTryAgain": "Diese Buchung wird gerade aktualisiert. Bitte versuchen Sie es gleich noch einmal."
+    "busyTryAgain": "Diese Buchung wird gerade aktualisiert. Bitte versuchen Sie es gleich noch einmal.",
+    "paymentMethodNotAccepted": "Der gewählte Tarif kann nicht auf diese Weise bezahlt werden. Bitte wählen Sie eine andere Zahlungsart."
   },
   "locationMap": {
     "title": "Lage",

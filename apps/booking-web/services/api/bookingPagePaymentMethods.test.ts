@@ -3,7 +3,11 @@ import { beforeEach, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ get: vi.fn() }));
 vi.mock("./client", () => ({ bookingWebPublic: { get: mocks.get } }));
 
-import { bookingPageMethodsForArrival, getBookingPagePayment } from "./bookingPagePaymentMethods";
+import {
+  bookingPageMethodsForArrival,
+  defaultQuoteMethods,
+  getBookingPagePayment,
+} from "./bookingPagePaymentMethods";
 
 beforeEach(() => mocks.get.mockReset());
 
@@ -116,4 +120,18 @@ it("reads how the extras step shows each extra (VAY-2195)", async () => {
     },
   });
   expect((await getBookingPagePayment("hotel")).groupExtras).toBe(false);
+});
+
+it("prices first with a way the chosen rates take, paying at the hotel first (VAY-2309)", () => {
+  const hotel = ["card", "paypal", "pay_at_property"] as const;
+  expect(defaultQuoteMethods(hotel, null)).toEqual(["pay_at_property", "card", "paypal"]);
+  // A non-refundable rate paid by card: not priced at the hotel first.
+  expect(defaultQuoteMethods(hotel, ["card"])).toEqual(["card"]);
+  expect(defaultQuoteMethods(hotel, ["paypal", "pay_at_property"])).toEqual([
+    "pay_at_property",
+    "paypal",
+  ]);
+  // No way in common: the hotel's own order, so the refusal still tells the guest.
+  expect(defaultQuoteMethods(hotel, [])).toEqual(["pay_at_property", "card", "paypal"]);
+  expect(defaultQuoteMethods(["card"], ["pay_at_property"])).toEqual(["card"]);
 });

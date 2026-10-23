@@ -147,6 +147,20 @@ export function bookingPageMethodsForArrival(
   });
 }
 
+/** Until the guest picks how to pay, the price uses the hotel's ways in this order: paying at the
+ * hotel first (nothing is charged now), and only ways the chosen rates take when the catalog names
+ * them (VAY-2309), so a card-only or non-refundable rate isn't priced at the hotel first. */
+export function defaultQuoteMethods(
+  available: readonly PricingPaymentMethod[],
+  rateMethods: readonly PricingPaymentMethod[] | null,
+): PricingPaymentMethod[] {
+  const ordered = [...available].sort(
+    (a, b) => Number(b === "pay_at_property") - Number(a === "pay_at_property"),
+  );
+  const taken = rateMethods ? ordered.filter((method) => rateMethods.includes(method)) : [];
+  return taken.length ? taken : ordered;
+}
+
 function earliestArrival(value: unknown): ManualEarliestArrival {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   const result: ManualEarliestArrival = {};

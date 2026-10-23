@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   pricingPaymentsNow,
   pricingRateNotSelling,
+  pricingRatePaymentMethods,
   pricingRateSells,
   type PricingCardState,
 } from "./pricingRatePayability.js";
@@ -66,6 +67,25 @@ describe("which published rates sell", () => {
     // Old terms without methods, and methods the hotel can't take now, don't sell.
     expect(pricingRateSells(rate({ kind: "full" }), card)).toBe(false);
     expect(pricingRateSells(rate({ kind: "full", acceptedMethods: ["paypal"] }), card)).toBe(false);
+  });
+
+  it("names the ways guests can pay a rate now, in the hotel's order (VAY-2309)", () => {
+    const now = { methods: ["pay_at_property", "card", "paypal"] as const, deposits: true };
+    expect(
+      pricingRatePaymentMethods(
+        rate({ kind: "full", acceptedMethods: ["card", "paypal", "pay_at_property"] }),
+        now,
+      ),
+    ).toEqual(["pay_at_property", "card", "paypal"]);
+    expect(
+      pricingRatePaymentMethods(rate({ kind: "full", acceptedMethods: ["card"] }, nonRefundable), {
+        ...now,
+        methods: ["pay_at_property"],
+      }),
+    ).toEqual([]);
+    expect(pricingRatePaymentMethods(rate(cardDeposit), now)).toEqual(["card"]);
+    expect(pricingRatePaymentMethods(rate(cardDeposit), { ...now, deposits: false })).toEqual([]);
+    expect(pricingRatePaymentMethods(rate({ kind: "full" }), now)).toEqual([]);
   });
 
   it("names the reason and the fixes, main fix first", () => {

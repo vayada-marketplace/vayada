@@ -38,6 +38,7 @@ import type {
 import {
   bookingPageMethodsForArrival,
   bookingPagePaymentMethodLabels,
+  defaultQuoteMethods,
   getBookingPagePayment,
   type BookingPagePayment,
 } from "@/services/api/bookingPagePaymentMethods";
@@ -66,6 +67,7 @@ import {
   toConfirmationBooking,
 } from "@/lib/storage/bookingDraft";
 import {
+  chosenRatesPaymentMethods,
   getReplacementOffers,
   quoteMoneyAmount,
   roomQuoteRequest,
@@ -114,6 +116,7 @@ export default function BookPageClient() {
 function RoomQuoteForm({ slug }: { slug: string }) {
   const t = useTranslations("home");
   const tAddons = useTranslations("addons");
+  const tGuestErrors = useTranslations("guestErrors");
   const { hotel } = useHotel();
   const [termsAcknowledgement, setTermsAcknowledgement] =
     useState<QuoteTermsAcknowledgement | null>(null);
@@ -247,11 +250,13 @@ function RoomQuoteForm({ slug }: { slug: string }) {
       });
     return () => controller.abort();
   }, [slug, reload]);
-  // Until the guest picks how to pay, the price uses the first way the hotel offers, paying at
-  // the hotel first (nothing is charged now); a way the rooms don't accept moves on to the next.
+  // Until the guest picks how to pay, the price uses the first way the hotel offers that the
+  // chosen rates take, paying at the hotel first (nothing is charged now); a way the rooms refuse
+  // anyway moves on to the next.
   const [fallback, setFallback] = useState(0);
-  const defaultMethods = [...paymentMethods].sort(
-    (a, b) => Number(b === "pay_at_property") - Number(a === "pay_at_property"),
+  const defaultMethods = defaultQuoteMethods(
+    paymentMethods,
+    rooms && chosenRatesPaymentMethods(rooms, choices),
   );
   const method = payment || (pagePaymentLoaded ? (defaultMethods[fallback] ?? "") : "");
   // VAY-2200: without promo codes a code from an old link or draft is never sent.
@@ -700,10 +705,13 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     Date.parse(seenQuote.quote.expiresAt) <= serverNow()
       ? seenQuote.quote
       : undefined);
+  // VAY-2309: a way to pay the chosen rates don't take, in the guest's language.
+  const refusal =
+    errorCode === "PAYMENT_METHOD_NOT_ACCEPTED" ? tGuestErrors("paymentMethodNotAccepted") : error;
   const priceNotice = error && !quote && (
     <Notice
       tone="red"
-      title={error}
+      title={refusal}
       action={
         refused
           ? { label: "Choose another room", onClick: backToRooms }
