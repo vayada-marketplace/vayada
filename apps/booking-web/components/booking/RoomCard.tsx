@@ -211,7 +211,8 @@ export default function RoomCard({
             : t("tooManyGuests", { count: room.occupancy.maxGuests })}
         </p>
       )}
-      {!soldOut && prices?.roomsLeft != null && (
+      {/* Rooms left only matter when a choice can be booked; never beside "Not available" (VAY-2319). */}
+      {!soldOut && selected && prices?.roomsLeft != null && (
         <p
           className={`text-sm mt-3 flex items-center gap-1.5 font-medium ${prices.roomsLeft === 1 ? "text-red-700" : "text-amber-800"}`}
         >
