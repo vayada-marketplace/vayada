@@ -557,5 +557,16 @@
     "withdrawNotOnline": "Cette demande ne peut pas être retirée en ligne. Veuillez contacter l’établissement.",
     "bookingNotChangeable": "Cette réservation ne peut plus être modifiée. Recherchez-la à nouveau pour voir son statut actuel.",
     "busyTryAgain": "Cette réservation est en cours de mise à jour. Veuillez réessayer dans un instant."
+  },
+  "locationMap": {
+    "title": "Emplacement",
+    "severalPlaces": "Nos chambres se trouvent à {count} endroits. Sélectionnez un repère pour voir quelle chambre s'y trouve.",
+    "viewDetails": "Voir les détails",
+    "placesLabel": "Lieux sur la carte",
+    "mapLabel": "Carte de l'emplacement des chambres",
+    "showMap": "Afficher la carte",
+    "mapNote": "Charge Google Maps. Google reçoit votre requête.",
+    "loadingMap": "Chargement de la carte…",
+    "mapFailed": "La carte n'a pas pu être chargée pour le moment."
   }
 }

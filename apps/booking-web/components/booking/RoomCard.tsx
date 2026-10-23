@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { useLocale, useTranslations } from "next-intl";
 import { useCurrency } from "@/contexts/CurrencyContext";
@@ -35,6 +35,7 @@ export default function RoomCard({
   promoCode,
   onSelect,
   onView: onViewed,
+  detailsRequest = 0,
 }: {
   room: PricingRoom;
   /** Stay prices for this room; null while loading, when they failed or aren't offered. */
@@ -52,6 +53,8 @@ export default function RoomCard({
   onSelect: (publicOfferKey: string, roomCount: number) => void;
   /** The room's details were opened. */
   onView?: () => void;
+  /** Raised to open the room's details from elsewhere, such as its pin on the location map (VAY-2126). */
+  detailsRequest?: number;
 }) {
   const t = useTranslations("home");
   const tc = useTranslations("common");
@@ -64,6 +67,13 @@ export default function RoomCard({
     setDetailsOpen(true);
     onViewed?.();
   };
+  const handledDetailsRequest = useRef(detailsRequest);
+  useEffect(() => {
+    if (detailsRequest === handledDetailsRequest.current) return;
+    handledDetailsRequest.current = detailsRequest;
+    onView();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only a new request opens the details
+  }, [detailsRequest]);
 
   const images = room.images ?? [];
   // Without prices for this room (failed, no read, or the room missing from the answer) the

@@ -350,6 +350,8 @@ jobs:
           E2E_START_SERVERS: "0"
           PORT: "3002"
           E2E_BOOKING_BASE_URL: http://hotel-alpenrose.booking.localhost:3002
+          # A fake key: the location map loads Google Maps on "Show map", which location-map.spec.ts fakes (VAY-2126).
+          NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: e2e-google-places
 
       - name: Upload the Playwright report
         if: failure()

@@ -558,5 +558,16 @@
     "withdrawNotOnline": "This request can't be withdrawn online. Please contact the hotel.",
     "bookingNotChangeable": "This booking can no longer be changed. Look it up again to see its current status.",
     "busyTryAgain": "This booking is being updated right now. Please try again in a moment."
+  },
+  "locationMap": {
+    "title": "Location",
+    "severalPlaces": "Our rooms are in {count} places. Select a pin to see which room is there.",
+    "viewDetails": "View details",
+    "placesLabel": "Places on the map",
+    "mapLabel": "Map of where the rooms are",
+    "showMap": "Show map",
+    "mapNote": "Loads Google Maps. Google receives your request.",
+    "loadingMap": "Loading map…",
+    "mapFailed": "The map couldn't load right now."
   }
 }

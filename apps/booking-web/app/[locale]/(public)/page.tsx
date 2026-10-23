@@ -19,9 +19,11 @@ import { hotelService } from "@/services/api/hotel";
 import { useBookingSteps } from "@/lib/hooks/useBookingSteps";
 import { useStayPrices } from "@/lib/hooks/useStayPrices";
 import RoomCard from "@/components/booking/RoomCard";
+import RoomsLocationMap from "@/components/booking/RoomsLocationMap";
 import {
-  getReplacementOffers,
+  getReplacementCatalog,
   quoteMoneyAmount,
+  type CatalogLocationMap,
   type PricingRoom,
 } from "@/services/api/replacementOffers";
 
@@ -157,11 +159,17 @@ function HomePageContent() {
   // catalog the page keeps the plain "Choose rooms and get a price" entry.
   const [rooms, setRooms] = useState<PricingRoom[] | null>(null);
   const [roomsFailed, setRoomsFailed] = useState(false);
+  // The hotel's location map (VAY-2126), read live with the catalog; null while its switch is off.
+  const [locationMap, setLocationMap] = useState<CatalogLocationMap | null>(null);
+  // A map pin's "View details" opens that room card's details: one counter per room.
+  const [detailsRequests, setDetailsRequests] = useState<Record<string, number>>({});
   useEffect(() => {
     const controller = new AbortController();
-    getReplacementOffers(slug, controller.signal)
+    getReplacementCatalog(slug, controller.signal)
       .then((value) => {
-        if (!controller.signal.aborted) setRooms(value);
+        if (controller.signal.aborted) return;
+        setRooms(value.rooms);
+        setLocationMap(value.locationMap);
       })
       .catch(() => {
         if (!controller.signal.aborted) setRoomsFailed(true);
@@ -599,6 +607,7 @@ function HomePageContent() {
                   promoCode={appliedPromo?.code ?? null}
                   onSelect={selectRoom}
                   onView={() => trackEvent(slug, "room_viewed", { roomTypeId: room.roomTypeId })}
+                  detailsRequest={detailsRequests[room.roomTypeId] ?? 0}
                 />
               ))}
             </div>
@@ -619,6 +628,20 @@ function HomePageContent() {
           </Link>
         )}
       </div>
+
+      {locationMap && rooms?.length ? (
+        <RoomsLocationMap
+          rooms={rooms}
+          property={{ name: hotel.name, locality: hotel.location, pin: locationMap.property }}
+          apiKey={process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY?.trim() ?? ""}
+          onViewDetails={(roomTypeId) =>
+            setDetailsRequests((requests) => ({
+              ...requests,
+              [roomTypeId]: (requests[roomTypeId] ?? 0) + 1,
+            }))
+          }
+        />
+      ) : null}
 
       {/* TODO(VAY-2098): the Location section ("Explore our surroundings", components/booking/
           Surroundings.tsx) is hidden for every property until the surroundings feature is finished.
