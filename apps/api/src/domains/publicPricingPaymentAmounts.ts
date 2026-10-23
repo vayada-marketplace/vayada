@@ -48,8 +48,9 @@ export async function lockPublicPricingPaymentAmounts(
   )
     return null;
   const terms = selectedTerms.map((t) => t!);
-  if (new Set(terms.map((t) => canonical(t.cancellation))).size !== 1) return null;
-  // A stay is paid on one schedule: a deposit only when every room takes the same one.
+  // VAY-2320: each room keeps its own cancellation terms; a cancellation adds up what each room
+  // gives back (bookedCancellationOutcome). A stay is still paid on one schedule: a deposit only
+  // when every room takes the same one.
   const deposit = terms[0]!.payment.kind === "deposit" ? terms[0]!.payment : null;
   if (
     terms.some((t) => (t.payment.kind === "deposit") !== (deposit !== null)) ||

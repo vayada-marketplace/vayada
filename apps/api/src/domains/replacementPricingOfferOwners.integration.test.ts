@@ -7718,31 +7718,59 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     );
     expect(await paymentAmounts(f, "card")).toBeNull();
   });
-  it("rejects selected rates with incompatible cancellation terms", async () => {
-    const f = await componentsFixture(fixedPolicy(), (t) => ({
-      ...propertyTerms(t),
-      cancellation:
-        t.offerId === "other"
-          ? {
-              kind: "flexible",
-              terms: {
-                type: "free_until_days_before_arrival",
-                freeCancellationDeadlineDays: 7,
-                afterDeadlinePenalty: "full_booking_amount",
-                noShowPenalty: "full_booking_amount",
-              },
-            }
-          : t.cancellation,
-    }));
-    const otherKey = f.bindings.find(
-      (b) => b.roomTypeId === f.snapshot.rooms[0].roomTypeId && b.offerId === "other",
-    )!.publicOfferKey;
-    expect(
-      await paymentAmounts(f, "pay_at_property", {
+  // VAY-2320: rooms in one booking keep their own cancellation terms (Flamur, 2026-09-06 and
+  // 2026-10-23): another rate of the same room type, or another room type.
+  it("keeps each selected rate's own cancellation terms in one quote", async () => {
+    const flexible = {
+      kind: "flexible",
+      terms: {
+        type: "free_until_days_before_arrival",
+        freeCancellationDeadlineDays: 7,
+        afterDeadlinePenalty: "full_booking_amount",
+        noShowPenalty: "full_booking_amount",
+      },
+    } as const;
+    // The fixture saves the first room type's terms first: every other rate is flexible.
+    let firstFlex: string | undefined;
+    const f = await componentsFixture(fixedPolicy(), (t) => {
+      firstFlex ??= `${t.roomTypeId}:${t.offerId}`;
+      return {
+        ...propertyTerms(t),
+        cancellation: `${t.roomTypeId}:${t.offerId}` === firstFlex ? t.cancellation : flexible,
+      };
+    });
+    const key = (roomTypeId: string, offerId: string) =>
+      f.bindings.find((b) => b.roomTypeId === roomTypeId && b.offerId === offerId)!.publicOfferKey;
+    const [first, second] = f.snapshot.rooms.map((room) => room.roomTypeId);
+    for (const [otherRoom, offerId] of [
+      [first!, "other"],
+      [second!, "flex"],
+    ] as const) {
+      const cancellations = [{ kind: "non_refundable" }, flexible];
+      const selection = {
         ...f.selection,
-        rooms: [f.selection.rooms[0], { ...f.selection.rooms[1], publicOfferKey: otherKey }],
-      }),
-    ).toBeNull();
+        rooms: [
+          f.selection.rooms[0],
+          { ...f.selection.rooms[1], publicOfferKey: key(otherRoom, offerId) },
+        ],
+      };
+      const result = await paymentAmounts(f, "pay_at_property", selection);
+      expect(result).not.toBeNull();
+      expect(result!.selectedTerms.map((t) => t.cancellation)).toEqual(cancellations);
+      const issued = await createCurrentPricingQuoteStore(pool, 300).issue(f.scope.propertyId, {
+        requestId: randomUUID(),
+        selection,
+        paymentMethod: "pay_at_property",
+      });
+      expect(
+        issued.quote.stay.rooms.map(
+          (room) =>
+            issued.quote.evidence.terms.find(
+              (t) => t.roomTypeId === room.roomTypeId && t.offerId === room.offerId,
+            )!.cancellation,
+        ),
+      ).toEqual(cancellations);
+    }
   });
 
   async function assembledQuote(f: Awaited<ReturnType<typeof componentsFixture>>, lifetime = 300) {

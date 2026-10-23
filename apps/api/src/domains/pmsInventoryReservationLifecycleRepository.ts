@@ -193,6 +193,14 @@ type WatermarkRow = {
 
 class InventoryInvariantError extends Error {}
 
+/** VAY-2320: a quote's room type has no free room left on some night, so the guest can choose
+ * another room. Same message as any other unavailable quote for callers that only match that. */
+export class QuoteRoomsSoldOutError extends Error {
+  constructor(readonly roomTypeIds: readonly string[]) {
+    super("Quote inventory is unavailable");
+  }
+}
+
 export function createPgPmsInventoryReservationLifecycleRepository(
   config: PmsInventoryReservationLifecycleRepositoryConfig,
 ): PmsInventoryReservationLifecycleRepository {
@@ -409,6 +417,8 @@ export async function reservePmsQuoteInventory(
         idempotencyKey: `pricing-quote:${quoteId}:${roomTypeId}`,
         audit,
       });
+      if (!result.ok && result.error.code === "inventory_unavailable")
+        throw new QuoteRoomsSoldOutError([roomTypeId]);
       if (!result.ok || result.status.state !== "reserved") return unavailable();
       receipts.push(result.status.receipt);
     }
