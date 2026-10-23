@@ -593,14 +593,15 @@
   },
   "locationMap": {
     "title": "Emplacement",
-    "severalPlaces": "Nos chambres se trouvent à {count} endroits. Sélectionnez un repère pour voir quelle chambre s'y trouve.",
+    "severalPlaces": "Nos chambres se trouvent à {count} endroits.",
     "viewDetails": "Voir les détails",
     "placesLabel": "Lieux sur la carte",
     "mapLabel": "Carte de l'emplacement des chambres",
     "showMap": "Afficher la carte",
     "mapNote": "Charge Google Maps. Google reçoit votre requête.",
     "loadingMap": "Chargement de la carte…",
-    "mapFailed": "La carte n'a pas pu être chargée pour le moment."
+    "mapFailed": "La carte n'a pas pu être chargée pour le moment.",
+    "mainHouse": "Maison principale · {count, plural, one {# chambre} other {# chambres}}"
   },
   "roomPlace": {
     "title": "Où vous logerez",

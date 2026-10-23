@@ -593,14 +593,15 @@
   },
   "locationMap": {
     "title": "Ubicación",
-    "severalPlaces": "Nuestras habitaciones están en {count} lugares. Selecciona un marcador para ver qué habitación hay allí.",
+    "severalPlaces": "Nuestras habitaciones están en {count} lugares.",
     "viewDetails": "Ver detalles",
     "placesLabel": "Lugares en el mapa",
     "mapLabel": "Mapa con la ubicación de las habitaciones",
     "showMap": "Mostrar mapa",
     "mapNote": "Carga Google Maps. Google recibe tu solicitud.",
     "loadingMap": "Cargando mapa…",
-    "mapFailed": "Ahora mismo no se pudo cargar el mapa."
+    "mapFailed": "Ahora mismo no se pudo cargar el mapa.",
+    "mainHouse": "Casa principal · {count, plural, one {# habitación} other {# habitaciones}}"
   },
   "roomPlace": {
     "title": "Dónde te alojarás",

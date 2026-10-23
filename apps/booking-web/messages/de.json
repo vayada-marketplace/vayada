@@ -594,14 +594,15 @@
   },
   "locationMap": {
     "title": "Lage",
-    "severalPlaces": "Unsere Zimmer liegen an {count} Orten. Wählen Sie eine Markierung, um zu sehen, welches Zimmer dort ist.",
+    "severalPlaces": "Unsere Zimmer liegen an {count} Orten.",
     "viewDetails": "Details ansehen",
     "placesLabel": "Orte auf der Karte",
     "mapLabel": "Karte mit der Lage der Zimmer",
     "showMap": "Karte anzeigen",
     "mapNote": "Lädt Google Maps. Google erhält Ihre Anfrage.",
     "loadingMap": "Karte wird geladen …",
-    "mapFailed": "Die Karte konnte gerade nicht geladen werden."
+    "mapFailed": "Die Karte konnte gerade nicht geladen werden.",
+    "mainHouse": "Haupthaus · {count, plural, one {# Zimmer} other {# Zimmer}}"
   },
   "roomPlace": {
     "title": "Hier wohnen Sie",

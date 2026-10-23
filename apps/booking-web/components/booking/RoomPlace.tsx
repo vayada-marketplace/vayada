@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { useLocale, useTranslations } from "next-intl";
 import { metresBetween } from "@vayada/domain-hotels";
 import { importGoogleMapsLibrary } from "@vayada/product-onboarding/googleMaps";
+import { onGoogleAuthFailure } from "@/lib/googleMapsFailure";
 import { chooseMaps, mapsChosen } from "@/lib/mapsChoice";
 import type { CatalogLocationMap, PricingRoom } from "@/services/api/replacementOffers";
 
@@ -375,12 +376,7 @@ function PlaceMap({
 
   useEffect(() => {
     if (!mapRef.current) return;
-    const googleWindow = window as Window & { gm_authFailure?: () => void };
-    const previous = googleWindow.gm_authFailure;
-    googleWindow.gm_authFailure = () => {
-      previous?.();
-      setFailed(true);
-    };
+    const stopListening = onGoogleAuthFailure(() => setFailed(true));
     let disposed = false;
     const timeout = setTimeout(() => {
       if (!disposed) setFailed(true);
@@ -466,7 +462,7 @@ function PlaceMap({
     return () => {
       disposed = true;
       clearTimeout(timeout);
-      googleWindow.gm_authFailure = previous;
+      stopListening();
     };
     // placeKey stands for place; the map is drawn once per place.
     // eslint-disable-next-line react-hooks/exhaustive-deps

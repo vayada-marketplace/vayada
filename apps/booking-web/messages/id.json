@@ -593,14 +593,15 @@
   },
   "locationMap": {
     "title": "Lokasi",
-    "severalPlaces": "Kamar kami ada di {count} tempat. Pilih penanda untuk melihat kamar mana yang ada di sana.",
+    "severalPlaces": "Kamar kami ada di {count} tempat.",
     "viewDetails": "Lihat detail",
     "placesLabel": "Tempat di peta",
     "mapLabel": "Peta lokasi kamar",
     "showMap": "Tampilkan peta",
     "mapNote": "Memuat Google Maps. Google menerima permintaan Anda.",
     "loadingMap": "Memuat peta…",
-    "mapFailed": "Peta tidak dapat dimuat saat ini."
+    "mapFailed": "Peta tidak dapat dimuat saat ini.",
+    "mainHouse": "Rumah utama · {count, plural, other {# kamar}}"
   },
   "roomPlace": {
     "title": "Tempat Anda menginap",
