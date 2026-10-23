@@ -126,4 +126,10 @@ it("names what it can't read as unknown and leaves other bookings unchanged", ()
   expect(
     serializeTargetBooking(row({ bookingMetadata: { selectedOffer: { roomName: "Suite" } } })),
   ).not.toHaveProperty("bookedRooms");
+  // A loader that doesn't read the rooms' terms and names leaves the field out.
+  const unread: Record<string, unknown> = row();
+  delete unread["bookedTerms"];
+  delete unread["bookedPricedRooms"];
+  delete unread["bookedRoomNames"];
+  expect(serializeTargetBooking(unread as TargetBookingRow)).not.toHaveProperty("bookedRooms");
 });

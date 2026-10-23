@@ -99,9 +99,10 @@ export type PublicOfferPaymentSchedule =
   | { kind: "full" }
   | { kind: "deposit"; percent: number; key: string };
 
-/** How each offer is paid, by public offer key (VAY-2320). One booking is paid one way: rooms
- * combine when all are paid in full, or all take the same deposit (`key`), as the quote's payment
- * amounts require. An offer without its exact terms has no entry. */
+/** How each offer is paid, by public offer key (VAY-2320). One booking is paid one way, as the
+ * quote's payment amounts require: rooms combine when all are paid in full or all take the same
+ * deposit (`key`), AND they share a way to pay (the catalog's `paymentMethods`). An offer without
+ * its exact terms has no entry. */
 export function publicOfferPaymentSchedules(
   owner: Owner,
 ): ReadonlyMap<string, PublicOfferPaymentSchedule> {

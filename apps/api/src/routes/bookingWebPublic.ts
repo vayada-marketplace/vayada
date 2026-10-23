@@ -4299,8 +4299,16 @@ export async function loadTargetBooking(
      -- VAY-2320: each booked room's terms and meal, from the accepted quote (a date change keeps
      -- rooms, rates and terms), and the room types' names.
      LEFT JOIN LATERAL (
-       SELECT acceptance.quote_snapshot->'evidence'->'terms' AS terms,
-              acceptance.quote_snapshot->'rooms' AS rooms
+       SELECT (
+                SELECT jsonb_agg(jsonb_build_object('roomTypeId', term->'roomTypeId',
+                  'offerId', term->'offerId', 'cancellation', term->'cancellation'))
+                FROM jsonb_array_elements(acceptance.quote_snapshot->'evidence'->'terms') term
+              ) AS terms,
+              (
+                SELECT jsonb_agg(jsonb_build_object('selectionId', room->'selectionId',
+                  'mealPlan', room->'mealPlan'))
+                FROM jsonb_array_elements(acceptance.quote_snapshot->'rooms') room
+              ) AS rooms
        FROM booking.pricing_quote_acceptances acceptance
        WHERE acceptance.guest_booking_id = b.id
          AND acceptance.property_id = b.property_id
@@ -4344,7 +4352,13 @@ export async function loadTargetBooking(
  * cancellation as guests read it. Additive: rooms of several types or rates in one booking. */
 function pricingBookedRooms(booking: TargetBookingRow, metadata: Record<string, unknown>) {
   const selections = metadata["pricingSelections"];
-  if (metadata["targetSource"] !== "pricing_quote_draft" || !Array.isArray(selections)) return {};
+  // Only loadTargetBooking reads the rooms' terms and names; other loaders leave the field out.
+  if (
+    metadata["targetSource"] !== "pricing_quote_draft" ||
+    !Array.isArray(selections) ||
+    !("bookedRoomNames" in booking)
+  )
+    return {};
   const terms = Array.isArray(booking.bookedTerms) ? booking.bookedTerms.map(objectValue) : [];
   const priced = Array.isArray(booking.bookedPricedRooms)
     ? booking.bookedPricedRooms.map(objectValue)

@@ -104,6 +104,26 @@ export function oneRoomFits(occupancy: Occupancy, room: { adults: number; childr
   );
 }
 
+/** The fewest rooms a party could need when it may mix the given room types (VAY-2320): enough
+ * for the adults, the children and everyone in the largest rooms, each room with an adult. A
+ * lower bound to start the group's room count; null when no type takes the children, or more
+ * rooms than a party books would be needed. */
+export function fewestRooms(
+  rooms: readonly { occupancy: Occupancy }[],
+  party: { adults: number; children: number },
+) {
+  if (!rooms.length) return null;
+  const most = (key: keyof Occupancy) => Math.max(...rooms.map((room) => room.occupancy[key]));
+  if (party.children > 0 && most("maxChildren") === 0) return null;
+  const needed = Math.max(
+    1,
+    Math.ceil(party.adults / most("maxAdults")),
+    party.children > 0 ? Math.ceil(party.children / most("maxChildren")) : 1,
+    Math.ceil((party.adults + party.children) / most("maxGuests")),
+  );
+  return needed <= MAX_ROOMS && needed <= party.adults ? needed : null;
+}
+
 /** Adults spread evenly; the first rooms take any remainder. */
 export function splitAdults(adults: number, rooms: number) {
   return Array.from(
@@ -147,14 +167,10 @@ export function createPublicPricingStayPrices(pool: Pool, catalog: OfferCatalog)
       let budget = MAX_PRICED_OFFERS;
       const rooms = [];
       const one = query.room;
-      // The fewest rooms the party could need: a lower bound over the types with a room free,
-      // shown as the group's starting room count (VAY-2320).
-      let suggestedRooms: number | null = null;
-      for (const room of offered.rooms) {
-        const needed = roomsForParty(room.occupancy, query.adults, query.children);
-        if (needed !== null && (free.get(room.roomTypeId) ?? 0) >= 1)
-          suggestedRooms = Math.min(suggestedRooms ?? needed, needed);
-      }
+      const suggestedRooms = fewestRooms(
+        offered.rooms.filter((room) => (free.get(room.roomTypeId) ?? 0) >= 1),
+        query,
+      );
       for (const room of offered.rooms) {
         const roomCount = one
           ? oneRoomFits(room.occupancy, one)
@@ -186,9 +202,9 @@ export function createPublicPricingStayPrices(pool: Pool, catalog: OfferCatalog)
           roomCount,
           availability: available ? ("available" as const) : ("sold_out" as const),
           roomsLeft: available && left <= FEW_LEFT ? left : null,
-          // Additive (VAY-2320): free rooms of this type, up to the most a party books, so a
-          // group choosing room by room can tell when its own choices used them up.
-          roomsFree: Math.min(left, MAX_ROOMS),
+          // Additive (VAY-2320), room by room only: free rooms of this type, up to the most a
+          // party books, so the group can tell when its own choices used them up.
+          ...(one && { roomsFree: Math.min(left, MAX_ROOMS) }),
           offers,
         });
       }

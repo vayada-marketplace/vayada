@@ -8,6 +8,7 @@ vi.mock("./publicPricingChargeTotals.js", () => ({ lockPublicPricingChargeTotals
 
 import {
   createPublicPricingStayPrices,
+  fewestRooms,
   oneRoomFits,
   parseStayPricesQuery,
   roomsForParty,
@@ -163,6 +164,18 @@ describe("rooms for a party", () => {
     expect(oneRoomFits(room, { adults: 0, children: 1 })).toBe(false);
   });
 
+  // VAY-2320: a group may mix room types, so the starting room count uses the largest rooms.
+  it("starts a group at the fewest rooms it could need across room types", () => {
+    const big = { occupancy: { maxGuests: 4, maxAdults: 4, maxChildren: 0 } };
+    const family = { occupancy: { maxGuests: 2, maxAdults: 1, maxChildren: 1 } };
+    expect(fewestRooms([big, family], { adults: 4, children: 1 })).toBe(2);
+    expect(fewestRooms([big, family], { adults: 10, children: 1 })).toBe(3);
+    expect(fewestRooms([big], { adults: 2, children: 1 })).toBeNull();
+    expect(fewestRooms([family], { adults: 2, children: 0 })).toBe(2);
+    expect(fewestRooms([family], { adults: 10, children: 0 })).toBeNull();
+    expect(fewestRooms([], { adults: 2, children: 0 })).toBeNull();
+  });
+
   it("spreads adults evenly", () => {
     expect(splitAdults(5, 2)).toEqual([3, 2]);
     expect(splitAdults(4, 4)).toEqual([1, 1, 1, 1]);
@@ -190,7 +203,6 @@ describe("createPublicPricingStayPrices", () => {
           roomCount: 1,
           availability: "available",
           roomsLeft: 2,
-          roomsFree: 2,
           offers: [
             {
               publicOfferKey: "offer-a-free",
@@ -207,7 +219,6 @@ describe("createPublicPricingStayPrices", () => {
           roomCount: 1,
           availability: "available",
           roomsLeft: null,
-          roomsFree: 7,
           offers: [
             {
               publicOfferKey: "offer-b",
@@ -307,6 +318,8 @@ describe("createPublicPricingStayPrices", () => {
       [null, "sold_out"],
       [2, "sold_out"],
     ]);
+    // Free-room counts are given only to a group choosing room by room.
+    expect(party!.rooms.every((room) => !("roomsFree" in room))).toBe(true);
     expect(party!.suggestedRooms).toBe(2);
     totals.mockClear();
     const adultsRoom = await env.reader.read("hotel", {
