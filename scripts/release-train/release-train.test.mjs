@@ -127,6 +127,9 @@ test("every call carries its own timeout", async () => {
   assert.ok(signals[0] instanceof AbortSignal);
 });
 
+const openIssue = (number) => ({ number, state: "open", labels: [{ name: "release-train-hold" }] });
+const issueNumber = (path) => Number(/\/issues\/(\d+)$/.exec(path)?.[1]);
+
 const holdIssue = (number, marker, created = "2026-10-23T11:55:00Z") => ({
   number,
   html_url: `https://github.com/${REPO}/issues/${number}`,
@@ -159,8 +162,30 @@ test("a new hold carries the label and the run marker and is created once", asyn
       throw new Error("reply lost");
     }
   });
-  const hold = await openHold(gh, REPO, { reason: "r", marker: holdMarker(42) });
+  const hold = await openHold(gh, REPO, {
+    reason: "r",
+    marker: holdMarker(42),
+    sleep: async () => {},
+  });
   assert.equal(hold.number, 9);
+});
+
+test("after a lost reply the hold is looked for until the labelled list shows it", async () => {
+  let listReads = 0;
+  const gh = fakeGitHub((method, path) => {
+    if (method === "GET" && path.includes("/issues?"))
+      return listReads++ < 3 ? [] : [holdIssue(9, holdMarker(42))];
+    if (method === "POST" && path === `/repos/${REPO}/issues`) throw new Error("socket hang up");
+  });
+  const slept = [];
+  const hold = await openHold(gh, REPO, {
+    reason: "r",
+    marker: holdMarker(42),
+    sleep: async (ms) => slept.push(ms),
+  });
+  assert.deepEqual(hold, { number: 9, url: `https://github.com/${REPO}/issues/9`, reused: true });
+  assert.equal(gh.calls.filter((call) => call.method === "POST").length, 1);
+  assert.deepEqual(slept, [10_000, 10_000, 10_000]);
 });
 
 test("a hold whose label GitHub dropped gets the label added", async () => {
@@ -178,6 +203,7 @@ test("a hold whose label GitHub dropped gets the label added", async () => {
 });
 
 test("the cleanup after a cancelled train closes only that run's open hold", async () => {
+  const closedIssues = new Set([10]);
   const gh = fakeGitHub((method, path) => {
     if (method === "GET" && path.includes("/issues?"))
       return [
@@ -185,12 +211,18 @@ test("the cleanup after a cancelled train closes only that run's open hold", asy
         holdIssue(8, holdMarker(42)),
         holdIssue(9, "manual hold"),
       ];
+    if (method === "GET" && issueNumber(path))
+      return {
+        ...openIssue(issueNumber(path)),
+        state: closedIssues.has(issueNumber(path)) ? "closed" : "open",
+      };
     if (method === "POST" || method === "PATCH") return {};
   });
-  assert.deepEqual(await cleanupHold(gh, REPO, "42", "https://run/42"), [8]);
+  // #12 is the hold this run recorded; the list does not show it yet. #10 was already closed.
+  assert.deepEqual(await cleanupHold(gh, REPO, "42", "https://run/42", [12, 10]), [12, 8]);
   assert.deepEqual(
     gh.calls.filter((call) => call.method === "PATCH").map((call) => call.path),
-    [`/repos/${REPO}/issues/8`],
+    [`/repos/${REPO}/issues/12`, `/repos/${REPO}/issues/8`],
   );
   const none = fakeGitHub((method, path) => (path.includes("/issues?") ? [] : undefined));
   assert.deepEqual(await cleanupHold(none, REPO, "42", "u"), []);
@@ -224,10 +256,13 @@ function settleWorld({
   holds = () => [holdIssue(5, holdMarker(1))],
   gatePassed = () => false,
   files = () => [],
+  holdState = () => "open",
 }) {
   let poll = -1;
   return fakeGitHub((method, path) => {
     if (method === "GET" && path.includes("/issues?")) return holds();
+    if (method === "GET" && issueNumber(path))
+      return { ...openIssue(issueNumber(path)), state: holdState() };
     if (method === "GRAPHQL") {
       poll += 1;
       return { repository: { mergeQueue: { entries: { nodes: entries(poll) } } } };
@@ -249,7 +284,10 @@ test("settle waits for entries that can still merge, then for two still reads pa
   });
   const lines = [];
   const started = now();
-  assert.equal(await settle(world, REPO, { sleep, now, log: (line) => lines.push(line) }), SHA);
+  assert.equal(
+    await settle(world, REPO, { hold: 5, sleep, now, log: (line) => lines.push(line) }),
+    SHA,
+  );
   assert.ok(lines.some((line) => line.includes("#1")));
   // Polls 1-2 see #1, polls 3-4 are the two still reads a minute apart.
   assert.equal((now() - started) / 60_000, 3);
@@ -261,7 +299,7 @@ test("the first entry still waiting at the gate holds back every entry behind it
     entries: () => [entry(1, "AWAITING_CHECKS"), entry(2, "MERGEABLE")],
     mains: () => SHA,
   });
-  assert.equal(await settle(world, REPO, { sleep, now, log: quiet }), SHA);
+  assert.equal(await settle(world, REPO, { hold: 5, sleep, now, log: quiet }), SHA);
 });
 
 test("settle stops when a queued PR edits the hold gate or the hold closes", async () => {
@@ -271,16 +309,49 @@ test("settle stops when a queued PR edits the hold gate or the hold closes", asy
     mains: () => SHA,
     files: () => [{ filename: "scripts/ci/pr-checks.mjs" }],
   });
-  await assert.rejects(settle(editor, REPO, { sleep, now, log: quiet }), /#3 edit the hold gate/);
+  await assert.rejects(
+    settle(editor, REPO, { hold: 5, sleep, now, log: quiet }),
+    /#3 edit the hold gate/,
+  );
   let reads = 0;
   const closed = settleWorld({
     entries: () => [],
     mains: () => SHA,
-    holds: () => (reads++ < 1 ? [holdIssue(5, "m")] : []),
+    holdState: () => (reads++ < 1 ? "open" : "closed"),
   });
-  await assert.rejects(settle(closed, REPO, { sleep, now, log: quiet }), /closed while settling/);
-  const none = settleWorld({ entries: () => [], mains: () => SHA, holds: () => [] });
-  await assert.rejects(settle(none, REPO, { sleep, now, log: quiet }), /no hold is open/);
+  await assert.rejects(
+    settle(closed, REPO, { hold: 5, sleep, now, log: quiet }),
+    /hold #5 was closed while settling/,
+  );
+  const none = settleWorld({ entries: () => [], mains: () => SHA, holdState: () => "closed" });
+  await assert.rejects(
+    settle(none, REPO, { hold: 5, sleep, now, log: quiet }),
+    /hold #5 is not open/,
+  );
+});
+
+test("settle waits for the labelled list to show a new hold and counts the floor from then", async () => {
+  // The first real run (2026-10-23) read the list 0.3 s after opening its hold and found nothing.
+  const { now, sleep } = clock(Date.parse("2026-10-23T12:00:00Z"));
+  let listReads = 0;
+  const world = settleWorld({
+    entries: () => [],
+    mains: () => SHA,
+    holds: () => (listReads++ < 2 ? [] : [holdIssue(5, holdMarker(1), "2026-10-23T12:00:00Z")]),
+  });
+  const started = now();
+  assert.equal(await settle(world, REPO, { hold: 5, sleep, now, log: quiet }), SHA);
+  // Visible after 10 s; two still reads a minute apart, the second at least 2 min after that.
+  assert.equal((now() - started) / 1000, 130);
+});
+
+test("settle stops when the list never shows the hold, so nothing pauses the queue", async () => {
+  const { now, sleep } = clock();
+  const world = settleWorld({ entries: () => [], mains: () => SHA, holds: () => [] });
+  await assert.rejects(
+    settle(world, REPO, { hold: 5, sleep, now, log: quiet }),
+    /hold #5 did not appear in the release-train-hold list within 120 s/,
+  );
 });
 
 test("a failed settle read starts the two still reads over", async () => {
@@ -288,6 +359,7 @@ test("a failed settle read starts the two still reads over", async () => {
   let mainReads = 0;
   const world = fakeGitHub((method, path) => {
     if (method === "GET" && path.includes("/issues?")) return [holdIssue(5, "m")];
+    if (method === "GET" && issueNumber(path)) return openIssue(issueNumber(path));
     if (method === "GRAPHQL") return { repository: { mergeQueue: { entries: { nodes: [] } } } };
     if (method === "GET" && path.endsWith("/commits/main")) {
       mainReads += 1;
@@ -296,7 +368,7 @@ test("a failed settle read starts the two still reads over", async () => {
     }
   });
   const started = now();
-  assert.equal(await settle(world, REPO, { sleep, now, log: quiet }), SHA);
+  assert.equal(await settle(world, REPO, { hold: 5, sleep, now, log: quiet }), SHA);
   // reads 1 ok, 2 failed, 3 ok, 4 ok: three minutes of polling instead of one.
   assert.equal((now() - started) / 60_000, 3);
 });
@@ -693,6 +765,10 @@ function trainWorld({ main = () => SHA, buildConclusion = "success" } = {}) {
       holds.push(issue);
       return issue;
     }
+    if (method === "GET" && issueNumber(path)) {
+      const issue = holds.find((item) => item.number === issueNumber(path));
+      return { ...issue, state: issue.open ? "open" : "closed" };
+    }
     if (method === "POST" && path.match(/issues\/\d+\/comments$/)) return {};
     if (method === "PATCH" && path.match(/issues\/\d+$/)) {
       holds.find((issue) => path.endsWith(`/${issue.number}`)).open = false;
@@ -762,11 +838,13 @@ test("a dry run writes nothing in the app repository and sends a dry-run event",
 test("a release holds, settles, prechecks, closes the hold at publish, then hands off", async () => {
   const world = trainWorld();
   const { now, sleep } = clock();
+  const remembered = [];
   const result = await runTrain(trainOptions({ dryRun: false, admission: "push" }), {
     ...world,
     sleep,
     now,
     log: quiet,
+    rememberHold: (number) => remembered.push(number),
   });
   assert.equal(result.ok, true, JSON.stringify(result.steps));
   assert.deepEqual(
@@ -787,6 +865,8 @@ test("a release holds, settles, prechecks, closes the hold at publish, then hand
   assert.equal(payload.dryRun, false);
   assert.equal(payload.admission, "push");
   assert.deepEqual(payload.appRun, { id: 42, url: `https://github.com/${REPO}/actions/runs/42` });
+  // The cleanup step of the same job finds the hold by this number, not through the lagging list.
+  assert.deepEqual(remembered, [world.holds[0].number]);
 });
 
 test("keep_hold leaves the hold open for the coordinator", async () => {

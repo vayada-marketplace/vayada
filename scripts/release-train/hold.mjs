@@ -17,7 +17,17 @@ export async function openHolds(gh, repo) {
 
 // Opens this run's hold, or returns it when a previous attempt already opened it. The create is
 // sent once: a retried POST after a lost reply would stack a second hold.
-export async function openHold(gh, repo, { reason, marker, now = () => new Date() }) {
+export async function openHold(
+  gh,
+  repo,
+  {
+    reason,
+    marker,
+    now = () => new Date(),
+    sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    findPolls = 6,
+  },
+) {
   const existing = (await openHolds(gh, repo)).find((issue) => issue.body?.includes(marker));
   if (existing) return { number: existing.number, url: existing.html_url, reused: true };
   const body = [
@@ -41,9 +51,15 @@ export async function openHold(gh, repo, { reason, marker, now = () => new Date(
       await gh.post(`/repos/${repo}/issues/${issue.number}/labels`, { labels: [HOLD_LABEL] });
     return { number: issue.number, url: issue.html_url, reused: false };
   } catch (error) {
-    // The issue may exist even though the reply was lost.
-    const created = (await openHolds(gh, repo)).find((issue) => issue.body?.includes(marker));
-    if (created) return { number: created.number, url: created.html_url, reused: true };
+    // The issue may exist even though the reply was lost, and the labelled list shows a new issue
+    // only after a few seconds: look for a minute before giving up.
+    for (let poll = 0; poll < findPolls; poll += 1) {
+      await sleep(10_000);
+      const created = (await openHolds(gh, repo).catch(() => [])).find((issue) =>
+        issue.body?.includes(marker),
+      );
+      if (created) return { number: created.number, url: created.html_url, reused: true };
+    }
     throw error;
   }
 }
@@ -116,17 +132,49 @@ export async function branchSha(gh, repo, branch = "main") {
   return (await gh.get(`/repos/${repo}/commits/${branch}`)).sha;
 }
 
-// Waits until no queue entry can still merge and main stayed at one sha for two reads a minute
-// apart, no earlier than two minutes after the newest hold opened (GitHub's issue search lags a
-// new issue by a few seconds). Returns that sha: the release sha nothing can move while held.
+export async function holdIsOpen(gh, repo, number) {
+  const issue = await gh.get(`/repos/${repo}/issues/${number}`);
+  return (
+    issue.state === "open" && issue.labels?.some((label) => (label.name ?? label) === HOLD_LABEL)
+  );
+}
+
+// Waits until this run's hold `hold` (an issue number) pauses the queue and the queue settled: no
+// entry can still merge and main stayed at one sha for two reads a minute apart. Returns that sha:
+// the release sha nothing can move while held.
+//
+// The hold is read by number: GitHub's labelled-issue list lags a new issue by seconds (the first
+// real run, 2026-10-23, read it 0.3 s after opening and found nothing). The merge queue's gate
+// reads that list, so the hold pauses merging only once the list shows it; the two-minute floor
+// counts from then, for entries whose Required Checks read "no hold" just before.
 export async function settle(
   gh,
   repo,
-  { sleep, now, log, pollMs = 60_000, maxPolls = 90, notBeforeMs = 120_000 },
+  {
+    hold,
+    sleep,
+    now,
+    log,
+    pollMs = 60_000,
+    maxPolls = 90,
+    notBeforeMs = 120_000,
+    visiblePollMs = 5_000,
+    visibleWaitMs = 120_000,
+  },
 ) {
-  const holds = await openHolds(gh, repo);
-  if (holds.length === 0) throw new Error("no hold is open");
-  const newest = Math.max(...holds.map((issue) => Date.parse(issue.created_at)));
+  if (!(await holdIsOpen(gh, repo, hold))) throw new Error(`hold #${hold} is not open`);
+  const waitUntil = now() + visibleWaitMs;
+  let holds = await openHolds(gh, repo);
+  while (!holds.some((issue) => issue.number === hold)) {
+    if (now() >= waitUntil)
+      throw new Error(
+        `hold #${hold} did not appear in the release-train-hold list within ${visibleWaitMs / 1000} s`,
+      );
+    await sleep(visiblePollMs);
+    holds = await openHolds(gh, repo);
+  }
+  const notBefore =
+    Math.max(now(), ...holds.map((issue) => Date.parse(issue.created_at))) + notBeforeMs;
   const editors = await gateEditors(gh, repo, await queueEntries(gh, repo));
   if (editors.length > 0)
     throw new Error(
@@ -138,8 +186,8 @@ export async function settle(
     let merging;
     let sha;
     try {
-      if ((await openHolds(gh, repo)).length === 0)
-        throw new SettleStop("the hold was closed while settling");
+      if (!(await holdIsOpen(gh, repo, hold)))
+        throw new SettleStop(`hold #${hold} was closed while settling`);
       merging = await entriesThatCanMerge(gh, repo, await queueEntries(gh, repo));
       sha = await branchSha(gh, repo);
     } catch (error) {
@@ -151,7 +199,7 @@ export async function settle(
       continue;
     }
     const clean = merging.length === 0;
-    if (clean && previousClean && sha === previous && now() >= newest + notBeforeMs) return sha;
+    if (clean && previousClean && sha === previous && now() >= notBefore) return sha;
     if (!clean)
       log(
         `waiting for queue entries that can still merge: ${merging.map((n) => `#${n}`).join(" ")}`,

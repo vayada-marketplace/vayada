@@ -10,7 +10,7 @@
 //
 // A dry run changes nothing: no hold, no PR Checks dispatch, no waiting; it reads the current state
 // and sends the platform a dry-run event.
-import { mkdtempSync, appendFileSync, realpathSync } from "node:fs";
+import { mkdtempSync, appendFileSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,6 +19,7 @@ import {
   branchSha,
   closeHold,
   entriesThatCanMerge,
+  holdIsOpen,
   holdMarker,
   openHold,
   openHolds,
@@ -108,7 +109,7 @@ export function renderSummary(options, steps, identity) {
 
 export async function runTrain(
   options,
-  { gh, platform, sleep, now, log, workdir, download = downloadArtifact },
+  { gh, platform, sleep, now, log, workdir, download = downloadArtifact, rememberHold = () => {} },
 ) {
   const steps = [];
   const record = (name, status, detail) => {
@@ -127,7 +128,9 @@ export async function runTrain(
       hold = await openHold(gh, repo, {
         reason: `release train ${options.runId}: ${options.summary}`,
         marker: holdMarker(options.runId),
+        sleep,
       });
+      rememberHold(hold.number);
       record(
         "hold",
         "done",
@@ -146,7 +149,7 @@ export async function runTrain(
         `dry run: main at ${main.slice(0, 9)}; queue entries that could still merge: ${merging.map((n) => `#${n}`).join(" ") || "none"}`,
       );
     } else {
-      sha = await settle(gh, repo, { sleep, now, log });
+      sha = await settle(gh, repo, { hold: hold.number, sleep, now, log });
       if (options.sha && options.sha !== sha)
         throw new Error(
           `main settled at ${sha.slice(0, 9)}, not the requested ${options.sha.slice(0, 9)}`,
@@ -242,18 +245,31 @@ export async function runTrain(
 }
 
 // After a cancelled or timed-out train (the train's own stop path never ran): close this run's
-// hold if it is still open, so merging does not stay paused until someone notices.
-export async function cleanupHold(gh, repo, runId, runUrl) {
+// hold if it is still open, so merging does not stay paused until someone notices. The hold the
+// train recorded is read by number (the labelled list may not show a seconds-old issue yet); the
+// list adds holds of earlier attempts of this run.
+export async function cleanupHold(gh, repo, runId, runUrl, known = []) {
   const marker = holdMarker(runId);
-  const mine = (await openHolds(gh, repo)).filter((issue) => issue.body?.includes(marker));
-  for (const issue of mine)
+  const listed = (await openHolds(gh, repo))
+    .filter((issue) => issue.body?.includes(marker))
+    .map((issue) => issue.number);
+  const closed = [];
+  for (const number of new Set([...known, ...listed])) {
+    if (!(await holdIsOpen(gh, repo, number))) continue;
     await closeHold(
       gh,
       repo,
-      issue.number,
+      number,
       `Release train ${runUrl} was cancelled or timed out before any deploy.`,
     );
-  return mine.map((issue) => issue.number);
+    closed.push(number);
+  }
+  return closed;
+}
+
+// Where the train records its hold for the cleanup step of the same job.
+function holdFile(env) {
+  return join(env.RUNNER_TEMP || tmpdir(), `release-train-hold-${env.GITHUB_RUN_ID}`);
 }
 
 async function main() {
@@ -264,11 +280,16 @@ async function main() {
       GITHUB_SERVER_URL: server,
     } = process.env;
     const gh = createGitHub({ token: process.env.GH_TOKEN, log: (line) => console.log(line) });
+    let known = [];
+    try {
+      known = [Number(readFileSync(holdFile(process.env), "utf8").trim())].filter(Boolean);
+    } catch {}
     const closed = await cleanupHold(
       gh,
       repo,
       runId,
       `${server || "https://github.com"}/${repo}/actions/runs/${runId}`,
+      known,
     );
     console.log(
       closed.length
@@ -283,7 +304,16 @@ async function main() {
   const gh = createGitHub({ token: process.env.GH_TOKEN, log });
   const platform = createGitHub({ token: process.env.PLATFORM_DISPATCH_TOKEN, log });
   const workdir = mkdtempSync(join(process.env.RUNNER_TEMP || tmpdir(), "release-train-"));
-  const result = await runTrain(options, { gh, platform, sleep, now: Date.now, log, workdir });
+  const rememberHold = (number) => writeFileSync(holdFile(process.env), `${number}\n`);
+  const result = await runTrain(options, {
+    gh,
+    platform,
+    sleep,
+    now: Date.now,
+    log,
+    workdir,
+    rememberHold,
+  });
   const summary = renderSummary(options, result.steps, result.identity);
   if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary);
   else console.log(summary);

@@ -23,6 +23,13 @@ concurrency:
   group: pr-checks-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+# npm ci retries a failed registry fetch 5 times, 15-90 s apart (VAY-2314). Only network fetches
+# are retried; any other npm ci error, a lockfile out of sync say, still fails at once.
+env:
+  NPM_CONFIG_FETCH_RETRIES: "5"
+  NPM_CONFIG_FETCH_RETRY_MINTIMEOUT: "15000"
+  NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT: "90000"
+
 # Job selection is path-based and fails safe: scripts/ci/pr-checks.mjs maps each changed file to
 # the jobs that cover it, and any file it cannot classify selects every job. "Required Checks"
 # stays the single required status and only accepts a job that succeeded or that was skipped
@@ -159,9 +166,11 @@ jobs:
       - name: Vayada Admin tests
         run: npm --workspace vayada-admin run test
 
+      - name: Install Chromium
+        run: scripts/install-playwright-chromium.sh
+
       - name: Landing consent browser regressions
         run: |
-          npx playwright install --with-deps chromium
           npm --workspace vayada-landing run start -- --port 3006 &
           landing_pid=$!
           trap 'kill "$landing_pid" 2>/dev/null || true' EXIT
@@ -207,7 +216,7 @@ jobs:
           npm --workspace @vayada/domain-pms run build
 
       - name: Install Chromium
-        run: npx playwright install --with-deps chromium
+        run: scripts/install-playwright-chromium.sh
 
       - name: Verify frontend auth gateways
         run: |
@@ -257,7 +266,7 @@ jobs:
         run: npm --workspace vayada-api run build:backend-packages
 
       - name: Install Chromium
-        run: npx playwright install --with-deps chromium
+        run: scripts/install-playwright-chromium.sh
 
       - name: Run the pms-web browser specs
         run: |
@@ -329,7 +338,7 @@ jobs:
         run: npm --workspace vayada-api run build:backend-packages
 
       - name: Install Chromium
-        run: npx playwright install --with-deps chromium
+        run: scripts/install-playwright-chromium.sh
 
       - name: Run the booking-web browser specs
         run: |
@@ -410,7 +419,7 @@ jobs:
           NEXT_PUBLIC_PMS_FRONTEND_URL: http://pms.localhost:3004
 
       - name: Install Chromium
-        run: npx playwright install --with-deps chromium
+        run: scripts/install-playwright-chromium.sh
 
       - name: Run the booking-admin browser specs
         run: |
