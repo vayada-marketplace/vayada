@@ -329,7 +329,7 @@ async function bookedPolicyImpact(
     timezone: string;
   },
 ): Promise<HostPolicyImpact | null> {
-  const lines: { roomTypeId: string; impact: SingleHostPolicyImpact }[] = [];
+  const lines: { roomTypeId: string; offerId: string; impact: SingleHostPolicyImpact }[] = [];
   for (const room of input.booked.stay.rooms) {
     const terms = input.booked.evidence.terms.find(
       (t) => t.roomTypeId === room.roomTypeId && t.offerId === room.offerId,
@@ -343,7 +343,7 @@ async function bookedPolicyImpact(
       input.timezone,
     );
     if (!impact) return null;
-    lines.push({ roomTypeId: room.roomTypeId, impact });
+    lines.push({ roomTypeId: room.roomTypeId, offerId: room.offerId, impact });
   }
   const first = lines[0]?.impact;
   if (!first) return null;
@@ -356,21 +356,28 @@ async function bookedPolicyImpact(
       )
     ).rows.map((row) => [row.id, row.name]),
   );
-  const grouped = new Map<string, { impact: SingleHostPolicyImpact; roomCount: number }>();
-  for (const line of lines)
-    grouped.set(line.roomTypeId, {
+  // One line per booked rate: a room type booked at two rates has two sets of terms (VAY-2320).
+  const grouped = new Map<
+    string,
+    { roomTypeId: string; impact: SingleHostPolicyImpact; roomCount: number }
+  >();
+  for (const line of lines) {
+    const key = JSON.stringify([line.roomTypeId, line.offerId]);
+    grouped.set(key, {
+      roomTypeId: line.roomTypeId,
       impact: line.impact,
-      roomCount: (grouped.get(line.roomTypeId)?.roomCount ?? 0) + 1,
+      roomCount: (grouped.get(key)?.roomCount ?? 0) + 1,
     });
+  }
   return {
     type: "mixed_room",
     previousDeadline: null,
     newDeadline: null,
     timezone: input.timezone,
-    lines: [...grouped].map(([roomTypeId, line]) => ({
+    lines: [...grouped.values()].map((line) => ({
       ...line.impact,
-      roomTypeId,
-      roomName: names.get(roomTypeId) ?? roomTypeId,
+      roomTypeId: line.roomTypeId,
+      roomName: names.get(line.roomTypeId) ?? line.roomTypeId,
       roomCount: line.roomCount,
     })),
   };

@@ -8,6 +8,7 @@ import { stagePricingBookingLifecycle } from "./pricingBookingLifecycle.js";
 import { stagePricingBookingRevenue } from "./pricingBookingRevenue.js";
 import { stagePmsAcceptedPricingReservationJob } from "./pricingPmsAcceptedReservationJob.js";
 import { storePricingAcceptance } from "./storePricingAcceptance.js";
+import { QuoteRoomsSoldOutError } from "./pmsInventoryReservationLifecycleRepository.js";
 import {
   pricingCardQuoteSupported,
   pricingCardBookingId,
@@ -33,8 +34,11 @@ export class PricingAcceptanceError extends Error {
       | "unexpected"
       | "card_unavailable"
       | "request_unavailable"
-      | "manual_unavailable",
+      | "manual_unavailable"
+      | "sold_out",
     cause: unknown,
+    /** sold_out: the room types with no free room left (VAY-2320). */
+    readonly roomTypeIds: readonly string[] = [],
   ) {
     super("Pricing acceptance failed", { cause });
   }
@@ -253,6 +257,8 @@ export async function writePricingAcceptance(
   } catch (error) {
     await client?.query("ROLLBACK").catch(() => undefined);
     if (error instanceof PricingAcceptanceError) throw error;
+    if (error instanceof QuoteRoomsSoldOutError)
+      throw new PricingAcceptanceError("sold_out", error, error.roomTypeIds);
     if (error instanceof Error && error.message === "Card acceptance unavailable")
       throw new PricingAcceptanceError("card_unavailable", error);
     if (error instanceof Error && error.message === "Request acceptance unavailable")
