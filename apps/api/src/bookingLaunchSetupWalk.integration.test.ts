@@ -1177,6 +1177,52 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
       expect(await publicProfile(true)).toMatchObject({ hotel: { propertyId } });
       if (manualMethod) expect(await publicProfile(false)).toBeNull();
       else expect(await publicProfile(false)).toMatchObject({ hotel: { propertyId } });
+      // VAY-2318: Design Studio saves a hero heading into the booking settings and a colour outside
+      // the setup swatches into the booking design, then refreshes the live page, and guests get
+      // both. Before, the page kept the hotel name and the setup colour.
+      expect(await publicProfile(true)).toMatchObject({
+        hotel: { branding: { primaryColor: "#4F46E5", fontPairing: "high-end-serif" } },
+      });
+      await admin.query(
+        `UPDATE booking.booking_settings SET hero_heading = 'Sea-view terraces', updated_at = now()
+         WHERE property_id = $1`,
+        [propertyId],
+      );
+      const studioAudit = {
+        requestId: `studio-colour-${suffix}`,
+        correlationId: `studio-colour-${suffix}`,
+        source: "web",
+      };
+      ok(
+        await designRepository.upsertDesign({
+          organizationId,
+          propertyId,
+          actorUserId: owner,
+          idempotencyKey: `studio-colour-${suffix}`,
+          expectedRevision: 2,
+          choices: { primaryColor: "#5E0000", fontPairing: "grand-classic" },
+          audit: studioAudit,
+        }),
+        "Design Studio colour",
+      );
+      expect(
+        await runtime.refresh({
+          ...scope,
+          actorUserId: owner,
+          idempotencyKey: `studio-colour-refresh-${suffix}`,
+          audit: studioAudit,
+          onlyIfLive: true,
+        }),
+      ).toMatchObject({ status: "succeeded" });
+      expect(await publicProfile(true)).toMatchObject({
+        hotel: {
+          branding: {
+            heroHeading: "Sea-view terraces",
+            primaryColor: "#5E0000",
+            fontPairing: "grand-classic",
+          },
+        },
+      });
       // A Vayada operator: changes the page address (VAY-2295) and suspends the hotel (step 11).
       await admin.query("INSERT INTO identity.users(id,email,status) VALUES($1,$2,'active')", [
         platformAdmin,

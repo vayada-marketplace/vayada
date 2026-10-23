@@ -1,8 +1,10 @@
+// Every preset keeps white button text readable (WCAG AA), as the booking design requires
+// (VAY-2318: Tropical Gold and Sunset Coral are darker than they were).
 export const BOOKING_PAGE_COLOR_PRESETS = [
   { name: "Ocean Blue", primary: "#0077B6" },
-  { name: "Tropical Gold", primary: "#D4A017" },
+  { name: "Tropical Gold", primary: "#A67D12" },
   { name: "Forest Green", primary: "#2D6A4F" },
-  { name: "Sunset Coral", primary: "#E76F51" },
+  { name: "Sunset Coral", primary: "#E35734" },
   { name: "Royal Purple", primary: "#7B2D8E" },
   { name: "Charcoal", primary: "#2D3436" },
 ] as const;

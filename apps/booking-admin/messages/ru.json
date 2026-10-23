@@ -364,6 +364,7 @@
   "designStudio.colors.primaryBrandColor": "Основной цвет бренда",
   "designStudio.colors.primaryDescription": "Кнопки, ссылки и акценты",
   "designStudio.colors.quickPresets": "Быстрые пресеты",
+  "designStudio.colors.tooLight": "Слишком светлый для белого текста на кнопках. Выберите более тёмный оттенок.",
   "designStudio.fonts.title": "Типографика",
   "designStudio.fonts.subtitle": "Выберите сочетание шрифтов",
   "bookingFlow.title": "Процесс бронирования",

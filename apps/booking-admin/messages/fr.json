@@ -364,6 +364,7 @@
   "designStudio.colors.primaryBrandColor": "Couleur principale de la marque",
   "designStudio.colors.primaryDescription": "Boutons, liens et accents",
   "designStudio.colors.quickPresets": "Préréglages rapides",
+  "designStudio.colors.tooLight": "Trop clair pour le texte blanc des boutons. Choisissez une teinte plus foncée.",
   "designStudio.fonts.title": "Typographie",
   "designStudio.fonts.subtitle": "Sélectionnez une combinaison de polices",
   "bookingFlow.title": "Parcours de réservation",

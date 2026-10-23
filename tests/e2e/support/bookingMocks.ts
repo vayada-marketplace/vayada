@@ -309,6 +309,8 @@ type MockBookingApisOptions = {
   promoCodes?: boolean;
   /** A Design Studio font pairing id, e.g. "high-end-serif". */
   fontPairing?: string;
+  /** The published brand colour, e.g. "#5E0000" (VAY-2318). */
+  primaryColor?: string;
   /** VAY-2247: a hotel that went live before adding any photos. */
   noPhotos?: boolean;
   /** VAY-2307: the public map pin, shown only when the hotel shows its location. */
@@ -321,7 +323,10 @@ export async function mockBookingApis(page: Page, options: MockBookingApisOption
     ...publicHotelProfile,
     hotel: {
       ...publicHotelProfile.hotel,
-      ...(options.headerLogoUrl || options.headerSettings || options.fontPairing
+      ...(options.headerLogoUrl ||
+      options.headerSettings ||
+      options.fontPairing ||
+      options.primaryColor
         ? {
             branding: {
               logoUrl: options.headerLogoUrl ?? null,
@@ -333,7 +338,7 @@ export async function mockBookingApis(page: Page, options: MockBookingApisOption
               heroImage: null,
               heroHeading: null,
               heroSubtext: null,
-              primaryColor: null,
+              primaryColor: options.primaryColor ?? null,
               fontPairing: options.fontPairing ?? null,
             },
           }

@@ -130,6 +130,27 @@ describe("Booking design renderer readiness", () => {
     ).toBeNull();
   });
 
+  it("carries a Design Studio colour into the snapshot the booking page renders (VAY-2318)", async () => {
+    const custom = {
+      ...design(),
+      choices: { primaryColor: "#5E0000", fontPairing: "grand-classic" },
+    };
+    const ready = await provider({
+      design: { getCurrentDesign: vi.fn().mockResolvedValue(custom) },
+    }).result.getBookingDesignReadiness(scope);
+    expect(ready).toMatchObject({
+      outcome: "ready",
+      snapshot: {
+        appearance: {
+          primaryColor: "#5E0000",
+          fontPairing: "grand-classic",
+          button: { backgroundColor: "#530000", hoverBackgroundColor: "#440000" },
+        },
+      },
+    });
+    expect(parseBookingDesignReadinessResult(ready, scope)).toEqual(ready);
+  });
+
   it("accepts the Catalog summary limit in Unicode code points", async () => {
     const ready = await provider().result.getBookingDesignReadiness(scope);
     if (ready.outcome !== "ready") throw new Error("Expected ready design");
