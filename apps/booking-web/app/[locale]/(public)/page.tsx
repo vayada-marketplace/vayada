@@ -291,7 +291,6 @@ function HomePageContent() {
   };
   // Room by room: the card's rate becomes the active room's choice; then the next open room.
   const chooseRoom = (room: PricingRoom, publicOfferKey: string) => {
-    trackEvent(slug, "rate_selected", { entry: "room_card" });
     const offer = room.offers.find((candidate) => candidate.publicOfferKey === publicOfferKey);
     if (!offer) return;
     const price = roomPrices(room)?.offers.find((p) => p.publicOfferKey === publicOfferKey);
@@ -320,7 +319,8 @@ function HomePageContent() {
     const params = new URLSearchParams(bookParams);
     params.set("rooms", String(roomCount));
     for (const pick of picks) params.append("pick", encodePick(pick!));
-    trackEvent(slug, "rate_selected", { entry: "rooms_bar" });
+    // One rate selection per booking, as from a single room card.
+    trackEvent(slug, "rate_selected", { entry: "room_card" });
     router.push(`/book?${params}`);
   };
   const chosenTotal = picks.every((pick) => !pick || pick.totalMinor !== null)
