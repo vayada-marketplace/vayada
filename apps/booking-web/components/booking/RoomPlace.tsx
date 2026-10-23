@@ -273,7 +273,9 @@ function FullScreenMap({
   const titleId = useId();
   const closeRef = useRef<HTMLButtonElement>(null);
   const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  });
   // Once per opening (not on every render of the page behind): focus the close button, and give the focus back
   // to "Expand map" when the map closes.
   useEffect(() => {
@@ -364,7 +366,9 @@ function PlaceMap({
   const placeKey = JSON.stringify(place);
   const reception = t("reception");
   const onFailedRef = useRef(onFailed);
-  onFailedRef.current = onFailed;
+  useEffect(() => {
+    onFailedRef.current = onFailed;
+  });
   useEffect(() => {
     if (failed) onFailedRef.current?.();
   }, [failed]);
