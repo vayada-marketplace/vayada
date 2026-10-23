@@ -13,6 +13,7 @@ import {
 import type { PricingPaymentSwitches } from "./pricingRatePayability.js";
 import { readPmsRoomOperatingEligibility } from "./pmsRoomOperatingEligibility.js";
 import { toPublicPmsRoomAmenityLabelsV1 } from "./pmsRoomAmenityVocabulary.js";
+import { readGuestLocationMap, roomAddress, roomPin } from "./bookingLocationMap.js";
 
 type MediaServing = Pick<
   PlatformMediaServingConfig,
@@ -76,6 +77,8 @@ export function createPublicPricingOfferCatalog(
           }))
           .filter((room) => room.offers.length > 0);
         const content = await readRoomContent(client, propertyId, offered);
+        // The location map switch (VAY-2126) is read live; rooms' pins are sent only while it is on.
+        const locationMap = await readGuestLocationMap(client, propertyId);
         const rooms = [];
         for (const room of offered) {
           const row = content.get(room.roomTypeId);
@@ -88,6 +91,7 @@ export function createPublicPricingOfferCatalog(
             description: facts.description,
             occupancy: facts.occupancy,
             ...roomCardFacts(row),
+            ...(locationMap && roomLocation(row)),
             images: await roomImages(client, options.mediaServing, organizationId, row),
             offers: room.offers.map((rate) => ({
               publicOfferKey: rate.ratePlanId,
@@ -105,7 +109,12 @@ export function createPublicPricingOfferCatalog(
         if (!rooms.length) return null;
         const current = await lockPublicPricingAuthority(client, slug);
         if (!current || !isDeepStrictEqual(current, owner.scope)) return null;
-        return { version: "public-pricing-offers.v1" as const, rooms };
+        return {
+          version: "public-pricing-offers.v1" as const,
+          rooms,
+          // Additive (VAY-2126): only while the hotel shows the location map.
+          ...(locationMap && { locationMap }),
+        };
       } finally {
         try {
           await client.query("ROLLBACK");
@@ -249,4 +258,14 @@ async function roomImages(
     await client.query("ROLLBACK TO SAVEPOINT room_images");
     return [];
   }
+}
+
+/** A room's own pin for the guest location map, with its address when the hotel wrote one. */
+function roomLocation(row: RoomRow): {
+  location?: { latitude: number; longitude: number; address?: string };
+} {
+  const pin = roomPin(row.attributes);
+  if (!pin) return {};
+  const address = roomAddress(row.attributes);
+  return { location: { ...pin, ...(address && { address }) } };
 }

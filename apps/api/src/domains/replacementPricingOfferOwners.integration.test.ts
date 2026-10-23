@@ -6204,6 +6204,39 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
         /baseNightlyAmount|termsRevision|publicationRevision|ownerReferences|sourceRevision/,
       );
       expect(await catalog.read(randomUUID())).toBeNull();
+      // VAY-2126: the location map is off by default. Switched on (read live), rooms with their own pin carry it;
+      // a room pin doesn't make saved prices stale (VAY-2129).
+      expect(offers).not.toHaveProperty("locationMap");
+      expect(offers?.rooms.some((room) => "location" in room)).toBe(false);
+      await pool.query(
+        `UPDATE pms.room_types SET room_attributes = room_attributes || $2::jsonb
+         WHERE property_id = $1 AND name = 'Terms room'`,
+        [
+          scope.propertyId,
+          JSON.stringify({
+            latitude: 48.15634,
+            longitude: 11.58242,
+            locationAddress: "Leopoldstraße 12",
+          }),
+        ],
+      );
+      expect(await catalog.read(scope.propertyId)).toEqual(offers);
+      // This fixture has no booking settings: add a row with the switch on, then remove it again.
+      await pool.query(
+        "INSERT INTO booking.booking_settings (property_id, location_map_enabled) VALUES ($1, TRUE)",
+        [scope.propertyId],
+      );
+      const mapped = await catalog.read(scope.propertyId);
+      expect(mapped?.locationMap).toHaveProperty("property");
+      expect(
+        Object.fromEntries((mapped?.rooms ?? []).map((room) => [room.name, room.location ?? null])),
+      ).toEqual({
+        "Terms room": { latitude: 48.15634, longitude: 11.58242, address: "Leopoldstraße 12" },
+        "Second room": null,
+      });
+      await pool.query("DELETE FROM booking.booking_settings WHERE property_id = $1", [
+        scope.propertyId,
+      ]);
       const app = Fastify({ logger: false });
       await app.register(registerBookingWebPublicRoutes, {
         profileRepository: {
