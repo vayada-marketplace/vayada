@@ -29,12 +29,14 @@ for (const width of [1440, 390]) {
     await expect(deluxe.getByRole("button", { name: "None left for room 2" })).toBeDisabled();
     await expect(deluxe).toContainText("In your room 1");
     await expect(deluxe).toContainText("You chose the last one for room 1.");
+    await expect(deluxe).not.toContainText("This room can't be booked for these dates.");
     const garden = page.getByTestId("room-card-garden");
     await expect(garden).toContainText("Select your rate for room 2 · 1 Adult, 1 Child");
     const fullPayment = garden.locator(`[data-offer-key="${key("b")}"]`);
     await expect(fullPayment).toBeDisabled();
     await expect(fullPayment).toContainText("Can't combine");
     await expect(fullPayment).toContainText("One booking is paid one way.");
+    await expect(garden).not.toContainText("This room can't be booked for these dates.");
     await expect(page.getByTestId("room-card-family")).toContainText("Sold Out");
     await garden.getByRole("button", { name: "Choose for room 2" }).click();
 
