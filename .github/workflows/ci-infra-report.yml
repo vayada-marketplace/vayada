@@ -1,0 +1,43 @@
+name: CI Infra Report
+
+# Every Monday, counts the past week's PR Checks jobs that failed for infrastructure reasons
+# (browser and package downloads, image pulls, npm, runners, the PostgreSQL teardown race) and
+# rewrites one GitHub issue with the result, so a new flake source shows up (VAY-2314). It reads
+# runs, job logs and annotations, and writes only that issue. See scripts/ci/infra-failures.mjs.
+on:
+  schedule:
+    - cron: "23 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  checks: read
+  contents: read
+  issues: write
+
+concurrency:
+  group: ci-infra-report
+  cancel-in-progress: false
+
+jobs:
+  report:
+    name: Report last week's infrastructure failures
+    runs-on: ubuntu-latest
+    # A week of runs took about 11 minutes to read (2026-10-23).
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version-file: .nvmrc
+
+      - name: Count and report
+        run: node scripts/ci/infra-failures.mjs
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
