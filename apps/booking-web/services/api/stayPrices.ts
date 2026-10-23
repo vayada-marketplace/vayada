@@ -20,15 +20,25 @@ export type StayRoomPrices = {
   availability: "available" | "sold_out";
   /** Set only when three or fewer rooms are left ("Only 2 left"). */
   roomsLeft: number | null;
+  /** VAY-2320, room by room only: free rooms of this type (up to 9). */
+  roomsFree?: number;
   offers: StayOfferPrice[];
 };
-export type StayPrices = { checkIn: string; checkOut: string; rooms: StayRoomPrices[] };
+export type StayPrices = {
+  checkIn: string;
+  checkOut: string;
+  /** VAY-2320: the fewest rooms the group could need; null when none fits, absent from older APIs. */
+  suggestedRooms?: number | null;
+  rooms: StayRoomPrices[];
+};
 export type StayQuery = {
   checkIn: string;
   checkOut: string;
   adults: number;
   children: number;
   promoCode?: string | null;
+  /** VAY-2320: the guests of the one room being chosen, room by room. */
+  room?: { adults: number; children: number };
 };
 
 const object = (v: unknown): v is Record<string, unknown> =>
@@ -49,6 +59,10 @@ export async function getStayPrices(
     children: String(stay.children),
   });
   if (stay.promoCode) params.set("promoCode", stay.promoCode);
+  if (stay.room) {
+    params.set("roomAdults", String(stay.room.adults));
+    params.set("roomChildren", String(stay.room.children));
+  }
   const raw = await bookingWebPublic.get<unknown>(
     `/api/booking-web/hotels/${encodeURIComponent(slug)}/pricing-offers/stay-prices?${params}`,
     { signal, cache: "no-store" },
@@ -62,9 +76,14 @@ export async function getStayPrices(
     !Array.isArray(raw.rooms)
   )
     throw invalid();
+  const count = (v: unknown, min: number) =>
+    typeof v === "number" && Number.isSafeInteger(v) && v >= min && v <= 99;
   return {
     checkIn: stay.checkIn,
     checkOut: stay.checkOut,
+    ...((raw.suggestedRooms === null || count(raw.suggestedRooms, 1)) && {
+      suggestedRooms: raw.suggestedRooms as number | null,
+    }),
     rooms: raw.rooms.map((room): StayRoomPrices => {
       if (
         !object(room) ||
@@ -86,6 +105,7 @@ export async function getStayPrices(
         roomCount: room.roomCount as number | null,
         availability: room.availability,
         roomsLeft: room.roomsLeft as number | null,
+        ...(count(room.roomsFree, 0) && { roomsFree: room.roomsFree as number }),
         offers: room.offers.map((offer): StayOfferPrice => {
           if (!object(offer) || typeof offer.publicOfferKey !== "string") throw invalid();
           if (offer.status === "unavailable" || offer.status === "unpriced")

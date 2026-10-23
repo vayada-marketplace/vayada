@@ -19,6 +19,17 @@ import { hotelService } from "@/services/api/hotel";
 import { useBookingSteps } from "@/lib/hooks/useBookingSteps";
 import { useStayPrices } from "@/lib/hooks/useStayPrices";
 import RoomCard from "@/components/booking/RoomCard";
+import RoomsBar from "@/components/booking/RoomsBar";
+import { useCurrency } from "@/contexts/CurrencyContext";
+import { choiceKeys, choiceText } from "@/lib/roomChoices";
+import {
+  encodePick,
+  MAX_ROOMS,
+  readPickDraft,
+  savePickDraft,
+  splitParty,
+  type RoomPick,
+} from "@/lib/roomPicker";
 import RoomsLocationMap, {
   useGuestPlaces,
   useLocationLine,
@@ -133,6 +144,12 @@ function HomePageContent() {
   const [checkOut, setCheckOut] = useState(initialDates.checkOut);
   const [adults, setAdults] = useState(() => parseInt(searchParams.get("adults") || "2"));
   const [children, setChildren] = useState(() => parseInt(searchParams.get("children") || "0"));
+  // VAY-2320: the rooms the group wants; null until the guest picks a number (then the fewest
+  // the group needs).
+  const [roomsWanted, setRoomsWanted] = useState<number | null>(() => {
+    const value = Number(searchParams.get("rooms"));
+    return Number.isInteger(value) && value >= 1 && value <= MAX_ROOMS ? value : null;
+  });
   const guestTypeSettings = hotel?.guestTypeSettings ?? {
     adultAgeThreshold: 18,
     childrenEnabled: true,
@@ -148,6 +165,30 @@ function HomePageContent() {
   const [promoLoading, setPromoLoading] = useState(false);
   const [promoError, setPromoError] = useState("");
   const promoCodesEnabled = hotel?.promoCodesEnabled !== false;
+  // VAY-2320: a promo the guest applied comes back with the search (Back from /book, "Change
+  // rooms"), checked like a typed one, so the rooms chosen with it stay chosen.
+  useEffect(() => {
+    const code = searchParams.get("promoCode");
+    if (!code || !slug) return;
+    let live = true;
+    setPromoCode(code);
+    hotelService
+      .validatePromoCode(slug, code, { checkIn: initialDates.checkIn || undefined })
+      .then((result) => {
+        if (live && result.valid)
+          setAppliedPromo({
+            code: result.code,
+            discountType: result.discountType!,
+            discountValue: result.discountValue!,
+          });
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+    // Once per visit, from the URL it came with.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slug]);
 
   const nights = calculateNights(checkIn, checkOut);
   const { steps: STEPS } = useBookingSteps("rooms");
@@ -180,6 +221,46 @@ function HomePageContent() {
       });
     return () => controller.abort();
   }, [slug]);
+  // VAY-2320: the group's room count starts at the fewest rooms it needs (the API's lower bound
+  // across room types) and never goes below it. One room is chosen like before; with two or
+  // more the guest chooses room by room, each card priced and sized for the room being chosen.
+  const [fewestRooms, setFewestRooms] = useState(1);
+  const roomCount = Math.min(
+    Math.max(roomsWanted ?? fewestRooms, fewestRooms),
+    Math.min(MAX_ROOMS, Math.max(adults, 1)),
+  );
+  const pickMode = roomCount > 1;
+  const slots = splitParty(adults, effectiveChildren, roomCount);
+  const pickIdentity = JSON.stringify([
+    checkIn,
+    checkOut,
+    adults,
+    effectiveChildren,
+    roomCount,
+    appliedPromo?.code ?? null,
+  ]);
+  const [pickState, setPickState] = useState<{ identity: string; picks: (RoomPick | null)[] }>({
+    identity: "",
+    picks: [],
+  });
+  // Picks belong to one search: other dates, guests, rooms or promo start afresh, unless this
+  // tab already chose rooms for it (Back from /book).
+  useEffect(() => {
+    if (!pickMode || pickState.identity === pickIdentity) return;
+    setPickState({ identity: pickIdentity, picks: readPickDraft(slug, pickIdentity) ?? [] });
+  }, [pickMode, pickIdentity, pickState.identity, slug]);
+  const picks = Array.from(
+    { length: roomCount },
+    (_, index) => (pickState.identity === pickIdentity ? pickState.picks[index] : null) ?? null,
+  );
+  const firstOpen = picks.findIndex((pick) => !pick);
+  const [changing, setChanging] = useState<number | null>(null);
+  const activeRoom =
+    changing !== null && changing < roomCount
+      ? changing
+      : firstOpen === -1
+        ? roomCount - 1
+        : firstOpen;
   const stay = useStayPrices(
     slug,
     rooms?.length
@@ -189,9 +270,15 @@ function HomePageContent() {
           adults,
           children: effectiveChildren,
           promoCode: appliedPromo?.code ?? null,
+          room: pickMode ? slots[activeRoom]! : { adults, children: effectiveChildren },
         }
       : null,
   );
+  useEffect(() => {
+    // null: no type is free for the group, so it isn't held to a minimum.
+    const suggested = stay.prices?.suggestedRooms;
+    if (suggested !== undefined) setFewestRooms(suggested ?? 1);
+  }, [stay.prices?.suggestedRooms]);
   const [sortOption, setSortOption] = useState("recommended");
   const roomPrices = (room: PricingRoom) =>
     stay.prices?.rooms.find(({ roomTypeId }) => roomTypeId === room.roomTypeId) ?? null;
@@ -233,6 +320,97 @@ function HomePageContent() {
     if (roomCount > 1) params.set("rooms", String(roomCount));
     router.push(`/book?${params}`);
   };
+  const { formatPrice } = useCurrency();
+  const offerOf = (pick: RoomPick) =>
+    rooms
+      ?.find((room) => room.roomTypeId === pick.roomTypeId)
+      ?.offers.find((offer) => offer.publicOfferKey === pick.publicOfferKey);
+  const setPicks = (next: (RoomPick | null)[]) => {
+    setPickState({ identity: pickIdentity, picks: next });
+    savePickDraft(slug, pickIdentity, next);
+  };
+  // Room by room: the card's rate becomes the active room's choice; then the next open room.
+  const chooseRoom = (room: PricingRoom, publicOfferKey: string) => {
+    const offer = room.offers.find((candidate) => candidate.publicOfferKey === publicOfferKey);
+    if (!offer) return;
+    const price = roomPrices(room)?.offers.find((p) => p.publicOfferKey === publicOfferKey);
+    const next = [...picks];
+    next[activeRoom] = {
+      ...slots[activeRoom]!,
+      roomTypeId: room.roomTypeId,
+      publicOfferKey,
+      totalMinor: price?.status === "priced" ? price.totalMinor : null,
+      currency: offer.currency,
+    };
+    setPicks(next);
+    setChanging(null);
+    if (next.some((pick) => !pick))
+      document.getElementById("rooms")?.scrollIntoView({ behavior: "smooth" });
+  };
+  const changeRoom = (index: number) => {
+    const next = [...picks];
+    next[index] = null;
+    setPicks(next);
+    setChanging(index);
+    document.getElementById("rooms")?.scrollIntoView({ behavior: "smooth" });
+  };
+  const continueWithRooms = () => {
+    if (picks.some((pick) => !pick)) return;
+    // This page's history entry keeps the search, so Back finds the chosen rooms again.
+    const here = new URLSearchParams(bookParams);
+    here.set("rooms", String(roomCount));
+    window.history.replaceState(null, "", `${window.location.pathname}?${here}`);
+    const params = new URLSearchParams(bookParams);
+    params.set("rooms", String(roomCount));
+    for (const pick of picks) params.append("pick", encodePick(pick!));
+    // One rate selection per booking, as from a single room card.
+    trackEvent(slug, "rate_selected", { entry: "room_card" });
+    router.push(`/book?${params}`);
+  };
+  const chosenTotal = picks.every((pick) => !pick || pick.totalMinor !== null)
+    ? picks.reduce<{ amount: number; currency: string } | null>(
+        (sum, pick) =>
+          pick
+            ? {
+                amount: (sum?.amount ?? 0) + quoteMoneyAmount(pick.totalMinor!, pick.currency),
+                currency: pick.currency,
+              }
+            : sum,
+        null,
+      )
+    : null;
+  const barSlots = slots.map((guests, index) => {
+    const pick = picks[index];
+    const room = pick && rooms?.find((r) => r.roomTypeId === pick.roomTypeId);
+    const offerIndex = room
+      ? room.offers.findIndex((o) => o.publicOfferKey === pick.publicOfferKey)
+      : -1;
+    const rate =
+      room && offerIndex >= 0
+        ? choiceText(
+            choiceKeys(room.offers)[offerIndex]!,
+            { checkIn, timezone: hotel.timezone, formatDate: (date) => date },
+            t,
+          ).name
+        : null;
+    return {
+      guests,
+      chosen:
+        pick && room
+          ? {
+              roomName: room.name,
+              detail: [
+                rate,
+                pick.totalMinor === null
+                  ? null
+                  : formatPrice(quoteMoneyAmount(pick.totalMinor, pick.currency), pick.currency),
+              ]
+                .filter(Boolean)
+                .join(" · "),
+            }
+          : null,
+    };
+  });
   const sortControl = (
     <>
       <svg
@@ -281,7 +459,26 @@ function HomePageContent() {
       timezone={hotel.timezone}
       childGuests={effectiveChildren}
       promoCode={appliedPromo?.code ?? null}
-      onSelect={selectRoom}
+      onSelect={(publicOfferKey, count) =>
+        pickMode ? chooseRoom(room, publicOfferKey) : selectRoom(publicOfferKey, count)
+      }
+      pick={
+        pickMode
+          ? {
+              room: activeRoom + 1,
+              guests: slots[activeRoom]!,
+              takenBy: picks.flatMap((pick, index) =>
+                pick && index !== activeRoom && pick.roomTypeId === room.roomTypeId
+                  ? [index + 1]
+                  : [],
+              ),
+              chosen: picks.flatMap((pick, index) => {
+                const offer = pick && index !== activeRoom ? offerOf(pick) : undefined;
+                return offer ? [offer] : [];
+              }),
+            }
+          : undefined
+      }
       onView={() => trackEvent(slug, "room_viewed", { roomTypeId: room.roomTypeId })}
       detailsRequest={detailsRequests[room.roomTypeId] ?? 0}
       place={mapProperty}
@@ -301,8 +498,26 @@ function HomePageContent() {
           </button>
         </div>
       )}
-      {effectiveChildren > 0 && (
-        <p className="mb-5 text-sm text-gray-500">{t("childrenPricedLater")}</p>
+      {pickMode && (
+        <RoomsBar
+          slots={barSlots}
+          active={firstOpen === -1 && changing === null ? null : activeRoom}
+          total={chosenTotal ? formatPrice(chosenTotal.amount, chosenTotal.currency) : null}
+          summary={[
+            tc("adults", { count: adults }) +
+              (effectiveChildren > 0 ? `, ${tc("children", { count: effectiveChildren })}` : ""),
+            `${formatDateShort(checkIn, locale)} – ${formatDateShort(checkOut, locale)}`,
+          ].join(" · ")}
+          onChange={changeRoom}
+          onContinue={continueWithRooms}
+        />
+      )}
+      {pickMode ? (
+        <p className="mb-5 text-sm text-gray-500">{t("pricesPerRoom")}</p>
+      ) : (
+        effectiveChildren > 0 && (
+          <p className="mb-5 text-sm text-gray-500">{t("childrenPricedLater")}</p>
+        )
       )}
     </>
   );
@@ -312,7 +527,10 @@ function HomePageContent() {
   const heroSubtext = hotel.branding?.heroSubtext || hotel.description;
 
   return (
-    <div className="min-h-screen bg-white overflow-x-hidden">
+    // A group choosing room by room has its rooms bar pinned to the bottom of phone screens.
+    <div
+      className={`min-h-screen bg-white overflow-x-hidden ${pickMode && rooms?.length ? "pb-44 md:pb-0" : ""}`}
+    >
       <PublicStructuredData hotel={hotel} rooms={[]} locale={locale} />
 
       {/* Hero Section */}
@@ -419,7 +637,9 @@ function HomePageContent() {
                   {tc("adults", { count: adults })}
                   {effectiveChildren > 0 && `, ${tc("children", { count: effectiveChildren })}`}
                 </p>
-                <p className="text-sm text-gray-500">{tc("guests")}</p>
+                <p className="text-sm text-gray-500">
+                  {pickMode ? t("roomsCount", { count: roomCount }) : tc("guests")}
+                </p>
               </div>
             </button>
             <GuestSelector
@@ -433,6 +653,11 @@ function HomePageContent() {
                 setAdults(a);
                 setChildren(c);
               }}
+              rooms={
+                rooms?.length
+                  ? { count: roomCount, fewest: fewestRooms, onChange: setRoomsWanted }
+                  : undefined
+              }
             />
           </div>
 

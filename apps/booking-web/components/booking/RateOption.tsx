@@ -16,6 +16,7 @@ export default function RateOption({
   unavailable,
   loading,
   disabled = false,
+  blocked,
   publicOfferKey,
 }: {
   selected: boolean;
@@ -34,6 +35,8 @@ export default function RateOption({
   /** Prices are on their way: show placeholders where they go. */
   loading: boolean;
   disabled?: boolean;
+  /** VAY-2320: why this rate can't join the group's other rooms; it can't be picked. */
+  blocked?: string;
   publicOfferKey: string;
 }) {
   const t = useTranslations("home");
@@ -41,10 +44,10 @@ export default function RateOption({
     <button
       type="button"
       onClick={onSelect}
-      disabled={unavailable || disabled}
+      disabled={unavailable || disabled || !!blocked}
       aria-pressed={selected}
       data-offer-key={publicOfferKey}
-      className={`w-full text-left rounded-xl border-2 p-4 transition-colors disabled:cursor-not-allowed ${unavailable || disabled ? "opacity-50" : ""} ${selected ? "border-primary-500" : "border-gray-200 hover:border-gray-300"}`}
+      className={`w-full text-left rounded-xl border-2 p-4 transition-colors disabled:cursor-not-allowed ${unavailable || disabled ? "opacity-50" : ""} ${blocked ? "border-dashed border-gray-300 bg-gray-50" : selected ? "border-primary-500" : "border-gray-200 hover:border-gray-300"}`}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-start gap-3 min-w-0 flex-1">
@@ -79,11 +82,19 @@ export default function RateOption({
                 </span>
               )}
             </p>
-            {terms && <p className="text-xs text-gray-500">{terms}</p>}
+            {blocked ? (
+              <p className="text-xs text-gray-600">{blocked}</p>
+            ) : (
+              terms && <p className="text-xs text-gray-500">{terms}</p>
+            )}
           </div>
         </div>
         <div className="text-right flex-shrink-0">
-          {unavailable ? (
+          {blocked ? (
+            <p className="text-sm font-medium text-gray-600 whitespace-nowrap">
+              {t("cantCombine")}
+            </p>
+          ) : unavailable ? (
             <p className="text-sm font-medium text-gray-500 whitespace-nowrap">
               {t("notAvailable")}
             </p>
