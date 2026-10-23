@@ -317,7 +317,9 @@
     "recoveryRetry": "Réessayer la réservation en attente",
     "recoveryInProgress": "Votre réservation est toujours en cours de traitement. Réessayez pour vérifier la même réservation.",
     "termsRequired": "Veuillez accepter les conditions générales avant d'envoyer.",
-    "chooseAnotherRoom": "Choisir une autre chambre"
+    "chooseAnotherRoom": "Choisir une autre chambre",
+    "noWayToPay": "Cet établissement ne propose aucun moyen de paiement pour les chambres choisies. Veuillez choisir d'autres chambres.",
+    "noWayToPayThisSoon": "Les chambres choisies ne peuvent être payées que d'une façon qui n'est pas disponible si près de l'arrivée. Veuillez choisir des dates plus tardives ou d'autres chambres."
   },
   "myBooking": {
     "title": "Ma réservation",

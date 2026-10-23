@@ -318,7 +318,9 @@
     "recoveryRetry": "Retry pending booking",
     "recoveryInProgress": "Your booking is still being processed. Retry to check the same booking again.",
     "termsRequired": "Please accept the Terms and Conditions before submitting.",
-    "chooseAnotherRoom": "Choose another room"
+    "chooseAnotherRoom": "Choose another room",
+    "noWayToPay": "The rooms you chose can't be paid for in any way this hotel offers. Please choose other rooms.",
+    "noWayToPayThisSoon": "The rooms you chose can only be paid for in a way that isn't available this close to check-in. Please choose later dates or other rooms."
   },
   "myBooking": {
     "title": "My Booking",
