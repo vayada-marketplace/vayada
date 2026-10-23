@@ -97,7 +97,7 @@ export default defineConfig({
           },
           {
             command:
-              "NEXT_PUBLIC_BOOKING_ADMIN_URL=http://admin.booking.localhost:3003 PORT=3004 npm run dev:pms-web",
+              "NEXT_PUBLIC_BOOKING_ADMIN_URL=http://admin.booking.localhost:3003 NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=e2e-google-places PORT=3004 npm run dev:pms-web",
             url: "http://127.0.0.1:3004",
             reuseExistingServer: !process.env.CI,
             timeout: 120_000,
