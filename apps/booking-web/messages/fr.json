@@ -157,6 +157,7 @@
     "severalRooms": "Vous réservez plus d'une chambre ?",
     "notAvailable": "Indisponible",
     "tooManyGuests": "Cette chambre accueille jusqu'à {count, plural, one {# personne} other {# personnes}}. Choisissez une chambre plus grande ou réservez plusieurs chambres.",
+    "notBookableForDates": "Cette chambre ne peut pas être réservée pour ces dates. Essayez d'autres dates.",
     "promoNotApplied": "Votre code {code} ne s'applique pas à ce séjour.",
     "noChildren": "Cette chambre n'accueille pas d'enfants. Choisissez une autre chambre pour votre groupe.",
     "percentOff": "-{percent} %",

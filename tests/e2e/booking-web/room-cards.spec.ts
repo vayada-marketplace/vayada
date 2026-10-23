@@ -179,7 +179,7 @@ test("keeps the rooms choosable when prices can't be loaded", async ({ page }) =
   await expect(page).toHaveURL(/\/(en\/)?book\?.*offer=/);
 });
 
-test("says only 'Not available' on a room whose one choice can't be booked (VAY-2319)", async ({
+test("says why a room whose one choice can't be booked is not available (VAY-2319)", async ({
   page,
 }, testInfo) => {
   const assertHealthy = watchPageHealth(page, testInfo);
@@ -205,7 +205,14 @@ test("says only 'Not available' on a room whose one choice can't be booked (VAY-
   await page.getByRole("button", { name: "Reject analytics" }).click();
   await garden.scrollIntoViewIfNeeded();
   await page.screenshot({ path: testInfo.outputPath("room-card-not-available-1440.png") });
+  const reason = "This room can't be booked for these dates. Try other dates.";
+  await expect(garden.getByText(reason)).toBeVisible();
   await expect(garden.getByText("Last room available!")).toHaveCount(0);
+  // A sold-out room says "Sold Out" instead.
+  await expect(page.getByTestId("room-card-family").getByText(reason)).toHaveCount(0);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await garden.getByText(reason).scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath("room-card-not-available-390.png") });
   // A bookable room keeps its rooms-left line.
   await mockStayPrices(
     page,
@@ -218,6 +225,7 @@ test("says only 'Not available' on a room whose one choice can't be booked (VAY-
   );
   await page.reload();
   await expect(garden.getByText("Last room available!")).toBeVisible();
+  await expect(garden.getByText(reason)).toHaveCount(0);
   await assertHealthy();
 });
 

@@ -157,6 +157,7 @@
     "severalRooms": "Booking more than one room?",
     "notAvailable": "Not available",
     "tooManyGuests": "This room fits up to {count, plural, one {# guest} other {# guests}}. Choose a bigger room, or book more than one room.",
+    "notBookableForDates": "This room can't be booked for these dates. Try other dates.",
     "promoNotApplied": "Your code {code} doesn't apply to this stay.",
     "noChildren": "This room doesn't take children. Choose another room for your group.",
     "percentOff": "-{percent}% OFF",

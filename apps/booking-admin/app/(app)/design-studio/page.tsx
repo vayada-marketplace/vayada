@@ -3,13 +3,20 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { EyeIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { BOOKING_GUEST_LANGUAGE_CODES } from "@vayada/locale-constants";
+import {
+  BOOKING_DESIGN_DEFAULT_FONT_PAIRING,
+  BOOKING_DESIGN_DEFAULT_PRIMARY_COLOR,
+  type BookingDesignFontPairing,
+  type BookingDesignRevision,
+} from "@vayada/domain-booking";
 import { BookingPagePreview } from "@vayada/product-onboarding";
 import { settingsService, type CustomDomainStatus } from "@/services/settings";
+import { designStudioBookingDesignClient } from "@/services/api/bookingDesignClient";
 import { requireSelectedBookingHotelId } from "@/services/api/bookingHotelScope";
 import { getBookingHotelPropertyLink } from "@/services/api/bookingPropertyLinkClient";
 import { publishPublicBookabilityProfile } from "@/services/api/publicBookabilityPublicationClient";
 import { sharedHotelSetupApi } from "@/services/api/sharedHotelSetupClient";
-import { COLOR_PRESETS, FONT_PAIRINGS } from "@/lib/constants/branding";
+import { COLOR_PRESETS, FONT_PAIRINGS, isTooLightBrandColor } from "@/lib/constants/branding";
 import { FeedbackAlert, SaveButton } from "@/components/ui";
 import {
   MAX_PROPERTY_GALLERY_PHOTOS,
@@ -81,6 +88,10 @@ export default function DesignStudioPage() {
   const logoInputRef = useRef<HTMLInputElement>(null);
   const designHotelIdRef = useRef<string | null>(null);
   const propertyIdRef = useRef<string | null>(null);
+  const designRef = useRef<BookingDesignRevision | null>(null);
+  // The colour and font the page loaded or last saved; Save writes the booking design only when
+  // they change, so a logo-only Save never creates or rewrites a design (VAY-2318).
+  const savedChoicesRef = useRef<BookingDesignRevision["choices"] | null>(null);
   const profileRevisionRef = useRef<number | null>(null);
   const galleryOverflowRef = useRef<PropertyGalleryImage[]>([]);
   const galleryWriteInFlightRef = useRef(false);
@@ -163,6 +174,8 @@ export default function DesignStudioPage() {
     setLoadFailed(false);
     setDomainStatus(null);
     propertyIdRef.current = null;
+    designRef.current = null;
+    savedChoicesRef.current = null;
     profileRevisionRef.current = null;
     try {
       designHotelIdRef.current ??= requireSelectedBookingHotelId();
@@ -190,10 +203,11 @@ export default function DesignStudioPage() {
         return Promise.all([
           sharedHotelSetupApi.getPropertyProfile(propertyId),
           sharedHotelSetupApi.getPublicPropertyProfile(propertyId),
+          designStudioBookingDesignClient.load(propertyId, { cache: "no-store" }),
         ]);
       }),
     ])
-      .then(([settings, property, [canonicalProfile, publicProfile]]) => {
+      .then(([settings, property, [canonicalProfile, publicProfile, design]]) => {
         applyPublicGallery(publicProfile);
         setHeaderLogo(settings.header_logo || "");
         setHeaderLogoMediaObjectId(settings.header_logo_media_object_id);
@@ -207,8 +221,22 @@ export default function DesignStudioPage() {
         if (savedHero) setHeroImage(savedHero);
         if (settings.hero_heading) setHeroHeading(settings.hero_heading);
         if (settings.hero_subtext) setHeroSubtext(settings.hero_subtext);
-        if (settings.primary_color) setPrimaryColor(settings.primary_color);
-        if (settings.font_pairing) setSelectedFont(settings.font_pairing);
+        // Guests get the booking design's colour and font (VAY-2318); the settings row only
+        // covers hotels that have no booking design yet.
+        designRef.current = design;
+        const savedChoices = {
+          primaryColor: (
+            design?.choices.primaryColor ||
+            settings.primary_color ||
+            BOOKING_DESIGN_DEFAULT_PRIMARY_COLOR
+          ).toUpperCase(),
+          fontPairing: (design?.choices.fontPairing ||
+            settings.font_pairing ||
+            BOOKING_DESIGN_DEFAULT_FONT_PAIRING) as BookingDesignFontPairing,
+        };
+        savedChoicesRef.current = savedChoices;
+        setPrimaryColor(savedChoices.primaryColor);
+        setSelectedFont(savedChoices.fontPairing);
         setPropertyName(property?.property_name || canonicalProfile.profile.displayName);
         if (property?.slug) setPropertySlug(property.slug);
         if (property?.default_currency) setDefaultCurrency(property.default_currency);
@@ -675,9 +703,48 @@ export default function DesignStudioPage() {
     }
   };
 
+  // The colour and font to write to the booking design, or null when they are what the page
+  // loaded or last saved.
+  const changedDesignChoices = () => {
+    const choices = {
+      primaryColor: primaryColor.trim().toUpperCase(),
+      fontPairing: selectedFont as BookingDesignFontPairing,
+    };
+    const saved = savedChoicesRef.current;
+    return saved?.primaryColor === choices.primaryColor && saved.fontPairing === choices.fontPairing
+      ? null
+      : choices;
+  };
+
+  // The booking page takes its colour and font from the booking design, which the setup design
+  // step also writes, so Save writes them there too (VAY-2318). Returns whether that worked.
+  const saveBookingDesign = async (choices: BookingDesignRevision["choices"]) => {
+    const propertyId = propertyIdRef.current;
+    if (!propertyId) return false;
+    try {
+      designRef.current = await designStudioBookingDesignClient.save(propertyId, {
+        expectedRevision: designRef.current?.revision ?? 0,
+        choices,
+      });
+      savedChoicesRef.current = choices;
+      return true;
+    } catch {
+      // Another tab or the setup step may have saved a newer design: Save again uses it.
+      designRef.current = await designStudioBookingDesignClient
+        .load(propertyId, { cache: "no-store" })
+        .catch(() => designRef.current);
+      return false;
+    }
+  };
+
   const handleSave = async () => {
     const hotelId = designHotelIdRef.current;
     if (!hotelId) return;
+    const designChoices = changedDesignChoices();
+    if (designChoices && isTooLightBrandColor(designChoices.primaryColor)) {
+      setFeedback({ type: "error", message: "designStudio.colors.tooLight" });
+      return;
+    }
     try {
       setSaving(true);
       setFeedback(null);
@@ -690,11 +757,15 @@ export default function DesignStudioPage() {
           hero_image: heroImage,
           hero_heading: heroHeading,
           hero_subtext: heroSubtext,
-          primary_color: primaryColor,
-          font_pairing: selectedFont,
+          // Unchanged, they stay as they are: a hotel still on its legacy page reads them from here.
+          ...(designChoices
+            ? { primary_color: designChoices.primaryColor, font_pairing: designChoices.fontPairing }
+            : {}),
         },
         hotelId,
       );
+      const designSaved = designChoices ? await saveBookingDesign(designChoices) : true;
+      // The other settings are saved either way, so the live page still gets them.
       try {
         await publishPublicBookabilityProfile(hotelId);
       } catch {
@@ -704,7 +775,11 @@ export default function DesignStudioPage() {
         });
         return;
       }
-      setFeedback({ type: "success", message: "designStudio.feedback.saveSuccess" });
+      setFeedback(
+        designSaved
+          ? { type: "success", message: "designStudio.feedback.saveSuccess" }
+          : { type: "error", message: "designStudio.feedback.saveError" },
+      );
     } catch {
       setFeedback({ type: "error", message: "designStudio.feedback.saveError" });
     } finally {

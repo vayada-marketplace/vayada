@@ -265,6 +265,10 @@ export default function RoomCard({
             : t("tooManyGuests", { count: room.occupancy.maxGuests })}
         </p>
       )}
+      {/* Free rooms but no choice priced for the stay: say why the button reads "Not available". */}
+      {prices && !selected && !soldOut && !tooSmall && (
+        <p className="text-sm mt-3 text-gray-600">{t("notBookableForDates")}</p>
+      )}
       {/* Rooms left only matter when a choice can be booked; never beside "Not available" (VAY-2319). */}
       {!soldOut && selected && fewLeft !== null && (
         <p

@@ -157,6 +157,7 @@
     "severalRooms": "Memesan lebih dari satu kamar?",
     "notAvailable": "Tidak tersedia",
     "tooManyGuests": "Kamar ini muat hingga {count} tamu. Pilih kamar yang lebih besar, atau pesan lebih dari satu kamar.",
+    "notBookableForDates": "Kamar ini tidak dapat dipesan untuk tanggal ini. Coba tanggal lain.",
     "promoNotApplied": "Kode Anda {code} tidak berlaku untuk masa inap ini.",
     "noChildren": "Kamar ini tidak menerima anak-anak. Pilih kamar lain untuk rombongan Anda.",
     "percentOff": "-{percent}% HEMAT",
