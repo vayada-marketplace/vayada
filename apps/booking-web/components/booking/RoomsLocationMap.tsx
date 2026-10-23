@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import { locationMapPins, type LocationMapPin } from "@vayada/domain-hotels";
 import { importGoogleMapsLibrary } from "@vayada/product-onboarding/googleMaps";
 import type { PricingRoom } from "@/services/api/replacementOffers";
+import { chooseMaps, mapsChosen } from "@/lib/mapsChoice";
 
 type LatLng = { lat: number; lng: number };
 type GoogleMap = {
@@ -65,6 +66,10 @@ export default function RoomsLocationMap({
   const mapRef = useRef<HTMLDivElement>(null);
   const brandRef = useRef<HTMLSpanElement>(null);
   const [requested, setRequested] = useState(false);
+  // The guest's "Show map" earlier in this tab counts here too (read after mount: sessionStorage).
+  useEffect(() => {
+    if (mapsChosen()) setRequested(true);
+  }, []);
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
   const [selected, setSelected] = useState<number | null>(null);
@@ -250,7 +255,10 @@ export default function RoomsLocationMap({
                   <>
                     <button
                       type="button"
-                      onClick={() => setRequested(true)}
+                      onClick={() => {
+                        chooseMaps();
+                        setRequested(true);
+                      }}
                       className="rounded-full bg-primary-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-primary-700"
                     >
                       {t("showMap")}

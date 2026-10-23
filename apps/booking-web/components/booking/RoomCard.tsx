@@ -12,6 +12,7 @@ import { quoteMoneyAmount } from "@/services/api/replacementOffers";
 import type { StayRoomPrices } from "@/services/api/stayPrices";
 import RateOption from "./RateOption";
 import RoomDetailModal from "./RoomDetailModal";
+import type { GuestPlace } from "./RoomPlace";
 
 /** "3 Nov" for a stay date (YYYY-MM-DD), the same in every time zone. */
 const shortDate = (date: string, locale: string) =>
@@ -36,6 +37,7 @@ export default function RoomCard({
   onSelect,
   onView: onViewed,
   detailsRequest = 0,
+  place = null,
 }: {
   room: PricingRoom;
   /** Stay prices for this room; null while loading, when they failed or aren't offered. */
@@ -55,6 +57,8 @@ export default function RoomCard({
   onView?: () => void;
   /** Raised to open the room's details from elsewhere, such as its pin on the location map (VAY-2126). */
   detailsRequest?: number;
+  /** The hotel's location map while it shows one, for the details' "Where you'll stay" (VAY-2323). */
+  place?: GuestPlace | null;
 }) {
   const t = useTranslations("home");
   const tc = useTranslations("common");
@@ -448,6 +452,7 @@ export default function RoomCard({
           room={room}
           roomCount={roomCount}
           soldOut={soldOut}
+          place={place}
           onClose={() => setDetailsOpen(false)}
         >
           {rates(true)}
