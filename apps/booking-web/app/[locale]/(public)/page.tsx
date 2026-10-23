@@ -23,6 +23,7 @@ import RoomsLocationMap from "@/components/booking/RoomsLocationMap";
 import {
   getReplacementCatalog,
   quoteMoneyAmount,
+  type CatalogLocationMap,
   type PricingRoom,
 } from "@/services/api/replacementOffers";
 
@@ -158,8 +159,8 @@ function HomePageContent() {
   // catalog the page keeps the plain "Choose rooms and get a price" entry.
   const [rooms, setRooms] = useState<PricingRoom[] | null>(null);
   const [roomsFailed, setRoomsFailed] = useState(false);
-  // The hotel's location map switch (VAY-2126), read live with the catalog.
-  const [locationMap, setLocationMap] = useState(false);
+  // The hotel's location map (VAY-2126), read live with the catalog; null while its switch is off.
+  const [locationMap, setLocationMap] = useState<CatalogLocationMap | null>(null);
   // A map pin's "View details" opens that room card's details: one counter per room.
   const [detailsRequests, setDetailsRequests] = useState<Record<string, number>>({});
   useEffect(() => {
@@ -631,7 +632,7 @@ function HomePageContent() {
       {locationMap && rooms?.length ? (
         <RoomsLocationMap
           rooms={rooms}
-          property={{ name: hotel.name, locality: hotel.location, pin: hotel.mapPin ?? null }}
+          property={{ name: hotel.name, locality: hotel.location, pin: locationMap.property }}
           apiKey={process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY?.trim() ?? ""}
           onViewDetails={(roomTypeId) =>
             setDetailsRequests((requests) => ({

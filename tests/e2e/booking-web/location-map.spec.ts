@@ -33,13 +33,21 @@ const villas = [
   room("family", "Family Apartment", "d"),
 ];
 
-/** The Google Maps calls the section makes, kept on window.__locationMap: the markers, the popup's text, and
- * clickMarker(index) to tap a pin. */
+/** The Google Maps calls the section makes, kept on window.__locationMap: the markers, the area circles, the
+ * popup, and clickMarker(index) to tap a pin. */
 const GOOGLE_FAKE = `
   // An IIFE: a top-level "class Map" would replace the browser's own Map for the whole page.
   (() => {
-  const state = (window.__locationMap = { markers: [], popup: null, fitted: 0 });
-  class Map { constructor(element, options) { state.options = options; } fitBounds() { state.fitted += 1; } panTo() {} }
+  const state = (window.__locationMap = { markers: [], circles: [], popup: null, fitted: 0 });
+  class Map {
+    constructor(element, options) { state.options = options; this.zoom = options.zoom; }
+    fitBounds() { state.fitted += 1; this.zoom = 21; setTimeout(() => this.idle?.(), 0); }
+    addListener(event, handler) { if (event === "idle") this.idle = handler; return { remove: () => (this.idle = null) }; }
+    getZoom() { return this.zoom; }
+    setZoom(zoom) { this.zoom = zoom; state.zoom = zoom; }
+    panTo() {}
+  }
+  class Circle { constructor(options) { state.circles.push({ lat: options.center.lat, lng: options.center.lng, radius: options.radius }); } }
   class InfoWindow {
     setContent(content) { this.content = content; }
     open() { state.popup = this.content; document.body.append(this.content); }
@@ -57,18 +65,18 @@ const GOOGLE_FAKE = `
   class LatLngBounds { extend() {} }
   class Point { constructor(x, y) { this.x = x; this.y = y; } }
   window.google = { maps: { importLibrary: async (library) =>
-    library === "maps" ? { Map, InfoWindow } : library === "marker" ? { Marker }
+    library === "maps" ? { Map, InfoWindow, Circle } : library === "marker" ? { Marker }
     : library === "core" ? { LatLngBounds, Point } : {} } };
   window.__vayadaGoogleMapsReady?.();
   })();
 `;
 
-async function setup(
-  page: Page,
-  catalog: { locationMap?: boolean; rooms: unknown[] },
-  mapPin?: { latitude: number; longitude: number },
-) {
-  await mockBookingApis(page, mapPin ? { mapPin } : {});
+type CatalogMap = {
+  property: { latitude: number; longitude: number; approximate: boolean } | null;
+};
+
+async function setup(page: Page, catalog: { locationMap?: CatalogMap; rooms: unknown[] }) {
+  await mockBookingApis(page);
   await page.route("**/pricing-offers", (route) =>
     route.fulfill({ json: { version: "public-pricing-offers.v1", ...catalog } }),
   );
@@ -95,7 +103,7 @@ test.describe("booking page location map", () => {
   test.skip(!hasMapsKey, "needs the dev server's fake Google Maps key");
 
   test("lists the rooms' places and loads Google only when the guest asks", async ({ page }) => {
-    const google = await setup(page, { locationMap: true, rooms: villas });
+    const google = await setup(page, { locationMap: { property: null }, rooms: villas });
     await page.goto("/");
     const section = page.getByTestId("rooms-location-map");
     await expect(section.getByRole("heading", { name: "Location" })).toBeVisible();
@@ -110,6 +118,9 @@ test.describe("booking page location map", () => {
     await expect(
       section.getByText("Loads Google Maps. Google receives your request."),
     ).toBeVisible();
+    // Picking a place before the map is open only highlights it: Google loads on "Show map" alone.
+    await places.nth(2).getByRole("button").first().click();
+    await expect(places.nth(2).getByRole("button").first()).toHaveAttribute("aria-current", "true");
     // Nothing to wait for when all is well: give a late script tag a moment to show up.
     await page.waitForTimeout(1500);
     expect(google).toEqual([]);
@@ -123,22 +134,39 @@ test.describe("booking page location map", () => {
         { title: "Isar Studio", label: "3" },
       ]);
     expect(google.length).toBeGreaterThan(0);
+    // Pins only a few streets apart don't zoom the map in past street level.
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () => (window as unknown as { __locationMap: { zoom?: number } }).__locationMap.zoom,
+        ),
+      )
+      .toBe(17);
+    // The place picked before the map opened gets its popup.
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            (window as unknown as { __locationMap: { popup: HTMLElement | null } }).__locationMap
+              .popup?.textContent,
+        ),
+      )
+      .toContain("Isar Studio");
 
     // A tapped pin names its room and opens the room's details.
     await page.evaluate(() =>
       (window as unknown as { __clickMarker: (i: number) => void }).__clickMarker(1),
     );
     await expect(places.nth(1)).toHaveClass(/bg-primary-50/);
-    await page.getByRole("button", { name: "View details →" }).click();
+    await page.getByRole("button", { name: "View details", exact: true }).last().click();
     await expect(page.getByRole("dialog")).toContainText("Haidhausen Garden Flat");
   });
 
   test("shows one pin with the hotel's name when no room has its own place", async ({ page }) => {
-    await setup(
-      page,
-      { locationMap: true, rooms: [room("suite", "Suite", "a"), room("double", "Double", "b")] },
-      { latitude: 48.1394, longitude: 11.5835 },
-    );
+    await setup(page, {
+      locationMap: { property: { latitude: 48.1394, longitude: 11.5835, approximate: false } },
+      rooms: [room("suite", "Suite", "a"), room("double", "Double", "b")],
+    });
     await page.goto("/");
     const section = page.getByTestId("rooms-location-map");
     await expect(section.getByRole("list", { name: "Places on the map" })).toHaveCount(0);
@@ -146,8 +174,26 @@ test.describe("booking page location map", () => {
     await expect.poll(() => markers(page)).toEqual([{ title: "Hotel Alpenrose", label: null }]);
   });
 
+  test("shows the area, not a pin, when the hotel's location is approximate", async ({ page }) => {
+    await setup(page, {
+      locationMap: { property: { latitude: 48.14, longitude: 11.58, approximate: true } },
+      rooms: [room("suite", "Suite", "a")],
+    });
+    await page.goto("/");
+    await page.getByTestId("rooms-location-map").getByRole("button", { name: "Show map" }).click();
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            (window as unknown as { __locationMap: { circles: unknown[] } }).__locationMap.circles,
+        ),
+      )
+      .toEqual([{ lat: 48.14, lng: 11.58, radius: 1000 }]);
+    expect(await markers(page)).toEqual([]);
+  });
+
   test("shows no map while the hotel's switch is off", async ({ page }) => {
-    const google = await setup(page, { rooms: villas }, { latitude: 48.1394, longitude: 11.5835 });
+    const google = await setup(page, { rooms: villas });
     await page.goto("/");
     await expect(page.getByRole("heading", { name: "Available Accommodations" })).toBeVisible();
     await expect(page.getByTestId("rooms-location-map")).toHaveCount(0);

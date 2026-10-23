@@ -178,7 +178,7 @@ it("keeps the room cards' content and drops malformed parts without failing sele
   ]);
 });
 
-it("reads the location map flag and each room's pin, dropping a pin out of range (VAY-2126)", async () => {
+it("reads the location map and each room's pin, dropping a pin out of range (VAY-2126)", async () => {
   // Offer keys are unique across the catalog.
   const offers = (digit: string) => [
     {
@@ -197,7 +197,7 @@ it("reads the location map flag and each room's pin, dropping a pin out of range
         ),
     );
   catalog({
-    locationMap: true,
+    locationMap: { property: { latitude: 48.14, longitude: 11.58, approximate: true } },
     rooms: [
       {
         ...rooms[0],
@@ -218,7 +218,7 @@ it("reads the location map flag and each room's pin, dropping a pin out of range
     ],
   });
   expect(await getReplacementCatalog("hotel")).toEqual({
-    locationMap: true,
+    locationMap: { property: { latitude: 48.14, longitude: 11.58, approximate: true } },
     rooms: [
       {
         ...rooms[0],
@@ -228,6 +228,8 @@ it("reads the location map flag and each room's pin, dropping a pin out of range
       { roomTypeId: "studio", name: "Studio", offers: offers("c") },
     ],
   });
+  catalog({ rooms, locationMap: { property: { latitude: 120, longitude: 11.58 } } });
+  expect(await getReplacementCatalog("hotel")).toEqual({ rooms, locationMap: { property: null } });
   catalog({ rooms });
-  expect(await getReplacementCatalog("hotel")).toEqual({ rooms, locationMap: false });
+  expect(await getReplacementCatalog("hotel")).toEqual({ rooms, locationMap: null });
 });

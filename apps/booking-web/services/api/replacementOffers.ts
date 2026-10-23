@@ -103,11 +103,17 @@ export async function getReplacementOffers(
   return (await getReplacementCatalog(slug, signal)).rooms;
 }
 
-/** The catalog's rooms, and whether the hotel shows its location map (VAY-2126, read live). */
+/** The location map while the hotel shows it (VAY-2126, read live): the property's own pin as its visibility
+ * shows it (rounded to the area for "Approximate"), used when no room has a pin. */
+export type CatalogLocationMap = {
+  property: { latitude: number; longitude: number; approximate: boolean } | null;
+};
+
+/** The catalog's rooms, and the location map while the hotel shows it. */
 export async function getReplacementCatalog(
   slug: string,
   signal?: AbortSignal,
-): Promise<{ rooms: PricingRoom[]; locationMap: boolean }> {
+): Promise<{ rooms: PricingRoom[]; locationMap: CatalogLocationMap | null }> {
   const raw = await bookingWebPublic.get<unknown>(
     `/api/booking-web/hotels/${encodeURIComponent(slug)}/pricing-offers`,
     { signal, cache: "no-store" },
@@ -159,7 +165,22 @@ export async function getReplacementCatalog(
       }),
     };
   });
-  return { rooms, locationMap: raw.locationMap === true };
+  return { rooms, locationMap: catalogLocationMap(raw.locationMap) };
+}
+
+function catalogLocationMap(v: unknown): CatalogLocationMap | null {
+  if (!object(v)) return null;
+  const p = v.property;
+  return {
+    property:
+      object(p) &&
+      typeof p.latitude === "number" &&
+      Math.abs(p.latitude) <= 90 &&
+      typeof p.longitude === "number" &&
+      Math.abs(p.longitude) <= 180
+        ? { latitude: p.latitude, longitude: p.longitude, approximate: p.approximate === true }
+        : null,
+  };
 }
 export type RoomChoice = {
   selectionId: string;

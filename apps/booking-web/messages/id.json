@@ -556,6 +556,7 @@
     "mapLabel": "Peta lokasi kamar",
     "showMap": "Tampilkan peta",
     "mapNote": "Memuat Google Maps. Google menerima permintaan Anda.",
+    "loadingMap": "Memuat peta…",
     "mapFailed": "Peta tidak dapat dimuat saat ini."
   }
 }

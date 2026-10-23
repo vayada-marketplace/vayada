@@ -10,6 +10,9 @@ type LatLng = { lat: number; lng: number };
 type GoogleMap = {
   fitBounds: (bounds: unknown, padding?: number) => void;
   panTo: (position: LatLng) => void;
+  getZoom?: () => number | undefined;
+  setZoom?: (zoom: number) => void;
+  addListener?: (event: "idle", handler: () => void) => { remove: () => void };
 };
 type GoogleMarker = { addListener: (event: "click", handler: () => void) => void };
 type GoogleInfoWindow = {
@@ -20,6 +23,7 @@ type GoogleInfoWindow = {
 type MapsLibrary = {
   Map: new (element: HTMLElement, options: Record<string, unknown>) => GoogleMap;
   InfoWindow: new (options?: Record<string, unknown>) => GoogleInfoWindow;
+  Circle: new (options: Record<string, unknown>) => unknown;
 };
 type MarkerLibrary = { Marker: new (options: Record<string, unknown>) => GoogleMarker };
 type CoreLibrary = {
@@ -29,6 +33,12 @@ type CoreLibrary = {
 
 // The pin shape (30 × 40, point at the bottom), filled with the hotel's colour.
 const PIN_PATH = "M15 0C6.7 0 0 6.7 0 15C0 26 15 40 15 40S30 26 30 15C30 6.7 23.3 0 15 0Z";
+// Pins a few metres apart: closer than this the map shows streets, not just one building.
+const MAX_FITTED_ZOOM = 17;
+// An "Approximate" location is rounded to 2 decimals (about 1 km): drawn as an area this big.
+const AREA_RADIUS_METRES = 1000;
+// A map that hasn't drawn by then (a hanging script) counts as failed.
+const LOAD_TIMEOUT_MS = 12_000;
 
 /** The booking page's location map (VAY-2126): shown when the hotel switched it on in Booking Admin. Rooms
  * with their own pin get one each; otherwise the property's public pin. Booking pages talk to no third party
@@ -40,7 +50,12 @@ export default function RoomsLocationMap({
   onViewDetails,
 }: {
   rooms: PricingRoom[];
-  property: { name: string; locality: string; pin: { latitude: number; longitude: number } | null };
+  /** The property's pin as its visibility shows it (from the live catalog), for when no room has a pin. */
+  property: {
+    name: string;
+    locality: string;
+    pin: { latitude: number; longitude: number; approximate: boolean } | null;
+  };
   apiKey: string;
   onViewDetails: (roomTypeId: string) => void;
 }) {
@@ -48,6 +63,7 @@ export default function RoomsLocationMap({
   const mapRef = useRef<HTMLDivElement>(null);
   const brandRef = useRef<HTMLSpanElement>(null);
   const [requested, setRequested] = useState(false);
+  const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
   const [selected, setSelected] = useState<number | null>(null);
   // A place picked in the list before the map has loaded opens once it has.
@@ -69,9 +85,8 @@ export default function RoomsLocationMap({
     {
       name: property.name,
       address: property.locality || null,
-      pin: property.pin,
-      // The public profile only carries a pin the hotel shows (rounded for "Approximate").
-      mapDisplayMode: property.pin ? "exact" : "hidden",
+      pin: property.pin && { latitude: property.pin.latitude, longitude: property.pin.longitude },
+      mapDisplayMode: !property.pin ? "hidden" : property.pin.approximate ? "approximate" : "exact",
     },
   );
   const several = pins.length > 1;
@@ -86,18 +101,23 @@ export default function RoomsLocationMap({
       setFailed(true);
     };
     let disposed = false;
+    const timeout = setTimeout(() => {
+      if (!disposed) setFailed(true);
+    }, LOAD_TIMEOUT_MS);
     void Promise.all([
       importGoogleMapsLibrary<MapsLibrary>(apiKey, "maps"),
       importGoogleMapsLibrary<MarkerLibrary>(apiKey, "marker"),
       importGoogleMapsLibrary<CoreLibrary>(apiKey, "core"),
     ])
-      .then(([{ Map, InfoWindow }, { Marker }, { LatLngBounds, Point }]) => {
+      .then(([{ Map, InfoWindow, Circle }, { Marker }, { LatLngBounds, Point }]) => {
         if (disposed || !mapRef.current) return;
+        clearTimeout(timeout);
         const positions = pins.map((pin) => ({ lat: pin.latitude, lng: pin.longitude }));
         const narrow = window.matchMedia("(max-width: 639px)").matches;
+        const area = pins.length === 1 && pins[0].approximate;
         const map = new Map(mapRef.current, {
           center: positions[0],
-          zoom: 15,
+          zoom: area ? 14 : 15,
           clickableIcons: false,
           disableDefaultUI: true,
           // Phones pinch to zoom; the zoom buttons would sit under the pin's popup.
@@ -108,8 +128,28 @@ export default function RoomsLocationMap({
           const bounds = new LatLngBounds();
           positions.forEach((position) => bounds.extend(position));
           map.fitBounds(bounds, 64);
+          const fitted = map.addListener?.("idle", () => {
+            fitted?.remove();
+            if ((map.getZoom?.() ?? 0) > MAX_FITTED_ZOOM) map.setZoom?.(MAX_FITTED_ZOOM);
+          });
         }
         const color = brandRef.current ? getComputedStyle(brandRef.current).color : "#1E3EDB";
+        setReady(true);
+        if (area) {
+          // The property shows only its area: a circle, no pin on a spot that isn't the hotel's.
+          new Circle({
+            map,
+            center: positions[0],
+            radius: AREA_RADIUS_METRES,
+            fillColor: color,
+            fillOpacity: 0.15,
+            strokeColor: color,
+            strokeOpacity: 0.6,
+            strokeWeight: 2,
+            clickable: false,
+          });
+          return;
+        }
         const info = new InfoWindow({ maxWidth: 260 });
         const markers = pins.map((pin, index) => {
           const marker = new Marker({
@@ -150,6 +190,7 @@ export default function RoomsLocationMap({
       });
     return () => {
       disposed = true;
+      clearTimeout(timeout);
       googleWindow.gm_authFailure = previous;
     };
     // pinsKey stands for pins; the map is drawn once per set of pins.
@@ -178,13 +219,17 @@ export default function RoomsLocationMap({
               ref={mapRef}
               role="region"
               aria-label={t("mapLabel")}
-              className={`absolute inset-0 ${requested && !failed ? "" : "invisible"}`}
+              className={`absolute inset-0 ${ready && !failed ? "" : "invisible"}`}
             />
-            {(!requested || failed) && (
+            {(!ready || failed) && (
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center">
                 {failed ? (
                   <p role="status" className="text-sm text-gray-600">
                     {t("mapFailed")}
+                  </p>
+                ) : requested ? (
+                  <p role="status" className="text-sm text-gray-500">
+                    {t("loadingMap")}
                   </p>
                 ) : (
                   <>
@@ -215,12 +260,12 @@ export default function RoomsLocationMap({
                       : "border-gray-200 bg-white"
                   }`}
                 >
+                  {/* Selecting a place only highlights it until the guest opens the map: Google loads on
+                      "Show map" alone. */}
                   <button
                     type="button"
-                    onClick={() => {
-                      setRequested(true);
-                      select.current(index);
-                    }}
+                    aria-current={selected === index ? "true" : undefined}
+                    onClick={() => select.current(index)}
                     className="flex min-w-0 flex-1 items-center gap-3 text-left"
                   >
                     <span className="flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-full bg-primary-600 text-xs font-bold text-white">
@@ -273,7 +318,11 @@ function popup(
   if (pin.kind === "rooms" && pin.roomTypeIds.length === 1) {
     const button = document.createElement("button");
     button.type = "button";
-    button.textContent = `${viewDetails} →`;
+    button.textContent = viewDetails;
+    const arrow = document.createElement("span");
+    arrow.textContent = " →";
+    arrow.setAttribute("aria-hidden", "true");
+    button.append(arrow);
     button.className = "text-primary-600";
     button.style.cssText =
       "margin-top: 6px; padding: 0; border: 0; background: none; font-size: 14px; font-weight: 600; cursor: pointer";

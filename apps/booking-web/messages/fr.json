@@ -556,6 +556,7 @@
     "mapLabel": "Carte de l'emplacement des chambres",
     "showMap": "Afficher la carte",
     "mapNote": "Charge Google Maps. Google reçoit votre requête.",
+    "loadingMap": "Chargement de la carte…",
     "mapFailed": "La carte n'a pas pu être chargée pour le moment."
   }
 }
