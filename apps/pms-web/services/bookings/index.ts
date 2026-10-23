@@ -1366,12 +1366,12 @@ function toBooking(
     bookingReference: reservation.bookingReference,
     roomTypeId,
     mealDescription: reservation.mealDescription,
-    roomName: reservation.roomLines?.length
-      ? reservation.roomLines.map((line) => `${line.roomCount} × ${line.roomName}`).join(" + ")
-      : assignedRoomSummary(reservation, roomTypesById) ||
-        roomType?.name ||
-        reservation.bookedOffer?.roomName ||
-        "",
+    // The PMS rooms' types once it has them (a room can move to another type), as the stays.
+    roomName:
+      assignedRoomSummary(reservation, roomTypesById) ||
+      (!reservation.assignments.length && reservation.roomLines?.length
+        ? reservation.roomLines.map((line) => `${line.roomCount} × ${line.roomName}`).join(" + ")
+        : roomType?.name || reservation.bookedOffer?.roomName || ""),
     roomMaxOccupancy: maxOccupancy(roomType),
     totalRoomCapacity,
     guestFirstName,

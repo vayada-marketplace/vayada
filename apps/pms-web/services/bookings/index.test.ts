@@ -168,6 +168,13 @@ describe("PMS target booking projection", () => {
       { position: 2, roomName: "Twin", adults: 2, children: 0, ratePlanName: "Non-refundable" },
     ]);
     expect(result.assignedRooms).toEqual([]);
+    // VAY-2320: once the PMS has the rooms, their types name the booking, as they name the stays.
+    // prettier-ignore
+    mocks.get.mockImplementation(async (endpoint: string) => endpoint.endsWith("/room-types") ? { items: roomTypes } : reservationPage({ ...mixed, roomCount: 2, assignments }));
+    expect((await bookingsService.list()).bookings[0]!.roomName).toBe("1 × Suite + 1 × Studio");
+    // prettier-ignore
+    mocks.get.mockImplementation(async (endpoint: string) => endpoint.endsWith("/room-types") ? { items: roomTypes } : reservationPage({ ...mixed, roomCount: 2, assignments: [assignments[0], { ...assignments[1], roomTypeId: "type-1" }] }));
+    expect((await bookingsService.list()).bookings[0]!.roomName).toBe("Suite");
   });
 
   it("uses the booked offer and authoritative booking amounts when no PMS assignment exists", async () => {

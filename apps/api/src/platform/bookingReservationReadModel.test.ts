@@ -108,3 +108,56 @@ it("lists a pricing booking's rooms by type from its assigned rooms", () => {
     "roomLines",
   );
 });
+
+// A booked room selection whose rooms the PMS moved to other types lists the PMS rooms' types.
+it("lists the PMS rooms' types over a booked room selection", () => {
+  const [double, twin, suite] = ["a", "b", "c"].map(
+    (id) => `00000000-0000-4000-8000-00000000000${id}`,
+  );
+  const lines = [double!, twin!].map((roomTypeId, index) => ({
+    roomTypeId,
+    publicOfferKey: roomTypeId,
+    guests: Array.from({ length: index ? 1 : 2 }, () => ({ adults: 2, children: 0 })),
+  }));
+  const row = {
+    id: "booking",
+    bookingReference: "VAY-3",
+    roomTypeId: suite!,
+    roomName: "Suite",
+    roomMaxOccupancy: 2,
+    guestFirstName: "Ada",
+    guestLastName: "Lovelace",
+    guestEmail: "",
+    guestPhone: "",
+    specialRequests: "",
+    checkIn: "2026-11-10",
+    checkOut: "2026-11-12",
+    adults: 6,
+    children: 0,
+    nightlyRate: 100,
+    numberOfRooms: 3,
+    totalAmount: 900,
+    currency: "EUR",
+    status: "confirmed",
+    createdAt: "2026-10-23",
+    updatedAt: "2026-10-23",
+    selectedRoomOffer: {
+      roomSelection: { contractVersion: "booking-room-selection.v1", lines },
+      roomLines: lines.map((line, index) => ({
+        ...line,
+        offer: { roomSummary: { name: index ? "Twin" : "Double" } },
+      })),
+    },
+  } satisfies BookingReservationReadModelRow;
+  const moved = [
+    { roomTypeId: suite!, roomName: "Suite", roomCount: 2 },
+    { roomTypeId: twin!, roomName: "Twin", roomCount: 1 },
+  ];
+  expect(toBookingReservationReadModel({ ...row, assignedRoomLines: moved }).roomLines).toEqual(
+    moved,
+  );
+  expect(toBookingReservationReadModel(row).roomLines).toEqual([
+    { roomTypeId: double!, roomName: "Double", roomCount: 2 },
+    { roomTypeId: twin!, roomName: "Twin", roomCount: 1 },
+  ]);
+});

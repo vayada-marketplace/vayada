@@ -65,9 +65,10 @@ export type BookingReservationReadModelRow = {
 export function toBookingReservationReadModel(
   reservation: BookingReservationReadModelRow,
 ): BookingReservationReadModel {
+  // The PMS rooms' types once it has them (a room can move to another type), else as booked.
   const roomLines =
-    projectBookingRoomSelection(reservation.selectedRoomOffer).roomLines ??
-    assignedRoomLines(reservation.assignedRoomLines);
+    assignedRoomLines(reservation.assignedRoomLines) ??
+    projectBookingRoomSelection(reservation.selectedRoomOffer).roomLines;
   const checkIn = toDateOnly(reservation.checkIn);
   const checkOut = toDateOnly(reservation.checkOut);
   const numberOfRooms = Math.max(1, reservation.numberOfRooms ?? 1);
