@@ -17,13 +17,14 @@ type GoogleMap = {
 type GoogleMarker = { addListener: (event: "click", handler: () => void) => void };
 type GoogleInfoWindow = {
   setContent: (content: Node) => void;
-  open: (options: { map: GoogleMap; anchor: GoogleMarker }) => void;
+  setPosition: (position: LatLng) => void;
+  open: (options: { map: GoogleMap; anchor?: GoogleMarker }) => void;
   close: () => void;
 };
 type MapsLibrary = {
   Map: new (element: HTMLElement, options: Record<string, unknown>) => GoogleMap;
   InfoWindow: new (options?: Record<string, unknown>) => GoogleInfoWindow;
-  Circle: new (options: Record<string, unknown>) => unknown;
+  Circle: new (options: Record<string, unknown>) => GoogleMarker;
 };
 type MarkerLibrary = { Marker: new (options: Record<string, unknown>) => GoogleMarker };
 type CoreLibrary = {
@@ -41,8 +42,9 @@ const AREA_RADIUS_METRES = 1000;
 const LOAD_TIMEOUT_MS = 12_000;
 
 /** The booking page's location map (VAY-2126): shown when the hotel switched it on in Booking Admin. Rooms
- * with their own pin get one each; otherwise the property's public pin. Booking pages talk to no third party
- * on their own (VAY-2216), so Google Maps loads only when the guest asks for it with "Show map". */
+ * at the property share its public pin; rooms elsewhere get one each, or an area when the hotel shows only
+ * that (VAY-2321). Booking pages talk to no third party on their own (VAY-2216), so Google Maps loads only
+ * when the guest asks for it with "Show map". */
 export default function RoomsLocationMap({
   rooms,
   property,
@@ -50,7 +52,7 @@ export default function RoomsLocationMap({
   onViewDetails,
 }: {
   rooms: PricingRoom[];
-  /** The property's pin as its visibility shows it (from the live catalog), for when no room has a pin. */
+  /** The property's pin as its visibility shows it (from the live catalog), for the rooms there. */
   property: {
     name: string;
     locality: string;
@@ -74,13 +76,14 @@ export default function RoomsLocationMap({
   });
 
   const { pins } = locationMapPins(
-    rooms.map((room) => ({
-      roomTypeId: room.roomTypeId,
-      name: room.name,
-      address: room.location?.address ?? null,
-      pin: room.location
-        ? { latitude: room.location.latitude, longitude: room.location.longitude }
-        : null,
+    rooms.map(({ roomTypeId, name, location, atProperty }) => ({
+      roomTypeId,
+      name,
+      address: (location?.approximate ? location.area : location?.address) ?? null,
+      pin: location ? { latitude: location.latitude, longitude: location.longitude } : null,
+      // A catalog from before VAY-2321 doesn't say: a room without a pin of its own is at the property.
+      atProperty: atProperty ?? !location,
+      approximate: location?.approximate === true,
     })),
     {
       name: property.name,
@@ -135,23 +138,30 @@ export default function RoomsLocationMap({
         }
         const color = brandRef.current ? getComputedStyle(brandRef.current).color : "#1E3EDB";
         setReady(true);
-        if (area) {
-          // The property shows only its area: a circle, no pin on a spot that isn't the hotel's.
+        // A place shown only as its area: a circle, no pin on a spot that isn't the hotel's.
+        const drawArea = (center: LatLng) =>
           new Circle({
             map,
-            center: positions[0],
+            center,
             radius: AREA_RADIUS_METRES,
             fillColor: color,
             fillOpacity: 0.15,
             strokeColor: color,
             strokeOpacity: 0.6,
             strokeWeight: 2,
-            clickable: false,
+            clickable: several,
           });
+        if (area) {
+          drawArea(positions[0]);
           return;
         }
         const info = new InfoWindow({ maxWidth: 260 });
         const markers = pins.map((pin, index) => {
+          if (pin.approximate) {
+            const circle = drawArea(positions[index]);
+            circle.addListener("click", () => select.current(index));
+            return null;
+          }
           const marker = new Marker({
             map,
             position: positions[index],
@@ -181,7 +191,12 @@ export default function RoomsLocationMap({
           setSelected(index);
           map.panTo(positions[index]);
           info.setContent(popup(pins[index], t("viewDetails"), onViewDetails));
-          info.open({ map, anchor: markers[index] });
+          const marker = markers[index];
+          if (marker) info.open({ map, anchor: marker });
+          else {
+            info.setPosition(positions[index]);
+            info.open({ map });
+          }
         };
         if (queued.current !== null) select.current(queued.current);
       })

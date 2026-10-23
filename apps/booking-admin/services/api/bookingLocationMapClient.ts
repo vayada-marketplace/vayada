@@ -7,11 +7,14 @@ import { sharedSetupClient } from "./sharedHotelSetupClient";
 export type LocationMapSummary = {
   enabled: boolean;
   canSwitch: boolean;
+  /** Each room's place as guests see it (VAY-2321): at the property, or its own pin, exact or as an area. */
   rooms: {
     roomTypeId: string;
     name: string;
     address: string | null;
     pin: LocationMapPoint | null;
+    atProperty: boolean;
+    approximate: boolean;
   }[];
   property: {
     name: string;
@@ -51,16 +54,28 @@ function parseSummary(v: unknown): LocationMapSummary | null {
       uuid(room.roomTypeId) &&
       typeof room.name === "string" &&
       text(room.address) &&
-      point(room.pin),
+      point(room.pin) &&
+      ["boolean", "undefined"].includes(typeof room.atProperty) &&
+      ["boolean", "undefined"].includes(typeof room.approximate),
   );
   const { property } = v;
-  return rooms &&
-    typeof property.name === "string" &&
-    text(property.address) &&
-    point(property.pin) &&
-    ["hidden", "approximate", "exact"].includes(property.mapDisplayMode as string)
-    ? (v as LocationMapSummary)
-    : null;
+  if (
+    !rooms ||
+    typeof property.name !== "string" ||
+    !text(property.address) ||
+    !point(property.pin) ||
+    !["hidden", "approximate", "exact"].includes(property.mapDisplayMode as string)
+  )
+    return null;
+  // An API from before VAY-2321 sends neither flag: a room without a pin of its own is at the property.
+  return {
+    ...(v as LocationMapSummary),
+    rooms: (v.rooms as Record<string, unknown>[]).map((room) => ({
+      ...(room as LocationMapSummary["rooms"][number]),
+      atProperty: typeof room.atProperty === "boolean" ? room.atProperty : room.pin === null,
+      approximate: room.approximate === true,
+    })),
+  };
 }
 
 export function createBookingLocationMapClient(http: Http) {

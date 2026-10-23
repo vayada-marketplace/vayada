@@ -8,11 +8,21 @@ import type { QueryResult, QueryResultRow } from "pg";
 export type MapPin = { latitude: number; longitude: number };
 export type MapDisplayMode = "hidden" | "approximate" | "exact";
 
+/** A room's place as guests see it (VAY-2321): its own address and pin, or "same as property". */
 export type LocationMapRoom = {
   roomTypeId: string;
   name: string;
+  /** Its own address, or its area's name when it is shown as an area. */
   address: string | null;
+  /** Its own pin, rounded to its area when it is shown as one; null at the property or without a pin. */
   pin: MapPin | null;
+  atProperty: boolean;
+  approximate: boolean;
+};
+
+export type GuestRoomLocation = Omit<LocationMapRoom, "roomTypeId" | "name"> & {
+  /** The room's own "Show map in room details" switch: on unless the hotel turned it off. */
+  showMapInDetails: boolean;
 };
 
 export type LocationMapSummary = {
@@ -91,16 +101,34 @@ export async function readGuestLocationMap(
   });
   if (!pin || !row.geoPublic || row.mapDisplayMode === "hidden" || !row.mapDisplayMode)
     return { property: null };
-  // The same rounding the booking page publication applies to an approximate location.
   return row.mapDisplayMode === "approximate"
-    ? {
-        property: {
-          latitude: Number(pin.latitude.toFixed(2)),
-          longitude: Number(pin.longitude.toFixed(2)),
-          approximate: true,
-        },
-      }
+    ? { property: { ...roundToArea(pin), approximate: true } }
     : { property: { ...pin, approximate: false } };
+}
+
+/** The same rounding the booking page publication applies to an approximate location: about 1 km. */
+function roundToArea(pin: MapPin): MapPin {
+  return { latitude: Number(pin.latitude.toFixed(2)), longitude: Number(pin.longitude.toFixed(2)) };
+}
+
+/** A room's place as guests see it, from its saved attributes (VAY-2321). A room saved before VAY-2321 has no
+ * locationSource: with a pin of its own it is at its own place, otherwise at the property. A room shown as
+ * an area gets its pin rounded and its area's name instead of its street. */
+export function guestRoomLocation(attributes: unknown): GuestRoomLocation {
+  const saved =
+    attributes && typeof attributes === "object" ? (attributes as Record<string, unknown>) : {};
+  const pin = roomPin(saved);
+  const atProperty =
+    saved.locationSource === "property" || (saved.locationSource !== "custom" && !pin);
+  const approximate = !atProperty && pin !== null && saved.locationPrecision === "approximate";
+  const area = typeof saved.locationArea === "string" ? saved.locationArea.trim() : "";
+  return {
+    atProperty,
+    approximate,
+    pin: atProperty || !pin ? null : approximate ? roundToArea(pin) : pin,
+    address: atProperty || !pin ? null : approximate ? area || null : roomAddress(saved),
+    showMapInDetails: saved.showMapInDetails !== false,
+  };
 }
 
 /** A room's own pin from its saved attributes; null unless both coordinates are numbers in range. */
@@ -181,12 +209,17 @@ export function createPgBookingLocationMapRepository(config: {
       return {
         enabled: settings.rows[0]?.enabled ?? false,
         canSwitch: settings.rows.length > 0,
-        rooms: rooms.rows.map((room) => ({
-          roomTypeId: room.roomTypeId,
-          name: room.name,
-          address: roomAddress(room.attributes),
-          pin: roomPin(room.attributes),
-        })),
+        rooms: rooms.rows.map((room) => {
+          const { atProperty, approximate, pin, address } = guestRoomLocation(room.attributes);
+          return {
+            roomTypeId: room.roomTypeId,
+            name: room.name,
+            address,
+            pin,
+            atProperty,
+            approximate,
+          };
+        }),
         property: {
           name: place.name,
           address:

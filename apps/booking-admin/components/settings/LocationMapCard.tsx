@@ -14,8 +14,9 @@ import {
 
 const PMS_FRONTEND_URL = process.env.NEXT_PUBLIC_PMS_FRONTEND_URL || "https://pms.vayada.com";
 
-/** "Location map on your booking page" (VAY-2126): off by default; on, guests see the rooms' pins (or the
- * property's) below the room list. The switch saves at once and guests read it live. */
+/** "Location map on your booking page" (VAY-2126): off by default; on, guests see below the room list the
+ * property's pin for the rooms there and a pin for each room elsewhere (VAY-2321). The switch saves at once and
+ * guests read it live. */
 export function LocationMapCard({
   propertyId,
   client = bookingLocationMapClient,
@@ -85,7 +86,11 @@ export function LocationMapCard({
     );
   }
 
-  const { pins, unpinnedRooms } = locationMapPins(summary.rooms, summary.property);
+  const { pins, unpinnedRooms, propertyRoomsOffMap } = locationMapPins(
+    summary.rooms,
+    summary.property,
+  );
+  const onePropertyPin = pins.length === 1 && pins[0].kind === "property";
   // Into PMS with this hotel selected: the sign-in handoff when available, else PMS's own sign-in.
   const openPms = async (targetPath: string) => {
     const csrfToken = getAuthCsrfToken();
@@ -157,17 +162,20 @@ export function LocationMapCard({
         <>
           <div className={`space-y-2 border-t border-gray-100 pt-3.5 ${indent}`}>
             {pins.length === 0 ? (
-              <Warning
-                text={
-                  summary.property.pin
-                    ? t("settings.locationMap.noPins")
-                    : t("settings.locationMap.noPinsMissing")
-                }
-              />
+              // Rooms with a place of their own but no pin get their own warning below.
+              (propertyRoomsOffMap.length > 0 || unpinnedRooms.length === 0) && (
+                <Warning
+                  text={
+                    summary.property.pin
+                      ? t("settings.locationMap.noPins")
+                      : t("settings.locationMap.noPinsMissing")
+                  }
+                />
+              )
             ) : (
               <>
                 <p className="text-[13px] font-semibold text-gray-700">
-                  {pins[0].kind === "property"
+                  {onePropertyPin
                     ? t("settings.locationMap.onePropertyPin")
                     : pins.length === 1
                       ? t("settings.locationMap.oneRoomPin")
@@ -190,10 +198,15 @@ export function LocationMapCard({
                           {pin.address}
                         </span>
                       )}
+                      {pin.approximate && !onePropertyPin && (
+                        <span className="shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600">
+                          {t("settings.locationMap.approximateTag")}
+                        </span>
+                      )}
                     </li>
                   ))}
                 </ol>
-                {pins[0].kind === "property" && (
+                {onePropertyPin && (
                   <p className="text-xs text-gray-500">
                     {pins[0].approximate
                       ? t("settings.locationMap.approximateHint")
@@ -201,6 +214,17 @@ export function LocationMapCard({
                   </p>
                 )}
               </>
+            )}
+            {pins.length > 0 && propertyRoomsOffMap.length > 0 && (
+              // With no pin at all, the warning above already says the property's pin can't be seen.
+              <Warning
+                text={t(
+                  summary.property.pin
+                    ? "settings.locationMap.propertyRoomsHidden"
+                    : "settings.locationMap.propertyRoomsMissing",
+                  { names: propertyRoomsOffMap.map((room) => room.name).join(", ") },
+                )}
+              />
             )}
             {unpinnedRooms.length > 0 && (
               <Warning

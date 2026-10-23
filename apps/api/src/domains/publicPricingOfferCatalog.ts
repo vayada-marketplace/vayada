@@ -13,7 +13,7 @@ import {
 import type { PricingPaymentSwitches } from "./pricingRatePayability.js";
 import { readPmsRoomOperatingEligibility } from "./pmsRoomOperatingEligibility.js";
 import { toPublicPmsRoomAmenityLabelsV1 } from "./pmsRoomAmenityVocabulary.js";
-import { readGuestLocationMap, roomAddress, roomPin } from "./bookingLocationMap.js";
+import { guestRoomLocation, readGuestLocationMap } from "./bookingLocationMap.js";
 
 type MediaServing = Pick<
   PlatformMediaServingConfig,
@@ -264,12 +264,24 @@ async function roomImages(
   }
 }
 
-/** A room's own pin for the guest location map, with its address when the hotel wrote one. */
+/** A room's place for the guest location map (VAY-2321): at the property, or its own pin with its address. A
+ * room shown as an area gets its pin rounded and its area's name, never its street. */
 function roomLocation(row: RoomRow): {
-  location?: { latitude: number; longitude: number; address?: string };
+  atProperty: boolean;
+  showMapInDetails: boolean;
+  location?:
+    | { latitude: number; longitude: number; address?: string }
+    | { latitude: number; longitude: number; approximate: true; area?: string };
 } {
-  const pin = roomPin(row.attributes);
-  if (!pin) return {};
-  const address = roomAddress(row.attributes);
-  return { location: { ...pin, ...(address && { address }) } };
+  const { atProperty, approximate, pin, address, showMapInDetails } = guestRoomLocation(
+    row.attributes,
+  );
+  if (!pin) return { atProperty, showMapInDetails };
+  return {
+    atProperty,
+    showMapInDetails,
+    location: approximate
+      ? { ...pin, approximate: true, ...(address && { area: address }) }
+      : { ...pin, ...(address && { address }) },
+  };
 }
