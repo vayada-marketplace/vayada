@@ -121,6 +121,10 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
     "repository-stay-cancel-guest-route",
     // VAY-2320: rooms with different cancellation terms in one booking.
     "repository-stay-cancel-guest-route-mixed-terms",
+    // VAY-2320: a non-refundable room beside partial-refund rooms; each keeps by its own terms.
+    "repository-stay-cancel-guest-route-non-refundable-room",
+    "repository-stay-cancel-guest-paid-card-non-refundable-room",
+    "repository-stay-cancel-guest-paid-bank-transfer-non-refundable-room",
     "repository-stay-cancel-guest-paid-card",
     "repository-stay-cancel-host-guest-request",
     "repository-stay-cancel-host-paid-card",
@@ -216,6 +220,8 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
             ...term,
             roomTypeId,
             ...(scenario.endsWith("-mixed-terms") && i === 1 && { cancellation: freeUntilWeek }),
+            ...(scenario.endsWith("-non-refundable-room") &&
+              i === 1 && { cancellation: { kind: "non_refundable" } }),
           })),
           ...(twoRates
             ? [
@@ -759,7 +765,7 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
       };
       // The hotel keeps 75% of what was paid, so the nights keep 75% of their room value as
       // retained revenue, split by room price and adding up exactly, on each stay date.
-      const expectRetainedRevenue = async (stayDates: string[]) => {
+      const expectRetainedRevenue = async (stayDates: string[], keptMinor = 81000n) => {
         const roomValue = 330_01n * BigInt(stayDates.length);
         const retained = (
           await db.query(
@@ -771,7 +777,7 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
         ).rows;
         expect(retained).toHaveLength(stayDates.length * roomLines.length);
         expect(retained.reduce((sum, row) => sum + BigInt(row.cents), 0n)).toBe(
-          (roomValue * 81000n * 2n + 108000n) / (108000n * 2n),
+          (roomValue * keptMinor * 2n + 108000n) / (108000n * 2n),
         );
         expect(
           retained.every((row) => row.recognizedOn === row.stayDate && row.occupied === 0),
@@ -952,8 +958,14 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
         await expect(adopt()).rejects.toBeInstanceOf(PmsAcceptedPricingReservationConflict);
         expect(await snapshot()).toEqual(before);
       } else if (scenario.startsWith("repository-stay-cancel-guest-route")) {
-        // The two partial-refund rooms keep 75% of 36000 each; the free one gives everything back.
-        const fee = scenario.endsWith("-mixed-terms") ? "54000" : "81000";
+        // The two partial-refund rooms keep 75% of 36000 each; the free one gives everything back,
+        // the non-refundable one keeps all its 36000 (VAY-2320).
+        const nonRefundableRoom = scenario.endsWith("-non-refundable-room");
+        const fee = scenario.endsWith("-mixed-terms")
+          ? "54000"
+          : nonRefundableRoom
+            ? "90000"
+            : "81000";
         // VAY-2100: the guest cancels an adopted v2 stay online, end to end on real PostgreSQL.
         expect(await adopt()).toMatchObject({ outcome: "adopted" });
         await db.query(
@@ -1000,7 +1012,8 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
           { bookingReference: bookingId, guestEmail: "jane@example.test" },
           context("l"),
         )) as { bookedRooms?: unknown };
-        // With mixed terms the second room type is free until a week before arrival.
+        // With mixed terms the second room type is free until a week before arrival, or
+        // non-refundable.
         expect(looked.bookedRooms).toEqual(
           [types[0], types[1], types[0]].map((roomTypeId) => ({
             roomTypeId,
@@ -1011,18 +1024,50 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
             cancellation:
               scenario.endsWith("-mixed-terms") && roomTypeId === types[1]
                 ? { kind: "free_until_days_before_arrival", days: 7 }
-                : { kind: "partial_refund" },
+                : nonRefundableRoom && roomTypeId === types[1]
+                  ? { kind: "non_refundable" }
+                  : { kind: "partial_refund" },
           })),
         );
-        expect(
-          await adapter.cancelPreview(propertyId, bookingId, guest, context("p")),
-        ).toMatchObject({
+        const stayDates = nonRefundableRoom ? await seedRoomNights() : [];
+        const preview = (await adapter.cancelPreview(
+          propertyId,
+          bookingId,
+          guest,
+          context("p"),
+        )) as Record<string, unknown>;
+        expect(preview).toMatchObject({
           amountPaid: 0,
           refundAmount: 0,
           refundPercentage: 0,
           cancellationFeeAmount: Number(fee) / 100,
           bookedTermsOutcome: { retainedMinor: fee, refundMinor: String(108000 - Number(fee)) },
         });
+        // VAY-2320: each room, named, with what its own terms give back and keep (36000 each).
+        if (nonRefundableRoom)
+          expect(preview["rooms"]).toEqual([
+            {
+              roomName: types[0],
+              rule: "partial_refund",
+              refundPercent: 25,
+              refundAmount: 90,
+              keptAmount: 270,
+            },
+            {
+              roomName: types[1],
+              rule: "non_refundable",
+              refundPercent: 0,
+              refundAmount: 0,
+              keptAmount: 360,
+            },
+            {
+              roomName: types[0],
+              rule: "partial_refund",
+              refundPercent: 25,
+              refundAmount: 90,
+              keptAmount: 270,
+            },
+          ]);
         await expect(
           adapter.cancel(
             propertyId,
@@ -1047,6 +1092,39 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
           [bookingId],
         );
         expect(event.rows).toEqual([{ status: "canceled", fee }]);
+        if (nonRefundableRoom) {
+          // The cancel event keeps each room's type and what it kept.
+          const rooms = await db.query(
+            `SELECT room->>'roomTypeId' AS "roomTypeId", room->>'retainedMinor' AS kept
+             FROM booking.booking_status_events event,
+               jsonb_array_elements(event.event_payload->'cancellationOutcome'->'rooms') room
+             WHERE event.guest_booking_id=$1 AND event.event_type='guest_booking.canceled'`,
+            [bookingId],
+          );
+          expect(rooms.rows).toEqual([
+            { roomTypeId: types[0], kept: "27000" },
+            { roomTypeId: types[1], kept: "36000" },
+            { roomTypeId: types[0], kept: "27000" },
+          ]);
+          // Nothing was paid, so nothing is kept as revenue: every night is cleared to zero.
+          const nights = await db.query(
+            `SELECT count(*) FILTER (WHERE economic_event='retained_charge')::int AS retained,
+               SUM(gross_room_amount) = 0 AS "netZero", SUM(occupied_room_nights)::int AS occupied,
+               count(*) FILTER (WHERE economic_event='room_night')::int AS nights,
+               count(*) FILTER (WHERE economic_event='occupancy_adjustment')::int AS cleared
+             FROM booking.nightly_revenue_evidence WHERE guest_booking_id=$1`,
+            [bookingId],
+          );
+          expect(nights.rows).toEqual([
+            {
+              retained: 0,
+              netZero: true,
+              occupied: 0,
+              nights: stayDates.length * 3,
+              cleared: stayDates.length * 3,
+            },
+          ]);
+        }
         const assignments = await db.query(
           "SELECT DISTINCT assignment_status AS status FROM pms.operational_booking_assignments WHERE guest_booking_id=$1",
           [bookingId],
@@ -1061,9 +1139,12 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
           [bookingId],
         );
         expect(jobs.rows).toEqual([]);
-      } else if (scenario === "repository-stay-cancel-guest-paid-card") {
+      } else if (scenario.startsWith("repository-stay-cancel-guest-paid-card")) {
         // VAY-2205: the guest cancels a paid card stay online; the cancel records the refund its
         // terms owe, and money moves only once Stripe answers (after the commit).
+        // VAY-2320: with a non-refundable room, only the partial-refund rooms give back 25%.
+        const kept = scenario.endsWith("-non-refundable-room") ? 90000 : 81000;
+        const back = 108000 - kept;
         expect(await adopt()).toMatchObject({ outcome: "adopted" });
         await db.query(
           "INSERT INTO hotel_catalog.property_slugs(property_id,slug,purpose) VALUES($1,$2,'canonical')",
@@ -1153,17 +1234,17 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
           await adapter(true).cancelPreview(propertyId, bookingId, guest, context("p")),
         ).toMatchObject({
           amountPaid: 1080,
-          refundAmount: 270,
-          refundPercentage: 25,
-          cancellationFeeAmount: 810,
-          bookedTermsOutcome: { retainedMinor: "81000", refundMinor: "27000" },
+          refundAmount: back / 100,
+          refundPercentage: Math.round((back / 108000) * 100),
+          cancellationFeeAmount: kept / 100,
+          bookedTermsOutcome: { retainedMinor: String(kept), refundMinor: String(back) },
         });
         const cancel = adapter(true);
         for (const key of ["c", "c"])
           await cancel.cancel(
             propertyId,
             bookingId,
-            { ...guest, expected_cancellation_fee_minor: "81000" },
+            { ...guest, expected_cancellation_fee_minor: String(kept) },
             context(key),
           );
         await db.query("SET CONSTRAINTS ALL IMMEDIATE");
@@ -1178,12 +1259,17 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
             )
           ).rows,
         ).toEqual([
-          { status: "canceled", paid: "paid", payment: "partially_refunded", refunded: "270.00" },
+          {
+            status: "canceled",
+            paid: "paid",
+            payment: "partially_refunded",
+            refunded: (back / 100).toFixed(2),
+          },
         ]);
-        await expectRetainedRevenue(stayDates);
+        await expectRetainedRevenue(stayDates, BigInt(kept));
         // One refund for the replayed cancel, asked of Stripe once after the commit and settled.
         expect(createRefund).toHaveBeenCalledOnce();
-        expect(createRefund.mock.calls[0]![0]).toMatchObject({ amountMinor: 27000 });
+        expect(createRefund.mock.calls[0]![0]).toMatchObject({ amountMinor: back });
         expect(
           (
             await db.query(
@@ -1193,8 +1279,87 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
             )
           ).rows,
         ).toEqual([
-          { status: "succeeded", requested_by: "guest", amount: "270.00", minor: "27000" },
+          {
+            status: "succeeded",
+            requested_by: "guest",
+            amount: (back / 100).toFixed(2),
+            minor: String(back),
+          },
         ]);
+      } else if (
+        scenario === "repository-stay-cancel-guest-paid-bank-transfer-non-refundable-room"
+      ) {
+        // VAY-2320: a bank transfer can't be paid back online, so a paid mixed stay still asks the
+        // guest to contact the hotel, and nothing changes.
+        expect(await adopt()).toMatchObject({ outcome: "adopted" });
+        await db.query(
+          "INSERT INTO hotel_catalog.property_slugs(property_id,slug,purpose) VALUES($1,$2,'canonical')",
+          [propertyId, propertyId],
+        );
+        await db.query(
+          `INSERT INTO booking.booking_guests(guest_booking_id,guest_role,first_name,last_name,email)
+           VALUES($1,'booker','Jane','Guest','jane@example.test')`,
+          [bookingId],
+        );
+        await db.query(
+          `INSERT INTO finance.payments(property_id,guest_booking_id,source_system,payment_kind,payment_method,status,
+             amount,fee_amount,net_amount,refunded_amount,currency,visibility_class,paid_at)
+           VALUES($1,$2,'finance','manual','bank_transfer','paid',1080,0,1080,0,'EUR','pms_finance',now())`,
+          [propertyId, bookingId],
+        );
+        await db.query(
+          `UPDATE booking.guest_bookings SET payment_status='paid',
+             booking_metadata=booking_metadata || '{"paymentMethod":"bank_transfer"}' WHERE id=$1`,
+          [bookingId],
+        );
+        const nested = {
+          query: (text: string, values?: unknown[]) =>
+            db.query(
+              (
+                {
+                  BEGIN: "SAVEPOINT guest_cancel",
+                  COMMIT: "RELEASE SAVEPOINT guest_cancel",
+                  ROLLBACK: "ROLLBACK TO SAVEPOINT guest_cancel",
+                } as Record<string, string>
+              )[text] ?? text,
+              values,
+            ),
+        };
+        const adapter = createTargetBookingWebCheckoutAdapter({
+          pool: nested as unknown as pg.Pool,
+          connectionString: url!,
+          externalChanges: externalBookingChanges,
+          inventoryReservationPort: createTargetPmsInventoryReservationPort(),
+        });
+        const context = (key: string) => ({
+          operation: "booking-cancel",
+          requestId: `request-${key}`,
+          correlationId: `correlation-${key}`,
+          idempotencyKey: key,
+          fingerprint: hash(key),
+          occurredAt: new Date("2026-09-21T08:00:00Z"),
+        });
+        const guest = { guest_email: "jane@example.test" };
+        const refused = { statusCode: 409, code: "BOOKING_CANCEL_NOT_ONLINE" };
+        await expect(
+          adapter.cancelPreview(propertyId, bookingId, guest, context("p")),
+        ).rejects.toMatchObject(refused);
+        await expect(
+          adapter.cancel(
+            propertyId,
+            bookingId,
+            { ...guest, expected_cancellation_fee_minor: "90000" },
+            context("c"),
+          ),
+        ).rejects.toMatchObject(refused);
+        const kept = await db.query(
+          `SELECT booking.lifecycle_status AS status,
+             (SELECT array_agg(DISTINCT assignment_status) FROM pms.operational_booking_assignments
+              WHERE guest_booking_id=booking.id)::text AS assignments
+           FROM booking.guest_bookings booking WHERE booking.id=$1`,
+          [bookingId],
+        );
+        expect(kept.rows).toEqual([{ status: "confirmed", assignments: "{pending}" }]);
       } else if (scenario === "repository-stay-cancel-host-guest-request") {
         // VAY-2100: PMS staff cancel an adopted v2 stay because the guest asked.
         expect(await adopt()).toMatchObject({ outcome: "adopted" });
