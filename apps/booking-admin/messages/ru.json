@@ -1697,5 +1697,18 @@
   "addons.preview.close": "Закрыть просмотр для гостя",
   "addons.preview.done": "Готово",
   "addons.list.preview": "Посмотреть {name} глазами гостя",
-  "addons.list.previewAsGuest": "Посмотреть как гость"
+  "addons.list.previewAsGuest": "Посмотреть как гость",
+  "propertyAddress.search": "Поиск адреса",
+  "propertyAddress.searchHint": "При выборе результата поля ниже заполняются автоматически. Каждое поле можно изменить вручную.",
+  "propertyAddress.street": "Улица и номер дома",
+  "propertyAddress.postalCode": "Почтовый индекс",
+  "propertyAddress.city": "Город / регион",
+  "propertyAddress.country": "Страна",
+  "propertyAddress.chooseCountry": "Выберите страну",
+  "propertyAddress.pinHint": "Поставьте метку там, куда должны прибыть гости",
+  "propertyAddress.noPin": "Выберите адрес, нажмите на карту или введите координаты, чтобы поставить метку.",
+  "propertyAddress.coordinates": "Координаты",
+  "propertyAddress.latitude": "Широта",
+  "propertyAddress.longitude": "Долгота",
+  "propertyAddress.coordinatesHint": "Введите их, если поиск адреса или карта недоступны, или чтобы поставить метку точно."
 }

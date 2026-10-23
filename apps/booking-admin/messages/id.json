@@ -1697,5 +1697,18 @@
   "addons.preview.close": "Tutup pratinjau tamu",
   "addons.preview.done": "Selesai",
   "addons.list.preview": "Lihat {name} seperti yang dilihat tamu",
-  "addons.list.previewAsGuest": "Lihat sebagai tamu"
+  "addons.list.previewAsGuest": "Lihat sebagai tamu",
+  "propertyAddress.search": "Cari alamat",
+  "propertyAddress.searchHint": "Memilih hasil akan mengisi kolom di bawah. Setiap kolom bisa diedit manual.",
+  "propertyAddress.street": "Jalan dan nomor",
+  "propertyAddress.postalCode": "Kode pos",
+  "propertyAddress.city": "Kota / wilayah",
+  "propertyAddress.country": "Negara",
+  "propertyAddress.chooseCountry": "Pilih negara",
+  "propertyAddress.pinHint": "Letakkan penanda di tempat tamu harus tiba",
+  "propertyAddress.noPin": "Pilih alamat, klik peta, atau ketik koordinat untuk meletakkan penanda.",
+  "propertyAddress.coordinates": "Koordinat",
+  "propertyAddress.latitude": "Lintang",
+  "propertyAddress.longitude": "Bujur",
+  "propertyAddress.coordinatesHint": "Ketik koordinat jika pencarian alamat atau peta tidak tersedia, atau untuk meletakkan penanda dengan tepat."
 }

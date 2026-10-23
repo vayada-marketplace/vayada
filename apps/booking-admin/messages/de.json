@@ -1697,5 +1697,18 @@
   "addons.preview.close": "Gastvorschau schließen",
   "addons.preview.done": "Fertig",
   "addons.list.preview": "{name} so ansehen, wie Gäste es sehen",
-  "addons.list.previewAsGuest": "Als Gast ansehen"
+  "addons.list.previewAsGuest": "Als Gast ansehen",
+  "propertyAddress.search": "Adresse suchen",
+  "propertyAddress.searchHint": "Ein Treffer füllt die Felder unten aus. Jedes Feld lässt sich von Hand bearbeiten.",
+  "propertyAddress.street": "Straße und Hausnummer",
+  "propertyAddress.postalCode": "Postleitzahl",
+  "propertyAddress.city": "Ort / Region",
+  "propertyAddress.country": "Land",
+  "propertyAddress.chooseCountry": "Land auswählen",
+  "propertyAddress.pinHint": "Setzen Sie die Markierung dorthin, wo Gäste ankommen sollen",
+  "propertyAddress.noPin": "Wählen Sie eine Adresse, klicken Sie auf die Karte oder geben Sie Koordinaten ein, um die Markierung zu setzen.",
+  "propertyAddress.coordinates": "Koordinaten",
+  "propertyAddress.latitude": "Breitengrad",
+  "propertyAddress.longitude": "Längengrad",
+  "propertyAddress.coordinatesHint": "Geben Sie sie ein, wenn die Adresssuche oder die Karte nicht verfügbar ist, oder um die Markierung genau zu setzen."
 }

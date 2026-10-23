@@ -12,6 +12,7 @@
     ".": "./src/index.ts",
     "./useNearbyNavigationGuard": "./src/useNearbyNavigationGuard.ts",
     "./NearbyEditor": "./src/NearbyEditor.tsx",
+    "./PropertyAddressFields": "./src/PropertyAddressFields.tsx",
     "./NearbyPreview": "./src/NearbyPreview.tsx",
     "./nearbyApi": "./src/nearbyApi.ts",
     "./localApiOrigin": "./src/localApiOrigin.ts",

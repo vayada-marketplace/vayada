@@ -1697,5 +1697,18 @@
   "addons.preview.close": "Chiudi l’anteprima ospite",
   "addons.preview.done": "Fatto",
   "addons.list.preview": "Vedi {name} come lo vedono gli ospiti",
-  "addons.list.previewAsGuest": "Vedi come ospite"
+  "addons.list.previewAsGuest": "Vedi come ospite",
+  "propertyAddress.search": "Cerca indirizzo",
+  "propertyAddress.searchHint": "Scegliendo un risultato si compilano i campi qui sotto. Ogni campo si può modificare a mano.",
+  "propertyAddress.street": "Via e numero civico",
+  "propertyAddress.postalCode": "CAP",
+  "propertyAddress.city": "Città / regione",
+  "propertyAddress.country": "Paese",
+  "propertyAddress.chooseCountry": "Scegli un paese",
+  "propertyAddress.pinHint": "Posiziona il segnaposto dove devono arrivare gli ospiti",
+  "propertyAddress.noPin": "Scegli un indirizzo, fai clic sulla mappa o inserisci le coordinate per posizionare il segnaposto.",
+  "propertyAddress.coordinates": "Coordinate",
+  "propertyAddress.latitude": "Latitudine",
+  "propertyAddress.longitude": "Longitudine",
+  "propertyAddress.coordinatesHint": "Inseriscile quando la ricerca degli indirizzi o la mappa non sono disponibili, o per posizionare il segnaposto con precisione."
 }

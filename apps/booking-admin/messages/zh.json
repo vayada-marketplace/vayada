@@ -1697,5 +1697,18 @@
   "addons.preview.close": "关闭客人预览",
   "addons.preview.done": "完成",
   "addons.list.preview": "以客人视角查看{name}",
-  "addons.list.previewAsGuest": "以客人身份预览"
+  "addons.list.previewAsGuest": "以客人身份预览",
+  "propertyAddress.search": "搜索地址",
+  "propertyAddress.searchHint": "选择一个结果后会填入下方字段。每个字段都可以手动修改。",
+  "propertyAddress.street": "街道和门牌号",
+  "propertyAddress.postalCode": "邮政编码",
+  "propertyAddress.city": "城市 / 地区",
+  "propertyAddress.country": "国家/地区",
+  "propertyAddress.chooseCountry": "选择国家/地区",
+  "propertyAddress.pinHint": "将图钉放在客人应到达的位置",
+  "propertyAddress.noPin": "选择地址、点击地图或输入坐标来放置图钉。",
+  "propertyAddress.coordinates": "坐标",
+  "propertyAddress.latitude": "纬度",
+  "propertyAddress.longitude": "经度",
+  "propertyAddress.coordinatesHint": "在地址搜索或地图不可用时输入，或用于精确放置图钉。"
 }

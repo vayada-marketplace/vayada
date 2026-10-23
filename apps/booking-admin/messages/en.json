@@ -1697,5 +1697,18 @@
   "addons.preview.close": "Close guest preview",
   "addons.preview.done": "Done",
   "addons.list.preview": "Preview {name} as guests see it",
-  "addons.list.previewAsGuest": "Preview as guest"
+  "addons.list.previewAsGuest": "Preview as guest",
+  "propertyAddress.search": "Search address",
+  "propertyAddress.searchHint": "Picking a result fills in the fields below. Every field can be edited by hand.",
+  "propertyAddress.street": "Street and number",
+  "propertyAddress.postalCode": "Postal code",
+  "propertyAddress.city": "City / region",
+  "propertyAddress.country": "Country",
+  "propertyAddress.chooseCountry": "Choose a country",
+  "propertyAddress.pinHint": "Place the pin where guests should arrive",
+  "propertyAddress.noPin": "Pick an address, click the map or type coordinates to place the pin.",
+  "propertyAddress.coordinates": "Coordinates",
+  "propertyAddress.latitude": "Latitude",
+  "propertyAddress.longitude": "Longitude",
+  "propertyAddress.coordinatesHint": "Type them when address search or the map is unavailable, or to place the pin exactly."
 }

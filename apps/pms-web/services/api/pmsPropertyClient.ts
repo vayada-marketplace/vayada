@@ -3,6 +3,7 @@ import {
   SELECTED_SHARED_PROPERTY_ID_KEY,
 } from "@/lib/utils/pmsPropertySelectionKeys";
 import type { AdaptiveHotelSetupStatus } from "@vayada/product-onboarding";
+import type { PropertyProfileResponse } from "@vayada/domain-hotels";
 
 import { sharedHotelSetupApi } from "./sharedHotelSetupClient";
 import { pmsOperationsClient, pmsOperationsRequestOptions } from "./pmsOperationsClient";
@@ -165,7 +166,14 @@ export type PmsPropertyPlace = {
 
 export async function getPmsPropertyPlace(): Promise<PmsPropertyPlace> {
   const propertyId = await resolveSelectedPmsPropertyId("loading the property's location");
-  const { profile } = await sharedHotelSetupApi.getPropertyProfile(propertyId);
+  return pmsPropertyPlace(propertyId, await sharedHotelSetupApi.getPropertyProfile(propertyId));
+}
+
+/** The property's place as the room editor shows it, from its shared profile (also right after a save). */
+export function pmsPropertyPlace(
+  propertyId: string,
+  { profile }: Pick<PropertyProfileResponse, "profile">,
+): PmsPropertyPlace {
   const { streetAddress, postalCode, city, latitude, longitude } = profile.location;
   return {
     propertyId,

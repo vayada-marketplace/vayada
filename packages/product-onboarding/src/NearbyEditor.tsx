@@ -5,6 +5,7 @@ import type { NearbyApi } from "./nearbyApi";
 import type { SharedHotelSetupApi } from "./sharedHotelSetupApi";
 import NearbyPreview, { GoogleNearbyPlace, nearbyCategoryLabels } from "./NearbyPreview";
 import NearbyLocationForm, { nearbyInputClass } from "./NearbyLocationForm";
+import type { propertyAddressEnglish } from "./PropertyAddressFields";
 import NearbyCustomPlaceForm from "./NearbyCustomPlaceForm";
 import { useNearbyEditor } from "./useNearbyEditor";
 import { useNearbyNavigationGuard } from "./useNearbyNavigationGuard";
@@ -19,11 +20,16 @@ export default function NearbyEditor({
   profileApi,
   apiKey,
   intro,
+  addressTranslate,
+  locale,
 }: {
   propertyId: string;
   api: NearbyApi;
   profileApi: SharedHotelSetupApi;
   apiKey: string;
+  /** The address fields' copy, shared with the PMS (VAY-2322). */
+  addressTranslate?: (key: keyof typeof propertyAddressEnglish) => string;
+  locale?: string;
   /** Shown under the page header, above the editor (Booking Admin's location map switch, VAY-2126). Given
    * the saved profile revision, so it can re-read what depends on the location saved below. */
   intro?: (profileRevision: number) => ReactNode;
@@ -145,7 +151,8 @@ export default function NearbyEditor({
           <NearbyPreview key={JSON.stringify(projected)} preview={projected} apiKey={apiKey} />
         </div>
       ) : (
-        <div className="grid items-start gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)]">
+        // The address takes the full width, its map next to the fields; nearby places below (VAY-2322).
+        <div className="space-y-8">
           <form
             className="space-y-5 rounded-2xl border border-gray-200 bg-white p-5 sm:p-6"
             onSubmit={(event) => {
@@ -158,6 +165,8 @@ export default function NearbyEditor({
               value={location}
               onChange={editor.setLocation}
               disabled={editor.busy}
+              translate={addressTranslate}
+              locale={locale}
             />
             <button
               className={primary}
