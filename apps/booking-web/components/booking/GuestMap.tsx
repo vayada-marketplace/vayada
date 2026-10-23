@@ -208,7 +208,7 @@ export default function GuestMap({
   // The selected place's pill stands out, and comes into view.
   useEffect(() => {
     const current = drawn.current;
-    if (!ready || !current) return;
+    if (draws === 0 || !current) return;
     current.pills.forEach((pill, index) => {
       pill.className = `${PILL} ${index === selected ? PILL_SELECTED : PILL_IDLE}`;
       if (index === selected) pill.setAttribute("aria-current", "true");
