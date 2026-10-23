@@ -571,7 +571,8 @@
     "showMap": "Afficher la carte",
     "mapNote": "Charge Google Maps. Google reçoit votre requête.",
     "loadingMap": "Chargement de la carte…",
-    "mapFailed": "La carte n'a pas pu être chargée pour le moment."
+    "mapFailed": "La carte n'a pas pu être chargée pour le moment.",
+    "mainHouse": "Maison principale · {count, plural, one {# chambre} other {# chambres}}"
   },
   "roomPlace": {
     "title": "Où vous logerez",

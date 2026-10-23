@@ -41,24 +41,39 @@ const villas = [
   room("family", "Family Apartment", "d"),
 ];
 
-/** The Google Maps calls the section makes, kept on window.__locationMap: the markers, the area circles, the
- * popup, and clickMarker(index) to tap a pin. */
+/** The Google Maps calls the page makes, kept on window.__locationMap: the markers and area circles, the
+ * popup, and clickMarker(index) to tap a room details pin. The Location section's pills (VAY-2324) are page
+ * buttons drawn by an OverlayView: this fake puts each one in its own spot on the map. */
 const GOOGLE_FAKE = `
   // An IIFE: a top-level "class Map" would replace the browser's own Map for the whole page.
   (() => {
-  const state = (window.__locationMap = { markers: [], circles: [], popup: null, fitted: 0 });
+  const state = (window.__locationMap = { markers: [], circles: [], popup: null, fitted: 0, overlays: 0, panned: [] });
+  const point = (position) =>
+    typeof position.lat === "function" ? { lat: position.lat(), lng: position.lng() } : position;
   class Map {
-    constructor(element, options) { state.options = options; this.zoom = options.zoom; }
+    constructor(element, options) {
+      state.options = options; this.zoom = options.zoom;
+      this.pane = document.createElement("div"); element.append(this.pane);
+    }
     fitBounds() { state.fitted += 1; this.zoom = 21; setTimeout(() => this.idle?.(), 0); }
     addListener(event, handler) { if (event === "idle") this.idle = handler; return { remove: () => (this.idle = null) }; }
     getZoom() { return this.zoom; }
     setZoom(zoom) { this.zoom = zoom; state.zoom = zoom; }
-    panTo() {}
+    getBounds() { return { contains: () => false }; }
+    panTo(position) { state.panned.push(point(position)); }
+  }
+  class OverlayView {
+    setMap(map) {
+      if (!map) return this.onRemove();
+      this.map = map; this.slot = state.overlays++; this.onAdd(); this.draw();
+    }
+    getPanes() { return { floatPane: this.map.pane }; }
+    getProjection() { return { fromLatLngToDivPixel: () => ({ x: 140 + 220 * this.slot, y: 90 }) }; }
   }
   class Circle {
     constructor(options) {
       this.listeners = {};
-      state.circles.push({ lat: options.center.lat, lng: options.center.lng, radius: options.radius, circle: this });
+      state.circles.push({ ...point(options.center), radius: options.radius, circle: this });
     }
     addListener(event, handler) { this.listeners[event] = handler; }
   }
@@ -78,11 +93,12 @@ const GOOGLE_FAKE = `
     addListener(event, handler) { this.listeners[event] = handler; }
   }
   window.__clickMarker = (index) => state.markers[index].marker.listeners.click();
+  class LatLng { constructor(lat, lng) { this.lat = () => lat; this.lng = () => lng; } }
   class LatLngBounds { extend() {} }
   class Point { constructor(x, y) { this.x = x; this.y = y; } }
   window.google = { maps: { importLibrary: async (library) =>
-    library === "maps" ? { Map, InfoWindow, Circle } : library === "marker" ? { Marker }
-    : library === "core" ? { LatLngBounds, Point } : {} } };
+    library === "maps" ? { Map, InfoWindow, Circle, OverlayView } : library === "marker" ? { Marker }
+    : library === "core" ? { LatLng, LatLngBounds, Point } : {} } };
   window.__vayadaGoogleMapsReady?.();
   })();
 `;
@@ -114,6 +130,13 @@ const markers = (page: Page) =>
         }
       ).__locationMap?.markers.map(({ title, label }) => ({ title, label })) ?? [],
   );
+
+/** The Location section's pills, as the guest reads them. */
+const pills = (page: Page) =>
+  page
+    .getByTestId("rooms-location-map")
+    .getByRole("region", { name: "Map of where the rooms are" })
+    .getByRole("button");
 
 const circles = (page: Page) =>
   page.evaluate(
@@ -152,13 +175,12 @@ test.describe("booking page location map", () => {
     expect(google).toEqual([]);
 
     await section.getByRole("button", { name: "Show map" }).click();
-    await expect
-      .poll(() => markers(page))
-      .toEqual([
-        { title: "Schwabing Loft", label: "1" },
-        { title: "Haidhausen Garden Flat", label: "2" },
-        { title: "Isar Studio", label: "3" },
-      ]);
+    await expect(pills(page)).toHaveText([
+      "Schwabing Loft",
+      "Haidhausen Garden Flat",
+      "Isar Studio",
+    ]);
+    expect(await markers(page)).toEqual([]);
     expect(google.length).toBeGreaterThan(0);
     // Pins only a few streets apart don't zoom the map in past street level.
     await expect
@@ -167,24 +189,26 @@ test.describe("booking page location map", () => {
           () => (window as unknown as { __locationMap?: { zoom?: number } }).__locationMap?.zoom,
         ),
       )
-      .toBe(17);
-    // The place picked before the map opened gets its popup.
+      .toBe(16);
+    // The place picked before the map opened stands out on it.
+    await expect(pills(page).nth(2)).toHaveAttribute("aria-pressed", "true");
+    await expect(pills(page).nth(0)).toHaveAttribute("aria-pressed", "false");
+
+    // A tapped pill selects its place in the list, and the map moves to it when it's out of view.
+    await pills(page).nth(1).click();
+    await expect(pills(page).nth(1)).toHaveAttribute("aria-pressed", "true");
+    await expect(places.nth(1)).toHaveClass(/bg-primary-50/);
     await expect
       .poll(() =>
         page.evaluate(
           () =>
-            (window as unknown as { __locationMap?: { popup: HTMLElement | null } }).__locationMap
-              ?.popup?.textContent,
+            (
+              window as unknown as { __locationMap?: { panned: { lat: number }[] } }
+            ).__locationMap?.panned.at(-1)?.lat,
         ),
       )
-      .toContain("Isar Studio");
-
-    // A tapped pin names its room and opens the room's details.
-    await page.evaluate(() =>
-      (window as unknown as { __clickMarker: (i: number) => void }).__clickMarker(1),
-    );
-    await expect(places.nth(1)).toHaveClass(/bg-primary-50/);
-    await page.getByRole("button", { name: "View details", exact: true }).last().click();
+      .toBe(48.1291);
+    await places.nth(1).getByRole("button", { name: "View details", exact: true }).click();
     await expect(page.getByRole("dialog")).toContainText("Haidhausen Garden Flat");
   });
 
@@ -197,7 +221,8 @@ test.describe("booking page location map", () => {
     const section = page.getByTestId("rooms-location-map");
     await expect(section.getByRole("list", { name: "Places on the map" })).toHaveCount(0);
     await section.getByRole("button", { name: "Show map" }).click();
-    await expect.poll(() => markers(page)).toEqual([{ title: "Hotel Alpenrose", label: null }]);
+    await expect(pills(page)).toHaveText(["Hotel Alpenrose"]);
+    expect(await circles(page)).toEqual([]);
   });
 
   test("shows the area, not a pin, when the hotel's location is approximate", async ({ page }) => {
@@ -208,6 +233,9 @@ test.describe("booking page location map", () => {
     await page.goto("/");
     await page.getByTestId("rooms-location-map").getByRole("button", { name: "Show map" }).click();
     await expect.poll(() => circles(page)).toEqual([{ lat: 48.14, lng: 11.58, radius: 1000 }]);
+    // The area's name sits on the area: no pin on a spot that isn't the hotel's.
+    await expect(pills(page)).toHaveText(["Hotel Alpenrose"]);
+    await expect(pills(page)).toHaveAttribute("style", /translate\(-50%, -50%\)/);
     expect(await markers(page)).toEqual([]);
   });
 
@@ -250,34 +278,22 @@ test.describe("booking page location map", () => {
     const section = page.getByTestId("rooms-location-map");
     const places = section.getByRole("list", { name: "Places on the map" }).getByRole("listitem");
     await expect(places).toHaveCount(3);
-    await expect(places.nth(0)).toContainText("Hotel Alpenrose");
+    // The rooms at the property share the main house's pin (VAY-2324).
+    await expect(places.nth(0)).toContainText("Main house · 2 rooms");
     await expect(places.nth(1)).toContainText("Schwabing Loft");
     await expect(places.nth(2)).toContainText("Beach Villa");
     await expect(places.nth(2)).toContainText("Isarvorstadt");
     await expect(section.getByText("Annex")).toHaveCount(0);
 
     await section.getByRole("button", { name: "Show map" }).click();
-    await expect
-      .poll(() => markers(page))
-      .toEqual([
-        { title: "Hotel Alpenrose", label: "1" },
-        { title: "Schwabing Loft", label: "2" },
-      ]);
+    await expect(pills(page)).toHaveText(["Main house · 2 rooms", "Schwabing Loft", "Beach Villa"]);
     expect(await circles(page)).toEqual([{ lat: 48.13, lng: 11.57, radius: 1000 }]);
-    // The area opens its popup where it is, and names the area, not a street.
-    await page.evaluate(() =>
-      (window as unknown as { __clickCircle: (i: number) => void }).__clickCircle(0),
-    );
+    // The area's pill names the room, never a street.
+    await pills(page).nth(2).click();
     await expect(places.nth(2)).toHaveClass(/bg-primary-50/);
-    await expect
-      .poll(() =>
-        page.evaluate(
-          () =>
-            (window as unknown as { __locationMap?: { popup: HTMLElement | null } }).__locationMap
-              ?.popup?.textContent,
-        ),
-      )
-      .toBe("Beach VillaIsarvorstadtView details →");
+    // Several rooms on one pin: no single room's details to open from it.
+    await expect(places.nth(0).getByRole("button", { name: "View details" })).toHaveCount(0);
+    await expect(places.nth(2).getByRole("button", { name: "View details" })).toHaveCount(1);
   });
 
   test("shows where a villa is in its details, with Directions, and loads Google only after Show map (VAY-2323)", async ({
@@ -354,7 +370,7 @@ test.describe("booking page location map", () => {
     await page.goto("/");
     // The Location section below the list draws at once, without a new press.
     const section = page.getByTestId("rooms-location-map");
-    await expect.poll(() => markers(page)).toEqual([{ title: "Hotel Alpenrose", label: "1" }]);
+    await expect(pills(page)).toHaveText(["Main house · 2 rooms", "Beach Villa"]);
     await expect(section.getByRole("button", { name: "Show map" })).toHaveCount(0);
     const cards = page.getByRole("button", { name: "View Details", exact: true });
     await expect(cards).toHaveCount(3);

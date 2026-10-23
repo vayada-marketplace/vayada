@@ -571,7 +571,8 @@
     "showMap": "Mostrar mapa",
     "mapNote": "Carga Google Maps. Google recibe tu solicitud.",
     "loadingMap": "Cargando mapa…",
-    "mapFailed": "Ahora mismo no se pudo cargar el mapa."
+    "mapFailed": "Ahora mismo no se pudo cargar el mapa.",
+    "mainHouse": "Casa principal · {count, plural, one {# habitación} other {# habitaciones}}"
   },
   "roomPlace": {
     "title": "Dónde te alojarás",

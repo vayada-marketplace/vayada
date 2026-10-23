@@ -572,7 +572,8 @@
     "showMap": "Show map",
     "mapNote": "Loads Google Maps. Google receives your request.",
     "loadingMap": "Loading map…",
-    "mapFailed": "The map couldn't load right now."
+    "mapFailed": "The map couldn't load right now.",
+    "mainHouse": "Main house · {count, plural, one {# room} other {# rooms}}"
   },
   "roomPlace": {
     "title": "Where you'll stay",

@@ -572,7 +572,8 @@
     "showMap": "Karte anzeigen",
     "mapNote": "Lädt Google Maps. Google erhält Ihre Anfrage.",
     "loadingMap": "Karte wird geladen …",
-    "mapFailed": "Die Karte konnte gerade nicht geladen werden."
+    "mapFailed": "Die Karte konnte gerade nicht geladen werden.",
+    "mainHouse": "Haupthaus · {count, plural, one {# Zimmer} other {# Zimmer}}"
   },
   "roomPlace": {
     "title": "Hier wohnen Sie",
