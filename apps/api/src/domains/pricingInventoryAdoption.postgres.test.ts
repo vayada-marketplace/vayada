@@ -978,7 +978,12 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
         });
         const guest = { guest_email: "jane@example.test" };
         const stayDates = nonRefundableRoom ? await seedRoomNights() : [];
-        const preview = await adapter.cancelPreview(propertyId, bookingId, guest, context("p"));
+        const preview = (await adapter.cancelPreview(
+          propertyId,
+          bookingId,
+          guest,
+          context("p"),
+        )) as Record<string, unknown>;
         expect(preview).toMatchObject({
           amountPaid: 0,
           refundAmount: 0,
