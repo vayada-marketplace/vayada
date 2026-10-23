@@ -62,3 +62,49 @@ it.each(["recorded", "unverified"] as const)(
     expect(result.nightlyRate).toBe(amountStatus === "unverified" ? null : 100);
   },
 );
+
+// VAY-2320: a booking with rooms of several types lists them by type, not as "3 x" the first one.
+it("lists a pricing booking's rooms by type from its assigned rooms", () => {
+  const row = {
+    id: "booking",
+    bookingReference: "VAY-2",
+    roomTypeId: "type-a",
+    roomName: "Deluxe Double Room",
+    roomMaxOccupancy: 2,
+    guestFirstName: "Ada",
+    guestLastName: "Lovelace",
+    guestEmail: "",
+    guestPhone: "",
+    specialRequests: "",
+    checkIn: "2026-11-10",
+    checkOut: "2026-11-12",
+    adults: 5,
+    children: 1,
+    nightlyRate: 100,
+    numberOfRooms: 3,
+    totalAmount: 900,
+    currency: "EUR",
+    status: "confirmed",
+    createdAt: "2026-10-23",
+    updatedAt: "2026-10-23",
+    selectedRoomOffer: null,
+  } satisfies BookingReservationReadModelRow;
+  const lines = [
+    { roomTypeId: "type-a", roomName: "Deluxe Double Room", roomCount: 2 },
+    { roomTypeId: "type-b", roomName: "Garden Double Room", roomCount: "1" },
+  ];
+  expect(toBookingReservationReadModel({ ...row, assignedRoomLines: lines }).roomLines).toEqual([
+    { roomTypeId: "type-a", roomName: "Deluxe Double Room", roomCount: 2 },
+    { roomTypeId: "type-b", roomName: "Garden Double Room", roomCount: 1 },
+  ]);
+  // The driver may hand JSON over as text; one type keeps today's "3 x Deluxe Double Room".
+  expect(
+    toBookingReservationReadModel({ ...row, assignedRoomLines: JSON.stringify(lines) }).roomLines,
+  ).toHaveLength(2);
+  expect(
+    toBookingReservationReadModel({ ...row, assignedRoomLines: [lines[0]] }),
+  ).not.toHaveProperty("roomLines");
+  expect(toBookingReservationReadModel({ ...row, assignedRoomLines: null })).not.toHaveProperty(
+    "roomLines",
+  );
+});

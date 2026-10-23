@@ -10,6 +10,8 @@ import {
 import { processNextPmsAcceptedPricingReservationJob } from "./pmsAcceptedPricingReservationWorker.js";
 import { createTargetPmsInventoryReservationPort } from "./pmsInventoryReservation.js";
 import { externalBookingChanges } from "../integrations/externalBookingChanges.js";
+import { loadBookingNotificationSnapshot } from "../jobs/bookingEmails.js";
+import { createTargetBookingReservationsReadRepository } from "../platform/bookingReservations.js";
 import { createTargetBookingWebCheckoutAdapter } from "../routes/bookingWebPublic.js";
 import { createBookingHostActions } from "./bookingHostActions.js";
 import { targetBookingHostActionGuards } from "./bookingHostActionGuards.js";
@@ -811,6 +813,28 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
             { position: 2, status: "pending", adults: 2, children: 1 },
             { position: 3, status: "pending", adults: 2, children: 1 },
           ]);
+        if (scenario === "repository-complete") {
+          // VAY-2320: emails and Booking Admin name every booked room type, not the first one.
+          const snapshot = await loadBookingNotificationSnapshot(db, {
+            propertyId,
+            guestBookingId: bookingId,
+          });
+          expect(snapshot?.accommodation).toBe(`2 × ${types[0]} + ${types[1]}`);
+          const listed = await createTargetBookingReservationsReadRepository({
+            connectionString: url!,
+            pool: db as never,
+          }).listReservationsByPropertyId(propertyId, {
+            limit: 10,
+            offset: 0,
+            canReadGuestContact: false,
+          });
+          expect(
+            listed.reservations.find((reservation) => reservation.id === bookingId)?.roomLines,
+          ).toEqual([
+            { roomTypeId: types[0], roomName: types[0], roomCount: 2 },
+            { roomTypeId: types[1], roomName: types[1], roomCount: 1 },
+          ]);
+        }
         if (repository && !worker) {
           expect(await adopt()).toEqual({
             outcome: "replayed",

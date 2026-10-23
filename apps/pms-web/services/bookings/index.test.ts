@@ -592,6 +592,8 @@ describe("PMS target booking projection", () => {
     // prettier-ignore
     mocks.get.mockImplementation(async (endpoint: string) => endpoint.endsWith("/room-types") ? { items: roomTypes } : reservationPage(heterogeneousReservation));
     const complete = (await bookingsService.list()).bookings[0]!;
+    // VAY-2320: the booking is named by all its rooms, not the first room's type.
+    expect(complete.roomName).toBe("1 × Suite + 1 × Studio");
     expect(complete.expectedPaymentMethod).toBe("cash");
     // prettier-ignore
     expect(complete.stays).toMatchObject([{ position: 0, roomName: "Suite", ratePlanName: "Plan 1", checkIn: "2026-09-10", adults: 1, nightly: [{ appliedAmount: 100 }] }, { position: 1, roomName: "Studio", ratePlanName: "Plan 2", checkIn: "2026-09-12", adults: 2, nightly: [{ appliedAmount: 180 }] }]);

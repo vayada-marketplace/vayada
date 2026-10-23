@@ -134,6 +134,7 @@ export function createTargetBookingReservationsReadRepository(config: {
              primary_room.id::text AS "roomId",
              primary_room.room_number AS "roomNumber",
              COALESCE(assigned_rooms.assigned_rooms, '[]'::jsonb) AS "assignedRooms",
+             assigned_types.room_lines AS "assignedRoomLines",
              COALESCE(primary_assignment.channel, 'direct') AS "channel",
              COALESCE(booking.booking_metadata->>'paymentMethod', booking.expected_payment_method, payment.payment_method) AS "paymentMethod",
              booking.payment_status AS "paymentStatus",
@@ -271,6 +272,29 @@ export function createTargetBookingReservationsReadRepository(config: {
               AND room.property_id = assignment.property_id
              WHERE primary_assignment.id IS NULL OR assignment.id <> primary_assignment.id
            ) assigned_rooms ON TRUE
+           -- VAY-2320: rooms of several types, one line per type in room order.
+           LEFT JOIN LATERAL (
+             SELECT jsonb_agg(
+                      jsonb_build_object(
+                        'roomTypeId', typed.room_type_id::text,
+                        'roomName', typed.name,
+                        'roomCount', typed.count
+                      )
+                      ORDER BY typed.first_position
+                    ) AS room_lines
+             FROM (
+               SELECT assignment.room_type_id, room_type_line.name, count(*) AS count,
+                      min(assignment.position) AS first_position
+               FROM pms.operational_booking_assignments assignment
+               JOIN pms.room_types room_type_line
+                 ON room_type_line.id = assignment.room_type_id
+                AND room_type_line.property_id = assignment.property_id
+               WHERE assignment.guest_booking_id = booking.id
+                 AND assignment.property_id = booking.property_id
+               GROUP BY assignment.room_type_id, room_type_line.name
+             ) typed
+             HAVING count(*) > 1
+           ) assigned_types ON TRUE
            LEFT JOIN LATERAL (
              WITH expanded AS (
                SELECT item.*

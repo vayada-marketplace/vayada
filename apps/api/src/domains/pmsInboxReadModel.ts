@@ -161,7 +161,22 @@ const THREAD_FROM = `FROM pms.message_threads thread
     ON assigned_membership.id = thread.assigned_to_membership_id
   LEFT JOIN identity.users assigned_user ON assigned_user.id = assigned_membership.user_id
   LEFT JOIN LATERAL (
-    SELECT room_type.name, room.room_number
+    -- VAY-2320: a booking with rooms of several types names each type with its count.
+    SELECT COALESCE((
+             SELECT string_agg(rooms.count || ' × ' || rooms.name, ' + ' ORDER BY rooms.first_position)
+             FROM (
+               SELECT room_type_count.name, count(*) AS count,
+                      min(typed.position) AS first_position
+               FROM pms.operational_booking_assignments typed
+               JOIN pms.room_types room_type_count
+                 ON room_type_count.id = typed.room_type_id
+                AND room_type_count.property_id = typed.property_id
+               WHERE typed.guest_booking_id = booking.id AND typed.property_id = booking.property_id
+               GROUP BY room_type_count.id, room_type_count.name
+             ) rooms
+             HAVING count(*) > 1
+           ), room_type.name) AS name,
+           room.room_number
     FROM pms.operational_booking_assignments assignment
     LEFT JOIN pms.room_types room_type
       ON room_type.id = assignment.room_type_id AND room_type.property_id = assignment.property_id
