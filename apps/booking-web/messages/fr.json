@@ -604,5 +604,32 @@
     "fewer": "Retirer : {label}",
     "more": "Ajouter : {label}",
     "done": "Terminé"
+  },
+  "groupRooms": {
+    "title": "Qui dort dans chaque chambre",
+    "intro": "Vérifiez qui dort où. Vous pouvez déplacer des personnes d'une chambre à l'autre ; chaque chambre indique sa capacité.",
+    "roomLabel": "Chambre {number}",
+    "adults": "Adultes",
+    "children": "Enfants",
+    "childAge": "Enfant {number} : âge à l'arrivée",
+    "chooseAge": "Choisir l'âge",
+    "underOne": "Moins d'1 an",
+    "sleepsUpTo": "Jusqu'à {count} personnes",
+    "tooMany": "{room} accueille jusqu'à {count} personnes. Déplacez une personne dans une autre chambre ou ajoutez une chambre.",
+    "tooManyAdults": "{room} accueille jusqu'à {count} adultes.",
+    "noChildren": "{room} n'accueille pas d'enfants.",
+    "tooManyChildren": "{room} accueille jusqu'à {count} enfants.",
+    "needsAdult": "Chaque chambre doit accueillir au moins un adulte.",
+    "changeRooms": "Modifier les chambres",
+    "continue": "Continuer",
+    "soldOutTitle": "{rooms} n'est plus disponible à vos dates",
+    "aRoom": "Une chambre choisie",
+    "soldOutBody": "Une autre réservation a pris la dernière ou l'hôtel a fermé ces dates : rien n'a été débité.",
+    "othersKept": "Vos autres chambres restent choisies.",
+    "chooseAgainFor": "Choisir une autre chambre pour la chambre {number}",
+    "chooseAgain": "Choisir une autre chambre",
+    "newSearch": "Lancer une nouvelle recherche",
+    "yourRooms": "Vos {count} chambres",
+    "roomLine": "Chambre {number} · {room}"
   }
 }

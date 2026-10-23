@@ -44,7 +44,7 @@ const ROOMS = [
   },
 ];
 
-export async function mockGroup(page: Page, stayRequests: URL[]) {
+export async function mockGroup(page: Page, stayRequests: URL[], paymentMethods = ["card"]) {
   await page.clock.setFixedTime(new Date("2026-10-23T08:00:00Z"));
   await page.route("**/pricing-offers", (route) =>
     route.fulfill({
@@ -59,7 +59,7 @@ export async function mockGroup(page: Page, stayRequests: URL[]) {
             currency: "EUR",
             mealPlan: offer.mealPlan,
             cancellation: offer.cancellation,
-            paymentMethods: ["card"],
+            paymentMethods,
             paymentSchedule: "full" in offer ? { kind: "full" } : deposit,
           })),
         })),

@@ -41,6 +41,10 @@ type Translate = (key: string, values?: Record<string, string | number>) => stri
 export type ChoiceText = {
   name: string;
   terms: string;
+  /** The meal's name, null for room only, and the cancellation's words, null when unknown: a
+   * booked room's line (VAY-2320). */
+  meal: string | null;
+  cancellationTerms: string | null;
   /** The rate icon: the arrows for free or partial cancellation, a cross for no refund, none
    * when the cancellation isn't known or free cancellation has passed. */
   refundable: boolean | null;
@@ -81,22 +85,25 @@ export function choiceText(
         : cancellation === "partial_refund"
           ? t("choice.mealPartialRefund", { meal })
           : meal;
+  const cancellationTerms = cancellationPassed
+    ? t("choice.noLongerFree")
+    : cancellation === "free" && until
+      ? t("choice.freeUntil", { date: stay.formatDate(until) })
+      : cancellation === "non_refundable"
+        ? t("choice.noRefund")
+        : cancellation === "partial_refund"
+          ? t("choice.partialRefundTerms")
+          : null;
   const terms = [
     // The hotel's own meal text when it wrote one, shown as written (not translated).
     keys.mealDescription ?? (keys.meal === "room_only" ? null : t(`choice.mealTerms.${keys.meal}`)),
-    cancellationPassed
-      ? t("choice.noLongerFree")
-      : cancellation === "free" && until
-        ? t("choice.freeUntil", { date: stay.formatDate(until) })
-        : cancellation === "non_refundable"
-          ? t("choice.noRefund")
-          : cancellation === "partial_refund"
-            ? t("choice.partialRefundTerms")
-            : null,
+    cancellationTerms,
   ].filter(Boolean);
   return {
     name: keys.number ? `${base} ${keys.number}` : base,
     terms: terms.join(" · "),
+    meal: keys.meal === "room_only" ? null : meal,
+    cancellationTerms,
     refundable:
       cancellation === "free" || cancellation === "partial_refund"
         ? true

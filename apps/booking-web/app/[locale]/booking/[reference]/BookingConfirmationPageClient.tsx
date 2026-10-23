@@ -1,6 +1,7 @@
 "use client";
 import ApproximateAmountsNote from "@/components/booking/ApproximateAmountsNote";
 import RoomSelectionSummary from "@/components/booking/RoomSelectionSummary";
+import BookedRoomsList from "@/components/booking/BookedRoomsList";
 import StayRange from "@/components/booking/StayRange";
 
 import { formatCheckInTime, formatCheckOutTime } from "@/lib/arrivalTimes";
@@ -880,35 +881,45 @@ export default function BookingConfirmationPageClient({
                 </div>
 
                 <div className="flex flex-col gap-4 border-t border-dashed border-gray-300 px-5 py-5 sm:px-9 sm:py-6">
-                  <div className="flex flex-col gap-4 sm:flex-row sm:gap-8">
-                    <div className="flex min-w-0 flex-1 flex-col gap-1">
-                      <span className={labelClass}>{t("room")}</span>
-                      <span className="font-semibold text-gray-900 sm:text-[17px]">
-                        {`${!booking.roomSelection && displayedRooms > 1 ? `${displayedRooms}× ` : ""}${booking.roomName || t("room")}`}
-                      </span>
-                      {booking.mealDescription && (
-                        <span className="text-sm text-gray-600 sm:text-[15px]">
-                          {booking.mealDescription}
+                  {/* VAY-2320: a group's rooms, each with its own guests and terms. */}
+                  {booking.bookedRooms && booking.bookedRooms.length > 1 ? (
+                    <BookedRoomsList
+                      rooms={booking.bookedRooms}
+                      checkIn={booking.checkIn}
+                      timezone={hotel.timezone}
+                      labelClass={labelClass}
+                    />
+                  ) : (
+                    <div className="flex flex-col gap-4 sm:flex-row sm:gap-8">
+                      <div className="flex min-w-0 flex-1 flex-col gap-1">
+                        <span className={labelClass}>{t("room")}</span>
+                        <span className="font-semibold text-gray-900 sm:text-[17px]">
+                          {`${!booking.roomSelection && displayedRooms > 1 ? `${displayedRooms}× ` : ""}${booking.roomName || t("room")}`}
                         </span>
-                      )}
-                      {booking.unitNames && booking.unitNames.length > 0 && (
-                        <span className="text-sm text-gray-600 sm:text-[15px]">
-                          {booking.unitNames.join(", ")}
+                        {booking.mealDescription && (
+                          <span className="text-sm text-gray-600 sm:text-[15px]">
+                            {booking.mealDescription}
+                          </span>
+                        )}
+                        {booking.unitNames && booking.unitNames.length > 0 && (
+                          <span className="text-sm text-gray-600 sm:text-[15px]">
+                            {booking.unitNames.join(", ")}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex flex-col gap-1 sm:w-44 sm:shrink-0">
+                        <span className={labelClass}>{t("guests")}</span>
+                        <span className="font-semibold text-gray-900 sm:text-[17px]">
+                          {displayedAdults !== null
+                            ? `${tc("adults", { count: displayedAdults })}${displayedChildren > 0 ? `, ${tc("children", { count: displayedChildren })}` : ""}`
+                            : "—"}
                         </span>
-                      )}
+                        <span className="text-sm text-gray-600 sm:text-[15px]">
+                          {tc("room", { count: displayedRooms })}
+                        </span>
+                      </div>
                     </div>
-                    <div className="flex flex-col gap-1 sm:w-44 sm:shrink-0">
-                      <span className={labelClass}>{t("guests")}</span>
-                      <span className="font-semibold text-gray-900 sm:text-[17px]">
-                        {displayedAdults !== null
-                          ? `${tc("adults", { count: displayedAdults })}${displayedChildren > 0 ? `, ${tc("children", { count: displayedChildren })}` : ""}`
-                          : "—"}
-                      </span>
-                      <span className="text-sm text-gray-600 sm:text-[15px]">
-                        {tc("room", { count: displayedRooms })}
-                      </span>
-                    </div>
-                  </div>
+                  )}
                   {booking.roomLines && (
                     <RoomSelectionSummary
                       lines={booking.roomLines}

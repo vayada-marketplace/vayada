@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useState, type FormEvent } from "react";
+import { useEffect, useId, useState, type FormEvent, type ReactNode } from "react";
 import {
   isManualPricingPaymentMethod,
   type PublicBookingQuote,
@@ -41,6 +41,7 @@ export default function ReplacementBookingConfirmation({
   onAttemptChange,
   onBooked,
   onConsentMissing,
+  soldOutNotice,
 }: {
   slug: string;
   quote: PublicBookingQuote;
@@ -64,10 +65,14 @@ export default function ReplacementBookingConfirmation({
   /** The page can point at the boxes still to tick (VAY-2306): Confirm then stays pressable and
    * a press before both are ticked calls this instead of booking. */
   onConsentMissing?: () => void;
+  /** VAY-2320: a chosen room has no free room left for the dates; the page says which and how to
+   * choose again. Nothing was stored. */
+  soldOutNotice?: (roomTypeIds: string[]) => ReactNode;
 }) {
   const termsNoticeId = useId();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [soldOut, setSoldOut] = useState<string[] | null>(null);
   const [refreshRequired, setRefreshRequired] = useState(false);
   const [result, setResult] = useState<PricingAcceptanceResult | PricingCardPaymentResult | null>(
     null,
@@ -135,6 +140,7 @@ export default function ReplacementBookingConfirmation({
     setPending({ quoteId: quote.quoteId, guest: attempted, disclosure: acceptedDisclosure });
     setLoading(true);
     setError("");
+    setSoldOut(null);
     try {
       const accepted = await acceptPricingQuote(
         slug,
@@ -154,6 +160,12 @@ export default function ReplacementBookingConfirmation({
       const unavailable = failure instanceof ApiError && failure.status === 404 && !pending;
       const code =
         failure instanceof ApiError && (failure.detail as { code?: unknown } | null)?.code;
+      const soldOutIds =
+        failure instanceof ApiError && failure.status === 409 && code === "ROOMS_SOLD_OUT"
+          ? (failure.detail as { roomTypeIds?: unknown } | null)?.roomTypeIds
+          : undefined;
+      if (Array.isArray(soldOutIds))
+        setSoldOut(soldOutIds.filter((id): id is string => typeof id === "string"));
       const cardUnavailable = unavailable && code === "CARD_PAYMENT_UNAVAILABLE";
       // The hotel confirms each booking, but online requests are not switched on yet.
       const requestUnavailable = unavailable && code === "REQUEST_ACCEPTANCE_UNAVAILABLE";
@@ -269,7 +281,7 @@ export default function ReplacementBookingConfirmation({
             : "Fill in your details to book."}
         </p>
       ) : null}
-      {error && <p role="alert">{error}</p>}
+      {soldOut && soldOutNotice ? soldOutNotice(soldOut) : error && <p role="alert">{error}</p>}
       {hotelTerms && (
         <p id={termsNoticeId} className="text-sm text-gray-600">
           By booking, you agree to our terms & conditions.

@@ -1,4 +1,4 @@
-import { Booking, RoomSelection } from "@/lib/types";
+import { BookedRoom, Booking, RoomSelection } from "@/lib/types";
 
 /**
  * Centralizes the sessionStorage keys the checkout flow uses, so we read and
@@ -221,6 +221,39 @@ function nonEmptyStrings(value: unknown): string[] {
     : [];
 }
 
+/** VAY-2320: the booked rooms when the API sends them whole; anything malformed means none. */
+function bookedRooms(value: unknown): BookedRoom[] | undefined {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 99) return undefined;
+  const rooms: BookedRoom[] = [];
+  for (const room of value as Record<string, unknown>[]) {
+    const c = room?.cancellation as Record<string, unknown> | null | undefined;
+    const cancellation =
+      c?.kind === "non_refundable" || c?.kind === "partial_refund"
+        ? { kind: c.kind }
+        : c?.kind === "free_until_days_before_arrival" &&
+            Number.isInteger(c.days) &&
+            (c.days as number) >= 0
+          ? { kind: c.kind, days: c.days as number }
+          : null;
+    if (
+      !room ||
+      typeof room.roomTypeId !== "string" ||
+      !Number.isInteger(room.adults) ||
+      !Number.isInteger(room.children)
+    )
+      return undefined;
+    rooms.push({
+      roomTypeId: room.roomTypeId,
+      roomName: typeof room.roomName === "string" ? room.roomName : null,
+      mealPlan: typeof room.mealPlan === "string" ? room.mealPlan : null,
+      adults: room.adults as number,
+      children: room.children as number,
+      cancellation: cancellation as BookedRoom["cancellation"],
+    });
+  }
+  return rooms;
+}
+
 /**
  * Converts the compact target-checkout response into the stable confirmation
  * shape. Server-owned booking facts win; checkout-owned display fields (room,
@@ -245,6 +278,7 @@ export function toConfirmationBooking(
   return {
     roomSelection: source.roomSelection,
     roomLines: source.roomLines,
+    ...(bookedRooms(source.bookedRooms) && { bookedRooms: bookedRooms(source.bookedRooms)! }),
     canEditRequest: source.canEditRequest ?? context.canEditRequest,
     id:
       nonEmptyString(source.guestBookingId) ??

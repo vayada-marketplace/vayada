@@ -25,6 +25,7 @@ import { choiceKeys, choiceText } from "@/lib/roomChoices";
 import {
   encodePick,
   MAX_ROOMS,
+  pickIdentity as searchIdentity,
   readPickDraft,
   savePickDraft,
   splitParty,
@@ -227,14 +228,14 @@ function HomePageContent() {
   );
   const pickMode = roomCount > 1;
   const slots = splitParty(adults, effectiveChildren, roomCount);
-  const pickIdentity = JSON.stringify([
+  const pickIdentity = searchIdentity({
     checkIn,
     checkOut,
     adults,
-    effectiveChildren,
-    roomCount,
-    appliedPromo?.code ?? null,
-  ]);
+    children: effectiveChildren,
+    rooms: roomCount,
+    promoCode: appliedPromo?.code ?? null,
+  });
   const [pickState, setPickState] = useState<{ identity: string; picks: (RoomPick | null)[] }>({
     identity: "",
     picks: [],
