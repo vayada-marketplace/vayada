@@ -87,8 +87,14 @@ export function createTargetBookingReservationsReadRepository(config: {
              booking.id::text AS "id",
              booking.property_id::text AS "propertyId",
              booking.public_reference AS "bookingReference",
-             COALESCE(room_type.id::text, quote.selected_offer_snapshot ->> 'roomTypeId', '') AS "roomTypeId",
-             COALESCE(room_type.name, quote.selected_offer_snapshot ->> 'roomName', '') AS "roomName",
+             COALESCE(room_type.id::text, quote.selected_offer_snapshot ->> 'roomTypeId',
+               booking.booking_metadata #>> '{pricingSelections,0,roomTypeId}', '') AS "roomTypeId",
+             -- VAY-2320: before the PMS has the rooms, the first booked room's type names it.
+             COALESCE(room_type.name, quote.selected_offer_snapshot ->> 'roomName', (
+               SELECT selected_type.name FROM pms.room_types selected_type
+               WHERE selected_type.id::text = booking.booking_metadata #>> '{pricingSelections,0,roomTypeId}'
+                 AND selected_type.property_id = booking.property_id
+             ), '') AS "roomName",
              COALESCE(booking.booking_metadata->'selectedOffer',quote.selected_offer_snapshot) AS "selectedRoomOffer",
              COALESCE(
                NULLIF(room_type.occupancy_limits ->> 'maxOccupancy', '')::integer,
@@ -272,29 +278,42 @@ export function createTargetBookingReservationsReadRepository(config: {
               AND room.property_id = assignment.property_id
              WHERE primary_assignment.id IS NULL OR assignment.id <> primary_assignment.id
            ) assigned_rooms ON TRUE
-           -- VAY-2320: rooms of several types, one line per type in room order.
+           -- VAY-2320: rooms of several types, one line per type in room order: the PMS rooms
+           -- (without rooms an OTA change removed), or the booked rooms before the PMS has them.
            LEFT JOIN LATERAL (
              SELECT jsonb_agg(
                       jsonb_build_object(
-                        'roomTypeId', typed.room_type_id::text,
+                        'roomTypeId', typed.room_type_id,
                         'roomName', typed.name,
                         'roomCount', typed.count
                       )
                       ORDER BY typed.first_position
                     ) AS room_lines
              FROM (
-               SELECT assignment.room_type_id, room_type_line.name, count(*) AS count,
-                      min(assignment.position) AS first_position
-               FROM pms.operational_booking_assignments assignment
+               SELECT rooms.room_type_id, room_type_line.name, count(*) AS count,
+                      min(rooms.position) AS first_position
+               FROM (
+                 SELECT assignment.room_type_id::text AS room_type_id, assignment.position
+                 FROM pms.operational_booking_assignments assignment
+                 WHERE assignment.guest_booking_id = booking.id
+                   AND assignment.property_id = booking.property_id
+                   AND NOT (assignment.assignment_status = 'released'
+                     AND assignment.assignment_payload @> '{"channexAlterationReleased":true}')
+                 UNION ALL
+                 SELECT selection.value->>'roomTypeId', selection.position
+                 FROM jsonb_array_elements(
+                   CASE WHEN jsonb_typeof(booking.booking_metadata->'pricingSelections') = 'array'
+                     THEN booking.booking_metadata->'pricingSelections' ELSE '[]'::jsonb END
+                 ) WITH ORDINALITY AS selection(value, position)
+                 WHERE primary_assignment.id IS NULL
+               ) rooms
                JOIN pms.room_types room_type_line
-                 ON room_type_line.id = assignment.room_type_id
-                AND room_type_line.property_id = assignment.property_id
-               WHERE assignment.guest_booking_id = booking.id
-                 AND assignment.property_id = booking.property_id
-               GROUP BY assignment.room_type_id, room_type_line.name
+                 ON room_type_line.id::text = rooms.room_type_id
+                AND room_type_line.property_id = booking.property_id
+               GROUP BY rooms.room_type_id, room_type_line.name
              ) typed
              HAVING count(*) > 1
-           ) assigned_types ON TRUE
+           ) assigned_types ON booking.room_count > 1
            LEFT JOIN LATERAL (
              WITH expanded AS (
                SELECT item.*

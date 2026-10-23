@@ -1292,18 +1292,27 @@ function toBookingStays(
 }
 
 /** VAY-2320: a booking with rooms of several types names each type with its count
- * ("1 × Deluxe Double + 2 × Garden Double"), in room order; null for one type. */
+ * ("1 × Deluxe Double + 2 × Garden Double"), in room order; null for one type. Rooms an OTA
+ * change removed stay above the booking's room count and aren't counted. */
 function assignedRoomSummary(
   reservation: PmsOperationalReservation,
   roomTypesById: Map<string, PmsOperationsRoomType>,
 ): string | null {
   const counts = new Map<string, number>();
   for (const assignment of reservation.assignments)
-    counts.set(assignment.roomTypeId, (counts.get(assignment.roomTypeId) ?? 0) + 1);
+    if (reservation.roomCount == null || assignment.position <= reservation.roomCount)
+      counts.set(assignment.roomTypeId, (counts.get(assignment.roomTypeId) ?? 0) + 1);
   if (counts.size < 2) return null;
   return Array.from(counts)
-    .map(([roomTypeId, count]) => `${count} × ${roomTypesById.get(roomTypeId)?.name || "Room"}`)
+    .map(([roomTypeId, count]) => `${count} × ${roomTypesById.get(roomTypeId)?.name || "—"}`)
     .join(" + ");
+}
+
+/** VAY-2320: one assigned room's own room type name; the booking's name when it isn't known. */
+export function assignedRoomName(booking: Booking, room: { position: number }): string {
+  return (
+    booking.stays.find((stay) => stay.position === room.position)?.roomName || booking.roomName
+  );
 }
 
 function toBooking(

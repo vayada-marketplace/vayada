@@ -814,12 +814,17 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
             { position: 3, status: "pending", adults: 2, children: 1 },
           ]);
         if (scenario === "repository-complete") {
-          // VAY-2320: emails and Booking Admin name every booked room type, not the first one.
+          // VAY-2320: emails and Booking Admin name every booked room type, not the first one,
+          // in room order (the names sort the other way round).
+          await db.query(
+            "UPDATE pms.room_types SET name=CASE WHEN id=$1 THEN 'Zeta Deluxe' ELSE 'Alpha Garden' END WHERE id=ANY($2::uuid[])",
+            [types[0], types],
+          );
           const snapshot = await loadBookingNotificationSnapshot(db, {
             propertyId,
             guestBookingId: bookingId,
           });
-          expect(snapshot?.accommodation).toBe(`2 × ${types[0]} + ${types[1]}`);
+          expect(snapshot?.accommodation).toBe("2 × Zeta Deluxe + Alpha Garden");
           const listed = await createTargetBookingReservationsReadRepository({
             connectionString: url!,
             pool: db as never,
@@ -831,8 +836,8 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
           expect(
             listed.reservations.find((reservation) => reservation.id === bookingId)?.roomLines,
           ).toEqual([
-            { roomTypeId: types[0], roomName: types[0], roomCount: 2 },
-            { roomTypeId: types[1], roomName: types[1], roomCount: 1 },
+            { roomTypeId: types[0], roomName: "Zeta Deluxe", roomCount: 2 },
+            { roomTypeId: types[1], roomName: "Alpha Garden", roomCount: 1 },
           ]);
         }
         if (repository && !worker) {
