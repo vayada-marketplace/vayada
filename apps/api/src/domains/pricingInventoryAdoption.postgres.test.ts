@@ -124,6 +124,8 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
     "repository-stay-cancel-host-paid-card",
     "repository-stay-cancel-host-reject",
     "repository-date-change",
+    // VAY-2320: a room type booked at two rates keeps a line per rate in the policy impact.
+    "repository-date-change-two-rates",
     "repository-stay-cancel-amended",
     "repository-stay-cancel-undecodable",
     // VAY-2110: a date-change amendment rebinds the stay to its repriced quote.
@@ -186,7 +188,14 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
         rooms: selections.map((s) => ({
           ...priced,
           selectionId: s.selectionId,
-          ...(s.offerId !== selected.offerId && { termsRevisions: { [s.offerId]: term.revision } }),
+          // A room at another rate is priced from that rate's own terms and nights.
+          ...(s.offerId !== selected.offerId && {
+            termsRevisions: { [s.offerId]: term.revision },
+            nights: priced.nights.map((night) => ({
+              ...night,
+              sources: night.sources.map((source) => ({ ...source, offerId: s.offerId })),
+            })),
+          }),
         })),
       });
       // Free cancellation for the second room type, partial refunds for the first.
@@ -206,7 +215,16 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
             roomTypeId,
             ...(scenario.endsWith("-mixed-terms") && i === 1 && { cancellation: freeUntilWeek }),
           })),
-          ...(twoRates ? [{ ...term, roomTypeId: types[0]!, offerId: "second-rate" }] : []),
+          ...(twoRates
+            ? [
+                {
+                  ...term,
+                  roomTypeId: types[0]!,
+                  offerId: "second-rate",
+                  cancellation: freeUntilWeek,
+                },
+              ]
+            : []),
         ],
         lines: selections.flatMap((s) => [
           {
@@ -286,7 +304,7 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
         [
           propertyId,
           types,
-          amended || scenario === "repository-date-change"
+          amended || scenario.startsWith("repository-date-change")
             ? ["2026-10-01", "2026-10-02", "2026-10-03", "2026-10-04"]
             : ["2026-10-01", "2026-10-02"],
         ],
@@ -839,6 +857,23 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
             { position: 2, status: "pending", adults: 2, children: 1 },
             { position: 3, status: "pending", adults: 2, children: 1 },
           ]);
+        if (scenario.endsWith("-two-rates"))
+          // Each room keeps its own rate: the third room is the first type at the second rate.
+          expect(
+            (
+              await db.query(
+                `SELECT position,room_type_id::text AS "roomTypeId",
+                   assignment_payload->'pricingAcceptance'->>'offerId' AS "offerId"
+                 FROM pms.operational_booking_assignments
+                 WHERE property_id=$1 AND guest_booking_id=$2 ORDER BY position`,
+                [propertyId, bookingId],
+              )
+            ).rows,
+          ).toEqual([
+            { position: 1, roomTypeId: types[0], offerId: quote.stay.rooms[0]!.offerId },
+            { position: 2, roomTypeId: types[1], offerId: quote.stay.rooms[1]!.offerId },
+            { position: 3, roomTypeId: types[0], offerId: "second-rate" },
+          ]);
         if (repository && !worker) {
           expect(await adopt()).toEqual({
             outcome: "replayed",
@@ -1311,7 +1346,7 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
           requestedBy: "host",
           failureReason: null,
         });
-      } else if (scenario === "repository-date-change") {
+      } else if (scenario.startsWith("repository-date-change")) {
         // VAY-2110: PMS staff move an adopted v2 stay to new dates at its booked terms.
         expect(await adopt()).toMatchObject({ outcome: "adopted" });
         await db.query(
@@ -1457,6 +1492,21 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
           newTotalAmount: "540.00",
           inventory: "replace",
         });
+        if (scenario.endsWith("-two-rates")) {
+          // The first type's two rooms are on two rates with different terms: one line each.
+          const policy = hostPreview.impact.cancellationPolicy as unknown as {
+            type: string;
+            lines: { roomTypeId: string; roomCount: number }[];
+          };
+          expect(policy.type).toBe("mixed_room");
+          expect(policy.lines.map((line) => [line.roomTypeId, line.roomCount]).sort()).toEqual(
+            [
+              [types[0], 1],
+              [types[0], 1],
+              [types[1], 1],
+            ].sort(),
+          );
+        }
         // A preview proves the new nights can be held and keeps nothing.
         expect(await holds()).toEqual(heldBefore);
         expect(await occupied()).toEqual(occupiedBefore);

@@ -7747,8 +7747,10 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       [second!, "flex"],
     ] as const) {
       const cancellations = [{ kind: "non_refundable" }, flexible];
+      // Without the promo code: its 200.00 minimum isn't met by the cheaper rooms.
       const selection = {
         ...f.selection,
+        promoCode: null,
         rooms: [
           f.selection.rooms[0],
           { ...f.selection.rooms[1], publicOfferKey: key(otherRoom, offerId) },

@@ -2052,11 +2052,12 @@ export function createTargetBookingWebCheckoutAdapter(
             createHttpError(404, "Bank transfer and PayPal bookings are unavailable."),
             { code: "MANUAL_PAYMENT_UNAVAILABLE" },
           );
-        // VAY-2320: another booking took the last room of a chosen type first. Nothing was
-        // stored; the guest keeps the other rooms and chooses again for that one.
+        // VAY-2320: a chosen room type has no free room left for these dates (another booking
+        // took it, or the hotel closed the dates). Nothing was stored; the guest keeps the other
+        // rooms and chooses again for that one.
         if (error instanceof PricingAcceptanceError && error.code === "sold_out")
           throw Object.assign(
-            createHttpError(409, "A room you chose was just booked by someone else."),
+            createHttpError(409, "A room you chose is no longer available for these dates."),
             { code: "ROOMS_SOLD_OUT", roomTypeIds: error.roomTypeIds },
           );
         const statusCode =

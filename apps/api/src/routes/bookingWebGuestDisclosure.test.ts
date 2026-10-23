@@ -280,7 +280,7 @@ it("answers a room sold out at the last step with 409 ROOMS_SOLD_OUT naming the 
     statusCode: 409,
     error: "Conflict",
     code: "ROOMS_SOLD_OUT",
-    message: "A room you chose was just booked by someone else.",
+    message: "A room you chose is no longer available for these dates.",
     roomTypeIds: [roomTypeId],
   });
   // Other conflicts keep the plain answer.
