@@ -574,7 +574,7 @@
     "mapFailed": "La carte n'a pas pu être chargée pour le moment.",
     "mainHouse": "Maison principale · {count, plural, one {# chambre} other {# chambres}}",
     "lineMainHouse": "Maison principale",
-    "lineOwnLocation": "Emplacement propre",
+    "lineOwnLocation": "Emplacement séparé",
     "lineFromMainHouse": "{place} · à {distance} de la maison principale",
     "lineAboutFromMainHouse": "{place} · à environ {distance} de la maison principale",
     "viewsLabel": "Afficher les hébergements en",

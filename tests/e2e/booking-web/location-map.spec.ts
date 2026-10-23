@@ -465,7 +465,8 @@ test.describe("booking page location map", () => {
   }) => {
     const google = await setup(page, { locationMap: MIXED_MAP, rooms: mixed });
     await mockStayPrices(page, { villa: { [offerKey("d")]: "84000" } });
-    await page.goto("/");
+    // Three nights: €840 for the stay.
+    await page.goto("/?checkIn=2027-03-10&checkOut=2027-03-13");
     const views = page.getByRole("group", { name: "Show the accommodations as" });
     await expect(views.getByRole("button", { name: "List + map" })).toHaveAttribute(
       "aria-pressed",
@@ -481,7 +482,7 @@ test.describe("booking page location map", () => {
       "Isarvorstadt · about 1 km from the main house",
     );
     // The short cards show the lowest price per night and keep the choices in their details.
-    await expect(page.getByTestId("room-card-villa")).toContainText(/from €[\d,.]+\/ night/);
+    await expect(page.getByTestId("room-card-villa")).toContainText("from €280 / night");
     await expect(page.getByTestId("select-rate-suite")).toHaveCount(0);
     // The list works before the map: picking a card loads nothing.
     await page

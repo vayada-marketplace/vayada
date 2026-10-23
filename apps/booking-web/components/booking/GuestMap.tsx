@@ -225,7 +225,8 @@ export default function GuestMap({
   }, [draws, selected]);
 
   return (
-    <div className={`relative overflow-hidden bg-gray-100 ${className}`}>
+    // Its own stacking layer: Google's panes and the pills stay under cards drawn over the map.
+    <div className={`relative isolate overflow-hidden bg-gray-100 ${className}`}>
       <span ref={brandRef} className="hidden text-primary-600" aria-hidden="true" />
       <div
         ref={mapRef}

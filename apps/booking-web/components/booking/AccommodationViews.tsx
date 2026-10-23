@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { useTranslations } from "next-intl";
 import type { LocationMapPin } from "@vayada/domain-hotels";
 import type { PricingRoom } from "@/services/api/replacementOffers";
@@ -20,14 +20,16 @@ const VIEWS = [
   ["map", "viewMap"],
 ] as const;
 
+function onWidthChange(onChange: () => void) {
+  const query = window.matchMedia(WIDE);
+  query.addEventListener("change", onChange);
+  return () => query.removeEventListener("change", onChange);
+}
+
 /** Desktop widths, where the accommodations get their List | List + map | Map views (VAY-2324). */
 export function useWideScreen(): boolean {
   return useSyncExternalStore(
-    (onChange) => {
-      const query = window.matchMedia(WIDE);
-      query.addEventListener("change", onChange);
-      return () => query.removeEventListener("change", onChange);
-    },
+    onWidthChange,
     () => window.matchMedia(WIDE).matches,
     () => false,
   );
@@ -58,16 +60,11 @@ export default function AccommodationViews({
   ) => ReactNode;
 }) {
   const t = useTranslations("locationMap");
-  const [view, setView] = useState<AccommodationView>("split");
-  const [requested, setRequested] = useState(false);
+  // This tab's choices, read at once: the cards only render in the browser, after the catalog loaded.
+  const [view, setView] = useState<AccommodationView>(() => chosenView() ?? "split");
+  const [requested, setRequested] = useState(mapsChosen);
   const [selectedRoom, setSelectedRoom] = useState<string | null>(null);
-
-  // Read after mount: sessionStorage.
-  useEffect(() => {
-    if (mapsChosen()) setRequested(true);
-    const saved = chosenView();
-    if (saved) setView(saved);
-  }, []);
+  const listRef = useRef<HTMLDivElement>(null);
 
   if (!map) {
     return (
@@ -84,15 +81,18 @@ export default function AccommodationViews({
   const selectedPin = pins.findIndex(
     (pin) => selectedRoom !== null && pin.roomTypeIds.includes(selectedRoom),
   );
-  // A pin selects its first room in the guest's order, and brings that room's card into view.
+  // A pin selects its first room in the guest's order, and scrolls the cards next to the map to it.
   const selectPin = (index: number) => {
     const room = rooms.find(({ roomTypeId }) => pins[index]?.roomTypeIds.includes(roomTypeId));
     if (!room) return;
     setSelectedRoom(room.roomTypeId);
+    const list = listRef.current;
+    const card = document.getElementById(`room-card-${room.roomTypeId}`);
+    if (!list || !card) return;
+    const [inList, inCard] = [list.getBoundingClientRect(), card.getBoundingClientRect()];
+    if (inCard.top >= inList.top && inCard.bottom <= inList.bottom) return;
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    document
-      .getElementById(`room-card-${room.roomTypeId}`)
-      ?.scrollIntoView({ block: "nearest", behavior: reduce ? "auto" : "smooth" });
+    list.scrollBy({ top: inCard.top - inList.top - 8, behavior: reduce ? "auto" : "smooth" });
   };
   const floating =
     view === "map" ? rooms.find(({ roomTypeId }) => roomTypeId === selectedRoom) : undefined;
@@ -130,13 +130,16 @@ export default function AccommodationViews({
       <div
         className={
           view === "split"
-            ? "grid h-[min(760px,calc(100vh-12rem))] min-h-[520px] grid-cols-[minmax(0,620px)_minmax(0,1fr)] gap-6"
+            ? "grid h-[min(760px,calc(100vh-12rem))] min-h-[520px] grid-cols-2 gap-6 xl:grid-cols-[minmax(0,620px)_minmax(0,1fr)]"
             : ""
         }
       >
         {view !== "map" && (
           // List + map: the short cards scroll next to the map.
-          <div className={view === "split" ? "space-y-3 overflow-y-auto pr-1" : "space-y-6"}>
+          <div
+            ref={listRef}
+            className={view === "split" ? "space-y-3 overflow-y-auto pr-1" : "space-y-6"}
+          >
             {rooms.map((room) =>
               renderCard(room, {
                 compact: view === "split",
@@ -174,7 +177,7 @@ export default function AccommodationViews({
             )}
             {floating && (
               // Above Google's logo and terms at the bottom of the map.
-              <div className="absolute bottom-10 left-4 w-[400px] max-w-[calc(100%-2rem)] shadow-xl">
+              <div className="absolute bottom-10 left-4 z-10 w-[460px] max-w-[calc(100%-2rem)] shadow-xl">
                 {renderCard(floating, { compact: true, active: false })}
               </div>
             )}

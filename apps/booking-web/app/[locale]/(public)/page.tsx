@@ -223,7 +223,7 @@ function HomePageContent() {
     : null;
   const guestPlaces = useGuestPlaces(rooms ?? [], mapProperty);
   const severalPlaces = guestPlaces.pins.length > 1;
-  const locationLine = useLocationLine(mapProperty);
+  const locationLine = useLocationLine(mapProperty, guestPlaces.pins);
   const wide = useWideScreen();
   const views = severalPlaces && !!mapsKey && wide;
   const selectRoom = (publicOfferKey: string, roomCount: number) => {

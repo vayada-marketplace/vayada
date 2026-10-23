@@ -83,19 +83,27 @@ export function roomLocation(
  * with "about 1 km". */
 export function useLocationLine(
   property: MapProperty | null,
-): (room: PricingRoom) => string | null {
+  pins: LocationMapPin[],
+): (room: PricingRoom) => { text: string; mainHouse: boolean } | null {
   const t = useTranslations("locationMap");
   const locale = useLocale();
   return (room) => {
     const where = property && roomLocation(room, property.pin);
     if (!where) return null;
-    if (where.atProperty) return t("lineMainHouse");
+    // A place of its own a few metres from the main house shares its pill, so it reads the same.
+    const onMainHousePin = pins.some(
+      (pin) => pin.kind === "property" && pin.roomTypeIds.includes(room.roomTypeId),
+    );
+    if (where.atProperty || onMainHousePin) return { text: t("lineMainHouse"), mainHouse: true };
     const place = where.area ?? t("lineOwnLocation");
-    if (where.distance === null) return place;
-    return t(where.about ? "lineAboutFromMainHouse" : "lineFromMainHouse", {
-      place,
-      distance: formatDistance(where.distance, locale, where.about),
-    });
+    if (where.distance === null) return { text: place, mainHouse: false };
+    return {
+      text: t(where.about ? "lineAboutFromMainHouse" : "lineFromMainHouse", {
+        place,
+        distance: formatDistance(where.distance, locale, where.about),
+      }),
+      mainHouse: false,
+    };
   };
 }
 
