@@ -3,8 +3,10 @@
 import { useEffect, useState } from "react";
 import { ArrowRightIcon, ExclamationTriangleIcon, MapIcon } from "@heroicons/react/24/outline";
 import { locationMapPins } from "@vayada/domain-hotels";
-import { crossAppReauthenticationUrl } from "@vayada/product-onboarding";
+import { createBrowserAuthHandoff, crossAppReauthenticationUrl } from "@vayada/product-onboarding";
 import { useTranslation } from "@/lib/i18n";
+import { ApiErrorResponse } from "@/services/api/client";
+import { getAuthCsrfToken } from "@/services/auth/sessionStore";
 import {
   bookingLocationMapClient,
   type LocationMapSummary,
@@ -24,6 +26,8 @@ export function LocationMapCard({
   const { t } = useTranslation();
   const [summary, setSummary] = useState<LocationMapSummary | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
+  // Members who may not manage booking settings don't get the card (the API answers 403).
+  const [hidden, setHidden] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [saving, setSaving] = useState(false);
   const [saveFailed, setSaveFailed] = useState(false);
@@ -34,8 +38,10 @@ export function LocationMapCard({
     client
       .load(propertyId, controller.signal)
       .then(setSummary)
-      .catch(() => {
-        if (!controller.signal.aborted) setLoadFailed(true);
+      .catch((error) => {
+        if (controller.signal.aborted) return;
+        if (error instanceof ApiErrorResponse && error.status === 403) setHidden(true);
+        else setLoadFailed(true);
       });
     return () => controller.abort();
   }, [client, propertyId, attempt]);
@@ -54,6 +60,7 @@ export function LocationMapCard({
     }
   }
 
+  if (hidden) return null;
   if (!summary) {
     return (
       <section
@@ -79,7 +86,25 @@ export function LocationMapCard({
   }
 
   const { pins, unpinnedRooms } = locationMapPins(summary.rooms, summary.property);
-  const pmsLink = (path: string) => crossAppReauthenticationUrl(PMS_FRONTEND_URL, path);
+  // Into PMS with this hotel selected: the sign-in handoff when available, else PMS's own sign-in.
+  const openPms = async (targetPath: string) => {
+    const csrfToken = getAuthCsrfToken();
+    if (csrfToken) {
+      try {
+        window.location.href = await createBrowserAuthHandoff({
+          csrfToken,
+          routingHints: { propertyId },
+          sourceSurface: "booking-admin",
+          targetPath,
+          targetSurface: "pms-web",
+        });
+        return;
+      } catch {
+        // Require PMS sign-in when the one-time exchange is unavailable.
+      }
+    }
+    window.location.href = crossAppReauthenticationUrl(PMS_FRONTEND_URL, targetPath);
+  };
   const indent = "md:pl-[54px]";
 
   return (
@@ -132,7 +157,13 @@ export function LocationMapCard({
         <>
           <div className={`space-y-2 border-t border-gray-100 pt-3.5 ${indent}`}>
             {pins.length === 0 ? (
-              <Warning text={t("settings.locationMap.noPins")} />
+              <Warning
+                text={
+                  summary.property.pin
+                    ? t("settings.locationMap.noPins")
+                    : t("settings.locationMap.noPinsMissing")
+                }
+              />
             ) : (
               <>
                 <p className="text-[13px] font-semibold text-gray-700">
@@ -164,7 +195,9 @@ export function LocationMapCard({
                 </ol>
                 {pins[0].kind === "property" && (
                   <p className="text-xs text-gray-500">
-                    {t("settings.locationMap.onePropertyPinHint")}
+                    {pins[0].approximate
+                      ? t("settings.locationMap.approximateHint")
+                      : t("settings.locationMap.onePropertyPinHint")}
                   </p>
                 )}
               </>
@@ -180,9 +213,12 @@ export function LocationMapCard({
                       })
                 }
                 link={{
-                  href: pmsLink(
-                    unpinnedRooms.length === 1 ? `/rooms/${unpinnedRooms[0].roomTypeId}` : "/rooms",
-                  ),
+                  onClick: () =>
+                    void openPms(
+                      unpinnedRooms.length === 1
+                        ? `/rooms/${unpinnedRooms[0].roomTypeId}`
+                        : "/rooms",
+                    ),
                   label:
                     unpinnedRooms.length === 1
                       ? t("settings.locationMap.addInRooms")
@@ -198,20 +234,21 @@ export function LocationMapCard({
   );
 }
 
-function Warning({ text, link }: { text: string; link?: { href: string; label: string } }) {
+function Warning({ text, link }: { text: string; link?: { onClick: () => void; label: string } }) {
   return (
     <div className="mt-1 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5">
       <ExclamationTriangleIcon className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
       <div className="space-y-0.5">
         <p className="text-[13px] font-medium text-amber-800">{text}</p>
         {link && (
-          <a
-            href={link.href}
+          <button
+            type="button"
+            onClick={link.onClick}
             className="inline-flex items-center gap-1 text-[13px] font-semibold text-primary-600 hover:text-primary-700"
           >
             {link.label}
-            <ArrowRightIcon className="h-3.5 w-3.5" />
-          </a>
+            <ArrowRightIcon className="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
         )}
       </div>
     </div>

@@ -47,7 +47,10 @@ export default function LocationPage() {
           api={nearbyApi}
           profileApi={sharedHotelSetupApi}
           apiKey={process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? ""}
-          intro={<LocationMapCard propertyId={propertyId} />}
+          // A saved location (pin, visibility) changes what guests see: re-read the card then.
+          intro={(profileRevision) => (
+            <LocationMapCard key={profileRevision} propertyId={propertyId} />
+          )}
         />
       ) : (
         <div role={error ? "alert" : "status"}>

@@ -107,15 +107,19 @@ test("turns the location map on and shows a pin for each room's place", async ({
   await expect(pins.nth(0)).toContainText("Schwabing Loft");
   await expect(pins.nth(0)).toContainText("Leopoldstraße 12, Munich");
   await expect(card.getByText("Family Apartment has no location, so it has no pin.")).toBeVisible();
-  const add = card.getByRole("link", { name: "Add it in Rooms & Rates" });
-  await expect(add).toHaveAttribute(
-    "href",
-    /rooms%2F00000000-0000-4000-8000-000000000004|\/rooms\/00000000-0000-4000-8000-000000000004/,
-  );
-
   await toggle.click();
   await expect(toggle).toHaveAttribute("aria-checked", "false");
   expect(state.saves).toEqual([{ enabled: true }, { enabled: false }]);
+
+  // The room without a location opens in PMS (through PMS sign-in when there is no handoff).
+  await toggle.click();
+  await page.route(/^http:\/\/pms\.localhost:3004\//, (route) =>
+    route.fulfill({ contentType: "text/html", body: "<p>PMS</p>" }),
+  );
+  await card.getByRole("button", { name: "Add it in Rooms & Rates" }).click();
+  await expect
+    .poll(() => decodeURIComponent(page.url()))
+    .toContain("/rooms/00000000-0000-4000-8000-000000000004");
 });
 
 test("shows one pin at the property when no room has its own location", async ({ page }) => {

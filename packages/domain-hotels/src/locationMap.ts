@@ -25,6 +25,8 @@ export type LocationMapPin = LocationMapPoint & {
   address: string | null;
   roomTypeIds: string[];
   kind: "rooms" | "property";
+  /** The property's pin rounded to its area ("Approximate"): drawn as an area, not an exact spot. */
+  approximate: boolean;
 };
 
 export type LocationMapPins = {
@@ -33,9 +35,16 @@ export type LocationMapPins = {
   unpinnedRooms: LocationMapRoomInput[];
 };
 
-// Five decimals is about a metre: two rooms typed at "the same" spot share one pin.
-const key = ({ latitude, longitude }: LocationMapPoint) =>
-  `${latitude.toFixed(5)},${longitude.toFixed(5)}`;
+// Rooms closer than this share one pin: the same building, typed or dragged a few metres apart.
+const SAME_PLACE_METRES = 25;
+
+function metresBetween(a: LocationMapPoint, b: LocationMapPoint): number {
+  const toRadians = Math.PI / 180;
+  const x =
+    (b.longitude - a.longitude) * toRadians * Math.cos(((a.latitude + b.latitude) / 2) * toRadians);
+  const y = (b.latitude - a.latitude) * toRadians;
+  return Math.hypot(x, y) * 6_371_000;
+}
 
 export function locationMapPins(
   rooms: readonly LocationMapRoomInput[],
@@ -53,24 +62,32 @@ export function locationMapPins(
                 address: property.address ?? null,
                 roomTypeIds: rooms.map((room) => room.roomTypeId),
                 kind: "property",
+                approximate: property.mapDisplayMode === "approximate",
               },
             ]
           : [],
       unpinnedRooms: [],
     };
   }
-  const groups = new Map<string, LocationMapRoomInput[]>();
-  for (const room of pinned)
-    groups.set(key(room.pin!), [...(groups.get(key(room.pin!)) ?? []), room]);
+  // Each room joins the first pin within SAME_PLACE_METRES of it, in room order.
+  const groups: LocationMapRoomInput[][] = [];
+  for (const room of pinned) {
+    const near = groups.find(
+      (group) => metresBetween(group[0].pin!, room.pin!) < SAME_PLACE_METRES,
+    );
+    if (near) near.push(room);
+    else groups.push([room]);
+  }
   const unpinnedRooms = rooms.filter((room) => !room.pin);
-  const everyRoomAtOneSpot = groups.size === 1 && unpinnedRooms.length === 0;
+  const everyRoomAtOneSpot = groups.length === 1 && unpinnedRooms.length === 0;
   return {
-    pins: [...groups.values()].map((group) => ({
+    pins: groups.map((group) => ({
       ...group[0].pin!,
       label: everyRoomAtOneSpot ? property.name : group.map((room) => room.name).join(", "),
       address: group.find((room) => room.address)?.address ?? null,
       roomTypeIds: group.map((room) => room.roomTypeId),
       kind: everyRoomAtOneSpot ? "property" : "rooms",
+      approximate: false,
     })),
     unpinnedRooms,
   };

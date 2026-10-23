@@ -35,6 +35,7 @@ describe("location map pins (VAY-2126)", () => {
           address: "Leopoldstraße 12",
           roomTypeIds: ["a"],
           kind: "rooms",
+          approximate: false,
         },
         {
           latitude: 48.1291,
@@ -43,10 +44,25 @@ describe("location map pins (VAY-2126)", () => {
           address: null,
           roomTypeIds: ["b"],
           kind: "rooms",
+          approximate: false,
         },
       ],
       unpinnedRooms: [room("c", null)],
     });
+  });
+
+  it("shares one pin between rooms within 25 metres, however their decimals round", () => {
+    // About 1 m apart, on either side of a 5-decimal grid line; then about 40 m apart.
+    expect(
+      locationMapPins(
+        [room("a", [48.156345, 11.58242]), room("b", [48.156354, 11.58242])],
+        property,
+      ).pins,
+    ).toHaveLength(1);
+    expect(
+      locationMapPins([room("a", [48.15634, 11.58242]), room("b", [48.1567, 11.58242])], property)
+        .pins,
+    ).toHaveLength(2);
   });
 
   it("shares one pin between rooms at the same spot, named after the property when every room is there", () => {
@@ -81,10 +97,15 @@ describe("location map pins (VAY-2126)", () => {
           address: "Maximilianstraße 3, 80539 Munich",
           roomTypeIds: ["a", "b"],
           kind: "property",
+          approximate: false,
         },
       ],
       unpinnedRooms: [],
     });
+    // "Approximate": the property's area, drawn as an area.
+    expect(
+      locationMapPins([room("a", null)], { ...property, mapDisplayMode: "approximate" }).pins,
+    ).toEqual([expect.objectContaining({ kind: "property", approximate: true })]);
     expect(
       locationMapPins([room("a", null)], { ...property, mapDisplayMode: "hidden" }).pins,
     ).toEqual([]);

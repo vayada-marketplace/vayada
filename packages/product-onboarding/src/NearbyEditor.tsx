@@ -24,8 +24,9 @@ export default function NearbyEditor({
   api: NearbyApi;
   profileApi: SharedHotelSetupApi;
   apiKey: string;
-  /** Shown under the page header, above the editor (Booking Admin's location map switch, VAY-2126). */
-  intro?: ReactNode;
+  /** Shown under the page header, above the editor (Booking Admin's location map switch, VAY-2126). Given
+   * the saved profile revision, so it can re-read what depends on the location saved below. */
+  intro?: (profileRevision: number) => ReactNode;
 }) {
   const editor = useNearbyEditor(propertyId, api, profileApi);
   const [adding, setAdding] = useState(false);
@@ -135,7 +136,7 @@ export default function NearbyEditor({
           {editor.notice}
         </p>
       )}
-      {intro}
+      {intro?.(profile.profileRevision)}
       {preview ? (
         <div className="mx-auto max-w-2xl">
           <p className="mb-4 text-xs text-gray-500">
