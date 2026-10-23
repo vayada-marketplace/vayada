@@ -5,6 +5,7 @@ import { useState, type DragEvent } from "react";
 import {
   ADDON_CATEGORIES,
   AddonEditor,
+  AddonGuestPreview,
   addonLeadTimeNoticeKey,
   emptyAddonValues,
   type AddonEditorValues,
@@ -13,6 +14,7 @@ import { buildSharedHotelSetupRedirectPath } from "@vayada/product-onboarding";
 import Link from "next/link";
 import {
   DocumentDuplicateIcon,
+  EyeIcon,
   MagnifyingGlassIcon,
   PencilIcon,
   PhotoIcon,
@@ -22,7 +24,6 @@ import { PrimaryActionButton, ToggleSwitch } from "@/components/ui";
 import type { AddonItem, AddonSettings } from "@/services/settings";
 import { cn, formatCurrency } from "@/lib/utils";
 import { PageHeader } from "@/components/layout/PageLayout";
-
 
 const PRICING_MODEL_LABELS: Record<string, string> = {
   "false:false": "addons.editor.flatFee",
@@ -168,6 +169,9 @@ export default function AddonsTab({
     setItemError(null);
     setIsEditorOpen(true);
   };
+
+  // VAY-2231: the add-on whose guest preview is open.
+  const [previewing, setPreviewing] = useState<AddonItem | null>(null);
 
   const closeEditor = () => {
     if (savingItem) return;
@@ -522,6 +526,15 @@ export default function AddonsTab({
                   </button>
                   <button
                     type="button"
+                    onClick={() => setPreviewing(addon)}
+                    aria-label={t("addons.list.preview", { name: addon.name })}
+                    title={t("addons.list.previewAsGuest")}
+                    className={iconButtonClass}
+                  >
+                    <EyeIcon className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => openEditEditor(addon)}
                     disabled={currencyMissing}
                     aria-label={t("admin.editName", { name: addon.name })}
@@ -581,6 +594,22 @@ export default function AddonsTab({
         </div>
       </div>
 
+      {previewing && (
+        <AddonGuestPreview
+          translate={t}
+          values={toDraft(previewing, propertyCurrency || previewing.currency)}
+          currency={propertyCurrency || previewing.currency}
+          onEdit={
+            currencyMissing
+              ? undefined
+              : () => {
+                  setPreviewing(null);
+                  openEditEditor(previewing);
+                }
+          }
+          onClose={() => setPreviewing(null)}
+        />
+      )}
       {isEditorOpen && (
         <AddonEditor
           translate={t}

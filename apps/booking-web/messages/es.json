@@ -191,7 +191,17 @@
     "pricePerDay": "Precio por día",
     "priceLabel": "Precio",
     "addedToTrip": "Añadido al viaje",
-    "addToTrip": "Añadir al viaje"
+    "addToTrip": "Añadir al viaje",
+    "seeDetails": "Ver detalles",
+    "remove": "Quitar",
+    "previousPhoto": "Foto anterior",
+    "nextPhoto": "Foto siguiente",
+    "showPhoto": "Mostrar foto {number}",
+    "closeDetails": "Cerrar los detalles del extra",
+    "upToGuests": "{count, plural, one {Hasta # huésped} other {Hasta # huéspedes}}",
+    "inYourStay": "En tu estancia: {detail}",
+    "groupsUpTo": "Para grupos de hasta {count} huéspedes.",
+    "tooSoonForStay": "{notice}: ya no se puede añadir a esta estancia."
   },
   "book": {
     "guestInformation": "Información del Huésped",

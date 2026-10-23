@@ -194,7 +194,15 @@
     "pricePerPersonNight": "Preis pro Person / Nacht",
     "needsNotice": "{hours, plural, =48 {Nur mit 2 Tagen Vorlauf buchbar} =72 {Nur mit 3 Tagen Vorlauf buchbar} =168 {Nur mit 1 Woche Vorlauf buchbar} other {Nur mit # Stunden Vorlauf buchbar}}",
     "showPhoto": "Foto {number} anzeigen",
-    "closeDetails": "Zusatzleistungsdetails schließen"
+    "closeDetails": "Zusatzleistungsdetails schließen",
+    "seeDetails": "Details ansehen",
+    "remove": "Entfernen",
+    "previousPhoto": "Vorheriges Foto",
+    "nextPhoto": "Nächstes Foto",
+    "upToGuests": "{count, plural, one {Bis zu # Gast} other {Bis zu # Gäste}}",
+    "inYourStay": "In Ihrem Aufenthalt: {detail}",
+    "groupsUpTo": "Für Gruppen bis {count} Gäste.",
+    "tooSoonForStay": "{notice}. Für diesen Aufenthalt ist es zu spät."
   },
   "book": {
     "guestInformation": "Gastinformationen",
