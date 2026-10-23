@@ -185,6 +185,8 @@ test.describe("booking page location map", () => {
     // The narrowest phone it's made for.
     await page.setViewportSize({ width: 360, height: 760 });
     await page.goto("/");
+    // The first visit's analytics question sits over the bottom of a phone screen.
+    await page.getByRole("button", { name: "Reject analytics" }).click();
     // No view switch and no Location section on a phone: the cards say where each room is.
     await expect(page.getByRole("heading", { name: "Available Accommodations" })).toBeVisible();
     await expect(page.getByRole("group", { name: "Show the accommodations as" })).toHaveCount(0);
@@ -290,6 +292,7 @@ test.describe("booking page location map", () => {
     await setup(page, { locationMap: MIXED_MAP, rooms: mixed });
     await page.setViewportSize({ width: 820, height: 1180 });
     await page.goto("/");
+    await page.getByRole("button", { name: "Reject analytics" }).click();
     await page.getByTestId("room-card-loft").scrollIntoViewIfNeeded();
     await page.getByRole("button", { name: "Map", exact: true }).click();
     const map = page.getByRole("dialog", { name: "Accommodations on the map" });
