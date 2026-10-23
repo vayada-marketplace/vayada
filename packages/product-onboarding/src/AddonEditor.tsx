@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { GuestAddonCard, formatGuestPrice, guestAddonAddClass, guestAddonUnit } from "./GuestAddon";
 
 export type AddonPhoto = {
   imageUrl: string;
@@ -48,7 +49,7 @@ export function emptyAddonValues(currency: string): AddonEditorValues {
     partnerCommissionRate: "",
   };
 }
-// [label, description, perPerson, perNight, price label, preview unit]
+// [label, description, perPerson, perNight, price label]
 const models = [
   [
     "addons.editor.flatFee",
@@ -56,7 +57,6 @@ const models = [
     false,
     false,
     "addons.editor.pricePerBooking",
-    "addons.editor.unitPerBooking",
   ],
   [
     "addons.editor.perPerson",
@@ -64,7 +64,6 @@ const models = [
     true,
     false,
     "addons.editor.pricePerGuest",
-    "addons.editor.unitPerGuest",
   ],
   [
     "addons.editor.perNight",
@@ -72,7 +71,6 @@ const models = [
     false,
     true,
     "addons.editor.pricePerNight",
-    "addons.editor.unitPerNight",
   ],
   [
     "addons.editor.perPersonNight",
@@ -80,7 +78,6 @@ const models = [
     true,
     true,
     "addons.editor.pricePerGuestNight",
-    "addons.editor.unitPerGuestNight",
   ],
 ] as const;
 /** The add-on categories, in the order the editor and the Add-ons filter chips show them. */
@@ -525,35 +522,18 @@ export function AddonEditor({
               <h3 className="text-xs font-semibold tracking-widest text-gray-500">
                 {t("addons.editor.checkoutPreview")}
               </h3>
-              <div
-                aria-hidden="true"
-                className="mt-3 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm"
-              >
-                {cover ? (
-                  <img src={cover.imageUrl} alt="" className="h-36 w-full object-cover" />
-                ) : (
-                  <div className="flex h-36 items-center justify-center bg-primary-50 text-sm text-gray-500">
-                    {t("addons.editor.noPhotoYet")}
-                  </div>
-                )}
-                <div className="space-y-2 p-4">
-                  <p className="font-semibold text-gray-900">
-                    {values.name.trim() || t("addons.editor.untitledAddOn")}
-                  </p>
-                  <p className="line-clamp-3 text-sm text-gray-600">
-                    {values.description.trim() || t("addons.editor.previewDescription")}
-                  </p>
-                  <div className="flex items-end justify-between gap-2 pt-1">
-                    <div>
-                      <p className="font-semibold text-gray-900">{formatPrice(price, currency)}</p>
-                      <p className="text-xs text-gray-500">{t(model[5])}</p>
-                    </div>
-                    <span className="rounded-lg bg-primary-600 px-3 py-1.5 text-sm font-medium text-white">
-                      {t("addons.editor.add")}
-                    </span>
-                  </div>
-                  {notice && <p className="text-xs text-gray-500">{t(notice)}</p>}
-                </div>
+              {/* The booking page's own card (VAY-2231). */}
+              <div aria-hidden="true" className="mt-3">
+                <GuestAddonCard
+                  name={values.name.trim() || t("addons.editor.untitledAddOn")}
+                  description={values.description.trim()}
+                  photo={cover?.imageUrl ?? null}
+                  price={formatGuestPrice(price, currency)}
+                  unit={guestAddonUnit(values.perPerson, values.perNight)}
+                  action={<span className={guestAddonAddClass}>Add</span>}
+                >
+                  {notice && <p className="mt-2 text-xs text-gray-500">{t(notice)}</p>}
+                </GuestAddonCard>
               </div>
               <p className="mt-3 text-xs text-gray-500">{t("addons.editor.previewHint")}</p>
             </div>
@@ -630,7 +610,6 @@ export const AddonEditorMessages = {
   "addons.editor.photos": "Photos",
   "addons.editor.upTo5": "Up to 5",
   "addons.editor.cover": "COVER",
-  "addons.editor.add": "Add",
   "addons.editor.addPhotos": "Add photos",
   "addons.editor.duration": "Duration",
   "addons.editor.eG2Hours": "e.g., 2 hours",
@@ -676,12 +655,6 @@ export const AddonEditorMessages = {
   "addons.editor.priceExample": "Example: 2 guests, 3 nights → {total} total",
   "addons.editor.moreOptions": "More options",
   "addons.editor.checkoutPreview": "CHECKOUT PREVIEW",
-  "addons.editor.noPhotoYet": "No photo yet",
   "addons.editor.untitledAddOn": "Untitled add-on",
-  "addons.editor.previewDescription": "Add a description so guests know what they get.",
-  "addons.editor.unitPerBooking": "per booking",
-  "addons.editor.unitPerGuest": "per guest",
-  "addons.editor.unitPerNight": "per night",
-  "addons.editor.unitPerGuestNight": "per guest per night",
   "addons.editor.previewHint": "A preview of how this add-on appears in the booking flow.",
 };
