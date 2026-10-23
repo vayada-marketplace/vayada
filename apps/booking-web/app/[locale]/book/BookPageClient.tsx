@@ -121,6 +121,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   const tGuestErrors = useTranslations("guestErrors");
   const tPayment = useTranslations("payment");
   const tGroup = useTranslations("groupRooms");
+  const tCommon = useTranslations("common");
   const { hotel } = useHotel();
   const [termsAcknowledgement, setTermsAcknowledgement] =
     useState<QuoteTermsAcknowledgement | null>(null);
@@ -169,7 +170,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     // VAY-2195: a refresh or Back keeps what this tab chose for the same hand-off.
     const handOff = bookEntry(window.location.search);
     setEntry(handOff);
-    setFromPicks(params.getAll("pick").length > 0);
+    setFromPicks(decodePicks(params.getAll("pick")) !== null);
     const home = new URLSearchParams();
     for (const name of ["checkIn", "checkOut", "adults", "children", "promoCode", "rooms"])
       if (params.get(name)) home.set(name, params.get(name)!);
@@ -442,7 +443,8 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     (addonCatalogue !== null || addonError);
   const step = settled
     ? reachableStep(wanted, steps, {
-        rooms: roomsComplete,
+        // A group's room that breaks its limits keeps it on the rooms step (VAY-2320).
+        rooms: roomsComplete && !guestProblems,
         extras: addons !== null,
         details: detailsReady,
       })
@@ -609,6 +611,8 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   // A room card's hand-off goes back to the cards; the room form goes back to itself.
   const backToRooms = () => {
     const params = new URLSearchParams(window.location.search);
+    // A group's rooms are chosen again on the hotel page, the others kept (VAY-2320).
+    if (fromPicks) return router.push(`/?${homeSearch}`);
     if (!params.get("offer")) return goBack("rooms");
     const home = new URLSearchParams();
     for (const name of ["checkIn", "checkOut", "adults", "children", "promoCode"])
@@ -648,13 +652,11 @@ function RoomQuoteForm({ slug }: { slug: string }) {
             image: room.images?.[0]?.url,
             // VAY-2320: who sleeps in each of a group's rooms.
             guests: [
-              `${Number(choice.adults) || 0} ${Number(choice.adults) === 1 ? "adult" : "adults"}`,
-              choice.childAges.length
-                ? `${choice.childAges.length} ${choice.childAges.length === 1 ? "child" : "children"}`
-                : null,
-            ]
-              .filter(Boolean)
-              .join(", "),
+              tCommon("adults", { count: Number(choice.adults) || 0 }),
+              ...(choice.childAges.length
+                ? [tCommon("children", { count: choice.childAges.length })]
+                : []),
+            ].join(", "),
           },
         ]
       : [];
@@ -924,12 +926,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                   )
                 }
               />
-              {noWayToPay && (
-                <Notice
-                  tone="red"
-                  title={tPayment(tooSoon.length ? "noWayToPayThisSoon" : "noWayToPay")}
-                />
-              )}
+              {priceNotice}
               <div className="flex justify-end">
                 <button
                   type="button"

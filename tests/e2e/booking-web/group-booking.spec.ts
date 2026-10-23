@@ -120,6 +120,29 @@ for (const width of [1440, 390]) {
   });
 }
 
+test("says when the rooms can't be priced and sends the group back to choose them", async ({
+  page,
+}) => {
+  await mockGroupCheckout(page);
+  await page.route("**/bookings/quote", (route) =>
+    route.fulfill({
+      status: 409,
+      json: {
+        statusCode: 409,
+        error: "Conflict",
+        message: "These rooms are no longer available for your dates.",
+      },
+    }),
+  );
+  await chooseTwoRooms(page, 1440);
+  await page.getByTestId("room-guests-2").getByLabel("Child 1: age at check-in").selectOption("5");
+  const notice = page.getByText("No booking was made and nothing was charged.").locator("..");
+  await expect(notice).toBeVisible();
+  await notice.getByRole("button", { name: "Choose another room" }).click();
+  await expect(page).toHaveURL(/\/(en)?\?checkIn=2026-11-10.*rooms=2/);
+  await expect(page.getByTestId("rooms-bar")).toContainText("Deluxe Double Room");
+});
+
 const groupBooking = {
   id: "booking-2320",
   bookingReference: "VAY-2320",
