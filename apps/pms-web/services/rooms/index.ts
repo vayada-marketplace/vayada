@@ -92,6 +92,11 @@ export interface RoomType {
   locationAddress: string;
   latitude: number | null;
   longitude: number | null;
+  /** How guests see the room's place (VAY-2321); undefined until the host chooses (see roomLocationSource). */
+  locationSource?: RoomLocationSource;
+  locationPrecision?: RoomLocationPrecision;
+  locationArea?: string;
+  showMapInDetails?: boolean;
   amenities: string[];
   images: RoomImageReference[];
   roomMediaRevision: number;
@@ -144,6 +149,10 @@ export interface RoomTypeCreate {
   locationAddress?: string;
   latitude?: number | null;
   longitude?: number | null;
+  locationSource?: RoomLocationSource;
+  locationPrecision?: RoomLocationPrecision;
+  locationArea?: string;
+  showMapInDetails?: boolean;
   amenities?: string[];
   images?: RoomImageReference[];
   bedType?: string;
@@ -470,6 +479,7 @@ function toRoomType(propertyId: string, roomType: PmsOperationsRoomType): RoomTy
     locationAddress: asString(roomType.attributes.locationAddress),
     latitude: asNullableNumber(roomType.attributes.latitude),
     longitude: asNullableNumber(roomType.attributes.longitude),
+    ...roomLocationDisplay(roomType.attributes),
     amenities: roomAmenityLabels(roomType.amenities),
     images: roomType.media.map((image) =>
       image.altText === undefined
@@ -666,7 +676,11 @@ export const roomsService = {
           }
           throw error;
         }
-        if (location.locationAddress || location.latitude != null || location.longitude != null) {
+        if (
+          Object.values(location).some(
+            (value) => value !== undefined && value !== null && value !== "",
+          )
+        ) {
           await pmsOperationsRoomsReadService.updateRoomType(propertyId, roomTypeId, location);
         }
         // Confirming, even an empty list, marks the amenities reviewed for room publication.
@@ -914,6 +928,12 @@ function changedRoomLocation(next: RoomTypeUpdate, saved: RoomType): RoomTypeUpd
   }
   if ((next.latitude ?? null) !== saved.latitude) location.latitude = next.latitude ?? null;
   if ((next.longitude ?? null) !== saved.longitude) location.longitude = next.longitude ?? null;
+  // Only choices the host made: a default shown but never touched is not written (VAY-2321).
+  for (const key of ROOM_LOCATION_DISPLAY_KEYS) {
+    if (next[key] !== undefined && next[key] !== saved[key]) {
+      Object.assign(location, { [key]: next[key] });
+    }
+  }
   return Object.keys(location).length > 0 ? location : null;
 }
 
@@ -1384,7 +1404,32 @@ function roomTypeUpdatePayload(data: RoomTypeUpdate) {
   if (Object.hasOwn(data, "locationAddress")) payload.locationAddress = data.locationAddress;
   if (Object.hasOwn(data, "latitude")) payload.latitude = data.latitude ?? null;
   if (Object.hasOwn(data, "longitude")) payload.longitude = data.longitude ?? null;
+  for (const key of ROOM_LOCATION_DISPLAY_KEYS) {
+    if (data[key] !== undefined) Object.assign(payload, { [key]: data[key] });
+  }
   return payload;
+}
+
+export type RoomLocationSource = "property" | "custom";
+export type RoomLocationPrecision = "exact" | "approximate";
+const ROOM_LOCATION_DISPLAY_KEYS = [
+  "locationSource",
+  "locationPrecision",
+  "locationArea",
+  "showMapInDetails",
+] as const;
+
+/** The VAY-2321 choices as saved; a key the host never chose stays undefined, so a save leaves it unwritten. */
+function roomLocationDisplay(attributes: Record<string, unknown>): Partial<RoomType> {
+  const { locationSource, locationPrecision, locationArea, showMapInDetails } = attributes;
+  return {
+    ...(locationSource === "property" || locationSource === "custom" ? { locationSource } : {}),
+    ...(locationPrecision === "exact" || locationPrecision === "approximate"
+      ? { locationPrecision }
+      : {}),
+    ...(typeof locationArea === "string" ? { locationArea } : {}),
+    ...(typeof showMapInDetails === "boolean" ? { showMapInDetails } : {}),
+  };
 }
 
 export function roomTypeUpdateForm(r: RoomType): RoomTypeUpdate {

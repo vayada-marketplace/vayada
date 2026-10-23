@@ -154,6 +154,33 @@ export async function getPmsPropertyProfile(): Promise<PmsPropertyProfile> {
   return toPmsPropertyProfile(status, profile);
 }
 
+/** The property's own place for room locations (VAY-2321): "Same as property" rooms use it, and it is the
+ * reference for a room at its own address. */
+export type PmsPropertyPlace = {
+  propertyId: string;
+  name: string;
+  address: string;
+  pin: { latitude: number; longitude: number } | null;
+};
+
+export async function getPmsPropertyPlace(): Promise<PmsPropertyPlace> {
+  const propertyId = await resolveSelectedPmsPropertyId("loading the property's location");
+  const { profile } = await sharedHotelSetupApi.getPropertyProfile(propertyId);
+  const { streetAddress, postalCode, city, latitude, longitude } = profile.location;
+  return {
+    propertyId,
+    name: profile.displayName,
+    address: [streetAddress, [postalCode, city].filter(Boolean).join(" ")]
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .join(", "),
+    pin:
+      typeof latitude === "number" && typeof longitude === "number"
+        ? { latitude, longitude }
+        : null,
+  };
+}
+
 export async function updatePmsPropertyProfile(
   data: Partial<PmsPropertyProfile>,
 ): Promise<PmsPropertyProfile> {

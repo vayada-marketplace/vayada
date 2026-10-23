@@ -9,7 +9,8 @@ import { mockGoogleMaps, type FakeGooglePlace } from "../support/googleMapsFake"
 import { watchPageHealth } from "../support/pageHealth";
 
 // VAY-2126: a room type's own address and pin. Google address search fills the coordinates and the pin can be
-// dragged; without Google the host types them, with a comma or a dot.
+// dragged; without Google the host types them, with a comma or a dot. VAY-2321: "Same as property" (the default)
+// or a "Separate location", shown to guests exactly or as an area, and "Show map in room details".
 const roomTypeId = "22222222-2222-4222-8222-222222222222";
 const acceptedAt = "2026-10-22T08:00:00.000Z";
 // The dev server's Maps key: CI's pms-web job and playwright.config.ts start it with this fake key.
@@ -22,7 +23,11 @@ const leopoldstrasse: FakeGooglePlace = {
   formattedAddress: "Leopoldstraße 12, 80802 München, Germany",
   latitude: 48.1563412,
   longitude: 11.5824198,
+  area: "Schwabing",
 };
+// The mocked property's own pin (pmsWebMocks' shared profile: Alpenrose Munich, Alpenstrasse 12).
+const propertyPin = "48.1372,11.5756";
+const HANDOFF_CODE = "e2e-room-location-handoff-code-0123456789abcdef";
 
 test.describe("pms-web room location", () => {
   test("fills the pin from a picked address, takes a dragged pin and saves both", async ({
@@ -35,8 +40,11 @@ test.describe("pms-web room location", () => {
 
     await page.goto(`/rooms/${roomTypeId}`);
     const location = page.locator("main");
-    await expect(location.getByText("No location yet")).toBeVisible();
-    await expect(location.getByText("Add an address to see the pin on the map.")).toBeVisible();
+    await page.getByRole("radio", { name: /Separate location/ }).click();
+    await expect(location.getByText("Pick an address to place the pin")).toBeVisible();
+    await expect(
+      location.getByText("Search above, or click the map to drop the pin."),
+    ).toBeVisible();
 
     // Keyboard: the arrow highlights the suggestion and Enter takes it.
     const address = page.getByRole("combobox", { name: "Address" });
@@ -48,6 +56,7 @@ test.describe("pms-web room location", () => {
     await address.press("Enter");
 
     await expect(address).toHaveValue("Leopoldstraße 12, 80802 München, Germany");
+    await page.getByRole("button", { name: /Coordinates \(advanced\)/ }).click();
     await expect(page.getByLabel("Latitude")).toHaveValue("48.156341");
     await expect(page.getByLabel("Longitude")).toHaveValue("11.58242");
     await expect(location.getByText("Pin set")).toBeVisible();
@@ -59,7 +68,10 @@ test.describe("pms-web room location", () => {
       await page.evaluate(
         () => (window as { vayadaE2ePlaceQueries?: string[] }).vayadaE2ePlaceQueries,
       ),
-    ).toEqual(["suggest:Leopold", "fields:made-up-leopoldstrasse-12:formattedAddress,location"]);
+    ).toEqual([
+      "suggest:Leopold",
+      "fields:made-up-leopoldstrasse-12:formattedAddress,location,addressComponents",
+    ]);
 
     await expect(map).toHaveAttribute("data-center", "48.156341,11.58242");
     await expect(map).toHaveAttribute("data-zoom", "17");
@@ -81,7 +93,9 @@ test.describe("pms-web room location", () => {
       .poll(() => backend.locationWrites)
       .toEqual([
         expect.objectContaining({
+          locationSource: "custom",
           locationAddress: "Leopoldstraße 12, 80802 München, Germany",
+          locationArea: "Schwabing",
           latitude: 48.156512,
           longitude: 11.583012,
         }),
@@ -98,6 +112,7 @@ test.describe("pms-web room location", () => {
     await mockGoogleMaps(page, { places: [leopoldstrasse], placesUnavailable: true });
 
     await page.goto(`/rooms/${roomTypeId}`);
+    await page.getByRole("radio", { name: /Separate location/ }).click();
     const address = page.getByRole("combobox", { name: "Address" });
     // One failed request is treated as a blip; the second turns search off.
     await address.fill("Leop");
@@ -128,6 +143,7 @@ test.describe("pms-web room location", () => {
     await mockGoogleMaps(page, { authFailure: true });
 
     await page.goto(`/rooms/${roomTypeId}`);
+    await page.getByRole("radio", { name: /Separate location/ }).click();
     await expect(page.getByText("The map couldn't load")).toBeVisible();
     await expect(page.getByRole("combobox", { name: "Address" })).toHaveCount(0);
     // Google rejected the key: trying again can't help, so it isn't offered.
@@ -160,6 +176,7 @@ test.describe("pms-web room location", () => {
       .poll(() => backend.locationWrites)
       .toEqual([
         expect.objectContaining({
+          locationSource: "custom",
           locationAddress: "Leopoldstraße 12, Munich",
           latitude: 48.1565,
           longitude: 11.583,
@@ -171,16 +188,30 @@ test.describe("pms-web room location", () => {
     const backend = await mockRoomBackend(page, { latitude: 48.1565 });
 
     await page.goto(`/rooms/${roomTypeId}`);
+    // Without a whole pin of its own the room is at the property, and an untouched room writes nothing.
+    await expect(page.getByRole("radio", { name: /Same as property/ })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    const save = page.getByRole("button", { name: "Save Changes" });
+    await save.click();
+    await expect(page.getByText("Room type updated successfully")).toBeVisible();
+    expect(backend.locationWrites).toEqual([]);
+
+    // Its own place shows what is wrong with the half pair, and Save still takes the room.
+    await page.getByRole("radio", { name: /Separate location/ }).click();
     await expect(page.getByLabel("Latitude")).toHaveValue("48.1565");
     await expect(page.getByLabel("Longitude")).toHaveValue("");
     await expect(
       page.getByText("Enter both latitude and longitude, or leave both empty."),
     ).toBeVisible();
-    const save = page.getByRole("button", { name: "Save Changes" });
     await expect(save).toBeEnabled();
     await save.click();
-    await expect(page.getByText("Room type updated successfully")).toBeVisible();
-    expect(backend.locationWrites).toEqual([]);
+    await expect
+      .poll(() => backend.locationWrites)
+      .toEqual([expect.objectContaining({ locationSource: "custom" })]);
+    // The half pair the host didn't touch isn't written.
+    expect(backend.locationWrites[0]).not.toHaveProperty("latitude");
   });
 
   test("removes a saved location", async ({ page }) => {
@@ -191,6 +222,14 @@ test.describe("pms-web room location", () => {
     });
 
     await page.goto(`/rooms/${roomTypeId}`);
+    // Saved before VAY-2321 with its own pin, away from the property: a separate location.
+    await expect(page.getByRole("radio", { name: /Separate location/ })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    if (hasMapsKey) {
+      await page.getByRole("button", { name: /Coordinates \(advanced\)/ }).click();
+    }
     await expect(page.getByLabel("Latitude")).toHaveValue("48.1565");
     await expect(page.getByLabel("Longitude")).toHaveValue("11.583");
     await expect(page.locator("main").getByText("Pin set")).toBeVisible();
@@ -202,14 +241,181 @@ test.describe("pms-web room location", () => {
     }
 
     await page.getByRole("button", { name: "Remove location" }).click();
-    await expect(page.locator("main").getByText("No location yet")).toBeVisible();
+    // Still its own place, now without a pin.
+    await expect(page.locator("main").getByText("Pick an address to place the pin")).toBeVisible();
     await expect(page.getByLabel("Latitude")).toHaveValue("");
     await expect(page.getByLabel("Longitude")).toHaveValue("");
 
     await page.getByRole("button", { name: "Save Changes" }).click();
     await expect
       .poll(() => backend.locationWrites)
-      .toEqual([expect.objectContaining({ locationAddress: "", latitude: null, longitude: null })]);
+      .toEqual([
+        expect.objectContaining({
+          locationSource: "custom",
+          locationAddress: "",
+          latitude: null,
+          longitude: null,
+        }),
+      ]);
+  });
+
+  test("uses the property's place by default, and the room-details map switch saves on its own (VAY-2321)", async ({
+    page,
+  }) => {
+    const backend = await mockRoomBackend(page);
+    await page.goto(`/rooms/${roomTypeId}`);
+    const location = page.locator("main");
+    await expect(page.getByRole("radio", { name: /Same as property/ })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    await expect(location.getByText("Alpenrose Munich", { exact: true })).toBeVisible();
+    await expect(location.getByText("Alpenstrasse 12, 80331 Munich")).toBeVisible();
+    await expect(location.getByText("Pin set")).toBeVisible();
+    if (hasMapsKey) {
+      // A small map of the property, not an editor.
+      await expect(page.getByTestId("google-address-map-canvas")).toHaveAttribute(
+        "data-marker",
+        propertyPin,
+      );
+      await expect(page.getByTestId("google-address-map-canvas")).toHaveAttribute(
+        "data-marker-draggable",
+        "false",
+      );
+    }
+    await expect(page.getByRole("combobox", { name: "Address" })).toHaveCount(0);
+
+    const detailsMap = page.getByRole("switch", { name: "Show map in room details" });
+    await expect(detailsMap).toHaveAttribute("aria-checked", "true");
+    await detailsMap.click();
+    await expect(detailsMap).toHaveAttribute("aria-checked", "false");
+    await page.getByRole("button", { name: "Save Changes" }).click();
+    await expect
+      .poll(() => backend.locationWrites)
+      .toEqual([expect.objectContaining({ showMapInDetails: false })]);
+    expect(Object.keys(backend.locationWrites[0]).sort()).toEqual([
+      "commandId",
+      "idempotencyKey",
+      "showMapInDetails",
+    ]);
+  });
+
+  test("opens Booking Admin's Location page in a new tab to edit the property's address", async ({
+    page,
+  }) => {
+    await mockRoomBackend(page);
+    const destination = `${new URL("/handoff", bookingAdminOrigin()).toString()}#code=${HANDOFF_CODE}`;
+    const handoffs: unknown[] = [];
+    await page.route("**/auth/handoff/create", (route) => {
+      handoffs.push(route.request().postDataJSON());
+      return route.fulfill({ json: { destination } });
+    });
+    await page.context().route(
+      (url) => url.origin === bookingAdminOrigin() && url.pathname === "/handoff",
+      (route) =>
+        route.fulfill({ contentType: "text/html", body: "<!doctype html><h1>Booking Admin</h1>" }),
+    );
+
+    await page.goto(`/rooms/${roomTypeId}`);
+    // An unsaved edit elsewhere in the room stays.
+    await page.getByRole("switch", { name: "Show map in room details" }).click();
+    const [tab] = await Promise.all([
+      page.waitForEvent("popup"),
+      page.getByRole("button", { name: "Edit property address" }).click(),
+    ]);
+    await expect.poll(() => tab.url()).toBe(destination);
+    expect(handoffs).toEqual([
+      {
+        routingHints: { propertyId: PMS_WEB_PROPERTY_ID },
+        sourceSurface: "pms-web",
+        targetPath: "/settings/location",
+        targetSurface: "booking-admin",
+      },
+    ]);
+    await expect(page.getByRole("switch", { name: "Show map in room details" })).toHaveAttribute(
+      "aria-checked",
+      "false",
+    );
+  });
+
+  test("shows a separate place to guests as an area, named from Google, next to the property (VAY-2321)", async ({
+    page,
+  }) => {
+    test.skip(!hasMapsKey, "needs the dev server's fake Google Maps key");
+    const backend = await mockRoomBackend(page);
+    await mockGoogleMaps(page, { places: [leopoldstrasse] });
+    await page.goto(`/rooms/${roomTypeId}`);
+    await page.getByRole("radio", { name: /Separate location/ }).click();
+    const map = page.getByTestId("google-address-map-canvas");
+    // The main property, for reference.
+    await expect(map).toHaveAttribute("data-reference", propertyPin);
+    await expect(map).toHaveAttribute("data-reference-title", "Alpenrose Munich");
+
+    const address = page.getByRole("combobox", { name: "Address" });
+    await address.fill("Leopold");
+    await page.getByRole("option", { name: /Leopoldstraße 12/ }).click();
+    await expect(map).toHaveAttribute("data-marker", "48.156341,11.58242");
+    const guests = page.locator("main").getByText("Guests will see").locator("..");
+    await expect(guests).toContainText("Schwabing Loft");
+    await expect(guests).toContainText("Leopoldstraße 12, 80802 München, Germany");
+    await expect(guests).toContainText("2.2 km from Alpenrose Munich");
+
+    await page.getByRole("radio", { name: /Approximate area/ }).check();
+    await expect(map).toHaveAttribute("data-circle", "48.16,11.58,1000");
+    await expect(map).toHaveAttribute("data-marker-visible", "false");
+    await expect(page.getByLabel("Area name guests see")).toHaveValue("Schwabing");
+    await expect(guests).toContainText("Schwabing · an area about 1 km wide, no street address");
+    await expect(guests).toContainText("About 2.2 km from Alpenrose Munich");
+    await expect(guests).not.toContainText("Leopoldstraße");
+
+    await page.getByRole("button", { name: "Satellite" }).click();
+    await expect(map).toHaveAttribute("data-map-type", "satellite");
+    await page.getByRole("button", { name: "Recenter" }).click();
+    await expect(map).toHaveAttribute("data-center", "48.16,11.58");
+
+    await page.getByRole("button", { name: "Save Changes" }).click();
+    await expect
+      .poll(() => backend.locationWrites)
+      .toEqual([
+        expect.objectContaining({
+          locationSource: "custom",
+          locationPrecision: "approximate",
+          locationArea: "Schwabing",
+          locationAddress: "Leopoldstraße 12, 80802 München, Germany",
+          latitude: 48.156341,
+          longitude: 11.58242,
+        }),
+      ]);
+  });
+
+  test("places the pin from a pasted Google Maps link or the property's address", async ({
+    page,
+  }) => {
+    test.skip(!hasMapsKey, "needs the dev server's fake Google Maps key");
+    await mockRoomBackend(page);
+    await mockGoogleMaps(page, { places: [leopoldstrasse] });
+    await page.goto(`/rooms/${roomTypeId}`);
+    await page.getByRole("radio", { name: /Separate location/ }).click();
+    const map = page.getByTestId("google-address-map-canvas");
+
+    await page.getByRole("button", { name: "Paste a Google Maps link" }).click();
+    const link = page.getByLabel("Google Maps link");
+    await link.fill("https://maps.app.goo.gl/AbCdEf123");
+    await expect(
+      page.getByText(/Short links \(maps\.app\.goo\.gl\) carry no coordinates/),
+    ).toBeVisible();
+    await link.fill(
+      "https://www.google.com/maps/place/Isar/@48.1301,11.5869,16z/data=!3d48.13021!4d11.58693",
+    );
+    await expect(page.getByText("Pin placed at 48.13021, 11.58693")).toBeVisible();
+    await expect(map).toHaveAttribute("data-marker", "48.13021,11.58693");
+
+    await page.getByRole("button", { name: "Search an address instead" }).click();
+    await page.getByRole("button", { name: "Use property address as start" }).click();
+    await expect(page.getByRole("combobox", { name: "Address" })).toHaveValue(
+      "Alpenstrasse 12, 80331 Munich",
+    );
+    await expect(map).toHaveAttribute("data-marker", propertyPin);
   });
 });
 
@@ -257,7 +463,15 @@ async function mockRoomBackend(
       }
       const body = route.request().postDataJSON() as Record<string, unknown>;
       state.locationWrites.push(body);
-      for (const key of ["locationAddress", "latitude", "longitude"]) {
+      for (const key of [
+        "locationAddress",
+        "latitude",
+        "longitude",
+        "locationSource",
+        "locationPrecision",
+        "locationArea",
+        "showMapInDetails",
+      ]) {
         if (key in body) state.room.attributes[key] = body[key];
       }
       return route.fulfill({
@@ -304,4 +518,14 @@ async function mockRoomBackend(
     }),
   );
   return state;
+}
+
+function bookingAdminOrigin(): string {
+  return (
+    process.env.E2E_SETUP_HOST_BASE_URL ||
+    process.env.NEXT_PUBLIC_BOOKING_ADMIN_URL ||
+    (process.env.CI === "true" || process.env.E2E_START_SERVERS === "1"
+      ? "http://admin.booking.localhost:3003"
+      : "https://admin.booking.localhost")
+  );
 }
