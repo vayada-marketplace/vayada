@@ -29,11 +29,16 @@ export type BookingPagePayment = {
   groupExtras: boolean;
 };
 
-/** An extra's photo, words, category and display price from the hotel's checkout settings. The
+/** An extra's photos, words, category and display price from the hotel's checkout settings. The
  * pricing-addons catalogue decides what can be booked and the quote decides the price. */
 export type ExtraDisplay = {
   description: string;
+  /** The cover photo, also first in photos. */
   image: string | null;
+  /** VAY-2231: every photo the details show. */
+  photos: string[];
+  duration: string | null;
+  location: string | null;
   category: "dining" | "experience" | "transport" | "wellness" | "other";
   price: number | null;
 };
@@ -70,11 +75,18 @@ function extraDisplay(value: unknown): Record<string, ExtraDisplay> {
     if (!item || typeof item !== "object") continue;
     const v = item as Record<string, unknown>;
     if (typeof v.id !== "string") continue;
-    const image = [v.image, ...(Array.isArray(v.images) ? v.images : [])].find(photoUrl);
+    const photos = Array.from(
+      new Set([v.image, ...(Array.isArray(v.images) ? v.images : [])].filter(photoUrl)),
+    );
     const price = typeof v.price === "string" ? Number(v.price) : v.price;
+    const words = (value: unknown) =>
+      typeof value === "string" && value.trim() ? value.trim() : null;
     result[v.id] = {
       description: typeof v.description === "string" ? v.description.trim() : "",
-      image: image ?? null,
+      image: photos[0] ?? null,
+      photos,
+      duration: words(v.duration),
+      location: words(v.location),
       category: categories.includes(v.category as ExtraDisplay["category"])
         ? (v.category as ExtraDisplay["category"])
         : "other",

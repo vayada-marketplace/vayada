@@ -194,7 +194,15 @@
     "pricePerPersonNight": "Price per person / night",
     "needsNotice": "{hours, plural, =48 {Needs 2 days’ notice} =72 {Needs 3 days’ notice} =168 {Needs 1 week’s notice} other {Needs # hours’ notice}}",
     "showPhoto": "Show photo {number}",
-    "closeDetails": "Close add-on details"
+    "closeDetails": "Close add-on details",
+    "seeDetails": "See details",
+    "remove": "Remove",
+    "previousPhoto": "Previous photo",
+    "nextPhoto": "Next photo",
+    "upToGuests": "{count, plural, one {Up to # guest} other {Up to # guests}}",
+    "inYourStay": "In your stay: {detail}",
+    "groupsUpTo": "For groups of up to {count} guests.",
+    "tooSoonForStay": "{notice}, so it can’t be added to this stay."
   },
   "book": {
     "guestInformation": "Guest Information",

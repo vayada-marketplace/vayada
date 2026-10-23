@@ -23,6 +23,7 @@
     "./HotelIcon": "./src/HotelIcon.tsx",
     "./bankTransferDestination": "./src/bankTransferDestination.ts",
     "./AddonEditor": "./src/AddonEditor.tsx",
+    "./GuestAddon": "./src/GuestAddon.tsx",
     "./PreparedHotelEditor": "./src/PreparedHotelEditor.tsx",
     "./PreparedHotelImportPanel": "./src/PreparedHotelImportPanel.tsx",
     "./replacementPricingClient": "./src/replacementPricingClient.ts",

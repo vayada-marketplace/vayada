@@ -38,8 +38,24 @@ const transfer = {
 };
 const catalogue = [breakfast, transfer];
 const display = {
-  breakfast: { description: "Fresh bread.", image: null, category: "dining" as const, price: 18 },
-  transfer: { description: "", image: null, category: "other" as const, price: 30 },
+  breakfast: {
+    description: "Fresh bread.",
+    image: null,
+    photos: [],
+    duration: null,
+    location: "Garden terrace",
+    category: "dining" as const,
+    price: 18,
+  },
+  transfer: {
+    description: "",
+    image: null,
+    photos: [],
+    duration: null,
+    location: null,
+    category: "other" as const,
+    price: 30,
+  },
 };
 const quote = (extrasMinor: string) =>
   ({
@@ -148,4 +164,74 @@ it("shows an extra that needs more notice than the stay gives, but doesn't let i
   // Without a date (the hotel's time zone is unknown) it can't be added.
   render({ catalogue: [breakfast, { ...late, bookableFrom: null }], onChange });
   expect(button("Add Late check-out").disabled).toBe(true);
+});
+
+// VAY-2231: each card opens its details; Add there adds the extra and closes them.
+const seeDetails = (name: string) =>
+  act(() =>
+    host
+      .querySelector(`article[aria-label="${name}"]`)!
+      .querySelector<HTMLButtonElement>("button:not([aria-label])")!
+      .click(),
+  );
+const details = () => host.querySelector("dialog");
+const dialogButton = (text: string) =>
+  Array.from(details()!.querySelectorAll("button")).find((b) => b.textContent === text)!;
+
+it("opens an extra's details with what the hotel filled in, and adds it from there", () => {
+  const onChange = vi.fn();
+  const groupBreakfast = { ...breakfast, maxGuests: 4 };
+  render({ onChange, catalogue: [groupBreakfast, transfer] });
+  expect(details()).toBeNull();
+  seeDetails("Garden breakfast");
+  expect(details()!.getAttribute("aria-labelledby")).toBeTruthy();
+  const text = details()!.textContent;
+  expect(text).toContain("Dining");
+  expect(text).toContain("Garden breakfast");
+  expect(text).toContain("Garden terrace");
+  expect(text).toContain("Up to 4 guests");
+  expect(text).toContain("Fresh bread.");
+  expect(text).toContain("€18/ person / night");
+  // Nothing the hotel left empty: no duration, notice or photos.
+  expect(text).not.toContain("notice");
+  expect(details()!.querySelector('[aria-label="Next photo"]')).toBeNull();
+  act(() => dialogButton("Add").click());
+  expect(onChange).toHaveBeenCalledWith({
+    scope: replacementExtrasScope([groupBreakfast, transfer], selection, 0),
+    items: [newExtraItem(groupBreakfast, selection)],
+  });
+  expect(details()).toBeNull();
+});
+
+it("shows an added extra as added in its details and removes it there", () => {
+  const onChange = vi.fn();
+  const scope = replacementExtrasScope(catalogue, selection, 0);
+  render({ onChange, value: { scope, items: [newExtraItem(breakfast, selection)] } });
+  seeDetails("Garden breakfast");
+  expect(details()!.textContent).toContain("In your stay: 2 guests · 2 nights");
+  expect(details()!.textContent).toContain("Added");
+  act(() => dialogButton("Remove").click());
+  expect(onChange).toHaveBeenCalledWith(null);
+  act(() =>
+    details()!.querySelector<HTMLButtonElement>('[aria-label="Close add-on details"]')!.click(),
+  );
+  expect(details()).toBeNull();
+});
+
+it("says in the details why an extra can't be added to this stay", () => {
+  const late = { ...transfer, leadTimeHours: 24, bookableFrom: "2026-11-07" };
+  render({ catalogue: [breakfast, late] });
+  seeDetails("Late check-out");
+  expect(details()!.textContent).toContain(
+    "Needs 24 hours’ notice, so it can’t be added to this stay.",
+  );
+  expect(dialogButton("Add").disabled).toBe(true);
+  act(() =>
+    details()!.querySelector<HTMLButtonElement>('[aria-label="Close add-on details"]')!.click(),
+  );
+  // A per-stay extra takes parties up to its max guests; this stay has two.
+  render({ catalogue: [breakfast, { ...transfer, maxGuests: 1 }] });
+  seeDetails("Late check-out");
+  expect(details()!.textContent).toContain("For groups of up to 1 guests.");
+  expect(dialogButton("Add").disabled).toBe(true);
 });

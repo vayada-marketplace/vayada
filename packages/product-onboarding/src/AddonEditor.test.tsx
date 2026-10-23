@@ -1,6 +1,12 @@
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { describe, expect, it, vi } from "vitest";
-import { AddonEditor, emptyAddonValues } from "./AddonEditor";
+import { AddonEditor, AddonGuestPreview, emptyAddonValues } from "./AddonEditor";
+import { GuestAddonCard, GuestAddonDetail } from "./GuestAddon";
+
+const previewTab = (view: ReactTestRenderer, label: string) =>
+  view.root.find(
+    (node) => node.props["aria-pressed"] !== undefined && node.children.includes(label),
+  );
 
 describe("shared add-on editor", () => {
   it("shows inline errors on submit and leaves the save button enabled", async () => {
@@ -141,6 +147,34 @@ it("picks a category chip, labels the price by pricing model and opens More opti
   });
 });
 
+it("previews the add-on with the booking page's own card as the host types (VAY-2231)", async () => {
+  let view: ReactTestRenderer;
+  await act(async () => {
+    view = create(
+      <AddonEditor
+        initialValues={{ ...emptyAddonValues("USD"), price: "30.00", perPerson: true }}
+        currency="USD"
+        editing={false}
+        onSave={() => {}}
+        onCancel={() => {}}
+      />,
+    );
+  });
+  const card = () => view!.root.findByType(GuestAddonCard).props;
+  expect(card()).toMatchObject({
+    name: "Untitled add-on",
+    description: "",
+    photo: null,
+    price: "US$30",
+    unit: "/ person",
+  });
+  const name = view!.root.findAllByType("input").find((i) => i.props["aria-label"] === "Name *")!;
+  await act(async () => {
+    name.props.onChange({ target: { value: "Airport transfer" } });
+  });
+  expect(card().name).toBe("Airport transfer");
+});
+
 it("offers the fixed lead times and shows the guests' notice in the preview (VAY-2232)", async () => {
   const save = vi.fn();
   let view: ReactTestRenderer;
@@ -171,6 +205,10 @@ it("offers the fixed lead times and shows the guests' notice in the preview (VAY
       .findAllByType("option")
       .map((o) => o.props.children),
   ).toEqual(["No lead time", "12 hours", "24 hours", "2 days", "3 days", "1 week"]);
+  // VAY-2231: the guests' notice is one of the details' facts.
+  await act(async () => {
+    previewTab(view!, "Detail view").props.onClick();
+  });
   expect(text()).toContain("Needs 24 hours’ notice");
   await act(async () => {
     select().props.onChange({ target: { value: "168" } });
@@ -222,4 +260,75 @@ it("shows a lead time typed before the fixed choices until one is picked (VAY-22
     await view!.root.findByType("form").props.onSubmit({ preventDefault() {} });
   });
   expect(save.mock.calls[0][0]).toMatchObject({ leadTimeHours: "", legacyLeadTime: "" });
+});
+
+it("switches the preview to the details guests open, with every fact the host filled in", async () => {
+  const photos = [0, 1, 2].map((i) => ({
+    imageUrl: `https://media.test/${i}`,
+    mediaObjectId: `media-${i}`,
+    isCover: i === 1,
+  }));
+  let view: ReactTestRenderer;
+  await act(async () => {
+    view = create(
+      <AddonEditor
+        initialValues={{
+          ...emptyAddonValues("EUR"),
+          name: "Old town walk",
+          category: "experience",
+          price: "25",
+          perPerson: true,
+          duration: "2 hours",
+          location: " ",
+          maxGuests: "8",
+          photos,
+        }}
+        currency="EUR"
+        editing
+        onSave={() => {}}
+        onCancel={() => {}}
+      />,
+    );
+  });
+  expect(previewTab(view!, "Checkout list").props["aria-pressed"]).toBe(true);
+  expect(view!.root.findAllByType(GuestAddonDetail)).toHaveLength(0);
+  // The card's own "See details" opens the details too.
+  await act(async () => {
+    view!.root.findByType(GuestAddonCard).props.onOpenDetails();
+  });
+  expect(previewTab(view!, "Detail view").props["aria-pressed"]).toBe(true);
+  expect(view!.root.findByType(GuestAddonDetail).props).toMatchObject({
+    name: "Old town walk",
+    category: "Experiences",
+    photos: ["https://media.test/1", "https://media.test/0", "https://media.test/2"],
+    facts: { duration: "2 hours", location: null, guests: "Up to 8 guests", notice: null },
+    price: "€25",
+    unit: "/ person",
+    size: "compact",
+  });
+});
+
+it("previews a saved add-on as guests see it, with a way to edit it", async () => {
+  const edit = vi.fn();
+  const close = vi.fn();
+  let view: ReactTestRenderer;
+  await act(async () => {
+    view = create(
+      <AddonGuestPreview
+        values={{ ...emptyAddonValues("EUR"), name: "Airport transfer", price: "45.00" }}
+        currency="EUR"
+        onEdit={edit}
+        onClose={close}
+      />,
+    );
+  });
+  const text = JSON.stringify(view!.toJSON());
+  expect(text).toContain("Guest preview · Airport transfer");
+  expect(view!.root.findByType(GuestAddonDetail).props.price).toBe("€45");
+  const button = (label: string) =>
+    view!.root.find((node) => node.type === "button" && node.children.includes(label));
+  button("Edit add-on").props.onClick();
+  button("Done").props.onClick();
+  expect(edit).toHaveBeenCalledTimes(1);
+  expect(close).toHaveBeenCalledTimes(1);
 });
