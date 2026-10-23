@@ -364,6 +364,7 @@
   "designStudio.colors.primaryBrandColor": "プライマリブランドカラー",
   "designStudio.colors.primaryDescription": "ボタン、リンク、アクセント",
   "designStudio.colors.quickPresets": "クイックプリセット",
+  "designStudio.colors.tooLight": "明るすぎて、ボタンの白い文字が読みにくくなります。もっと濃い色を選んでください。",
   "designStudio.fonts.title": "タイポグラフィ",
   "designStudio.fonts.subtitle": "フォントの組み合わせを選択",
   "bookingFlow.title": "予約フロー",

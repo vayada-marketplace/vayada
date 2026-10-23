@@ -3,6 +3,7 @@ import {
   isBookingLaunchOwnerEvidenceValid,
 } from "@vayada/domain-booking";
 import { createHotelMediaResolutionPort } from "@vayada/domain-hotels";
+import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -231,6 +232,7 @@ describe("production Booking publication owner sources", () => {
             heroSubtext: "Book direct.",
             hasActivePromos: true,
             updatedAt: now,
+            heroHeading: null as string | null,
           },
         ],
       })),
@@ -270,6 +272,7 @@ describe("production Booking publication owner sources", () => {
           showLanguageSelector: false,
           showCurrencySelector: true,
           heroImage: "https://cdn.test/cover.webp",
+          heroHeading: "Hotel Alpenrose",
           heroSubtext: "Book direct.",
         },
         policies: {
@@ -284,6 +287,26 @@ describe("production Booking publication owner sources", () => {
     });
 
     expect(evidence.entities[1]?.bindings).toBeUndefined();
+
+    // VAY-2318: Design Studio's hero heading replaces the hotel name. Without one, the settings
+    // row hashes exactly as before, so live pages without a heading are not marked as edited.
+    const settingsRevision = (sources: typeof evidence.sources) =>
+      sources.find(({ entityType }) => entityType === "booking_settings")?.revision;
+    const rowBefore: Record<string, unknown> = { ...(await pool.query()).rows[0]! };
+    delete rowBefore["heroHeading"];
+    expect(settingsRevision(evidence.sources)).toBe(
+      `sha256:${createHash("sha256").update(JSON.stringify(rowBefore)).digest("hex")}`,
+    );
+    const withHeading = { ...(await pool.query()).rows[0]!, heroHeading: "Stay above the clouds" };
+    pool.query.mockResolvedValue({ rows: [withHeading] });
+    const headed = await source.getBookingLaunchEvidence(scope);
+    if (headed.outcome !== "evidence") throw new Error("Expected Booking evidence");
+    expect(settingsRevision(headed.sources)).not.toBe(settingsRevision(evidence.sources));
+    await expect(source.getSnapshot(manifestRequest(headed.sources))).resolves.toMatchObject({
+      outcome: "snapshot",
+      content: { branding: { heroHeading: "Stay above the clouds" } },
+    });
+    pool.query.mockResolvedValue({ rows: [{ ...withHeading, heroHeading: null }] });
     getCurrentGuestRules.mockResolvedValue({
       ...rules,
       sourceRevision: `guest-choices:${organizationId}`,

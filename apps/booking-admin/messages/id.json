@@ -364,6 +364,7 @@
   "designStudio.colors.primaryBrandColor": "Warna Merek Utama",
   "designStudio.colors.primaryDescription": "Tombol, tautan, dan aksen",
   "designStudio.colors.quickPresets": "Preset Cepat",
+  "designStudio.colors.tooLight": "Terlalu terang untuk teks putih pada tombol. Pilih warna yang lebih gelap.",
   "designStudio.fonts.title": "Tipografi",
   "designStudio.fonts.subtitle": "Pilih pasangan font",
   "bookingFlow.title": "Alur Pemesanan",

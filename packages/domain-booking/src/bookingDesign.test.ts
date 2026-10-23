@@ -165,9 +165,10 @@ describe("Booking design contract", () => {
         createdAt: "2026-10-23T12:00:00.000Z",
       })?.choices.primaryColor,
     ).toBe("#5E0000");
-    // The lightest setup swatch passes; Design Studio's Tropical Gold and Sunset Coral do not.
-    expect(isBookingDesignPrimaryColor("#0077B6")).toBe(true);
-    expect(isBookingDesignPrimaryColor("#000000")).toBe(true);
+    // The lightest setup swatch and the darker Design Studio presets pass; the old Tropical Gold
+    // and Sunset Coral did not.
+    for (const readable of ["#0077B6", "#000000", "#A67D12", "#E35734"])
+      expect(isBookingDesignPrimaryColor(readable), readable).toBe(true);
     expect(isBookingDesignPrimaryColor("#D4A017")).toBe(false);
     expect(isBookingDesignPrimaryColor("#E76F51")).toBe(false);
   });

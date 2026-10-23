@@ -364,6 +364,7 @@
   "designStudio.colors.primaryBrandColor": "Primary Brand Color",
   "designStudio.colors.primaryDescription": "Buttons, links, and accents",
   "designStudio.colors.quickPresets": "Quick Presets",
+  "designStudio.colors.tooLight": "Too light for white button text. Choose a darker shade.",
   "designStudio.fonts.title": "Typography",
   "designStudio.fonts.subtitle": "Select a font pairing",
   "bookingFlow.title": "Booking Flow",

@@ -683,9 +683,28 @@ test.describe("booking-admin settings no-legacy guard", () => {
         order.push("publish");
     });
 
+    await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto("/design-studio?tab=colors");
     const hex = page.getByRole("textbox", { name: "Primary brand color", exact: true });
     await expect(hex).toHaveValue("#0077B6");
+
+    // A colour too light for white button text is explained and never saved.
+    const tooLight = "Too light for white button text. Choose a darker shade.";
+    await hex.fill("#d4a017");
+    await expect(hex).toHaveAttribute("aria-invalid", "true");
+    await expect(page.getByText(tooLight)).toHaveCount(1);
+    await page.getByRole("button", { name: "Save Changes" }).click();
+    await expect(page.getByText(tooLight)).toHaveCount(2);
+    expect(order).toEqual([]);
+    await page.screenshot({ path: testInfo.outputPath("design-studio-too-light-1440.png") });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.screenshot({ path: testInfo.outputPath("design-studio-too-light-390.png") });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    // The Tropical Gold preset is a darker, readable gold now.
+    await page.getByRole("button", { name: "Tropical Gold" }).click();
+    await expect(hex).toHaveValue("#A67D12");
+    await expect(hex).toHaveAttribute("aria-invalid", "false");
+
     await hex.fill("#5e0000");
     await page.getByRole("button", { name: "Typography" }).click();
     await page.getByRole("button", { name: /Grand Classic/ }).click();
@@ -703,7 +722,15 @@ test.describe("booking-admin settings no-legacy guard", () => {
       fontPairing: "grand-classic",
     });
     expect(order).toEqual(["settings", "design", "publish"]);
-    await page.screenshot({ path: testInfo.outputPath("design-studio-brand-colour-saved.png") });
+    await page.getByRole("button", { name: "Colors" }).click();
+    await page.screenshot({
+      path: testInfo.outputPath("design-studio-brand-colour-saved-1440.png"),
+    });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.screenshot({
+      path: testInfo.outputPath("design-studio-brand-colour-saved-390.png"),
+    });
+    await page.setViewportSize({ width: 1440, height: 900 });
 
     // A second Save with nothing changed does not write a new booking design revision.
     await page.getByRole("button", { name: "Save Changes" }).click();

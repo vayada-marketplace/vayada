@@ -78,6 +78,12 @@ test.describe("booking-web tenant smoke", () => {
     const reject = page.getByRole("button", { name: "Reject analytics" });
     if (await reject.isVisible()) await reject.click();
     await page.screenshot({ path: testInfo.outputPath("brand-colour-5e0000-1440.png") });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(page.getByRole("button", { name: /Check Availability/i })).toHaveCSS(
+      "background-color",
+      "rgb(83, 0, 0)",
+    );
+    await page.screenshot({ path: testInfo.outputPath("brand-colour-5e0000-390.png") });
   });
 
   test("shows WhatsApp only when the hotel publishes a WhatsApp number", async ({ page }) => {

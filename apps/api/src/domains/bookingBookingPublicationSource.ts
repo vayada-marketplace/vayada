@@ -41,6 +41,8 @@ type SettingsRow = QueryResultRow & {
   heroSubtext: string | null;
   hasActivePromos: boolean;
   updatedAt: Date | string;
+  /** Design Studio's hero heading; selected last and hashed only when set (VAY-2318). */
+  heroHeading: string | null;
 };
 type LoadedBooking = {
   sources: BookingSource[];
@@ -169,10 +171,13 @@ async function load(
   if (design.outcome === "provider_failure") return design.error.code;
   if (rawPolicy !== null && !policy) return "guest_policy_invalid";
 
+  // Without a hero heading the row hashes as it did before VAY-2318, so those pages stay current.
+  const hashed: Record<string, unknown> = { ...settings };
+  if (settings.heroHeading === null) delete hashed["heroHeading"];
   const settingsSource = source(
     "booking_settings",
     scope.propertyId,
-    `sha256:${sha256(JSON.stringify(settings))}`,
+    `sha256:${sha256(JSON.stringify(hashed))}`,
   );
   const pageSource = design.outcome === "ready" ? design.designSource : settingsSource;
   const guestSource = source(
@@ -218,7 +223,7 @@ async function load(
       showLanguageSelector: settings.showLanguageSelector,
       showCurrencySelector: settings.showCurrencySelector,
       heroImage: hero,
-      heroHeading: design.snapshot.profile.displayName,
+      heroHeading: settings.heroHeading ?? design.snapshot.profile.displayName,
       heroSubtext: settings.heroSubtext ?? design.snapshot.profile.shortDescription,
       primaryColor: design.snapshot.appearance.primaryColor,
       fontPairing: design.snapshot.appearance.fontPairing,
@@ -277,7 +282,8 @@ SELECT settings.acceptance_mode AS "acceptanceMode",
        EXISTS (SELECT 1 FROM booking.promo_definitions promo
          WHERE promo.property_id = settings.property_id AND promo.status = 'active'
            AND promo.is_active AND (promo.valid_from IS NULL OR promo.valid_from <= current_date)
-           AND (promo.valid_until IS NULL OR promo.valid_until >= current_date)) AS "hasActivePromos"
+           AND (promo.valid_until IS NULL OR promo.valid_until >= current_date)) AS "hasActivePromos",
+       NULLIF(BTRIM(settings.hero_heading), '') AS "heroHeading"
 FROM booking.booking_settings settings
 LEFT JOIN LATERAL (
   SELECT variant.public_cdn_url

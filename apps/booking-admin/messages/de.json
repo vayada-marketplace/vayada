@@ -364,6 +364,7 @@
   "designStudio.colors.primaryBrandColor": "Primäre Markenfarbe",
   "designStudio.colors.primaryDescription": "Schaltflächen, Links und Akzente",
   "designStudio.colors.quickPresets": "Schnellvorlagen",
+  "designStudio.colors.tooLight": "Zu hell für weiße Schrift auf Schaltflächen. Wählen Sie einen dunkleren Farbton.",
   "designStudio.fonts.title": "Typografie",
   "designStudio.fonts.subtitle": "Wählen Sie eine Schriftarten-Kombination",
   "bookingFlow.title": "Buchungsablauf",

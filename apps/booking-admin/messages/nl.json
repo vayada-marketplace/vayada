@@ -364,6 +364,7 @@
   "designStudio.colors.primaryBrandColor": "Primaire merkkleur",
   "designStudio.colors.primaryDescription": "Knoppen, links en accenten",
   "designStudio.colors.quickPresets": "Snelle presets",
+  "designStudio.colors.tooLight": "Te licht voor witte tekst op knoppen. Kies een donkerdere tint.",
   "designStudio.fonts.title": "Typografie",
   "designStudio.fonts.subtitle": "Selecteer een lettertypecombinatie",
   "bookingFlow.title": "Boekingsproces",

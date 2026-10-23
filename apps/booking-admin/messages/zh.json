@@ -364,6 +364,7 @@
   "designStudio.colors.primaryBrandColor": "主品牌颜色",
   "designStudio.colors.primaryDescription": "按钮、链接和强调色",
   "designStudio.colors.quickPresets": "快速预设",
+  "designStudio.colors.tooLight": "颜色太浅，按钮上的白色文字难以看清。请选择更深的颜色。",
   "designStudio.fonts.title": "字体排版",
   "designStudio.fonts.subtitle": "选择字体搭配",
   "bookingFlow.title": "预订流程",
