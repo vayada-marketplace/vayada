@@ -1617,9 +1617,7 @@
   "addons.editor.pricePerGuestNight": "Prezzo per ospite a notte ({currency}) *",
   "addons.editor.priceExample": "Esempio: 2 ospiti, 3 notti → {total} in totale",
   "addons.editor.moreOptions": "Altre opzioni",
-  "addons.editor.checkoutPreview": "ANTEPRIMA CHECKOUT",
   "addons.editor.untitledAddOn": "Extra senza titolo",
-  "addons.editor.previewHint": "Un'anteprima di come appare questo extra nel percorso di prenotazione.",
   "admin.lastMinute": "Last minute",
   "admin.midweek": "Infrasettimanale",
   "admin.lastMinuteDescription": "Tariffe scontate per arrivi nei prossimi giorni: riempie in fretta le camere libere.",
@@ -1661,5 +1659,17 @@
   "admin.nights": "notti",
   "admin.pickAtLeastOneDay": "Scegli almeno un giorno.",
   "admin.promotionDetails": "Dettagli promozione",
-  "admin.turnOffToPauseWithoutDeleting": "Disattiva per mettere in pausa senza eliminare."
+  "admin.turnOffToPauseWithoutDeleting": "Disattiva per mettere in pausa senza eliminare.",
+  "addons.editor.guestPreview": "ANTEPRIMA OSPITE",
+  "addons.editor.previewCheckoutList": "Elenco del checkout",
+  "addons.editor.previewDetailView": "Vista dettaglio",
+  "addons.editor.previewListHint": "Così appare l’extra nell’elenco della tua pagina di prenotazione. È la stessa scheda che vedono gli ospiti.",
+  "addons.editor.previewDetailHint": "Cosa vedono gli ospiti quando aprono l’extra, in formato smartphone. Cambia mentre scrivi. I campi lasciati vuoti non vengono mostrati.",
+  "addons.preview.title": "Anteprima ospite · {name}",
+  "addons.preview.subtitle": "Cosa vedono gli ospiti quando aprono questo extra sulla tua pagina di prenotazione.",
+  "addons.preview.inert": "I pulsanti dell’anteprima non fanno nulla.",
+  "addons.preview.close": "Chiudi l’anteprima ospite",
+  "addons.preview.done": "Fatto",
+  "addons.list.preview": "Vedi {name} come lo vedono gli ospiti",
+  "addons.list.previewAsGuest": "Vedi come ospite"
 }

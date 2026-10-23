@@ -1617,9 +1617,7 @@
   "addons.editor.pricePerGuestNight": "Prijs per gast per nacht ({currency}) *",
   "addons.editor.priceExample": "Voorbeeld: 2 gasten, 3 nachten → {total} totaal",
   "addons.editor.moreOptions": "Meer opties",
-  "addons.editor.checkoutPreview": "VOORBEELD BIJ AFREKENEN",
   "addons.editor.untitledAddOn": "Naamloze extra",
-  "addons.editor.previewHint": "Een voorbeeld van hoe deze extra in het boekingsproces verschijnt.",
   "admin.lastMinute": "Last minute",
   "admin.midweek": "Doordeweeks",
   "admin.lastMinuteDescription": "Korting voor aankomsten in de komende dagen, vult lege kamers snel.",
@@ -1661,5 +1659,17 @@
   "admin.nights": "nachten",
   "admin.pickAtLeastOneDay": "Kies minstens één dag.",
   "admin.promotionDetails": "Actiedetails",
-  "admin.turnOffToPauseWithoutDeleting": "Zet uit om te pauzeren zonder te verwijderen."
+  "admin.turnOffToPauseWithoutDeleting": "Zet uit om te pauzeren zonder te verwijderen.",
+  "addons.editor.guestPreview": "GASTVOORBEELD",
+  "addons.editor.previewCheckoutList": "Afrekenlijst",
+  "addons.editor.previewDetailView": "Detailweergave",
+  "addons.editor.previewListHint": "Zo verschijnt de extra in de lijst op je boekingspagina. Het is dezelfde kaart die gasten zien.",
+  "addons.editor.previewDetailHint": "Wat gasten zien als ze de extra openen, op telefoonformaat. Verandert terwijl je typt. Lege velden zien gasten niet.",
+  "addons.preview.title": "Gastvoorbeeld · {name}",
+  "addons.preview.subtitle": "Wat gasten zien als ze deze extra openen op je boekingspagina.",
+  "addons.preview.inert": "Knoppen in het voorbeeld doen niets.",
+  "addons.preview.close": "Gastvoorbeeld sluiten",
+  "addons.preview.done": "Klaar",
+  "addons.list.preview": "{name} bekijken zoals gasten het zien",
+  "addons.list.previewAsGuest": "Bekijken als gast"
 }
