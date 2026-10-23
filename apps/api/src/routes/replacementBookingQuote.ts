@@ -138,13 +138,24 @@ export function createReplacementBookingQuoteIssuer(
         throw Object.assign(httpError(422, "An extra needs more notice than this stay gives."), {
           code: "ADDON_NEEDS_NOTICE",
         });
+      // VAY-2309: a chosen rate doesn't take this way to pay (a non-refundable rate never takes
+      // pay at the property).
+      if (error.code === "denied" && error.reason === "payment_method_not_accepted")
+        throw Object.assign(httpError(422, "A chosen rate can't be paid this way."), {
+          code: "PAYMENT_METHOD_NOT_ACCEPTED",
+        });
       if (error.code === "idempotency_conflict")
         throw httpError(409, "Quote request changed. Use a new Idempotency-Key.");
       if (error.code === "stale")
         throw Object.assign(httpError(409, "Quote needs refreshing. Request a new quote."), {
           code: "QUOTE_REFRESH_REQUIRED",
         });
-      throw httpError(404, "Quote unavailable.");
+      // VAY-2309: the request log names the refusal (its code and reason, never guest data); the
+      // response stays "Quote unavailable.".
+      throw Object.assign(httpError(404, "Quote unavailable."), {
+        pricingCode: error.code,
+        pricingReason: error.reason ?? null,
+      });
     }
   };
 }

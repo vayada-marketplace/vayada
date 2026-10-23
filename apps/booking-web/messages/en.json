@@ -557,7 +557,8 @@
     "cancelFeeChanged": "The cancellation fee has changed. Please review it before cancelling.",
     "withdrawNotOnline": "This request can't be withdrawn online. Please contact the hotel.",
     "bookingNotChangeable": "This booking can no longer be changed. Look it up again to see its current status.",
-    "busyTryAgain": "This booking is being updated right now. Please try again in a moment."
+    "busyTryAgain": "This booking is being updated right now. Please try again in a moment.",
+    "paymentMethodNotAccepted": "The rate you chose can't be paid this way. Please choose another way to pay."
   },
   "locationMap": {
     "title": "Location",

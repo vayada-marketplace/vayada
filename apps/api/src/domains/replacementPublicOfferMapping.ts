@@ -1,11 +1,15 @@
-import { publicOfferCancellation, type PublicOfferCancellation } from "@vayada/domain-booking";
+import {
+  publicOfferCancellation,
+  type PricingPaymentMethod,
+  type PublicOfferCancellation,
+} from "@vayada/domain-booking";
 import type { BookingPublicQuotedOffer } from "@vayada/domain-distribution/booking-publication";
 import { pricingOfferOnBookingPage } from "@vayada/domain-pms";
 import type { lockCurrentPricingPublication } from "./currentPricingPublication.js";
 import { publicPricingOfferBindings } from "./publicPricingRoomStay.js";
 import {
   pricingPaymentsNow,
-  pricingRateSells,
+  pricingRatePaymentMethods,
   type PricingPaymentSwitches,
 } from "./pricingRatePayability.js";
 
@@ -91,16 +95,17 @@ export function publicOfferCancellations(
   return cancellations;
 }
 
-/** VAY-2304: the public offer keys of the rates guests can pay now (pricingRateSells), with the
- * booking page's switches applied to Finance's ready methods. A rate nobody can pay stops selling;
- * the others keep selling. */
-export function sellingPublicOfferKeys(
+/** The ways guests can pay each offer now (pricingRatePaymentMethods, VAY-2309), by public offer
+ * key, with the booking page's switches applied to Finance's ready methods. A rate nobody can pay
+ * has none and stops selling; the others keep selling (VAY-2304). The booking page prices a stay
+ * with a way its rates take. An offer without its exact terms has no entry. */
+export function publicOfferPaymentMethods(
   owner: Owner,
   switches: PricingPaymentSwitches,
-): ReadonlySet<string> {
+): ReadonlyMap<string, readonly PricingPaymentMethod[]> {
   const now = pricingPaymentsNow(owner.finance.methods, switches);
   const bindings = publicPricingOfferBindings(owner);
-  const selling = new Set<string>();
+  const methods = new Map<string, readonly PricingPaymentMethod[]>();
   for (const room of owner.publication.rooms)
     for (const offer of room.offers) {
       const terms = owner.terms.find(
@@ -112,7 +117,8 @@ export function sellingPublicOfferKeys(
       const binding = bindings.find(
         (b) => b.roomTypeId === room.roomTypeId && b.offerId === offer.id,
       );
-      if (terms && binding && pricingRateSells(terms, now)) selling.add(binding.publicOfferKey);
+      if (terms && binding)
+        methods.set(binding.publicOfferKey, pricingRatePaymentMethods(terms, now));
     }
-  return selling;
+  return methods;
 }

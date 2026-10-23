@@ -1,6 +1,8 @@
 import {
+  isPricingPaymentMethod,
   pricingAmountStep,
   pricingCurrencyScale,
+  type PricingPaymentMethod,
   type PublicBookingQuoteRequest,
   type PublicOfferCancellation,
 } from "@vayada/domain-booking/replacement-pricing";
@@ -22,6 +24,8 @@ export type PricingOffer = {
   cancellation?: OfferCancellation;
   /** The meal in the hotel's own words (VAY-2281); absent when it wrote none or it's malformed. */
   mealDescription?: string;
+  /** The ways guests can pay this rate now (VAY-2309); absent from older APIs or when malformed. */
+  paymentMethods?: PricingPaymentMethod[];
 };
 /** Room content for the booking page's room cards (VAY-2190). Each field is absent when the
  * API doesn't send it or sends it malformed; selection never depends on it. */
@@ -161,6 +165,10 @@ export async function getReplacementCatalog(
           ...(cancellation && { cancellation }),
           ...(text(offer.mealDescription) &&
             offer.mealDescription.length <= 200 && { mealDescription: offer.mealDescription }),
+          ...(Array.isArray(offer.paymentMethods) &&
+            offer.paymentMethods.every(isPricingPaymentMethod) && {
+              paymentMethods: Array.from(new Set(offer.paymentMethods)),
+            }),
         };
       }),
     };
@@ -188,6 +196,22 @@ export type RoomChoice = {
   adults: string;
   childAges: string[];
 };
+/** VAY-2309: the ways every chosen rate takes, or null while a chosen rate's ways are unknown. */
+export function chosenRatesPaymentMethods(
+  rooms: PricingRoom[],
+  choices: RoomChoice[],
+): PricingPaymentMethod[] | null {
+  const offers = rooms.flatMap((room) => room.offers);
+  let common: PricingPaymentMethod[] | null = null;
+  for (const choice of choices) {
+    const methods = offers.find(
+      (offer) => offer.publicOfferKey === choice.publicOfferKey,
+    )?.paymentMethods;
+    if (!methods) return null;
+    common = (common ?? methods).filter((method) => methods.includes(method));
+  }
+  return common;
+}
 /** Blank age fields remain unknown, including for infants: zero must be explicitly chosen. */
 export function roomQuoteRequest(
   rooms: PricingRoom[],

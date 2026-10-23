@@ -8,7 +8,7 @@ import {
   mapReplacementPublicOffers,
   publicOfferCancellations,
   publicOfferMealDescriptions,
-  sellingPublicOfferKeys,
+  publicOfferPaymentMethods,
 } from "./replacementPublicOfferMapping.js";
 import type { PricingPaymentSwitches } from "./pricingRatePayability.js";
 import { readPmsRoomOperatingEligibility } from "./pmsRoomOperatingEligibility.js";
@@ -36,7 +36,8 @@ type RoomRow = {
  * catalog follows what is saved now: priced, operating rooms with their current content and
  * offers. Offer keys always bind the current pricing revision. Only rates guests can pay now
  * are offered, with the booking page's `payments` switches (VAY-2304); a room left with none is
- * left out. Without switches, Finance's ready methods alone decide. */
+ * left out. Without switches, Finance's ready methods alone decide. Each offer names those ways to
+ * pay (VAY-2309), read live like the rest. */
 export function createPublicPricingOfferCatalog(
   pool: Pool,
   options: { mediaServing?: MediaServing; payments?: PricingPaymentSwitches } = {},
@@ -68,12 +69,12 @@ export function createPublicPricingOfferCatalog(
             .filter((room) => room.state === "operating")
             .map((room) => room.roomTypeId),
         );
-        const selling = sellingPublicOfferKeys(owner, payments);
+        const methods = publicOfferPaymentMethods(owner, payments);
         const offered = mapped
           .filter((room) => operating.has(room.roomTypeId))
           .map((room) => ({
             ...room,
-            offers: room.offers.filter((rate) => selling.has(rate.ratePlanId)),
+            offers: room.offers.filter((rate) => !!methods.get(rate.ratePlanId)?.length),
           }))
           .filter((room) => room.offers.length > 0);
         const content = await readRoomContent(client, propertyId, offered);
@@ -103,6 +104,9 @@ export function createPublicPricingOfferCatalog(
               ...(mealDescriptions.has(rate.ratePlanId) && {
                 mealDescription: mealDescriptions.get(rate.ratePlanId)!,
               }),
+              // Additive (VAY-2309): the ways guests can pay this rate now, so the booking page
+              // prices the stay with one of them first.
+              paymentMethods: [...methods.get(rate.ratePlanId)!],
             })),
           });
         }

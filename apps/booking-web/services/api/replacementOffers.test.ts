@@ -1,5 +1,6 @@
 import { afterEach, expect, it, vi } from "vitest";
 import {
+  chosenRatesPaymentMethods,
   displayQuoteMoney,
   getReplacementCatalog,
   getReplacementOffers,
@@ -232,4 +233,59 @@ it("reads the location map and each room's pin, dropping a pin out of range (VAY
   expect(await getReplacementCatalog("hotel")).toEqual({ rooms, locationMap: { property: null } });
   catalog({ rooms });
   expect(await getReplacementCatalog("hotel")).toEqual({ rooms, locationMap: null });
+});
+
+it("reads each rate's ways to pay and the ways all chosen rates take (VAY-2309)", async () => {
+  const card = `pricing-offer.v2:${"d".repeat(64)}`;
+  const fetcher = vi.fn().mockResolvedValue(
+    new Response(
+      JSON.stringify({
+        version: "public-pricing-offers.v1",
+        rooms: [
+          {
+            ...rooms[0],
+            offers: [
+              { ...rooms[0].offers[0], paymentMethods: ["card", "pay_at_property"] },
+              {
+                publicOfferKey: card,
+                currency: "EUR",
+                mealPlan: "room_only",
+                paymentMethods: ["card"],
+              },
+              {
+                publicOfferKey: `pricing-offer.v2:${"e".repeat(64)}`,
+                currency: "EUR",
+                mealPlan: "room_only",
+                paymentMethods: ["card", "cash"],
+              },
+            ],
+          },
+        ],
+      }),
+    ),
+  );
+  vi.stubGlobal("fetch", fetcher);
+  const read = await getReplacementOffers("hotel");
+  expect(read[0]!.offers.map((offer) => offer.paymentMethods)).toEqual([
+    ["card", "pay_at_property"],
+    ["card"],
+    // A way to pay the page doesn't know: the rate's ways stay unknown.
+    undefined,
+  ]);
+  const chosen = (...keys: string[]) =>
+    chosenRatesPaymentMethods(
+      read,
+      keys.map((publicOfferKey, index) => ({
+        selectionId: String(index),
+        publicOfferKey,
+        adults: "1",
+        childAges: [],
+      })),
+    );
+  expect(chosen(key)).toEqual(["card", "pay_at_property"]);
+  expect(chosen(key, card)).toEqual(["card"]);
+  expect(chosen(key, `pricing-offer.v2:${"e".repeat(64)}`)).toBeNull();
+  expect(chosen("pricing-offer.v2:unknown")).toBeNull();
+  // An older API without the field: unknown.
+  expect(chosenRatesPaymentMethods(rooms, choices())).toBeNull();
 });
