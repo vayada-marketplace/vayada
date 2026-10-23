@@ -56,16 +56,51 @@ type Queryable = {
   ): Promise<Pick<QueryResult<T>, "rows">>;
 };
 
-/** Whether guests see the location map: read live, never from the booking page publication. */
-export async function readGuestLocationMapEnabled(
+/** The location map as guests get it; null while the switch is off. */
+export type GuestLocationMap = {
+  /** The property's own pin as its "Guest map visibility" shows it: rounded to the area for Approximate,
+   * none for Hidden or a private location. Used when no room has a pin of its own. */
+  property: (MapPin & { approximate: boolean }) | null;
+};
+
+/** Read live, never from the booking page publication: switching the map never makes a live page stale. */
+export async function readGuestLocationMap(
   db: Queryable,
   propertyId: string,
-): Promise<boolean> {
-  const result = await db.query<{ enabled: boolean }>(
-    "SELECT location_map_enabled AS enabled FROM booking.booking_settings WHERE property_id = $1::uuid",
+): Promise<GuestLocationMap | null> {
+  const result = await db.query<{
+    enabled: boolean;
+    latitude: string | null;
+    longitude: string | null;
+    geoPublic: boolean | null;
+    mapDisplayMode: MapDisplayMode | null;
+  }>(
+    `SELECT settings.location_map_enabled AS enabled,
+            location.latitude::text, location.longitude::text,
+            location.geo_public AS "geoPublic", location.map_display_mode AS "mapDisplayMode"
+     FROM booking.booking_settings settings
+     LEFT JOIN hotel_catalog.property_locations location ON location.property_id = settings.property_id
+     WHERE settings.property_id = $1::uuid`,
     [propertyId],
   );
-  return result.rows[0]?.enabled ?? false;
+  const row = result.rows[0];
+  if (!row?.enabled) return null;
+  const pin = roomPin({
+    latitude: row.latitude === null ? null : Number(row.latitude),
+    longitude: row.longitude === null ? null : Number(row.longitude),
+  });
+  if (!pin || !row.geoPublic || row.mapDisplayMode === "hidden" || !row.mapDisplayMode)
+    return { property: null };
+  // The same rounding the booking page publication applies to an approximate location.
+  return row.mapDisplayMode === "approximate"
+    ? {
+        property: {
+          latitude: Number(pin.latitude.toFixed(2)),
+          longitude: Number(pin.longitude.toFixed(2)),
+          approximate: true,
+        },
+      }
+    : { property: { ...pin, approximate: false } };
 }
 
 /** A room's own pin from its saved attributes; null unless both coordinates are numbers in range. */

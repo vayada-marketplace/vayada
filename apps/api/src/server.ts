@@ -620,7 +620,7 @@ const bookingModuleRepository = config.auth
   ? createPgBookingModuleRepository({ connectionString: targetDatabaseUrl })
   : undefined;
 const bookingLocationMapRepository = config.auth
-  ? createPgBookingLocationMapRepository({ connectionString: targetDatabaseUrl })
+  ? createPgBookingLocationMapRepository({ connectionString: targetDatabaseUrl, max: 2 })
   : undefined;
 
 const stripeConnectProvider = config.stripeSubscriptions.secretKey

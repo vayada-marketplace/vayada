@@ -6227,7 +6227,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
         [scope.propertyId],
       );
       const mapped = await catalog.read(scope.propertyId);
-      expect(mapped?.locationMap).toBe(true);
+      expect(mapped?.locationMap).toHaveProperty("property");
       expect(
         Object.fromEntries((mapped?.rooms ?? []).map((room) => [room.name, room.location ?? null])),
       ).toEqual({

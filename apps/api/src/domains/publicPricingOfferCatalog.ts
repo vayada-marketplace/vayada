@@ -13,7 +13,7 @@ import {
 import type { PricingPaymentSwitches } from "./pricingRatePayability.js";
 import { readPmsRoomOperatingEligibility } from "./pmsRoomOperatingEligibility.js";
 import { toPublicPmsRoomAmenityLabelsV1 } from "./pmsRoomAmenityVocabulary.js";
-import { readGuestLocationMapEnabled, roomAddress, roomPin } from "./bookingLocationMap.js";
+import { readGuestLocationMap, roomAddress, roomPin } from "./bookingLocationMap.js";
 
 type MediaServing = Pick<
   PlatformMediaServingConfig,
@@ -78,7 +78,7 @@ export function createPublicPricingOfferCatalog(
           .filter((room) => room.offers.length > 0);
         const content = await readRoomContent(client, propertyId, offered);
         // The location map switch (VAY-2126) is read live; rooms' pins are sent only while it is on.
-        const locationMap = await readGuestLocationMapEnabled(client, propertyId);
+        const locationMap = await readGuestLocationMap(client, propertyId);
         const rooms = [];
         for (const room of offered) {
           const row = content.get(room.roomTypeId);
@@ -113,7 +113,7 @@ export function createPublicPricingOfferCatalog(
           version: "public-pricing-offers.v1" as const,
           rooms,
           // Additive (VAY-2126): only while the hotel shows the location map.
-          ...(locationMap && { locationMap: true as const }),
+          ...(locationMap && { locationMap }),
         };
       } finally {
         try {

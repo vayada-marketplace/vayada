@@ -9,7 +9,7 @@ import {
 } from "./hotelSetupOrdinaryLogin.fixture.js";
 import {
   createPgBookingLocationMapRepository,
-  readGuestLocationMapEnabled,
+  readGuestLocationMap,
   type BookingLocationMapRepository,
 } from "./domains/bookingLocationMap.js";
 
@@ -101,13 +101,21 @@ describe.skipIf(!TEST_DATABASE_URL)("Booking location map (runtime login)", () =
         mapDisplayMode: "approximate",
       },
     });
-    expect(await readGuestLocationMapEnabled(admin, propertyId)).toBe(false);
+    expect(await readGuestLocationMap(admin, propertyId)).toBeNull();
 
     const audit = { actorUserId, organizationId, requestId: randomUUID(), correlationId: null };
     expect(await repository.setEnabled({ propertyId, enabled: true, audit })).toEqual({
       enabled: true,
     });
-    expect(await readGuestLocationMapEnabled(admin, propertyId)).toBe(true);
+    // Guests get the property's pin as its visibility shows it: rounded to the area for Approximate.
+    expect(await readGuestLocationMap(admin, propertyId)).toEqual({
+      property: { latitude: 48.14, longitude: 11.58, approximate: true },
+    });
+    await admin.query(
+      "UPDATE hotel_catalog.property_locations SET map_display_mode='hidden' WHERE property_id=$1::uuid",
+      [propertyId],
+    );
+    expect(await readGuestLocationMap(admin, propertyId)).toEqual({ property: null });
     await repository.setEnabled({ propertyId, enabled: false, audit });
     await repository.setEnabled({ propertyId, enabled: true, audit });
     expect(await repository.read(propertyId)).toMatchObject({ enabled: true });
@@ -140,7 +148,7 @@ describe.skipIf(!TEST_DATABASE_URL)("Booking location map (runtime login)", () =
     const audit = { actorUserId, organizationId, requestId: randomUUID(), correlationId: null };
 
     expect(await repository.read(propertyId)).toMatchObject({ enabled: false, canSwitch: false });
-    expect(await readGuestLocationMapEnabled(admin, propertyId)).toBe(false);
+    expect(await readGuestLocationMap(admin, propertyId)).toBeNull();
     expect(await repository.setEnabled({ propertyId, enabled: true, audit })).toBeNull();
     const audits = await admin.query(
       "SELECT count(*)::int AS count FROM platform.product_audit_events WHERE property_id=$1::uuid",
