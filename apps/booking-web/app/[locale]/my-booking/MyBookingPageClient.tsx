@@ -7,6 +7,7 @@ import ApproximateAmountsNote from "@/components/booking/ApproximateAmountsNote"
 import RoomSelectionSummary from "@/components/booking/RoomSelectionSummary";
 import BookedRoomsList from "@/components/booking/BookedRoomsList";
 import type { BookedRoom } from "@/lib/types";
+import CancelRoomsList from "@/components/booking/CancelRoomsList";
 import { useState, useEffect, useRef } from "react";
 import HotelHeroImage from "@/components/booking/HotelHeroImage";
 import { useSearchParams } from "next/navigation";
@@ -507,6 +508,14 @@ export default function MyBookingPageClient() {
                     ? t("freeCancellation")
                     : t("cancellationFeeApplies")}
                 </div>
+                {/* VAY-2320: several rooms, each under its own terms. */}
+                {cancelPreview.rooms && cancelPreview.rooms.length > 1 && (
+                  <CancelRoomsList
+                    preview={cancelPreview}
+                    rooms={cancelPreview.rooms}
+                    formatPrice={formatPrice}
+                  />
+                )}
                 <p className="text-sm text-gray-700">
                   {cancelPreview.amountPaid === 0 && cancelPreview.cancellationFeeAmount === 0
                     ? t("noPaymentToRefund")
