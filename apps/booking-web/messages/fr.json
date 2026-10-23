@@ -564,7 +564,7 @@
   },
   "locationMap": {
     "title": "Emplacement",
-    "severalPlaces": "Nos chambres se trouvent à {count} endroits. Sélectionnez un repère pour voir quelle chambre s'y trouve.",
+    "severalPlaces": "Nos chambres se trouvent à {count} endroits.",
     "viewDetails": "Voir les détails",
     "placesLabel": "Lieux sur la carte",
     "mapLabel": "Carte de l'emplacement des chambres",

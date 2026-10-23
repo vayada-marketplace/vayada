@@ -74,6 +74,8 @@ export default function RoomsLocationMap({
   const [selected, setSelected] = useState<number | null>(null);
   const { pins, places } = useGuestPlaces(rooms, property);
   const several = pins.length > 1;
+  // A single place that isn't the property's still lists its room, to open its details.
+  const listed = several || pins[0]?.kind === "rooms";
 
   // The guest's "Show map" earlier in this tab counts here too (read after mount: sessionStorage).
   useEffect(() => {
@@ -95,7 +97,7 @@ export default function RoomsLocationMap({
         <p className="mt-2 text-gray-600">
           {several ? t("severalPlaces", { count: pins.length }) : pins[0].address || property.name}
         </p>
-        <div className={`mt-6 ${several ? "lg:flex lg:items-start lg:gap-6" : ""}`}>
+        <div className={`mt-6 ${listed ? "lg:flex lg:items-start lg:gap-6" : ""}`}>
           <div className="relative h-80 w-full overflow-hidden rounded-2xl border border-gray-200 sm:h-[480px] lg:min-w-0 lg:flex-1">
             {requested ? (
               <GuestMap
@@ -116,7 +118,7 @@ export default function RoomsLocationMap({
               />
             )}
           </div>
-          {several && (
+          {listed && (
             <ol
               aria-label={t("placesLabel")}
               className="mt-5 space-y-2.5 lg:mt-0 lg:w-[360px] lg:shrink-0"

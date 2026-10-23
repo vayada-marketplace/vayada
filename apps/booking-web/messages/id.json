@@ -564,7 +564,7 @@
   },
   "locationMap": {
     "title": "Lokasi",
-    "severalPlaces": "Kamar kami ada di {count} tempat. Pilih penanda untuk melihat kamar mana yang ada di sana.",
+    "severalPlaces": "Kamar kami ada di {count} tempat.",
     "viewDetails": "Lihat detail",
     "placesLabel": "Tempat di peta",
     "mapLabel": "Peta lokasi kamar",

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import { importGoogleMapsLibrary } from "@vayada/product-onboarding/googleMaps";
+import { onGoogleAuthFailure } from "@/lib/googleMapsFailure";
 
 /** A place on the guest map (VAY-2324): a labelled pill at an exact spot, or a circle with its label for an
  * "Approximate area". */
@@ -31,8 +32,10 @@ type OverlayViewBase = {
 };
 type MapsLibrary = {
   Map: new (element: HTMLElement, options: Record<string, unknown>) => GoogleMap;
-  Circle: new (options: Record<string, unknown>) => unknown;
-  OverlayView: new () => OverlayViewBase;
+  Circle: new (options: Record<string, unknown>) => { setMap: (map: GoogleMap | null) => void };
+  OverlayView: (new () => OverlayViewBase) & {
+    preventMapHitsAndGesturesFrom?: (element: HTMLElement) => void;
+  };
 };
 type CoreLibrary = {
   LatLng: new (lat: number, lng: number) => LatLng;
@@ -46,7 +49,7 @@ const MAX_FITTED_ZOOM = 16;
 // A map that hasn't drawn by then (a hanging script) counts as failed.
 const LOAD_TIMEOUT_MS = 12_000;
 const PILL =
-  "absolute whitespace-nowrap rounded-full px-3 py-1.5 text-[13px] font-bold shadow-[0_2px_6px_rgb(0_0_0_/_22%)] " +
+  "absolute max-w-[220px] truncate rounded-full px-3 py-1.5 text-[13px] font-bold shadow-[0_2px_6px_rgb(0_0_0_/_22%)] " +
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2";
 const PILL_IDLE = "border border-gray-200 bg-white text-gray-900";
 const PILL_SELECTED = "border-2 border-white bg-primary-600 text-white";
@@ -61,41 +64,38 @@ export default function GuestMap({
   apiKey,
   label,
   className = "",
-  onFailed,
 }: {
   places: GuestMapPlace[];
+  /** The selected place's index in places. */
   selected: number | null;
   onSelect: (index: number) => void;
   apiKey: string;
   /** The map's accessible name. */
   label: string;
   className?: string;
-  onFailed?: () => void;
 }) {
   const t = useTranslations("locationMap");
   const mapRef = useRef<HTMLDivElement>(null);
   const brandRef = useRef<HTMLSpanElement>(null);
-  const [ready, setReady] = useState(false);
+  // Raised each time the places are drawn, so the selection is applied to the new pills.
+  const [draws, setDraws] = useState(0);
   const [failed, setFailed] = useState(false);
   const drawn = useRef<{ map: GoogleMap; positions: LatLng[]; pills: HTMLButtonElement[] } | null>(
     null,
   );
   const onSelectRef = useRef(onSelect);
-  const onFailedRef = useRef(onFailed);
   useEffect(() => {
     onSelectRef.current = onSelect;
-    onFailedRef.current = onFailed;
   });
   const placesKey = JSON.stringify(places);
+  const ready = draws > 0;
 
   useEffect(() => {
     if (!mapRef.current || places.length === 0) return;
-    const googleWindow = window as Window & { gm_authFailure?: () => void };
-    const previous = googleWindow.gm_authFailure;
-    googleWindow.gm_authFailure = () => {
-      previous?.();
-      setFailed(true);
-    };
+    const stopListening = onGoogleAuthFailure(() => setFailed(true));
+    // What this drawing put on the map, taken off again when the places change or the map goes.
+    const shapes: { setMap: (map: GoogleMap | null) => void }[] = [];
+    let fitted: { remove: () => void } | undefined;
     let disposed = false;
     const timeout = setTimeout(() => {
       if (!disposed) setFailed(true);
@@ -107,6 +107,8 @@ export default function GuestMap({
       .then(([{ Map, Circle, OverlayView }, { LatLng, LatLngBounds }]) => {
         if (disposed || !mapRef.current) return;
         clearTimeout(timeout);
+        // Google answered after all: a slow load isn't a failed one.
+        setFailed(false);
         const positions = places.map((place) => new LatLng(place.latitude, place.longitude));
         const narrow = window.matchMedia("(max-width: 639px)").matches;
         const map = new Map(mapRef.current, {
@@ -121,7 +123,7 @@ export default function GuestMap({
           const bounds = new LatLngBounds();
           positions.forEach((position) => bounds.extend(position));
           map.fitBounds(bounds, 72);
-          const fitted = map.addListener?.("idle", () => {
+          fitted = map.addListener?.("idle", () => {
             fitted?.remove();
             if ((map.getZoom?.() ?? 0) > MAX_FITTED_ZOOM) map.setZoom?.(MAX_FITTED_ZOOM);
           });
@@ -159,7 +161,7 @@ export default function GuestMap({
         const pills = places.map((place, index) => {
           if (place.approximate) {
             // Only the area: no pin on a spot that isn't the room's.
-            new Circle({
+            const area = new Circle({
               map,
               center: positions[index],
               radius: AREA_RADIUS_METRES,
@@ -170,16 +172,23 @@ export default function GuestMap({
               strokeWeight: 2,
               clickable: false,
             });
+            shapes.push(area);
           }
           const button = document.createElement("button");
           button.type = "button";
+          button.className = `${PILL} ${PILL_IDLE}`;
           button.textContent = place.label;
+          button.title = place.label;
           button.addEventListener("click", () => onSelectRef.current(index));
-          new Pill(positions[index], button, place.approximate).setMap(map);
+          // Dragging or double-clicking a pill doesn't move or zoom the map under it.
+          OverlayView.preventMapHitsAndGesturesFrom?.(button);
+          const pill = new Pill(positions[index], button, place.approximate);
+          pill.setMap(map);
+          shapes.push(pill);
           return button;
         });
         drawn.current = { map, positions, pills };
-        setReady(true);
+        setDraws((count) => count + 1);
       })
       .catch(() => {
         if (!disposed) setFailed(true);
@@ -187,7 +196,9 @@ export default function GuestMap({
     return () => {
       disposed = true;
       clearTimeout(timeout);
-      googleWindow.gm_authFailure = previous;
+      stopListening();
+      fitted?.remove();
+      shapes.forEach((shape) => shape.setMap(null));
       drawn.current = null;
     };
     // placesKey stands for places; the map is drawn once per set of places.
@@ -200,17 +211,14 @@ export default function GuestMap({
     if (!ready || !current) return;
     current.pills.forEach((pill, index) => {
       pill.className = `${PILL} ${index === selected ? PILL_SELECTED : PILL_IDLE}`;
-      pill.setAttribute("aria-pressed", String(index === selected));
+      if (index === selected) pill.setAttribute("aria-current", "true");
+      else pill.removeAttribute("aria-current");
       pill.style.zIndex = index === selected ? "2" : "1";
     });
     if (selected === null) return;
     const position = current.positions[selected];
     if (position && !current.map.getBounds?.()?.contains(position)) current.map.panTo(position);
-  }, [ready, selected]);
-
-  useEffect(() => {
-    if (failed) onFailedRef.current?.();
-  }, [failed]);
+  }, [draws, selected]);
 
   return (
     <div className={`relative overflow-hidden bg-gray-100 ${className}`}>

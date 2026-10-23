@@ -565,7 +565,7 @@
   },
   "locationMap": {
     "title": "Lage",
-    "severalPlaces": "Unsere Zimmer liegen an {count} Orten. Wählen Sie eine Markierung, um zu sehen, welches Zimmer dort ist.",
+    "severalPlaces": "Unsere Zimmer liegen an {count} Orten.",
     "viewDetails": "Details ansehen",
     "placesLabel": "Orte auf der Karte",
     "mapLabel": "Karte mit der Lage der Zimmer",

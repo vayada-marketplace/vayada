@@ -59,10 +59,12 @@ const GOOGLE_FAKE = `
     addListener(event, handler) { if (event === "idle") this.idle = handler; return { remove: () => (this.idle = null) }; }
     getZoom() { return this.zoom; }
     setZoom(zoom) { this.zoom = zoom; state.zoom = zoom; }
-    getBounds() { return { contains: () => false }; }
+    // Only Haidhausen is out of view, to show the map moves to a selected place only when it has to.
+    getBounds() { return { contains: (position) => point(position).lat !== 48.1291 }; }
     panTo(position) { state.panned.push(point(position)); }
   }
   class OverlayView {
+    static preventMapHitsAndGesturesFrom(element) { element.dataset.noMapGestures = "1"; }
     setMap(map) {
       if (!map) return this.onRemove();
       this.map = map; this.slot = state.overlays++; this.onAdd(); this.draw();
@@ -76,6 +78,7 @@ const GOOGLE_FAKE = `
       state.circles.push({ ...point(options.center), radius: options.radius, circle: this });
     }
     addListener(event, handler) { this.listeners[event] = handler; }
+    setMap() {}
   }
   window.__clickCircle = (index) => state.circles[index].circle.listeners.click();
   class InfoWindow {
@@ -156,9 +159,7 @@ test.describe("booking page location map", () => {
     await page.goto("/");
     const section = page.getByTestId("rooms-location-map");
     await expect(section.getByRole("heading", { name: "Location" })).toBeVisible();
-    await expect(
-      section.getByText("Our rooms are in 3 places. Select a pin to see which room is there."),
-    ).toBeVisible();
+    await expect(section.getByText("Our rooms are in 3 places.")).toBeVisible();
     const places = section.getByRole("list", { name: "Places on the map" }).getByRole("listitem");
     await expect(places).toHaveCount(3);
     await expect(places.nth(0)).toContainText("Schwabing Loft");
@@ -180,7 +181,6 @@ test.describe("booking page location map", () => {
       "Haidhausen Garden Flat",
       "Isar Studio",
     ]);
-    expect(await markers(page)).toEqual([]);
     expect(google.length).toBeGreaterThan(0);
     // Pins only a few streets apart don't zoom the map in past street level.
     await expect
@@ -190,24 +190,24 @@ test.describe("booking page location map", () => {
         ),
       )
       .toBe(16);
-    // The place picked before the map opened stands out on it.
-    await expect(pills(page).nth(2)).toHaveAttribute("aria-pressed", "true");
-    await expect(pills(page).nth(0)).toHaveAttribute("aria-pressed", "false");
+    // The place picked before the map opened stands out on it, and the map stays put: it's in view.
+    await expect(pills(page).nth(2)).toHaveAttribute("aria-current", "true");
+    await expect(pills(page).nth(0)).not.toHaveAttribute("aria-current");
+    await expect(pills(page).nth(0)).toHaveAttribute("data-no-map-gestures", "1");
 
     // A tapped pill selects its place in the list, and the map moves to it when it's out of view.
     await pills(page).nth(1).click();
-    await expect(pills(page).nth(1)).toHaveAttribute("aria-pressed", "true");
+    await expect(pills(page).nth(1)).toHaveAttribute("aria-current", "true");
     await expect(places.nth(1)).toHaveClass(/bg-primary-50/);
     await expect
       .poll(() =>
-        page.evaluate(
-          () =>
-            (
-              window as unknown as { __locationMap?: { panned: { lat: number }[] } }
-            ).__locationMap?.panned.at(-1)?.lat,
+        page.evaluate(() =>
+          (
+            window as unknown as { __locationMap?: { panned: { lat: number }[] } }
+          ).__locationMap?.panned.map(({ lat }) => lat),
         ),
       )
-      .toBe(48.1291);
+      .toEqual([48.1291]);
     await places.nth(1).getByRole("button", { name: "View details", exact: true }).click();
     await expect(page.getByRole("dialog")).toContainText("Haidhausen Garden Flat");
   });
@@ -225,6 +225,21 @@ test.describe("booking page location map", () => {
     expect(await circles(page)).toEqual([]);
   });
 
+  test("lists a lone villa's place, so its details open from the section", async ({ page }) => {
+    await setup(page, {
+      locationMap: { property: null },
+      rooms: [villas[0], room("suite", "Suite", "b", undefined, true)],
+    });
+    await page.goto("/");
+    const section = page.getByTestId("rooms-location-map");
+    // The hotel hides its own place: the suite is left off, the loft is the only place.
+    const places = section.getByRole("list", { name: "Places on the map" }).getByRole("listitem");
+    await expect(places).toHaveCount(1);
+    await expect(places).toContainText("Leopoldstraße 12, Munich");
+    await places.getByRole("button", { name: "View details", exact: true }).click();
+    await expect(page.getByRole("dialog")).toContainText("Schwabing Loft");
+  });
+
   test("shows the area, not a pin, when the hotel's location is approximate", async ({ page }) => {
     await setup(page, {
       locationMap: { property: { latitude: 48.14, longitude: 11.58, approximate: true } },
@@ -236,7 +251,6 @@ test.describe("booking page location map", () => {
     // The area's name sits on the area: no pin on a spot that isn't the hotel's.
     await expect(pills(page)).toHaveText(["Hotel Alpenrose"]);
     await expect(pills(page)).toHaveAttribute("style", /translate\(-50%, -50%\)/);
-    expect(await markers(page)).toEqual([]);
   });
 
   test("puts the rooms at the property on the hotel's pin, and a villa shown as an area as a circle (VAY-2321)", async ({

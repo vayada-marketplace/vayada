@@ -565,7 +565,7 @@
   },
   "locationMap": {
     "title": "Location",
-    "severalPlaces": "Our rooms are in {count} places. Select a pin to see which room is there.",
+    "severalPlaces": "Our rooms are in {count} places.",
     "viewDetails": "View details",
     "placesLabel": "Places on the map",
     "mapLabel": "Map of where the rooms are",
