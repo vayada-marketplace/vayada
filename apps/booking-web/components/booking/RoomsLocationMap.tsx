@@ -107,10 +107,11 @@ export function useLocationLine(
   };
 }
 
-/** The booking page's location map (VAY-2126): shown when the hotel switched it on in Booking Admin. Rooms
- * at the property share its public pin; rooms elsewhere get one each, or an area when the hotel shows only
- * that (VAY-2321). Booking pages talk to no third party on their own (VAY-2216), so Google Maps loads only
- * when the guest asks for it with "Show map" (remembered for this tab). */
+/** The booking page's location map (VAY-2126): shown when the hotel switched it on in Booking Admin and every
+ * room is in one place; with rooms in several places the accommodations' own map replaces it (VAY-2324,
+ * VAY-2325). The place is the property's public pin, or an area when the hotel shows only that (VAY-2321).
+ * Booking pages talk to no third party on their own (VAY-2216), so Google Maps loads only when the guest asks
+ * for it with "Show map" (remembered for this tab). */
 export default function RoomsLocationMap({
   rooms,
   property,
@@ -126,9 +127,9 @@ export default function RoomsLocationMap({
   const [requested, setRequested] = useState(false);
   const [selected, setSelected] = useState<number | null>(null);
   const { pins, places } = useGuestPlaces(rooms, property);
-  const several = pins.length > 1;
-  // A single place that isn't the property's still lists its room, to open its details.
-  const listed = several || pins[0]?.kind === "rooms";
+  // A place that isn't the property's (a lone villa while the hotel hides its own) lists its room, to open
+  // its details.
+  const listed = pins[0]?.kind === "rooms";
 
   // The guest's "Show map" earlier in this tab counts here too (read after mount: sessionStorage).
   useEffect(() => {
@@ -147,9 +148,7 @@ export default function RoomsLocationMap({
         <h2 id="location-map-title" className="text-2xl font-heading text-gray-900 md:text-3xl">
           {t("title")}
         </h2>
-        <p className="mt-2 text-gray-600">
-          {several ? t("severalPlaces", { count: pins.length }) : pins[0].address || property.name}
-        </p>
+        <p className="mt-2 text-gray-600">{pins[0].address || property.name}</p>
         <div className={`mt-6 ${listed ? "lg:flex lg:items-start lg:gap-6" : ""}`}>
           <div className="relative h-80 w-full overflow-hidden rounded-2xl border border-gray-200 sm:h-[480px] lg:min-w-0 lg:flex-1">
             {requested ? (

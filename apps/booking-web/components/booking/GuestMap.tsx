@@ -16,8 +16,9 @@ export type GuestMapPlace = {
 };
 
 type LatLng = { lat: () => number; lng: () => number };
+type Padding = { top: number; right: number; bottom: number; left: number };
 type GoogleMap = {
-  fitBounds: (bounds: unknown, padding?: number) => void;
+  fitBounds: (bounds: unknown, padding?: number | Padding) => void;
   getBounds?: () => { contains: (position: LatLng) => boolean } | undefined;
   getZoom?: () => number | undefined;
   setZoom?: (zoom: number) => void;
@@ -50,7 +51,9 @@ const MAX_FITTED_ZOOM = 16;
 const LOAD_TIMEOUT_MS = 12_000;
 const PILL =
   "absolute inline-flex max-w-[220px] items-center gap-1 whitespace-nowrap rounded-full px-3 py-1.5 text-[13px] font-bold shadow-[0_2px_6px_rgb(0_0_0_/_22%)] " +
-  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2";
+  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 " +
+  // A touch target of at least 44 px around the pill (VAY-2325).
+  "before:absolute before:-inset-2 before:content-['']";
 const PILL_IDLE = "border border-gray-200 bg-white text-gray-900";
 const PILL_SELECTED = "border-2 border-white bg-primary-600 text-white";
 
@@ -64,6 +67,8 @@ export default function GuestMap({
   apiKey,
   label,
   className = "",
+  fitPadding = 72,
+  gestureHandling = "cooperative",
 }: {
   places: GuestMapPlace[];
   /** The selected place's index in places. */
@@ -73,6 +78,10 @@ export default function GuestMap({
   /** The map's accessible name. */
   label: string;
   className?: string;
+  /** Room kept around the places when the map fits them in, such as for cards drawn over the map. */
+  fitPadding?: number | Padding;
+  /** "greedy" where nothing else scrolls, such as a full-screen map: one finger moves the map. */
+  gestureHandling?: "cooperative" | "greedy";
 }) {
   const t = useTranslations("locationMap");
   const mapRef = useRef<HTMLDivElement>(null);
@@ -84,8 +93,11 @@ export default function GuestMap({
     null,
   );
   const onSelectRef = useRef(onSelect);
+  // Read when the map is drawn: cards drawn over the map are measured after it mounts.
+  const fitPaddingRef = useRef(fitPadding);
   useEffect(() => {
     onSelectRef.current = onSelect;
+    fitPaddingRef.current = fitPadding;
   });
   const placesKey = JSON.stringify(places);
   const ready = draws > 0;
@@ -117,12 +129,12 @@ export default function GuestMap({
           clickableIcons: false,
           disableDefaultUI: true,
           zoomControl: !narrow,
-          gestureHandling: "cooperative",
+          gestureHandling,
         });
         if (places.length > 1) {
           const bounds = new LatLngBounds();
           positions.forEach((position) => bounds.extend(position));
-          map.fitBounds(bounds, 72);
+          map.fitBounds(bounds, fitPaddingRef.current);
           fitted = map.addListener?.("idle", () => {
             fitted?.remove();
             if ((map.getZoom?.() ?? 0) > MAX_FITTED_ZOOM) map.setZoom?.(MAX_FITTED_ZOOM);
