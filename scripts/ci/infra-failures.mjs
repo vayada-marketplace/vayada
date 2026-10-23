@@ -2,12 +2,11 @@
 // Weekly report of PR Checks jobs that failed for infrastructure reasons (VAY-2314), run every
 // Monday by the CI Infra Report workflow. It reads the past week's PR Checks runs through the
 // GitHub API and sorts every failed job, attempts a rerun replaced included, by the error in its
-// failed step's log (or, for a job that ran out of time, its annotations). It then rewrites one
-// GitHub issue, so a new flake source shows up as soon as it costs reruns. It also times the
-// browser installs of the merge queue runs, which run every job.
+// failed step's log (or, for a job that ran out of time, its annotations), so a new flake source
+// shows up as soon as it costs reruns. It also times the browser installs of the merge queue runs,
+// which run every job. The report goes to the run's page (the step summary), nowhere else.
 //
-//   node scripts/ci/infra-failures.mjs            # needs GITHUB_TOKEN, GITHUB_REPOSITORY
-//   node scripts/ci/infra-failures.mjs --dry-run  # prints the report, touches no issue
+//   node scripts/ci/infra-failures.mjs   # needs GITHUB_TOKEN, GITHUB_REPOSITORY; prints it locally
 //
 // The report quotes no log text: this repository is public and logs carry what tests print. A run
 // cancelled by a newer push is not read, even if a job had failed in it.
@@ -15,10 +14,6 @@
 import { appendFileSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-export const BOT = "github-actions[bot]";
-export const ISSUE_TITLE = "PR Checks: infrastructure failures, weekly";
-export const ISSUE_LABELS = ["monitoring"];
-export const MARKER = "<!-- ci-infra-failures -->";
 export const WORKFLOW = "pr-checks.yml";
 export const INSTALL_STEP = "Install Chromium";
 // The GitHub token allows 1,000 API requests an hour per repository, shared with every other
@@ -200,7 +195,7 @@ export async function collect({ client, until, days = 7 }) {
 }
 
 // A job or step name as inline code: names come from the workflow a pull request may change, and
-// the issue is public, so they must not render links, mentions or HTML.
+// the run page is public, so they must not render links, mentions or HTML.
 const code = (text) => `\`${String(text).replaceAll("`", "'").replaceAll("|", "\\|")}\``;
 const date = (when) => when.toISOString().slice(0, 10);
 const minutes = (s) => (s >= 90 ? `${(s / 60).toFixed(1)} min` : `${Math.round(s)} s`);
@@ -223,7 +218,6 @@ export function buildReport(
   const headline = `${date(since)} to ${date(until)}: ${infra.length} PR Checks job${infra.length === 1 ? "" : "s"} failed for infrastructure reasons`;
 
   const lines = [
-    MARKER,
     `**${headline}**, of ${failures.length} failed jobs in ${runs} runs (attempts that a rerun replaced included).`,
     "",
     rows.length
@@ -257,7 +251,7 @@ export function buildReport(
   }
   lines.push(
     "",
-    `Rewritten every Monday by [CI Infra Report](${workflowUrl ?? "../actions"}) (VAY-2314). Known causes are retried inside their steps; a test failure is never retried.`,
+    `Written every Monday by [CI Infra Report](${workflowUrl ?? "../actions"}) (VAY-2314). Known causes are retried inside their steps; a test failure is never retried.`,
     "",
   );
   return { headline, body: lines.join("\n") };
@@ -275,17 +269,16 @@ export function githubClient({
 }) {
   let requests = 0;
   let rateLeft = Infinity;
-  const call = async (method, path, body) => {
+  // Reads only: the report writes nothing to GitHub but the run's own step summary.
+  const call = async (path) => {
     requests += 1;
     const response = await fetchImpl(`${api}/repos/${repository}${path}`, {
-      method,
+      method: "GET",
       headers: {
         accept: "application/vnd.github+json",
         authorization: `Bearer ${token}`,
         "x-github-api-version": "2022-11-28",
-        ...(body ? { "content-type": "application/json" } : {}),
       },
-      body: body ? JSON.stringify(body) : undefined,
       signal: AbortSignal.timeout(60_000),
     });
     const left = response.headers.get("x-ratelimit-remaining");
@@ -302,7 +295,7 @@ export function githubClient({
   const get = async (path, read = (response) => response.json()) => {
     for (let attempt = 1; ; attempt++) {
       try {
-        return await read(await call("GET", path));
+        return await read(await call(path));
       } catch (error) {
         const transient = !error.status || error.status === 429 || error.status >= 500;
         if (!transient || attempt === 3) throw new Error(`GET ${path}: ${error.message}`);
@@ -341,43 +334,11 @@ export function githubClient({
       get(`/actions/jobs/${jobId}/logs`, (response) => response.text()).catch(() => ""),
     annotations: (checkRunId) =>
       json(`/check-runs/${checkRunId}/annotations?per_page=100`).catch(() => []),
-    async openIssues() {
-      const issues = [];
-      for (let page = 1; ; page++) {
-        const batch = await json(`/issues?state=open&creator=${BOT}&per_page=100&page=${page}`);
-        issues.push(...batch.filter((issue) => !issue.pull_request));
-        if (batch.length < 100) return issues;
-      }
-    },
-    createIssue: async (fields) => (await call("POST", "/issues", fields)).json(),
-    updateIssue: (number, fields) => call("PATCH", `/issues/${number}`, fields),
-    comment: (number, body) => call("POST", `/issues/${number}/comments`, { body }),
   };
 }
 
-// One open issue holds the latest report; each week adds a one-line comment, so the thread keeps
-// the history and watchers hear of it. Only an issue this workflow opened counts: anyone can file
-// one quoting the marker in this public repository.
-export async function publish({ client, report }) {
-  const [issue] = (await client.openIssues())
-    .filter((candidate) => candidate.user?.login === BOT && candidate.body?.includes(MARKER))
-    .sort((a, b) => a.number - b.number);
-  if (!issue) {
-    const created = await client.createIssue({
-      title: ISSUE_TITLE,
-      body: report.body,
-      labels: ISSUE_LABELS,
-    });
-    return `opened #${created.number}`;
-  }
-  await client.updateIssue(issue.number, { body: report.body });
-  await client.comment(issue.number, `${report.headline}. The description has the details.`);
-  return `updated #${issue.number}`;
-}
-
 async function main() {
-  const dryRun = process.argv.includes("--dry-run");
-  const { GITHUB_TOKEN, GITHUB_REPOSITORY, GITHUB_SERVER_URL, GITHUB_REF } = process.env;
+  const { GITHUB_TOKEN, GITHUB_REPOSITORY, GITHUB_SERVER_URL } = process.env;
   if (!GITHUB_TOKEN || !GITHUB_REPOSITORY)
     throw new Error("needs GITHUB_TOKEN and GITHUB_REPOSITORY");
   const client = githubClient({
@@ -392,12 +353,6 @@ async function main() {
   console.log(report.headline);
   if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, report.body);
   else console.log(`\n${report.body}`);
-  // Only main's scheduled or manual run writes the issue; a branch run is a dry run.
-  if (dryRun || GITHUB_REF !== "refs/heads/main") {
-    console.log("Issue: none changed (dry run, or not main).");
-    return;
-  }
-  console.log(`Issue: ${await publish({ client, report })}.`);
 }
 
 // Compare real paths so a symlinked invocation can never turn the CLI into a silent no-op.

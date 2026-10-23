@@ -3,16 +3,12 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { parse } from "yaml";
 import {
-  BOT,
   CAUSES,
-  ISSUE_TITLE,
-  MARKER,
   buildReport,
   classify,
   collect,
   failedStepLog,
   githubClient,
-  publish,
 } from "./infra-failures.mjs";
 
 // Lines from real PR Checks logs and annotations (2026-10-12 to 2026-10-22), timestamps dropped.
@@ -285,7 +281,6 @@ test("the report counts each cause, lists setup-step mysteries and the queue's s
     headline,
     "2026-10-19 to 2026-10-26: 3 PR Checks jobs failed for infrastructure reasons",
   );
-  assert.ok(body.startsWith(MARKER));
   assert.match(body, /of 5 failed jobs in 1150 runs/);
   assert.match(body, /\| Playwright browser download \| 2 \| \[`First-Party \\\| Auth`\]/);
   assert.match(body, /\| Ubuntu packages \(apt\) \| 1 \|/);
@@ -318,37 +313,6 @@ test("a quiet week says so", () => {
   assert.match(headline, /: 0 PR Checks jobs failed/);
   assert.match(body, /No known infrastructure cause this week\./);
   assert.match(body, /No merge queue run installed a browser\./);
-});
-
-function fakeIssues(open) {
-  const calls = [];
-  return {
-    calls,
-    openIssues: async () => open,
-    createIssue: async (fields) => (calls.push(["create", fields]), { number: 9 }),
-    updateIssue: async (number, fields) => calls.push(["update", number, fields]),
-    comment: async (number, body) => calls.push(["comment", number, body]),
-  };
-}
-const REPORT = { headline: "Week: 1 PR Checks job failed", body: `${MARKER}\nreport` };
-
-test("publish opens the issue once, then rewrites it and comments the headline each week", async () => {
-  const first = fakeIssues([]);
-  assert.equal(await publish({ client: first, report: REPORT }), "opened #9");
-  assert.deepEqual(first.calls, [
-    ["create", { title: ISSUE_TITLE, body: REPORT.body, labels: ["monitoring"] }],
-  ]);
-  const later = fakeIssues([{ number: 7, user: { login: BOT }, body: `${MARKER}\nold` }]);
-  assert.equal(await publish({ client: later, report: REPORT }), "updated #7");
-  assert.deepEqual(later.calls, [
-    ["update", 7, { body: REPORT.body }],
-    ["comment", 7, "Week: 1 PR Checks job failed. The description has the details."],
-  ]);
-});
-
-test("publish ignores an issue someone else opened with the marker", async () => {
-  const client = fakeIssues([{ number: 3, user: { login: "someone" }, body: MARKER }]);
-  assert.equal(await publish({ client, report: REPORT }), "opened #9");
 });
 
 test("the client lists runs by whole-second ranges, pages through runs and jobs, and reads logs as text", async () => {
@@ -439,14 +403,18 @@ test("the client retries a read that timed out or got a 5xx, but not a 4xx", asy
   assert.equal(pauses.length, 4);
 });
 
-test("the weekly workflow runs the report from main with read access and issue writes only", () => {
+test("the weekly workflow only reads, and reports on its own run page", () => {
   const workflow = parse(readFileSync(".github/workflows/ci-infra-report.yml", "utf8"));
   assert.deepEqual(workflow.permissions, {
     actions: "read",
     checks: "read",
     contents: "read",
-    issues: "write",
   });
+  // The report is the step summary; nothing writes issues, comments or pull requests.
+  assert.doesNotMatch(
+    readFileSync("scripts/ci/infra-failures.mjs", "utf8"),
+    /\/issues|\/pulls|"POST"|"PATCH"/,
+  );
   assert.deepEqual(Object.keys(workflow.on).sort(), ["schedule", "workflow_dispatch"]);
   const steps = workflow.jobs.report.steps;
   assert.ok(steps.some((s) => s.run === "node scripts/ci/infra-failures.mjs"));
