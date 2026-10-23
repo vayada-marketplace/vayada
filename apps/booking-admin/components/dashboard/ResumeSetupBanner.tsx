@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { buildSharedHotelSetupRedirectPath, setupExitPropertyId } from "@vayada/product-onboarding";
 import { useTranslation } from "@/lib/i18n";
@@ -13,7 +12,6 @@ import { sharedHotelSetupApi } from "@/services/api/sharedHotelSetupClient";
  */
 export function ResumeSetupBanner({ hidden = false }: { hidden?: boolean } = {}) {
   const { t } = useTranslation();
-  const router = useRouter();
   const [propertyId, setPropertyId] = useState<string | null>(null);
   // Read once: the marker is gone from the URL after the first run (and Strict Mode runs effects twice).
   const exitPropertyId = useRef<string | null | undefined>(undefined);
@@ -24,8 +22,10 @@ export function ResumeSetupBanner({ hidden = false }: { hidden?: boolean } = {})
         `${window.location.pathname}${window.location.search}`,
       );
       // The layout has already entered this property; drop the marker so a reload or a hotel
-      // switch doesn't point the banner at it again.
-      if (exitPropertyId.current) router.replace("/dashboard", { scroll: false });
+      // switch doesn't point the banner at it again. Not with router.replace: in a production
+      // build Next.js 16 commits the cached route's URL, marker included (VAY-2330). Next.js
+      // syncs its router with a plain history update.
+      if (exitPropertyId.current) window.history.replaceState(null, "", "/dashboard");
     }
     const id = exitPropertyId.current;
     if (!id) return;
@@ -45,7 +45,7 @@ export function ResumeSetupBanner({ hidden = false }: { hidden?: boolean } = {})
     return () => {
       active = false;
     };
-  }, [router]);
+  }, []);
 
   if (!propertyId || hidden) return null;
   return (
