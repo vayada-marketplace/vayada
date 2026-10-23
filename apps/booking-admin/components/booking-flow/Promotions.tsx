@@ -2,7 +2,12 @@
 import { useTranslation } from "@/lib/i18n";
 
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { BoltIcon, PencilSquareIcon, TrashIcon } from "@heroicons/react/24/outline";
+import {
+  BoltIcon,
+  InformationCircleIcon,
+  PencilSquareIcon,
+  TrashIcon,
+} from "@heroicons/react/24/outline";
 import { PrimaryActionButton } from "@/components/ui";
 import {
   getBookingLastMinuteSettings,
@@ -220,7 +225,8 @@ export default function Promotions({
             {t("admin.promotions")}
           </h2>
           <p className="mt-[var(--page-subtitle-gap)] text-[13px] text-gray-500">
-            {t("admin.automaticRateRulesThatApplyWithoutACodeGuestsSee")}
+            {/* "Guests see the discount…" returns with promotion pricing (VAY-2333). */}
+            {t("admin.automaticRateRulesThatApplyWithoutACode")}
           </p>
           <p className="text-[13px] text-gray-500">
             {t("admin.theHighestSingleDiscountAppliesPromotionsAndPromoCodesNever")}
@@ -254,6 +260,24 @@ export default function Promotions({
           <p className="mt-1 text-sm text-gray-500">
             {t("admin.addOneToGiveGuestsAnAutomaticDiscount")}
           </p>
+        </div>
+      )}
+      {/* Saved promotions change no booking-page price until VAY-2333; the old hotel-wide tiers
+          shown as "Last minute escape" before a first save still apply, so no notice for them. */}
+      {!!settings?.promotions?.length && (
+        <div
+          role="status"
+          className="mt-[var(--page-header-gap)] flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3.5"
+        >
+          <InformationCircleIcon className="h-5 w-5 shrink-0 text-amber-700" aria-hidden="true" />
+          <div className="text-amber-800">
+            <p className="text-sm font-semibold">
+              {t("admin.promotionsDontChangeBookingPagePricesYet")}
+            </p>
+            <p className="mt-0.5 text-[13px]">
+              {t("admin.guestsPayYourNormalPriceEvenWhileAPromotionIsOn")}
+            </p>
+          </div>
         </div>
       )}
       {promotions.length > 0 && (
