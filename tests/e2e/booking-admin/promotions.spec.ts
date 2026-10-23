@@ -150,6 +150,61 @@ test("manages all automatic promotions in Promos and preserves last-minute tiers
   await noLegacy();
 });
 
+test("says saved promotions don't change booking page prices yet (VAY-2319)", async ({
+  page,
+}, testInfo) => {
+  test.skip(process.env.E2E_BOOKING_ADMIN_PROD !== "1", "Requires production booking-admin build.");
+  const healthy = watchPageHealth(page, testInfo);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockBookingAdminBookingFlow(page);
+  // The old hotel-wide tiers, shown as "Last minute escape", still price stays until a first save.
+  let settings: Record<string, any> = {
+    enabled: true,
+    stackWithPromo: false,
+    tiers: [{ daysBeforeMin: 0, daysBeforeMax: 5, discountPercent: 15 }],
+    updatedAt: "2026-10-23T10:00:00Z",
+  };
+  await page.route(`**${BOOKING_ADMIN_LAST_MINUTE_SETTINGS_PATH}*`, async (route) => {
+    if (route.request().method() === "PUT")
+      settings = { ...route.request().postDataJSON(), updatedAt: settings.updatedAt };
+    await route.fulfill({ json: settings });
+  });
+  const notice = page
+    .getByRole("status")
+    .filter({ hasText: "Promotions don't change booking page prices yet" });
+  await page.goto("/promo-codes");
+  await expect(
+    page.getByRole("heading", { name: "Last minute escape", exact: true }),
+  ).toBeVisible();
+  await expect(notice).toHaveCount(0);
+  await expect(
+    page.getByText("Automatic rate rules that apply without a code.", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText(/Guests see the discount/)).toHaveCount(0);
+  // Once saved, the list replaces those tiers, and nothing in it changes a price yet.
+  const toggle = page.getByRole("switch", { name: "Activate Last minute escape" });
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-checked", "false");
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-checked", "true");
+  expect(settings.promotions).toHaveLength(1);
+  await expect(notice).toContainText(
+    "Guests pay your normal price, even while a promotion is on. Promo codes already work.",
+  );
+  await notice.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath("promotions-notice-1440.png") });
+  // On a phone the page loads at 390, with the sidebar closed.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.reload();
+  await expect(notice).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  );
+  await notice.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath("promotions-notice-390.png") });
+  await healthy();
+});
+
 test("shows the empty state and a keyboard-friendly type menu styled like New promo code", async ({
   page,
 }, testInfo) => {
