@@ -178,6 +178,48 @@ test("keeps the rooms choosable when prices can't be loaded", async ({ page }) =
   await expect(page).toHaveURL(/\/(en\/)?book\?.*offer=/);
 });
 
+test("says only 'Not available' on a room whose one choice can't be booked (VAY-2319)", async ({
+  page,
+}, testInfo) => {
+  const assertHealthy = watchPageHealth(page, testInfo);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockBookingApis(page);
+  await mockRooms(page);
+  // The last free room, but its only choice has no price for the stay.
+  await mockStayPrices(
+    page,
+    {
+      deluxe: { [key("a")]: "29800", [key("b")]: "26800", [key("c")]: "33800" },
+      family: { [key("d")]: "43800" },
+      garden: { [key("e")]: null },
+    },
+    { garden: { roomsLeft: 1 } },
+  );
+  await page.goto(STAY);
+
+  const garden = page.getByTestId("room-card-garden");
+  await expect(garden.locator(`[data-offer-key="${key("e")}"]`)).toContainText("Not available");
+  await expect(page.getByTestId("select-rate-garden")).toBeDisabled();
+  await expect(page.getByTestId("select-rate-garden")).toHaveText("Not available");
+  await page.getByRole("button", { name: "Reject analytics" }).click();
+  await garden.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath("room-card-not-available-1440.png") });
+  await expect(garden.getByText("Last room available!")).toHaveCount(0);
+  // A bookable room keeps its rooms-left line.
+  await mockStayPrices(
+    page,
+    {
+      deluxe: { [key("a")]: "29800", [key("b")]: "26800", [key("c")]: "33800" },
+      family: { [key("d")]: "43800" },
+      garden: { [key("e")]: "35800" },
+    },
+    { garden: { roomsLeft: 1 } },
+  );
+  await page.reload();
+  await expect(garden.getByText("Last room available!")).toBeVisible();
+  await assertHealthy();
+});
+
 test("fills in /book from a room card, with plain option names", async ({ page }, testInfo) => {
   const assertHealthy = watchPageHealth(page, testInfo);
   await mockBookingApis(page);
