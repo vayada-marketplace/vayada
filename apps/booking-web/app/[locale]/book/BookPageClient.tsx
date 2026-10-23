@@ -961,6 +961,20 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                   formatMoney={money}
                   formatDay={formatDay}
                   formatNotice={(hours) => tAddons("needsNotice", { hours })}
+                  labels={{
+                    seeDetails: tAddons("seeDetails"),
+                    add: tAddons("add"),
+                    added: tAddons("added"),
+                    remove: tAddons("remove"),
+                    previousPhoto: tAddons("previousPhoto"),
+                    nextPhoto: tAddons("nextPhoto"),
+                    showPhoto: (number) => tAddons("showPhoto", { number }),
+                    upToGuests: (count) => tAddons("upToGuests", { count }),
+                    close: tAddons("closeDetails"),
+                    inYourStay: (detail) => tAddons("inYourStay", { detail }),
+                    groupsUpTo: (count) => tAddons("groupsUpTo", { count }),
+                    tooSoon: (notice) => tAddons("tooSoonForStay", { notice }),
+                  }}
                 />
               )
             )}

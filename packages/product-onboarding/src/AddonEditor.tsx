@@ -1,6 +1,16 @@
 "use client";
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import {
+  GuestAddonCard,
+  GuestAddonDetail,
+  formatGuestPrice,
+  guestAddonAddClass,
+  guestAddonCategories,
+  guestAddonPrimaryClass,
+  guestAddonText,
+  guestAddonUnit,
+} from "./GuestAddon";
 
 export type AddonPhoto = {
   imageUrl: string;
@@ -48,7 +58,7 @@ export function emptyAddonValues(currency: string): AddonEditorValues {
     partnerCommissionRate: "",
   };
 }
-// [label, description, perPerson, perNight, price label, preview unit]
+// [label, description, perPerson, perNight, price label]
 const models = [
   [
     "addons.editor.flatFee",
@@ -56,7 +66,6 @@ const models = [
     false,
     false,
     "addons.editor.pricePerBooking",
-    "addons.editor.unitPerBooking",
   ],
   [
     "addons.editor.perPerson",
@@ -64,7 +73,6 @@ const models = [
     true,
     false,
     "addons.editor.pricePerGuest",
-    "addons.editor.unitPerGuest",
   ],
   [
     "addons.editor.perNight",
@@ -72,7 +80,6 @@ const models = [
     false,
     true,
     "addons.editor.pricePerNight",
-    "addons.editor.unitPerNight",
   ],
   [
     "addons.editor.perPersonNight",
@@ -80,7 +87,6 @@ const models = [
     true,
     true,
     "addons.editor.pricePerGuestNight",
-    "addons.editor.unitPerGuestNight",
   ],
 ] as const;
 /** The add-on categories, in the order the editor and the Add-ons filter chips show them. */
@@ -111,12 +117,134 @@ const optionalFields = [
 const inputClass =
   "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500";
 
+/** VAY-2231: what the booking page shows for these values: the card's and the details' props. */
+export function addonGuestView(
+  values: AddonEditorValues,
+  currency: string,
+  t: (key: string) => string,
+) {
+  const cover = values.photos.find((photo) => photo.isCover) ?? values.photos[0];
+  const notice = addonLeadTimeNoticeKey(values.leadTimeHours);
+  const guests = /^\d+$/.test(values.maxGuests) ? Number(values.maxGuests) : 0;
+  return {
+    name: values.name.trim() || t("addons.editor.untitledAddOn"),
+    description: values.description.trim(),
+    category: guestAddonCategories[values.category],
+    // The cover first, as the booking page orders them.
+    photos: cover
+      ? [cover, ...values.photos.filter((photo) => photo !== cover)].map((photo) => photo.imageUrl)
+      : [],
+    facts: {
+      duration: values.duration.trim() || null,
+      location: values.location.trim() || null,
+      guests: guests >= 1 ? guestAddonText.upToGuests(guests) : null,
+      notice: notice ? t(notice) : null,
+    },
+    price: formatGuestPrice(
+      /^\d+(?:\.\d{1,2})?$/.test(values.price) ? Number(values.price) : 0,
+      currency,
+    ),
+    unit: guestAddonUnit(values.perPerson, values.perNight),
+  };
+}
+
 function formatPrice(amount: number, currency: string): string {
   try {
     return new Intl.NumberFormat(undefined, { style: "currency", currency }).format(amount);
   } catch {
     return `${currency} ${amount.toFixed(2)}`;
   }
+}
+
+type Translate = (key: string, params?: Record<string, string | number>) => string;
+const englishText: Translate = (key, params) => {
+  let message = AddonEditorMessages[key as keyof typeof AddonEditorMessages];
+  for (const [name, value] of Object.entries(params ?? {}))
+    message = message.split(`{${name}}`).join(String(value));
+  return message;
+};
+
+/** VAY-2231: the add-on's details as guests see them, from the Add-ons list's eye button. */
+export function AddonGuestPreview({
+  translate,
+  values,
+  currency,
+  onEdit,
+  onClose,
+}: {
+  translate?: Translate;
+  values: AddonEditorValues;
+  currency: string;
+  /** Left out while the add-on can't be edited (no property currency). */
+  onEdit?: () => void;
+  onClose: () => void;
+}) {
+  const t = translate ?? englishText;
+  const dialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    if (dialog.current && !dialog.current.open) dialog.current.showModal?.();
+  }, []);
+  const view = addonGuestView(values, currency, t);
+  return (
+    <dialog
+      ref={dialog}
+      aria-labelledby="addon-guest-preview-title"
+      onCancel={(event) => {
+        event.preventDefault();
+        onClose();
+      }}
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+      className="m-auto max-h-[90vh] w-[calc(100%-2rem)] max-w-[776px] overflow-hidden rounded-2xl bg-white p-0 text-gray-900 shadow-2xl backdrop:bg-black/40 open:flex open:flex-col"
+    >
+      <header className="flex shrink-0 items-start justify-between gap-4 border-b border-gray-200 px-6 py-5">
+        <div>
+          <h2 id="addon-guest-preview-title" className="text-lg font-semibold">
+            {t("addons.preview.title", { name: view.name })}
+          </h2>
+          <p className="mt-1 text-sm text-gray-500">{t("addons.preview.subtitle")}</p>
+        </div>
+        <button
+          type="button"
+          aria-label={t("addons.preview.close")}
+          onClick={onClose}
+          className="rounded-lg p-1.5 text-xl leading-none text-gray-500 hover:bg-gray-100 hover:text-gray-900"
+        >
+          ×
+        </button>
+      </header>
+      <div className="min-h-0 flex-1 overflow-y-auto bg-gray-100 px-4 py-6 md:px-12">
+        <div className="mx-auto flex max-w-[680px] flex-col overflow-hidden rounded-[20px] bg-white shadow-xl">
+          <GuestAddonDetail
+            {...view}
+            action={<span className={guestAddonPrimaryClass}>{guestAddonText.add}</span>}
+          />
+        </div>
+      </div>
+      <footer className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-gray-200 px-6 py-4">
+        <p className="text-[13px] text-gray-500">{t("addons.preview.inert")}</p>
+        <div className="flex gap-2">
+          {onEdit && (
+            <button
+              type="button"
+              onClick={onEdit}
+              className="rounded-lg border border-gray-300 px-4 py-2 text-sm"
+            >
+              {t("addons.editor.editAddOn")}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-semibold text-white hover:bg-primary-700"
+          >
+            {t("addons.preview.done")}
+          </button>
+        </div>
+      </footer>
+    </dialog>
+  );
 }
 
 export function AddonEditor({
@@ -127,21 +255,14 @@ export function AddonEditor({
   onSave,
   onCancel,
 }: {
-  translate?: (key: string, params?: Record<string, string | number>) => string;
+  translate?: Translate;
   initialValues: AddonEditorValues;
   currency: string;
   editing: boolean;
   onSave: (values: AddonEditorValues) => Promise<void> | void;
   onCancel: () => void;
 }) {
-  const t =
-    translate ??
-    ((key: string, params?: Record<string, string | number>) => {
-      let message = AddonEditorMessages[key as keyof typeof AddonEditorMessages];
-      for (const [name, value] of Object.entries(params ?? {}))
-        message = message.split(`{${name}}`).join(String(value));
-      return message;
-    });
+  const t = translate ?? englishText;
   const [values, setValues] = useState(initialValues);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
@@ -163,8 +284,8 @@ export function AddonEditor({
       ([, , perPerson, perNight]) => values.perPerson === perPerson && values.perNight === perNight,
     ) ?? models[0];
   const price = /^\d+(?:\.\d{1,2})?$/.test(values.price) ? Number(values.price) : 0;
-  const cover = values.photos.find((photo) => photo.isCover) ?? values.photos[0];
-  const notice = addonLeadTimeNoticeKey(values.leadTimeHours);
+  const view = addonGuestView(values, currency, t);
+  const [previewTab, setPreviewTab] = useState<"list" | "detail">("list");
   function field(key: keyof AddonEditorValues, label: string, type = "text", placeholder = "") {
     return (
       <label className="block text-xs font-medium text-gray-800">
@@ -255,7 +376,7 @@ export function AddonEditor({
             ×
           </button>
         </header>
-        <div className="grid min-h-0 overflow-y-auto md:grid-cols-[minmax(0,1fr)_20rem]">
+        <div className="grid min-h-0 overflow-y-auto md:grid-cols-[minmax(0,1fr)_22.5rem]">
           <section className="space-y-5 p-6">
             <h3 className="text-xs font-semibold tracking-widest text-gray-500">
               {t("addons.editor.essentials")}
@@ -522,40 +643,63 @@ export function AddonEditor({
           <aside className="border-t border-gray-200 bg-gray-50 p-6 md:border-l md:border-t-0">
             {/* Keep the preview in view while the form scrolls. */}
             <div className="md:sticky md:top-0">
-              <h3 className="text-xs font-semibold tracking-widest text-gray-500">
-                {t("addons.editor.checkoutPreview")}
-              </h3>
-              <div
-                aria-hidden="true"
-                className="mt-3 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm"
+              <h3
+                id="addon-guest-preview"
+                className="text-xs font-semibold tracking-widest text-gray-500"
               >
-                {cover ? (
-                  <img src={cover.imageUrl} alt="" className="h-36 w-full object-cover" />
+                {t("addons.editor.guestPreview")}
+              </h3>
+              {/* VAY-2231: the booking page's own card and details. */}
+              <div
+                role="group"
+                aria-labelledby="addon-guest-preview"
+                className="mt-3 flex rounded-[10px] bg-gray-200 p-1"
+              >
+                {(
+                  [
+                    ["list", "addons.editor.previewCheckoutList"],
+                    ["detail", "addons.editor.previewDetailView"],
+                  ] as const
+                ).map(([tab, label]) => (
+                  <button
+                    key={tab}
+                    type="button"
+                    aria-pressed={previewTab === tab}
+                    onClick={() => setPreviewTab(tab)}
+                    className={`flex-1 rounded-[7px] py-1.5 text-[13px] ${previewTab === tab ? "bg-white font-semibold text-gray-900 shadow-sm" : "font-medium text-gray-600 hover:text-gray-900"}`}
+                  >
+                    {t(label)}
+                  </button>
+                ))}
+              </div>
+              <div className="mt-3">
+                {previewTab === "list" ? (
+                  <GuestAddonCard
+                    name={view.name}
+                    description={view.description}
+                    photo={view.photos[0] ?? null}
+                    price={view.price}
+                    unit={view.unit}
+                    action={<span className={guestAddonAddClass}>{guestAddonText.add}</span>}
+                    onOpenDetails={() => setPreviewTab("detail")}
+                  />
                 ) : (
-                  <div className="flex h-36 items-center justify-center bg-primary-50 text-sm text-gray-500">
-                    {t("addons.editor.noPhotoYet")}
+                  <div className="flex flex-col overflow-hidden rounded-2xl border border-gray-200">
+                    <GuestAddonDetail
+                      {...view}
+                      size="compact"
+                      action={<span className={guestAddonPrimaryClass}>{guestAddonText.add}</span>}
+                    />
                   </div>
                 )}
-                <div className="space-y-2 p-4">
-                  <p className="font-semibold text-gray-900">
-                    {values.name.trim() || t("addons.editor.untitledAddOn")}
-                  </p>
-                  <p className="line-clamp-3 text-sm text-gray-600">
-                    {values.description.trim() || t("addons.editor.previewDescription")}
-                  </p>
-                  <div className="flex items-end justify-between gap-2 pt-1">
-                    <div>
-                      <p className="font-semibold text-gray-900">{formatPrice(price, currency)}</p>
-                      <p className="text-xs text-gray-500">{t(model[5])}</p>
-                    </div>
-                    <span className="rounded-lg bg-primary-600 px-3 py-1.5 text-sm font-medium text-white">
-                      {t("addons.editor.add")}
-                    </span>
-                  </div>
-                  {notice && <p className="text-xs text-gray-500">{t(notice)}</p>}
-                </div>
               </div>
-              <p className="mt-3 text-xs text-gray-500">{t("addons.editor.previewHint")}</p>
+              <p className="mt-3 text-xs text-gray-500">
+                {t(
+                  previewTab === "list"
+                    ? "addons.editor.previewListHint"
+                    : "addons.editor.previewDetailHint",
+                )}
+              </p>
             </div>
           </aside>
         </div>
@@ -630,7 +774,6 @@ export const AddonEditorMessages = {
   "addons.editor.photos": "Photos",
   "addons.editor.upTo5": "Up to 5",
   "addons.editor.cover": "COVER",
-  "addons.editor.add": "Add",
   "addons.editor.addPhotos": "Add photos",
   "addons.editor.duration": "Duration",
   "addons.editor.eG2Hours": "e.g., 2 hours",
@@ -675,13 +818,17 @@ export const AddonEditorMessages = {
   "addons.editor.pricePerGuestNight": "Price per guest per night ({currency}) *",
   "addons.editor.priceExample": "Example: 2 guests, 3 nights → {total} total",
   "addons.editor.moreOptions": "More options",
-  "addons.editor.checkoutPreview": "CHECKOUT PREVIEW",
-  "addons.editor.noPhotoYet": "No photo yet",
+  "addons.editor.guestPreview": "GUEST PREVIEW",
+  "addons.editor.previewCheckoutList": "Checkout list",
+  "addons.editor.previewDetailView": "Detail view",
   "addons.editor.untitledAddOn": "Untitled add-on",
-  "addons.editor.previewDescription": "Add a description so guests know what they get.",
-  "addons.editor.unitPerBooking": "per booking",
-  "addons.editor.unitPerGuest": "per guest",
-  "addons.editor.unitPerNight": "per night",
-  "addons.editor.unitPerGuestNight": "per guest per night",
-  "addons.editor.previewHint": "A preview of how this add-on appears in the booking flow.",
+  "addons.editor.previewListHint":
+    "How the add-on shows in the list of extras on your booking page. It is the same card guests see.",
+  "addons.editor.previewDetailHint":
+    "What guests see when they open the add-on, at phone size. It changes as you type. Fields you leave empty are not shown to guests.",
+  "addons.preview.title": "Guest preview · {name}",
+  "addons.preview.subtitle": "What guests see when they open this add-on on your booking page.",
+  "addons.preview.inert": "Buttons in the preview don’t do anything.",
+  "addons.preview.close": "Close guest preview",
+  "addons.preview.done": "Done",
 };

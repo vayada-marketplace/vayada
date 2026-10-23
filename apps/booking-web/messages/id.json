@@ -191,7 +191,17 @@
     "pricePerDay": "Harga per hari",
     "priceLabel": "Harga",
     "addedToTrip": "Ditambahkan ke Perjalanan",
-    "addToTrip": "Tambah ke Perjalanan"
+    "addToTrip": "Tambah ke Perjalanan",
+    "seeDetails": "Lihat detail",
+    "remove": "Hapus",
+    "previousPhoto": "Foto sebelumnya",
+    "nextPhoto": "Foto berikutnya",
+    "showPhoto": "Tampilkan foto {number}",
+    "closeDetails": "Tutup detail tambahan",
+    "upToGuests": "{count, plural, other {Hingga # tamu}}",
+    "inYourStay": "Dalam masa inap Anda: {detail}",
+    "groupsUpTo": "Untuk grup hingga {count} tamu.",
+    "tooSoonForStay": "{notice}, jadi tidak bisa ditambahkan ke masa inap ini."
   },
   "book": {
     "guestInformation": "Informasi Tamu",
