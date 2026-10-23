@@ -1301,7 +1301,7 @@ function assignedRoomSummary(
   for (const assignment of reservation.assignments)
     counts.set(assignment.roomTypeId, (counts.get(assignment.roomTypeId) ?? 0) + 1);
   if (counts.size < 2) return null;
-  return [...counts]
+  return Array.from(counts)
     .map(([roomTypeId, count]) => `${count} × ${roomTypesById.get(roomTypeId)?.name || "Room"}`)
     .join(" + ");
 }
