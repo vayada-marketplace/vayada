@@ -105,8 +105,8 @@ export default function AccommodationViews({
               setRequested(true);
               setPhoneMap(true);
             }}
-            // Above the privacy settings pill at the bottom left.
-            className="fixed bottom-16 left-1/2 z-40 inline-flex min-h-[44px] -translate-x-1/2 items-center gap-2 rounded-full bg-gray-900 px-5 text-sm font-semibold text-white shadow-lg"
+            // Above the privacy settings pill and a group's rooms bar at the bottom of a phone.
+            className="fixed bottom-[calc(4rem+var(--fixed-bottom-bar,0px))] left-1/2 z-40 inline-flex min-h-[44px] -translate-x-1/2 items-center gap-2 rounded-full bg-gray-900 px-5 text-sm font-semibold text-white shadow-lg"
           >
             <svg
               className="h-4 w-4"
