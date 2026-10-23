@@ -162,7 +162,25 @@
     "noChildren": "Kamar ini tidak menerima anak-anak. Pilih kamar lain untuk rombongan Anda.",
     "percentOff": "-{percent}% HEMAT",
     "closeRoomDetails": "Tutup detail kamar",
-    "soldOutForDates": "Habis untuk tanggal Anda"
+    "soldOutForDates": "Habis untuk tanggal Anda",
+    "roomsCount": "{count} kamar",
+    "yourRooms": "{count} kamar Anda",
+    "roomNumber": "Kamar {number}",
+    "chooseBelow": "Pilih kamar di bawah",
+    "nextRoom": "Berikutnya",
+    "changeRoom": "Ubah",
+    "changeRoomNumber": "Ubah kamar {number}",
+    "totalSoFar": "sejauh ini",
+    "totalForRooms": "untuk {count} kamar",
+    "chooseMoreRooms": "Pilih {count} kamar lagi",
+    "selectRateForRoom": "Pilih tarif untuk kamar {number} · {guests}",
+    "chooseForRoom": "Pilih untuk kamar {number}",
+    "noneLeftForRoom": "Tidak tersisa untuk kamar {number}",
+    "inYourRoom": "Di kamar {number} Anda",
+    "lastOneChosen": "Anda memilih yang terakhir untuk kamar {number}.",
+    "cantCombine": "Tidak bisa digabung",
+    "paidDifferently": "Dibayar dengan cara berbeda dari kamar yang Anda pilih. Satu pemesanan dibayar dengan satu cara.",
+    "pricesPerRoom": "Harga per kamar, untuk orang dewasa di dalamnya. Anak-anak kami tambahkan setelah Anda memberi tahu usia mereka di langkah berikutnya."
   },
   "rooms": {
     "title": "Kamar Kami",
@@ -594,5 +612,19 @@
     "directions": "Petunjuk arah",
     "areaNote": "Ditampilkan sebagai area, bukan titik persisnya.",
     "reception": "Resepsionis"
+  },
+  "guestPicker": {
+    "title": "Siapa yang datang?",
+    "adults": "Dewasa",
+    "adultAges": "Usia {age}+",
+    "children": "Anak-anak",
+    "childAges": "Usia 0-{age}",
+    "rooms": "Kamar",
+    "roomsHint": "Tambah kamar agar lebih lega",
+    "roomsNeeded": "{guests} tamu memerlukan minimal {count} kamar di sini",
+    "splitNote": "Kami membagi rombongan Anda ke beberapa kamar. Anda memilih kamar untuk masing-masing, dan dapat menentukan siapa tidur di mana sebelum membayar.",
+    "fewer": "Kurangi {label}",
+    "more": "Tambah {label}",
+    "done": "Selesai"
   }
 }

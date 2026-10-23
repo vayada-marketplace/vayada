@@ -58,12 +58,22 @@ export type BookFlowDraft = {
   guest: GuestDetails;
 };
 
-const ENTRY_PARAMS = ["checkIn", "checkOut", "adults", "children", "promoCode", "offer", "rooms"];
+const ENTRY_PARAMS = [
+  "checkIn",
+  "checkOut",
+  "adults",
+  "children",
+  "promoCode",
+  "offer",
+  "rooms",
+  // VAY-2320: one per room a group chose on the hotel page.
+  "pick",
+];
 
 /** The hand-off part of a /book query, ignoring the step and anything else. */
 export function bookEntry(search: string): string {
   const params = new URLSearchParams(search);
-  return ENTRY_PARAMS.map((name) => `${name}=${params.get(name) ?? ""}`).join("&");
+  return ENTRY_PARAMS.map((name) => `${name}=${params.getAll(name).join(",")}`).join("&");
 }
 
 const key = (slug: string) => `bookFlow:${slug}`;
