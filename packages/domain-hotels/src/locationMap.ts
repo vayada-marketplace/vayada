@@ -46,7 +46,8 @@ export type LocationMapPins = {
 // Rooms closer than this share one pin: the same building, typed or dragged a few metres apart.
 const SAME_PLACE_METRES = 25;
 
-function metresBetween(a: LocationMapPoint, b: LocationMapPoint): number {
+/** Straight-line distance: plenty for a villa a few kilometres from its main property. */
+export function metresBetween(a: LocationMapPoint, b: LocationMapPoint): number {
   const toRadians = Math.PI / 180;
   const x =
     (b.longitude - a.longitude) * toRadians * Math.cos(((a.latitude + b.latitude) / 2) * toRadians);

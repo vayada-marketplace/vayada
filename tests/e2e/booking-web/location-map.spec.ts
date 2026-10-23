@@ -280,6 +280,110 @@ test.describe("booking page location map", () => {
       .toBe("Beach VillaIsarvorstadtView details →");
   });
 
+  test("shows where a villa is in its details, with Directions, and loads Google only after Show map (VAY-2323)", async ({
+    page,
+  }) => {
+    const google = await setup(page, {
+      locationMap: { property: { latitude: 48.1394, longitude: 11.5835, approximate: false } },
+      rooms: [
+        room("suite", "Suite", "a", undefined, true),
+        room(
+          "villa",
+          "Beach Villa",
+          "b",
+          { latitude: 48.15634, longitude: 11.58242, address: "Leopoldstraße 12, Munich" },
+          false,
+        ),
+      ],
+    });
+    await page.goto("/");
+    await expect(page.getByRole("heading", { name: "Available Accommodations" })).toBeVisible();
+    await page.getByRole("button", { name: "View Details" }).nth(1).click();
+    const details = page.getByRole("dialog");
+    const place = details.getByRole("region", { name: "Where you'll stay" });
+    await expect(place).toBeVisible();
+    await expect(place).toContainText("1.9 km from the main property");
+    await expect(place).toContainText("Beach Villa");
+    await expect(place).toContainText("Leopoldstraße 12, Munich");
+    await expect(place.getByRole("link", { name: "Directions" })).toHaveAttribute(
+      "href",
+      "https://www.google.com/maps/dir/?api=1&destination=48.15634,11.58242",
+    );
+    await page.waitForTimeout(1000);
+    expect(google).toEqual([]);
+
+    await place.getByRole("button", { name: "Show map" }).click();
+    await expect
+      .poll(() => markers(page))
+      .toEqual([
+        { title: "Beach Villa", label: null },
+        // The main property, for reference.
+        { title: "Reception", label: "Reception" },
+      ]);
+    expect(google.length).toBeGreaterThan(0);
+
+    await place.getByRole("button", { name: "Expand map" }).click();
+    const full = page.getByRole("dialog", { name: "Where you'll stay" });
+    await expect(full).toContainText("Beach Villa · Leopoldstraße 12, Munich");
+    await page.keyboard.press("Escape");
+    await expect(full).toHaveCount(0);
+    // Escape closed the map, not the room's details.
+    await expect(details).toBeVisible();
+  });
+
+  test("shows an area without its street or Directions, the property's own place, or nothing (VAY-2323)", async ({
+    page,
+  }) => {
+    await setup(page, {
+      locationMap: { property: { latitude: 48.1394, longitude: 11.5835, approximate: false } },
+      rooms: [
+        room(
+          "villa",
+          "Beach Villa",
+          "a",
+          { latitude: 48.13, longitude: 11.57, approximate: true, area: "Isarvorstadt" },
+          false,
+        ),
+        room("suite", "Suite", "b", undefined, true),
+        { ...room("loft", "Loft", "c", undefined, true), showMapInDetails: false },
+      ],
+    });
+    // "Show map" pressed earlier in this tab counts: the maps load at once.
+    await page.addInitScript(() => sessionStorage.setItem("vayada.booking.showMap", "1"));
+    await page.goto("/");
+    const cards = page.getByRole("button", { name: "View Details" });
+    await expect(cards).toHaveCount(3);
+
+    await cards.nth(0).click();
+    let place = page.getByRole("dialog").getByRole("region", { name: "Where you'll stay" });
+    await expect(place).toContainText("Isarvorstadt");
+    await expect(place).toContainText("Shown as an area, not the exact spot.");
+    await expect(place).toContainText("About 1.4 km from the main property");
+    await expect(place.getByRole("link", { name: "Directions" })).toHaveCount(0);
+    // The Location section below the room list loads at once too, with its own circle for the same area.
+    await expect
+      .poll(() => circles(page))
+      .toEqual(expect.arrayContaining([{ lat: 48.13, lng: 11.57, radius: 1000 }]));
+    await expect(page.getByTestId("room-place-map")).toBeVisible();
+    await page.getByRole("button", { name: "Close room details" }).click();
+
+    // "Same as property": the hotel's own place, no distance.
+    await cards.nth(1).click();
+    place = page.getByRole("dialog").getByRole("region", { name: "Where you'll stay" });
+    await expect(place).toContainText("Hotel Alpenrose");
+    await expect(place).not.toContainText("from the main property");
+    await expect(place.getByRole("link", { name: "Directions" })).toHaveAttribute(
+      "href",
+      "https://www.google.com/maps/dir/?api=1&destination=48.1394,11.5835",
+    );
+    await page.getByRole("button", { name: "Close room details" }).click();
+
+    // "Show map in room details" off.
+    await cards.nth(2).click();
+    await expect(page.getByRole("dialog")).toContainText("Loft");
+    await expect(page.getByRole("dialog").getByText("Where you'll stay")).toHaveCount(0);
+  });
+
   test("shows no map while the hotel's switch is off", async ({ page }) => {
     const google = await setup(page, { rooms: villas });
     await page.goto("/");
