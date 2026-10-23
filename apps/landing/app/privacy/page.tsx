@@ -15,7 +15,7 @@ export default function PrivacyPage() {
           <div className="mb-8">
             <h1 className="text-4xl md:text-5xl font-bold text-primary-800 mb-4">Privacy Policy</h1>
             <p className="text-gray-600">
-              <strong>Effective Date:</strong> October 20, 2026
+              <strong>Effective Date:</strong> October 23, 2026
             </p>
           </div>
 
@@ -311,7 +311,8 @@ export default function PrivacyPage() {
                   </li>
                   <li>
                     <strong>Maps:</strong> Google Maps, which loads only on the setup and settings
-                    pages where you place your property on a map and then receives your browser
+                    pages where you place your property or a room on a map, and on your booking site
+                    only when a guest opens its location map. Google then receives those browser
                     requests under Google&apos;s own privacy policy.
                   </li>
                   <li>
@@ -583,16 +584,28 @@ export default function PrivacyPage() {
                   payment form opens: __stripe_mid (for one year) and __stripe_sid (for 30 minutes).
                 </p>
                 <p className="mb-3">
+                  If the hotel shows a map of where its rooms are, the map comes from Google Maps
+                  and loads only when you press &quot;Show map&quot;. Google then receives your
+                  request, including your IP address, and processes it under its own{" "}
+                  <a
+                    href="https://policies.google.com/privacy"
+                    className="text-primary-600 hover:text-primary-700 underline"
+                  >
+                    privacy policy
+                  </a>
+                  .
+                </p>
+                <p className="mb-3">
                   The booking site and booking data are hosted by Amazon Web Services in the
-                  European Union (Ireland). Booking emails are sent through Resend. Stripe and
-                  Resend may process data in the United States; these transfers are covered by the
-                  EU–US Data Privacy Framework or the European Commission&apos;s standard
+                  European Union (Ireland). Booking emails are sent through Resend. Stripe, Resend
+                  and Google may process data in the United States; these transfers are covered by
+                  the EU–US Data Privacy Framework or the European Commission&apos;s standard
                   contractual clauses.
                 </p>
                 <p>
-                  Fonts, images and all other parts of the booking site are served by vayada. Before
-                  you pay by card, the booking site does not load content from other companies, such
-                  as Google Fonts.
+                  Fonts, images and all other parts of the booking site are served by vayada. Unless
+                  you pay by card or open the map, the booking site does not load content from other
+                  companies, such as Google Fonts.
                 </p>
               </div>
 
