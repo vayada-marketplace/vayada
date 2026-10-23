@@ -31,17 +31,30 @@ import {
 } from "@/lib/extrasChoices";
 import {
   GuestAddonCard,
+  GuestAddonDetail,
   guestAddonAddClass,
+  guestAddonCategories,
+  guestAddonPrimaryClass,
+  guestAddonText,
   guestAddonUnit,
 } from "@vayada/product-onboarding/GuestAddon";
+import ExtraDetailsDialog from "./ExtraDetailsDialog";
 
 type Selection = PublicBookingQuoteRequest["selection"];
-const categoryLabels: Record<ExtraDisplay["category"], string> = {
-  dining: "Dining",
-  experience: "Experiences",
-  transport: "Transport",
-  wellness: "Wellness",
-  other: "Other",
+/** The words the cards and details use beyond the English defaults; BookPageClient passes the
+ * page's translations (VAY-2231). */
+export type ExtrasLabels = typeof guestAddonText & {
+  close: string;
+  inYourStay: (detail: string) => string;
+  groupsUpTo: (count: number) => string;
+  tooSoon: (notice: string) => string;
+};
+const englishLabels: ExtrasLabels = {
+  ...guestAddonText,
+  close: "Close add-on details",
+  inYourStay: (detail) => `In your stay: ${detail}`,
+  groupsUpTo: (count) => `For groups of up to ${count} guests.`,
+  tooSoon: (notice) => `${notice}, so it can’t be added to this stay.`,
 };
 const round =
   "w-7 h-7 rounded-full border border-gray-300 flex items-center justify-center text-gray-600 hover:border-gray-400 disabled:opacity-30 disabled:cursor-not-allowed transition-colors";
@@ -72,6 +85,7 @@ export default function ExtrasStep({
   formatDay,
   formatNotice,
   showCategories = true,
+  labels = englishLabels,
 }: {
   catalogue: PricingAddon[];
   display: Record<string, ExtraDisplay>;
@@ -88,12 +102,16 @@ export default function ExtrasStep({
   formatNotice: (hours: number) => string;
   /** The hotel's "group add-ons by category" setting. */
   showCategories?: boolean;
+  labels?: ExtrasLabels;
 }) {
   const scope = replacementExtrasScope(catalogue, selection, allocationRevision);
   const items = value?.scope === scope ? value.items : [];
   const extras = catalogue.filter((addon) => addon.currency === selection.currency);
   const categories = Array.from(new Set(extras.map((a) => display[a.id]?.category ?? "other")));
   const [category, setCategory] = useState<string>("all");
+  // The extra whose details are open (VAY-2231).
+  const [open, setOpen] = useState<string | null>(null);
+  const opened = extras.find((addon) => addon.id === open);
   const guests = extraGuests(selection).length;
   const set = (next: ExtraItem[]) => onChange(next.length ? { scope, items: next } : null);
   const replace = (item: ExtraItem) =>
@@ -142,7 +160,7 @@ export default function ExtrasStep({
                   : "bg-white text-gray-700 border-gray-300 hover:border-gray-400"
               }`}
             >
-              {key === "all" ? "All extras" : categoryLabels[key as ExtraDisplay["category"]]}
+              {key === "all" ? "All extras" : guestAddonCategories[key as ExtraDisplay["category"]]}
             </button>
           ))}
         </div>
@@ -171,6 +189,8 @@ export default function ExtrasStep({
                 price={price !== null ? formatMoney(String(price), addon.currency) : null}
                 unit={unit(addon)}
                 tone={item ? (missingDay ? "attention" : "chosen") : "idle"}
+                onOpenDetails={() => setOpen(addon.id)}
+                detailsLabel={labels.seeDetails}
                 renderPhoto={(src) => (
                   <Image
                     src={src}
@@ -222,14 +242,14 @@ export default function ExtrasStep({
                       onClick={() => set([...items, newExtraItem(addon, selection)])}
                       className={guestAddonAddClass}
                     >
-                      Add
+                      {labels.add}
                     </button>
                   )
                 }
               >
                 {!fits && (
                   <p className="mt-2 text-xs text-gray-500">
-                    For groups of up to {addon.maxGuests} guests.
+                    {labels.groupsUpTo(addon.maxGuests!)}
                   </p>
                 )}
                 {tooSoon && addon.leadTimeHours !== null && (
@@ -279,6 +299,86 @@ export default function ExtrasStep({
             );
           })}
       </div>
+      {opened && (
+        <ExtraDetailsDialog key={opened.id} closeLabel={labels.close} onClose={() => setOpen(null)}>
+          {({ titleId, closeButton, close }) => {
+            const facts = display[opened.id];
+            const item = items.find((current) => current.id === opened.id);
+            const fits = extraFitsParty(opened, selection);
+            const tooSoon = addonNeedsNotice(opened, selection.checkIn);
+            const price = unitMinor(facts?.price, opened.currency);
+            const notice =
+              opened.leadTimeHours !== null ? formatNotice(opened.leadTimeHours) : null;
+            return (
+              <GuestAddonDetail
+                titleId={titleId}
+                name={opened.name}
+                category={guestAddonCategories[facts?.category ?? "other"]}
+                photos={facts?.photos ?? []}
+                facts={{
+                  duration: facts?.duration,
+                  location: facts?.location,
+                  guests: opened.maxGuests !== null ? labels.upToGuests(opened.maxGuests) : null,
+                  notice,
+                }}
+                description={facts?.description ?? ""}
+                price={price !== null ? formatMoney(String(price), opened.currency) : null}
+                unit={unit(opened)}
+                closeButton={closeButton}
+                labels={labels}
+                renderPhoto={(src) => (
+                  <Image
+                    src={src}
+                    alt=""
+                    fill
+                    className="object-cover"
+                    sizes="(min-width: 768px) 680px, 100vw"
+                  />
+                )}
+                note={
+                  item
+                    ? { text: labels.inYourStay(detail(opened, item)) }
+                    : !fits && opened.maxGuests !== null
+                      ? { text: labels.groupsUpTo(opened.maxGuests), warning: true }
+                      : tooSoon && notice
+                        ? { text: labels.tooSoon(notice), warning: true }
+                        : null
+                }
+                action={
+                  item ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => set(items.filter((current) => current.id !== opened.id))}
+                        className="text-[15px] font-semibold text-gray-600 hover:text-gray-900"
+                      >
+                        {labels.remove}
+                      </button>
+                      <span className="inline-flex h-11 items-center gap-1.5 rounded-full border border-primary-200 bg-primary-50 px-5 text-[15px] font-semibold text-primary-700">
+                        {icon("M5 13l4 4L19 7", "w-4 h-4")}
+                        {labels.added}
+                      </span>
+                    </>
+                  ) : (
+                    // Adding closes the details: nights and days are picked on the card.
+                    <button
+                      type="button"
+                      className={guestAddonPrimaryClass}
+                      disabled={!fits || tooSoon || items.length >= 99}
+                      onClick={() => {
+                        set([...items, newExtraItem(opened, selection)]);
+                        close();
+                      }}
+                    >
+                      {labels.add}
+                    </button>
+                  )
+                }
+              />
+            );
+          }}
+        </ExtraDetailsDialog>
+      )}
       {chosen.length > 0 && (
         <div className="bg-gradient-to-br from-primary-50 to-white border border-primary-100 rounded-2xl p-6 mb-8">
           <div className="flex items-center gap-2 mb-4">
