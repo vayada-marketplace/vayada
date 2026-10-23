@@ -1,9 +1,9 @@
 name: CI Infra Report
 
 # Every Monday, counts the past week's PR Checks jobs that failed for infrastructure reasons
-# (browser and package downloads, image pulls, npm, runners, the PostgreSQL teardown race) and
-# rewrites one GitHub issue with the result, so a new flake source shows up (VAY-2314). It reads
-# runs, job logs and annotations, and writes only that issue. See scripts/ci/infra-failures.mjs.
+# (browser and package downloads, image pulls, npm, runners, the PostgreSQL teardown race), so a
+# new flake source shows up (VAY-2314). It only reads runs, job logs and annotations; the report is
+# this run's summary page. See scripts/ci/infra-failures.mjs.
 on:
   schedule:
     - cron: "23 5 * * 1"
@@ -13,7 +13,6 @@ permissions:
   actions: read
   checks: read
   contents: read
-  issues: write
 
 concurrency:
   group: ci-infra-report
