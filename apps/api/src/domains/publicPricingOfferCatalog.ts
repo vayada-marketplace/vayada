@@ -9,6 +9,7 @@ import {
   publicOfferCancellations,
   publicOfferMealDescriptions,
   publicOfferPaymentMethods,
+  publicOfferPaymentSchedules,
 } from "./replacementPublicOfferMapping.js";
 import type { PricingPaymentSwitches } from "./pricingRatePayability.js";
 import { readPmsRoomOperatingEligibility } from "./pmsRoomOperatingEligibility.js";
@@ -70,6 +71,7 @@ export function createPublicPricingOfferCatalog(
             .map((room) => room.roomTypeId),
         );
         const methods = publicOfferPaymentMethods(owner, payments);
+        const schedules = publicOfferPaymentSchedules(owner);
         const offered = mapped
           .filter((room) => operating.has(room.roomTypeId))
           .map((room) => ({
@@ -107,6 +109,11 @@ export function createPublicPricingOfferCatalog(
               // Additive (VAY-2309): the ways guests can pay this rate now, so the booking page
               // prices the stay with one of them first.
               paymentMethods: [...methods.get(rate.ratePlanId)!],
+              // Additive (VAY-2320): how the rate is paid, so a group combines only rates paid
+              // the same way.
+              ...(schedules.has(rate.ratePlanId) && {
+                paymentSchedule: schedules.get(rate.ratePlanId)!,
+              }),
             })),
           });
         }

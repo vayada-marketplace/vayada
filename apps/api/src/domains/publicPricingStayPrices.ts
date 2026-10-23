@@ -21,6 +21,9 @@ export type StayPricesQuery = {
   adults: number;
   children: number;
   promoCode: string | null;
+  /** VAY-2320: the guests of the one room being chosen when a group picks its rooms one by one.
+   * Then each room type is sized and priced for that one room. */
+  room?: { adults: number; children: number };
 };
 
 /** A party never needs more rooms of one type than this on the booking page. */
@@ -46,6 +49,9 @@ export function parseStayPricesQuery(query: unknown): StayPricesQuery | null {
   const adults = count(q["adults"], 1),
     children = q["children"] === undefined ? 0 : count(q["children"], 0),
     promo = typeof q["promoCode"] === "string" ? q["promoCode"].trim() : "";
+  // One room of the group, never more guests than the group has (VAY-2320).
+  const roomAdults = q["roomAdults"] === undefined ? undefined : count(q["roomAdults"], 1),
+    roomChildren = q["roomChildren"] === undefined ? 0 : count(q["roomChildren"], 0);
   if (
     !date(q["checkIn"]) ||
     !date(q["checkOut"]) ||
@@ -54,7 +60,11 @@ export function parseStayPricesQuery(query: unknown): StayPricesQuery | null {
     adults === null ||
     children === null ||
     adults + children > 99 ||
-    promo.length > 200
+    promo.length > 200 ||
+    roomAdults === null ||
+    roomChildren === null ||
+    (roomAdults === undefined && q["roomChildren"] !== undefined) ||
+    (roomAdults !== undefined && (roomAdults > adults || roomChildren > children))
   )
     return null;
   return {
@@ -63,6 +73,7 @@ export function parseStayPricesQuery(query: unknown): StayPricesQuery | null {
     adults,
     children,
     promoCode: promo || null,
+    ...(roomAdults !== undefined && { room: { adults: roomAdults, children: roomChildren } }),
   };
 }
 
@@ -81,6 +92,16 @@ export function roomsForParty(occupancy: Occupancy, adults: number, children: nu
     Math.ceil((adults + children) / occupancy.maxGuests),
   );
   return rooms <= MAX_ROOMS && rooms <= adults ? rooms : null;
+}
+
+/** One room for these guests: at least one adult and within every limit (VAY-2320). */
+export function oneRoomFits(occupancy: Occupancy, room: { adults: number; children: number }) {
+  return (
+    room.adults >= 1 &&
+    room.adults <= occupancy.maxAdults &&
+    room.children <= occupancy.maxChildren &&
+    room.adults + room.children <= occupancy.maxGuests
+  );
 }
 
 /** Adults spread evenly; the first rooms take any remainder. */
@@ -125,8 +146,21 @@ export function createPublicPricingStayPrices(pool: Pool, catalog: OfferCatalog)
       const query = scoped.promoCodes ? requested : { ...requested, promoCode: null };
       let budget = MAX_PRICED_OFFERS;
       const rooms = [];
+      const one = query.room;
+      // The fewest rooms the party could need: a lower bound over the types with a room free,
+      // shown as the group's starting room count (VAY-2320).
+      let suggestedRooms: number | null = null;
       for (const room of offered.rooms) {
-        const roomCount = roomsForParty(room.occupancy, query.adults, query.children);
+        const needed = roomsForParty(room.occupancy, query.adults, query.children);
+        if (needed !== null && (free.get(room.roomTypeId) ?? 0) >= 1)
+          suggestedRooms = Math.min(suggestedRooms ?? needed, needed);
+      }
+      for (const room of offered.rooms) {
+        const roomCount = one
+          ? oneRoomFits(room.occupancy, one)
+            ? 1
+            : null
+          : roomsForParty(room.occupancy, query.adults, query.children);
         const left = free.get(room.roomTypeId) ?? 0;
         const available = roomCount !== null && left >= roomCount;
         const offers = [];
@@ -136,9 +170,10 @@ export function createPublicPricingStayPrices(pool: Pool, catalog: OfferCatalog)
             offers.push({ publicOfferKey: offer.publicOfferKey, status: "unpriced" as const });
             continue;
           }
+          const adults = one ? [one.adults] : splitAdults(query.adults, roomCount ?? 1);
           const price =
             available && roomCount !== null
-              ? await short(pool, (client) => stayTotal(client, slug, query, offer, roomCount))
+              ? await short(pool, (client) => stayTotal(client, slug, query, offer, adults))
               : null;
           offers.push(
             price
@@ -151,6 +186,9 @@ export function createPublicPricingStayPrices(pool: Pool, catalog: OfferCatalog)
           roomCount,
           availability: available ? ("available" as const) : ("sold_out" as const),
           roomsLeft: available && left <= FEW_LEFT ? left : null,
+          // Additive (VAY-2320): free rooms of this type, up to the most a party books, so a
+          // group choosing room by room can tell when its own choices used them up.
+          roomsFree: Math.min(left, MAX_ROOMS),
           offers,
         });
       }
@@ -158,7 +196,9 @@ export function createPublicPricingStayPrices(pool: Pool, catalog: OfferCatalog)
         version: "public-pricing-stay-prices.v1" as const,
         checkIn: query.checkIn,
         checkOut: query.checkOut,
-        childrenPriced: query.children === 0,
+        childrenPriced: (one ? one.children : query.children) === 0,
+        // Additive (VAY-2320).
+        suggestedRooms,
         rooms,
       };
     },
@@ -216,7 +256,8 @@ async function stayTotal(
   slug: string,
   query: StayPricesQuery,
   offer: { publicOfferKey: string; currency: string },
-  roomCount: number,
+  /** Adults in each room priced. */
+  adultsPerRoom: number[],
 ) {
   const price = async (promoCode: string | null) =>
     (
@@ -225,7 +266,7 @@ async function stayTotal(
         checkIn: query.checkIn,
         checkOut: query.checkOut,
         currency: offer.currency,
-        rooms: splitAdults(query.adults, roomCount).map((adults, index) => ({
+        rooms: adultsPerRoom.map((adults, index) => ({
           selectionId: `room-${index + 1}`,
           publicOfferKey: offer.publicOfferKey,
           guests: { adults, childAgesAtCheckIn: [] },
