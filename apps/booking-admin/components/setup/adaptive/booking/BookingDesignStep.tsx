@@ -344,13 +344,13 @@ export function BookingDesignStep(props: AdaptiveSetupStepComponentProps) {
             </p>
             <div className="mt-4 flex flex-wrap gap-3">
               {/* A colour picked in Design Studio stays selectable here (VAY-2318). */}
-              {[
-                ...new Set<BookingDesignPrimaryColor>([
+              {Array.from(
+                new Set<BookingDesignPrimaryColor>([
                   ...BOOKING_DESIGN_PRIMARY_COLORS,
                   ...(savedColor ? [savedColor] : []),
                   form.primaryColor,
                 ]),
-              ].map((color) => {
+              ).map((color) => {
                 const checked = form.primaryColor === color;
                 return (
                   <label
