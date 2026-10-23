@@ -30,7 +30,7 @@
     "check:architecture-boundaries": "node scripts/check-architecture-boundaries.mjs",
     "test:architecture-boundaries": "node --test scripts/check-architecture-boundaries.test.mjs",
     "test:workos-local-config": "bash scripts/dev-workos-local-config.test.sh",
-    "test:coordinated-release": "node --test scripts/coordinated-release/*.test.mjs",
+    "test:coordinated-release": "node --test scripts/coordinated-release/*.test.mjs scripts/release-train/*.test.mjs",
     "test:pr-checks": "node --test scripts/ci/*.test.mjs",
     "lint:python": "ruff check .",
     "format:python": "ruff format .",

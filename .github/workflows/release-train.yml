@@ -1,0 +1,77 @@
+name: Release train
+
+# The release train on GitHub (VAY-2311), instead of the coordinator's laptop scripts: hold the
+# merge queue, settle main, precheck the settled sha (PR Checks reuse), wait for its coordinated
+# publication, close the hold, then hand the release to vayada-platform's "Release train deploy"
+# workflow, which admits the API image, deploys and verifies. See scripts/release-train/train.mjs.
+# A dry run (the default) changes nothing here and sends the platform a dry-run event.
+
+on:
+  workflow_dispatch:
+    inputs:
+      summary:
+        description: One line for the release (admission commit and summaries)
+        required: true
+        type: string
+      sha:
+        description: Optional full sha to release; it must be where main settles (default main)
+        required: false
+        type: string
+        default: ""
+      dry_run:
+        description: Change nothing; report what a release would do
+        required: true
+        type: boolean
+        default: true
+      admission:
+        description: "API image admission on the platform: pr (a person merges the admission PR) or push"
+        required: true
+        type: choice
+        options: [pr, push]
+        default: pr
+      keep_hold:
+        description: Keep the merge queue hold open after publish (close it by hand after the deploy)
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# One train at a time; a second one waits instead of cancelling a release in flight.
+concurrency:
+  group: release-train
+  cancel-in-progress: false
+
+jobs:
+  train:
+    name: Hold, settle, precheck, publish, hand off
+    # A real release runs only from main; any branch may dry-run.
+    if: github.ref == 'refs/heads/main' || inputs.dry_run
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    permissions:
+      contents: read
+      issues: write
+      actions: write
+      checks: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version-file: .nvmrc
+
+      - name: Run the release train
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PLATFORM_DISPATCH_TOKEN: ${{ secrets.PLATFORM_DEPLOY_TOKEN }}
+          TRAIN_SUMMARY: ${{ inputs.summary }}
+          TRAIN_SHA: ${{ inputs.sha }}
+          TRAIN_DRY_RUN: ${{ inputs.dry_run }}
+          TRAIN_ADMISSION: ${{ inputs.admission }}
+          TRAIN_KEEP_HOLD: ${{ inputs.keep_hold }}
+        run: node scripts/release-train/train.mjs
