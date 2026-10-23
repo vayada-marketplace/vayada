@@ -6,8 +6,9 @@ import { useLocale, useTranslations } from "next-intl";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { bookingImageSizes } from "@/components/booking/imageSizes";
 import { choiceKeys, choiceText } from "@/lib/roomChoices";
+import { combinable, type RoomGuests } from "@/lib/roomPicker";
 import { resolveLocale } from "@/lib/utils";
-import type { PricingRoom } from "@/services/api/replacementOffers";
+import type { PricingOffer, PricingRoom } from "@/services/api/replacementOffers";
 import { quoteMoneyAmount } from "@/services/api/replacementOffers";
 import type { StayRoomPrices } from "@/services/api/stayPrices";
 import RateOption from "./RateOption";
@@ -36,6 +37,7 @@ export default function RoomCard({
   onSelect,
   onView: onViewed,
   detailsRequest = 0,
+  pick,
 }: {
   room: PricingRoom;
   /** Stay prices for this room; null while loading, when they failed or aren't offered. */
@@ -55,6 +57,16 @@ export default function RoomCard({
   onView?: () => void;
   /** Raised to open the room's details from elsewhere, such as its pin on the location map (VAY-2126). */
   detailsRequest?: number;
+  /** VAY-2320: a group choosing its rooms one by one. Prices and fit are for this one room. */
+  pick?: {
+    /** The room being chosen, from 1, and its guests. */
+    room: number;
+    guests: RoomGuests;
+    /** The group's other rooms (by number) that took this room type. */
+    takenBy: number[];
+    /** The rates chosen for the group's other rooms: one booking is paid one way. */
+    chosen: PricingOffer[];
+  };
 }) {
   const t = useTranslations("home");
   const tc = useTranslations("common");
@@ -83,7 +95,19 @@ export default function RoomCard({
   // A room the party doesn't fit isn't sold out: it says how many guests it takes instead.
   const tooSmall = prices !== null && prices.roomCount === null;
   const soldOut = prices?.availability === "sold_out" && !tooSmall;
-  const roomCount = prices?.roomCount ?? 1;
+  const roomCount = pick ? 1 : (prices?.roomCount ?? 1);
+  // Room by room: free rooms of this type the group's other rooms haven't taken.
+  const left =
+    pick && prices?.roomsFree != null ? prices.roomsFree - pick.takenBy.length : null;
+  const usedUp = !!pick && left !== null && left <= 0 && !soldOut && !tooSmall;
+  const paidDifferently = (offer: PricingOffer) =>
+    !!pick && combinable(offer, pick.chosen) === "paid_differently";
+  const guestsText = pick
+    ? [
+        tc("adults", { count: pick.guests.adults }),
+        ...(pick.guests.children ? [tc("children", { count: pick.guests.children })] : []),
+      ].join(", ")
+    : "";
   const keys = choiceKeys(room.offers);
   const all = room.offers.map((offer, index) => {
     const price = prices?.offers.find((p) => p.publicOfferKey === offer.publicOfferKey);
@@ -99,6 +123,8 @@ export default function RoomCard({
       bookable:
         !soldOut &&
         !tooSmall &&
+        !usedUp &&
+        !paidDifferently(offer) &&
         (unpricedRoom || price?.status === "priced" || price?.status === "unpriced"),
     };
   });
@@ -154,7 +180,9 @@ export default function RoomCard({
   const rates = (inDetails: boolean) => (
     <div className="border-t border-gray-100 pt-4">
       <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
-        {t("selectYourRate")}
+        {pick
+          ? t("selectRateForRoom", { number: pick.room, guests: guestsText })
+          : t("selectYourRate")}
       </p>
       <div className="space-y-3">
         {shown.map((choice) => {
@@ -180,10 +208,20 @@ export default function RoomCard({
               discountPercent={discount(choice)}
               unavailable={
                 choice.unavailable ||
-                (!choice.bookable && !soldOut && !tooSmall && pricesState === "ready")
+                (!choice.bookable &&
+                  !soldOut &&
+                  !tooSmall &&
+                  !usedUp &&
+                  !paidDifferently(choice.offer) &&
+                  pricesState === "ready")
               }
               loading={pricesState === "loading"}
-              disabled={soldOut}
+              disabled={soldOut || usedUp}
+              blocked={
+                paidDifferently(choice.offer) && !soldOut && !usedUp
+                  ? t("paidDifferently")
+                  : undefined
+              }
             />
           );
         })}
@@ -195,15 +233,24 @@ export default function RoomCard({
         type="button"
         data-testid={inDetails ? undefined : `select-rate-${room.roomTypeId}`}
         onClick={() => selected && onSelect(selected.offer.publicOfferKey, roomCount)}
-        disabled={!selected || tooSmall}
+        disabled={!selected || tooSmall || usedUp}
         className="w-full mt-4 py-3 bg-primary-600 text-white font-semibold rounded-xl hover:bg-primary-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-primary-600"
       >
         {soldOut
           ? t("soldOut")
-          : tooSmall || (prices && !selected)
-            ? t("notAvailable")
-            : t("selectThisRate")}
+          : usedUp
+            ? t("noneLeftForRoom", { number: pick!.room })
+            : tooSmall || (prices && !selected)
+              ? t("notAvailable")
+              : pick
+                ? t("chooseForRoom", { number: pick.room })
+                : t("selectThisRate")}
       </button>
+      {usedUp && (
+        <p className="text-sm mt-3 text-gray-600">
+          {t("lastOneChosen", { number: pick!.takenBy[pick!.takenBy.length - 1]! })}
+        </p>
+      )}
       {tooSmall && room.occupancy && (
         <p className="text-sm mt-3 text-gray-600">
           {childGuests > 0 && room.occupancy.maxChildren === 0
@@ -211,7 +258,7 @@ export default function RoomCard({
             : t("tooManyGuests", { count: room.occupancy.maxGuests })}
         </p>
       )}
-      {!soldOut && prices?.roomsLeft != null && (
+      {!soldOut && !usedUp && (left ?? prices?.roomsLeft) != null && (left ?? 4) <= 3 && (
         <p
           className={`text-sm mt-3 flex items-center gap-1.5 font-medium ${prices.roomsLeft === 1 ? "text-red-700" : "text-amber-800"}`}
         >
@@ -229,7 +276,7 @@ export default function RoomCard({
   return (
     <div
       data-testid={`room-card-${room.roomTypeId}`}
-      className={`bg-white border border-gray-200 rounded-2xl overflow-hidden transition-all ${soldOut ? "opacity-60" : "hover:shadow-lg"}`}
+      className={`bg-white border border-gray-200 rounded-2xl overflow-hidden transition-all ${soldOut || usedUp ? "opacity-60" : "hover:shadow-lg"}`}
     >
       <div className="flex flex-col md:flex-row">
         <div
@@ -260,10 +307,10 @@ export default function RoomCard({
               />
             </svg>
           )}
-          {soldOut && (
+          {(soldOut || usedUp) && (
             <div className="absolute inset-0 bg-black/30 z-20 flex items-center justify-center">
               <span className="bg-white text-gray-900 text-sm font-bold px-5 py-2 rounded-full shadow">
-                {t("soldOut")}
+                {soldOut ? t("soldOut") : t("inYourRoom", { number: pick!.takenBy[0]! })}
               </span>
             </div>
           )}

@@ -26,6 +26,9 @@ export type PricingOffer = {
   mealDescription?: string;
   /** The ways guests can pay this rate now (VAY-2309); absent from older APIs or when malformed. */
   paymentMethods?: PricingPaymentMethod[];
+  /** How the rate is paid (VAY-2320): rooms combine when paid in full, or with the same deposit
+   * (`key`), and they share a way to pay. Absent from older APIs or when malformed. */
+  paymentSchedule?: { kind: "full" } | { kind: "deposit"; percent: number; key: string };
 };
 /** Room content for the booking page's room cards (VAY-2190). Each field is absent when the
  * API doesn't send it or sends it malformed; selection never depends on it. */
@@ -169,11 +172,27 @@ export async function getReplacementCatalog(
             offer.paymentMethods.every(isPricingPaymentMethod) && {
               paymentMethods: Array.from(new Set(offer.paymentMethods)),
             }),
+          ...(paymentSchedule(offer.paymentSchedule) && {
+            paymentSchedule: paymentSchedule(offer.paymentSchedule)!,
+          }),
         };
       }),
     };
   });
   return { rooms, locationMap: catalogLocationMap(raw.locationMap) };
+}
+
+function paymentSchedule(v: unknown): PricingOffer["paymentSchedule"] {
+  if (!object(v)) return undefined;
+  if (v.kind === "full") return { kind: "full" };
+  return v.kind === "deposit" &&
+    typeof v.percent === "number" &&
+    v.percent > 0 &&
+    v.percent < 100 &&
+    text(v.key) &&
+    v.key.length <= 200
+    ? { kind: "deposit", percent: v.percent, key: v.key }
+    : undefined;
 }
 
 function catalogLocationMap(v: unknown): CatalogLocationMap | null {
