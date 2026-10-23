@@ -17,6 +17,7 @@ async function mockFlow(
     extras = true,
     lateCheckOutNotice = null as { leadTimeHours: number; bookableFrom: string | null } | null,
     methods = ["pay_at_property", "card"],
+    earliestArrival = {} as Record<string, string>,
     // The ways the rate takes, as the catalog names them (VAY-2309); older APIs send none.
     offerPaymentMethods = undefined as string[] | undefined,
   } = {},
@@ -41,6 +42,7 @@ async function mockFlow(
     ],
     payAtPropertyEnabled: true,
     bookingPagePaymentMethods: methods,
+    manualPaymentEarliestArrival: earliestArrival,
     termsText: "Quiet hours are 22:00–07:00.",
   };
   await page.route(`**/api/booking-web/hotels/${SEEDED_BOOKING_SLUG}/checkout-config`, (route) =>
@@ -599,7 +601,10 @@ for (const width of [1440, 390]) {
     await page.getByRole("button", { name: "Continue to payment" }).click();
     await expect(paymentOption(page, "card")).toHaveAttribute("aria-checked", "true");
     await expect(orderTotal(page)).toHaveText("€268");
-    await page.screenshot({ path: testInfo.outputPath(`payment-card-rate-${width}.png`) });
+    await page.screenshot({
+      path: testInfo.outputPath(`payment-card-rate-${width}.png`),
+      fullPage: true,
+    });
     await expect(paymentOption(page, "pay_at_property")).toHaveCount(0);
     expect(prices.asked.length).toBeGreaterThan(0);
     expect(prices.asked).not.toContain("pay_at_property");
@@ -673,13 +678,19 @@ for (const width of [1440, 390]) {
     );
     await expect(page.getByRole("radiogroup", { name: "Payment preference" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Confirm booking" })).toHaveCount(0);
-    await page.screenshot({ path: testInfo.outputPath(`payment-no-way-${width}.png`) });
+    await page.screenshot({
+      path: testInfo.outputPath(`payment-no-way-${width}.png`),
+      fullPage: true,
+    });
+    // Past the 400 ms the page waits before asking for a price.
+    await page.waitForTimeout(1_000);
     expect(prices.asked.length).toBe(asked);
     // The earlier steps say the same, with the way back to the rooms.
     await page.goto(STAY);
     await expect(noWay).toBeVisible();
     await expect(noWay.getByRole("button", { name: "Choose another room" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Continue to your details" })).toBeDisabled();
+    await page.waitForTimeout(1_000);
     expect(prices.asked.length).toBe(asked);
     // In the guest's language.
     await page.goto(`/de${STAY}`);
@@ -690,3 +701,22 @@ for (const width of [1440, 390]) {
     ).toBeVisible();
   });
 }
+
+test("says later dates would work when the rate's only way to pay opens later", async ({
+  page,
+}) => {
+  // The rate takes only bank transfer, which this hotel takes from 20 Nov; the stay starts 6 Nov.
+  const { prices } = await mockFlow(page, {
+    methods: ["pay_at_property", "bank_transfer"],
+    earliestArrival: { bank_transfer: "2026-11-20" },
+    offerPaymentMethods: ["bank_transfer"],
+  });
+  await page.goto(STAY);
+  const notice = page.getByRole("alert").filter({
+    hasText:
+      "The rooms you chose can only be paid for in a way that isn't available this close to check-in. Please choose later dates or other rooms.",
+  });
+  await expect(notice).toBeVisible();
+  await page.waitForTimeout(1_000);
+  expect(prices.asked).toEqual([]);
+});

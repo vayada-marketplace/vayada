@@ -48,7 +48,7 @@ function render(available: PricingPaymentMethod[], method: PricingPaymentMethod 
 // VAY-2309: Payment offers only the ways the chosen rates take, and says so when none is left.
 it("lists only the ways it is given", () => {
   const page = render(["card"], "card");
-  expect([...page.querySelectorAll('[role="radio"]')].map((r) => r.textContent)).toEqual([
+  expect(Array.from(page.querySelectorAll('[role="radio"]')).map((r) => r.textContent)).toEqual([
     expect.stringContaining("Pay by card now"),
   ]);
   expect(page.querySelector('[role="alert"]')).toBeNull();
@@ -65,6 +65,7 @@ it("shows why instead of an empty list when no way is left", () => {
 it("every locale says that no way to pay is left", () => {
   for (const messages of [de, en, es, fr, id]) {
     expect(messages.payment.noWayToPay.trim()).not.toBe("");
+    expect(messages.payment.noWayToPayThisSoon.trim()).not.toBe("");
     expect(messages.payment.chooseAnotherRoom.trim()).not.toBe("");
   }
 });

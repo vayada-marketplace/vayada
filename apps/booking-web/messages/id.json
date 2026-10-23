@@ -318,7 +318,8 @@
     "recoveryInProgress": "Pemesanan Anda masih diproses. Coba lagi untuk memeriksa pemesanan yang sama.",
     "termsRequired": "Harap setujui Syarat dan Ketentuan sebelum mengirim.",
     "chooseAnotherRoom": "Pilih kamar lain",
-    "noWayToPay": "Properti ini tidak menyediakan metode pembayaran untuk kamar yang Anda pilih. Silakan pilih kamar lain."
+    "noWayToPay": "Properti ini tidak menyediakan metode pembayaran untuk kamar yang Anda pilih. Silakan pilih kamar lain.",
+    "noWayToPayThisSoon": "Kamar yang Anda pilih hanya dapat dibayar dengan cara yang tidak tersedia sedekat ini dengan tanggal check-in. Silakan pilih tanggal lain atau kamar lain."
   },
   "myBooking": {
     "title": "Pemesanan Saya",

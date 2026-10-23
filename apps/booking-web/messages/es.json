@@ -318,7 +318,8 @@
     "recoveryInProgress": "Tu reserva aún se está procesando. Vuelve a intentarlo para comprobar la misma reserva.",
     "termsRequired": "Acepta los términos y condiciones antes de enviar.",
     "chooseAnotherRoom": "Elegir otra habitación",
-    "noWayToPay": "Este alojamiento no ofrece ninguna forma de pago para las habitaciones que elegiste. Elige otras habitaciones."
+    "noWayToPay": "Este alojamiento no ofrece ninguna forma de pago para las habitaciones que elegiste. Elige otras habitaciones.",
+    "noWayToPayThisSoon": "Las habitaciones que elegiste solo se pueden pagar de una forma que no está disponible tan cerca de la llegada. Elige fechas posteriores u otras habitaciones."
   },
   "myBooking": {
     "title": "Mi Reserva",

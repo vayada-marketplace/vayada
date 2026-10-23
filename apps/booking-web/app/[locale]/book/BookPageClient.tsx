@@ -559,6 +559,13 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [error]);
+  // VAY-2309: no price is asked for when no way to pay fits the chosen rates, so no refusal
+  // reports it; the funnel still counts the dead end on each step it shows.
+  useEffect(() => {
+    if (!noWayToPay || !settled || step === "rooms") return;
+    trackEvent(slug, "booking_error", { step, reason: "price_refused" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [noWayToPay, settled, step]);
   // A room card's hand-off goes back to the cards; the room form goes back to itself.
   const backToRooms = () => {
     const params = new URLSearchParams(window.location.search);
@@ -717,12 +724,13 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     Date.parse(seenQuote.quote.expiresAt) <= serverNow()
       ? seenQuote.quote
       : undefined);
-  // VAY-2309: a way to pay the chosen rates don't take is named, in the guest's language, where
-  // the guest can pick another; elsewhere another room is the way out.
+  // VAY-2309: when no way to pay fits the chosen rates the steps say so (later dates help when
+  // one they take opens later). A way they don't take is named, in the guest's language, where the
+  // guest can pick another; elsewhere another room is the way out.
   const priceNotice = noWayToPay ? (
     <Notice
       tone="red"
-      title={tPayment("noWayToPay")}
+      title={tPayment(tooSoon.length ? "noWayToPayThisSoon" : "noWayToPay")}
       action={{ label: tPayment("chooseAnotherRoom"), onClick: backToRooms }}
     >
       No booking was made and nothing was charged.
@@ -993,7 +1001,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                   value={extras}
                   onChange={setExtras}
                   quote={quote}
-                  priceFailed={priceFailed}
+                  priceFailed={priceFailed || noWayToPay}
                   formatMoney={money}
                   formatDay={formatDay}
                   formatNotice={(hours) => tAddons("needsNotice", { hours })}

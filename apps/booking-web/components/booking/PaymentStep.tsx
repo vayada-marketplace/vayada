@@ -149,7 +149,10 @@ export default function PaymentStep({
           <h2 className="text-lg font-bold text-gray-900">How would you like to pay?</h2>
         </div>
         {!available.length && unavailable ? (
-          unavailable
+          <>
+            {unavailable}
+            {tooSoon && <p className="mt-4 text-sm text-gray-600">{tooSoon}</p>}
+          </>
         ) : (
           <>
             <div

@@ -319,7 +319,8 @@
     "recoveryInProgress": "Ihre Buchung wird noch verarbeitet. Versuchen Sie es erneut, um dieselbe Buchung zu prüfen.",
     "termsRequired": "Bitte akzeptieren Sie die Allgemeinen Geschäftsbedingungen vor dem Absenden.",
     "chooseAnotherRoom": "Anderes Zimmer wählen",
-    "noWayToPay": "Für die gewählten Zimmer bietet diese Unterkunft keine passende Zahlungsart an. Bitte wählen Sie andere Zimmer."
+    "noWayToPay": "Für die gewählten Zimmer bietet diese Unterkunft keine passende Zahlungsart an. Bitte wählen Sie andere Zimmer.",
+    "noWayToPayThisSoon": "Die gewählten Zimmer können nur auf eine Weise bezahlt werden, die so kurz vor der Anreise nicht verfügbar ist. Bitte wählen Sie spätere Daten oder andere Zimmer."
   },
   "myBooking": {
     "title": "Meine Buchung",
