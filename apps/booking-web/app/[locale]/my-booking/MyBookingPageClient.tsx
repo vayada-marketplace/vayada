@@ -5,6 +5,8 @@ import { formatStayDate } from "@/lib/utils";
 import { Link } from "@/i18n/navigation";
 import ApproximateAmountsNote from "@/components/booking/ApproximateAmountsNote";
 import RoomSelectionSummary from "@/components/booking/RoomSelectionSummary";
+import BookedRoomsList from "@/components/booking/BookedRoomsList";
+import type { BookedRoom } from "@/lib/types";
 import CancelRoomsList from "@/components/booking/CancelRoomsList";
 import { useState, useEffect, useRef } from "react";
 import HotelHeroImage from "@/components/booking/HotelHeroImage";
@@ -376,10 +378,10 @@ export default function MyBookingPageClient() {
               <div className="flex justify-between py-3">
                 <span className="text-gray-600 text-sm">{t("room")}</span>
                 <span className="font-medium text-gray-900 text-sm">
-                  {!booking.roomSelection && booking.numberOfRooms && booking.numberOfRooms > 1
-                    ? `${booking.numberOfRooms}× `
-                    : ""}
-                  {booking.roomName}
+                  {/* VAY-2320: a group's rooms by type ("2 × Deluxe + 1 × Garden"). */}
+                  {booking.bookedRooms && booking.bookedRooms.length > 1
+                    ? bookedRoomSummary(booking.bookedRooms)
+                    : `${!booking.roomSelection && booking.numberOfRooms && booking.numberOfRooms > 1 ? `${booking.numberOfRooms}× ` : ""}${booking.roomName}`}
                   {booking.mealDescription && (
                     <span className="block text-sm">{booking.mealDescription}</span>
                   )}
@@ -413,6 +415,16 @@ export default function MyBookingPageClient() {
               <ApproximateAmountsNote currency={booking.currency} />
             </div>
 
+            {booking.bookedRooms && booking.bookedRooms.length > 1 && (
+              <div className="mt-5">
+                <BookedRoomsList
+                  rooms={booking.bookedRooms}
+                  checkIn={booking.checkIn}
+                  timezone={hotel.timezone}
+                  labelClass="text-xs font-semibold uppercase tracking-wider text-gray-500"
+                />
+              </div>
+            )}
             {booking.roomLines && (
               <div className="mt-5">
                 <RoomSelectionSummary
@@ -562,4 +574,16 @@ export default function MyBookingPageClient() {
       <BookingFooter />
     </div>
   );
+}
+
+/** "2 × Deluxe Double Room + 1 × Garden Double Room", in room order. */
+function bookedRoomSummary(rooms: BookedRoom[]): string {
+  const counts = new Map<string, number>();
+  for (const room of rooms) {
+    const name = room.roomName ?? "—";
+    counts.set(name, (counts.get(name) ?? 0) + 1);
+  }
+  return Array.from(counts)
+    .map(([name, count]) => `${count} × ${name}`)
+    .join(" + ");
 }

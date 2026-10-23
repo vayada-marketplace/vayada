@@ -81,6 +81,8 @@ describe("room choices", () => {
     expect(choiceText(keys, { ...stay, checkIn: "2026-10-16" }, t, now)).toEqual({
       name: "Breakfast included",
       terms: "Breakfast every morning · Free cancellation is no longer available for these dates",
+      meal: "Breakfast included",
+      cancellationTerms: "Free cancellation is no longer available for these dates",
       refundable: null,
       cancellationPassed: true,
     });
@@ -99,8 +101,25 @@ describe("room choices", () => {
     expect(choiceText(keys, { ...stay, checkIn: "" }, t, now)).toEqual({
       name: "Free cancellation",
       terms: "",
+      meal: null,
+      cancellationTerms: null,
       refundable: true,
       cancellationPassed: false,
+    });
+  });
+
+  it("gives a booked room's meal and cancellation on their own (VAY-2320)", () => {
+    const [roomOnly, breakfast] = choiceKeys([
+      offer("room_only", free(3)),
+      offer("breakfast", free(3)),
+    ]);
+    expect(choiceText(roomOnly!, stay, t, now)).toMatchObject({
+      meal: null,
+      cancellationTerms: expect.stringMatching(/^Free cancellation until /),
+    });
+    expect(choiceText(breakfast!, stay, t, now)).toMatchObject({
+      meal: "Breakfast included",
+      cancellationTerms: expect.stringMatching(/^Free cancellation until /),
     });
   });
 

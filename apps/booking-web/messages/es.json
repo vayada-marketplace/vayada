@@ -627,5 +627,32 @@
     "fewer": "Quitar: {label}",
     "more": "Añadir: {label}",
     "done": "Listo"
+  },
+  "groupRooms": {
+    "title": "Quién se aloja en cada habitación",
+    "intro": "Revisa quién duerme dónde. Puedes mover huéspedes entre habitaciones; cada una indica cuántas personas caben.",
+    "roomLabel": "Habitación {number}",
+    "adults": "Adultos",
+    "children": "Niños",
+    "childAge": "Niño {number}: edad al llegar",
+    "chooseAge": "Elige la edad",
+    "underOne": "Menos de 1",
+    "sleepsUpTo": "Hasta {count} personas",
+    "tooMany": "{room} admite hasta {count} personas. Mueve a un huésped a otra habitación o añade una habitación.",
+    "tooManyAdults": "{room} admite hasta {count} adultos.",
+    "noChildren": "{room} no admite niños.",
+    "tooManyChildren": "{room} admite hasta {count} niños.",
+    "needsAdult": "Cada habitación necesita al menos un adulto.",
+    "changeRooms": "Cambiar habitaciones",
+    "continue": "Continuar",
+    "soldOutTitle": "{rooms} ya no está disponible para tus fechas",
+    "aRoom": "Una habitación que elegiste",
+    "soldOutBody": "Otra reserva se llevó la última o el hotel cerró estas fechas, así que no se ha cobrado nada.",
+    "othersKept": "Tus otras habitaciones siguen elegidas.",
+    "chooseAgainFor": "Elegir otra habitación para la habitación {number}",
+    "chooseAgain": "Elegir otra habitación",
+    "newSearch": "Empezar una nueva búsqueda",
+    "yourRooms": "Tus {count} habitaciones",
+    "roomLine": "Habitación {number} · {room}"
   }
 }

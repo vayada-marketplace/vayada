@@ -1,11 +1,12 @@
 /** @vitest-environment jsdom */
 import { afterEach, describe, expect, it } from "vitest";
-import type { PricingOffer } from "@/services/api/replacementOffers";
+import type { PricingOffer, PricingRoom } from "@/services/api/replacementOffers";
 import {
   combinable,
   decodePicks,
   encodePick,
   readPickDraft,
+  roomGuestProblem,
   savePickDraft,
   splitParty,
   type RoomPick,
@@ -118,5 +119,37 @@ describe("pick drafts", () => {
     expect(readPickDraft("hotel", "search-2")).toBeNull();
     sessionStorage.setItem("roomPicks:hotel", JSON.stringify({ identity: "x", picks: [{}] }));
     expect(readPickDraft("hotel", "x")).toBeNull();
+  });
+});
+
+const room = (maxGuests: number, maxAdults: number, maxChildren: number): PricingRoom => ({
+  roomTypeId: "room",
+  name: "Room",
+  offers: [],
+  occupancy: { maxGuests, maxAdults, maxChildren },
+});
+const guests = (adults: number, childAges: string[] = []) => ({
+  selectionId: "room-1",
+  publicOfferKey: "key",
+  adults: String(adults),
+  childAges,
+});
+
+describe("roomGuestProblem", () => {
+  it("accepts guests within the room's limits", () => {
+    expect(roomGuestProblem(room(3, 2, 1), guests(2, ["5"]))).toBeNull();
+  });
+
+  it("names the first limit the room's guests break", () => {
+    expect(roomGuestProblem(room(3, 2, 1), guests(0, ["5"]))).toBe("no_adult");
+    expect(roomGuestProblem(room(2, 2, 0), guests(1, ["5"]))).toBe("no_children");
+    expect(roomGuestProblem(room(2, 2, 2), guests(2, ["5"]))).toBe("too_many");
+    expect(roomGuestProblem(room(3, 2, 1), guests(3))).toBe("too_many_adults");
+    expect(roomGuestProblem(room(4, 3, 1), guests(1, ["5", "7"]))).toBe("too_many_children");
+  });
+
+  it("leaves a room without known limits to the quote, but still needs an adult", () => {
+    expect(roomGuestProblem(undefined, guests(4, ["5"]))).toBeNull();
+    expect(roomGuestProblem(undefined, guests(0))).toBe("no_adult");
   });
 });

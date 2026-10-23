@@ -628,5 +628,32 @@
     "fewer": "Weniger: {label}",
     "more": "Mehr: {label}",
     "done": "Fertig"
+  },
+  "groupRooms": {
+    "title": "Wer schläft in welchem Zimmer",
+    "intro": "Prüfen Sie, wer wo schläft. Sie können Gäste zwischen den Zimmern verschieben; bei jedem Zimmer steht, wie viele darin schlafen können.",
+    "roomLabel": "Zimmer {number}",
+    "adults": "Erwachsene",
+    "children": "Kinder",
+    "childAge": "Kind {number}: Alter bei Anreise",
+    "chooseAge": "Alter wählen",
+    "underOne": "Unter 1",
+    "sleepsUpTo": "Für bis zu {count} Personen",
+    "tooMany": "{room}: höchstens {count} Personen. Verschieben Sie einen Gast in ein anderes Zimmer oder fügen Sie ein Zimmer hinzu.",
+    "tooManyAdults": "{room}: höchstens {count} Erwachsene.",
+    "noChildren": "{room} ist nicht für Kinder.",
+    "tooManyChildren": "{room}: höchstens {count} Kinder.",
+    "needsAdult": "In jedem Zimmer muss mindestens ein Erwachsener sein.",
+    "changeRooms": "Zimmer ändern",
+    "continue": "Weiter",
+    "soldOutTitle": "{rooms} ist für Ihre Daten nicht mehr verfügbar",
+    "aRoom": "Ein gewähltes Zimmer",
+    "soldOutBody": "Eine andere Buchung hat das letzte genommen oder das Hotel hat diese Daten geschlossen; es wurde nichts berechnet.",
+    "othersKept": "Ihre anderen Zimmer bleiben gewählt.",
+    "chooseAgainFor": "Anderes Zimmer für Zimmer {number} wählen",
+    "chooseAgain": "Anderes Zimmer wählen",
+    "newSearch": "Neue Suche starten",
+    "yourRooms": "Ihre {count} Zimmer",
+    "roomLine": "Zimmer {number} · {room}"
   }
 }

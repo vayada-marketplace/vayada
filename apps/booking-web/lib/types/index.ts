@@ -98,6 +98,19 @@ export interface RoomSelectionSnapshot {
   roomSelection?: RoomSelection;
   roomLines?: SelectedRoomLine[];
 }
+/** VAY-2320: one booked room of a pricing booking, as the guest booking view sends it. */
+export type BookedRoom = {
+  roomTypeId: string;
+  roomName: string | null;
+  mealPlan: string | null;
+  adults: number;
+  children: number;
+  cancellation:
+    | { kind: "non_refundable" }
+    | { kind: "free_until_days_before_arrival"; days: number }
+    | { kind: "partial_refund" }
+    | null;
+};
 export type RoomCombination = {
   roomSelection: RoomSelection;
   roomLines: SelectedRoomLine[];
@@ -165,6 +178,8 @@ export interface SearchParams {
 }
 
 export interface Booking extends RoomSelectionSnapshot {
+  /** VAY-2320: every booked room, each with its own type, guests, meal and terms. */
+  bookedRooms?: BookedRoom[];
   mealDescription?: string | null;
   canEditRequest?: boolean;
   id: string;

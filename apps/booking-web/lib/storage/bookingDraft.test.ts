@@ -89,6 +89,53 @@ describe("toConfirmationBooking", () => {
     });
   });
 
+  it("keeps each booked room's type, guests and terms (VAY-2320)", () => {
+    const rooms = [
+      {
+        roomTypeId: "deluxe",
+        roomName: "Deluxe Double Room",
+        mealPlan: "breakfast_included",
+        adults: 2,
+        children: 0,
+        cancellation: { kind: "free_until_days_before_arrival", days: 7 },
+      },
+      {
+        roomTypeId: "garden",
+        roomName: null,
+        mealPlan: null,
+        adults: 1,
+        children: 1,
+        cancellation: { kind: "non_refundable" },
+      },
+    ];
+    const source = { bookingReference: "B-ROOMS", checkIn: "2026-07-24", checkOut: "2026-07-27" };
+    expect(
+      toConfirmationBooking({ ...source, bookedRooms: rooms } as BookingConfirmationSource, {})
+        .bookedRooms,
+    ).toEqual(rooms);
+    for (const bookedRooms of [
+      [],
+      [{ ...rooms[0], adults: "2" }],
+      [{ ...rooms[0], roomTypeId: 7 }],
+      "rooms",
+    ])
+      expect(
+        toConfirmationBooking(
+          { ...source, bookedRooms } as unknown as BookingConfirmationSource,
+          {},
+        ).bookedRooms,
+      ).toBeUndefined();
+    expect(
+      toConfirmationBooking(
+        {
+          ...source,
+          bookedRooms: [{ ...rooms[0], cancellation: { kind: "free_until_days_before_arrival" } }],
+        } as unknown as BookingConfirmationSource,
+        {},
+      ).bookedRooms?.[0]?.cancellation,
+    ).toBeNull();
+  });
+
   it("rejects invalid public-response fields and never creates NaN confirmation values", () => {
     const unsafeSource = {
       bookingReference: "B-SAFE",

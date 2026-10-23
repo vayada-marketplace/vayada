@@ -4,7 +4,8 @@ import { Suspense, useEffect, useId, useRef, useState, type ReactNode } from "re
 import { flushSync } from "react-dom";
 import { useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { decodePicks } from "@/lib/roomPicker";
+import { decodePicks, pickIdentity, releaseSoldOutPicks, roomGuestProblem } from "@/lib/roomPicker";
+import RoomGuestsStep from "@/components/booking/RoomGuestsStep";
 import { useRouter } from "@/i18n/navigation";
 import BookShell from "./BookShell";
 import ReplacementGuestRules from "@/components/booking/ReplacementGuestRules";
@@ -119,6 +120,8 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   const tAddons = useTranslations("addons");
   const tGuestErrors = useTranslations("guestErrors");
   const tPayment = useTranslations("payment");
+  const tGroup = useTranslations("groupRooms");
+  const tCommon = useTranslations("common");
   const { hotel } = useHotel();
   const [termsAcknowledgement, setTermsAcknowledgement] =
     useState<QuoteTermsAcknowledgement | null>(null);
@@ -158,11 +161,20 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   const handedOver = useRef(false);
   const [payment, setPayment] = useState<"" | PricingPaymentMethod>("");
   const [guest, setGuest] = useState<GuestDetails>(emptyGuest);
+  // VAY-2320: a group chose its rooms on the hotel page; the rooms step then says who sleeps
+  // where, and "Change rooms" goes back to its search there.
+  const [fromPicks, setFromPicks] = useState(false);
+  const [homeSearch, setHomeSearch] = useState("");
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     // VAY-2195: a refresh or Back keeps what this tab chose for the same hand-off.
     const handOff = bookEntry(window.location.search);
     setEntry(handOff);
+    setFromPicks(decodePicks(params.getAll("pick")) !== null);
+    const home = new URLSearchParams();
+    for (const name of ["checkIn", "checkOut", "adults", "children", "promoCode", "rooms"])
+      if (params.get(name)) home.set(name, params.get(name)!);
+    setHomeSearch(home.toString());
     const draft = readBookFlowDraft(slug, handOff);
     if (draft) {
       setCheckIn(draft.checkIn);
@@ -327,9 +339,14 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     setExtras(null);
     setFallback(0);
   };
+  // A group's room that breaks its limits (VAY-2320) is fixed on the rooms step before pricing.
+  const roomOf = (choice: RoomChoice) =>
+    rooms?.find((room) => room.offers.some((o) => o.publicOfferKey === choice.publicOfferKey));
+  const guestProblems =
+    fromPicks && !!rooms && choices.some((choice) => !!roomGuestProblem(roomOf(choice), choice));
   const { quote, error, errorStatus, errorCode, loading, submit } = useReplacementQuote(
     slug,
-    noWayToPay ? null : request,
+    noWayToPay || guestProblems ? null : request,
   );
   const { formatPrice } = useCurrency();
   // The old pages' prices: the charged currency ("€410"), then any approximation.
@@ -426,7 +443,8 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     (addonCatalogue !== null || addonError);
   const step = settled
     ? reachableStep(wanted, steps, {
-        rooms: roomsComplete,
+        // A group's room that breaks its limits keeps it on the rooms step (VAY-2320).
+        rooms: roomsComplete && !guestProblems,
         extras: addons !== null,
         details: detailsReady,
       })
@@ -516,12 +534,22 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   ]);
   // After the rooms, the price follows every change; a refused way to pay moves to the next one.
   useEffect(() => {
-    if (step === "rooms" || !request || noWayToPay || quote || loading || error) return;
+    // A group's rooms step shows each room's price (VAY-2320).
+    if (
+      (step === "rooms" && !fromPicks) ||
+      !request ||
+      noWayToPay ||
+      guestProblems ||
+      quote ||
+      loading ||
+      error
+    )
+      return;
     const timer = setTimeout(submit, 400);
     return () => clearTimeout(timer);
     // submit belongs to this request.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [JSON.stringify(request), step, noWayToPay, quote, loading, error]);
+  }, [JSON.stringify(request), step, noWayToPay, guestProblems, fromPicks, quote, loading, error]);
   // Only a refusal of this price moves on; a failed request can be tried again.
   const refused = !!errorStatus && errorStatus >= 400 && errorStatus < 500 && errorStatus !== 429;
   useEffect(() => {
@@ -583,6 +611,8 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   // A room card's hand-off goes back to the cards; the room form goes back to itself.
   const backToRooms = () => {
     const params = new URLSearchParams(window.location.search);
+    // A group's rooms are chosen again on the hotel page, the others kept (VAY-2320).
+    if (fromPicks) return router.push(`/?${homeSearch}`);
     if (!params.get("offer")) return goBack("rooms");
     const home = new URLSearchParams();
     for (const name of ["checkIn", "checkOut", "adults", "children", "promoCode"])
@@ -620,6 +650,13 @@ function RoomQuoteForm({ slug }: { slug: string }) {
             name: room.name,
             choice: choiceName(room, choice.publicOfferKey),
             image: room.images?.[0]?.url,
+            // VAY-2320: who sleeps in each of a group's rooms.
+            guests: [
+              tCommon("adults", { count: Number(choice.adults) || 0 }),
+              ...(choice.childAges.length
+                ? [tCommon("children", { count: choice.childAges.length })]
+                : []),
+            ].join(", "),
           },
         ]
       : [];
@@ -771,8 +808,73 @@ function RoomQuoteForm({ slug }: { slug: string }) {
       </Notice>
     )
   );
+  // VAY-2320: a chosen room sold out at the last step (another booking took it, or the hotel
+  // closed the dates). Nothing was stored: say which room, keep a group's other rooms and send
+  // the guest back to choose again.
+  const soldOutNotice = (roomTypeIds: string[]) => {
+    const gone = choices.flatMap((choice, index) =>
+      roomTypeIds.includes(roomOf(choice)?.roomTypeId ?? "") ? [index + 1] : [],
+    );
+    const names = Array.from(
+      new Set(
+        roomTypeIds.flatMap((id) => {
+          const name = rooms?.find((room) => room.roomTypeId === id)?.name;
+          return name ? [name] : [];
+        }),
+      ),
+    );
+    const chooseAgain = () => {
+      const params = new URLSearchParams(homeSearch);
+      if (fromPicks)
+        releaseSoldOutPicks(
+          slug,
+          pickIdentity({
+            checkIn: params.get("checkIn") ?? "",
+            checkOut: params.get("checkOut") ?? "",
+            adults: Number(params.get("adults")) || 0,
+            children:
+              hotel?.guestTypeSettings?.childrenEnabled === false
+                ? 0
+                : Number(params.get("children")) || 0,
+            rooms: Number(params.get("rooms")) || choices.length,
+            promoCode: params.get("promoCode"),
+          }),
+          roomTypeIds,
+        );
+      router.push(`/?${homeSearch}`);
+    };
+    return (
+      <div
+        role="alert"
+        data-testid="rooms-sold-out"
+        className="space-y-2 rounded-2xl border-[1.5px] border-red-200 bg-red-50 p-5"
+      >
+        <p className="font-bold text-red-700">
+          {tGroup("soldOutTitle", { rooms: names.join(", ") || tGroup("aRoom") })}
+        </p>
+        <p className="text-sm text-gray-800">
+          {tGroup("soldOutBody")}{" "}
+          {fromPicks && choices.length > gone.length && tGroup("othersKept")}
+        </p>
+        <div className="flex flex-wrap items-center gap-4 pt-1">
+          <button type="button" className={button} onClick={chooseAgain}>
+            {fromPicks && gone.length === 1
+              ? tGroup("chooseAgainFor", { number: gone[0]! })
+              : tGroup("chooseAgain")}
+          </button>
+          <button
+            type="button"
+            className="text-sm font-semibold text-gray-700 underline"
+            onClick={() => router.push("/")}
+          >
+            {tGroup("newSearch")}
+          </button>
+        </div>
+      </div>
+    );
+  };
   const titles: Record<BookStep, string> = {
-    rooms: "Choose rooms and get a price",
+    rooms: fromPicks ? tGroup("title") : "Choose rooms and get a price",
     extras: "Enhance Your Stay",
     details: "Guest Information",
     payment: "Secure Payment",
@@ -789,7 +891,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
           : undefined
       }
     >
-      <div className={step === "rooms" ? "max-w-3xl space-y-6" : "space-y-6"}>
+      <div className={step === "rooms" && !fromPicks ? "max-w-3xl space-y-6" : "space-y-6"}>
         {step !== "rooms" && !settled ? (
           <p role="status">Loading your booking…</p>
         ) : step !== "rooms" ? null : catalogError ? (
@@ -803,6 +905,56 @@ function RoomQuoteForm({ slug }: { slug: string }) {
           <p role="status">Loading room options…</p>
         ) : rooms.length === 0 ? (
           <p role="status">Room options are currently unavailable.</p>
+        ) : fromPicks ? (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <div className="lg:col-span-2 space-y-6">
+              <RoomGuestsStep
+                choices={choices}
+                rooms={rooms}
+                quote={quote ?? null}
+                checkIn={checkIn}
+                timezone={hotel?.timezone}
+                childMaxAge={Math.max(0, (hotel?.guestTypeSettings?.adultAgeThreshold ?? 18) - 1)}
+                childrenEnabled={hotel?.guestTypeSettings?.childrenEnabled !== false}
+                changeRoomsHref={`/?${homeSearch}`}
+                formatMoney={money}
+                onChange={(selectionId, patch) =>
+                  changeChoices((current) =>
+                    current.map((choice) =>
+                      choice.selectionId === selectionId ? { ...choice, ...patch } : choice,
+                    ),
+                  )
+                }
+              />
+              {priceNotice}
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  className={button}
+                  disabled={!roomsComplete || !settled || guestProblems}
+                  onClick={() => {
+                    passMissingExtras();
+                    go(next);
+                  }}
+                >
+                  {tGroup("continue")}
+                </button>
+              </div>
+            </div>
+            <div className="lg:col-span-1">
+              {quote && (
+                <StaySummary
+                  title="Your Stay"
+                  quote={quote}
+                  rooms={summaryRooms}
+                  guests={guestsLine}
+                  rules={knownRules}
+                  formatMoney={money}
+                  formatDate={formatStayDate}
+                />
+              )}
+            </div>
+          </div>
         ) : (
           <form
             className="space-y-6"
@@ -1316,6 +1468,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                       attempt={attempt}
                       onAttemptChange={setAttempt}
                       onBooked={openConfirmation}
+                      soldOutNotice={soldOutNotice}
                       onConsentMissing={
                         // Only while both boxes can be ticked: an expired price, rules that
                         // didn't load or a room without its name keep Confirm off, as before.

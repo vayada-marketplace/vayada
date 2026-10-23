@@ -8,8 +8,14 @@ import type {
 } from "@vayada/domain-booking/replacement-pricing";
 import { deviceTimeOf } from "@/lib/serverClock";
 
-/** One booked room as the guest knows it: its name, plain choice name and photo. */
-export type SummaryRoom = { selectionId: string; name: string; choice: string; image?: string };
+/** One booked room as the guest knows it: its name, plain choice name, photo and guests. */
+export type SummaryRoom = {
+  selectionId: string;
+  name: string;
+  choice: string;
+  image?: string;
+  guests?: string;
+};
 
 function Row({ label, value, sub }: { label: ReactNode; value: ReactNode; sub?: ReactNode }) {
   return (
@@ -111,7 +117,7 @@ export default function StaySummary({
                 ),
               ),
             )}
-            sub={single ? undefined : room.choice}
+            sub={single ? undefined : [room.choice, room.guests].filter(Boolean).join(" · ")}
           />
         ))}
         {extras.length > 0 && <Row label="Extras" value={money(sum(extras))} />}
