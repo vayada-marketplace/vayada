@@ -6207,7 +6207,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       // VAY-2126: the location map is off by default. Switched on (read live), rooms with their own pin carry it;
       // a room pin doesn't make saved prices stale (VAY-2129).
       expect(offers).not.toHaveProperty("locationMap");
-      expect(offers?.rooms.some((room) => "location" in room)).toBe(false);
+      expect(offers?.rooms.some((room) => "location" in room || "atProperty" in room)).toBe(false);
       await pool.query(
         `UPDATE pms.room_types SET room_attributes = room_attributes || $2::jsonb
          WHERE property_id = $1 AND name = 'Terms room'`,
@@ -6228,11 +6228,52 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       );
       const mapped = await catalog.read(scope.propertyId);
       expect(mapped?.locationMap).toHaveProperty("property");
+      const placesOf = async () =>
+        Object.fromEntries(
+          ((await catalog.read(scope.propertyId))?.rooms ?? []).map((room) => [
+            room.name,
+            {
+              atProperty: room.atProperty,
+              showMapInDetails: room.showMapInDetails,
+              location: room.location ?? null,
+            },
+          ]),
+        );
+      // VAY-2321: a room without a pin of its own is at the property.
       expect(
         Object.fromEntries((mapped?.rooms ?? []).map((room) => [room.name, room.location ?? null])),
       ).toEqual({
         "Terms room": { latitude: 48.15634, longitude: 11.58242, address: "Leopoldstraße 12" },
         "Second room": null,
+      });
+      expect(await placesOf()).toMatchObject({
+        "Terms room": { atProperty: false, showMapInDetails: true },
+        "Second room": { atProperty: true, showMapInDetails: true, location: null },
+      });
+      // Shown as an area: the pin rounded to it, its name instead of the street, never the exact spot.
+      const setTermsRoom = (attributes: Record<string, unknown>) =>
+        pool.query(
+          `UPDATE pms.room_types SET room_attributes = room_attributes || $2::jsonb
+           WHERE property_id = $1 AND name = 'Terms room'`,
+          [scope.propertyId, JSON.stringify(attributes)],
+        );
+      await setTermsRoom({
+        locationSource: "custom",
+        locationPrecision: "approximate",
+        locationArea: "Schwabing",
+        showMapInDetails: false,
+      });
+      expect((await placesOf())["Terms room"]).toEqual({
+        atProperty: false,
+        showMapInDetails: false,
+        location: { latitude: 48.16, longitude: 11.58, approximate: true, area: "Schwabing" },
+      });
+      // "Same as property" keeps the room's own place saved but no longer shows it.
+      await setTermsRoom({ locationSource: "property" });
+      expect((await placesOf())["Terms room"]).toEqual({
+        atProperty: true,
+        showMapInDetails: false,
+        location: null,
       });
       await pool.query("DELETE FROM booking.booking_settings WHERE property_id = $1", [
         scope.propertyId,
@@ -7722,31 +7763,61 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     );
     expect(await paymentAmounts(f, "card")).toBeNull();
   });
-  it("rejects selected rates with incompatible cancellation terms", async () => {
-    const f = await componentsFixture(fixedPolicy(), (t) => ({
-      ...propertyTerms(t),
-      cancellation:
-        t.offerId === "other"
-          ? {
-              kind: "flexible",
-              terms: {
-                type: "free_until_days_before_arrival",
-                freeCancellationDeadlineDays: 7,
-                afterDeadlinePenalty: "full_booking_amount",
-                noShowPenalty: "full_booking_amount",
-              },
-            }
-          : t.cancellation,
-    }));
-    const otherKey = f.bindings.find(
-      (b) => b.roomTypeId === f.snapshot.rooms[0].roomTypeId && b.offerId === "other",
-    )!.publicOfferKey;
-    expect(
-      await paymentAmounts(f, "pay_at_property", {
+  // VAY-2320: rooms in one booking keep their own cancellation terms (Flamur, 2026-09-06 and
+  // 2026-10-23): another rate of the same room type, or another room type.
+  it("keeps each selected rate's own cancellation terms in one quote", async () => {
+    const flexible = {
+      kind: "flexible",
+      terms: {
+        type: "free_until_days_before_arrival",
+        freeCancellationDeadlineDays: 7,
+        afterDeadlinePenalty: "full_booking_amount",
+        noShowPenalty: "full_booking_amount",
+      },
+    } as const;
+    // The fixture saves the first room type's terms first: every other rate is flexible.
+    let firstFlex: string | undefined;
+    const f = await componentsFixture(fixedPolicy(), (t) => {
+      firstFlex ??= `${t.roomTypeId}:${t.offerId}`;
+      return {
+        ...propertyTerms(t),
+        cancellation: `${t.roomTypeId}:${t.offerId}` === firstFlex ? t.cancellation : flexible,
+      };
+    });
+    const key = (roomTypeId: string, offerId: string) =>
+      f.bindings.find((b) => b.roomTypeId === roomTypeId && b.offerId === offerId)!.publicOfferKey;
+    const [first, second] = f.snapshot.rooms.map((room) => room.roomTypeId);
+    for (const [otherRoom, offerId] of [
+      [first!, "other"],
+      [second!, "flex"],
+    ] as const) {
+      const cancellations = [{ kind: "non_refundable" }, flexible];
+      // Without the promo code: its 200.00 minimum isn't met by the cheaper rooms.
+      const selection = {
         ...f.selection,
-        rooms: [f.selection.rooms[0], { ...f.selection.rooms[1], publicOfferKey: otherKey }],
-      }),
-    ).toBeNull();
+        promoCode: null,
+        rooms: [
+          f.selection.rooms[0],
+          { ...f.selection.rooms[1], publicOfferKey: key(otherRoom, offerId) },
+        ],
+      };
+      const result = await paymentAmounts(f, "pay_at_property", selection);
+      expect(result).not.toBeNull();
+      expect(result!.selectedTerms.map((t) => t.cancellation)).toEqual(cancellations);
+      const issued = await createCurrentPricingQuoteStore(pool, 300).issue(f.scope.propertyId, {
+        requestId: randomUUID(),
+        selection,
+        paymentMethod: "pay_at_property",
+      });
+      expect(
+        issued.quote.stay.rooms.map(
+          (room) =>
+            issued.quote.evidence.terms.find(
+              (t) => t.roomTypeId === room.roomTypeId && t.offerId === room.offerId,
+            )!.cancellation,
+        ),
+      ).toEqual(cancellations);
+    }
   });
 
   async function assembledQuote(f: Awaited<ReturnType<typeof componentsFixture>>, lifetime = 300) {

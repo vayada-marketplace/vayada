@@ -12,9 +12,9 @@ import {
 
 import {
   BOOKING_DESIGN_FONT_PAIRINGS,
-  BOOKING_DESIGN_PRIMARY_COLORS,
   createBookingDesignButtonColors,
   createBookingDesignSourceRevision,
+  isBookingDesignPrimaryColor,
   parseBookingDesignRevision,
   type BookingDesignReadPort,
   type BookingDesignFontPairing,
@@ -500,7 +500,7 @@ function parseRendererAppearance(
       "bodyFontFamily",
       "button",
     ]) ||
-    !BOOKING_DESIGN_PRIMARY_COLORS.includes(value["primaryColor"] as BookingDesignPrimaryColor) ||
+    !isBookingDesignPrimaryColor(value["primaryColor"]) ||
     !Object.hasOwn(BOOKING_DESIGN_FONT_PAIRINGS, value["fontPairing"] as PropertyKey)
   ) {
     return null;

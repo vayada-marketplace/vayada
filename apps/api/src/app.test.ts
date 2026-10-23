@@ -15620,6 +15620,75 @@ describe("vayada-api", () => {
     expect(commandRepository.roomTypeUpdates).toHaveLength(0);
   });
 
+  it("saves how guests see a PMS room-type's place and rejects unknown values (VAY-2321)", async () => {
+    const commandRepository = createPmsOperationsCommandRepository(structuredClone(pmsRoomTypes));
+    const server = buildAuthenticatedApp({
+      permissions: ["pms.operations.manage"],
+      entitlements: [
+        {
+          product: "pms",
+          key: "property-management",
+          status: "active",
+          resource: {
+            product: "pms",
+            resourceType: "pms_property",
+            resourceId: pmsPropertyId,
+          },
+        },
+      ],
+      pmsOperationsCommandRepository: commandRepository,
+    });
+    app = server;
+    const patch = (key: string, payload: Record<string, unknown>) =>
+      injectJson(server, {
+        method: "PATCH",
+        url: `/api/pms/properties/${pmsPropertyId}/room-types/${pmsRoomTypes[0].roomTypeId}`,
+        payload: { commandId: `cmd-${key}`, idempotencyKey: key, ...payload },
+        headers: { authorization: "Bearer valid-token" },
+      });
+
+    const saved = await patch("room-type-location-display", {
+      locationSource: "custom",
+      locationPrecision: "approximate",
+      locationArea: "  Ahangama ",
+      showMapInDetails: false,
+    });
+    expect(saved.statusCode).toBe(200);
+    expect(commandRepository.roomTypeUpdates[0]).toMatchObject({
+      attributes: {
+        locationSource: "custom",
+        locationPrecision: "approximate",
+        locationArea: "Ahangama",
+        showMapInDetails: false,
+      },
+    });
+    expect((await patch("room-type-location-area-clear", { locationArea: "" })).statusCode).toBe(
+      200,
+    );
+    expect(commandRepository.roomTypeUpdates[1]).toMatchObject({
+      attributes: { locationArea: null },
+    });
+
+    for (const [payload, message] of [
+      [{ locationSource: "villa" }, "Room type update locationSource must be property or custom."],
+      [{ locationSource: null }, "Room type update locationSource must be property or custom."],
+      [
+        { locationPrecision: "blurred" },
+        "Room type update locationPrecision must be exact or approximate.",
+      ],
+      [
+        { locationArea: "x".repeat(121) },
+        "Room type update locationArea must be text of at most 120 characters, or null.",
+      ],
+      [{ showMapInDetails: "yes" }, "Room type update showMapInDetails must be true or false."],
+    ] as const) {
+      const response = await patch("room-type-location-display-invalid", payload);
+      expect(response.statusCode).toBe(400);
+      expect(response.body).toMatchObject({ code: "invalid_body", message });
+    }
+    expect(commandRepository.roomTypeUpdates).toHaveLength(2);
+  });
+
   it("rejects PMS room-type update fields the command does not save", async () => {
     const commandRepository = createPmsOperationsCommandRepository();
     app = buildAuthenticatedApp({

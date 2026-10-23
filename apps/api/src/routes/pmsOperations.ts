@@ -5092,6 +5092,10 @@ const ROOM_TYPE_UPDATE_FIELDS = new Set([
   "locationAddress",
   "latitude",
   "longitude",
+  "locationSource",
+  "locationPrecision",
+  "locationArea",
+  "showMapInDetails",
   "cancellationPolicy",
   "flexibleCancellationType",
   "partialRefundCancelWindowDays",
@@ -5345,6 +5349,33 @@ function roomTypeLocationAttributes(
   const longitude = optionalCoordinate(raw.longitude, "longitude", -180, 180, action);
   if ("error" in longitude) return longitude;
   if (longitude.present) attributes.longitude = longitude.value;
+
+  // How guests see the room's place (VAY-2321): at the property or its own, exact or as an area.
+  for (const [field, allowed] of [
+    ["locationSource", ["property", "custom"]],
+    ["locationPrecision", ["exact", "approximate"]],
+  ] as const) {
+    if (!Object.hasOwn(raw, field)) continue;
+    const value = raw[field];
+    if (typeof value !== "string" || !(allowed as readonly string[]).includes(value)) {
+      return { error: `${action} ${field} must be ${allowed.join(" or ")}.` };
+    }
+    attributes[field] = value;
+  }
+  if (Object.hasOwn(raw, "locationArea")) {
+    const value = raw.locationArea;
+    const area = nullableStringField(value);
+    if ((value !== null && value !== "" && area === undefined) || (area && area.length > 120)) {
+      return { error: `${action} locationArea must be text of at most 120 characters, or null.` };
+    }
+    attributes.locationArea = area ?? null;
+  }
+  if (Object.hasOwn(raw, "showMapInDetails")) {
+    if (typeof raw.showMapInDetails !== "boolean") {
+      return { error: `${action} showMapInDetails must be true or false.` };
+    }
+    attributes.showMapInDetails = raw.showMapInDetails;
+  }
 
   return { value: attributes };
 }

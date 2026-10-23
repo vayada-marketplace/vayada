@@ -1,4 +1,5 @@
 import {
+  QuoteRoomsSoldOutError,
   reservePmsQuoteInventory,
   reservePmsInventoryInTransaction,
 } from "./pmsInventoryReservationLifecycleRepository.js";
@@ -131,6 +132,45 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory reservation lifecy
       await expect(
         reservePmsQuoteInventory(client, { ...input, rooms: input.rooms.slice(0, 1) }, fresh),
       ).rejects.toThrow("Quote inventory is unavailable");
+    } finally {
+      await client.query("ROLLBACK");
+      client.release();
+      await pool.end();
+    }
+  });
+
+  // VAY-2320: the guest is told which room another booking took, and nothing is held.
+  it("names the room type another quote took the last rooms of", async () => {
+    const f = await currentFixture();
+    const pool = new pg.Pool({ connectionString: TEST_DATABASE_URL }),
+      client = await pool.connect();
+    const stay = { ...f, checkIn: "2026-08-04", checkOut: "2026-08-06" };
+    try {
+      await client.query("BEGIN");
+      await reservePmsQuoteInventory(
+        client,
+        {
+          ...stay,
+          quoteId: randomUUID(),
+          rooms: [{ roomTypeId: f.roomTypeId }, { roomTypeId: f.roomTypeId }],
+        },
+        async () => {},
+      );
+      await client.query("COMMIT");
+      const before = await sideEffectCounts(admin, f.propertyId);
+      await client.query("BEGIN");
+      const late = await reservePmsQuoteInventory(
+        client,
+        { ...stay, quoteId: randomUUID(), rooms: [{ roomTypeId: f.roomTypeId }] },
+        async () => {},
+      ).catch((error: unknown) => error);
+      expect(late).toBeInstanceOf(QuoteRoomsSoldOutError);
+      expect(late).toMatchObject({
+        message: "Quote inventory is unavailable",
+        roomTypeIds: [f.roomTypeId],
+      });
+      await client.query("COMMIT");
+      expect(await sideEffectCounts(admin, f.propertyId)).toEqual(before);
     } finally {
       await client.query("ROLLBACK");
       client.release();
