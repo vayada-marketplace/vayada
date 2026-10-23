@@ -971,6 +971,7 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
           { bookingReference: bookingId, guestEmail: "jane@example.test" },
           context("l"),
         )) as { bookedRooms?: unknown };
+        // With mixed terms the second room type is free until a week before arrival.
         expect(looked.bookedRooms).toEqual(
           [types[0], types[1], types[0]].map((roomTypeId) => ({
             roomTypeId,
@@ -978,7 +979,10 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
             mealPlan: quote.rooms[0]!.mealPlan,
             adults: 2,
             children: 1,
-            cancellation: { kind: "partial_refund" },
+            cancellation:
+              scenario.endsWith("-mixed-terms") && roomTypeId === types[1]
+                ? { kind: "free_until_days_before_arrival", days: 7 }
+                : { kind: "partial_refund" },
           })),
         );
         expect(
