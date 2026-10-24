@@ -6,6 +6,14 @@ import { locationMapPins, metresBetween, type LocationMapPin } from "@vayada/dom
 import type { PricingRoom } from "@/services/api/replacementOffers";
 import { chooseMaps, mapsChosen } from "@/lib/mapsChoice";
 import GuestMap, { MapGate, type GuestMapPlace } from "./GuestMap";
+import {
+  NearbyChips,
+  NearbyPlaceCard,
+  closeNearby,
+  nearbyOnMap,
+  useNearbyLayer,
+  type NearbyReference,
+} from "./NearbyMapLayer";
 import { formatDistance } from "./RoomPlace";
 
 /** The property's pin as the live catalog sends it (VAY-2126), with the hotel's name and locality. */
@@ -113,11 +121,14 @@ export function useLocationLine(
  * Booking pages talk to no third party on their own (VAY-2216), so Google Maps loads only when the guest asks
  * for it with "Show map" (remembered for this tab). */
 export default function RoomsLocationMap({
+  slug,
   rooms,
   property,
   apiKey,
   onViewDetails,
 }: {
+  /** The hotel's booking page, for its nearby places (VAY-2327). */
+  slug: string;
   rooms: PricingRoom[];
   property: MapProperty;
   apiKey: string;
@@ -130,6 +141,20 @@ export default function RoomsLocationMap({
   // A place that isn't the property's (a lone villa while the hotel hides its own) lists its room, to open
   // its details.
   const listed = pins[0]?.kind === "rooms";
+  // The host's nearby places on the same map (VAY-2327), once the guest asked for it.
+  const nearby = useNearbyLayer(slug, requested && pins.length > 0);
+  const first = pins[0];
+  // Every room is in this one place: distances count from it.
+  const reference: NearbyReference | null = first
+    ? {
+        latitude: first.latitude,
+        longitude: first.longitude,
+        approximate: first.approximate,
+        ...(first.kind === "property"
+          ? { kind: "property" as const }
+          : { kind: "place" as const, label: places[0].label }),
+      }
+    : null;
 
   // The guest's "Show map" earlier in this tab counts here too (read after mount: sessionStorage).
   useEffect(() => {
@@ -152,14 +177,27 @@ export default function RoomsLocationMap({
         <div className={`mt-6 ${listed ? "lg:flex lg:items-start lg:gap-6" : ""}`}>
           <div className="relative h-80 w-full overflow-hidden rounded-2xl border border-gray-200 sm:h-[480px] lg:min-w-0 lg:flex-1">
             {requested ? (
-              <GuestMap
-                places={places}
-                selected={selected}
-                onSelect={setSelected}
-                apiKey={apiKey}
-                label={t("mapLabel")}
-                className="h-full"
-              />
+              <>
+                <GuestMap
+                  places={places}
+                  selected={selected}
+                  onSelect={setSelected}
+                  apiKey={apiKey}
+                  label={t("mapLabel")}
+                  className="h-full"
+                  nearby={nearbyOnMap(nearby)}
+                />
+                <NearbyChips layer={nearby} className="absolute left-3 right-3 top-3 z-10" />
+                {nearby.selected && (
+                  // Above Google's logo and terms at the bottom of the map.
+                  <NearbyPlaceCard
+                    place={nearby.selected}
+                    reference={reference}
+                    onClose={() => closeNearby(nearby)}
+                    className="absolute bottom-10 left-3 right-3 z-10 sm:left-auto sm:right-4 sm:w-[340px]"
+                  />
+                )}
+              </>
             ) : (
               <MapGate
                 className="h-full"

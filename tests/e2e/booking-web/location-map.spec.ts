@@ -637,3 +637,221 @@ test.describe("booking page location map", () => {
     expect(google).toEqual([]);
   });
 });
+
+// VAY-2327: the host's nearby places on the same guest maps, in the host's order.
+const MUSIC = "c0000000-0000-4000-8000-000000000001";
+const nearbyPlace = (
+  id: string,
+  name: string,
+  category: string,
+  latitude: number,
+  longitude: number,
+  note: string | null = null,
+) => ({
+  source: "custom",
+  id,
+  name,
+  address: null,
+  category,
+  latitude,
+  longitude,
+  favorite: false,
+  note,
+});
+const NEARBY = {
+  schemaVersion: 1,
+  status: "ready",
+  location: { mode: "exact", latitude: 48.1394, longitude: 11.5835 },
+  places: [
+    nearbyPlace(
+      "p-garden",
+      "Englischer Garten",
+      "activities",
+      48.1525,
+      11.5922,
+      "Rent a bike at the south entrance and ride to the lake.",
+    ),
+    nearbyPlace("p-market", "Viktualienmarkt", "food", 48.1351, 11.5763),
+    nearbyPlace("p-jazz", "Jazzclub Unterfahrt", MUSIC, 48.1335, 11.5927, "Free jam on Sundays."),
+  ],
+  categories: [
+    { id: "food", name: null, color: "orange", icon: "cake" },
+    { id: "nature", name: null, color: "teal", icon: "sun" },
+    { id: "activities", name: null, color: "purple", icon: "camera" },
+    { id: "transport", name: null, color: "slate", icon: "map" },
+    { id: MUSIC, name: "Live music", color: "pink", icon: "musical-note" },
+  ],
+};
+
+/** Answers the page's nearby request with the host's places, and counts the requests. */
+async function mockNearby(page: Page, payload: unknown = NEARBY) {
+  const requests: string[] = [];
+  await page.route("**/api/booking-web/hotels/hotel-alpenrose/nearby", (route) => {
+    requests.push(route.request().url());
+    return route.fulfill({ json: payload });
+  });
+  return requests;
+}
+const marker = (page: Page, testId: string, name: string) =>
+  page.getByTestId(testId).getByRole("button", { name });
+const overlaps = (a: { x: number; y: number; width: number; height: number }, b: typeof a) =>
+  a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+
+test.describe("nearby places on the guest map (VAY-2327)", () => {
+  test.skip(!hasMapsKey, "needs the dev server's fake Google Maps key");
+
+  test("List + map: the host's places after Show map, the chips filter them, a place opens its card", async ({
+    page,
+  }) => {
+    await setup(page, { locationMap: MIXED_MAP, rooms: mixed });
+    const requests = await mockNearby(page);
+    await page.goto("/");
+    const map = page.getByTestId("accommodations-map");
+    await expect(map.getByRole("button", { name: "Show map" })).toBeVisible();
+    // Nothing about the places loads before the guest asks for the map.
+    await page.waitForTimeout(500);
+    expect(requests).toEqual([]);
+    await expect(page.getByRole("group", { name: "Nearby places" })).toHaveCount(0);
+
+    await map.getByRole("button", { name: "Show map" }).click();
+    const chips = map.getByRole("group", { name: "Nearby places" });
+    // One chip per category the places use, in the host's order, the host's own ones too.
+    await expect(chips.getByRole("button")).toHaveText(["Food & drink", "Sights", "Live music"]);
+    await expect(marker(page, "accommodations-map", "Englischer Garten, Sights")).toBeVisible();
+    await expect(
+      marker(page, "accommodations-map", "Jazzclub Unterfahrt, Live music"),
+    ).toBeVisible();
+
+    // With no room selected, distances count from the main house.
+    await marker(page, "accommodations-map", "Englischer Garten, Sights").click();
+    const card = map.getByTestId("nearby-place-card");
+    await expect(card).toContainText("Englischer Garten");
+    await expect(card).toContainText("Sights · 1.6 km from the main house");
+    await expect(card).toContainText("Host tip");
+    await expect(card).toContainText("Rent a bike at the south entrance and ride to the lake.");
+    await expect(
+      card.getByRole("link", { name: "Directions to Englischer Garten, opens Google Maps" }),
+    ).toHaveAttribute("href", "https://www.google.com/maps/dir/?api=1&destination=48.1525,11.5922");
+    await expect(card.getByRole("button", { name: "Close" })).toBeFocused();
+    await card.getByRole("button", { name: "Close" }).click();
+    await expect(card).toHaveCount(0);
+    await expect(marker(page, "accommodations-map", "Englischer Garten, Sights")).toBeFocused();
+
+    // A selected room: distances count from its place.
+    await page.getByTestId("room-card-loft").click();
+    // Keyboard: Enter opens a place's card, Escape closes it and gives the focus back.
+    await marker(page, "accommodations-map", "Englischer Garten, Sights").focus();
+    await page.keyboard.press("Enter");
+    await expect(card).toContainText("Sights · 840 m from Schwabing Loft");
+    await page.keyboard.press("Escape");
+    await expect(card).toHaveCount(0);
+    await expect(marker(page, "accommodations-map", "Englischer Garten, Sights")).toBeFocused();
+
+    // A chip turns its category off at once (and closes its place's card), for this tab.
+    await marker(page, "accommodations-map", "Englischer Garten, Sights").click();
+    await chips.getByRole("button", { name: "Sights" }).click();
+    await expect(chips.getByRole("button", { name: "Sights" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+    await expect(marker(page, "accommodations-map", "Englischer Garten, Sights")).toHaveCount(0);
+    await expect(card).toHaveCount(0);
+    await page.reload();
+    await expect(chips.getByRole("button", { name: "Sights" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+    await expect(marker(page, "accommodations-map", "Viktualienmarkt, Food & drink")).toBeVisible();
+    await expect(marker(page, "accommodations-map", "Englischer Garten, Sights")).toHaveCount(0);
+    await chips.getByRole("button", { name: "Sights" }).click();
+    await expect(marker(page, "accommodations-map", "Englischer Garten, Sights")).toBeVisible();
+  });
+
+  test("Map view: the place's card opens bottom right and never covers the room's card", async ({
+    page,
+  }) => {
+    await setup(page, { locationMap: MIXED_MAP, rooms: mixed });
+    await mockNearby(page);
+    await page.goto("/");
+    const map = page.getByTestId("accommodations-map");
+    await map.getByRole("button", { name: "Show map" }).click();
+    await page
+      .getByRole("group", { name: "Show the accommodations as" })
+      .getByRole("button", { name: "Map", exact: true })
+      .click();
+    await pills(page, "accommodations-map").nth(1).click();
+    await marker(page, "accommodations-map", "Jazzclub Unterfahrt, Live music").click();
+    const room = map.getByTestId("room-card-loft");
+    const card = map.getByTestId("nearby-place-card");
+    await expect(card).toContainText("Live music · 2.7 km from Schwabing Loft");
+    const [roomBox, cardBox, mapBox] = await Promise.all([
+      room.boundingBox(),
+      card.boundingBox(),
+      map.boundingBox(),
+    ]);
+    expect(overlaps(roomBox!, cardBox!)).toBe(false);
+    expect(cardBox!.x + cardBox!.width).toBeGreaterThan(mapBox!.x + mapBox!.width - 40);
+  });
+
+  test("on a phone, a place's card takes the carousel's place until it's closed", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await setup(page, { locationMap: MIXED_MAP, rooms: mixed });
+    await mockNearby(page);
+    await page.goto("/");
+    await page.getByRole("button", { name: "Map", exact: true }).click();
+    const dialog = page.getByTestId("accommodations-phone-map");
+    await expect(
+      dialog.getByRole("group", { name: "Nearby places" }).getByRole("button"),
+    ).toHaveCount(3);
+    await dialog.getByRole("button", { name: "Viktualienmarkt, Food & drink" }).click();
+    const card = dialog.getByTestId("nearby-place-card");
+    // The first room, Suite, is in the main house.
+    await expect(card).toContainText("Food & drink · 720 m from the main house");
+    await expect(dialog.getByRole("group", { name: "Accommodations" })).toHaveCount(0);
+    await card.getByRole("button", { name: "Close" }).click();
+    await expect(dialog.getByRole("group", { name: "Accommodations" })).toBeVisible();
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+  });
+
+  test("every room in one place: the Location section shows the same chips, markers and card", async ({
+    page,
+  }) => {
+    await setup(page, {
+      locationMap: { property: { latitude: 48.1394, longitude: 11.5835, approximate: false } },
+      rooms: [room("suite", "Suite", "a"), room("double", "Double", "b")],
+    });
+    await mockNearby(page);
+    await page.goto("/");
+    const section = page.getByTestId("rooms-location-map");
+    await section.getByRole("button", { name: "Show map" }).click();
+    await expect(
+      section.getByRole("group", { name: "Nearby places" }).getByRole("button"),
+    ).toHaveCount(3);
+    await marker(page, "rooms-location-map", "Viktualienmarkt, Food & drink").click();
+    await expect(section.getByTestId("nearby-place-card")).toContainText(
+      "Food & drink · 720 m from the property",
+    );
+    // A place without a tip has no "Host tip".
+    await expect(section.getByTestId("nearby-place-card")).not.toContainText("Host tip");
+  });
+
+  test("shows no nearby places while the host's switch is off", async ({ page }) => {
+    await setup(page, { locationMap: MIXED_MAP, rooms: mixed });
+    const requests = await mockNearby(page, {
+      schemaVersion: 1,
+      status: "hidden",
+      location: null,
+      places: [],
+      categories: [],
+    });
+    await page.goto("/");
+    await page.getByTestId("accommodations-map").getByRole("button", { name: "Show map" }).click();
+    await expect(pills(page, "accommodations-map")).toHaveCount(3);
+    await expect.poll(() => requests.length).toBe(1);
+    await expect(page.getByRole("group", { name: "Nearby places" })).toHaveCount(0);
+  });
+});

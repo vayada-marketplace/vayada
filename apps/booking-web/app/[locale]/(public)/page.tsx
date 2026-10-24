@@ -858,6 +858,7 @@ function HomePageContent() {
         ) : rooms?.length ? (
           <>
             <AccommodationViews
+              slug={slug}
               rooms={shownRooms}
               map={roomsMap}
               stay={{
@@ -900,6 +901,7 @@ function HomePageContent() {
 
       {mapProperty && rooms?.length && !severalPlaces ? (
         <RoomsLocationMap
+          slug={slug}
           rooms={rooms}
           property={mapProperty}
           apiKey={mapsKey}
@@ -911,11 +913,6 @@ function HomePageContent() {
           }
         />
       ) : null}
-
-      {/* TODO(VAY-2098): the Location section ("Explore our surroundings", components/booking/
-          Surroundings.tsx) is hidden for every property until the surroundings feature is finished.
-          It comes back behind a Feature Hub "location" module; the admin Location settings and the
-          public /nearby API stay as they are. */}
 
       <BookingFooter />
     </div>

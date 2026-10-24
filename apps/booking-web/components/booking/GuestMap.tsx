@@ -1,9 +1,15 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useTranslations } from "next-intl";
+import { metresBetween } from "@vayada/domain-hotels";
+import { NearbyCategoryBadge } from "@vayada/product-onboarding/NearbyCategoryBadge";
+import { NEARBY_CATEGORY_HEX } from "@vayada/product-onboarding/nearbyPlaces";
 import { importGoogleMapsLibrary } from "@vayada/product-onboarding/googleMaps";
 import { onGoogleAuthFailure } from "@/lib/googleMapsFailure";
+import type { GuestNearbyPlace } from "@/lib/nearbyPlaces";
+import { useNearbyCategoryName } from "./NearbyMapLayer";
 
 /** A place on the guest map (VAY-2324): a labelled pill at an exact spot, or a circle with its label for an
  * "Approximate area". */
@@ -23,7 +29,7 @@ type GoogleMap = {
   getZoom?: () => number | undefined;
   setZoom?: (zoom: number) => void;
   panTo: (position: LatLng) => void;
-  addListener?: (event: "idle", handler: () => void) => { remove: () => void };
+  addListener?: (event: "idle" | "dragstart", handler: () => void) => { remove: () => void };
 };
 type Projection = { fromLatLngToDivPixel: (position: LatLng) => { x: number; y: number } | null };
 type OverlayViewBase = {
@@ -56,6 +62,8 @@ const PILL =
   "before:absolute before:-inset-2 before:content-['']";
 const PILL_IDLE = "border border-gray-200 bg-white text-gray-900";
 const PILL_SELECTED = "border-2 border-white bg-primary-600 text-white";
+// Nearby places further from every pill than this stay out of the first view (an airport, a day trip).
+const NEARBY_FIT_METRES = 5_000;
 
 /** The guest map (VAY-2324), shared by the booking page's location map and its accommodation views. It loads
  * Google Maps when mounted, so only mount it after the guest's "Show map" (VAY-2216, see MapGate). Pills are
@@ -82,6 +90,8 @@ export default function GuestMap({
   fitPadding?: number | Padding;
   /** "greedy" where nothing else scrolls, such as a full-screen map: one finger moves the map. */
   gestureHandling?: "cooperative" | "greedy";
+  /** The host's nearby places (VAY-2327): round markers under the pills, in the host's order. */
+  nearby?: { places: GuestNearbyPlace[]; selected: string | null; onSelect: (id: string) => void };
 }) {
   const t = useTranslations("locationMap");
   const mapRef = useRef<HTMLDivElement>(null);
@@ -89,15 +99,29 @@ export default function GuestMap({
   // Raised each time the places are drawn, so the selection is applied to the new pills.
   const [draws, setDraws] = useState(0);
   const [failed, setFailed] = useState(false);
-  const drawn = useRef<{ map: GoogleMap; positions: LatLng[]; pills: HTMLButtonElement[] } | null>(
-    null,
-  );
+  const drawn = useRef<{
+    map: GoogleMap;
+    positions: LatLng[];
+    pills: HTMLButtonElement[];
+    /** Puts page content on the map, centred on a spot; setMap(null) takes it off. */
+    overlay: (
+      latitude: number,
+      longitude: number,
+      element: HTMLElement,
+    ) => { setMap: (map: GoogleMap | null) => void };
+    fit: (positions: LatLng[]) => void;
+    /** The guest moved or zoomed the map: later places don't move it again. */
+    touched: boolean;
+  } | null>(null);
+  const [nearbySlots, setNearbySlots] = useState<{ id: string; element: HTMLDivElement }[]>([]);
+  const onNearbyRef = useRef(nearby?.onSelect);
   const onSelectRef = useRef(onSelect);
   // Read when the map is drawn: cards drawn over the map are measured after it mounts.
   const fitPaddingRef = useRef(fitPadding);
   useEffect(() => {
     onSelectRef.current = onSelect;
     fitPaddingRef.current = fitPadding;
+    onNearbyRef.current = nearby?.onSelect;
   });
   const placesKey = JSON.stringify(places);
   const ready = draws > 0;
@@ -108,6 +132,7 @@ export default function GuestMap({
     // What this drawing put on the map, taken off again when the places change or the map goes.
     const shapes: { setMap: (map: GoogleMap | null) => void }[] = [];
     let fitted: { remove: () => void } | undefined;
+    let moved: { remove: () => void } | undefined;
     let disposed = false;
     const timeout = setTimeout(() => {
       if (!disposed) setFailed(true);
@@ -145,9 +170,9 @@ export default function GuestMap({
         // A labelled pill drawn by the page at a spot on the map: above the spot for an exact place, on it for an area.
         class Pill extends OverlayView {
           position: LatLng;
-          button: HTMLButtonElement;
+          button: HTMLElement;
           centred: boolean;
-          constructor(position: LatLng, button: HTMLButtonElement, centred: boolean) {
+          constructor(position: LatLng, button: HTMLElement, centred: boolean) {
             super();
             this.position = position;
             this.button = button;
@@ -203,7 +228,33 @@ export default function GuestMap({
           shapes.push(pill);
           return button;
         });
-        drawn.current = { map, positions, pills };
+        const fit = (points: LatLng[]) => {
+          const bounds = new LatLngBounds();
+          points.forEach((position) => bounds.extend(position));
+          map.fitBounds(bounds, fitPaddingRef.current);
+          const idle = map.addListener?.("idle", () => {
+            idle?.remove();
+            if ((map.getZoom?.() ?? 0) > MAX_FITTED_ZOOM) map.setZoom?.(MAX_FITTED_ZOOM);
+          });
+        };
+        const current = {
+          map,
+          positions,
+          pills,
+          fit,
+          touched: false,
+          overlay: (latitude: number, longitude: number, element: HTMLElement) => {
+            OverlayView.preventMapHitsAndGesturesFrom?.(element);
+            const marker = new Pill(new LatLng(latitude, longitude), element, true);
+            marker.setMap(map);
+            shapes.push(marker);
+            return marker;
+          },
+        };
+        moved = map.addListener?.("dragstart", () => {
+          current.touched = true;
+        });
+        drawn.current = current;
         setDraws((count) => count + 1);
       })
       .catch(() => {
@@ -214,6 +265,7 @@ export default function GuestMap({
       clearTimeout(timeout);
       stopListening();
       fitted?.remove();
+      moved?.remove();
       shapes.forEach((shape) => shape.setMap(null));
       drawn.current = null;
     };
@@ -229,12 +281,67 @@ export default function GuestMap({
       pill.className = `${PILL} ${index === selected ? PILL_SELECTED : PILL_IDLE}`;
       if (index === selected) pill.setAttribute("aria-current", "true");
       else pill.removeAttribute("aria-current");
-      pill.style.zIndex = index === selected ? "2" : "1";
+      // Above the nearby places' markers where they overlap (VAY-2327).
+      pill.style.zIndex = index === selected ? "3" : "2";
     });
     if (selected === null) return;
     const position = current.positions[selected];
     if (position && !current.map.getBounds?.()?.contains(position)) current.map.panTo(position);
   }, [draws, selected]);
+
+  // The host's nearby places (VAY-2327): one round marker each, under the pills, in the host's order (the order
+  // they take the focus in). The first time they come, the view widens to the ones near the pills.
+  const nearbyKey = JSON.stringify(
+    (nearby?.places ?? []).map(({ id, latitude, longitude }) => [id, latitude, longitude]),
+  );
+  useEffect(() => {
+    const current = drawn.current;
+    const places = nearby?.places ?? [];
+    if (draws === 0 || !current || places.length === 0) {
+      setNearbySlots([]);
+      return;
+    }
+    const markers = places.map((place) => {
+      const element = document.createElement("div");
+      element.style.zIndex = "0";
+      return {
+        id: place.id,
+        element,
+        overlay: current.overlay(place.latitude, place.longitude, element),
+      };
+    });
+    setNearbySlots(markers.map(({ id, element }) => ({ id, element })));
+    const near = places.filter((place) =>
+      current.positions.some(
+        (position) =>
+          metresBetween(place, { latitude: position.lat(), longitude: position.lng() }) <=
+          NEARBY_FIT_METRES,
+      ),
+    );
+    if (!current.touched && near.length > 0)
+      current.fit([
+        ...current.positions,
+        ...near.map((place) => ({ lat: () => place.latitude, lng: () => place.longitude })),
+      ]);
+    return () => markers.forEach(({ overlay }) => overlay.setMap(null));
+    // nearbyKey stands for the places' spots.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draws, nearbyKey]);
+
+  // The selected place's marker comes forward, and into view.
+  const selectedNearby = nearby?.selected ?? null;
+  useEffect(() => {
+    nearbySlots.forEach(({ id, element }) => {
+      element.style.zIndex = id === selectedNearby ? "1" : "0";
+    });
+    const current = drawn.current;
+    const place = nearby?.places.find(({ id }) => id === selectedNearby);
+    if (!current || !place) return;
+    const position = { lat: () => place.latitude, lng: () => place.longitude };
+    if (!current.map.getBounds?.()?.contains(position)) current.map.panTo(position);
+    // nearby is read for the selected place's spot only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nearbySlots, selectedNearby]);
 
   return (
     // Its own stacking layer: Google's panes and the pills stay under cards drawn over the map.
@@ -254,7 +361,57 @@ export default function GuestMap({
           {failed ? t("mapFailed") : t("loadingMap")}
         </p>
       )}
+      {nearbySlots.map(({ id, element }) => {
+        const place = nearby?.places.find((candidate) => candidate.id === id);
+        return place
+          ? createPortal(
+              <NearbyMarker
+                place={place}
+                selected={id === selectedNearby}
+                onSelect={() => onNearbyRef.current?.(id)}
+              />,
+              element,
+              id,
+            )
+          : null;
+      })}
     </div>
+  );
+}
+
+/** A nearby place on the map (VAY-2327): a round marker in its category's colour, unlike the rooms' labelled
+ * pills; bigger, with a ring, while selected. A button in the page, so it takes the focus in the host's order. */
+function NearbyMarker({
+  place,
+  selected,
+  onSelect,
+}: {
+  place: GuestNearbyPlace;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  const t = useTranslations("nearbyMap");
+  const name = useNearbyCategoryName();
+  const color = NEARBY_CATEGORY_HEX[place.category.color];
+  return (
+    <button
+      type="button"
+      data-nearby-id={place.id}
+      aria-label={t("markerLabel", { name: place.name, category: name(place.category) })}
+      aria-current={selected ? "true" : undefined}
+      onClick={onSelect}
+      // A touch target of at least 44 px around the marker (VAY-2325).
+      className="relative block rounded-full before:absolute before:-inset-1.5 before:content-[''] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2"
+      style={
+        selected
+          ? { padding: 4, backgroundColor: `${color}40`, boxShadow: `0 0 0 2px ${color}` }
+          : undefined
+      }
+    >
+      <span className="block rounded-full shadow-[0_2px_6px_rgb(0_0_0_/_28%)] ring-2 ring-white">
+        <NearbyCategoryBadge category={place.category} size={selected ? 36 : 32} />
+      </span>
+    </button>
   );
 }
 
