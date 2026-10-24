@@ -56,7 +56,7 @@ export default function NearbyAreaSearch({
             longitude: place.location.lng(),
           });
       } catch {
-        if (selection === latest) unavailable();
+        // One failed lookup only misses that result; the search stays for the next one.
       }
     };
     void importGoogleMapsLibrary<GooglePlacesLibrary>(apiKey, "places")

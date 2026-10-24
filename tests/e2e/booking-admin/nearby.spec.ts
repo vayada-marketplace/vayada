@@ -248,6 +248,12 @@ async function names(page: Page) {
     items.map((item) => item.querySelector("p.font-bold")?.textContent),
   );
 }
+// Booking Admin scrolls inside its main column, so that is where content would stick out.
+async function expectNoSidewaysScroll(page: Page) {
+  expect(await page.locator("main").evaluate((main) => main.scrollWidth <= main.clientWidth)).toBe(
+    true,
+  );
+}
 async function savePlaces(page: Page) {
   await editor(page).getByRole("button", { name: "Save places", exact: true }).click();
   await expect(page.getByText("Places saved.", { exact: true })).toBeVisible();
@@ -339,11 +345,14 @@ test("adds a place: the search moves the map, a click drops the pin, and a new c
     .toEqual([{ center: { lat: 48.1525, lng: 11.5922 }, zoom: 15 }]);
   // The search alone drops no pin: Google's place never becomes the host's.
   await expect(add).toBeDisabled();
-  await map(page).evaluate((element) =>
-    (
-      element as unknown as { vayadaE2eClickMap: (lat: number, lng: number) => void }
-    ).vayadaE2eClickMap(48.1525, 11.5922),
-  );
+  // The fake map keeps its click on the map element inside the region.
+  await map(page).evaluate((region) => {
+    type Clickable = Element & { vayadaE2eClickMap?: (lat: number, lng: number) => void };
+    const map = [region, ...region.querySelectorAll("*")].find(
+      (element) => (element as Clickable).vayadaE2eClickMap,
+    ) as Clickable;
+    map.vayadaE2eClickMap!(48.1525, 11.5922);
+  });
   await expect(form.getByText("Pin dropped · 1.6 km from Alpenrose Apartments")).toBeVisible();
   await form.getByLabel("Place name").fill("Chinesischer Turm");
 
@@ -487,6 +496,37 @@ test("Edit categories renames a standard one and deletes one of the host's own, 
   });
 });
 
+test("forms take the focus and give it back; Escape closes them and takes back their new category", async ({
+  page,
+}) => {
+  await setup(page);
+  await page.goto("/settings/location");
+  const add = editor(page).getByRole("button", { name: "Add a place", exact: true });
+  await add.click();
+  await expect(editor(page).getByLabel("Place name")).toBeFocused();
+  await editor(page).getByRole("button", { name: "New category" }).click();
+  await editor(page).getByRole("textbox", { name: "Name", exact: true }).fill("Temporary");
+  await editor(page).getByRole("button", { name: "Add category" }).click();
+  await expect(editor(page).getByText("3 of 20 places · Unsaved changes")).toBeVisible();
+  await editor(page).getByLabel("Place name").press("Escape");
+  await expect(add).toBeFocused();
+  // The category made for the cancelled place went with it.
+  await expect(editor(page).getByText("3 of 20 places · All changes saved")).toBeVisible();
+
+  const edit = editor(page).getByRole("button", { name: "Edit Isartor S-Bahn" });
+  await edit.click();
+  await expect(editor(page).getByLabel("Place name")).toHaveValue("Isartor S-Bahn");
+  await expect(editor(page).getByLabel("Place name")).toBeFocused();
+  await editor(page).getByRole("button", { name: "Cancel" }).click();
+  await expect(edit).toBeFocused();
+
+  const categories = editor(page).getByRole("button", { name: "Edit categories" });
+  await categories.click();
+  await expect(editor(page).getByRole("textbox", { name: "Name of Food & drink" })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(categories).toBeFocused();
+});
+
 test("Show nearby places saves at once; off, the preview shows no places", async ({ page }) => {
   const state = await setup(page);
   await page.goto("/settings/location");
@@ -542,9 +582,7 @@ test("on a phone the map sits above the list, and nothing scrolls sideways", asy
   await editor(page).getByRole("button", { name: "Add a place", exact: true }).click();
   await editor(page).getByRole("button", { name: "New category" }).click();
   await editor(page).screenshot({ path: test.info().outputPath("add-390.png") });
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
-    true,
-  );
+  await expectNoSidewaysScroll(page);
 });
 
 test("the editor speaks the admin's language", async ({ page }) => {
@@ -554,7 +592,9 @@ test("the editor speaks the admin's language", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Lage & Umgebung" })).toBeVisible();
   await expect(page.getByRole("region", { name: "Orte in der Nähe", exact: true })).toBeVisible();
   await expect(page.getByRole("switch", { name: "Orte in der Nähe zeigen" })).toBeChecked();
-  await expect(rows(page).nth(0)).toContainText("Essen & Trinken · 0,7 km");
+  await expect(
+    page.getByRole("region", { name: "Orte in der Nähe", exact: true }).locator("ol > li").first(),
+  ).toContainText("Essen & Trinken · 0,7 km");
   await expect(page.getByText("3 von 20 Orten · Alle Änderungen gespeichert")).toBeVisible();
 });
 
@@ -580,9 +620,7 @@ test("mobile editing, discard and navigation protection retain dirty forms", asy
   await expect(page.getByLabel("Street and number", { exact: true })).not.toHaveValue(
     "Changed street",
   );
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
-    true,
-  );
+  await expectNoSidewaysScroll(page);
 });
 
 test("an unfinished place keeps the page from being left", async ({ page }) => {

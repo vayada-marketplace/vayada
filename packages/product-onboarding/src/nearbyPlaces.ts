@@ -50,13 +50,13 @@ export function distanceKm(from: Point, to: Point): number {
   return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-/** "1.4 km", with the reader's decimal mark. */
+/** "1.4 km", with the reader's decimal mark, never broken between the number and its unit. */
 export function formatDistance(from: Point, to: Point, locale: string, t: Translate): string {
   const distance = new Intl.NumberFormat(locale, {
     minimumFractionDigits: 1,
     maximumFractionDigits: 1,
   }).format(distanceKm(from, to));
-  return t("nearbyPlaces.distance", { distance });
+  return t("nearbyPlaces.distance", { distance }).replace(/ /g, "\u00A0");
 }
 
 /** The list with one item moved, for drag and the arrow keys. */

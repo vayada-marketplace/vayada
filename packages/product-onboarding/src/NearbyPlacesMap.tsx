@@ -24,9 +24,10 @@ type Projection = {
 };
 type GoogleMap = {
   addListener: (
-    event: "click" | "idle",
+    event: "click" | "idle" | "dragstart",
     handler: (event?: { latLng?: LatLng | null }) => void,
   ) => { remove: () => void };
+  setOptions?: (options: { draggableCursor?: string | null }) => void;
   fitBounds: (bounds: unknown, padding?: number) => void;
   moveCamera: (camera: { center: { lat: number; lng: number }; zoom: number }) => void;
   getZoom: () => number | undefined;
@@ -81,8 +82,8 @@ export default function NearbyPlacesMap({
   apiKey: string;
   t: Translate;
   property: (NearbyMapPoint & { name: string }) | null;
-  /** Rooms with their own location, such as a villa elsewhere. */
-  rooms: (NearbyMapPoint & { name: string })[];
+  /** Rooms with their own location, such as a villa elsewhere; an area as guests see it when approximate. */
+  rooms: (NearbyMapPoint & { name: string; approximate: boolean })[];
   places: NearbyMapPlace[];
   /** "Show nearby places": off, guests see no place markers, and neither does this preview. */
   shown: boolean;
@@ -96,9 +97,9 @@ export default function NearbyPlacesMap({
   editingId: string | null;
   /** Where "Find the area" moved the map; a new object each search. */
   focus: NearbyMapPoint | null;
-  /** A click on the map while adding: the draft's pin. */
+  /** A click on the map while adding: the draft's pin. Left out, a click does nothing. */
   onDrop?: (position: NearbyMapPoint) => void;
-  /** The edited place's marker moved. */
+  /** The edited place's marker moved. Left out, it can't be moved. */
   onMove?: (id: string, position: NearbyMapPoint) => void;
 }) {
   const mapElement = useRef<HTMLDivElement>(null);
@@ -111,6 +112,8 @@ export default function NearbyPlacesMap({
   useEffect(() => {
     callbacks.current = { onDrop, onMove };
   });
+  // Once the host moves the map, a late fit (rooms arriving) leaves their view alone.
+  const touched = useRef(false);
   // Where the map first looks: the property, else the places.
   const start = property ?? places[0] ?? null;
   const startKey = start ? `${start.latitude},${start.longitude}` : "";
@@ -122,6 +125,7 @@ export default function NearbyPlacesMap({
       if (!disposed) setFailed(true);
     }, LOAD_TIMEOUT_MS);
     let click: { remove: () => void } | undefined;
+    let drag: { remove: () => void } | undefined;
     const drawn = pins.current;
     void Promise.all([
       importGoogleMapsLibrary<MapsLibrary>(apiKey, "maps"),
@@ -138,12 +142,14 @@ export default function NearbyPlacesMap({
           disableDefaultUI: true,
           zoomControl: true,
           gestureHandling: "cooperative",
-          draggableCursor: "crosshair",
         });
         click = google.addListener("click", (event) => {
           const position = event?.latLng;
           if (position)
             callbacks.current.onDrop?.({ latitude: position.lat(), longitude: position.lng() });
+        });
+        drag = google.addListener("dragstart", () => {
+          touched.current = true;
         });
         // A marker: page content positioned on the map, with its point at the centre.
         class Overlay extends OverlayView {
@@ -197,6 +203,7 @@ export default function NearbyPlacesMap({
       disposed = true;
       clearTimeout(timeout);
       click?.remove();
+      drag?.remove();
       drawn.forEach((pin) => pin.remove());
       drawn.clear();
       map.current = null;
@@ -245,12 +252,12 @@ export default function NearbyPlacesMap({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, markersKey]);
 
-  // Fit the property, rooms and places in once, when the map is ready.
-  const fitted = useRef(false);
+  // Fit the property, rooms and places in when the map is ready, and again when the rooms arrive, until the host
+  // moves the map.
+  const roomsKey = JSON.stringify(rooms);
   useEffect(() => {
     const current = map.current;
-    if (!ready || !current || fitted.current) return;
-    fitted.current = true;
+    if (!ready || !current || touched.current) return;
     const points = [...(property ? [property] : []), ...rooms, ...places];
     if (points.length < 2) return;
     const bounds = new current.core.LatLngBounds();
@@ -262,12 +269,19 @@ export default function NearbyPlacesMap({
       idle.remove();
       if ((current.map.getZoom() ?? 0) > MAX_FITTED_ZOOM) current.map.setZoom(MAX_FITTED_ZOOM);
     });
-    // Only the first fit: later edits keep the host's view.
+    // Places the host adds later keep the host's view; roomsKey stands for rooms.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready]);
+  }, [ready, roomsKey]);
+
+  // The crosshair only while a click drops a pin.
+  const dropping = Boolean(onDrop);
+  useEffect(() => {
+    if (ready) map.current?.map.setOptions?.({ draggableCursor: dropping ? "crosshair" : null });
+  }, [ready, dropping]);
 
   // "Find the area" moves the map there.
   useEffect(() => {
+    if (ready && focus) touched.current = true;
     if (ready && focus)
       map.current?.map.moveCamera({
         center: { lat: focus.latitude, lng: focus.longitude },
@@ -280,7 +294,7 @@ export default function NearbyPlacesMap({
       const pin = pins.current.get(`place:${id}`);
       const projection = pin?.projection();
       const start = projection && toPixel(projection, position, map.current?.core);
-      if (!pin || !projection || !start) return;
+      if (!callbacks.current.onMove || !pin || !projection || !start) return;
       event.preventDefault();
       const button = event.currentTarget;
       button.setPointerCapture(event.pointerId);
@@ -296,16 +310,24 @@ export default function NearbyPlacesMap({
         const point = at(moved);
         if (point) pin.place(point, 5);
       };
-      const drop = (moved: globalThis.PointerEvent) => {
+      const end = () => {
         button.removeEventListener("pointermove", follow);
         button.removeEventListener("pointerup", drop);
-        button.removeEventListener("pointercancel", drop);
+        button.removeEventListener("pointercancel", cancel);
+      };
+      const drop = (moved: globalThis.PointerEvent) => {
+        end();
         const point = at(moved);
         if (point) callbacks.current.onMove?.(id, point);
       };
+      // A cancelled gesture (a scroll took over, the window lost focus) puts the marker back.
+      const cancel = () => {
+        end();
+        pin.place(position, 5);
+      };
       button.addEventListener("pointermove", follow);
       button.addEventListener("pointerup", drop);
-      button.addEventListener("pointercancel", drop);
+      button.addEventListener("pointercancel", cancel);
     },
     onKeyDown: (event: KeyboardEvent<HTMLButtonElement>) => {
       const step = {
@@ -316,7 +338,7 @@ export default function NearbyPlacesMap({
       }[event.key];
       const projection = pins.current.get(`place:${id}`)?.projection();
       const start = projection && step && toPixel(projection, position, map.current?.core);
-      if (!projection || !start || !step) return;
+      if (!callbacks.current.onMove || !projection || !start || !step) return;
       event.preventDefault();
       const point = toPoint(
         projection.fromDivPixelToLatLng({ x: start.x + step.x, y: start.y + step.y }),
@@ -347,8 +369,8 @@ export default function NearbyPlacesMap({
       {property &&
         containers.property &&
         createPortal(
-          <span className="flex items-center gap-1.5" title={property.name}>
-            <span className="inline-flex h-8 w-8 items-center justify-center rounded-full border-2 border-white bg-gray-900 text-white shadow">
+          <span className="relative block" title={property.name}>
+            <span className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-white bg-gray-900 text-white shadow">
               <HomeModernIcon aria-hidden="true" className="h-[18px] w-[18px]" />
             </span>
             <MapLabel>{property.name}</MapLabel>
@@ -359,8 +381,15 @@ export default function NearbyPlacesMap({
         (room, index) =>
           containers[`room:${index}`] &&
           createPortal(
-            <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full border border-gray-200 bg-white px-2.5 py-1 text-xs font-bold text-gray-900 shadow">
-              <MapPinIcon aria-hidden="true" className="h-3.5 w-3.5 text-blue-700" />
+            // An area as guests see it: its name, without a pin on a spot that isn't the room's.
+            <span
+              className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-white px-2.5 py-1 text-xs font-bold text-gray-900 shadow ${
+                room.approximate ? "border border-dashed border-blue-400" : "border border-gray-200"
+              }`}
+            >
+              {!room.approximate && (
+                <MapPinIcon aria-hidden="true" className="h-3.5 w-3.5 text-blue-700" />
+              )}
               {room.name}
             </span>,
             containers[`room:${index}`],
@@ -382,11 +411,11 @@ export default function NearbyPlacesMap({
             place.id,
           );
         return createPortal(
-          <span className="flex items-center gap-1.5">
+          <span className="relative block">
             <button
               type="button"
               aria-label={t("nearbyPlaces.map.moveMarker", { name: place.name })}
-              className="cursor-grab touch-none rounded-full p-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 active:cursor-grabbing"
+              className="block cursor-grab touch-none rounded-full p-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 active:cursor-grabbing"
               style={{
                 backgroundColor: `${NEARBY_CATEGORY_HEX[place.category.color]}40`,
                 boxShadow: `0 0 0 2px ${NEARBY_CATEGORY_HEX[place.category.color]}`,
@@ -406,9 +435,9 @@ export default function NearbyPlacesMap({
       {draft?.position &&
         containers.draft &&
         createPortal(
-          <span className="flex items-center gap-1.5">
+          <span className="relative block">
             <span
-              className="rounded-full border-2 border-dashed p-1"
+              className="block rounded-full border-2 border-dashed p-1"
               style={{ borderColor: NEARBY_CATEGORY_HEX[draft.category.color] }}
             >
               <span className="block rounded-full ring-2 ring-white">
@@ -423,10 +452,11 @@ export default function NearbyPlacesMap({
   );
 }
 
-/** A marker's name next to it, like the boards' white labels. */
+/** A marker's name to the right of its icon, like the boards' white labels. Out of the marker's flow, so the
+ * marker's point stays the icon's centre. */
 function MapLabel({ children }: { children: string }) {
   return (
-    <span className="max-w-[180px] truncate whitespace-nowrap rounded-md border border-gray-200 bg-white px-1.5 py-0.5 text-[11px] font-bold text-gray-900 shadow-sm">
+    <span className="absolute left-full top-1/2 ml-1.5 max-w-[180px] -translate-y-1/2 truncate whitespace-nowrap rounded-md border border-gray-200 bg-white px-1.5 py-0.5 text-[11px] font-bold text-gray-900 shadow-sm">
       {children}
     </span>
   );

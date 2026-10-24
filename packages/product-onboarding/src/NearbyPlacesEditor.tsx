@@ -1,6 +1,14 @@
 "use client";
 
-import { useEffect, useRef, useState, type PointerEvent, type ReactNode } from "react";
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type PointerEvent,
+  type ReactNode,
+} from "react";
 import {
   CursorArrowRaysIcon,
   EyeSlashIcon,
@@ -11,6 +19,7 @@ import {
   XMarkIcon,
 } from "@heroicons/react/24/outline";
 import {
+  NEARBY_CATEGORIES,
   NEARBY_CATEGORY_ICONS,
   NEARBY_CATEGORY_NAME_MAX_LENGTH,
   NEARBY_CUSTOM_CATEGORY_COLORS,
@@ -42,7 +51,12 @@ export type NearbyGuestMap = {
   load: (signal: AbortSignal) => Promise<{
     nearbyEnabled: boolean;
     canSwitch: boolean;
-    rooms: { name: string; pin: NearbyMapPoint | null; atProperty: boolean }[];
+    rooms: {
+      name: string;
+      pin: NearbyMapPoint | null;
+      atProperty: boolean;
+      approximate: boolean;
+    }[];
   }>;
   setNearbyEnabled: (enabled: boolean) => Promise<boolean>;
 };
@@ -115,10 +129,18 @@ export default function NearbyPlacesEditor({
   // A new object per keyboard move, so the moved row's handle gets the focus back.
   const [focusHandle, setFocusHandle] = useState<{ id: string } | null>(null);
   const handles = useRef(new Map<string, HTMLButtonElement>());
+  const editButtons = useRef(new Map<string, HTMLButtonElement>());
+  const addButton = useRef<HTMLButtonElement>(null);
+  const categoriesButton = useRef<HTMLButtonElement>(null);
+  // When a form closes, the focus goes back to what opened it (or "Add a place" once that's gone).
+  const returnFocus = useRef<() => HTMLElement | null | undefined>(() => null);
+  const [restoreFocus, setRestoreFocus] = useState(0);
+  // Categories made in the open place form: dropped again if the form is cancelled and no place uses them.
+  const createdInForm = useRef<string[]>([]);
   const [guests, setGuests] = useState<{
     enabled: boolean;
     canSwitch: boolean;
-    rooms: (NearbyMapPoint & { name: string })[];
+    rooms: (NearbyMapPoint & { name: string; approximate: boolean })[];
   } | null>(null);
   const [switching, setSwitching] = useState(false);
   const [switchFailed, setSwitchFailed] = useState(false);
@@ -133,7 +155,9 @@ export default function NearbyPlacesEditor({
           enabled: summary.nearbyEnabled,
           canSwitch: summary.canSwitch,
           rooms: summary.rooms.flatMap((room) =>
-            room.pin && !room.atProperty ? [{ name: room.name, ...room.pin }] : [],
+            room.pin && !room.atProperty
+              ? [{ name: room.name, approximate: room.approximate, ...room.pin }]
+              : [],
           ),
         }),
       )
@@ -149,6 +173,37 @@ export default function NearbyPlacesEditor({
   useEffect(() => {
     if (focusHandle) handles.current.get(focusHandle.id)?.focus();
   }, [focusHandle]);
+  useEffect(() => {
+    if (restoreFocus) (returnFocus.current() ?? addButton.current)?.focus();
+  }, [restoreFocus]);
+
+  function open(next: Mode, from: () => HTMLElement | null | undefined) {
+    returnFocus.current = from;
+    createdInForm.current = [];
+    setNewCategory(null);
+    setMode(next);
+  }
+  /** Closes the open form; a cancelled place form takes back the categories it made that nothing uses. */
+  function close(saved = false) {
+    const made = createdInForm.current;
+    createdInForm.current = [];
+    if (!saved && made.length)
+      setDraft((current) => ({
+        ...current,
+        customCategories: current.customCategories.filter(
+          ({ id }) =>
+            !made.includes(id) || current.customPlaces.some((place) => place.category === id),
+        ),
+      }));
+    setMode(null);
+    setNewCategory(null);
+    setRestoreFocus((count) => count + 1);
+  }
+  const escape = (event: KeyboardEvent) => {
+    if (event.key !== "Escape") return;
+    event.preventDefault();
+    close();
+  };
 
   const categories = nearbyCategoryViews(draft);
   const categoryOf = (id: string): NearbyCategoryView =>
@@ -157,6 +212,12 @@ export default function NearbyPlacesEditor({
   const limit = NEARBY_PLACE_LIMIT - draft.choices.filter((choice) => choice.added).length;
   const distance = (point: NearbyMapPoint) =>
     propertyPin ? formatDistance(propertyPin, point, locale, t) : null;
+  const coordinate = (value: number) =>
+    new Intl.NumberFormat(locale, {
+      minimumFractionDigits: 4,
+      maximumFractionDigits: 4,
+      useGrouping: false,
+    }).format(value);
   const shown = guests?.enabled ?? true;
   const update = (form: Partial<PlaceForm>) =>
     setMode((current) =>
@@ -206,16 +267,21 @@ export default function NearbyPlacesEditor({
         setDrag({ from: index, over });
       }
     };
-    const end = () => {
+    const stop = () => {
       handle.removeEventListener("pointermove", move);
-      handle.removeEventListener("pointerup", end);
-      handle.removeEventListener("pointercancel", end);
+      handle.removeEventListener("pointerup", drop);
+      handle.removeEventListener("pointercancel", cancel);
       setDrag(null);
+    };
+    const drop = () => {
+      stop();
       reorder(index, over);
     };
+    // A cancelled gesture (a scroll took over) leaves the order as it was.
+    const cancel = stop;
     handle.addEventListener("pointermove", move);
-    handle.addEventListener("pointerup", end);
-    handle.addEventListener("pointercancel", end);
+    handle.addEventListener("pointerup", drop);
+    handle.addEventListener("pointercancel", cancel);
   }
 
   function savePlace() {
@@ -233,8 +299,7 @@ export default function NearbyPlacesEditor({
         ),
       }));
     }
-    setMode(null);
-    setNewCategory(null);
+    close(true);
   }
 
   function addCategory() {
@@ -247,6 +312,7 @@ export default function NearbyPlacesEditor({
         { ...newCategory, id, name: newCategory.name.trim() },
       ],
     }));
+    createdInForm.current = [...createdInForm.current, id];
     update({ category: id });
     setNewCategory(null);
   }
@@ -307,7 +373,9 @@ export default function NearbyPlacesEditor({
                 role="switch"
                 aria-checked={guests.enabled}
                 aria-labelledby="nearby-places-switch"
-                disabled={switching || !guests.canSwitch}
+                // Saving keeps the switch focusable; a second press waits for the first.
+                aria-busy={switching || undefined}
+                disabled={!guests.canSwitch}
                 onClick={() => void toggle()}
                 className={`relative h-5 w-9 shrink-0 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 ${
                   guests.enabled ? "bg-blue-700" : "bg-gray-300"
@@ -371,10 +439,14 @@ export default function NearbyPlacesEditor({
               }
               editingId={editing?.id ?? null}
               focus={focus}
-              onDrop={adding ? (position) => update({ position }) : undefined}
-              onMove={(id, position) => {
-                if (editing?.id === id) update({ position });
-              }}
+              onDrop={adding && !disabled ? (position) => update({ position }) : undefined}
+              onMove={
+                editing && !disabled
+                  ? (id, position) => {
+                      if (editing.id === id) update({ position });
+                    }
+                  : undefined
+              }
             />
           </div>
           {shown && <p className="mt-2 text-xs text-gray-500">{t("nearbyPlaces.map.caption")}</p>}
@@ -398,6 +470,7 @@ export default function NearbyPlacesEditor({
                 return (
                   <li
                     key={place.id}
+                    onKeyDown={escape}
                     className="rounded-xl border-2 border-blue-600 bg-white p-4 shadow-[0_0_0_4px_rgb(219_234_254)]"
                   >
                     <p className="flex items-center gap-2.5 text-sm text-gray-500">
@@ -430,6 +503,8 @@ export default function NearbyPlacesEditor({
                           <button
                             type="button"
                             className={button}
+                            // The question replaces the Delete button that had the focus.
+                            autoFocus
                             onClick={() => setMode({ ...editing, deleting: false })}
                           >
                             {t("nearbyPlaces.delete.keep")}
@@ -444,8 +519,7 @@ export default function NearbyPlacesEditor({
                                   (item) => item.id !== place.id,
                                 ),
                               }));
-                              setMode(null);
-                              setNewCategory(null);
+                              close();
                             }}
                           >
                             {t("nearbyPlaces.delete.confirm")}
@@ -468,14 +542,7 @@ export default function NearbyPlacesEditor({
                             <TrashIcon aria-hidden="true" className="h-4 w-4" />
                             {t("nearbyPlaces.form.delete")}
                           </button>
-                          <button
-                            type="button"
-                            className={button}
-                            onClick={() => {
-                              setMode(null);
-                              setNewCategory(null);
-                            }}
-                          >
+                          <button type="button" className={button} onClick={() => close()}>
                             {t("nearbyPlaces.form.cancel")}
                           </button>
                           <button
@@ -532,28 +599,36 @@ export default function NearbyPlacesEditor({
                       {[nearbyCategoryName(category, t), away].filter(Boolean).join(" · ")}
                     </p>
                     {place.note && (
-                      <p className="mt-1 break-words text-[13px] text-gray-700">“{place.note}”</p>
+                      <p className="mt-1 break-words text-[13px] text-gray-700">
+                        {t("nearbyPlaces.row.tip", { tip: place.note })}
+                      </p>
                     )}
                   </div>
                   <button
                     type="button"
+                    ref={(element) => {
+                      if (element) editButtons.current.set(place.id, element);
+                      else editButtons.current.delete(place.id);
+                    }}
                     aria-label={t("nearbyPlaces.row.edit", { name: place.name })}
                     disabled={formOpen}
                     className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-50"
-                    onClick={() => {
-                      setNewCategory(null);
-                      setMode({
-                        kind: "edit",
-                        id: place.id,
-                        deleting: false,
-                        form: {
-                          name: place.name,
-                          category: place.category,
-                          note: place.note ?? "",
-                          position: { latitude: place.latitude, longitude: place.longitude },
+                    onClick={() =>
+                      open(
+                        {
+                          kind: "edit",
+                          id: place.id,
+                          deleting: false,
+                          form: {
+                            name: place.name,
+                            category: place.category,
+                            note: place.note ?? "",
+                            position: { latitude: place.latitude, longitude: place.longitude },
+                          },
                         },
-                      });
-                    }}
+                        () => editButtons.current.get(place.id),
+                      )
+                    }
                   >
                     <PencilSquareIcon aria-hidden="true" className="h-5 w-5" />
                   </button>
@@ -563,7 +638,10 @@ export default function NearbyPlacesEditor({
           </ol>
 
           {adding ? (
-            <div className="space-y-4 rounded-xl border border-blue-200 bg-blue-50/60 p-4">
+            <div
+              onKeyDown={escape}
+              className="space-y-4 rounded-xl border border-blue-200 bg-blue-50/60 p-4"
+            >
               <div className="flex items-center justify-between">
                 <h3 className="text-[15px] font-bold text-gray-950">
                   {t("nearbyPlaces.form.addTitle")}
@@ -572,10 +650,7 @@ export default function NearbyPlacesEditor({
                   type="button"
                   aria-label={t("nearbyPlaces.form.close")}
                   className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-500 hover:bg-white"
-                  onClick={() => {
-                    setMode(null);
-                    setNewCategory(null);
-                  }}
+                  onClick={() => close()}
                 >
                   <XMarkIcon aria-hidden="true" className="h-5 w-5" />
                 </button>
@@ -601,8 +676,8 @@ export default function NearbyPlacesEditor({
                       })}
                     </span>{" "}
                     <span className="text-gray-500">
-                      {adding.form.position.latitude.toFixed(4)},{" "}
-                      {adding.form.position.longitude.toFixed(4)}
+                      {coordinate(adding.form.position.latitude)},{" "}
+                      {coordinate(adding.form.position.longitude)}
                     </span>
                   </span>
                 ) : (
@@ -611,14 +686,7 @@ export default function NearbyPlacesEditor({
               </p>
               {form}
               <div className="flex justify-end gap-2">
-                <button
-                  type="button"
-                  className={button}
-                  onClick={() => {
-                    setMode(null);
-                    setNewCategory(null);
-                  }}
-                >
+                <button type="button" className={button} onClick={() => close()}>
                   {t("nearbyPlaces.form.cancel")}
                 </button>
                 <button type="button" className={primary} disabled={!formReady} onClick={savePlace}>
@@ -628,25 +696,23 @@ export default function NearbyPlacesEditor({
               </div>
             </div>
           ) : mode?.kind === "categories" ? (
-            <CategoriesPanel
-              t={t}
-              draft={draft}
-              setDraft={setDraft}
-              onClose={() => setMode(null)}
-            />
+            <CategoriesPanel t={t} draft={draft} setDraft={setDraft} onClose={() => close(true)} />
           ) : (
             <>
               <button
                 type="button"
+                ref={addButton}
                 disabled={formOpen || !propertyPin || places.length >= limit}
                 className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-blue-300 py-3 text-sm font-semibold text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
-                onClick={() => {
-                  setNewCategory(null);
-                  setMode({
-                    kind: "add",
-                    form: { name: "", category: categories[0].id, note: "", position: null },
-                  });
-                }}
+                onClick={() =>
+                  open(
+                    {
+                      kind: "add",
+                      form: { name: "", category: categories[0].id, note: "", position: null },
+                    },
+                    () => addButton.current,
+                  )
+                }
               >
                 <PlusIcon aria-hidden="true" className="h-4 w-4" />
                 {t("nearbyPlaces.add")}
@@ -662,8 +728,9 @@ export default function NearbyPlacesEditor({
                 <div className="flex justify-end">
                   <button
                     type="button"
+                    ref={categoriesButton}
                     className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm font-semibold text-blue-700 hover:bg-blue-50"
-                    onClick={() => setMode({ kind: "categories" })}
+                    onClick={() => open({ kind: "categories" }, () => categoriesButton.current)}
                   >
                     <PencilSquareIcon aria-hidden="true" className="h-4 w-4" />
                     {t("nearbyPlaces.editCategories")}
@@ -689,6 +756,7 @@ export default function NearbyPlacesEditor({
             className={button}
             disabled={busy || (!dirty && !formOpen && !locationDirty)}
             onClick={() => {
+              createdInForm.current = [];
               setMode(null);
               setNewCategory(null);
               onDiscard();
@@ -739,6 +807,7 @@ function PlaceFormFields({
   onAddCategory: () => void;
 }) {
   const tooLong = tipTooLong(form.note, savedNote);
+  const counter = useId();
   return (
     <>
       <label className={label}>
@@ -747,6 +816,8 @@ function PlaceFormFields({
           className={input}
           value={form.name}
           maxLength={120}
+          // A form opened by a button moves the focus into it; it goes back when the form closes.
+          autoFocus
           onChange={(event) => onChange({ name: plain(event.target.value) })}
         />
       </label>
@@ -782,6 +853,11 @@ function PlaceFormFields({
             </button>
           )}
         </div>
+        {!canAddCategory && (
+          <p className="mt-1.5 text-xs text-gray-500">
+            {t("nearbyPlaces.category.full", { limit: NEARBY_MAX_CUSTOM_CATEGORIES })}
+          </p>
+        )}
         {newCategory && (
           <NewCategoryForm
             t={t}
@@ -803,10 +879,12 @@ function PlaceFormFields({
             rows={2}
             value={form.note}
             aria-invalid={tooLong || undefined}
+            aria-describedby={counter}
             onChange={(event) => onChange({ note: plain(event.target.value) })}
           />
         </label>
         <p
+          id={counter}
           className={`mt-1 text-right text-xs ${tooLong ? "font-semibold text-red-700" : "text-gray-500"}`}
         >
           {tooLong && (
@@ -1009,22 +1087,32 @@ function CategoriesPanel({
   onClose: () => void;
 }) {
   const [deleting, setDeleting] = useState<{ id: string; moveTo: string } | null>(null);
+  // What the host types. An emptied standard name brings the standard one back; an emptied name of the host's own
+  // keeps its last name, so a category never goes nameless.
+  const [typed, setTyped] = useState<Record<string, string>>({});
   const categories = nearbyCategoryViews(draft);
-  const rename = (id: string, value: string) =>
+  const rename = (id: string, value: string) => {
+    const name = plain(value);
+    setTyped((current) => ({ ...current, [id]: name }));
     setDraft((current) => {
-      const name = plain(value);
       if (!isStandardCategory(id))
-        return {
-          ...current,
-          customCategories: current.customCategories.map((category) =>
-            category.id === id ? { ...category, name } : category,
-          ),
-        };
-      const names: Record<string, string> = { ...current.categoryNames };
-      if (name.trim()) names[id] = name;
-      else delete names[id];
+        return name.trim()
+          ? {
+              ...current,
+              customCategories: current.customCategories.map((category) =>
+                category.id === id ? { ...category, name } : category,
+              ),
+            }
+          : current;
+      // In the categories' own order, so renaming back and forth doesn't count as a change.
+      const names: Record<string, string> = {};
+      for (const key of NEARBY_CATEGORIES) {
+        const next = key === id ? name : current.categoryNames[key];
+        if (next?.trim()) names[key] = next;
+      }
       return { ...current, categoryNames: names };
     });
+  };
   const row = (category: NearbyCategoryView, extra?: ReactNode) => {
     const standardName = t(`nearbyPlaces.category.${category.id}`);
     const standard = isStandardCategory(category.id);
@@ -1038,10 +1126,12 @@ function CategoriesPanel({
             })}
             className={`${input} mt-0 min-w-0 flex-1`}
             value={
-              standard
+              typed[category.id] ??
+              (standard
                 ? (draft.categoryNames[category.id as keyof typeof draft.categoryNames] ?? "")
-                : (category.name ?? "")
+                : (category.name ?? ""))
             }
+            autoFocus={category.id === categories[0].id}
             placeholder={standard ? standardName : undefined}
             maxLength={NEARBY_CATEGORY_NAME_MAX_LENGTH}
             onChange={(event) => rename(category.id, event.target.value)}
@@ -1056,7 +1146,14 @@ function CategoriesPanel({
     ? draft.customPlaces.filter((place) => place.category === deleting.id).length
     : 0;
   return (
-    <div className="space-y-4 rounded-xl border border-blue-200 bg-blue-50/60 p-4">
+    <div
+      onKeyDown={(event) => {
+        if (event.key !== "Escape") return;
+        event.preventDefault();
+        onClose();
+      }}
+      className="space-y-4 rounded-xl border border-blue-200 bg-blue-50/60 p-4"
+    >
       <div className="flex items-start justify-between gap-3">
         <div>
           <h3 className="text-[15px] font-bold text-gray-950">
@@ -1163,12 +1260,7 @@ function CategoriesPanel({
         </div>
       )}
       <div className="flex justify-end">
-        <button
-          type="button"
-          className={primary}
-          disabled={draft.customCategories.some((category) => !category.name.trim())}
-          onClick={onClose}
-        >
+        <button type="button" className={primary} onClick={onClose}>
           {t("nearbyPlaces.categories.done")}
         </button>
       </div>

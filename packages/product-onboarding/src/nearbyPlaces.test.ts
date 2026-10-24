@@ -30,9 +30,13 @@ describe("nearby places editor rules (VAY-2326)", () => {
     const chinesischerTurm = { latitude: 48.152468, longitude: 11.592201 };
     expect(distanceKm(marienplatz, chinesischerTurm)).toBeCloseTo(2.05, 1);
     expect(distanceKm(marienplatz, marienplatz)).toBe(0);
-    expect(formatDistance(marienplatz, chinesischerTurm, "en", englishNearbyPlaces)).toBe("2.1 km");
-    expect(formatDistance(marienplatz, chinesischerTurm, "de", englishNearbyPlaces)).toBe("2,1 km");
-    expect(formatDistance(marienplatz, marienplatz, "en", englishNearbyPlaces)).toBe("0.0 km");
+    expect(formatDistance(marienplatz, chinesischerTurm, "en", englishNearbyPlaces)).toBe(
+      "2.1\u00A0km",
+    );
+    expect(formatDistance(marienplatz, chinesischerTurm, "de", englishNearbyPlaces)).toBe(
+      "2,1\u00A0km",
+    );
+    expect(formatDistance(marienplatz, marienplatz, "en", englishNearbyPlaces)).toBe("0.0\u00A0km");
   });
 
   it("moves one place, and leaves the list alone for a move off either end", () => {
