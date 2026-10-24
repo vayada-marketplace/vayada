@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import ts from "typescript";
 import { SUPPORTED_LANGUAGES } from "./languages";
 import { SEARCH_ENTRIES } from "../../components/layout/navigationSearchEntries";
+import { nearbyPlacesEnglish } from "@vayada/product-onboarding/nearbyPlacesMessages";
 import en from "../../messages/en.json";
 
 const root = resolve(import.meta.dirname, "../../..");
@@ -59,6 +60,11 @@ describe("admin translation catalogs", () => {
     });
   }
 
+  it("has the nearby places editor's English text as the shared package writes it (VAY-2326)", () => {
+    for (const [key, text] of Object.entries(nearbyPlacesEnglish))
+      expect((en as Record<string, string>)[key], key).toBe(text);
+  });
+
   it("covers literal translation keys in active admin and shared components", () => {
     const files: string[] = [];
     function walk(dir: string) {
@@ -77,6 +83,10 @@ describe("admin translation catalogs", () => {
       "product-onboarding/src/BookingPagePreview.tsx",
       "settings-ui/src/SupportButton.tsx",
       "feature-hub/src/FeatureHubPage.tsx",
+      "product-onboarding/src/NearbyEditor.tsx",
+      "product-onboarding/src/NearbyPlacesEditor.tsx",
+      "product-onboarding/src/NearbyPlacesMap.tsx",
+      "product-onboarding/src/NearbyAreaSearch.tsx",
     ]) {
       files.push(resolve(root, "../packages", file));
     }
