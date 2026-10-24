@@ -623,7 +623,7 @@
     "expandMap": "Expand map",
     "closeMap": "Close map",
     "directions": "Directions",
-    "areaNote": "Shown as an area, not the exact spot.",
+    "areaNote": "Shown as an area, not the exact spot. The exact address is sent with your booking confirmation.",
     "reception": "Reception"
   },
   "guestPicker": {

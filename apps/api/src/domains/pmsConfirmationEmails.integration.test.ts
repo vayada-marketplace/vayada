@@ -278,4 +278,96 @@ describe.skipIf(!url)("confirmation resend with target PostgreSQL", () => {
       writer.release();
     }
   });
+  it("tells the guest where they stay, from the property's place and the booked rooms (VAY-2322)", async () => {
+    const garden = randomUUID();
+    const villa = randomUUID();
+    await pool.query(
+      `UPDATE hotel_catalog.property_locations SET street_address='Marienplatz 1', area='Altstadt',
+         postal_code='80331', city='Munich', country_code='DE', latitude=48.137154, longitude=11.576124,
+         arrival_directions='Ring the bell at the side door.'
+       WHERE property_id=$1`,
+      [property],
+    );
+    await pool.query(
+      `INSERT INTO pms.room_types(id, property_id, name, base_rate_amount, currency, room_attributes)
+       VALUES ($1, $3, 'Garden Room', 100, 'EUR', '{"locationSource":"property"}'),
+              ($2, $3, 'Beach Villa', 200, 'EUR',
+               '{"locationSource":"custom","locationAddress":"Fraunhoferstraße 5","latitude":48.13,"longitude":11.57}')`,
+      [garden, villa, property],
+    );
+    const booked = async (metadata: Record<string, unknown>) => {
+      await pool.query(
+        `UPDATE booking.guest_bookings
+         SET booking_metadata = (booking_metadata - 'airbnbMoneyStatus' - 'pricingSelections'
+           - 'selectedOffer') || $2::jsonb
+         WHERE id=$1`,
+        [booking, JSON.stringify(metadata)],
+      );
+      return loadBookingNotificationSnapshot(pool, {
+        propertyId: property,
+        guestBookingId: booking,
+      });
+    };
+    const names = (snapshot: Awaited<ReturnType<typeof booked>>) =>
+      snapshot?.bookedRooms.map((room) => room.name);
+
+    // Two rooms of one type, booked on the booking page: one place.
+    const snapshot = await booked({
+      pricingSelections: [{ roomTypeId: garden }, { roomTypeId: garden }],
+    });
+    expect(snapshot).toMatchObject({
+      propertyLocation: {
+        streetAddress: "Marienplatz 1",
+        area: "Altstadt",
+        postalCode: "80331",
+        city: "Munich",
+        countryCode: "DE",
+        latitude: 48.137154,
+        longitude: 11.576124,
+        arrivalDirections: "Ring the bell at the side door.",
+      },
+      bookedRooms: [{ name: "Garden Room", attributes: { locationSource: "property" } }],
+    });
+    // The older checkout's offer: every room line, else its one room.
+    expect(
+      names(
+        await booked({
+          selectedOffer: {
+            roomTypeId: villa,
+            roomLines: [{ roomTypeId: villa }, { roomTypeId: garden }],
+          },
+        }),
+      ),
+    ).toEqual(["Beach Villa", "Garden Room"]);
+    expect(names(await booked({ selectedOffer: { roomTypeId: villa } }))).toEqual(["Beach Villa"]);
+    // The PMS's rooms win once it has them; a canceled one is gone.
+    await pool.query(
+      `INSERT INTO pms.operational_booking_assignments
+         (property_id, guest_booking_id, room_type_id, position, assignment_status, source, stay_evidence_kind)
+       VALUES ($1, $2, $3, 1, 'canceled', 'migration', 'summary_only'),
+              ($1, $2, $4, 2, 'pending', 'migration', 'summary_only')`,
+      [property, booking, villa, garden],
+    );
+    const assigned = await booked({ pricingSelections: [{ roomTypeId: villa }] });
+    expect(names(assigned)).toEqual(["Garden Room"]);
+
+    const job = await enqueueBookingLifecycleEmailJob(pool, {
+      kind: "final_confirmation",
+      resendKey: `booking.confirmation.stay:${randomUUID()}`,
+      occurredAt: new Date().toISOString(),
+      booking: assigned!,
+    });
+    const { payload } = (
+      await pool.query(`SELECT payload FROM platform.jobs WHERE id=$1`, [job.jobId])
+    ).rows[0];
+    expect(payload.text).toContain(
+      [
+        "Where you'll stay:",
+        "Test Hotel · Garden Room",
+        "Marienplatz 1, Altstadt, 80331 Munich, Germany",
+        "Arrival directions: Ring the bell at the side door.",
+        "Open in Google Maps: https://www.google.com/maps/dir/?api=1&destination=48.137154,11.576124",
+      ].join("\n"),
+    );
+  });
 });

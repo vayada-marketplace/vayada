@@ -622,7 +622,7 @@
     "expandMap": "Ampliar mapa",
     "closeMap": "Cerrar mapa",
     "directions": "Cómo llegar",
-    "areaNote": "Se muestra como una zona, no el punto exacto.",
+    "areaNote": "Se muestra como una zona, no el punto exacto. La dirección exacta se envía con la confirmación de tu reserva.",
     "reception": "Recepción"
   },
   "guestPicker": {

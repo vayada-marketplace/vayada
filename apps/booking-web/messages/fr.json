@@ -622,7 +622,7 @@
     "expandMap": "Agrandir la carte",
     "closeMap": "Fermer la carte",
     "directions": "Itinéraire",
-    "areaNote": "Affiché comme un secteur, pas l'endroit exact.",
+    "areaNote": "Affiché comme un secteur, pas l'endroit exact. L'adresse exacte vous est envoyée avec la confirmation de votre réservation.",
     "reception": "Réception"
   },
   "guestPicker": {

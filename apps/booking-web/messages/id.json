@@ -622,7 +622,7 @@
     "expandMap": "Perbesar peta",
     "closeMap": "Tutup peta",
     "directions": "Petunjuk arah",
-    "areaNote": "Ditampilkan sebagai area, bukan titik persisnya.",
+    "areaNote": "Ditampilkan sebagai area, bukan titik persisnya. Alamat persisnya dikirim bersama konfirmasi pemesanan Anda.",
     "reception": "Resepsionis"
   },
   "guestPicker": {

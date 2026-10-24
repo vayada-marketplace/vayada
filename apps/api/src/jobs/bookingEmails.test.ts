@@ -44,6 +44,167 @@ describe("booking lifecycle email jobs", () => {
     expect(payload.text).toContain("Accommodation: 2 × Double + 1 × Twin");
   });
 
+  it("tells the guest where they'll stay once the stay is confirmed (VAY-2322)", async () => {
+    const propertyLocation = {
+      streetAddress: "Marienplatz 1",
+      area: "Altstadt",
+      postalCode: "80331",
+      city: "Munich",
+      countryCode: "DE",
+      latitude: 48.137154,
+      longitude: 11.576124,
+      arrivalDirections: "Ring the bell at the side door.",
+    };
+    const maps = "Open in Google Maps: https://www.google.com/maps/dir/?api=1&destination=";
+    const atProperty = [
+      "Where you'll stay:",
+      "Hotel Alpenrose · Double",
+      "Marienplatz 1, Altstadt, 80331 Munich, Germany",
+      "Arrival directions: Ring the bell at the side door.",
+      `${maps}48.137154,11.576124`,
+    ].join("\n");
+    const villa = (name: string, attributes: Record<string, unknown> = {}) => ({
+      name,
+      attributes: {
+        locationSource: "custom",
+        locationAddress: "Fraunhoferstraße 5, 80469 München",
+        latitude: 48.1301234,
+        longitude: 11.5734567,
+        ...attributes,
+      },
+    });
+    const text = async (
+      kind: BookingLifecycleEmailInput["kind"],
+      booking: Partial<BookingLifecycleEmailInput["booking"]> = {},
+    ) => {
+      const target = createTargetEmailStore();
+      const input = bookingEmailInput({ kind });
+      Object.assign(input.booking, {
+        propertyLocation,
+        bookedRooms: [{ name: "Double", attributes: { locationSource: "property" } }],
+        ...booking,
+      });
+      await enqueueBookingLifecycleEmailJob(target, input);
+      return String(
+        JSON.parse(String(target.requiredCall("INSERT INTO platform.jobs").values?.[8])).text,
+      );
+    };
+
+    for (const kind of ["final_confirmation", "booking_accepted", "booking_updated"] as const)
+      expect(await text(kind)).toContain(`\n\n${atProperty}\n\nBooking reference: B-BANK-001`);
+    for (const kind of [
+      "request_received",
+      "reserved_pending_payment",
+      "booking_rejected",
+      "booking_canceled",
+      "host_new_booking",
+      "host_request_updated",
+    ] as const)
+      expect(await text(kind)).not.toContain("Where you'll stay");
+
+    // Older rooms count as the property's without a pin of their own away from it, and so does a room on the
+    // property's pin without an address of its own. Rooms at one villa share its paragraph; an approximate one
+    // gets the exact address with a word on why; a room elsewhere with nothing saved is left out.
+    const mixed = await text("final_confirmation", {
+      propertyLocation: { ...propertyLocation, arrivalDirections: null },
+      bookedRooms: [
+        { name: "Double", attributes: {} },
+        { name: "Twin", attributes: { latitude: 48.137154, longitude: 11.576124 } },
+        {
+          name: "Studio",
+          attributes: { locationSource: "custom", latitude: 48.137154, longitude: 11.576124 },
+        },
+        villa("Beach Villa", { locationPrecision: "approximate", locationArea: "Isarvorstadt" }),
+        villa("Garden Villa"),
+        { name: "Lake Lodge", attributes: { locationSource: "custom" } },
+      ],
+    });
+    expect(mixed).toContain(
+      [
+        "Where you'll stay:",
+        "Hotel Alpenrose · Double, Twin, Studio",
+        "Marienplatz 1, Altstadt, 80331 Munich, Germany",
+        `${maps}48.137154,11.576124`,
+        "",
+        "Beach Villa, Garden Villa",
+        "Fraunhoferstraße 5, 80469 München",
+        "Your booking page showed the area, Isarvorstadt. This is the exact address.",
+        `${maps}48.1301234,11.5734567`,
+        "",
+        "Booking reference: B-BANK-001",
+      ].join("\n"),
+    );
+    expect(mixed).not.toMatch(/Lake Lodge|Arrival directions/);
+
+    // Only a villa: no paragraph for the property. Without a pin, the link looks the address up.
+    const onlyVilla = await text("booking_accepted", {
+      bookedRooms: [villa("Beach Villa", { latitude: undefined, longitude: undefined })],
+    });
+    expect(onlyVilla).toContain(
+      `Where you'll stay:\nBeach Villa\nFraunhoferstraße 5, 80469 München\n${maps}Fraunhoferstra%C3%9Fe%205%2C%2080469%20M%C3%BCnchen\n\n`,
+    );
+    expect(onlyVilla).not.toContain("Marienplatz");
+    expect(
+      await text("final_confirmation", {
+        propertyLocation: { ...propertyLocation, latitude: null, longitude: null, area: null },
+      }),
+    ).toContain(`${maps}Marienplatz%201%2C%2080331%20Munich%2C%20Germany`);
+
+    // Nothing to show: a property without an address or pin, rooms booked elsewhere with nothing saved, or no
+    // snapshot at all.
+    const empty = {
+      ...propertyLocation,
+      streetAddress: null,
+      area: null,
+      postalCode: null,
+      city: null,
+      latitude: null,
+      longitude: null,
+      arrivalDirections: null,
+    };
+    for (const booking of [
+      { propertyLocation: empty, bookedRooms: [] },
+      { bookedRooms: [{ name: "Lake Lodge", attributes: { locationSource: "custom" } }] },
+      { propertyLocation: null, bookedRooms: null },
+    ])
+      expect(await text("final_confirmation", booking)).not.toContain("Where you'll stay");
+  });
+
+  it("reads the property's place and the booked rooms with the booking (VAY-2322)", async () => {
+    const target = createTargetEmailStore({
+      propertyLocation: {
+        streetAddress: "Marienplatz 1",
+        area: null,
+        postalCode: "80331",
+        city: "Munich",
+        countryCode: "DE",
+        latitude: null,
+        longitude: null,
+        arrivalDirections: "Side door.",
+      },
+      bookedRooms: [{ name: "Double", attributes: { locationSource: "property" } }],
+    });
+    await enqueueBookingTransitionNotifications(target, {
+      propertyId: "f2000000-0000-0000-0000-000000000951",
+      guestBookingId: "book_bank_001",
+      occurredAt: "2026-09-01T10:00:00.000Z",
+      transition: {
+        eventType: "guest_booking.payment_received",
+        fromStatus: "pending_payment",
+        toStatus: "confirmed",
+      },
+    });
+    const payloads = target.calls
+      .filter((call) => call.text.includes("INSERT INTO platform.jobs"))
+      .map((call) => JSON.parse(String(call.values?.[8])));
+    const guest = payloads.find((payload) => payload.recipientRole === "guest");
+    const host = payloads.find((payload) => payload.recipientRole === "host");
+    expect(guest.text).toContain(
+      "Where you'll stay:\nHotel Alpenrose · Double\nMarienplatz 1, 80331 Munich, Germany\nArrival directions: Side door.",
+    );
+    expect(host.text).not.toContain("Where you'll stay");
+  });
+
   it("deduplicates retries but sends each accepted host date revision", async () => {
     const target = createTargetEmailStore();
     const enqueue = (revision: string) =>
