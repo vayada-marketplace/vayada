@@ -1,6 +1,11 @@
 "use client";
 import { useState, type ReactNode } from "react";
-import { NEARBY_CATEGORIES, projectNearbyPreview, type NearbyChoice } from "@vayada/domain-hotels";
+import {
+  NEARBY_CATEGORIES,
+  NEARBY_TIP_MAX_LENGTH,
+  projectNearbyPreview,
+  type NearbyChoice,
+} from "@vayada/domain-hotels";
 import type { NearbyApi } from "./nearbyApi";
 import type { SharedHotelSetupApi } from "./sharedHotelSetupApi";
 import NearbyPreview, { GoogleNearbyPlace, nearbyCategoryLabels } from "./NearbyPreview";
@@ -293,7 +298,7 @@ export default function NearbyEditor({
                             <textarea
                               className={nearbyInputClass}
                               rows={2}
-                              maxLength={140}
+                              maxLength={NEARBY_TIP_MAX_LENGTH}
                               value={choice?.note ?? ""}
                               onChange={(event) =>
                                 changeChoice(placeId, category, {

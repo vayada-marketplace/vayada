@@ -2,6 +2,7 @@
 import type { FormEvent } from "react";
 import {
   NEARBY_CATEGORIES,
+  NEARBY_TIP_MAX_LENGTH,
   parseNearbyCurationWrite,
   type NearbyCustomPlace,
 } from "@vayada/domain-hotels";
@@ -88,7 +89,12 @@ export default function NearbyCustomPlaceForm({
       </div>
       <label className="block text-sm font-medium text-gray-700">
         Your note
-        <textarea name="note" maxLength={140} rows={2} className={nearbyInputClass} />
+        <textarea
+          name="note"
+          maxLength={NEARBY_TIP_MAX_LENGTH}
+          rows={2}
+          className={nearbyInputClass}
+        />
       </label>
       <div className="flex gap-3">
         <button

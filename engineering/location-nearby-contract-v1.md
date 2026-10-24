@@ -206,7 +206,7 @@ It returns the shared preview with `schemaVersion` and public `status`; revision
 scope and provider failure details stay server-only. `Cache-Control: no-store`
 keeps privacy changes immediate. Opening surroundings may refresh expired IDs
 through the existing property lease/cooldown; publication and privacy are re-read
-after provider I/O. The UI says that place details load when opened; it does not
+after provider I/O (paused in v1: see Editor v2 data below). The UI says that place details load when opened; it does not
 present discovery timestamps as the freshness of third-party descriptions.
 Use existing API envelopes; each success contains `schemaVersion: 1`.
 Exact route mounting must be checked against existing adapters before coding.
@@ -247,6 +247,8 @@ type CustomPlace = {
   hidden: boolean;
   note: string | null;
 };
+// Extended by VAY-2326 (Editor v2 data below): choices may be left out, custom places may use
+// the host's own categories, and customCategories / categoryNames are added.
 type CurationWrite = {
   schemaVersion: 1;
   expectedProfileRevision: number;
@@ -261,8 +263,9 @@ HTML content, oversized payloads, and `hidden && favorite` (the UI clears a
 favorite on hide). Coordinates must occur as a pair, latitude -90..90 and
 longitude -180..180; 0 is valid. Limit request body to 64 KiB and 100 stored
 Google choices including hidden references; at most 20 combined explicit Google
-and custom additions. Omitted choices in PUT mean reset to automatic behavior;
-omitted custom IDs mean delete. Preserve drafts on conflict and never silently
+and custom additions. Omitted choices in PUT mean reset to automatic behavior
+(since VAY-2326 an empty `choices` array does that, and a left-out `choices` keeps
+the saved ones; see Editor v2 data below); omitted custom IDs mean delete. Preserve drafts on conflict and never silently
 retry them over someone else's edit.
 
 Read state includes profile/curation revisions, `status` (`ready`, `empty`,
@@ -330,11 +333,12 @@ failure returns a usable 200 state with existing permitted hotel content.
 
 ## Editor v2 data (VAY-2326)
 
-Decided 2026-10-24 for the v1 editor in Booking Admin › Location & surroundings (migration 0513):
+Decided 2026-10-24 for the v1 editor in Booking Admin › Location & surroundings (migration 0513).
+Where this section differs from the text above, this section applies.
 
 - Guests see only the host's own places in v1 (D5): the public nearby response leaves out Google places
-  and never starts a lookup (`status` is `ready`, `empty`, `location_required` or `hidden`). The editor
-  no longer shows Google suggestions; both return with VAY-2207. Saved Google choices stay stored: a
+  and never starts a lookup (`status` is `ready`, `empty`, `location_required` or `hidden`). The v2
+  editor (VAY-2326 part G2) drops Google suggestions; both return with VAY-2207. Saved Google choices stay stored: a
   curation `PUT` may leave out `choices`, and then the saved ones are kept.
 - `customPlaces` order is the order guests see. `projectNearbyPreview` lists own places first, in that
   order, then Google places with favorites first.
