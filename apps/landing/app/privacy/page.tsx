@@ -15,7 +15,7 @@ export default function PrivacyPage() {
           <div className="mb-8">
             <h1 className="text-4xl md:text-5xl font-bold text-primary-800 mb-4">Privacy Policy</h1>
             <p className="text-gray-600">
-              <strong>Effective Date:</strong> October 23, 2026
+              <strong>Effective Date:</strong> October 24, 2026
             </p>
           </div>
 

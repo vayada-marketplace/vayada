@@ -292,12 +292,6 @@ export default function DataProcessingAgreementPage() {
                 adequate protection. Where a certification lapses, the European Commission&apos;s
                 standard contractual clauses (Decision (EU) 2021/914) apply instead.
               </p>
-              <p>
-                <em>
-                  Checked 2026-10-24 on the providers&apos; own pages. Lawyer to confirm the UK
-                  adequacy decision is still in force when hotels sign.
-                </em>
-              </p>
             </section>
 
             <section className="mt-12 space-y-4">
