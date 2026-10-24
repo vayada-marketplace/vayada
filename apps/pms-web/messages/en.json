@@ -3708,5 +3708,6 @@
   "rooms.addressModal.needsWholePin": "Enter both coordinates (latitude from -90 to 90, longitude from -180 to 180), or leave both empty.",
   "rooms.addressModal.needsPin": "Guests see a map of the property: place the pin before saving.",
   "rooms.addressModal.noPermission": "Only the property's owner can change its address, signed in to their own account.",
-  "rooms.addressModal.leftBehind": "{names} sit on the old pin by their own coordinates and stay there. Set them to “Same as property” to follow the address."
+  "rooms.addressModal.leftBehindOne": "{names} sits on the old pin by its own coordinates and stays there. Set it to “Same as property” to follow the address.",
+  "rooms.addressModal.leftBehindMany": "{names} sit on the old pin by their own coordinates and stay there. Set them to “Same as property” to follow the address."
 }

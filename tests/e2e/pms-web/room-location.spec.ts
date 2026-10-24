@@ -429,7 +429,7 @@ test.describe("pms-web room location", () => {
     await modal.getByLabel("Longitude").fill("11.5835");
     await expect(impact).toContainText("Changes apply to 2 room types");
     await expect(impact).toContainText(
-      "Garden Room sit on the old pin by their own coordinates and stay there.",
+      "Garden Room sits on the old pin by its own coordinates and stays there.",
     );
     await expect(modal).toContainText("Goes live in the Booking Engine as soon as you save.");
     await save.click();

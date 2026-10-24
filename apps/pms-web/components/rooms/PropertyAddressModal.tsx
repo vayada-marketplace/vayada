@@ -209,7 +209,12 @@ export default function PropertyAddressModal({
               </ul>
               {impact.leftBehind.length > 0 && (
                 <p className="text-[11px] font-medium text-amber-800">
-                  {t("rooms.addressModal.leftBehind", { names: impact.leftBehind.join(", ") })}
+                  {t(
+                    impact.leftBehind.length === 1
+                      ? "rooms.addressModal.leftBehindOne"
+                      : "rooms.addressModal.leftBehindMany",
+                    { names: impact.leftBehind.join(", ") },
+                  )}
                 </p>
               )}
               {impact.own.length > 0 && (

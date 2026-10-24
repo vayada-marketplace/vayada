@@ -3722,5 +3722,6 @@
   "rooms.addressModal.needsWholePin": "Geben Sie beide Koordinaten ein (Breitengrad von -90 bis 90, Längengrad von -180 bis 180) oder lassen Sie beide leer.",
   "rooms.addressModal.needsPin": "Gäste sehen eine Karte der Unterkunft: Setzen Sie vor dem Speichern die Markierung.",
   "rooms.addressModal.noPermission": "Nur der Inhaber der Unterkunft kann ihre Adresse ändern, angemeldet mit seinem eigenen Konto.",
-  "rooms.addressModal.leftBehind": "{names} liegen mit eigenen Koordinaten auf der alten Markierung und bleiben dort. Stellen Sie sie auf „Wie die Unterkunft“, damit sie der Adresse folgen."
+  "rooms.addressModal.leftBehindOne": "{names} liegt mit eigenen Koordinaten auf der alten Markierung und bleibt dort. Stellen Sie diesen Zimmertyp auf „Wie die Unterkunft“, damit er der Adresse folgt.",
+  "rooms.addressModal.leftBehindMany": "{names} liegen mit eigenen Koordinaten auf der alten Markierung und bleiben dort. Stellen Sie sie auf „Wie die Unterkunft“, damit sie der Adresse folgen."
 }
