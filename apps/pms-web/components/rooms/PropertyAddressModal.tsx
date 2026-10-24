@@ -11,11 +11,34 @@ import { useTranslation } from "@/lib/i18n";
 import { roomLocationSource } from "@/lib/roomLocation";
 import { pmsPropertyPlace, type PmsPropertyPlace } from "@/services/api/pmsPropertyClient";
 import { sharedHotelSetupApi } from "@/services/api/sharedHotelSetupClient";
-import { roomsService } from "@/services/rooms";
+import { roomsService, type RoomType } from "@/services/rooms";
 
 const GOOGLE_MAPS_API_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY?.trim() ?? "";
 
-type Impact = { inherit: string[]; own: string[] };
+type Pin = { latitude: number; longitude: number } | null;
+
+const pinOf = (place: { latitude: number | null; longitude: number | null }): Pin =>
+  place.latitude !== null && place.longitude !== null
+    ? { latitude: place.latitude, longitude: place.longitude }
+    : null;
+
+/** Who follows the address besides this room: rooms on "Same as property", and older rooms (saved before
+ * VAY-2321) that count as the property's by their own pin on it. Those stay at their pin when the property's
+ * moves away, so they are named apart. */
+function addressImpact(rooms: RoomType[], roomId: string | null, saved: Pin, draft: Pin) {
+  const others = rooms.filter((other) => other.id !== roomId);
+  const atProperty = others.filter((other) => roomLocationSource(other, saved) === "property");
+  const leftBehind = atProperty.filter(
+    (other) => !other.locationSource && roomLocationSource(other, draft) === "custom",
+  );
+  return {
+    inherit: atProperty.filter((other) => !leftBehind.includes(other)).map((other) => other.name),
+    leftBehind: leftBehind.map((other) => other.name),
+    own: others
+      .filter((other) => roomLocationSource(other, saved) === "custom")
+      .map((other) => other.name),
+  };
+}
 
 /** The property's address over the room editor (VAY-2322), so the room's unsaved edits stay: the same form as
  * Booking Admin's Location settings, saved to the shared property profile. Only the address and pin change;
@@ -36,7 +59,7 @@ export default function PropertyAddressModal({
   const dialog = useRef<HTMLDialogElement>(null);
   const [profile, setProfile] = useState<PropertyProfileResponse | "loading" | "failed">("loading");
   const [draft, setDraft] = useState<PropertyAddress | null>(null);
-  const [impact, setImpact] = useState<Impact | "loading" | "failed">("loading");
+  const [rooms, setRooms] = useState<RoomType[] | "loading" | "failed">("loading");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -54,39 +77,40 @@ export default function PropertyAddressModal({
         const { streetAddress, postalCode, city, countryCode, latitude, longitude } =
           read.profile.location;
         setDraft({ streetAddress, postalCode, city, countryCode, latitude, longitude });
-        const pin = latitude !== null && longitude !== null ? { latitude, longitude } : null;
-        return roomsService.list().then((rooms) => {
-          if (disposed) return;
-          // This room first, as it is on screen; the others as saved.
-          const others = rooms.filter((other) => other.id !== room.id);
-          setImpact({
-            inherit: [
-              room.name.trim() || t("rooms.addressModal.thisRoom"),
-              ...others
-                .filter((other) => roomLocationSource(other, pin) === "property")
-                .map((other) => other.name),
-            ],
-            own: others
-              .filter((other) => roomLocationSource(other, pin) === "custom")
-              .map((other) => other.name),
-          });
-        });
       })
-      .catch(() => {
-        if (disposed) return;
-        setProfile((current) => (current === "loading" ? "failed" : current));
-        setImpact((current) => (current === "loading" ? "failed" : current));
-      });
+      .catch(() => !disposed && setProfile("failed"));
+    roomsService
+      .list()
+      .then((list) => !disposed && setRooms(list))
+      .catch(() => !disposed && setRooms("failed"));
     return () => {
       disposed = true;
     };
-    // Read once per opening.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [propertyId]);
 
-  const complete =
-    draft !== null &&
-    [draft.streetAddress, draft.city, draft.countryCode].every((part) => part.trim() !== "");
+  const location = typeof profile === "object" ? profile.profile.location : null;
+  const impact =
+    location && draft && typeof rooms === "object"
+      ? addressImpact(rooms, room.id, pinOf(location), pinOf(draft))
+      : null;
+  // This room first, as it is on screen; the others as saved.
+  const inherit = impact && [
+    room.name.trim() || t("rooms.addressModal.thisRoom"),
+    ...impact.inherit,
+  ];
+  // What the profile accepts: street, city and country; a whole pin in range; a pin while guests see a map.
+  const problem = !draft
+    ? null
+    : [draft.streetAddress, draft.city, draft.countryCode].some((part) => part.trim() === "")
+      ? "rooms.addressModal.needsAddress"
+      : (draft.latitude === null) !== (draft.longitude === null) ||
+          (draft.latitude !== null && Math.abs(draft.latitude) > 90) ||
+          (draft.longitude !== null && Math.abs(draft.longitude) > 180)
+        ? "rooms.addressModal.needsWholePin"
+        : location?.geoPublic && draft.latitude === null
+          ? "rooms.addressModal.needsPin"
+          : null;
+  const complete = draft !== null && problem === null;
 
   async function save() {
     if (typeof profile !== "object" || !draft || !complete) return;
@@ -105,17 +129,27 @@ export default function PropertyAddressModal({
           },
         },
       });
+      // Closed first, so the focus goes back to "Edit property address".
+      dialog.current?.close();
       onSaved(pmsPropertyPlace(propertyId, next));
     } catch (failure) {
       const status =
         (failure as { status?: number; statusCode?: number })?.status ??
         (failure as { statusCode?: number })?.statusCode;
-      setError(t(status === 409 ? "rooms.addressModal.conflict" : "rooms.addressModal.saveFailed"));
+      setError(
+        t(
+          status === 409
+            ? "rooms.addressModal.conflict"
+            : status === 403
+              ? "rooms.addressModal.noPermission"
+              : "rooms.addressModal.saveFailed",
+        ),
+      );
       setSaving(false);
     }
   }
 
-  const close = () => !saving && onClose();
+  const close = () => !saving && dialog.current?.close();
 
   // Outside the room form: Enter in these fields must not submit the room.
   return createPortal(
@@ -126,6 +160,8 @@ export default function PropertyAddressModal({
         event.preventDefault();
         close();
       }}
+      // However it closed (a second Escape can't be held back), the room editor hears it.
+      onClose={onClose}
       className="m-0 h-full max-h-none w-full max-w-none overflow-hidden bg-white p-0 text-gray-900 backdrop:bg-black/50 open:flex open:flex-col sm:m-auto sm:h-auto sm:max-h-[92vh] sm:w-[calc(100%-2rem)] sm:max-w-[1040px] sm:rounded-2xl sm:shadow-2xl"
     >
       <div className="flex items-start gap-3 px-4 pt-4 sm:px-6 sm:pt-6">
@@ -146,9 +182,9 @@ export default function PropertyAddressModal({
       </div>
 
       <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
-        {impact === "loading" ? null : impact === "failed" ? (
+        {rooms === "failed" ? (
           <p className="text-[12px] text-gray-500">{t("rooms.addressModal.roomsFailed")}</p>
-        ) : (
+        ) : !impact || !inherit ? null : (
           <div
             data-testid="address-impact"
             className="flex items-start gap-2.5 rounded-xl border border-primary-100 bg-primary-50 px-3.5 py-3"
@@ -156,12 +192,12 @@ export default function PropertyAddressModal({
             <InformationCircleIcon className="mt-0.5 h-[18px] w-[18px] shrink-0 text-primary-600" />
             <div className="min-w-0 space-y-2">
               <p className="text-[13px] font-semibold">
-                {impact.inherit.length === 1
+                {inherit.length === 1
                   ? t("rooms.addressModal.impactOne")
-                  : t("rooms.addressModal.impactMany", { count: impact.inherit.length })}
+                  : t("rooms.addressModal.impactMany", { count: inherit.length })}
               </p>
               <ul className="flex flex-wrap gap-1.5">
-                {impact.inherit.map((name, index) => (
+                {inherit.map((name, index) => (
                   <li
                     key={`${index}-${name}`}
                     className="inline-flex items-center gap-1 rounded-full border border-primary-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-primary-700"
@@ -171,6 +207,11 @@ export default function PropertyAddressModal({
                   </li>
                 ))}
               </ul>
+              {impact.leftBehind.length > 0 && (
+                <p className="text-[11px] font-medium text-amber-800">
+                  {t("rooms.addressModal.leftBehind", { names: impact.leftBehind.join(", ") })}
+                </p>
+              )}
               {impact.own.length > 0 && (
                 <p className="text-[11px] text-gray-600">
                   {t("rooms.addressModal.ownPins", { names: impact.own.join(", ") })}
@@ -197,7 +238,6 @@ export default function PropertyAddressModal({
             translate={t}
             locale={locale}
             markerTitle={profile.profile.displayName}
-            split
           />
         )}
       </div>
@@ -208,8 +248,8 @@ export default function PropertyAddressModal({
             <p role="alert" className="font-medium text-red-600">
               {error}
             </p>
-          ) : draft && !complete ? (
-            <p className="text-amber-800">{t("rooms.addressModal.needsAddress")}</p>
+          ) : problem ? (
+            <p className="text-amber-800">{t(problem)}</p>
           ) : (
             <p className="text-gray-500">{t("rooms.addressModal.goesLive")}</p>
           )}

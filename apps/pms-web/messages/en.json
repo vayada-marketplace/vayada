@@ -3704,5 +3704,9 @@
   "propertyAddress.coordinates": "Coordinates",
   "propertyAddress.latitude": "Latitude",
   "propertyAddress.longitude": "Longitude",
-  "propertyAddress.coordinatesHint": "Type them when address search or the map is unavailable, or to place the pin exactly."
+  "propertyAddress.coordinatesHint": "Type them when address search or the map is unavailable, or to place the pin exactly.",
+  "rooms.addressModal.needsWholePin": "Enter both coordinates (latitude from -90 to 90, longitude from -180 to 180), or leave both empty.",
+  "rooms.addressModal.needsPin": "Guests see a map of the property: place the pin before saving.",
+  "rooms.addressModal.noPermission": "Only the property's owner, or someone allowed to manage booking settings, can change its address.",
+  "rooms.addressModal.leftBehind": "{names} sit on the old pin by their own coordinates and stay there. Set them to “Same as property” to follow the address."
 }

@@ -1710,5 +1710,15 @@
   "propertyAddress.coordinates": "Coordinate",
   "propertyAddress.latitude": "Latitudine",
   "propertyAddress.longitude": "Longitudine",
-  "propertyAddress.coordinatesHint": "Inseriscile quando la ricerca degli indirizzi o la mappa non sono disponibili, o per posizionare il segnaposto con precisione."
+  "propertyAddress.coordinatesHint": "Inseriscile quando la ricerca degli indirizzi o la mappa non sono disponibili, o per posizionare il segnaposto con precisione.",
+  "locationForm.title": "Posizione",
+  "locationForm.intro": "Conferma il tuo indirizzo e il segnaposto. Suggeriremo automaticamente i luoghi nei dintorni.",
+  "locationForm.timezone": "Fuso orario",
+  "locationForm.visibility": "Visibilità sulla mappa per gli ospiti",
+  "locationForm.hidden": "Nascosta",
+  "locationForm.approximate": "Zona approssimativa",
+  "locationForm.exact": "Posizione esatta",
+  "locationForm.visibilityHint": "Approssimativa mostra la tua zona senza il segnaposto esatto. Nascosta rimuove la mappa e i luoghi nei dintorni.",
+  "locationForm.save": "Salva posizione",
+  "locationForm.saving": "Salvataggio…"
 }

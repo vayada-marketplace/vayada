@@ -481,6 +481,9 @@ export default function RoomLocationField({
                       room={{ id: roomId, name: roomName }}
                       onClose={() => setEditingAddress(false)}
                       onSaved={(saved) => {
+                        // A room that is the property's only by its own pin (saved before VAY-2321) follows
+                        // the moved address too, once the room is saved.
+                        if (!value.locationSource) onChange({ locationSource: "property" });
                         setProperty(saved);
                         setEditingAddress(false);
                         setAddressSaved(true);

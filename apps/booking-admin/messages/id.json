@@ -1710,5 +1710,15 @@
   "propertyAddress.coordinates": "Koordinat",
   "propertyAddress.latitude": "Lintang",
   "propertyAddress.longitude": "Bujur",
-  "propertyAddress.coordinatesHint": "Ketik koordinat jika pencarian alamat atau peta tidak tersedia, atau untuk meletakkan penanda dengan tepat."
+  "propertyAddress.coordinatesHint": "Ketik koordinat jika pencarian alamat atau peta tidak tersedia, atau untuk meletakkan penanda dengan tepat.",
+  "locationForm.title": "Lokasi",
+  "locationForm.intro": "Konfirmasi alamat dan penanda Anda. Kami akan menyarankan tempat di sekitar secara otomatis.",
+  "locationForm.timezone": "Zona waktu",
+  "locationForm.visibility": "Visibilitas di peta tamu",
+  "locationForm.hidden": "Disembunyikan",
+  "locationForm.approximate": "Area perkiraan",
+  "locationForm.exact": "Lokasi tepat",
+  "locationForm.visibilityHint": "Perkiraan menampilkan area Anda tanpa penanda tepat. Disembunyikan menghapus peta dan tempat di sekitar.",
+  "locationForm.save": "Simpan lokasi",
+  "locationForm.saving": "Menyimpan…"
 }

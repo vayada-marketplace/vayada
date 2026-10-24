@@ -1710,5 +1710,15 @@
   "propertyAddress.coordinates": "座標",
   "propertyAddress.latitude": "緯度",
   "propertyAddress.longitude": "経度",
-  "propertyAddress.coordinatesHint": "住所検索や地図が使えないとき、またはピンを正確に置きたいときに入力してください。"
+  "propertyAddress.coordinatesHint": "住所検索や地図が使えないとき、またはピンを正確に置きたいときに入力してください。",
+  "locationForm.title": "所在地",
+  "locationForm.intro": "住所とピンを確認してください。周辺のスポットを自動で提案します。",
+  "locationForm.timezone": "タイムゾーン",
+  "locationForm.visibility": "ゲスト向け地図での表示",
+  "locationForm.hidden": "非表示",
+  "locationForm.approximate": "おおよそのエリア",
+  "locationForm.exact": "正確な場所",
+  "locationForm.visibilityHint": "「おおよそ」は正確なピンなしでエリアを表示します。「非表示」は地図と周辺スポットを表示しません。",
+  "locationForm.save": "所在地を保存",
+  "locationForm.saving": "保存中…"
 }

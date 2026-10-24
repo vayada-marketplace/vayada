@@ -1710,5 +1710,15 @@
   "propertyAddress.coordinates": "坐标",
   "propertyAddress.latitude": "纬度",
   "propertyAddress.longitude": "经度",
-  "propertyAddress.coordinatesHint": "在地址搜索或地图不可用时输入，或用于精确放置图钉。"
+  "propertyAddress.coordinatesHint": "在地址搜索或地图不可用时输入，或用于精确放置图钉。",
+  "locationForm.title": "位置",
+  "locationForm.intro": "请确认您的地址和图钉。我们会自动推荐附近的地点。",
+  "locationForm.timezone": "时区",
+  "locationForm.visibility": "客人地图上的显示方式",
+  "locationForm.hidden": "隐藏",
+  "locationForm.approximate": "大致区域",
+  "locationForm.exact": "精确位置",
+  "locationForm.visibilityHint": "“大致”只显示您所在的区域，不显示精确图钉。“隐藏”会移除地图和附近地点。",
+  "locationForm.save": "保存位置",
+  "locationForm.saving": "正在保存…"
 }

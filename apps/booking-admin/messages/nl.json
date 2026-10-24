@@ -1710,5 +1710,15 @@
   "propertyAddress.coordinates": "Coördinaten",
   "propertyAddress.latitude": "Breedtegraad",
   "propertyAddress.longitude": "Lengtegraad",
-  "propertyAddress.coordinatesHint": "Typ ze als het zoeken naar adressen of de kaart niet beschikbaar is, of om de speld precies te zetten."
+  "propertyAddress.coordinatesHint": "Typ ze als het zoeken naar adressen of de kaart niet beschikbaar is, of om de speld precies te zetten.",
+  "locationForm.title": "Locatie",
+  "locationForm.intro": "Bevestig je adres en speld. We stellen automatisch plekken in de buurt voor.",
+  "locationForm.timezone": "Tijdzone",
+  "locationForm.visibility": "Zichtbaarheid op de gastenkaart",
+  "locationForm.hidden": "Verborgen",
+  "locationForm.approximate": "Globaal gebied",
+  "locationForm.exact": "Exacte locatie",
+  "locationForm.visibilityHint": "Globaal toont je buurt zonder de exacte speld. Verborgen haalt de kaart en plekken in de buurt weg.",
+  "locationForm.save": "Locatie opslaan",
+  "locationForm.saving": "Opslaan…"
 }

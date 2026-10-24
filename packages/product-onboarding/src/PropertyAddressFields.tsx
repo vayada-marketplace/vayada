@@ -1,5 +1,5 @@
 "use client";
-import { useId, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { PropertyProfileLocation } from "@vayada/domain-hotels";
 import { COUNTRY_OPTIONS } from "@vayada/locale-constants";
 import GooglePlacesAddressField from "./GooglePlacesAddressField";
@@ -34,6 +34,7 @@ type Translate = (key: keyof typeof propertyAddressEnglish) => string;
 const inputClass =
   "mt-1 block w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-950 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:bg-gray-50";
 const labelClass = "block text-sm font-medium text-gray-700";
+const MAX_LENGTH = { streetAddress: 240, postalCode: 32, city: 120 } as const;
 
 /** The property's address (VAY-2322), shared by Booking Admin's Location settings and the PMS room editor's
  * "Property address" modal so the two can't drift apart: address search, fields that can all be typed by
@@ -47,7 +48,6 @@ export default function PropertyAddressFields({
   translate,
   locale = "en",
   markerTitle,
-  split = false,
 }: {
   value: PropertyAddress;
   onChange: (patch: Partial<PropertyAddress>) => void;
@@ -57,39 +57,43 @@ export default function PropertyAddressFields({
   /** For the country names. */
   locale?: string;
   markerTitle?: string;
-  /** The map next to the fields on wide screens. */
-  split?: boolean;
 }) {
   const t = translate ?? ((key) => propertyAddressEnglish[key]);
-  const id = useId();
   // A pick still loading is dropped once the host types.
   const revision = useRef(0);
   const [mapUnavailable, setMapUnavailable] = useState(false);
+  // The map and address search keep the handlers they started with: they read this to ignore picks while saving.
+  const disabledRef = useRef(disabled);
+  useEffect(() => {
+    disabledRef.current = disabled;
+  }, [disabled]);
   const change = (patch: Partial<PropertyAddress>) => {
     revision.current += 1;
     onChange(patch);
   };
   const hasPin = value.latitude !== null && value.longitude !== null;
   const showMap = Boolean(apiKey) && !mapUnavailable;
-  const countryName = (() => {
+  const countries = useMemo(() => {
+    let name = (_code: string, fallback: string) => fallback;
     try {
       const names = new Intl.DisplayNames([locale], { type: "region" });
-      return (code: string, fallback: string) => names.of(code) ?? fallback;
+      name = (code, fallback) => names.of(code) ?? fallback;
     } catch {
-      return (_code: string, fallback: string) => fallback;
+      // An old browser: the English names.
     }
-  })();
-  const countries = COUNTRY_OPTIONS.map((country) => ({
-    code: country.code,
-    name: countryName(country.code, country.name),
-  })).sort((a, b) => a.name.localeCompare(b.name, locale));
+    return COUNTRY_OPTIONS.map((country) => ({
+      code: country.code,
+      name: name(country.code, country.name),
+    })).sort((a, b) => a.name.localeCompare(b.name, locale));
+  }, [locale]);
   const text = (key: "streetAddress" | "postalCode" | "city", label: string) => (
     <label className={labelClass}>
       {label}
       <input
         className={inputClass}
         value={value[key]}
-        maxLength={200}
+        // The property profile's limits.
+        maxLength={MAX_LENGTH[key]}
         disabled={disabled}
         onChange={(event) => change({ [key]: event.target.value })}
       />
@@ -114,11 +118,9 @@ export default function PropertyAddressFields({
   );
 
   return (
-    <div
-      className={`grid gap-5 ${split ? "lg:grid-cols-[minmax(0,400px)_minmax(0,1fr)] lg:gap-6" : ""}`}
-    >
+    <div className="grid gap-5 lg:grid-cols-[minmax(0,400px)_minmax(0,1fr)] lg:gap-6">
       <div className="space-y-4">
-        {apiKey && !disabled && (
+        {apiKey && (
           <div>
             <GooglePlacesAddressField
               apiKey={apiKey}
@@ -126,6 +128,7 @@ export default function PropertyAddressFields({
               addressRevision={revision}
               onUnavailable={() => {}}
               onSelect={(address) =>
+                !disabledRef.current &&
                 change({
                   streetAddress: address.streetAddress,
                   postalCode: address.postalCode,
@@ -175,10 +178,8 @@ export default function PropertyAddressFields({
               latitude={value.latitude}
               longitude={value.longitude}
               markerTitle={markerTitle}
-              onPick={
-                disabled
-                  ? undefined
-                  : (position) => change({ latitude: position.lat, longitude: position.lng })
+              onPick={(position) =>
+                !disabledRef.current && change({ latitude: position.lat, longitude: position.lng })
               }
               onUnavailable={() => setMapUnavailable(true)}
             />
@@ -190,11 +191,8 @@ export default function PropertyAddressFields({
         {!hasPin && <p className="text-xs text-amber-800">{t("propertyAddress.noPin")}</p>}
         {/* Open by itself when the map can't place the pin. */}
         <details open={!showMap} className="group">
-          <summary
-            id={`${id}-coordinates`}
-            className="cursor-pointer select-none text-sm font-medium text-gray-700"
-          >
-            {t("propertyAddress.coordinates")}
+          <summary className="flex min-h-11 cursor-pointer select-none items-center text-sm font-medium text-gray-700 sm:min-h-0">
+            <span>{t("propertyAddress.coordinates")}</span>
             {hasPin && (
               <span className="ml-2 font-normal text-gray-500">
                 {value.latitude}, {value.longitude}

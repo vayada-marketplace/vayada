@@ -1710,5 +1710,15 @@
   "propertyAddress.coordinates": "Координаты",
   "propertyAddress.latitude": "Широта",
   "propertyAddress.longitude": "Долгота",
-  "propertyAddress.coordinatesHint": "Введите их, если поиск адреса или карта недоступны, или чтобы поставить метку точно."
+  "propertyAddress.coordinatesHint": "Введите их, если поиск адреса или карта недоступны, или чтобы поставить метку точно.",
+  "locationForm.title": "Местоположение",
+  "locationForm.intro": "Подтвердите адрес и метку. Мы автоматически предложим места поблизости.",
+  "locationForm.timezone": "Часовой пояс",
+  "locationForm.visibility": "Видимость на карте для гостей",
+  "locationForm.hidden": "Скрыто",
+  "locationForm.approximate": "Примерный район",
+  "locationForm.exact": "Точное местоположение",
+  "locationForm.visibilityHint": "«Примерно» показывает ваш район без точной метки. «Скрыто» убирает карту и места поблизости.",
+  "locationForm.save": "Сохранить местоположение",
+  "locationForm.saving": "Сохранение…"
 }

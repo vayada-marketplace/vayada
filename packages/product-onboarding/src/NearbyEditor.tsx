@@ -4,8 +4,11 @@ import { NEARBY_CATEGORIES, projectNearbyPreview, type NearbyChoice } from "@vay
 import type { NearbyApi } from "./nearbyApi";
 import type { SharedHotelSetupApi } from "./sharedHotelSetupApi";
 import NearbyPreview, { GoogleNearbyPlace, nearbyCategoryLabels } from "./NearbyPreview";
-import NearbyLocationForm, { nearbyInputClass } from "./NearbyLocationForm";
-import type { propertyAddressEnglish } from "./PropertyAddressFields";
+import NearbyLocationForm, {
+  nearbyInputClass,
+  nearbyLocationEnglish,
+  type LocationFormKey,
+} from "./NearbyLocationForm";
 import NearbyCustomPlaceForm from "./NearbyCustomPlaceForm";
 import { useNearbyEditor } from "./useNearbyEditor";
 import { useNearbyNavigationGuard } from "./useNearbyNavigationGuard";
@@ -27,8 +30,8 @@ export default function NearbyEditor({
   api: NearbyApi;
   profileApi: SharedHotelSetupApi;
   apiKey: string;
-  /** The address fields' copy, shared with the PMS (VAY-2322). */
-  addressTranslate?: (key: keyof typeof propertyAddressEnglish) => string;
+  /** The location form's copy (VAY-2322; its address fields are shared with the PMS). */
+  addressTranslate?: (key: LocationFormKey) => string;
   locale?: string;
   /** Shown under the page header, above the editor (Booking Admin's location map switch, VAY-2126). Given
    * the saved profile revision, so it can re-read what depends on the location saved below. */
@@ -173,7 +176,11 @@ export default function NearbyEditor({
               disabled={editor.busy || !editor.locationDirty}
               type="submit"
             >
-              {editor.busy ? "Saving…" : "Save location"}
+              {editor.busy
+                ? (addressTranslate?.("locationForm.saving") ??
+                  nearbyLocationEnglish["locationForm.saving"])
+                : (addressTranslate?.("locationForm.save") ??
+                  nearbyLocationEnglish["locationForm.save"])}
             </button>
           </form>
           <section aria-label="Nearby places" className="space-y-5">

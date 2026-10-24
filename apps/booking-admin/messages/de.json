@@ -1710,5 +1710,15 @@
   "propertyAddress.coordinates": "Koordinaten",
   "propertyAddress.latitude": "Breitengrad",
   "propertyAddress.longitude": "Längengrad",
-  "propertyAddress.coordinatesHint": "Geben Sie sie ein, wenn die Adresssuche oder die Karte nicht verfügbar ist, oder um die Markierung genau zu setzen."
+  "propertyAddress.coordinatesHint": "Geben Sie sie ein, wenn die Adresssuche oder die Karte nicht verfügbar ist, oder um die Markierung genau zu setzen.",
+  "locationForm.title": "Lage",
+  "locationForm.intro": "Bestätigen Sie Ihre Adresse und Markierung. Wir schlagen automatisch Orte in der Nähe vor.",
+  "locationForm.timezone": "Zeitzone",
+  "locationForm.visibility": "Sichtbarkeit auf der Gästekarte",
+  "locationForm.hidden": "Ausgeblendet",
+  "locationForm.approximate": "Ungefährer Bereich",
+  "locationForm.exact": "Genaue Lage",
+  "locationForm.visibilityHint": "„Ungefähr“ zeigt Ihre Gegend ohne genaue Markierung. „Ausgeblendet“ entfernt die Karte und die Orte in der Nähe.",
+  "locationForm.save": "Lage speichern",
+  "locationForm.saving": "Wird gespeichert…"
 }

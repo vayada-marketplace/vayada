@@ -1,6 +1,26 @@
 "use client";
 import type { PropertyProfileLocation } from "@vayada/domain-hotels";
-import PropertyAddressFields, { type propertyAddressEnglish } from "./PropertyAddressFields";
+import PropertyAddressFields, { propertyAddressEnglish } from "./PropertyAddressFields";
+
+/** Booking Admin's own location settings around the shared address fields (VAY-2322). */
+export const nearbyLocationEnglish = {
+  "locationForm.title": "Location",
+  "locationForm.intro": "Confirm your address and pin. We’ll suggest places nearby automatically.",
+  "locationForm.timezone": "Time zone",
+  "locationForm.visibility": "Guest map visibility",
+  "locationForm.hidden": "Hidden",
+  "locationForm.approximate": "Approximate area",
+  "locationForm.exact": "Exact location",
+  "locationForm.visibilityHint":
+    "Approximate shows your area without the exact pin. Hidden removes the map and nearby places.",
+  "locationForm.save": "Save location",
+  "locationForm.saving": "Saving…",
+} as const;
+
+export type LocationFormKey =
+  | keyof typeof propertyAddressEnglish
+  | keyof typeof nearbyLocationEnglish;
+const english = { ...propertyAddressEnglish, ...nearbyLocationEnglish };
 
 export const nearbyInputClass =
   "mt-1 block w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-950 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100";
@@ -16,30 +36,30 @@ export default function NearbyLocationForm({
   onChange: (value: PropertyProfileLocation) => void;
   apiKey: string;
   disabled: boolean;
-  /** The address fields' copy (VAY-2322, shared with the PMS); English without it. */
-  translate?: (key: keyof typeof propertyAddressEnglish) => string;
+  /** The form's copy (VAY-2322; the address fields are shared with the PMS); English without it. */
+  translate?: (key: LocationFormKey) => string;
   locale?: string;
 }) {
+  const t = translate ?? ((key: LocationFormKey) => english[key]);
   function change(patch: Partial<PropertyProfileLocation>) {
     onChange({ ...value, ...patch });
   }
   return (
     <fieldset disabled={disabled} className="space-y-5">
-      <legend className="mb-2 text-lg font-semibold text-gray-950">Location</legend>
-      <p className="text-sm text-gray-500">
-        Confirm your address and pin. We’ll suggest places nearby automatically.
-      </p>
+      <legend className="mb-2 text-lg font-semibold text-gray-950">
+        {t("locationForm.title")}
+      </legend>
+      <p className="text-sm text-gray-500">{t("locationForm.intro")}</p>
       <PropertyAddressFields
         value={value}
         onChange={change}
         apiKey={apiKey}
         disabled={disabled}
-        translate={translate}
+        translate={t}
         locale={locale}
-        split
       />
       <label className="block text-sm font-medium text-gray-700">
-        Time zone
+        {t("locationForm.timezone")}
         <input
           className={nearbyInputClass}
           value={value.timezone}
@@ -49,7 +69,7 @@ export default function NearbyLocationForm({
         />
       </label>
       <label className="block text-sm font-medium text-gray-700">
-        Guest map visibility
+        {t("locationForm.visibility")}
         <select
           className={nearbyInputClass}
           value={value.geoPublic ? value.mapDisplayMode : "hidden"}
@@ -60,14 +80,12 @@ export default function NearbyLocationForm({
             })
           }
         >
-          <option value="hidden">Hidden</option>
-          <option value="approximate">Approximate area</option>
-          <option value="exact">Exact location</option>
+          <option value="hidden">{t("locationForm.hidden")}</option>
+          <option value="approximate">{t("locationForm.approximate")}</option>
+          <option value="exact">{t("locationForm.exact")}</option>
         </select>
       </label>
-      <p className="text-xs text-gray-500">
-        Approximate shows your area without the exact pin. Hidden removes the map and nearby places.
-      </p>
+      <p className="text-xs text-gray-500">{t("locationForm.visibilityHint")}</p>
     </fieldset>
   );
 }

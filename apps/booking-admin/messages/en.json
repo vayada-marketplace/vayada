@@ -1710,5 +1710,15 @@
   "propertyAddress.coordinates": "Coordinates",
   "propertyAddress.latitude": "Latitude",
   "propertyAddress.longitude": "Longitude",
-  "propertyAddress.coordinatesHint": "Type them when address search or the map is unavailable, or to place the pin exactly."
+  "propertyAddress.coordinatesHint": "Type them when address search or the map is unavailable, or to place the pin exactly.",
+  "locationForm.title": "Location",
+  "locationForm.intro": "Confirm your address and pin. We’ll suggest places nearby automatically.",
+  "locationForm.timezone": "Time zone",
+  "locationForm.visibility": "Guest map visibility",
+  "locationForm.hidden": "Hidden",
+  "locationForm.approximate": "Approximate area",
+  "locationForm.exact": "Exact location",
+  "locationForm.visibilityHint": "Approximate shows your area without the exact pin. Hidden removes the map and nearby places.",
+  "locationForm.save": "Save location",
+  "locationForm.saving": "Saving…"
 }

@@ -4,6 +4,7 @@ import {
   mockPmsWebAuthenticatedSession,
   mockPmsWebTargetRoutes,
   pmsWebRoomType,
+  sharedPropertyProfile,
 } from "../support/pmsWebMocks";
 import { mockGoogleMaps, type FakeGooglePlace } from "../support/googleMapsFake";
 import { watchPageHealth } from "../support/pageHealth";
@@ -342,7 +343,9 @@ test.describe("pms-web room location", () => {
     page,
   }) => {
     const backend = await mockRoomBackend(page);
-    // The other room types: one at the property, a villa with a place of its own.
+    await mockGoogleMaps(page, { places: [] });
+    // The other room types: one on "Same as property", an older one on the property's pin by its own
+    // coordinates (saved before VAY-2321), and a villa with a place of its own.
     await page.route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/room-types*`, (route) =>
       route.fulfill({
         json: {
@@ -351,6 +354,12 @@ test.describe("pms-web room location", () => {
           items: [
             backend.room,
             pmsWebRoomType,
+            {
+              ...pmsWebRoomType,
+              roomTypeId: "room_type_garden",
+              name: "Garden Room",
+              attributes: { latitude: 48.13721, longitude: 11.57562 },
+            },
             {
               ...pmsWebRoomType,
               roomTypeId: "room_type_beach_villa",
@@ -362,49 +371,71 @@ test.describe("pms-web room location", () => {
         },
       }),
     );
+    // Guests see an approximate area and no locality: saving the address must keep both.
+    const profile = structuredClone(sharedPropertyProfile);
+    Object.assign(profile.profile.location, {
+      mapDisplayMode: "approximate",
+      localityPublic: false,
+    });
     const profileWrites: Record<string, unknown>[] = [];
     await page.route(`**/api/hotel-setup/properties/${PMS_WEB_PROPERTY_ID}/profile`, (route) => {
-      if (route.request().method() === "PUT") profileWrites.push(route.request().postDataJSON());
+      if (route.request().method() !== "PUT") return route.fulfill({ json: profile });
+      profileWrites.push(route.request().postDataJSON());
       return route.fallback();
     });
 
     await page.goto(`/rooms/${roomTypeId}`);
     // An unsaved edit elsewhere in the room stays.
     await page.getByRole("switch", { name: "Show map in room details" }).click();
-    await page.getByRole("button", { name: "Edit property address" }).click();
+    const edit = page.getByRole("button", { name: "Edit property address" });
+    await edit.click();
     const modal = page.getByRole("dialog", { name: "Property address" });
-    await expect(modal.getByTestId("address-impact")).toContainText(
-      "Changes apply to 2 room types",
-    );
-    await expect(modal.getByTestId("address-impact").getByRole("listitem")).toHaveText([
+    const impact = modal.getByTestId("address-impact");
+    await expect(impact).toContainText("Changes apply to 3 room types");
+    await expect(impact.getByRole("listitem")).toHaveText([
       "Schwabing Loft",
       "Alpine Suite",
+      "Garden Room",
     ]);
-    await expect(modal).toContainText(
+    await expect(impact).toContainText(
       "Rooms with a separate location keep their own pin: Beach Villa.",
     );
     await expect(modal.getByLabel("Street and number")).toHaveValue("Alpenstrasse 12");
     await expect(modal.getByLabel("Country")).toHaveValue("DE");
 
-    // Escape closes without saving, and the room is as it was.
+    // Escape closes without saving; the focus is back on the link and the room is as it was.
     await page.keyboard.press("Escape");
     await expect(modal).toHaveCount(0);
+    await expect(edit).toBeFocused();
     expect(profileWrites).toEqual([]);
 
-    await page.getByRole("button", { name: "Edit property address" }).click();
+    await edit.click();
     await modal.getByLabel("Street and number").fill("Maximilianstraße 3");
     await modal.getByLabel("Postal code").fill("80539");
     // Enter in a field doesn't save the room behind.
     await modal.getByLabel("Postal code").press("Enter");
     await modal.getByLabel("City / region").fill("");
-    await expect(modal.getByRole("button", { name: "Save address" })).toBeDisabled();
+    const save = modal.getByRole("button", { name: "Save address" });
+    await expect(save).toBeDisabled();
     await expect(modal).toContainText("Add the street, city and country before saving.");
     await modal.getByLabel("City / region").fill("Munich");
+
+    // Moving the pin away leaves the older room at its own pin, and says so.
+    await modal.getByText("Coordinates", { exact: true }).click();
+    await modal.getByLabel("Latitude").fill("48.1394");
+    await modal.getByLabel("Longitude").fill("");
+    await expect(save).toBeDisabled();
+    await expect(modal).toContainText("Enter both coordinates");
+    await modal.getByLabel("Longitude").fill("11.5835");
+    await expect(impact).toContainText("Changes apply to 2 room types");
+    await expect(impact).toContainText(
+      "Garden Room sit on the old pin by their own coordinates and stay there.",
+    );
     await expect(modal).toContainText("Goes live in the Booking Engine as soon as you save.");
-    await modal.getByRole("button", { name: "Save address" }).click();
+    await save.click();
     await expect(modal).toHaveCount(0);
 
-    // Only the address changes: the guest map's visibility and the time zone stay as they were.
+    // Only the address and pin change: visibility, locality and time zone stay as they were.
     expect(profileWrites).toEqual([
       {
         expectedProfileRevision: 1,
@@ -415,11 +446,11 @@ test.describe("pms-web room location", () => {
             streetAddress: "Maximilianstraße 3",
             postalCode: "80539",
             timezone: "Europe/Berlin",
-            latitude: 48.1372,
-            longitude: 11.5756,
-            localityPublic: true,
+            latitude: 48.1394,
+            longitude: 11.5835,
+            localityPublic: false,
             geoPublic: true,
-            mapDisplayMode: "exact",
+            mapDisplayMode: "approximate",
           },
         },
       },
