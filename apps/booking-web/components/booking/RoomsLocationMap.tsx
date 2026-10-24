@@ -175,39 +175,42 @@ export default function RoomsLocationMap({
         </h2>
         <p className="mt-2 text-gray-600">{pins[0].address || property.name}</p>
         <div className={`mt-6 ${listed ? "lg:flex lg:items-start lg:gap-6" : ""}`}>
-          <div className="relative h-80 w-full overflow-hidden rounded-2xl border border-gray-200 sm:h-[480px] lg:min-w-0 lg:flex-1">
-            {requested ? (
-              <>
-                <GuestMap
-                  places={places}
-                  selected={selected}
-                  onSelect={setSelected}
-                  apiKey={apiKey}
-                  label={t("mapLabel")}
-                  className="h-full"
-                  nearby={nearbyOnMap(nearby)}
-                />
-                <NearbyChips
-                  layer={nearby}
-                  className="absolute left-3 right-3 top-3 z-10 sm:right-16"
-                />
-                {nearby.selected && (
-                  // Above Google's logo and terms at the bottom of the map.
-                  <NearbyPlaceCard
-                    place={nearby.selected}
-                    reference={reference}
-                    onClose={() => closeNearby(nearby)}
-                    className="absolute bottom-10 left-3 right-3 z-10 sm:left-auto sm:right-4 sm:w-[340px]"
+          <div className="relative lg:min-w-0 lg:flex-1">
+            <div className="relative h-80 w-full overflow-hidden rounded-2xl border border-gray-200 sm:h-[480px]">
+              {requested ? (
+                <>
+                  <GuestMap
+                    places={places}
+                    selected={selected}
+                    onSelect={setSelected}
+                    apiKey={apiKey}
+                    label={t("mapLabel")}
+                    className="h-full"
+                    nearby={nearbyOnMap(nearby)}
                   />
-                )}
-              </>
-            ) : (
-              <MapGate
-                className="h-full"
-                onRequest={() => {
-                  chooseMaps();
-                  setRequested(true);
-                }}
+                  <NearbyChips
+                    layer={nearby}
+                    className="absolute left-3 right-3 top-3 z-10 sm:right-16"
+                  />
+                </>
+              ) : (
+                <MapGate
+                  className="h-full"
+                  onRequest={() => {
+                    chooseMaps();
+                    setRequested(true);
+                  }}
+                />
+              )}
+            </div>
+            {requested && nearby.selected && (
+              // Over the map, above Google's logo and terms; under it on a phone, where the short map would be
+              // all card.
+              <NearbyPlaceCard
+                place={nearby.selected}
+                reference={reference}
+                onClose={() => closeNearby(nearby)}
+                className="mt-3 sm:absolute sm:bottom-10 sm:right-4 sm:z-10 sm:mt-0 sm:w-[340px]"
               />
             )}
           </div>

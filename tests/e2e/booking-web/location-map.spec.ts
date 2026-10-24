@@ -862,6 +862,17 @@ test.describe("nearby places on the guest map (VAY-2327)", () => {
     );
     // A place without a tip has no "Host tip".
     await expect(section.getByTestId("nearby-place-card")).not.toContainText("Host tip");
+    // The card sits over the map, and under it on a phone, where the map is short.
+    const boxes = () =>
+      Promise.all([
+        section.getByRole("region", { name: "Map of where the rooms are" }).boundingBox(),
+        section.getByTestId("nearby-place-card").boundingBox(),
+      ]);
+    let [map, card] = await boxes();
+    expect(card!.y + card!.height).toBeLessThanOrEqual(map!.y + map!.height);
+    await page.setViewportSize({ width: 390, height: 844 });
+    [map, card] = await boxes();
+    expect(card!.y).toBeGreaterThanOrEqual(map!.y + map!.height);
   });
 
   test("shows no nearby places while the host's switch is off", async ({ page }) => {
