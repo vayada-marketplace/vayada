@@ -652,6 +652,7 @@ export default function RoomTypeForm({
 
           {/* Location */}
           <RoomLocationField
+            roomId={roomTypeId ?? null}
             roomName={form.name || ""}
             value={{
               locationAddress: form.locationAddress || "",
