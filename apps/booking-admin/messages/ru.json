@@ -1720,5 +1720,9 @@
   "locationForm.exact": "Точное местоположение",
   "locationForm.visibilityHint": "«Примерно» показывает ваш район без точной метки. «Скрыто» убирает карту и места поблизости.",
   "locationForm.save": "Сохранить местоположение",
-  "locationForm.saving": "Сохранение…"
+  "locationForm.saving": "Сохранение…",
+  "propertyAddress.area": "Район / деревня",
+  "propertyAddress.optional": "необязательно",
+  "propertyAddress.directions": "Как добраться",
+  "propertyAddress.directionsHint": "Отправляется гостю в письме с подтверждением бронирования. Например: «Поверните у синих ворот после храма»."
 }

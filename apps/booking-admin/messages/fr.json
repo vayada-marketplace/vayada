@@ -1720,5 +1720,9 @@
   "locationForm.exact": "Emplacement exact",
   "locationForm.visibilityHint": "Approximatif montre votre quartier sans le repère exact. Masqué retire la carte et les lieux à proximité.",
   "locationForm.save": "Enregistrer l'emplacement",
-  "locationForm.saving": "Enregistrement…"
+  "locationForm.saving": "Enregistrement…",
+  "propertyAddress.area": "Quartier / village",
+  "propertyAddress.optional": "facultatif",
+  "propertyAddress.directions": "Indications d'arrivée",
+  "propertyAddress.directionsHint": "Envoyées dans l'e-mail de confirmation de réservation. Par exemple : « Tournez au portail bleu après le temple »."
 }

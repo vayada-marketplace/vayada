@@ -8,7 +8,14 @@ import GoogleAddressMap from "./GoogleAddressMap";
 /** The property's address and arrival pin: what the shared form edits. */
 export type PropertyAddress = Pick<
   PropertyProfileLocation,
-  "streetAddress" | "postalCode" | "city" | "countryCode" | "latitude" | "longitude"
+  | "streetAddress"
+  | "postalCode"
+  | "city"
+  | "countryCode"
+  | "latitude"
+  | "longitude"
+  | "area"
+  | "arrivalDirections"
 >;
 
 export const propertyAddressEnglish = {
@@ -16,6 +23,11 @@ export const propertyAddressEnglish = {
   "propertyAddress.searchHint":
     "Picking a result fills in the fields below. Every field can be edited by hand.",
   "propertyAddress.street": "Street and number",
+  "propertyAddress.area": "Area / village",
+  "propertyAddress.optional": "optional",
+  "propertyAddress.directions": "Arrival directions",
+  "propertyAddress.directionsHint":
+    "Sent in the guest's booking confirmation email. For example: “Turn at the blue gate after the temple”.",
   "propertyAddress.postalCode": "Postal code",
   "propertyAddress.city": "City / region",
   "propertyAddress.country": "Country",
@@ -34,7 +46,7 @@ type Translate = (key: keyof typeof propertyAddressEnglish) => string;
 const inputClass =
   "mt-1 block w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-950 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:bg-gray-50";
 const labelClass = "block text-sm font-medium text-gray-700";
-const MAX_LENGTH = { streetAddress: 240, postalCode: 32, city: 120 } as const;
+const MAX_LENGTH = { streetAddress: 240, postalCode: 32, city: 120, area: 120 } as const;
 
 /** The property's address (VAY-2322), shared by Booking Admin's Location settings and the PMS room editor's
  * "Property address" modal so the two can't drift apart: address search, fields that can all be typed by
@@ -87,12 +99,17 @@ export default function PropertyAddressFields({
       name: name(country.code, country.name),
     })).sort((a, b) => a.name.localeCompare(b.name, locale));
   }, [locale]);
-  const text = (key: "streetAddress" | "postalCode" | "city", label: string) => (
+  const text = (key: "streetAddress" | "postalCode" | "city" | "area", label: string) => (
     <label className={labelClass}>
       {label}
+      {key === "area" && (
+        <span className="ml-1.5 text-xs font-normal text-gray-400">
+          {t("propertyAddress.optional")}
+        </span>
+      )}
       <input
         className={inputClass}
-        value={value[key]}
+        value={value[key] ?? ""}
         // The property profile's limits.
         maxLength={MAX_LENGTH[key]}
         disabled={disabled}
@@ -146,7 +163,10 @@ export default function PropertyAddressFields({
             )}
           </div>
         )}
-        {text("streetAddress", t("propertyAddress.street"))}
+        <div className="grid gap-3 sm:grid-cols-2">
+          {text("streetAddress", t("propertyAddress.street"))}
+          {text("area", t("propertyAddress.area"))}
+        </div>
         <div className="grid grid-cols-[minmax(0,8rem)_minmax(0,1fr)] gap-3">
           {text("postalCode", t("propertyAddress.postalCode"))}
           {text("city", t("propertyAddress.city"))}
@@ -170,6 +190,23 @@ export default function PropertyAddressFields({
               </option>
             ))}
           </select>
+        </label>
+        <label className={labelClass}>
+          {t("propertyAddress.directions")}
+          <span className="ml-1.5 text-xs font-normal text-gray-400">
+            {t("propertyAddress.optional")}
+          </span>
+          <textarea
+            className={`${inputClass} min-h-[72px]`}
+            value={value.arrivalDirections ?? ""}
+            maxLength={1000}
+            rows={3}
+            disabled={disabled}
+            onChange={(event) => change({ arrivalDirections: event.target.value })}
+          />
+          <span className="mt-1 block text-xs font-normal text-gray-500">
+            {t("propertyAddress.directionsHint")}
+          </span>
         </label>
       </div>
       <div className="space-y-2">

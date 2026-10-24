@@ -36,6 +36,7 @@ const PROFILE_ROW = `SELECT jsonb_build_object(
     'timezone', NULLIF(location.timezone, ''), 'latitude', location.latitude, 'longitude', location.longitude,
     'localityPublic', COALESCE(location.address_public, FALSE), 'geoPublic', COALESCE(location.geo_public, FALSE),
     'mapDisplayMode', COALESCE(location.map_display_mode, 'hidden'),
+    'area', location.area, 'arrivalDirections', location.arrival_directions,
     'contacts', COALESCE((SELECT jsonb_agg(jsonb_build_object('channelType', contact.channel_type,
         'value', contact.value, 'purpose', contact.purpose, 'isPublic', contact.is_public)
         ORDER BY contact.channel_type, contact.value, contact.created_at, contact.id)
@@ -170,18 +171,20 @@ export async function writeOrdinaryHotelSetupPropertyProfile(
     await client.query(
       `INSERT INTO hotel_catalog.property_locations (property_id, country_code, city, street_address,
          postal_code, latitude, longitude, timezone, address_public, geo_public, map_display_mode,
-         source_confidence, updated_at)
+         area, arrival_directions, source_confidence, updated_at)
        SELECT $1::uuid, NULLIF(input.country_code,'')::char(2), input.city, input.street_address,
          input.postal_code, input.latitude, input.longitude, input.timezone, input.address_public,
-         input.geo_public, COALESCE(input.map_display_mode,'hidden'), 'verified', now()
+         input.geo_public, COALESCE(input.map_display_mode,'hidden'), input.area, input.arrival_directions,
+         'verified', now()
        FROM jsonb_to_record($2::jsonb) AS input(country_code text, city text, street_address text,
          postal_code text, timezone text, latitude numeric, longitude numeric, address_public boolean,
-         geo_public boolean, map_display_mode text)
+         geo_public boolean, map_display_mode text, area text, arrival_directions text)
        ON CONFLICT (property_id) DO UPDATE SET country_code=EXCLUDED.country_code, city=EXCLUDED.city,
          street_address=EXCLUDED.street_address, postal_code=EXCLUDED.postal_code,
          latitude=EXCLUDED.latitude, longitude=EXCLUDED.longitude, timezone=EXCLUDED.timezone,
          address_public=EXCLUDED.address_public, geo_public=EXCLUDED.geo_public,
-         map_display_mode=EXCLUDED.map_display_mode, source_confidence=EXCLUDED.source_confidence,
+         map_display_mode=EXCLUDED.map_display_mode, area=EXCLUDED.area,
+         arrival_directions=EXCLUDED.arrival_directions, source_confidence=EXCLUDED.source_confidence,
          updated_at=now()`,
       [scope.propertyId, payload],
     );

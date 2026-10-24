@@ -76,7 +76,16 @@ export default function PropertyAddressModal({
         setProfile(read);
         const { streetAddress, postalCode, city, countryCode, latitude, longitude } =
           read.profile.location;
-        setDraft({ streetAddress, postalCode, city, countryCode, latitude, longitude });
+        setDraft({
+          streetAddress,
+          postalCode,
+          city,
+          countryCode,
+          latitude,
+          longitude,
+          area: read.profile.location.area ?? "",
+          arrivalDirections: read.profile.location.arrivalDirections ?? "",
+        });
       })
       .catch(() => !disposed && setProfile("failed"));
     roomsService
@@ -126,6 +135,8 @@ export default function PropertyAddressModal({
             streetAddress: draft.streetAddress.trim(),
             postalCode: draft.postalCode.trim(),
             city: draft.city.trim(),
+            area: draft.area?.trim() ?? "",
+            arrivalDirections: draft.arrivalDirections?.trim() ?? "",
           },
         },
       });

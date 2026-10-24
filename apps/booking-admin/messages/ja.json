@@ -1720,5 +1720,9 @@
   "locationForm.exact": "正確な場所",
   "locationForm.visibilityHint": "「おおよそ」は正確なピンなしでエリアを表示します。「非表示」は地図と周辺スポットを表示しません。",
   "locationForm.save": "所在地を保存",
-  "locationForm.saving": "保存中…"
+  "locationForm.saving": "保存中…",
+  "propertyAddress.area": "地区・村",
+  "propertyAddress.optional": "任意",
+  "propertyAddress.directions": "到着までの道順",
+  "propertyAddress.directionsHint": "ゲストへの予約確認メールで送られます。例：「お寺を過ぎた青い門で曲がってください」"
 }

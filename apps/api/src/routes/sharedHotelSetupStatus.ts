@@ -1501,6 +1501,8 @@ function propertyProfileUpdate(
       "localityPublic",
       "geoPublic",
       "mapDisplayMode",
+      "area",
+      "arrivalDirections",
     ],
     "patch.location",
     errors,
@@ -1622,6 +1624,12 @@ function parseProfileLocation(
     localityPublic,
     geoPublic,
     mapDisplayMode,
+    // VAY-2322 F2: optional. Left out of a patch, the stored value stays (the merge keeps it); "" clears it.
+    area: optionalString(input["area"], "location.area", errors, { maxLength: 120 }) ?? "",
+    arrivalDirections:
+      optionalString(input["arrivalDirections"], "location.arrivalDirections", errors, {
+        maxLength: 1000,
+      }) ?? "",
   };
 }
 

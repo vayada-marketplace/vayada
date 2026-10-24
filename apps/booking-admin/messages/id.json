@@ -1720,5 +1720,9 @@
   "locationForm.exact": "Lokasi tepat",
   "locationForm.visibilityHint": "Perkiraan menampilkan area Anda tanpa penanda tepat. Disembunyikan menghapus peta dan tempat di sekitar.",
   "locationForm.save": "Simpan lokasi",
-  "locationForm.saving": "Menyimpan…"
+  "locationForm.saving": "Menyimpan…",
+  "propertyAddress.area": "Area / desa",
+  "propertyAddress.optional": "opsional",
+  "propertyAddress.directions": "Petunjuk kedatangan",
+  "propertyAddress.directionsHint": "Dikirim dalam email konfirmasi pemesanan tamu. Contoh: “Belok di gerbang biru setelah pura”."
 }

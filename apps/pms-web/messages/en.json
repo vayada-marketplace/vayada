@@ -3709,5 +3709,9 @@
   "rooms.addressModal.needsPin": "Guests see a map of the property: place the pin before saving.",
   "rooms.addressModal.noPermission": "Only the property's owner can change its address, signed in to their own account.",
   "rooms.addressModal.leftBehindOne": "{names} sits on the old pin by its own coordinates and stays there. Set it to “Same as property” to follow the address.",
-  "rooms.addressModal.leftBehindMany": "{names} sit on the old pin by their own coordinates and stay there. Set them to “Same as property” to follow the address."
+  "rooms.addressModal.leftBehindMany": "{names} sit on the old pin by their own coordinates and stay there. Set them to “Same as property” to follow the address.",
+  "propertyAddress.area": "Area / village",
+  "propertyAddress.optional": "optional",
+  "propertyAddress.directions": "Arrival directions",
+  "propertyAddress.directionsHint": "Sent in the guest's booking confirmation email. For example: “Turn at the blue gate after the temple”."
 }

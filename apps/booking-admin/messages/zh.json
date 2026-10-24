@@ -1720,5 +1720,9 @@
   "locationForm.exact": "精确位置",
   "locationForm.visibilityHint": "“大致”只显示您所在的区域，不显示精确图钉。“隐藏”会移除地图和附近地点。",
   "locationForm.save": "保存位置",
-  "locationForm.saving": "正在保存…"
+  "locationForm.saving": "正在保存…",
+  "propertyAddress.area": "区域 / 村庄",
+  "propertyAddress.optional": "选填",
+  "propertyAddress.directions": "到达指引",
+  "propertyAddress.directionsHint": "会在预订确认邮件中发送给客人。例如：“过了寺庙后在蓝色大门处转弯”。"
 }
