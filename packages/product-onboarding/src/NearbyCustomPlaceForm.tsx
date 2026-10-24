@@ -88,7 +88,7 @@ export default function NearbyCustomPlaceForm({
       </div>
       <label className="block text-sm font-medium text-gray-700">
         Your note
-        <textarea name="note" maxLength={500} rows={2} className={nearbyInputClass} />
+        <textarea name="note" maxLength={140} rows={2} className={nearbyInputClass} />
       </label>
       <div className="flex gap-3">
         <button

@@ -197,4 +197,83 @@ describe.skipIf(!url)("nearby curation PostgreSQL transactions", () => {
       code: "missing_property_resource_link",
     });
   });
+  it("saves the host's categories and order, and keeps saved Google choices a write leaves out (VAY-2326)", async () => {
+    await admin.query(
+      "UPDATE identity.organization_resource_links SET status='active' WHERE organization_id=$1",
+      [organizationId],
+    );
+    // Discovery no longer vouches for the hidden Google choice saved above; leaving it out keeps it.
+    await admin.query(
+      "UPDATE hotel_catalog.property_nearby_discovery SET valid_until=now()-interval '1 second' WHERE property_id=$1",
+      [propertyId],
+    );
+    const before = await repository.read(scope);
+    expect(before).toMatchObject({
+      curationRevision: 3,
+      choices: [{ placeId: "verified", hidden: true }],
+      customCategories: [],
+      categoryNames: {},
+    });
+    const music = { id: randomUUID(), name: "Live music", color: "pink", icon: "musical-note" };
+    const jazz = {
+      ...customPlace,
+      id: randomUUID(),
+      name: "Jazz club",
+      category: music.id,
+      favorite: false,
+      note: "x".repeat(140),
+    };
+    const v2 = {
+      schemaVersion: 1,
+      expectedProfileRevision: 2,
+      customPlaces: [jazz, customPlace],
+      customCategories: [music],
+      categoryNames: { food: "Street food" },
+    };
+    const saved = await repository.save(scope, { ...v2, expectedCurationRevision: 3 });
+    expect(saved).toEqual({
+      ok: true,
+      state: {
+        ...before,
+        curationRevision: 4,
+        customPlaces: [jazz, customPlace],
+        customCategories: [music],
+        categoryNames: { food: "Street food" },
+      },
+    });
+    expect(await repository.read(scope)).toEqual(saved.ok ? saved.state : null);
+    // An editor from before VAY-2326 sends neither categories nor names: they stay.
+    expect(
+      await repository.save(scope, {
+        ...write(4, 2),
+        choices: before!.choices,
+        customPlaces: [customPlace, jazz],
+      }),
+    ).toMatchObject({
+      ok: true,
+      state: {
+        curationRevision: 5,
+        customPlaces: [customPlace, jazz],
+        customCategories: [music],
+        categoryNames: { food: "Street food" },
+      },
+    });
+    // A category with places can't go, and a new tip has at most 140 characters.
+    for (const change of [
+      { customCategories: [] },
+      { customPlaces: [{ ...jazz, note: "x".repeat(141) }] },
+    ])
+      expect(
+        await repository.save(scope, { ...v2, expectedCurationRevision: 5, ...change }),
+      ).toEqual({ ok: false, code: "invalid_request" });
+    expect(await repository.read(scope)).toMatchObject({ curationRevision: 5 });
+    // The table holds at most 8 categories, whatever writes it.
+    await expect(
+      admin.query(
+        `UPDATE hotel_catalog.property_nearby_curation
+         SET custom_categories=(SELECT jsonb_agg(n) FROM generate_series(1,9) n) WHERE property_id=$1`,
+        [propertyId],
+      ),
+    ).rejects.toThrow(/check constraint/);
+  });
 });

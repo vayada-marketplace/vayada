@@ -328,6 +328,36 @@ Errors: 400 invalid request; 401 missing/invalid auth; 403 permission/link denia
 503 provider unavailable. Curation PUT never calls Google. Public provider
 failure returns a usable 200 state with existing permitted hotel content.
 
+## Editor v2 data (VAY-2326)
+
+Decided 2026-10-24 for the v1 editor in Booking Admin › Location & surroundings (migration 0513):
+
+- Guests see only the host's own places in v1 (D5): the public nearby response leaves out Google places
+  and never starts a lookup (`status` is `ready`, `empty`, `location_required` or `hidden`). The editor
+  no longer shows Google suggestions; both return with VAY-2207. Saved Google choices stay stored: a
+  curation `PUT` may leave out `choices`, and then the saved ones are kept.
+- `customPlaces` order is the order guests see. `projectNearbyPreview` lists own places first, in that
+  order, then Google places with favorites first.
+- A save fails with `payload_too_large` when what it saves, kept parts included, exceeds the 64 KiB
+  limit that every read checks again.
+- The four categories keep their keys and get colours and icons: `food` (orange, cake), `nature`
+  (teal, sun), `activities` (purple, camera), `transport` (slate, map). `categoryNames` holds the host's
+  own names for them (1..24 characters each); a missing key keeps the translated name. They can't be
+  deleted.
+- `customCategories`: up to 8 of the host's own, each `{ id: UUID, name: 1..24, color, icon }` with
+  `color` one of red, amber, green, sky, indigo, pink, stone and `icon` one of musical-note, cake,
+  sun, camera, map, heart, star, shopping-bag. A custom place's `category` is one of the four keys or
+  one of these IDs. Leaving out `customCategories` or `categoryNames` keeps the saved ones; a category
+  can't be removed while a place uses it.
+- Tips: a new or changed note has at most 140 characters. A note saved before keeps up to 500 until
+  the host changes it.
+- Public and editor previews carry `categories` (the four, then the host's own) with `name: null` for
+  a default without a host name.
+- "Show nearby places" is `booking.booking_settings.nearby_places_enabled` (off by default), switched
+  with `PUT /api/booking/properties/:id/location-map/nearby` `{ enabled }` and read as `nearbyEnabled`
+  on the location map summary. Like the location map switch it leaves `updated_at` alone. While it is
+  off, the public nearby response is `hidden`.
+
 ## Desktop and mobile flows
 
 Host: Property settings → Location → shared address search/manual entry →

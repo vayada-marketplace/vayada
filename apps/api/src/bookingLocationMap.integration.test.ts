@@ -61,6 +61,8 @@ describe.skipIf(!TEST_DATABASE_URL)("Booking location map (runtime login)", () =
       `SELECT
          has_column_privilege($1, 'booking.booking_settings', 'location_map_enabled', 'UPDATE')
            AS "switchUpdate",
+         has_column_privilege($1, 'booking.booking_settings', 'nearby_places_enabled', 'UPDATE')
+           AS "nearbySwitchUpdate",
          has_table_privilege($1, 'pms.room_types', 'SELECT') AS "roomsSelect",
          has_table_privilege($1, 'hotel_catalog.property_locations', 'SELECT') AS "locationSelect",
          has_table_privilege($1, 'platform.product_audit_events', 'INSERT') AS "auditInsert",
@@ -69,6 +71,7 @@ describe.skipIf(!TEST_DATABASE_URL)("Booking location map (runtime login)", () =
     );
     expect(privileges.rows[0]).toEqual({
       switchUpdate: true,
+      nearbySwitchUpdate: true,
       roomsSelect: true,
       locationSelect: true,
       auditInsert: true,
@@ -83,6 +86,7 @@ describe.skipIf(!TEST_DATABASE_URL)("Booking location map (runtime login)", () =
 
     expect(await repository.read(propertyId)).toEqual({
       enabled: false,
+      nearbyEnabled: false,
       canSwitch: true,
       rooms: [
         {
@@ -187,6 +191,44 @@ describe.skipIf(!TEST_DATABASE_URL)("Booking location map (runtime login)", () =
     );
   });
 
+  it("switches Show nearby places on its own, with an audit row and the row's updated_at kept (VAY-2326)", async () => {
+    const propertyId = await seedProperty(admin, true);
+    const before = await settingsRow(admin, propertyId);
+    const audit = { actorUserId, organizationId, requestId: randomUUID(), correlationId: null };
+    const nearby = (enabled: boolean) =>
+      repository.setEnabled({ propertyId, enabled, setting: "nearbyPlaces", audit });
+
+    expect(await nearby(true)).toEqual({ enabled: true });
+    expect(await repository.read(propertyId)).toMatchObject({
+      enabled: false,
+      nearbyEnabled: true,
+    });
+    expect(await nearby(false)).toEqual({ enabled: false });
+    expect(await repository.read(propertyId)).toMatchObject({
+      enabled: false,
+      nearbyEnabled: false,
+    });
+    expect(await settingsRow(admin, propertyId)).toEqual(before);
+
+    const audits = await admin.query(
+      `SELECT action, split_part(audit_key, ':', 1) AS "keyPrefix", redacted_payload AS payload
+       FROM platform.product_audit_events WHERE property_id=$1::uuid ORDER BY recorded_at, id`,
+      [propertyId],
+    );
+    expect(audits.rows).toEqual([
+      {
+        action: "booking.nearby_places.enabled",
+        keyPrefix: "booking.nearby-places",
+        payload: { enabled: true },
+      },
+      {
+        action: "booking.nearby_places.disabled",
+        keyPrefix: "booking.nearby-places",
+        payload: { enabled: false },
+      },
+    ]);
+  });
+
   it("switches nothing and audits nothing for a property without booking settings", async () => {
     const propertyId = await seedProperty(admin, false);
     const audit = { actorUserId, organizationId, requestId: randomUUID(), correlationId: null };
@@ -194,6 +236,9 @@ describe.skipIf(!TEST_DATABASE_URL)("Booking location map (runtime login)", () =
     expect(await repository.read(propertyId)).toMatchObject({ enabled: false, canSwitch: false });
     expect(await readGuestLocationMap(admin, propertyId)).toBeNull();
     expect(await repository.setEnabled({ propertyId, enabled: true, audit })).toBeNull();
+    expect(
+      await repository.setEnabled({ propertyId, enabled: true, setting: "nearbyPlaces", audit }),
+    ).toBeNull();
     const audits = await admin.query(
       "SELECT count(*)::int AS count FROM platform.product_audit_events WHERE property_id=$1::uuid",
       [propertyId],

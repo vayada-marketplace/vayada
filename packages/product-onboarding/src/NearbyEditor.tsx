@@ -293,7 +293,7 @@ export default function NearbyEditor({
                             <textarea
                               className={nearbyInputClass}
                               rows={2}
-                              maxLength={500}
+                              maxLength={140}
                               value={choice?.note ?? ""}
                               onChange={(event) =>
                                 changeChoice(placeId, category, {

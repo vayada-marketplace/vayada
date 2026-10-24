@@ -2,11 +2,10 @@ import pg from "pg";
 import {
   parseNearbyCurationState,
   projectNearbyPreview,
-  type NearbyDiscoveryState,
   type NearbyPreview,
   type PropertyProfileLocation,
 } from "@vayada/domain-hotels";
-import { NEARBY_POLICY_VERSION, nearbyOriginKey } from "../integrations/googleNearbyPlaces.js";
+import { nearbyOriginKey } from "../integrations/googleNearbyPlaces.js";
 import { samePin } from "./propertyNearbyDiscoveryRepository.js";
 import type { NearbyScope } from "./propertyNearbyRepository.js";
 
@@ -42,9 +41,7 @@ export function createPgPublicNearbyRepository(
           CASE WHEN location.geo_public AND location.map_display_mode='exact' THEN location.longitude
             WHEN location.geo_public AND location.map_display_mode='approximate' THEN round(location.longitude,2) END::double precision AS longitude,
           c.revision AS curation_revision, c.saved_profile_revision, c.saved_origin, c.choices, c.custom_places,
-          d.profile_revision AS discovery_revision, d.origin AS discovery_origin, d.policy_version, d.status AS discovery_status,
-          d.places, d.valid_until > clock_timestamp() AS unexpired,
-          d.lease_expires_at > clock_timestamp() AS refreshing
+          c.custom_categories, c.category_names, settings.nearby_places_enabled
         FROM hotel_catalog.properties p
         JOIN distribution.active_public_booking_revision active ON active.property_id=p.id
         JOIN identity.organization_resource_links catalog ON catalog.resource_id=p.id::text
@@ -58,7 +55,7 @@ export function createPgPublicNearbyRepository(
           AND booking.status='active'
         LEFT JOIN hotel_catalog.property_locations location ON location.property_id=p.id
         LEFT JOIN hotel_catalog.property_nearby_curation c ON c.property_id=p.id
-        LEFT JOIN hotel_catalog.property_nearby_discovery d ON d.property_id=p.id
+        LEFT JOIN booking.booking_settings settings ON settings.property_id=p.id
         WHERE p.id=$1::uuid AND p.lifecycle_status='active'
           AND EXISTS (SELECT 1 FROM identity.product_entitlements e
             WHERE e.organization_id=org.id AND e.product='booking' AND e.entitlement_key='booking-engine'
@@ -95,7 +92,11 @@ export function createPgPublicNearbyRepository(
               : Number(row.saved_profile_revision),
         choices: row.choices ?? [],
         customPlaces: row.custom_places ?? [],
+        customCategories: row.custom_categories ?? [],
+        categoryNames: row.category_names ?? {},
       });
+      // The host's "Show nearby places" switch (VAY-2326) hides every place at once, like a hidden location.
+      const shown = row.nearby_places_enabled === true;
       const location: PropertyProfileLocation = {
         streetAddress: "",
         postalCode: "",
@@ -103,29 +104,19 @@ export function createPgPublicNearbyRepository(
         countryCode: "",
         timezone: "",
         localityPublic: false,
-        geoPublic: row.geo_public === true,
+        geoPublic: shown && row.geo_public === true,
         mapDisplayMode: row.map_display_mode ?? "hidden",
         latitude: row.latitude,
         longitude: row.longitude,
       };
-      const current =
-        (Number(row.discovery_revision) === revision || samePin(row.discovery_origin, originKey)) &&
-        row.policy_version === NEARBY_POLICY_VERSION;
-      const ready = current && row.unexpired && ["ready", "empty"].includes(row.discovery_status);
-      const refreshing = current && row.discovery_status === "refreshing" && row.refreshing;
-      const discovery: NearbyDiscoveryState = {
-        schemaVersion: 1,
-        profileRevision: revision,
-        retryAfter: null,
-        status: ready ? row.discovery_status : "stale",
-        places: ready ? row.places : [],
-      };
-      const preview = projectNearbyPreview(location, revision, curation, discovery);
+      // v1 (VAY-2326, decision D5): guests see only the host's own places, so a guest view never starts a
+      // paid Google lookup. Google places, and the lookup they need, come back with VAY-2207.
+      const preview = projectNearbyPreview(location, revision, { ...curation, choices: [] }, null);
       const hidden = !location.geoPublic || location.mapDisplayMode === "hidden";
       return {
         scope: { propertyId, organizationId: row.organization_id },
         revision,
-        needsRefresh: Boolean(preview.location && !ready && !refreshing),
+        needsRefresh: false,
         public: {
           schemaVersion: 1,
           ...preview,
@@ -133,13 +124,9 @@ export function createPgPublicNearbyRepository(
             ? "hidden"
             : !preview.location
               ? "location_required"
-              : refreshing
-                ? "refreshing"
-                : ready
-                  ? preview.places.length
-                    ? "ready"
-                    : "empty"
-                  : "unavailable",
+              : preview.places.length
+                ? "ready"
+                : "empty",
         },
       };
     },
