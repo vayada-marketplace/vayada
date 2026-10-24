@@ -112,6 +112,8 @@ export default function GuestMap({
       element: HTMLElement,
     ) => { setMap: (map: GoogleMap | null) => void };
     fit: (positions: LatLng[]) => void;
+    /** A spot as Google takes it: its own LatLng, never a look-alike object. */
+    latLng: (latitude: number, longitude: number) => LatLng;
     /** The guest moved the map: later places don't move it again. */
     touched: boolean;
     /** The nearby places widened the view once already in this drawing. */
@@ -247,6 +249,7 @@ export default function GuestMap({
           positions,
           pills,
           fit,
+          latLng: (latitude: number, longitude: number) => new LatLng(latitude, longitude),
           touched: false,
           nearbyFitted: false,
           overlay: (latitude: number, longitude: number, element: HTMLElement) => {
@@ -338,7 +341,7 @@ export default function GuestMap({
       current.nearbyFitted = true;
       current.fit([
         ...current.positions,
-        ...near.map((place) => ({ lat: () => place.latitude, lng: () => place.longitude })),
+        ...near.map((place) => current.latLng(place.latitude, place.longitude)),
       ]);
     }
     return () => markers.forEach(({ overlay }) => overlay.setMap(null));
@@ -355,7 +358,7 @@ export default function GuestMap({
     const current = drawn.current;
     const place = nearby?.places.find(({ id }) => id === selectedNearby);
     if (!current || !place) return;
-    const position = { lat: () => place.latitude, lng: () => place.longitude };
+    const position = current.latLng(place.latitude, place.longitude);
     if (!current.map.getBounds?.()?.contains(position)) current.map.panTo(position);
     // nearby is read for the selected place's spot only.
     // eslint-disable-next-line react-hooks/exhaustive-deps

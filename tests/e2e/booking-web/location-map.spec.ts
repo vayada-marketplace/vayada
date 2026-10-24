@@ -69,8 +69,12 @@ const GOOGLE_FAKE = `
   // An IIFE: a top-level "class Map" would replace the browser's own Map for the whole page.
   (() => {
   const state = (window.__locationMap = { maps: 0, markers: [], circles: [], popup: null, fitted: 0, overlays: 0, panned: [] });
-  const point = (position) =>
-    typeof position.lat === "function" ? { lat: position.lat(), lng: position.lng() } : position;
+  // Like Google: a LatLng, or a literal with numbers; anything else throws.
+  const point = (position) => {
+    if (position instanceof LatLng) return { lat: position.lat(), lng: position.lng() };
+    if (typeof position?.lat === "number" && typeof position?.lng === "number") return position;
+    throw new Error("InvalidValueError: not a LatLng or LatLngLiteral");
+  };
   class Map {
     constructor(element, options) {
       state.maps += 1; state.options = options; this.zoom = options.zoom;
@@ -118,7 +122,7 @@ const GOOGLE_FAKE = `
   }
   window.__clickMarker = (index) => state.markers[index].marker.listeners.click();
   class LatLng { constructor(lat, lng) { this.lat = () => lat; this.lng = () => lng; } }
-  class LatLngBounds { extend() {} }
+  class LatLngBounds { extend(position) { point(position); } }
   class Point { constructor(x, y) { this.x = x; this.y = y; } }
   window.google = { maps: { importLibrary: async (library) =>
     library === "maps" ? { Map, InfoWindow, Circle, OverlayView } : library === "marker" ? { Marker }
