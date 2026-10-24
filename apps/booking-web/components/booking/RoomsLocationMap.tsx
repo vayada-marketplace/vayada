@@ -187,7 +187,10 @@ export default function RoomsLocationMap({
                   className="h-full"
                   nearby={nearbyOnMap(nearby)}
                 />
-                <NearbyChips layer={nearby} className="absolute left-3 right-3 top-3 z-10" />
+                <NearbyChips
+                  layer={nearby}
+                  className="absolute left-3 right-3 top-3 z-10 sm:right-16"
+                />
                 {nearby.selected && (
                   // Above Google's logo and terms at the bottom of the map.
                   <NearbyPlaceCard

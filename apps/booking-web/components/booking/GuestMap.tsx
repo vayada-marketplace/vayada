@@ -45,6 +45,7 @@ type MapsLibrary = {
   };
 };
 type CoreLibrary = {
+  ControlPosition?: { RIGHT_TOP: number };
   LatLng: new (lat: number, lng: number) => LatLng;
   LatLngBounds: new () => { extend: (position: LatLng) => void };
 };
@@ -77,6 +78,7 @@ export default function GuestMap({
   className = "",
   fitPadding = 72,
   gestureHandling = "cooperative",
+  nearby,
 }: {
   places: GuestMapPlace[];
   /** The selected place's index in places. */
@@ -110,18 +112,18 @@ export default function GuestMap({
       element: HTMLElement,
     ) => { setMap: (map: GoogleMap | null) => void };
     fit: (positions: LatLng[]) => void;
-    /** The guest moved or zoomed the map: later places don't move it again. */
+    /** The guest moved the map: later places don't move it again. */
     touched: boolean;
+    /** The nearby places widened the view once already in this drawing. */
+    nearbyFitted: boolean;
   } | null>(null);
   const [nearbySlots, setNearbySlots] = useState<{ id: string; element: HTMLDivElement }[]>([]);
-  const onNearbyRef = useRef(nearby?.onSelect);
   const onSelectRef = useRef(onSelect);
   // Read when the map is drawn: cards drawn over the map are measured after it mounts.
   const fitPaddingRef = useRef(fitPadding);
   useEffect(() => {
     onSelectRef.current = onSelect;
     fitPaddingRef.current = fitPadding;
-    onNearbyRef.current = nearby?.onSelect;
   });
   const placesKey = JSON.stringify(places);
   const ready = draws > 0;
@@ -141,7 +143,7 @@ export default function GuestMap({
       importGoogleMapsLibrary<MapsLibrary>(apiKey, "maps"),
       importGoogleMapsLibrary<CoreLibrary>(apiKey, "core"),
     ])
-      .then(([{ Map, Circle, OverlayView }, { LatLng, LatLngBounds }]) => {
+      .then(([{ Map, Circle, OverlayView }, { LatLng, LatLngBounds, ControlPosition }]) => {
         if (disposed || !mapRef.current) return;
         clearTimeout(timeout);
         // Google answered after all: a slow load isn't a failed one.
@@ -154,6 +156,8 @@ export default function GuestMap({
           clickableIcons: false,
           disableDefaultUI: true,
           zoomControl: !narrow,
+          // Top right, as the approved views draw it: the bottom right holds a nearby place's card (VAY-2327).
+          ...(ControlPosition && { zoomControlOptions: { position: ControlPosition.RIGHT_TOP } }),
           gestureHandling,
         });
         if (places.length > 1) {
@@ -232,8 +236,9 @@ export default function GuestMap({
           const bounds = new LatLngBounds();
           points.forEach((position) => bounds.extend(position));
           map.fitBounds(bounds, fitPaddingRef.current);
-          const idle = map.addListener?.("idle", () => {
-            idle?.remove();
+          fitted?.remove();
+          fitted = map.addListener?.("idle", () => {
+            fitted?.remove();
             if ((map.getZoom?.() ?? 0) > MAX_FITTED_ZOOM) map.setZoom?.(MAX_FITTED_ZOOM);
           });
         };
@@ -243,12 +248,20 @@ export default function GuestMap({
           pills,
           fit,
           touched: false,
+          nearbyFitted: false,
           overlay: (latitude: number, longitude: number, element: HTMLElement) => {
             OverlayView.preventMapHitsAndGesturesFrom?.(element);
             const marker = new Pill(new LatLng(latitude, longitude), element, true);
             marker.setMap(map);
             shapes.push(marker);
-            return marker;
+            return {
+              setMap: (next: GoogleMap | null) => {
+                marker.setMap(next);
+                // Taken off for good: the drawing no longer holds it.
+                const at = shapes.indexOf(marker);
+                if (!next && at >= 0) shapes.splice(at, 1);
+              },
+            };
           },
         };
         moved = map.addListener?.("dragstart", () => {
@@ -303,6 +316,8 @@ export default function GuestMap({
     }
     const markers = places.map((place) => {
       const element = document.createElement("div");
+      // Placed by its overlay, like the pills.
+      element.style.position = "absolute";
       element.style.zIndex = "0";
       return {
         id: place.id,
@@ -318,11 +333,14 @@ export default function GuestMap({
           NEARBY_FIT_METRES,
       ),
     );
-    if (!current.touched && near.length > 0)
+    // Once per drawing: turning a category off or on later keeps the guest's view.
+    if (!current.touched && !current.nearbyFitted && near.length > 0) {
+      current.nearbyFitted = true;
       current.fit([
         ...current.positions,
         ...near.map((place) => ({ lat: () => place.latitude, lng: () => place.longitude })),
       ]);
+    }
     return () => markers.forEach(({ overlay }) => overlay.setMap(null));
     // nearbyKey stands for the places' spots.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -368,7 +386,7 @@ export default function GuestMap({
               <NearbyMarker
                 place={place}
                 selected={id === selectedNearby}
-                onSelect={() => onNearbyRef.current?.(id)}
+                onSelect={() => nearby?.onSelect(id)}
               />,
               element,
               id,

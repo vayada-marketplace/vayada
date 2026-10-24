@@ -84,8 +84,9 @@ export function NearbyChips({ layer, className = "" }: { layer: NearbyLayer; cla
               if (on && layer.selected?.category.id === category.id) layer.close();
               layer.toggle(category.id);
             }}
-            className={`inline-flex min-h-[36px] shrink-0 items-center gap-2 rounded-full border bg-white px-3 text-[13px] font-semibold shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 ${
-              on ? "border-gray-200 text-gray-900" : "border-gray-200 text-gray-400"
+            // 44 px to touch on a phone; "off" stays readable (gray-500 on white).
+            className={`inline-flex min-h-[44px] shrink-0 items-center gap-2 rounded-full border border-gray-200 bg-white px-3 text-[13px] font-semibold shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 sm:min-h-[36px] ${
+              on ? "text-gray-900" : "text-gray-500"
             }`}
           >
             <span
@@ -182,7 +183,10 @@ export function NearbyPlaceCard({
           <p className="text-[11px] font-bold uppercase tracking-wider text-gray-500">
             {t("hostTip")}
           </p>
-          <p className="mt-0.5 break-words text-[15px] leading-snug text-gray-700">{place.note}</p>
+          {/* A long tip doesn't cover a phone's small map: four lines there. */}
+          <p className="mt-0.5 break-words text-[15px] leading-snug text-gray-700 max-sm:line-clamp-4">
+            {place.note}
+          </p>
         </div>
       )}
       <a

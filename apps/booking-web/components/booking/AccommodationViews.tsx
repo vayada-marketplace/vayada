@@ -148,6 +148,7 @@ export default function AccommodationViews({
               label: stay.label,
               // Once the map is gone and the page is in reach again.
               onEdit: () => {
+                nearby.close();
                 setPhoneMap(false);
                 requestAnimationFrame(stay.onEdit);
               },
@@ -155,6 +156,8 @@ export default function AccommodationViews({
             renderCard={renderCard}
             nearby={nearby}
             onClose={() => {
+              // A place's card belongs to this map: the next one opens on the rooms.
+              nearby.close();
               setPhoneMap(false);
               requestAnimationFrame(() => mapButtonRef.current?.focus());
             }}
@@ -198,6 +201,8 @@ export default function AccommodationViews({
               type="button"
               aria-pressed={view === value}
               onClick={() => {
+                // A place's card stays with the map it was opened on.
+                if (value !== view) nearby.close();
                 setView(value);
                 chooseView(value);
               }}
@@ -255,7 +260,10 @@ export default function AccommodationViews({
                   className="h-full"
                   nearby={nearbyOnMap(nearby)}
                 />
-                <NearbyChips layer={nearby} className="absolute left-3 right-3 top-3 z-10" />
+                <NearbyChips
+                  layer={nearby}
+                  className="absolute left-3 right-3 top-3 z-10 sm:right-16"
+                />
               </>
             ) : (
               <MapGate

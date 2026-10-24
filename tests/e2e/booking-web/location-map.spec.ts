@@ -721,6 +721,13 @@ test.describe("nearby places on the guest map (VAY-2327)", () => {
     await expect(
       marker(page, "accommodations-map", "Jazzclub Unterfahrt, Live music"),
     ).toBeVisible();
+    // Each marker sits at its spot on the map, inside it.
+    const [mapBox, markerBox] = await Promise.all([
+      map.boundingBox(),
+      marker(page, "accommodations-map", "Englischer Garten, Sights").boundingBox(),
+    ]);
+    expect(markerBox!.x).toBeGreaterThan(mapBox!.x);
+    expect(markerBox!.x + markerBox!.width).toBeLessThan(mapBox!.x + mapBox!.width);
 
     // With no room selected, distances count from the main house.
     await marker(page, "accommodations-map", "Englischer Garten, Sights").click();
@@ -812,6 +819,19 @@ test.describe("nearby places on the guest map (VAY-2327)", () => {
     await expect(dialog.getByRole("group", { name: "Accommodations" })).toHaveCount(0);
     await card.getByRole("button", { name: "Close" }).click();
     await expect(dialog.getByRole("group", { name: "Accommodations" })).toBeVisible();
+    // With a place's card open, Escape closes the card, not the map; then the map.
+    await dialog.getByRole("button", { name: "Viktualienmarkt, Food & drink" }).click();
+    await dialog.getByRole("button", { name: "Viktualienmarkt, Food & drink" }).focus();
+    await page.keyboard.press("Escape");
+    await expect(card).toHaveCount(0);
+    await expect(dialog).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
+    // The next map opens on the rooms, not on the closed place.
+    await page.getByRole("button", { name: "Map", exact: true }).click();
+    await expect(
+      page.getByTestId("accommodations-phone-map").getByRole("group", { name: "Accommodations" }),
+    ).toBeVisible();
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);

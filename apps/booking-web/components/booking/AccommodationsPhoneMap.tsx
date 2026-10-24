@@ -15,8 +15,9 @@ import {
   type NearbyLayer,
 } from "./NearbyMapLayer";
 
-// Room around the pills when the map fits them in; below, the cards drawn over the map (measured).
-const FIT_PADDING = { top: 48, right: 48, bottom: 280, left: 48 };
+// Room around the pills when the map fits them in: above, the nearby chips; below, the cards drawn over the map
+// (measured).
+const FIT_PADDING = { top: 72, right: 48, bottom: 280, left: 48 };
 
 /** The phone's accommodations map (VAY-2325): full screen under a short summary of the stay, the same pills as
  * on a wide screen, and the rooms as a row of cards to swipe. Swiping selects a room's pill; tapping a pill
@@ -135,8 +136,10 @@ export default function AccommodationsPhoneMap({
       data-testid="accommodations-phone-map"
       className="fixed inset-0 z-[90] flex flex-col bg-white"
       onKeyDown={(event) => {
-        // Escape from a room's details (a portal of its own) closes only those.
-        if (event.key === "Escape" && dialogRef.current?.contains(event.target as Node)) onClose();
+        // Escape from a room's details (a portal of its own) closes only those; with a place's card open, the card.
+        if (event.key !== "Escape" || !dialogRef.current?.contains(event.target as Node)) return;
+        if (nearby.selected) closeNearby(nearby);
+        else onClose();
       }}
     >
       <div className="flex items-center justify-between gap-3 border-b border-gray-200 px-4 py-1.5">
