@@ -6,6 +6,8 @@ import { sharedSetupClient } from "./sharedHotelSetupClient";
  * and what guests would see. */
 export type LocationMapSummary = {
   enabled: boolean;
+  /** "Show nearby places" (VAY-2326); false from an API before it. */
+  nearbyEnabled: boolean;
   canSwitch: boolean;
   /** Each room's place as guests see it (VAY-2321): at the property, or its own pin, exact or as an area. */
   rooms: {
@@ -70,12 +72,19 @@ function parseSummary(v: unknown): LocationMapSummary | null {
   // An API from before VAY-2321 sends neither flag: a room without a pin of its own is at the property.
   return {
     ...(v as LocationMapSummary),
+    nearbyEnabled: v.nearbyEnabled === true,
     rooms: (v.rooms as Record<string, unknown>[]).map((room) => ({
       ...(room as LocationMapSummary["rooms"][number]),
       atProperty: typeof room.atProperty === "boolean" ? room.atProperty : room.pin === null,
       approximate: room.approximate === true,
     })),
   };
+}
+
+function confirmed(result: unknown): boolean {
+  if (!record(result) || typeof result.enabled !== "boolean")
+    throw new Error("The save could not be confirmed. Reload to check the result.");
+  return result.enabled;
 }
 
 export function createBookingLocationMapClient(http: Http) {
@@ -88,10 +97,11 @@ export function createBookingLocationMapClient(http: Http) {
       return summary;
     },
     async save(propertyId: string, enabled: boolean): Promise<boolean> {
-      const result = await http.put<unknown>(path(propertyId), { enabled });
-      if (!record(result) || typeof result.enabled !== "boolean")
-        throw new Error("The save could not be confirmed. Reload to check the result.");
-      return result.enabled;
+      return confirmed(await http.put<unknown>(path(propertyId), { enabled }));
+    },
+    /** The "Show nearby places" switch (VAY-2326), saved like the location map's. */
+    async saveNearby(propertyId: string, enabled: boolean): Promise<boolean> {
+      return confirmed(await http.put<unknown>(`${path(propertyId)}/nearby`, { enabled }));
     },
   };
 }

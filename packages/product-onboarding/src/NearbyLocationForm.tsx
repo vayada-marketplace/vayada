@@ -5,7 +5,8 @@ import PropertyAddressFields, { propertyAddressEnglish } from "./PropertyAddress
 /** Booking Admin's own location settings around the shared address fields (VAY-2322). */
 export const nearbyLocationEnglish = {
   "locationForm.title": "Location",
-  "locationForm.intro": "Confirm your address and pin. We’ll suggest places nearby automatically.",
+  // Google suggestions left the editor in v1 (VAY-2326); they return with VAY-2207.
+  "locationForm.intro": "Confirm your address and pin.",
   "locationForm.timezone": "Time zone",
   "locationForm.visibility": "Guest map visibility",
   "locationForm.hidden": "Hidden",
