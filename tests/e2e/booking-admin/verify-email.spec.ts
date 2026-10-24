@@ -25,6 +25,9 @@ async function signUpUntilVerification(page: Page) {
   await page.goto("/signup");
   await page.getByLabel("Email address", { exact: true }).fill("owner@example.test");
   await page.getByLabel("Password", { exact: true }).fill("correct-password");
+  await page
+    .getByRole("checkbox", { name: /I accept the Terms and the Data Processing Agreement/ })
+    .check();
   await page.getByRole("button", { name: /create account/i }).click();
   await expect(page).toHaveURL(/\/verify-email$/);
   await expect(page.getByRole("heading", { name: "Verify your email" })).toBeVisible();

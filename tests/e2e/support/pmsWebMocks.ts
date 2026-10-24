@@ -2,6 +2,7 @@ import type { Page, Route } from "@playwright/test";
 import { createAdaptiveHotelSetupStatusMock } from "./sharedHotelSetupMocks";
 import { mockBookingModules } from "./featureHubModuleMocks";
 import { mockSetupChecklistUnavailable } from "./setupChecklistMocks";
+import { mockHotelAccountAgreements } from "./hotelAccountAgreementsMocks";
 import { mockGoogleMaps } from "./googleMapsFake";
 
 export const PMS_WEB_PROPERTY_ID = "f6853000-0000-4000-8000-000000000001";
@@ -358,6 +359,8 @@ export async function mockPmsWebTargetRoutes(page: Page): Promise<void> {
     }),
   );
   await mockSetupChecklistUnavailable(page);
+  // VAY-2246: an account that accepted its terms and DPA at sign-up, so no banner.
+  await mockHotelAccountAgreements(page);
   await page.route("**/api/hotel-setup/status**", (route) =>
     route.fulfill({
       json: createAdaptiveHotelSetupStatusMock({

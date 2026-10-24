@@ -673,5 +673,16 @@
   "settings.team.roleFrontDesk": "Réception",
   "settings.team.roleHousekeeping": "Ménage",
   "settings.team.roleOwner": "Propriétaire",
-  "settings.team.roleCustom": "Personnalisé"
+  "settings.team.roleCustom": "Personnalisé",
+  "agreements.banner.title": "Acceptez l’accord de traitement des données",
+  "agreements.banner.body": "vayada conserve les données de réservation de vos clients pour votre compte, et le RGPD (art. 28) exige un accord écrit pour cela. En tant qu’administrateur du compte, vous l’acceptez pour {account}, avec les {terms} dont il fait partie.",
+  "agreements.banner.yourAccount": "votre compte hôtel",
+  "agreements.banner.hotelTerms": "conditions d’utilisation hôtelières",
+  "agreements.banner.meta": "Version du {date} · Seul l’administrateur du compte voit ce message.",
+  "agreements.banner.read": "Lire l’accord",
+  "agreements.banner.accept": "Accepter",
+  "agreements.banner.accepting": "Acceptation…",
+  "agreements.banner.failed": "Cela n’a pas fonctionné. Veuillez réessayer.",
+  "agreements.banner.accepted": "Accord de traitement des données accepté pour {account}.",
+  "agreements.banner.dismiss": "Fermer"
 }

@@ -2,18 +2,22 @@
 import { useTranslation } from "@/lib/i18n";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import HotelAccountAgreementsBanner from "@vayada/product-onboarding/HotelAccountAgreementsBanner";
 import { useNearbyHistoryGuard } from "@vayada/product-onboarding/useNearbyNavigationGuard";
 import Header from "@/components/layout/Header";
 import Sidebar from "@/components/layout/Sidebar";
+import { hotelAccountAgreementsMessages } from "@/components/layout/hotelAccountAgreementsMessages";
+import { hotelAccountAgreementsApi } from "@/services/api/hotelAccountAgreementsClient";
 import { authService } from "@/services/auth";
 import { setupExitPropertyId } from "@vayada/product-onboarding";
 
 import { resolveBookingSetupGuard } from "@/lib/utils/sharedSetupGuard";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const router = useRouter();
+  const pathname = usePathname();
   useNearbyHistoryGuard(router);
   const [isAuthorized, setIsAuthorized] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -115,6 +119,15 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       <div className="flex-1 flex flex-col min-w-0">
         <Header onMenuToggle={() => setSidebarOpen(!sidebarOpen)} />
         <main className="flex-1 overflow-auto bg-gray-50 [scrollbar-gutter:stable]">
+          {/* VAY-2246: the account admin accepts the hotel terms and DPA; Privacy & data has its own button. */}
+          <HotelAccountAgreementsBanner
+            client={hotelAccountAgreementsApi}
+            messages={hotelAccountAgreementsMessages(t)}
+            locale={locale}
+            acceptedHref="/settings/privacy"
+            hidden={pathname === "/settings/privacy"}
+            frameClassName="page-frame pb-0"
+          />
           {children}
         </main>
       </div>

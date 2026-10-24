@@ -257,6 +257,10 @@ export async function signUpSyntheticHotelOwner(
   await page.goto(`${NEXT_STACK_ORIGINS.bookingAdmin}/signup`);
   await page.getByLabel("Email address").fill(identity.email);
   await fillSecret(page.getByLabel("Password", { exact: true }), environment.password);
+  // VAY-2246: a new hotel accepts the hotel terms and the data processing agreement at sign-up.
+  await page
+    .getByRole("checkbox", { name: /I accept the Terms and the Data Processing Agreement/ })
+    .check();
   const signupResponsePromise = page.waitForResponse(
     (response) =>
       new URL(response.url()).pathname === "/auth/password/signup" &&

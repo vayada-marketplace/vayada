@@ -3713,5 +3713,16 @@
   "propertyAddress.area": "Area / village",
   "propertyAddress.optional": "optional",
   "propertyAddress.directions": "Arrival directions",
-  "propertyAddress.directionsHint": "How guests find your entrance once they arrive. For example: “Turn at the blue gate after the temple”."
+  "propertyAddress.directionsHint": "How guests find your entrance once they arrive. For example: “Turn at the blue gate after the temple”.",
+  "agreements.banner.title": "Accept the data processing agreement",
+  "agreements.banner.body": "vayada stores your guests’ booking data on your behalf, and the GDPR (Art. 28) requires a written agreement for that. As account admin, you accept it for {account}, together with the {terms} it belongs to.",
+  "agreements.banner.yourAccount": "your hotel account",
+  "agreements.banner.hotelTerms": "hotel terms",
+  "agreements.banner.meta": "Version of {date} · Only the account admin sees this.",
+  "agreements.banner.read": "Read the agreement",
+  "agreements.banner.accept": "Accept",
+  "agreements.banner.accepting": "Accepting…",
+  "agreements.banner.failed": "That didn’t work. Please try again.",
+  "agreements.banner.accepted": "Data processing agreement accepted for {account}.",
+  "agreements.banner.dismiss": "Close"
 }

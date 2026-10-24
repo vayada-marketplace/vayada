@@ -21,6 +21,8 @@
     "./returnTo": "./src/returnTo.ts",
     "./SharedHotelLoginForm": "./src/SharedHotelLoginForm.tsx",
     "./SharedSignupPage": "./src/SharedSignupPage.tsx",
+    "./HotelAccountAgreementsBanner": "./src/HotelAccountAgreementsBanner.tsx",
+    "./hotelAccountAgreementsApi": "./src/hotelAccountAgreementsApi.ts",
     "./HotelIcon": "./src/HotelIcon.tsx",
     "./bankTransferDestination": "./src/bankTransferDestination.ts",
     "./AddonEditor": "./src/AddonEditor.tsx",

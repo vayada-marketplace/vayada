@@ -3727,5 +3727,16 @@
   "propertyAddress.area": "Ortsteil / Dorf",
   "propertyAddress.optional": "optional",
   "propertyAddress.directions": "Anfahrtsbeschreibung",
-  "propertyAddress.directionsHint": "Wie Gäste bei der Ankunft Ihren Eingang finden. Zum Beispiel: „Am blauen Tor nach dem Tempel abbiegen“."
+  "propertyAddress.directionsHint": "Wie Gäste bei der Ankunft Ihren Eingang finden. Zum Beispiel: „Am blauen Tor nach dem Tempel abbiegen“.",
+  "agreements.banner.title": "Auftragsverarbeitungsvertrag akzeptieren",
+  "agreements.banner.body": "vayada speichert die Buchungsdaten Ihrer Gäste in Ihrem Auftrag, und die DSGVO (Art. 28) verlangt dafür einen schriftlichen Vertrag. Als Kontoadministrator akzeptieren Sie ihn für {account}, zusammen mit den {terms}, zu denen er gehört.",
+  "agreements.banner.yourAccount": "Ihr Hotelkonto",
+  "agreements.banner.hotelTerms": "Nutzungsbedingungen für Hotels",
+  "agreements.banner.meta": "Version vom {date} · Nur der Kontoadministrator sieht diesen Hinweis.",
+  "agreements.banner.read": "Vertrag lesen",
+  "agreements.banner.accept": "Akzeptieren",
+  "agreements.banner.accepting": "Wird akzeptiert…",
+  "agreements.banner.failed": "Das hat nicht funktioniert. Bitte versuchen Sie es erneut.",
+  "agreements.banner.accepted": "Auftragsverarbeitungsvertrag für {account} akzeptiert.",
+  "agreements.banner.dismiss": "Schließen"
 }
