@@ -79,18 +79,6 @@ To stop the Docker backend services started by the script:
 ./scripts/dev-portless.sh --stop
 ```
 
-## `run_migration.sh`
-
-Run database migrations against the production AWS RDS instance for a given
-service. Temporarily opens the RDS security group to your public IP, runs the
-service's `scripts/run_migrations.py`, then revokes the ingress rule on exit.
-
-```sh
-./scripts/run_migration.sh <pms|booking|auth>
-```
-
-Requires AWS CLI credentials and Python 3 with `asyncpg`. DB passwords are stored in AWS SSM under `/vayada/prod/`.
-
 ## Seed scripts
 
 Populate local databases with mock data for development. All seed scripts

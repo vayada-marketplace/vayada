@@ -312,7 +312,7 @@ Migration ownership is split across three paths:
 | Scope                    | Location                                 | Local behavior                                                 | Production behavior                                                                                   |
 | ------------------------ | ---------------------------------------- | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
 | Legacy product APIs      | `apps/*-api/migrations/`                 | FastAPI containers apply pending migrations before serving     | Each legacy API image applies its own migrations on container start                                   |
-| Legacy shared auth       | `auth-db/migrations/`                    | Compose runs the `auth-db-migrate` one-shot service            | The dedicated `migrate-auth-db` workflow applies changes                                              |
+| Legacy shared auth       | `auth-db/migrations/`                    | Compose runs the `auth-db-migrate` one-shot service            | Frozen with the legacy stack; a change needs a reviewed one-off ECS task in `vayada-platform`         |
 | TypeScript target schema | `packages/backend-migration/migrations/` | `dev:workos-local` applies migrations to `TARGET_DATABASE_URL` | Follow the reviewed target migration and cutover runbook; `apps/api` does not auto-migrate on startup |
 
 The target database is organized into domain schemas for platform, identity,
@@ -334,8 +334,8 @@ npm run target:migrate -- --env local
 
 Detailed target migration, fixture, parity, and WorkOS backfill commands live
 in [`packages/backend-migration/README.md`](packages/backend-migration/README.md).
-Production database operations are service-specific; do not treat
-`scripts/run_migration.sh` as a universal migration command.
+Production database operations are service-specific and run only inside the
+AWS VPC as reviewed one-off ECS tasks from `vayada-platform` (VAY-2339).
 
 ## Authentication and authorization
 
