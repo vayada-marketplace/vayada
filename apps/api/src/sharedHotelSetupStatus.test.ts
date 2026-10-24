@@ -3510,6 +3510,9 @@ function minimalHotelInput(): SharedPropertyProfileInput {
       localityPublic: false,
       geoPublic: false,
       mapDisplayMode: "hidden",
+      // Read back as "" when not given (VAY-2322).
+      area: "",
+      arrivalDirections: "",
     },
     contacts: [
       {

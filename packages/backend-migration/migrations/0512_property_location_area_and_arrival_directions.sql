@@ -1,4 +1,4 @@
--- Migration: 0511_property_location_area_and_arrival_directions
+-- Migration: 0512_property_location_area_and_arrival_directions
 -- Owner: domain-hotels / VAY-2322
 --
 -- Two optional parts of a property's address, edited in the PMS "Property address" modal and Booking
