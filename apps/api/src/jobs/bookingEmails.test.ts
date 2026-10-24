@@ -55,20 +55,35 @@ describe("booking lifecycle email jobs", () => {
       longitude: 11.576124,
       arrivalDirections: "Ring the bell at the side door.",
     };
+    const maps = "Open in Google Maps: https://www.google.com/maps/dir/?api=1&destination=";
     const atProperty = [
       "Where you'll stay:",
-      "Hotel Alpenrose",
+      "Hotel Alpenrose · Double",
       "Marienplatz 1, Altstadt, 80331 Munich, Germany",
       "Arrival directions: Ring the bell at the side door.",
-      "Directions: https://www.google.com/maps/dir/?api=1&destination=48.137154,11.576124",
+      `${maps}48.137154,11.576124`,
     ].join("\n");
+    const villa = (name: string, attributes: Record<string, unknown> = {}) => ({
+      name,
+      attributes: {
+        locationSource: "custom",
+        locationAddress: "Fraunhoferstraße 5, 80469 München",
+        latitude: 48.1301234,
+        longitude: 11.5734567,
+        ...attributes,
+      },
+    });
     const text = async (
       kind: BookingLifecycleEmailInput["kind"],
       booking: Partial<BookingLifecycleEmailInput["booking"]> = {},
     ) => {
       const target = createTargetEmailStore();
       const input = bookingEmailInput({ kind });
-      Object.assign(input.booking, { propertyLocation, bookedRooms: [], ...booking });
+      Object.assign(input.booking, {
+        propertyLocation,
+        bookedRooms: [{ name: "Double", attributes: { locationSource: "property" } }],
+        ...booking,
+      });
       await enqueueBookingLifecycleEmailJob(target, input);
       return String(
         JSON.parse(String(target.requiredCall("INSERT INTO platform.jobs").values?.[8])).text,
@@ -87,64 +102,72 @@ describe("booking lifecycle email jobs", () => {
     ] as const)
       expect(await text(kind)).not.toContain("Where you'll stay");
 
-    // A room elsewhere gets its own exact address and pin, even when the booking page shows only its area.
-    // Older rooms count as the property's without a pin of their own away from it; a room elsewhere with
-    // nothing saved is left out.
+    // Older rooms count as the property's without a pin of their own away from it, and so does a room on the
+    // property's pin without an address of its own. Rooms at one villa share its paragraph; an approximate one
+    // gets the exact address with a word on why; a room elsewhere with nothing saved is left out.
     const mixed = await text("final_confirmation", {
       propertyLocation: { ...propertyLocation, arrivalDirections: null },
       bookedRooms: [
         { name: "Double", attributes: {} },
         { name: "Twin", attributes: { latitude: 48.137154, longitude: 11.576124 } },
         {
-          name: "Beach Villa",
-          attributes: {
-            locationSource: "custom",
-            locationPrecision: "approximate",
-            locationArea: "Isarvorstadt",
-            locationAddress: "Fraunhoferstraße 5, 80469 München",
-            latitude: 48.1301234,
-            longitude: 11.5734567,
-          },
+          name: "Studio",
+          attributes: { locationSource: "custom", latitude: 48.137154, longitude: 11.576124 },
         },
+        villa("Beach Villa", { locationPrecision: "approximate", locationArea: "Isarvorstadt" }),
+        villa("Garden Villa"),
         { name: "Lake Lodge", attributes: { locationSource: "custom" } },
       ],
     });
     expect(mixed).toContain(
       [
         "Where you'll stay:",
-        "Hotel Alpenrose (Double, Twin)",
+        "Hotel Alpenrose · Double, Twin, Studio",
         "Marienplatz 1, Altstadt, 80331 Munich, Germany",
-        "Directions: https://www.google.com/maps/dir/?api=1&destination=48.137154,11.576124",
+        `${maps}48.137154,11.576124`,
         "",
-        "Beach Villa",
+        "Beach Villa, Garden Villa",
         "Fraunhoferstraße 5, 80469 München",
-        "Directions: https://www.google.com/maps/dir/?api=1&destination=48.1301234,11.5734567",
+        "Your booking page showed the area, Isarvorstadt. This is the exact address.",
+        `${maps}48.1301234,11.5734567`,
         "",
         "Booking reference: B-BANK-001",
       ].join("\n"),
     );
-    expect(mixed).not.toMatch(/Isarvorstadt|Lake Lodge|Arrival directions/);
+    expect(mixed).not.toMatch(/Lake Lodge|Arrival directions/);
 
-    // Only a villa: no property block. Without a pin, the directions look the address up.
-    const villa = await text("booking_accepted", {
-      propertyLocation: { ...propertyLocation, latitude: null, longitude: null },
-      bookedRooms: [
-        {
-          name: "Beach Villa",
-          attributes: { locationSource: "custom", locationAddress: "Fraunhoferstraße 5" },
-        },
-      ],
+    // Only a villa: no paragraph for the property. Without a pin, the link looks the address up.
+    const onlyVilla = await text("booking_accepted", {
+      bookedRooms: [villa("Beach Villa", { latitude: undefined, longitude: undefined })],
     });
-    expect(villa).toContain(
-      "Where you'll stay:\nBeach Villa\nFraunhoferstraße 5\nDirections: https://www.google.com/maps/dir/?api=1&destination=Fraunhoferstra%C3%9Fe%205\n\n",
+    expect(onlyVilla).toContain(
+      `Where you'll stay:\nBeach Villa\nFraunhoferstraße 5, 80469 München\n${maps}Fraunhoferstra%C3%9Fe%205%2C%2080469%20M%C3%BCnchen\n\n`,
     );
-    expect(villa).not.toContain("Marienplatz");
-    const noPin = await text("final_confirmation", {
-      propertyLocation: { ...propertyLocation, latitude: null, longitude: null, area: null },
-    });
-    expect(noPin).toContain(
-      "Directions: https://www.google.com/maps/dir/?api=1&destination=Marienplatz%201%2C%2080331%20Munich%2C%20Germany",
-    );
+    expect(onlyVilla).not.toContain("Marienplatz");
+    expect(
+      await text("final_confirmation", {
+        propertyLocation: { ...propertyLocation, latitude: null, longitude: null, area: null },
+      }),
+    ).toContain(`${maps}Marienplatz%201%2C%2080331%20Munich%2C%20Germany`);
+
+    // Nothing to show: a property without an address or pin, rooms booked elsewhere with nothing saved, or no
+    // snapshot at all.
+    const empty = {
+      ...propertyLocation,
+      streetAddress: null,
+      area: null,
+      postalCode: null,
+      city: null,
+      latitude: null,
+      longitude: null,
+      arrivalDirections: null,
+    };
+    for (const booking of [
+      { propertyLocation: empty, bookedRooms: [] },
+      { bookedRooms: [{ name: "Lake Lodge", attributes: { locationSource: "custom" } }] },
+      { propertyLocation: null, bookedRooms: null },
+    ])
+      expect(await text("final_confirmation", booking)).not.toContain("Where you'll stay");
   });
 
   it("reads the property's place and the booked rooms with the booking (VAY-2322)", async () => {
@@ -177,12 +200,9 @@ describe("booking lifecycle email jobs", () => {
     const guest = payloads.find((payload) => payload.recipientRole === "guest");
     const host = payloads.find((payload) => payload.recipientRole === "host");
     expect(guest.text).toContain(
-      "Where you'll stay:\nHotel Alpenrose\nMarienplatz 1, 80331 Munich, Germany\nArrival directions: Side door.",
+      "Where you'll stay:\nHotel Alpenrose · Double\nMarienplatz 1, 80331 Munich, Germany\nArrival directions: Side door.",
     );
     expect(host.text).not.toContain("Where you'll stay");
-    const snapshot = target.requiredCall('AS "hostEmail"').text;
-    expect(snapshot).toContain('AS "bookedRooms"');
-    expect(snapshot).toContain("pms.operational_booking_assignments");
   });
 
   it("deduplicates retries but sends each accepted host date revision", async () => {

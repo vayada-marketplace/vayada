@@ -279,7 +279,8 @@ describe.skipIf(!url)("confirmation resend with target PostgreSQL", () => {
     }
   });
   it("tells the guest where they stay, from the property's place and the booked rooms (VAY-2322)", async () => {
-    const roomType = randomUUID();
+    const garden = randomUUID();
+    const villa = randomUUID();
     await pool.query(
       `UPDATE hotel_catalog.property_locations SET street_address='Marienplatz 1', area='Altstadt',
          postal_code='80331', city='Munich', country_code='DE', latitude=48.137154, longitude=11.576124,
@@ -289,20 +290,30 @@ describe.skipIf(!url)("confirmation resend with target PostgreSQL", () => {
     );
     await pool.query(
       `INSERT INTO pms.room_types(id, property_id, name, base_rate_amount, currency, room_attributes)
-       VALUES ($1, $2, 'Garden Room', 100, 'EUR', '{"locationSource":"property"}')`,
-      [roomType, property],
+       VALUES ($1, $3, 'Garden Room', 100, 'EUR', '{"locationSource":"property"}'),
+              ($2, $3, 'Beach Villa', 200, 'EUR',
+               '{"locationSource":"custom","locationAddress":"Fraunhoferstraße 5","latitude":48.13,"longitude":11.57}')`,
+      [garden, villa, property],
     );
+    const booked = async (metadata: Record<string, unknown>) => {
+      await pool.query(
+        `UPDATE booking.guest_bookings
+         SET booking_metadata = (booking_metadata - 'airbnbMoneyStatus' - 'pricingSelections'
+           - 'selectedOffer') || $2::jsonb
+         WHERE id=$1`,
+        [booking, JSON.stringify(metadata)],
+      );
+      return loadBookingNotificationSnapshot(pool, {
+        propertyId: property,
+        guestBookingId: booking,
+      });
+    };
+    const names = (snapshot: Awaited<ReturnType<typeof booked>>) =>
+      snapshot?.bookedRooms.map((room) => room.name);
+
     // Two rooms of one type, booked on the booking page: one place.
-    await pool.query(
-      `UPDATE booking.guest_bookings SET booking_metadata = booking_metadata
-         - 'airbnbMoneyStatus' || jsonb_build_object('pricingSelections', jsonb_build_array(
-           jsonb_build_object('roomTypeId', $2::text), jsonb_build_object('roomTypeId', $2::text)))
-       WHERE id=$1`,
-      [booking, roomType],
-    );
-    const snapshot = await loadBookingNotificationSnapshot(pool, {
-      propertyId: property,
-      guestBookingId: booking,
+    const snapshot = await booked({
+      pricingSelections: [{ roomTypeId: garden }, { roomTypeId: garden }],
     });
     expect(snapshot).toMatchObject({
       propertyLocation: {
@@ -317,11 +328,34 @@ describe.skipIf(!url)("confirmation resend with target PostgreSQL", () => {
       },
       bookedRooms: [{ name: "Garden Room", attributes: { locationSource: "property" } }],
     });
+    // The older checkout's offer: every room line, else its one room.
+    expect(
+      names(
+        await booked({
+          selectedOffer: {
+            roomTypeId: villa,
+            roomLines: [{ roomTypeId: villa }, { roomTypeId: garden }],
+          },
+        }),
+      ),
+    ).toEqual(["Beach Villa", "Garden Room"]);
+    expect(names(await booked({ selectedOffer: { roomTypeId: villa } }))).toEqual(["Beach Villa"]);
+    // The PMS's rooms win once it has them; a canceled one is gone.
+    await pool.query(
+      `INSERT INTO pms.operational_booking_assignments
+         (property_id, guest_booking_id, room_type_id, position, assignment_status, source, stay_evidence_kind)
+       VALUES ($1, $2, $3, 1, 'canceled', 'migration', 'summary_only'),
+              ($1, $2, $4, 2, 'pending', 'migration', 'summary_only')`,
+      [property, booking, villa, garden],
+    );
+    const assigned = await booked({ pricingSelections: [{ roomTypeId: villa }] });
+    expect(names(assigned)).toEqual(["Garden Room"]);
+
     const job = await enqueueBookingLifecycleEmailJob(pool, {
       kind: "final_confirmation",
       resendKey: `booking.confirmation.stay:${randomUUID()}`,
       occurredAt: new Date().toISOString(),
-      booking: snapshot!,
+      booking: assigned!,
     });
     const { payload } = (
       await pool.query(`SELECT payload FROM platform.jobs WHERE id=$1`, [job.jobId])
@@ -329,10 +363,10 @@ describe.skipIf(!url)("confirmation resend with target PostgreSQL", () => {
     expect(payload.text).toContain(
       [
         "Where you'll stay:",
-        "Test Hotel",
+        "Test Hotel · Garden Room",
         "Marienplatz 1, Altstadt, 80331 Munich, Germany",
         "Arrival directions: Ring the bell at the side door.",
-        "Directions: https://www.google.com/maps/dir/?api=1&destination=48.137154,11.576124",
+        "Open in Google Maps: https://www.google.com/maps/dir/?api=1&destination=48.137154,11.576124",
       ].join("\n"),
     );
   });

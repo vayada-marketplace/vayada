@@ -1,6 +1,7 @@
 import { paymentMethodLabel } from "@vayada/locale-constants";
 import { createHash } from "node:crypto";
 import type { QueryResultRow } from "pg";
+import { isSamePlace } from "@vayada/domain-hotels";
 import {
   roomAddress,
   roomAtProperty,
@@ -379,13 +380,15 @@ export async function loadBookingNotificationSnapshot(
         FROM booking.booking_addon_selection_items item
         JOIN booking.active_booking_addon_selections current_selection ON current_selection.id = item.selection_id
         WHERE item.guest_booking_id = booking.id AND item.property_id = booking.property_id) AS addons,
-       -- VAY-2322: the booked room types and their places, for "Where you'll stay": the PMS's rooms, else the
-       -- booked pricing rooms, else the booked offer's room (as the PMS reservation list names them).
+       -- VAY-2322: the booked room types and their places, for "Where you'll stay": the PMS's rooms (a room
+       -- can move to another type; a canceled one is gone), else the booked pricing rooms, else the booked
+       -- offer's room lines, else its room.
        (WITH assigned AS (
           SELECT assignment.room_type_id::text AS room_type_id, assignment.position::bigint AS position
           FROM pms.operational_booking_assignments assignment
           WHERE assignment.guest_booking_id = booking.id
             AND assignment.property_id = booking.property_id
+            AND assignment.assignment_status <> 'canceled'
             AND NOT (assignment.assignment_status = 'released'
               AND assignment.assignment_payload @> '{"channexAlterationReleased":true}')
         ), selected AS (
@@ -394,13 +397,23 @@ export async function loadBookingNotificationSnapshot(
             CASE WHEN jsonb_typeof(booking.booking_metadata->'pricingSelections') = 'array'
               THEN booking.booking_metadata->'pricingSelections' ELSE '[]'::jsonb END
           ) WITH ORDINALITY AS selection(value, position)
+        ), offered AS (
+          SELECT line.value->>'roomTypeId' AS room_type_id, line.position
+          FROM jsonb_array_elements(
+            CASE WHEN jsonb_typeof(booking.booking_metadata #> '{selectedOffer,roomLines}') = 'array'
+              THEN booking.booking_metadata #> '{selectedOffer,roomLines}' ELSE '[]'::jsonb END
+          ) WITH ORDINALITY AS line(value, position)
         ), booked AS (
           SELECT room_type_id, position FROM assigned
           UNION ALL
           SELECT room_type_id, position FROM selected WHERE NOT EXISTS (SELECT 1 FROM assigned)
           UNION ALL
+          SELECT room_type_id, position FROM offered
+          WHERE NOT EXISTS (SELECT 1 FROM assigned) AND NOT EXISTS (SELECT 1 FROM selected)
+          UNION ALL
           SELECT booking.booking_metadata #>> '{selectedOffer,roomTypeId}', 0
           WHERE NOT EXISTS (SELECT 1 FROM assigned) AND NOT EXISTS (SELECT 1 FROM selected)
+            AND NOT EXISTS (SELECT 1 FROM offered)
         )
         SELECT COALESCE(jsonb_agg(
                  jsonb_build_object('name', room.name, 'attributes', room.room_attributes)
@@ -783,68 +796,105 @@ function confirmationDetails(booking: BookingLifecycleEmailInput["booking"]): st
   ];
 }
 
-/** "Where you'll stay" (VAY-2322), for the guest once the stay is confirmed: the property's full address,
- * arrival directions and a Google Maps link for rooms at the property, and a room's own address and link
- * for one elsewhere. Exact even where the booking page shows only an area (D7). Empty without a snapshot. */
+/** "Where you'll stay" (VAY-2322), for the guest once the stay is confirmed, as on the approved Paper board: the
+ * property's full address, arrival directions and a Google Maps link for its rooms, and the own address and
+ * link of rooms elsewhere, one paragraph per place. Exact even where the booking page shows only an area (D7).
+ * Nothing it can't place: a room elsewhere with nothing saved, or a property without an address or pin. */
 function whereYoullStay(booking: BookingLifecycleEmailInput["booking"]): string[] {
   const location = booking.propertyLocation;
   const rooms = booking.bookedRooms ?? [];
-  if (!location && rooms.length === 0) return [];
   const propertyPin = location ? roomPin(location) : null;
-  const atProperty = rooms.filter((room) => roomAtProperty(room.attributes, propertyPin));
-  // A room elsewhere without an address or pin has nothing to show.
-  const elsewhere = rooms
-    .filter((room) => !atProperty.includes(room))
-    .map((room) => ({
-      name: room.name,
-      address: roomAddress(room.attributes),
-      pin: roomPin(room.attributes),
-    }))
-    .filter((room) => room.address || room.pin);
+  const atProperty: string[] = [];
+  const elsewhere = new Map<
+    string,
+    {
+      names: string[];
+      address: string | null;
+      pin: MapPin | null;
+      area: string | null;
+      approximate: boolean;
+    }
+  >();
+  for (const room of rooms) {
+    const saved = record(room.attributes);
+    const pin = roomPin(saved);
+    const address = roomAddress(saved);
+    // A room on the property's own pin without an address of its own is there, whatever its setting.
+    if (
+      roomAtProperty(saved, propertyPin) ||
+      (!address && pin && propertyPin && isSamePlace(pin, propertyPin))
+    ) {
+      atProperty.push(room.name);
+      continue;
+    }
+    if (!address && !pin) continue;
+    const key = `${address ?? ""}|${pin ? `${pin.latitude},${pin.longitude}` : ""}`;
+    const place = elsewhere.get(key) ?? {
+      names: [],
+      address,
+      pin,
+      area: text(saved["locationArea"]),
+      approximate: false,
+    };
+    place.names.push(room.name);
+    place.approximate ||= pin !== null && saved["locationPrecision"] === "approximate";
+    elsewhere.set(key, place);
+  }
   const places: string[] = [];
-  if (location && (atProperty.length > 0 || elsewhere.length === 0)) {
+  const street = text(location?.streetAddress);
+  const city = text(location?.city);
+  if (
+    location &&
+    (street || city || propertyPin) &&
+    (atProperty.length > 0 || rooms.length === 0)
+  ) {
     const address = [
-      location.streetAddress,
-      location.area,
-      [location.postalCode, location.city]
-        .map((part) => part?.trim())
-        .filter(Boolean)
-        .join(" "),
+      street,
+      text(location.area),
+      [text(location.postalCode), city].filter(Boolean).join(" "),
       countryName(location.countryCode),
     ]
-      .map((part) => part?.trim())
       .filter(Boolean)
       .join(", ");
-    const name = booking.propertyName || "The property";
+    const directions = text(location.arrivalDirections);
     places.push(
       [
-        elsewhere.length > 0 ? `${name} (${atProperty.map((room) => room.name).join(", ")})` : name,
+        [booking.propertyName || "The property", atProperty.join(", ")].filter(Boolean).join(" · "),
         address,
-        ...(location.arrivalDirections?.trim()
-          ? [`Arrival directions: ${location.arrivalDirections.trim()}`]
-          : []),
-        directionsLine(propertyPin, address),
+        ...(directions ? [`Arrival directions: ${directions}`] : []),
+        mapsLine(propertyPin, street || city ? address : null),
       ]
         .filter(Boolean)
         .join("\n"),
     );
   }
-  for (const room of elsewhere)
+  for (const place of elsewhere.values())
     places.push(
-      [room.name, room.address, directionsLine(room.pin, room.address)].filter(Boolean).join("\n"),
+      [
+        place.names.join(", "),
+        place.address,
+        ...(place.approximate
+          ? [
+              `${place.area ? `Your booking page showed the area, ${place.area}.` : "Your booking page showed only the area."} ${place.address ? "This is the exact address." : "The link below has the exact spot."}`,
+            ]
+          : []),
+        mapsLine(place.pin, place.address),
+      ]
+        .filter(Boolean)
+        .join("\n"),
     );
   return places.length > 0 ? [`Where you'll stay:\n${places.join("\n\n")}`] : [];
 }
 
 /** Google Maps directions to the pin, or to the address without one (as the booking page's Directions). */
-function directionsLine(pin: MapPin | null, address: string | null): string | null {
+function mapsLine(pin: MapPin | null, address: string | null): string | null {
   const destination = pin
     ? `${pin.latitude},${pin.longitude}`
     : address
       ? encodeURIComponent(address)
       : null;
   return destination
-    ? `Directions: https://www.google.com/maps/dir/?api=1&destination=${destination}`
+    ? `Open in Google Maps: https://www.google.com/maps/dir/?api=1&destination=${destination}`
     : null;
 }
 
