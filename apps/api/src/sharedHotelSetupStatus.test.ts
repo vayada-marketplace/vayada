@@ -1783,7 +1783,7 @@ describe("shared hotel setup status route", () => {
       arrivalDirections: "Walk through the blue gate.",
     };
     const profiles = new Map<string, SharedPropertyProfile>([[propertyId, stored]]);
-    app = buildSharedSetupApp({
+    const server = buildSharedSetupApp({
       permissions: [
         "hotel_catalog.setup.read",
         "hotel_catalog.setup.manage",
@@ -1791,8 +1791,9 @@ describe("shared hotel setup status route", () => {
       ],
       repository: profileRepository(profiles),
     });
+    app = server;
     const put = (revision: number, location: Record<string, unknown>) =>
-      injectJson<SharedPropertyProfile & { fields?: Record<string, string[]> }>(app, {
+      injectJson<SharedPropertyProfile & { fields?: Record<string, string[]> }>(server, {
         method: "PUT",
         url: "/api/hotel-setup/properties/" + propertyId + "/profile",
         headers: { authorization: "Bearer valid-token" },
