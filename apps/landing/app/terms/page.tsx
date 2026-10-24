@@ -14,7 +14,7 @@ export default function TermsPage() {
               Terms of Service (AGB)
             </h1>
             <p className="text-gray-600">
-              <strong>Effective Date:</strong> October 20, 2026
+              <strong>Effective Date:</strong> October 24, 2026
             </p>
           </div>
 
@@ -57,7 +57,7 @@ export default function TermsPage() {
                   a Hotel, such as an owner, manager or staff member.
                 </p>
                 <p>
-                  <strong>Guest:</strong> A person who views a Hotel&apos;s booking site or books a
+                  <strong>Guest: </strong>A person who views a Hotel&apos;s booking site or books a
                   stay through it.
                 </p>
                 <p>
@@ -200,7 +200,7 @@ export default function TermsPage() {
                   Guest funds.
                 </p>
                 <p>
-                  <strong>Card Refunds:</strong> When a booking paid by card on your booking site is
+                  <strong>Card Refunds: </strong>When a booking paid by card on your booking site is
                   cancelled, vayada instructs Stripe to refund the Guest automatically. The amount
                   follows the cancellation terms of the booked rate: if the Guest cancels, the Guest
                   gets back what those terms do not let you keep; if you cancel for a reason on your
@@ -227,7 +227,7 @@ export default function TermsPage() {
                   until the amount is settled.
                 </p>
                 <p>
-                  <strong>Price Changes:</strong> We may change our prices with at least 30
+                  <strong>Price Changes: </strong>We may change our prices with at least 30
                   days&apos; notice. If you do not accept a change, you may terminate before it
                   takes effect.
                 </p>
@@ -262,6 +262,16 @@ export default function TermsPage() {
                   For Guest data and other personal data you enter into the Services, you are the
                   controller and vayada processes that data on your behalf and on your instructions
                   (Article 28 GDPR).
+                </p>
+                <p>
+                  The terms of that processing are set out in our{" "}
+                  <a
+                    href="/terms/dpa"
+                    className="text-primary-600 hover:text-primary-700 underline"
+                  >
+                    Data Processing Agreement
+                  </a>
+                  , an annex to these Terms.
                 </p>
               </div>
             </section>
@@ -341,7 +351,7 @@ export default function TermsPage() {
                   billing period.
                 </p>
                 <p>
-                  <strong>Termination by vayada:</strong> vayada may terminate or suspend your
+                  <strong>Termination by vayada: </strong>vayada may terminate or suspend your
                   access immediately, without prior notice, if you breach these Terms, provide false
                   information, fail to pay after a reminder, or engage in fraudulent or illegal
                   activity. Otherwise vayada may terminate with 30 days&apos; notice.

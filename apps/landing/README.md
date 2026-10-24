@@ -12,7 +12,7 @@ Sign-up and log-in links point at Booking Admin.
 | `/`                                                       | Home                                      |
 | `/booking-engine`, `/pms`, `/partner-program`, `/pricing` | Product pages                             |
 | `/about`, `/contact`                                      | Marketing                                 |
-| `/imprint`, `/privacy`, `/terms`                          | Legal                                     |
+| `/imprint`, `/privacy`, `/terms`, `/terms/dpa`            | Legal (`/terms/dpa`: the hotel DPA)       |
 | `/api/health`                                             | Health check (for the container platform) |
 
 `/contact` posts to the contact intake of the TypeScript API (`apps/api`,
