@@ -1,14 +1,17 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   type NearbyCurationState,
-  type NearbyDiscoveryState,
   type PropertyProfileLocation,
   type PropertyProfileResponse,
 } from "@vayada/domain-hotels";
 import type { NearbyApi } from "./nearbyApi";
+import type { NearbyPlacesMessageKey } from "./nearbyPlacesMessages";
 import type { SharedHotelSetupApi } from "./sharedHotelSetupApi";
 
+/** The location page's state: the property's location and its nearby places, each saved on its own. Errors and
+ * notices are message keys. Google suggestions left the editor in v1 (VAY-2326): saves leave the stored Google
+ * choices out, and the server keeps them. */
 export function useNearbyEditor(
   propertyId: string,
   api: NearbyApi,
@@ -18,56 +21,37 @@ export function useNearbyEditor(
   const [location, setLocation] = useState<PropertyProfileLocation | null>(null);
   const [saved, setSaved] = useState<NearbyCurationState | null>(null);
   const [draft, setDraft] = useState<NearbyCurationState | null>(null);
-  const [discovery, setDiscovery] = useState<NearbyDiscoveryState | null>(null);
-  const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
-  const [providerMessage, setProviderMessage] = useState("");
+  const [error, setError] = useState<NearbyPlacesMessageKey | "">("");
+  const [notice, setNotice] = useState<NearbyPlacesMessageKey | "">("");
   const [busy, setBusy] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
-  const refreshGeneration = useRef(0);
   const [reload, setReload] = useState(0);
   useEffect(() => {
     let disposed = false;
-    const generation = ++refreshGeneration.current;
-    setRefreshing(false);
     setProfile(null);
     setSaved(null);
     setDraft(null);
     setLocation(null);
-    setDiscovery(null);
     setError("");
     void Promise.all([profileApi.getPropertyProfile(propertyId), api.read(propertyId)])
-      .then(async ([profile, curation]) => {
+      .then(([profile, curation]) => {
         if (disposed) return;
         if (
           profile.propertyId !== propertyId ||
           profile.profileRevision !== curation.profileRevision
-        )
-          throw new Error("Location changed while loading. Reload and try again.");
+        ) {
+          setError("nearbyPlaces.error.locationChanged");
+          return;
+        }
         setProfile(profile);
         setLocation(profile.profile.location);
         setSaved(curation);
         setDraft(curation);
-        try {
-          const result = await api.refresh(propertyId, profile.profileRevision);
-          if (!disposed && generation === refreshGeneration.current) {
-            setDiscovery(result);
-            setProviderMessage(discoveryMessage(result));
-          }
-        } catch {
-          if (!disposed && generation === refreshGeneration.current)
-            setProviderMessage(
-              "Automatic suggestions are unavailable. Retry later or add your own place.",
-            );
-        }
       })
-      .catch((error) => {
-        if (!disposed)
-          setError(error instanceof Error ? error.message : "Location could not load.");
+      .catch(() => {
+        if (!disposed) setError("nearbyPlaces.error.load");
       });
     return () => {
       disposed = true;
-      refreshGeneration.current += 1;
     };
   }, [propertyId, api, profileApi, reload]);
   const locationDirty = Boolean(
@@ -76,28 +60,10 @@ export function useNearbyEditor(
   const placesDirty = Boolean(
     saved &&
     draft &&
-    (JSON.stringify(saved.choices) !== JSON.stringify(draft.choices) ||
-      JSON.stringify(saved.customPlaces) !== JSON.stringify(draft.customPlaces)),
+    (JSON.stringify(saved.customPlaces) !== JSON.stringify(draft.customPlaces) ||
+      JSON.stringify(saved.customCategories) !== JSON.stringify(draft.customCategories) ||
+      JSON.stringify(saved.categoryNames) !== JSON.stringify(draft.categoryNames)),
   );
-  async function refresh(revision = profile?.profileRevision, force = true) {
-    if (!revision) return;
-    const generation = ++refreshGeneration.current;
-    setRefreshing(true);
-    setProviderMessage("");
-    try {
-      const result = await api.refresh(propertyId, revision, force);
-      if (generation !== refreshGeneration.current) return;
-      setDiscovery(result);
-      setProviderMessage(discoveryMessage(result));
-    } catch {
-      if (generation !== refreshGeneration.current) return;
-      setProviderMessage(
-        "Suggestions could not refresh yet. Please retry later. Your saved places are safe.",
-      );
-    } finally {
-      if (generation === refreshGeneration.current) setRefreshing(false);
-    }
-  }
   async function saveLocation() {
     if (!profile || !location) return;
     setBusy(true);
@@ -110,7 +76,6 @@ export function useNearbyEditor(
       });
       setProfile(next);
       setLocation(next.profile.location);
-      setDiscovery(null);
       // The server keeps saved places confirmed while the public pin is unchanged (VAY-2104).
       const curation = await api.read(propertyId).catch(() => null);
       const revisions = curation ?? {
@@ -127,11 +92,11 @@ export function useNearbyEditor(
           },
       );
       setNotice(
-        revisions.savedProfileRevision === revisions.profileRevision
-          ? "Location saved."
-          : "Location saved. Review your saved places for this location.",
+        revisions.savedProfileRevision === null ||
+          revisions.savedProfileRevision === revisions.profileRevision
+          ? "nearbyPlaces.notice.locationSaved"
+          : "nearbyPlaces.notice.locationSavedReview",
       );
-      await refresh(next.profileRevision, false);
     } catch (error) {
       setError(saveError(error));
     } finally {
@@ -148,12 +113,13 @@ export function useNearbyEditor(
         schemaVersion: 1,
         expectedProfileRevision: profile.profileRevision,
         expectedCurationRevision: saved.curationRevision,
-        choices: draft.choices,
         customPlaces: draft.customPlaces,
+        customCategories: draft.customCategories,
+        categoryNames: draft.categoryNames,
       });
       setSaved(next);
       setDraft(next);
-      setNotice("Places saved.");
+      setNotice("nearbyPlaces.notice.placesSaved");
     } catch (error) {
       setError(saveError(error));
     } finally {
@@ -167,16 +133,12 @@ export function useNearbyEditor(
     saved,
     draft,
     setDraft,
-    discovery,
     error,
     setError,
     notice,
-    providerMessage,
     busy,
-    refreshing,
     locationDirty,
     placesDirty,
-    refresh,
     saveLocation,
     savePlaces,
     reload: () => setReload((value) => value + 1),
@@ -188,20 +150,9 @@ export function useNearbyEditor(
     },
   };
 }
-function discoveryMessage(state: NearbyDiscoveryState): string {
-  if (state.status === "ready") return "";
-  if (state.status === "empty") return "No automatic places found. You can add your own.";
-  if (state.status === "location_required")
-    return "Save a valid pin and enable the guest map to discover nearby places.";
-  if (state.status === "refreshing")
-    return "Suggestions are being refreshed. Select Refresh suggestions in a moment.";
-  return "Automatic suggestions are unavailable. You can still add your own places.";
-}
-function saveError(error: unknown): string {
+function saveError(error: unknown): NearbyPlacesMessageKey {
   const status =
     (error as { status?: number; statusCode?: number })?.status ??
     (error as { statusCode?: number })?.statusCode;
-  return status === 409
-    ? "Someone changed this property's settings. Your edits are preserved. Reload the latest version before saving again."
-    : "Changes could not be saved. Your edits are preserved. Check the fields and try again.";
+  return status === 409 ? "nearbyPlaces.error.conflict" : "nearbyPlaces.error.save";
 }
