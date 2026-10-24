@@ -1720,5 +1720,9 @@
   "locationForm.exact": "Genaue Lage",
   "locationForm.visibilityHint": "„Ungefähr“ zeigt Ihre Gegend ohne genaue Markierung. „Ausgeblendet“ entfernt die Karte und die Orte in der Nähe.",
   "locationForm.save": "Lage speichern",
-  "locationForm.saving": "Wird gespeichert…"
+  "locationForm.saving": "Wird gespeichert…",
+  "propertyAddress.area": "Ortsteil / Dorf",
+  "propertyAddress.optional": "optional",
+  "propertyAddress.directions": "Anfahrtsbeschreibung",
+  "propertyAddress.directionsHint": "Wie Gäste bei der Ankunft Ihren Eingang finden. Zum Beispiel: „Am blauen Tor nach dem Tempel abbiegen“."
 }

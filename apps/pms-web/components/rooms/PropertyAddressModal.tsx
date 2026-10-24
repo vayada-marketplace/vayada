@@ -76,7 +76,16 @@ export default function PropertyAddressModal({
         setProfile(read);
         const { streetAddress, postalCode, city, countryCode, latitude, longitude } =
           read.profile.location;
-        setDraft({ streetAddress, postalCode, city, countryCode, latitude, longitude });
+        setDraft({
+          streetAddress,
+          postalCode,
+          city,
+          countryCode,
+          latitude,
+          longitude,
+          area: read.profile.location.area ?? "",
+          arrivalDirections: read.profile.location.arrivalDirections ?? "",
+        });
       })
       .catch(() => !disposed && setProfile("failed"));
     roomsService
@@ -117,15 +126,26 @@ export default function PropertyAddressModal({
     setSaving(true);
     setError("");
     try {
+      const { area, arrivalDirections, ...address } = draft;
+      const saved = profile.profile.location;
+      // Sent only when given or being cleared: an API from before VAY-2322 F2 refuses them.
+      const optional = (value: string | undefined, before: string | undefined) => {
+        const text = value?.trim() ?? "";
+        return text || before ? text : undefined;
+      };
+      const newArea = optional(area, saved.area);
+      const newDirections = optional(arrivalDirections, saved.arrivalDirections);
       const next = await sharedHotelSetupApi.updatePropertyProfile(propertyId, {
         expectedProfileRevision: profile.profileRevision,
         patch: {
           location: {
-            ...profile.profile.location,
-            ...draft,
-            streetAddress: draft.streetAddress.trim(),
-            postalCode: draft.postalCode.trim(),
-            city: draft.city.trim(),
+            ...saved,
+            ...address,
+            streetAddress: address.streetAddress.trim(),
+            postalCode: address.postalCode.trim(),
+            city: address.city.trim(),
+            ...(newArea !== undefined ? { area: newArea } : {}),
+            ...(newDirections !== undefined ? { arrivalDirections: newDirections } : {}),
           },
         },
       });

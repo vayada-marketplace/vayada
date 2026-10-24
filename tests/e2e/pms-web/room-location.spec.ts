@@ -419,6 +419,11 @@ test.describe("pms-web room location", () => {
     await expect(save).toBeDisabled();
     await expect(modal).toContainText("Add the street, city and country before saving.");
     await modal.getByLabel("City / region").fill("Munich");
+    // Area and arrival directions (VAY-2322 F2): the directions go in the guest's confirmation email.
+    await modal.getByLabel("Area / village").fill("Altstadt-Lehel");
+    await modal
+      .getByLabel("Arrival directions")
+      .fill("Walk through the blue gate next to the bakery. Reception is on the first floor.");
 
     // Moving the pin away leaves the older room at its own pin, and says so.
     await modal.getByText("Coordinates", { exact: true }).click();
@@ -451,13 +456,18 @@ test.describe("pms-web room location", () => {
             localityPublic: false,
             geoPublic: true,
             mapDisplayMode: "approximate",
+            area: "Altstadt-Lehel",
+            arrivalDirections:
+              "Walk through the blue gate next to the bakery. Reception is on the first floor.",
           },
         },
       },
     ]);
     const location = page.locator("main");
     await expect(location.getByText("Property address saved.")).toBeVisible();
-    await expect(location.getByText("Maximilianstraße 3, 80539 Munich")).toBeVisible();
+    await expect(
+      location.getByText("Maximilianstraße 3, 80539 Munich · Altstadt-Lehel"),
+    ).toBeVisible();
     await expect(page.getByRole("switch", { name: "Show map in room details" })).toHaveAttribute(
       "aria-checked",
       "false",

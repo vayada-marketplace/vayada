@@ -1720,5 +1720,9 @@
   "locationForm.exact": "Ubicación exacta",
   "locationForm.visibilityHint": "Aproximada muestra tu zona sin el marcador exacto. Oculta elimina el mapa y los lugares cercanos.",
   "locationForm.save": "Guardar ubicación",
-  "locationForm.saving": "Guardando…"
+  "locationForm.saving": "Guardando…",
+  "propertyAddress.area": "Zona / pueblo",
+  "propertyAddress.optional": "opcional",
+  "propertyAddress.directions": "Indicaciones de llegada",
+  "propertyAddress.directionsHint": "Cómo encuentran los huéspedes tu entrada al llegar. Por ejemplo: «Gira en la puerta azul después del templo»."
 }

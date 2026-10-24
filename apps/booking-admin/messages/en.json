@@ -1720,5 +1720,9 @@
   "locationForm.exact": "Exact location",
   "locationForm.visibilityHint": "Approximate shows your area without the exact pin. Hidden removes the map and nearby places.",
   "locationForm.save": "Save location",
-  "locationForm.saving": "Saving…"
+  "locationForm.saving": "Saving…",
+  "propertyAddress.area": "Area / village",
+  "propertyAddress.optional": "optional",
+  "propertyAddress.directions": "Arrival directions",
+  "propertyAddress.directionsHint": "How guests find your entrance once they arrive. For example: “Turn at the blue gate after the temple”."
 }

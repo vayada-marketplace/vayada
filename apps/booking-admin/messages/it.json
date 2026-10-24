@@ -1720,5 +1720,9 @@
   "locationForm.exact": "Posizione esatta",
   "locationForm.visibilityHint": "Approssimativa mostra la tua zona senza il segnaposto esatto. Nascosta rimuove la mappa e i luoghi nei dintorni.",
   "locationForm.save": "Salva posizione",
-  "locationForm.saving": "Salvataggio…"
+  "locationForm.saving": "Salvataggio…",
+  "propertyAddress.area": "Zona / paese",
+  "propertyAddress.optional": "facoltativo",
+  "propertyAddress.directions": "Indicazioni per l'arrivo",
+  "propertyAddress.directionsHint": "Come gli ospiti trovano il tuo ingresso al loro arrivo. Per esempio: «Gira al cancello blu dopo il tempio»."
 }

@@ -1775,6 +1775,54 @@ describe("shared hotel setup status route", () => {
     });
   });
 
+  it("keeps, sets and checks the area and arrival directions of a property's address (VAY-2322)", async () => {
+    const stored = profileResponse(propertyId, minimalHotelInput(), 7);
+    stored.profile.location = {
+      ...stored.profile.location,
+      area: "Altstadt",
+      arrivalDirections: "Walk through the blue gate.",
+    };
+    const profiles = new Map<string, SharedPropertyProfile>([[propertyId, stored]]);
+    const server = buildSharedSetupApp({
+      permissions: [
+        "hotel_catalog.setup.read",
+        "hotel_catalog.setup.manage",
+        "booking.settings.manage",
+      ],
+      repository: profileRepository(profiles),
+    });
+    app = server;
+    const put = (revision: number, location: Record<string, unknown>) =>
+      injectJson<SharedPropertyProfile & { fields?: Record<string, string[]> }>(server, {
+        method: "PUT",
+        url: "/api/hotel-setup/properties/" + propertyId + "/profile",
+        headers: { authorization: "Bearer valid-token" },
+        payload: { expectedProfileRevision: revision, patch: { location } },
+      });
+
+    // A client that doesn't know the fields (the setup wizard) leaves them as they are.
+    const kept = await put(7, { streetAddress: "Marienplatz 2" });
+    expect(kept.statusCode).toBe(200);
+    expect(kept.body.profile.location).toMatchObject({
+      streetAddress: "Marienplatz 2",
+      area: "Altstadt",
+      arrivalDirections: "Walk through the blue gate.",
+    });
+
+    const changed = await put(8, { area: "  Lehel ", arrivalDirections: "" });
+    expect(changed.statusCode).toBe(200);
+    expect(changed.body.profile.location).toMatchObject({ area: "Lehel" });
+    // An empty field is left out, as clients from before these fields expect.
+    expect(changed.body.profile.location).not.toHaveProperty("arrivalDirections");
+
+    const tooLong = await put(9, { area: "x".repeat(121), arrivalDirections: "y".repeat(1001) });
+    expect(tooLong.statusCode).toBe(422);
+    expect(tooLong.body.fields).toMatchObject({
+      "location.area": ["location.area is too long."],
+      "location.arrivalDirections": ["location.arrivalDirections is too long."],
+    });
+  });
+
   it("returns the current revision for a stale profile patch", async () => {
     const profiles = new Map<string, SharedPropertyProfile>([
       [propertyId, profileResponse(propertyId, minimalHotelInput(), 4)],

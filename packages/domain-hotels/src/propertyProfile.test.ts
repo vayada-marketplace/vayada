@@ -161,6 +161,35 @@ describe("canonical property profile wire contract", () => {
     ).toBeNull();
   });
 
+  it("reads and writes the area and arrival directions, both optional (VAY-2322)", () => {
+    const located = {
+      ...response,
+      profile: {
+        ...response.profile,
+        location: {
+          ...response.profile.location,
+          area: "Altstadt",
+          arrivalDirections: "Blue gate.",
+        },
+      },
+    };
+    expect(parsePropertyProfileResponse(located)).toEqual(located);
+    // Servers from before read back without them.
+    expect(parsePropertyProfileResponse(response)).toEqual(response);
+    expect(
+      parseUpdatePropertyProfileRequest({
+        expectedProfileRevision: 3,
+        patch: { location: { area: "", arrivalDirections: "Turn at the temple." } },
+      }),
+    ).not.toBeNull();
+    expect(
+      parseUpdatePropertyProfileRequest({
+        expectedProfileRevision: 3,
+        patch: { location: { area: 7 } },
+      }),
+    ).toBeNull();
+  });
+
   it("rejects the removed addressPublic compatibility field", () => {
     expect(
       parseCreatePropertyProfileRequest({

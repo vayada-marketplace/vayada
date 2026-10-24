@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { PropertyProfileLocation } from "@vayada/domain-hotels";
 import { COUNTRY_OPTIONS } from "@vayada/locale-constants";
 import GooglePlacesAddressField from "./GooglePlacesAddressField";
@@ -8,7 +8,14 @@ import GoogleAddressMap from "./GoogleAddressMap";
 /** The property's address and arrival pin: what the shared form edits. */
 export type PropertyAddress = Pick<
   PropertyProfileLocation,
-  "streetAddress" | "postalCode" | "city" | "countryCode" | "latitude" | "longitude"
+  | "streetAddress"
+  | "postalCode"
+  | "city"
+  | "countryCode"
+  | "latitude"
+  | "longitude"
+  | "area"
+  | "arrivalDirections"
 >;
 
 export const propertyAddressEnglish = {
@@ -16,6 +23,11 @@ export const propertyAddressEnglish = {
   "propertyAddress.searchHint":
     "Picking a result fills in the fields below. Every field can be edited by hand.",
   "propertyAddress.street": "Street and number",
+  "propertyAddress.area": "Area / village",
+  "propertyAddress.optional": "optional",
+  "propertyAddress.directions": "Arrival directions",
+  "propertyAddress.directionsHint":
+    "How guests find your entrance once they arrive. For example: “Turn at the blue gate after the temple”.",
   "propertyAddress.postalCode": "Postal code",
   "propertyAddress.city": "City / region",
   "propertyAddress.country": "Country",
@@ -34,7 +46,7 @@ type Translate = (key: keyof typeof propertyAddressEnglish) => string;
 const inputClass =
   "mt-1 block w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-950 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:bg-gray-50";
 const labelClass = "block text-sm font-medium text-gray-700";
-const MAX_LENGTH = { streetAddress: 240, postalCode: 32, city: 120 } as const;
+const MAX_LENGTH = { streetAddress: 240, postalCode: 32, city: 120, area: 120 } as const;
 
 /** The property's address (VAY-2322), shared by Booking Admin's Location settings and the PMS room editor's
  * "Property address" modal so the two can't drift apart: address search, fields that can all be typed by
@@ -59,6 +71,7 @@ export default function PropertyAddressFields({
   markerTitle?: string;
 }) {
   const t = translate ?? ((key) => propertyAddressEnglish[key]);
+  const id = useId();
   // A pick still loading is dropped once the host types.
   const revision = useRef(0);
   const [mapUnavailable, setMapUnavailable] = useState(false);
@@ -87,12 +100,17 @@ export default function PropertyAddressFields({
       name: name(country.code, country.name),
     })).sort((a, b) => a.name.localeCompare(b.name, locale));
   }, [locale]);
-  const text = (key: "streetAddress" | "postalCode" | "city", label: string) => (
+  const text = (key: "streetAddress" | "postalCode" | "city" | "area", label: string) => (
     <label className={labelClass}>
       {label}
+      {key === "area" && (
+        <span className="ml-1.5 text-xs font-normal text-gray-400">
+          {t("propertyAddress.optional")}
+        </span>
+      )}
       <input
         className={inputClass}
-        value={value[key]}
+        value={value[key] ?? ""}
         // The property profile's limits.
         maxLength={MAX_LENGTH[key]}
         disabled={disabled}
@@ -135,6 +153,8 @@ export default function PropertyAddressFields({
                   postalCode: address.postalCode,
                   city: address.city || address.region,
                   countryCode: address.countryCode,
+                  // A new address: the old area no longer describes it.
+                  area: "",
                   ...(address.latitude !== null && address.longitude !== null
                     ? { latitude: address.latitude, longitude: address.longitude }
                     : {}),
@@ -146,7 +166,10 @@ export default function PropertyAddressFields({
             )}
           </div>
         )}
-        {text("streetAddress", t("propertyAddress.street"))}
+        <div className="grid gap-3 sm:grid-cols-2">
+          {text("streetAddress", t("propertyAddress.street"))}
+          {text("area", t("propertyAddress.area"))}
+        </div>
         <div className="grid grid-cols-[minmax(0,8rem)_minmax(0,1fr)] gap-3">
           {text("postalCode", t("propertyAddress.postalCode"))}
           {text("city", t("propertyAddress.city"))}
@@ -171,6 +194,24 @@ export default function PropertyAddressFields({
             ))}
           </select>
         </label>
+        <label className={labelClass}>
+          {t("propertyAddress.directions")}
+          <span className="ml-1.5 text-xs font-normal text-gray-400">
+            {t("propertyAddress.optional")}
+          </span>
+          <textarea
+            className={`${inputClass} min-h-[72px]`}
+            value={value.arrivalDirections ?? ""}
+            maxLength={1000}
+            rows={3}
+            disabled={disabled}
+            aria-describedby={`${id}-directions-hint`}
+            onChange={(event) => change({ arrivalDirections: event.target.value })}
+          />
+        </label>
+        <p id={`${id}-directions-hint`} className="-mt-3 text-xs text-gray-500">
+          {t("propertyAddress.directionsHint")}
+        </p>
       </div>
       <div className="space-y-2">
         {showMap ? (

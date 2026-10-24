@@ -454,7 +454,9 @@ export default function RoomLocationField({
                     <>
                       <p className="text-[13px] font-semibold text-gray-900">{place.name}</p>
                       {place.address && (
-                        <p className="text-[12px] text-gray-600">{place.address}</p>
+                        <p className="text-[12px] text-gray-600">
+                          {[place.address, place.area].filter(Boolean).join(" · ")}
+                        </p>
                       )}
                     </>
                   )}
