@@ -4,6 +4,7 @@ import {
   mockPmsWebAuthenticatedSession,
   mockPmsWebTargetRoutes,
   pmsWebRoomType,
+  sharedPropertyProfile,
 } from "../support/pmsWebMocks";
 import { mockGoogleMaps, type FakeGooglePlace } from "../support/googleMapsFake";
 import { watchPageHealth } from "../support/pageHealth";
@@ -27,7 +28,6 @@ const leopoldstrasse: FakeGooglePlace = {
 };
 // The mocked property's own pin (pmsWebMocks' shared profile: Alpenrose Munich, Alpenstrasse 12).
 const propertyPin = "48.1372,11.5756";
-const HANDOFF_CODE = "e2e-room-location-handoff-code-0123456789abcdef";
 
 test.describe("pms-web room location", () => {
   test("fills the pin from a picked address, takes a dragged pin and saves both", async ({
@@ -339,42 +339,140 @@ test.describe("pms-web room location", () => {
     expect(backend.locationWrites[0]).toMatchObject({ locationSource: "property" });
   });
 
-  test("opens Booking Admin's Location page in a new tab to edit the property's address", async ({
+  test("edits the property's address over the room, keeping the room's unsaved changes (VAY-2322)", async ({
     page,
   }) => {
-    await mockRoomBackend(page);
-    const destination = `${new URL("/handoff", bookingAdminOrigin()).toString()}#code=${HANDOFF_CODE}`;
-    const handoffs: unknown[] = [];
-    await page.route("**/auth/handoff/create", (route) => {
-      handoffs.push(route.request().postDataJSON());
-      return route.fulfill({ json: { destination } });
-    });
-    await page.context().route(
-      (url) => url.origin === bookingAdminOrigin() && url.pathname === "/handoff",
-      (route) =>
-        route.fulfill({ contentType: "text/html", body: "<!doctype html><h1>Booking Admin</h1>" }),
+    const backend = await mockRoomBackend(page);
+    await mockGoogleMaps(page, { places: [] });
+    // The other room types: one on "Same as property", an older one on the property's pin by its own
+    // coordinates (saved before VAY-2321), and a villa with a place of its own.
+    await page.route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/room-types*`, (route) =>
+      route.fulfill({
+        json: {
+          contractVersion: "pms-operations.v1",
+          propertyId: PMS_WEB_PROPERTY_ID,
+          items: [
+            backend.room,
+            pmsWebRoomType,
+            {
+              ...pmsWebRoomType,
+              roomTypeId: "room_type_garden",
+              name: "Garden Room",
+              attributes: { latitude: 48.13721, longitude: 11.57562 },
+            },
+            {
+              ...pmsWebRoomType,
+              roomTypeId: "room_type_beach_villa",
+              name: "Beach Villa",
+              attributes: { locationSource: "custom", latitude: 48.1563, longitude: 11.5824 },
+            },
+          ],
+          sourceFreshness: {},
+        },
+      }),
     );
+    // Guests see an approximate area and no locality: saving the address must keep both.
+    const profile = structuredClone(sharedPropertyProfile);
+    Object.assign(profile.profile.location, {
+      mapDisplayMode: "approximate",
+      localityPublic: false,
+    });
+    const profileWrites: Record<string, unknown>[] = [];
+    await page.route(`**/api/hotel-setup/properties/${PMS_WEB_PROPERTY_ID}/profile`, (route) => {
+      if (route.request().method() !== "PUT") return route.fulfill({ json: profile });
+      profileWrites.push(route.request().postDataJSON());
+      return route.fallback();
+    });
 
     await page.goto(`/rooms/${roomTypeId}`);
     // An unsaved edit elsewhere in the room stays.
     await page.getByRole("switch", { name: "Show map in room details" }).click();
-    const [tab] = await Promise.all([
-      page.waitForEvent("popup"),
-      page.getByRole("button", { name: "Edit property address" }).click(),
+    const edit = page.getByRole("button", { name: "Edit property address" });
+    await edit.click();
+    const modal = page.getByRole("dialog", { name: "Property address" });
+    const impact = modal.getByTestId("address-impact");
+    await expect(impact).toContainText("Changes apply to 3 room types");
+    await expect(impact.getByRole("listitem")).toHaveText([
+      "Schwabing Loft",
+      "Alpine Suite",
+      "Garden Room",
     ]);
-    await expect.poll(() => tab.url()).toBe(destination);
-    expect(handoffs).toEqual([
+    await expect(impact).toContainText(
+      "Rooms with a separate location keep their own pin: Beach Villa.",
+    );
+    await expect(modal.getByLabel("Street and number")).toHaveValue("Alpenstrasse 12");
+    await expect(modal.getByLabel("Country")).toHaveValue("DE");
+
+    // Escape closes without saving; the focus is back on the link and the room is as it was.
+    await page.keyboard.press("Escape");
+    await expect(modal).toHaveCount(0);
+    await expect(edit).toBeFocused();
+    expect(profileWrites).toEqual([]);
+
+    await edit.click();
+    await modal.getByLabel("Street and number").fill("Maximilianstraße 3");
+    await modal.getByLabel("Postal code").fill("80539");
+    // Enter in a field doesn't save the room behind.
+    await modal.getByLabel("Postal code").press("Enter");
+    await modal.getByLabel("City / region").fill("");
+    const save = modal.getByRole("button", { name: "Save address" });
+    await expect(save).toBeDisabled();
+    await expect(modal).toContainText("Add the street, city and country before saving.");
+    await modal.getByLabel("City / region").fill("Munich");
+    // Area and arrival directions (VAY-2322 F2): the directions go in the guest's confirmation email.
+    await modal.getByLabel("Area / village").fill("Altstadt-Lehel");
+    await modal
+      .getByLabel("Arrival directions")
+      .fill("Walk through the blue gate next to the bakery. Reception is on the first floor.");
+
+    // Moving the pin away leaves the older room at its own pin, and says so.
+    await modal.getByText("Coordinates", { exact: true }).click();
+    await modal.getByLabel("Latitude").fill("48.1394");
+    await modal.getByLabel("Longitude").fill("");
+    await expect(save).toBeDisabled();
+    await expect(modal).toContainText("Enter both coordinates");
+    await modal.getByLabel("Longitude").fill("11.5835");
+    await expect(impact).toContainText("Changes apply to 2 room types");
+    await expect(impact).toContainText(
+      "Garden Room sits on the old pin by its own coordinates and stays there.",
+    );
+    await expect(modal).toContainText("Goes live in the Booking Engine as soon as you save.");
+    await save.click();
+    await expect(modal).toHaveCount(0);
+
+    // Only the address and pin change: visibility, locality and time zone stay as they were.
+    expect(profileWrites).toEqual([
       {
-        routingHints: { propertyId: PMS_WEB_PROPERTY_ID },
-        sourceSurface: "pms-web",
-        targetPath: "/settings/location",
-        targetSurface: "booking-admin",
+        expectedProfileRevision: 1,
+        patch: {
+          location: {
+            countryCode: "DE",
+            city: "Munich",
+            streetAddress: "Maximilianstraße 3",
+            postalCode: "80539",
+            timezone: "Europe/Berlin",
+            latitude: 48.1394,
+            longitude: 11.5835,
+            localityPublic: false,
+            geoPublic: true,
+            mapDisplayMode: "approximate",
+            area: "Altstadt-Lehel",
+            arrivalDirections:
+              "Walk through the blue gate next to the bakery. Reception is on the first floor.",
+          },
+        },
       },
     ]);
+    const location = page.locator("main");
+    await expect(location.getByText("Property address saved.")).toBeVisible();
+    await expect(
+      location.getByText("Maximilianstraße 3, 80539 Munich · Altstadt-Lehel"),
+    ).toBeVisible();
     await expect(page.getByRole("switch", { name: "Show map in room details" })).toHaveAttribute(
       "aria-checked",
       "false",
     );
+    expect(backend.locationWrites).toEqual([]);
   });
 
   test("shows a separate place to guests as an area, named from Google, next to the property (VAY-2321)", async ({
@@ -557,14 +655,4 @@ async function mockRoomBackend(
     }),
   );
   return state;
-}
-
-function bookingAdminOrigin(): string {
-  return (
-    process.env.E2E_SETUP_HOST_BASE_URL ||
-    process.env.NEXT_PUBLIC_BOOKING_ADMIN_URL ||
-    (process.env.CI === "true" || process.env.E2E_START_SERVERS === "1"
-      ? "http://admin.booking.localhost:3003"
-      : "https://admin.booking.localhost")
-  );
 }

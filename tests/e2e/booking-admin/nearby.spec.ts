@@ -178,20 +178,21 @@ test("mobile editing, discard and navigation protection retain dirty forms", asy
   await setup(page, false);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/settings/location");
-  await page.getByLabel("Street address", { exact: true }).fill("Changed street");
-  await expect(page.getByLabel(/^latitude$/i)).toHaveValue("");
+  await page.getByLabel("Street and number", { exact: true }).fill("Changed street");
+  // The pin marks where guests arrive: typing the address keeps it (VAY-2322).
+  await expect(page.getByLabel(/^latitude$/i)).toHaveValue("-1.125");
   page.once("dialog", (dialog) => dialog.dismiss());
   await page
     .getByRole("navigation", { name: "Breadcrumb" })
     .getByRole("link", { name: "General", exact: true })
     .click();
   await expect(page).toHaveURL(/settings\/location/);
-  await expect(page.getByLabel("Street address", { exact: true })).toHaveValue("Changed street");
+  await expect(page.getByLabel("Street and number", { exact: true })).toHaveValue("Changed street");
   page.once("dialog", (dialog) => dialog.dismiss());
   await page.reload({ timeout: 2000 }).catch(() => {});
-  await expect(page.getByLabel("Street address", { exact: true })).toHaveValue("Changed street");
+  await expect(page.getByLabel("Street and number", { exact: true })).toHaveValue("Changed street");
   await page.getByRole("button", { name: "Discard changes", exact: true }).click();
-  await expect(page.getByLabel("Street address", { exact: true })).not.toHaveValue(
+  await expect(page.getByLabel("Street and number", { exact: true })).not.toHaveValue(
     "Changed street",
   );
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
@@ -225,20 +226,22 @@ test("fallback protects same-document back, forward and app navigation", async (
   await page.addInitScript(() => Object.defineProperty(window, "navigation", { value: undefined }));
   await setup(page, false);
   await page.goto("/settings/location");
-  await expect(page.getByLabel("Street address", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Street and number", { exact: true })).toBeVisible();
   await page.evaluate(() => {
     history.pushState({}, "", "?step=1");
     history.pushState({}, "", "?step=2");
     history.back();
   });
   await expect(page).toHaveURL(/step=1/);
-  await page.getByLabel("Street address", { exact: true }).fill("Keep this draft");
+  await page.getByLabel("Street and number", { exact: true }).fill("Keep this draft");
   for (const direction of ["back", "forward"] as const) {
     const dialog = page.waitForEvent("dialog");
     await page.evaluate((direction) => history[direction](), direction);
     await (await dialog).dismiss();
     await expect(page).toHaveURL(/step=1/);
-    await expect(page.getByLabel("Street address", { exact: true })).toHaveValue("Keep this draft");
+    await expect(page.getByLabel("Street and number", { exact: true })).toHaveValue(
+      "Keep this draft",
+    );
   }
   page.once("dialog", (dialog) => dialog.dismiss());
   await page

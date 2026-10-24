@@ -108,6 +108,8 @@ export type SharedPropertyProfileRow = {
   localityPublic: boolean | null;
   geoPublic: boolean | null;
   mapDisplayMode: string | null;
+  area?: string | null;
+  arrivalDirections?: string | null;
   contacts: unknown;
 };
 
@@ -154,6 +156,8 @@ type SharedPropertyProfileWritePayload = {
   address_public: boolean;
   geo_public: boolean;
   map_display_mode: SharedPropertyProfileInput["location"]["mapDisplayMode"];
+  area?: string;
+  arrival_directions?: string;
   contacts: Array<{
     channel_type: SharedPropertyProfileInput["contacts"][number]["channelType"];
     value: string;
@@ -1128,10 +1132,21 @@ export function toSharedPropertyProfile(row: SharedPropertyProfileRow): SharedPr
         localityPublic: row.localityPublic ?? false,
         geoPublic: row.geoPublic ?? false,
         mapDisplayMode: mapDisplayMode(row.mapDisplayMode),
+        // Only when given (VAY-2322): clients from before them reject unknown keys.
+        ...optionalLocationText(row),
       },
       contacts: contactItems(row.contacts),
     },
   };
+}
+
+function optionalLocationText(row: { area?: string | null; arrivalDirections?: string | null }): {
+  area?: string;
+  arrivalDirections?: string;
+} {
+  const area = nonEmpty(row.area);
+  const arrivalDirections = nonEmpty(row.arrivalDirections);
+  return { ...(area ? { area } : {}), ...(arrivalDirections ? { arrivalDirections } : {}) };
 }
 
 function toPublicPropertyProfile(row: PublicPropertyProfileRow): SharedPublicPropertyProfile {
@@ -1344,6 +1359,11 @@ export function propertyProfileWritePayload(
     address_public: profile.location.localityPublic,
     geo_public: profile.location.geoPublic,
     map_display_mode: profile.location.mapDisplayMode,
+    // Only when given: an identical create keeps its idempotency fingerprint across this release.
+    ...(profile.location.area ? { area: profile.location.area } : {}),
+    ...(profile.location.arrivalDirections
+      ? { arrival_directions: profile.location.arrivalDirections }
+      : {}),
     contacts: profile.contacts.map((item) => ({
       channel_type: item.channelType,
       value: item.value,
@@ -1370,6 +1390,8 @@ function propertyProfileSql(): string {
       COALESCE(location.address_public, FALSE) AS "localityPublic",
       COALESCE(location.geo_public, FALSE) AS "geoPublic",
       COALESCE(location.map_display_mode, 'hidden') AS "mapDisplayMode",
+      location.area,
+      location.arrival_directions AS "arrivalDirections",
       COALESCE(contacts.items, '[]'::jsonb) AS contacts
     FROM hotel_catalog.properties property
     JOIN identity.organization_resource_links link
@@ -1564,6 +1586,8 @@ function createPropertyProfileSql(): string {
         address_public boolean,
         geo_public boolean,
         map_display_mode text,
+        area text,
+        arrival_directions text,
         contacts jsonb
       )
     ),
@@ -1692,6 +1716,8 @@ function updatePropertyProfileSql(): string {
         address_public boolean,
         geo_public boolean,
         map_display_mode text,
+        area text,
+        arrival_directions text,
         contacts jsonb
       )
     ),
@@ -1745,6 +1771,8 @@ function propertyProfileMutationCtes(mode: "create" | "update"): string {
         address_public,
         geo_public,
         map_display_mode,
+        area,
+        arrival_directions,
         source_confidence,
         updated_at
       )
@@ -1760,6 +1788,8 @@ function propertyProfileMutationCtes(mode: "create" | "update"): string {
         profile_input.address_public,
         profile_input.geo_public,
         COALESCE(profile_input.map_display_mode, 'hidden'),
+        profile_input.area,
+        profile_input.arrival_directions,
         'verified',
         now()
       FROM written_property, profile_input
@@ -1776,6 +1806,8 @@ function propertyProfileMutationCtes(mode: "create" | "update"): string {
           address_public = EXCLUDED.address_public,
           geo_public = EXCLUDED.geo_public,
           map_display_mode = EXCLUDED.map_display_mode,
+          area = EXCLUDED.area,
+          arrival_directions = EXCLUDED.arrival_directions,
           source_confidence = EXCLUDED.source_confidence,
           updated_at = now()`
           : ""

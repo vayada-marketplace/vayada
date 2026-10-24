@@ -12,7 +12,6 @@ import {
 } from "react";
 import {
   ArrowPathIcon,
-  ArrowTopRightOnSquareIcon,
   ArrowsPointingOutIcon,
   BuildingOffice2Icon,
   CheckCircleIcon,
@@ -21,6 +20,7 @@ import {
   LinkIcon,
   MagnifyingGlassIcon,
   MapPinIcon,
+  PencilSquareIcon,
   TrashIcon,
   ViewfinderCircleIcon,
   XMarkIcon,
@@ -43,10 +43,9 @@ import {
   roundCoordinate,
   type CoordinateAxis,
 } from "@/lib/roomLocation";
-import { resolveSharedHotelSetupHandoff } from "@/lib/utils/setupHandoff";
 import { getPmsPropertyPlace, type PmsPropertyPlace } from "@/services/api/pmsPropertyClient";
-import { getAuthCsrfToken } from "@/services/auth/sessionStore";
 import type { RoomLocationPrecision, RoomLocationSource } from "@/services/rooms";
+import PropertyAddressModal from "./PropertyAddressModal";
 
 const GOOGLE_MAPS_API_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY?.trim() ?? "";
 // One failed request can be a blip; after this many in a row, address search gives way to typing.
@@ -103,11 +102,14 @@ const mapButtonClass = "rounded-lg bg-white shadow-[0_1px_4px_rgb(0_0_0_/_20%)]"
  * a "Separate location" has its own, from Google address search, a pasted Google Maps link, the map or typed
  * coordinates, shown to guests exactly or as an area. Without Google the host types the address and coordinates. */
 export default function RoomLocationField({
+  roomId = null,
   roomName,
   value,
   onChange,
   onValidityChange,
 }: {
+  /** The saved room type being edited; null for a new one. */
+  roomId?: string | null;
   roomName: string;
   value: RoomLocation;
   onChange: (patch: Partial<RoomLocation>) => void;
@@ -131,7 +133,9 @@ export default function RoomLocationField({
   const [advancedOpen, setAdvancedOpen] = useState(false);
   // The property's own place: what "Same as property" uses and what a separate room is placed by.
   const [property, setProperty] = useState<PmsPropertyPlace | "loading" | "failed">("loading");
-  const [propertyLinkFailed, setPropertyLinkFailed] = useState(false);
+  // The property's address, edited over the room (VAY-2322), and its saved notice.
+  const [editingAddress, setEditingAddress] = useState(false);
+  const [addressSaved, setAddressSaved] = useState(false);
   // A pick still loading is dropped when the host types, drags or removes meanwhile.
   const pickGeneration = useRef(0);
 
@@ -178,18 +182,8 @@ export default function RoomLocationField({
           () => !disposed && setProperty((current) => (current === "loading" ? "failed" : current)),
         );
     void load();
-    // Rendered without a browser (unit tests): nothing to listen to.
-    if (typeof document === "undefined") {
-      return () => {
-        disposed = true;
-      };
-    }
-    // Back from editing the address in Booking Admin's tab: show the address saved there.
-    const onVisible = () => document.visibilityState === "visible" && void load();
-    document.addEventListener("visibilitychange", onVisible);
     return () => {
       disposed = true;
-      document.removeEventListener("visibilitychange", onVisible);
     };
   }, []);
 
@@ -265,31 +259,6 @@ export default function RoomLocationField({
   }
 
   /** Booking Admin's Location page, in a new tab so the room's unsaved edits stay (until VAY-2322's modal). */
-  async function openPropertyAddress() {
-    setPropertyLinkFailed(false);
-    // Opened before the handoff resolves: a tab opened after an await is a blocked popup. Without a tab the
-    // room page stays, so its unsaved edits do too.
-    const tab = window.open("", "_blank");
-    if (!tab) {
-      setPropertyLinkFailed(true);
-      return;
-    }
-    try {
-      const handoff = await resolveSharedHotelSetupHandoff({
-        targetPath: "/settings/location",
-        csrfToken: getAuthCsrfToken(),
-        ...(place ? { propertyId: place.propertyId } : {}),
-      });
-      if (handoff.kind === "retryable")
-        throw new Error("The Booking Admin handoff is unavailable.");
-      tab.opener = null;
-      tab.location.href = handoff.destination;
-    } catch {
-      tab.close();
-      setPropertyLinkFailed(true);
-    }
-  }
-
   const coordinateField = (axis: CoordinateAxis) => {
     const text = axis === "latitude" ? latitudeText : longitudeText;
     const invalid =
@@ -485,23 +454,43 @@ export default function RoomLocationField({
                     <>
                       <p className="text-[13px] font-semibold text-gray-900">{place.name}</p>
                       {place.address && (
-                        <p className="text-[12px] text-gray-600">{place.address}</p>
+                        <p className="text-[12px] text-gray-600">
+                          {[place.address, place.area].filter(Boolean).join(" · ")}
+                        </p>
                       )}
                     </>
                   )}
                   <button
                     type="button"
-                    onClick={() => void openPropertyAddress()}
+                    onClick={() => {
+                      setAddressSaved(false);
+                      setEditingAddress(true);
+                    }}
+                    disabled={!place}
                     className={linkClass}
-                    title={t("rooms.form.editPropertyAddressHint")}
                   >
-                    <ArrowTopRightOnSquareIcon className="h-3.5 w-3.5" />
+                    <PencilSquareIcon className="h-3.5 w-3.5" />
                     {t("rooms.form.editPropertyAddress")}
                   </button>
-                  {propertyLinkFailed && (
-                    <p role="alert" className="text-[11px] font-medium text-red-600">
-                      {t("rooms.form.editPropertyAddressFailed")}
+                  {addressSaved && (
+                    <p role="status" className="text-[11px] font-medium text-green-700">
+                      {t("rooms.form.propertyAddressSaved")}
                     </p>
+                  )}
+                  {editingAddress && place && (
+                    <PropertyAddressModal
+                      propertyId={place.propertyId}
+                      room={{ id: roomId, name: roomName }}
+                      onClose={() => setEditingAddress(false)}
+                      onSaved={(saved) => {
+                        // A room that is the property's only by its own pin (saved before VAY-2321) follows
+                        // the moved address too, once the room is saved.
+                        if (!value.locationSource) onChange({ locationSource: "property" });
+                        setProperty(saved);
+                        setEditingAddress(false);
+                        setAddressSaved(true);
+                      }}
+                    />
                   )}
                 </div>
               </div>

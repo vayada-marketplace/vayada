@@ -1,8 +1,26 @@
 "use client";
-import { useRef } from "react";
 import type { PropertyProfileLocation } from "@vayada/domain-hotels";
-import GooglePlacesAddressField from "./GooglePlacesAddressField";
-import GoogleAddressMap from "./GoogleAddressMap";
+import PropertyAddressFields, { propertyAddressEnglish } from "./PropertyAddressFields";
+
+/** Booking Admin's own location settings around the shared address fields (VAY-2322). */
+export const nearbyLocationEnglish = {
+  "locationForm.title": "Location",
+  "locationForm.intro": "Confirm your address and pin. We’ll suggest places nearby automatically.",
+  "locationForm.timezone": "Time zone",
+  "locationForm.visibility": "Guest map visibility",
+  "locationForm.hidden": "Hidden",
+  "locationForm.approximate": "Approximate area",
+  "locationForm.exact": "Exact location",
+  "locationForm.visibilityHint":
+    "Approximate shows your area without the exact pin. Hidden removes the map and nearby places.",
+  "locationForm.save": "Save location",
+  "locationForm.saving": "Saving…",
+} as const;
+
+export type LocationFormKey =
+  | keyof typeof propertyAddressEnglish
+  | keyof typeof nearbyLocationEnglish;
+const english = { ...propertyAddressEnglish, ...nearbyLocationEnglish };
 
 export const nearbyInputClass =
   "mt-1 block w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-950 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100";
@@ -11,102 +29,47 @@ export default function NearbyLocationForm({
   onChange,
   apiKey,
   disabled,
+  translate,
+  locale,
 }: {
   value: PropertyProfileLocation;
   onChange: (value: PropertyProfileLocation) => void;
   apiKey: string;
   disabled: boolean;
+  /** The form's copy (VAY-2322; the address fields are shared with the PMS); English without it. */
+  translate?: (key: LocationFormKey) => string;
+  locale?: string;
 }) {
-  const revision = useRef(0);
+  const t = translate ?? ((key: LocationFormKey) => english[key]);
   function change(patch: Partial<PropertyProfileLocation>) {
-    revision.current += 1;
     onChange({ ...value, ...patch });
   }
   return (
     <fieldset disabled={disabled} className="space-y-5">
-      <legend className="mb-2 text-lg font-semibold text-gray-950">Location</legend>
-      <p className="text-sm text-gray-500">
-        Confirm your address and pin. We’ll suggest places nearby automatically.
-      </p>
-      {apiKey && (
-        <GooglePlacesAddressField
-          apiKey={apiKey}
-          addressRevision={revision}
-          onUnavailable={() => {}}
-          onSelect={(address) => {
-            if (disabled) return;
-            change({
-              streetAddress: address.streetAddress,
-              postalCode: address.postalCode,
-              city: address.city,
-              countryCode: address.countryCode,
-              latitude: address.latitude,
-              longitude: address.longitude,
-            });
-          }}
-        />
-      )}
-      <div className="grid gap-4 sm:grid-cols-2">
-        {(
-          [
-            ["streetAddress", "Street address"],
-            ["city", "City"],
-            ["postalCode", "Postal code"],
-            ["countryCode", "Country code"],
-            ["timezone", "Time zone"],
-          ] as const
-        ).map(([key, label]) => (
-          <label key={key} className="text-sm font-medium text-gray-700">
-            {label}
-            <input
-              className={nearbyInputClass}
-              value={value[key]}
-              maxLength={key === "countryCode" ? 2 : 200}
-              placeholder={key === "timezone" ? "Asia/Makassar" : undefined}
-              onChange={(event) =>
-                change({
-                  [key]:
-                    key === "countryCode" ? event.target.value.toUpperCase() : event.target.value,
-                  ...(key !== "timezone" ? { latitude: null, longitude: null } : {}),
-                })
-              }
-            />
-          </label>
-        ))}
-      </div>
-      <div className="grid grid-cols-2 gap-4">
-        {(["latitude", "longitude"] as const).map((key) => (
-          <label key={key} className="text-sm font-medium capitalize text-gray-700">
-            {key}
-            <input
-              className={nearbyInputClass}
-              type="number"
-              step="any"
-              min={key === "latitude" ? -90 : -180}
-              max={key === "latitude" ? 90 : 180}
-              value={value[key] ?? ""}
-              onChange={(event) =>
-                change({ [key]: event.target.value === "" ? null : Number(event.target.value) })
-              }
-            />
-          </label>
-        ))}
-      </div>
-      <p className="text-xs text-gray-500">
-        You can enter coordinates manually when address search is unavailable.
-      </p>
-      {apiKey && value.latitude !== null && value.longitude !== null && (
-        <div className="relative h-48 overflow-hidden rounded-xl">
-          <GoogleAddressMap
-            active
-            apiKey={apiKey}
-            latitude={value.latitude}
-            longitude={value.longitude}
-          />
-        </div>
-      )}
+      <legend className="mb-2 text-lg font-semibold text-gray-950">
+        {t("locationForm.title")}
+      </legend>
+      <p className="text-sm text-gray-500">{t("locationForm.intro")}</p>
+      <PropertyAddressFields
+        value={value}
+        onChange={change}
+        apiKey={apiKey}
+        disabled={disabled}
+        translate={t}
+        locale={locale}
+      />
       <label className="block text-sm font-medium text-gray-700">
-        Guest map visibility
+        {t("locationForm.timezone")}
+        <input
+          className={nearbyInputClass}
+          value={value.timezone}
+          maxLength={200}
+          placeholder="Asia/Makassar"
+          onChange={(event) => change({ timezone: event.target.value })}
+        />
+      </label>
+      <label className="block text-sm font-medium text-gray-700">
+        {t("locationForm.visibility")}
         <select
           className={nearbyInputClass}
           value={value.geoPublic ? value.mapDisplayMode : "hidden"}
@@ -117,14 +80,12 @@ export default function NearbyLocationForm({
             })
           }
         >
-          <option value="hidden">Hidden</option>
-          <option value="approximate">Approximate area</option>
-          <option value="exact">Exact location</option>
+          <option value="hidden">{t("locationForm.hidden")}</option>
+          <option value="approximate">{t("locationForm.approximate")}</option>
+          <option value="exact">{t("locationForm.exact")}</option>
         </select>
       </label>
-      <p className="text-xs text-gray-500">
-        Approximate shows your area without the exact pin. Hidden removes the map and nearby places.
-      </p>
+      <p className="text-xs text-gray-500">{t("locationForm.visibilityHint")}</p>
     </fieldset>
   );
 }

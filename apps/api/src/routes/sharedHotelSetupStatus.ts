@@ -1421,6 +1421,8 @@ function parseCreatePropertyProfile(
       "localityPublic",
       "geoPublic",
       "mapDisplayMode",
+      "area",
+      "arrivalDirections",
     ],
     "location",
     errors,
@@ -1501,6 +1503,8 @@ function propertyProfileUpdate(
       "localityPublic",
       "geoPublic",
       "mapDisplayMode",
+      "area",
+      "arrivalDirections",
     ],
     "patch.location",
     errors,
@@ -1558,6 +1562,13 @@ function parseProfileLocation(
     addFieldError(errors, "location.timezone", "timezone must be an IANA timezone.");
   }
 
+  const area = optionalString(input["area"], "location.area", errors, { maxLength: 120 });
+  const arrivalDirections = optionalString(
+    input["arrivalDirections"],
+    "location.arrivalDirections",
+    errors,
+    { maxLength: 1000 },
+  );
   const latitude = optionalNumber(input["latitude"], "location.latitude", errors, {
     min: -90,
     max: 90,
@@ -1622,6 +1633,10 @@ function parseProfileLocation(
     localityPublic,
     geoPublic,
     mapDisplayMode,
+    // VAY-2322 F2: optional, and only when given. Left out of a patch, the stored value stays (the merge
+    // keeps it); "" clears it.
+    ...(area ? { area } : {}),
+    ...(arrivalDirections ? { arrivalDirections } : {}),
   };
 }
 
