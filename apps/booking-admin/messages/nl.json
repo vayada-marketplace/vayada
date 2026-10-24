@@ -1723,6 +1723,6 @@
   "locationForm.saving": "Opslaan…",
   "propertyAddress.area": "Wijk / dorp",
   "propertyAddress.optional": "optioneel",
-  "propertyAddress.directions": "Aanrijroute",
-  "propertyAddress.directionsHint": "Wordt meegestuurd in de boekingsbevestiging aan de gast. Bijvoorbeeld: ‘Sla af bij de blauwe poort na de tempel’."
+  "propertyAddress.directions": "Routebeschrijving",
+  "propertyAddress.directionsHint": "Hoe gasten bij aankomst je ingang vinden. Bijvoorbeeld: ‘Sla af bij de blauwe poort na de tempel’."
 }

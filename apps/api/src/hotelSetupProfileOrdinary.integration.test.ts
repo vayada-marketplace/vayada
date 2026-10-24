@@ -370,10 +370,12 @@ describe.skipIf(!url)("ordinary property profile writer (VAY-2056)", () => {
         area: "Kathaluwa",
         arrival_directions: "Turn at the blue gate after the temple.",
       });
-      expect(await write(bound, "arrival-cleared", located("", ""), 5)).toMatchObject({
-        status: "updated",
-        profile: { profile: { location: { area: "", arrivalDirections: "" } } },
-      });
+      const cleared = await write(bound, "arrival-cleared", located("", ""), 5);
+      expect(cleared).toMatchObject({ status: "updated" });
+      // Empty fields are left out of the profile, as clients from before them expect.
+      expect(
+        (cleared as { profile: { profile: { location: object } } }).profile.profile.location,
+      ).not.toHaveProperty("area");
       expect(await stored()).toEqual({ area: null, arrival_directions: null });
     } finally {
       await admin.query("ROLLBACK").catch(() => undefined);

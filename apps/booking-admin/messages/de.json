@@ -1724,5 +1724,5 @@
   "propertyAddress.area": "Ortsteil / Dorf",
   "propertyAddress.optional": "optional",
   "propertyAddress.directions": "Anfahrtsbeschreibung",
-  "propertyAddress.directionsHint": "Wird in der Buchungsbestätigung an den Gast gesendet. Zum Beispiel: „Am blauen Tor nach dem Tempel abbiegen“."
+  "propertyAddress.directionsHint": "Wie Gäste bei der Ankunft Ihren Eingang finden. Zum Beispiel: „Am blauen Tor nach dem Tempel abbiegen“."
 }

@@ -1724,5 +1724,5 @@
   "propertyAddress.area": "区域 / 村庄",
   "propertyAddress.optional": "选填",
   "propertyAddress.directions": "到达指引",
-  "propertyAddress.directionsHint": "会在预订确认邮件中发送给客人。例如：“过了寺庙后在蓝色大门处转弯”。"
+  "propertyAddress.directionsHint": "客人到达后如何找到您的入口。例如：“过了寺庙后在蓝色大门处转弯”。"
 }

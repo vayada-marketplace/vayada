@@ -161,6 +161,8 @@ export type PmsPropertyPlace = {
   propertyId: string;
   name: string;
   address: string;
+  /** The area or village (VAY-2322): shown with the address, never copied into a room's street. */
+  area: string;
   pin: { latitude: number; longitude: number } | null;
 };
 
@@ -175,14 +177,14 @@ export function pmsPropertyPlace(
   { profile }: Pick<PropertyProfileResponse, "profile">,
 ): PmsPropertyPlace {
   const { streetAddress, postalCode, city, latitude, longitude, area } = profile.location;
-  const address = [streetAddress, [postalCode, city].filter(Boolean).join(" ")]
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .join(", ");
   return {
     propertyId,
     name: profile.displayName,
-    address: [address, area?.trim()].filter(Boolean).join(" · "),
+    address: [streetAddress, [postalCode, city].filter(Boolean).join(" ")]
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .join(", "),
+    area: area?.trim() ?? "",
     pin:
       typeof latitude === "number" && typeof longitude === "number"
         ? { latitude, longitude }

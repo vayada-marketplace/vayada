@@ -1810,7 +1810,9 @@ describe("shared hotel setup status route", () => {
 
     const changed = await put(8, { area: "  Lehel ", arrivalDirections: "" });
     expect(changed.statusCode).toBe(200);
-    expect(changed.body.profile.location).toMatchObject({ area: "Lehel", arrivalDirections: "" });
+    expect(changed.body.profile.location).toMatchObject({ area: "Lehel" });
+    // An empty field is left out, as clients from before these fields expect.
+    expect(changed.body.profile.location).not.toHaveProperty("arrivalDirections");
 
     const tooLong = await put(9, { area: "x".repeat(121), arrivalDirections: "y".repeat(1001) });
     expect(tooLong.statusCode).toBe(422);
@@ -3510,9 +3512,6 @@ function minimalHotelInput(): SharedPropertyProfileInput {
       localityPublic: false,
       geoPublic: false,
       mapDisplayMode: "hidden",
-      // Read back as "" when not given (VAY-2322).
-      area: "",
-      arrivalDirections: "",
     },
     contacts: [
       {

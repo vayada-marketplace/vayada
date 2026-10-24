@@ -61,8 +61,6 @@ async function fixture(
         localityPublic: false,
         geoPublic: false,
         mapDisplayMode: "hidden",
-        area: "",
-        arrivalDirections: "",
       },
       contacts: [
         { channelType: "email", value: "hotel@example.test", purpose: "guest", isPublic: false },

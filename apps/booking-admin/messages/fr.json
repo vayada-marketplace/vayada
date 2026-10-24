@@ -1724,5 +1724,5 @@
   "propertyAddress.area": "Quartier / village",
   "propertyAddress.optional": "facultatif",
   "propertyAddress.directions": "Indications d'arrivée",
-  "propertyAddress.directionsHint": "Envoyées dans l'e-mail de confirmation de réservation. Par exemple : « Tournez au portail bleu après le temple »."
+  "propertyAddress.directionsHint": "Comment les clients trouvent votre entrée à leur arrivée. Par exemple : « Tournez au portail bleu après le temple »."
 }

@@ -1724,5 +1724,5 @@
   "propertyAddress.area": "地区・村",
   "propertyAddress.optional": "任意",
   "propertyAddress.directions": "到着までの道順",
-  "propertyAddress.directionsHint": "ゲストへの予約確認メールで送られます。例：「お寺を過ぎた青い門で曲がってください」"
+  "propertyAddress.directionsHint": "到着したゲストが入口を見つける方法。例：「お寺を過ぎた青い門で曲がってください」"
 }

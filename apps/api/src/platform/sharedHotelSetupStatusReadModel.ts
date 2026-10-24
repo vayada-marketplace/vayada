@@ -156,8 +156,8 @@ type SharedPropertyProfileWritePayload = {
   address_public: boolean;
   geo_public: boolean;
   map_display_mode: SharedPropertyProfileInput["location"]["mapDisplayMode"];
-  area: string | null;
-  arrival_directions: string | null;
+  area?: string;
+  arrival_directions?: string;
   contacts: Array<{
     channel_type: SharedPropertyProfileInput["contacts"][number]["channelType"];
     value: string;
@@ -1132,12 +1132,21 @@ export function toSharedPropertyProfile(row: SharedPropertyProfileRow): SharedPr
         localityPublic: row.localityPublic ?? false,
         geoPublic: row.geoPublic ?? false,
         mapDisplayMode: mapDisplayMode(row.mapDisplayMode),
-        area: nonEmpty(row.area) ?? "",
-        arrivalDirections: nonEmpty(row.arrivalDirections) ?? "",
+        // Only when given (VAY-2322): clients from before them reject unknown keys.
+        ...optionalLocationText(row),
       },
       contacts: contactItems(row.contacts),
     },
   };
+}
+
+function optionalLocationText(row: { area?: string | null; arrivalDirections?: string | null }): {
+  area?: string;
+  arrivalDirections?: string;
+} {
+  const area = nonEmpty(row.area);
+  const arrivalDirections = nonEmpty(row.arrivalDirections);
+  return { ...(area ? { area } : {}), ...(arrivalDirections ? { arrivalDirections } : {}) };
 }
 
 function toPublicPropertyProfile(row: PublicPropertyProfileRow): SharedPublicPropertyProfile {
@@ -1350,8 +1359,11 @@ export function propertyProfileWritePayload(
     address_public: profile.location.localityPublic,
     geo_public: profile.location.geoPublic,
     map_display_mode: profile.location.mapDisplayMode,
-    area: profile.location.area || null,
-    arrival_directions: profile.location.arrivalDirections || null,
+    // Only when given: an identical create keeps its idempotency fingerprint across this release.
+    ...(profile.location.area ? { area: profile.location.area } : {}),
+    ...(profile.location.arrivalDirections
+      ? { arrival_directions: profile.location.arrivalDirections }
+      : {}),
     contacts: profile.contacts.map((item) => ({
       channel_type: item.channelType,
       value: item.value,

@@ -3713,5 +3713,5 @@
   "propertyAddress.area": "Area / village",
   "propertyAddress.optional": "optional",
   "propertyAddress.directions": "Arrival directions",
-  "propertyAddress.directionsHint": "Sent in the guest's booking confirmation email. For example: “Turn at the blue gate after the temple”."
+  "propertyAddress.directionsHint": "How guests find your entrance once they arrive. For example: “Turn at the blue gate after the temple”."
 }

@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { PropertyProfileLocation } from "@vayada/domain-hotels";
 import { COUNTRY_OPTIONS } from "@vayada/locale-constants";
 import GooglePlacesAddressField from "./GooglePlacesAddressField";
@@ -27,7 +27,7 @@ export const propertyAddressEnglish = {
   "propertyAddress.optional": "optional",
   "propertyAddress.directions": "Arrival directions",
   "propertyAddress.directionsHint":
-    "Sent in the guest's booking confirmation email. For example: “Turn at the blue gate after the temple”.",
+    "How guests find your entrance once they arrive. For example: “Turn at the blue gate after the temple”.",
   "propertyAddress.postalCode": "Postal code",
   "propertyAddress.city": "City / region",
   "propertyAddress.country": "Country",
@@ -71,6 +71,7 @@ export default function PropertyAddressFields({
   markerTitle?: string;
 }) {
   const t = translate ?? ((key) => propertyAddressEnglish[key]);
+  const id = useId();
   // A pick still loading is dropped once the host types.
   const revision = useRef(0);
   const [mapUnavailable, setMapUnavailable] = useState(false);
@@ -152,6 +153,8 @@ export default function PropertyAddressFields({
                   postalCode: address.postalCode,
                   city: address.city || address.region,
                   countryCode: address.countryCode,
+                  // A new address: the old area no longer describes it.
+                  area: "",
                   ...(address.latitude !== null && address.longitude !== null
                     ? { latitude: address.latitude, longitude: address.longitude }
                     : {}),
@@ -202,12 +205,13 @@ export default function PropertyAddressFields({
             maxLength={1000}
             rows={3}
             disabled={disabled}
+            aria-describedby={`${id}-directions-hint`}
             onChange={(event) => change({ arrivalDirections: event.target.value })}
           />
-          <span className="mt-1 block text-xs font-normal text-gray-500">
-            {t("propertyAddress.directionsHint")}
-          </span>
         </label>
+        <p id={`${id}-directions-hint`} className="-mt-3 text-xs text-gray-500">
+          {t("propertyAddress.directionsHint")}
+        </p>
       </div>
       <div className="space-y-2">
         {showMap ? (

@@ -1724,5 +1724,5 @@
   "propertyAddress.area": "Zona / pueblo",
   "propertyAddress.optional": "opcional",
   "propertyAddress.directions": "Indicaciones de llegada",
-  "propertyAddress.directionsHint": "Se envían en el correo de confirmación de la reserva. Por ejemplo: «Gira en la puerta azul después del templo»."
+  "propertyAddress.directionsHint": "Cómo encuentran los huéspedes tu entrada al llegar. Por ejemplo: «Gira en la puerta azul después del templo»."
 }

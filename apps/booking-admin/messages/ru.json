@@ -1724,5 +1724,5 @@
   "propertyAddress.area": "Район / деревня",
   "propertyAddress.optional": "необязательно",
   "propertyAddress.directions": "Как добраться",
-  "propertyAddress.directionsHint": "Отправляется гостю в письме с подтверждением бронирования. Например: «Поверните у синих ворот после храма»."
+  "propertyAddress.directionsHint": "Как гости найдут ваш вход по прибытии. Например: «Поверните у синих ворот после храма»."
 }
