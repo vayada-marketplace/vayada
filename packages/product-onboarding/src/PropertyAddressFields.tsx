@@ -62,6 +62,7 @@ export default function PropertyAddressFields({
   // A pick still loading is dropped once the host types.
   const revision = useRef(0);
   const [mapUnavailable, setMapUnavailable] = useState(false);
+  const [searchUnavailable, setSearchUnavailable] = useState(false);
   // The map and address search keep the handlers they started with: they read this to ignore picks while saving.
   const disabledRef = useRef(disabled);
   useEffect(() => {
@@ -126,7 +127,7 @@ export default function PropertyAddressFields({
               apiKey={apiKey}
               label={t("propertyAddress.search")}
               addressRevision={revision}
-              onUnavailable={() => {}}
+              onUnavailable={() => setSearchUnavailable(true)}
               onSelect={(address) =>
                 !disabledRef.current &&
                 change({
@@ -140,7 +141,9 @@ export default function PropertyAddressFields({
                 })
               }
             />
-            <p className="mt-1 text-xs text-gray-500">{t("propertyAddress.searchHint")}</p>
+            {!searchUnavailable && (
+              <p className="mt-1 text-xs text-gray-500">{t("propertyAddress.searchHint")}</p>
+            )}
           </div>
         )}
         {text("streetAddress", t("propertyAddress.street"))}

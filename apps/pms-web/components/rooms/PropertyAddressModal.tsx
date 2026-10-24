@@ -162,7 +162,7 @@ export default function PropertyAddressModal({
       }}
       // However it closed (a second Escape can't be held back), the room editor hears it.
       onClose={onClose}
-      className="m-0 h-full max-h-none w-full max-w-none overflow-hidden bg-white p-0 text-gray-900 backdrop:bg-black/50 open:flex open:flex-col sm:m-auto sm:h-auto sm:max-h-[92vh] sm:w-[calc(100%-2rem)] sm:max-w-[1040px] sm:rounded-2xl sm:shadow-2xl"
+      className="m-0 h-full max-h-none w-full max-w-none overflow-hidden bg-white p-0 text-gray-900 backdrop:bg-black/50 open:flex open:flex-col sm:m-auto sm:h-fit sm:max-h-[92vh] sm:w-[calc(100%-2rem)] sm:max-w-[1040px] sm:rounded-2xl sm:shadow-2xl"
     >
       <div className="flex items-start gap-3 px-4 pt-4 sm:px-6 sm:pt-6">
         <div className="min-w-0 flex-1">
