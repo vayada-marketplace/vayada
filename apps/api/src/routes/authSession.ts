@@ -26,8 +26,13 @@ import {
   type PropertyAccessContext,
   type PropertyAccessRepository,
 } from "@vayada/backend-authorization";
+import {
+  isCurrentHotelAccountAgreements,
+  type HotelAccountAgreementVersions,
+} from "@vayada/domain-hotels";
 import type { FastifyInstance, FastifyPluginAsync, FastifyReply, FastifyRequest } from "fastify";
 
+import type { HotelAccountAgreementsRepository } from "../domains/hotelAccountAgreementsRepository.js";
 import { mapWorkOSAuthError, type VayadaAuthStateResponse } from "../platform/workosAuthState.js";
 import type {
   AuthHandoffRoutingHints,
@@ -222,6 +227,8 @@ export type AuthSessionRouteOptions = {
   cookieDomain?: string;
   profileImageMediaRepository?: ApprovedPublicProfileImageRepository;
   hotelAccountInviteOnboarding?: Pick<HotelAccountInviteRepository, "resolveForOnboarding">;
+  /** VAY-2246: records the sign-up tickbox's acceptance of the hotel terms and the DPA. */
+  hotelAccountAgreements?: Pick<HotelAccountAgreementsRepository, "accept">;
   handoffRepository?: AuthSessionHandoffRepository;
   propertyAccessRepository?: PropertyAccessRepository;
   adminTransfer?: AdminTransferCoordinator;
@@ -243,6 +250,9 @@ const DEFAULT_SURFACE: AuthSurface = "platform-admin";
 const EMAIL_SEND_COOLDOWN_MS = 60_000;
 const EMAIL_SEND_COOLDOWN_MESSAGE = "Please wait before requesting another email.";
 const AUTH_HANDOFF_TTL_MS = 60_000;
+const AGREEMENTS_OUTDATED = "agreements_outdated";
+const AGREEMENTS_OUTDATED_MESSAGE =
+  "Our terms have been updated. Reload the page, read them and accept them again.";
 
 type AuthSignupOrganizationContext = {
   workosOrganizationId: string;
@@ -271,6 +281,7 @@ type PasswordSignupVerificationState = {
   email: string;
   surface: AuthSurface;
   intent?: AuthSignupIntent;
+  acceptedAgreements?: HotelAccountAgreementVersions;
 };
 
 type AuthOrganizationCandidate = {
@@ -701,6 +712,7 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
       flow: parsed.flow,
       surface: parsed.surface,
       intent: parsed.intent,
+      ...(parsed.acceptedAgreements ? { acceptedAgreements: parsed.acceptedAgreements } : {}),
       returnTo: parsed.returnTo,
       errorReturnTo: parsed.errorReturnTo,
     });
@@ -870,6 +882,13 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
       requestId: request.id,
       occurredAt: new Date().toISOString(),
     });
+    await recordSignupAgreements(
+      request,
+      options,
+      resolution,
+      signupContext?.intent,
+      state.value.acceptedAgreements,
+    );
 
     const csrfToken = randomBytes(24).toString("base64url");
     reply.headers({
@@ -1090,6 +1109,7 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
           email: createdUser.email,
           surface: parsed.surface,
           intent: parsed.intent,
+          ...(parsed.acceptedAgreements ? { acceptedAgreements: parsed.acceptedAgreements } : {}),
         });
       }
       return reply
@@ -1171,6 +1191,13 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
       requestId: request.id,
       occurredAt: new Date().toISOString(),
     });
+    await recordSignupAgreements(
+      request,
+      options,
+      resolution,
+      parsed.intent,
+      parsed.acceptedAgreements,
+    );
 
     const csrfToken = randomBytes(24).toString("base64url");
     reply.headers({
@@ -1322,6 +1349,13 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
       requestId: request.id,
       occurredAt: new Date().toISOString(),
     });
+    await recordSignupAgreements(
+      request,
+      options,
+      resolution,
+      signupContext?.intent,
+      signupVerification?.acceptedAgreements,
+    );
 
     const csrfToken = randomBytes(24).toString("base64url");
     reply.headers({
@@ -2364,6 +2398,7 @@ type GoogleOAuthState = {
   flow: GoogleOAuthFlow;
   surface: AuthSurface;
   intent?: AuthSignupIntent;
+  acceptedAgreements?: HotelAccountAgreementVersions;
   returnTo: string;
   errorReturnTo: string;
   nonce: string;
@@ -2379,6 +2414,7 @@ function parseGoogleOAuthStartQuery(
       flow: GoogleOAuthFlow;
       surface: AuthSurface;
       intent?: AuthSignupIntent;
+      acceptedAgreements?: HotelAccountAgreementVersions;
       returnTo: string;
       errorReturnTo: string;
       loginHint?: string;
@@ -2392,6 +2428,8 @@ function parseGoogleOAuthStartQuery(
     return_to?: unknown;
     error_return_to?: unknown;
     login_hint?: unknown;
+    accepted_terms?: unknown;
+    accepted_dpa?: unknown;
   };
   const flow = query.flow === "signup" ? "signup" : "login";
   let surface: AuthSurface;
@@ -2401,6 +2439,7 @@ function parseGoogleOAuthStartQuery(
   } catch {
     return { ok: false, error: { error: "invalid_surface", message: "Unsupported auth surface." } };
   }
+  let acceptedAgreements: HotelAccountAgreementVersions | undefined;
   if (flow === "signup") {
     const rawIntent = typeof query.type === "string" ? query.type : query.intent;
     try {
@@ -2410,6 +2449,15 @@ function parseGoogleOAuthStartQuery(
         ok: false,
         error: { error: "invalid_signup", message: "Unsupported Google signup request." },
       };
+    }
+    if (query.accepted_terms !== undefined || query.accepted_dpa !== undefined) {
+      const accepted = { termsVersion: query.accepted_terms, dpaVersion: query.accepted_dpa };
+      if (!isCurrentHotelAccountAgreements(accepted))
+        return {
+          ok: false,
+          error: { error: AGREEMENTS_OUTDATED, message: AGREEMENTS_OUTDATED_MESSAGE },
+        };
+      acceptedAgreements = accepted;
     }
   }
   const surfaceOrigin = options.surfacePolicies?.[surface]?.publicOrigin;
@@ -2426,6 +2474,7 @@ function parseGoogleOAuthStartQuery(
     flow,
     surface,
     intent,
+    acceptedAgreements,
     returnTo,
     errorReturnTo,
     loginHint: typeof query.login_hint === "string" ? query.login_hint : undefined,
@@ -2736,6 +2785,7 @@ function parsePasswordSignupBody(body: unknown):
       password: string;
       surface: AuthSurface;
       intent?: AuthSignupIntent;
+      acceptedAgreements?: HotelAccountAgreementVersions;
     }
   | {
       ok: false;
@@ -2753,6 +2803,7 @@ function parsePasswordSignupBody(body: unknown):
     surface?: unknown;
     type?: unknown;
     intent?: unknown;
+    acceptedAgreements?: unknown;
   };
   const email = typeof input.email === "string" ? input.email.trim() : "";
   const password = typeof input.password === "string" ? input.password : "";
@@ -2761,6 +2812,13 @@ function parsePasswordSignupBody(body: unknown):
       ok: false,
       error: { state: "auth_failed", message: "Email and password are required." },
     };
+  }
+  // VAY-2246: the sign-up tickbox's versions; anything but the current ones was read on an old page.
+  if (
+    input.acceptedAgreements !== undefined &&
+    !isCurrentHotelAccountAgreements(input.acceptedAgreements)
+  ) {
+    return { ok: false, error: { state: "auth_failed", message: AGREEMENTS_OUTDATED_MESSAGE } };
   }
   try {
     const surface = parseRequiredSurface(input.surface);
@@ -2771,6 +2829,9 @@ function parsePasswordSignupBody(body: unknown):
       password,
       surface,
       intent: parseSignupIntent(surface, typeof rawIntent === "string" ? rawIntent : undefined),
+      ...(input.acceptedAgreements
+        ? { acceptedAgreements: input.acceptedAgreements as HotelAccountAgreementVersions }
+        : {}),
     };
   } catch {
     return { ok: false, error: { state: "auth_failed", message: "Unsupported signup request." } };
@@ -3433,6 +3494,38 @@ async function findOrCreateIdentityUser(
     throw new Error("Identity lifecycle command did not create a resolvable signup user");
   }
   return { user, created: true };
+}
+
+/** VAY-2246: the sign-up tickbox accepts the hotel terms and the DPA for the new hotel account. A failure
+ * only logs: the account admin's banner asks again. */
+async function recordSignupAgreements(
+  request: FastifyRequest,
+  options: AuthSessionRouteOptions,
+  resolution: IdentityResolution,
+  intent: AuthSignupIntent | undefined,
+  accepted: HotelAccountAgreementVersions | undefined,
+): Promise<void> {
+  if (!accepted || intent !== "hotel" || !options.hotelAccountAgreements) return;
+  if (resolution.organizationKind !== "hotel_group" || !resolution.organizationId) return;
+  if (!isCurrentHotelAccountAgreements(accepted)) return;
+  try {
+    const recorded = await options.hotelAccountAgreements.accept({
+      organizationId: resolution.organizationId,
+      userId: resolution.user.userId,
+      source: "signup",
+      versions: accepted,
+    });
+    if (!recorded)
+      request.log.warn(
+        { organizationId: resolution.organizationId },
+        "Sign-up agreements not recorded: the new user is not the account admin",
+      );
+  } catch (error) {
+    request.log.error(
+      { err: error, organizationId: resolution.organizationId },
+      "Sign-up agreements could not be recorded",
+    );
+  }
 }
 
 function isMatchingSignupIdentity(user: IdentityUser, workosUser: AuthKitUser): boolean {

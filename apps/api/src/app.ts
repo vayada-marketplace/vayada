@@ -104,6 +104,7 @@ import { registerPropertyNearbyRoutes } from "./routes/propertyNearby.js";
 import type { PropertyNearbyRepository } from "./domains/propertyNearbyRepository.js";
 import { registerHotelFirstRunRoutes } from "./routes/hotelFirstRun.js";
 import { registerHotelSetupChecklistRoutes } from "./routes/hotelSetupChecklist.js";
+import { registerHotelAccountAgreementsRoutes } from "./routes/hotelAccountAgreements.js";
 import {
   registerSharedHotelSetupStatusRoutes,
   type SharedHotelSetupStatusRepository,
@@ -291,6 +292,8 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   hotelFirstRun?: import("./routes/hotelFirstRun.js").HotelFirstRunRouteOptions["createService"];
   /** VAY-2247 wave 2: the setup checklist; mounted with the first run (it reads the first run's state). */
   hotelSetupChecklist?: import("./routes/hotelSetupChecklist.js").HotelSetupChecklistRouteOptions["createService"];
+  /** VAY-2246: the hotel account's terms and DPA acceptance (GET/POST /api/hotel-account/agreements). */
+  hotelAccountAgreements?: import("./routes/hotelAccountAgreements.js").HotelAccountAgreementsRouteOptions["repository"];
   /** Owner-only Feature Hub Financials on the ordinary login; unset keeps the shared repository. */
   hotelSetupFeatureHubCommands?: Pick<
     import("./routes/pmsModuleActivations.js").PmsModuleActivationRepository,
@@ -650,6 +653,12 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       prefix: "/api/hotel-setup",
       createService: options.hotelSetupChecklist,
       propertyAccessRepository: options.auth.propertyAccessRepository,
+    });
+  }
+  if (options.hotelAccountAgreements) {
+    app.register(registerHotelAccountAgreementsRoutes, {
+      prefix: "/api/hotel-account",
+      repository: options.hotelAccountAgreements,
     });
   }
   if (options.propertySetupRouteStateReadPort) {
