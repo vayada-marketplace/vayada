@@ -17,6 +17,7 @@ import type {
   AuthKitClient,
   AuthKitSession,
   AuthSurface,
+  AuthSessionRouteOptions,
   AuthSurfacePolicy,
   ProductAuditEvent,
 } from "./routes/authSession.js";
@@ -1556,6 +1557,7 @@ describe("AuthKit session routes", () => {
   it("signs up a hotel account through Google OAuth and provisions the hotel organization", async () => {
     const commands: IdentityLifecycleCommand[] = [];
     const auditEvents: ProductAuditEvent[] = [];
+    const accept = vi.fn(async () => null);
     let identityCreated = false;
     let state = "";
     let signupOrganizationId = "";
@@ -1658,12 +1660,14 @@ describe("AuthKit session routes", () => {
           requiredResourceLink: { product: "booking", resourceType: "booking_hotel" },
         },
       },
+      hotelAccountAgreements: { accept },
     });
 
     const start = await app.inject({
       method: "GET",
       url:
         "/auth/oauth/google/start?surface=booking-admin&flow=signup&type=hotel" +
+        "&accepted_terms=2026-10-24&accepted_dpa=2026-10-24" +
         "&return_to=https%3A%2F%2Fadmin.booking.localhost%2Flogin%3Fauth%3Dcallback%26returnTo%3D%252Fdashboard" +
         "&error_return_to=https%3A%2F%2Fadmin.booking.localhost%2Fsignup",
       headers: { host: "api.localhost", "x-forwarded-proto": "https" },
@@ -1716,6 +1720,36 @@ describe("AuthKit session routes", () => {
         workosOrgId: signupOrganizationId,
       }),
     ]);
+    // VAY-2246: the sign-up tickbox accepted the hotel terms and the DPA for the new account.
+    expect(accept).toHaveBeenCalledWith({
+      organizationId: "org_google_hotel",
+      userId: "user_google_hotel",
+      source: "signup",
+      versions: { termsVersion: "2026-10-24", dpaVersion: "2026-10-24" },
+    });
+  });
+
+  it("refuses a Google sign-up that accepted other versions of the hotel terms or DPA", async () => {
+    const getAuthorizationUrl = vi.fn(() => "https://auth.workos.test/google");
+    app = buildAuthSessionApp({
+      allowedOrigins: ["https://admin.booking.localhost"],
+      authKitClient: createAuthKitClient({ getAuthorizationUrl }),
+    });
+    const response = await app.inject({
+      method: "GET",
+      url:
+        "/auth/oauth/google/start?surface=booking-admin&flow=signup&type=hotel" +
+        "&accepted_terms=2026-10-20&accepted_dpa=2026-10-24" +
+        "&return_to=https%3A%2F%2Fadmin.booking.localhost%2Flogin" +
+        "&error_return_to=https%3A%2F%2Fadmin.booking.localhost%2Fsignup",
+      headers: { host: "api.localhost", "x-forwarded-proto": "https" },
+    });
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({
+      error: "agreements_outdated",
+      message: "Our terms have been updated. Reload the page, read them and accept them again.",
+    });
+    expect(getAuthorizationUrl).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -2065,6 +2099,7 @@ describe("AuthKit session routes", () => {
   it("completes PMS signup when the WorkOS user webhook arrives before verification", async () => {
     const commands: IdentityLifecycleCommand[] = [];
     const workosCalls: string[] = [];
+    const accept = vi.fn(async () => null);
     let accessGranted = false;
     let webhookArrived = false;
     let signupPending = true;
@@ -2173,13 +2208,17 @@ describe("AuthKit session routes", () => {
       surfacePolicies: {
         "pms-web": { requiredOrganizationKind: "hotel_group" },
       },
+      hotelAccountAgreements: { accept },
     });
 
     const pendingAuthenticationToken = await beginPasswordSignup(app, {
       email: webhookUser.email,
       surface: "pms-web",
       type: "hotel",
+      acceptedAgreements: { termsVersion: "2026-10-24", dpaVersion: "2026-10-24" },
     });
+    // The tickbox's versions wait in the signed verification state until the account exists.
+    expect(accept).not.toHaveBeenCalled();
 
     const verification = await app.inject({
       method: "POST",
@@ -2198,6 +2237,12 @@ describe("AuthKit session routes", () => {
     expect(verification.json()).toMatchObject({
       organizationId: "org_webhook_first_hotel",
       user: { id: webhookUser.userId },
+    });
+    expect(accept).toHaveBeenCalledWith({
+      organizationId: "org_webhook_first_hotel",
+      userId: webhookUser.userId,
+      source: "signup",
+      versions: { termsVersion: "2026-10-24", dpaVersion: "2026-10-24" },
     });
     expect(commands).toEqual([
       expect.objectContaining({
@@ -2388,6 +2433,7 @@ describe("AuthKit session routes", () => {
       workosOrgId: "org_workos_booking_hotel",
       organizationId: "org_booking_hotel",
       selectedSession: "selected_booking_hotel_session",
+      acceptedAgreements: { termsVersion: "2026-10-24", dpaVersion: "2026-10-24" },
     },
     {
       surface: "pms-web" as const,
@@ -2396,9 +2442,11 @@ describe("AuthKit session routes", () => {
       workosOrgId: "org_workos_pms_hotel",
       organizationId: "org_pms_hotel",
       selectedSession: "selected_pms_hotel_session",
+      acceptedAgreements: undefined,
     },
   ])("keeps hotel organization provisioning for $surface password signup", async (scenario) => {
     const commands: IdentityLifecycleCommand[] = [];
+    const accept = vi.fn(async () => null);
     const workosCalls: string[] = [];
     let identityCreated = false;
     const unsignedSession: AuthKitSession = {
@@ -2520,6 +2568,7 @@ describe("AuthKit session routes", () => {
           logoutReturnUrl: `https://${scenario.surface === "booking-admin" ? "admin.booking" : "pms"}.localhost/login`,
         },
       },
+      hotelAccountAgreements: { accept },
     });
 
     const response = await app.inject({
@@ -2533,6 +2582,7 @@ describe("AuthKit session routes", () => {
         password: "correct-password",
         surface: scenario.surface,
         type: "hotel",
+        ...(scenario.acceptedAgreements ? { acceptedAgreements: scenario.acceptedAgreements } : {}),
       },
     });
 
@@ -2577,6 +2627,42 @@ describe("AuthKit session routes", () => {
     expect(commands[0]?.payload).not.toHaveProperty("organization");
     expect(commands[0]?.payload).not.toHaveProperty("membership");
     expect(workosCalls).toEqual(["user", "password", "organization", "membership", "refresh"]);
+    // VAY-2246: only a ticked sign-up records the hotel terms and the DPA for the new account.
+    if (scenario.acceptedAgreements)
+      expect(accept).toHaveBeenCalledWith({
+        organizationId: scenario.organizationId,
+        userId: canonicalUser.userId,
+        source: "signup",
+        versions: scenario.acceptedAgreements,
+      });
+    else expect(accept).not.toHaveBeenCalled();
+  });
+
+  it("refuses a password sign-up that accepted other versions of the hotel terms or DPA", async () => {
+    const createUser = vi.fn();
+    app = buildAuthSessionApp({
+      allowedOrigins: ["https://admin.booking.localhost"],
+      surfacePolicies: { "booking-admin": { requiredOrganizationKind: ["hotel_group"] } },
+      authKitClient: createAuthKitClient({ createUser }),
+    });
+    const response = await app.inject({
+      method: "POST",
+      url: "/auth/password/signup",
+      headers: { origin: "https://admin.booking.localhost" },
+      payload: {
+        email: "hotel@example.test",
+        password: "correct-password",
+        surface: "booking-admin",
+        type: "hotel",
+        acceptedAgreements: { termsVersion: "2026-10-20", dpaVersion: "2026-10-24" },
+      },
+    });
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({
+      state: "auth_failed",
+      message: "Our terms have been updated. Reload the page, read them and accept them again.",
+    });
+    expect(createUser).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -5452,7 +5538,12 @@ function createMemoryHandoffRepository(): {
 
 async function beginPasswordSignup(
   app: ReturnType<typeof buildAuthSessionApp>,
-  input: { email: string; surface: AuthSurface; type?: "hotel" },
+  input: {
+    email: string;
+    surface: AuthSurface;
+    type?: "hotel";
+    acceptedAgreements?: { termsVersion: string; dpaVersion: string };
+  },
 ): Promise<string> {
   const response = await app.inject({
     method: "POST",
@@ -5486,6 +5577,7 @@ function buildAuthSessionApp(
     handoffRepository?: AuthSessionHandoffRepository;
     propertyAccessRepository?: PropertyAccessRepository;
     adminTransfer?: AdminTransferCoordinator;
+    hotelAccountAgreements?: AuthSessionRouteOptions["hotelAccountAgreements"];
   } = {},
 ) {
   const compatibilityCallbackOrigin =
@@ -5527,6 +5619,7 @@ function buildAuthSessionApp(
         },
       },
       adminTransfer: options.adminTransfer,
+      hotelAccountAgreements: options.hotelAccountAgreements,
     },
   });
 }

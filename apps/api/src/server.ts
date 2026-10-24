@@ -308,6 +308,7 @@ import {
   createHotelFirstRunRuntime,
 } from "./domains/hotelFirstRunRuntime.js";
 import { createPgHotelSetupChecklistRepository } from "./domains/hotelSetupChecklistRepository.js";
+import { createPgHotelAccountAgreementsRepository } from "./domains/hotelAccountAgreementsRepository.js";
 import { createHotelSetupChecklistService } from "./domains/hotelSetupChecklistService.js";
 import { createTargetBookingCustomDomainRepository } from "./routes/bookingCustomDomain.js";
 import {
@@ -1048,6 +1049,13 @@ const refreshLivePublicPage = publicBookabilityPublisher
 const hotelSetupOrdinaryPool = config.auth
   ? new pg.Pool({ connectionString: targetDatabaseUrl, connectionTimeoutMillis: 5_000, max: 10 })
   : undefined;
+// VAY-2246: the hotel account's terms and DPA acceptance, on the ordinary API login (hotel_catalog);
+// sign-up records it here too, since the identity login can't write hotel_catalog.
+const hotelAccountAgreements = config.auth
+  ? createPgHotelAccountAgreementsRepository(
+      new pg.Pool({ connectionString: targetDatabaseUrl, connectionTimeoutMillis: 5_000, max: 2 }),
+    )
+  : undefined;
 const hotelSetupOrdinaryLogo =
   hotelSetupOrdinaryPool && platformMediaRuntime && config.platformMediaServing
     ? createOrdinaryHotelSetupLogoRuntime({
@@ -1686,6 +1694,7 @@ const app = buildApp({
             connectionString: config.auth.databaseUrl,
           }),
           handoffRepository: authSessionHandoffRepository,
+          hotelAccountAgreements,
           tokenVerifier: createWorkOSVerifier({
             jwksUrl: config.auth.workosJwksUrl,
             issuer: config.auth.workosIssuer,
@@ -1934,6 +1943,7 @@ const app = buildApp({
   ...hotelSetupOrdinaryOptions,
   hotelFirstRun,
   hotelSetupChecklist,
+  hotelAccountAgreements,
   financialsActivationPropertyIds: config.financialsActivationPropertyIds,
   pmsReviewRepository: createPgPmsReviewRepository({
     connectionString: targetDatabaseUrl,
