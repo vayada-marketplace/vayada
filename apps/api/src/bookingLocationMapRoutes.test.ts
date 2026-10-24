@@ -12,6 +12,7 @@ import { registerBookingLocationMapRoutes } from "./routes/bookingLocationMap.js
 // VAY-2126: Booking Admin's "Location map on your booking page" switch.
 const summary: LocationMapSummary = {
   enabled: false,
+  nearbyEnabled: false,
   canSwitch: true,
   rooms: [
     {
@@ -63,6 +64,62 @@ describe("Booking location map routes", () => {
         correlationId: "correlation-1",
       },
     });
+  });
+
+  it("saves Show nearby places on its own route, with the same checks (VAY-2326)", async () => {
+    const repository = repositoryFake();
+    app = await routeApp(repository);
+    const nearby = `${url}/nearby`;
+
+    const saved = await app.inject({
+      method: "PUT",
+      url: nearby,
+      headers,
+      payload: { enabled: true },
+    });
+    expect(saved.statusCode).toBe(200);
+    expect(saved.headers["cache-control"]).toBe("no-store");
+    expect(saved.json()).toEqual({ enabled: true });
+    expect(repository.setEnabled).toHaveBeenCalledWith({
+      propertyId,
+      enabled: true,
+      setting: "nearbyPlaces",
+      audit: {
+        actorUserId,
+        organizationId,
+        requestId: "request-1",
+        correlationId: "correlation-1",
+      },
+    });
+
+    repository.setEnabled.mockClear();
+    for (const payload of [{}, { enabled: "on" }, { enabled: true, setting: "locationMap" }])
+      expect((await app.inject({ method: "PUT", url: nearby, headers, payload })).statusCode).toBe(
+        400,
+      );
+    expect(repository.setEnabled).not.toHaveBeenCalled();
+    repository.setEnabled.mockResolvedValueOnce(null);
+    const missing = await app.inject({
+      method: "PUT",
+      url: nearby,
+      headers,
+      payload: { enabled: true },
+    });
+    expect(missing.statusCode).toBe(409);
+    expect(missing.json()).toEqual({
+      code: "booking_settings_missing",
+      message: "Set up the booking engine before showing nearby places.",
+    });
+    await app.close();
+
+    app = await routeApp(repository, ["booking.settings.read" as PermissionKey]);
+    expect(
+      (await app.inject({ method: "PUT", url: nearby, headers, payload: { enabled: true } }))
+        .statusCode,
+    ).toBe(403);
+    expect(
+      (await app.inject({ method: "PUT", url: nearby, payload: { enabled: true } })).statusCode,
+    ).toBe(401);
   });
 
   it("refuses other fields, a missing hotel and a hotel without booking settings", async () => {

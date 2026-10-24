@@ -16,6 +16,7 @@ async function setup(logStream?: { write(line: string): void }) {
     status: "unavailable" as const,
     location: { mode: "approximate" as const, latitude: 1.01, longitude: 2.02 },
     places: [],
+    categories: [],
   };
   const snapshot: PublicNearbySnapshot = {
     scope: { propertyId: "property", organizationId: "private-org" },

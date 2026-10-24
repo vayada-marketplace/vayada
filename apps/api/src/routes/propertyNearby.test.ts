@@ -31,6 +31,8 @@ const state: NearbyCurationState = {
   savedProfileRevision: 1,
   choices: [],
   customPlaces: [],
+  customCategories: [],
+  categoryNames: {},
 };
 const permissions: PermissionKey[] = [
   "hotel_catalog.setup.read",

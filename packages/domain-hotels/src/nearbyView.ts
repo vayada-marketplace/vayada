@@ -1,8 +1,12 @@
 import {
   NEARBY_CATEGORIES,
+  NEARBY_DEFAULT_CATEGORIES,
   isNearbyPlaceId,
   parseNearbyCurationWrite,
   type NearbyCategory,
+  type NearbyCategoryColor,
+  type NearbyCategoryIcon,
+  type NearbyCuration,
   type NearbyCurationState,
   type NearbyCustomPlace,
 } from "./propertyNearby.js";
@@ -34,10 +38,34 @@ export type NearbyPublicPlace =
       note: string | null;
     }
   | ({ source: "custom" } & Omit<NearbyCustomPlace, "hidden">);
+/** A category as the editor and guests show it: the four first, then the host's own (VAY-2326). */
+export type NearbyCategoryView = {
+  id: string;
+  /** Null for one of the four the host didn't rename: show its translated name. */
+  name: string | null;
+  color: NearbyCategoryColor;
+  icon: NearbyCategoryIcon;
+};
 export type NearbyPreview = {
   location: { mode: "exact" | "approximate"; latitude: number; longitude: number } | null;
+  /** The host's own places first, in the host's order, then Google's with favorites first. */
   places: NearbyPublicPlace[];
+  categories: NearbyCategoryView[];
 };
+
+export function nearbyCategoryViews(
+  curation: Pick<NearbyCuration, "customCategories" | "categoryNames">,
+): NearbyCategoryView[] {
+  return [
+    ...NEARBY_DEFAULT_CATEGORIES.map(({ id, color, icon }) => ({
+      id,
+      name: curation.categoryNames[id] ?? null,
+      color,
+      icon,
+    })),
+    ...curation.customCategories.map(({ id, name, color, icon }) => ({ id, name, color, icon })),
+  ];
+}
 
 /** Used by the editor preview and the guest projection; never expose private origins. */
 export function projectNearbyPreview(
@@ -56,7 +84,7 @@ export function projectNearbyPreview(
     !Number.isFinite(location.longitude) ||
     Math.abs(location.longitude) > 180
   )
-    return { location: null, places: [] };
+    return { location: null, places: [], categories: [] };
   const round = (value: number) =>
     Number(
       new Intl.NumberFormat("en-US", { maximumFractionDigits: 2, useGrouping: false }).format(
@@ -72,11 +100,11 @@ export function projectNearbyPreview(
   if (current)
     for (const choice of curation.choices)
       if (choice.added || choice.favorite) candidates.set(choice.placeId, choice.category);
-  const places: NearbyPublicPlace[] = [];
+  const google: NearbyPublicPlace[] = [];
   for (const [placeId, category] of candidates) {
     const choice = choices.get(placeId);
     if (choice?.hidden) continue; // Exclusions survive location changes.
-    places.push({
+    google.push({
       source: "google",
       placeId,
       category: current ? (choice?.category ?? category) : category,
@@ -84,11 +112,13 @@ export function projectNearbyPreview(
       note: current ? (choice?.note ?? null) : null,
     });
   }
+  // Stable order preserves provider ranking within each category/favorite group.
+  google.sort((a, b) => Number(b.favorite) - Number(a.favorite));
+  const places: NearbyPublicPlace[] = [];
   if (current)
     for (const { hidden, ...place } of curation.customPlaces)
       if (!hidden) places.push({ source: "custom", ...place });
-  // Stable order preserves provider ranking within each category/favorite group.
-  places.sort((a, b) => Number(b.favorite) - Number(a.favorite));
+  places.push(...google);
   return {
     location: {
       mode: location.mapDisplayMode,
@@ -98,6 +128,7 @@ export function projectNearbyPreview(
         location.mapDisplayMode === "approximate" ? round(location.longitude) : location.longitude,
     },
     places,
+    categories: nearbyCategoryViews(curation),
   };
 }
 
@@ -109,6 +140,9 @@ export function parseNearbyCurationState(value: unknown): NearbyCurationState {
     expectedCurationRevision: row.curationRevision,
     choices: row.choices,
     customPlaces: row.customPlaces,
+    // Absent from an API before VAY-2326.
+    customCategories: row.customCategories ?? [],
+    categoryNames: row.categoryNames ?? {},
   });
   if (
     !parsed.ok ||
@@ -121,8 +155,10 @@ export function parseNearbyCurationState(value: unknown): NearbyCurationState {
     profileRevision: row.profileRevision,
     curationRevision: parsed.value.expectedCurationRevision,
     savedProfileRevision: row.savedProfileRevision as number | null,
-    choices: parsed.value.choices,
+    choices: parsed.value.choices ?? [],
     customPlaces: parsed.value.customPlaces,
+    customCategories: parsed.value.customCategories ?? [],
+    categoryNames: parsed.value.categoryNames ?? {},
   };
 }
 export function parseNearbyDiscoveryState(value: unknown): NearbyDiscoveryState {

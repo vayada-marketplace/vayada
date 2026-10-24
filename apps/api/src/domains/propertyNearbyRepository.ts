@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   checkNearbyCurationWrite,
+  mergeNearbyCurationWrite,
   parseNearbyCurationWrite,
   type NearbyCurationState,
   type NearbyWriteError,
@@ -72,16 +73,18 @@ export function createPgPropertyNearbyRepository(
           profileRevision: current.profileRevision,
           curationRevision: current.curationRevision + 1,
           savedProfileRevision: current.profileRevision,
-          choices: parsed.value.choices,
-          customPlaces: parsed.value.customPlaces,
+          ...mergeNearbyCurationWrite(parsed.value, current),
         };
         await client.query(
           `INSERT INTO hotel_catalog.property_nearby_curation
-          (property_id, revision, saved_profile_revision, saved_origin, choices, custom_places)
-          VALUES ($1::uuid, $2, $3, $6, $4::jsonb, $5::jsonb)
+          (property_id, revision, saved_profile_revision, saved_origin, choices, custom_places,
+           custom_categories, category_names)
+          VALUES ($1::uuid, $2, $3, $6, $4::jsonb, $5::jsonb, $7::jsonb, $8::jsonb)
           ON CONFLICT (property_id) DO UPDATE SET revision=EXCLUDED.revision,
           saved_profile_revision=EXCLUDED.saved_profile_revision, saved_origin=EXCLUDED.saved_origin,
-          choices=EXCLUDED.choices, custom_places=EXCLUDED.custom_places, updated_at=now()`,
+          choices=EXCLUDED.choices, custom_places=EXCLUDED.custom_places,
+          custom_categories=EXCLUDED.custom_categories, category_names=EXCLUDED.category_names,
+          updated_at=now()`,
           [
             scope.propertyId,
             state.curationRevision,
@@ -89,6 +92,8 @@ export function createPgPropertyNearbyRepository(
             JSON.stringify(state.choices),
             JSON.stringify(state.customPlaces),
             originKey,
+            JSON.stringify(state.customCategories),
+            JSON.stringify(state.categoryNames),
           ],
         );
         await client.query(
@@ -110,6 +115,7 @@ export function createPgPropertyNearbyRepository(
               profileRevision: state.profileRevision,
               choiceCount: state.choices.length,
               customPlaceCount: state.customPlaces.length,
+              customCategoryCount: state.customCategories.length,
             }),
           ],
         );
@@ -145,7 +151,8 @@ async function lockState(
   const profileRevision = Number(property.rows[0].profile_revision);
   const originKey = nearbyOriginKey(await readNearbyOrigin(client, scope.propertyId));
   const result = await client.query(
-    `SELECT revision, saved_profile_revision, saved_origin, choices, custom_places
+    `SELECT revision, saved_profile_revision, saved_origin, choices, custom_places,
+      custom_categories, category_names
     FROM hotel_catalog.property_nearby_curation WHERE property_id=$1::uuid`,
     [scope.propertyId],
   );
@@ -160,6 +167,8 @@ async function lockState(
         savedProfileRevision: null,
         choices: [],
         customPlaces: [],
+        customCategories: [],
+        categoryNames: {},
       },
     };
   const parsed = parseNearbyCurationWrite({
@@ -168,6 +177,8 @@ async function lockState(
     expectedCurationRevision: Number(row.revision),
     choices: row.choices,
     customPlaces: row.custom_places,
+    customCategories: row.custom_categories,
+    categoryNames: row.category_names,
   });
   if (!parsed.ok) throw new Error("Stored nearby curation is invalid");
   return {
@@ -180,8 +191,10 @@ async function lockState(
       savedProfileRevision: samePin(row.saved_origin, originKey)
         ? profileRevision
         : Number(row.saved_profile_revision),
-      choices: parsed.value.choices,
+      choices: parsed.value.choices ?? [],
       customPlaces: parsed.value.customPlaces,
+      customCategories: parsed.value.customCategories ?? [],
+      categoryNames: parsed.value.categoryNames ?? {},
     },
   };
 }

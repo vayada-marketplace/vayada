@@ -28,6 +28,8 @@ export type GuestRoomLocation = Omit<LocationMapRoom, "roomTypeId" | "name"> & {
 
 export type LocationMapSummary = {
   enabled: boolean;
+  /** The "Show nearby places" switch (VAY-2326), stored and switched the same way. */
+  nearbyEnabled: boolean;
   /** False until the hotel has booking settings; the switch then can't be saved yet. */
   canSwitch: boolean;
   /** Operating room types, in the hotel's room order. */
@@ -41,9 +43,17 @@ export type LocationMapSummary = {
   };
 };
 
+/** The two guest map switches in booking_settings: the location map and its nearby places. */
+const SWITCHES = {
+  locationMap: { column: "location_map_enabled", action: "booking.location_map" },
+  nearbyPlaces: { column: "nearby_places_enabled", action: "booking.nearby_places" },
+} as const;
+
 export type LocationMapUpdate = {
   propertyId: string;
   enabled: boolean;
+  /** Which switch; the location map when omitted. */
+  setting?: keyof typeof SWITCHES;
   audit: {
     actorUserId: string;
     organizationId: string;
@@ -218,9 +228,9 @@ export function createPgBookingLocationMapRepository(config: {
       const place = property.rows[0];
       if (!place) return null;
       const [settings, rooms] = await Promise.all([
-        pool.query<{ enabled: boolean }>(
-          `SELECT location_map_enabled AS enabled FROM booking.booking_settings
-           WHERE property_id = $1::uuid`,
+        pool.query<{ enabled: boolean; nearbyEnabled: boolean }>(
+          `SELECT location_map_enabled AS enabled, nearby_places_enabled AS "nearbyEnabled"
+           FROM booking.booking_settings WHERE property_id = $1::uuid`,
           [propertyId],
         ),
         pool.query<{ roomTypeId: string; name: string; attributes: unknown }>(
@@ -238,6 +248,7 @@ export function createPgBookingLocationMapRepository(config: {
       const propertyPin = roomPin({ latitude, longitude });
       return {
         enabled: settings.rows[0]?.enabled ?? false,
+        nearbyEnabled: settings.rows[0]?.nearbyEnabled ?? false,
         canSwitch: settings.rows.length > 0,
         rooms: rooms.rows.map((room) => {
           const { atProperty, approximate, pin, address } = guestRoomLocation(
@@ -266,12 +277,13 @@ export function createPgBookingLocationMapRepository(config: {
       };
     },
 
-    async setEnabled({ propertyId, enabled, audit }) {
+    async setEnabled({ propertyId, enabled, setting = "locationMap", audit }) {
+      const { column, action } = SWITCHES[setting];
       const result = await pool.query<{ enabled: boolean }>(
         `WITH updated AS (
-           UPDATE booking.booking_settings SET location_map_enabled = $2::boolean
+           UPDATE booking.booking_settings SET ${column} = $2::boolean
            WHERE property_id = $1::uuid
-           RETURNING location_map_enabled AS enabled
+           RETURNING ${column} AS enabled
          ), audited AS (
            INSERT INTO platform.product_audit_events (
              audit_key, product, action, occurred_at, tenant_scope, organization_id, property_id,
@@ -279,9 +291,7 @@ export function createPgBookingLocationMapRepository(config: {
              target_resource_id, correlation_id, causation_id, redacted_payload, audit_metadata,
              privacy_scope
            )
-           SELECT $3, 'booking',
-             CASE WHEN $2::boolean THEN 'booking.location_map.enabled'
-                  ELSE 'booking.location_map.disabled' END,
+           SELECT $3, 'booking', $8::text || CASE WHEN $2::boolean THEN '.enabled' ELSE '.disabled' END,
              now(), 'property', NULL, $1::uuid, 'user', $4::uuid, 'booking', 'booking_hotel',
              $1::uuid::text, $5, $6, jsonb_build_object('enabled', $2::boolean),
              jsonb_build_object('organizationId', $7::uuid), 'internal'
@@ -292,11 +302,12 @@ export function createPgBookingLocationMapRepository(config: {
         [
           propertyId,
           enabled,
-          `booking.location-map:${propertyId}:${randomUUID()}`,
+          `${action.replaceAll("_", "-")}:${propertyId}:${randomUUID()}`,
           audit.actorUserId,
           audit.correlationId ?? audit.requestId,
           audit.requestId,
           audit.organizationId,
+          action,
         ],
       );
       const row = result.rows[0];

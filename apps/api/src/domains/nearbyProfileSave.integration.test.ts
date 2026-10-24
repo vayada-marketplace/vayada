@@ -88,6 +88,11 @@ describe.skipIf(!url)("nearby picks across Property saves", () => {
       "INSERT INTO hotel_catalog.property_locations(property_id,latitude,longitude,geo_public,map_display_mode) VALUES ($1,-1.125,1.005,true,'approximate')",
       [propertyId],
     );
+    // Guests see nearby places only with the host's "Show nearby places" switch on (VAY-2326).
+    await q(
+      "INSERT INTO booking.booking_settings(property_id,nearby_places_enabled) VALUES ($1,true)",
+      [propertyId],
+    );
     await q(
       `INSERT INTO distribution.public_booking_content_revisions
       (id,property_id,revision_number,readiness_contract_version,source_manifest,source_manifest_hash,readiness_hash,readiness_product,readiness_status,public_content,built_by_user_id)
@@ -155,10 +160,8 @@ describe.skipIf(!url)("nearby picks across Property saves", () => {
   });
 
   it("keeps picks, notes, own places and the lookup after a phone-number-only save", async () => {
-    expect(await guestPlaces()).toEqual([
-      ["google", true, "Best coffee"],
-      ["custom", true, "Our favorite"],
-    ]);
+    // Guests get only the host's own places in v1 (VAY-2326); the Google pick stays saved.
+    expect(await guestPlaces()).toEqual([["custom", true, "Our favorite"]]);
     const before = await revision();
     const saved = await settings.updatePropertySettingsByHotelId!(
       propertyId,
@@ -171,10 +174,7 @@ describe.skipIf(!url)("nearby picks across Property saves", () => {
 
     const guest = await nearby.read(propertyId);
     expect(guest).toMatchObject({ needsRefresh: false, public: { status: "ready" } });
-    expect(await guestPlaces()).toEqual([
-      ["google", true, "Best coffee"],
-      ["custom", true, "Our favorite"],
-    ]);
+    expect(await guestPlaces()).toEqual([["custom", true, "Our favorite"]]);
     // The editor shows the picks as confirmed (no "reconfirm") and reuses the lookup.
     expect(await curation.read(scope)).toMatchObject({
       profileRevision: after,
@@ -237,7 +237,7 @@ describe.skipIf(!url)("nearby picks across Property saves", () => {
     );
     expect(await confirmed()).toBe(false);
     expect(await nearby.read(propertyId)).toMatchObject({
-      needsRefresh: true,
+      needsRefresh: false,
       public: { places: [] },
     });
     await admin.query(
@@ -261,9 +261,10 @@ describe.skipIf(!url)("nearby picks across Property saves", () => {
       [propertyId],
     );
     const moved = await revision();
+    // A guest view never starts the lookup (VAY-2326): only the editor does.
     expect(await nearby.read(propertyId)).toMatchObject({
-      needsRefresh: true,
-      public: { status: "unavailable", places: [] },
+      needsRefresh: false,
+      public: { status: "empty", places: [] },
     });
     const state = await curation.read(scope);
     expect(state?.profileRevision).toBe(moved);
