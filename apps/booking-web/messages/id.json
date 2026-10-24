@@ -614,6 +614,26 @@
     "accommodationsCount": "{count, plural, other {# akomodasi}}",
     "editStay": "Ubah"
   },
+  "nearbyMap": {
+    "filtersLabel": "Tempat di sekitar",
+    "category": {
+      "food": "Makan & minum",
+      "nature": "Pantai & selancar",
+      "activities": "Tempat wisata",
+      "transport": "Transportasi"
+    },
+    "markerLabel": "{name}, {category}",
+    "hostTip": "Tips dari tuan rumah",
+    "directions": "Petunjuk arah",
+    "directionsLabel": "Petunjuk arah ke {name}, membuka Google Maps",
+    "close": "Tutup",
+    "fromMainHouse": "{distance} dari rumah utama",
+    "fromMainHouseAbout": "sekitar {distance} dari rumah utama",
+    "fromProperty": "{distance} dari properti",
+    "fromPropertyAbout": "sekitar {distance} dari properti",
+    "fromPlace": "{distance} dari {place}",
+    "fromPlaceAbout": "sekitar {distance} dari {place}"
+  },
   "roomPlace": {
     "title": "Tempat Anda menginap",
     "distance": "{distance} dari properti utama",

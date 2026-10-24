@@ -615,6 +615,26 @@
     "accommodationsCount": "{count, plural, one {# Unterkunft} other {# Unterkünfte}}",
     "editStay": "Ändern"
   },
+  "nearbyMap": {
+    "filtersLabel": "Orte in der Nähe",
+    "category": {
+      "food": "Essen & Trinken",
+      "nature": "Strand & Surfen",
+      "activities": "Sehenswürdigkeiten",
+      "transport": "Unterwegs"
+    },
+    "markerLabel": "{name}, {category}",
+    "hostTip": "Tipp des Gastgebers",
+    "directions": "Route",
+    "directionsLabel": "Route zu {name}, öffnet Google Maps",
+    "close": "Schließen",
+    "fromMainHouse": "{distance} vom Haupthaus",
+    "fromMainHouseAbout": "etwa {distance} vom Haupthaus",
+    "fromProperty": "{distance} von der Unterkunft",
+    "fromPropertyAbout": "etwa {distance} von der Unterkunft",
+    "fromPlace": "{distance} von {place}",
+    "fromPlaceAbout": "etwa {distance} von {place}"
+  },
   "roomPlace": {
     "title": "Hier wohnen Sie",
     "distance": "{distance} von der Hauptunterkunft",

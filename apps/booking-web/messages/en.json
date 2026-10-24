@@ -615,6 +615,26 @@
     "accommodationsCount": "{count, plural, one {# accommodation} other {# accommodations}}",
     "editStay": "Edit"
   },
+  "nearbyMap": {
+    "filtersLabel": "Nearby places",
+    "category": {
+      "food": "Food & drink",
+      "nature": "Beach & surf",
+      "activities": "Sights",
+      "transport": "Getting around"
+    },
+    "markerLabel": "{name}, {category}",
+    "hostTip": "Host tip",
+    "directions": "Directions",
+    "directionsLabel": "Directions to {name}, opens Google Maps",
+    "close": "Close",
+    "fromMainHouse": "{distance} from the main house",
+    "fromMainHouseAbout": "about {distance} from the main house",
+    "fromProperty": "{distance} from the property",
+    "fromPropertyAbout": "about {distance} from the property",
+    "fromPlace": "{distance} from {place}",
+    "fromPlaceAbout": "about {distance} from {place}"
+  },
   "roomPlace": {
     "title": "Where you'll stay",
     "distance": "{distance} from the main property",

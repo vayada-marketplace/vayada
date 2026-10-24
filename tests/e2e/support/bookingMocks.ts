@@ -375,6 +375,13 @@ export async function mockBookingApis(page: Page, options: MockBookingApisOption
     },
   );
 
+  // The host's nearby places (VAY-2327): none unless a test gives some.
+  await page.route(`**/api/booking-web/hotels/${SEEDED_BOOKING_SLUG}/nearby`, (route) =>
+    route.fulfill({
+      json: { schemaVersion: 1, status: "hidden", location: null, places: [], categories: [] },
+    }),
+  );
+
   for (const retired of ["offers", "calendar"]) {
     await page.route(`**/api/booking-web/hotels/${SEEDED_BOOKING_SLUG}/${retired}**`, (route) =>
       route.fulfill(PRICING_RETIRED),

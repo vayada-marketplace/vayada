@@ -614,6 +614,26 @@
     "accommodationsCount": "{count, plural, one {# hébergement} other {# hébergements}}",
     "editStay": "Modifier"
   },
+  "nearbyMap": {
+    "filtersLabel": "Lieux à proximité",
+    "category": {
+      "food": "Restaurants et bars",
+      "nature": "Plage et surf",
+      "activities": "À voir",
+      "transport": "Se déplacer"
+    },
+    "markerLabel": "{name}, {category}",
+    "hostTip": "Conseil de l’hôte",
+    "directions": "Itinéraire",
+    "directionsLabel": "Itinéraire vers {name}, ouvre Google Maps",
+    "close": "Fermer",
+    "fromMainHouse": "à {distance} de la maison principale",
+    "fromMainHouseAbout": "à environ {distance} de la maison principale",
+    "fromProperty": "à {distance} de l’établissement",
+    "fromPropertyAbout": "à environ {distance} de l’établissement",
+    "fromPlace": "à {distance} de {place}",
+    "fromPlaceAbout": "à environ {distance} de {place}"
+  },
   "roomPlace": {
     "title": "Où vous logerez",
     "distance": "À {distance} de l'établissement principal",

@@ -13,6 +13,14 @@ import {
 } from "@/lib/mapsChoice";
 import AccommodationsPhoneMap from "./AccommodationsPhoneMap";
 import GuestMap, { MapGate, type GuestMapPlace } from "./GuestMap";
+import {
+  NearbyChips,
+  NearbyPlaceCard,
+  closeNearby,
+  nearbyOnMap,
+  nearbyReference,
+  useNearbyLayer,
+} from "./NearbyMapLayer";
 
 const WIDE = "(min-width: 1024px)";
 const VIEWS = [
@@ -43,6 +51,7 @@ function useWideScreen(): boolean {
  *   and the press are remembered for this tab;
  * - on a phone (VAY-2325) the cards have a floating "Map" button that opens a full-screen map. */
 export default function AccommodationViews({
+  slug,
   rooms,
   map,
   stay,
@@ -50,6 +59,8 @@ export default function AccommodationViews({
   notices,
   renderCard,
 }: {
+  /** The hotel's booking page, for its nearby places (VAY-2327). */
+  slug: string;
   /** In the order the guest sorted them. */
   rooms: PricingRoom[];
   /** The rooms' places, or null without the views. */
@@ -77,6 +88,8 @@ export default function AccommodationViews({
   const [cardsOnScreen, setCardsOnScreen] = useState(false);
   const [phoneCards, setPhoneCards] = useState<HTMLDivElement | null>(null);
   const mapButtonRef = useRef<HTMLButtonElement>(null);
+  // The host's nearby places, once the guest asked for a map (VAY-2327).
+  const nearby = useNearbyLayer(slug, Boolean(map) && requested);
 
   useEffect(() => {
     if (!phoneCards) return;
@@ -135,12 +148,16 @@ export default function AccommodationViews({
               label: stay.label,
               // Once the map is gone and the page is in reach again.
               onEdit: () => {
+                nearby.close();
                 setPhoneMap(false);
                 requestAnimationFrame(stay.onEdit);
               },
             }}
             renderCard={renderCard}
+            nearby={nearby}
             onClose={() => {
+              // A place's card belongs to this map: the next one opens on the rooms.
+              nearby.close();
               setPhoneMap(false);
               requestAnimationFrame(() => mapButtonRef.current?.focus());
             }}
@@ -168,6 +185,7 @@ export default function AccommodationViews({
   };
   const floating =
     view === "map" ? rooms.find(({ roomTypeId }) => roomTypeId === selectedRoom) : undefined;
+  const reference = nearbyReference(pins, places, selectedPin);
 
   return (
     <>
@@ -183,6 +201,8 @@ export default function AccommodationViews({
               type="button"
               aria-pressed={view === value}
               onClick={() => {
+                // A place's card stays with the map it was opened on.
+                if (value !== view) nearby.close();
                 setView(value);
                 chooseView(value);
               }}
@@ -230,14 +250,21 @@ export default function AccommodationViews({
             }`}
           >
             {requested ? (
-              <GuestMap
-                places={places}
-                selected={selectedPin < 0 ? null : selectedPin}
-                onSelect={selectPin}
-                apiKey={apiKey}
-                label={t("mapLabel")}
-                className="h-full"
-              />
+              <>
+                <GuestMap
+                  places={places}
+                  selected={selectedPin < 0 ? null : selectedPin}
+                  onSelect={selectPin}
+                  apiKey={apiKey}
+                  label={t("mapLabel")}
+                  className="h-full"
+                  nearby={nearbyOnMap(nearby)}
+                />
+                <NearbyChips
+                  layer={nearby}
+                  className="absolute left-3 right-3 top-3 z-10 sm:right-16"
+                />
+              </>
             ) : (
               <MapGate
                 className="h-full"
@@ -252,6 +279,15 @@ export default function AccommodationViews({
               <div className="absolute bottom-10 left-4 z-10 w-[460px] max-w-[calc(100%-2rem)] shadow-xl">
                 {renderCard(floating, { compact: true, active: false })}
               </div>
+            )}
+            {requested && nearby.selected && (
+              // Bottom right: the selected room's card keeps the bottom left (VAY-2327).
+              <NearbyPlaceCard
+                place={nearby.selected}
+                reference={reference}
+                onClose={() => closeNearby(nearby)}
+                className="absolute bottom-10 right-4 z-10 w-[340px] max-w-[calc(100%-2rem)]"
+              />
             )}
           </div>
         )}
