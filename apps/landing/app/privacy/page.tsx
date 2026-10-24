@@ -310,7 +310,7 @@ export default function PrivacyPage() {
                     rates, availability and the reservations of those channels.
                   </li>
                   <li>
-                    <strong>Maps:</strong> Google Maps, which loads only on the setup and settings
+                    <strong>Maps: </strong>Google Maps, which loads only on the setup and settings
                     pages where you place your property or a room on a map, and on your booking site
                     only when a guest opens its location map. Google then receives those browser
                     requests under Google&apos;s own privacy policy.
@@ -435,7 +435,7 @@ export default function PrivacyPage() {
                     <strong>Required Data:</strong> Your Name, Email Address, and your Message.
                   </li>
                   <li>
-                    <strong>Optional Data:</strong> Your Phone Number, Company Name, Country, and
+                    <strong>Optional Data: </strong>Your Phone Number, Company Name, Country, and
                     the User Category (&quot;I am a...&quot;).
                   </li>
                 </ul>
@@ -515,9 +515,13 @@ export default function PrivacyPage() {
                   The hotel named on the booking site is the controller for your booking and for the
                   optional analytics on its booking site. vayada runs the booking site and processes
                   this data on the hotel&apos;s behalf and on its instructions (Article 28 GDPR).
-                  vayada is the controller for its own server logs and for the partner-link records
-                  described below. The hotel&apos;s contact details are shown at the bottom of its
-                  booking site.
+                  The hotel and vayada have a{" "}
+                  <a href="/terms/dpa" className={LINK}>
+                    data processing agreement
+                  </a>{" "}
+                  for this. vayada is the controller for its own server logs and for the
+                  partner-link records described below. The hotel&apos;s contact details are shown
+                  at the bottom of its booking site.
                 </p>
               </div>
 
@@ -542,7 +546,7 @@ export default function PrivacyPage() {
                     (Article 6(1) lit. f GDPR).
                   </li>
                   <li>
-                    <strong>Optional analytics (only if you allow it):</strong> which pages and
+                    <strong>Optional analytics (only if you allow it): </strong>which pages and
                     booking steps you reach, the room, extras and payment method you choose, whether
                     the booking goes through, and any error, together with a random identifier for
                     your browser tab. The hotel uses this to see where guests leave the booking.
@@ -552,7 +556,7 @@ export default function PrivacyPage() {
                     local storage, for that hotel&apos;s booking site only.
                   </li>
                   <li>
-                    <strong>Partner links:</strong> if you arrive through a link from one of the
+                    <strong>Partner links: </strong>if you arrive through a link from one of the
                     hotel&apos;s referral partners, we record the partner code, the page you arrived
                     on and the site you came from, so the partner can be credited (Article 6(1) lit.
                     f GDPR).
