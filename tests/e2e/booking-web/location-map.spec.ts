@@ -807,6 +807,10 @@ test.describe("nearby places on the guest map (VAY-2327)", () => {
     await setup(page, { locationMap: MIXED_MAP, rooms: mixed });
     await mockNearby(page);
     await page.goto("/");
+    // The first visit's analytics question sits over the bottom of a phone screen.
+    await page.getByRole("button", { name: "Reject analytics" }).click();
+    // The Map button floats while the cards are on screen.
+    await page.getByTestId("room-card-loft").scrollIntoViewIfNeeded();
     await page.getByRole("button", { name: "Map", exact: true }).click();
     const dialog = page.getByTestId("accommodations-phone-map");
     await expect(
@@ -828,6 +832,7 @@ test.describe("nearby places on the guest map (VAY-2327)", () => {
     await page.keyboard.press("Escape");
     await expect(dialog).toHaveCount(0);
     // The next map opens on the rooms, not on the closed place.
+    await page.getByTestId("room-card-loft").scrollIntoViewIfNeeded();
     await page.getByRole("button", { name: "Map", exact: true }).click();
     await expect(
       page.getByTestId("accommodations-phone-map").getByRole("group", { name: "Accommodations" }),
