@@ -44,7 +44,7 @@ test("the account admin accepts the data processing agreement from the banner", 
   await expect(banner).toBeVisible();
   await expect(banner).toContainText("As account admin, you accept it for Alpenrose Hotels");
   await expect(banner).toContainText(
-    "Version of 24 October 2026 · Only the account admin sees this.",
+    "Version of October 24, 2026 · Only the account admin sees this.",
   );
   await expect(banner.getByRole("link", { name: "hotel terms" })).toHaveAttribute(
     "href",
@@ -141,8 +141,8 @@ test.describe("Settings › Privacy & data", () => {
     const terms = page.getByRole("listitem").filter({ hasText: "Terms of Service (hotel terms)" });
     const dpa = page.getByRole("listitem").filter({ hasText: "Data processing agreement" });
     for (const row of [terms, dpa]) {
-      await expect(row).toContainText("Version of 24 October 2026");
-      await expect(row).toContainText("Accepted on 24 Oct 2026 by Anna Keller");
+      await expect(row).toContainText("Version of October 24, 2026");
+      await expect(row).toContainText("Accepted on Oct 24, 2026 by Anna Keller");
     }
     await expect(terms.getByRole("link", { name: "Read" })).toHaveAttribute("href", /\/terms$/);
     await expect(dpa.getByRole("link", { name: "Read" })).toHaveAttribute("href", /\/terms\/dpa$/);
@@ -170,7 +170,7 @@ test.describe("Settings › Privacy & data", () => {
     await page.screenshot({ path: testInfo.outputPath("privacy-agreements-missing-1440.png") });
 
     await page.getByRole("button", { name: "Accept", exact: true }).click();
-    await expect(page.getByText("Accepted on 24 Oct 2026 by Booking Owner")).toHaveCount(2);
+    await expect(page.getByText("Accepted on Oct 24, 2026 by Booking Owner")).toHaveCount(2);
     await expect(page.getByRole("button", { name: "Accept", exact: true })).toHaveCount(0);
     expect(writes).toEqual([{ path: "/api/hotel-account/agreements/accept", body: current }]);
     await assertHealthy();

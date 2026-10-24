@@ -40,7 +40,7 @@ describe("hotel account agreements (VAY-2246)", () => {
         <p>{fillTemplate("{a} vor {b}, {unknown}", { a: <b>Eins</b>, b: "zwei" })}</p>,
       ),
     ).toBe("<p><b>Eins</b> vor zwei, {unknown}</p>");
-    expect(formatAgreementVersion("2026-10-24")).toBe("24 October 2026");
+    expect(formatAgreementVersion("2026-10-24")).toBe("October 24, 2026");
     expect(formatAgreementVersion("2026-10-24", "de")).toBe("24. Oktober 2026");
     expect(formatAgreementVersion("latest")).toBe("latest");
   });
@@ -113,7 +113,7 @@ describe("hotel account agreements (VAY-2246)", () => {
     });
     const section = view!.root.findByType("section");
     expect(textOf(section)).toContain("As account admin, you accept it for your hotel account");
-    expect(textOf(section)).toContain("Version of 24 October 2026");
+    expect(textOf(section)).toContain("Version of October 24, 2026");
     const acceptButton = view!.root.findAll(
       (node) => node.type === "button" && textOf(node) === "Accept",
     )[0]!;
@@ -171,7 +171,9 @@ describe("sign-up tickbox (VAY-2246)", () => {
           onGoogleSignup={onGoogleSignup}
         />,
         {
-          createNodeMock: () => ({ focus: vi.fn(), scrollIntoView: vi.fn() }),
+          // The tickbox takes the focus; other refs (next/image) get none, as without a mock.
+          createNodeMock: (element) =>
+            element.type === "input" ? { focus: vi.fn(), scrollIntoView: vi.fn() } : null,
         },
       );
     });
