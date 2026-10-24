@@ -219,8 +219,9 @@ GitHub Actions under `.github/workflows/`. Canonical frontend builds are frozen
 on the legacy APIs and intentionally have no active deploy workflow; restoring
 their delivery requires explicit rollback-compatibility or cutover work.
 
-- **PMS migrations** auto-run on ECS container start. Do not suggest manually running `scripts/run_migration.sh` after a push to `main`.
-- **auth-db** does **not** auto-migrate in production — run `scripts/run_migration.sh auth` against RDS for any schema change. Locally, the `auth-db-migrate` one-shot service in `docker-compose.yml` runs migrations on `docker compose up`.
+- **PMS migrations** auto-run on ECS container start.
+- **Production databases** are reached only from inside the AWS VPC (VAY-2339). No laptop or GitHub-hosted runner connects to RDS; database work runs as a reviewed one-off ECS task from `vayada-platform`.
+- **auth-db** does **not** auto-migrate in production and is frozen with the legacy stack. A production auth-db schema change needs a reviewed one-off ECS task in `vayada-platform` (`scripts/legacy-migration-oneoff.sh` has no auth-db command yet). Locally, the `auth-db-migrate` one-shot service in `docker-compose.yml` runs migrations on `docker compose up`.
 - Infrastructure is managed with Terraform in the [`vayada-platform`](https://github.com/vayada-marketplace/vayada-platform) repository. This repo contains no infrastructure code.
 
 ## Skills
@@ -237,6 +238,6 @@ Use `.agents/skills/vayada-paper-design/SKILL.md` whenever work touches the Pape
 
 - **SMTP** — port 587 SES uses `start_tls=True`, **not** `use_tls=True`. Recurring regression — check on any email/SMTP change.
 - **Booking Engine guest copy** — guest-facing direct-booking pages and emails speak as the property in first person (`we` / `our` / `us`). Do not refer to the property as `the host`, `the hotel`, or `the property` when it is reviewing, accepting, declining, confirming, or verifying a guest booking/payment/change.
-- **PMS migrations auto-run** on ECS container start. After a push to `main`, do **not** suggest manually running `scripts/run_migration.sh`.
-- **auth-db** does **not** auto-migrate **in production** (unlike PMS). Locally, `docker compose up` runs auth migrations via the `auth-db-migrate` one-shot service. For prod schema changes, run `scripts/run_migration.sh auth` against RDS.
+- **PMS migrations auto-run** on ECS container start. After a push to `main`, do **not** suggest running migrations by hand.
+- **auth-db** does **not** auto-migrate **in production** (unlike PMS). Locally, `docker compose up` runs auth migrations via the `auth-db-migrate` one-shot service. The production database has no public path (VAY-2339): a prod schema change needs a reviewed one-off ECS task in `vayada-platform`.
 - **`vw` worktree helper is gone.** Ticket work uses normal git branches and direct-to-main commits — no worktree scripts, no shipping helpers.
