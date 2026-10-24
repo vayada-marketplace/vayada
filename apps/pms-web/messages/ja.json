@@ -673,5 +673,16 @@
   "settings.team.roleFrontDesk": "フロント",
   "settings.team.roleHousekeeping": "客室清掃",
   "settings.team.roleOwner": "施設オーナー",
-  "settings.team.roleCustom": "カスタム"
+  "settings.team.roleCustom": "カスタム",
+  "agreements.banner.title": "データ処理契約に同意してください",
+  "agreements.banner.body": "vayadaはお客様に代わってゲストの予約データを保管しており、GDPR（第28条）ではそのための書面による契約が必要です。アカウント管理者として、{account}のために、この契約が属する{terms}とあわせて同意してください。",
+  "agreements.banner.yourAccount": "ホテルアカウント",
+  "agreements.banner.hotelTerms": "ホテル利用規約",
+  "agreements.banner.meta": "{date}版 · この表示はアカウント管理者にのみ表示されます。",
+  "agreements.banner.read": "契約を読む",
+  "agreements.banner.accept": "同意する",
+  "agreements.banner.accepting": "同意しています…",
+  "agreements.banner.failed": "うまくいきませんでした。もう一度お試しください。",
+  "agreements.banner.accepted": "{account}のデータ処理契約に同意しました。",
+  "agreements.banner.dismiss": "閉じる"
 }

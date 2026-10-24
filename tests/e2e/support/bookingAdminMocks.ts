@@ -1,6 +1,7 @@
 import type { Page } from "@playwright/test";
 import { mockBookingPublication } from "./bookingPublicationMocks";
 import { mockSetupChecklistUnavailable } from "./setupChecklistMocks";
+import { mockHotelAccountAgreements } from "./hotelAccountAgreementsMocks";
 import { createAdaptiveHotelSetupStatusMock } from "./sharedHotelSetupMocks";
 import { mockBookingModules } from "./featureHubModuleMocks";
 
@@ -417,6 +418,8 @@ export async function mockBookingAdminShellRoutes(
   // The dashboard's booking page card; specs override it with their own state.
   await mockBookingPublication(page, BOOKING_ADMIN_PROPERTY_ID);
   await mockSetupChecklistUnavailable(page);
+  // VAY-2246: an account that accepted its terms and DPA at sign-up, so no banner.
+  await mockHotelAccountAgreements(page);
   await page.route("**/api/pms/properties/*/module-activations", (route) =>
     route.fulfill({
       json: {

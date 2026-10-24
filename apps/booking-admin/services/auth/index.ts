@@ -29,10 +29,14 @@ export interface LoginRequest {
   password: string;
 }
 
+/** VAY-2246: the hotel terms and DPA versions the sign-up tickbox accepted. */
+export type AcceptedHotelAgreements = { termsVersion: string; dpaVersion: string };
+
 export interface SignupRequest {
   name?: string;
   email: string;
   password: string;
+  acceptedAgreements?: AcceptedHotelAgreements;
 }
 
 export type AuthStateResponse = {
@@ -208,7 +212,7 @@ export const authService = {
     window.location.href = url.toString();
   },
 
-  startGoogleSignup: (returnTo: string): void => {
+  startGoogleSignup: (returnTo: string, acceptedAgreements?: AcceptedHotelAgreements): void => {
     if (typeof window === "undefined") return;
 
     const callbackUrl = new URL("/login", window.location.origin);
@@ -221,6 +225,10 @@ export const authService = {
     url.searchParams.set("surface", AUTH_SURFACE);
     url.searchParams.set("flow", "signup");
     url.searchParams.set("type", "hotel");
+    if (acceptedAgreements) {
+      url.searchParams.set("accepted_terms", acceptedAgreements.termsVersion);
+      url.searchParams.set("accepted_dpa", acceptedAgreements.dpaVersion);
+    }
     url.searchParams.set("return_to", callbackUrl.toString());
     url.searchParams.set("error_return_to", errorUrl.toString());
     window.location.href = url.toString();

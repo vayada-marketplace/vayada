@@ -6,7 +6,12 @@ import SharedSignupPage from "@vayada/product-onboarding/SharedSignupPage";
 import { useTranslation } from "@/lib/i18n";
 import { resolveBookingSetupGuard } from "@/lib/utils/sharedSetupGuard";
 import { hasPendingHotelAccountInvite } from "@/services/api/hotelAccountInvites";
-import { AuthStateError, authService, storePendingEmailVerification } from "@/services/auth";
+import {
+  AuthStateError,
+  authService,
+  storePendingEmailVerification,
+  type SignupRequest,
+} from "@/services/auth";
 import {
   signupErrorKey,
   signupRedirectErrorKey,
@@ -26,7 +31,7 @@ export default function SignupPage() {
       setSubmitError(signupRedirectErrorKey(authError, params.get("auth_error_code")));
   }, []);
 
-  async function handleSignup(data: { email: string; password: string }) {
+  async function handleSignup(data: SignupRequest) {
     setSubmitError("");
     setIsSubmitting(true);
     try {
@@ -69,7 +74,9 @@ export default function SignupPage() {
           : undefined
       }
       onErrorClear={() => setSubmitError("")}
-      onGoogleSignup={() => authService.startGoogleSignup("/dashboard")}
+      onGoogleSignup={(acceptedAgreements) =>
+        authService.startGoogleSignup("/dashboard", acceptedAgreements)
+      }
     />
   );
 }

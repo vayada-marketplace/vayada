@@ -673,5 +673,16 @@
   "settings.team.roleFrontDesk": "Receptie",
   "settings.team.roleHousekeeping": "Huishouding",
   "settings.team.roleOwner": "Eigenaar",
-  "settings.team.roleCustom": "Aangepast"
+  "settings.team.roleCustom": "Aangepast",
+  "agreements.banner.title": "Accepteer de verwerkersovereenkomst",
+  "agreements.banner.body": "vayada bewaart de boekingsgegevens van je gasten namens jou, en de AVG (art. 28) vereist daarvoor een schriftelijke overeenkomst. Als accountbeheerder accepteer je die voor {account}, samen met de {terms} waar ze bij hoort.",
+  "agreements.banner.yourAccount": "je hotelaccount",
+  "agreements.banner.hotelTerms": "hotelvoorwaarden",
+  "agreements.banner.meta": "Versie van {date} · Alleen de accountbeheerder ziet dit.",
+  "agreements.banner.read": "Overeenkomst lezen",
+  "agreements.banner.accept": "Accepteren",
+  "agreements.banner.accepting": "Bezig met accepteren…",
+  "agreements.banner.failed": "Dat is niet gelukt. Probeer het opnieuw.",
+  "agreements.banner.accepted": "Verwerkersovereenkomst geaccepteerd voor {account}.",
+  "agreements.banner.dismiss": "Sluiten"
 }

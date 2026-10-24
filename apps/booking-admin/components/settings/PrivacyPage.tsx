@@ -13,6 +13,7 @@ import {
 } from "@heroicons/react/24/outline";
 import { SettingsCard } from "@vayada/settings-ui";
 import { PageHeader, PageLayout } from "@/components/layout/PageLayout";
+import { HotelAccountAgreementsCard } from "@/components/settings/HotelAccountAgreementsCard";
 import { SettingsBreadcrumb } from "@/components/settings/SettingsSubPage";
 import { FeedbackAlert } from "@/components/ui";
 import { useTranslation } from "@/lib/i18n";
@@ -114,6 +115,9 @@ export function PrivacyPage() {
         <div className="space-y-4">
           {errorKey && <FeedbackAlert type="error" message={t(errorKey)} />}
           {successMessage && <FeedbackAlert type="success" message={successMessage} />}
+
+          {/* VAY-2246: the hotel account's terms and DPA; it loads on its own. */}
+          <HotelAccountAgreementsCard />
 
           {isLoading ? (
             <div className="space-y-4" aria-busy="true">

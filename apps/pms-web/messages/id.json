@@ -677,5 +677,16 @@
   "settings.team.roleFrontDesk": "Resepsionis",
   "settings.team.roleHousekeeping": "Tata graha",
   "settings.team.roleOwner": "Pemilik properti",
-  "settings.team.roleCustom": "Kustom"
+  "settings.team.roleCustom": "Kustom",
+  "agreements.banner.title": "Terima perjanjian pemrosesan data",
+  "agreements.banner.body": "vayada menyimpan data pemesanan tamu Anda atas nama Anda, dan GDPR (Pasal 28) mewajibkan perjanjian tertulis untuk itu. Sebagai admin akun, Anda menerimanya untuk {account}, bersama dengan {terms} tempat perjanjian ini berada.",
+  "agreements.banner.yourAccount": "akun hotel Anda",
+  "agreements.banner.hotelTerms": "ketentuan hotel",
+  "agreements.banner.meta": "Versi {date} · Hanya admin akun yang melihat ini.",
+  "agreements.banner.read": "Baca perjanjian",
+  "agreements.banner.accept": "Terima",
+  "agreements.banner.accepting": "Menerima…",
+  "agreements.banner.failed": "Gagal. Silakan coba lagi.",
+  "agreements.banner.accepted": "Perjanjian pemrosesan data diterima untuk {account}.",
+  "agreements.banner.dismiss": "Tutup"
 }

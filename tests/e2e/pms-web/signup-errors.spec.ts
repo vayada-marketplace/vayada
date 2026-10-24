@@ -16,6 +16,9 @@ test("an email that already has an account says so and offers to sign in", async
   await page.goto("/signup");
   await page.getByLabel("Email address", { exact: true }).fill("owner@example.test");
   await page.getByLabel("Password", { exact: true }).fill("correct-password");
+  await page
+    .getByRole("checkbox", { name: /I accept the Terms and the Data Processing Agreement/ })
+    .check();
   await page.getByRole("button", { name: /create account/i }).click();
 
   const alert = page

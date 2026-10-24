@@ -5,7 +5,12 @@ import { useRouter } from "next/navigation";
 import SharedSignupPage from "@vayada/product-onboarding/SharedSignupPage";
 import { useTranslation } from "@/lib/i18n";
 import { resolvePmsSetupGuard } from "@/lib/utils/sharedSetupGuard";
-import { AuthStateError, authService, storePendingEmailVerification } from "@/services/auth";
+import {
+  AuthStateError,
+  authService,
+  storePendingEmailVerification,
+  type SignupRequest,
+} from "@/services/auth";
 
 export default function SignupPage() {
   const { t } = useTranslation();
@@ -26,7 +31,7 @@ export default function SignupPage() {
     setAccountExists(false);
   }
 
-  async function handleSignup(data: { email: string; password: string }) {
+  async function handleSignup(data: SignupRequest) {
     clearError();
     setIsSubmitting(true);
     try {
@@ -65,7 +70,9 @@ export default function SignupPage() {
         accountExists ? { label: t("auth.register.signIn"), href: "/login" } : undefined
       }
       onErrorClear={clearError}
-      onGoogleSignup={() => authService.startGoogleSignup("/dashboard")}
+      onGoogleSignup={(acceptedAgreements) =>
+        authService.startGoogleSignup("/dashboard", acceptedAgreements)
+      }
     />
   );
 }

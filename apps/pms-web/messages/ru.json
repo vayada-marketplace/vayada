@@ -673,5 +673,16 @@
   "settings.team.roleFrontDesk": "Ресепшен",
   "settings.team.roleHousekeeping": "Уборка номеров",
   "settings.team.roleOwner": "Владелец объекта",
-  "settings.team.roleCustom": "Своя роль"
+  "settings.team.roleCustom": "Своя роль",
+  "agreements.banner.title": "Примите соглашение об обработке данных",
+  "agreements.banner.body": "vayada хранит данные о бронированиях ваших гостей от вашего имени, и GDPR (ст. 28) требует для этого письменного соглашения. Как администратор аккаунта вы принимаете его для {account} вместе с {terms}, частью которых оно является.",
+  "agreements.banner.yourAccount": "вашего аккаунта отеля",
+  "agreements.banner.hotelTerms": "условиями для отелей",
+  "agreements.banner.meta": "Версия от {date} · Это видит только администратор аккаунта.",
+  "agreements.banner.read": "Прочитать соглашение",
+  "agreements.banner.accept": "Принять",
+  "agreements.banner.accepting": "Принимаем…",
+  "agreements.banner.failed": "Не получилось. Попробуйте ещё раз.",
+  "agreements.banner.accepted": "Соглашение об обработке данных принято для {account}.",
+  "agreements.banner.dismiss": "Закрыть"
 }
