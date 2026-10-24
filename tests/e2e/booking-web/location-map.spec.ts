@@ -492,7 +492,9 @@ test.describe("booking page location map", () => {
       .getByRole("dialog")
       .getByRole("region", { name: "Where you'll stay", exact: true });
     await expect(place).toContainText("Isarvorstadt");
-    await expect(place).toContainText("Shown as an area, not the exact spot.");
+    await expect(place).toContainText(
+      "Shown as an area, not the exact spot. The exact address is sent with your booking confirmation.",
+    );
     await expect(place).toContainText("About 1 km from the main property");
     await expect(place.getByRole("link", { name: "Directions" })).toHaveCount(0);
     // The accommodations map's circle and the popup's own, for the same area.

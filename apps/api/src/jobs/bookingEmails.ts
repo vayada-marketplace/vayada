@@ -1,6 +1,12 @@
 import { paymentMethodLabel } from "@vayada/locale-constants";
 import { createHash } from "node:crypto";
 import type { QueryResultRow } from "pg";
+import {
+  roomAddress,
+  roomAtProperty,
+  roomPin,
+  type MapPin,
+} from "../domains/bookingLocationMap.js";
 
 export const BOOKING_EMAIL_QUEUE = "platform.email";
 const BOOKING_LIFECYCLE_EMAIL_JOB_TYPE_BY_KIND = {
@@ -75,7 +81,22 @@ export type BookingLifecycleEmailInput = {
     children?: number;
     specialRequests?: string | null;
     bookingMetadata?: unknown;
+    /** The property's address, arrival directions and pin, for "Where you'll stay" (VAY-2322). */
+    propertyLocation?: StayPropertyLocation | null;
+    /** The booked room types with their saved locations, in booking order. */
+    bookedRooms?: Array<{ name: string; attributes: unknown }> | null;
   };
+};
+
+export type StayPropertyLocation = {
+  streetAddress: string | null;
+  area: string | null;
+  postalCode: string | null;
+  city: string | null;
+  countryCode: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  arrivalDirections: string | null;
 };
 
 export type BookingTransitionNotificationInput = {
@@ -309,6 +330,8 @@ type BookingNotificationSnapshot = QueryResultRow & {
   children: number;
   specialRequests: string | null;
   addons: string | null;
+  propertyLocation: StayPropertyLocation | null;
+  bookedRooms: Array<{ name: string; attributes: unknown }>;
 };
 
 export async function loadBookingNotificationSnapshot(
@@ -324,8 +347,8 @@ export async function loadBookingNotificationSnapshot(
        NULLIF(trim(concat_ws(' ', guest.first_name, guest.last_name)), '') AS "guestName",
        host_contact.value AS "hostEmail",
        property.display_name AS "propertyName",
-       (SELECT location.timezone FROM hotel_catalog.property_locations location
-        WHERE location.property_id = booking.property_id LIMIT 1) AS "propertyTimeZone",
+       location.timezone AS "propertyTimeZone",
+       location.place AS "propertyLocation",
        booking.check_in::text AS "checkIn",
        booking.check_out::text AS "checkOut",
        booking.total_amount::text AS "totalAmount",
@@ -355,9 +378,55 @@ export async function loadBookingNotificationSnapshot(
        (SELECT string_agg(item.addon_name || ' × ' || item.quantity, ', ' ORDER BY item.created_at)
         FROM booking.booking_addon_selection_items item
         JOIN booking.active_booking_addon_selections current_selection ON current_selection.id = item.selection_id
-        WHERE item.guest_booking_id = booking.id AND item.property_id = booking.property_id) AS addons
+        WHERE item.guest_booking_id = booking.id AND item.property_id = booking.property_id) AS addons,
+       -- VAY-2322: the booked room types and their places, for "Where you'll stay": the PMS's rooms, else the
+       -- booked pricing rooms, else the booked offer's room (as the PMS reservation list names them).
+       (WITH assigned AS (
+          SELECT assignment.room_type_id::text AS room_type_id, assignment.position::bigint AS position
+          FROM pms.operational_booking_assignments assignment
+          WHERE assignment.guest_booking_id = booking.id
+            AND assignment.property_id = booking.property_id
+            AND NOT (assignment.assignment_status = 'released'
+              AND assignment.assignment_payload @> '{"channexAlterationReleased":true}')
+        ), selected AS (
+          SELECT selection.value->>'roomTypeId' AS room_type_id, selection.position
+          FROM jsonb_array_elements(
+            CASE WHEN jsonb_typeof(booking.booking_metadata->'pricingSelections') = 'array'
+              THEN booking.booking_metadata->'pricingSelections' ELSE '[]'::jsonb END
+          ) WITH ORDINALITY AS selection(value, position)
+        ), booked AS (
+          SELECT room_type_id, position FROM assigned
+          UNION ALL
+          SELECT room_type_id, position FROM selected WHERE NOT EXISTS (SELECT 1 FROM assigned)
+          UNION ALL
+          SELECT booking.booking_metadata #>> '{selectedOffer,roomTypeId}', 0
+          WHERE NOT EXISTS (SELECT 1 FROM assigned) AND NOT EXISTS (SELECT 1 FROM selected)
+        )
+        SELECT COALESCE(jsonb_agg(
+                 jsonb_build_object('name', room.name, 'attributes', room.room_attributes)
+                 ORDER BY room.first_position), '[]'::jsonb)
+        FROM (
+          SELECT room_type.name, room_type.room_attributes, min(booked.position) AS first_position
+          FROM booked
+          JOIN pms.room_types room_type
+            ON room_type.id::text = booked.room_type_id
+           AND room_type.property_id = booking.property_id
+          GROUP BY room_type.id, room_type.name, room_type.room_attributes
+        ) room) AS "bookedRooms"
      FROM booking.guest_bookings booking
      JOIN hotel_catalog.properties property ON property.id = booking.property_id
+     LEFT JOIN LATERAL (
+       SELECT location.timezone,
+              jsonb_build_object(
+                'streetAddress', location.street_address, 'area', location.area,
+                'postalCode', location.postal_code, 'city', location.city,
+                'countryCode', location.country_code,
+                'latitude', location.latitude, 'longitude', location.longitude,
+                'arrivalDirections', location.arrival_directions) AS place
+       FROM hotel_catalog.property_locations location
+       WHERE location.property_id = booking.property_id
+       LIMIT 1
+     ) location ON TRUE
      LEFT JOIN LATERAL (
        SELECT booking_guest.first_name, booking_guest.last_name, booking_guest.email, booking_guest.special_requests
        FROM booking.booking_guests booking_guest
@@ -544,6 +613,7 @@ function emailCopy(input: BookingLifecycleEmailInput) {
         `We've accepted your booking request for ${property}.`,
         `Stay: ${stayDate(booking.checkIn)} to ${stayDate(booking.checkOut)}`,
         ...confirmationDetails(booking),
+        ...whereYoullStay(booking),
         `Booking reference: ${booking.bookingReference}`,
       ].join("\n\n"),
     };
@@ -557,6 +627,7 @@ function emailCopy(input: BookingLifecycleEmailInput) {
         `We've updated your booking at ${property}.`,
         `Stay: ${stayDate(booking.checkIn)} to ${stayDate(booking.checkOut)}`,
         ...confirmationDetails(booking),
+        ...whereYoullStay(booking),
         ...(input.guestMessage ? [`Message from us:\n${input.guestMessage}`] : []),
         `Booking reference: ${booking.bookingReference}`,
       ].join("\n\n"),
@@ -679,6 +750,7 @@ function emailCopy(input: BookingLifecycleEmailInput) {
       `Your booking at ${property} is confirmed.`,
       `Stay: ${stayDate(booking.checkIn)} to ${stayDate(booking.checkOut)}`,
       ...confirmationDetails(booking),
+      ...whereYoullStay(booking),
       `Booking reference: ${booking.bookingReference}`,
       "We look forward to welcoming you!",
     ].join("\n\n"),
@@ -709,6 +781,80 @@ function confirmationDetails(booking: BookingLifecycleEmailInput["booking"]): st
     `Add-ons: ${booking.addons || "None"}`,
     ...(booking.specialRequests ? [`Special requests: ${booking.specialRequests}`] : []),
   ];
+}
+
+/** "Where you'll stay" (VAY-2322), for the guest once the stay is confirmed: the property's full address,
+ * arrival directions and a Google Maps link for rooms at the property, and a room's own address and link
+ * for one elsewhere. Exact even where the booking page shows only an area (D7). Empty without a snapshot. */
+function whereYoullStay(booking: BookingLifecycleEmailInput["booking"]): string[] {
+  const location = booking.propertyLocation;
+  const rooms = booking.bookedRooms ?? [];
+  if (!location && rooms.length === 0) return [];
+  const propertyPin = location ? roomPin(location) : null;
+  const atProperty = rooms.filter((room) => roomAtProperty(room.attributes, propertyPin));
+  // A room elsewhere without an address or pin has nothing to show.
+  const elsewhere = rooms
+    .filter((room) => !atProperty.includes(room))
+    .map((room) => ({
+      name: room.name,
+      address: roomAddress(room.attributes),
+      pin: roomPin(room.attributes),
+    }))
+    .filter((room) => room.address || room.pin);
+  const places: string[] = [];
+  if (location && (atProperty.length > 0 || elsewhere.length === 0)) {
+    const address = [
+      location.streetAddress,
+      location.area,
+      [location.postalCode, location.city]
+        .map((part) => part?.trim())
+        .filter(Boolean)
+        .join(" "),
+      countryName(location.countryCode),
+    ]
+      .map((part) => part?.trim())
+      .filter(Boolean)
+      .join(", ");
+    const name = booking.propertyName || "The property";
+    places.push(
+      [
+        elsewhere.length > 0 ? `${name} (${atProperty.map((room) => room.name).join(", ")})` : name,
+        address,
+        ...(location.arrivalDirections?.trim()
+          ? [`Arrival directions: ${location.arrivalDirections.trim()}`]
+          : []),
+        directionsLine(propertyPin, address),
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    );
+  }
+  for (const room of elsewhere)
+    places.push(
+      [room.name, room.address, directionsLine(room.pin, room.address)].filter(Boolean).join("\n"),
+    );
+  return places.length > 0 ? [`Where you'll stay:\n${places.join("\n\n")}`] : [];
+}
+
+/** Google Maps directions to the pin, or to the address without one (as the booking page's Directions). */
+function directionsLine(pin: MapPin | null, address: string | null): string | null {
+  const destination = pin
+    ? `${pin.latitude},${pin.longitude}`
+    : address
+      ? encodeURIComponent(address)
+      : null;
+  return destination
+    ? `Directions: https://www.google.com/maps/dir/?api=1&destination=${destination}`
+    : null;
+}
+
+function countryName(code: string | null): string | null {
+  if (!code?.trim()) return null;
+  try {
+    return new Intl.DisplayNames(["en"], { type: "region" }).of(code.trim().toUpperCase()) ?? code;
+  } catch {
+    return code;
+  }
 }
 
 function notificationsForTransition(

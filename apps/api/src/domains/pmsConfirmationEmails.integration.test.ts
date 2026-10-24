@@ -278,4 +278,62 @@ describe.skipIf(!url)("confirmation resend with target PostgreSQL", () => {
       writer.release();
     }
   });
+  it("tells the guest where they stay, from the property's place and the booked rooms (VAY-2322)", async () => {
+    const roomType = randomUUID();
+    await pool.query(
+      `UPDATE hotel_catalog.property_locations SET street_address='Marienplatz 1', area='Altstadt',
+         postal_code='80331', city='Munich', country_code='DE', latitude=48.137154, longitude=11.576124,
+         arrival_directions='Ring the bell at the side door.'
+       WHERE property_id=$1`,
+      [property],
+    );
+    await pool.query(
+      `INSERT INTO pms.room_types(id, property_id, name, base_rate_amount, currency, room_attributes)
+       VALUES ($1, $2, 'Garden Room', 100, 'EUR', '{"locationSource":"property"}')`,
+      [roomType, property],
+    );
+    // Two rooms of one type, booked on the booking page: one place.
+    await pool.query(
+      `UPDATE booking.guest_bookings SET booking_metadata = booking_metadata
+         - 'airbnbMoneyStatus' || jsonb_build_object('pricingSelections', jsonb_build_array(
+           jsonb_build_object('roomTypeId', $2::text), jsonb_build_object('roomTypeId', $2::text)))
+       WHERE id=$1`,
+      [booking, roomType],
+    );
+    const snapshot = await loadBookingNotificationSnapshot(pool, {
+      propertyId: property,
+      guestBookingId: booking,
+    });
+    expect(snapshot).toMatchObject({
+      propertyLocation: {
+        streetAddress: "Marienplatz 1",
+        area: "Altstadt",
+        postalCode: "80331",
+        city: "Munich",
+        countryCode: "DE",
+        latitude: 48.137154,
+        longitude: 11.576124,
+        arrivalDirections: "Ring the bell at the side door.",
+      },
+      bookedRooms: [{ name: "Garden Room", attributes: { locationSource: "property" } }],
+    });
+    const job = await enqueueBookingLifecycleEmailJob(pool, {
+      kind: "final_confirmation",
+      resendKey: `booking.confirmation.stay:${randomUUID()}`,
+      occurredAt: new Date().toISOString(),
+      booking: snapshot!,
+    });
+    const { payload } = (
+      await pool.query(`SELECT payload FROM platform.jobs WHERE id=$1`, [job.jobId])
+    ).rows[0];
+    expect(payload.text).toContain(
+      [
+        "Where you'll stay:",
+        "Test Hotel",
+        "Marienplatz 1, Altstadt, 80331 Munich, Germany",
+        "Arrival directions: Ring the bell at the side door.",
+        "Directions: https://www.google.com/maps/dir/?api=1&destination=48.137154,11.576124",
+      ].join("\n"),
+    );
+  });
 });

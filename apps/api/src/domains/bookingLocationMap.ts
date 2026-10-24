@@ -135,10 +135,7 @@ export function guestRoomLocation(
   const saved =
     attributes && typeof attributes === "object" ? (attributes as Record<string, unknown>) : {};
   const pin = roomPin(saved);
-  const atProperty =
-    saved.locationSource === "property" ||
-    (saved.locationSource !== "custom" &&
-      (!pin || (propertyPin !== null && isSamePlace(pin, propertyPin))));
+  const atProperty = roomAtProperty(saved, propertyPin);
   const approximate = !atProperty && pin !== null && saved.locationPrecision === "approximate";
   const area = typeof saved.locationArea === "string" ? saved.locationArea.trim() : "";
   return {
@@ -148,6 +145,19 @@ export function guestRoomLocation(
     address: atProperty || !pin ? null : approximate ? area || null : roomAddress(saved),
     showMapInDetails: saved.showMapInDetails !== false,
   };
+}
+
+/** Whether a room is at the property: "Same as property", or (saved before VAY-2321) no pin of its own away
+ * from the property's. */
+export function roomAtProperty(attributes: unknown, propertyPin: MapPin | null): boolean {
+  const saved =
+    attributes && typeof attributes === "object" ? (attributes as Record<string, unknown>) : {};
+  const pin = roomPin(saved);
+  return (
+    saved.locationSource === "property" ||
+    (saved.locationSource !== "custom" &&
+      (!pin || (propertyPin !== null && isSamePlace(pin, propertyPin))))
+  );
 }
 
 /** A room's own pin from its saved attributes; null unless both coordinates are numbers in range. */

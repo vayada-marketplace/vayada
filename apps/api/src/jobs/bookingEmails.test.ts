@@ -44,6 +44,147 @@ describe("booking lifecycle email jobs", () => {
     expect(payload.text).toContain("Accommodation: 2 × Double + 1 × Twin");
   });
 
+  it("tells the guest where they'll stay once the stay is confirmed (VAY-2322)", async () => {
+    const propertyLocation = {
+      streetAddress: "Marienplatz 1",
+      area: "Altstadt",
+      postalCode: "80331",
+      city: "Munich",
+      countryCode: "DE",
+      latitude: 48.137154,
+      longitude: 11.576124,
+      arrivalDirections: "Ring the bell at the side door.",
+    };
+    const atProperty = [
+      "Where you'll stay:",
+      "Hotel Alpenrose",
+      "Marienplatz 1, Altstadt, 80331 Munich, Germany",
+      "Arrival directions: Ring the bell at the side door.",
+      "Directions: https://www.google.com/maps/dir/?api=1&destination=48.137154,11.576124",
+    ].join("\n");
+    const text = async (
+      kind: BookingLifecycleEmailInput["kind"],
+      booking: Partial<BookingLifecycleEmailInput["booking"]> = {},
+    ) => {
+      const target = createTargetEmailStore();
+      const input = bookingEmailInput({ kind });
+      Object.assign(input.booking, { propertyLocation, bookedRooms: [], ...booking });
+      await enqueueBookingLifecycleEmailJob(target, input);
+      return String(
+        JSON.parse(String(target.requiredCall("INSERT INTO platform.jobs").values?.[8])).text,
+      );
+    };
+
+    for (const kind of ["final_confirmation", "booking_accepted", "booking_updated"] as const)
+      expect(await text(kind)).toContain(`\n\n${atProperty}\n\nBooking reference: B-BANK-001`);
+    for (const kind of [
+      "request_received",
+      "reserved_pending_payment",
+      "booking_rejected",
+      "booking_canceled",
+      "host_new_booking",
+      "host_request_updated",
+    ] as const)
+      expect(await text(kind)).not.toContain("Where you'll stay");
+
+    // A room elsewhere gets its own exact address and pin, even when the booking page shows only its area.
+    // Older rooms count as the property's without a pin of their own away from it; a room elsewhere with
+    // nothing saved is left out.
+    const mixed = await text("final_confirmation", {
+      propertyLocation: { ...propertyLocation, arrivalDirections: null },
+      bookedRooms: [
+        { name: "Double", attributes: {} },
+        { name: "Twin", attributes: { latitude: 48.137154, longitude: 11.576124 } },
+        {
+          name: "Beach Villa",
+          attributes: {
+            locationSource: "custom",
+            locationPrecision: "approximate",
+            locationArea: "Isarvorstadt",
+            locationAddress: "Fraunhoferstraße 5, 80469 München",
+            latitude: 48.1301234,
+            longitude: 11.5734567,
+          },
+        },
+        { name: "Lake Lodge", attributes: { locationSource: "custom" } },
+      ],
+    });
+    expect(mixed).toContain(
+      [
+        "Where you'll stay:",
+        "Hotel Alpenrose (Double, Twin)",
+        "Marienplatz 1, Altstadt, 80331 Munich, Germany",
+        "Directions: https://www.google.com/maps/dir/?api=1&destination=48.137154,11.576124",
+        "",
+        "Beach Villa",
+        "Fraunhoferstraße 5, 80469 München",
+        "Directions: https://www.google.com/maps/dir/?api=1&destination=48.1301234,11.5734567",
+        "",
+        "Booking reference: B-BANK-001",
+      ].join("\n"),
+    );
+    expect(mixed).not.toMatch(/Isarvorstadt|Lake Lodge|Arrival directions/);
+
+    // Only a villa: no property block. Without a pin, the directions look the address up.
+    const villa = await text("booking_accepted", {
+      propertyLocation: { ...propertyLocation, latitude: null, longitude: null },
+      bookedRooms: [
+        {
+          name: "Beach Villa",
+          attributes: { locationSource: "custom", locationAddress: "Fraunhoferstraße 5" },
+        },
+      ],
+    });
+    expect(villa).toContain(
+      "Where you'll stay:\nBeach Villa\nFraunhoferstraße 5\nDirections: https://www.google.com/maps/dir/?api=1&destination=Fraunhoferstra%C3%9Fe%205\n\n",
+    );
+    expect(villa).not.toContain("Marienplatz");
+    const noPin = await text("final_confirmation", {
+      propertyLocation: { ...propertyLocation, latitude: null, longitude: null, area: null },
+    });
+    expect(noPin).toContain(
+      "Directions: https://www.google.com/maps/dir/?api=1&destination=Marienplatz%201%2C%2080331%20Munich%2C%20Germany",
+    );
+  });
+
+  it("reads the property's place and the booked rooms with the booking (VAY-2322)", async () => {
+    const target = createTargetEmailStore({
+      propertyLocation: {
+        streetAddress: "Marienplatz 1",
+        area: null,
+        postalCode: "80331",
+        city: "Munich",
+        countryCode: "DE",
+        latitude: null,
+        longitude: null,
+        arrivalDirections: "Side door.",
+      },
+      bookedRooms: [{ name: "Double", attributes: { locationSource: "property" } }],
+    });
+    await enqueueBookingTransitionNotifications(target, {
+      propertyId: "f2000000-0000-0000-0000-000000000951",
+      guestBookingId: "book_bank_001",
+      occurredAt: "2026-09-01T10:00:00.000Z",
+      transition: {
+        eventType: "guest_booking.payment_received",
+        fromStatus: "pending_payment",
+        toStatus: "confirmed",
+      },
+    });
+    const payloads = target.calls
+      .filter((call) => call.text.includes("INSERT INTO platform.jobs"))
+      .map((call) => JSON.parse(String(call.values?.[8])));
+    const guest = payloads.find((payload) => payload.recipientRole === "guest");
+    const host = payloads.find((payload) => payload.recipientRole === "host");
+    expect(guest.text).toContain(
+      "Where you'll stay:\nHotel Alpenrose\nMarienplatz 1, 80331 Munich, Germany\nArrival directions: Side door.",
+    );
+    expect(host.text).not.toContain("Where you'll stay");
+    const snapshot = target.requiredCall('AS "hostEmail"').text;
+    expect(snapshot).toContain('AS "bookedRooms"');
+    expect(snapshot).toContain("pms.operational_booking_assignments");
+  });
+
   it("deduplicates retries but sends each accepted host date revision", async () => {
     const target = createTargetEmailStore();
     const enqueue = (revision: string) =>
