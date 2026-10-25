@@ -845,7 +845,8 @@
         "freeEnded": "Kostenlose Stornierung abgelaufen",
         "nonRefundable": "Nicht erstattbar",
         "noRefund": "Keine Erstattung mehr",
-        "notRefundableOnceAccepted": "Nicht erstattbar, sobald das Hotel annimmt"
+        "notRefundableOnceAccepted": "Nicht erstattbar, sobald das Hotel annimmt",
+        "notRefundableOncePaid": "Nach der Zahlung nicht erstattbar"
       },
       "when": {
         "untilEnd": "Bis einschließlich {date}",
@@ -856,14 +857,21 @@
         "fromBooking": "Ab Buchung",
         "beforeAccept": "Bevor das Hotel annimmt",
         "afterAccept": "Nachdem das Hotel angenommen hat",
-        "noShow": "Nichterscheinen"
+        "noShow": "Nichterscheinen",
+        "beforeTransfer": "Bevor Ihre Überweisung eingeht",
+        "noTransfer": "Keine Überweisung innerhalb von 48 Stunden",
+        "paidUntilEnd": "Bezahlt, bis einschließlich {date}",
+        "afterTransfer": "Sobald Ihre Überweisung eingegangen ist"
       },
       "pay": {
         "free": "Kostenlos",
         "freeNothingCharged": "Kostenlos · nichts berechnet",
         "freeHoldReleased": "Kostenlos · Kartenautorisierung freigegeben",
         "part": "{percent} % ({amount})",
-        "full": "Gesamtbetrag ({amount})"
+        "full": "Gesamtbetrag ({amount})",
+        "freeNothingPaid": "Kostenlos · noch nichts bezahlt",
+        "releasedNothingCharged": "Buchung verfällt · nichts berechnet",
+        "fullRefund": "Volle Erstattung"
       },
       "note": {
         "freeUntil": "Kostenlose Stornierung bis Ende {date}, Ortszeit des Hotels. Zum Stornieren nutzen Sie den Link in Ihrer Bestätigungs-E-Mail oder kontaktieren das Hotel.",
@@ -871,7 +879,9 @@
         "partial": "Wie viel Sie zurückbekommen, hängt davon ab, wann Sie stornieren. Nach dem {date} oder wenn Sie nicht anreisen, zahlen Sie den Gesamtbetrag.",
         "partialEnded": "Die Erstattung ist am {date} abgelaufen. Wenn Sie stornieren oder nicht anreisen, zahlen Sie den Gesamtbetrag.",
         "nonRefundable": "Dieser Tarif kann nicht gegen Erstattung storniert oder geändert werden.",
-        "request": "Bis das Hotel antwortet, können Sie Ihre Anfrage kostenlos zurückziehen."
+        "request": "Bis das Hotel antwortet, können Sie Ihre Anfrage kostenlos zurückziehen.",
+        "paidFreeUntil": "Volle Erstattung bis Ende {date}, sobald Ihre Überweisung eingegangen ist.",
+        "bankTransfer": "Geht Ihre Überweisung nicht innerhalb von 48 Stunden ein, verfällt die Buchung und es wird nichts berechnet."
       }
     },
     "rules": {

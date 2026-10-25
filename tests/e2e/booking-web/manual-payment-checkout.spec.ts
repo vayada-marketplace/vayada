@@ -163,6 +163,19 @@ test("books by bank transfer and opens the protected payment details", async ({ 
   await expect(
     page.getByText(/Your transfer must arrive within 48 hours, or the booking is released\./),
   ).toBeVisible();
+  // VAY-2348: the cancellation table leads with the time before the transfer arrives.
+  const policy = page.getByRole("table", { name: "Cancellation policy" });
+  const [first, second] = [policy.getByRole("row").nth(1), policy.getByRole("row").nth(2)];
+  for (const text of ["Before your transfer arrives", "applies now", "Free · nothing paid yet"])
+    await expect(first).toContainText(text);
+  for (const text of ["No transfer within 48 hours", "Booking released · nothing charged"])
+    await expect(second).toContainText(text);
+  await expect(
+    page.getByText(
+      "If your transfer doesn’t arrive within 48 hours, the booking is released and nothing is charged.",
+      { exact: false },
+    ),
+  ).toBeVisible();
   await page.getByLabel(/^I agree to the cancellation policy/).check();
   await page.getByRole("button", { name: "Confirm booking" }).click();
 

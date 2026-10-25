@@ -845,7 +845,8 @@
         "freeEnded": "Free cancellation ended",
         "nonRefundable": "Non-refundable",
         "noRefund": "No refund any more",
-        "notRefundableOnceAccepted": "Not refundable once the hotel accepts"
+        "notRefundableOnceAccepted": "Not refundable once the hotel accepts",
+        "notRefundableOncePaid": "Not refundable once paid"
       },
       "when": {
         "untilEnd": "Until the end of {date}",
@@ -856,14 +857,21 @@
         "fromBooking": "From booking",
         "beforeAccept": "Before the hotel accepts",
         "afterAccept": "After the hotel accepts",
-        "noShow": "No-show"
+        "noShow": "No-show",
+        "beforeTransfer": "Before your transfer arrives",
+        "noTransfer": "No transfer within 48 hours",
+        "paidUntilEnd": "Paid, until the end of {date}",
+        "afterTransfer": "Once your transfer arrives"
       },
       "pay": {
         "free": "Free",
         "freeNothingCharged": "Free · nothing charged",
         "freeHoldReleased": "Free · card hold released",
         "part": "{percent}% ({amount})",
-        "full": "Full amount ({amount})"
+        "full": "Full amount ({amount})",
+        "freeNothingPaid": "Free · nothing paid yet",
+        "releasedNothingCharged": "Booking released · nothing charged",
+        "fullRefund": "Full refund"
       },
       "note": {
         "freeUntil": "Free cancellation until the end of {date}, local hotel time. To cancel, use the link in your confirmation email or contact the hotel.",
@@ -871,7 +879,9 @@
         "partial": "What you get back depends on when you cancel. After {date}, or if you don’t arrive, you pay the full amount.",
         "partialEnded": "Refunds ended on {date}. If you cancel or don’t arrive, you pay the full amount.",
         "nonRefundable": "This rate can’t be cancelled or changed for a refund.",
-        "request": "You can withdraw your request for free until the hotel answers."
+        "request": "You can withdraw your request for free until the hotel answers.",
+        "paidFreeUntil": "Full refunds until the end of {date} once your transfer has arrived.",
+        "bankTransfer": "If your transfer doesn’t arrive within 48 hours, the booking is released and nothing is charged."
       }
     },
     "rules": {

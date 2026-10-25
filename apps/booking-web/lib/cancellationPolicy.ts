@@ -17,20 +17,35 @@ export type PolicyWhen =
   | { kind: "fromBooking" }
   | { kind: "beforeAccept" }
   | { kind: "afterAccept" }
+  /** VAY-2348: a bank transfer booking, before its money arrives, without it, and once paid. */
+  | { kind: "beforeTransfer" }
+  | { kind: "noTransfer" }
+  | { kind: "paidUntilEnd"; date: string }
+  | { kind: "afterTransfer" }
   | { kind: "noShow" };
 /** What the guest pays if they cancel then: amounts in the price's minor units. */
 export type PolicyPay =
   | { kind: "free" }
   | { kind: "freeNothingCharged" }
   | { kind: "freeHoldReleased" }
+  | { kind: "freeNothingPaid" }
+  | { kind: "releasedNothingCharged" }
+  | { kind: "fullRefund" }
   | { kind: "part"; percent: number; amountMinor: string }
   | { kind: "full"; amountMinor: string };
 export type PolicyRow = { when: PolicyWhen; pay: PolicyPay; now: boolean; ended: boolean };
 export type PolicyBadge =
   | { kind: "freeUntil" | "refundsUntil"; date: string }
-  | { kind: "freeEnded" | "nonRefundable" | "noRefund" | "notRefundableOnceAccepted" };
+  | {
+      kind:
+        | "freeEnded"
+        | "nonRefundable"
+        | "noRefund"
+        | "notRefundableOnceAccepted"
+        | "notRefundableOncePaid";
+    };
 export type PolicyNote =
-  | { kind: "freeUntil" | "freeEnded" | "partial" | "partialEnded"; date: string }
+  | { kind: "freeUntil" | "paidFreeUntil" | "freeEnded" | "partial" | "partialEnded"; date: string }
   | { kind: "nonRefundable" };
 export type Policy = {
   badge: PolicyBadge;
@@ -39,6 +54,8 @@ export type Policy = {
   note: PolicyNote;
   /** The hotel accepts each booking: withdrawing before it answers is free. */
   request: boolean;
+  /** VAY-2348: a bank transfer booking is released, nothing charged, without its money in 48 h. */
+  bankTransfer: boolean;
 };
 /** One policy and the rooms it covers (VAY-2347, D7: one block per policy). `key` tells blocks
  * apart; `today` is the hotel's date, so dates in another year can say theirs. */
@@ -55,7 +72,7 @@ export function cancellationPolicy(
   cancellation: Cancellation,
   stay: TermsStay,
   amount: string | readonly bigint[],
-  mode: { request: boolean; card: boolean },
+  mode: { request: boolean; card: boolean; bankTransfer?: boolean },
 ): Policy {
   const bases = typeof amount === "string" ? [BigInt(amount)] : amount;
   const amountMinor = String(bases.reduce((a, b) => a + b, BigInt(0)));
@@ -153,8 +170,40 @@ export function cancellationPolicy(
     ];
     if (!refundable) badge = { kind: "notRefundableOnceAccepted" };
   }
+  const bankTransfer = !mode.request && !!mode.bankTransfer;
+  if (bankTransfer) {
+    // VAY-2348: until the transfer arrives nothing is paid, and without it the booking is released;
+    // the rate's terms apply once it is paid, so "free" is a full refund then.
+    rows = [
+      {
+        when: { kind: "beforeTransfer" },
+        pay: { kind: "freeNothingPaid" },
+        now: true,
+        ended: false,
+      },
+      {
+        when: { kind: "noTransfer" },
+        pay: { kind: "releasedNothingCharged" },
+        now: false,
+        ended: false,
+      },
+      ...rows.map((row) => ({
+        ...row,
+        now: false,
+        when:
+          row.when.kind === "untilEnd"
+            ? ({ kind: "paidUntilEnd", date: row.when.date } as const)
+            : row.when.kind === "fromNow" || row.when.kind === "fromBooking"
+              ? ({ kind: "afterTransfer" } as const)
+              : row.when,
+        pay: row.pay.kind === "free" ? ({ kind: "fullRefund" } as const) : row.pay,
+      })),
+    ];
+    if (!refundable) badge = { kind: "notRefundableOncePaid" };
+    if (note.kind === "freeUntil") note = { kind: "paidFreeUntil", date: note.date };
+  }
   const tone = badge.kind === "freeUntil" || badge.kind === "refundsUntil" ? "ok" : "amber";
-  return { badge, tone, rows: [...rows, noShow], note, request: mode.request };
+  return { badge, tone, rows: [...rows, noShow], note, request: mode.request, bankTransfer };
 }
 
 /** Each room's share of the price's total, in proportion to its own lines (room, meal, its
@@ -232,7 +281,11 @@ export function policyBlocks(
       group.cancellation,
       { checkIn: quote.checkIn, today },
       group.shares,
-      { request, card: quote.paymentMethod === "card" },
+      {
+        request,
+        card: quote.paymentMethod === "card",
+        bankTransfer: quote.paymentMethod === "bank_transfer",
+      },
     ),
   }));
 }

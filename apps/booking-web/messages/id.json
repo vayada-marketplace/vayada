@@ -844,7 +844,8 @@
         "freeEnded": "Pembatalan gratis berakhir",
         "nonRefundable": "Tidak dapat dikembalikan",
         "noRefund": "Tidak ada pengembalian dana lagi",
-        "notRefundableOnceAccepted": "Tidak dapat dikembalikan setelah hotel menerima"
+        "notRefundableOnceAccepted": "Tidak dapat dikembalikan setelah hotel menerima",
+        "notRefundableOncePaid": "Tidak dapat dikembalikan setelah dibayar"
       },
       "when": {
         "untilEnd": "Sampai akhir {date}",
@@ -855,14 +856,21 @@
         "fromBooking": "Sejak pemesanan",
         "beforeAccept": "Sebelum hotel menerima",
         "afterAccept": "Setelah hotel menerima",
-        "noShow": "Tidak datang"
+        "noShow": "Tidak datang",
+        "beforeTransfer": "Sebelum transfer Anda diterima",
+        "noTransfer": "Tidak ada transfer dalam 48 jam",
+        "paidUntilEnd": "Sudah dibayar, sampai akhir {date}",
+        "afterTransfer": "Setelah transfer Anda diterima"
       },
       "pay": {
         "free": "Gratis",
         "freeNothingCharged": "Gratis · tidak ada biaya",
         "freeHoldReleased": "Gratis · penahanan kartu dilepas",
         "part": "{percent}% ({amount})",
-        "full": "Jumlah penuh ({amount})"
+        "full": "Jumlah penuh ({amount})",
+        "freeNothingPaid": "Gratis · belum ada yang dibayar",
+        "releasedNothingCharged": "Pemesanan dibatalkan · tidak ada biaya",
+        "fullRefund": "Pengembalian dana penuh"
       },
       "note": {
         "freeUntil": "Pembatalan gratis hingga akhir {date}, waktu setempat hotel. Untuk membatalkan, gunakan tautan di email konfirmasi atau hubungi hotel.",
@@ -870,7 +878,9 @@
         "partial": "Jumlah yang dikembalikan tergantung kapan Anda membatalkan. Setelah {date}, atau jika Anda tidak datang, Anda membayar jumlah penuh.",
         "partialEnded": "Pengembalian dana berakhir pada {date}. Jika Anda membatalkan atau tidak datang, Anda membayar jumlah penuh.",
         "nonRefundable": "Tarif ini tidak dapat dibatalkan atau diubah dengan pengembalian dana.",
-        "request": "Anda dapat menarik permintaan secara gratis sampai hotel menjawab."
+        "request": "Anda dapat menarik permintaan secara gratis sampai hotel menjawab.",
+        "paidFreeUntil": "Pengembalian dana penuh hingga akhir {date} setelah transfer Anda diterima.",
+        "bankTransfer": "Jika transfer Anda tidak diterima dalam 48 jam, pemesanan dibatalkan dan tidak ada biaya."
       }
     },
     "rules": {

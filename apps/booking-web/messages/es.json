@@ -844,7 +844,8 @@
         "freeEnded": "Cancelación gratuita terminada",
         "nonRefundable": "No reembolsable",
         "noRefund": "Ya no hay reembolso",
-        "notRefundableOnceAccepted": "No reembolsable una vez que el hotel acepte"
+        "notRefundableOnceAccepted": "No reembolsable una vez que el hotel acepte",
+        "notRefundableOncePaid": "No reembolsable una vez pagado"
       },
       "when": {
         "untilEnd": "Hasta el final del {date}",
@@ -855,14 +856,21 @@
         "fromBooking": "Desde la reserva",
         "beforeAccept": "Antes de que el hotel acepte",
         "afterAccept": "Después de que el hotel acepte",
-        "noShow": "No presentarse"
+        "noShow": "No presentarse",
+        "beforeTransfer": "Antes de que llegue tu transferencia",
+        "noTransfer": "Sin transferencia en un plazo de 48 horas",
+        "paidUntilEnd": "Pagado, hasta el final del {date}",
+        "afterTransfer": "Cuando llegue tu transferencia"
       },
       "pay": {
         "free": "Gratis",
         "freeNothingCharged": "Gratis · no se cobra nada",
         "freeHoldReleased": "Gratis · se libera la retención de la tarjeta",
         "part": "{percent} % ({amount})",
-        "full": "Importe total ({amount})"
+        "full": "Importe total ({amount})",
+        "freeNothingPaid": "Gratis · aún no has pagado nada",
+        "releasedNothingCharged": "Reserva cancelada · no se cobra nada",
+        "fullRefund": "Reembolso total"
       },
       "note": {
         "freeUntil": "Cancelación gratuita hasta el final del {date}, hora local del hotel. Para cancelar, usa el enlace del correo de confirmación o contacta con el hotel.",
@@ -870,7 +878,9 @@
         "partial": "Lo que recuperas depende de cuándo canceles. Después del {date}, o si no te presentas, pagas el importe total.",
         "partialEnded": "Los reembolsos terminaron el {date}. Si cancelas o no te presentas, pagas el importe total.",
         "nonRefundable": "Esta tarifa no se puede cancelar ni cambiar con reembolso.",
-        "request": "Puedes retirar tu solicitud gratis hasta que el hotel responda."
+        "request": "Puedes retirar tu solicitud gratis hasta que el hotel responda.",
+        "paidFreeUntil": "Reembolso total hasta el final del {date} una vez que llegue tu transferencia.",
+        "bankTransfer": "Si tu transferencia no llega en un plazo de 48 horas, la reserva se cancela y no se cobra nada."
       }
     },
     "rules": {

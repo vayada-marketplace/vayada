@@ -844,7 +844,8 @@
         "freeEnded": "Annulation gratuite terminée",
         "nonRefundable": "Non remboursable",
         "noRefund": "Plus de remboursement",
-        "notRefundableOnceAccepted": "Non remboursable une fois accepté par l’hôtel"
+        "notRefundableOnceAccepted": "Non remboursable une fois accepté par l’hôtel",
+        "notRefundableOncePaid": "Non remboursable une fois payé"
       },
       "when": {
         "untilEnd": "Jusqu’à la fin du {date}",
@@ -855,14 +856,21 @@
         "fromBooking": "Dès la réservation",
         "beforeAccept": "Avant l’acceptation de l’hôtel",
         "afterAccept": "Après l’acceptation de l’hôtel",
-        "noShow": "Non-présentation"
+        "noShow": "Non-présentation",
+        "beforeTransfer": "Avant l’arrivée de votre virement",
+        "noTransfer": "Aucun virement sous 48 heures",
+        "paidUntilEnd": "Payé, jusqu’à la fin du {date}",
+        "afterTransfer": "Dès l’arrivée de votre virement"
       },
       "pay": {
         "free": "Gratuit",
         "freeNothingCharged": "Gratuit · rien n’est débité",
         "freeHoldReleased": "Gratuit · blocage de la carte levé",
         "part": "{percent} % ({amount})",
-        "full": "Montant total ({amount})"
+        "full": "Montant total ({amount})",
+        "freeNothingPaid": "Gratuit · rien n’est encore payé",
+        "releasedNothingCharged": "Réservation annulée · rien n’est débité",
+        "fullRefund": "Remboursement intégral"
       },
       "note": {
         "freeUntil": "Annulation gratuite jusqu’à la fin du {date}, heure locale de l’hôtel. Pour annuler, utilisez le lien de votre e-mail de confirmation ou contactez l’hôtel.",
@@ -870,7 +878,9 @@
         "partial": "Le remboursement dépend de la date d’annulation. Après le {date}, ou si vous ne venez pas, vous payez le montant total.",
         "partialEnded": "Les remboursements se sont terminés le {date}. Si vous annulez ou ne venez pas, vous payez le montant total.",
         "nonRefundable": "Ce tarif ne peut être ni annulé ni modifié contre remboursement.",
-        "request": "Vous pouvez retirer votre demande gratuitement tant que l’hôtel n’a pas répondu."
+        "request": "Vous pouvez retirer votre demande gratuitement tant que l’hôtel n’a pas répondu.",
+        "paidFreeUntil": "Remboursement intégral jusqu’à la fin du {date} une fois votre virement arrivé.",
+        "bankTransfer": "Si votre virement n’arrive pas sous 48 heures, la réservation est annulée et rien n’est débité."
       }
     },
     "rules": {
