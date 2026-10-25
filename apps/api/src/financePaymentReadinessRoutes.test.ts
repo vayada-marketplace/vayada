@@ -17,7 +17,7 @@ import {
 import { PMS_PRICING_CONTRACT_VERSION } from "@vayada/domain-pms";
 import Fastify from "fastify";
 import { request as httpRequest } from "node:http";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   registerFinancePaymentReadinessRoutes,
@@ -283,6 +283,29 @@ describe("Finance payment readiness routes", () => {
         requestedAt: now,
       },
     });
+  });
+
+  it("republishes a live page as the saving user after a payment-method save (VAY-2344)", async () => {
+    const ports = fakePorts();
+    const refresh = vi.fn(async () => null);
+    const refreshPublicPage = vi.fn(async (_propertyId: string) => undefined);
+    app = await testApp({ ...ports, refreshPublicPage, bookingPublicationRefresh: { refresh } });
+    expect((await put(app)).statusCode).toBe(201);
+    await vi.waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+    expect(refresh).toHaveBeenCalledWith({
+      organizationId,
+      propertyId,
+      actorUserId,
+      idempotencyKey: "request-1",
+      audit: expect.objectContaining({ requestId: "request-1" }),
+      onlyIfLive: true,
+    });
+    // A refused save changes nothing for guests.
+    ports.result = { ok: false, error: { code: "payment_methods_revision_conflict", currentRevision: 2 } };
+    expect((await put(app, body(), "second-key")).statusCode).toBe(409);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(refreshPublicPage).not.toHaveBeenCalled();
   });
 
   it.each([

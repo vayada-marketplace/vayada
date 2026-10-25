@@ -14,9 +14,10 @@ import {
 import { PMS_PRICING_CONTRACT_VERSION } from "@vayada/domain-pms";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
+import type { BookingPublicationRefreshPort } from "../domains/bookingPublicationProductionRuntime.js";
 import type { FinanceManualPaymentMethodsReadPort } from "../domains/financeManualPaymentReadiness.js";
 import { enforceRoutePolicy } from "./policy.js";
-import { refreshPublicPageAfterSaves } from "./publicPageRefresh.js";
+import { livePublicPageRefresh, refreshPublicPageAfterSaves } from "./publicPageRefresh.js";
 
 type PropertyParams = { propertyId: string };
 type AuthorizedScope = {
@@ -29,6 +30,8 @@ export type FinancePaymentReadinessRoutesOptions = {
   readPort: FinancePaymentReadinessReadPort;
   /** Refreshes the live booking page after payment-method saves (VAY-2129). */
   refreshPublicPage?: (propertyId: string) => Promise<void>;
+  /** Where the public site serves setup publications, refreshes a live page instead (VAY-2344). */
+  bookingPublicationRefresh?: BookingPublicationRefreshPort;
   /** Present only while bank-transfer and PayPal acceptance is on (VAY-2139). */
   manualPayments?: FinanceManualPaymentMethodsReadPort;
 };
@@ -44,7 +47,7 @@ export async function registerFinancePaymentReadinessRoutes(
   refreshPublicPageAfterSaves(
     app,
     ["PUT /finance/properties/:propertyId/payment-methods"],
-    options.refreshPublicPage,
+    livePublicPageRefresh(options),
   );
   const authorize = async (request: FastifyRequest, reply: FastifyReply) => {
     const scope = authorizeRequest(request, reply);

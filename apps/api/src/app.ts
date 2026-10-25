@@ -721,6 +721,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       prefix: "/api",
       ...options.financePaymentSetup,
       refreshPublicPage: options.publicPageRefresh,
+      bookingPublicationRefresh: options.bookingPublicationRefresh,
     });
   }
   if (options.identityPrivacyRepository) {

@@ -679,6 +679,7 @@ describe.skipIf(!url)(
            WHERE property_id = $1`,
           [h.propertyId],
         );
+        expect(blockerCodes(await h.readiness())).toEqual([]);
         const both = await Promise.all([refresh("profile", true), refresh("settings", true)]);
         expect(both.map((operation) => operation?.status)).not.toContain(undefined);
         expect(await page()).toMatchObject({

@@ -2491,7 +2491,7 @@ describe("shared hotel setup status route", () => {
         status: "updated",
         profile: profileResponse(propertyId, minimalHotelInput()),
       });
-    app = buildSharedSetupApp({
+    const server = buildSharedSetupApp({
       permissions: ["hotel_catalog.setup.manage", "booking.settings.manage"],
       linkedResources: [propertyLink(propertyId)],
       repository: repositoryWith([]),
@@ -2499,8 +2499,9 @@ describe("shared hotel setup status route", () => {
       publicPageRefresh,
       bookingPublicationRefresh: { refresh },
     });
+    app = server;
     const save = (idempotencyKey: string) =>
-      injectJson(app, {
+      injectJson(server, {
         method: "PUT",
         url: `/api/hotel-setup/properties/${propertyId}/profile`,
         headers: { authorization: "Bearer valid-token", "idempotency-key": idempotencyKey },

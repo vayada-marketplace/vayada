@@ -72,7 +72,8 @@ const CHOICES = [
  * The parts of Google Maps the location page uses: the address map (VAY-2322) and the nearby places map, whose
  * markers are page content in an overlay. The projection is 10,000 px a degree around the property, so a marker
  * moved by the arrow keys lands on a known spot. `element.vayadaE2eClickMap(lat, lng)` clicks the map; the
- * "Find the area" search picks the Chinesischer Turm when typed into.
+ * "Find the area" search picks the Chinesischer Turm when typed into, as a road-level result (no exact address),
+ * or `window.__nearbyFakePlace` when set.
  */
 const GOOGLE_FAKE = `
   (() => {
@@ -115,7 +116,8 @@ const GOOGLE_FAKE = `
         input.addEventListener("change", () => {
           state.searches += 1;
           const event = new Event("gmp-select");
-          event.placePrediction = { types: [], toPlace: () => ({ location: latLng(48.1525, 11.5922), fetchFields: async () => {} }) };
+          const found = window.__nearbyFakePlace ?? { lat: 48.1525, lng: 11.5922 };
+          event.placePrediction = { types: [], toPlace: () => ({ location: latLng(found.lat, found.lng), fetchFields: async () => {} }) };
           this.dispatchEvent(event);
         });
         this.append(input);
@@ -638,6 +640,64 @@ test("an unfinished place keeps the page from being left", async ({ page }) => {
     .click();
   await expect(page).toHaveURL(/settings\/location/);
   await expect(editor(page).getByLabel("Place name")).toHaveValue("Unfinished garden");
+});
+
+// VAY-2344: a test hotel's pin sat in Oman: a road-level search result never moves the pin, and a pin
+// only moves by dragging. A road far from the pin now clears it and shows the road, so a click pins it.
+for (const width of [1440, 390]) {
+  test(`a road picked far from the pin clears it and shows the road; a click there pins it (${width})`, async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize({ width, height: 2400 });
+    await setup(page);
+    // Welhengoda Road, Ahangama: Google knows only the road, so it is no arrival point.
+    await page.addInitScript(() => {
+      (window as unknown as { __nearbyFakePlace: unknown }).__nearbyFakePlace = {
+        lat: 5.9731,
+        lng: 80.3628,
+      };
+    });
+    await page.goto("/settings/location");
+    const coordinates = page.locator("summary", { hasText: "Coordinates" });
+    await expect(coordinates).toContainText("48.1394, 11.5835");
+    const search = page.getByRole("textbox", { name: "Property address" });
+    await search.fill("Welhengoda Road");
+    await search.dispatchEvent("change");
+    const form = page.locator("form").filter({ has: search });
+
+    await expect(
+      page.getByText("Pick an address, click the map or type coordinates to place the pin."),
+    ).toBeVisible();
+    await expect(coordinates).not.toContainText("48.1394");
+    await form.screenshot({ path: testInfo.outputPath(`vay2344-road-pick-${width}.png`) });
+    const cameras = () =>
+      page.evaluate(
+        () => (window as unknown as { __nearbyFake: { cameras: unknown[] } }).__nearbyFake.cameras,
+      );
+    await expect.poll(cameras).toContainEqual({ center: { lat: 5.9731, lng: 80.3628 }, zoom: 16 });
+    await page.getByTestId("google-address-map-canvas").evaluate((canvas) => {
+      (
+        canvas as Element & { vayadaE2eClickMap: (lat: number, lng: number) => void }
+      ).vayadaE2eClickMap(5.9729, 80.3631);
+    });
+    await expect(coordinates).toContainText("5.9729, 80.3631");
+    await page.getByRole("button", { name: "Save location", exact: true }).click();
+    await expect(page.getByText(/^Location saved/)).toBeVisible();
+  });
+}
+
+test("a road picked near the pin keeps it", async ({ page }) => {
+  await setup(page);
+  await page.goto("/settings/location");
+  const coordinates = page.locator("summary", { hasText: "Coordinates" });
+  // The fake's road is 1.6 km from the pin: close enough to be the same place.
+  const search = page.getByRole("textbox", { name: "Property address" });
+  await search.fill("Englischer Garten");
+  await search.dispatchEvent("change");
+  await expect(coordinates).toContainText("48.1394, 11.5835");
+  await expect(
+    page.getByText("Pick an address, click the map or type coordinates to place the pin."),
+  ).toHaveCount(0);
 });
 
 test("saving a new location keeps the places and says when they need a look", async ({ page }) => {

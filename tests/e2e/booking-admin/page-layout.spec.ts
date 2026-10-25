@@ -237,7 +237,8 @@ for (const viewport of [VIEWPORTS[0]!, VIEWPORTS[2]!]) {
     for (const route of [...TOP_LEVEL, ...SUB_PAGES]) {
       await page.goto(route);
       await expect(page.locator("main h1").first()).toBeVisible();
-      const main = page.locator("main");
+      // The app's own <main>: Feature Hub nests one more.
+      const main = page.locator("main").first();
       await main.evaluate((element) => element.scrollTo(0, element.scrollHeight));
       const box = (await main.boundingBox())!;
       await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
