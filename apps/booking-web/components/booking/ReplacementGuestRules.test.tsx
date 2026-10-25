@@ -58,7 +58,12 @@ const render = async (
 ) => {
   await act(async () =>
     root.render(
-      createElement(ReplacementGuestRules, { slug, quote: value, onAcknowledgementChange }),
+      createElement(ReplacementGuestRules, {
+        slug,
+        quote: value,
+        onAcknowledgementChange,
+        hotelCountry: "Germany",
+      }),
     ),
   );
 };
@@ -67,7 +72,8 @@ it("discloses every guest rule without inventing booking submission or dropping 
   await render();
   const text = document.body.textContent;
   for (const phrase of [
-    "Times are in Central European Time.",
+    // Local hotel time with the country, never a zone's name (VAY-2347).
+    "All times are local hotel time (Germany).",
     "15:00",
     "midnight at the end of your arrival day",
     "from 06:00 by 11:00",
@@ -148,7 +154,12 @@ it("reports the loaded rules whether or not they are ticked, and none on failure
   const renderWith = async (value = quote) =>
     act(async () =>
       root.render(
-        createElement(ReplacementGuestRules, { slug: "hotel", quote: value, onRulesChange: rules }),
+        createElement(ReplacementGuestRules, {
+          slug: "hotel",
+          quote: value,
+          onRulesChange: rules,
+          hotelCountry: null,
+        }),
       ),
     );
   await renderWith();
@@ -174,6 +185,7 @@ it("shows the tick first and the rules behind Read on the payment step (VAY-2195
         quote,
         onAcknowledgementChange: change,
         compact: true,
+        hotelCountry: null,
       }),
     ),
   );

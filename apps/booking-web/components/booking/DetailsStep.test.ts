@@ -7,39 +7,47 @@ import { rateTerms, ruleLines } from "./DetailsStep";
 
 type Room = PublicBookingQuote["rooms"][number];
 const payment = { kind: "full", acceptedMethods: ["pay_at_property"] } as Room["payment"];
+// Booked on 25 Oct 2026 for a stay from 10 Nov.
+const stay = { checkIn: "2026-11-10", today: "2026-10-25" };
 
 it("words each kind of cancellation for the guest (VAY-2195)", () => {
   expect(
-    rateTerms({
-      selectionId: "a",
-      mealPlan: "room_only",
-      cancellation: { kind: "non_refundable" },
-      payment,
-    } as Room),
+    rateTerms(
+      {
+        selectionId: "a",
+        mealPlan: "room_only",
+        cancellation: { kind: "non_refundable" },
+        payment,
+      } as Room,
+      stay,
+    ),
   ).toEqual([
     "Meals: room only.",
     "Cancellation: non-refundable. If you cancel, change or don’t arrive, we charge the full amount.",
   ]);
   expect(
-    rateTerms({
-      selectionId: "a",
-      mealPlan: "breakfast",
-      cancellation: {
-        kind: "flexible",
-        terms: {
-          flexibleCancellationType: "free",
-          freeCancellationDeadlineDays: 3,
-          text: "Call us.",
+    rateTerms(
+      {
+        selectionId: "a",
+        mealPlan: "breakfast",
+        cancellation: {
+          kind: "flexible",
+          terms: {
+            flexibleCancellationType: "free",
+            freeCancellationDeadlineDays: 3,
+            text: "Call us.",
+          },
         },
-      },
-      payment,
-    } as unknown as Room),
+        payment,
+      } as unknown as Room,
+      stay,
+    ),
   ).toEqual([
     "Meals: breakfast.",
-    "Cancellation: free until 3 days before arrival. After that, or if you don’t arrive, we charge the full amount.",
+    "Cancellation: free until the end of Sat, 7 Nov 2026, local hotel time. After that, or if you don’t arrive, we charge the full amount.",
     "Call us.",
   ]);
-  const partial = rateTerms({
+  const partial = {
     selectionId: "a",
     mealPlan: "room_only",
     cancellation: {
@@ -53,10 +61,13 @@ it("words each kind of cancellation for the guest (VAY-2195)", () => {
       },
     },
     payment,
-  } as unknown as Room);
-  // Most notice first, as on the payment terms (VAY-2100).
-  expect(partial[1]).toBe(
-    "Cancellation: 100% back with at least 30 days’ notice; 50% back with at least 7 days’ notice. With less notice, or if you don’t arrive, we keep the full amount.",
+  } as unknown as Room;
+  // Most notice first, as on the payment terms (VAY-2100); a step already passed isn't offered.
+  expect(rateTerms(partial, { checkIn: "2026-12-10", today: "2026-10-25" })[1]).toBe(
+    "Cancellation: 100% back if you cancel by the end of Tue, 10 Nov 2026; 50% back if you cancel by the end of Thu, 3 Dec 2026, local hotel time. After that, or if you don’t arrive, we keep the full amount.",
+  );
+  expect(rateTerms(partial, stay)[1]).toBe(
+    "Cancellation: 50% back if you cancel by the end of Tue, 3 Nov 2026, local hotel time. After that, or if you don’t arrive, we keep the full amount.",
   );
 });
 

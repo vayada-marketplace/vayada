@@ -5,7 +5,7 @@ import type {
   PublicBookingQuote,
   PublicQuoteGuestDisclosure,
 } from "@vayada/domain-booking/replacement-pricing";
-import { formatTimeZoneName } from "@/lib/utils";
+import { cancellationLine, checkoutCopy, type TermsStay } from "@/lib/checkoutTerms";
 import BookingPageTerms from "./BookingPageTerms";
 import GuestDetailsForm, { type GuestDetails } from "./GuestDetailsForm";
 import type { SummaryRoom } from "./StaySummary";
@@ -20,27 +20,11 @@ const meals: Record<string, string> = {
 };
 
 /** A room's rate terms in a few plain sentences (VAY-2195); the payment step asks the guest to
- * confirm they read them for the final price. */
-export function rateTerms(room: Room): string[] {
-  const lines = [`Meals: ${meals[room.mealPlan] ?? room.mealPlan}.`];
+ * confirm they read them for the final price. Cancellation is worded for this stay's dates
+ * (VAY-2347). */
+export function rateTerms(room: Room, stay: TermsStay): string[] {
   const c = room.cancellation;
-  if (c.kind === "non_refundable")
-    lines.push(
-      "Cancellation: non-refundable. If you cancel, change or don’t arrive, we charge the full amount.",
-    );
-  else if (c.terms.flexibleCancellationType === "partial_refund") {
-    const steps = [...(c.terms.partialRefundTiers ?? [])].sort(
-      (a, b) => b.minDaysBeforeCheckIn - a.minDaysBeforeCheckIn,
-    );
-    lines.push(
-      `Cancellation: ${steps
-        .map((s) => `${s.refundPercent}% back with at least ${s.minDaysBeforeCheckIn} days’ notice`)
-        .join("; ")}. With less notice, or if you don’t arrive, we keep the full amount.`,
-    );
-  } else
-    lines.push(
-      `Cancellation: free until ${c.terms.freeCancellationDeadlineDays} days before arrival. After that, or if you don’t arrive, we charge the full amount.`,
-    );
+  const lines = [`Meals: ${meals[room.mealPlan] ?? room.mealPlan}.`, cancellationLine(c, stay)];
   if (c.kind !== "non_refundable" && c.terms.text) lines.push(c.terms.text);
   return lines;
 }
@@ -95,6 +79,8 @@ export default function DetailsStep({
   termsText,
   locked,
   rules,
+  today,
+  hotelCountry,
 }: {
   /** The current price; the form shows without one (a refused price keeps the details). */
   quote: PublicBookingQuote | undefined;
@@ -110,6 +96,10 @@ export default function DetailsStep({
   locked: boolean;
   /** The last guest rules known, so the form stays steady while a new price's rules load. */
   rules: PublicQuoteGuestDisclosure["choices"] | null;
+  /** The hotel's date today (YYYY-MM-DD): cancellation deadlines are worded against it. */
+  today: string;
+  /** The hotel's country by name for the times line, null when it hides its address. */
+  hotelCountry: string | null;
 }) {
   if (!quote)
     return (
@@ -193,8 +183,7 @@ export default function DetailsStep({
         ) : (
           <div className="divide-y divide-gray-100">
             <p className="pb-2.5 text-xs text-gray-500">
-              {/* The step speaks English, so the zone is named in English too. */}
-              Times are in {formatTimeZoneName(disclosure.propertyTimeZone)}.
+              {checkoutCopy.allTimesLocal(hotelCountry)}
             </p>
             {ruleLines(disclosure).map(([title, text]) => (
               <div key={title} className="flex justify-between gap-6 py-2.5 text-sm">
@@ -216,7 +205,7 @@ export default function DetailsStep({
                 <p className="font-semibold text-gray-900">
                   {named ? `${named.name} · ${named.choice}` : `Room ${index + 1}`}
                 </p>
-                {rateTerms(room).map((line) => (
+                {rateTerms(room, { checkIn: quote.checkIn, today }).map((line) => (
                   <p key={line} className="text-gray-700 whitespace-pre-wrap break-words">
                     {line}
                   </p>

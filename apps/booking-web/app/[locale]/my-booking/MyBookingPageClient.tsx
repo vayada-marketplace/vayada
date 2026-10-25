@@ -431,7 +431,7 @@ export default function MyBookingPageClient() {
                   lines={booking.roomLines}
                   currency={booking.currency}
                   checkIn={booking.checkIn}
-                  timezone={hotel.timezone}
+                  country={hotel.country}
                 />
               </div>
             )}

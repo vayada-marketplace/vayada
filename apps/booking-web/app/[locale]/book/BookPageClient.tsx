@@ -10,7 +10,7 @@ import { useRouter } from "@/i18n/navigation";
 import BookShell from "./BookShell";
 import ReplacementGuestRules from "@/components/booking/ReplacementGuestRules";
 import ExtrasStep from "@/components/booking/ExtrasStep";
-import DetailsStep, { rateTerms } from "@/components/booking/DetailsStep";
+import DetailsStep from "@/components/booking/DetailsStep";
 import PaymentStep from "@/components/booking/PaymentStep";
 import StaySummary, { type SummaryRoom } from "@/components/booking/StaySummary";
 import {
@@ -47,7 +47,8 @@ import {
 import ApproximateAmountsNote from "@/components/booking/ApproximateAmountsNote";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useHotel, useSlug } from "@/contexts/HotelContext";
-import { choiceKeys, choiceText } from "@/lib/roomChoices";
+import { choiceKeys, choiceText, hotelToday } from "@/lib/roomChoices";
+import { cancellationLine, hotelCountryName } from "@/lib/checkoutTerms";
 import {
   bookEntry,
   bookStepQuery,
@@ -677,6 +678,9 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   ]
     .filter(Boolean)
     .join(" · ");
+  // VAY-2347: deadlines are worded against the hotel's date today, on the server's clock.
+  const hotelDate = hotelToday(hotel?.timezone, new Date(serverNow()));
+  const hotelCountry = hotelCountryName(hotel?.country);
   // VAY-2195: a made booking opens its confirmation page, as on the old pages. The page shows
   // what the server has for it; the room and extras names come from this booking.
   const openConfirmation = async ({
@@ -1284,6 +1288,8 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                 termsText={pagePayment.termsText}
                 locked={attemptOpen}
                 rules={knownRules}
+                today={hotelDate}
+                hotelCountry={hotelCountry}
               />
               {!quote && loading && <p role="status">Checking price…</p>}
               {priceNotice}
@@ -1404,6 +1410,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                         quote={quote}
                         onAcknowledgementChange={setTermsAcknowledgement}
                         roomNames={roomNames}
+                        today={hotelDate}
                       />
                       <ReplacementGuestRules
                         key={quote.quoteId}
@@ -1413,6 +1420,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                         quote={quote}
                         onAcknowledgementChange={setGuestDisclosure}
                         onRulesChange={setShownRules}
+                        hotelCountry={hotelCountry}
                       />
                       {consentError && (
                         <p
@@ -1445,7 +1453,10 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                     ? Array.from(
                         new Set(
                           quote.rooms.map((room) =>
-                            rateTerms(room)[1]!.replace(/^Cancellation: /, ""),
+                            cancellationLine(room.cancellation, {
+                              checkIn: quote.checkIn,
+                              today: hotelDate,
+                            }).replace(/^Cancellation: /, ""),
                           ),
                         ),
                       ).map((line) => line.charAt(0).toUpperCase() + line.slice(1))

@@ -5,6 +5,8 @@ import {
   isManualPricingPaymentMethod,
   type PublicBookingQuote,
 } from "@vayada/domain-booking/replacement-pricing";
+import { checkoutCopy, refundSteps, type TermsStay } from "@/lib/checkoutTerms";
+import { freeCancellationUntil } from "@/lib/roomChoices";
 import { serverNow } from "@/lib/serverClock";
 import { bookingPagePaymentMethodLabels } from "@/services/api/bookingPagePaymentMethods";
 import ConsentTile from "./ConsentTile";
@@ -19,6 +21,8 @@ export type ReplacementQuoteTermsProps = {
   compact?: boolean;
   /** Confirm was pressed before ticking (VAY-2306): the id of the message that says so. */
   errorId?: string;
+  /** The hotel's date today (YYYY-MM-DD): deadlines read as dates for this stay (VAY-2347). */
+  today: string;
 };
 const mealNames: Record<string, string> = {
   room_only: "Room only (no meals)",
@@ -37,6 +41,7 @@ export default function ReplacementQuoteTerms({
   onAcknowledgementChange,
   compact = false,
   errorId,
+  today,
 }: ReplacementQuoteTermsProps) {
   const headingId = useId();
   const [open, setOpen] = useState(false);
@@ -127,13 +132,16 @@ export default function ReplacementQuoteTerms({
               </p>
               {room.cancellation.terms.flexibleCancellationType === "partial_refund" ? (
                 // The refund steps alone decide (VAY-2100); there is no separate free deadline.
-                <PartialRefundSteps tiers={room.cancellation.terms.partialRefundTiers ?? []} />
+                <PartialRefundSteps
+                  tiers={room.cancellation.terms.partialRefundTiers ?? []}
+                  stay={{ checkIn: quote.checkIn, today }}
+                />
               ) : (
                 <>
-                  <p>
-                    Free cancellation deadline:{" "}
-                    {room.cancellation.terms.freeCancellationDeadlineDays} days before arrival.
-                  </p>
+                  <FreeDeadline
+                    days={room.cancellation.terms.freeCancellationDeadlineDays}
+                    stay={{ checkIn: quote.checkIn, today }}
+                  />
                   <p>After-deadline penalty: full booking amount.</p>
                 </>
               )}
@@ -201,26 +209,44 @@ export default function ReplacementQuoteTerms({
   );
 }
 
-/** Most notice first; with less notice than the last step, nothing is refunded. */
+/** The free cancellation deadline as this stay's date, and whether it has passed (VAY-2347). */
+function FreeDeadline({ days, stay }: { days: number; stay: TermsStay }) {
+  const until = freeCancellationUntil(stay.checkIn, days);
+  return (
+    <p>
+      {stay.today > until
+        ? checkoutCopy.deadlinePassed(until, days)
+        : checkoutCopy.deadline(until, days)}
+    </p>
+  );
+}
+
+/** Most notice first, each with its last day; with less notice than the last step, nothing is
+ * refunded. */
 function PartialRefundSteps({
   tiers,
+  stay,
 }: {
   tiers: readonly { minDaysBeforeCheckIn: number; refundPercent: number }[];
+  stay: TermsStay;
 }) {
-  const steps = [...tiers].sort((a, b) => b.minDaysBeforeCheckIn - a.minDaysBeforeCheckIn);
+  const steps = refundSteps(tiers, stay);
   const last = steps.at(-1);
   return (
     <>
       <ul className="list-disc pl-5" aria-label="Refund notice periods">
-        {steps.map((tier) => (
-          <li key={tier.minDaysBeforeCheckIn}>
-            {tier.refundPercent}% refund with at least {tier.minDaysBeforeCheckIn} days before
-            check-in.
+        {steps.map((step) => (
+          <li key={step.minDaysBeforeCheckIn}>
+            {(step.passed ? checkoutCopy.refundStepPassed : checkoutCopy.refundStep)(
+              step.refundPercent,
+              step.until,
+              step.minDaysBeforeCheckIn,
+            )}
           </li>
         ))}
       </ul>
       {last && last.minDaysBeforeCheckIn > 0 && (
-        <p>No refund with less than {last.minDaysBeforeCheckIn} days before check-in.</p>
+        <p>{checkoutCopy.noRefundAfter(last.until, last.minDaysBeforeCheckIn)}</p>
       )}
     </>
   );

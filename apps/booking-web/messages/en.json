@@ -569,6 +569,8 @@
     "roomNumber": "Room {number}",
     "totalStay": "Total for {nights} nights",
     "freeUntil": "Free cancellation until {date} ({timezone}).",
+    "hotelTime": "local hotel time",
+    "hotelTimeIn": "local hotel time, {country}",
     "afterDeadline": "No refund after the deadline or for a no-show.",
     "termsUnavailable": "Cancellation terms are unavailable.",
     "unavailable": "This accommodation selection is no longer available. Please search again.",
