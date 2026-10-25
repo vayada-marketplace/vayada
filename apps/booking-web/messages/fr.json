@@ -62,7 +62,7 @@
     "rooms": "Chambres",
     "addons": "Suppléments",
     "details": "Détails",
-    "payment": "Paiement"
+    "payment": "Vérifier et payer"
   },
   "home": {
     "guestCountUnsupported": "La recherche en ligne ne prend pas en charge votre groupe de {count} personnes. Essayez avec moins de personnes ou contactez-nous.",
@@ -689,5 +689,40 @@
     "newSearch": "Lancer une nouvelle recherche",
     "yourRooms": "Vos {count} chambres",
     "roomLine": "Chambre {number} · {room}"
+  },
+  "guestDetails": {
+    "title": "Vos coordonnées",
+    "heading": "Qui séjourne ?",
+    "intro": "Environ 1 minute. Les champs marqués d’un * sont obligatoires.",
+    "firstName": "Prénom",
+    "lastName": "Nom",
+    "email": "E-mail",
+    "phone": "Téléphone",
+    "phoneCountry": "Indicatif du pays",
+    "countryOfResidence": "Pays de résidence",
+    "noCountry": "Choisir un pays",
+    "arrivalTime": "Heure d’arrivée prévue",
+    "specialRequests": "Demandes particulières",
+    "optional": "(facultatif)",
+    "firstNamePlaceholder": "Jean",
+    "lastNamePlaceholder": "Dupont",
+    "emailPlaceholder": "jean.dupont@example.com",
+    "phonePlaceholder": "151 2345 6789",
+    "specialRequestsPlaceholder": "p. ex. arrivée tardive, transfert depuis l’aéroport, régime alimentaire",
+    "emailHint": "Nous y envoyons votre confirmation.",
+    "phoneHint": "Utilisé uniquement pour votre séjour.",
+    "specialRequestsHint": "Les demandes dépendent des disponibilités. L’hôtel vous répondra par e-mail.",
+    "errorFirstName": "Saisissez votre prénom.",
+    "errorLastName": "Saisissez votre nom.",
+    "errorEmail": "Saisissez une adresse e-mail comme nom@example.com.",
+    "errorPhone": "Saisissez votre numéro de téléphone.",
+    "errorSummary": "{count, plural, one {Vérifiez le champ indiqué en rouge.} other {Vérifiez les # champs indiqués en rouge.}}",
+    "continue": "Continuer vers le récapitulatif",
+    "backToRooms": "Retour aux chambres",
+    "backToExtras": "Retour aux suppléments",
+    "errorPhoneInvalid": "Saisissez un numéro de téléphone valide.",
+    "errorCountry": "Choisissez votre pays dans la liste.",
+    "rulesFailed": "Nous n’avons pas pu vérifier les règles de l’établissement pour ce prix. Vous pouvez continuer à remplir vos coordonnées.",
+    "retry": "Réessayer"
   }
 }

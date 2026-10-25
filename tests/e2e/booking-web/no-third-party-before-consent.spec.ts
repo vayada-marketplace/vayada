@@ -132,7 +132,7 @@ test("loads Stripe.js only once the card form shows", async ({ page, baseURL }) 
   await page.getByRole("button", { name: "Continue", exact: true }).click();
   await expect(page).toHaveURL(/[?&]step=details/);
   await fillGuestDetails(page);
-  await page.getByRole("button", { name: "Continue to payment" }).click();
+  await page.getByRole("button", { name: "Continue to review" }).click();
   await expect(page).toHaveURL(/[?&]step=payment/);
   await paymentOption(page, "card").click();
   await expect(paymentOption(page, "card")).toHaveAttribute("aria-checked", "true");
