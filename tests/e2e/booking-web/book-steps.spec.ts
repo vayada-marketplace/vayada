@@ -486,8 +486,8 @@ test("skips Extras for a hotel without extras", async ({ page }) => {
   await mockFlow(page, { extras: false });
   await page.goto(STAY);
   await expect(page).toHaveURL(/[?&]step=details/);
-  const steps = page.locator("main").getByText(/^(Rooms|Extras|Details|Payment)$/);
-  await expect(steps).toHaveText(["Rooms", "Details", "Payment"]);
+  const steps = page.locator("main").getByText(/^(Rooms|Extras|Details|Review & pay)$/);
+  await expect(steps).toHaveText(["Rooms", "Details", "Review & pay"]);
   await page.getByRole("button", { name: "Back to rooms" }).click();
   await expect(page).toHaveURL(/\/\?checkIn=2026-11-06&checkOut=2026-11-08&adults=2$/);
 });
