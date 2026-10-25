@@ -244,6 +244,7 @@ import {
   createPgBookingLifecycleStore,
   runBookingLifecycleSchedulerJobs,
 } from "./jobs/bookingLifecycle.js";
+import { runBankTransferPaymentReminders } from "./jobs/bankTransferPaymentReminders.js";
 import {
   createResendBookingEmailDelivery,
   runBookingEmailDeliveryJobs,
@@ -3106,8 +3107,11 @@ if (platformMediaRuntime) {
   });
 }
 
+// The sweep's pool also sends the bank-transfer payment reminders (VAY-2348).
+const bookingLifecyclePool = new pg.Pool({ connectionString: targetDatabaseUrl });
 const bookingLifecycleStore = createPgBookingLifecycleStore({
   connectionString: targetDatabaseUrl,
+  pool: bookingLifecyclePool,
   inventoryReservationPort: createTargetPmsInventoryReservationPort(),
   stripePaymentProvider: stripeBookingPaymentProvider,
 });
@@ -3125,6 +3129,14 @@ const runBookingLifecycle = () => {
       }
     })
     .catch((error: unknown) => app.log.warn({ err: error }, "Booking lifecycle sweep failed"))
+    .then(() => runBankTransferPaymentReminders(bookingLifecyclePool))
+    .then((result) => {
+      if (result.failed > 0)
+        app.log.warn({ failed: result.failed }, "Bank transfer payment reminders failed");
+    })
+    .catch((error: unknown) =>
+      app.log.warn({ err: error }, "Bank transfer payment reminders failed"),
+    )
     .finally(() => {
       activeBookingLifecycleRun = undefined;
     });
@@ -3257,6 +3269,7 @@ app.addHook("onClose", async () => {
   await activePricingCardReconciliation;
   await activeBookingEmailDelivery;
   await bookingLifecycleStore.close();
+  await bookingLifecyclePool.end();
   await pmsInboxDeliveryStore?.close();
   await pmsInboxDeliveryPool?.end();
 });

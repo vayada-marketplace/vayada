@@ -913,6 +913,7 @@ jobs:
             src/domains/preparePricingAcceptance.postgres.test.ts \
             src/domains/storePricingAcceptance.postgres.test.ts \
             src/domains/pricingAcceptanceWriter.postgres.test.ts \
+            src/jobs/bankTransferRelease.postgres.test.ts \
             src/domains/pricingAcceptanceNotifications.postgres.test.ts \
             src/domains/pricingBookingDraft.postgres.test.ts \
             src/domains/pricingBookingLifecycle.postgres.test.ts \

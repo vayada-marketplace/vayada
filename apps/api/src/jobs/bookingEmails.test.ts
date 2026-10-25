@@ -578,7 +578,55 @@ describe("booking lifecycle email jobs", () => {
       .filter((call) => call.text.includes("INSERT INTO platform.jobs"))
       .map((call) => JSON.parse(String(call.values?.[8])));
     expect(guest.text).toContain("We didn't receive your payment by the deadline");
+    expect(guest.text).toContain("If you've already sent the money, please contact the hotel.");
     expect(host.text).toContain("its payment didn't arrive by the deadline");
+    // VAY-2348 D5: no late confirmation; the hotel refunds or makes a new booking.
+    expect(host.text).toContain("refund it or make a new booking for them");
+  });
+
+  it("reminds a booking-page bank transfer guest once, with the bank details, and nobody else (VAY-2348)", async () => {
+    const reminder = async (paymentMethod: string, targetSource = "pricing_quote_draft") => {
+      const target = createTargetEmailStore({
+        paymentMethod,
+        propertyTimeZone: "Asia/Colombo",
+        bookingMetadata: { targetSource },
+      });
+      const enqueued = await enqueueBookingTransitionNotifications(target, {
+        propertyId: "f2000000-0000-0000-0000-000000000951",
+        guestBookingId: "book_bank_001",
+        occurredAt: "2026-09-02T10:00:00.000Z",
+        transition: {
+          eventType: "guest_booking.payment_reminder",
+          fromStatus: "pending_payment",
+          toStatus: "pending_payment",
+        },
+        paymentDeadlineAt: "2026-09-03T10:00:00.000Z",
+      });
+      const payloads = target.calls
+        .filter((call) => call.text.includes("INSERT INTO platform.jobs"))
+        .map((call) => JSON.parse(String(call.values?.[8])));
+      return { enqueued, payloads };
+    };
+    const bank = await reminder("bank_transfer");
+    expect(bank.enqueued.map((job) => job.jobType)).toEqual(["email.booking-payment-reminder"]);
+    expect(bank.enqueued[0]!.jobKey).toBe(
+      "email.booking-payment-reminder:booking:book_bank_001:transition:guest_booking.payment_reminder-pending_payment-pending_payment-none:recipient:guest:payment_reminder:v1",
+    );
+    const [guest] = bank.payloads;
+    expect(guest).toMatchObject({
+      to: "guest@example.test",
+      recipientRole: "guest",
+      requiresBankTransferInstructions: true,
+      subject: expect.stringContaining("Reminder: your bank transfer is due"),
+    });
+    // The deadline in the hotel's own time (Colombo is UTC+5:30).
+    expect(guest.text).toMatch(/Payment deadline: Thu, 3 Sept? 2026, 15:30 GMT\+5:30/);
+    expect(guest.text).toContain("we haven't received your bank transfer yet");
+    // PayPal keeps its own flow (D10); bookings outside the booking page get none.
+    await expect(reminder("paypal")).resolves.toMatchObject({ enqueued: [] });
+    await expect(reminder("bank_transfer", "legacy_checkout")).resolves.toMatchObject({
+      enqueued: [],
+    });
   });
 
   it("waits for card authorization before notifying a future request-mode booking", async () => {
