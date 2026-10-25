@@ -675,6 +675,7 @@ export * from "./roomCombinationSearch.js";
 
 export * from "./replacementPricingEvidence.js";
 export * from "./pricingPaymentMethods.js";
+export * from "./paymentMethodWindows.js";
 export * from "./pricingPaidWhenBooking.js";
 export * from "./pricingOfferNames.js";
 export * from "./publicPricingSelection.js";

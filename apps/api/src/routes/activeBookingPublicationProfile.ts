@@ -18,6 +18,7 @@ type CurrentPublicGatesRow = QueryResultRow & {
   promoCodes: boolean;
   latitude: number | null;
   longitude: number | null;
+  displayCurrencies: string[] | null;
 };
 
 const ACTIVE_PROFILE_SELECT = `SELECT
@@ -131,11 +132,21 @@ async function currentActiveProfile(
          WHEN geo_public AND map_display_mode='approximate' THEN round(longitude,2) END::double precision
          FROM hotel_catalog.property_locations WHERE property_id=$1::uuid
            AND latitude IS NOT NULL AND longitude IS NOT NULL) AS longitude,
-       ${LIVE_PROMO_CODES_SQL("$1::uuid")} AS "promoCodes"`,
+       ${LIVE_PROMO_CODES_SQL("$1::uuid")} AS "promoCodes",
+       (SELECT supported_currencies FROM booking.booking_settings
+         WHERE property_id=$1::uuid) AS "displayCurrencies"`,
     [row.propertyId],
   );
   const gates = result.rows[0];
   const branding = profile.hotel.branding;
+  // Live, not from the publication, which never carried them (VAY-2345): the currencies Booking
+  // settings add for display, after the hotel's own. Quotes and charges stay in that currency.
+  const displayCurrencies = [
+    ...new Set([
+      profile.hotel.defaultCurrency,
+      ...(gates?.displayCurrencies ?? []).filter((code) => /^[A-Z]{3}$/.test(code)),
+    ]),
+  ];
   return {
     ...profile,
     hotel: {
@@ -156,6 +167,7 @@ async function currentActiveProfile(
             branding: {
               ...branding,
               showReferAGuestButton: false,
+              ...(displayCurrencies.length > 1 ? { displayCurrencies } : {}),
             },
           }
         : {}),

@@ -115,12 +115,29 @@ export async function stagePricingBookingDraft(client: PoolClient, slug: unknown
   const cents = numerator / unit,
     amount = `${cents / 100n}.${(cents % 100n).toString().padStart(2, "0")}`;
   const guest = parsed.guest;
+  // VAY-2347: what the guest's one tick on the payment step agreed to, with the time it was given
+  // (the transaction's, as on the acceptance): this price's terms and the guest rules by their
+  // evidence, and the hotel's own terms & conditions as they stand now, by hash (null without).
+  const hotelTerms = (
+    await client.query(
+      "SELECT terms_and_conditions FROM hotel_catalog.property_policy_summaries WHERE property_id=$1",
+      [scope.propertyId],
+    )
+  ).rows[0]?.terms_and_conditions;
+  const termsText = typeof hotelTerms === "string" ? hotelTerms.trim() : "";
+  const consent = {
+    version: "booking-consent.v1",
+    quoteEvidenceId: parsed.acceptance.quoteEvidenceId,
+    guestPolicyEvidenceId: parsed.acceptance.guestPolicyEvidenceId,
+    termsHash: termsText ? "sha256:" + createHash("sha256").update(termsText).digest("hex") : null,
+  };
   await client.query(
     `WITH draft AS (
     INSERT INTO booking.guest_bookings(id,property_id,public_reference,source_system,booking_channel,direct_booking_source,
       lifecycle_status,payment_status,expected_payment_method,check_in,check_out,adults,children,room_count,currency,
       total_amount,balance_amount,booking_metadata,billing_plan_snapshot,commission_terms_snapshot,finance_terms_captured_at)
-    VALUES($1,$2,$3,'booking','direct','booking_engine','draft','unpaid',$22,$4,$5,$6,$7,$8,$9,$10,$10,$11,$12,$13,$14)
+    VALUES($1,$2,$3,'booking','direct','booking_engine','draft','unpaid',$22,$4,$5,$6,$7,$8,$9,$10,$10,
+      jsonb_set($11::jsonb,'{consent,acceptedAt}',to_jsonb(now())),$12,$13,$14)
     RETURNING id
   ) INSERT INTO booking.booking_guests(guest_booking_id,guest_role,first_name,last_name,email,phone,country_code,arrival_time,special_requests)
     SELECT id,'booker',$15,$16,$17,$18,$19,$20,$21 FROM draft`,
@@ -142,6 +159,7 @@ export async function stagePricingBookingDraft(client: PoolClient, slug: unknown
         paymentMethod: quote.paymentMethod,
         acceptanceMode: quote.acceptanceMode,
         pricingSelections: quote.stay.rooms,
+        consent,
       },
       finance.billingPlanSnapshot,
       terms,

@@ -164,6 +164,7 @@ import { registerFinanceDashboardRoutes } from "./routes/financeDashboard.js";
 import { registerFinanceProfitLossRoutes } from "./routes/financeProfitLoss.js";
 import { registerFinanceRevenueRoutes } from "./routes/financeRevenue.js";
 import { registerFinanceBankTransferRoutes } from "./routes/financeBankTransfer.js";
+import { registerFinancePaymentWindowsRoutes } from "./routes/financePaymentWindows.js";
 import {
   registerPlatformMediaRoutes,
   type ApprovedPublicProfileImageRepository,
@@ -436,6 +437,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   financeProfitLoss?: Parameters<typeof registerFinanceProfitLossRoutes>[1];
   financeRevenue?: Parameters<typeof registerFinanceRevenueRoutes>[1];
   financeBankTransfer?: Parameters<typeof registerFinanceBankTransferRoutes>[1];
+  financePaymentWindows?: Parameters<typeof registerFinancePaymentWindowsRoutes>[1];
   pmsFinanceCompatibilityRepository?: PmsFinanceCompatibilityRoutesOptions["repository"];
   financeXenditBankValidator?: FinanceXenditBankValidator;
   financePublicHotelProfileRepository?: PublicHotelProfileRepository;
@@ -633,6 +635,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       launchSettingsCommand: options.hotelSetupLaunchSettingsCommand,
       profileCommand: options.hotelSetupProfileCommand,
       refreshPublicPage: options.publicPageRefresh,
+      bookingPublicationRefresh: options.bookingPublicationRefresh,
     });
   }
   if (options.hotelFirstRun) {
@@ -720,6 +723,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       prefix: "/api",
       ...options.financePaymentSetup,
       refreshPublicPage: options.publicPageRefresh,
+      bookingPublicationRefresh: options.bookingPublicationRefresh,
     });
   }
   if (options.identityPrivacyRepository) {
@@ -1057,6 +1061,13 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       prefix: "/api",
       publicBookabilityPublisher: options.publicBookabilityPublisher,
       ...options.financeBankTransfer,
+      propertyAccessRepository: options.auth?.propertyAccessRepository,
+    });
+  }
+  if (options.financePaymentWindows) {
+    app.register(registerFinancePaymentWindowsRoutes, {
+      prefix: "/api",
+      ...options.financePaymentWindows,
       propertyAccessRepository: options.auth?.propertyAccessRepository,
     });
   }

@@ -25,6 +25,7 @@ import {
   type PricingManualPaymentTerms,
 } from "./pricingManualPayment.js";
 import { pricingManualLeadTimeAllows } from "./pricingManualPaymentLead.js";
+import { pricingPaymentWindowAllows } from "./pricingPaymentWindows.js";
 
 export class PricingAcceptanceError extends Error {
   constructor(
@@ -133,6 +134,17 @@ export async function writePricingAcceptance(
       )
         throw new Error("Manual payment acceptance unavailable");
     }
+    // VAY-2348: time passed since the quote; the method's booking window must still allow it. A
+    // new quote then names the reason.
+    if (
+      !(await pricingPaymentWindowAllows(
+        client,
+        prepared.current.scope.propertyId,
+        quote.paymentMethod,
+        quote.stay.checkIn,
+      ))
+    )
+      throw new Error("Booking acceptance unavailable");
     const bookingId =
       cardPayments && pricingCardQuoteSupported(prepared.current.quote)
         ? pricingCardBookingId(prepared.current.scope.propertyId, prepared.command.requestId)

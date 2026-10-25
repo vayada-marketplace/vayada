@@ -1152,9 +1152,12 @@ describe("Booking Web public bootstrap parity", () => {
     let termsText: string | null = "Hotel Alpenrose booking terms.";
     let paypalConfigured = true;
     let paymentsEnabled = true;
+    let windows: { method: string; kind: string; amount: number; unit: string }[] = [];
     const pool = {
       async query(text: string) {
         calls.push(text);
+        // VAY-2348: the hotel's booking windows per payment method.
+        if (text.includes("FROM finance.payment_method_booking_windows")) return { rows: windows };
         // VAY-2145: where and when check-in happens, and the bank-transfer and PayPal terms.
         if (text.includes('AS "checkInTime"'))
           return {
@@ -1303,6 +1306,32 @@ describe("Booking Web public bootstrap parity", () => {
         replacementPricingManualPaymentAcceptanceEnabled: true,
       }).getCheckoutConfig("hotel-alpenrose"),
     ).resolves.toMatchObject({ bookingPagePaymentMethods: ["pay_at_property", "paypal"] });
+    await expect(adapter.getCheckoutConfig("hotel-alpenrose")).resolves.not.toHaveProperty(
+      "paymentMethodArrivalWindows",
+    );
+    // VAY-2348: each window as the arrival dates it allows now (12:00 in Vienna, check-in 15:00):
+    // within 48 h ends with the 13th (27 h; the 14th is 51 h), at least 7 days starts on the 19th.
+    windows = [
+      { method: "pay_at_property", kind: "within", amount: 48, unit: "hours" },
+      { method: "bank_transfer", kind: "at_least", amount: 7, unit: "days" },
+    ];
+    await expect(
+      createTargetBookingWebCheckoutAdapter({
+        externalChanges: externalBookingChanges,
+        connectionString: "postgres://unused",
+        inventoryReservationPort: createTargetPmsInventoryReservationPort(),
+        pool: pool as never,
+        replacementPricingManualPaymentAcceptanceEnabled: true,
+        bankTransfers: {} as never,
+      }).getCheckoutConfig("hotel-alpenrose"),
+    ).resolves.toMatchObject({
+      bookingPagePaymentMethods: ["pay_at_property", "bank_transfer", "paypal"],
+      paymentMethodArrivalWindows: {
+        pay_at_property: { through: "2026-10-13" },
+        bank_transfer: { from: "2026-10-19" },
+      },
+    });
+    windows = [];
     paymentsEnabled = false;
     await expect(adapter.getCheckoutConfig("hotel-alpenrose")).resolves.toMatchObject({
       paymentsEnabled: false,
