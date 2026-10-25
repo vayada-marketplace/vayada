@@ -461,7 +461,7 @@
   "bookings.detail.dueAtProperty": "In der Unterkunft fällig",
   "bookings.detail.depositExceedsTotal": "Die Anzahlung übersteigt den aktuellen Gesamtbetrag um {amount}.",
   "bookings.detail.paymentBeforeRelease": "Die Zahlung muss erfasst werden, bevor diese Reservierung freigegeben wird.",
-  "bookings.detail.markBankTransferReceived": "Überweisung als eingegangen markieren",
+  "bookings.detail.markBankTransferReceived": "Überweisung als erhalten markieren",
   "bookings.detail.markPayAtHotelReceived": "Zahlung vor Ort als eingegangen markieren",
   "bookings.detail.markRestPaid": "Rest als bezahlt markieren ({amount})",
   "bookings.detail.restDueAtHotel": "Die Anzahlung wurde bei der Buchung per Karte bezahlt. Der Rest von {amount} wird vor Ort bezahlt.",
@@ -3760,5 +3760,17 @@
   "rooms.roomCount.other": "{count} Zimmer",
   "rooms.roomTypeCount.one": "{count} Zimmertyp",
   "rooms.roomTypeCount.other": "{count} Zimmertypen",
-  "rooms.sizeSqm": "{size} m²"
+  "rooms.sizeSqm": "{size} m²",
+  "bookings.statusAwaitingPayment": "Zahlung ausstehend",
+  "bookings.payBy": "Zahlung bis {date}",
+  "bookings.hotelTime": "Hotelzeit",
+  "bookings.detail.waitingForTransfer": "Warten auf die Banküberweisung",
+  "bookings.detail.waitingForPaypal": "Warten auf die PayPal-Zahlung",
+  "bookings.detail.transferDueBy": "Fällig bis {date}. Wenn Sie die Zahlung bis dahin nicht als erhalten markieren, wird die Buchung automatisch freigegeben und das Zimmer ist wieder verfügbar.",
+  "bookings.detail.confirmTransferReceived": "Die Überweisung von {amount} von {guest} (Referenz {reference}) als erhalten markieren? Die Buchung wird bestätigt, die Zahlung erfasst und der Gast erhält eine Bestätigungs-E-Mail.",
+  "bookings.detail.markReceived": "Als erhalten markieren",
+  "calendar.awaitingPayment": "Zahlung ausstehend",
+  "calendar.awaitingPaymentHeld": "Die Zimmer sind bis dahin reserviert und werden automatisch freigegeben, wenn die Zahlung nicht als erhalten markiert wird.",
+  "calendar.paymentDeadlinePassed": "Die Zahlungsfrist ist abgelaufen, die Zahlung kann nicht mehr als erhalten markiert werden. Die Buchung wird automatisch freigegeben.",
+  "calendar.openBooking": "Buchung öffnen"
 }

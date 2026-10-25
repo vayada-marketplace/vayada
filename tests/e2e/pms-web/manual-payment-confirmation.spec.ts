@@ -70,8 +70,19 @@ test("confirms a bank transfer from the booking page instead of accepting it", a
   await expect(page.getByRole("heading", { name: "Booking VAY-ADA" })).toBeVisible();
   await expect(page.getByText(/The guest pays you directly/)).toBeVisible();
   await expect(page.getByRole("button", { name: "Accept Booking" })).toHaveCount(0);
-  await page.getByRole("button", { name: "Mark bank transfer received" }).first().click();
-  await page.getByRole("button", { name: "Mark as paid" }).click();
+  // VAY-2348: "Awaiting payment", the deadline banner, and the confirmation naming the money.
+  await expect(page.getByText("Awaiting payment").first()).toBeVisible();
+  await expect(page.getByText("Waiting for the bank transfer")).toBeVisible();
+  await page.getByRole("button", { name: "Mark transfer received" }).first().click();
+  await expect(
+    page.getByText(
+      "Mark the transfer of €360.00 from Ada Lovelace (reference VAY-ADA) as received?",
+      {
+        exact: false,
+      },
+    ),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Mark received" }).click();
   await expect.poll(() => paid).toBe(true);
   await expect(page.getByText(/The guest pays you directly/)).toHaveCount(0);
   expect(accepts).toBe(0);

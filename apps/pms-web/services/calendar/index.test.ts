@@ -353,6 +353,68 @@ describe("calendarService manual-booking rates", () => {
     ]);
   });
 
+  // VAY-2348: a booking waiting for its bank transfer holds rooms before any is assigned.
+  it("draws a booking waiting for its bank transfer, one unassigned bar per held room", async () => {
+    const base = mocks.get.getMockImplementation()!;
+    const pending = (id: string, extra: object) => ({
+      guestBookingId: id,
+      bookingReference: id.toUpperCase(),
+      status: "pending_payment",
+      source: "direct_booking",
+      stay: { checkIn: "2026-08-21", checkOut: "2026-08-23" },
+      primaryGuest: { displayName: "Ada Lovelace" },
+      assignments: [],
+      ...extra,
+    });
+    mocks.get.mockImplementation(async (route: string) =>
+      route.includes("/reservations?")
+        ? {
+            items: [
+              pending("bank-booking", {
+                awaitingHotelPaymentConfirmation: true,
+                hostResponseDeadlineAt: "2026-08-19T13:30:00.000Z",
+                roomCount: 2,
+                payment: { method: "bank_transfer" },
+                roomLines: [
+                  { roomTypeId: "rt-double", roomName: "Double", roomCount: 1 },
+                  { roomTypeId: "rt-suite", roomName: "Suite", roomCount: 1 },
+                ],
+              }),
+              // A card request waiting for the hotel is not drawn, as before.
+              pending("card-request", { hostResponseDeadlineAt: "2026-08-19T13:30:00.000Z" }),
+            ],
+            pagination: { total: 2, limit: 500, offset: 0 },
+          }
+        : base(route),
+    );
+    const result = await calendarService.getCalendarData("2026-08-20", "2026-08-24");
+    expect(
+      result.bookings.map(
+        ({ id, status, roomId, roomPosition, numberOfRooms, paymentDeadlineAt, ...rest }) => ({
+          id,
+          status,
+          roomId,
+          roomPosition,
+          numberOfRooms,
+          paymentDeadlineAt,
+          paymentMethod: rest.paymentMethod,
+          room: `${rest.roomTypeId} ${rest.roomName}`,
+        }),
+      ),
+    ).toEqual(
+      ["rt-double Double", "rt-suite Suite"].map((room, roomPosition) => ({
+        id: "bank-booking",
+        status: "awaiting_payment",
+        roomId: null,
+        roomPosition,
+        numberOfRooms: 2,
+        paymentDeadlineAt: "2026-08-19T13:30:00.000Z",
+        paymentMethod: "bank_transfer",
+        room,
+      })),
+    );
+  });
+
   // VAY-2065: the published currency wins, the legacy rate's currency is the fallback, and a
   // room type from the room-facts flow has none, so custom rates leave it to the server.
   it("takes the currency from the publication, else the legacy rate, else none", async () => {
