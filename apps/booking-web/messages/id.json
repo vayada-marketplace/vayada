@@ -802,5 +802,91 @@
     "busyConfirm": "Mengonfirmasi pemesanan…",
     "busyRequest": "Mengirim permintaan…",
     "editDetails": "Ubah data tamu"
+  },
+  "beforeYouBook": {
+    "title": "Sebelum memesan",
+    "checkIn": "Check-in",
+    "checkOut": "Check-out",
+    "meals": "Makanan",
+    "children": "Anak-anak",
+    "checkInFrom": "Mulai {time}",
+    "checkInBetween": "Mulai {from} sampai {until}",
+    "checkInToMidnight": "Mulai {from} sampai tengah malam",
+    "checkOutBy": "Paling lambat {time}",
+    "mealsVary": "Tergantung kamar",
+    "childrenWelcome": "Diterima",
+    "childrenWelcomeAge": "Diterima · {age}+ dihitung dewasa",
+    "childrenNo": "Tidak diterima",
+    "timesLocal": "Semua waktu adalah waktu setempat hotel.",
+    "timesLocalIn": "Semua waktu adalah waktu setempat hotel ({country}).",
+    "guestRules": "Aturan tamu",
+    "terms": "Syarat & ketentuan",
+    "rulesLoading": "Memuat aturan tamu hotel…",
+    "rulesFailed": "Kami tidak dapat memeriksa aturan tamu hotel untuk harga ini.",
+    "retry": "Coba lagi",
+    "roomsMissing": "Detail kamar tidak tersedia. Pilih kamar Anda lagi untuk memesan.",
+    "agree": "Saya menyetujui kebijakan pembatalan, aturan tamu, serta syarat & ketentuan di atas.",
+    "agreeNoTerms": "Saya menyetujui kebijakan pembatalan dan aturan tamu di atas.",
+    "agreeMissing": "Centang kotak untuk menyetujui sebelum memesan.",
+    "hintDetails": "Isi data Anda untuk memesan.",
+    "hintAgree": "Setujui ketentuan di atas untuk memesan.",
+    "policy": {
+      "title": "Kebijakan pembatalan",
+      "titleRooms": "{rooms} · pembatalan",
+      "ifYouCancel": "Jika Anda membatalkan",
+      "youPay": "Anda membayar",
+      "appliesNow": "berlaku sekarang",
+      "ended": "berakhir",
+      "badge": {
+        "freeUntil": "Pembatalan gratis hingga {date}",
+        "refundsUntil": "Pengembalian dana hingga {date}",
+        "freeEnded": "Pembatalan gratis berakhir",
+        "nonRefundable": "Tidak dapat dikembalikan",
+        "noRefund": "Tidak ada pengembalian dana lagi",
+        "notRefundableOnceAccepted": "Tidak dapat dikembalikan setelah hotel menerima"
+      },
+      "when": {
+        "untilEnd": "Sampai akhir {date}",
+        "until": "Sampai {date}",
+        "between": "Dari {from} sampai akhir {until}",
+        "from": "Mulai {date}",
+        "fromNow": "Mulai sekarang hingga check-in",
+        "fromBooking": "Sejak pemesanan",
+        "beforeAccept": "Sebelum hotel menerima",
+        "afterAccept": "Setelah hotel menerima",
+        "noShow": "Tidak datang"
+      },
+      "pay": {
+        "free": "Gratis",
+        "freeNothingCharged": "Gratis · tidak ada biaya",
+        "freeHoldReleased": "Gratis · penahanan kartu dilepas",
+        "part": "{percent}% ({amount})",
+        "full": "Jumlah penuh ({amount})"
+      },
+      "note": {
+        "freeUntil": "Pembatalan gratis hingga akhir {date}, waktu setempat hotel. Untuk membatalkan, gunakan tautan di email konfirmasi atau hubungi hotel.",
+        "freeEnded": "Pembatalan gratis berakhir pada {date}. Jika Anda membatalkan atau tidak datang, Anda membayar jumlah penuh.",
+        "partial": "Jumlah yang dikembalikan tergantung kapan Anda membatalkan. Setelah {date}, atau jika Anda tidak datang, Anda membayar jumlah penuh.",
+        "partialEnded": "Pengembalian dana berakhir pada {date}. Jika Anda membatalkan atau tidak datang, Anda membayar jumlah penuh.",
+        "nonRefundable": "Tarif ini tidak dapat dibatalkan atau diubah dengan pengembalian dana.",
+        "request": "Anda dapat menarik permintaan secara gratis sampai hotel menjawab."
+      }
+    },
+    "rules": {
+      "checkIn": "Check-in mulai {time}.",
+      "checkInBetween": "Check-in mulai {from} sampai {until}.",
+      "checkInToMidnight": "Check-in mulai {from} sampai tengah malam di akhir hari kedatangan Anda.",
+      "checkOut": "Check-out paling lambat {time}.",
+      "checkOutFrom": "Check-out mulai {from}, paling lambat {time}.",
+      "childrenWelcome": "Anak-anak diterima.",
+      "childrenNo": "Anak-anak tidak dapat menginap di hotel ini.",
+      "adultsFrom": "Tamu mulai usia {age} dihitung dewasa.",
+      "phoneRequired": "Nomor telepon wajib untuk setiap pemesanan.",
+      "phoneOptional": "Nomor telepon bersifat opsional.",
+      "arrivalYes": "Anda dapat memberi tahu hotel perkiraan waktu kedatangan Anda.",
+      "arrivalNo": "Waktu kedatangan tidak dikumpulkan secara online. Tambahkan di permintaan khusus atau kirim pesan ke hotel.",
+      "requestsYes": "Anda dapat mengirim permintaan khusus ke hotel.",
+      "requestsNo": "Permintaan khusus tidak dapat dikirim secara online. Kirim pesan ke hotel."
+    }
   }
 }

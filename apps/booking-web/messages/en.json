@@ -803,5 +803,91 @@
     "busyConfirm": "Confirming booking…",
     "busyRequest": "Sending request…",
     "editDetails": "Edit the guest’s details"
+  },
+  "beforeYouBook": {
+    "title": "Before you book",
+    "checkIn": "Check-in",
+    "checkOut": "Check-out",
+    "meals": "Meals",
+    "children": "Children",
+    "checkInFrom": "From {time}",
+    "checkInBetween": "From {from} to {until}",
+    "checkInToMidnight": "From {from} to midnight",
+    "checkOutBy": "By {time}",
+    "mealsVary": "Varies by room",
+    "childrenWelcome": "Welcome",
+    "childrenWelcomeAge": "Welcome · {age}+ count as adults",
+    "childrenNo": "Not accommodated",
+    "timesLocal": "All times are local hotel time.",
+    "timesLocalIn": "All times are local hotel time ({country}).",
+    "guestRules": "Guest rules",
+    "terms": "Terms & conditions",
+    "rulesLoading": "Loading the hotel’s guest rules…",
+    "rulesFailed": "We couldn’t check the hotel’s guest rules for this price.",
+    "retry": "Try again",
+    "roomsMissing": "Room details are unavailable. Choose your rooms again to book.",
+    "agree": "I agree to the cancellation policy, guest rules and terms & conditions above.",
+    "agreeNoTerms": "I agree to the cancellation policy and guest rules above.",
+    "agreeMissing": "Tick the box to agree before you book.",
+    "hintDetails": "Fill in your details to book.",
+    "hintAgree": "Agree to the terms above to book.",
+    "policy": {
+      "title": "Cancellation policy",
+      "titleRooms": "{rooms} · cancellation",
+      "ifYouCancel": "If you cancel",
+      "youPay": "You pay",
+      "appliesNow": "applies now",
+      "ended": "ended",
+      "badge": {
+        "freeUntil": "Free cancellation until {date}",
+        "refundsUntil": "Refunds until {date}",
+        "freeEnded": "Free cancellation ended",
+        "nonRefundable": "Non-refundable",
+        "noRefund": "No refund any more",
+        "notRefundableOnceAccepted": "Not refundable once the hotel accepts"
+      },
+      "when": {
+        "untilEnd": "Until the end of {date}",
+        "until": "Until {date}",
+        "between": "From {from} to the end of {until}",
+        "from": "From {date}",
+        "fromNow": "From now until check-in",
+        "fromBooking": "From booking",
+        "beforeAccept": "Before the hotel accepts",
+        "afterAccept": "After the hotel accepts",
+        "noShow": "No-show"
+      },
+      "pay": {
+        "free": "Free",
+        "freeNothingCharged": "Free · nothing charged",
+        "freeHoldReleased": "Free · card hold released",
+        "part": "{percent}% ({amount})",
+        "full": "Full amount ({amount})"
+      },
+      "note": {
+        "freeUntil": "Free cancellation until the end of {date}, local hotel time. To cancel, use the link in your confirmation email or contact the hotel.",
+        "freeEnded": "Free cancellation ended on {date}. If you cancel or don’t arrive, you pay the full amount.",
+        "partial": "What you get back depends on when you cancel. After {date}, or if you don’t arrive, you pay the full amount.",
+        "partialEnded": "Refunds ended on {date}. If you cancel or don’t arrive, you pay the full amount.",
+        "nonRefundable": "This rate can’t be cancelled or changed for a refund.",
+        "request": "You can withdraw your request for free until the hotel answers."
+      }
+    },
+    "rules": {
+      "checkIn": "Check-in from {time}.",
+      "checkInBetween": "Check-in from {from} until {until}.",
+      "checkInToMidnight": "Check-in from {from} until midnight at the end of your arrival day.",
+      "checkOut": "Check-out by {time}.",
+      "checkOutFrom": "Check-out from {from}, by {time}.",
+      "childrenWelcome": "Children are welcome.",
+      "childrenNo": "Children can’t stay at this hotel.",
+      "adultsFrom": "Guests from {age} count as adults.",
+      "phoneRequired": "A phone number is required for every booking.",
+      "phoneOptional": "A phone number is optional.",
+      "arrivalYes": "You can tell the hotel your expected arrival time.",
+      "arrivalNo": "Arrival time isn’t collected online. Add it to special requests or message the hotel.",
+      "requestsYes": "You can send the hotel special requests.",
+      "requestsNo": "Special requests can’t be sent online. Message the hotel instead."
+    }
   }
 }

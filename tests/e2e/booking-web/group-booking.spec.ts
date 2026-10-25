@@ -96,8 +96,7 @@ for (const width of [1440, 390]) {
     await fillGuestDetails(page);
     await page.getByRole("button", { name: "Continue to review" }).click();
     await expect(orderTotal(page)).toHaveText("€200");
-    await page.getByLabel("I have read the room and rate terms for this price").check();
-    await page.getByLabel("guest rules for this price").check();
+    await page.getByLabel(/^I agree to the cancellation policy/).check();
     await page.getByRole("button", { name: "Confirm booking" }).click();
 
     // Another booking took the last Garden room: say which, and keep room 1.

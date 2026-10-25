@@ -45,26 +45,24 @@ for (const width of [1440, 390]) {
     const checkIn = hotelDay(1);
     await openDetails(page, { checkIn, checkOut: shift(checkIn, 1), freeDays: 3 });
     const deadline = shown(shift(checkIn, -3));
-    const ended = `ree cancellation ended on ${deadline}`;
 
     await fillGuestDetails(page);
     await page.getByRole("button", { name: "Continue to review" }).click();
     await expect(orderTotal(page)).toHaveText("€240");
-    await page.getByRole("button", { name: "Read the room and rate terms" }).click();
-    await page.getByRole("button", { name: "Read our guest rules" }).click();
-    const cancellation = page.getByRole("region", { name: "Cancellation" });
-    await expect(cancellation).toBeVisible();
+    const policy = page.getByRole("table", { name: "Cancellation policy" });
+    await expect(policy).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath(`payment-${width}.png`), fullPage: true });
-    await expect.soft(cancellation).toContainText(`F${ended}.`);
-    await expect.soft(cancellation).not.toContainText("days before arrival");
-    await expect
-      .soft(page.getByRole("region", { name: "Room 1 terms" }))
-      .toContainText(
-        `Free cancellation deadline: ${deadline} (3 days before arrival). It has passed`,
-      );
-    await expect
-      .soft(page.getByRole("region", { name: "Guest rules" }))
-      .toContainText("All times are local hotel time (Switzerland).");
+    // The amber badge, the row that applies now and the note all say it has ended.
+    await expect(page.getByText("Free cancellation ended", { exact: true })).toBeVisible();
+    await expect(policy.getByRole("row", { name: /From now until check-in/ })).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+    // The note sits under the table, in the policy's box.
+    const before = page.getByRole("region", { name: "Before you book" });
+    await expect(before).toContainText(`Free cancellation ended on ${deadline}.`);
+    await expect(before).not.toContainText("days before arrival");
+    await expect(before).toContainText("All times are local hotel time (Switzerland).");
   });
 }
 
@@ -74,8 +72,13 @@ test("words a deadline still ahead as the hotel's date", async ({ page }) => {
   const until = shown(shift(checkIn, -3));
   await fillGuestDetails(page);
   await page.getByRole("button", { name: "Continue to review" }).click();
-  await expect(page.getByRole("region", { name: "Cancellation" })).toContainText(
-    `Free until the end of ${until}, local hotel time.`,
+  const policy = page.getByRole("table", { name: "Cancellation policy" });
+  await expect(policy.getByRole("row", { name: /Until the end of/ })).toHaveAttribute(
+    "aria-current",
+    "true",
+  );
+  await expect(page.getByRole("region", { name: "Before you book" })).toContainText(
+    `Free cancellation until the end of ${until}, local hotel time.`,
   );
 });
 

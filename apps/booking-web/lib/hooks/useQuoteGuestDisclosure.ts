@@ -17,7 +17,8 @@ export function useQuoteGuestDisclosure(slug: string, quote: PublicBookingQuote 
   const [state, setState] = useState<{
     identity: string;
     disclosure?: PublicQuoteGuestDisclosure;
-    failed?: boolean;
+    /** The try that failed: a new try shows as loading again until it answers. */
+    failed?: number;
   }>();
   useEffect(() => {
     if (!quote) return;
@@ -27,7 +28,7 @@ export function useQuoteGuestDisclosure(slug: string, quote: PublicBookingQuote 
         if (!controller.signal.aborted) setState({ identity, disclosure });
       })
       .catch(() => {
-        if (!controller.signal.aborted) setState({ identity, failed: true });
+        if (!controller.signal.aborted) setState({ identity, failed: retry });
       });
     return () => controller.abort();
     // The quote ID identifies immutable evidence; dates prevent reusing malformed replacements.
@@ -36,7 +37,7 @@ export function useQuoteGuestDisclosure(slug: string, quote: PublicBookingQuote 
   const current = state?.identity === identity ? state : undefined;
   return {
     disclosure: current?.disclosure ?? null,
-    failed: !!current?.failed,
+    failed: current?.failed === retry,
     retry: () => setRetry((value) => value + 1),
   };
 }

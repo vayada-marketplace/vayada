@@ -16,7 +16,6 @@ import { decodePicks, pickIdentity, releaseSoldOutPicks, roomGuestProblem } from
 import RoomGuestsStep from "@/components/booking/RoomGuestsStep";
 import { useRouter } from "@/i18n/navigation";
 import BookShell from "./BookShell";
-import ReplacementGuestRules from "@/components/booking/ReplacementGuestRules";
 import ExtrasStep from "@/components/booking/ExtrasStep";
 import PaymentStep from "@/components/booking/PaymentStep";
 import StaySummary, { type SummaryRoom } from "@/components/booking/StaySummary";
@@ -33,8 +32,7 @@ import {
   replacementExtrasScope,
   type ReplacementExtrasValue,
 } from "@/services/api/replacementAddonSelection";
-import ReplacementQuoteTerms from "@/components/booking/ReplacementQuoteTerms";
-import type { QuoteTermsAcknowledgement } from "@/components/booking/ReplacementQuoteTerms";
+import BeforeYouBook from "@/components/booking/BeforeYouBook";
 import ReplacementBookingConfirmation, {
   type BookingAttempt,
 } from "@/components/booking/ReplacementBookingConfirmation";
@@ -54,7 +52,7 @@ import ApproximateAmountsNote from "@/components/booking/ApproximateAmountsNote"
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useHotel, useSlug } from "@/contexts/HotelContext";
 import { choiceKeys, choiceText, hotelToday } from "@/lib/roomChoices";
-import { cancellationSummary, hotelCountryName } from "@/lib/checkoutTerms";
+import { hotelCountryName } from "@/lib/checkoutTerms";
 import { paymentMethodOptions } from "@/lib/paymentMethodOptions";
 import { resolveLocale } from "@/lib/utils";
 import {
@@ -132,16 +130,14 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   const tDetails = useTranslations("guestDetails");
   const tReview = useTranslations("reviewPay");
   const locale = useLocale();
+  const tBefore = useTranslations("beforeYouBook");
   const tGroup = useTranslations("groupRooms");
   const tCommon = useTranslations("common");
   const { hotel } = useHotel();
-  const [termsAcknowledgement, setTermsAcknowledgement] =
-    useState<QuoteTermsAcknowledgement | null>(null);
-  const [guestDisclosure, setGuestDisclosure] = useState<PublicQuoteGuestDisclosure | null>(null);
-  // The price whose Confirm was pressed before both boxes were ticked (VAY-2306).
+  // VAY-2347: the one tick, for the price, rules and room names it was given for.
+  const [agreedTo, setAgreedTo] = useState<string | null>(null);
+  // The price whose Confirm was pressed before the box was ticked (VAY-2306).
   const [consentMissedFor, setConsentMissedFor] = useState<string | null>(null);
-  // The guest rules the payment step's own tick shows (null while they load or if they failed).
-  const [shownRules, setShownRules] = useState<PublicQuoteGuestDisclosure | null>(null);
   const consentErrorId = useId();
   const [rooms, setRooms] = useState<PricingRoom[] | null>(null);
   const [catalogError, setCatalogError] = useState(false);
@@ -424,22 +420,13 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     if (guestRulesQuote.disclosure) setKnownRules(guestRulesQuote.disclosure.choices);
   }, [guestRulesQuote.disclosure]);
   const detailsComplete = guestComplete(guest, knownRules);
-  // Booking sends the details under this price's own rules (the ticked ones, or as loaded);
-  // until they are known the phone is required (VAY-2163).
-  const rulesForQuote =
-    (guestDisclosure?.quoteId === quote?.quoteId ? guestDisclosure?.choices : undefined) ??
-    (guestRulesQuote.disclosure?.quoteId === quote?.quoteId
-      ? guestRulesQuote.disclosure?.choices
-      : undefined) ??
-    null;
-  // Until the price runs out: its notice then asks for a new price instead.
-  const consentError =
-    !!quote &&
-    !error &&
-    consentMissedFor === quote.quoteId &&
-    !(
-      termsAcknowledgement?.quoteId === quote.quoteId && guestDisclosure?.quoteId === quote.quoteId
-    );
+  // This price's own guest rules; booking sends the details under them, and until they are
+  // known the phone is required (VAY-2163).
+  const quoteRules =
+    guestRulesQuote.disclosure && guestRulesQuote.disclosure.quoteId === quote?.quoteId
+      ? guestRulesQuote.disclosure
+      : null;
+  const rulesForQuote = quoteRules?.choices ?? null;
   // While the rules load (after a refresh), a blank phone doesn't send the guest back a step;
   // booking itself still waits for this price's rules.
   const detailsReady =
@@ -638,7 +625,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   const hotelZone = guestRulesQuote.disclosure?.propertyTimeZone ?? (hotel?.timezone || "Etc/UTC");
   const hotelNow = new Date(serverNow());
   const hotelDate = hotelToday(hotelZone, hotelNow);
-  const hotelCountry = hotelCountryName(hotel?.country);
+  const hotelCountry = hotelCountryName(hotel?.country, locale);
   // VAY-2347: each offered way to pay with its words and amounts; the price's own way gives the
   // "Your stay" payment lines and the button's words.
   const methodOptions = paymentMethodOptions(
@@ -705,7 +692,26 @@ function RoomQuoteForm({ slug }: { slug: string }) {
         ]
       : [];
   });
-  const roomNames = Object.fromEntries(summaryRooms.map((room) => [room.selectionId, room.name]));
+  // Each room with its rate, so the policy blocks of two rates of one room tell them apart.
+  const roomNames = Object.fromEntries(
+    summaryRooms.map((room) => [room.selectionId, `${room.name} · ${room.choice}`]),
+  );
+  // VAY-2347: the tick holds for this price, its rules' evidence and the rooms as named; a new
+  // price, an expired one or rooms without names need it again.
+  const consentFor =
+    quote && quoteRules && quote.rooms.every((room) => roomNames[room.selectionId]?.trim())
+      ? JSON.stringify([
+          quote.quoteId,
+          quote.issuedAt,
+          quote.expiresAt,
+          quoteRules.quoteEvidenceId,
+          quoteRules.guestPolicyEvidenceId,
+          quote.rooms.map((room) => roomNames[room.selectionId]),
+        ])
+      : null;
+  const agreed = !!consentFor && !error && agreedTo === consentFor;
+  // Until the price runs out: its notice then asks for a new price instead.
+  const consentError = !!quote && !error && consentMissedFor === quote.quoteId && !agreed;
   const adultCount = choices.reduce((sum, choice) => sum + (Number(choice.adults) || 0), 0);
   const childCount = choices.reduce((sum, choice) => sum + choice.childAges.length, 0);
   const guestsLine = [
@@ -1445,8 +1451,6 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                 }
                 onMethod={setPayment}
                 locked={attemptOpen}
-                termsText={pagePayment.termsText}
-                hasQuote={!!quote}
                 showExplanation={!!quote && quote.paymentMethod === method}
                 notice={
                   error && quote && !attemptOpen ? (
@@ -1464,69 +1468,31 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                       tone="amber"
                       title={`Your price changed from ${priceChange} to ${money(quote.totalMinor, quote.currency)}.`}
                     >
-                      Please check it and tick both boxes again.
+                      Please check it and tick the box again.
                     </Notice>
                   ) : loading ? (
                     <p role="status">{tReview("checkingPrice")}</p>
                   ) : null
                 }
-                acknowledgements={
+                beforeYouBook={
                   quote && (
-                    <>
-                      <ReplacementQuoteTerms
-                        compact
-                        errorId={consentError ? consentErrorId : undefined}
-                        quote={quote}
-                        onAcknowledgementChange={setTermsAcknowledgement}
-                        roomNames={roomNames}
-                        today={hotelDate}
-                      />
-                      <ReplacementGuestRules
-                        key={quote.quoteId}
-                        compact
-                        errorId={consentError ? consentErrorId : undefined}
-                        slug={slug}
-                        quote={quote}
-                        onAcknowledgementChange={setGuestDisclosure}
-                        onRulesChange={setShownRules}
-                        hotelCountry={hotelCountry}
-                      />
-                      {consentError && (
-                        <p
-                          id={consentErrorId}
-                          role="alert"
-                          className="flex items-start gap-2 text-sm font-medium text-red-700"
-                        >
-                          <svg
-                            className="mt-0.5 h-4 w-4 shrink-0"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                            aria-hidden="true"
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth={2}
-                              d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                            />
-                          </svg>
-                          Read and accept both the room terms and guest rules to book.
-                        </p>
-                      )}
-                    </>
+                    <BeforeYouBook
+                      quote={quote}
+                      disclosure={quoteRules}
+                      rulesFailed={guestRulesQuote.failed}
+                      onRetryRules={guestRulesQuote.retry}
+                      roomNames={roomNames}
+                      today={hotelDate}
+                      hotelCountry={hotelCountry}
+                      termsText={pagePayment.termsText}
+                      formatMoney={(minor) => money(minor, quote.currency)}
+                      agreed={agreed}
+                      consentDisabled={!consentFor || !!error}
+                      consentErrorId={consentError ? consentErrorId : undefined}
+                      onAgree={(checked) => setAgreedTo(checked ? consentFor : null)}
+                      status={quoteRules && !consentFor ? tBefore("roomsMissing") : undefined}
+                    />
                   )
-                }
-                cancellation={
-                  quote
-                    ? cancellationSummary(
-                        quote.rooms.map((room, index) => ({
-                          name: roomNames[room.selectionId] || `Room ${index + 1}`,
-                          cancellation: room.cancellation,
-                        })),
-                        { checkIn: quote.checkIn, today: hotelDate },
-                      )
-                    : []
                 }
                 confirm={
                   quote && (
@@ -1534,28 +1500,26 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                       key={quote.quoteId}
                       slug={slug}
                       quote={quote}
-                      disclosure={guestDisclosure}
+                      disclosure={agreed ? quoteRules : null}
                       guest={
                         guestComplete(guest, rulesForQuote)
                           ? acceptanceGuest(guest, rulesForQuote)
                           : null
                       }
-                      termsAccepted={termsAcknowledgement?.quoteId === quote.quoteId}
-                      hotelTerms={pagePayment.termsText !== null}
+                      termsAccepted={agreed}
                       attempt={attempt}
                       onAttemptChange={setAttempt}
                       onBooked={openConfirmation}
                       soldOutNotice={soldOutNotice}
                       label={pricedOption?.button}
                       busyLabel={pricedOption?.busy}
+                      hints={{ details: tBefore("hintDetails"), agree: tBefore("hintAgree") }}
                       onConsentMissing={
-                        // Only while both boxes can be ticked: an expired price, rules that
-                        // didn't load or a room without its name keep Confirm off, as before.
-                        !error &&
-                        shownRules?.quoteId === quote.quoteId &&
-                        quote.rooms.every((room) => roomNames[room.selectionId]?.trim())
+                        // Only while the box can be ticked: an expired price, rules that didn't
+                        // load or a room without its name keep Confirm off, as before.
+                        !error && consentFor
                           ? () => {
-                              // The boxes are marked before focus lands, so it is announced.
+                              // The box is marked before focus lands, so it is announced.
                               flushSync(() => setConsentMissedFor(quote.quoteId));
                               document
                                 .querySelector<HTMLInputElement>(
