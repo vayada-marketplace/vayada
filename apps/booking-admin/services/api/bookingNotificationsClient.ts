@@ -56,6 +56,8 @@ export type HostNotificationSyncAlert = {
   failedAt: string;
   lastSuccessAt: string | null;
   canRetry: boolean;
+  /** Whether the person may open PMS → Channel manager ("View details"). */
+  canViewDetails: boolean;
 };
 
 export type HostNotificationFeed = {
@@ -86,6 +88,23 @@ const count = (v: unknown): v is number => typeof v === "number" && Number.isInt
 const uuid = (v: unknown): v is string =>
   typeof v === "string" &&
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
+const day = (v: unknown): v is string => typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
+
+/** Whether the bell can read a property's notifications: Booking Admin's selected id must be the
+ * property's UUID. */
+export function isNotificationPropertyId(propertyId: string | undefined): propertyId is string {
+  return uuid(propertyId);
+}
+
+/** A time zone this browser knows, else UTC: Intl throws on one it doesn't. */
+function knownTimeZone(timeZone: string): string {
+  try {
+    new Intl.DateTimeFormat("en", { timeZone });
+    return timeZone;
+  } catch {
+    return "UTC";
+  }
+}
 
 function path(propertyId: string, suffix = ""): string {
   if (!uuid(propertyId)) throw new Error("Choose a property before opening notifications.");
@@ -104,9 +123,14 @@ function item(v: unknown): v is HostNotification {
     (v.booking === undefined ||
       (record(v.booking) &&
         typeof v.booking.reference === "string" &&
-        typeof v.booking.checkIn === "string" &&
-        typeof v.booking.checkOut === "string")) &&
-    (v.promo === undefined || (record(v.promo) && typeof v.promo.code === "string")) &&
+        day(v.booking.checkIn) &&
+        day(v.booking.checkOut) &&
+        typeof v.booking.currency === "string" &&
+        /^[A-Z]{3}$/.test(v.booking.currency))) &&
+    (v.promo === undefined ||
+      (record(v.promo) &&
+        typeof v.promo.code === "string" &&
+        (v.promo.validUntil === null || day(v.promo.validUntil)))) &&
     (v.member === undefined ||
       (record(v.member) && (v.member.name === null || typeof v.member.name === "string")))
   );
@@ -144,9 +168,16 @@ export function parseHostNotificationFeed(v: unknown): HostNotificationFeed | nu
     )
   )
     return null;
-  // A kind this version doesn't know (from a newer API) is skipped, not an error.
+  // A kind this version doesn't know (from a newer API), or a row it can't show, is skipped.
   const items = v.items.filter(item);
-  return { ...(v as HostNotificationFeed), items };
+  return {
+    ...(v as HostNotificationFeed),
+    timeZone: knownTimeZone(v.timeZone),
+    items,
+    syncAlert: alert
+      ? { ...(alert as HostNotificationSyncAlert), canViewDetails: alert.canViewDetails === true }
+      : null,
+  };
 }
 
 export function createBookingNotificationsClient(http: Http) {
@@ -158,27 +189,52 @@ export function createBookingNotificationsClient(http: Http) {
       if (!feed) throw new Error("Notifications could not be loaded.");
       return feed;
     },
+    // keepalive: a mark made right before a page change still reaches the API.
     async markRead(propertyId: string, keys: string[]): Promise<void> {
-      await http.post(path(propertyId, "/read"), { keys });
+      await http.post(path(propertyId, "/read"), { keys }, { keepalive: true });
     },
     /** Marks what the person saw: items up to the feed's generatedAt, and the sync card it showed. */
     async markAllRead(
       propertyId: string,
       seen: { before: string; syncAlertKey: string | null },
     ): Promise<void> {
-      await http.post(path(propertyId, "/read-all"), seen);
+      await http.post(path(propertyId, "/read-all"), seen, { keepalive: true });
     },
-    /** "Retry sync": the same command as PMS → Channel manager → Sync now, once per failing sync. */
-    async retrySync(propertyId: string, domains: ("ari" | "booking")[]): Promise<void> {
+    /** "Retry sync": the same command as PMS → Channel manager → Sync now, once per failing sync.
+     * Returns the operations to follow. */
+    async retrySync(propertyId: string, domains: ("ari" | "booking")[]): Promise<string[]> {
       if (!uuid(propertyId)) throw new Error("Choose a property before retrying the sync.");
+      const operations: string[] = [];
       for (const domain of domains) {
         const id = crypto.randomUUID();
-        await http.post(`/api/pms/properties/${propertyId.toLowerCase()}/channex/commands`, {
-          commandId: id,
-          idempotencyKey: id,
-          operationType: domain === "ari" ? "sync_ari" : "sync_bookings",
-        });
+        const operation = await http.post<unknown>(
+          `/api/pms/properties/${propertyId.toLowerCase()}/channex/commands`,
+          {
+            commandId: id,
+            idempotencyKey: id,
+            operationType: domain === "ari" ? "sync_ari" : "sync_bookings",
+          },
+        );
+        if (!record(operation) || typeof operation.operationId !== "string")
+          throw new Error("The sync could not be started.");
+        operations.push(operation.operationId);
       }
+      return operations;
+    },
+    /** Where a sync operation stands: done, failed, or still running. */
+    async syncOperationStatus(
+      propertyId: string,
+      operationId: string,
+    ): Promise<"succeeded" | "failed" | "running"> {
+      if (!uuid(propertyId)) throw new Error("Choose a property before checking the sync.");
+      const operation = await http.get<unknown>(
+        `/api/pms/properties/${propertyId.toLowerCase()}/channex/operations/${encodeURIComponent(operationId)}`,
+        { cache: "no-store" },
+      );
+      const status = record(operation) ? operation.status : null;
+      if (status === "succeeded") return "succeeded";
+      if (status === "failed" || status === "dead_lettered") return "failed";
+      return "running";
     },
   };
 }

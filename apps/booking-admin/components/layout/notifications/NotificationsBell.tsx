@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import {
   ArrowPathIcon,
   BanknotesIcon,
@@ -14,14 +13,7 @@ import {
   XCircleIcon,
   XMarkIcon,
 } from "@heroicons/react/24/outline";
-import { createBrowserAuthHandoff, crossAppReauthenticationUrl } from "@vayada/product-onboarding";
 import { useTranslation } from "@/lib/i18n";
-import { openNotificationLink } from "@/lib/notificationLinks";
-import { getAuthCsrfToken } from "@/services/auth/sessionStore";
-import {
-  bookingNotificationsClient,
-  type HostNotificationFeed,
-} from "@/services/api/bookingNotificationsClient";
 import {
   NOTIFICATION_TABS,
   badgeLabel,
@@ -35,8 +27,7 @@ import {
   type NotificationTab,
 } from "./notificationRows";
 import type { useHostNotifications } from "./useHostNotifications";
-
-const PMS_FRONTEND_URL = process.env.NEXT_PUBLIC_PMS_FRONTEND_URL || "https://pms.vayada.com";
+import type { useNotificationActions } from "./useNotificationActions";
 
 const TAB_LABEL: Record<NotificationTab, string> = {
   all: "notifications.tab.all",
@@ -68,35 +59,37 @@ const SECONDARY_BUTTON =
   "inline-flex h-[30px] items-center rounded-[7px] border border-gray-300 bg-white px-3 text-[13px] font-medium text-gray-700 hover:bg-gray-50";
 
 type Notifications = ReturnType<typeof useHostNotifications>;
+type Actions = ReturnType<typeof useNotificationActions>;
 
 /** Booking Admin's bell and notifications panel (VAY-2349): a dropdown from 768 px, a full-width sheet
  * under the header on phones. */
 export default function NotificationsBell({
-  hotelId,
   hotelName,
   notifications,
+  actions,
 }: {
-  hotelId: string | undefined;
   hotelName: string;
   notifications: Notifications;
+  actions: Actions;
 }) {
   const { t, locale } = useTranslation();
-  const router = useRouter();
-  const { feed, failed, reload, markRead, markAllRead } = notifications;
+  const { feed, status, markRead, markAllRead } = notifications;
+  const { sync, resetSync, retrySync, openChannelManager } = actions;
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<NotificationTab>("all");
-  const [sync, setSync] = useState<"idle" | "starting" | "started" | "failed">("idle");
-  const [synced, setSynced] = useState(false);
   const box = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
-  const hadAlert = useRef(false);
+  const panel = useRef<HTMLDivElement>(null);
+  const tabs = useRef<(HTMLButtonElement | null)[]>([]);
 
   useEffect(() => {
     if (!open) return;
+    // Into the panel, so keyboard and screen reader users land on what just opened.
+    panel.current?.focus();
     const onPointer = (event: MouseEvent) => {
       if (box.current && !box.current.contains(event.target as Node)) setOpen(false);
     };
-    const onKey = (event: KeyboardEvent) => {
+    const onKey = (event: globalThis.KeyboardEvent) => {
       if (event.key !== "Escape") return;
       setOpen(false);
       button.current?.focus();
@@ -109,80 +102,37 @@ export default function NotificationsBell({
     };
   }, [open]);
 
-  // A sync error that clears while the panel is open turns into a green "synced" line until it closes.
+  // The green "synced" line shows after a successful retry, until the panel closes.
   useEffect(() => {
-    if (!feed) return;
-    if (feed.syncAlert) hadAlert.current = true;
-    else if (hadAlert.current) {
-      hadAlert.current = false;
-      if (open) setSynced(true);
-      setSync("idle");
-    }
-  }, [feed, open]);
+    if (!open) resetSync();
+  }, [open, resetSync]);
 
-  useEffect(() => {
-    if (!open) setSynced(false);
-  }, [open]);
+  if (status === "unavailable") return null;
 
   const unread = feed?.unread.all ?? 0;
   const badge = feed && unread > 0 ? feed.badge : "none";
   const now = new Date();
   const context = { t, locale, timeZone: feed?.timeZone ?? "UTC", now };
+  const synced = sync === "succeeded";
 
   const act = (row: NotificationRow, action: NotificationAction) => {
-    if (!row.read) void markRead([row.key]);
-    if (action.kind === "contact_guest") {
-      window.location.href = `mailto:${action.email}`;
-      return;
-    }
-    setOpen(false);
-    if (action.kind === "view_booking")
-      openNotificationLink(
-        { path: "/reservations", param: "search" },
-        action.reference,
-        router.push,
-      );
-    else openNotificationLink({ path: "/promo-codes", param: "edit" }, action.promoId, router.push);
+    if (action.kind !== "contact_guest") setOpen(false);
+    actions.act(row.key, row.read, action);
   };
 
-  const retrySync = async (alert: NonNullable<HostNotificationFeed["syncAlert"]>) => {
-    if (!hotelId) return;
-    if (!alert.read) void markRead([alert.key]);
-    setSync("starting");
-    try {
-      await bookingNotificationsClient.retrySync(hotelId, alert.domains);
-      setSync("started");
-      // The sync runs in the background; look again shortly, then on the usual minute.
-      window.setTimeout(() => void reload(), 15_000);
-    } catch {
-      setSync("failed");
-    }
-  };
-
-  const openChannelManager = async (alert: NonNullable<HostNotificationFeed["syncAlert"]>) => {
-    if (!alert.read) void markRead([alert.key]);
-    const targetPath = "/channel-manager";
-    const csrfToken = getAuthCsrfToken();
-    if (csrfToken && hotelId) {
-      try {
-        window.location.href = await createBrowserAuthHandoff({
-          csrfToken,
-          routingHints: { propertyId: hotelId },
-          sourceSurface: "booking-admin",
-          targetPath,
-          targetSurface: "pms-web",
-        });
-        return;
-      } catch {
-        // Require PMS sign-in when the one-time exchange is unavailable.
-      }
-    }
-    window.location.href = crossAppReauthenticationUrl(PMS_FRONTEND_URL, targetPath);
+  const onTabKey = (event: KeyboardEvent<HTMLDivElement>) => {
+    const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
+    if (!step) return;
+    event.preventDefault();
+    const next =
+      (NOTIFICATION_TABS.indexOf(tab) + step + NOTIFICATION_TABS.length) % NOTIFICATION_TABS.length;
+    setTab(NOTIFICATION_TABS[next]!);
+    tabs.current[next]?.focus();
   };
 
   const items = feed ? itemsForTab(feed.items, tab) : [];
   const alert = feed?.syncAlert ?? null;
-  const showAlert = alert !== null && (tab === "all" || tab === "needs_action");
+  const showAlert = alert !== null && !synced && (tab === "all" || tab === "needs_action");
   const nothingAtAll = feed !== null && feed.items.length === 0 && alert === null && !synced;
 
   return (
@@ -218,9 +168,11 @@ export default function NotificationsBell({
 
       {open && (
         <div
+          ref={panel}
+          tabIndex={-1}
           role="dialog"
           aria-label={t("layout.header.notifications")}
-          className="fixed inset-x-0 bottom-0 top-12 z-50 flex flex-col overflow-hidden border-t border-gray-200 bg-white md:absolute md:inset-x-auto md:bottom-auto md:right-0 md:top-full md:mt-1.5 md:max-h-[min(640px,calc(100vh-64px))] md:w-[400px] md:rounded-xl md:border md:shadow-[0_12px_32px_rgba(17,24,39,0.14),0_2px_6px_rgba(17,24,39,0.06)]"
+          className="fixed inset-x-0 bottom-0 top-12 z-50 flex flex-col overflow-hidden border-t border-gray-200 bg-white md:absolute md:inset-x-auto md:bottom-auto md:right-0 md:top-full md:mt-1.5 md:max-h-[min(640px,calc(100vh-64px))] md:w-[400px] md:rounded-xl md:border md:shadow-[0_12px_32px_rgba(17,24,39,0.14),0_2px_6px_rgba(17,24,39,0.06)] focus:outline-none"
         >
           <div className="flex shrink-0 items-center justify-between px-4 pb-3 pt-4">
             <div className="flex items-center gap-2">
@@ -257,17 +209,24 @@ export default function NotificationsBell({
           <div
             role="tablist"
             aria-label={t("layout.header.notifications")}
+            onKeyDown={onTabKey}
             className="flex shrink-0 items-center gap-0.5 overflow-x-auto border-b border-gray-200 px-2.5 pb-3 md:gap-1 md:px-3"
           >
-            {NOTIFICATION_TABS.map((name) => {
+            {NOTIFICATION_TABS.map((name, index) => {
               const count = feed ? unreadForTab(feed, name) : 0;
               const active = name === tab;
               return (
                 <button
                   key={name}
+                  ref={(element) => {
+                    tabs.current[index] = element;
+                  }}
+                  id={`notifications-tab-${name}`}
                   type="button"
                   role="tab"
                   aria-selected={active}
+                  aria-controls="notifications-tabpanel"
+                  tabIndex={active ? 0 : -1}
                   onClick={() => setTab(name)}
                   className={`flex h-[30px] shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[13px] ${
                     active
@@ -294,10 +253,15 @@ export default function NotificationsBell({
             })}
           </div>
 
-          <div className="min-h-0 flex-1 overflow-y-auto">
+          <div
+            id="notifications-tabpanel"
+            role="tabpanel"
+            aria-labelledby={`notifications-tab-${tab}`}
+            className="min-h-0 flex-1 overflow-y-auto"
+          >
             {!feed && (
               <p className="px-4 py-10 text-center text-[13px] text-gray-500">
-                {failed ? t("notifications.loadFailed") : t("notifications.loading")}
+                {status === "failed" ? t("notifications.loadFailed") : t("notifications.loading")}
               </p>
             )}
 
@@ -331,30 +295,38 @@ export default function NotificationsBell({
                   <p className="text-[13px] leading-[19px] text-red-800">
                     {syncAlertText(alert, context)}
                   </p>
-                  {sync === "failed" && (
+                  {(sync === "failed" || sync === "slow") && (
                     <p role="alert" className="text-xs text-red-700">
-                      {t("notifications.sync.retryFailed")}
+                      {t(
+                        sync === "failed"
+                          ? "notifications.sync.retryFailed"
+                          : "notifications.sync.stillRunning",
+                      )}
                     </p>
                   )}
-                  {alert.canRetry && (
+                  {(alert.canRetry || alert.canViewDetails) && (
                     <div className="mt-1.5 flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        disabled={sync === "starting" || sync === "started"}
-                        onClick={() => void retrySync(alert)}
-                        className="inline-flex h-[30px] items-center rounded-[7px] bg-red-700 px-3 text-[13px] font-medium text-white hover:bg-red-800 disabled:opacity-70"
-                      >
-                        {sync === "starting" || sync === "started"
-                          ? t("notifications.sync.syncing")
-                          : t("notifications.sync.retry")}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void openChannelManager(alert)}
-                        className="inline-flex h-[30px] items-center rounded-[7px] border border-red-200 bg-white px-3 text-[13px] font-medium text-red-800 hover:bg-red-50"
-                      >
-                        {t("notifications.sync.viewDetails")}
-                      </button>
+                      {alert.canRetry && (
+                        <button
+                          type="button"
+                          disabled={sync === "running"}
+                          onClick={() => void retrySync(alert)}
+                          className="inline-flex h-[30px] items-center rounded-[7px] bg-red-700 px-3 text-[13px] font-medium text-white hover:bg-red-800 disabled:opacity-70"
+                        >
+                          {sync === "running"
+                            ? t("notifications.sync.syncing")
+                            : t("notifications.sync.retry")}
+                        </button>
+                      )}
+                      {alert.canViewDetails && (
+                        <button
+                          type="button"
+                          onClick={() => void openChannelManager(alert)}
+                          className="inline-flex h-[30px] items-center rounded-[7px] border border-red-200 bg-white px-3 text-[13px] font-medium text-red-800 hover:bg-red-50"
+                        >
+                          {t("notifications.sync.viewDetails")}
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>
@@ -439,6 +411,7 @@ function Row({
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <div className="flex items-start justify-between gap-2">
           <p className={`text-sm text-gray-900 ${row.read ? "font-medium" : "font-semibold"}`}>
+            {!row.read && <span className="sr-only">{t("notifications.unread")}: </span>}
             {row.title}
           </p>
           {row.amount && (
@@ -465,14 +438,16 @@ function Row({
           </div>
         )}
       </div>
-      <div className="flex w-3 shrink-0 justify-center pt-1.5">
+      <div className="-mr-1.5 -mt-1 flex w-6 shrink-0 justify-center">
         {!row.read && (
           <button
             type="button"
             onClick={() => onMarkRead(row.key)}
-            aria-label={t("notifications.markRead")}
-            className="h-2 w-2 rounded-full bg-primary-500 ring-primary-200 hover:ring-4"
-          />
+            aria-label={t("notifications.markReadNamed", { title: row.title })}
+            className="group flex h-6 w-6 items-center justify-center rounded-full"
+          >
+            <span className="h-2 w-2 rounded-full bg-primary-500 ring-primary-200 group-hover:ring-4" />
+          </button>
         )}
       </div>
     </li>

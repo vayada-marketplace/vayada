@@ -232,6 +232,7 @@ describe("notification rows (VAY-2349)", () => {
       // Berlin is back on UTC+1 from 25 October 2026.
       lastSuccessAt: "2026-10-25T11:20:00Z",
       canRetry: true,
+      canViewDetails: true,
     };
     expect(syncAlertText(alert, context)).toBe(
       "Availability hasn't updated since 12:20 PM. Guests may book rooms that are already taken on other channels.",
@@ -261,6 +262,12 @@ describe("notification rows (VAY-2349)", () => {
     expect(all.badge).toBe("none");
   });
 
+  it("shows cents only when an amount has them", () => {
+    const row = (totalAmount: string) =>
+      notificationRow(item({ booking: { ...booking, totalAmount } }), context).amount;
+    expect([row("600.00"), row("360.5"), row("1234.56")]).toEqual(["€600", "€360.50", "€1,234.56"]);
+  });
+
   it("parses the API's feed and skips kinds it doesn't know", () => {
     const parsed = parseHostNotificationFeed({
       ...feed({ items: [item({})], unread: { all: 1, bookings: 1, needsAction: 0, updates: 0 } }),
@@ -268,5 +275,17 @@ describe("notification rows (VAY-2349)", () => {
     });
     expect(parsed?.items).toHaveLength(1);
     expect(parseHostNotificationFeed({ items: [] })).toBeNull();
+    // A time zone this browser doesn't know, a bad currency or date: the feed still shows, safely.
+    const odd = parseHostNotificationFeed({
+      ...feed({ items: [item({})] }),
+      timeZone: "Foo/Bar",
+      items: [
+        item({}),
+        item({ key: "x", booking: { ...booking, currency: "euro" } }),
+        item({ key: "y", booking: { ...booking, checkIn: "13 Feb" } }),
+      ],
+    });
+    expect(odd?.timeZone).toBe("UTC");
+    expect(odd?.items.map((entry) => entry.key)).toEqual([item({}).key]);
   });
 });

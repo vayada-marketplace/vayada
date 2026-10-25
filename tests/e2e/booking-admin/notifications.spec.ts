@@ -43,6 +43,7 @@ const syncAlert = {
   failedAt: ago(5),
   lastSuccessAt: ago(40),
   canRetry: true,
+  canViewDetails: true,
 };
 
 function fullFeed() {
@@ -87,6 +88,8 @@ function fullFeed() {
         read: true,
         booking: {
           ...booking,
+          id: "b0000000-0000-4000-8000-000000000003",
+          reference: "VAY-GHI789",
           guestName: "Emma Rossi",
           roomName: "Garden Room",
           checkIn: "2027-02-20",
@@ -251,7 +254,7 @@ test.describe("Booking Admin notifications bell (VAY-2349)", () => {
     await page.goto("/settings");
     await bell(page).click();
 
-    await rows(page).first().getByRole("button", { name: "Mark as read" }).click();
+    await rows(page).first().getByRole("button", { name: "Mark “New booking” as read" }).click();
     await expect
       .poll(() => marks)
       .toEqual([{ keys: ["booking-event:e0000000-0000-4000-8000-000000000001"] }]);
@@ -291,12 +294,14 @@ test.describe("Booking Admin notifications bell (VAY-2349)", () => {
     );
     await expect.poll(() => searches).toContain("VAY-ABC123");
 
-    // From Reservations itself, a second link filters the open page again.
+    // From Reservations itself, a link to another booking filters the open page again.
     await bell(page).click();
     await rows(page).nth(2).getByRole("button", { name: "View booking" }).click();
+    await expect(page).toHaveURL(/\/reservations\?search=VAY-GHI789$/);
     await expect(page.getByPlaceholder("Search guest, email, or reference")).toHaveValue(
-      "VAY-ABC123",
+      "VAY-GHI789",
     );
+    await expect.poll(() => searches).toContain("VAY-GHI789");
     await assertHealthy();
   });
 
@@ -315,7 +320,7 @@ test.describe("Booking Admin notifications bell (VAY-2349)", () => {
     await expect(page).toHaveURL(/\/promo-codes$/);
   });
 
-  test("Retry sync runs the PMS sync and turns the card green once it clears", async ({
+  test("Retry sync runs the PMS sync, follows it and turns the card green when it succeeds", async ({
     page,
   }, testInfo) => {
     const reads = await setUp(page, [fullFeed(), { ...fullFeed(), syncAlert: null }]);
@@ -326,6 +331,16 @@ test.describe("Booking Admin notifications bell (VAY-2349)", () => {
       (route) => {
         commands.push(route.request().postDataJSON());
         return route.fulfill({ status: 202, json: { operationId: "op-1", status: "queued" } });
+      },
+    );
+    let checks = 0;
+    await page.route(
+      `**/api/pms/properties/${BOOKING_ADMIN_PROPERTY_ID}/channex/operations/op-1`,
+      (route) => {
+        checks += 1;
+        return route.fulfill({
+          json: { operationId: "op-1", status: checks === 1 ? "running" : "succeeded" },
+        });
       },
     );
     await page.setViewportSize({ width: 1440, height: 900 });
@@ -343,17 +358,52 @@ test.describe("Booking Admin notifications bell (VAY-2349)", () => {
           operationType: "sync_ari",
         },
       ]);
-    // The next read (here on window focus; the panel also reads again after 15 s) finds the sync healthy.
-    const before = reads.length;
-    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
-    await expect.poll(() => reads.length).toBeGreaterThan(before);
-    await expect(panel(page).getByRole("status")).toContainText("Channel manager synced");
+    // Retrying doesn't mark the card read: a failure that comes back must still count.
+    await expect(page.getByTestId("notifications-badge")).toHaveText("3");
+    // The operation reports success on its second check (every 5 s); then the feed is read again.
+    await expect(panel(page).getByRole("status")).toContainText("Channel manager synced", {
+      timeout: 20_000,
+    });
+    await expect.poll(() => reads.length).toBeGreaterThan(1);
     await expect(panel(page).getByText("Channel manager sync failed")).toHaveCount(0);
     await page.screenshot({ path: testInfo.outputPath("notifications-synced-1440.png") });
   });
 
-  test("hides Retry sync from people who can't run it", async ({ page }) => {
+  test("says so when a retried sync fails, and lets the person try again", async ({ page }) => {
+    await setUp(page, [fullFeed()]);
+    await page.route(
+      `**/api/pms/properties/${BOOKING_ADMIN_PROPERTY_ID}/channex/commands`,
+      (route) => route.fulfill({ status: 202, json: { operationId: "op-2", status: "queued" } }),
+    );
+    await page.route(
+      `**/api/pms/properties/${BOOKING_ADMIN_PROPERTY_ID}/channex/operations/op-2`,
+      (route) => route.fulfill({ json: { operationId: "op-2", status: "failed" } }),
+    );
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto("/settings");
+    await bell(page).click();
+    await panel(page).getByRole("button", { name: "Retry sync" }).click();
+    await expect(panel(page).getByRole("alert")).toContainText("The sync didn't go through", {
+      timeout: 20_000,
+    });
+    await expect(panel(page).getByRole("button", { name: "Retry sync" })).toBeEnabled();
+    await expect(panel(page).getByText("Channel manager sync failed")).toBeVisible();
+  });
+
+  test("shows Retry sync and View details only to people PMS lets do them", async ({ page }) => {
     await setUp(page, [{ ...fullFeed(), syncAlert: { ...syncAlert, canRetry: false } }]);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto("/settings");
+    await bell(page).click();
+    await expect(panel(page).getByText("Channel manager sync failed")).toBeVisible();
+    await expect(panel(page).getByRole("button", { name: "Retry sync" })).toHaveCount(0);
+    await expect(panel(page).getByRole("button", { name: "View details" })).toBeVisible();
+  });
+
+  test("shows the sync error without buttons to people without PMS access", async ({ page }) => {
+    await setUp(page, [
+      { ...fullFeed(), syncAlert: { ...syncAlert, canRetry: false, canViewDetails: false } },
+    ]);
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto("/settings");
     await bell(page).click();
@@ -454,6 +504,7 @@ test.describe("Booking Admin notifications bell (VAY-2349)", () => {
       .click();
     await expect(page).toHaveURL(/\/design-studio$/);
     expect(refused).toBe(1);
-    await expect(page.getByTestId("notifications-badge")).toHaveCount(0);
+    // No access: no bell at all, rather than a panel that never loads.
+    await expect(bell(page)).toHaveCount(0);
   });
 });

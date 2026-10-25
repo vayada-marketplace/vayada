@@ -14,6 +14,7 @@ import NavigationSearch from "./NavigationSearch";
 import DailyStatsStrip from "./DailyStatsStrip";
 import NotificationsBell from "./notifications/NotificationsBell";
 import { useHostNotifications } from "./notifications/useHostNotifications";
+import { useNotificationActions } from "./notifications/useNotificationActions";
 import ManagePropertiesModal from "./ManagePropertiesModal";
 import { buildBookingPreviewUrl } from "@/lib/utils/bookingPreviewUrl";
 import { SELECTED_HOTEL_CHANGED_EVENT } from "@/services/api/bookingHotelScope";
@@ -97,6 +98,7 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
   // The bell's feed for the selected property (VAY-2349), by its canonical property id.
   const propertyId = selectedHotel?.propertyId ?? selectedHotel?.id;
   const notifications = useHostNotifications(propertyId);
+  const notificationActions = useNotificationActions(propertyId, notifications);
 
   const handleCurrencyChange = async (code: string) => {
     if (code === currency || savingCurrency) return;
@@ -284,9 +286,9 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
 
         {/* Notifications bell and panel (VAY-2349) */}
         <NotificationsBell
-          hotelId={propertyId}
           hotelName={selectedHotel?.name ?? ""}
           notifications={notifications}
+          actions={notificationActions}
         />
 
         {/* Profile Avatar + Dropdown */}

@@ -123,7 +123,17 @@ function nights(checkIn: string, checkOut: string): number {
 
 function money(amount: string | null, currency: string, locale: string): string | null {
   if (amount === null || !Number.isFinite(Number(amount))) return null;
-  return formatCurrency(Number(amount), currency, locale, { maximumFractionDigits: 2 });
+  const value = Number(amount);
+  // Whole amounts without cents; others with both digits ("€360.50", not "€360.5").
+  const digits = Number.isInteger(value) ? 0 : 2;
+  try {
+    return formatCurrency(value, currency, locale, {
+      minimumFractionDigits: digits,
+      maximumFractionDigits: digits,
+    });
+  } catch {
+    return `${currency} ${value.toFixed(digits)}`;
+  }
 }
 
 function plural(t: Translate, key: string, count: number): string {
