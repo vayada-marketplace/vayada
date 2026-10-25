@@ -765,5 +765,10 @@
   "calendar.awaitingPayment": "paiement en attente",
   "calendar.awaitingPaymentHeld": "Les chambres sont bloquées jusque-là et libérées automatiquement si le paiement n'est pas marqué comme reçu.",
   "calendar.paymentDeadlinePassed": "Le délai de paiement est dépassé : le paiement ne peut plus être marqué comme reçu. La réservation est libérée automatiquement.",
-  "calendar.openBooking": "Ouvrir la réservation"
+  "calendar.openBooking": "Ouvrir la réservation",
+  "calendar.targetManualBooking.roomCapacity": "Voyageurs max. : {count}",
+  "calendar.targetManualBooking.guestTally": "Voyageurs : {count} sur {capacity}",
+  "calendar.targetManualBooking.capacityReached": "Capacité maximale atteinte pour les chambres sélectionnées. Ajoutez une chambre pour ajouter d'autres voyageurs.",
+  "calendar.targetManualBooking.guestsOverCapacity": "{count} voyageurs, c'est plus que les {capacity} autorisés par les chambres sélectionnées. Retirez un voyageur ou ajoutez une chambre.",
+  "calendar.targetManualBooking.guestsOverCapacityServer": "Les chambres sélectionnées n'ont pas assez de place pour tous les voyageurs indiqués. Retirez un voyageur ou ajoutez une chambre."
 }

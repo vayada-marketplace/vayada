@@ -35,6 +35,7 @@ only writer that accepts them.
 | 2026-10-07 | VAY-1422 | Slice A of `pricing-ordinary-login-plan.md`: `ratePlanId` names a published pricing-v2 offer, optional `childAgesAtCheckIn`, preview `pricingRevision` |
 | 2026-10-08 | VAY-1422 | Optional create field `expectedPricingRevision`; `409 pricing_changed` when prices were republished after the preview                                  |
 | 2026-10-08 | VAY-2065 | A `custom` stay's `nightlyAmount.currency` is optional; omitted, the server prices it in the currency it resolves for custom-only bookings (below)     |
+| 2026-10-26 | VAY-2365 | Create refuses `422 guests_over_capacity` when the booker plus `additionalGuests` exceed the busiest night's room places (below); preview unchanged    |
 
 The slice A row changes what `ratePlanId` refers to. It stays in v1 because the
 old meaning, a `pms.rate_plans` flexible plan, has had no working caller since
@@ -197,6 +198,7 @@ Both endpoints return `{ code, message, field?, stayPosition? }` on failure:
 | `409` | `room_unavailable`, `pricing_not_published`; create also uses `idempotency_conflict` and `pricing_changed`                                              |
 | `422` | `invalid_dates`, `occupancy_exceeded`, `currency_mismatch`, `inactive_rate_plan`, `invalid_addon_selection`, `invalid_source`, `invalid_payment_method` |
 | `422` | `child_ages_required`, `rate_restricted` (slice A amendment)                                                                                            |
+| `422` | `guests_over_capacity`, create only (VAY-2365 amendment)                                                                                                |
 
 Preview is display evidence, not a reservation or price lock; it has no
 idempotency reservation. Create revalidates and recalculates inside the booking
@@ -296,9 +298,12 @@ the target manual writer can be accepted.
 - `additionalGuests` are the other people staying, beyond the booker. The
   list is booking-level, not assigned to a stay. It holds at most 100 entries.
   Each entry needs first and last name; email, E.164 phone and `countryCode`
-  are optional and validated like the booker's. The count is not checked
-  against stay occupancy: the UI warns, and the host may override. Omitting
-  the field or sending `[]` means no additional guests.
+  are optional and validated like the booker's. Create refuses
+  `guests_over_capacity` (422, field `additionalGuests`) when the booker plus
+  these guests exceed the places on the busiest night: the summed
+  `occupancyLimits.total` of the rooms booked that night (VAY-2365 amendment).
+  The preview doesn't check it. Omitting the field or sending `[]` means no
+  additional guests.
 - `privateNote` is access-controlled PMS data. `specialRequests` is guest-facing
   Booking PII and may be used by confirmed guest communication.
 
@@ -381,20 +386,20 @@ credentials, or unrestricted guest PII beyond the authorized PMS response.
 
 ## Field ownership and cross-stack treatment
 
-| Field/capability  | Validation                                     | Source of truth and persistence         | Legacy Python                 | Target TypeScript            | UI/cutover                                 |
-| ----------------- | ---------------------------------------------- | --------------------------------------- | ----------------------------- | ---------------------------- | ------------------------------------------ |
-| `stays[]`         | Property, room, dates, occupancy, availability | PMS per-stay rows                       | New normalized evidence       | PMS assignments/stay schema  | Never fake with extra-room IDs             |
-| Rate plan/pricing | Active matching plan or explicit custom amount | PMS selection; Booking nightly snapshot | Plan ID and exact nights      | PMS plan + VAY-1184 evidence | Server preview is authoritative            |
-| Guest/phone       | Required name/email; optional E.164 phone      | Booking guest PII                       | Booking guest fields          | Booking owner port           | Property country only defaults dial code   |
-| Special requests  | Bounded guest-facing text                      | Booking guest PII                       | `bookings.special_requests`   | Booking owner port           | Separate from internal note                |
-| Additional guests | Names required; optional contact/nationality   | Booking guest PII (`additional_guest`)  | Not built (target only)       | Same transaction as booker   | Soft occupancy warning; Booking Detail     |
-| Private note      | PMS-authorized bounded text                    | PMS private notes                       | Transactional `booking_notes` | PMS note owner port          | Never guest-visible                        |
-| Direct source     | Canonical enum; reject OTA/Booking Engine      | Booking attribution                     | Constrained canonical field   | VAY-1186/1187                | Required; channel fixed to Direct          |
-| Expected method   | Canonical enum for paid and unpaid             | Booking payment intent                  | New canonical field           | Booking owner port           | Display on detail/check-in                 |
-| Settlement        | Paid requires Finance policy and full amount   | Finance payment evidence                | Atomic captured row           | VAY-1253 Finance port        | Hide Paid without permission/evidence path |
-| Add-ons           | Active property item and model-specific units  | Booking economic snapshot               | Normalized selection snapshot | Booking add-on owner port    | One booking-level section                  |
-| Replay            | Same key + same payload only                   | Platform command record                 | Transactional record          | Platform owner port          | Generate one key per submit action         |
-| Done button       | Primary design token                           | Shared frontend                         | Backported release            | Target main                  | Visual only                                |
+| Field/capability  | Validation                                     | Source of truth and persistence         | Legacy Python                 | Target TypeScript            | UI/cutover                                     |
+| ----------------- | ---------------------------------------------- | --------------------------------------- | ----------------------------- | ---------------------------- | ---------------------------------------------- |
+| `stays[]`         | Property, room, dates, occupancy, availability | PMS per-stay rows                       | New normalized evidence       | PMS assignments/stay schema  | Never fake with extra-room IDs                 |
+| Rate plan/pricing | Active matching plan or explicit custom amount | PMS selection; Booking nightly snapshot | Plan ID and exact nights      | PMS plan + VAY-1184 evidence | Server preview is authoritative                |
+| Guest/phone       | Required name/email; optional E.164 phone      | Booking guest PII                       | Booking guest fields          | Booking owner port           | Property country only defaults dial code       |
+| Special requests  | Bounded guest-facing text                      | Booking guest PII                       | `bookings.special_requests`   | Booking owner port           | Separate from internal note                    |
+| Additional guests | Names required; optional contact/nationality   | Booking guest PII (`additional_guest`)  | Not built (target only)       | Same transaction as booker   | Busiest-night limit (VAY-2365); Booking Detail |
+| Private note      | PMS-authorized bounded text                    | PMS private notes                       | Transactional `booking_notes` | PMS note owner port          | Never guest-visible                            |
+| Direct source     | Canonical enum; reject OTA/Booking Engine      | Booking attribution                     | Constrained canonical field   | VAY-1186/1187                | Required; channel fixed to Direct              |
+| Expected method   | Canonical enum for paid and unpaid             | Booking payment intent                  | New canonical field           | Booking owner port           | Display on detail/check-in                     |
+| Settlement        | Paid requires Finance policy and full amount   | Finance payment evidence                | Atomic captured row           | VAY-1253 Finance port        | Hide Paid without permission/evidence path     |
+| Add-ons           | Active property item and model-specific units  | Booking economic snapshot               | Normalized selection snapshot | Booking add-on owner port    | One booking-level section                      |
+| Replay            | Same key + same payload only                   | Platform command record                 | Transactional record          | Platform owner port          | Generate one key per submit action             |
+| Done button       | Primary design token                           | Shared frontend                         | Backported release            | Target main                  | Visual only                                    |
 
 ## Migration, parity and cutover
 
