@@ -1362,9 +1362,12 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                 </svg>
                 {previous === "extras" ? tDetails("backToExtras") : tDetails("backToRooms")}
               </button>
+              {/* Pressable while fields are missing, so it can mark them; with everything filled
+                  in it waits for the price, which step 3 needs. */}
               <button
                 type="submit"
                 className={`${button} flex items-center justify-center gap-2 px-7 text-[17px]`}
+                disabled={detailsComplete && !quote}
               >
                 {tDetails("continue")}
                 <svg
