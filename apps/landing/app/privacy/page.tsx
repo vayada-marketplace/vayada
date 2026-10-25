@@ -539,7 +539,7 @@ export default function PrivacyPage() {
                     (Article 6(1) lit. c GDPR).
                   </li>
                   <li>
-                    <strong>What you agreed to:</strong> when you book, we keep a record with your
+                    <strong>What you agreed to: </strong>when you book, we keep a record with your
                     booking of when you agreed and to what: the version of the wording you saw, and
                     references to the room and rate terms, the hotel&apos;s guest rules and the
                     hotel&apos;s terms &amp; conditions as they were at that moment. The hotel uses
