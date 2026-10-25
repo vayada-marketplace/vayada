@@ -18,9 +18,15 @@ type ManualMethod = "bank_transfer" | "paypal";
 /** The first property-local arrival date (YYYY-MM-DD) each bank-transfer or PayPal method can be
  * booked for: its payment deadline must end before check-in (VAY-2145). */
 export type ManualEarliestArrival = Partial<Record<ManualMethod, string>>;
+/** VAY-2348: the hotel's booking window per method, as property-local arrival dates: `from` the
+ * first (booked at least N days ahead), `through` the last (booked within N hours/days). */
+export type PaymentArrivalWindows = Partial<
+  Record<PricingPaymentMethod, { from?: string; through?: string }>
+>;
 export type BookingPagePayment = {
   methods: PricingPaymentMethod[];
   earliestArrival: ManualEarliestArrival;
+  arrivalWindows?: PaymentArrivalWindows;
   /** The hotel's own Terms & Conditions; null when it has none or they can't be read (VAY-2176). */
   termsText: string | null;
   /** How the extras step shows each extra, by id (VAY-2195). */
@@ -120,6 +126,7 @@ export async function getBookingPagePayment(
     return {
       methods: Array.from(new Set(methods)),
       earliestArrival: earliestArrival(config?.manualPaymentEarliestArrival),
+      arrivalWindows: arrivalWindows(config?.paymentMethodArrivalWindows),
       termsText,
       extras,
       groupExtras,
@@ -134,13 +141,21 @@ export async function getBookingPagePaymentMethods(
   return (await getBookingPagePayment(slug, signal)).methods;
 }
 
-/** The methods for this arrival date: bank transfer and PayPal only from their earliest date. */
+/** The methods for this arrival date: bank transfer and PayPal only from their earliest date, and
+ * each method only within the hotel's booking window (VAY-2348). */
 export function bookingPageMethodsForArrival(
-  { methods, earliestArrival: earliest }: Pick<BookingPagePayment, "methods" | "earliestArrival">,
+  {
+    methods,
+    earliestArrival: earliest,
+    arrivalWindows: windows = {},
+  }: Pick<BookingPagePayment, "methods" | "earliestArrival" | "arrivalWindows">,
   checkIn: string,
 ): PricingPaymentMethod[] {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(checkIn)) return methods;
   return methods.filter((method) => {
+    const window = windows[method];
+    if (window?.from && checkIn < window.from) return false;
+    if (window?.through && checkIn > window.through) return false;
     if (method !== "bank_transfer" && method !== "paypal") return true;
     const from = earliest[method];
     return !from || checkIn >= from;
@@ -159,6 +174,19 @@ export function defaultQuoteMethods(
   );
   const taken = rateMethods ? ordered.filter((method) => rateMethods.includes(method)) : [];
   return taken.length ? taken : ordered;
+}
+
+function arrivalWindows(value: unknown): PaymentArrivalWindows {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const date = (v: unknown) => (typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null);
+  const result: PaymentArrivalWindows = {};
+  for (const [method, window] of Object.entries(value)) {
+    if (!isPricingPaymentMethod(method) || !window || typeof window !== "object") continue;
+    const from = date((window as Record<string, unknown>).from);
+    const through = date((window as Record<string, unknown>).through);
+    if (from || through) result[method] = { ...(from && { from }), ...(through && { through }) };
+  }
+  return result;
 }
 
 function earliestArrival(value: unknown): ManualEarliestArrival {

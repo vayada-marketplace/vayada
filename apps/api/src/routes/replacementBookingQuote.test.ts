@@ -73,6 +73,17 @@ describe("replacement booking quote issuer", () => {
     });
   });
 
+  it("tells the guest when the hotel's booking window doesn't cover these dates (VAY-2348)", async () => {
+    const issue = vi
+      .fn()
+      .mockRejectedValue(new PricingStorageError("denied", "payment_method_window"));
+    const on = createReplacementBookingQuoteIssuer({ issue }, ["paypal", "bank_transfer"]);
+    await expect(on("hotel", request("bank_transfer"), "key")).rejects.toMatchObject({
+      statusCode: 422,
+      code: "PAYMENT_METHOD_WINDOW",
+    });
+  });
+
   it("tells the guest when a chosen rate doesn't take this way to pay (VAY-2309)", async () => {
     const issue = vi
       .fn()
