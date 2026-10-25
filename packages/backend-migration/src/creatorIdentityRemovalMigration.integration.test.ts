@@ -315,6 +315,8 @@ const REFERENCES = [
   "identity.organizations <- identity.account_admin_transfer_proofs(organization_id) c",
   "identity.organizations <- identity.organization_roles(organization_id) c",
   "identity.product_entitlements <- finance.billing_entitlements(identity_entitlement_id) n",
+  // 0514 (VAY-2349): a removed user's notification read marks go with the user.
+  "identity.users <- booking.host_notification_reads(user_id) c",
   "identity.users <- distribution.external_api_clients(created_by_user_id) n",
   "identity.users <- distribution.external_api_clients(revoked_by_user_id) n",
   "identity.users <- finance.commission_rate_changes(changed_by_user_id) n",
