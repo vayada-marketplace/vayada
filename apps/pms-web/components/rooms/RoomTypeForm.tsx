@@ -148,12 +148,45 @@ interface RoomTypeFormProps {
   mode?: "create" | "edit";
   roomTypeId?: string;
   propertyPlan: PropertyPlan | null;
-  // With these the page owns the tab and adds the Prices tab. The page renders its content outside this form, where
-  // remounting the form cannot drop unsaved prices.
+  // With these the page owns the tab, draws the tab bar (RoomTabBar) and adds the Prices tab. The page renders the
+  // Prices tab and its own messages outside this form, where remounting the form cannot drop their state.
   tab?: RoomTab;
   onTabChange?: (tab: RoomTab) => void;
-  /** The page's own messages. Every message sits under the tab bar, so the tabs stay put (VAY-2337). */
-  notices?: React.ReactNode;
+}
+
+/** The room tabs. Every message sits under this bar, so switching tabs never moves it (VAY-2337). */
+export function RoomTabBar({
+  tab,
+  onTabChange,
+  prices = true,
+}: {
+  tab: RoomTab;
+  onTabChange: (tab: RoomTab) => void;
+  prices?: boolean;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="relative border-b border-gray-200 mb-5 md:mb-6">
+      <div className="flex gap-5 md:gap-6 overflow-x-auto scrollbar-hide -mx-4 px-4 md:mx-0 md:px-0">
+        {ROOM_TABS.filter((item) => prices || item.key !== "prices").map((item) => (
+          <button
+            key={item.key}
+            type="button"
+            onClick={() => onTabChange(item.key)}
+            className={`shrink-0 whitespace-nowrap pb-2.5 text-[12px] font-medium transition-colors relative ${
+              tab === item.key ? "text-gray-900" : "text-gray-400 hover:text-gray-600"
+            }`}
+          >
+            {t(item.labelKey)}
+            {tab === item.key && (
+              <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-gray-900 rounded-full" />
+            )}
+          </button>
+        ))}
+      </div>
+      <div className="absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-l from-gray-50 to-transparent pointer-events-none lg:hidden" />
+    </div>
+  );
 }
 
 function bedsToSummary(beds: { type: string; count: number }[]): string {
@@ -191,7 +224,6 @@ export default function RoomTypeForm({
   propertyPlan,
   tab,
   onTabChange,
-  notices,
 }: RoomTypeFormProps) {
   const { t } = useTranslation();
   const translateRoomOption = (value: string): string => {
@@ -201,8 +233,6 @@ export default function RoomTypeForm({
   };
   const [ownTab, setOwnTab] = useState<RoomTab>("details");
   const activeTab = tab ?? ownTab;
-  const setActiveTab = onTabChange ?? setOwnTab;
-  const tabs = ROOM_TABS.filter((item) => item.key !== "prices" || onTabChange);
   // False while the Location box holds something Save would lose (VAY-2126): Save waits.
   const [locationValid, setLocationValid] = useState(true);
   const [amenityInput, setAmenityInput] = useState("");
@@ -266,28 +296,7 @@ export default function RoomTypeForm({
 
   return (
     <form onSubmit={onSubmit}>
-      {/* Tabs */}
-      <div className="relative border-b border-gray-200 mb-5 md:mb-6">
-        <div className="flex gap-5 md:gap-6 overflow-x-auto scrollbar-hide -mx-4 px-4 md:mx-0 md:px-0">
-          {tabs.map((item) => (
-            <button
-              key={item.key}
-              type="button"
-              onClick={() => setActiveTab(item.key)}
-              className={`shrink-0 whitespace-nowrap pb-2.5 text-[12px] font-medium transition-colors relative ${
-                activeTab === item.key ? "text-gray-900" : "text-gray-400 hover:text-gray-600"
-              }`}
-            >
-              {t(item.labelKey)}
-              {activeTab === item.key && (
-                <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-gray-900 rounded-full" />
-              )}
-            </button>
-          ))}
-        </div>
-        <div className="absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-l from-gray-50 to-transparent pointer-events-none lg:hidden" />
-      </div>
-
+      {!onTabChange && <RoomTabBar tab={activeTab} onTabChange={setOwnTab} prices={false} />}
       {error && activeTab !== "prices" && (
         <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-[11px] text-red-700 font-medium">
           {error}
@@ -298,7 +307,6 @@ export default function RoomTypeForm({
           {success}
         </div>
       )}
-      {notices}
 
       {/* Tab 1: Room Details */}
       {activeTab === "details" && (

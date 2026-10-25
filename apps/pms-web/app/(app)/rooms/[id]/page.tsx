@@ -12,7 +12,7 @@ import {
   type PropertyPlan,
   type RoomTypeRetirementImpact,
 } from "@/services/rooms";
-import RoomTypeForm, { type RoomTab } from "@/components/rooms/RoomTypeForm";
+import RoomTypeForm, { RoomTabBar, type RoomTab } from "@/components/rooms/RoomTypeForm";
 import { RoomPricesTab } from "@/components/pricing/RoomPricesTab";
 import { RoomsPricesStrip, usePropertyPrices } from "@/components/pricing/RoomsPrices";
 import ConfirmDialog from "@/components/ConfirmDialog";
@@ -33,6 +33,10 @@ export default function EditRoomPage({ params }: { params: Promise<{ id: string 
   // unsaved prices.
   const [tab, setTab] = useState<RoomTab>(pricesFirst ? "prices" : "details");
   const [pricesOpened, setPricesOpened] = useState(pricesFirst);
+  const showTab = (next: RoomTab) => {
+    setTab(next);
+    if (next === "prices") setPricesOpened(true);
+  };
   const [room, setRoom] = useState<RoomType | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<{ cause: unknown; message: string } | null>(null);
@@ -216,6 +220,20 @@ export default function EditRoomPage({ params }: { params: Promise<{ id: string 
         </button>
       </div>
 
+      <RoomTabBar tab={tab} onTabChange={showTab} />
+      {deleteError && (
+        <p
+          role="alert"
+          className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-[11px] text-red-700 font-medium"
+        >
+          {deleteError}
+        </p>
+      )}
+
+      {pricesNeedPublishing && (
+        <RoomsPricesStrip {...propertyPrices} staleOnly onSaved={refreshPrices} />
+      )}
+
       <RoomTypeForm
         key={formKey}
         form={form}
@@ -231,25 +249,7 @@ export default function EditRoomPage({ params }: { params: Promise<{ id: string 
         roomTypeId={id}
         propertyPlan={propertyPlan}
         tab={tab}
-        onTabChange={(next) => {
-          setTab(next);
-          if (next === "prices") setPricesOpened(true);
-        }}
-        notices={
-          <>
-            {deleteError && (
-              <p
-                role="alert"
-                className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-[11px] text-red-700 font-medium"
-              >
-                {deleteError}
-              </p>
-            )}
-            {pricesNeedPublishing && (
-              <RoomsPricesStrip {...propertyPrices} staleOnly onSaved={refreshPrices} />
-            )}
-          </>
-        }
+        onTabChange={showTab}
       />
       {pricesOpened && (
         <div hidden={tab !== "prices"}>

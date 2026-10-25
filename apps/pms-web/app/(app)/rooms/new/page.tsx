@@ -7,7 +7,7 @@ import Link from "next/link";
 import { roomsService, RoomTypeCreate, type PropertyPlan, type RoomType } from "@/services/rooms";
 import { roomOccupancyFromForm } from "@/services/rooms/roomFacts";
 import { createReplacementPricingClient } from "@/services/api/replacementPricingClient";
-import RoomTypeForm, { type RoomTab } from "@/components/rooms/RoomTypeForm";
+import RoomTypeForm, { RoomTabBar, type RoomTab } from "@/components/rooms/RoomTypeForm";
 import { keepNewRoomPrices } from "@/components/pricing/keptNewRoomPrices";
 import { NewRoomPricesTab } from "@/components/pricing/NewRoomPricesTab";
 import {
@@ -261,6 +261,7 @@ export default function NewRoomPage() {
         </h2>
       </div>
 
+      <RoomTabBar tab={tab} onTabChange={showTab} />
       <RoomTypeForm
         form={form}
         onChange={setForm}
