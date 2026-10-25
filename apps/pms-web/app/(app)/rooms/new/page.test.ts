@@ -32,6 +32,7 @@ vi.mock("@/components/rooms/RoomTypeForm", () => ({
     mocks.form = props;
     return null;
   },
+  RoomTabBar: () => null,
 }));
 vi.mock("@/components/pricing/NewRoomPricesTab", () => ({
   NewRoomPricesTab: (props: Record<string, unknown>) => {
