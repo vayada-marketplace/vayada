@@ -743,7 +743,7 @@
   "settings.paymentWindows.bankWithin": "Il bonifico bancario richiede una finestra di più di {hours} ore: gli ospiti hanno {hours} ore per pagare e il denaro deve arrivare prima del check-in.",
   "settings.paymentWindows.bankRuleTitle": "Regola fissa: gli ospiti hanno {hours} ore per pagare",
   "settings.paymentWindows.bankRuleBody": "Se entro allora non hai segnato il bonifico come ricevuto, la prenotazione viene rilasciata e la camera torna disponibile. Il bonifico bancario viene offerto solo se mancano almeno {hours} ore al check-in.",
-  "settings.paymentWindows.switchedOff": "{method} è disattivato sopra.",
+  "settings.paymentWindows.notOffered": "Non offerto agli ospiti: {method}",
   "settings.paymentWindows.stripTitle": "Quando prenotano gli ospiti, contato a ritroso dal tuo orario di check-in",
   "settings.paymentWindows.guestsCanBook": "Si può prenotare",
   "settings.paymentWindows.noWayToPay": "Nessun modo di pagare",

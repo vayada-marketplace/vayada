@@ -46,6 +46,23 @@ test("sets a booking window per way to pay and warns about a gap", async ({ page
       },
     }),
   );
+  // Bank transfer is offered only with saved bank details.
+  await page.route(
+    `**/api/finance/properties/${BOOKING_ADMIN_PROPERTY_ID}/bank-transfer-destination`,
+    (route) =>
+      route.fulfill({
+        json: {
+          destination: {
+            id: BOOKING_ADMIN_PROPERTY_ID,
+            revision: 1,
+            version: 1,
+            enabled: true,
+            deleted: false,
+            maskedAccount: "•••• 3000",
+          },
+        },
+      }),
+  );
   const writes: unknown[] = [];
   await page.route(`**${BOOKING_ADMIN_FINANCE_PAYMENT_WINDOWS_PATH}`, async (route) => {
     const body =
@@ -61,7 +78,7 @@ test("sets a booking window per way to pay and warns about a gap", async ({ page
   await page.goto("/settings/payments");
   const card = page.getByRole("region", { name: "When guests can pay each way" });
   await expect(card).toBeVisible();
-  await expect(card.getByText("Online Card is switched off above.")).toBeVisible();
+  await expect(card.getByText("Not offered to guests: Online Card")).toBeVisible();
   await expect(card.getByText("Fixed rule: guests have 48 hours to pay")).toBeVisible();
   const save = card.getByRole("button", { name: "Save booking windows" });
   await expect(save).toBeDisabled();
@@ -96,10 +113,11 @@ test("sets a booking window per way to pay and warns about a gap", async ({ page
   ]);
   await expect(save).toBeDisabled();
 
-  // Switching online card on (not saved yet) covers the gap at once.
+  // The card shows what guests are offered: switching Online Card on above changes nothing here
+  // until it is saved with Stripe connected.
   await page.getByRole("button", { name: /^Online Card/ }).click();
-  await expect(card.getByLabel("When Online Card is offered")).toHaveValue("any");
-  await expect(card.getByText(/have no way to pay\.$/)).toHaveCount(0);
+  await expect(card.getByText("Not offered to guests: Online Card")).toBeVisible();
+  await expect(card.getByText(/have no way to pay\.$/)).toHaveCount(1);
 
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(card.getByLabel("Hours for Pay at Hotel")).toBeVisible();

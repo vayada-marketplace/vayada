@@ -743,7 +743,7 @@
   "settings.paymentWindows.bankWithin": "Для банковского перевода нужен срок больше {hours} ч.: у гостей есть {hours} ч. на оплату, и деньги должны поступить до заезда.",
   "settings.paymentWindows.bankRuleTitle": "Постоянное правило: у гостей есть {hours} ч. на оплату",
   "settings.paymentWindows.bankRuleBody": "Если к этому времени вы не отметите перевод как полученный, бронирование снимается, и номер снова становится доступным. Банковский перевод предлагается, только если до заезда не меньше {hours} ч.",
-  "settings.paymentWindows.switchedOff": "{method} выключен выше.",
+  "settings.paymentWindows.notOffered": "Не предлагается гостям: {method}",
   "settings.paymentWindows.stripTitle": "Когда гости бронируют, считая от вашего времени заезда",
   "settings.paymentWindows.guestsCanBook": "Можно бронировать",
   "settings.paymentWindows.noWayToPay": "Нет способа оплаты",

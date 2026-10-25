@@ -743,7 +743,7 @@
   "settings.paymentWindows.bankWithin": "Banküberweisung braucht ein Fenster von mehr als {hours} Stunden: Gäste haben {hours} Stunden Zeit zu zahlen, und das Geld muss vor dem Check-in ankommen.",
   "settings.paymentWindows.bankRuleTitle": "Feste Regel: Gäste haben {hours} Stunden Zeit zu zahlen",
   "settings.paymentWindows.bankRuleBody": "Wenn Sie die Überweisung bis dahin nicht als eingegangen markiert haben, wird die Buchung freigegeben und das Zimmer ist wieder verfügbar. Banküberweisung wird nur angeboten, wenn der Check-in mindestens {hours} Stunden entfernt ist.",
-  "settings.paymentWindows.switchedOff": "{method} ist oben ausgeschaltet.",
+  "settings.paymentWindows.notOffered": "Gästen nicht angeboten: {method}",
   "settings.paymentWindows.stripTitle": "Wann Gäste buchen, gezählt ab Ihrer Check-in-Zeit",
   "settings.paymentWindows.guestsCanBook": "Gäste können buchen",
   "settings.paymentWindows.noWayToPay": "Keine Zahlungsart",

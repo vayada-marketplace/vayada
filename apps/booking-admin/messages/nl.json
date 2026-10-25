@@ -743,7 +743,7 @@
   "settings.paymentWindows.bankWithin": "Bankoverschrijving heeft een venster van meer dan {hours} uur nodig: gasten hebben {hours} uur om te betalen en het geld moet voor het inchecken binnen zijn.",
   "settings.paymentWindows.bankRuleTitle": "Vaste regel: gasten hebben {hours} uur om te betalen",
   "settings.paymentWindows.bankRuleBody": "Als u de overschrijving dan nog niet als ontvangen hebt gemarkeerd, vervalt de boeking en komt de kamer weer vrij. Bankoverschrijving wordt alleen aangeboden als het inchecken minstens {hours} uur weg is.",
-  "settings.paymentWindows.switchedOff": "{method} staat hierboven uit.",
+  "settings.paymentWindows.notOffered": "Niet aangeboden aan gasten: {method}",
   "settings.paymentWindows.stripTitle": "Wanneer gasten boeken, teruggeteld vanaf uw inchecktijd",
   "settings.paymentWindows.guestsCanBook": "Gasten kunnen boeken",
   "settings.paymentWindows.noWayToPay": "Geen betaalmogelijkheid",

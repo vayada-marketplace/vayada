@@ -743,7 +743,7 @@
   "settings.paymentWindows.bankWithin": "Transfer bank memerlukan jendela lebih dari {hours} jam: tamu memiliki waktu {hours} jam untuk membayar, dan dana harus masuk sebelum check-in.",
   "settings.paymentWindows.bankRuleTitle": "Aturan tetap: tamu memiliki waktu {hours} jam untuk membayar",
   "settings.paymentWindows.bankRuleBody": "Jika Anda belum menandai transfer sebagai diterima saat itu, pemesanan dilepas dan kamar tersedia kembali. Transfer bank hanya ditawarkan jika check-in masih minimal {hours} jam lagi.",
-  "settings.paymentWindows.switchedOff": "{method} dinonaktifkan di atas.",
+  "settings.paymentWindows.notOffered": "Tidak ditawarkan kepada tamu: {method}",
   "settings.paymentWindows.stripTitle": "Kapan tamu memesan, dihitung mundur dari jam check-in Anda",
   "settings.paymentWindows.guestsCanBook": "Tamu dapat memesan",
   "settings.paymentWindows.noWayToPay": "Tidak ada cara bayar",

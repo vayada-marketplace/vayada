@@ -745,7 +745,7 @@
   "settings.paymentWindows.bankWithin": "Bank transfer needs a window longer than {hours} hours: guests have {hours} hours to pay, and the money must arrive before check-in.",
   "settings.paymentWindows.bankRuleTitle": "Fixed rule: guests have {hours} hours to pay",
   "settings.paymentWindows.bankRuleBody": "If you haven't marked the transfer as received by then, the booking is released and the room becomes available again. Bank transfer is only offered when check-in is at least {hours} hours away.",
-  "settings.paymentWindows.switchedOff": "{method} is switched off above.",
+  "settings.paymentWindows.notOffered": "Not offered to guests: {method}",
   "settings.paymentWindows.stripTitle": "When guests book, counted back from your check-in time",
   "settings.paymentWindows.guestsCanBook": "Guests can book",
   "settings.paymentWindows.noWayToPay": "No way to pay",

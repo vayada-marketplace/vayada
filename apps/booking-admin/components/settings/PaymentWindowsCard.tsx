@@ -29,7 +29,8 @@ export type WindowDraft = {
   unit: "hours" | "days";
 };
 export type WindowProblem = "amount" | "bank_at_least" | "bank_within";
-/** Which ways to pay are switched on above (not saved yet, too). PayPal keeps its own window. */
+/** The ways to pay guests are offered now: saved, and ready (Stripe connected, bank details
+ * saved). PayPal keeps its own payment window. */
 export type PaymentWindowMethods = Record<WindowedPaymentMethod, boolean> & {
   paypalHours: number | null;
 };
@@ -268,7 +269,7 @@ export function PaymentWindowsCard({
   const results = Object.fromEntries(
     WINDOWED_PAYMENT_METHODS.map((method) => [method, windowOf(method, drafts[method])]),
   ) as Record<WindowedPaymentMethod, ReturnType<typeof windowOf>>;
-  // A switched-off way to pay keeps its saved window; the save replaces every window.
+  // A way to pay guests aren't offered keeps its saved window; the save replaces every window.
   const next: PaymentMethodBookingWindows = {};
   for (const method of WINDOWED_PAYMENT_METHODS) {
     const result = results[method];
@@ -319,7 +320,11 @@ export function PaymentWindowsCard({
       setMessage({
         type: "error",
         text: t(
-          tooShort ? "settings.paymentWindows.bankAtLeast" : "settings.paymentWindows.saveFailed",
+          !tooShort
+            ? "settings.paymentWindows.saveFailed"
+            : next.bank_transfer?.kind === "within"
+              ? "settings.paymentWindows.bankWithin"
+              : "settings.paymentWindows.bankAtLeast",
           { hours: deadlineHours },
         ),
       });
@@ -358,9 +363,9 @@ export function PaymentWindowsCard({
               <div className="flex flex-col gap-3 md:flex-row md:items-center md:gap-6">
                 <div className="min-w-0 md:flex-1">
                   <p className="text-sm font-medium text-gray-900">{name}</p>
-                  <p className="text-[12px] text-gray-500">{summary}</p>
+                  {!problem && <p className="text-[12px] text-gray-500">{summary}</p>}
                 </div>
-                <div className="flex items-center gap-2 md:w-[340px] md:shrink-0">
+                <div className="flex flex-wrap items-center gap-2 md:w-[340px] md:shrink-0">
                   <select
                     aria-label={t("settings.paymentWindows.whenOffered", { method: name })}
                     value={draft.kind}
@@ -368,7 +373,7 @@ export function PaymentWindowsCard({
                     onChange={(event) =>
                       update(method, { kind: event.target.value as WindowDraft["kind"] })
                     }
-                    className={`${field} border-gray-300 px-2.5 ${draft.kind === "any" ? "flex-1" : "w-[116px] shrink-0"}`}
+                    className={`${field} border-gray-300 px-2.5 ${draft.kind === "any" ? "flex-1" : "shrink-0"}`}
                   >
                     <option value="any">{t("settings.paymentWindows.anyTime")}</option>
                     <option value="at_least">{t("settings.paymentWindows.atLeast")}</option>
@@ -387,6 +392,7 @@ export function PaymentWindowsCard({
                         { method: name },
                       )}
                       aria-invalid={problem ? true : undefined}
+                      aria-describedby={problem ? `payment-window-${method}-problem` : undefined}
                       value={draft.amount}
                       disabled={saving}
                       onChange={(event) => update(method, { amount: event.target.value })}
@@ -394,7 +400,7 @@ export function PaymentWindowsCard({
                     />
                   )}
                   {draft.kind === "at_least" && (
-                    <span className="whitespace-nowrap text-[13px] text-gray-700">
+                    <span className="text-[13px] text-gray-700">
                       {t("settings.paymentWindows.daysBeforeArrival")}
                     </span>
                   )}
@@ -415,7 +421,10 @@ export function PaymentWindowsCard({
                 </div>
               </div>
               {problem && (
-                <p role="alert" className="text-[12px] font-medium text-red-700">
+                <p
+                  id={`payment-window-${method}-problem`}
+                  className="text-[12px] font-medium text-red-700"
+                >
                   {t(
                     problem === "amount"
                       ? "settings.paymentWindows.amountInvalid"
@@ -444,11 +453,12 @@ export function PaymentWindowsCard({
             key={method}
             className="border-b border-gray-100 px-4 py-3 text-[12px] text-gray-400 md:px-5"
           >
-            {t("settings.paymentWindows.switchedOff", { method: t(METHOD_LABEL[method]) })}
+            {t("settings.paymentWindows.notOffered", { method: t(METHOD_LABEL[method]) })}
           </p>
         ))}
       </div>
       <div
+        aria-hidden="true"
         className="space-y-2 bg-gray-50/60 px-4 py-4 md:px-5"
         data-testid="payment-windows-strip"
       >
@@ -473,13 +483,13 @@ export function PaymentWindowsCard({
             />
           ))}
         </Lane>
-        <div className="flex gap-3" aria-hidden="true">
+        <div className="flex gap-3">
           <span className="w-24 shrink-0 sm:w-32" />
           <div className="relative h-3.5 flex-1">
             {TICKS.map((hours) => (
               <span
                 key={hours}
-                className={`absolute whitespace-nowrap text-[11px] text-gray-500 ${hours === 720 ? "hidden sm:inline" : ""}`}
+                className={`absolute whitespace-nowrap text-[11px] text-gray-500 ${hours === 48 || hours === 720 ? "hidden sm:inline" : ""}`}
                 style={{ left: `${axisPercent(hours)}%` }}
               >
                 {hours === 0 ? t("settings.paymentWindows.arrival") : leadText(hours, t)}
