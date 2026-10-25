@@ -696,5 +696,6 @@
   "bookings.detail.markBankTransferReceived": "振込を入金済みにする",
   "calendar.awaitingPayment": "入金待ち",
   "calendar.awaitingPaymentHeld": "それまで客室は確保され、入金済みにされない場合は自動的に解除されます。",
+  "calendar.paymentDeadlinePassed": "お支払い期限を過ぎたため、受領済みにすることはできません。予約は自動的に解除されます。",
   "calendar.openBooking": "予約を開く"
 }

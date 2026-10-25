@@ -85,9 +85,6 @@ test.describe("PMS awaiting payment (VAY-2348)", () => {
     );
     await card.getByRole("link", { name: "Mark transfer received" }).click();
 
-    await expect(page).toHaveURL(
-      new RegExp(`/bookings/${PMS_WEB_RESERVATION_ID}\\?confirm=payment$`),
-    );
     await expect(page.getByText("Waiting for the bank transfer")).toBeVisible();
     await expect(
       page.getByText(
@@ -96,6 +93,8 @@ test.describe("PMS awaiting payment (VAY-2348)", () => {
       ),
     ).toBeVisible();
     await expect(page.getByRole("button", { name: "Mark received" })).toBeVisible();
+    // The link's ?confirm=payment is used once: a reload doesn't ask again.
+    await expect(page).toHaveURL(new RegExp(`/bookings/${PMS_WEB_RESERVATION_ID}$`));
     await assertHealthy();
   });
 });

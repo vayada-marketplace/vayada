@@ -374,6 +374,11 @@ describe("calendarService manual-booking rates", () => {
                 awaitingHotelPaymentConfirmation: true,
                 hostResponseDeadlineAt: "2026-08-19T13:30:00.000Z",
                 roomCount: 2,
+                payment: { method: "bank_transfer" },
+                roomLines: [
+                  { roomTypeId: "rt-double", roomName: "Double", roomCount: 1 },
+                  { roomTypeId: "rt-suite", roomName: "Suite", roomCount: 1 },
+                ],
               }),
               // A card request waiting for the hotel is not drawn, as before.
               pending("card-request", { hostResponseDeadlineAt: "2026-08-19T13:30:00.000Z" }),
@@ -385,23 +390,27 @@ describe("calendarService manual-booking rates", () => {
     const result = await calendarService.getCalendarData("2026-08-20", "2026-08-24");
     expect(
       result.bookings.map(
-        ({ id, status, roomId, roomPosition, numberOfRooms, paymentDeadlineAt }) => ({
+        ({ id, status, roomId, roomPosition, numberOfRooms, paymentDeadlineAt, ...rest }) => ({
           id,
           status,
           roomId,
           roomPosition,
           numberOfRooms,
           paymentDeadlineAt,
+          paymentMethod: rest.paymentMethod,
+          room: `${rest.roomTypeId} ${rest.roomName}`,
         }),
       ),
     ).toEqual(
-      [0, 1].map((roomPosition) => ({
+      ["rt-double Double", "rt-suite Suite"].map((room, roomPosition) => ({
         id: "bank-booking",
         status: "awaiting_payment",
         roomId: null,
         roomPosition,
         numberOfRooms: 2,
         paymentDeadlineAt: "2026-08-19T13:30:00.000Z",
+        paymentMethod: "bank_transfer",
+        room,
       })),
     );
   });

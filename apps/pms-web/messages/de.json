@@ -3749,5 +3749,6 @@
   "bookings.detail.markReceived": "Als erhalten markieren",
   "calendar.awaitingPayment": "Zahlung ausstehend",
   "calendar.awaitingPaymentHeld": "Die Zimmer sind bis dahin reserviert und werden automatisch freigegeben, wenn die Zahlung nicht als erhalten markiert wird.",
+  "calendar.paymentDeadlinePassed": "Die Zahlungsfrist ist abgelaufen, die Zahlung kann nicht mehr als erhalten markiert werden. Die Buchung wird automatisch freigegeben.",
   "calendar.openBooking": "Buchung öffnen"
 }

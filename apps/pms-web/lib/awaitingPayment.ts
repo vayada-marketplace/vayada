@@ -37,6 +37,17 @@ export function formatPaymentDeadline(
   }
 }
 
+/** The zone if this browser can show times in it, else null. */
+export function knownTimeZone(zone: string | null | undefined): string | null {
+  if (!zone) return null;
+  try {
+    new Intl.DateTimeFormat("en", { timeZone: zone });
+    return zone;
+  } catch {
+    return null;
+  }
+}
+
 /** The current hotel's IANA time zone, or null until (or unless) it is known. */
 export function useHotelTimeZone(): string | null {
   const [zone, setZone] = useState<string | null>(null);
@@ -45,7 +56,7 @@ export function useHotelTimeZone(): string | null {
     pmsSettingsService
       .getHotelDetails()
       .then((hotel) => {
-        if (alive) setZone(hotel?.timezone || null);
+        if (alive) setZone(knownTimeZone(hotel?.timezone));
       })
       .catch(() => undefined);
     return () => {

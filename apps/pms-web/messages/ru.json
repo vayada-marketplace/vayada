@@ -696,5 +696,6 @@
   "bookings.detail.markBankTransferReceived": "Отметить перевод как полученный",
   "calendar.awaitingPayment": "ожидает оплаты",
   "calendar.awaitingPaymentHeld": "Номера удерживаются до этого срока и автоматически освобождаются, если оплата не отмечена как полученная.",
+  "calendar.paymentDeadlinePassed": "Срок оплаты истёк, поэтому оплату больше нельзя отметить как полученную. Бронирование снимается автоматически.",
   "calendar.openBooking": "Открыть бронирование"
 }

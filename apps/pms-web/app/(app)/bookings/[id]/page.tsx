@@ -1525,6 +1525,8 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
     if (confirmFromLink.current || !booking?.awaitingPaymentConfirmation) return;
     if (new URLSearchParams(window.location.search).get("confirm") !== "payment") return;
     confirmFromLink.current = true;
+    // Reload or Back must not ask again (router.replace keeps the cached URL in Next 16).
+    window.history.replaceState(null, "", window.location.pathname);
     const deadline = booking.hostResponseDeadline;
     if (deadline && Date.now() >= new Date(deadline).getTime()) return;
     handleMarkPaid();

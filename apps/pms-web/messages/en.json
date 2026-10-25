@@ -3735,5 +3735,6 @@
   "bookings.detail.markReceived": "Mark received",
   "calendar.awaitingPayment": "awaiting payment",
   "calendar.awaitingPaymentHeld": "The rooms are held until then and released automatically if the payment isn't marked as received.",
+  "calendar.paymentDeadlinePassed": "The payment deadline has passed, so the payment can't be marked as received any more. The booking is released automatically.",
   "calendar.openBooking": "Open booking"
 }

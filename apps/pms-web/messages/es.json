@@ -700,5 +700,6 @@
   "bookings.detail.markBankTransferReceived": "Marcar transferencia como recibida",
   "calendar.awaitingPayment": "pago pendiente",
   "calendar.awaitingPaymentHeld": "Las habitaciones quedan retenidas hasta entonces y se liberan automáticamente si el pago no se marca como recibido.",
+  "calendar.paymentDeadlinePassed": "El plazo de pago ha vencido, así que ya no se puede marcar el pago como recibido. La reserva se libera automáticamente.",
   "calendar.openBooking": "Abrir reserva"
 }

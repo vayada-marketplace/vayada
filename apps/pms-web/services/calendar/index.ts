@@ -65,6 +65,8 @@ export interface CalendarBooking {
   status: "pending" | "confirmed" | "checked_in" | "in_house" | "awaiting_payment";
   /** awaiting_payment only: when the hold is released unless the payment is marked received. */
   paymentDeadlineAt?: string | null;
+  /** awaiting_payment only: "bank_transfer" or "paypal". */
+  paymentMethod?: string | null;
   roomId: string | null;
   roomNumber: string | null;
   channel: string;
@@ -200,6 +202,9 @@ type PmsOperationalReservation = {
   primaryGuest: { displayName: string };
   hostResponseDeadlineAt?: string | null;
   awaitingHotelPaymentConfirmation?: boolean;
+  payment?: { method: string | null };
+  /** The booked room types, for rooms not assigned yet. */
+  roomLines?: Array<{ roomTypeId: string; roomName: string; roomCount: number }>;
   assignments: Array<{
     assignmentId?: string | null;
     roomTypeId: string;
@@ -497,22 +502,30 @@ function calendarBookingsForReservation(
     reservation.assignments.length > 0
       ? reservation.assignments
       : Array.from({ length: awaiting ? numberOfRooms : 1 }, () => null);
+  // Held rooms with no room assigned yet show their booked room type.
+  const bookedRooms = (reservation.roomLines ?? []).flatMap((line) =>
+    Array.from({ length: line.roomCount }, () => line),
+  );
   const [guestFirstName, guestLastName] = splitGuestName(reservation.primaryGuest.displayName);
   return assignments
     .map((assignment, index): CalendarBooking | null => {
       const stay = assignment?.stay ?? (numberOfRooms === 1 || awaiting ? reservation.stay : null);
       if (!stay) return null;
       const roomType = assignment ? roomTypesById.get(assignment.roomTypeId) : undefined;
+      const booked = !assignment && awaiting ? bookedRooms[index] : undefined;
       return {
         id: reservation.guestBookingId,
-        roomTypeId: assignment?.roomTypeId ?? "",
-        roomName: roomType?.name ?? "",
+        roomTypeId: assignment?.roomTypeId ?? booked?.roomTypeId ?? "",
+        roomName: roomType?.name ?? booked?.roomName ?? "",
         guestFirstName,
         guestLastName,
         checkIn: stay.checkIn,
         checkOut: stay.checkOut,
         status,
-        ...(awaiting && { paymentDeadlineAt: reservation.hostResponseDeadlineAt ?? null }),
+        ...(awaiting && {
+          paymentDeadlineAt: reservation.hostResponseDeadlineAt ?? null,
+          paymentMethod: reservation.payment?.method ?? null,
+        }),
         roomId: assignment?.roomId ?? null,
         roomNumber: assignment?.roomNumber ?? null,
         channel:
