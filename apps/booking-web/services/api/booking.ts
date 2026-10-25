@@ -1,4 +1,9 @@
-import { parseBookingStay, type BookingStay } from "@/lib/bookingStay";
+import {
+  parseBookingStay,
+  parseExtrasRequest,
+  type BookingStay,
+  type StayExtrasRequest,
+} from "@/lib/bookingStay";
 import { Booking, RoomSelection, RoomSelectionSnapshot } from "@/lib/types";
 import { bookingWebPublic } from "./client";
 
@@ -197,6 +202,24 @@ export const bookingService = {
       await bookingWebPublic.post(
         `/api/booking-web/hotels/${encodeURIComponent(slug)}/bookings/${encodeURIComponent(bookingId)}/stay`,
         { guestEmail },
+      ),
+    );
+  },
+
+  /** VAY-2360 part 3: asks the hotel for these extras; it confirms by email, nothing is charged
+   * online. One key per attempt, so a retried press doesn't ask twice. */
+  async requestExtras(
+    slug: string,
+    bookingId: string,
+    guestEmail: string,
+    addonIds: string[],
+    attemptKey: string,
+  ): Promise<StayExtrasRequest | null> {
+    return parseExtrasRequest(
+      await bookingWebPublic.post(
+        `/api/booking-web/hotels/${encodeURIComponent(slug)}/bookings/${encodeURIComponent(bookingId)}/extras-request`,
+        { guestEmail, addonIds },
+        { headers: { "Idempotency-Key": `booking.extras:${attemptKey}` } },
       ),
     );
   },

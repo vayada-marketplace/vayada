@@ -3,6 +3,7 @@ import ApproximateAmountsNote from "@/components/booking/ApproximateAmountsNote"
 import RoomSelectionSummary from "@/components/booking/RoomSelectionSummary";
 import BookedRoomsList, { useBookedRoomLine } from "@/components/booking/BookedRoomsList";
 import ConfirmationCancellation from "@/components/booking/ConfirmationCancellation";
+import ConfirmationExtras from "@/components/booking/ConfirmationExtras";
 import ConfirmationHotelCard from "@/components/booking/ConfirmationHotelCard";
 import StayDates from "@/components/booking/StayDates";
 import StayRange from "@/components/booking/StayRange";
@@ -1152,6 +1153,27 @@ export default function BookingConfirmationPageClient({
               </button>
             </div>
           </section>
+
+          {/* VAY-2360 part 3: extras the guest asks us for after booking. */}
+          {booking && isConfirmed && details?.extras && (
+            <ConfirmationExtras
+              extras={details.extras}
+              formatMoney={(minor, currency) =>
+                formatPrice(quoteMoneyAmount(minor, currency), currency)
+              }
+              onRequest={(addonIds) =>
+                bookingService.requestExtras(
+                  slug,
+                  booking.id,
+                  stayEmail,
+                  addonIds,
+                  typeof crypto.randomUUID === "function"
+                    ? crypto.randomUUID()
+                    : `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+                )
+              }
+            />
+          )}
 
           {(isPending || isConfirmed) &&
             booking?.paymentMethod === "bank_transfer" &&

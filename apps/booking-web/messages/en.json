@@ -553,6 +553,22 @@
         "noRefund": "{rooms}: no refund any more.",
         "nonRefundable": "{rooms}: non-refundable."
       }
+    },
+    "extras": {
+      "title": "Add to your stay",
+      "requested": "requested",
+      "send": "Send request",
+      "sending": "Sending…",
+      "hint": "We confirm by email. You pay at the hotel; nothing is charged now.",
+      "pending": "Sent on {date}. We'll confirm by email; you pay at the hotel.",
+      "accepted": "Confirmed: {names}. You pay {amount} at the hotel.",
+      "declined": "We couldn't offer {names} for this stay.",
+      "failed": "We couldn't send your request. Please try again.",
+      "unit": {
+        "per_night": "{amount} per night",
+        "per_guest": "{amount} per guest",
+        "per_guest_night": "{amount} per guest per night"
+      }
     }
   },
   "requestChange": {

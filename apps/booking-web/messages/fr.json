@@ -552,6 +552,22 @@
         "noRefund": "{rooms} : plus de remboursement.",
         "nonRefundable": "{rooms} : non remboursable."
       }
+    },
+    "extras": {
+      "title": "Ajouter à votre séjour",
+      "requested": "demandé",
+      "send": "Envoyer la demande",
+      "sending": "Envoi…",
+      "hint": "Nous confirmons par e-mail. Vous payez à l’hôtel ; rien n’est débité maintenant.",
+      "pending": "Envoyée le {date}. Nous confirmons par e-mail ; vous payez à l’hôtel.",
+      "accepted": "Confirmé : {names}. Vous payez {amount} à l’hôtel.",
+      "declined": "Nous ne pouvons pas proposer {names} pour ce séjour.",
+      "failed": "Votre demande n’a pas pu être envoyée. Veuillez réessayer.",
+      "unit": {
+        "per_night": "{amount} par nuit",
+        "per_guest": "{amount} par personne",
+        "per_guest_night": "{amount} par personne et par nuit"
+      }
     }
   },
   "refer": {

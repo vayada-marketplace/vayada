@@ -552,6 +552,22 @@
         "noRefund": "{rooms}: tidak ada pengembalian dana lagi.",
         "nonRefundable": "{rooms}: tidak dapat dikembalikan."
       }
+    },
+    "extras": {
+      "title": "Tambahkan ke masa inap Anda",
+      "requested": "diminta",
+      "send": "Kirim permintaan",
+      "sending": "Mengirim…",
+      "hint": "Kami mengonfirmasi lewat email. Anda membayar di hotel; tidak ada biaya sekarang.",
+      "pending": "Dikirim pada {date}. Kami akan mengonfirmasi lewat email; Anda membayar di hotel.",
+      "accepted": "Dikonfirmasi: {names}. Anda membayar {amount} di hotel.",
+      "declined": "Kami tidak dapat menyediakan {names} untuk masa inap ini.",
+      "failed": "Permintaan Anda tidak dapat dikirim. Silakan coba lagi.",
+      "unit": {
+        "per_night": "{amount} per malam",
+        "per_guest": "{amount} per tamu",
+        "per_guest_night": "{amount} per tamu per malam"
+      }
     }
   },
   "refer": {
