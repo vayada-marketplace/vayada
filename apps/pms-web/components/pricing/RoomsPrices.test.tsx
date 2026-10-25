@@ -242,6 +242,8 @@ it("writes list prices with the currency code and grouped digits, without .00 on
   expect(plain(listPrice("12050", "EUR", "en"))).toBe("EUR 120.50");
   expect(plain(listPrice("12000", "EUR", "en"))).toBe("EUR 120");
   expect(plain(listPrice("87500000", "IDR", "de"))).toBe("875.000 IDR");
+  expect(plain(listPrice("12000", "JPY", "en"))).toBe("JPY 12,000");
+  expect(plain(listPrice("1250", "KWD", "en"))).toBe("KWD 1.250");
 });
 it("on a room page shows only a stale publication's republish, or that prices could not be checked", async () => {
   const onSaved = vi.fn();

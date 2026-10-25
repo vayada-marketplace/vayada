@@ -51,7 +51,13 @@ export default function RoomsMenu({
   }, [open, buttonRef]);
 
   return (
-    <div ref={menu} className="relative">
+    <div
+      ref={menu}
+      className="relative"
+      onBlur={(event) => {
+        if (!menu.current?.contains(event.relatedTarget as Node | null)) setOpen(false);
+      }}
+    >
       <button
         ref={buttonRef}
         type="button"

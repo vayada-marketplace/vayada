@@ -284,7 +284,9 @@ function RoomTypeCard({
           {/* Name + facts */}
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-              <span className="text-base font-semibold text-gray-900">{room.name}</span>
+              <span className="text-base font-semibold text-gray-900 [overflow-wrap:anywhere]">
+                {room.name}
+              </span>
               <span
                 className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${categoryStyle}`}
               >
@@ -308,8 +310,8 @@ function RoomTypeCard({
           <div className="min-w-0 flex-1 lg:w-[200px] lg:flex-none">
             {prices && <RoomPriceSummary roomTypeId={room.id} publication={prices.publication} />}
           </div>
-          <div className="flex shrink-0 items-center justify-end gap-2 lg:w-[200px]">
-            {prices && <RoomPricesLink roomTypeId={room.id} publication={prices.publication} />}
+          <div className="flex shrink-0 items-center justify-end gap-2 lg:w-[240px]">
+            <RoomPricesLink roomTypeId={room.id} publication={prices?.publication} />
             <button
               onClick={(e) => {
                 e.stopPropagation();
@@ -758,7 +760,7 @@ export default function RoomsPage() {
             <span className="w-5 shrink-0" />
             <span className="flex-1">{t("rooms.columnRoomType")}</span>
             <span className="w-[200px] shrink-0">{t("rooms.columnRates")}</span>
-            <span className="w-[200px] shrink-0 text-right">{t("rooms.columnActions")}</span>
+            <span className="w-[240px] shrink-0 text-right">{t("rooms.columnActions")}</span>
           </div>
           {rooms.map((room) => (
             <RoomTypeCard

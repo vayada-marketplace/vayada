@@ -23,13 +23,17 @@ export default function LinkedInventoryDrawer({
     const button = returnFocus.current;
     return () => button?.focus();
   }, [returnFocus]);
-  // Escape closes the drawer wherever the focus is (a deleted group's button leaves it on the page), except in a
-  // confirmation opened from the drawer, which closes itself.
+  // Saving, cancelling or deleting removes the focused button and leaves the focus on the page. Escape still closes
+  // the drawer then, and Tab returns to it; a confirmation opened from the drawer handles its own keys.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
       const dialog = (event.target as Element | null)?.closest?.('[role="dialog"]');
-      if (!dialog || dialog === panel.current) onClose();
+      if (dialog && dialog !== panel.current) return;
+      if (event.key === "Escape") onClose();
+      else if (event.key === "Tab" && !dialog) {
+        event.preventDefault();
+        panel.current?.focus();
+      }
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);

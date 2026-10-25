@@ -149,6 +149,9 @@ test.describe("Rooms & Rates list", () => {
       .getByRole("button", { name: "Delete" })
       .click();
     await expect(drawer.getByText("No groups yet")).toBeVisible();
+    // The deleted group's button took the focus with it; Tab returns to the drawer, not the page behind it.
+    await page.keyboard.press("Tab");
+    await expect(drawer).toBeFocused();
     await page.keyboard.press("Escape");
     await expect(drawer).toHaveCount(0);
     await expect(page.getByRole("button", { name: "More actions" })).toBeFocused();

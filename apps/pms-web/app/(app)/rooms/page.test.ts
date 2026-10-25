@@ -38,6 +38,8 @@ beforeEach(() => {
 afterEach(() => {
   act(() => view?.unmount());
   vi.restoreAllMocks();
+  // After the unmount: the menu and drawer remove their document listeners then.
+  vi.unstubAllGlobals();
 });
 async function mount() {
   await act(async () => {
@@ -162,7 +164,6 @@ it("keeps the setup tools in the ☰ menu and opens Linked inventory in a drawer
     "linked-inventory-title",
   );
   expect(view.root.findAllByType(LinkedInventoryGroupsPanel)).toHaveLength(1);
-  vi.unstubAllGlobals();
 });
 
 it("offers no room reordering with a single room", async () => {
@@ -176,5 +177,4 @@ it("offers no room reordering with a single room", async () => {
     view.root.findByProps({ "aria-label": "rooms.menu.label" }).props.onClick(),
   );
   expect(view.root.findAllByProps({ href: "/calendar?reorder=1" })).toHaveLength(0);
-  vi.unstubAllGlobals();
 });

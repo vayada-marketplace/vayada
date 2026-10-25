@@ -129,23 +129,24 @@ export function RoomPriceSummary({
 }
 
 /** "Edit prices", or "Set prices" for a room without published prices: a link to the room's Prices tab. It is a
- * document navigation, so the tab's leave warning also covers the browser's back button. */
+ * document navigation, so the tab's leave warning also covers the browser's back button. Until the prices are read
+ * (publication undefined) it says "Edit prices". */
 export function RoomPricesLink({
   roomTypeId,
   publication,
 }: {
   roomTypeId: string;
-  publication: Publication;
+  publication: Publication | undefined;
 }) {
   const { t } = useTranslation();
   return (
     <a
       href={`/rooms/${encodeURIComponent(roomTypeId)}?tab=prices`}
       onClick={(event) => event.stopPropagation()}
-      className="px-1.5 text-sm font-semibold text-primary-600 hover:text-primary-700"
+      className="whitespace-nowrap px-1.5 text-sm font-semibold text-primary-600 hover:text-primary-700"
     >
       {t(
-        publishedRoom(publication, roomTypeId)
+        publication === undefined || publishedRoom(publication, roomTypeId)
           ? "pricing.list.editPrices"
           : "pricing.list.setPrices",
       )}
@@ -251,7 +252,7 @@ export function RoomsPricesStrip({
       className={
         staleOnly
           ? `mt-3 ${ui.primaryButton}`
-          : `${ui.primaryButton} shrink-0 justify-center py-2 text-sm`
+          : "inline-flex shrink-0 items-center justify-center rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-50"
       }
     >
       {t(
