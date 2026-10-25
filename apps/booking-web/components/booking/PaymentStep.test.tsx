@@ -28,6 +28,7 @@ const option = (method: PaymentMethodOption["method"], title: string): PaymentMe
   explanation: `${title} explained`,
   box: [],
   button: "Confirm booking",
+  busy: "Confirming booking…",
 });
 function render(
   options: PaymentMethodOption[],
