@@ -26,7 +26,6 @@ export default function PaymentStep({
   method,
   options,
   unavailable = null,
-  tooSoon,
   onMethod,
   showExplanation,
   notice,
@@ -47,7 +46,6 @@ export default function PaymentStep({
   options: readonly PaymentMethodOption[];
   /** Shown instead of the ways to pay when none is left for the chosen rates (VAY-2309). */
   unavailable?: ReactNode;
-  tooSoon: string | null;
   onMethod: (method: PricingPaymentMethod) => void;
   /** The current price is for the chosen way, so its explanation's amounts are right. */
   showExplanation: boolean;
@@ -104,10 +102,7 @@ export default function PaymentStep({
       <section aria-label={t("howToPay")} className={card}>
         <h2 className="mb-5 text-xl font-bold text-gray-900">{t("howToPay")}</h2>
         {!options.length && unavailable ? (
-          <>
-            {unavailable}
-            {tooSoon && <p className="mt-4 text-sm text-gray-600">{tooSoon}</p>}
-          </>
+          unavailable
         ) : (
           <>
             <div
@@ -165,7 +160,6 @@ export default function PaymentStep({
                 );
               })}
             </div>
-            {tooSoon && <p className="mt-4 text-sm text-gray-600">{tooSoon}</p>}
           </>
         )}
       </section>

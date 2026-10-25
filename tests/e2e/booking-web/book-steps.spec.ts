@@ -18,6 +18,8 @@ async function mockFlow(
     lateCheckOutNotice = null as { leadTimeHours: number; bookableFrom: string | null } | null,
     methods = ["pay_at_property", "card"],
     earliestArrival = {} as Record<string, string>,
+    // VAY-2348: the hotel's booking window per way to pay, as arrival dates.
+    arrivalWindows = {} as Record<string, { from?: string; through?: string }>,
     // The ways the rate takes, as the catalog names them (VAY-2309); older APIs send none.
     offerPaymentMethods = undefined as string[] | undefined,
   } = {},
@@ -43,6 +45,7 @@ async function mockFlow(
     payAtPropertyEnabled: true,
     bookingPagePaymentMethods: methods,
     manualPaymentEarliestArrival: earliestArrival,
+    paymentMethodArrivalWindows: arrivalWindows,
     termsText: "Quiet hours are 22:00–07:00.",
   };
   await page.route(`**/api/booking-web/hotels/${SEEDED_BOOKING_SLUG}/checkout-config`, (route) =>
@@ -714,24 +717,29 @@ for (const width of [1440, 390]) {
   });
 }
 
-test("says later dates would work when the rate's only way to pay opens later", async ({
-  page,
-}) => {
-  // The rate takes only bank transfer, which this hotel takes from 20 Nov; the stay starts 6 Nov.
-  const { prices } = await mockFlow(page, {
-    methods: ["pay_at_property", "bank_transfer"],
-    earliestArrival: { bank_transfer: "2026-11-20" },
-    offerPaymentMethods: ["bank_transfer"],
+// VAY-2348 (D8): the hotel takes the rate's way to pay, just not for this arrival.
+for (const [why, rules] of [
+  // Bank transfer's 48-hour deadline: this hotel takes it from 20 Nov; the stay starts 6 Nov.
+  ["payment deadline", { earliestArrival: { bank_transfer: "2026-11-20" } }],
+  // The hotel's booking window: bank transfer only for guests booking at least 30 days ahead.
+  ["booking window", { arrivalWindows: { bank_transfer: { from: "2026-11-20" } } }],
+] as const) {
+  test(`says online booking isn't available for these dates (${why})`, async ({ page }) => {
+    // The rate takes only bank transfer.
+    const { prices } = await mockFlow(page, {
+      methods: ["pay_at_property", "bank_transfer"],
+      offerPaymentMethods: ["bank_transfer"],
+      ...rules,
+    });
+    await page.goto(STAY);
+    const notice = page.getByRole("alert").filter({
+      hasText: "Online booking isn't available for these dates. Please contact the hotel.",
+    });
+    await expect(notice).toBeVisible();
+    await page.waitForTimeout(1_000);
+    expect(prices.asked).toEqual([]);
   });
-  await page.goto(STAY);
-  const notice = page.getByRole("alert").filter({
-    hasText:
-      "The rooms you chose can only be paid for in a way that isn't available this close to check-in. Please choose later dates or other rooms.",
-  });
-  await expect(notice).toBeVisible();
-  await page.waitForTimeout(1_000);
-  expect(prices.asked).toEqual([]);
-});
+}
 
 test("says on the room form when no way to pay fits the chosen room", async ({ page }) => {
   const { prices } = await mockFlow(page, {

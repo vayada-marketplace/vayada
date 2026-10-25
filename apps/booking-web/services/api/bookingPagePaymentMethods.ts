@@ -162,25 +162,6 @@ export function bookingPageMethodsForArrival(
   });
 }
 
-/** The hotel's methods hidden for this arrival because it is too close (VAY-2145 deadlines, or a
- * VAY-2348 "at least N days" window). Methods hidden because the stay is too far ahead ("within"
- * windows) are just not offered. */
-export function bookingPageMethodsTooSoon(
-  {
-    methods,
-    earliestArrival: earliest,
-    arrivalWindows: windows = {},
-  }: Pick<BookingPagePayment, "methods" | "earliestArrival" | "arrivalWindows">,
-  checkIn: string,
-): PricingPaymentMethod[] {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(checkIn)) return [];
-  return methods.filter((method) => {
-    const from = windows[method]?.from;
-    const manual = method === "bank_transfer" || method === "paypal" ? earliest[method] : undefined;
-    return (!!from && checkIn < from) || (!!manual && checkIn < manual);
-  });
-}
-
 /** Until the guest picks how to pay, the price uses the hotel's ways in this order: paying at the
  * hotel first (nothing is charged now), and only ways the chosen rates take when the catalog names
  * them (VAY-2309), so a card-only or non-refundable rate isn't priced at the hotel first. */

@@ -11,7 +11,7 @@ import {
 } from "react";
 import { flushSync } from "react-dom";
 import { useSearchParams } from "next/navigation";
-import { useLocale, useTranslations } from "next-intl";
+import { useTranslations } from "next-intl";
 import { decodePicks, pickIdentity, releaseSoldOutPicks, roomGuestProblem } from "@/lib/roomPicker";
 import RoomGuestsStep from "@/components/booking/RoomGuestsStep";
 import { useRouter } from "@/i18n/navigation";
@@ -45,7 +45,6 @@ import type {
 } from "@vayada/domain-booking/replacement-pricing";
 import {
   bookingPageMethodsForArrival,
-  bookingPageMethodsTooSoon,
   defaultQuoteMethods,
   getBookingPagePayment,
   type BookingPagePayment,
@@ -56,7 +55,6 @@ import { useHotel, useSlug } from "@/contexts/HotelContext";
 import { choiceKeys, choiceText, hotelToday } from "@/lib/roomChoices";
 import { cancellationSummary, hotelCountryName } from "@/lib/checkoutTerms";
 import { paymentMethodOptions } from "@/lib/paymentMethodOptions";
-import { resolveLocale } from "@/lib/utils";
 import {
   bookEntry,
   bookStepQuery,
@@ -131,7 +129,6 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   const tPayment = useTranslations("payment");
   const tDetails = useTranslations("guestDetails");
   const tReview = useTranslations("reviewPay");
-  const locale = useLocale();
   const tGroup = useTranslations("groupRooms");
   const tCommon = useTranslations("common");
   const { hotel } = useHotel();
@@ -267,11 +264,11 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     : paymentMethods;
   // No way the hotel offers fits the chosen rates: no price is asked for, and the steps say so.
   const noWayToPay = pagePaymentLoaded && !!rateMethods && !offeredMethods.length;
-  // Only methods hidden because the stay is too close; a "within N days" window that the stay is
-  // too far ahead for just isn't offered (VAY-2348).
-  const tooSoon = bookingPageMethodsTooSoon(pagePayment, checkIn).filter(
-    (method) => !rateMethods || rateMethods.includes(method),
-  );
+  // VAY-2348 (D8): the hotel takes a way these rates allow, but not for this arrival (its booking
+  // window or payment deadline): online booking isn't available for these dates.
+  const datesRuleOut =
+    noWayToPay && pagePayment.methods.some((method) => rateMethods!.includes(method));
+  const noWayToPayTitle = tPayment(datesRuleOut ? "noWayToPayTheseDates" : "noWayToPay");
   useEffect(() => {
     // A restored choice waits for the hotel's own methods before it is judged.
     if (!pagePaymentLoaded) return;
@@ -834,8 +831,11 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   const priceNotice = noWayToPay ? (
     <Notice
       tone="red"
-      title={tPayment(tooSoon.length ? "noWayToPayThisSoon" : "noWayToPay")}
-      action={{ label: tPayment("chooseAnotherRoom"), onClick: backToRooms }}
+      title={noWayToPayTitle}
+      action={{
+        label: tPayment(datesRuleOut ? "changeDates" : "chooseAnotherRoom"),
+        onClick: backToRooms,
+      }}
     >
       No booking was made and nothing was charged.
     </Notice>
@@ -1189,12 +1189,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
               We’ll check the price for your choices next. All rooms must use the same currency.
             </p>
             {/* VAY-2309: said here too, where the rooms can be changed. */}
-            {noWayToPay && (
-              <Notice
-                tone="red"
-                title={tPayment(tooSoon.length ? "noWayToPayThisSoon" : "noWayToPay")}
-              />
-            )}
+            {noWayToPay && <Notice tone="red" title={noWayToPayTitle} />}
             <button className={button} type="submit" disabled={!roomsComplete || !settled}>
               Continue
             </button>
@@ -1433,16 +1428,6 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                 method={method}
                 options={methodOptions}
                 unavailable={noWayToPay ? priceNotice : null}
-                tooSoon={
-                  tooSoon.length
-                    ? tReview("tooSoon", {
-                        count: tooSoon.length,
-                        methods: new Intl.ListFormat(resolveLocale(locale), {
-                          type: "conjunction",
-                        }).format(tooSoon.map((value) => tReview(`method.${value}.title`))),
-                      })
-                    : null
-                }
                 onMethod={setPayment}
                 locked={attemptOpen}
                 termsText={pagePayment.termsText}

@@ -161,7 +161,7 @@ test("books by bank transfer and opens the protected payment details", async ({ 
   await expect(paymentOption(page, "bank_transfer")).toHaveAttribute("aria-checked", "true");
   await expect(orderTotal(page)).toHaveText("€240");
   await expect(
-    page.getByText(/We hold your room until the payment deadline, and your booking is confirmed/),
+    page.getByText(/Your transfer must arrive within 48 hours, or the booking is released\./),
   ).toBeVisible();
   await page.getByLabel("I have read the room and rate terms for this price").check();
   await page.getByLabel("guest rules for this price").check();
@@ -219,16 +219,13 @@ test("hides bank transfer for arrivals closer than its payment deadline", async 
     await room.getByLabel(/Adults/).fill("2");
     await continueToPayment(page);
     if (checkIn === "2026-10-01") {
+      // VAY-2348: the one way left is already chosen, and the hidden one isn't mentioned.
       await expect(methods).toHaveCount(1);
-      await expect(paymentOption(page, "pay_at_property")).toBeVisible();
-      await expect(
-        page.getByText("Pay by bank transfer isn’t available this close to check-in."),
-      ).toBeVisible();
+      await expect(paymentOption(page, "pay_at_property")).toHaveAttribute("aria-checked", "true");
+      await expect(page.getByText(/available this close to check-in/)).toHaveCount(0);
     }
   }
   await expect(methods).toHaveCount(2);
   await expect(paymentOption(page, "bank_transfer")).toBeVisible();
-  await expect(
-    page.getByText("Pay by bank transfer isn’t available this close to check-in."),
-  ).toHaveCount(0);
+  await expect(page.getByText(/available this close to check-in/)).toHaveCount(0);
 });

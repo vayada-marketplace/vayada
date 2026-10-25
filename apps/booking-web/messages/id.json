@@ -337,8 +337,9 @@
     "recoveryInProgress": "Pemesanan Anda masih diproses. Coba lagi untuk memeriksa pemesanan yang sama.",
     "termsRequired": "Harap setujui Syarat dan Ketentuan sebelum mengirim.",
     "chooseAnotherRoom": "Pilih kamar lain",
+    "changeDates": "Ubah tanggal",
     "noWayToPay": "Properti ini tidak menyediakan metode pembayaran untuk kamar yang Anda pilih. Silakan pilih kamar lain.",
-    "noWayToPayThisSoon": "Kamar yang Anda pilih hanya dapat dibayar dengan cara yang tidak tersedia sedekat ini dengan tanggal check-in. Silakan pilih tanggal lain atau kamar lain."
+    "noWayToPayTheseDates": "Pemesanan online tidak tersedia untuk tanggal ini. Silakan hubungi hotel."
   },
   "myBooking": {
     "title": "Pemesanan Saya",
@@ -739,7 +740,7 @@
       "pay_at_property": {
         "title": "Bayar di hotel",
         "summary": "Tidak ada pembayaran sekarang · bayar saat tiba",
-        "explain": "Anda membayar {total} di hotel saat tiba. Pemesanan Anda langsung dikonfirmasi.",
+        "explain": "Tidak ada biaya yang ditagih sekarang. Anda membayar {total} di hotel saat tiba. Pemesanan Anda langsung dikonfirmasi.",
         "explainRequest": "Tidak ada biaya sekarang. Jika hotel menerima permintaan Anda, Anda membayar {total} saat tiba. Hotel menjawab dalam 24 jam.",
         "boxNow": "Bayar sekarang",
         "boxLater": "Di hotel",
@@ -762,10 +763,10 @@
       },
       "bank_transfer": {
         "title": "Bayar melalui transfer bank",
-        "summary": "Rincian bank dikirim lewat email setelah memesan",
-        "explain": "Setelah memesan, kami mengirimkan rincian bank hotel dan kode pemesanan Anda lewat email. Kami menahan kamar Anda sampai batas waktu pembayaran, dan pemesanan dikonfirmasi setelah transfer Anda diterima.",
+        "summary": "Bayar dalam 48 jam · rincian bank dikirim lewat email",
+        "explain": "Setelah memesan, kami mengirimkan rincian bank hotel dan kode pemesanan Anda lewat email. Transfer Anda harus diterima dalam 48 jam, atau pemesanan dilepas. Pemesanan Anda dikonfirmasi setelah hotel mengonfirmasi transfer Anda.",
         "boxNow": "Bayar sekarang",
-        "boxLater": "Melalui transfer",
+        "boxLater": "Transfer dalam 48 jam",
         "phrase": "melalui transfer bank"
       },
       "paypal": {
@@ -798,7 +799,6 @@
       "children": "{count, plural, one {# anak} other {# anak}}"
     },
     "checkingPrice": "Memeriksa harga…",
-    "tooSoon": "{methods} tidak tersedia sedekat ini dengan tanggal check-in.",
     "busyConfirm": "Mengonfirmasi pemesanan…",
     "busyRequest": "Mengirim permintaan…",
     "editDetails": "Ubah data tamu"

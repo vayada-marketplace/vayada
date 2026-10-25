@@ -337,8 +337,9 @@
     "recoveryInProgress": "Votre réservation est toujours en cours de traitement. Réessayez pour vérifier la même réservation.",
     "termsRequired": "Veuillez accepter les conditions générales avant d'envoyer.",
     "chooseAnotherRoom": "Choisir une autre chambre",
+    "changeDates": "Changer de dates",
     "noWayToPay": "Cet établissement ne propose aucun moyen de paiement pour les chambres choisies. Veuillez choisir d'autres chambres.",
-    "noWayToPayThisSoon": "Les chambres choisies ne peuvent être payées que d'une façon qui n'est pas disponible si près de l'arrivée. Veuillez choisir des dates plus tardives ou d'autres chambres."
+    "noWayToPayTheseDates": "La réservation en ligne n'est pas disponible pour ces dates. Veuillez contacter l'hôtel."
   },
   "myBooking": {
     "title": "Ma réservation",
@@ -738,8 +739,8 @@
     "method": {
       "pay_at_property": {
         "title": "Payer à l’hôtel",
-        "summary": "Rien à payer maintenant · vous payez à l’arrivée",
-        "explain": "Vous payez {total} à l’hôtel à votre arrivée. Votre réservation est confirmée immédiatement.",
+        "summary": "Rien à payer maintenant · paiement à l’arrivée",
+        "explain": "Rien n’est débité maintenant. Vous payez {total} à l’hôtel à votre arrivée. Votre réservation est confirmée immédiatement.",
         "explainRequest": "Rien n’est débité maintenant. Si l’hôtel accepte votre demande, vous payez {total} à votre arrivée. L’hôtel répond sous 24 heures.",
         "boxNow": "À payer maintenant",
         "boxLater": "À l’hôtel",
@@ -762,10 +763,10 @@
       },
       "bank_transfer": {
         "title": "Payer par virement bancaire",
-        "summary": "Coordonnées bancaires envoyées par e-mail après la réservation",
-        "explain": "Après la réservation, nous vous envoyons par e-mail les coordonnées bancaires de l’hôtel et votre référence de réservation. Nous gardons votre chambre jusqu’à la date limite de paiement ; votre réservation est confirmée dès réception de votre virement.",
+        "summary": "Paiement sous 48 heures · coordonnées bancaires par e-mail",
+        "explain": "Après la réservation, nous vous envoyons par e-mail les coordonnées bancaires de l’hôtel et votre référence de réservation. Votre virement doit arriver sous 48 heures, sinon la réservation est libérée. Votre réservation est confirmée dès que l’hôtel confirme votre virement.",
         "boxNow": "À payer maintenant",
-        "boxLater": "Par virement",
+        "boxLater": "Virement sous 48 heures",
         "phrase": "par virement bancaire"
       },
       "paypal": {
@@ -798,7 +799,6 @@
       "children": "{count, plural, one {# enfant} other {# enfants}}"
     },
     "checkingPrice": "Vérification du prix…",
-    "tooSoon": "{methods} {count, plural, one {n’est pas disponible} other {ne sont pas disponibles}} si près de l’arrivée.",
     "busyConfirm": "Confirmation de la réservation…",
     "busyRequest": "Envoi de la demande…",
     "editDetails": "Modifier les coordonnées du client"
