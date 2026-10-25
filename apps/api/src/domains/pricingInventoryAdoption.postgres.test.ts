@@ -1160,6 +1160,124 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
           places: [],
         });
         await db.query("ROLLBACK TO SAVEPOINT stay_statuses");
+        // VAY-2360 part 3: extras after booking, asked by the guest and answered by the hotel. The stay
+        // moves a month ahead so the extras' notice can still be given.
+        await db.query("SAVEPOINT extras");
+        await db.query("SET LOCAL session_replication_role=replica");
+        await db.query(
+          `UPDATE booking.guest_bookings SET check_in=current_date+30, check_out=current_date+31
+           WHERE id=$1`,
+          [bookingId],
+        );
+        await db.query(
+          "UPDATE hotel_catalog.property_locations SET timezone='Europe/Berlin' WHERE property_id=$1",
+          [propertyId],
+        );
+        await db.query(
+          `INSERT INTO hotel_catalog.property_contact_channels
+             (property_id,channel_type,value,source_system,purpose)
+           VALUES($1,'email','host@example.test','platform','operations')`,
+          [propertyId],
+        );
+        const [transfer, breakfast, late] = [randomUUID(), randomUUID(), randomUUID()];
+        await db.query(
+          `INSERT INTO booking.addon_definitions
+             (id,property_id,name,pricing_model,price_amount,currency,metadata,public_visible)
+           VALUES($1,$5,'Airport transfer','per_stay',25,'EUR','{}',true),
+                 ($2,$5,'Breakfast','per_guest_night',12,'EUR','{}',true),
+                 ($3,$5,'Late check-out','per_stay',10,'EUR','{"leadTimeHours":168}',true),
+                 ($4,$5,'Staff only','per_stay',1,'EUR','{}',false)`,
+          [transfer, breakfast, late, randomUUID(), propertyId],
+        );
+        const offered = (
+          (await adapter.getStay(propertyId, bookingId, guest, context("e1"))) as {
+            extras: { offered: Array<{ name: string; amountMinor: string }>; request: unknown };
+          }
+        ).extras;
+        // 9 guests (6 adults, 3 children) for one night; nothing else in the request yet.
+        expect(offered).toEqual({
+          offered: [
+            expect.objectContaining({
+              addonId: transfer,
+              name: "Airport transfer",
+              amountMinor: "2500",
+            }),
+            expect.objectContaining({
+              addonId: breakfast,
+              name: "Breakfast",
+              amountMinor: "10800",
+            }),
+            expect.objectContaining({ addonId: late, name: "Late check-out", amountMinor: "1000" }),
+          ],
+          request: null,
+        });
+        const asked = (await adapter.requestExtras(
+          propertyId,
+          bookingId,
+          { guest_email: "jane@example.test", addonIds: [transfer, breakfast] },
+          context("e2"),
+        )) as { request: { id: string; status: string; totalMinor: string } };
+        expect(asked.request).toMatchObject({ status: "pending", totalMinor: "13300" });
+        await expect(
+          adapter.requestExtras(
+            propertyId,
+            bookingId,
+            { guest_email: "jane@example.test", addonIds: [late] },
+            context("e3"),
+          ),
+        ).rejects.toMatchObject({ statusCode: 409, code: "EXTRAS_REQUEST_PENDING" });
+        const sentTo = async (jobType: string) =>
+          (
+            await db.query<{ to: string; text: string }>(
+              `SELECT payload->>'to' AS "to", payload->>'text' AS text FROM platform.jobs
+               WHERE job_type=$1 AND resource_id=$2`,
+              [jobType, bookingId],
+            )
+          ).rows;
+        expect(await sentTo("email.booking-host-extras-requested")).toEqual([
+          expect.objectContaining({ to: "host@example.test" }),
+        ]);
+        expect(await adapter.findLatestExtrasRequest!(propertyId, bookingId)).toMatchObject({
+          id: asked.request.id,
+          status: "pending",
+        });
+        const decision = (key: string) => ({
+          actorUserId: null as unknown as string,
+          requestId: key,
+          correlationId: key,
+          idempotencyKey: key,
+          fingerprint: hash(key),
+          occurredAt: new Date(),
+        });
+        const accept = () =>
+          adapter.decideExtrasRequest!(
+            propertyId,
+            bookingId,
+            asked.request.id,
+            "accept",
+            null,
+            decision("d1"),
+          );
+        expect(await accept()).toMatchObject({ status: "accepted", totalMinor: "13300" });
+        // The same answer again changes nothing; another answer is refused.
+        expect(await accept()).toMatchObject({ status: "accepted" });
+        await expect(
+          adapter.decideExtrasRequest!(
+            propertyId,
+            bookingId,
+            asked.request.id,
+            "decline",
+            "Full",
+            decision("d2"),
+          ),
+        ).rejects.toMatchObject({ statusCode: 409 });
+        expect(await sentTo("email.booking-extras-accepted")).toEqual([
+          expect.objectContaining({
+            to: "jane@example.test",
+            text: expect.stringContaining("You pay 133.00 EUR at the hotel"),
+          }),
+        ]);
+        await db.query("ROLLBACK TO SAVEPOINT extras");
         // Never by a booking reference: those are what the lookup's limit guards.
         await expect(
           adapter.getStay(propertyId, "VAY-7C2F4A9E1B3D", guest, context("s3")),

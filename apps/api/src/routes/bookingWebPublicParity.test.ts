@@ -746,6 +746,11 @@ describe("Booking Web public bootstrap parity", () => {
         record(context);
         return { status: "pending" };
       },
+      async requestExtras(_slug, _bookingId, request, context) {
+        record(context);
+        expect(request).toEqual({ guest_email: "guest@example.com", addonIds: ["a1"] });
+        return { version: "booking-extras-request.v1" };
+      },
       async getStay(_slug, _bookingId, request, context) {
         record(context);
         // The route passes only the guest's email on.
@@ -851,6 +856,11 @@ describe("Booking Web public bootstrap parity", () => {
         payload: { guestEmail: "guest@example.com", expectedCancellationFeeMinor: "100" },
       }),
       app.inject({
+        method: "POST",
+        url: "/api/booking-web/hotels/hotel-alpenrose/bookings/b9fccec2-eb4c-4c35-bfd3-02a748c2e951/extras-request",
+        payload: { guestEmail: "guest@example.com", addonIds: ["a1"] },
+      }),
+      app.inject({
         method: "GET",
         url: "/api/booking-web/hotels/hotel-alpenrose/bookings/VAY-TARGET-1/payment-instructions",
       }),
@@ -861,7 +871,7 @@ describe("Booking Web public bootstrap parity", () => {
       }),
     ]);
 
-    expect(responses.map((response) => response.statusCode)).toEqual(Array(17).fill(200));
+    expect(responses.map((response) => response.statusCode)).toEqual(Array(18).fill(200));
     expect(operations.map((entry) => entry.operation)).toEqual(
       expect.arrayContaining([
         "checkout-config",
@@ -877,11 +887,12 @@ describe("Booking Web public bootstrap parity", () => {
         "booking-change-submit",
         "booking-change-get",
         "booking-stay",
+        "booking-extras-request",
         "booking-payment-instructions",
         "promo-validate",
       ]),
     );
-    expect(operations).toHaveLength(17);
+    expect(operations).toHaveLength(18);
     expect(operations.find((entry) => entry.operation === "booking-create")?.idempotencyKey).toBe(
       "guest-create-1",
     );

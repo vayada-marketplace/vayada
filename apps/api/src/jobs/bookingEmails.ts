@@ -1,3 +1,4 @@
+import { pricingCurrencyScale } from "@vayada/domain-pms";
 import { paymentMethodLabel } from "@vayada/locale-constants";
 import { createHash } from "node:crypto";
 import type { QueryResultRow } from "pg";
@@ -28,6 +29,10 @@ const BOOKING_LIFECYCLE_EMAIL_JOB_TYPE_BY_KIND = {
   host_payment_pending: "email.booking-host-payment-pending",
   host_payment_expired: "email.booking-host-payment-expired",
   payment_reminder: "email.booking-payment-reminder",
+  // VAY-2360: extras a booked guest asks for, and the hotel's answer.
+  host_extras_requested: "email.booking-host-extras-requested",
+  extras_accepted: "email.booking-extras-accepted",
+  extras_declined: "email.booking-extras-declined",
 } as const;
 
 export type BookingLifecycleEmailKind = keyof typeof BOOKING_LIFECYCLE_EMAIL_JOB_TYPE_BY_KIND;
@@ -52,6 +57,12 @@ export type BookingLifecycleTransition = {
 
 export type BookingLifecycleEmailInput = {
   guestMessage?: string;
+  /** VAY-2360: the extras of a guest's request, priced for the stay, in minor units. */
+  extras?: {
+    items: ReadonlyArray<{ name: string; amountMinor: string }>;
+    totalMinor: string;
+    currency: string;
+  };
   resendKey?: string;
   kind: BookingLifecycleEmailKind;
   occurredAt: string;
@@ -516,6 +527,42 @@ function emailCopy(input: BookingLifecycleEmailInput) {
   const { booking } = input;
   const name = booking.guestName?.trim() || "there";
   const property = booking.propertyName || "our property";
+  const extras = input.extras;
+  if (extras && input.kind === "host_extras_requested")
+    return {
+      template: "booking_host_extras_requested",
+      subject: `Extras requested - ${booking.bookingReference}`,
+      text: [
+        `${booking.guestName?.trim() || "Your guest"} asks for extras for their stay at ${property}, ${stayDate(booking.checkIn)} to ${stayDate(booking.checkOut)}:`,
+        extrasList(extras),
+        `To charge at check-in: ${minorMoney(extras.totalMinor, extras.currency)}`,
+        "Accept or decline them on the booking in your PMS. Accepting doesn't change the booking's total: charge them at check-in.",
+        `Booking reference: ${booking.bookingReference}`,
+      ].join("\n\n"),
+    };
+  if (extras && input.kind === "extras_accepted")
+    return {
+      template: "booking_extras_accepted",
+      subject: `Your extras are confirmed - ${booking.bookingReference}`,
+      text: [
+        `Hi ${name},`,
+        `We've confirmed your extras for your stay at ${property}:`,
+        extrasList(extras),
+        `You pay ${minorMoney(extras.totalMinor, extras.currency)} at the hotel. Nothing has been charged.`,
+        `Booking reference: ${booking.bookingReference}`,
+      ].join("\n\n"),
+    };
+  if (extras && input.kind === "extras_declined")
+    return {
+      template: "booking_extras_declined",
+      subject: `About your extras - ${booking.bookingReference}`,
+      text: [
+        `Hi ${name},`,
+        `We can't offer these extras for your stay at ${property}: ${extras.items.map((item) => item.name).join(", ")}. Nothing has been charged.`,
+        ...(input.guestMessage ? [`Message from us:\n${input.guestMessage}`] : []),
+        `Booking reference: ${booking.bookingReference}`,
+      ].join("\n\n"),
+    };
   if (input.kind === "reserved_pending_payment" && manualPricingPayment(booking)) {
     // Booking-page bank transfer or PayPal (VAY-2139); the bank details are added when sent.
     const paypal = booking.paymentMethod === "paypal";
@@ -988,6 +1035,18 @@ function record(value: unknown): Record<string, unknown> {
 
 function text(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+/** "- Airport transfer: 25.00 USD", one line per extra. */
+function extrasList(extras: NonNullable<BookingLifecycleEmailInput["extras"]>): string {
+  return extras.items
+    .map((item) => `- ${item.name}: ${minorMoney(item.amountMinor, extras.currency)}`)
+    .join("\n");
+}
+
+function minorMoney(minor: string, currency: string): string {
+  const scale = pricingCurrencyScale(currency) ?? 2;
+  return money(Number(minor) / 10 ** scale, currency);
 }
 
 function money(
