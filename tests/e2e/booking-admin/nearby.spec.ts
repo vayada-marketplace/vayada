@@ -117,7 +117,7 @@ const GOOGLE_FAKE = `
           state.searches += 1;
           const event = new Event("gmp-select");
           const found = window.__nearbyFakePlace ?? { lat: 48.1525, lng: 11.5922 };
-          event.placePrediction = { types: [], toPlace: () => ({ location: latLng(found.lat, found.lng), fetchFields: async () => {} }) };
+          event.placePrediction = { types: [], toPlace: () => ({ location: latLng(found.lat, found.lng), addressComponents: found.addressComponents, fetchFields: async () => {} }) };
           this.dispatchEvent(event);
         });
         this.append(input);
@@ -652,9 +652,19 @@ for (const width of [1440, 390]) {
     await setup(page);
     // Welhengoda Road, Ahangama: Google knows only the road, so it is no arrival point.
     await page.addInitScript(() => {
+      const part = (longText: string, shortText: string, type: string) => ({
+        longText,
+        shortText,
+        types: [type],
+      });
       (window as unknown as { __nearbyFakePlace: unknown }).__nearbyFakePlace = {
         lat: 5.9731,
         lng: 80.3628,
+        addressComponents: [
+          part("Welhengoda Road", "Welhengoda Rd", "route"),
+          part("Ahangama", "Ahangama", "locality"),
+          part("Sri Lanka", "LK", "country"),
+        ],
       };
     });
     await page.goto("/settings/location");
@@ -669,6 +679,7 @@ for (const width of [1440, 390]) {
       page.getByText("Pick an address, click the map or type coordinates to place the pin."),
     ).toBeVisible();
     await expect(coordinates).not.toContainText("48.1394");
+    await expect(page.getByLabel("City / region")).toHaveValue("Ahangama");
     await form.screenshot({ path: testInfo.outputPath(`vay2344-road-pick-${width}.png`) });
     const cameras = () =>
       page.evaluate(
