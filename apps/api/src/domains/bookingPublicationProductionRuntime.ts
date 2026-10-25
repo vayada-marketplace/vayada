@@ -79,6 +79,9 @@ const LIVE_REFRESH_RETRIED_CONFLICTS = new Set([
   "publication_in_progress",
   "active_content_revision_conflict",
 ]);
+// The request and another refresh's projection can deadlock on the hotel's rows; Postgres
+// rolls one back whole, so asking again is safe (deadlock_detected, serialization_failure).
+const LIVE_REFRESH_RETRIED_SQLSTATES = new Set(["40P01", "40001"]);
 
 export function createBookingPublicationRefresh(
   dependencies: BookingPublicationRefreshDependencies,
@@ -86,6 +89,7 @@ export function createBookingPublicationRefresh(
 ): BookingPublicationRefreshPort["refresh"] {
   return async ({ onlyIfLive, ...input }) => {
     for (let attempt = 0; ; attempt += 1) {
+      const delay = LIVE_REFRESH_RETRY_DELAYS_MS[attempt];
       const active = await dependencies.projection.getActive(input.propertyId);
       // A save never makes the page public; only "Publish booking page" does (VAY-2129).
       if (onlyIfLive && !active) return null;
@@ -99,7 +103,6 @@ export function createBookingPublicationRefresh(
         readiness.status !== "ready"
       ) {
         // A read that failed (retryable by contract) may meet the other publication's locks.
-        const delay = LIVE_REFRESH_RETRY_DELAYS_MS[attempt];
         if (onlyIfLive && delay !== undefined && readiness.outcome === "provider_failure") {
           await wait(delay);
           continue;
@@ -108,14 +111,26 @@ export function createBookingPublicationRefresh(
           `Booking publication readiness is incomplete. (${readinessSummary(readiness)})`,
         );
       }
-      const requested = await dependencies.repository.requestPublication({
-        ...input,
-        idempotencyKey: attempt ? `${input.idempotencyKey}:retry-${attempt}` : input.idempotencyKey,
-        expectedActiveContentRevisionId: active?.revisionId ?? null,
-        readiness: readiness as ReadyBookingPublicationEvidence,
-      });
+      let requested: Awaited<
+        ReturnType<BookingPublicationRefreshDependencies["repository"]["requestPublication"]>
+      >;
+      try {
+        requested = await dependencies.repository.requestPublication({
+          ...input,
+          idempotencyKey: attempt
+            ? `${input.idempotencyKey}:retry-${attempt}`
+            : input.idempotencyKey,
+          expectedActiveContentRevisionId: active?.revisionId ?? null,
+          readiness: readiness as ReadyBookingPublicationEvidence,
+        });
+      } catch (error) {
+        const code = (error as { code?: unknown } | null)?.code;
+        if (!onlyIfLive || delay === undefined || !LIVE_REFRESH_RETRIED_SQLSTATES.has(String(code)))
+          throw error;
+        await wait(delay);
+        continue;
+      }
       if (!requested.ok) {
-        const delay = LIVE_REFRESH_RETRY_DELAYS_MS[attempt];
         if (
           !onlyIfLive ||
           delay === undefined ||

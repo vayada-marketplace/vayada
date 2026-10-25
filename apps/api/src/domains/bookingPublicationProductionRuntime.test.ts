@@ -306,6 +306,48 @@ describe("Booking publication refresh", () => {
       "Booking publication readiness is incomplete. (provider_failure: system/owner_read_failed)",
     );
   });
+
+  it("asks again after a deadlock with another refresh, only for a live page (VAY-2344)", async () => {
+    const propertyId = "22222222-2222-4222-8222-222222222222";
+    const done = { operationId: "33333333-3333-4333-8333-333333333333", status: "succeeded" };
+    const deadlock = Object.assign(new Error("deadlock detected"), { code: "40P01" });
+    const requestPublication = vi
+      .fn()
+      .mockRejectedValueOnce(deadlock)
+      .mockResolvedValue({ ok: true, operation: done });
+    const wait = vi.fn(async (_ms: number) => undefined);
+    const refresh = createBookingPublicationRefresh(
+      {
+        readinessProvider: {
+          getBookingReadiness: vi.fn().mockResolvedValue(await readyEvidence(propertyId)),
+        },
+        projection: {
+          getActive: vi
+            .fn()
+            .mockResolvedValue({ revisionId: "44444444-4444-4444-8444-444444444444" }),
+        },
+        repository: { requestPublication, getPublicationStatus: vi.fn().mockResolvedValue(done) },
+        projector: { projectPending: vi.fn().mockResolvedValue({}) },
+      },
+      wait,
+    );
+    const input = {
+      organizationId: "11111111-1111-4111-8111-111111111111",
+      propertyId,
+      actorUserId: "44444444-4444-4444-8444-444444444444",
+      idempotencyKey: "req-save",
+      audit: { requestId: "req-save", source: "hotel_setup" },
+    };
+
+    await expect(refresh({ ...input, onlyIfLive: true })).resolves.toEqual(done);
+    expect(wait.mock.calls).toEqual([[1_000]]);
+    expect(requestPublication.mock.calls.map(([command]) => command.idempotencyKey)).toEqual([
+      "req-save",
+      "req-save:retry-1",
+    ]);
+    requestPublication.mockRejectedValueOnce(deadlock);
+    await expect(refresh(input)).rejects.toBe(deadlock);
+  });
 });
 
 async function readyEvidence(propertyId: string): Promise<ReadyBookingPublicationEvidence> {
