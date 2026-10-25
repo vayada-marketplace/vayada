@@ -64,7 +64,7 @@ it("words each kind of cancellation for the guest (VAY-2195)", () => {
   } as unknown as Room;
   // Most notice first, as on the payment terms (VAY-2100); a step already passed isn't offered.
   expect(rateTerms(partial, { checkIn: "2026-12-10", today: "2026-10-25" })[1]).toBe(
-    "Cancellation: 100% back if you cancel by the end of Tue, 10 Nov 2026; 50% back if you cancel by the end of Thu, 3 Dec 2026, local hotel time. After that, or if you don’t arrive, we keep the full amount.",
+    "Cancellation: 100% back if you cancel by the end of Tue, 10 Nov 2026; 50% back if you cancel from Wed, 11 Nov 2026 to the end of Thu, 3 Dec 2026, local hotel time. After that, or if you don’t arrive, we keep the full amount.",
   );
   expect(rateTerms(partial, stay)[1]).toBe(
     "Cancellation: 50% back if you cancel by the end of Tue, 3 Nov 2026, local hotel time. After that, or if you don’t arrive, we keep the full amount.",

@@ -124,8 +124,8 @@ it("shows partial-refund steps alone, most notice first, without a free-cancella
   expect(room).toContain("Cancellation type: Partial refund.");
   expect(Array.from(document.querySelectorAll("li")).map((li) => li.textContent)).toEqual([
     "75% refund if you cancel by the end of Sat, 2 Jan 2027 (at least 30 days before check-in).",
-    "50% refund if you cancel by the end of Mon, 18 Jan 2027 (at least 14 days before check-in).",
-    "0% refund if you cancel by the end of Mon, 25 Jan 2027 (at least 7 days before check-in).",
+    "50% refund if you cancel from Sun, 3 Jan 2027 to the end of Mon, 18 Jan 2027 (at least 14 days before check-in).",
+    "No refund if you cancel from Tue, 19 Jan 2027 to the end of Mon, 25 Jan 2027 (at least 7 days before check-in).",
   ]);
   expect(room).toContain("No refund after Mon, 25 Jan 2027 (less than 7 days before check-in).");
   expect(room).toContain("No-show penalty: full booking amount.");
@@ -143,7 +143,7 @@ it("adds no less-notice line when a step starts at check-in", () => {
   });
   render({ quote: partial });
   expect(document.body.textContent).toContain(
-    "20% refund if you cancel by the end of Mon, 1 Feb 2027 (at least 0 days before check-in).",
+    "20% refund if you cancel by the end of Mon, 1 Feb 2027 (up to the arrival day).",
   );
   expect(document.body.textContent).not.toContain("No refund after");
 });
@@ -166,7 +166,7 @@ it("says a deadline that has passed for this stay has passed (VAY-2347)", () => 
   render({ quote: partial, today: "2027-01-20" });
   expect(Array.from(document.querySelectorAll("li")).map((li) => li.textContent)).toEqual([
     "75% refund until the end of Sat, 2 Jan 2027 (at least 30 days before check-in): this date has passed.",
-    "50% refund if you cancel by the end of Mon, 25 Jan 2027 (at least 7 days before check-in).",
+    "50% refund if you cancel from Sun, 3 Jan 2027 to the end of Mon, 25 Jan 2027 (at least 7 days before check-in).",
   ]);
 });
 

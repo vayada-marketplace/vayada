@@ -111,10 +111,11 @@ it("aborts superseded reads and ignores a late result", async () => {
   expect(document.body.textContent).toContain("Loading guest rules");
   await render("other");
   expect(firstSignal.aborted).toBe(true);
-  await act(async () => resolve({ ...disclosure, propertyTimeZone: "Asia/Tokyo" }));
-  expect(document.body.textContent).toContain("Central European Time");
-  expect(document.body.textContent).not.toContain("Japan");
-  expect(document.body.textContent).not.toContain("Asia/Tokyo");
+  await act(async () =>
+    resolve({ ...disclosure, choices: { ...disclosure.choices, checkInTime: "09:30" } }),
+  );
+  expect(document.body.textContent).toContain("Check-in from 15:00");
+  expect(document.body.textContent).not.toContain("09:30");
 });
 it("fails closed on fetch failure and retries without prior agreement", async () => {
   vi.mocked(getQuoteGuestDisclosure).mockRejectedValueOnce(new Error("private diagnostic"));

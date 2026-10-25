@@ -221,8 +221,8 @@ function FreeDeadline({ days, stay }: { days: number; stay: TermsStay }) {
   );
 }
 
-/** Most notice first, each with its last day; with less notice than the last step, nothing is
- * refunded. */
+/** Most notice first, each with the days it covers; with less notice than the last step, nothing
+ * is refunded. */
 function PartialRefundSteps({
   tiers,
   stay,
@@ -238,8 +238,7 @@ function PartialRefundSteps({
         {steps.map((step) => (
           <li key={step.minDaysBeforeCheckIn}>
             {(step.passed ? checkoutCopy.refundStepPassed : checkoutCopy.refundStep)(
-              step.refundPercent,
-              step.until,
+              step,
               step.minDaysBeforeCheckIn,
             )}
           </li>

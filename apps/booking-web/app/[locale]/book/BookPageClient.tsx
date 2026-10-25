@@ -48,7 +48,7 @@ import ApproximateAmountsNote from "@/components/booking/ApproximateAmountsNote"
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useHotel, useSlug } from "@/contexts/HotelContext";
 import { choiceKeys, choiceText, hotelToday } from "@/lib/roomChoices";
-import { cancellationLine, hotelCountryName } from "@/lib/checkoutTerms";
+import { cancellationSummary, hotelCountryName } from "@/lib/checkoutTerms";
 import {
   bookEntry,
   bookStepQuery,
@@ -620,12 +620,19 @@ function RoomQuoteForm({ slug }: { slug: string }) {
       if (params.get(name)) home.set(name, params.get(name)!);
     router.push(`/?${home}`);
   };
+  // VAY-2347: deadlines are worded on the hotel's calendar day by the server's clock, never in the
+  // guest's device's zone; the price's guest rules name the zone the server books in.
+  const hotelZone = guestRulesQuote.disclosure?.propertyTimeZone ?? (hotel?.timezone || "Etc/UTC");
+  const hotelNow = new Date(serverNow());
+  const hotelDate = hotelToday(hotelZone, hotelNow);
+  const hotelCountry = hotelCountryName(hotel?.country);
   const choiceName = (room: PricingRoom, publicOfferKey: string) => {
     const index = room.offers.findIndex((offer) => offer.publicOfferKey === publicOfferKey);
     return choiceText(
       choiceKeys(room.offers)[index]!,
-      { checkIn, timezone: hotel?.timezone, formatDate: (date) => date },
+      { checkIn, timezone: hotelZone, formatDate: (date) => date },
       t,
+      hotelNow,
     ).name;
   };
   const nights = Math.round((Date.parse(checkOut) - Date.parse(checkIn)) / 86_400_000);
@@ -678,9 +685,6 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   ]
     .filter(Boolean)
     .join(" · ");
-  // VAY-2347: deadlines are worded against the hotel's date today, on the server's clock.
-  const hotelDate = hotelToday(hotel?.timezone, new Date(serverNow()));
-  const hotelCountry = hotelCountryName(hotel?.country);
   // VAY-2195: a made booking opens its confirmation page, as on the old pages. The page shows
   // what the server has for it; the room and extras names come from this booking.
   const openConfirmation = async ({
@@ -1022,10 +1026,11 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                                   keys[offerIndex]!,
                                   {
                                     checkIn,
-                                    timezone: hotel?.timezone,
+                                    timezone: hotelZone,
                                     formatDate: (date) => date,
                                   },
                                   t,
+                                  hotelNow,
                                 ).name
                               }
                             </option>
@@ -1450,16 +1455,13 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                 }
                 cancellation={
                   quote
-                    ? Array.from(
-                        new Set(
-                          quote.rooms.map((room) =>
-                            cancellationLine(room.cancellation, {
-                              checkIn: quote.checkIn,
-                              today: hotelDate,
-                            }).replace(/^Cancellation: /, ""),
-                          ),
-                        ),
-                      ).map((line) => line.charAt(0).toUpperCase() + line.slice(1))
+                    ? cancellationSummary(
+                        quote.rooms.map((room, index) => ({
+                          name: roomNames[room.selectionId] || `Room ${index + 1}`,
+                          cancellation: room.cancellation,
+                        })),
+                        { checkIn: quote.checkIn, today: hotelDate },
+                      )
                     : []
                 }
                 confirm={

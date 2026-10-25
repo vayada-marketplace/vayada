@@ -7,7 +7,14 @@ const offerKey = `pricing-offer.v2:${"d".repeat(64)}`;
 // The seeded hotel's time zone: the deadline is the hotel's calendar day.
 const HOTEL_TIME_ZONE = "Europe/Zurich";
 
-/** The hotel's date `offset` days from today (YYYY-MM-DD). */
+/** `date` moved by `offset` days (YYYY-MM-DD). */
+function shift(date: string, offset: number): string {
+  const day = new Date(`${date}T00:00:00Z`);
+  day.setUTCDate(day.getUTCDate() + offset);
+  return day.toISOString().slice(0, 10);
+}
+/** The hotel's date `offset` days from today. Each test reads it once, so a run across the hotel's
+ * midnight still expects dates that belong together. */
 function hotelDay(offset: number): string {
   const today = new Intl.DateTimeFormat("en-CA", {
     timeZone: HOTEL_TIME_ZONE,
@@ -15,9 +22,7 @@ function hotelDay(offset: number): string {
     month: "2-digit",
     day: "2-digit",
   }).format(new Date());
-  const day = new Date(`${today}T00:00:00Z`);
-  day.setUTCDate(day.getUTCDate() + offset);
-  return day.toISOString().slice(0, 10);
+  return shift(today, offset);
 }
 /** "Fri, 23 Oct 2026", as the checkout words a date. */
 const shown = (date: string) =>
@@ -37,8 +42,10 @@ for (const width of [1440, 390]) {
     page,
   }, testInfo) => {
     await page.setViewportSize({ width, height: 900 });
-    await openDetails(page, { checkIn: hotelDay(1), checkOut: hotelDay(2), freeDays: 3 });
-    const ended = `ree cancellation ended on ${shown(hotelDay(-2))}`;
+    const checkIn = hotelDay(1);
+    await openDetails(page, { checkIn, checkOut: shift(checkIn, 1), freeDays: 3 });
+    const deadline = shown(shift(checkIn, -3));
+    const ended = `ree cancellation ended on ${deadline}`;
 
     const rateTerms = page.getByRole("region", { name: "Room and rate terms" });
     await expect(rateTerms).toBeVisible();
@@ -63,7 +70,7 @@ for (const width of [1440, 390]) {
     await expect
       .soft(page.getByRole("region", { name: "Room 1 terms" }))
       .toContainText(
-        `Free cancellation deadline: ${shown(hotelDay(-2))} (3 days before arrival). It has passed`,
+        `Free cancellation deadline: ${deadline} (3 days before arrival). It has passed`,
       );
     await expect
       .soft(page.getByRole("region", { name: "Guest rules" }))
@@ -72,8 +79,9 @@ for (const width of [1440, 390]) {
 }
 
 test("words a deadline still ahead as the hotel's date", async ({ page }) => {
-  await openDetails(page, { checkIn: hotelDay(20), checkOut: hotelDay(21), freeDays: 3 });
-  const until = shown(hotelDay(17));
+  const checkIn = hotelDay(20);
+  await openDetails(page, { checkIn, checkOut: shift(checkIn, 1), freeDays: 3 });
+  const until = shown(shift(checkIn, -3));
   await expect(page.getByRole("region", { name: "Room and rate terms" })).toContainText(
     `Cancellation: free until the end of ${until}, local hotel time.`,
   );
