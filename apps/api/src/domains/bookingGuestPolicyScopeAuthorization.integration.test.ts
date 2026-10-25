@@ -69,6 +69,39 @@ describe.skipIf(!TEST_DATABASE_URL)("Booking guest-policy PostgreSQL scope autho
     await client.end();
   });
 
+  it("checks a custom-role member's team-role and override like the route (VAY-2335)", async () => {
+    const manage = input();
+    const read = { ...input(), permission: "booking.settings.read" as const };
+    // "Create role" roles sit on hotel_custom, which has no booking grant rows.
+    const role = await client.query<{ id: string }>(
+      `INSERT INTO identity.organization_roles
+         (organization_id, name, security_class, base_role_key, default_permissions)
+       VALUES ($1::uuid, 'Guest rules editor', 'staff', 'hotel_custom', $2::jsonb)
+       RETURNING id`,
+      [organizationId, JSON.stringify(["booking.settings.read", "booking.settings.manage"])],
+    );
+    await setMember("hotel_custom", role.rows[0]!.id, null);
+    await expect(authorization.authorizeGuestPolicyScope(manage)).resolves.toBe(true);
+
+    await client.query(
+      `UPDATE identity.organization_roles SET default_permissions = '["booking.settings.read"]'
+       WHERE id = $1::uuid`,
+      [role.rows[0]!.id],
+    );
+    await expect(authorization.authorizeGuestPolicyScope(read)).resolves.toBe(true);
+    await expect(authorization.authorizeGuestPolicyScope(manage)).resolves.toBe(false);
+
+    await setMember("hotel_custom", null, {
+      grant: ["booking.settings.read", "booking.settings.manage"],
+      deny: [],
+    });
+    await expect(authorization.authorizeGuestPolicyScope(manage)).resolves.toBe(true);
+    await setMember("hotel_custom", null, null);
+    await expect(authorization.authorizeGuestPolicyScope(read)).resolves.toBe(false);
+
+    await setMember(roleKey, null, null);
+  });
+
   it("authorizes the exact active tenant boundary and fails closed after revocation", async () => {
     await expect(authorization.authorizeGuestPolicyScope(input())).resolves.toBe(true);
 
@@ -96,6 +129,25 @@ describe.skipIf(!TEST_DATABASE_URL)("Booking guest-policy PostgreSQL scope autho
     );
     await expect(authorization.authorizeGuestPolicyScope(input())).resolves.toBe(false);
   });
+
+  async function setMember(
+    memberRoleKey: string,
+    roleDefinitionId: string | null,
+    overrides: unknown,
+  ): Promise<void> {
+    await client.query(
+      `UPDATE identity.organization_memberships
+       SET role_key = $3, role_definition_id = $4::uuid, permission_overrides = $5::jsonb
+       WHERE organization_id = $1::uuid AND user_id = $2::uuid`,
+      [
+        organizationId,
+        actorUserId,
+        memberRoleKey,
+        roleDefinitionId,
+        overrides === null ? null : JSON.stringify(overrides),
+      ],
+    );
+  }
 });
 
 function input() {

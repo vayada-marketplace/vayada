@@ -100,6 +100,18 @@ describe.skipIf(!url)("replacement pricing live identity authorization", () => {
       VALUES($1,'pms','property-management','suspended','pms','pms_property',$2)`, [scope.organizationId, scope.propertyId]);
     expect(await lockReplacementPricingAuthorization(client, context, scope, "manage")).toBe(false);
   }));
+  it("resolves a custom-role member's team-role like the route (VAY-2335)", async () => fixture(async (client, context, scope) => {
+    // "Create role" roles sit on hotel_custom, which has no pricing grant rows.
+    const role = await client.query<{ id: string }>(`INSERT INTO identity.organization_roles(organization_id,name,security_class,base_role_key,default_permissions)
+      VALUES($1,'Rates editor','staff','hotel_custom',$2::jsonb) RETURNING id`,
+    [scope.organizationId, JSON.stringify(["pms.room_status.read", "pms.rooms_rates.read", "pms.rooms_rates.manage"])]);
+    await client.query("UPDATE identity.organization_memberships SET role_key='hotel_custom',role_definition_id=$2 WHERE id=$1", [context.membership.membershipId, role.rows[0]!.id]);
+    const custom = { ...context, membership: { ...context.membership, roleKey: "hotel_custom" } };
+    expect(await lockReplacementPricingAuthorization(client, custom, scope, "manage")).toBe(true);
+    await client.query(`UPDATE identity.organization_roles SET default_permissions='["pms.room_status.read","pms.rooms_rates.read"]' WHERE id=$1`, [role.rows[0]!.id]);
+    expect(await lockReplacementPricingAuthorization(client, custom, scope, "read")).toBe(true);
+    expect(await lockReplacementPricingAuthorization(client, custom, scope, "manage")).toBe(false);
+  }));
   it("holds live authorization locks until transaction end", async () => fixture(async (client, context, scope) => {
     await client.query(`INSERT INTO identity.product_entitlements(organization_id,product,entitlement_key,status)
       VALUES($1,'booking','test-unrelated','suspended')`, [scope.organizationId]);
