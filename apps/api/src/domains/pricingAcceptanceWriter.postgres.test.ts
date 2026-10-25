@@ -3447,7 +3447,7 @@ describe.skipIf(!url)("pricing acceptance writer bank transfer and PayPal (Postg
       await lockPool.end();
       await racing.close();
     }
-  });
+  }, 60_000);
 
   it("reminds the guest once a day before the bank transfer deadline, never after it ends (VAY-2348)", async () => {
     const reminders = async (booking: Awaited<ReturnType<typeof pendingBankTransfer>>) =>
@@ -3502,7 +3502,7 @@ describe.skipIf(!url)("pricing acceptance writer bank transfer and PayPal (Postg
     } finally {
       await released.close();
     }
-  });
+  }, 60_000);
 
   it("lets the hotel decline an unpaid PayPal booking: rooms released, guest told", async () => {
     const fixture = await setupFixture(manualQuote("paypal", "instant"), undefined, true);

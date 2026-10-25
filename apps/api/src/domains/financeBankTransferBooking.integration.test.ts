@@ -117,7 +117,11 @@ it.skipIf(!url)(
         ),
       ).toEqual({ processed: 1, failed: 0 });
       expect(send.mock.calls[0]?.[0]).toMatchObject({ text: expect.stringContaining(secret) });
-      // VAY-2348: the payment reminder carries the bank details too.
+      // VAY-2348: the payment reminder carries the bank details too, while the booking is unpaid.
+      await pool.query(
+        "UPDATE booking.guest_bookings SET payment_status='unpaid',balance_amount=100 WHERE id=$1",
+        [bookingId],
+      );
       await enqueueBookingLifecycleEmailJob(pool, {
         kind: "payment_reminder",
         occurredAt: new Date().toISOString(),
