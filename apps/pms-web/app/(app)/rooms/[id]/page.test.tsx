@@ -1,4 +1,4 @@
-import { createElement, useEffect } from "react";
+import { createElement, Fragment, useEffect, type ReactNode } from "react";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import EditRoomPage from "./page";
@@ -29,7 +29,8 @@ vi.mock("@/services/rooms", () => ({
 vi.mock("@/components/rooms/RoomTypeForm", () => ({
   default: (props: Record<string, unknown>) => {
     mocks.form = props;
-    return null;
+    // The form draws the page's messages under its tab bar (VAY-2337).
+    return createElement(Fragment, null, props.notices as ReactNode);
   },
 }));
 vi.mock("@/components/pricing/RoomPricesTab", () => ({

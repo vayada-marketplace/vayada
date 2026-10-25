@@ -74,6 +74,21 @@ it("lets the page own the tab: the Prices tab hides this form's save and leaves 
   expect(JSON.stringify(view.toJSON())).toContain("rooms.form.roomTypeBasics");
 });
 
+it("puts every message under the tab bar, so switching tabs never moves the tabs (VAY-2337)", async () => {
+  await mount({
+    tab: "details",
+    onTabChange: () => undefined,
+    error: "Save failed",
+    success: "Saved",
+    notices: createElement("p", null, "Page notice"),
+  });
+  const text = JSON.stringify(view.toJSON());
+  const tabBar = text.indexOf("rooms.form.tabDetails");
+  for (const message of ["Save failed", "Saved", "Page notice"])
+    expect(text.indexOf(message)).toBeGreaterThan(tabBar);
+  expect(text.indexOf("Page notice")).toBeLessThan(text.indexOf("rooms.form.roomTypeBasics"));
+});
+
 it("shows the page's note beside the buttons and its text while saving (VAY-2147)", async () => {
   await mount({
     mode: "create",

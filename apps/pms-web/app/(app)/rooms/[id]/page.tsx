@@ -44,7 +44,7 @@ export default function EditRoomPage({ params }: { params: Promise<{ id: string 
   // What Delete would do, read before the confirmation (VAY-2132).
   const [deleteImpact, setDeleteImpact] = useState<RoomTypeRetirementImpact | null>(null);
   const [checkingDelete, setCheckingDelete] = useState(false);
-  // Shown under the title on every tab: the form's own banner is hidden on the Prices tab.
+  // Shown under the tab bar on every tab: the form's own banner is hidden on the Prices tab.
   const [deleteError, setDeleteError] = useState("");
   const [propertyPlan, setPropertyPlan] = useState<PropertyPlan | null>(null);
   const [pricesNeedPublishing, setPricesNeedPublishing] = useState(false);
@@ -216,19 +216,6 @@ export default function EditRoomPage({ params }: { params: Promise<{ id: string 
         </button>
       </div>
 
-      {deleteError && (
-        <p
-          role="alert"
-          className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-[11px] text-red-700 font-medium"
-        >
-          {deleteError}
-        </p>
-      )}
-
-      {pricesNeedPublishing && (
-        <RoomsPricesStrip {...propertyPrices} staleOnly onSaved={refreshPrices} />
-      )}
-
       <RoomTypeForm
         key={formKey}
         form={form}
@@ -248,6 +235,21 @@ export default function EditRoomPage({ params }: { params: Promise<{ id: string 
           setTab(next);
           if (next === "prices") setPricesOpened(true);
         }}
+        notices={
+          <>
+            {deleteError && (
+              <p
+                role="alert"
+                className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-[11px] text-red-700 font-medium"
+              >
+                {deleteError}
+              </p>
+            )}
+            {pricesNeedPublishing && (
+              <RoomsPricesStrip {...propertyPrices} staleOnly onSaved={refreshPrices} />
+            )}
+          </>
+        }
       />
       {pricesOpened && (
         <div hidden={tab !== "prices"}>

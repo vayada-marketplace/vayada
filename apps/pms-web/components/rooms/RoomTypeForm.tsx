@@ -152,6 +152,8 @@ interface RoomTypeFormProps {
   // remounting the form cannot drop unsaved prices.
   tab?: RoomTab;
   onTabChange?: (tab: RoomTab) => void;
+  /** The page's own messages. Every message sits under the tab bar, so the tabs stay put (VAY-2337). */
+  notices?: React.ReactNode;
 }
 
 function bedsToSummary(beds: { type: string; count: number }[]): string {
@@ -189,6 +191,7 @@ export default function RoomTypeForm({
   propertyPlan,
   tab,
   onTabChange,
+  notices,
 }: RoomTypeFormProps) {
   const { t } = useTranslation();
   const translateRoomOption = (value: string): string => {
@@ -263,17 +266,6 @@ export default function RoomTypeForm({
 
   return (
     <form onSubmit={onSubmit}>
-      {error && activeTab !== "prices" && (
-        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-[11px] text-red-700 font-medium">
-          {error}
-        </div>
-      )}
-      {success && activeTab !== "prices" && (
-        <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg text-[11px] text-green-700 font-medium">
-          {success}
-        </div>
-      )}
-
       {/* Tabs */}
       <div className="relative border-b border-gray-200 mb-5 md:mb-6">
         <div className="flex gap-5 md:gap-6 overflow-x-auto scrollbar-hide -mx-4 px-4 md:mx-0 md:px-0">
@@ -295,6 +287,18 @@ export default function RoomTypeForm({
         </div>
         <div className="absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-l from-gray-50 to-transparent pointer-events-none lg:hidden" />
       </div>
+
+      {error && activeTab !== "prices" && (
+        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-[11px] text-red-700 font-medium">
+          {error}
+        </div>
+      )}
+      {success && activeTab !== "prices" && (
+        <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg text-[11px] text-green-700 font-medium">
+          {success}
+        </div>
+      )}
+      {notices}
 
       {/* Tab 1: Room Details */}
       {activeTab === "details" && (

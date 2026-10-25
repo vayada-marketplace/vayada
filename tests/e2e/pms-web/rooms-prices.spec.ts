@@ -1,5 +1,6 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 import { watchPageHealth } from "../support/pageHealth";
+import { roomTabBarOffset } from "../support/roomTabBar";
 import {
   PMS_WEB_PROPERTY_ID,
   mockPmsWebAuthenticatedSession,
@@ -284,6 +285,11 @@ test("prices a room in its Prices tab and publishes the other rooms unchanged", 
   // VAY-2188: the first price is the simple card; the property's currency is fixed, so no currency field.
   await expect(main(page).getByText("Lake Loft has no price yet", { exact: false })).toBeVisible();
   await expect(main(page).getByLabel("Currency code (for example EUR)")).toHaveCount(0);
+  // The warning sits under the tab bar, as Room Details' messages do: switching tabs never moves the tabs (VAY-2337).
+  const tabBar = await roomTabBarOffset(page);
+  await main(page).getByRole("button", { name: "Room Details", exact: true }).click();
+  await expect(main(page).getByText("Lake Loft has no price yet", { exact: false })).toBeHidden();
+  expect(await roomTabBarOffset(page)).toBe(tabBar);
   await assertHealthy();
 });
 
