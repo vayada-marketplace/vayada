@@ -901,11 +901,6 @@ export default function BookingConfirmationPageClient({
                             {booking.mealDescription}
                           </span>
                         )}
-                        {booking.unitNames && booking.unitNames.length > 0 && (
-                          <span className="text-sm text-gray-600 sm:text-[15px]">
-                            {booking.unitNames.join(", ")}
-                          </span>
-                        )}
                       </div>
                       <div className="flex flex-col gap-1 sm:w-44 sm:shrink-0">
                         <span className={labelClass}>{t("guests")}</span>

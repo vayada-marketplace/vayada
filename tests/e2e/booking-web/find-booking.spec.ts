@@ -71,7 +71,8 @@ test("finds a booking from the shared footer on mobile", async ({ page }) => {
   );
   await expect(page.getByRole("heading", { name: "You're all set, Ada." })).toBeVisible();
   await expect(page.getByText("2× Alpine Suite")).toBeVisible();
-  await expect(page.getByText("Suite 204, Suite 205")).toBeVisible();
+  // VAY-2361: guests see the room type, never the room the hotel assigned (it can still change).
+  await expect(page.getByText("Suite 204, Suite 205")).toHaveCount(0);
   // Stay dates read as days, not as raw YYYY-MM-DD.
   await expect(page.getByText(/^Sat, 12 Sept? 2026$/)).toBeVisible();
   await expect(page.getByText(/^Tue, 15 Sept? 2026$/)).toBeVisible();
