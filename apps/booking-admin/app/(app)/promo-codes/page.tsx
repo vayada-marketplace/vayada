@@ -21,6 +21,7 @@ import {
 import { apiClient } from "@/services/api/client";
 import { settingsService } from "@/services/settings";
 import { PageLayout } from "@/components/layout/PageLayout";
+import { useNotificationLink } from "@/lib/notificationLinks";
 
 type RoomTypesResponse = {
   items: PromoRoomType[];
@@ -51,6 +52,9 @@ export default function PromoCodesPage() {
   const [propertyTimeZone, setPropertyTimeZone] = useState("Etc/UTC");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // "Extend" / "Raise limit" from the notifications bell open that promo code (VAY-2349).
+  const [openPromoCodeId, setOpenPromoCodeId] = useState<string | null>(null);
+  useNotificationLink({ path: "/promo-codes", param: "edit" }, setOpenPromoCodeId);
 
   const load = useCallback(async () => {
     const selectedHotelId = getSelectedBookingHotelId();
@@ -169,6 +173,11 @@ export default function PromoCodesPage() {
         onUpdatePromoCode={updatePromo}
         onDeletePromoCode={deletePromo}
         onTogglePromoCode={togglePromo}
+        openPromoCodeId={openPromoCodeId}
+        onPromoCodeOpened={() => {
+          setOpenPromoCodeId(null);
+          window.history.replaceState(null, "", "/promo-codes");
+        }}
       />
       {hotelId && (
         <Promotions hotelId={hotelId} roomTypes={roomTypes} propertyCurrency={propertyCurrency} />

@@ -645,6 +645,21 @@ export async function mockBookingAdminShellRoutes(
       },
     }),
   );
+  // The header's notifications bell (VAY-2349): nothing yet. Specs that need a feed route their own.
+  await page.route(/\/api\/booking\/properties\/[^/]+\/notifications(\/read(-all)?)?$/, (route) =>
+    route.request().method() === "GET"
+      ? route.fulfill({
+          json: {
+            generatedAt: new Date().toISOString(),
+            timeZone: "Europe/Berlin",
+            items: [],
+            syncAlert: null,
+            unread: { all: 0, bookings: 0, needsAction: 0, updates: 0 },
+            badge: "none",
+          },
+        })
+      : route.fulfill({ status: 204 }),
+  );
   await page.route("**/api/booking/properties/*/dashboard/bookings-by-source**", (route) =>
     route.fulfill({
       json: {

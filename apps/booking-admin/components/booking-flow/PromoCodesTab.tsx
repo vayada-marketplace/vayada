@@ -1,7 +1,7 @@
 "use client";
 import { useTranslation } from "@/lib/i18n";
 
-import { useCallback, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import {
   AdjustmentsHorizontalIcon,
   ChevronDownIcon,
@@ -43,6 +43,9 @@ interface PromoCodesTabProps {
   onUpdatePromoCode: (promoCodeId: string, values: PromoCodeFormValues) => Promise<void>;
   onDeletePromoCode: (promoCodeId: string) => Promise<void>;
   onTogglePromoCode: (promoCode: BookingPromoCode) => Promise<void>;
+  /** A promo code to open in the editor, from the notifications bell's "Extend" or "Raise limit" (VAY-2349). */
+  openPromoCodeId?: string | null;
+  onPromoCodeOpened?: () => void;
 }
 
 function emptyDraft(): PromoCodeFormValues {
@@ -125,6 +128,8 @@ export default function PromoCodesTab({
   onUpdatePromoCode,
   onDeletePromoCode,
   onTogglePromoCode,
+  openPromoCodeId = null,
+  onPromoCodeOpened,
 }: PromoCodesTabProps) {
   const { t, locale } = useTranslation();
   function dateLabel(value: string | null): string {
@@ -187,6 +192,15 @@ export default function PromoCodesTab({
     setErrorField(null);
     setIsEditorOpen(true);
   };
+
+  useEffect(() => {
+    if (!openPromoCodeId) return;
+    const promo = promoCodes.find((item) => item.promoCodeId === openPromoCodeId);
+    if (promo) openEditor(promo);
+    onPromoCodeOpened?.();
+    // Opens once per link; the editor's own state takes over from there.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openPromoCodeId]);
 
   const closeEditor = useCallback(() => {
     if (savingPromo) return;

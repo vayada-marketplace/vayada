@@ -5,18 +5,15 @@ import { apiClient } from "@/services/api/client";
 
 import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import {
-  BellIcon,
-  ChevronDownIcon,
-  ArrowTopRightOnSquareIcon,
-  PlusIcon,
-} from "@heroicons/react/24/outline";
+import { ChevronDownIcon, ArrowTopRightOnSquareIcon, PlusIcon } from "@heroicons/react/24/outline";
 import { authService } from "@/services/auth";
 import { settingsService, HotelSummary, SuperAdminHotel } from "@/services/settings";
 import { useTranslation, SUPPORTED_LANGUAGES } from "@/lib/i18n";
 import { CURRENCY_OPTIONS } from "@/lib/constants/options";
 import NavigationSearch from "./NavigationSearch";
 import DailyStatsStrip from "./DailyStatsStrip";
+import NotificationsBell from "./notifications/NotificationsBell";
+import { useHostNotifications } from "./notifications/useHostNotifications";
 import ManagePropertiesModal from "./ManagePropertiesModal";
 import { buildBookingPreviewUrl } from "@/lib/utils/bookingPreviewUrl";
 import { SELECTED_HOTEL_CHANGED_EVENT } from "@/services/api/bookingHotelScope";
@@ -36,7 +33,6 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
   const [hotels, setHotels] = useState<(HotelSummary | SuperAdminHotel)[]>([]);
   const [selectedHotel, setSelectedHotel] = useState<(HotelSummary | SuperAdminHotel) | null>(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
-  const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [langOpen, setLangOpen] = useState(false);
   const [currencyOpen, setCurrencyOpen] = useState(false);
@@ -48,7 +44,6 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
   const [userEmail, setUserEmail] = useState("");
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
-  const notificationsRef = useRef<HTMLDivElement>(null);
   const profileRef = useRef<HTMLDivElement>(null);
   const supportDialog = useRef<SupportDialogHandle>(null);
   const profileButtonRef = useRef<HTMLButtonElement>(null);
@@ -57,9 +52,6 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
     function handleClickOutside(e: MouseEvent) {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
         setDropdownOpen(false);
-      }
-      if (notificationsRef.current && !notificationsRef.current.contains(e.target as Node)) {
-        setNotificationsOpen(false);
       }
       if (profileRef.current && !profileRef.current.contains(e.target as Node)) {
         setProfileOpen(false);
@@ -101,6 +93,10 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
       })
       .catch(() => {});
   }, []);
+
+  // The bell's feed for the selected property (VAY-2349), by its canonical property id.
+  const propertyId = selectedHotel?.propertyId ?? selectedHotel?.id;
+  const notifications = useHostNotifications(propertyId);
 
   const handleCurrencyChange = async (code: string) => {
     if (code === currency || savingCurrency) return;
@@ -286,29 +282,12 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
           </div>
         )}
 
-        {/* Notification Bell + Dropdown */}
-        <div className="relative" ref={notificationsRef}>
-          <button
-            onClick={() => setNotificationsOpen(!notificationsOpen)}
-            className="relative p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-50 rounded-md transition-colors"
-          >
-            <BellIcon className="w-4 h-4" />
-          </button>
-
-          {notificationsOpen && (
-            <div className="absolute top-full right-0 mt-1.5 w-72 bg-white border border-gray-200 rounded-lg shadow-lg z-50">
-              <div className="px-4 py-3">
-                <h3 className="text-[13px] font-semibold text-gray-900">
-                  {t("layout.header.notifications")}
-                </h3>
-              </div>
-              <div className="px-4 py-6 text-center">
-                <BellIcon className="w-8 h-8 text-gray-300 mx-auto mb-2" />
-                <p className="text-[13px] text-gray-500">{t("layout.header.noNotifications")}</p>
-              </div>
-            </div>
-          )}
-        </div>
+        {/* Notifications bell and panel (VAY-2349) */}
+        <NotificationsBell
+          hotelId={propertyId}
+          hotelName={selectedHotel?.name ?? ""}
+          notifications={notifications}
+        />
 
         {/* Profile Avatar + Dropdown */}
         <div className="relative" ref={profileRef}>
