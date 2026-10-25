@@ -19,7 +19,6 @@ export const HOST_NOTIFICATION_SYNC_GRACE_MINUTES = 15;
 /** Promo codes ending within this many days (property calendar) show as "expires soon". */
 export const HOST_NOTIFICATION_PROMO_ENDING_DAYS = 7;
 
-const BOOKING_EVENT_LIMIT = 500;
 const KEY_PATTERN = /^[a-z][a-z-]*:[A-Za-z0-9:._-]{1,200}$/;
 
 export type HostNotificationKind =
@@ -107,7 +106,8 @@ export type HostNotificationFeed = {
   items: HostNotification[];
   syncAlert: HostNotificationSyncAlert | null;
   unread: HostNotificationUnread;
-  /** Red while a missed payment or a sync failure is unread, blue for other unread, none otherwise. */
+  /** Red while the channel sync is failing (read or not) or a missed payment is unread, blue for other
+   * unread, none otherwise. */
   badge: "none" | "blue" | "red";
 };
 
@@ -451,7 +451,8 @@ export function buildHostNotificationFeed(
   const items = allNotifications(sources, viewer);
   const alert = syncAlert(sources.syncStatuses, sources, viewer);
   const unread: HostNotificationUnread = { all: 0, bookings: 0, needsAction: 0, updates: 0 };
-  let urgent = alert !== null && !alert.read;
+  // A failing sync keeps the badge red until it is fixed, not just until it is read (VAY-2349).
+  let urgent = alert !== null;
   if (alert && !alert.read) {
     unread.all += 1;
     unread.needsAction += 1;
@@ -511,6 +512,7 @@ WHERE property.id = $1::uuid`;
 // Booking-page bookings only (VAY-2349 D2): PMS-made and channel manager bookings come later (VAY-2351).
 // The person's own changes are left out (D7). Every status event writer also bumps the booking's
 // updated_at, so bookings untouched for 30 days are skipped through the (property_id, updated_at) index.
+// No row cap: the unread counts, the badge and "Mark all read" need every event in the window.
 const BOOKING_EVENTS_SQL = `
 SELECT event.id::text AS "eventId", event.event_type AS "eventType",
   event.actor_type AS "actorType", event.occurred_at AS "occurredAt", event.event_payload AS payload,
@@ -557,8 +559,7 @@ WHERE booking.property_id = $1::uuid
   AND event.event_type = ANY($3::text[])
   AND event.actor_type <> 'migration'
   AND event.actor_user_id IS DISTINCT FROM $4::uuid
-ORDER BY event.occurred_at DESC, event.id
-LIMIT ${BOOKING_EVENT_LIMIT}`;
+ORDER BY event.occurred_at DESC, event.id`;
 
 // The channel manager's availability (ari) or booking sync is failing: its retries ran out, or its
 // scheduled retry is more than the grace period late. A failure being retried on time doesn't show.
