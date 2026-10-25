@@ -31,6 +31,7 @@ vi.mock("@/components/rooms/RoomTypeForm", () => ({
     mocks.form = props;
     return null;
   },
+  RoomTabBar: () => createElement("nav", { "aria-label": "tabs" }),
 }));
 vi.mock("@/components/pricing/RoomPricesTab", () => ({
   RoomPricesTab: (props: Record<string, unknown>) => {

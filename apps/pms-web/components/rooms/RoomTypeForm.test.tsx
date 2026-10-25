@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, expect, it, vi } from "vitest";
-import RoomTypeForm from "./RoomTypeForm";
+import RoomTypeForm, { RoomTabBar } from "./RoomTypeForm";
 
 vi.mock("@/lib/i18n", () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
 vi.mock("next/link", () => ({ default: "a" }));
@@ -46,16 +46,10 @@ it("offers no Prices tab where the page does not own the tab", async () => {
 it("lets the page own the tab: the Prices tab hides this form's save and leaves its content to the page (VAY-2093)", async () => {
   const onTabChange = vi.fn();
   await mount({ tab: "prices", onTabChange });
-  expect(tabs()).toEqual(["rooms.form.tabDetails", "rooms.form.tabPricing", "rooms.form.tabMedia"]);
+  // The page draws the tab bar, with its messages under it (VAY-2337).
+  expect(tabs()).toEqual([]);
   expect(submit()).toHaveLength(0);
   expect(JSON.stringify(view.toJSON())).not.toContain("rooms.form.roomTypeBasics");
-  await act(async () =>
-    view.root
-      .findAllByType("button")
-      .find((node) => node.children[0] === "rooms.form.tabDetails")!
-      .props.onClick(),
-  );
-  expect(onTabChange).toHaveBeenCalledWith("details");
   act(() =>
     view.update(
       createElement(RoomTypeForm, {
@@ -72,6 +66,26 @@ it("lets the page own the tab: the Prices tab hides this form's save and leaves 
   );
   expect(submit()).toHaveLength(1);
   expect(JSON.stringify(view.toJSON())).toContain("rooms.form.roomTypeBasics");
+});
+
+it("draws the room tabs for the page, and the form's own messages come after its tab bar (VAY-2337)", async () => {
+  const onTabChange = vi.fn();
+  await act(async () => {
+    view = create(createElement(RoomTabBar, { tab: "prices", onTabChange }));
+  });
+  expect(tabs()).toEqual(["rooms.form.tabDetails", "rooms.form.tabPricing", "rooms.form.tabMedia"]);
+  await act(async () =>
+    view.root
+      .findAllByType("button")
+      .find((node) => node.children[0] === "rooms.form.tabDetails")!
+      .props.onClick(),
+  );
+  expect(onTabChange).toHaveBeenCalledWith("details");
+
+  await mount({ error: "Save failed", success: "Saved" });
+  const text = JSON.stringify(view.toJSON());
+  for (const message of ["Save failed", "Saved"])
+    expect(text.indexOf(message)).toBeGreaterThan(text.indexOf("rooms.form.tabMedia"));
 });
 
 it("shows the page's note beside the buttons and its text while saving (VAY-2147)", async () => {
