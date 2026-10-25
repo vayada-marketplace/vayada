@@ -116,7 +116,10 @@ import { releasedPmsReservationOfferKeys } from "../domains/pmsInventoryReservat
 import {
   cancelAcceptedPricingStay,
   loadPricingBookingCancellation,
+  loadPricingBookingCancellationTerms,
+  type PricingBookingCancellationTerms,
 } from "../domains/pricingBookingCancellation.js";
+import { loadStayPlaces, type StayPlace } from "../domains/stayPlaces.js";
 import { enqueueBookingTransitionNotifications } from "../jobs/bookingEmails.js";
 import {
   inventoryReservationReceiptFromBookingMetadata,
@@ -330,6 +333,12 @@ export type BookingWebCheckoutAdapter = {
     slug: string,
     bookingId: string,
     query: BookingWebChangeRequestQuery,
+    context?: BookingWebCheckoutCommandContext,
+  ): Promise<unknown>;
+  getStay(
+    slug: string,
+    bookingId: string,
+    request: BookingWebGuestActionRequest,
     context?: BookingWebCheckoutCommandContext,
   ): Promise<unknown>;
   getPaymentInstructions(
@@ -987,6 +996,31 @@ export async function registerBookingWebPublicRoutes(
       );
       reply.header("Cache-Control", "no-store");
       reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-change-request-get");
+      reply.header("X-Robots-Tag", "noindex");
+      return response;
+    },
+  );
+
+  // VAY-2360: what the confirmation page shows beyond the booking itself. By the booking's id only, never its
+  // reference, so it can't be used to guess bookings past the lookup's limit.
+  app.post<{ Params: BookingWebBookingIdParams; Body: BookingWebGuestActionRequest }>(
+    "/hotels/:slug/bookings/:bookingId/stay",
+    async (request, reply) => {
+      const body = { guest_email: normalizeGuestActionRequest(request.body ?? {}).guest_email };
+      const response = await checkoutAdapter.getStay(
+        request.params.slug,
+        request.params.bookingId,
+        body,
+        checkoutCommandContext(
+          request,
+          "booking-stay",
+          `${request.params.slug}:${request.params.bookingId}`,
+          body,
+          now,
+        ),
+      );
+      reply.header("Cache-Control", "no-store");
+      reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-booking-stay");
       reply.header("X-Robots-Tag", "noindex");
       return response;
     },
@@ -2585,6 +2619,49 @@ export function createTargetBookingWebCheckoutAdapter(
           resourceType: "booking_change_request",
           resourceId: booking.guestBookingId,
           body: result.rows[0] ? serializeTargetChangeRequest(result.rows[0]) : { status: "none" },
+        };
+      });
+    },
+    async getStay(slug, bookingId, request, context) {
+      return withCommand(slug, context, async () => {
+        if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(bookingId))
+          throw createHttpError(404, "Booking not found.");
+        const property = await resolveTargetHistoricalBookingProperty(pool, slug);
+        const booking = await loadTargetBooking(
+          pool,
+          property.propertyId,
+          bookingId,
+          requireGuestEmail(request.guestEmail ?? request.guest_email),
+        );
+        const status = publicBookingLifecycleStatus(
+          booking.lifecycleStatus,
+          booking.operationalStatus,
+        );
+        const ids = { propertyId: property.propertyId, guestBookingId: booking.guestBookingId };
+        const [terms, places] = await Promise.all([
+          // The terms that still apply: before the stay ends or starts.
+          (status === "pending" || status === "confirmed") &&
+          objectValue(booking.bookingMetadata)["targetSource"] === "pricing_quote_draft"
+            ? loadPricingBookingCancellationTerms(pool, {
+                ...ids,
+                stay: {
+                  checkIn: dateOnly(booking.checkIn),
+                  checkOut: dateOnly(booking.checkOut),
+                  roomCount: booking.roomCount,
+                  currency: booking.currency,
+                },
+              })
+            : null,
+          // The exact places, as the confirmation email gives them: once the stay is confirmed.
+          ["confirmed", "checked_in", "checked_out"].includes(status)
+            ? loadStayPlaces(pool, ids)
+            : [],
+        ]);
+        return {
+          propertyId: property.propertyId,
+          resourceType: "guest_booking",
+          resourceId: booking.guestBookingId,
+          body: serializeBookingStay(booking, terms, places),
         };
       });
     },
@@ -4521,6 +4598,30 @@ export function serializeTargetBooking(booking: TargetBookingRow): Record<string
     hostResponseDeadline:
       stringValue(metadata["hostResponseDeadlineAt"]) ?? stringValue(metadata["pendingExpiresAt"]),
     createdAt: toIsoDateTime(booking.createdAt),
+  };
+}
+
+/** The confirmation page's extras (VAY-2360): the booked cancellation terms, as checkout step 3 words them, and
+ * where the guest stays. */
+function serializeBookingStay(
+  booking: TargetBookingRow,
+  terms: PricingBookingCancellationTerms | null,
+  places: StayPlace[],
+): Record<string, unknown> {
+  const names = objectValue(booking.bookedRoomNames);
+  return {
+    version: "booking-stay.v1",
+    cancellation: terms && {
+      checkIn: terms.checkIn,
+      currency: terms.currency,
+      timeZone: terms.timeZone,
+      totalMinor: terms.totalMinor,
+      rooms: terms.rooms.map((room) => ({
+        ...room,
+        roomName: stringValue(names[room.roomTypeId ?? ""]) ?? null,
+      })),
+    },
+    places,
   };
 }
 

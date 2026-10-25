@@ -1,13 +1,15 @@
 import { paymentMethodLabel } from "@vayada/locale-constants";
 import { createHash } from "node:crypto";
 import type { QueryResultRow } from "pg";
-import { isSamePlace } from "@vayada/domain-hotels";
+import type { MapPin } from "../domains/bookingLocationMap.js";
 import {
-  roomAddress,
-  roomAtProperty,
-  roomPin,
-  type MapPin,
-} from "../domains/bookingLocationMap.js";
+  BOOKED_ROOM_PLACES_SQL,
+  PROPERTY_PLACE_SQL,
+  stayPlaces,
+  type StayPropertyLocation,
+} from "../domains/stayPlaces.js";
+
+export type { StayPropertyLocation } from "../domains/stayPlaces.js";
 
 export const BOOKING_EMAIL_QUEUE = "platform.email";
 const BOOKING_LIFECYCLE_EMAIL_JOB_TYPE_BY_KIND = {
@@ -88,17 +90,6 @@ export type BookingLifecycleEmailInput = {
     /** The booked room types with their saved locations, in booking order. */
     bookedRooms?: Array<{ name: string; attributes: unknown }> | null;
   };
-};
-
-export type StayPropertyLocation = {
-  streetAddress: string | null;
-  area: string | null;
-  postalCode: string | null;
-  city: string | null;
-  countryCode: string | null;
-  latitude: number | null;
-  longitude: number | null;
-  arrivalDirections: string | null;
 };
 
 export type BookingTransitionNotificationInput = {
@@ -384,59 +375,12 @@ export async function loadBookingNotificationSnapshot(
        -- VAY-2322: the booked room types and their places, for "Where you'll stay": the PMS's rooms (a room
        -- can move to another type; a canceled one is gone), else the booked pricing rooms, else the booked
        -- offer's room lines, else its room.
-       (WITH assigned AS (
-          SELECT assignment.room_type_id::text AS room_type_id, assignment.position::bigint AS position
-          FROM pms.operational_booking_assignments assignment
-          WHERE assignment.guest_booking_id = booking.id
-            AND assignment.property_id = booking.property_id
-            AND assignment.assignment_status <> 'canceled'
-            AND NOT (assignment.assignment_status = 'released'
-              AND assignment.assignment_payload @> '{"channexAlterationReleased":true}')
-        ), selected AS (
-          SELECT selection.value->>'roomTypeId' AS room_type_id, selection.position
-          FROM jsonb_array_elements(
-            CASE WHEN jsonb_typeof(booking.booking_metadata->'pricingSelections') = 'array'
-              THEN booking.booking_metadata->'pricingSelections' ELSE '[]'::jsonb END
-          ) WITH ORDINALITY AS selection(value, position)
-        ), offered AS (
-          SELECT line.value->>'roomTypeId' AS room_type_id, line.position
-          FROM jsonb_array_elements(
-            CASE WHEN jsonb_typeof(booking.booking_metadata #> '{selectedOffer,roomLines}') = 'array'
-              THEN booking.booking_metadata #> '{selectedOffer,roomLines}' ELSE '[]'::jsonb END
-          ) WITH ORDINALITY AS line(value, position)
-        ), booked AS (
-          SELECT room_type_id, position FROM assigned
-          UNION ALL
-          SELECT room_type_id, position FROM selected WHERE NOT EXISTS (SELECT 1 FROM assigned)
-          UNION ALL
-          SELECT room_type_id, position FROM offered
-          WHERE NOT EXISTS (SELECT 1 FROM assigned) AND NOT EXISTS (SELECT 1 FROM selected)
-          UNION ALL
-          SELECT booking.booking_metadata #>> '{selectedOffer,roomTypeId}', 0
-          WHERE NOT EXISTS (SELECT 1 FROM assigned) AND NOT EXISTS (SELECT 1 FROM selected)
-            AND NOT EXISTS (SELECT 1 FROM offered)
-        )
-        SELECT COALESCE(jsonb_agg(
-                 jsonb_build_object('name', room.name, 'attributes', room.room_attributes)
-                 ORDER BY room.first_position), '[]'::jsonb)
-        FROM (
-          SELECT room_type.name, room_type.room_attributes, min(booked.position) AS first_position
-          FROM booked
-          JOIN pms.room_types room_type
-            ON room_type.id::text = booked.room_type_id
-           AND room_type.property_id = booking.property_id
-          GROUP BY room_type.id, room_type.name, room_type.room_attributes
-        ) room) AS "bookedRooms"
+       ${BOOKED_ROOM_PLACES_SQL} AS "bookedRooms"
      FROM booking.guest_bookings booking
      JOIN hotel_catalog.properties property ON property.id = booking.property_id
      LEFT JOIN LATERAL (
        SELECT location.timezone,
-              jsonb_build_object(
-                'streetAddress', location.street_address, 'area', location.area,
-                'postalCode', location.postal_code, 'city', location.city,
-                'countryCode', location.country_code,
-                'latitude', location.latitude, 'longitude', location.longitude,
-                'arrivalDirections', location.arrival_directions) AS place
+              ${PROPERTY_PLACE_SQL} AS place
        FROM hotel_catalog.property_locations location
        WHERE location.property_id = booking.property_id
        LIMIT 1
@@ -823,77 +767,30 @@ function confirmationDetails(booking: BookingLifecycleEmailInput["booking"]): st
  * link of rooms elsewhere, one paragraph per place. Exact even where the booking page shows only an area (D7).
  * Nothing it can't place: a room elsewhere with nothing saved, or a property without an address or pin. */
 function whereYoullStay(booking: BookingLifecycleEmailInput["booking"]): string[] {
-  const location = booking.propertyLocation;
-  const rooms = booking.bookedRooms ?? [];
-  const propertyPin = location ? roomPin(location) : null;
-  const atProperty: string[] = [];
-  const elsewhere = new Map<
-    string,
-    {
-      names: string[];
-      address: string | null;
-      pin: MapPin | null;
-      area: string | null;
-      approximate: boolean;
-    }
-  >();
-  for (const room of rooms) {
-    const saved = record(room.attributes);
-    const pin = roomPin(saved);
-    const address = roomAddress(saved);
-    // A room on the property's own pin without an address of its own is there, whatever its setting.
-    if (
-      roomAtProperty(saved, propertyPin) ||
-      (!address && pin && propertyPin && isSamePlace(pin, propertyPin))
-    ) {
-      atProperty.push(room.name);
-      continue;
-    }
-    if (!address && !pin) continue;
-    const key = `${address ?? ""}|${pin ? `${pin.latitude},${pin.longitude}` : ""}`;
-    const place = elsewhere.get(key) ?? {
-      names: [],
-      address,
-      pin,
-      area: text(saved["locationArea"]),
-      approximate: false,
-    };
-    place.names.push(room.name);
-    place.approximate ||= pin !== null && saved["locationPrecision"] === "approximate";
-    elsewhere.set(key, place);
-  }
-  const places: string[] = [];
-  const street = text(location?.streetAddress);
-  const city = text(location?.city);
-  if (
-    location &&
-    (street || city || propertyPin) &&
-    (atProperty.length > 0 || rooms.length === 0)
-  ) {
-    const address = [
-      street,
-      text(location.area),
-      [text(location.postalCode), city].filter(Boolean).join(" "),
-      countryName(location.countryCode),
-    ]
-      .filter(Boolean)
-      .join(", ");
-    const directions = text(location.arrivalDirections);
-    places.push(
-      [
-        [booking.propertyName || "The property", atProperty.join(", ")].filter(Boolean).join(" · "),
-        address,
-        ...(directions ? [`Arrival directions: ${directions}`] : []),
-        mapsLine(propertyPin, street || city ? address : null),
-      ]
-        .filter(Boolean)
-        .join("\n"),
-    );
-  }
-  for (const place of elsewhere.values())
-    places.push(
-      [
-        place.names.join(", "),
+  const places = stayPlaces(booking.propertyLocation ?? null, booking.bookedRooms ?? []).map(
+    (place) => {
+      if (place.kind === "property") {
+        const address = [
+          place.streetAddress,
+          place.area,
+          [place.postalCode, place.city].filter(Boolean).join(" "),
+          countryName(place.countryCode),
+        ]
+          .filter(Boolean)
+          .join(", ");
+        return [
+          [booking.propertyName || "The property", place.rooms.join(", ")]
+            .filter(Boolean)
+            .join(" · "),
+          address,
+          ...(place.arrivalDirections ? [`Arrival directions: ${place.arrivalDirections}`] : []),
+          mapsLine(place.pin, place.streetAddress || place.city ? address : null),
+        ]
+          .filter(Boolean)
+          .join("\n");
+      }
+      return [
+        place.rooms.join(", "),
         place.address,
         ...(place.approximate
           ? [
@@ -903,8 +800,9 @@ function whereYoullStay(booking: BookingLifecycleEmailInput["booking"]): string[
         mapsLine(place.pin, place.address),
       ]
         .filter(Boolean)
-        .join("\n"),
-    );
+        .join("\n");
+    },
+  );
   return places.length > 0 ? [`Where you'll stay:\n${places.join("\n\n")}`] : [];
 }
 

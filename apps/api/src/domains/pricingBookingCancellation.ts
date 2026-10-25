@@ -13,22 +13,31 @@ import { loadCurrentPricingAcceptance } from "./pricingAcceptanceAmendments.js";
 import { cancelHostBookingAssignments } from "./pmsHostBookingCancellation.js";
 import { lockPmsInventoryMutationScope } from "./pmsInventoryMutationLock.js";
 
+/** What a v2 stay's cancellation is worked out from (VAY-2360: the confirmation page words it the same way):
+ * its dates and prices, the booked terms per room and the property timezone the guest accepted under. */
+export type PricingBookingCancellationTerms = {
+  checkIn: string;
+  currency: string;
+  timeZone: string;
+  totalMinor: string;
+  rooms: BookedCancellationRoom[];
+};
+
 /** Pricing-v2 stays keep their booked terms in the immutable acceptance, never in booking
  * metadata. A date change (VAY-2110) moves the stay to its latest amendment's quote: its dates and
  * prices (what the guest now owes) set the base; the cancellation terms are read from the
  * acceptance, the ones the guest agreed to (0477 keeps an amendment's terms identical). Days count
  * in the property timezone the guest accepted under. Null when the acceptance is missing or its
  * current quote no longer describes the stay. */
-export async function loadPricingBookingCancellation(
-  client: InventoryReservationTransaction,
+export async function loadPricingBookingCancellationTerms(
+  client: Pick<PoolClient, "query">,
   input: {
     propertyId: string;
     guestBookingId: string;
     stay: { checkIn: string; checkOut: string; roomCount: number; currency: string };
-    cancelledAt: Date;
   },
-): Promise<BookedCancellationOutcome | null> {
-  const current = await loadCurrentPricingAcceptance(client as Pick<PoolClient, "query">, input);
+): Promise<PricingBookingCancellationTerms | null> {
+  const current = await loadCurrentPricingAcceptance(client, input);
   const quote = current?.quote;
   const { checkIn, checkOut, roomCount, currency } = input.stay;
   if (
@@ -60,12 +69,39 @@ export async function loadPricingBookingCancellation(
       subtotalMinor: subtotal.toString(),
     });
   }
-  return resolveBookedCancellationOutcome({
+  return {
     checkIn: quote.stay.checkIn,
-    cancelledOn: localDate(current.acceptance.propertyTimeZone, input.cancelledAt),
+    currency: quote.stay.currency,
+    timeZone: current.acceptance.propertyTimeZone,
     totalMinor: quote.evidence.totalMinor,
     rooms,
-  });
+  };
+}
+
+/** What the booked terms refund if the stay is cancelled at `cancelledAt` (see
+ * loadPricingBookingCancellationTerms). */
+export async function loadPricingBookingCancellation(
+  client: InventoryReservationTransaction,
+  input: {
+    propertyId: string;
+    guestBookingId: string;
+    stay: { checkIn: string; checkOut: string; roomCount: number; currency: string };
+    cancelledAt: Date;
+  },
+): Promise<BookedCancellationOutcome | null> {
+  const terms = await loadPricingBookingCancellationTerms(
+    client as Pick<PoolClient, "query">,
+    input,
+  );
+  return (
+    terms &&
+    resolveBookedCancellationOutcome({
+      checkIn: terms.checkIn,
+      cancelledOn: localDate(terms.timeZone, input.cancelledAt),
+      totalMinor: terms.totalMinor,
+      rooms: terms.rooms,
+    })
+  );
 }
 
 /** Frees a cancelled, declined, expired or withdrawn v2 stay inside the caller's transaction:

@@ -746,6 +746,12 @@ describe("Booking Web public bootstrap parity", () => {
         record(context);
         return { status: "pending" };
       },
+      async getStay(_slug, _bookingId, request, context) {
+        record(context);
+        // The route passes only the guest's email on.
+        expect(request).toEqual({ guest_email: "guest@example.com" });
+        return { version: "booking-stay.v1", cancellation: null, places: [] };
+      },
       async getPaymentInstructions(_slug, _handle, context) {
         record(context);
         return {
@@ -840,6 +846,11 @@ describe("Booking Web public bootstrap parity", () => {
         url: "/api/booking-web/hotels/hotel-alpenrose/bookings/VAY-TARGET-1/change-request?email=guest%40example.com",
       }),
       app.inject({
+        method: "POST",
+        url: "/api/booking-web/hotels/hotel-alpenrose/bookings/b9fccec2-eb4c-4c35-bfd3-02a748c2e951/stay",
+        payload: { guestEmail: "guest@example.com", expectedCancellationFeeMinor: "100" },
+      }),
+      app.inject({
         method: "GET",
         url: "/api/booking-web/hotels/hotel-alpenrose/bookings/VAY-TARGET-1/payment-instructions",
       }),
@@ -850,7 +861,7 @@ describe("Booking Web public bootstrap parity", () => {
       }),
     ]);
 
-    expect(responses.map((response) => response.statusCode)).toEqual(Array(16).fill(200));
+    expect(responses.map((response) => response.statusCode)).toEqual(Array(17).fill(200));
     expect(operations.map((entry) => entry.operation)).toEqual(
       expect.arrayContaining([
         "checkout-config",
@@ -865,11 +876,12 @@ describe("Booking Web public bootstrap parity", () => {
         "booking-change-preview",
         "booking-change-submit",
         "booking-change-get",
+        "booking-stay",
         "booking-payment-instructions",
         "promo-validate",
       ]),
     );
-    expect(operations).toHaveLength(16);
+    expect(operations).toHaveLength(17);
     expect(operations.find((entry) => entry.operation === "booking-create")?.idempotencyKey).toBe(
       "guest-create-1",
     );
