@@ -90,6 +90,7 @@ import { createPgHotelCatalogStep1Repository } from "./domains/hotelCatalogStep1
 import { createPgFinanceOtaCommissionRuleRepository } from "./domains/financeOtaCommissionRuleRepository.js";
 import { createBankTransferCodec } from "./domains/financeBankTransferCodec.js";
 import { createBankTransferRepository } from "./domains/financeBankTransferRepository.js";
+import { createPaymentMethodWindowsRepository } from "./domains/pricingPaymentWindows.js";
 import { createPgFinanceExpenseCategoryRepository } from "./domains/financeExpenseCategoryRepository.js";
 import { createPgFinanceManualExpenseRepository } from "./domains/financeManualExpenseRepository.js";
 import { createPgFinanceRecurringExpenseRuleRepository } from "./domains/financeRecurringExpenseRuleRepository.js";
@@ -244,6 +245,7 @@ import {
   createPgBookingLifecycleStore,
   runBookingLifecycleSchedulerJobs,
 } from "./jobs/bookingLifecycle.js";
+import { runBankTransferPaymentReminders } from "./jobs/bankTransferPaymentReminders.js";
 import {
   createResendBookingEmailDelivery,
   runBookingEmailDeliveryJobs,
@@ -2013,6 +2015,18 @@ const app = buildApp({
   bookingGuestPiiPort,
   financeRepository,
   financeBankTransfer: bankTransferRepository ? { repository: bankTransferRepository } : undefined,
+  // VAY-2348: booking windows per payment method, on the ordinary API login (finance).
+  financePaymentWindows: config.auth
+    ? {
+        repository: createPaymentMethodWindowsRepository(
+          new pg.Pool({
+            connectionString: targetDatabaseUrl,
+            connectionTimeoutMillis: 5_000,
+            max: 2,
+          }),
+        ),
+      }
+    : undefined,
   financeSubscriptionService,
   financeOtaCommissionSettingsRepository,
   financeExpenses: financeExpenseRuntime
@@ -3155,6 +3169,34 @@ const bookingLifecycleTimer = setInterval(runBookingLifecycle, 60_000);
 bookingLifecycleTimer.unref();
 runBookingLifecycle();
 
+// VAY-2348: one payment reminder a day before a booking-page bank transfer's deadline, on its own
+// pool and timer so a stuck reminder run never holds up the lifecycle sweep.
+const bankTransferReminderPool = new pg.Pool({
+  connectionString: targetDatabaseUrl,
+  connectionTimeoutMillis: 5_000,
+  max: 2,
+});
+let activeBankTransferReminderRun: Promise<void> | undefined;
+const runBankTransferReminders = () => {
+  if (!config.backgroundWorkersEnabled || activeBankTransferReminderRun) return;
+  activeBankTransferReminderRun = runBankTransferPaymentReminders(bankTransferReminderPool)
+    .then((result) => {
+      if (result.failures.length)
+        app.log.warn(
+          { failures: result.failures },
+          "Bank transfer payment reminders completed with failures",
+        );
+    })
+    .catch((error: unknown) =>
+      app.log.warn({ err: error }, "Bank transfer payment reminders failed"),
+    )
+    .finally(() => {
+      activeBankTransferReminderRun = undefined;
+    });
+};
+const bankTransferReminderTimer = setInterval(runBankTransferReminders, 60_000);
+bankTransferReminderTimer.unref();
+
 // Card refunds of cancelled pricing-v2 stays (VAY-2205): retries Stripe errors and follows refunds
 // still pending at Stripe. Commands exist only once a hotel takes card.
 let activePricingCardRefundRun: Promise<void> | undefined;
@@ -3270,15 +3312,18 @@ app.addHook("preClose", async () => {
 });
 app.addHook("onClose", async () => {
   clearInterval(bookingLifecycleTimer);
+  clearInterval(bankTransferReminderTimer);
   clearInterval(pricingCardRefundTimer);
   clearInterval(pricingCardReconciliationTimer);
   clearTimeout(pricingCardReconciliationStart);
   if (bookingEmailDeliveryTimer) clearInterval(bookingEmailDeliveryTimer);
   await activeBookingLifecycleRun;
+  await activeBankTransferReminderRun;
   await activePricingCardRefundRun;
   await activePricingCardReconciliation;
   await activeBookingEmailDelivery;
   await bookingLifecycleStore.close();
+  await bankTransferReminderPool.end();
   await pmsInboxDeliveryStore?.close();
   await pmsInboxDeliveryPool?.end();
 });

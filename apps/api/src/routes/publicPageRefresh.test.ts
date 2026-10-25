@@ -1,10 +1,10 @@
-import Fastify from "fastify";
+import Fastify, { type FastifyRequest } from "fastify";
 import { describe, expect, it, vi } from "vitest";
 
 import { refreshPublicPageAfterSaves } from "./publicPageRefresh.js";
 
 describe("booking page refresh after saves (VAY-2129)", () => {
-  async function app(refresh: (propertyId: string) => Promise<void>) {
+  async function app(refresh: (propertyId: string, request: FastifyRequest) => Promise<void>) {
     const server = Fastify({ logger: false });
     await server.register(
       async (scoped) => {
@@ -21,7 +21,7 @@ describe("booking page refresh after saves (VAY-2129)", () => {
   }
 
   it("refreshes after a successful listed save only, and never fails the request", async () => {
-    const refresh = vi.fn(async (_propertyId: string) => undefined);
+    const refresh = vi.fn(async (_propertyId: string, _request: FastifyRequest) => undefined);
     const server = await app(refresh);
     const put = (url: string) => server.inject({ method: "PUT", url });
     try {
@@ -29,10 +29,10 @@ describe("booking page refresh after saves (VAY-2129)", () => {
       expect((await put("/api/hotel-setup/properties/p-2/profile?fail=1")).statusCode).toBe(409);
       expect((await put("/api/hotel-setup/properties/p-3/other")).statusCode).toBe(200);
       await server.inject({ method: "GET", url: "/api/hotel-setup/properties/p-4/profile" });
-      await vi.waitFor(() => expect(refresh.mock.calls).toEqual([["p-1"]]));
+      await vi.waitFor(() => expect(refresh.mock.calls.map(([id]) => id)).toEqual(["p-1"]));
       refresh.mockRejectedValueOnce(new Error("projection unavailable"));
       expect((await put("/api/hotel-setup/properties/p-5/profile")).statusCode).toBe(200);
-      await vi.waitFor(() => expect(refresh).toHaveBeenLastCalledWith("p-5"));
+      await vi.waitFor(() => expect(refresh).toHaveBeenLastCalledWith("p-5", expect.anything()));
     } finally {
       await server.close();
     }

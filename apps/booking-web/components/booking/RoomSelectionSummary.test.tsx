@@ -34,7 +34,7 @@ afterEach(() => {
   act(() => root.unmount());
   vi.unstubAllGlobals();
 });
-function render(props: { timezone?: string; locale?: string; policy?: Record<string, unknown> }) {
+function render(props: { country?: string; locale?: string; policy?: Record<string, unknown> }) {
   const locale = props.locale ?? "en";
   act(() =>
     root.render(
@@ -45,7 +45,7 @@ function render(props: { timezone?: string; locale?: string; policy?: Record<str
           lines: [line(props.policy ?? { freeCancellationDeadlineDays: 7 })],
           currency: "EUR",
           checkIn: "2026-11-13",
-          timezone: props.timezone,
+          country: props.country,
         }),
       }),
     ),
@@ -53,18 +53,20 @@ function render(props: { timezone?: string; locale?: string; policy?: Record<str
   return document.body.textContent ?? "";
 }
 
-it("says until when cancelling is free as a readable date in the hotel's time zone", () => {
-  const text = render({ timezone: "Europe/Zurich" });
-  expect(text).toContain("Free cancellation until Fri, 6 Nov 2026 (Central European Time).");
+it("says until when cancelling is free as a readable date in local hotel time (VAY-2347)", () => {
+  const text = render({ country: "LK" });
+  expect(text).toContain("Free cancellation until Fri, 6 Nov 2026 (local hotel time, Sri Lanka).");
   expect(text).not.toContain("Nov 6, 2026");
-  expect(text).not.toContain("Europe/Zurich");
+  expect(text).not.toMatch(/India|Asia\/Colombo/);
 });
 
-it("falls back to UTC and follows the page's language", () => {
-  expect(render({})).toContain("Free cancellation until Fri, 6 Nov 2026 (UTC).");
-  expect(render({ timezone: "" })).toContain("Free cancellation until Fri, 6 Nov 2026 (UTC).");
-  expect(render({ timezone: "Europe/Zurich", locale: "de" })).toContain(
-    "Fr., 6. Nov. 2026 (Mitteleuropäische Zeit)",
+it("leaves the country out without one and follows the page's language", () => {
+  expect(render({})).toContain("Free cancellation until Fri, 6 Nov 2026 (local hotel time).");
+  expect(render({ country: "" })).toContain(
+    "Free cancellation until Fri, 6 Nov 2026 (local hotel time).",
+  );
+  expect(render({ country: "CH", locale: "de" })).toContain(
+    "Fr., 6. Nov. 2026 (Ortszeit des Hotels, Schweiz)",
   );
 });
 

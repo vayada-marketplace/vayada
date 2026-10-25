@@ -25,6 +25,7 @@ const BOOKING_LIFECYCLE_EMAIL_JOB_TYPE_BY_KIND = {
   host_request_expired: "email.booking-host-request-expired",
   host_payment_pending: "email.booking-host-payment-pending",
   host_payment_expired: "email.booking-host-payment-expired",
+  payment_reminder: "email.booking-payment-reminder",
 } as const;
 
 export type BookingLifecycleEmailKind = keyof typeof BOOKING_LIFECYCLE_EMAIL_JOB_TYPE_BY_KIND;
@@ -164,7 +165,7 @@ export async function enqueueBookingLifecycleEmailJob(
     requiresBankTransferInstructions:
       recipientRole === "guest" &&
       input.booking.paymentMethod === "bank_transfer" &&
-      ["request_received", "reserved_pending_payment"].includes(input.kind),
+      ["request_received", "reserved_pending_payment", "payment_reminder"].includes(input.kind),
     recipientRole,
     notificationType: input.kind,
     transition,
@@ -587,7 +588,24 @@ function emailCopy(input: BookingLifecycleEmailInput) {
         ...(paypalEmail ? [`Please send it by PayPal to ${paypalEmail}.`] : []),
         `Payment deadline: ${deadlineText(input.paymentDeadlineAt, booking.propertyTimeZone)}`,
         `Please add your booking reference to the payment: ${booking.bookingReference}`,
-        "If we don't receive it by the deadline, the booking expires and the room is released.",
+        "The hotel confirms your booking once your payment has arrived. If we don't receive it by the deadline, the booking expires and the room is released.",
+      ].join("\n\n"),
+    };
+  }
+  if (input.kind === "payment_reminder") {
+    // VAY-2348: one reminder a day before a booking-page bank transfer's deadline; the bank
+    // details are added when sent.
+    return {
+      template: "booking_payment_reminder",
+      subject: `Reminder: your bank transfer is due - ${booking.bookingReference}`,
+      text: [
+        `Hi ${name},`,
+        `Your room at ${property} is still reserved, but we haven't received your bank transfer yet.`,
+        `Amount due: ${money(booking.balanceAmount ?? booking.totalAmount, booking.currency)}`,
+        `Payment deadline: ${deadlineText(input.paymentDeadlineAt, booking.propertyTimeZone)}`,
+        `Please add your booking reference to the payment: ${booking.bookingReference}`,
+        "Please make sure it reaches the hotel before the deadline: bank transfers can take a few days. If it doesn't arrive by then, the booking is released.",
+        `If your transfer might arrive late, please contact ${property}.`,
       ].join("\n\n"),
     };
   }
@@ -680,7 +698,10 @@ function emailCopy(input: BookingLifecycleEmailInput) {
         `Hi ${name},`,
         `Your booking for ${property} has expired.`,
         ...(manualPricingPayment(booking)
-          ? ["We didn't receive your payment by the deadline, so the room is no longer held."]
+          ? [
+              "We didn't receive your payment by the deadline, so the room is no longer held.",
+              `If you've already sent the money, please contact ${property}.`,
+            ]
           : []),
         `Booking reference: ${booking.bookingReference}`,
       ].join("\n\n"),
@@ -722,6 +743,7 @@ function emailCopy(input: BookingLifecycleEmailInput) {
         `Guest: ${name}`,
         `Stay: ${stayDate(booking.checkIn)} to ${stayDate(booking.checkOut)}`,
         `Total: ${money(booking.totalAmount, booking.currency)}`,
+        "If the guest's payment arrives after all, refund it or make a new booking for them.",
         `Booking reference: ${booking.bookingReference}`,
       ].join("\n\n"),
     };
@@ -913,6 +935,11 @@ function notificationsForTransition(
 ): Array<{ kind: BookingLifecycleEmailKind; role: BookingNotificationRecipientRole }> {
   if (transition.eventType === "guest_booking.request_updated")
     return [{ kind: "host_request_updated", role: "host" }];
+  // VAY-2348: the reminder a day before a booking-page bank transfer's deadline.
+  if (transition.eventType === "guest_booking.payment_reminder")
+    return manualPricingPayment(booking) && booking.paymentMethod === "bank_transfer"
+      ? [{ kind: "payment_reminder", role: "guest" }]
+      : [];
   if (transition.eventType === "guest_booking.created") {
     if (transition.toStatus === "confirmed") {
       return [
@@ -1040,6 +1067,13 @@ function legacyTransition(kind: BookingLifecycleEmailKind): BookingLifecycleTran
   }
   if (kind === "host_new_booking") {
     return { eventType: "guest_booking.created", fromStatus: null, toStatus: "confirmed" };
+  }
+  if (kind === "payment_reminder") {
+    return {
+      eventType: "guest_booking.payment_reminder",
+      fromStatus: "pending_payment",
+      toStatus: "pending_payment",
+    };
   }
   return {
     eventType: "guest_booking.payment_received",

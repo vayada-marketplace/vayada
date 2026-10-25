@@ -70,6 +70,8 @@ function render(props: Partial<ReplacementQuoteTermsProps> = {}) {
         quote,
         roomNames,
         onAcknowledgementChange: change,
+        // The hotel's date when the quote was issued.
+        today: "2027-01-01",
         ...props,
       }),
     ),
@@ -84,7 +86,9 @@ it("discloses each physical room's actual name, meal, cancellation and payment t
   expect(rooms).toHaveLength(2);
   expect(rooms[0].textContent).toContain("Room 1: Garden suite");
   expect(rooms[0].textContent).toContain("Meals: Breakfast");
-  expect(rooms[0].textContent).toContain("Free cancellation deadline: 7 days before arrival.");
+  expect(rooms[0].textContent).toContain(
+    "Free cancellation deadline: the end of Mon, 25 Jan 2027, local hotel time (7 days before arrival).",
+  );
   expect(rooms[0].textContent).toContain("After-deadline penalty: full booking amount.");
   expect(rooms[0].textContent).toContain("No-show penalty: full booking amount.");
   expect(rooms[0].textContent).toContain(
@@ -119,11 +123,11 @@ it("shows partial-refund steps alone, most notice first, without a free-cancella
   const room = document.querySelector('section[aria-label="Room 1 terms"]')!.textContent;
   expect(room).toContain("Cancellation type: Partial refund.");
   expect(Array.from(document.querySelectorAll("li")).map((li) => li.textContent)).toEqual([
-    "75% refund with at least 30 days before check-in.",
-    "50% refund with at least 14 days before check-in.",
-    "0% refund with at least 7 days before check-in.",
+    "75% refund if you cancel by the end of Sat, 2 Jan 2027 (at least 30 days before check-in).",
+    "50% refund if you cancel from Sun, 3 Jan 2027 to the end of Mon, 18 Jan 2027 (at least 14 days before check-in).",
+    "No refund if you cancel from Tue, 19 Jan 2027 to the end of Mon, 25 Jan 2027 (at least 7 days before check-in).",
   ]);
-  expect(room).toContain("No refund with less than 7 days before check-in.");
+  expect(room).toContain("No refund after Mon, 25 Jan 2027 (less than 7 days before check-in).");
   expect(room).toContain("No-show penalty: full booking amount.");
   expect(room).not.toMatch(/Free cancellation deadline|After-deadline penalty|window|amount: 50%/);
   expect(document.body.textContent).not.toMatch(/midnight|23:59|2027-01-25/);
@@ -138,8 +142,32 @@ it("adds no less-notice line when a step starts at check-in", () => {
     partialRefundTiers: [{ minDaysBeforeCheckIn: 0, refundPercent: 20 }],
   });
   render({ quote: partial });
-  expect(document.body.textContent).toContain("20% refund with at least 0 days before check-in.");
-  expect(document.body.textContent).not.toContain("No refund with less than");
+  expect(document.body.textContent).toContain(
+    "20% refund if you cancel by the end of Mon, 1 Feb 2027 (up to the arrival day).",
+  );
+  expect(document.body.textContent).not.toContain("No refund after");
+});
+
+it("says a deadline that has passed for this stay has passed (VAY-2347)", () => {
+  render({ today: "2027-01-26" });
+  expect(document.querySelector('section[aria-label="Room 1 terms"]')!.textContent).toContain(
+    "Free cancellation deadline: Mon, 25 Jan 2027 (7 days before arrival). It has passed, so free cancellation no longer applies to this stay.",
+  );
+  const partial = structuredClone(quote);
+  const cancellation = partial.rooms[0].cancellation;
+  if (cancellation.kind !== "flexible") throw new Error("fixture");
+  Object.assign(cancellation.terms, {
+    flexibleCancellationType: "partial_refund",
+    partialRefundTiers: [
+      { minDaysBeforeCheckIn: 30, refundPercent: 75 },
+      { minDaysBeforeCheckIn: 7, refundPercent: 50 },
+    ],
+  });
+  render({ quote: partial, today: "2027-01-20" });
+  expect(Array.from(document.querySelectorAll("li")).map((li) => li.textContent)).toEqual([
+    "75% refund until the end of Sat, 2 Jan 2027 (at least 30 days before check-in): this date has passed.",
+    "50% refund if you cancel from Sun, 3 Jan 2027 to the end of Mon, 25 Jan 2027 (at least 7 days before check-in).",
+  ]);
 });
 
 it("binds acknowledgement to evidence and ignores the replay transport flag", () => {

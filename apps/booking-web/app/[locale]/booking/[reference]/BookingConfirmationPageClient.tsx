@@ -925,7 +925,7 @@ export default function BookingConfirmationPageClient({
                       lines={booking.roomLines}
                       currency={booking.currency}
                       checkIn={booking.checkIn}
-                      timezone={hotel.timezone}
+                      country={hotel.country}
                     />
                   )}
                   {booking.addonIds && booking.addonIds.length > 0 && (

@@ -1,5 +1,6 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 import { watchPageHealth } from "../support/pageHealth";
+import { roomTabBarOffset } from "../support/roomTabBar";
 import {
   PMS_WEB_PROPERTY_ID,
   mockPmsWebAuthenticatedSession,
@@ -232,9 +233,11 @@ test("prices a room in its Prices tab and publishes the other rooms unchanged", 
   );
 
   await page.goto("/rooms");
-  await expect(main(page).getByText("All prices are in EUR.", { exact: false })).toBeVisible();
-  await expect(main(page).getByText("1 rate · base price from 120.00 EUR")).toBeVisible();
-  await expect(main(page).getByText("1 rate · base price from 90.00 EUR")).toBeVisible();
+  // VAY-2338: the subtitle names the currency; each row reads "from EUR 120" over "1 rate · per night".
+  await expect(main(page).getByText(/ · prices in EUR$/)).toBeVisible();
+  await expect(main(page).getByText(/^from EUR\s120$/)).toBeVisible();
+  await expect(main(page).getByText(/^from EUR\s90$/)).toBeVisible();
+  await expect(main(page).getByText("1 rate · per night", { exact: true })).toHaveCount(2);
   await expect(main(page).getByRole("link", { name: "Set prices" })).toHaveAttribute(
     "href",
     `/rooms/${LAKE}?tab=prices`,
@@ -284,6 +287,17 @@ test("prices a room in its Prices tab and publishes the other rooms unchanged", 
   // VAY-2188: the first price is the simple card; the property's currency is fixed, so no currency field.
   await expect(main(page).getByText("Lake Loft has no price yet", { exact: false })).toBeVisible();
   await expect(main(page).getByLabel("Currency code (for example EUR)")).toHaveCount(0);
+  // Every message sits under the tab bar, so neither this warning nor the stale-prices banner moves the tabs, on
+  // any tab (VAY-2337).
+  const tabBar = await roomTabBarOffset(page);
+  pricing.publication = { ...pricing.publication!, stale: true };
+  await page.reload();
+  await expect(main(page).getByText("Prices need to be saved again").first()).toBeVisible();
+  expect(await roomTabBarOffset(page)).toBe(tabBar);
+  await main(page).getByRole("button", { name: "Room Details", exact: true }).click();
+  await expect(main(page).getByText("Lake Loft has no price yet", { exact: false })).toBeHidden();
+  await expect(main(page).getByText("Prices need to be saved again").first()).toBeVisible();
+  expect(await roomTabBarOffset(page)).toBe(tabBar);
   await assertHealthy();
 });
 

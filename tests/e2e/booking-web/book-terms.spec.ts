@@ -5,23 +5,25 @@ import { fillGuestDetails, orderTotal } from "../support/bookFlow";
 const offerKey = `pricing-offer.v2:${"c".repeat(64)}`;
 const terms = "These are our house terms.\n\n1. Your booking\nWe confirm by email.";
 
-// VAY-2176: /book shows the hotel's own Terms & Conditions under its guest rules.
-test("shows the hotel's terms under the guest rules and says booking accepts them", async ({
+// VAY-2176: /book shows the hotel's own Terms & Conditions where booking accepts them; since
+// VAY-2347 that is the payment step only.
+test("shows the hotel's terms on the payment step and says booking accepts them", async ({
   page,
 }) => {
   await openQuote(page, terms);
+  await expect(page.getByRole("region", { name: "Our terms & conditions" })).toHaveCount(0);
+  await toPayment(page);
+  await page.getByRole("button", { name: "Read our terms & conditions" }).click();
   const section = page.getByRole("region", { name: "Our terms & conditions" });
-  await expect(section).toBeVisible();
   await expect(section).toContainText("These are our house terms.");
   await expect(section).toContainText("We confirm by email.");
-  await toPayment(page);
   await expect(page.getByText("By booking, you agree to our terms & conditions.")).toBeVisible();
 });
 
 test("shows no terms section or agreement line when the hotel has no terms", async ({ page }) => {
   await openQuote(page, "  ");
-  await expect(page.getByRole("heading", { name: "Our terms & conditions" })).toHaveCount(0);
   await toPayment(page);
+  await expect(page.getByRole("button", { name: "Read our terms & conditions" })).toHaveCount(0);
   await expect(page.getByText("By booking, you agree to our terms & conditions.")).toHaveCount(0);
 });
 
@@ -119,13 +121,12 @@ async function openQuote(page: Page, termsText: string) {
   const room = page.getByRole("group", { name: "Room 1", exact: true });
   await room.getByLabel("Room and meal option").selectOption(offerKey);
   await room.getByLabel(/Adults/).fill("2");
-  // VAY-2195: the terms are read on the details step; booking accepts them on the payment step.
   await page.getByRole("button", { name: "Continue", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Our guest rules" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Who’s staying?" })).toBeVisible();
 }
 
 async function toPayment(page: Page) {
   await fillGuestDetails(page);
-  await page.getByRole("button", { name: "Continue to payment" }).click();
+  await page.getByRole("button", { name: "Continue to review" }).click();
   await expect(orderTotal(page)).toHaveText("€240");
 }

@@ -62,7 +62,7 @@
     "rooms": "Kamar",
     "addons": "Tambahan",
     "details": "Detail",
-    "payment": "Pembayaran"
+    "payment": "Tinjau & bayar"
   },
   "home": {
     "guestCountUnsupported": "Pencarian online tidak mendukung grup Anda sebanyak {count} tamu. Coba kurangi jumlah tamu atau hubungi kami.",
@@ -568,6 +568,8 @@
     "roomNumber": "Kamar {number}",
     "totalStay": "Total untuk {nights} malam",
     "freeUntil": "Pembatalan gratis hingga {date} ({timezone}).",
+    "hotelTime": "waktu setempat hotel",
+    "hotelTimeIn": "waktu setempat hotel, {country}",
     "afterDeadline": "Tidak ada pengembalian dana setelah batas waktu atau jika tidak datang.",
     "termsUnavailable": "Ketentuan pembatalan tidak tersedia.",
     "unavailable": "Pilihan akomodasi ini tidak lagi tersedia. Silakan cari kembali.",
@@ -589,7 +591,9 @@
     "withdrawNotOnline": "Permintaan ini tidak dapat ditarik secara online. Silakan hubungi properti.",
     "bookingNotChangeable": "Pemesanan ini tidak dapat diubah lagi. Cari kembali untuk melihat statusnya saat ini.",
     "busyTryAgain": "Pemesanan ini sedang diperbarui. Silakan coba lagi sebentar lagi.",
-    "paymentMethodNotAccepted": "Tarif yang Anda pilih tidak dapat dibayar dengan cara ini. Silakan pilih metode pembayaran lain."
+    "paymentMethodNotAccepted": "Tarif yang Anda pilih tidak dapat dibayar dengan cara ini. Silakan pilih metode pembayaran lain.",
+    "paymentMethodWindow": "Metode pembayaran ini tidak lagi tersedia untuk tanggal tersebut. Silakan pilih metode pembayaran lain.",
+    "paymentMethodWindowOnly": "Metode pembayaran ini tidak lagi tersedia untuk tanggal tersebut. Silakan pilih tanggal lain atau hubungi hotel."
   },
   "locationMap": {
     "title": "Lokasi",
@@ -685,5 +689,40 @@
     "newSearch": "Mulai pencarian baru",
     "yourRooms": "{count} kamar Anda",
     "roomLine": "Kamar {number} · {room}"
+  },
+  "guestDetails": {
+    "title": "Data Anda",
+    "heading": "Siapa yang menginap?",
+    "intro": "Sekitar 1 menit. Kolom bertanda * wajib diisi.",
+    "firstName": "Nama depan",
+    "lastName": "Nama belakang",
+    "email": "Email",
+    "phone": "Telepon",
+    "phoneCountry": "Kode negara",
+    "countryOfResidence": "Negara tempat tinggal",
+    "noCountry": "Pilih negara",
+    "arrivalTime": "Perkiraan waktu kedatangan",
+    "specialRequests": "Permintaan khusus",
+    "optional": "(opsional)",
+    "firstNamePlaceholder": "Budi",
+    "lastNamePlaceholder": "Santoso",
+    "emailPlaceholder": "budi.santoso@example.com",
+    "phonePlaceholder": "151 2345 6789",
+    "specialRequestsPlaceholder": "mis. tiba larut malam, jemputan bandara, kebutuhan makanan",
+    "emailHint": "Konfirmasi kami kirim ke sini.",
+    "phoneHint": "Hanya digunakan untuk masa menginap Anda.",
+    "specialRequestsHint": "Permintaan tergantung ketersediaan. Hotel akan membalas melalui email.",
+    "errorFirstName": "Masukkan nama depan Anda.",
+    "errorLastName": "Masukkan nama belakang Anda.",
+    "errorEmail": "Masukkan email seperti nama@example.com.",
+    "errorPhone": "Masukkan nomor telepon Anda.",
+    "errorSummary": "{count, plural, one {Periksa # kolom yang ditandai merah.} other {Periksa # kolom yang ditandai merah.}}",
+    "continue": "Lanjut ke tinjauan",
+    "backToRooms": "Kembali ke kamar",
+    "backToExtras": "Kembali ke Tambahan",
+    "errorPhoneInvalid": "Masukkan nomor telepon yang valid.",
+    "errorCountry": "Pilih negara Anda dari daftar.",
+    "rulesFailed": "Kami tidak dapat memeriksa aturan tamu hotel untuk harga ini. Anda tetap dapat mengisi data Anda.",
+    "retry": "Coba lagi"
   }
 }

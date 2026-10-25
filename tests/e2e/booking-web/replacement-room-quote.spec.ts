@@ -168,7 +168,7 @@ test("prices explicit mixed rooms and child ages, clears edits, and recovers fro
   await expect(extras.getByText("Your extras (1)")).toBeVisible();
   await toPayment.click();
   await fillGuestDetails(page);
-  await page.getByRole("button", { name: "Continue to payment" }).click();
+  await page.getByRole("button", { name: "Continue to review" }).click();
   await expect(paymentOption(page, "pay_at_property")).toHaveAttribute("aria-checked", "true");
   await expect(orderTotal(page)).toHaveText("€320");
   const acknowledgement = page.getByLabel("I have read the room and rate terms for this price");
@@ -221,7 +221,7 @@ test("prices explicit mixed rooms and child ages, clears edits, and recovers fro
   await toPayment.click();
   // The details step keeps what the guest typed.
   await expect(page.getByLabel("First name")).toHaveValue("Ada");
-  await page.getByRole("button", { name: "Continue to payment" }).click();
+  await page.getByRole("button", { name: "Continue to review" }).click();
   await expect(orderTotal(page)).toHaveText("€315");
   await expect(acknowledgement).not.toBeChecked();
   await expect(guestAcknowledgement).not.toBeChecked();

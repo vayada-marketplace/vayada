@@ -1,6 +1,14 @@
 "use client";
 
-import { Suspense, useEffect, useId, useRef, useState, type ReactNode } from "react";
+import {
+  Suspense,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from "react";
 import { flushSync } from "react-dom";
 import { useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
@@ -10,14 +18,12 @@ import { useRouter } from "@/i18n/navigation";
 import BookShell from "./BookShell";
 import ReplacementGuestRules from "@/components/booking/ReplacementGuestRules";
 import ExtrasStep from "@/components/booking/ExtrasStep";
-import DetailsStep, { rateTerms } from "@/components/booking/DetailsStep";
 import PaymentStep from "@/components/booking/PaymentStep";
 import StaySummary, { type SummaryRoom } from "@/components/booking/StaySummary";
-import {
+import GuestDetailsForm, {
   acceptanceGuest,
   emptyGuest,
   guestComplete,
-  phoneRequired,
   type GuestDetails,
 } from "@/components/booking/GuestDetailsForm";
 import { useQuoteGuestDisclosure } from "@/lib/hooks/useQuoteGuestDisclosure";
@@ -39,6 +45,7 @@ import type {
 } from "@vayada/domain-booking/replacement-pricing";
 import {
   bookingPageMethodsForArrival,
+  bookingPageMethodsTooSoon,
   bookingPagePaymentMethodLabels,
   defaultQuoteMethods,
   getBookingPagePayment,
@@ -47,7 +54,8 @@ import {
 import ApproximateAmountsNote from "@/components/booking/ApproximateAmountsNote";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useHotel, useSlug } from "@/contexts/HotelContext";
-import { choiceKeys, choiceText } from "@/lib/roomChoices";
+import { choiceKeys, choiceText, hotelToday } from "@/lib/roomChoices";
+import { cancellationSummary, hotelCountryName } from "@/lib/checkoutTerms";
 import {
   bookEntry,
   bookStepQuery,
@@ -120,6 +128,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   const tAddons = useTranslations("addons");
   const tGuestErrors = useTranslations("guestErrors");
   const tPayment = useTranslations("payment");
+  const tDetails = useTranslations("guestDetails");
   const tGroup = useTranslations("groupRooms");
   const tCommon = useTranslations("common");
   const { hotel } = useHotel();
@@ -255,8 +264,10 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     : paymentMethods;
   // No way the hotel offers fits the chosen rates: no price is asked for, and the steps say so.
   const noWayToPay = pagePaymentLoaded && !!rateMethods && !offeredMethods.length;
-  const tooSoon = pagePayment.methods.filter(
-    (method) => !paymentMethods.includes(method) && (!rateMethods || rateMethods.includes(method)),
+  // Only methods hidden because the stay is too close; a "within N days" window that the stay is
+  // too far ahead for just isn't offered (VAY-2348).
+  const tooSoon = bookingPageMethodsTooSoon(pagePayment, checkIn).filter(
+    (method) => !rateMethods || rateMethods.includes(method),
   );
   useEffect(() => {
     // A restored choice waits for the hotel's own methods before it is judged.
@@ -619,12 +630,19 @@ function RoomQuoteForm({ slug }: { slug: string }) {
       if (params.get(name)) home.set(name, params.get(name)!);
     router.push(`/?${home}`);
   };
+  // VAY-2347: deadlines are worded on the hotel's calendar day by the server's clock, never in the
+  // guest's device's zone; the price's guest rules name the zone the server books in.
+  const hotelZone = guestRulesQuote.disclosure?.propertyTimeZone ?? (hotel?.timezone || "Etc/UTC");
+  const hotelNow = new Date(serverNow());
+  const hotelDate = hotelToday(hotelZone, hotelNow);
+  const hotelCountry = hotelCountryName(hotel?.country);
   const choiceName = (room: PricingRoom, publicOfferKey: string) => {
     const index = room.offers.findIndex((offer) => offer.publicOfferKey === publicOfferKey);
     return choiceText(
       choiceKeys(room.offers)[index]!,
-      { checkIn, timezone: hotel?.timezone, formatDate: (date) => date },
+      { checkIn, timezone: hotelZone, formatDate: (date) => date },
       t,
+      hotelNow,
     ).name;
   };
   const nights = Math.round((Date.parse(checkOut) - Date.parse(checkIn)) / 86_400_000);
@@ -670,13 +688,22 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   ]
     .filter(Boolean)
     .join(", ");
-  const stayDates = [
-    `${formatStayDate(checkIn)} – ${formatStayDate(checkOut)}`,
-    Number.isFinite(nights) ? `${nights} ${nights === 1 ? "night" : "nights"}` : null,
-    guestsLine,
-  ]
-    .filter(Boolean)
-    .join(" · ");
+  // VAY-2347: once the guest pressed Continue with fields missing, they stay marked until fixed.
+  const [detailsTried, setDetailsTried] = useState(false);
+  const continueToReview = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!detailsComplete) {
+      const form = event.currentTarget;
+      // Marked before focus lands, so the first wrong field is announced with its message.
+      flushSync(() => setDetailsTried(true));
+      form.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus();
+      return;
+    }
+    // Without a price there is nothing to review yet; the price notice says why.
+    if (!quote) return;
+    trackEvent(slug, "details_completed", {});
+    go(next);
+  };
   // VAY-2195: a made booking opens its confirmation page, as on the old pages. The page shows
   // what the server has for it; the room and extras names come from this booking.
   const openConfirmation = async ({
@@ -796,7 +823,12 @@ function RoomQuoteForm({ slug }: { slug: string }) {
           step === "payment" &&
           offeredMethods.length > 1
             ? tGuestErrors("paymentMethodNotAccepted")
-            : error
+            : // VAY-2348: the hotel's booking window for this way to pay closed since /book opened.
+              errorCode === "PAYMENT_METHOD_WINDOW"
+              ? tGuestErrors(
+                  offeredMethods.length > 1 ? "paymentMethodWindow" : "paymentMethodWindowOnly",
+                )
+              : error
         }
         action={
           refused
@@ -876,7 +908,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   const titles: Record<BookStep, string> = {
     rooms: fromPicks ? tGroup("title") : "Choose rooms and get a price",
     extras: "Enhance Your Stay",
-    details: "Guest Information",
+    details: tDetails("title"),
     payment: "Secure Payment",
   };
 
@@ -1018,10 +1050,11 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                                   keys[offerIndex]!,
                                   {
                                     checkIn,
-                                    timezone: hotel?.timezone,
+                                    timezone: hotelZone,
                                     formatDate: (date) => date,
                                   },
                                   t,
+                                  hotelNow,
                                 ).name
                               }
                             </option>
@@ -1269,66 +1302,40 @@ function RoomQuoteForm({ slug }: { slug: string }) {
           </>
         )}
         {settled && step === "details" && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          // VAY-2347: the form, then "Your stay" (below it on a phone), then the buttons. Continue
+          // is always pressable; missing fields are marked and the first one gets focus.
+          <form
+            noValidate
+            className="grid grid-cols-1 gap-6 lg:grid-cols-3 lg:gap-x-8"
+            onSubmit={continueToReview}
+          >
             <div className="lg:col-span-2 space-y-6">
-              <DetailsStep
-                quote={quote}
-                rooms={summaryRooms}
-                stayLine={stayDates}
-                formatMoney={money}
-                guest={guest}
-                onGuestChange={setGuest}
-                disclosure={guestRulesQuote.disclosure}
-                rulesFailed={guestRulesQuote.failed}
-                onRetryRules={guestRulesQuote.retry}
-                termsText={pagePayment.termsText}
-                locked={attemptOpen}
+              {guestRulesQuote.failed && (
+                <div
+                  role="alert"
+                  className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800"
+                >
+                  <p>{tDetails("rulesFailed")}</p>
+                  <button
+                    type="button"
+                    className="mt-2 font-semibold underline"
+                    onClick={guestRulesQuote.retry}
+                  >
+                    {tDetails("retry")}
+                  </button>
+                </div>
+              )}
+              <GuestDetailsForm
+                value={guest}
+                onChange={setGuest}
                 rules={knownRules}
+                locked={attemptOpen}
+                showErrors={detailsTried}
               />
               {!quote && loading && <p role="status">Checking price…</p>}
               {priceNotice}
-              <div className="flex items-center justify-between gap-4 pt-2">
-                <button
-                  type="button"
-                  className="text-sm font-medium text-gray-600 hover:text-gray-900 flex items-center gap-1"
-                  onClick={() => (previous === "rooms" ? backToRooms() : goBack(previous))}
-                >
-                  <svg
-                    className="w-4 h-4"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                    aria-hidden="true"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M15 19l-7-7 7-7"
-                    />
-                  </svg>
-                  {previous === "extras" ? "Back to extras" : "Back to rooms"}
-                </button>
-                <button
-                  type="button"
-                  className={button}
-                  disabled={!detailsComplete || !quote}
-                  onClick={() => {
-                    trackEvent(slug, "details_completed", {});
-                    go(next);
-                  }}
-                >
-                  Continue to payment
-                </button>
-              </div>
-              {!detailsComplete && (
-                <p className="text-sm text-gray-600 text-right">
-                  Fill in your name, email{phoneRequired(knownRules) ? " and phone" : ""} to
-                  continue.
-                </p>
-              )}
             </div>
-            <div className="lg:col-span-1">
+            <div className="lg:col-start-3 lg:row-start-1 lg:row-span-2 lg:self-start">
               {quote && (
                 <StaySummary
                   title="Your Stay"
@@ -1341,7 +1348,53 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                 />
               )}
             </div>
-          </div>
+            <div className="lg:col-span-2 flex flex-col-reverse items-stretch gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <button
+                type="button"
+                className="text-[15px] font-semibold text-gray-800 hover:text-gray-900 flex items-center justify-center gap-1.5"
+                onClick={() => (previous === "rooms" ? backToRooms() : goBack(previous))}
+              >
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M15 19l-7-7 7-7"
+                  />
+                </svg>
+                {previous === "extras" ? tDetails("backToExtras") : tDetails("backToRooms")}
+              </button>
+              {/* Pressable while fields are missing, so it can mark them; with everything filled
+                  in it waits for the price, which step 3 needs. */}
+              <button
+                type="submit"
+                className={`${button} flex items-center justify-center gap-2 px-7 text-[17px]`}
+                disabled={detailsComplete && !quote}
+              >
+                {tDetails("continue")}
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M9 5l7 7-7 7"
+                  />
+                </svg>
+              </button>
+            </div>
+          </form>
         )}
         {settled && step === "payment" && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -1404,6 +1457,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                         quote={quote}
                         onAcknowledgementChange={setTermsAcknowledgement}
                         roomNames={roomNames}
+                        today={hotelDate}
                       />
                       <ReplacementGuestRules
                         key={quote.quoteId}
@@ -1413,6 +1467,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                         quote={quote}
                         onAcknowledgementChange={setGuestDisclosure}
                         onRulesChange={setShownRules}
+                        hotelCountry={hotelCountry}
                       />
                       {consentError && (
                         <p
@@ -1442,13 +1497,13 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                 }
                 cancellation={
                   quote
-                    ? Array.from(
-                        new Set(
-                          quote.rooms.map((room) =>
-                            rateTerms(room)[1]!.replace(/^Cancellation: /, ""),
-                          ),
-                        ),
-                      ).map((line) => line.charAt(0).toUpperCase() + line.slice(1))
+                    ? cancellationSummary(
+                        quote.rooms.map((room, index) => ({
+                          name: roomNames[room.selectionId] || `Room ${index + 1}`,
+                          cancellation: room.cancellation,
+                        })),
+                        { checkIn: quote.checkIn, today: hotelDate },
+                      )
                     : []
                 }
                 confirm={

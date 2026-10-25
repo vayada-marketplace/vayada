@@ -100,7 +100,8 @@ export function createBankTransferBookingOperations(
         WHERE job.id=$1::uuid AND job.locked_by=$2 AND job.attempts_count=$3 AND job.status='running'
           AND job.locked_at > now() - interval '5 minutes'
           AND job.queue_name='platform.email' AND job.resource_product='booking' AND job.resource_type='guest_booking'
-          AND job.job_type IN ('email.booking-request-received','email.booking-reserved-pending-payment')
+          AND job.job_type IN ('email.booking-request-received','email.booking-reserved-pending-payment',
+            'email.booking-payment-reminder')
           AND job.payload->>'recipientRole'='guest' AND lower(job.payload->>'to')=lower(booker.email)
           AND ${bankBooking} AND destination.deleted_at IS NULL
         FOR SHARE OF destination`,

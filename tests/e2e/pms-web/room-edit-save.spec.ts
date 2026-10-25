@@ -6,6 +6,7 @@ import {
   pmsWebRoomType,
 } from "../support/pmsWebMocks";
 import { watchPageHealth } from "../support/pageHealth";
+import { roomTabBarOffset } from "../support/roomTabBar";
 
 // VAY-2102: a room edit must survive a reload, and a refused save must not show success.
 const roomTypeId = "22222222-2222-4222-8222-222222222222";
@@ -27,6 +28,7 @@ test.describe("pms-web room edit save", () => {
     await page.goto(`/rooms/${roomTypeId}`);
     await expect(roomField(page, "Room Type Name")).toHaveValue("Alpine Suite");
     await expect(page.getByText("Prices need to be saved again")).toHaveCount(0);
+    const tabBar = await roomTabBarOffset(page);
     await roomField(page, "Room Type Name").fill("Lake Suite");
     await roomField(page, "Max Children").fill("2");
     await page.getByRole("button", { name: "Save Changes" }).click();
@@ -34,6 +36,12 @@ test.describe("pms-web room edit save", () => {
     await expect(page.getByText("Room type updated successfully")).toBeVisible();
     await expect(page.getByText("Prices need to be saved again")).toBeVisible();
     await expect(page.getByRole("button", { name: "Save prices again" })).toBeVisible();
+    // The banners sit under the tab bar on every tab: showing them never moves the tabs (VAY-2337).
+    expect(await roomTabBarOffset(page)).toBe(tabBar);
+    await page.getByRole("button", { name: "Images & Amenities", exact: true }).click();
+    await expect(page.getByText("Room type updated successfully")).toBeVisible();
+    expect(await roomTabBarOffset(page)).toBe(tabBar);
+    await page.getByRole("button", { name: "Room Details", exact: true }).click();
     expect(stored.factWrites).toEqual([
       expect.objectContaining({
         expectedRevision: 3,

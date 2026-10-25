@@ -118,7 +118,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       </div>
       <div className="flex-1 flex flex-col min-w-0">
         <Header onMenuToggle={() => setSidebarOpen(!sidebarOpen)} />
-        <main className="flex-1 overflow-auto bg-gray-50 [scrollbar-gutter:stable]">
+        {/* relative: absolutely placed content (sr-only text) scrolls inside <main> instead of
+            stretching the window, which showed a white strip under the app (VAY-2344). */}
+        <main className="relative flex-1 overflow-auto bg-gray-50 [scrollbar-gutter:stable]">
           {/* VAY-2246: the account admin accepts the hotel terms and DPA; Privacy & data has its own button. */}
           <HotelAccountAgreementsBanner
             client={hotelAccountAgreementsApi}

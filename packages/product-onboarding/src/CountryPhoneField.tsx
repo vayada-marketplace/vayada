@@ -83,6 +83,12 @@ export function phoneValue(country: CountryCode, national: string): string {
   return `+${getCountryCallingCode(country)} ${typed}`;
 }
 
+/** Whether an international number ("+49 30 1234567") has a possible length for its country
+ * (libphonenumber's "possible"; not a check that the line exists). */
+export function phonePossible(value: string): boolean {
+  return parsePhoneNumberFromString(value.trim())?.isPossible() ?? false;
+}
+
 /** The hotel's country first, then every other country by name. */
 export function orderedPhoneCountries(first: CountryCode): PhoneCountry[] {
   const top = PHONE_COUNTRIES.find(({ code }) => code === first);
