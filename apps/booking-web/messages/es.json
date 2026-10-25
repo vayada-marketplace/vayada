@@ -568,6 +568,8 @@
     "roomNumber": "Habitación {number}",
     "totalStay": "Total por {nights} noches",
     "freeUntil": "Cancelación gratuita hasta el {date} ({timezone}).",
+    "hotelTime": "hora local del hotel",
+    "hotelTimeIn": "hora local del hotel, {country}",
     "afterDeadline": "Sin reembolso después del plazo o en caso de no presentarse.",
     "termsUnavailable": "Las condiciones de cancelación no están disponibles.",
     "unavailable": "Esta selección ya no está disponible. Busca de nuevo.",

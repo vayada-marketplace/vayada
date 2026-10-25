@@ -279,9 +279,9 @@ for (const width of [1440, 390]) {
     await expect(page.getByRole("region", { name: "Guest rules" })).toContainText(
       "From 15:00 until 22:00",
     );
-    // The hotel's time zone by name, not as an IANA id.
+    // Local hotel time with the hotel's country, not a zone's name or IANA id (VAY-2347).
     await expect(page.getByRole("region", { name: "Guest rules" })).toContainText(
-      "Times are in Central European Time.",
+      "All times are local hotel time (Switzerland).",
     );
     await expect(page.getByRole("region", { name: "Our terms & conditions" })).toContainText(
       "Quiet hours",

@@ -10,7 +10,7 @@ import { useRouter } from "@/i18n/navigation";
 import BookShell from "./BookShell";
 import ReplacementGuestRules from "@/components/booking/ReplacementGuestRules";
 import ExtrasStep from "@/components/booking/ExtrasStep";
-import DetailsStep, { rateTerms } from "@/components/booking/DetailsStep";
+import DetailsStep from "@/components/booking/DetailsStep";
 import PaymentStep from "@/components/booking/PaymentStep";
 import StaySummary, { type SummaryRoom } from "@/components/booking/StaySummary";
 import {
@@ -47,7 +47,8 @@ import {
 import ApproximateAmountsNote from "@/components/booking/ApproximateAmountsNote";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useHotel, useSlug } from "@/contexts/HotelContext";
-import { choiceKeys, choiceText } from "@/lib/roomChoices";
+import { choiceKeys, choiceText, hotelToday } from "@/lib/roomChoices";
+import { cancellationSummary, hotelCountryName } from "@/lib/checkoutTerms";
 import {
   bookEntry,
   bookStepQuery,
@@ -619,12 +620,19 @@ function RoomQuoteForm({ slug }: { slug: string }) {
       if (params.get(name)) home.set(name, params.get(name)!);
     router.push(`/?${home}`);
   };
+  // VAY-2347: deadlines are worded on the hotel's calendar day by the server's clock, never in the
+  // guest's device's zone; the price's guest rules name the zone the server books in.
+  const hotelZone = guestRulesQuote.disclosure?.propertyTimeZone ?? (hotel?.timezone || "Etc/UTC");
+  const hotelNow = new Date(serverNow());
+  const hotelDate = hotelToday(hotelZone, hotelNow);
+  const hotelCountry = hotelCountryName(hotel?.country);
   const choiceName = (room: PricingRoom, publicOfferKey: string) => {
     const index = room.offers.findIndex((offer) => offer.publicOfferKey === publicOfferKey);
     return choiceText(
       choiceKeys(room.offers)[index]!,
-      { checkIn, timezone: hotel?.timezone, formatDate: (date) => date },
+      { checkIn, timezone: hotelZone, formatDate: (date) => date },
       t,
+      hotelNow,
     ).name;
   };
   const nights = Math.round((Date.parse(checkOut) - Date.parse(checkIn)) / 86_400_000);
@@ -1018,10 +1026,11 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                                   keys[offerIndex]!,
                                   {
                                     checkIn,
-                                    timezone: hotel?.timezone,
+                                    timezone: hotelZone,
                                     formatDate: (date) => date,
                                   },
                                   t,
+                                  hotelNow,
                                 ).name
                               }
                             </option>
@@ -1284,6 +1293,8 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                 termsText={pagePayment.termsText}
                 locked={attemptOpen}
                 rules={knownRules}
+                today={hotelDate}
+                hotelCountry={hotelCountry}
               />
               {!quote && loading && <p role="status">Checking price…</p>}
               {priceNotice}
@@ -1404,6 +1415,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                         quote={quote}
                         onAcknowledgementChange={setTermsAcknowledgement}
                         roomNames={roomNames}
+                        today={hotelDate}
                       />
                       <ReplacementGuestRules
                         key={quote.quoteId}
@@ -1413,6 +1425,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                         quote={quote}
                         onAcknowledgementChange={setGuestDisclosure}
                         onRulesChange={setShownRules}
+                        hotelCountry={hotelCountry}
                       />
                       {consentError && (
                         <p
@@ -1442,13 +1455,13 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                 }
                 cancellation={
                   quote
-                    ? Array.from(
-                        new Set(
-                          quote.rooms.map((room) =>
-                            rateTerms(room)[1]!.replace(/^Cancellation: /, ""),
-                          ),
-                        ),
-                      ).map((line) => line.charAt(0).toUpperCase() + line.slice(1))
+                    ? cancellationSummary(
+                        quote.rooms.map((room, index) => ({
+                          name: roomNames[room.selectionId] || `Room ${index + 1}`,
+                          cancellation: room.cancellation,
+                        })),
+                        { checkIn: quote.checkIn, today: hotelDate },
+                      )
                     : []
                 }
                 confirm={

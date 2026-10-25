@@ -569,6 +569,8 @@
     "roomNumber": "Zimmer {number}",
     "totalStay": "Gesamtpreis für {nights} Nächte",
     "freeUntil": "Kostenlose Stornierung bis {date} ({timezone}).",
+    "hotelTime": "Ortszeit des Hotels",
+    "hotelTimeIn": "Ortszeit des Hotels, {country}",
     "afterDeadline": "Keine Erstattung nach Ablauf der Frist oder bei Nichtanreise.",
     "termsUnavailable": "Die Stornierungsbedingungen sind nicht verfügbar.",
     "unavailable": "Diese Unterkunftsauswahl ist nicht mehr verfügbar. Bitte suche erneut.",

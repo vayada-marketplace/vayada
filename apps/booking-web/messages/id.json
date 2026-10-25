@@ -568,6 +568,8 @@
     "roomNumber": "Kamar {number}",
     "totalStay": "Total untuk {nights} malam",
     "freeUntil": "Pembatalan gratis hingga {date} ({timezone}).",
+    "hotelTime": "waktu setempat hotel",
+    "hotelTimeIn": "waktu setempat hotel, {country}",
     "afterDeadline": "Tidak ada pengembalian dana setelah batas waktu atau jika tidak datang.",
     "termsUnavailable": "Ketentuan pembatalan tidak tersedia.",
     "unavailable": "Pilihan akomodasi ini tidak lagi tersedia. Silakan cari kembali.",
