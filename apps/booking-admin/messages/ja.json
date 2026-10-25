@@ -225,6 +225,8 @@
   "notifications.sync.retryFailed": "同期できませんでした。しばらくしてからもう一度お試しください。",
   "notifications.sync.stillRunning": "同期はまだ実行中です。数分後に PMS → チャネルマネージャーを確認してください。",
   "notifications.sync.synced": "チャネルマネージャーと同期しました",
+  "notifications.toast.syncDetail": "他のチャネルの空室状況と予約が最新でない可能性があります。",
+  "notifications.toast.dismiss": "通知を閉じる",
   "layout.header.user": "ユーザー",
   "layout.header.accountSettings": "アカウント設定",
   "layout.header.signOut": "ログアウト",

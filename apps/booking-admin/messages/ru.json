@@ -225,6 +225,8 @@
   "notifications.sync.retryFailed": "Синхронизация не прошла. Попробуйте ещё раз чуть позже.",
   "notifications.sync.stillRunning": "Синхронизация ещё идёт. Проверьте PMS → Channel manager через несколько минут.",
   "notifications.sync.synced": "Синхронизация с channel manager выполнена",
+  "notifications.toast.syncDetail": "Наличие номеров и бронирования в других каналах могут быть неактуальны.",
+  "notifications.toast.dismiss": "Закрыть уведомление",
   "layout.header.user": "Пользователь",
   "layout.header.accountSettings": "Настройки аккаунта",
   "layout.header.signOut": "Выйти",
