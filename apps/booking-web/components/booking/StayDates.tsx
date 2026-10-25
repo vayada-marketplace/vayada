@@ -3,16 +3,28 @@
 import { useLocale, useTranslations } from "next-intl";
 import { resolveLocale } from "@/lib/utils";
 
-/** "Mon, 26 Oct" and "2026" for a stay date (YYYY-MM-DD), read as the hotel's calendar day. */
+/** "Mon, 26 Oct" and "2026" for a stay date (YYYY-MM-DD), read as the hotel's calendar day: the site's
+ * full stay date (formatStayDate) with its year taken out, so each language keeps its punctuation. */
 function dayParts(date: string, locale: string) {
   const value = new Date(`${date}T00:00:00Z`);
   if (Number.isNaN(value.getTime())) return { day: "—", year: "" };
-  const format = (options: Intl.DateTimeFormatOptions) =>
-    new Intl.DateTimeFormat(resolveLocale(locale), { ...options, timeZone: "UTC" }).format(value);
-  return {
-    day: format({ weekday: "short", day: "numeric", month: "short" }),
-    year: format({ year: "numeric" }),
-  };
+  const parts = new Intl.DateTimeFormat(resolveLocale(locale), {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  }).formatToParts(value);
+  const at = parts.findIndex((part) => part.type === "year");
+  const day = parts
+    .filter(
+      (part, index) =>
+        index !== at && !(part.type === "literal" && (index === at - 1 || index === at + 1)),
+    )
+    .map((part) => part.value)
+    .join("")
+    .trim();
+  return { day, year: parts[at]?.value ?? "" };
 }
 
 /** VAY-2360: check-in and check-out in one block of two equal columns built the same way (label, short date,
