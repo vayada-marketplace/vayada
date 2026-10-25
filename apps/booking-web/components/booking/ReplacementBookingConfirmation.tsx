@@ -42,6 +42,7 @@ export default function ReplacementBookingConfirmation({
   onBooked,
   onConsentMissing,
   soldOutNotice,
+  label,
 }: {
   slug: string;
   quote: PublicBookingQuote;
@@ -68,6 +69,8 @@ export default function ReplacementBookingConfirmation({
   /** VAY-2320: a chosen room has no free room left for the dates; the page says which and how to
    * choose again. Nothing was stored. */
   soldOutNotice?: (roomTypeIds: string[]) => ReactNode;
+  /** The button's words for the chosen way to pay (VAY-2347); the defaults below otherwise. */
+  label?: string;
 }) {
   const termsNoticeId = useId();
   const [loading, setLoading] = useState(false);
@@ -297,13 +300,15 @@ export default function ReplacementBookingConfirmation({
           ? request
             ? "Sending request…"
             : "Confirming booking…"
-          : quote.paymentMethod === "card"
-            ? request
-              ? "Continue to card authorisation"
-              : "Continue to card payment"
-            : request
-              ? "Send booking request"
-              : "Confirm booking"}
+          : label
+            ? label
+            : quote.paymentMethod === "card"
+              ? request
+                ? "Continue to card authorisation"
+                : "Continue to card payment"
+              : request
+                ? "Send booking request"
+                : "Confirm booking"}
       </button>
     </form>
   );

@@ -718,5 +718,76 @@
     "continue": "Continuer vers le récapitulatif",
     "backToRooms": "Retour aux chambres",
     "backToExtras": "Retour aux extras"
+  },
+  "reviewPay": {
+    "title": "Vérifier et payer",
+    "guest": "Client",
+    "edit": "Modifier",
+    "howToPay": "Comment souhaitez-vous payer ?",
+    "paymentPreference": "Mode de paiement",
+    "backToDetails": "Retour à vos coordonnées",
+    "buttonConfirm": "Confirmer la réservation",
+    "buttonRequest": "Envoyer la demande de réservation",
+    "buttonCard": "Continuer vers les données de carte",
+    "method": {
+      "pay_at_property": {
+        "title": "Payer à l’hôtel",
+        "summary": "Rien à payer maintenant · vous payez à l’arrivée",
+        "explain": "Vous payez {total} à l’hôtel à votre arrivée. Votre réservation est confirmée immédiatement.",
+        "explainRequest": "Rien n’est débité maintenant. Si l’hôtel accepte votre demande, vous payez {total} à votre arrivée. L’hôtel répond sous 24 heures.",
+        "boxNow": "À payer maintenant",
+        "boxLater": "À l’hôtel",
+        "phrase": "à l’hôtel"
+      },
+      "card": {
+        "title": "Payer par carte",
+        "summary": "Débité lors de la réservation",
+        "summaryRequest": "Débité seulement si l’hôtel accepte",
+        "explain": "Nous débitons {now} sur votre carte lorsque vous confirmez. Vous saisissez vos données de carte à l’étape suivante.",
+        "explainSplit": "Nous débitons {now} sur votre carte lorsque vous confirmez et vous réglez le reste, {later}, à l’hôtel. Vous saisissez vos données de carte à l’étape suivante.",
+        "explainRequest": "Nous bloquons {now} sur votre carte. Si l’hôtel refuse ou ne répond pas sous 24 heures, le blocage est levé. Vous saisissez vos données de carte à l’étape suivante.",
+        "explainRequestSplit": "Nous bloquons {now} sur votre carte et vous réglez le reste, {later}, à l’hôtel. Si l’hôtel refuse ou ne répond pas sous 24 heures, le blocage est levé. Vous saisissez vos données de carte à l’étape suivante.",
+        "boxNow": "Débité maintenant",
+        "boxHold": "Bloqué maintenant",
+        "boxCharged": "Débit",
+        "boxChargedValue": "Si l’hôtel accepte",
+        "boxLater": "À l’hôtel",
+        "phrase": "par carte"
+      },
+      "bank_transfer": {
+        "title": "Payer par virement bancaire",
+        "summary": "Coordonnées bancaires envoyées par e-mail après la réservation",
+        "explain": "Après la réservation, nous vous envoyons par e-mail les coordonnées bancaires de l’hôtel et votre référence de réservation. Nous gardons votre chambre jusqu’à la date limite de paiement ; votre réservation est confirmée dès réception de votre virement.",
+        "boxNow": "À payer maintenant",
+        "boxLater": "Par virement",
+        "phrase": "par virement bancaire"
+      },
+      "paypal": {
+        "title": "Payer avec PayPal",
+        "summary": "Coordonnées PayPal envoyées par e-mail après la réservation",
+        "explain": "Après la réservation, nous vous envoyons par e-mail l’adresse PayPal de l’hôtel et votre référence de réservation. Nous gardons votre chambre jusqu’à la date limite de paiement ; votre réservation est confirmée dès réception de votre paiement.",
+        "boxNow": "À payer maintenant",
+        "boxLater": "Par PayPal",
+        "phrase": "avec PayPal"
+      }
+    },
+    "stay": {
+      "title": "Votre séjour",
+      "checkIn": "Arrivée",
+      "checkOut": "Départ",
+      "from": "à partir de {time}",
+      "by": "avant {time}",
+      "nights": "{count, plural, one {# nuit} other {# nuits}}",
+      "room": "Chambre {number}",
+      "extras": "Extras",
+      "fees": "Frais",
+      "discount": "Réduction",
+      "total": "Total",
+      "includes": "Taxes et frais inclus",
+      "hold": "Prix garanti encore {time} min",
+      "expired": "Ce prix a expiré.",
+      "instant": "Confirmation immédiate par e-mail",
+      "methods": "Paiement {methods}"
+    }
   }
 }

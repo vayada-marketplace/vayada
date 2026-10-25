@@ -52,7 +52,7 @@ test("keeps the hotel's guest rules in the form when the price expires", async (
   await expect(page.getByRole("button", { name: "Confirm booking" })).toBeDisabled();
   await expect(missing).toHaveCount(0);
   // VAY-2195: the details are a step of their own; they stay as typed after the price expires.
-  await page.getByRole("button", { name: "Change", exact: true }).click();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
   await page.screenshot({
     path: testInfo.outputPath("book-price-expired-1440.png"),
     fullPage: true,

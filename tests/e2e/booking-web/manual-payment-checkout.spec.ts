@@ -161,9 +161,7 @@ test("books by bank transfer and opens the protected payment details", async ({ 
   await expect(paymentOption(page, "bank_transfer")).toHaveAttribute("aria-checked", "true");
   await expect(orderTotal(page)).toHaveText("€240");
   await expect(
-    page.getByText(
-      "We hold your room until the payment deadline and confirm your booking when your payment arrives.",
-    ),
+    page.getByText(/We hold your room until the payment deadline, and your booking is confirmed/),
   ).toBeVisible();
   await page.getByLabel("I have read the room and rate terms for this price").check();
   await page.getByLabel("guest rules for this price").check();

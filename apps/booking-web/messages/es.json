@@ -718,5 +718,76 @@
     "continue": "Continuar a la revisión",
     "backToRooms": "Volver a las habitaciones",
     "backToExtras": "Volver a los extras"
+  },
+  "reviewPay": {
+    "title": "Revisar y pagar",
+    "guest": "Huésped",
+    "edit": "Editar",
+    "howToPay": "¿Cómo quieres pagar?",
+    "paymentPreference": "Forma de pago",
+    "backToDetails": "Volver a tus datos",
+    "buttonConfirm": "Confirmar reserva",
+    "buttonRequest": "Enviar solicitud de reserva",
+    "buttonCard": "Continuar a los datos de la tarjeta",
+    "method": {
+      "pay_at_property": {
+        "title": "Pagar en el hotel",
+        "summary": "Nada que pagar ahora · pagas al llegar",
+        "explain": "Pagas {total} en el hotel al llegar. Tu reserva queda confirmada al momento.",
+        "explainRequest": "No se cobra nada ahora. Si el hotel acepta tu solicitud, pagas {total} al llegar. El hotel responde en 24 horas.",
+        "boxNow": "A pagar ahora",
+        "boxLater": "En el hotel",
+        "phrase": "en el hotel"
+      },
+      "card": {
+        "title": "Pagar con tarjeta",
+        "summary": "Se cobra al reservar",
+        "summaryRequest": "Se cobra solo si el hotel acepta",
+        "explain": "Cargamos {now} en tu tarjeta cuando confirmes. Introduces los datos de la tarjeta en el siguiente paso.",
+        "explainSplit": "Cargamos {now} en tu tarjeta cuando confirmes y pagas el resto, {later}, en el hotel. Introduces los datos de la tarjeta en el siguiente paso.",
+        "explainRequest": "Retenemos {now} en tu tarjeta. Si el hotel rechaza o no responde en 24 horas, la retención se libera. Introduces los datos de la tarjeta en el siguiente paso.",
+        "explainRequestSplit": "Retenemos {now} en tu tarjeta y pagas el resto, {later}, en el hotel. Si el hotel rechaza o no responde en 24 horas, la retención se libera. Introduces los datos de la tarjeta en el siguiente paso.",
+        "boxNow": "Cargo ahora",
+        "boxHold": "Retención ahora",
+        "boxCharged": "Cargo",
+        "boxChargedValue": "Cuando el hotel acepte",
+        "boxLater": "En el hotel",
+        "phrase": "con tarjeta"
+      },
+      "bank_transfer": {
+        "title": "Pagar por transferencia bancaria",
+        "summary": "Datos bancarios por correo tras la reserva",
+        "explain": "Tras la reserva, te enviamos por correo los datos bancarios del hotel y tu referencia de reserva. Guardamos tu habitación hasta la fecha límite de pago y tu reserva se confirma cuando llegue la transferencia.",
+        "boxNow": "A pagar ahora",
+        "boxLater": "Por transferencia",
+        "phrase": "por transferencia bancaria"
+      },
+      "paypal": {
+        "title": "Pagar con PayPal",
+        "summary": "Datos de PayPal por correo tras la reserva",
+        "explain": "Tras la reserva, te enviamos por correo la dirección de PayPal del hotel y tu referencia de reserva. Guardamos tu habitación hasta la fecha límite de pago y tu reserva se confirma cuando llegue el pago.",
+        "boxNow": "A pagar ahora",
+        "boxLater": "Por PayPal",
+        "phrase": "con PayPal"
+      }
+    },
+    "stay": {
+      "title": "Tu estancia",
+      "checkIn": "Entrada",
+      "checkOut": "Salida",
+      "from": "desde las {time}",
+      "by": "hasta las {time}",
+      "nights": "{count, plural, one {# noche} other {# noches}}",
+      "room": "Habitación {number}",
+      "extras": "Extras",
+      "fees": "Cargos",
+      "discount": "Descuento",
+      "total": "Total",
+      "includes": "Impuestos y cargos incluidos",
+      "hold": "Precio reservado para ti durante {time} min",
+      "expired": "Este precio ha caducado.",
+      "instant": "Confirmación inmediata por correo",
+      "methods": "Paga {methods}"
+    }
   }
 }

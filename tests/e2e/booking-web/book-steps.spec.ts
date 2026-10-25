@@ -296,7 +296,7 @@ for (const width of [1440, 390]) {
     await page.getByRole("button", { name: "Continue to review" }).click();
 
     // Payment: pay at the hotel by default, the ticks for this price, then Confirm.
-    await expect(page.getByRole("heading", { name: "Secure Payment" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Review & pay" })).toBeVisible();
     await expect(paymentOption(page, "pay_at_property")).toHaveAttribute("aria-checked", "true");
     await expect(orderTotal(page)).toHaveText("€370");
     await page.getByRole("button", { name: "Read our guest rules" }).click();
@@ -328,7 +328,7 @@ for (const width of [1440, 390]) {
       fullPage: true,
     });
     // Back to the details and on again: the boxes start without the mark until the next press.
-    await page.getByRole("button", { name: "Change", exact: true }).click();
+    await page.getByRole("button", { name: "Edit", exact: true }).click();
     await page.getByRole("button", { name: "Continue to review" }).click();
     await expect(terms).toBeVisible();
     await expect(missing).toHaveCount(0);
@@ -349,7 +349,7 @@ for (const width of [1440, 390]) {
     await page.screenshot({ path: testInfo.outputPath(`payment-${width}.png`), fullPage: true });
     // Another way to pay is a new price: its terms are ticked afresh.
     await paymentOption(page, "card").click();
-    await expect(page.getByRole("button", { name: "Continue to card payment" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Continue to card details" })).toBeVisible();
     await expect(terms).not.toBeChecked();
     await expect(rules).not.toBeChecked();
     await expect(missing).toHaveCount(0);
@@ -547,7 +547,7 @@ test("a refused updated price keeps the stay on the payment step", async ({ page
   await expect(orderTotal(page)).toHaveText("€268");
   await expect(orderTotal(page)).toHaveClass(/line-through/);
   await expect(
-    page.getByRole("complementary", { name: "Order Summary" }).getByText(/This price expired at/),
+    page.getByRole("complementary", { name: "Your stay" }).getByText("This price has expired."),
   ).toBeVisible();
 });
 
@@ -574,7 +574,7 @@ test("a way to pay the new choices don't take goes back to the hotel's own", asy
   await expect(orderTotal(page)).toHaveText("€268");
   // Back at Extras, the new choice can't be paid by card: it is priced to pay at the hotel.
   prices.refuse = "card";
-  await page.getByRole("button", { name: "Back to your details" }).click();
+  await page.getByRole("button", { name: "Back to details" }).click();
   await page.getByRole("button", { name: "Back to extras" }).click();
   await page
     .getByRole("region", { name: "Optional extras" })

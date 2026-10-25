@@ -55,6 +55,7 @@ import { useCurrency } from "@/contexts/CurrencyContext";
 import { useHotel, useSlug } from "@/contexts/HotelContext";
 import { choiceKeys, choiceText, hotelToday } from "@/lib/roomChoices";
 import { cancellationSummary, hotelCountryName } from "@/lib/checkoutTerms";
+import { paymentMethodOptions } from "@/lib/paymentMethodOptions";
 import {
   bookEntry,
   bookStepQuery,
@@ -128,6 +129,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   const tGuestErrors = useTranslations("guestErrors");
   const tPayment = useTranslations("payment");
   const tDetails = useTranslations("guestDetails");
+  const tReview = useTranslations("reviewPay");
   const tGroup = useTranslations("groupRooms");
   const tCommon = useTranslations("common");
   const { hotel } = useHotel();
@@ -633,6 +635,24 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   const hotelNow = new Date(serverNow());
   const hotelDate = hotelToday(hotelZone, hotelNow);
   const hotelCountry = hotelCountryName(hotel?.country);
+  // VAY-2347: each offered way to pay with its words and amounts; the price's own way gives the
+  // "Your stay" payment lines and the button's words.
+  const methodOptions = paymentMethodOptions(
+    offeredMethods,
+    {
+      request: quote?.acceptanceMode === "request",
+      amounts: quote
+        ? {
+            total: money(quote.totalMinor, quote.currency),
+            now: money(quote.dueNowMinor, quote.currency),
+            later: money(quote.dueLaterMinor, quote.currency),
+            zero: money("0", quote.currency),
+          }
+        : { total: "", now: "", later: "", zero: "" },
+    },
+    tReview,
+  );
+  const pricedOption = methodOptions.find((option) => option.method === quote?.paymentMethod);
   const choiceName = (room: PricingRoom, publicOfferKey: string) => {
     const index = room.offers.findIndex((offer) => offer.publicOfferKey === publicOfferKey);
     return choiceText(
@@ -907,7 +927,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     rooms: fromPicks ? tGroup("title") : "Choose rooms and get a price",
     extras: "Enhance Your Stay",
     details: tDetails("title"),
-    payment: "Secure Payment",
+    payment: tReview("title"),
   };
 
   return (
@@ -974,13 +994,12 @@ function RoomQuoteForm({ slug }: { slug: string }) {
             <div className="lg:col-span-1">
               {quote && (
                 <StaySummary
-                  title="Your Stay"
                   quote={quote}
                   rooms={summaryRooms}
                   guests={guestsLine}
                   rules={knownRules}
                   formatMoney={money}
-                  formatDate={formatStayDate}
+                  methods={offeredMethods}
                 />
               )}
             </div>
@@ -1321,13 +1340,12 @@ function RoomQuoteForm({ slug }: { slug: string }) {
             <div className="lg:col-start-3 lg:row-start-1 lg:row-span-2 lg:self-start">
               {quote && (
                 <StaySummary
-                  title="Your Stay"
                   quote={quote}
                   rooms={summaryRooms}
                   guests={guestsLine}
                   rules={knownRules}
                   formatMoney={money}
-                  formatDate={formatStayDate}
+                  methods={offeredMethods}
                 />
               )}
             </div>
@@ -1383,9 +1401,10 @@ function RoomQuoteForm({ slug }: { slug: string }) {
               <PaymentStep
                 guestName={`${guest.firstName} ${guest.lastName}`}
                 guestEmail={guest.email}
+                guestPhone={guest.phone}
                 onChangeDetails={() => goBack("details")}
                 method={method}
-                available={offeredMethods}
+                options={methodOptions}
                 unavailable={noWayToPay ? priceNotice : null}
                 tooSoon={
                   tooSoon.length
@@ -1397,16 +1416,8 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                 onMethod={setPayment}
                 locked={attemptOpen}
                 termsText={pagePayment.termsText}
-                quote={quote}
-                total={quote ? money(quote.totalMinor, quote.currency) : ""}
-                split={
-                  quote && quote.paymentMethod === "card" && quote.dueLaterMinor !== "0"
-                    ? {
-                        now: money(quote.dueNowMinor, quote.currency),
-                        later: money(quote.dueLaterMinor, quote.currency),
-                      }
-                    : undefined
-                }
+                hasQuote={!!quote}
+                showExplanation={!!quote && quote.paymentMethod === method}
                 notice={
                   error && quote && !attemptOpen ? (
                     <Notice
@@ -1505,6 +1516,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                       onAttemptChange={setAttempt}
                       onBooked={openConfirmation}
                       soldOutNotice={soldOutNotice}
+                      label={pricedOption?.button}
                       onConsentMissing={
                         // Only while both boxes can be ticked: an expired price, rules that
                         // didn't load or a room without its name keep Confirm off, as before.
@@ -1531,14 +1543,12 @@ function RoomQuoteForm({ slug }: { slug: string }) {
             <div className="lg:col-span-1 space-y-4">
               {summaryQuote && (
                 <StaySummary
-                  title="Order Summary"
                   quote={summaryQuote}
                   rooms={summaryRooms}
                   guests={guestsLine}
                   rules={knownRules}
                   formatMoney={money}
-                  formatDate={formatStayDate}
-                  payment
+                  box={pricedOption?.box}
                   expired={!!error}
                 />
               )}
