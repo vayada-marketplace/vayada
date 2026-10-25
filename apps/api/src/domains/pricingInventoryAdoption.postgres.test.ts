@@ -1158,6 +1158,7 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
           version: "booking-stay.v1",
           cancellation: null,
           places: [],
+          extras: null,
         });
         await db.query("ROLLBACK TO SAVEPOINT stay_statuses");
         // VAY-2360 part 3: extras after booking, asked by the guest and answered by the hotel. The stay
