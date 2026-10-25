@@ -3420,12 +3420,15 @@ describe.skipIf(!url)("pricing acceptance writer bank transfer and PayPal (Postg
       const both = Promise.all([racing.markPaid(), racing.sweep()]);
       let waiting = 0;
       for (let attempt = 0; attempt < 200 && waiting < 2; attempt++) {
-        waiting = (
-          await lockPool.query(
-            "SELECT count(*)::int AS n FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))",
-            [holder],
-          )
-        ).rows[0].n;
+        waiting =
+          // The second waiter queues behind the first, so count every lock wait in this database.
+          (
+            await lockPool.query(
+              `SELECT count(*)::int AS n FROM pg_stat_activity
+             WHERE datname = current_database() AND wait_event_type = 'Lock' AND pid <> $1`,
+              [holder],
+            )
+          ).rows[0].n;
         if (waiting < 2) await new Promise((resolve) => setTimeout(resolve, 25));
       }
       expect(waiting).toBe(2);
