@@ -717,7 +717,11 @@
     "errorSummary": "{count, plural, one {Revisa el campo marcado en rojo.} other {Revisa los # campos marcados en rojo.}}",
     "continue": "Continuar a la revisión",
     "backToRooms": "Volver a las habitaciones",
-    "backToExtras": "Volver a los extras"
+    "backToExtras": "Volver a los extras",
+    "errorPhoneInvalid": "Escribe un número de teléfono válido.",
+    "errorCountry": "Elige tu país de la lista.",
+    "rulesFailed": "No hemos podido comprobar las normas de la casa para este precio. Puedes seguir rellenando tus datos.",
+    "retry": "Reintentar"
   },
   "reviewPay": {
     "title": "Revisar y pagar",

@@ -718,7 +718,11 @@
     "errorSummary": "{count, plural, one {Bitte prüfen Sie das rot markierte Feld.} other {Bitte prüfen Sie die # rot markierten Felder.}}",
     "continue": "Weiter zur Übersicht",
     "backToRooms": "Zurück zu den Zimmern",
-    "backToExtras": "Zurück zu den Extras"
+    "backToExtras": "Zurück zu den Extras",
+    "errorPhoneInvalid": "Geben Sie eine gültige Telefonnummer ein.",
+    "errorCountry": "Wählen Sie Ihr Land aus der Liste.",
+    "rulesFailed": "Wir konnten die Hausregeln für diesen Preis nicht prüfen. Sie können Ihre Angaben weiter ausfüllen.",
+    "retry": "Erneut versuchen"
   },
   "reviewPay": {
     "title": "Prüfen & bezahlen",

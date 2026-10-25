@@ -68,6 +68,9 @@ test("keeps the hotel's guest rules in the form when the price expires", async (
 
 test("requires the phone while the guest rules can't be loaded", async ({ page }, testInfo) => {
   await openDetails(page, { rulesStatus: 503 });
+  // VAY-2347: step 2 says the rules couldn't be checked and offers to try again.
+  await expect(page.getByText(/couldn.t check the hotel.s guest rules/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
   await expect(page.getByText("Phone (optional)")).toHaveCount(0);
   await expect(page.getByRole("textbox", { name: "Phone", exact: true })).toHaveAttribute(
     "required",
@@ -75,7 +78,7 @@ test("requires the phone while the guest rules can't be loaded", async ({ page }
   );
   // VAY-2347: Continue is always pressable; it marks what's missing and focuses the first field.
   const toReview = page.getByRole("button", { name: "Continue to review" });
-  const summary = page.getByRole("alert").filter({ hasText: "fields marked in red" });
+  const summary = page.getByText(/fields marked in red/);
   await toReview.click();
   await expect(summary).toHaveText("Check the 4 fields marked in red.");
   await expect(page.getByLabel("First name")).toBeFocused();

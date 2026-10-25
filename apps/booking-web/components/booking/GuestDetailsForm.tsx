@@ -8,6 +8,7 @@ import {
   defaultPhoneCountry,
   orderedPhoneCountries,
   phoneParts,
+  phonePossible,
   phoneValue,
 } from "@vayada/product-onboarding/CountryPhoneField";
 import { hotelCountryName } from "@/lib/checkoutTerms";
@@ -46,7 +47,10 @@ export function guestErrors(guest: GuestDetails, rules: Rules): GuestField[] {
   if (!guest.firstName.trim()) errors.push("firstName");
   if (!guest.lastName.trim()) errors.push("lastName");
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(guest.email.trim())) errors.push("email");
-  if (phoneRequired(rules) && !guest.phone.trim()) errors.push("phone");
+  const phone = guest.phone.trim();
+  // A number with its code must be long enough to be one; an older draft's is sent as typed.
+  if (phone ? phone.startsWith("+") && !phonePossible(phone) : phoneRequired(rules))
+    errors.push("phone");
   if (!/^([A-Za-z]{2})?$/.test(guest.countryCode.trim())) errors.push("countryCode");
   return errors;
 }
@@ -132,6 +136,26 @@ const typedPhone = ({ country, national }: { country: string; national: string }
   if (!number) return "";
   return number.startsWith("+") ? number : `${DIAL.get(country) ?? ""} ${number}`;
 };
+type Parts = ReturnType<typeof phoneParts>;
+// For the codes several countries share (+1, +44, +7), the country most numbers belong to.
+const SHARED_CODE_HOME = new Set(["US", "GB", "RU"]);
+/** A stored number back into its code and the rest. A number libphonenumber can't place yet keeps
+ * its own code (the browser's country when that shares it), never the browser's. */
+function splitPhone(value: string, fallback: Parts["country"]): Parts {
+  const parts = phoneParts(value, fallback);
+  if (!parts.national.startsWith("+")) return parts;
+  const matches = Array.from(DIAL).filter(([, dial]) => parts.national.startsWith(`${dial} `));
+  const match =
+    matches.find(([code]) => code === fallback) ??
+    matches.find(([code]) => SHARED_CODE_HOME.has(code)) ??
+    matches.sort((a, b) => b[1].length - a[1].length)[0];
+  return match
+    ? {
+        country: match[0] as Parts["country"],
+        national: parts.national.slice(match[1].length).trim(),
+      }
+    : parts;
+}
 
 function Field({
   label,
@@ -197,10 +221,10 @@ function PhoneInput({
   const t = useTranslations("guestDetails");
   const locale = useLocale();
   const fallback = useMemo(() => defaultPhoneCountry(browserRegion()), []);
-  const [parts, setParts] = useState(() => phoneParts(value, fallback));
+  const [parts, setParts] = useState(() => splitPhone(value, fallback));
   // A number set from outside (a restored draft) replaces what's shown.
   useEffect(() => {
-    if (value !== typedPhone(parts)) setParts(phoneParts(value, fallback));
+    if (value !== typedPhone(parts)) setParts(splitPhone(value, fallback));
     // Only the stored value decides; the parts follow it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value]);
@@ -258,6 +282,11 @@ function PhoneInput({
         aria-describedby={describedBy}
         value={parts.national}
         onChange={(event) => update({ ...parts, national: event.target.value })}
+        // A number typed or pasted with its own code moves that code into the dropdown.
+        onBlur={() => {
+          if (parts.national.trim().startsWith("+"))
+            update(splitPhone(parts.national.trim(), parts.country));
+        }}
       />
     </div>
   );
@@ -301,7 +330,9 @@ export default function GuestDetailsForm({
   useEffect(() => {
     const current = value.countryCode.trim().toUpperCase();
     if (locked || (current && countries.some(({ code }) => code === current))) return;
-    const guess = browserRegion() ?? "";
+    // Only for a guest who hasn't filled anything in yet: a cleared choice stays cleared.
+    const fresh = !value.firstName.trim() && !value.lastName.trim() && !value.email.trim();
+    const guess = (fresh && browserRegion()) || "";
     if (guess !== value.countryCode) onChange({ ...value, countryCode: guess });
     // Only when the form opens.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -316,10 +347,9 @@ export default function GuestDetailsForm({
       </h2>
       <p className="mt-1 text-[15px] text-gray-600">{t("intro")}</p>
       {errors.length > 0 && (
-        <p
-          role="alert"
-          className="mt-5 flex items-start gap-2 rounded-[10px] bg-red-50 px-3.5 py-3 text-[15px] font-semibold text-red-700"
-        >
+        // Not a live region: focus moves to the first wrong field, whose message is read with
+        // it, and fixing fields doesn't interrupt the screen reader.
+        <p className="mt-5 flex items-start gap-2 rounded-[10px] bg-red-50 px-3.5 py-3 text-[15px] font-semibold text-red-700">
           {alertIcon}
           {t("errorSummary", { count: errors.length })}
         </p>
@@ -392,7 +422,7 @@ export default function GuestDetailsForm({
             label={t("phone")}
             required={phone}
             hint={t("phoneHint")}
-            error={error("phone", t("errorPhone"))}
+            error={error("phone", value.phone.trim() ? t("errorPhoneInvalid") : t("errorPhone"))}
           >
             {(props) => (
               <PhoneInput
@@ -404,15 +434,20 @@ export default function GuestDetailsForm({
               />
             )}
           </Field>
-          <Field label={t("countryOfResidence")} required={false}>
-            {({ id, describedBy }) => (
+          <Field
+            label={t("countryOfResidence")}
+            required={false}
+            error={error("countryCode", t("errorCountry"))}
+          >
+            {({ id, describedBy, invalid }) => (
               <div className="relative">
                 <select
                   id={id}
-                  className={`${input(false)} appearance-none pr-10`}
+                  className={`${input(invalid)} appearance-none pr-10`}
                   name="countryCode"
                   autoComplete="country-name"
                   disabled={locked}
+                  aria-invalid={invalid || undefined}
                   aria-describedby={describedBy}
                   value={value.countryCode.toUpperCase()}
                   onChange={set("countryCode")}

@@ -717,7 +717,11 @@
     "errorSummary": "{count, plural, one {Periksa # kolom yang ditandai merah.} other {Periksa # kolom yang ditandai merah.}}",
     "continue": "Lanjut ke tinjauan",
     "backToRooms": "Kembali ke kamar",
-    "backToExtras": "Kembali ke ekstra"
+    "backToExtras": "Kembali ke Tambahan",
+    "errorPhoneInvalid": "Masukkan nomor telepon yang valid.",
+    "errorCountry": "Pilih negara Anda dari daftar.",
+    "rulesFailed": "Kami tidak dapat memeriksa aturan tamu hotel untuk harga ini. Anda tetap dapat mengisi data Anda.",
+    "retry": "Coba lagi"
   },
   "reviewPay": {
     "title": "Tinjau & bayar",

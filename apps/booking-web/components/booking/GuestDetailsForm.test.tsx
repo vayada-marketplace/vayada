@@ -143,22 +143,23 @@ it("speaks the page's language", () => {
 });
 
 it("starts the code and the country of residence from the browser's language", () => {
-  render(rules, { value: { ...ada, phone: "", countryCode: "" } });
+  // A guest who hasn't filled anything in yet.
+  render(rules, { value: emptyGuest });
   expect(document.querySelector<HTMLSelectElement>('[name="phoneCountry"]')!.value).toBe("DE");
-  expect(change).toHaveBeenCalledWith({ ...ada, phone: "", countryCode: "DE" });
+  expect(change).toHaveBeenCalledWith({ ...emptyGuest, countryCode: "DE" });
   change.mockClear();
   type("phone", "151 2345");
-  expect(change).toHaveBeenLastCalledWith({ ...ada, phone: "+49 151 2345", countryCode: "" });
+  expect(change).toHaveBeenLastCalledWith({ ...emptyGuest, phone: "+49 151 2345" });
 });
 
 it("marks each wrong field and counts them once the guest tried to continue", () => {
   const value = { ...ada, lastName: " ", email: "ada@", phone: "" };
   render(rules, { value });
-  expect(document.querySelector('[role="alert"]')).toBeNull();
+  expect(document.body.textContent).not.toContain("marked in red");
   render(rules, { value, showErrors: true });
-  expect(document.querySelector('[role="alert"]')!.textContent).toBe(
-    "Check the 3 fields marked in red.",
-  );
+  // Not a live region: the first wrong field's own message is read when it gets focus.
+  expect(document.body.textContent).toContain("Check the 3 fields marked in red.");
+  expect(document.querySelector('[role="alert"]')).toBeNull();
   expect(input("firstName")!.getAttribute("aria-invalid")).toBeNull();
   for (const [name, message] of [
     ["lastName", "Enter your last name."],
@@ -171,6 +172,27 @@ it("marks each wrong field and counts them once the guest tried to continue", ()
       message,
     );
   }
+});
+
+it("flags a phone number too short to be one, and keeps a cleared country cleared", () => {
+  render(rules, { value: { ...ada, phone: "+49 12" }, showErrors: true });
+  const phone = input("phone")!;
+  expect(phone.getAttribute("aria-invalid")).toBe("true");
+  expect(document.getElementById(phone.getAttribute("aria-describedby")!)!.textContent).toBe(
+    "Enter a valid phone number.",
+  );
+  expect(guestErrors({ ...ada, phone: "+" }, rules)).toEqual(["phone"]);
+  // An older draft's number without a code is sent as typed.
+  expect(guestErrors({ ...ada, phone: "030 1234567" }, rules)).toEqual([]);
+  change.mockClear();
+  render(rules, { value: { ...ada, countryCode: "" } });
+  expect(change).not.toHaveBeenCalled();
+});
+
+it("shows a stored number's own code when it reopens", () => {
+  render(rules, { value: { ...ada, phone: "+44 20 1234" } });
+  expect(document.querySelector<HTMLSelectElement>('[name="phoneCountry"]')!.value).toBe("GB");
+  expect(input("phone")!.value).toBe("20 1234");
 });
 
 it("knows when the details are complete and sends only the fields the rules ask for", () => {
