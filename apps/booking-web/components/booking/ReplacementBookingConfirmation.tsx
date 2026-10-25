@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import {
   isManualPricingPaymentMethod,
   type PublicBookingQuote,
@@ -36,7 +36,6 @@ export default function ReplacementBookingConfirmation({
   disclosure,
   guest,
   termsAccepted,
-  hotelTerms = false,
   attempt: heldAttempt,
   onAttemptChange,
   onBooked,
@@ -44,6 +43,7 @@ export default function ReplacementBookingConfirmation({
   soldOutNotice,
   label,
   busyLabel,
+  hints = { details: "Fill in your details to book.", agree: "Agree to the terms above to book." },
 }: {
   slug: string;
   quote: PublicBookingQuote;
@@ -51,8 +51,6 @@ export default function ReplacementBookingConfirmation({
   /** The guest's details from the details step (VAY-2195); null until they are complete. */
   guest: PricingAcceptanceGuest | null;
   termsAccepted: boolean;
-  /** The hotel has its own Terms & Conditions on this page (VAY-2176). */
-  hotelTerms?: boolean;
   /** The page keeps the open attempt (VAY-2195), so leaving and coming back to this step can't
    * lose it: a retry then sends the same details as an uncertain retry. */
   attempt?: BookingAttempt | null;
@@ -72,10 +70,11 @@ export default function ReplacementBookingConfirmation({
   soldOutNotice?: (roomTypeIds: string[]) => ReactNode;
   /** The button's words for the chosen way to pay (VAY-2347); the defaults below otherwise. */
   label?: string;
+  /** What is still missing before booking, in the page's language (VAY-2347). */
+  hints?: { details: string; agree: string };
   /** Its words while the booking is being made. */
   busyLabel?: string;
 }) {
-  const termsNoticeId = useId();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [soldOut, setSoldOut] = useState<string[] | null>(null);
@@ -281,24 +280,10 @@ export default function ReplacementBookingConfirmation({
       {!supported ? (
         <p role="status">Online confirmation is not available for this payment option.</p>
       ) : !ready && !refreshRequired && !consentMissing ? (
-        <p role="status">
-          {guest
-            ? "Read and accept both the room terms and guest rules to book."
-            : "Fill in your details to book."}
-        </p>
+        <p role="status">{guest ? hints.agree : hints.details}</p>
       ) : null}
       {soldOut && soldOutNotice ? soldOutNotice(soldOut) : error && <p role="alert">{error}</p>}
-      {hotelTerms && (
-        <p id={termsNoticeId} className="text-sm text-gray-600">
-          By booking, you agree to our terms & conditions.
-        </p>
-      )}
-      <button
-        className={button}
-        type="submit"
-        disabled={!(ready || consentMissing) || loading}
-        aria-describedby={hotelTerms ? termsNoticeId : undefined}
-      >
+      <button className={button} type="submit" disabled={!(ready || consentMissing) || loading}>
         {loading
           ? busyLabel
             ? busyLabel

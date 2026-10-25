@@ -163,8 +163,7 @@ test("books by bank transfer and opens the protected payment details", async ({ 
   await expect(
     page.getByText(/Your transfer must arrive within 48 hours, or the booking is released\./),
   ).toBeVisible();
-  await page.getByLabel("I have read the room and rate terms for this price").check();
-  await page.getByLabel("guest rules for this price").check();
+  await page.getByLabel(/^I agree to the cancellation policy/).check();
   await page.getByRole("button", { name: "Confirm booking" }).click();
 
   // VAY-2195: the reservation opens its protected confirmation page, as a booking does.

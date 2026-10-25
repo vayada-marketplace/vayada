@@ -171,28 +171,19 @@ test("prices explicit mixed rooms and child ages, clears edits, and recovers fro
   await page.getByRole("button", { name: "Continue to review" }).click();
   await expect(paymentOption(page, "pay_at_property")).toHaveAttribute("aria-checked", "true");
   await expect(orderTotal(page)).toHaveText("€320");
-  const acknowledgement = page.getByLabel("I have read the room and rate terms for this price");
-  // The payment step shows the ticks first and the full terms behind "Read".
-  await page.getByRole("button", { name: "Read the room and rate terms" }).click();
-  await expect(
-    page
-      .getByRole("region", { name: "Room 1 terms" })
-      .getByText("Meals: Breakfast", { exact: true }),
-  ).toBeVisible();
-  await acknowledgement.check();
-  await expect(acknowledgement).toBeChecked();
-  const guestAcknowledgement = page.getByLabel("guest rules for this price");
-  await page.getByRole("button", { name: "Read our guest rules" }).click();
+  // VAY-2347: "Before you book" shows the policy, the rules behind their row, and one tick.
+  const acknowledgement = page.getByLabel(/^I agree to the cancellation policy/);
+  await expect(page.getByRole("table", { name: /[Cc]ancellation/ }).first()).toBeVisible();
+  await page.getByRole("button", { name: "Guest rules" }).click();
   await expect(page.getByRole("region", { name: "Guest rules", exact: true })).toContainText(
     "midnight at the end of your arrival day",
   );
   await expect(page.getByRole("region", { name: "Guest rules", exact: true })).toContainText(
-    "Our adult age threshold is 12",
+    "Guests from 12 count as adults.",
   );
-  await guestAcknowledgement.check();
-  await expect(guestAcknowledgement).toBeChecked();
+  await acknowledgement.check();
+  await expect(acknowledgement).toBeChecked();
   await expect(page.getByRole("button", { name: "Confirm booking" })).toBeEnabled();
-  await expect(page.getByRole("heading", { name: "Your room and rate terms" })).toBeVisible();
   expect(submitted.selection.rooms.map((room: any) => [room.publicOfferKey, room.guests])).toEqual([
     [firstKey, { adults: 2, childAgesAtCheckIn: [0] }],
     [secondKey, { adults: 1, childAgesAtCheckIn: [] }],
@@ -224,12 +215,10 @@ test("prices explicit mixed rooms and child ages, clears edits, and recovers fro
   await page.getByRole("button", { name: "Continue to review" }).click();
   await expect(orderTotal(page)).toHaveText("€315");
   await expect(acknowledgement).not.toBeChecked();
-  await expect(guestAcknowledgement).not.toBeChecked();
   expect(submitted.selection.addons).toEqual([]);
   await expect(page.getByText(/This price has expired/)).toBeVisible({ timeout: 6000 });
   await expect(orderTotal(page)).toBeVisible();
   await expect(acknowledgement).toBeDisabled();
-  await expect(guestAcknowledgement).toBeDisabled();
   lifetimeMs = 60_000;
   await page.getByRole("button", { name: "Get an updated price" }).click();
   await expect(orderTotal(page)).toHaveText("€315");

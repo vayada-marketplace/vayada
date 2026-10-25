@@ -39,10 +39,10 @@ test("keeps the hotel's guest rules in the form when the price expires", async (
     fullPage: true,
   });
   await page.getByRole("button", { name: "Continue to review" }).click();
-  // VAY-2306: Confirm before ticking marks the boxes; once the price runs out that mark goes.
+  // VAY-2306: Confirm before ticking marks the box; once the price runs out that mark goes.
   const missing = page
     .getByRole("alert")
-    .filter({ hasText: "Read and accept both the room terms and guest rules to book." });
+    .filter({ hasText: "Tick the box to agree before you book." });
   await page.getByRole("button", { name: "Confirm booking" }).click();
   await expect(missing).toBeVisible();
   await acknowledge(page);
@@ -92,7 +92,9 @@ test("requires the phone while the guest rules can't be loaded", async ({ page }
   await fillGuestDetails(page);
   await expect(summary).toHaveCount(0);
   await toReview.click();
-  await expect(page.getByText(/couldn.t verify our guest rules/)).toBeVisible();
+  await expect(
+    page.getByText(/couldn.t check the hotel.s guest rules for this price\.$/),
+  ).toBeVisible();
   await expect(page.getByRole("button", { name: "Confirm booking" })).toBeDisabled();
 });
 
@@ -192,6 +194,5 @@ async function openDetails(page: Page, { rulesStatus = 200 } = {}) {
 }
 
 async function acknowledge(page: Page) {
-  await page.getByLabel("I have read the room and rate terms for this price").check();
-  await page.getByLabel("guest rules for this price").check();
+  await page.getByLabel(/^I agree to the cancellation policy/).check();
 }

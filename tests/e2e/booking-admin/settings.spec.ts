@@ -453,7 +453,10 @@ test.describe("booking-admin settings no-legacy guard", () => {
     await expect(page.getByRole("switch", { name: "Enable map view" })).toHaveCount(0);
     await expect(page.getByRole("switch", { name: '"Refer a Guest" Feature' })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Location map", exact: true })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Notifications", exact: true })).toHaveCount(0);
+    // No Notifications settings section (the header's bell is a different button, VAY-2349).
+    await expect(
+      page.getByRole("main").getByRole("button", { name: "Notifications", exact: true }),
+    ).toHaveCount(0);
 
     await page.goto("/settings/payments");
     await expect(

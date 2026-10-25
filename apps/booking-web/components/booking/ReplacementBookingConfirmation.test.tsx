@@ -83,7 +83,6 @@ afterEach(() => {
 function render(
   termsAccepted = true,
   rules: PublicQuoteGuestDisclosure | null = disclosure,
-  hotelTerms = false,
   guest: typeof ada | null = ada,
   onConsentMissing?: () => void,
 ) {
@@ -95,7 +94,6 @@ function render(
         disclosure: rules,
         guest,
         termsAccepted,
-        hotelTerms,
         onConsentMissing,
       }),
     ),
@@ -117,30 +115,22 @@ it("stays blocked until both exact consent sources are present", async () => {
 it("lets the guest press Confirm before ticking and points at the boxes instead (VAY-2306)", async () => {
   const missing = vi.fn();
   const confirm = () => document.querySelector<HTMLButtonElement>('button[type="submit"]')!;
-  render(false, null, false, ada, missing);
+  render(false, null, ada, missing);
   expect(confirm().disabled).toBe(false);
-  expect(document.body.textContent).not.toContain("Read and accept both");
+  expect(document.body.textContent).not.toContain("Agree to the terms above");
   await submit();
   expect(missing).toHaveBeenCalledTimes(1);
   expect(acceptPricingQuote).not.toHaveBeenCalled();
   expect(funnel()).toEqual([]);
   // Missing details still wait for the details step.
-  render(false, null, false, null, missing);
+  render(false, null, null, missing);
   expect(confirm().disabled).toBe(true);
   expect(document.body.textContent).toContain("Fill in your details to book.");
   // Both ticked: Confirm books.
-  render(true, disclosure, false, ada, missing);
+  render(true, disclosure, ada, missing);
   await submit();
   expect(missing).toHaveBeenCalledTimes(1);
   expect(acceptPricingQuote).toHaveBeenCalledTimes(1);
-});
-
-it("says booking accepts the hotel's terms only when the hotel has terms (VAY-2176)", () => {
-  const line = "By booking, you agree to our terms & conditions.";
-  render();
-  expect(document.body.textContent).not.toContain(line);
-  render(true, disclosure, true);
-  expect(document.body.textContent).toContain(line);
 });
 
 it("uses the chosen way's words on the button (VAY-2347)", () => {
@@ -163,7 +153,7 @@ it("uses the chosen way's words on the button (VAY-2347)", () => {
 });
 
 it("waits for the guest's details from the details step", async () => {
-  render(true, disclosure, false, null);
+  render(true, disclosure, null);
   expect(document.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled).toBe(true);
   expect(document.body.textContent).toContain("Fill in your details to book.");
   await submit();
@@ -261,7 +251,7 @@ it("keeps an uncertain attempt retryable", async () => {
     "room may still have been booked",
   );
   const firstGuest = vi.mocked(acceptPricingQuote).mock.calls[0]![3];
-  render(false, null, false, { ...ada, firstName: "Grace" });
+  render(false, null, { ...ada, firstName: "Grace" });
   await submit();
   expect(acceptPricingQuote).toHaveBeenCalledTimes(2);
   expect(vi.mocked(acceptPricingQuote).mock.calls[1]![3]).toEqual(firstGuest);
