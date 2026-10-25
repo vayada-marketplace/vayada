@@ -65,9 +65,9 @@ it("is the one summary: room, dates with the hotel's times, total and how to pay
   for (const part of [
     "Villa Four",
     "Flexible rate · 2 adults",
-    "Mon, 26 Oct",
+    "Mon 26 Oct",
     "from 14:00",
-    "Tue, 27 Oct",
+    "Tue 27 Oct",
     "by 11:00",
     "1 night",
     "Includes taxes & fees",
@@ -96,7 +96,7 @@ it("counts the hold down and says when the price has run out", () => {
   act(() => vi.advanceTimersByTime(60_000));
   expect(text()).toContain("Price held for you for 13:52 min");
   act(() => vi.advanceTimersByTime(14 * 60_000));
-  expect(text()).toContain("This price has expired.");
+  expect(text()).toContain("Price no longer held");
   expect(document.querySelector('[data-testid="stay-total"]')!.className).toContain("line-through");
 });
 

@@ -547,7 +547,7 @@ test("a refused updated price keeps the stay on the payment step", async ({ page
   await expect(orderTotal(page)).toHaveText("€268");
   await expect(orderTotal(page)).toHaveClass(/line-through/);
   await expect(
-    page.getByRole("complementary", { name: "Your stay" }).getByText("This price has expired."),
+    page.getByRole("complementary", { name: "Your stay" }).getByText("Price no longer held"),
   ).toBeVisible();
 });
 

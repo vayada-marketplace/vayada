@@ -785,7 +785,7 @@
       "total": "Total",
       "includes": "Termasuk pajak & biaya",
       "hold": "Harga ditahan untuk Anda selama {time} menit",
-      "expired": "Harga ini sudah kedaluwarsa.",
+      "expired": "Harga tidak lagi ditahan",
       "instant": "Konfirmasi instan lewat email",
       "methods": "Bayar {methods}"
     }

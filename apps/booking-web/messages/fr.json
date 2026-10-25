@@ -785,7 +785,7 @@
       "total": "Total",
       "includes": "Taxes et frais inclus",
       "hold": "Prix garanti encore {time} min",
-      "expired": "Ce prix a expiré.",
+      "expired": "Prix plus garanti",
       "instant": "Confirmation immédiate par e-mail",
       "methods": "Paiement {methods}"
     }

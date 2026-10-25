@@ -786,7 +786,7 @@
       "total": "Total",
       "includes": "Includes taxes & fees",
       "hold": "Price held for you for {time} min",
-      "expired": "This price has expired.",
+      "expired": "Price no longer held",
       "instant": "Instant confirmation by email",
       "methods": "Pay {methods}"
     }

@@ -785,7 +785,7 @@
       "total": "Total",
       "includes": "Impuestos y cargos incluidos",
       "hold": "Precio reservado para ti durante {time} min",
-      "expired": "Este precio ha caducado.",
+      "expired": "Precio ya no reservado",
       "instant": "Confirmación inmediata por correo",
       "methods": "Paga {methods}"
     }

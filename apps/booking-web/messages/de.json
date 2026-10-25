@@ -786,7 +786,7 @@
       "total": "Gesamt",
       "includes": "Inkl. Steuern und Gebühren",
       "hold": "Preis für Sie reserviert: noch {time} Min.",
-      "expired": "Dieser Preis ist abgelaufen.",
+      "expired": "Preis nicht mehr reserviert",
       "instant": "Sofortige Bestätigung per E-Mail",
       "methods": "Zahlung {methods}"
     }
