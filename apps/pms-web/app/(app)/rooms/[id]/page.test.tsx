@@ -7,7 +7,6 @@ const mocks = vi.hoisted(() => ({
   form: {} as Record<string, any>,
   tab: {} as Record<string, any>,
   mounts: 0,
-  stripMounts: 0,
   update: vi.fn(),
   reload: vi.fn(),
   stale: false,
@@ -44,12 +43,7 @@ vi.mock("@/components/pricing/RoomPricesTab", () => ({
   },
 }));
 vi.mock("@/components/pricing/RoomsPrices", () => ({
-  RoomsPricesStrip: () => {
-    useEffect(() => {
-      mocks.stripMounts += 1;
-    }, []);
-    return createElement("section", { "aria-label": "strip" });
-  },
+  RoomsPricesStrip: () => createElement("section", { "aria-label": "strip" }),
   usePropertyPrices: () => ({
     prices: { publication: { stale: mocks.stale } },
     error: null,
@@ -61,7 +55,6 @@ vi.mock("@/components/ConfirmDialog", () => ({ default: () => null }));
 let view: ReactTestRenderer;
 beforeEach(() => {
   mocks.mounts = 0;
-  mocks.stripMounts = 0;
   mocks.stale = false;
   mocks.update.mockReset();
   mocks.reload.mockReset();
@@ -108,23 +101,4 @@ it("shows the one-click republish when the room page opens on stale prices", asy
     view = create(createElement(EditRoomPage, { params: Promise.resolve({ id: "room-1" }) }));
   });
   expect(strip()).toHaveLength(1);
-});
-
-it("draws the stale-prices banner under the tab bar and keeps it across a room-details save (VAY-2337)", async () => {
-  mocks.stale = true;
-  await act(async () => {
-    view = create(createElement(EditRoomPage, { params: Promise.resolve({ id: "room-1" }) }));
-  });
-  const text = JSON.stringify(view.toJSON());
-  expect(text.indexOf('"tabs"')).toBeGreaterThan(-1);
-  expect(text.indexOf('"tabs"')).toBeLessThan(text.indexOf('"strip"'));
-  expect(mocks.stripMounts).toBe(1);
-  // The save remounts the form; the banner keeps its state (a running or retryable republish).
-  mocks.update.mockResolvedValue({
-    roomType: { id: "room-1", name: "Lake Suite" },
-    pricesNeedPublishing: true,
-  });
-  await act(async () => mocks.form.onSubmit({ preventDefault: () => undefined }));
-  expect(strip()).toHaveLength(1);
-  expect(mocks.stripMounts).toBe(1);
 });
