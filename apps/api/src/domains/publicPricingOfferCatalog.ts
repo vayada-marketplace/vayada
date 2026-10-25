@@ -83,14 +83,15 @@ export function createPublicPricingOfferCatalog(
         // The location map switch (VAY-2126) is read live; rooms' pins are sent only while it is on.
         const guestLocation = await readGuestLocation(client, propertyId);
         const locationMap = guestLocation?.map ?? null;
+        const offeredRooms = new Map(offered.map((room) => [room.roomTypeId, room]));
         const rooms = [];
         // In the hotel's saved room order (Calendar → Reorder rooms, VAY-2315), read live like the
         // rooms' content, so a new order shows without publishing.
         for (const row of content.values()) {
-          const room = offered.find(({ roomTypeId }) => roomTypeId === row.roomTypeId)!;
+          const room = offeredRooms.get(row.roomTypeId);
           const facts = roomFacts(row);
           // A room whose saved facts are incomplete is left out; the others stay bookable.
-          if (!facts) continue;
+          if (!room || !facts) continue;
           rooms.push({
             roomTypeId: room.roomTypeId,
             name: facts.name,

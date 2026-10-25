@@ -6192,11 +6192,21 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       await publishContent(built!.publicContent);
       const offers = await catalog.read(scope.propertyId);
       expect(offers?.version).toBe("public-pricing-offers.v1");
-      // Rooms are listed in the hotel's saved order (VAY-2315), not the published one.
+      // Rooms are listed in the hotel's saved order (VAY-2315), so compare them by room type.
       expect(
-        offers?.rooms.flatMap((room) => room.offers.map((offer) => offer.publicOfferKey)).sort(),
+        Object.fromEntries(
+          (offers?.rooms ?? []).map((room) => [
+            room.roomTypeId,
+            room.offers.map((offer) => offer.publicOfferKey),
+          ]),
+        ),
       ).toEqual(
-        current!.rooms.flatMap((room) => room.offers.map((offer) => offer.ratePlanId)).sort(),
+        Object.fromEntries(
+          current!.rooms.map((room) => [
+            room.roomTypeId,
+            room.offers.map((offer) => offer.ratePlanId),
+          ]),
+        ),
       );
       // Room content is read live after go-live (VAY-2129), not from the published page.
       expect(
@@ -6495,8 +6505,17 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     const mapped = await publishBookingPage(f.scope);
     const offers = await createPublicPricingOfferCatalog(pool).read(id);
     expect(
-      offers?.rooms.flatMap((room) => room.offers.map((offer) => offer.publicOfferKey)).sort(),
-    ).toEqual(mapped.flatMap((room) => room.offers.map((offer) => offer.ratePlanId)).sort());
+      Object.fromEntries(
+        (offers?.rooms ?? []).map((room) => [
+          room.roomTypeId,
+          room.offers.map((offer) => offer.publicOfferKey),
+        ]),
+      ),
+    ).toEqual(
+      Object.fromEntries(
+        mapped.map((room) => [room.roomTypeId, room.offers.map((offer) => offer.ratePlanId)]),
+      ),
+    );
     expect(offers?.rooms.flatMap((room) => room.offers)).toHaveLength(3);
     // VAY-2320: each rate says how it is paid, so a group combines rates paid the same way.
     expect(
