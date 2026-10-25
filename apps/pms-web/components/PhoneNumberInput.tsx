@@ -75,19 +75,27 @@ export default function PhoneNumberInput({
       </label>
       <div className="mt-1 flex gap-2">
         {/* Options start with the country name so native type-ahead works; the closed
-            select shows only flag + calling code through the overlay. */}
+            select shows only flag + calling code through the overlay. Chrome autofill forces
+            the select's text colour, so the text fill hides it instead (VAY-2363). */}
         <div className="relative w-28 shrink-0">
           <select
             aria-label={countryLabel}
             value={country}
             onChange={(event) => onChange({ country: event.target.value, number })}
-            className={cn(inputClassName, "text-transparent disabled:text-transparent")}
+            className={cn(
+              inputClassName,
+              "text-transparent [-webkit-text-fill-color:transparent] disabled:text-transparent",
+            )}
           >
-            <option value="" className="text-gray-900">
+            <option value="" className="text-gray-900 [-webkit-text-fill-color:currentcolor]">
               {countryPlaceholder}
             </option>
             {PHONE_COUNTRIES.map((option) => (
-              <option key={option.code} value={option.code} className="text-gray-900">
+              <option
+                key={option.code}
+                value={option.code}
+                className="text-gray-900 [-webkit-text-fill-color:currentcolor]"
+              >
                 {option.name} {option.flag} {option.callingCode}
               </option>
             ))}

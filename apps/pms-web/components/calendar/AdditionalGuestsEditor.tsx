@@ -21,6 +21,8 @@ const EMAIL =
   /^(?!\.)(?!.*\.\.)([A-Za-z0-9_'+\-.]*)[A-Za-z0-9_+-]@([A-Za-z0-9][A-Za-z0-9-]*\.)+[A-Za-z]{2,}$/;
 /** Mirrors the API's per-booking limit. */
 export const MAX_ADDITIONAL_GUESTS = 100;
+/** The booker is guest 1, so the first additional guest is guest 2, as on check-in (VAY-2364). */
+export const additionalGuestNumber = (index: number) => index + 2;
 
 /** True when the card can be submitted: names present, optional email and phone valid. */
 export function additionalGuestValid(guest: AdditionalGuestDraft): boolean {
@@ -70,7 +72,7 @@ export default function AdditionalGuestsEditor({
     <div className="space-y-2">
       <h4 className="text-xs font-medium text-gray-700">{t("bookings.detail.additionalGuests")}</h4>
       {guests.map((guest, index) => {
-        const number = index + 1;
+        const number = additionalGuestNumber(index);
         const name = `${guest.firstName} ${guest.lastName}`.trim();
         return (
           <details
