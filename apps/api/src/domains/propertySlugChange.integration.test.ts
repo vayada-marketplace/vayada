@@ -86,7 +86,8 @@ describe.skipIf(!url)("operator booking address change in PostgreSQL (VAY-2295)"
         [owner.organizationId, `hotel-${owner.organizationId}`],
       );
       await pool.query(
-        "INSERT INTO identity.organization_memberships(organization_id,user_id,status,role_key,access_origin) VALUES($1,$2,'active','owner','agency')",
+        // Owners keep access to every property (0104); the republish checks it (VAY-2335).
+        "INSERT INTO identity.organization_memberships(organization_id,user_id,status,role_key,access_origin,property_access_mode) VALUES($1,$2,'active','owner','agency','all')",
         [owner.organizationId, owner.userId],
       );
       await pool.query(

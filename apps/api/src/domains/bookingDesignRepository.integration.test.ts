@@ -429,6 +429,74 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Booking design repository", () =
     ).resolves.toBeNull();
   });
 
+  it("checks the member's effective permission like the route does (VAY-2335)", async () => {
+    const granted = ["booking.settings.read", "booking.settings.manage"];
+    // Permission only through a team-role: "Create role" roles sit on hotel_custom, which has
+    // no booking grant rows.
+    await setMemberRole("hotel_custom", { definition: granted });
+    await expect(
+      repository.upsertDesign(command("team-role", 0, "#4F46E5", "high-end-serif")),
+    ).resolves.toMatchObject({ ok: true, outcome: "created", design: { revision: 1 } });
+
+    // Permission only through a per-person override.
+    await setMemberRole("hotel_custom", { overrides: { grant: granted, deny: [] } });
+    await expect(
+      repository.upsertDesign(command("override", 1, "#0077B6", "modern-minimalist")),
+    ).resolves.toMatchObject({ ok: true, outcome: "updated", design: { revision: 2 } });
+
+    // The base role's grant rows include it.
+    await setMemberRole("hotel_manager", {});
+    await expect(
+      repository.upsertDesign(command("base-role", 2, "#5E0000", "grand-classic")),
+    ).resolves.toMatchObject({ ok: true, outcome: "updated", design: { revision: 3 } });
+
+    for (const [roleKey, access] of [
+      ["hotel_custom", {}], // without the permission
+      ["hotel_manager", { definition: ["booking.settings.read"] }], // removed by a team-role
+      ["hotel_manager", { bookingAccess: false }], // Booking switched off
+    ] as const) {
+      await setMemberRole(roleKey, access);
+      await expect(
+        repository.upsertDesign(command("refused", 3, "#2D6A4F", "grand-classic")),
+      ).resolves.toEqual({ ok: false, error: { code: "setup_scope_unavailable" } });
+    }
+    await expect(counts()).resolves.toMatchObject({ revisions: "3", idempotencyKeys: "3" });
+  });
+
+  async function setMemberRole(
+    roleKey: string,
+    access: { definition?: readonly string[]; overrides?: unknown; bookingAccess?: boolean },
+  ): Promise<void> {
+    const definition = access.definition
+      ? await admin.query<{ id: string }>(
+          `INSERT INTO identity.organization_roles
+             (organization_id, name, security_class, base_role_key, default_permissions)
+           VALUES ($1::uuid, $2, 'staff', $3, $4::jsonb)
+           RETURNING id`,
+          [
+            organizationId,
+            `Role ${crypto.randomUUID()}`,
+            roleKey,
+            JSON.stringify(access.definition),
+          ],
+        )
+      : null;
+    await admin.query(
+      `UPDATE identity.organization_memberships
+       SET role_key = $3, role_definition_id = $4::uuid, permission_overrides = $5::jsonb,
+           booking_access_enabled = $6
+       WHERE organization_id = $1::uuid AND user_id = $2::uuid`,
+      [
+        organizationId,
+        actorUserId,
+        roleKey,
+        definition?.rows[0]!.id ?? null,
+        access.overrides === undefined ? null : JSON.stringify(access.overrides),
+        access.bookingAccess ?? true,
+      ],
+    );
+  }
+
   async function counts() {
     const result = await admin.query<{
       audits: string;
@@ -494,6 +562,9 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Booking design repository", () =
         "DELETE FROM identity.organization_memberships WHERE organization_id = $1",
         [secondOrganizationId],
       );
+      await admin.query("DELETE FROM identity.organization_roles WHERE organization_id = $1", [
+        organizationId,
+      ]);
       await admin.query("DELETE FROM hotel_catalog.properties WHERE id = $1", [propertyId]);
       await admin.query("DELETE FROM identity.organizations WHERE id = $1", [organizationId]);
       await admin.query("DELETE FROM identity.organizations WHERE id = $1", [secondOrganizationId]);

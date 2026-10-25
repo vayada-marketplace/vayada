@@ -1323,7 +1323,10 @@ const PRECHECK_ISOLATED_BLOCKS = {
     "src/domains/pmsInventoryBundle.integration.test.ts",
     "src/platform/bookingFunnel.integration.test.ts",
   ],
-  vayada_pub_cmd_test: ["src/domains/bookingPublicationCommandRepository.integration.test.ts"],
+  vayada_pub_cmd_test: [
+    "src/domains/bookingDesignRepository.integration.test.ts",
+    "src/domains/bookingPublicationCommandRepository.integration.test.ts",
+  ],
   vayada_guest_terms_test: ["src/domains/bookingGuestTermsStore.integration.test.ts"],
 };
 
