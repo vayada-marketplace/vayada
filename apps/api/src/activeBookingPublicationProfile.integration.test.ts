@@ -252,6 +252,25 @@ describe.skipIf(!TEST_DATABASE_URL)("active Booking publication reads in Postgre
     expect(await promoCodes()).toBe(true);
   });
 
+  it("offers guests the display currencies Booking settings add, read live (VAY-2345)", async () => {
+    const branding = async () =>
+      (await repository.findProfileBySlug("hotel-alpenrose"))?.hotel.branding;
+    // The publication never carried them, so a published page had only the hotel's currency
+    // and no currency switcher, whatever Design Studio showed.
+    expect((await branding())?.displayCurrencies).toBeUndefined();
+    await admin.query(
+      "INSERT INTO booking.booking_settings (property_id, supported_currencies) VALUES ($1::uuid, ARRAY['USD', 'usd', 'EUR'])",
+      [propertyA],
+    );
+    // The hotel's own currency first; the default once; anything malformed left out.
+    expect((await branding())?.displayCurrencies).toEqual(["EUR", "USD"]);
+    await admin.query(
+      "UPDATE booking.booking_settings SET supported_currencies = '{}' WHERE property_id = $1::uuid",
+      [propertyA],
+    );
+    expect((await branding())?.displayCurrencies).toBeUndefined();
+  });
+
   async function seedLegacyProperty(propertyId: string, slug: string): Promise<void> {
     await admin.query(
       `INSERT INTO hotel_catalog.properties (id, public_id, display_name, lifecycle_status)
