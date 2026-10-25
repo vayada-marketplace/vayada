@@ -1061,6 +1061,109 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
                   : { kind: "partial_refund" },
           })),
         );
+        // VAY-2360: the confirmation page gets the booked terms the cancel route works from, and the
+        // exact place, by the booking's id and the guest's email only.
+        await db.query(
+          `INSERT INTO hotel_catalog.property_locations
+             (property_id,country_code,city,street_address,postal_code,latitude,longitude)
+           VALUES($1,'LK','Ahangama','12 Matara Road','80650',5.973251,80.362548)
+           ON CONFLICT (property_id) DO UPDATE SET country_code=EXCLUDED.country_code,
+             city=EXCLUDED.city, street_address=EXCLUDED.street_address,
+             postal_code=EXCLUDED.postal_code, latitude=EXCLUDED.latitude,
+             longitude=EXCLUDED.longitude`,
+          [propertyId],
+        );
+        const stay = (await adapter.getStay(propertyId, bookingId, guest, context("s"))) as {
+          cancellation: { totalMinor: string; rooms: Array<Record<string, unknown>> } | null;
+          places: unknown;
+        };
+        const accepted = (
+          await db.query<{
+            terms: Array<{ roomTypeId: string; offerId: string; cancellation: unknown }>;
+          }>(
+            `SELECT quote_snapshot->'evidence'->'terms' AS terms
+             FROM booking.pricing_quote_acceptances WHERE guest_booking_id=$1`,
+            [bookingId],
+          )
+        ).rows[0]!.terms;
+        expect(stay).toMatchObject({
+          version: "booking-stay.v1",
+          cancellation: {
+            checkIn: quote.stay.checkIn,
+            currency: quote.stay.currency,
+            timeZone: expect.any(String),
+            totalMinor: "108000",
+          },
+          places: [
+            {
+              kind: "property",
+              rooms: [types[0], types[1]],
+              streetAddress: "12 Matara Road",
+              city: "Ahangama",
+              postalCode: "80650",
+              countryCode: "LK",
+              pin: { latitude: 5.973251, longitude: 80.362548 },
+            },
+          ],
+        });
+        expect(stay.cancellation!.rooms).toEqual(
+          quote.stay.rooms.map((room) => ({
+            selectionId: room.selectionId,
+            roomTypeId: room.roomTypeId,
+            roomName: room.roomTypeId,
+            cancellation: accepted.find(
+              (t) => t.roomTypeId === room.roomTypeId && t.offerId === room.offerId,
+            )!.cancellation,
+            subtotalMinor: "36000",
+          })),
+        );
+        await expect(
+          adapter.getStay(
+            propertyId,
+            bookingId,
+            { guest_email: "other@example.test" },
+            context("s2"),
+          ),
+        ).rejects.toMatchObject({ statusCode: 404 });
+        // The exact place only once confirmed, as the email; no terms once a room has started or the
+        // stay has ended.
+        await db.query("SAVEPOINT stay_statuses");
+        await db.query("SET LOCAL session_replication_role=replica");
+        await db.query(
+          "UPDATE booking.guest_bookings SET lifecycle_status='pending_payment' WHERE id=$1",
+          [bookingId],
+        );
+        expect(await adapter.getStay(propertyId, bookingId, guest, context("s4"))).toMatchObject({
+          cancellation: { totalMinor: "108000" },
+          places: [],
+        });
+        await db.query(
+          "UPDATE booking.guest_bookings SET lifecycle_status='confirmed' WHERE id=$1",
+          [bookingId],
+        );
+        await db.query(
+          `UPDATE pms.operational_booking_assignments SET assignment_status='checked_in'
+           WHERE guest_booking_id=$1 AND position=2`,
+          [bookingId],
+        );
+        expect(await adapter.getStay(propertyId, bookingId, guest, context("s5"))).toMatchObject({
+          cancellation: null,
+          places: [{ kind: "property" }],
+        });
+        await db.query(
+          "UPDATE booking.guest_bookings SET lifecycle_status='canceled' WHERE id=$1",
+          [bookingId],
+        );
+        expect(await adapter.getStay(propertyId, bookingId, guest, context("s6"))).toEqual({
+          version: "booking-stay.v1",
+          cancellation: null,
+          places: [],
+        });
+        await db.query("ROLLBACK TO SAVEPOINT stay_statuses");
+        // Never by a booking reference: those are what the lookup's limit guards.
+        await expect(
+          adapter.getStay(propertyId, "VAY-7C2F4A9E1B3D", guest, context("s3")),
+        ).rejects.toMatchObject({ statusCode: 404 });
         const stayDates = nonRefundableRoom ? await seedRoomNights() : [];
         const preview = (await adapter.cancelPreview(
           propertyId,
