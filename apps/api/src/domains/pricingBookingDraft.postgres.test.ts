@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import pg, { type PoolClient } from "pg";
 import { describe, expect, it, vi } from "vitest";
 import { replacementStayKey } from "@vayada/domain-booking";
@@ -104,6 +104,11 @@ describe.skipIf(!url)("PostgreSQL pricing draft composition", () => {
           "INSERT INTO hotel_catalog.properties(id,public_id,display_name) VALUES($1::uuid,($1::uuid)::text,'Synthetic draft')",
           [propertyId],
         );
+        // VAY-2347: the hotel's terms the guest agrees to, kept by hash of the trimmed text.
+        await db.query(
+          "INSERT INTO hotel_catalog.property_policy_summaries(property_id,terms_and_conditions) VALUES($1,'  Synthetic terms.\n')",
+          [propertyId],
+        );
         if (!missingDefinition)
           await db.query(
             "INSERT INTO booking.addon_definitions(id,property_id,name,pricing_model,price_amount,currency,ownership_kind,partner_commission_rate) VALUES($1,$2,'Synthetic extra','per_stay',12.5,'EUR','partner',12.5)",
@@ -137,8 +142,24 @@ describe.skipIf(!url)("PostgreSQL pricing draft composition", () => {
             booking_metadata: {
               pricingQuoteId: input.current.quote.quoteId,
               pricingSelections: input.current.quote.stay.rooms,
+              consent: {
+                version: "booking-consent.v1",
+                quoteEvidenceId: input.command.acceptance.quoteEvidenceId,
+                guestPolicyEvidenceId: input.command.acceptance.guestPolicyEvidenceId,
+                termsHash:
+                  "sha256:" + createHash("sha256").update("Synthetic terms.").digest("hex"),
+              },
             },
           });
+          // The time of the agreement is the transaction's.
+          expect(
+            (
+              await db.query(
+                "SELECT (booking_metadata->'consent'->>'acceptedAt')::timestamptz=now() AS same FROM booking.guest_bookings WHERE id=$1",
+                [input.bookingId],
+              )
+            ).rows[0].same,
+          ).toBe(true);
           expect(
             (
               await db.query(
