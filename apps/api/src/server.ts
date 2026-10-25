@@ -320,6 +320,7 @@ import { createPgPmsModuleActivationRepository } from "./routes/pmsModuleActivat
 import { createPgPmsNavigationModuleRepository } from "./routes/pmsNavigationModules.js";
 import { createPgBookingModuleRepository } from "./routes/pmsBookingModules.js";
 import { createPgBookingLocationMapRepository } from "./domains/bookingLocationMap.js";
+import { createPgBookingHostNotificationsRepository } from "./domains/bookingHostNotifications.js";
 import { createPgGuestReviewCommands } from "./domains/pmsGuestReviews.js";
 import { createChannexGuestReviews } from "./integrations/channexGuestReviews.js";
 import { createPgReviewReplyCommands } from "./domains/pmsReviewReplies.js";
@@ -622,6 +623,12 @@ const bookingModuleRepository = config.auth
   : undefined;
 const bookingLocationMapRepository = config.auth
   ? createPgBookingLocationMapRepository({ connectionString: targetDatabaseUrl, max: 2 })
+  : undefined;
+// Booking Admin's bell, read every 60 s per open tab (VAY-2349).
+const bookingHostNotificationsRepository = config.auth
+  ? createPgBookingHostNotificationsRepository(
+      new pg.Pool({ connectionString: targetDatabaseUrl, connectionTimeoutMillis: 5_000, max: 2 }),
+    )
   : undefined;
 
 const stripeConnectProvider = config.stripeSubscriptions.secretKey
@@ -1809,6 +1816,21 @@ const app = buildApp({
     ? {
         repository: bookingLocationMapRepository,
         propertyAccessRepository: bookingPropertyAccessRepository,
+      }
+    : undefined,
+  bookingHostNotifications: bookingHostNotificationsRepository
+    ? {
+        repository: bookingHostNotificationsRepository,
+        propertyAccessRepository: bookingPropertyAccessRepository,
+        // "Retry sync" posts PMS → Channel manager's sync command: offer it where that command runs.
+        syncRetryDomains: pmsChannexManagementCommandPort
+          ? (["ari", "booking"] as const).filter(
+              (domain) =>
+                config.channexManagement.capabilityModes[
+                  domain === "ari" ? "ariSync" : "bookingSync"
+                ] === "mutating",
+            )
+          : [],
       }
     : undefined,
   bookingGuestPolicy: bookingGuestPolicyApplication
