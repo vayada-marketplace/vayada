@@ -347,7 +347,7 @@ test("keeps the charged currency first when the guest views prices in another cu
   await continueToPayment(page, { method: "pay_at_property" });
 
   await expect(orderTotal(page)).toHaveText("€315 (≈ US$347)");
-  await expect(page.getByRole("complementary", { name: "Order Summary" })).toContainText(
+  await expect(page.getByRole("complementary", { name: "Your stay" })).toContainText(
     /At the hotel\s*€315 \(≈ US\$347\)/,
   );
   await expect(page.getByTestId("approximate-amounts-note")).toContainText(

@@ -724,5 +724,83 @@
     "errorCountry": "Pilih negara Anda dari daftar.",
     "rulesFailed": "Kami tidak dapat memeriksa aturan tamu hotel untuk harga ini. Anda tetap dapat mengisi data Anda.",
     "retry": "Coba lagi"
+  },
+  "reviewPay": {
+    "title": "Tinjau & bayar",
+    "guest": "Tamu",
+    "edit": "Ubah",
+    "howToPay": "Bagaimana Anda ingin membayar?",
+    "paymentPreference": "Metode pembayaran",
+    "backToDetails": "Kembali ke data Anda",
+    "buttonConfirm": "Konfirmasi pemesanan",
+    "buttonRequest": "Kirim permintaan pemesanan",
+    "buttonCard": "Lanjut ke data kartu",
+    "method": {
+      "pay_at_property": {
+        "title": "Bayar di hotel",
+        "summary": "Tidak ada pembayaran sekarang · bayar saat tiba",
+        "explain": "Anda membayar {total} di hotel saat tiba. Pemesanan Anda langsung dikonfirmasi.",
+        "explainRequest": "Tidak ada biaya sekarang. Jika hotel menerima permintaan Anda, Anda membayar {total} saat tiba. Hotel menjawab dalam 24 jam.",
+        "boxNow": "Bayar sekarang",
+        "boxLater": "Di hotel",
+        "phrase": "di hotel"
+      },
+      "card": {
+        "title": "Bayar dengan kartu",
+        "summary": "Ditagih saat memesan",
+        "summaryRequest": "Ditagih hanya jika hotel menerima",
+        "explain": "Kami menagih {now} ke kartu Anda saat Anda mengonfirmasi. Anda memasukkan data kartu di langkah berikutnya.",
+        "explainSplit": "Kami menagih {now} ke kartu Anda saat Anda mengonfirmasi dan sisanya, {later}, Anda bayar di hotel. Anda memasukkan data kartu di langkah berikutnya.",
+        "explainRequest": "Kami menahan {now} di kartu Anda. Jika hotel menolak atau tidak menjawab dalam 24 jam, penahanan dilepas. Anda memasukkan data kartu di langkah berikutnya.",
+        "explainRequestSplit": "Kami menahan {now} di kartu Anda dan sisanya, {later}, Anda bayar di hotel. Jika hotel menolak atau tidak menjawab dalam 24 jam, penahanan dilepas. Anda memasukkan data kartu di langkah berikutnya.",
+        "boxNow": "Ditagih sekarang",
+        "boxHold": "Ditahan sekarang",
+        "boxCharged": "Ditagih",
+        "boxChargedValue": "Saat hotel menerima",
+        "boxLater": "Di hotel",
+        "phrase": "dengan kartu"
+      },
+      "bank_transfer": {
+        "title": "Bayar melalui transfer bank",
+        "summary": "Rincian bank dikirim lewat email setelah memesan",
+        "explain": "Setelah memesan, kami mengirimkan rincian bank hotel dan kode pemesanan Anda lewat email. Kami menahan kamar Anda sampai batas waktu pembayaran, dan pemesanan dikonfirmasi setelah transfer Anda diterima.",
+        "boxNow": "Bayar sekarang",
+        "boxLater": "Melalui transfer",
+        "phrase": "melalui transfer bank"
+      },
+      "paypal": {
+        "title": "Bayar dengan PayPal",
+        "summary": "Rincian PayPal dikirim lewat email setelah memesan",
+        "explain": "Setelah memesan, kami mengirimkan alamat PayPal hotel dan kode pemesanan Anda lewat email. Kami menahan kamar Anda sampai batas waktu pembayaran, dan pemesanan dikonfirmasi setelah pembayaran Anda diterima.",
+        "boxNow": "Bayar sekarang",
+        "boxLater": "Melalui PayPal",
+        "phrase": "dengan PayPal"
+      }
+    },
+    "stay": {
+      "title": "Masa menginap Anda",
+      "checkIn": "Check-in",
+      "checkOut": "Check-out",
+      "from": "mulai {time}",
+      "by": "paling lambat {time}",
+      "nights": "{count, plural, one {# malam} other {# malam}}",
+      "room": "Kamar {number}",
+      "extras": "Ekstra",
+      "fees": "Biaya",
+      "discount": "Diskon",
+      "total": "Total",
+      "includes": "Termasuk pajak & biaya",
+      "hold": "Harga ditahan untuk Anda selama {time} menit",
+      "expired": "Harga tidak lagi ditahan",
+      "instant": "Konfirmasi instan lewat email",
+      "methods": "Bayar {methods}",
+      "adults": "{count, plural, one {# dewasa} other {# dewasa}}",
+      "children": "{count, plural, one {# anak} other {# anak}}"
+    },
+    "checkingPrice": "Memeriksa harga…",
+    "tooSoon": "{methods} tidak tersedia sedekat ini dengan tanggal check-in.",
+    "busyConfirm": "Mengonfirmasi pemesanan…",
+    "busyRequest": "Mengirim permintaan…",
+    "editDetails": "Ubah data tamu"
   }
 }

@@ -752,5 +752,18 @@
   "rooms.roomCount.other": "{count}室",
   "rooms.roomTypeCount.one": "{count}客室タイプ",
   "rooms.roomTypeCount.other": "{count}客室タイプ",
-  "rooms.sizeSqm": "{size} m²"
+  "rooms.sizeSqm": "{size} m²",
+  "bookings.statusAwaitingPayment": "入金待ち",
+  "bookings.payBy": "支払期限 {date}",
+  "bookings.hotelTime": "ホテル現地時間",
+  "bookings.detail.waitingForTransfer": "銀行振込の入金待ち",
+  "bookings.detail.waitingForPaypal": "PayPalの入金待ち",
+  "bookings.detail.transferDueBy": "期限 {date}。それまでに入金済みにしない場合、予約は自動的に解除され、客室は再び予約可能になります。",
+  "bookings.detail.confirmTransferReceived": "{guest}様からの{amount}の振込（参照番号 {reference}）を入金済みにしますか？予約が確定し、支払いが記録され、ゲストに確認メールが送信されます。",
+  "bookings.detail.markReceived": "入金済みにする",
+  "bookings.detail.markBankTransferReceived": "振込を入金済みにする",
+  "calendar.awaitingPayment": "入金待ち",
+  "calendar.awaitingPaymentHeld": "それまで客室は確保され、入金済みにされない場合は自動的に解除されます。",
+  "calendar.paymentDeadlinePassed": "お支払い期限を過ぎたため、受領済みにすることはできません。予約は自動的に解除されます。",
+  "calendar.openBooking": "予約を開く"
 }

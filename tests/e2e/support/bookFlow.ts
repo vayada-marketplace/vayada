@@ -17,9 +17,9 @@ export async function continueToPayment(
 
 const paymentNames: Record<string, RegExp> = {
   pay_at_property: /^Pay at the hotel/,
-  card: /^Pay by card now/,
-  bank_transfer: /^Bank transfer/,
-  paypal: /^PayPal/,
+  card: /^Pay with card/,
+  bank_transfer: /^Pay by bank transfer/,
+  paypal: /^Pay with PayPal/,
 };
 
 /** The payment step's way to pay, as a guest picks it. */
@@ -36,7 +36,7 @@ export async function choosePayment(page: Page, method: string) {
 
 /** The total in the payment step's order summary ("€240"). */
 export function orderTotal(page: Page) {
-  return page.getByRole("complementary", { name: "Order Summary" }).getByTestId("stay-total");
+  return page.getByRole("complementary", { name: "Your stay" }).getByTestId("stay-total");
 }
 
 /** The details step's required fields, as a guest fills them in. */

@@ -752,5 +752,18 @@
   "rooms.roomCount.other": "{count} camere",
   "rooms.roomTypeCount.one": "{count} tipo di camera",
   "rooms.roomTypeCount.other": "{count} tipi di camera",
-  "rooms.sizeSqm": "{size} m²"
+  "rooms.sizeSqm": "{size} m²",
+  "bookings.statusAwaitingPayment": "In attesa di pagamento",
+  "bookings.payBy": "Pagamento entro {date}",
+  "bookings.hotelTime": "ora dell'hotel",
+  "bookings.detail.waitingForTransfer": "In attesa del bonifico bancario",
+  "bookings.detail.waitingForPaypal": "In attesa del pagamento PayPal",
+  "bookings.detail.transferDueBy": "Scadenza {date}. Se entro quel momento non segni il pagamento come ricevuto, la prenotazione viene rilasciata automaticamente e la camera torna disponibile.",
+  "bookings.detail.confirmTransferReceived": "Segnare come ricevuto il bonifico di {amount} da {guest} (riferimento {reference})? La prenotazione viene confermata, il pagamento registrato e l'ospite riceve un'email di conferma.",
+  "bookings.detail.markReceived": "Segna come ricevuto",
+  "bookings.detail.markBankTransferReceived": "Segna bonifico come ricevuto",
+  "calendar.awaitingPayment": "in attesa di pagamento",
+  "calendar.awaitingPaymentHeld": "Le camere restano bloccate fino ad allora e vengono rilasciate automaticamente se il pagamento non viene segnato come ricevuto.",
+  "calendar.paymentDeadlinePassed": "La scadenza del pagamento è passata, quindi il pagamento non può più essere segnato come ricevuto. La prenotazione viene rilasciata automaticamente.",
+  "calendar.openBooking": "Apri prenotazione"
 }

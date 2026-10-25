@@ -752,5 +752,18 @@
   "rooms.roomCount.other": "Номеров: {count}",
   "rooms.roomTypeCount.one": "Типов номеров: {count}",
   "rooms.roomTypeCount.other": "Типов номеров: {count}",
-  "rooms.sizeSqm": "{size} м²"
+  "rooms.sizeSqm": "{size} м²",
+  "bookings.statusAwaitingPayment": "Ожидает оплаты",
+  "bookings.payBy": "Оплата до {date}",
+  "bookings.hotelTime": "время отеля",
+  "bookings.detail.waitingForTransfer": "Ожидаем банковский перевод",
+  "bookings.detail.waitingForPaypal": "Ожидаем оплату через PayPal",
+  "bookings.detail.transferDueBy": "Срок — {date}. Если к этому времени вы не отметите оплату как полученную, бронирование будет автоматически снято, а номер снова станет доступен.",
+  "bookings.detail.confirmTransferReceived": "Отметить перевод {amount} от {guest} (номер {reference}) как полученный? Бронирование будет подтверждено, платёж записан, а гость получит письмо с подтверждением.",
+  "bookings.detail.markReceived": "Отметить как полученный",
+  "bookings.detail.markBankTransferReceived": "Отметить перевод как полученный",
+  "calendar.awaitingPayment": "ожидает оплаты",
+  "calendar.awaitingPaymentHeld": "Номера удерживаются до этого срока и автоматически освобождаются, если оплата не отмечена как полученная.",
+  "calendar.paymentDeadlinePassed": "Срок оплаты истёк, поэтому оплату больше нельзя отметить как полученную. Бронирование снимается автоматически.",
+  "calendar.openBooking": "Открыть бронирование"
 }

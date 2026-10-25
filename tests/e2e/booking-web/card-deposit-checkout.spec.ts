@@ -86,11 +86,11 @@ test("says what the card pays now and what is left to pay at the hotel", async (
   await expect(orderTotal(page)).toHaveText("€240");
   await expect(
     page.getByText(
-      "We charge €72 to your card when you confirm. You pay the rest, €168, at the hotel. Your booking is confirmed straight away.",
+      "We charge €72 to your card when you confirm, and you pay the rest, €168, at the hotel. You enter your card details in the next step.",
     ),
   ).toBeVisible();
-  const summary = page.getByRole("complementary", { name: "Order Summary" });
-  await expect(summary.getByText("Pay now")).toBeVisible();
+  const summary = page.getByRole("complementary", { name: "Your stay" });
+  await expect(summary.getByText("Charged now")).toBeVisible();
   await expect(summary.getByText("At the hotel")).toBeVisible();
   await page.getByRole("button", { name: "Read the room and rate terms" }).click();
   await expect(

@@ -725,5 +725,83 @@
     "errorCountry": "Wählen Sie Ihr Land aus der Liste.",
     "rulesFailed": "Wir konnten die Hausregeln für diesen Preis nicht prüfen. Sie können Ihre Angaben weiter ausfüllen.",
     "retry": "Erneut versuchen"
+  },
+  "reviewPay": {
+    "title": "Prüfen & bezahlen",
+    "guest": "Gast",
+    "edit": "Ändern",
+    "howToPay": "Wie möchten Sie bezahlen?",
+    "paymentPreference": "Zahlungsart",
+    "backToDetails": "Zurück zu Ihren Angaben",
+    "buttonConfirm": "Buchung bestätigen",
+    "buttonRequest": "Buchungsanfrage senden",
+    "buttonCard": "Weiter zu den Kartendaten",
+    "method": {
+      "pay_at_property": {
+        "title": "Im Hotel bezahlen",
+        "summary": "Jetzt nichts zahlen · Sie zahlen bei Ankunft",
+        "explain": "Sie zahlen {total} bei Ankunft im Hotel. Ihre Buchung ist sofort bestätigt.",
+        "explainRequest": "Jetzt wird nichts berechnet. Wenn das Hotel Ihre Anfrage annimmt, zahlen Sie {total} bei Ankunft. Das Hotel antwortet innerhalb von 24 Stunden.",
+        "boxNow": "Jetzt zahlen",
+        "boxLater": "Im Hotel",
+        "phrase": "im Hotel"
+      },
+      "card": {
+        "title": "Mit Karte bezahlen",
+        "summary": "Abbuchung bei der Buchung",
+        "summaryRequest": "Abbuchung erst, wenn das Hotel annimmt",
+        "explain": "Wir belasten Ihre Karte mit {now}, wenn Sie bestätigen. Ihre Kartendaten geben Sie im nächsten Schritt ein.",
+        "explainSplit": "Wir belasten Ihre Karte mit {now}, wenn Sie bestätigen; den Rest von {later} zahlen Sie im Hotel. Ihre Kartendaten geben Sie im nächsten Schritt ein.",
+        "explainRequest": "Wir blockieren {now} auf Ihrer Karte. Lehnt das Hotel ab oder antwortet es nicht innerhalb von 24 Stunden, wird die Blockierung aufgehoben. Ihre Kartendaten geben Sie im nächsten Schritt ein.",
+        "explainRequestSplit": "Wir blockieren {now} auf Ihrer Karte; den Rest von {later} zahlen Sie im Hotel. Lehnt das Hotel ab oder antwortet es nicht innerhalb von 24 Stunden, wird die Blockierung aufgehoben. Ihre Kartendaten geben Sie im nächsten Schritt ein.",
+        "boxNow": "Jetzt belastet",
+        "boxHold": "Jetzt blockiert",
+        "boxCharged": "Abbuchung",
+        "boxChargedValue": "Wenn das Hotel annimmt",
+        "boxLater": "Im Hotel",
+        "phrase": "mit Karte"
+      },
+      "bank_transfer": {
+        "title": "Per Banküberweisung bezahlen",
+        "summary": "Bankdaten per E-Mail nach der Buchung",
+        "explain": "Nach der Buchung senden wir Ihnen die Bankdaten des Hotels und Ihre Buchungsnummer per E-Mail. Wir halten Ihr Zimmer bis zur Zahlungsfrist frei; Ihre Buchung ist bestätigt, sobald Ihre Überweisung eingegangen ist.",
+        "boxNow": "Jetzt zahlen",
+        "boxLater": "Per Überweisung",
+        "phrase": "per Banküberweisung"
+      },
+      "paypal": {
+        "title": "Mit PayPal bezahlen",
+        "summary": "PayPal-Daten per E-Mail nach der Buchung",
+        "explain": "Nach der Buchung senden wir Ihnen die PayPal-Adresse des Hotels und Ihre Buchungsnummer per E-Mail. Wir halten Ihr Zimmer bis zur Zahlungsfrist frei; Ihre Buchung ist bestätigt, sobald Ihre Zahlung eingegangen ist.",
+        "boxNow": "Jetzt zahlen",
+        "boxLater": "Per PayPal",
+        "phrase": "mit PayPal"
+      }
+    },
+    "stay": {
+      "title": "Ihr Aufenthalt",
+      "checkIn": "Check-in",
+      "checkOut": "Check-out",
+      "from": "ab {time}",
+      "by": "bis {time}",
+      "nights": "{count, plural, one {# Nacht} other {# Nächte}}",
+      "room": "Zimmer {number}",
+      "extras": "Extras",
+      "fees": "Gebühren",
+      "discount": "Rabatt",
+      "total": "Gesamt",
+      "includes": "Inkl. Steuern und Gebühren",
+      "hold": "Preis für Sie reserviert: noch {time} Min.",
+      "expired": "Preis nicht mehr reserviert",
+      "instant": "Sofortige Bestätigung per E-Mail",
+      "methods": "Zahlung {methods}",
+      "adults": "{count, plural, one {# Erwachsener} other {# Erwachsene}}",
+      "children": "{count, plural, one {# Kind} other {# Kinder}}"
+    },
+    "checkingPrice": "Preis wird geprüft …",
+    "tooSoon": "{methods} {count, plural, one {ist} other {sind}} so kurz vor der Anreise nicht möglich.",
+    "busyConfirm": "Buchung wird bestätigt …",
+    "busyRequest": "Anfrage wird gesendet …",
+    "editDetails": "Angaben des Gasts ändern"
   }
 }

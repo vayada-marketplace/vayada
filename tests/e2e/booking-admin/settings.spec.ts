@@ -27,6 +27,8 @@ import { watchNoLegacyCalls } from "../support/noLegacyCalls";
 import { watchPageHealth } from "../support/pageHealth";
 
 const PROD = process.env.E2E_BOOKING_ADMIN_PROD === "1";
+// The method tiles; the booking windows card below repeats the method names (VAY-2348).
+const paymentMethodTiles = (page: Page) => page.getByRole("group", { name: "Payment Methods" });
 
 test.describe("booking-admin settings no-legacy guard", () => {
   test("loads and saves the shared same-day booking cutoff", async ({ page }, testInfo) => {
@@ -1688,8 +1690,8 @@ test("keeps setup's plain Pay at Hotel when it is saved untouched", async ({ pag
   expect(writes).toEqual([{ acceptedMethods: ["pay_at_property"] }]);
 
   // Off and on again still shows Cash and Card, so nothing changed.
-  await page.getByText("Pay at Hotel", { exact: true }).click();
-  await page.getByText("Pay at Hotel", { exact: true }).click();
+  await paymentMethodTiles(page).getByText("Pay at Hotel", { exact: true }).click();
+  await paymentMethodTiles(page).getByText("Pay at Hotel", { exact: true }).click();
   await savePaymentsButton(page).click();
   await expect.poll(() => writes.length).toBe(2);
   expect(writes[1]).toEqual({ acceptedMethods: ["pay_at_property"] });
@@ -1802,7 +1804,7 @@ test("starts a newly switched-on Pay at Hotel with Cash and Card", async ({ page
   const writes = await mockPaymentWrites(page, [], [], false);
   await page.goto("/settings/payments");
   await expect(page.getByRole("heading", { name: "Payment Methods" })).toBeVisible();
-  await page.getByText("Pay at Hotel", { exact: true }).click();
+  await paymentMethodTiles(page).getByText("Pay at Hotel", { exact: true }).click();
   await expect(page.getByText("Cash & Card accepted", { exact: true })).toBeVisible();
   await savePaymentsButton(page).click();
   await expect(page.getByText("Payment settings saved").first()).toBeVisible();
@@ -1826,9 +1828,9 @@ test("waits for the saved payment methods before a click counts", async ({ page 
   });
   await page.goto("/settings/payments");
   // The cards are on screen and the saved methods are still on their way.
-  await expect(page.getByText("Pay at Hotel", { exact: true })).toBeVisible();
+  await expect(paymentMethodTiles(page).getByText("Pay at Hotel", { exact: true })).toBeVisible();
   await readIsHeld;
-  const click = page.getByText("Pay at Hotel", { exact: true }).click();
+  const click = paymentMethodTiles(page).getByText("Pay at Hotel", { exact: true }).click();
   await page.waitForTimeout(300);
   releaseRead();
   await click;

@@ -1,18 +1,11 @@
 "use client";
 
-import { useState, type KeyboardEvent, type ReactNode } from "react";
+import { useId, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useTranslations } from "next-intl";
+import type { PricingPaymentMethod } from "@vayada/domain-booking/replacement-pricing";
+import type { PaymentMethodOption } from "@/lib/paymentMethodOptions";
 import BookingPageTerms from "./BookingPageTerms";
-import {
-  isManualPricingPaymentMethod,
-  type PricingPaymentMethod,
-  type PublicBookingQuote,
-} from "@vayada/domain-booking/replacement-pricing";
 
-const cardIcon =
-  "M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z";
-const hotelIcon =
-  "M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4";
-const bankIcon = "M3 10l9-6 9 6M5 10v8m4-8v8m6-8v8m4-8v8M3 20h18";
 const documentIcon =
   "M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z";
 const icon = (d: string, size = "w-5 h-5 text-gray-700") => (
@@ -21,62 +14,21 @@ const icon = (d: string, size = "w-5 h-5 text-gray-700") => (
   </svg>
 );
 
-const methods: Record<PricingPaymentMethod, { title: string; note: string; icon: string }> = {
-  pay_at_property: {
-    title: "Pay at the hotel",
-    note: "Pay when you arrive. Nothing to pay now.",
-    icon: hotelIcon,
-  },
-  card: { title: "Pay by card now", note: "Pay securely online now.", icon: cardIcon },
-  bank_transfer: {
-    title: "Bank transfer",
-    note: "Transfer the amount to our bank account.",
-    icon: bankIcon,
-  },
-  paypal: { title: "PayPal", note: "Send the amount to us by PayPal.", icon: cardIcon },
-};
+const card = "bg-white rounded-2xl border border-gray-200 p-5 md:p-8";
 
-/** What happens with the chosen way to pay, in the old info box (VAY-2195). `split` is a card
- * quote's part now and the rest paid at the hotel: a deposit's remainder or the hotel's own fees
- * (VAY-2205). */
-function explanation(
-  method: PricingPaymentMethod,
-  quote: PublicBookingQuote | undefined,
-  total: string,
-  split?: { now: string; later: string },
-) {
-  const request = quote?.acceptanceMode === "request";
-  if (isManualPricingPaymentMethod(method))
-    return "We hold your room until the payment deadline and confirm your booking when your payment arrives.";
-  if (method === "card" && split)
-    return request
-      ? `We authorise ${split.now} on your card now and charge it only if we accept your request. You pay the rest, ${split.later}, at the hotel. We answer within 24 hours.`
-      : `We charge ${split.now} to your card when you confirm. You pay the rest, ${split.later}, at the hotel. Your booking is confirmed straight away.`;
-  if (method === "card")
-    return request
-      ? `We authorise ${total} on your card now and charge it only if we accept your request. We answer within 24 hours.`
-      : `We charge ${total} to your card when you confirm. Your booking is confirmed straight away.`;
-  return request
-    ? `Nothing is charged now. You pay ${total} at the hotel if we accept your request. We answer within 24 hours.`
-    : `Nothing is charged now. You pay ${total} at the hotel when you arrive. Your booking is confirmed straight away.`;
-}
-
-const card = "bg-white rounded-2xl border border-gray-200 p-6";
-
-/** The old secure-payment page on pricing v2 (VAY-2195): who is booking, how they pay, what they
- * agree to for this final price, and the button that books. */
+/** Step 3, "Review & pay" (VAY-2347): who is booking, how they pay (the hotel's ways, each with
+ * its own words from `options`), what they agree to for this final price, and the button. */
 export default function PaymentStep({
   guestName,
   guestEmail,
+  guestPhone = "",
   onChangeDetails,
   method,
-  available,
+  options,
   unavailable = null,
   tooSoon,
   onMethod,
-  quote,
-  total,
-  split,
+  showExplanation,
   notice,
   acknowledgements,
   cancellation,
@@ -84,21 +36,21 @@ export default function PaymentStep({
   onBack,
   locked = false,
   termsText = null,
+  hasQuote,
 }: {
   guestName: string;
   guestEmail: string;
+  guestPhone?: string;
   onChangeDetails: () => void;
   method: PricingPaymentMethod | "";
-  available: PricingPaymentMethod[];
+  /** The ways to pay the chosen rates take, with their words (see paymentMethodOptions). */
+  options: readonly PaymentMethodOption[];
   /** Shown instead of the ways to pay when none is left for the chosen rates (VAY-2309). */
   unavailable?: ReactNode;
   tooSoon: string | null;
   onMethod: (method: PricingPaymentMethod) => void;
-  quote: PublicBookingQuote | undefined;
-  /** The quote's total as the guest reads it, or "" while it loads. */
-  total: string;
-  /** A card quote's part now and the rest at the hotel, as the guest reads them (VAY-2205). */
-  split?: { now: string; later: string };
+  /** The current price is for the chosen way, so its explanation's amounts are right. */
+  showExplanation: boolean;
   notice: ReactNode;
   acknowledgements: ReactNode;
   cancellation: string[];
@@ -108,47 +60,50 @@ export default function PaymentStep({
   locked?: boolean;
   /** Our terms & conditions, readable here where booking accepts them (VAY-2176). */
   termsText?: string | null;
+  /** What the guest agrees to belongs to a price: without one there is nothing to accept. */
+  hasQuote: boolean;
 }) {
+  const t = useTranslations("reviewPay");
+  const id = useId();
   const [showTerms, setShowTerms] = useState(false);
+  const methods = options.map((option) => option.method);
   // The options behave like radio buttons: arrow keys move the choice.
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const step = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 }[event.key];
-    if (!step || locked || !available.length) return;
+    if (!step || locked || !methods.length) return;
     event.preventDefault();
-    const index = Math.max(0, available.indexOf(method as PricingPaymentMethod));
-    const target = available[(index + step + available.length) % available.length]!;
+    const index = Math.max(0, methods.indexOf(method as PricingPaymentMethod));
+    const target = methods[(index + step + methods.length) % methods.length]!;
     onMethod(target);
     event.currentTarget.querySelector<HTMLButtonElement>(`[data-method="${target}"]`)?.focus();
   };
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <p className="text-base font-bold text-gray-900">{guestName}</p>
-          <p className="text-sm text-gray-500">{guestEmail}</p>
+      <section aria-label={t("guest")} className={`${card} flex items-start gap-4`}>
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-bold uppercase tracking-wider text-gray-500">{t("guest")}</p>
+          <p id={`${id}-guest`} className="mt-0.5 text-[17px] font-bold text-gray-900">
+            {guestName}
+          </p>
+          <p className="text-[15px] text-gray-600 break-words">
+            {[guestEmail, guestPhone].filter(Boolean).join(" · ")}
+          </p>
         </div>
-        <div className="flex items-center gap-3 text-sm">
-          <span className="flex items-center gap-1.5 text-primary-600 font-medium">
-            {icon("M5 13l4 4L19 7", "w-4 h-4")}
-            Details confirmed
-          </span>
-          <button
-            type="button"
-            className="text-gray-500 underline disabled:opacity-40"
-            disabled={locked}
-            onClick={onChangeDetails}
-          >
-            Change
-          </button>
-        </div>
-      </div>
+        <button
+          type="button"
+          className="text-[15px] font-semibold text-gray-900 underline disabled:opacity-40"
+          disabled={locked}
+          aria-describedby={`${id}-guest`}
+          title={t("editDetails")}
+          onClick={onChangeDetails}
+        >
+          {t("edit")}
+        </button>
+      </section>
       {notice}
-      <section aria-label="How would you like to pay?" className={card}>
-        <div className="flex items-center gap-2.5 mb-6">
-          {icon(cardIcon)}
-          <h2 className="text-lg font-bold text-gray-900">How would you like to pay?</h2>
-        </div>
-        {!available.length && unavailable ? (
+      <section aria-label={t("howToPay")} className={card}>
+        <h2 className="mb-5 text-xl font-bold text-gray-900">{t("howToPay")}</h2>
+        {!options.length && unavailable ? (
           <>
             {unavailable}
             {tooSoon && <p className="mt-4 text-sm text-gray-600">{tooSoon}</p>}
@@ -157,66 +112,65 @@ export default function PaymentStep({
           <>
             <div
               role="radiogroup"
-              aria-label="Payment preference"
+              aria-label={t("paymentPreference")}
               aria-disabled={locked || undefined}
-              className="space-y-3 mb-6"
+              className="space-y-3"
               onKeyDown={onKeyDown}
             >
-              {available.map((value) => {
-                const on = value === method;
+              {options.map((option) => {
+                const on = option.method === method;
                 return (
                   <button
-                    key={value}
+                    key={option.method}
                     type="button"
                     role="radio"
                     aria-checked={on}
-                    data-method={value}
-                    tabIndex={on || (!method && value === available[0]) ? 0 : -1}
+                    data-method={option.method}
+                    // Named by its title; the summary and explanation describe it.
+                    aria-labelledby={`${id}-${option.method}`}
+                    aria-describedby={`${id}-${option.method}-about`}
+                    tabIndex={on || (!method && option.method === methods[0]) ? 0 : -1}
                     disabled={locked}
-                    onClick={() => onMethod(value)}
-                    className={`w-full p-4 rounded-xl border-2 transition-colors text-left ${
+                    onClick={() => onMethod(option.method)}
+                    className={`flex w-full items-start gap-3.5 rounded-[14px] border p-4 text-left transition-colors md:px-5 ${
                       on
-                        ? "border-primary-600 bg-primary-50"
+                        ? "border-primary-600 bg-primary-50 ring-1 ring-primary-600"
                         : "border-gray-200 hover:border-gray-300"
                     }`}
                   >
-                    <div className="flex items-center gap-3">
-                      <div
-                        className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${on ? "border-primary-600" : "border-gray-300"}`}
+                    <span
+                      className={`mt-0.5 flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full border-2 bg-white ${
+                        on ? "border-primary-600" : "border-gray-400"
+                      }`}
+                    >
+                      {on && <span className="h-2.5 w-2.5 rounded-full bg-primary-600" />}
+                    </span>
+                    <span className="flex-1">
+                      <span
+                        id={`${id}-${option.method}`}
+                        className="block text-[17px] font-bold text-gray-900"
                       >
-                        {on && <div className="w-2.5 h-2.5 rounded-full bg-primary-600" />}
-                      </div>
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-0.5">
-                          {icon(methods[value].icon)}
-                          <span className="font-semibold text-sm text-gray-900">
-                            {methods[value].title}
+                        {option.title}
+                      </span>
+                      <span id={`${id}-${option.method}-about`} className="block">
+                        <span className="block text-[15px] text-gray-600">{option.summary}</span>
+                        {on && showExplanation && (
+                          <span className="mt-1.5 block text-[15px] text-gray-700">
+                            {option.explanation}
                           </span>
-                        </div>
-                        <p className="text-xs text-gray-500 ml-7">{methods[value].note}</p>
-                      </div>
-                    </div>
+                        )}
+                      </span>
+                    </span>
                   </button>
                 );
               })}
             </div>
-            {tooSoon && <p className="mb-4 text-sm text-gray-600">{tooSoon}</p>}
-            {method && total && (
-              <div className="p-4 bg-primary-50 border border-primary-100 rounded-xl text-sm text-primary-700">
-                {explanation(method, quote, total, split)}
-              </div>
-            )}
-            {method === "card" && (
-              <div className="mt-3 p-3 bg-gray-100 rounded-lg text-sm text-gray-600 flex items-center gap-2">
-                {icon(cardIcon, "w-4 h-4 text-gray-400")}
-                You enter your card details in the next step.
-              </div>
-            )}
+            {tooSoon && <p className="mt-4 text-sm text-gray-600">{tooSoon}</p>}
           </>
         )}
       </section>
       {/* What the guest agrees to belongs to a price: without one there is nothing to accept. */}
-      {quote && (
+      {hasQuote && (
         <section aria-label="Before you book" className={`${card} space-y-3`}>
           <h2 className="text-base font-bold text-gray-900">Before you book</h2>
           {acknowledgements}
@@ -256,10 +210,10 @@ export default function PaymentStep({
           type="button"
           onClick={onBack}
           disabled={locked}
-          className="px-5 py-2.5 rounded-full border border-gray-300 text-sm font-medium text-gray-700 flex items-center gap-1.5 disabled:opacity-40"
+          className="text-[15px] font-semibold text-gray-800 flex items-center gap-1.5 disabled:opacity-40"
         >
           {icon("M15 19l-7-7 7-7", "w-4 h-4")}
-          Back to your details
+          {t("backToDetails")}
         </button>
         {confirm}
       </div>

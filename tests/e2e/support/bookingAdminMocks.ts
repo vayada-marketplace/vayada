@@ -30,6 +30,7 @@ export const BOOKING_ADMIN_DESIGN_SETTINGS_PATH = `/api/booking/hotels/${BOOKING
 export const BOOKING_ADMIN_CUSTOM_DOMAIN_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/custom-domain`;
 export const BOOKING_ADMIN_FINANCE_PAYMENT_SETTINGS_PATH = `/api/finance/properties/${BOOKING_ADMIN_PROPERTY_ID}/payment-settings`;
 export const BOOKING_ADMIN_FINANCE_PLAN_STATUS_PATH = `/api/finance/properties/${BOOKING_ADMIN_PROPERTY_ID}/plan-status`;
+export const BOOKING_ADMIN_FINANCE_PAYMENT_WINDOWS_PATH = `/api/finance/properties/${BOOKING_ADMIN_PROPERTY_ID}/payment-windows`;
 
 export interface BookingAdminPropertySettingsFixture {
   id: string;
@@ -587,6 +588,12 @@ export async function mockBookingAdminShellRoutes(
           },
         },
       },
+    }),
+  );
+  // VAY-2348: no booking windows per way to pay saved yet.
+  await page.route(`**${BOOKING_ADMIN_FINANCE_PAYMENT_WINDOWS_PATH}`, (route) =>
+    route.fulfill({
+      json: { propertyId: BOOKING_ADMIN_PROPERTY_ID, paymentDeadlineHours: 48, windows: {} },
     }),
   );
   await page.route(`**${BOOKING_ADMIN_PROPERTY_PROFILE_PATH}*`, (route) =>

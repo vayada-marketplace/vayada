@@ -725,5 +725,83 @@
     "errorCountry": "Choose your country from the list.",
     "rulesFailed": "We couldn’t check the hotel’s guest rules for this price. You can keep filling in your details.",
     "retry": "Try again"
+  },
+  "reviewPay": {
+    "title": "Review & pay",
+    "guest": "Guest",
+    "edit": "Edit",
+    "howToPay": "How would you like to pay?",
+    "paymentPreference": "Payment preference",
+    "backToDetails": "Back to details",
+    "buttonConfirm": "Confirm booking",
+    "buttonRequest": "Send booking request",
+    "buttonCard": "Continue to card details",
+    "method": {
+      "pay_at_property": {
+        "title": "Pay at the hotel",
+        "summary": "Nothing to pay now · you pay when you arrive",
+        "explain": "You pay {total} at the hotel when you arrive. Your booking is confirmed straight away.",
+        "explainRequest": "Nothing is charged now. If the hotel accepts your request, you pay {total} when you arrive. The hotel answers within 24 hours.",
+        "boxNow": "Pay now",
+        "boxLater": "At the hotel",
+        "phrase": "at the hotel"
+      },
+      "card": {
+        "title": "Pay with card",
+        "summary": "Charged when you book",
+        "summaryRequest": "Charged only when the hotel accepts",
+        "explain": "We charge {now} to your card when you confirm. You enter your card details in the next step.",
+        "explainSplit": "We charge {now} to your card when you confirm, and you pay the rest, {later}, at the hotel. You enter your card details in the next step.",
+        "explainRequest": "We place a hold of {now} on your card. If the hotel declines or doesn’t reply within 24 hours, the hold is released. You enter your card details in the next step.",
+        "explainRequestSplit": "We place a hold of {now} on your card, and you pay the rest, {later}, at the hotel. If the hotel declines or doesn’t reply within 24 hours, the hold is released. You enter your card details in the next step.",
+        "boxNow": "Charged now",
+        "boxHold": "Card hold now",
+        "boxCharged": "Charged",
+        "boxChargedValue": "When the hotel accepts",
+        "boxLater": "At the hotel",
+        "phrase": "by card"
+      },
+      "bank_transfer": {
+        "title": "Pay by bank transfer",
+        "summary": "Bank details sent by email after booking",
+        "explain": "After booking, we email you the hotel’s bank details and your booking reference. We hold your room until the payment deadline, and your booking is confirmed once your transfer arrives.",
+        "boxNow": "Pay now",
+        "boxLater": "By bank transfer",
+        "phrase": "by bank transfer"
+      },
+      "paypal": {
+        "title": "Pay with PayPal",
+        "summary": "PayPal details sent by email after booking",
+        "explain": "After booking, we email you the hotel’s PayPal address and your booking reference. We hold your room until the payment deadline, and your booking is confirmed once your payment arrives.",
+        "boxNow": "Pay now",
+        "boxLater": "By PayPal",
+        "phrase": "with PayPal"
+      }
+    },
+    "stay": {
+      "title": "Your stay",
+      "checkIn": "Check-in",
+      "checkOut": "Check-out",
+      "from": "from {time}",
+      "by": "by {time}",
+      "nights": "{count, plural, one {# night} other {# nights}}",
+      "room": "Room {number}",
+      "extras": "Extras",
+      "fees": "Fees",
+      "discount": "Discount",
+      "total": "Total",
+      "includes": "Includes taxes & fees",
+      "hold": "Price held for you for {time} min",
+      "expired": "Price no longer held",
+      "instant": "Instant confirmation by email",
+      "methods": "Pay {methods}",
+      "adults": "{count, plural, one {# adult} other {# adults}}",
+      "children": "{count, plural, one {# child} other {# children}}"
+    },
+    "checkingPrice": "Checking price…",
+    "tooSoon": "{methods} {count, plural, one {isn’t} other {aren’t}} available this close to check-in.",
+    "busyConfirm": "Confirming booking…",
+    "busyRequest": "Sending request…",
+    "editDetails": "Edit the guest’s details"
   }
 }

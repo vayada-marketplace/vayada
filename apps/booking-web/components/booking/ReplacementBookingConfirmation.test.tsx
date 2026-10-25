@@ -143,6 +143,25 @@ it("says booking accepts the hotel's terms only when the hotel has terms (VAY-21
   expect(document.body.textContent).toContain(line);
 });
 
+it("uses the chosen way's words on the button (VAY-2347)", () => {
+  act(() =>
+    root.render(
+      createElement(ReplacementBookingConfirmation, {
+        slug: "hotel",
+        quote,
+        disclosure,
+        guest: ada,
+        termsAccepted: true,
+        label: "Weiter zu den Kartendaten",
+        busyLabel: "Buchung wird bestätigt …",
+      }),
+    ),
+  );
+  expect(document.querySelector('button[type="submit"]')!.textContent).toBe(
+    "Weiter zu den Kartendaten",
+  );
+});
+
 it("waits for the guest's details from the details step", async () => {
   render(true, disclosure, false, null);
   expect(document.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled).toBe(true);
