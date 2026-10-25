@@ -10,7 +10,7 @@ export async function continueToPayment(
   if (extras) await page.getByRole("button", { name: "Continue to your details" }).click();
   await expect(page).toHaveURL(/[?&]step=details/);
   await fillGuestDetails(page);
-  await page.getByRole("button", { name: "Continue to payment" }).click();
+  await page.getByRole("button", { name: "Continue to review" }).click();
   await expect(page).toHaveURL(/[?&]step=payment/);
   if (method) await choosePayment(page, method);
 }

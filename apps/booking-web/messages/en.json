@@ -62,7 +62,7 @@
     "rooms": "Rooms",
     "addons": "Extras",
     "details": "Details",
-    "payment": "Payment"
+    "payment": "Review & pay"
   },
   "home": {
     "guestCountUnsupported": "Online search does not support your group of {count} guests. Try fewer guests or contact us for help.",
@@ -592,7 +592,9 @@
     "withdrawNotOnline": "This request can't be withdrawn online. Please contact the hotel.",
     "bookingNotChangeable": "This booking can no longer be changed. Look it up again to see its current status.",
     "busyTryAgain": "This booking is being updated right now. Please try again in a moment.",
-    "paymentMethodNotAccepted": "The rate you chose can't be paid this way. Please choose another way to pay."
+    "paymentMethodNotAccepted": "The rate you chose can't be paid this way. Please choose another way to pay.",
+    "paymentMethodWindow": "This way to pay isn't available for these dates any more. Please choose another way to pay.",
+    "paymentMethodWindowOnly": "This way to pay isn't available for these dates any more. Please choose other dates or contact the hotel."
   },
   "locationMap": {
     "title": "Location",
@@ -688,5 +690,40 @@
     "newSearch": "Start a new search",
     "yourRooms": "Your {count} rooms",
     "roomLine": "Room {number} · {room}"
+  },
+  "guestDetails": {
+    "title": "Your details",
+    "heading": "Who’s staying?",
+    "intro": "Takes about 1 minute. Fields marked * are required.",
+    "firstName": "First name",
+    "lastName": "Last name",
+    "email": "Email",
+    "phone": "Phone",
+    "phoneCountry": "Country code",
+    "countryOfResidence": "Country of residence",
+    "noCountry": "Choose a country",
+    "arrivalTime": "Expected arrival time",
+    "specialRequests": "Special requests",
+    "optional": "(optional)",
+    "firstNamePlaceholder": "John",
+    "lastNamePlaceholder": "Doe",
+    "emailPlaceholder": "john.doe@example.com",
+    "phonePlaceholder": "151 2345 6789",
+    "specialRequestsPlaceholder": "e.g. late arrival, airport pickup, dietary needs",
+    "emailHint": "We send your confirmation here.",
+    "phoneHint": "Only used for your stay.",
+    "specialRequestsHint": "Requests depend on availability. The hotel will reply by email.",
+    "errorFirstName": "Enter your first name.",
+    "errorLastName": "Enter your last name.",
+    "errorEmail": "Enter an email like name@example.com.",
+    "errorPhone": "Enter your phone number.",
+    "errorSummary": "{count, plural, one {Check the field marked in red.} other {Check the # fields marked in red.}}",
+    "continue": "Continue to review",
+    "backToRooms": "Back to rooms",
+    "backToExtras": "Back to extras",
+    "errorPhoneInvalid": "Enter a valid phone number.",
+    "errorCountry": "Choose your country from the list.",
+    "rulesFailed": "We couldn’t check the hotel’s guest rules for this price. You can keep filling in your details.",
+    "retry": "Try again"
   }
 }

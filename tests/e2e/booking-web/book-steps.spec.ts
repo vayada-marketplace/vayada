@@ -275,17 +275,11 @@ for (const width of [1440, 390]) {
     await next.click();
 
     // Details: the guest's details survive a refresh; Back keeps the extras.
-    await expect(page.getByRole("heading", { name: "Guest Information" })).toBeVisible();
-    await expect(page.getByRole("region", { name: "Guest rules" })).toContainText(
-      "From 15:00 until 22:00",
-    );
-    // Local hotel time with the hotel's country, not a zone's name or IANA id (VAY-2347).
-    await expect(page.getByRole("region", { name: "Guest rules" })).toContainText(
-      "All times are local hotel time (Switzerland).",
-    );
-    await expect(page.getByRole("region", { name: "Our terms & conditions" })).toContainText(
-      "Quiet hours",
-    );
+    await expect(page.getByRole("heading", { name: "Your details" })).toBeVisible();
+    // VAY-2347: only the form; the guest rules and terms are read on the next step.
+    await expect(page.getByRole("heading", { name: "Who’s staying?" })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Guest rules" })).toHaveCount(0);
+    await expect(page.getByRole("region", { name: "Our terms & conditions" })).toHaveCount(0);
     await fillGuestDetails(page);
     await page.getByLabel("Special requests (optional)").fill("A quiet room, please.");
     await page.reload();
@@ -299,12 +293,24 @@ for (const width of [1440, 390]) {
     await expect(page).toHaveURL(/[?&]step=extras/);
     await expect(extras.getByText("Your extras (2)")).toBeVisible();
     await page.goForward();
-    await page.getByRole("button", { name: "Continue to payment" }).click();
+    await page.getByRole("button", { name: "Continue to review" }).click();
 
     // Payment: pay at the hotel by default, the ticks for this price, then Confirm.
     await expect(page.getByRole("heading", { name: "Secure Payment" })).toBeVisible();
     await expect(paymentOption(page, "pay_at_property")).toHaveAttribute("aria-checked", "true");
     await expect(orderTotal(page)).toHaveText("€370");
+    await page.getByRole("button", { name: "Read our guest rules" }).click();
+    await expect(page.getByRole("region", { name: "Guest rules" })).toContainText(
+      "Check-in from 15:00 until 22:00",
+    );
+    // Local hotel time with the hotel's country, not a zone's name or IANA id (VAY-2347).
+    await expect(page.getByRole("region", { name: "Guest rules" })).toContainText(
+      "All times are local hotel time (Switzerland).",
+    );
+    await page.getByRole("button", { name: "Read our terms & conditions" }).click();
+    await expect(page.getByRole("region", { name: "Our terms & conditions" })).toContainText(
+      "Quiet hours",
+    );
     const confirm = page.getByRole("button", { name: "Confirm booking" });
     const terms = page.getByLabel("I have read the room and rate terms for this price");
     const rules = page.getByLabel("guest rules for this price");
@@ -323,7 +329,7 @@ for (const width of [1440, 390]) {
     });
     // Back to the details and on again: the boxes start without the mark until the next press.
     await page.getByRole("button", { name: "Change", exact: true }).click();
-    await page.getByRole("button", { name: "Continue to payment" }).click();
+    await page.getByRole("button", { name: "Continue to review" }).click();
     await expect(terms).toBeVisible();
     await expect(missing).toHaveCount(0);
     await expect(terms).not.toHaveAttribute("aria-invalid", "true");
@@ -480,8 +486,8 @@ test("skips Extras for a hotel without extras", async ({ page }) => {
   await mockFlow(page, { extras: false });
   await page.goto(STAY);
   await expect(page).toHaveURL(/[?&]step=details/);
-  const steps = page.locator("main").getByText(/^(Rooms|Extras|Details|Payment)$/);
-  await expect(steps).toHaveText(["Rooms", "Details", "Payment"]);
+  const steps = page.locator("main").getByText(/^(Rooms|Extras|Details|Review & pay)$/);
+  await expect(steps).toHaveText(["Rooms", "Details", "Review & pay"]);
   await page.getByRole("button", { name: "Back to rooms" }).click();
   await expect(page).toHaveURL(/\/\?checkIn=2026-11-06&checkOut=2026-11-08&adults=2$/);
 });
@@ -491,7 +497,7 @@ test("opens the first step a deep link can't skip", async ({ page }) => {
   await page.goto(`${STAY}&step=payment`);
   // No details yet: the guest lands on the details step.
   await expect(page).toHaveURL(/[?&]step=details/);
-  await expect(page.getByRole("heading", { name: "Guest Information" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Your details" })).toBeVisible();
 });
 
 test("a selection we can't price stops at Extras, above the buttons", async ({ page }) => {
@@ -523,7 +529,7 @@ test("a refused updated price keeps the stay on the payment step", async ({ page
   await page.goto(STAY);
   await page.getByRole("button", { name: "Continue to your details" }).click();
   await fillGuestDetails(page);
-  await page.getByRole("button", { name: "Continue to payment" }).click();
+  await page.getByRole("button", { name: "Continue to review" }).click();
   // A card price that runs out, then the updated price is refused.
   prices.lastsMs = 3_000;
   await paymentOption(page, "card").click();
@@ -563,7 +569,7 @@ test("a way to pay the new choices don't take goes back to the hotel's own", asy
   await page.goto(STAY);
   await page.getByRole("button", { name: "Continue to your details" }).click();
   await fillGuestDetails(page);
-  await page.getByRole("button", { name: "Continue to payment" }).click();
+  await page.getByRole("button", { name: "Continue to review" }).click();
   await paymentOption(page, "card").click();
   await expect(orderTotal(page)).toHaveText("€268");
   // Back at Extras, the new choice can't be paid by card: it is priced to pay at the hotel.
@@ -576,7 +582,7 @@ test("a way to pay the new choices don't take goes back to the hotel's own", asy
     .click();
   await expect(page.getByRole("status", { name: "Your stay total" })).toContainText("€340");
   await page.getByRole("button", { name: "Continue to your details" }).click();
-  await page.getByRole("button", { name: "Continue to payment" }).click();
+  await page.getByRole("button", { name: "Continue to review" }).click();
   await expect(paymentOption(page, "pay_at_property")).toHaveAttribute("aria-checked", "true");
 });
 
@@ -600,7 +606,7 @@ for (const width of [1440, 390]) {
     await expect(page.getByRole("status", { name: "Your stay total" })).toContainText("€268");
     await page.getByRole("button", { name: "Continue to your details" }).click();
     await fillGuestDetails(page);
-    await page.getByRole("button", { name: "Continue to payment" }).click();
+    await page.getByRole("button", { name: "Continue to review" }).click();
     await expect(paymentOption(page, "card")).toHaveAttribute("aria-checked", "true");
     await expect(orderTotal(page)).toHaveText("€268");
     await page.screenshot({
@@ -622,7 +628,7 @@ test("names a way to pay the rate doesn't take on Payment, in the guest's langua
   await page.goto(STAY);
   await page.getByRole("button", { name: "Continue to your details" }).click();
   await fillGuestDetails(page);
-  await page.getByRole("button", { name: "Continue to payment" }).click();
+  await page.getByRole("button", { name: "Continue to review" }).click();
   await paymentOption(page, "card").click();
   await expect(orderTotal(page)).toHaveText("€268");
   Object.assign(prices, { refuse: "pay_at_property", code: "PAYMENT_METHOD_NOT_ACCEPTED" });
@@ -669,7 +675,7 @@ for (const width of [1440, 390]) {
     await page.goto(STAY);
     await page.getByRole("button", { name: "Continue to your details" }).click();
     await fillGuestDetails(page);
-    await page.getByRole("button", { name: "Continue to payment" }).click();
+    await page.getByRole("button", { name: "Continue to review" }).click();
     await expect(paymentOption(page, "card")).toHaveAttribute("aria-checked", "true");
     // Meanwhile the rate takes only a way this page doesn't offer: Payment says so instead of
     // showing no way to pay, and asks for no price.

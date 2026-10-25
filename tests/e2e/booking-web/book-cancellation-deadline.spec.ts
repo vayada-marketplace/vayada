@@ -35,8 +35,8 @@ const shown = (date: string) =>
   });
 
 // VAY-2347: a stay tomorrow on a rate with free cancellation until 3 days before arrival. That
-// deadline passed two days ago, so neither step may promise free cancellation, and the times read
-// as local hotel time with the hotel's country, not a time zone's name.
+// deadline passed two days ago, so the payment step must not promise free cancellation, and the
+// times read as local hotel time with the hotel's country, not a time zone's name.
 for (const width of [1440, 390]) {
   test(`says free cancellation has ended for a stay tomorrow at ${width}px`, async ({
     page,
@@ -47,18 +47,8 @@ for (const width of [1440, 390]) {
     const deadline = shown(shift(checkIn, -3));
     const ended = `ree cancellation ended on ${deadline}`;
 
-    const rateTerms = page.getByRole("region", { name: "Room and rate terms" });
-    await expect(rateTerms).toBeVisible();
-    await page.screenshot({ path: testInfo.outputPath(`details-${width}.png`), fullPage: true });
-    // Soft, so a run on the old code still reaches the payment step's screenshot.
-    await expect.soft(rateTerms).toContainText(`Cancellation: f${ended}.`);
-    await expect.soft(rateTerms).not.toContainText("days before arrival");
-    const rules = page.getByRole("region", { name: "Guest rules" });
-    await expect.soft(rules).toContainText("All times are local hotel time (Switzerland).");
-    await expect.soft(rules).not.toContainText("Central European Time");
-
     await fillGuestDetails(page);
-    await page.getByRole("button", { name: "Continue to payment" }).click();
+    await page.getByRole("button", { name: "Continue to review" }).click();
     await expect(orderTotal(page)).toHaveText("€240");
     await page.getByRole("button", { name: "Read the room and rate terms" }).click();
     await page.getByRole("button", { name: "Read our guest rules" }).click();
@@ -82,11 +72,8 @@ test("words a deadline still ahead as the hotel's date", async ({ page }) => {
   const checkIn = hotelDay(20);
   await openDetails(page, { checkIn, checkOut: shift(checkIn, 1), freeDays: 3 });
   const until = shown(shift(checkIn, -3));
-  await expect(page.getByRole("region", { name: "Room and rate terms" })).toContainText(
-    `Cancellation: free until the end of ${until}, local hotel time.`,
-  );
   await fillGuestDetails(page);
-  await page.getByRole("button", { name: "Continue to payment" }).click();
+  await page.getByRole("button", { name: "Continue to review" }).click();
   await expect(page.getByRole("region", { name: "Cancellation" })).toContainText(
     `Free until the end of ${until}, local hotel time.`,
   );
@@ -210,5 +197,5 @@ async function openDetails(
   await room.getByLabel("Room and meal option").selectOption(offerKey);
   await room.getByLabel(/Adults/).fill("2");
   await page.getByRole("button", { name: "Continue", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Our guest rules" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Who’s staying?" })).toBeVisible();
 }

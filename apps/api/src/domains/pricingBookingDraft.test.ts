@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { replacementStayKey } from "@vayada/domain-booking";
 import type { PoolClient } from "pg";
 import { beforeEach, expect, it, vi } from "vitest";
@@ -94,6 +95,7 @@ it.each(["scope", "finance", "hash", "quote", "policy", "money", "guest"])(
 it("propagates insert failures and late authorization loss for caller rollback", async () => {
   query
     .mockImplementationOnce(query.getMockImplementation()!)
+    .mockImplementationOnce(query.getMockImplementation()!)
     .mockRejectedValueOnce(new Error("database failed"));
   await expect(stagePricingBookingDraft(client, "hotel", input)).rejects.toThrow("database failed");
   vi.mocked(lockPublicPricingAuthority)
@@ -166,4 +168,35 @@ it("refuses a fresh draft from an old quote without a frozen acceptance mode", a
   vi.mocked(lockPublicPricingAuthority).mockResolvedValue(input.current.scope);
   await expect(stagePricingBookingDraft(client, "hotel", input)).rejects.toThrow("unavailable");
   expect(query.mock.calls.some(([sql]) => sql.startsWith("WITH draft"))).toBe(false);
+});
+
+// VAY-2347: the one tick on the payment step is kept with the booking: its version, this price's
+// and the guest rules' evidence, the hotel's terms by hash, and the transaction's time.
+it("records what the guest agreed to and when", async () => {
+  await stagePricingBookingDraft(client, "hotel", input);
+  let [sql, values] = query.mock.calls.find(([sql]) => sql.startsWith("WITH draft"))!;
+  expect(sql).toContain("jsonb_set($11::jsonb,'{consent,acceptedAt}',to_jsonb(now()))");
+  expect((values?.[10] as { consent: unknown }).consent).toEqual({
+    version: "booking-consent.v1",
+    quoteEvidenceId: input.command.acceptance.quoteEvidenceId,
+    guestPolicyEvidenceId: input.command.acceptance.guestPolicyEvidenceId,
+    termsHash: null,
+  });
+  query.mockClear();
+  const implementation = query.getMockImplementation()!;
+  query.mockImplementation(async (statement: string, args?: unknown[]) =>
+    statement.startsWith("SELECT terms_and_conditions")
+      ? { rows: [{ terms_and_conditions: "  Quiet hours from 22:00.  " }], rowCount: 1 }
+      : implementation(statement, args),
+  );
+  try {
+    await stagePricingBookingDraft(client, "hotel", input);
+    [sql, values] = query.mock.calls.find(([statement]) => statement.startsWith("WITH draft"))!;
+    expect((values?.[10] as { consent: { termsHash: string } }).consent.termsHash).toBe(
+      // sha256 of the trimmed text, as the booking page shows it.
+      "sha256:" + createHash("sha256").update("Quiet hours from 22:00.").digest("hex"),
+    );
+  } finally {
+    query.mockImplementation(implementation);
+  }
 });
