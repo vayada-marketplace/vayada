@@ -226,6 +226,8 @@
   "notifications.sync.retryFailed": "De synchronisatie is niet gelukt. Probeer het zo opnieuw.",
   "notifications.sync.stillRunning": "De synchronisatie loopt nog. Kijk over een paar minuten in PMS → Channel manager.",
   "notifications.sync.synced": "Channel manager gesynchroniseerd",
+  "notifications.toast.syncDetail": "Beschikbaarheid en boekingen op je andere kanalen zijn mogelijk niet actueel.",
+  "notifications.toast.dismiss": "Melding sluiten",
   "layout.header.user": "Gebruiker",
   "layout.header.accountSettings": "Accountinstellingen",
   "layout.header.signOut": "Uitloggen",

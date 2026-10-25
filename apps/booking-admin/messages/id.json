@@ -226,6 +226,8 @@
   "notifications.sync.retryFailed": "Sinkronisasi tidak berhasil. Coba lagi sebentar lagi.",
   "notifications.sync.stillRunning": "Sinkronisasi masih berjalan. Periksa PMS → Channel manager dalam beberapa menit.",
   "notifications.sync.synced": "Channel manager tersinkron",
+  "notifications.toast.syncDetail": "Ketersediaan dan pemesanan di saluran Anda yang lain mungkin tidak terbaru.",
+  "notifications.toast.dismiss": "Tutup notifikasi",
   "layout.header.user": "Pengguna",
   "layout.header.accountSettings": "Pengaturan Akun",
   "layout.header.signOut": "Keluar",

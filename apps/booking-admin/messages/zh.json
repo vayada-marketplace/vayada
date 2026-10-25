@@ -226,6 +226,8 @@
   "notifications.sync.retryFailed": "同步未成功。请稍后再试。",
   "notifications.sync.stillRunning": "同步仍在进行中。请几分钟后在 PMS → 渠道管理器 中查看。",
   "notifications.sync.synced": "渠道管理器已同步",
+  "notifications.toast.syncDetail": "您其他渠道上的房态和预订可能不是最新的。",
+  "notifications.toast.dismiss": "关闭通知",
   "layout.header.user": "用户",
   "layout.header.accountSettings": "账户设置",
   "layout.header.signOut": "退出登录",

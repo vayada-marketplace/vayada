@@ -225,6 +225,8 @@
   "notifications.sync.retryFailed": "The sync didn't go through. Try again in a moment.",
   "notifications.sync.stillRunning": "The sync is still running. Check PMS → Channel manager in a few minutes.",
   "notifications.sync.synced": "Channel manager synced",
+  "notifications.toast.syncDetail": "Availability and bookings on your other channels may be out of date.",
+  "notifications.toast.dismiss": "Dismiss notification",
   "layout.header.user": "User",
   "layout.header.accountSettings": "Account Settings",
   "layout.header.signOut": "Sign Out",

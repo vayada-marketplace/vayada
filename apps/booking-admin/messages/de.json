@@ -226,6 +226,8 @@
   "notifications.sync.retryFailed": "Der Abgleich hat nicht geklappt. Versuchen Sie es gleich noch einmal.",
   "notifications.sync.stillRunning": "Der Abgleich läuft noch. Sehen Sie in ein paar Minuten unter PMS → Channel Manager nach.",
   "notifications.sync.synced": "Channel Manager abgeglichen",
+  "notifications.toast.syncDetail": "Verfügbarkeit und Buchungen auf Ihren anderen Kanälen sind möglicherweise nicht aktuell.",
+  "notifications.toast.dismiss": "Benachrichtigung schließen",
   "layout.header.user": "Benutzer",
   "layout.header.accountSettings": "Kontoeinstellungen",
   "layout.header.signOut": "Abmelden",

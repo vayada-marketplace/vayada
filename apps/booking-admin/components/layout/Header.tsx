@@ -13,6 +13,7 @@ import { CURRENCY_OPTIONS } from "@/lib/constants/options";
 import NavigationSearch from "./NavigationSearch";
 import DailyStatsStrip from "./DailyStatsStrip";
 import NotificationsBell from "./notifications/NotificationsBell";
+import NotificationToasts from "./notifications/NotificationToasts";
 import { useHostNotifications } from "./notifications/useHostNotifications";
 import { useNotificationActions } from "./notifications/useNotificationActions";
 import ManagePropertiesModal from "./ManagePropertiesModal";
@@ -457,6 +458,12 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
         submit={(request) =>
           apiClient.post("/api/support", request, { signal: AbortSignal.timeout(20000) })
         }
+      />
+      {/* Toasts for new bookings, missed payments and sync errors (VAY-2349) */}
+      <NotificationToasts
+        hotelId={propertyId}
+        feed={notifications.feed}
+        actions={notificationActions}
       />
       <ManagePropertiesModal
         open={manageOpen}

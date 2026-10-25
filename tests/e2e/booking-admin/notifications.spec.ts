@@ -163,8 +163,10 @@ const emptyFeed = {
   badge: "none",
 };
 
-async function setUp(page: Page, feeds: unknown[]) {
-  await page.clock.setFixedTime(NOW);
+async function setUp(page: Page, feeds: unknown[], { freezeTime = true } = {}) {
+  // A frozen clock keeps "12 min ago" and the day groups stable. Specs that wait for a later read (the
+  // bell reads again on focus at most every 2 s, by the clock) run on the real one.
+  if (freezeTime) await page.clock.setFixedTime(NOW);
   await mockBookingAdminAuthenticatedSession(page);
   await mockBookingAdminShellRoutes(page);
   const reads: URL[] = [];
@@ -508,5 +510,93 @@ test.describe("Booking Admin notifications bell (VAY-2349)", () => {
     expect(refused).toBe(1);
     // No access: no bell at all, rather than a panel that never loads.
     await expect(bell(page)).toHaveCount(0);
+  });
+});
+
+test.describe("Booking Admin notification toasts (VAY-2349 part 3)", () => {
+  const toasts = (page: Page) => page.getByTestId("notification-toast");
+  // A window focus reads the feed again, at most once every 2 s: wait that out first.
+  const focusRead = async (page: Page) => {
+    await page.waitForTimeout(2_100);
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  };
+
+  test("toasts only what arrives while Booking Admin is open", async ({ page }, testInfo) => {
+    const reads = await setUp(page, [emptyFeed, fullFeed()], { freezeTime: false });
+    const marks: unknown[] = [];
+    await page.route(READ_ROUTE, (route) => {
+      marks.push(route.request().postDataJSON());
+      return route.fulfill({ status: 204 });
+    });
+    await page.route(`**/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/reservations*`, (route) =>
+      route.fulfill({ json: { bookings: [], total: 0, limit: 20, offset: 0 } }),
+    );
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto("/settings");
+    await expect.poll(() => reads.length).toBeGreaterThan(0);
+    await expect(toasts(page)).toHaveCount(0);
+
+    // The next read brings a new booking, a missed payment and a sync error: one toast each, newest last.
+    await focusRead(page);
+    await expect(toasts(page)).toHaveCount(3);
+    await expect(toasts(page).nth(0)).toContainText("Payment not received · €480");
+    await expect(toasts(page).nth(1)).toContainText("New booking · €600");
+    await expect(toasts(page).nth(1)).toContainText("Sarah Miller · Deluxe Garden Room");
+    await expect(toasts(page).nth(2)).toContainText("Channel manager sync failed");
+    await expect(toasts(page).nth(2).getByRole("button", { name: "Retry sync" })).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath("notifications-toasts-1440.png") });
+
+    // A toast's button does what its row does, and marks it read.
+    await toasts(page).nth(1).getByRole("button", { name: "View booking" }).click();
+    await expect(page).toHaveURL(/\/reservations\?search=VAY-ABC123$/);
+    await expect
+      .poll(() => marks)
+      .toContainEqual({ keys: ["booking-event:e0000000-0000-4000-8000-000000000001"] });
+    await expect(toasts(page)).toHaveCount(2);
+
+    // Nothing toasts twice.
+    await focusRead(page);
+    await expect.poll(() => reads.length).toBeGreaterThan(2);
+    await expect(toasts(page)).toHaveCount(2);
+  });
+
+  test("closes booking toasts after 8 s; the sync error stays until closed", async ({ page }) => {
+    await page.clock.install({ time: NOW });
+    await mockBookingAdminAuthenticatedSession(page);
+    await mockBookingAdminShellRoutes(page);
+    let reads = 0;
+    await page.route(FEED_ROUTE, (route) => {
+      reads += 1;
+      return route.fulfill({ json: reads === 1 ? emptyFeed : fullFeed() });
+    });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto("/settings");
+    await expect.poll(() => reads).toBe(1);
+    await page.clock.runFor(60_000);
+    await expect(toasts(page)).toHaveCount(3);
+
+    await page.clock.runFor(8_000);
+    await expect(toasts(page)).toHaveCount(1);
+    await expect(toasts(page)).toContainText("Channel manager sync failed");
+    await toasts(page).getByRole("button", { name: "Dismiss notification" }).click();
+    await expect(toasts(page)).toHaveCount(0);
+  });
+
+  test("shows the newest toast only on phones, full width", async ({ page }, testInfo) => {
+    const reads = await setUp(page, [emptyFeed, { ...fullFeed(), syncAlert: null }], {
+      freezeTime: false,
+    });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/settings");
+    await expect.poll(() => reads.length).toBeGreaterThan(0);
+    await focusRead(page);
+    await expect(toasts(page)).toHaveCount(2);
+    await expect(toasts(page).first()).toBeHidden();
+    await expect(toasts(page).last()).toBeVisible();
+    await expect(toasts(page).last()).toContainText("New booking · €600");
+    const box = await toasts(page).last().boundingBox();
+    expect(box?.x).toBe(16);
+    expect(box?.width).toBe(358);
+    await page.screenshot({ path: testInfo.outputPath("notifications-toast-390.png") });
   });
 });

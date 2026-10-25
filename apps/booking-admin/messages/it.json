@@ -226,6 +226,8 @@
   "notifications.sync.retryFailed": "La sincronizzazione non è riuscita. Riprova tra un attimo.",
   "notifications.sync.stillRunning": "La sincronizzazione è ancora in corso. Controlla PMS → Channel manager tra qualche minuto.",
   "notifications.sync.synced": "Channel manager sincronizzato",
+  "notifications.toast.syncDetail": "Disponibilità e prenotazioni sugli altri canali potrebbero non essere aggiornate.",
+  "notifications.toast.dismiss": "Chiudi la notifica",
   "layout.header.user": "Utente",
   "layout.header.accountSettings": "Impostazioni account",
   "layout.header.signOut": "Esci",
