@@ -51,6 +51,11 @@ export async function replacePaymentMethodWindows(
   try {
     await client.query("BEGIN");
     await client.query("SET LOCAL lock_timeout='3s'; SET LOCAL statement_timeout='10s'");
+    // Two saves at once must not mix their sets.
+    await client.query(
+      "SELECT pg_advisory_xact_lock(hashtext('finance.payment_windows'), hashtext($1::uuid::text))",
+      [input.propertyId],
+    );
     const entries = Object.entries(input.windows) as [string, PaymentMethodBookingWindow][];
     await client.query(
       `DELETE FROM finance.payment_method_booking_windows

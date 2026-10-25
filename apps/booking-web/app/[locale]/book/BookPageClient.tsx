@@ -39,6 +39,7 @@ import type {
 } from "@vayada/domain-booking/replacement-pricing";
 import {
   bookingPageMethodsForArrival,
+  bookingPageMethodsTooSoon,
   bookingPagePaymentMethodLabels,
   defaultQuoteMethods,
   getBookingPagePayment,
@@ -255,8 +256,10 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     : paymentMethods;
   // No way the hotel offers fits the chosen rates: no price is asked for, and the steps say so.
   const noWayToPay = pagePaymentLoaded && !!rateMethods && !offeredMethods.length;
-  const tooSoon = pagePayment.methods.filter(
-    (method) => !paymentMethods.includes(method) && (!rateMethods || rateMethods.includes(method)),
+  // Only methods hidden because the stay is too close; a "within N days" window that the stay is
+  // too far ahead for just isn't offered (VAY-2348).
+  const tooSoon = bookingPageMethodsTooSoon(pagePayment, checkIn).filter(
+    (method) => !rateMethods || rateMethods.includes(method),
   );
   useEffect(() => {
     // A restored choice waits for the hotel's own methods before it is judged.
@@ -796,7 +799,12 @@ function RoomQuoteForm({ slug }: { slug: string }) {
           step === "payment" &&
           offeredMethods.length > 1
             ? tGuestErrors("paymentMethodNotAccepted")
-            : error
+            : // VAY-2348: the hotel's booking window for this way to pay closed since /book opened.
+              errorCode === "PAYMENT_METHOD_WINDOW" &&
+                step === "payment" &&
+                offeredMethods.length > 1
+              ? tGuestErrors("paymentMethodWindow")
+              : error
         }
         action={
           refused

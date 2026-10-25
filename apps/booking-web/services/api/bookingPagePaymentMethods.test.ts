@@ -5,6 +5,7 @@ vi.mock("./client", () => ({ bookingWebPublic: { get: mocks.get } }));
 
 import {
   bookingPageMethodsForArrival,
+  bookingPageMethodsTooSoon,
   defaultQuoteMethods,
   getBookingPagePayment,
 } from "./bookingPagePaymentMethods";
@@ -96,6 +97,12 @@ it("offers each method only within the hotel's booking window (VAY-2348)", async
   expect(offered("2026-10-14")).toEqual(["card", "pay_at_property"]);
   expect(offered("2026-10-15")).toEqual(["card"]);
   expect(offered("2026-10-19")).toEqual(["card", "bank_transfer"]);
+  // Only methods hidden because the stay is too close are named as "too close to check-in";
+  // pay at the property hidden because the stay is too far ahead is just not offered.
+  expect(bookingPageMethodsTooSoon(payment, "2026-10-13")).toEqual(["bank_transfer"]);
+  expect(bookingPageMethodsTooSoon(payment, "2026-10-15")).toEqual(["bank_transfer"]);
+  expect(bookingPageMethodsTooSoon(payment, "2026-10-19")).toEqual([]);
+  expect(bookingPageMethodsTooSoon(payment, "")).toEqual([]);
 });
 
 it("reads how the extras step shows each extra (VAY-2195)", async () => {

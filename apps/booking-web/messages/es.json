@@ -589,7 +589,8 @@
     "withdrawNotOnline": "Esta solicitud no se puede retirar en línea. Ponte en contacto con el alojamiento.",
     "bookingNotChangeable": "Esta reserva ya no se puede modificar. Vuelve a buscarla para ver su estado actual.",
     "busyTryAgain": "Esta reserva se está actualizando en este momento. Vuelve a intentarlo en un momento.",
-    "paymentMethodNotAccepted": "La tarifa que elegiste no se puede pagar de esta forma. Elige otra forma de pago."
+    "paymentMethodNotAccepted": "La tarifa que elegiste no se puede pagar de esta forma. Elige otra forma de pago.",
+    "paymentMethodWindow": "Esta forma de pago ya no está disponible para estas fechas. Elige otra forma de pago."
   },
   "locationMap": {
     "title": "Ubicación",
