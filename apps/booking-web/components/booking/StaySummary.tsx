@@ -103,8 +103,11 @@ export default function StaySummary({
   const discounts = quote.lines.filter((line) => line.kind === "discount");
   const single = rooms.length === 1 ? rooms[0] : undefined;
   const ranOut = expired || !timeLeft;
+  // Bank transfer and PayPal confirm once the money arrives, so "instant" holds only without them.
   const instant =
-    quote.acceptanceMode === "instant" && !isManualPricingPaymentMethod(quote.paymentMethod);
+    quote.acceptanceMode === "instant" &&
+    !isManualPricingPaymentMethod(quote.paymentMethod) &&
+    !methods?.some(isManualPricingPaymentMethod);
   const ways = methods?.length
     ? t("stay.methods", {
         methods: new Intl.ListFormat(resolveLocale(locale), { type: "disjunction" }).format(
@@ -180,9 +183,9 @@ export default function StaySummary({
         </div>
         <p className="text-right text-[13px] text-gray-500">{t("stay.includes")}</p>
       </div>
-      {(!!box?.length || ways) && (
+      {((!!box?.length && !ranOut) || ways) && (
         <div className="space-y-2.5 rounded-xl bg-gray-50 px-4 py-3.5 text-sm">
-          {box?.length
+          {box?.length && !ranOut
             ? box.map((line) => (
                 <div key={line.label} className="flex justify-between gap-4">
                   <span className="text-gray-600">{line.label}</span>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type KeyboardEvent, type ReactNode } from "react";
+import { useId, useState, type KeyboardEvent, type ReactNode } from "react";
 import { useTranslations } from "next-intl";
 import type { PricingPaymentMethod } from "@vayada/domain-booking/replacement-pricing";
 import type { PaymentMethodOption } from "@/lib/paymentMethodOptions";
@@ -64,6 +64,7 @@ export default function PaymentStep({
   hasQuote: boolean;
 }) {
   const t = useTranslations("reviewPay");
+  const id = useId();
   const [showTerms, setShowTerms] = useState(false);
   const methods = options.map((option) => option.method);
   // The options behave like radio buttons: arrow keys move the choice.
@@ -81,7 +82,9 @@ export default function PaymentStep({
       <section aria-label={t("guest")} className={`${card} flex items-start gap-4`}>
         <div className="min-w-0 flex-1">
           <p className="text-xs font-bold uppercase tracking-wider text-gray-500">{t("guest")}</p>
-          <p className="mt-0.5 text-[17px] font-bold text-gray-900">{guestName}</p>
+          <p id={`${id}-guest`} className="mt-0.5 text-[17px] font-bold text-gray-900">
+            {guestName}
+          </p>
           <p className="text-[15px] text-gray-600 break-words">
             {[guestEmail, guestPhone].filter(Boolean).join(" · ")}
           </p>
@@ -90,6 +93,8 @@ export default function PaymentStep({
           type="button"
           className="text-[15px] font-semibold text-gray-900 underline disabled:opacity-40"
           disabled={locked}
+          aria-describedby={`${id}-guest`}
+          title={t("editDetails")}
           onClick={onChangeDetails}
         >
           {t("edit")}
@@ -121,13 +126,16 @@ export default function PaymentStep({
                     role="radio"
                     aria-checked={on}
                     data-method={option.method}
+                    // Named by its title; the summary and explanation describe it.
+                    aria-labelledby={`${id}-${option.method}`}
+                    aria-describedby={`${id}-${option.method}-about`}
                     tabIndex={on || (!method && option.method === methods[0]) ? 0 : -1}
                     disabled={locked}
                     onClick={() => onMethod(option.method)}
-                    className={`flex w-full items-start gap-3.5 rounded-[14px] p-4 text-left transition-colors md:px-5 ${
+                    className={`flex w-full items-start gap-3.5 rounded-[14px] border p-4 text-left transition-colors md:px-5 ${
                       on
-                        ? "border-2 border-primary-600 bg-primary-50"
-                        : "border border-gray-200 hover:border-gray-300"
+                        ? "border-primary-600 bg-primary-50 ring-1 ring-primary-600"
+                        : "border-gray-200 hover:border-gray-300"
                     }`}
                   >
                     <span
@@ -138,15 +146,20 @@ export default function PaymentStep({
                       {on && <span className="h-2.5 w-2.5 rounded-full bg-primary-600" />}
                     </span>
                     <span className="flex-1">
-                      <span className="block text-[17px] font-bold text-gray-900">
+                      <span
+                        id={`${id}-${option.method}`}
+                        className="block text-[17px] font-bold text-gray-900"
+                      >
                         {option.title}
                       </span>
-                      <span className="block text-[15px] text-gray-600">{option.summary}</span>
-                      {on && showExplanation && (
-                        <span className="mt-1.5 block text-[15px] text-gray-700">
-                          {option.explanation}
-                        </span>
-                      )}
+                      <span id={`${id}-${option.method}-about`} className="block">
+                        <span className="block text-[15px] text-gray-600">{option.summary}</span>
+                        {on && showExplanation && (
+                          <span className="mt-1.5 block text-[15px] text-gray-700">
+                            {option.explanation}
+                          </span>
+                        )}
+                      </span>
                     </span>
                   </button>
                 );

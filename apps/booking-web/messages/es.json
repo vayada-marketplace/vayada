@@ -787,7 +787,14 @@
       "hold": "Precio reservado para ti durante {time} min",
       "expired": "Precio ya no reservado",
       "instant": "Confirmación inmediata por correo",
-      "methods": "Paga {methods}"
-    }
+      "methods": "Paga {methods}",
+      "adults": "{count, plural, one {# adulto} other {# adultos}}",
+      "children": "{count, plural, one {# niño} other {# niños}}"
+    },
+    "checkingPrice": "Comprobando el precio…",
+    "tooSoon": "{methods} no {count, plural, one {está disponible} other {están disponibles}} tan cerca de la llegada.",
+    "busyConfirm": "Confirmando la reserva…",
+    "busyRequest": "Enviando solicitud…",
+    "editDetails": "Editar los datos del huésped"
   }
 }

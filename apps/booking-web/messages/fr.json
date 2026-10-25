@@ -787,7 +787,14 @@
       "hold": "Prix garanti encore {time} min",
       "expired": "Prix plus garanti",
       "instant": "Confirmation immédiate par e-mail",
-      "methods": "Paiement {methods}"
-    }
+      "methods": "Paiement {methods}",
+      "adults": "{count, plural, one {# adulte} other {# adultes}}",
+      "children": "{count, plural, one {# enfant} other {# enfants}}"
+    },
+    "checkingPrice": "Vérification du prix…",
+    "tooSoon": "{methods} {count, plural, one {n’est pas disponible} other {ne sont pas disponibles}} si près de l’arrivée.",
+    "busyConfirm": "Confirmation de la réservation…",
+    "busyRequest": "Envoi de la demande…",
+    "editDetails": "Modifier les coordonnées du client"
   }
 }

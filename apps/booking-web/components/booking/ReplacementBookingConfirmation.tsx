@@ -43,6 +43,7 @@ export default function ReplacementBookingConfirmation({
   onConsentMissing,
   soldOutNotice,
   label,
+  busyLabel,
 }: {
   slug: string;
   quote: PublicBookingQuote;
@@ -71,6 +72,8 @@ export default function ReplacementBookingConfirmation({
   soldOutNotice?: (roomTypeIds: string[]) => ReactNode;
   /** The button's words for the chosen way to pay (VAY-2347); the defaults below otherwise. */
   label?: string;
+  /** Its words while the booking is being made. */
+  busyLabel?: string;
 }) {
   const termsNoticeId = useId();
   const [loading, setLoading] = useState(false);
@@ -297,9 +300,11 @@ export default function ReplacementBookingConfirmation({
         aria-describedby={hotelTerms ? termsNoticeId : undefined}
       >
         {loading
-          ? request
-            ? "Sending request…"
-            : "Confirming booking…"
+          ? busyLabel
+            ? busyLabel
+            : request
+              ? "Sending request…"
+              : "Confirming booking…"
           : label
             ? label
             : quote.paymentMethod === "card"

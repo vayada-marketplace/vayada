@@ -222,13 +222,13 @@ test("hides bank transfer for arrivals closer than its payment deadline", async 
       await expect(methods).toHaveCount(1);
       await expect(paymentOption(page, "pay_at_property")).toBeVisible();
       await expect(
-        page.getByText("Bank transfer isn’t available this close to check-in."),
+        page.getByText("Pay by bank transfer isn’t available this close to check-in."),
       ).toBeVisible();
     }
   }
   await expect(methods).toHaveCount(2);
   await expect(paymentOption(page, "bank_transfer")).toBeVisible();
-  await expect(page.getByText("Bank transfer isn’t available this close to check-in.")).toHaveCount(
-    0,
-  );
+  await expect(
+    page.getByText("Pay by bank transfer isn’t available this close to check-in."),
+  ).toHaveCount(0);
 });

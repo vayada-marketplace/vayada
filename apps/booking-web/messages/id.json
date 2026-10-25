@@ -787,7 +787,14 @@
       "hold": "Harga ditahan untuk Anda selama {time} menit",
       "expired": "Harga tidak lagi ditahan",
       "instant": "Konfirmasi instan lewat email",
-      "methods": "Bayar {methods}"
-    }
+      "methods": "Bayar {methods}",
+      "adults": "{count, plural, one {# dewasa} other {# dewasa}}",
+      "children": "{count, plural, one {# anak} other {# anak}}"
+    },
+    "checkingPrice": "Memeriksa harga…",
+    "tooSoon": "{methods} tidak tersedia sedekat ini dengan tanggal check-in.",
+    "busyConfirm": "Mengonfirmasi pemesanan…",
+    "busyRequest": "Mengirim permintaan…",
+    "editDetails": "Ubah data tamu"
   }
 }

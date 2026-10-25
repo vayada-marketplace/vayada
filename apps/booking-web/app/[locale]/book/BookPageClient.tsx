@@ -11,7 +11,7 @@ import {
 } from "react";
 import { flushSync } from "react-dom";
 import { useSearchParams } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { decodePicks, pickIdentity, releaseSoldOutPicks, roomGuestProblem } from "@/lib/roomPicker";
 import RoomGuestsStep from "@/components/booking/RoomGuestsStep";
 import { useRouter } from "@/i18n/navigation";
@@ -45,7 +45,6 @@ import type {
 } from "@vayada/domain-booking/replacement-pricing";
 import {
   bookingPageMethodsForArrival,
-  bookingPagePaymentMethodLabels,
   defaultQuoteMethods,
   getBookingPagePayment,
   type BookingPagePayment,
@@ -56,6 +55,7 @@ import { useHotel, useSlug } from "@/contexts/HotelContext";
 import { choiceKeys, choiceText, hotelToday } from "@/lib/roomChoices";
 import { cancellationSummary, hotelCountryName } from "@/lib/checkoutTerms";
 import { paymentMethodOptions } from "@/lib/paymentMethodOptions";
+import { resolveLocale } from "@/lib/utils";
 import {
   bookEntry,
   bookStepQuery,
@@ -130,6 +130,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   const tPayment = useTranslations("payment");
   const tDetails = useTranslations("guestDetails");
   const tReview = useTranslations("reviewPay");
+  const locale = useLocale();
   const tGroup = useTranslations("groupRooms");
   const tCommon = useTranslations("common");
   const { hotel } = useHotel();
@@ -640,7 +641,12 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   const methodOptions = paymentMethodOptions(
     offeredMethods,
     {
-      request: quote?.acceptanceMode === "request",
+      // A hotel accepts the same way for every price: while re-pricing, the last price (or the
+      // hotel's own setting) still says whether the guest asks or books.
+      request:
+        (quote ?? (seenQuote?.identity === requestIdentity ? seenQuote.quote : undefined))
+          ?.acceptanceMode === "request" ||
+        (!quote && seenQuote?.identity !== requestIdentity && hotel?.instantBook === false),
       amounts: quote
         ? {
             total: money(quote.totalMinor, quote.currency),
@@ -700,8 +706,8 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   const adultCount = choices.reduce((sum, choice) => sum + (Number(choice.adults) || 0), 0);
   const childCount = choices.reduce((sum, choice) => sum + choice.childAges.length, 0);
   const guestsLine = [
-    `${adultCount} ${adultCount === 1 ? "adult" : "adults"}`,
-    childCount ? `${childCount} ${childCount === 1 ? "child" : "children"}` : null,
+    tReview("stay.adults", { count: adultCount }),
+    childCount ? tReview("stay.children", { count: childCount }) : null,
   ]
     .filter(Boolean)
     .join(", ");
@@ -999,7 +1005,8 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                   guests={guestsLine}
                   rules={knownRules}
                   formatMoney={money}
-                  methods={offeredMethods}
+                  // Only once the hotel's own ways are known, not the defaults.
+                  methods={pagePaymentLoaded ? offeredMethods : undefined}
                 />
               )}
             </div>
@@ -1281,7 +1288,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                     {quote
                       ? money(quote.totalMinor, quote.currency)
                       : loading
-                        ? "Checking price…"
+                        ? tReview("checkingPrice")
                         : missingDay
                           ? "Choose a day to see your total"
                           : ""}
@@ -1334,7 +1341,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                 locked={attemptOpen}
                 showErrors={detailsTried}
               />
-              {!quote && loading && <p role="status">Checking price…</p>}
+              {!quote && loading && <p role="status">{tReview("checkingPrice")}</p>}
               {priceNotice}
             </div>
             <div className="lg:col-start-3 lg:row-start-1 lg:row-span-2 lg:self-start">
@@ -1345,7 +1352,8 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                   guests={guestsLine}
                   rules={knownRules}
                   formatMoney={money}
-                  methods={offeredMethods}
+                  // Only once the hotel's own ways are known, not the defaults.
+                  methods={pagePaymentLoaded ? offeredMethods : undefined}
                 />
               )}
             </div>
@@ -1408,9 +1416,12 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                 unavailable={noWayToPay ? priceNotice : null}
                 tooSoon={
                   tooSoon.length
-                    ? `${tooSoon.map((value) => bookingPagePaymentMethodLabels[value]).join(" and ")} ${
-                        tooSoon.length > 1 ? "aren’t" : "isn’t"
-                      } available this close to check-in.`
+                    ? tReview("tooSoon", {
+                        count: tooSoon.length,
+                        methods: new Intl.ListFormat(resolveLocale(locale), {
+                          type: "conjunction",
+                        }).format(tooSoon.map((value) => tReview(`method.${value}.title`))),
+                      })
                     : null
                 }
                 onMethod={setPayment}
@@ -1437,7 +1448,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                       Please check it and tick both boxes again.
                     </Notice>
                   ) : loading ? (
-                    <p role="status">Checking price…</p>
+                    <p role="status">{tReview("checkingPrice")}</p>
                   ) : null
                 }
                 acknowledgements={
@@ -1517,6 +1528,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                       onBooked={openConfirmation}
                       soldOutNotice={soldOutNotice}
                       label={pricedOption?.button}
+                      busyLabel={pricedOption?.busy}
                       onConsentMissing={
                         // Only while both boxes can be ticked: an expired price, rules that
                         // didn't load or a room without its name keep Confirm off, as before.

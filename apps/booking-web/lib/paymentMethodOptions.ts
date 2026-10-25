@@ -13,6 +13,8 @@ export type PaymentMethodOption = Readonly<{
   explanation: string;
   box: readonly { label: string; value: string }[];
   button: string;
+  /** The button's words while the booking is being made. */
+  busy: string;
 }>;
 
 /** The current price's amounts as the guest reads them: the total, the part paid now and the rest
@@ -49,6 +51,7 @@ export function paymentMethodOptions(
           ...(split ? [{ label: m("boxLater"), value: later }] : []),
         ],
         button: t("buttonCard"),
+        busy: t(request ? "busyRequest" : "busyConfirm"),
       };
     const manual = isManualPricingPaymentMethod(method);
     return {
@@ -61,6 +64,7 @@ export function paymentMethodOptions(
         { label: m("boxLater"), value: total },
       ],
       button: t(!manual && request ? "buttonRequest" : "buttonConfirm"),
+      busy: t(!manual && request ? "busyRequest" : "busyConfirm"),
     };
   });
 }

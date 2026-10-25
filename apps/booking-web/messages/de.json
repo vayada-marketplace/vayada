@@ -746,10 +746,10 @@
         "summaryRequest": "Abbuchung erst, wenn das Hotel annimmt",
         "explain": "Wir belasten Ihre Karte mit {now}, wenn Sie bestätigen. Ihre Kartendaten geben Sie im nächsten Schritt ein.",
         "explainSplit": "Wir belasten Ihre Karte mit {now}, wenn Sie bestätigen; den Rest von {later} zahlen Sie im Hotel. Ihre Kartendaten geben Sie im nächsten Schritt ein.",
-        "explainRequest": "Wir reservieren {now} auf Ihrer Karte. Lehnt das Hotel ab oder antwortet es nicht innerhalb von 24 Stunden, wird die Reservierung aufgehoben. Ihre Kartendaten geben Sie im nächsten Schritt ein.",
-        "explainRequestSplit": "Wir reservieren {now} auf Ihrer Karte; den Rest von {later} zahlen Sie im Hotel. Lehnt das Hotel ab oder antwortet es nicht innerhalb von 24 Stunden, wird die Reservierung aufgehoben. Ihre Kartendaten geben Sie im nächsten Schritt ein.",
+        "explainRequest": "Wir blockieren {now} auf Ihrer Karte. Lehnt das Hotel ab oder antwortet es nicht innerhalb von 24 Stunden, wird die Blockierung aufgehoben. Ihre Kartendaten geben Sie im nächsten Schritt ein.",
+        "explainRequestSplit": "Wir blockieren {now} auf Ihrer Karte; den Rest von {later} zahlen Sie im Hotel. Lehnt das Hotel ab oder antwortet es nicht innerhalb von 24 Stunden, wird die Blockierung aufgehoben. Ihre Kartendaten geben Sie im nächsten Schritt ein.",
         "boxNow": "Jetzt belastet",
-        "boxHold": "Jetzt reserviert",
+        "boxHold": "Jetzt blockiert",
         "boxCharged": "Abbuchung",
         "boxChargedValue": "Wenn das Hotel annimmt",
         "boxLater": "Im Hotel",
@@ -788,7 +788,14 @@
       "hold": "Preis für Sie reserviert: noch {time} Min.",
       "expired": "Preis nicht mehr reserviert",
       "instant": "Sofortige Bestätigung per E-Mail",
-      "methods": "Zahlung {methods}"
-    }
+      "methods": "Zahlung {methods}",
+      "adults": "{count, plural, one {# Erwachsener} other {# Erwachsene}}",
+      "children": "{count, plural, one {# Kind} other {# Kinder}}"
+    },
+    "checkingPrice": "Preis wird geprüft …",
+    "tooSoon": "{methods} {count, plural, one {ist} other {sind}} so kurz vor der Anreise nicht möglich.",
+    "busyConfirm": "Buchung wird bestätigt …",
+    "busyRequest": "Anfrage wird gesendet …",
+    "editDetails": "Angaben des Gasts ändern"
   }
 }

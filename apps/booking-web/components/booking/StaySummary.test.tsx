@@ -72,10 +72,13 @@ it("is the one summary: room, dates with the hotel's times, total and how to pay
     "1 night",
     "Includes taxes & fees",
     "Pay at the hotel or by bank transfer",
-    "Instant confirmation by email",
     "Price held for you for 14:52 min",
   ])
     expect(text()).toContain(part);
+  // A bank transfer is confirmed once the money arrives, so "instant" isn't promised beside it.
+  expect(text()).not.toContain("Instant confirmation");
+  render({ methods: ["pay_at_property"] });
+  expect(text()).toContain("Pay at the hotelInstant confirmation by email");
   expect(aside.querySelector('[data-testid="stay-total"]')!.textContent).toBe("US$175");
 });
 

@@ -788,7 +788,14 @@
       "hold": "Price held for you for {time} min",
       "expired": "Price no longer held",
       "instant": "Instant confirmation by email",
-      "methods": "Pay {methods}"
-    }
+      "methods": "Pay {methods}",
+      "adults": "{count, plural, one {# adult} other {# adults}}",
+      "children": "{count, plural, one {# child} other {# children}}"
+    },
+    "checkingPrice": "Checking price…",
+    "tooSoon": "{methods} {count, plural, one {isn’t} other {aren’t}} available this close to check-in.",
+    "busyConfirm": "Confirming booking…",
+    "busyRequest": "Sending request…",
+    "editDetails": "Edit the guest’s details"
   }
 }

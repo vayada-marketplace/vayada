@@ -32,6 +32,7 @@ it("words each way to pay, its payment lines and its button (VAY-2347)", () => {
       { label: "At the hotel", value: "€240" },
     ],
     button: "Confirm booking",
+    busy: "Confirming booking…",
   });
   expect(bank!.title).toBe("Pay by bank transfer");
   expect(bank!.box).toEqual([
@@ -51,6 +52,7 @@ it("says nothing is charged until a request is accepted; bank transfer still wai
     "Nothing is charged now. If the hotel accepts your request, you pay €240 when you arrive. The hotel answers within 24 hours.",
   );
   expect(hotel!.button).toBe("Send booking request");
+  expect(hotel!.busy).toBe("Sending request…");
   expect(bank!.button).toBe("Confirm booking");
   expect(bank!.explanation).toContain("once your transfer arrives");
 });
