@@ -24,6 +24,7 @@ const inactiveRevision = "85858585-8585-4585-8585-858585858506";
 const malformedRevision = "85858585-8585-4585-8585-858585858507";
 const legacyProperty = "85858585-8585-4585-8585-858585858509";
 const legacyRevision = "85858585-8585-4585-8585-858585858510";
+const brandedRevision = "85858585-8585-4585-8585-858585858511";
 const hostname = "book.alpenrose.example";
 const legacyHostname = "book.legacy-alpenrose.example";
 const fixture = PUBLIC_BOOKABILITY_FIXTURES.find(({ caseId }) => caseId === "custom_domain")!;
@@ -253,10 +254,26 @@ describe.skipIf(!TEST_DATABASE_URL)("active Booking publication reads in Postgre
   });
 
   it("offers guests the display currencies Booking settings add, read live (VAY-2345)", async () => {
+    // A page as setup publishes it: with its header settings, never with display currencies.
+    await seedRevision(propertyA, brandedRevision, "hotel-alpenrose", 3, false, (profile) => {
+      profile.hotel.branding = {
+        showCurrencySelector: true,
+        heroImage: null,
+        heroHeading: null,
+        heroSubtext: null,
+        primaryColor: null,
+        fontPairing: null,
+      };
+    });
+    await admin.query(
+      "UPDATE distribution.active_public_booking_revision SET content_revision_id = $2::uuid WHERE property_id = $1::uuid",
+      [propertyA, brandedRevision],
+    );
     const branding = async () =>
       (await repository.findProfileBySlug("hotel-alpenrose"))?.hotel.branding;
-    // The publication never carried them, so a published page had only the hotel's currency
-    // and no currency switcher, whatever Design Studio showed.
+    // So a published page had only the hotel's currency and no currency switcher, whatever
+    // Design Studio showed.
+    expect(await branding()).toMatchObject({ showCurrencySelector: true });
     expect((await branding())?.displayCurrencies).toBeUndefined();
     await admin.query(
       "INSERT INTO booking.booking_settings (property_id, supported_currencies) VALUES ($1::uuid, ARRAY['USD', 'usd', 'EUR'])",
@@ -328,11 +345,13 @@ describe.skipIf(!TEST_DATABASE_URL)("active Booking publication reads in Postgre
     slug: string,
     revisionNumber: number,
     active: boolean,
+    edit?: (profile: (typeof fixture)["profile"]) => void,
   ): Promise<void> {
     const profile = structuredClone(fixture.profile);
     profile.hotel.propertyId = propertyId;
     profile.hotel.slug = slug;
     profile.hotel.name = `Active ${slug}`;
+    edit?.(profile);
     const sourceManifest = {
       contractVersion: "onboarding-source-manifest.v1",
       propertyId,
