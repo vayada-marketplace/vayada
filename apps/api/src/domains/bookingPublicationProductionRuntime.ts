@@ -98,7 +98,15 @@ export function createBookingPublicationRefresh(
         readiness.product !== "booking" ||
         readiness.status !== "ready"
       ) {
-        throw new Error("Booking publication readiness is incomplete.");
+        // A read that failed (retryable by contract) may meet the other publication's locks.
+        const delay = LIVE_REFRESH_RETRY_DELAYS_MS[attempt];
+        if (onlyIfLive && delay !== undefined && readiness.outcome === "provider_failure") {
+          await wait(delay);
+          continue;
+        }
+        throw new Error(
+          `Booking publication readiness is incomplete. (${readinessSummary(readiness)})`,
+        );
       }
       const requested = await dependencies.repository.requestPublication({
         ...input,
@@ -130,6 +138,24 @@ export function createBookingPublicationRefresh(
       return operation;
     }
   };
+}
+
+/** Codes only, for the logs: the failed read, or the status and its blockers. */
+function readinessSummary(
+  readiness: Awaited<
+    ReturnType<BookingPublicationRefreshDependencies["readinessProvider"]["getBookingReadiness"]>
+  >,
+): string {
+  if (readiness.outcome !== "evaluated")
+    return `${readiness.outcome}: ${readiness.error.errorSource}/${readiness.error.code}`;
+  const blockers = readiness.groups.flatMap((group) =>
+    group.steps.flatMap((step) =>
+      step.entities.flatMap((entity) =>
+        entity.blockers.map((blocker) => `${group.groupId}:${blocker.code}`),
+      ),
+    ),
+  );
+  return `${readiness.product} ${readiness.status}: ${blockers.join(", ") || "no blockers"}`;
 }
 
 export type BookingPublicationWorker = { close(): Promise<void> };

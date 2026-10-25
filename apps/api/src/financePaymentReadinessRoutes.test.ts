@@ -301,7 +301,10 @@ describe("Finance payment readiness routes", () => {
       onlyIfLive: true,
     });
     // A refused save changes nothing for guests.
-    ports.result = { ok: false, error: { code: "payment_methods_revision_conflict", currentRevision: 2 } };
+    ports.result = {
+      ok: false,
+      error: { code: "payment_methods_revision_conflict", currentRevision: 2 },
+    };
     expect((await put(app, body(), "second-key")).statusCode).toBe(409);
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(refresh).toHaveBeenCalledTimes(1);

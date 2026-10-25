@@ -250,6 +250,62 @@ describe("Booking publication refresh", () => {
     expect(wait.mock.calls).toEqual([[1_000], [2_000], [4_000]]);
     expect(requestPublication).toHaveBeenCalledTimes(5);
   });
+
+  it("retries a failed readiness read on a live page, and names what blocks it (VAY-2344)", async () => {
+    const propertyId = "22222222-2222-4222-8222-222222222222";
+    const failure = {
+      outcome: "provider_failure" as const,
+      contractVersion: "onboarding-product-readiness.v1" as const,
+      propertyId,
+      product: "booking" as const,
+      status: "error" as const,
+      error: {
+        kind: "system_error" as const,
+        errorSource: "system" as const,
+        code: "owner_read_failed",
+        message: "Owner evidence is unavailable.",
+        retryable: true as const,
+      },
+      evaluatedAt: "2026-10-25T00:00:00.000Z",
+    };
+    const done = { operationId: "33333333-3333-4333-8333-333333333333", status: "succeeded" };
+    const getBookingReadiness = vi
+      .fn()
+      .mockResolvedValueOnce(failure)
+      .mockResolvedValue(await readyEvidence(propertyId));
+    const wait = vi.fn(async (_ms: number) => undefined);
+    const refresh = createBookingPublicationRefresh(
+      {
+        readinessProvider: { getBookingReadiness },
+        projection: {
+          getActive: vi
+            .fn()
+            .mockResolvedValue({ revisionId: "44444444-4444-4444-8444-444444444444" }),
+        },
+        repository: {
+          requestPublication: vi.fn().mockResolvedValue({ ok: true, operation: done }),
+          getPublicationStatus: vi.fn().mockResolvedValue(done),
+        },
+        projector: { projectPending: vi.fn().mockResolvedValue({}) },
+      },
+      wait,
+    );
+    const input = {
+      organizationId: "11111111-1111-4111-8111-111111111111",
+      propertyId,
+      actorUserId: "44444444-4444-4444-8444-444444444444",
+      idempotencyKey: "req-save",
+      audit: { requestId: "req-save", source: "hotel_setup" },
+    };
+
+    await expect(refresh({ ...input, onlyIfLive: true })).resolves.toEqual(done);
+    expect(wait.mock.calls).toEqual([[1_000]]);
+    // "Publish booking page" reports it at once, with the codes only.
+    getBookingReadiness.mockResolvedValueOnce(failure);
+    await expect(refresh(input)).rejects.toThrow(
+      "Booking publication readiness is incomplete. (provider_failure: system/owner_read_failed)",
+    );
+  });
 });
 
 async function readyEvidence(propertyId: string): Promise<ReadyBookingPublicationEvidence> {
