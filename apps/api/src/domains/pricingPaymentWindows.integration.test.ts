@@ -21,9 +21,10 @@ describe.skipIf(!url)("Booking windows per payment method (VAY-2348)", () => {
       "INSERT INTO hotel_catalog.properties(id,public_id,display_name) VALUES($1::uuid,$1::text,'Payment windows test')",
       [propertyId],
     );
-    // UTC and no check-in time: the arrival day starts at 00:00 UTC.
+    // UTC all year (property time zones are Area/City) and no check-in time: the arrival day
+    // starts at 00:00 UTC.
     await pool.query(
-      "INSERT INTO hotel_catalog.property_locations(property_id,timezone) VALUES($1,'UTC')",
+      "INSERT INTO hotel_catalog.property_locations(property_id,timezone) VALUES($1,'Atlantic/Reykjavik')",
       [propertyId],
     );
     await pool.query("INSERT INTO identity.users(id,email,name) VALUES($1,$2,'Windows test')", [
