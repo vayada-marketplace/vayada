@@ -685,18 +685,10 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   ]
     .filter(Boolean)
     .join(", ");
-  const stayDates = [
-    `${formatStayDate(checkIn)} – ${formatStayDate(checkOut)}`,
-    Number.isFinite(nights) ? `${nights} ${nights === 1 ? "night" : "nights"}` : null,
-    guestsLine,
-  ]
-    .filter(Boolean)
-    .join(" · ");
   // VAY-2347: once the guest pressed Continue with fields missing, they stay marked until fixed.
   const [detailsTried, setDetailsTried] = useState(false);
   const continueToReview = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!quote) return;
     if (!detailsComplete) {
       const form = event.currentTarget;
       // Marked before focus lands, so the first wrong field is announced with its message.
@@ -704,6 +696,8 @@ function RoomQuoteForm({ slug }: { slug: string }) {
       form.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus();
       return;
     }
+    // Without a price there is nothing to review yet; the price notice says why.
+    if (!quote) return;
     trackEvent(slug, "details_completed", {});
     go(next);
   };
@@ -1308,6 +1302,21 @@ function RoomQuoteForm({ slug }: { slug: string }) {
             onSubmit={continueToReview}
           >
             <div className="lg:col-span-2 space-y-6">
+              {guestRulesQuote.failed && (
+                <div
+                  role="alert"
+                  className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800"
+                >
+                  <p>{tDetails("rulesFailed")}</p>
+                  <button
+                    type="button"
+                    className="mt-2 font-semibold underline"
+                    onClick={guestRulesQuote.retry}
+                  >
+                    {tDetails("retry")}
+                  </button>
+                </div>
+              )}
               <GuestDetailsForm
                 value={guest}
                 onChange={setGuest}
@@ -1356,7 +1365,6 @@ function RoomQuoteForm({ slug }: { slug: string }) {
               <button
                 type="submit"
                 className={`${button} flex items-center justify-center gap-2 px-7 text-[17px]`}
-                disabled={!quote}
               >
                 {tDetails("continue")}
                 <svg

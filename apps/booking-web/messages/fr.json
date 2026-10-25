@@ -717,6 +717,10 @@
     "errorSummary": "{count, plural, one {Vérifiez le champ indiqué en rouge.} other {Vérifiez les # champs indiqués en rouge.}}",
     "continue": "Continuer vers le récapitulatif",
     "backToRooms": "Retour aux chambres",
-    "backToExtras": "Retour aux extras"
+    "backToExtras": "Retour aux suppléments",
+    "errorPhoneInvalid": "Saisissez un numéro de téléphone valide.",
+    "errorCountry": "Choisissez votre pays dans la liste.",
+    "rulesFailed": "Nous n’avons pas pu vérifier les règles de l’établissement pour ce prix. Vous pouvez continuer à remplir vos coordonnées.",
+    "retry": "Réessayer"
   }
 }

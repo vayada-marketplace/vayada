@@ -718,6 +718,10 @@
     "errorSummary": "{count, plural, one {Check the field marked in red.} other {Check the # fields marked in red.}}",
     "continue": "Continue to review",
     "backToRooms": "Back to rooms",
-    "backToExtras": "Back to extras"
+    "backToExtras": "Back to extras",
+    "errorPhoneInvalid": "Enter a valid phone number.",
+    "errorCountry": "Choose your country from the list.",
+    "rulesFailed": "We couldn’t check the hotel’s guest rules for this price. You can keep filling in your details.",
+    "retry": "Try again"
   }
 }
