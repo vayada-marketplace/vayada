@@ -2,6 +2,7 @@ import {
   readBankTransferDestination,
   type SavedBankTransferDestination,
 } from "@vayada/product-onboarding/bankTransferDestination";
+import type { PaymentMethodBookingWindows } from "@vayada/domain-booking";
 import { ApiErrorResponse, apiClient, omitHotelContext, type ApiClient } from "./client";
 
 export type FinanceRoutePaymentProvider =
@@ -236,6 +237,44 @@ export async function getFinancePaymentSettings(
       input.propertyId,
     );
     return { ...response, bankDestination };
+  } catch (error) {
+    throw toFinancePaymentSettingsClientError(error);
+  }
+}
+
+export interface PaymentMethodWindowsResponse {
+  propertyId: string;
+  /** Bank transfer's fixed payment deadline (48 hours). */
+  paymentDeadlineHours: number;
+  windows: PaymentMethodBookingWindows;
+}
+
+/** VAY-2348: when each payment method is offered, by how long before arrival the guest books. */
+export async function getPaymentMethodWindows(
+  input: { propertyId: string },
+  client: FinancePaymentSettingsReadApiClient = apiClient,
+): Promise<PaymentMethodWindowsResponse> {
+  try {
+    return await client.get<PaymentMethodWindowsResponse>(
+      `${buildFinancePaymentSettingsBaseEndpoint(input)}/payment-windows`,
+      omitHotelContext,
+    );
+  } catch (error) {
+    throw toFinancePaymentSettingsClientError(error);
+  }
+}
+
+/** Replaces every window: a method left out has no limit. Changes no price. */
+export async function savePaymentMethodWindows(
+  input: { propertyId: string; windows: PaymentMethodBookingWindows },
+  client: Pick<ApiClient, "put"> = apiClient,
+): Promise<PaymentMethodWindowsResponse> {
+  try {
+    return await client.put<PaymentMethodWindowsResponse>(
+      `${buildFinancePaymentSettingsBaseEndpoint(input)}/payment-windows`,
+      { windows: input.windows },
+      omitHotelContext,
+    );
   } catch (error) {
     throw toFinancePaymentSettingsClientError(error);
   }

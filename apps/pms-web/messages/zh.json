@@ -752,5 +752,18 @@
   "rooms.roomCount.other": "{count} 间房",
   "rooms.roomTypeCount.one": "{count} 个房型",
   "rooms.roomTypeCount.other": "{count} 个房型",
-  "rooms.sizeSqm": "{size} 平方米"
+  "rooms.sizeSqm": "{size} 平方米",
+  "bookings.statusAwaitingPayment": "待付款",
+  "bookings.payBy": "付款截止 {date}",
+  "bookings.hotelTime": "酒店当地时间",
+  "bookings.detail.waitingForTransfer": "等待银行转账",
+  "bookings.detail.waitingForPaypal": "等待PayPal付款",
+  "bookings.detail.transferDueBy": "截止时间 {date}。如果届时您未将付款标记为已收到，预订将自动释放，房间重新开放。",
+  "bookings.detail.confirmTransferReceived": "将{guest}的{amount}转账（参考号 {reference}）标记为已收到？预订将被确认，付款会被记录，客人会收到确认邮件。",
+  "bookings.detail.markReceived": "标记为已收到",
+  "bookings.detail.markBankTransferReceived": "标记转账已收到",
+  "calendar.awaitingPayment": "待付款",
+  "calendar.awaitingPaymentHeld": "在此之前房间会被保留；如果付款未标记为已收到，房间将自动释放。",
+  "calendar.paymentDeadlinePassed": "付款期限已过，无法再将付款标记为已收到。预订将自动释放。",
+  "calendar.openBooking": "打开预订"
 }

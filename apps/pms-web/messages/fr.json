@@ -752,5 +752,18 @@
   "rooms.roomCount.other": "{count} chambres",
   "rooms.roomTypeCount.one": "{count} type de chambre",
   "rooms.roomTypeCount.other": "{count} types de chambre",
-  "rooms.sizeSqm": "{size} m²"
+  "rooms.sizeSqm": "{size} m²",
+  "bookings.statusAwaitingPayment": "Paiement en attente",
+  "bookings.payBy": "Paiement avant le {date}",
+  "bookings.hotelTime": "heure de l'hôtel",
+  "bookings.detail.waitingForTransfer": "En attente du virement bancaire",
+  "bookings.detail.waitingForPaypal": "En attente du paiement PayPal",
+  "bookings.detail.transferDueBy": "À régler avant le {date}. Si vous ne marquez pas le paiement comme reçu d'ici là, la réservation est libérée automatiquement et la chambre redevient disponible.",
+  "bookings.detail.confirmTransferReceived": "Marquer le virement de {amount} de {guest} (référence {reference}) comme reçu ? La réservation est confirmée, le paiement est enregistré et le client reçoit un e-mail de confirmation.",
+  "bookings.detail.markReceived": "Marquer comme reçu",
+  "bookings.detail.markBankTransferReceived": "Marquer le virement comme reçu",
+  "calendar.awaitingPayment": "paiement en attente",
+  "calendar.awaitingPaymentHeld": "Les chambres sont bloquées jusque-là et libérées automatiquement si le paiement n'est pas marqué comme reçu.",
+  "calendar.paymentDeadlinePassed": "Le délai de paiement est dépassé : le paiement ne peut plus être marqué comme reçu. La réservation est libérée automatiquement.",
+  "calendar.openBooking": "Ouvrir la réservation"
 }

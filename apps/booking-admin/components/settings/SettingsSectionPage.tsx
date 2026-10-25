@@ -25,6 +25,10 @@ import {
 } from "@/services/api/financePaymentSettingsClient";
 import { paymentSaveError } from "@/components/settings/paymentSaveError";
 import {
+  PaymentWindowsCard,
+  type PaymentWindowMethods,
+} from "@/components/settings/PaymentWindowsCard";
+import {
   createFixedPlanCheckout,
   getFinancePlanStatus,
   openFinanceCustomerPortal,
@@ -334,6 +338,8 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
   // The saved row has setup's plain Pay at Hotel, without a Cash/Card choice (VAY-2185).
   const [plainPayAtHotel, setPlainPayAtHotel] = useState(false);
   const [billingPropertyId, setBillingPropertyId] = useState<string | null>(null);
+  // VAY-2348: the ways to pay guests are offered as saved, for the booking windows card.
+  const [offeredMethods, setOfferedMethods] = useState<PaymentWindowMethods | null>(null);
   const [savedPropertyName, setSavedPropertyName] = useState("");
   // Null until the public profile loads, so a failed read can never save over the text.
   const [savedDescription, setSavedDescription] = useState<string | null>(null);
@@ -453,6 +459,17 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
     }));
     setBankDestination(res.bankDestination ?? null);
     setPlainPayAtHotel(isPlainPayAtHotel(ps.acceptedMethods));
+    setOfferedMethods({
+      card: ps.acceptedMethods.includes("card") && isFinanceStripeReady(res),
+      pay_at_property: ps.acceptedMethods.includes("pay_at_property"),
+      bank_transfer:
+        ps.acceptedMethods.includes("bank_transfer") &&
+        !!res.bankDestination?.enabled &&
+        !res.bankDestination.deleted,
+      paypalHours: ps.acceptedMethods.includes("paypal")
+        ? paymentPolicyNumber(ps.depositPolicy, "paypalPaymentWindowHours", 24)
+        : null,
+    });
     setPaymentSettingsLoaded(true);
   }, []);
 
@@ -464,6 +481,7 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
       setStripeAccountCreationBlocked(true);
     }
     setPaymentSettingsLoaded(false);
+    setOfferedMethods(null);
     setBillingPlanLoading(true);
     setAcceptanceLoading(true);
     setAcceptanceMode(null);
@@ -504,6 +522,8 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
         void loadSameDayBooking(hotelId);
         if (hotelId !== selectedHotelId) void loadLocalizationSettings(hotelId);
         const propertyLink = await getBookingHotelPropertyLink({ hotelId });
+        // A slower lookup for the hotel shown before must not win.
+        if (paymentSettingsVersion !== paymentSettingsLoadVersion.current) return null;
         setBillingPropertyId(propertyLink.propertyId);
         const billingReturn =
           typeof window === "undefined"
@@ -944,6 +964,18 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
         await save(false);
       }
       setPlainPayAtHotel(keptPlain);
+      setOfferedMethods({
+        card:
+          (settings.online_card_payment ?? false) &&
+          paymentProvider === "stripe" &&
+          stripeOnboarded,
+        pay_at_property: settings.pay_at_property_enabled,
+        bank_transfer:
+          (settings.bank_transfer ?? false) && !!destination?.enabled && !destination.deleted,
+        paypalHours: settings.paypal_enabled
+          ? Math.max(1, Math.min(168, settings.paypal_payment_window_hours ?? 24))
+          : null,
+      });
       setSettings((previous) => ({
         ...previous,
         payout_account_holder: "",
@@ -2269,6 +2301,14 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
             </fieldset>
           </div>
 
+          {/* VAY-2348: each way to pay only for guests booking a certain time before arrival. */}
+          {paymentSettingsLoaded && billingPropertyId && offeredMethods && (
+            <PaymentWindowsCard
+              key={billingPropertyId}
+              propertyId={billingPropertyId}
+              methods={offeredMethods}
+            />
+          )}
           {settings.bank_transfer && bankDestination?.maskedAccount && (
             <p className="text-sm text-gray-600">
               {t("admin.savedAccount")} {bankDestination.maskedAccount}{" "}
