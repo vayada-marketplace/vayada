@@ -2481,6 +2481,58 @@ describe("shared hotel setup status route", () => {
     app = owner();
   });
 
+  it("republishes a live page as the hotel user after a hotel-detail save (VAY-2344)", async () => {
+    // Production serves setup publications: the target-mode refresher is never built there.
+    const publicPageRefresh = vi.fn(async (_propertyId: string) => undefined);
+    const refresh = vi.fn(async () => null);
+    const command = vi
+      .fn<import("./routes/sharedHotelSetupStatus.js").HotelSetupPropertyProfileUpdate>()
+      .mockResolvedValue({
+        status: "updated",
+        profile: profileResponse(propertyId, minimalHotelInput()),
+      });
+    const server = buildSharedSetupApp({
+      permissions: ["hotel_catalog.setup.manage", "booking.settings.manage"],
+      linkedResources: [propertyLink(propertyId)],
+      repository: repositoryWith([]),
+      profileCommand: command,
+      publicPageRefresh,
+      bookingPublicationRefresh: { refresh },
+    });
+    app = server;
+    const save = (idempotencyKey: string) =>
+      injectJson(server, {
+        method: "PUT",
+        url: `/api/hotel-setup/properties/${propertyId}/profile`,
+        headers: { authorization: "Bearer valid-token", "idempotency-key": idempotencyKey },
+        payload: { expectedProfileRevision: 1, patch: { location: { city: "Ahangama" } } },
+      });
+
+    expect((await save("save-address")).statusCode).toBe(200);
+    await vi.waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+    expect(refresh).toHaveBeenCalledWith({
+      organizationId,
+      propertyId,
+      actorUserId: "user_hotel_owner",
+      idempotencyKey: expect.any(String),
+      audit: expect.objectContaining({ requestId: expect.any(String) }),
+      onlyIfLive: true,
+    });
+
+    // A refused save changes nothing for guests, and its 422 is the only reply sent.
+    command.mockResolvedValueOnce({ status: "invalid", fields: { city: ["City is required."] } });
+    const refused = await save("save-invalid");
+    expect(refused.statusCode).toBe(422);
+    expect(refused.body).toMatchObject({ fields: { city: ["City is required."] } });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(refresh).toHaveBeenCalledTimes(1);
+    // A failing refresh is only logged: the save still succeeds.
+    refresh.mockRejectedValueOnce(new Error("Booking publication refresh failed: x."));
+    expect((await save("save-again")).statusCode).toBe(200);
+    await vi.waitFor(() => expect(refresh).toHaveBeenCalledTimes(2));
+    expect(publicPageRefresh).not.toHaveBeenCalled();
+  });
+
   it("creates and edits a hotel without a postal code (VAY-2289)", async () => {
     const input = minimalHotelInput();
     input.location.postalCode = "";
@@ -3273,9 +3325,13 @@ function buildSharedSetupApp(options: {
   membershipStatus?: RequestContext["membership"]["status"];
   roleKey?: string;
   includePropertyManifestPermission?: boolean;
+  publicPageRefresh?: (propertyId: string) => Promise<void>;
+  bookingPublicationRefresh?: import("./domains/bookingPublicationProductionRuntime.js").BookingPublicationRefreshPort;
 }): FastifyInstance {
   return buildApp({
     logger: false,
+    publicPageRefresh: options.publicPageRefresh,
+    bookingPublicationRefresh: options.bookingPublicationRefresh,
     sharedHotelSetupStatusRepository: options.repository,
     propertyLaunchSettingsRepository: options.launchSettingsRepository,
     hotelSetupProfileCommand: options.profileCommand,

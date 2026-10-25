@@ -633,6 +633,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       launchSettingsCommand: options.hotelSetupLaunchSettingsCommand,
       profileCommand: options.hotelSetupProfileCommand,
       refreshPublicPage: options.publicPageRefresh,
+      bookingPublicationRefresh: options.bookingPublicationRefresh,
     });
   }
   if (options.hotelFirstRun) {
@@ -720,6 +721,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       prefix: "/api",
       ...options.financePaymentSetup,
       refreshPublicPage: options.publicPageRefresh,
+      bookingPublicationRefresh: options.bookingPublicationRefresh,
     });
   }
   if (options.identityPrivacyRepository) {
