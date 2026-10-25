@@ -77,6 +77,9 @@ export default function DesignStudioPage() {
   const [propertySlug, setPropertySlug] = useState("");
   const [defaultCurrency, setDefaultCurrency] = useState("EUR");
   const [defaultLanguage, setDefaultLanguage] = useState("en");
+  // The booking page's main language: the hotel profile's, which guests always get besides
+  // Booking's languages (VAY-2292). null until the profile loads.
+  const [pageLanguage, setPageLanguage] = useState<string | null>(null);
   // null until property settings load, so a failed read never greys out the currency toggle.
   const [supportedCurrencies, setSupportedCurrencies] = useState<string[] | null>(null);
   // null until property settings load, so a failed read never greys out the language toggle.
@@ -209,6 +212,7 @@ export default function DesignStudioPage() {
     ])
       .then(([settings, property, [canonicalProfile, publicProfile, design]]) => {
         applyPublicGallery(publicProfile);
+        setPageLanguage(publicProfile.publicProfile.locale || null);
         setHeaderLogo(settings.header_logo || "");
         setHeaderLogoMediaObjectId(settings.header_logo_media_object_id);
         setShowContactButton(settings.show_contact_button);
@@ -800,11 +804,12 @@ export default function DesignStudioPage() {
   ];
 
   const currentFont = FONT_PAIRINGS.find((f) => f.id === selectedFont) || FONT_PAIRINGS[0];
-  // Guests only get a language selector with two languages the booking site can render.
+  // Guests only get a language selector with two languages the booking site can render: the
+  // page's main language and Booking's, as the live page counts them (VAY-2345).
   const languageSelectorAvailable =
     supportedLanguages === null ||
     new Set(
-      [defaultLanguage, ...supportedLanguages].filter((code) =>
+      [pageLanguage ?? defaultLanguage, defaultLanguage, ...supportedLanguages].filter((code) =>
         (BOOKING_GUEST_LANGUAGE_CODES as readonly string[]).includes(code),
       ),
     ).size > 1;
@@ -1012,13 +1017,15 @@ export default function DesignStudioPage() {
             bookingUrl={bookingPreviewUrl ?? t("bookingPreview.yourBookingUrl")}
             className="flex-1 rounded-none border-0 lg:rounded-lg lg:border"
             currency={defaultCurrency}
-            defaultLanguage={defaultLanguage}
+            defaultLanguage={pageLanguage ?? defaultLanguage}
             font={currentFont}
             headerLogo={headerLogo}
             showContactButton={showContactButton}
             showLanguageSelector={showLanguageSelector && languageSelectorAvailable}
             showCurrencySelector={showCurrencySelector && currencySelectorAvailable}
-            supportedLanguages={supportedLanguages ?? undefined}
+            supportedLanguages={
+              supportedLanguages ? [defaultLanguage, ...supportedLanguages] : undefined
+            }
             supportedCurrencies={supportedCurrencies ?? undefined}
             heroHeading={heroHeading}
             heroImage={heroImage}

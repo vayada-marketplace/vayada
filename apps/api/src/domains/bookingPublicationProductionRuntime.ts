@@ -71,44 +71,106 @@ type BookingPublicationRefreshDependencies = {
   projector: Pick<BookingPublicationProjector, "projectPending">;
 };
 
+// A live page's refresh that meets another publication of the same hotel (a save a moment after
+// another save, ~1 s each) waits for it and asks again, so the later save still reaches guests
+// (VAY-2344). Each retry needs its own key: the conflict is recorded against the first one.
+const LIVE_REFRESH_RETRY_DELAYS_MS = [1_000, 2_000, 4_000];
+const LIVE_REFRESH_RETRIED_CONFLICTS = new Set([
+  "publication_in_progress",
+  "active_content_revision_conflict",
+]);
+// The request and another refresh's projection can deadlock on the hotel's rows; Postgres
+// rolls one back whole, so asking again is safe (deadlock_detected, serialization_failure).
+const LIVE_REFRESH_RETRIED_SQLSTATES = new Set(["40P01", "40001"]);
+
 export function createBookingPublicationRefresh(
   dependencies: BookingPublicationRefreshDependencies,
+  wait: (ms: number) => Promise<void> = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 ): BookingPublicationRefreshPort["refresh"] {
   return async ({ onlyIfLive, ...input }) => {
-    const active = await dependencies.projection.getActive(input.propertyId);
-    // A save never makes the page public; only "Publish booking page" does (VAY-2129).
-    if (onlyIfLive && !active) return null;
-    const readiness = await dependencies.readinessProvider.getBookingReadiness({
-      organizationId: input.organizationId,
-      propertyId: input.propertyId,
-    });
-    if (
-      readiness.outcome !== "evaluated" ||
-      readiness.product !== "booking" ||
-      readiness.status !== "ready"
-    ) {
-      throw new Error("Booking publication readiness is incomplete.");
+    for (let attempt = 0; ; attempt += 1) {
+      const delay = LIVE_REFRESH_RETRY_DELAYS_MS[attempt];
+      const active = await dependencies.projection.getActive(input.propertyId);
+      // A save never makes the page public; only "Publish booking page" does (VAY-2129).
+      if (onlyIfLive && !active) return null;
+      const readiness = await dependencies.readinessProvider.getBookingReadiness({
+        organizationId: input.organizationId,
+        propertyId: input.propertyId,
+      });
+      if (
+        readiness.outcome !== "evaluated" ||
+        readiness.product !== "booking" ||
+        readiness.status !== "ready"
+      ) {
+        // A read that failed (retryable by contract) may meet the other publication's locks.
+        if (onlyIfLive && delay !== undefined && readiness.outcome === "provider_failure") {
+          await wait(delay);
+          continue;
+        }
+        throw new Error(
+          `Booking publication readiness is incomplete. (${readinessSummary(readiness)})`,
+        );
+      }
+      let requested: Awaited<
+        ReturnType<BookingPublicationRefreshDependencies["repository"]["requestPublication"]>
+      >;
+      try {
+        requested = await dependencies.repository.requestPublication({
+          ...input,
+          idempotencyKey: attempt
+            ? `${input.idempotencyKey}:retry-${attempt}`
+            : input.idempotencyKey,
+          expectedActiveContentRevisionId: active?.revisionId ?? null,
+          readiness: readiness as ReadyBookingPublicationEvidence,
+        });
+      } catch (error) {
+        const code = (error as { code?: unknown } | null)?.code;
+        if (!onlyIfLive || delay === undefined || !LIVE_REFRESH_RETRIED_SQLSTATES.has(String(code)))
+          throw error;
+        await wait(delay);
+        continue;
+      }
+      if (!requested.ok) {
+        if (
+          !onlyIfLive ||
+          delay === undefined ||
+          !LIVE_REFRESH_RETRIED_CONFLICTS.has(requested.error.code)
+        )
+          throw new Error(`Booking publication refresh failed: ${requested.error.code}.`);
+        await wait(delay);
+        continue;
+      }
+      await dependencies.projector.projectPending({ propertyId: input.propertyId });
+      const operation = await dependencies.repository.getPublicationStatus({
+        organizationId: input.organizationId,
+        propertyId: input.propertyId,
+        operationId: requested.operation.operationId,
+        actorUserId: input.actorUserId,
+      });
+      if (!operation || operation.status === "failed" || operation.status === "unknown") {
+        throw new Error("Booking publication refresh did not complete.");
+      }
+      return operation;
     }
-    const requested = await dependencies.repository.requestPublication({
-      ...input,
-      expectedActiveContentRevisionId: active?.revisionId ?? null,
-      readiness: readiness as ReadyBookingPublicationEvidence,
-    });
-    if (!requested.ok) {
-      throw new Error(`Booking publication refresh failed: ${requested.error.code}.`);
-    }
-    await dependencies.projector.projectPending({ propertyId: input.propertyId });
-    const operation = await dependencies.repository.getPublicationStatus({
-      organizationId: input.organizationId,
-      propertyId: input.propertyId,
-      operationId: requested.operation.operationId,
-      actorUserId: input.actorUserId,
-    });
-    if (!operation || operation.status === "failed" || operation.status === "unknown") {
-      throw new Error("Booking publication refresh did not complete.");
-    }
-    return operation;
   };
+}
+
+/** Codes only, for the logs: the failed read, or the status and its blockers. */
+function readinessSummary(
+  readiness: Awaited<
+    ReturnType<BookingPublicationRefreshDependencies["readinessProvider"]["getBookingReadiness"]>
+  >,
+): string {
+  if (readiness.outcome !== "evaluated")
+    return `${readiness.outcome}: ${readiness.error.errorSource}/${readiness.error.code}`;
+  const blockers = readiness.groups.flatMap((group) =>
+    group.steps.flatMap((step) =>
+      step.entities.flatMap((entity) =>
+        entity.blockers.map((blocker) => `${group.groupId}:${blocker.code}`),
+      ),
+    ),
+  );
+  return `${readiness.product} ${readiness.status}: ${blockers.join(", ") || "no blockers"}`;
 }
 
 export type BookingPublicationWorker = { close(): Promise<void> };

@@ -38,6 +38,7 @@ import {
 } from "@vayada/domain-hotels";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
+import type { BookingPublicationRefreshPort } from "../domains/bookingPublicationProductionRuntime.js";
 import type { HotelSetupTrackCommandRepository } from "../domains/hotelSetupTrackCommandRepository.js";
 import {
   BookingContactPublicationConflictError,
@@ -46,7 +47,7 @@ import {
   type UpdateBookingPropertySettingsBody,
 } from "./bookingSettings.js";
 import { enforceRoutePolicy } from "./policy.js";
-import { refreshPublicPageAfterSaves } from "./publicPageRefresh.js";
+import { livePublicPageRefresh, refreshPublicPageAfterSaves } from "./publicPageRefresh.js";
 
 export type SharedHotelSetupEntryProduct = ProductEntryDecision["requestedProduct"];
 export type SharedPropertyTypeCatalog = {
@@ -143,6 +144,8 @@ type SharedHotelSetupStatusRoutesOptions = {
   launchSettingsRepository?: SharedPropertyLaunchSettingsRepository;
   /** Refreshes the live booking page after hotel-detail saves (VAY-2129). */
   refreshPublicPage?: (propertyId: string) => Promise<void>;
+  /** Where the public site serves setup publications, refreshes a live page instead (VAY-2344). */
+  bookingPublicationRefresh?: BookingPublicationRefreshPort;
   now?: () => Date;
 };
 
@@ -192,7 +195,7 @@ export async function registerSharedHotelSetupStatusRoutes(
       "PUT /properties/:propertyId/public-profile",
       "PUT /properties/:propertyId/launch-settings",
     ],
-    options.refreshPublicPage,
+    livePublicPageRefresh(options),
   );
 
   app.addHook("onClose", async () => {
@@ -997,7 +1000,10 @@ export function hotelSetupPropertyProfileUpdateHandler(
         detail: "Hotel details could not be saved. Please try again.",
       });
     }
-    if (result.status === "invalid") return sendInvalidProfile(reply, result.fields);
+    if (result.status === "invalid") {
+      sendInvalidProfile(reply, result.fields);
+      return reply;
+    }
     if (result.status === "conflict")
       return reply.status(409).send({
         code: "profile_revision_conflict",

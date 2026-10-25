@@ -3,7 +3,8 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { PropertyProfileLocation } from "@vayada/domain-hotels";
 import { COUNTRY_OPTIONS } from "@vayada/locale-constants";
 import GooglePlacesAddressField from "./GooglePlacesAddressField";
-import GoogleAddressMap from "./GoogleAddressMap";
+import GoogleAddressMap, { type MapPosition } from "./GoogleAddressMap";
+import { distanceKm } from "./nearbyPlaces";
 
 /** The property's address and arrival pin: what the shared form edits. */
 export type PropertyAddress = Pick<
@@ -47,6 +48,8 @@ const inputClass =
   "mt-1 block w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-950 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:bg-gray-50";
 const labelClass = "block text-sm font-medium text-gray-700";
 const MAX_LENGTH = { streetAddress: 240, postalCode: 32, city: 120, area: 120 } as const;
+// A pin this far from a road or an area the host picks can't be where guests arrive (VAY-2344).
+const STALE_PIN_KM = 2;
 
 /** The property's address (VAY-2322), shared by Booking Admin's Location settings and the PMS room editor's
  * "Property address" modal so the two can't drift apart: address search, fields that can all be typed by
@@ -76,6 +79,8 @@ export default function PropertyAddressFields({
   const revision = useRef(0);
   const [mapUnavailable, setMapUnavailable] = useState(false);
   const [searchUnavailable, setSearchUnavailable] = useState(false);
+  // Where a road or an area picked in search lies: the map shows it, so the next click pins it.
+  const [found, setFound] = useState<MapPosition | null>(null);
   // The map and address search keep the handlers they started with: they read this to ignore picks while saving.
   const disabledRef = useRef(disabled);
   useEffect(() => {
@@ -146,8 +151,18 @@ export default function PropertyAddressFields({
               label={t("propertyAddress.search")}
               addressRevision={revision}
               onUnavailable={() => setSearchUnavailable(true)}
-              onSelect={(address) =>
-                !disabledRef.current &&
+              onSelect={(address) => {
+                if (disabledRef.current) return;
+                const exact = address.latitude !== null && address.longitude !== null;
+                const place = exact ? null : (address.location ?? null);
+                // A road or an area never places the pin; a pin far from it (another town, or the
+                // world map clicked by mistake) goes, and the map moves there (VAY-2344).
+                const stalePin =
+                  place !== null &&
+                  value.latitude !== null &&
+                  value.longitude !== null &&
+                  distanceKm({ latitude: value.latitude, longitude: value.longitude }, place) >
+                    STALE_PIN_KM;
                 change({
                   streetAddress: address.streetAddress,
                   postalCode: address.postalCode,
@@ -155,11 +170,15 @@ export default function PropertyAddressFields({
                   countryCode: address.countryCode,
                   // A new address: the old area no longer describes it.
                   area: "",
-                  ...(address.latitude !== null && address.longitude !== null
+                  ...(exact
                     ? { latitude: address.latitude, longitude: address.longitude }
-                    : {}),
-                })
-              }
+                    : stalePin
+                      ? { latitude: null, longitude: null }
+                      : {}),
+                });
+                if (place && (stalePin || !hasPin))
+                  setFound({ lat: place.latitude, lng: place.longitude });
+              }}
             />
             {!searchUnavailable && (
               <p className="mt-1 text-xs text-gray-500">{t("propertyAddress.searchHint")}</p>
@@ -221,6 +240,7 @@ export default function PropertyAddressFields({
               apiKey={apiKey}
               latitude={value.latitude}
               longitude={value.longitude}
+              focus={found}
               markerTitle={markerTitle}
               onPick={(position) =>
                 !disabledRef.current && change({ latitude: position.lat, longitude: position.lng })
