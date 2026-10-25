@@ -24,6 +24,7 @@ import {
   type FinancePaymentSettingsResponse,
 } from "@/services/api/financePaymentSettingsClient";
 import { paymentSaveError } from "@/components/settings/paymentSaveError";
+import { PaymentWindowsCard } from "@/components/settings/PaymentWindowsCard";
 import {
   createFixedPlanCheckout,
   getFinancePlanStatus,
@@ -2269,6 +2270,20 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
             </fieldset>
           </div>
 
+          {/* VAY-2348: each way to pay only for guests booking a certain time before arrival. */}
+          {paymentSettingsLoaded && billingPropertyId && (
+            <PaymentWindowsCard
+              propertyId={billingPropertyId}
+              methods={{
+                card: settings.online_card_payment ?? false,
+                pay_at_property: settings.pay_at_property_enabled,
+                bank_transfer: settings.bank_transfer ?? false,
+                paypalHours: settings.paypal_enabled
+                  ? (settings.paypal_payment_window_hours ?? 24)
+                  : null,
+              }}
+            />
+          )}
           {settings.bank_transfer && bankDestination?.maskedAccount && (
             <p className="text-sm text-gray-600">
               {t("admin.savedAccount")} {bankDestination.maskedAccount}{" "}
