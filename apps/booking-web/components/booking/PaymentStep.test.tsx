@@ -7,7 +7,8 @@ import en from "@/messages/en.json";
 import es from "@/messages/es.json";
 import fr from "@/messages/fr.json";
 import id from "@/messages/id.json";
-import type { PricingPaymentMethod } from "@vayada/domain-booking/replacement-pricing";
+import { NextIntlClientProvider } from "next-intl";
+import type { PaymentMethodOption } from "@/lib/paymentMethodOptions";
 import PaymentStep from "./PaymentStep";
 
 let root: Root;
@@ -20,25 +21,43 @@ afterEach(() => {
   act(() => root.unmount());
   vi.unstubAllGlobals();
 });
-function render(available: PricingPaymentMethod[], method: PricingPaymentMethod | "" = "") {
+const option = (method: PaymentMethodOption["method"], title: string): PaymentMethodOption => ({
+  method,
+  title,
+  summary: `${title} summary`,
+  explanation: `${title} explained`,
+  box: [],
+  button: "Confirm booking",
+  busy: "Confirming booking…",
+});
+function render(
+  options: PaymentMethodOption[],
+  method: PaymentMethodOption["method"] | "" = "",
+  showExplanation = true,
+) {
   act(() =>
     root.render(
-      createElement(PaymentStep, {
-        guestName: "Ada Lovelace",
-        guestEmail: "ada@example.test",
-        onChangeDetails: () => {},
-        method,
-        available,
-        unavailable: createElement("p", { role: "alert" }, "No way to pay fits these rooms."),
-        tooSoon: null,
-        onMethod: () => {},
-        quote: undefined,
-        total: "",
-        notice: null,
-        acknowledgements: null,
-        cancellation: [],
-        confirm: null,
-        onBack: () => {},
+      createElement(NextIntlClientProvider, {
+        locale: "en",
+        messages: en,
+        children: createElement(PaymentStep, {
+          guestName: "Ada Lovelace",
+          guestEmail: "ada@example.test",
+          guestPhone: "+49 30 1234567",
+          onChangeDetails: () => {},
+          method,
+          options,
+          unavailable: createElement("p", { role: "alert" }, "No way to pay fits these rooms."),
+          tooSoon: null,
+          onMethod: () => {},
+          showExplanation,
+          hasQuote: false,
+          notice: null,
+          acknowledgements: null,
+          cancellation: [],
+          confirm: null,
+          onBack: () => {},
+        }),
       }),
     ),
   );
@@ -47,11 +66,27 @@ function render(available: PricingPaymentMethod[], method: PricingPaymentMethod 
 
 // VAY-2309: Payment offers only the ways the chosen rates take, and says so when none is left.
 it("lists only the ways it is given", () => {
-  const page = render(["card"], "card");
+  const page = render([option("card", "Pay with card")], "card");
   expect(Array.from(page.querySelectorAll('[role="radio"]')).map((r) => r.textContent)).toEqual([
-    expect.stringContaining("Pay by card now"),
+    "Pay with cardPay with card summaryPay with card explained",
   ]);
   expect(page.querySelector('[role="alert"]')).toBeNull();
+});
+
+// VAY-2347: the guest card, and the chosen way's full explanation once its price is current.
+it("shows who books and explains only the chosen way, once priced for it", () => {
+  const ways = [
+    option("pay_at_property", "Pay at the hotel"),
+    option("bank_transfer", "Pay by bank transfer"),
+  ];
+  let page = render(ways, "bank_transfer");
+  expect(page.querySelector('[aria-label="Guest"]')!.textContent).toBe(
+    "GuestAda Lovelaceada@example.test · +49 30 1234567Edit",
+  );
+  expect(page.textContent).toContain("Pay by bank transfer explained");
+  expect(page.textContent).not.toContain("Pay at the hotel explained");
+  page = render(ways, "bank_transfer", false);
+  expect(page.textContent).not.toContain("explained");
 });
 
 it("shows why instead of an empty list when no way is left", () => {

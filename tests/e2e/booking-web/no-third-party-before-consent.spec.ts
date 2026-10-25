@@ -140,7 +140,7 @@ test("loads Stripe.js only once the card form shows", async ({ page, baseURL }) 
   await page.getByLabel("guest rules for this price").check();
   expect(outside).toEqual([]);
 
-  await page.getByRole("button", { name: "Continue to card payment" }).click();
+  await page.getByRole("button", { name: "Continue to card details" }).click();
   await expect.poll(() => outside).toContain("https://js.stripe.com/v3");
   expect(outside.every((url) => url.startsWith("https://js.stripe.com/"))).toBe(true);
 });
