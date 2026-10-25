@@ -317,7 +317,7 @@ describe.skipIf(!TEST_DATABASE_URL)("Booking Admin notifications (runtime login)
     await repository.markRead(propertyId, viewerId, [`booking-event:${lateEvent}`]);
     expect((await repository.read(propertyId, viewer))!.unread.all).toBe(0);
     expect(afterAll.syncAlert!.read).toBe(true);
-    expect(afterAll.badge).toBe("blue");
+    expect(afterAll.badge).toBe("red"); // read, but the sync is still failing
     const colleague = (await repository.read(propertyId, { ...viewer, userId: colleagueId }))!;
     expect(colleague.unread.all).toBeGreaterThan(0);
 
