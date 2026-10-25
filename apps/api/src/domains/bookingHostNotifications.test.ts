@@ -16,6 +16,7 @@ const viewer: HostNotificationViewer = {
   canReadPromos: true,
   canReadGuestContact: true,
   retrySyncDomains: ["ari", "booking"],
+  canOpenChannelManager: true,
 };
 
 let eventNumber = 0;
@@ -212,6 +213,7 @@ describe("Booking Admin notifications feed (VAY-2349)", () => {
       failedAt: "2026-10-25T14:50:00.000Z",
       lastSuccessAt: "2026-10-25T14:20:00.000Z",
       canRetry: true,
+      canViewDetails: true,
     });
     expect(feed.unread).toEqual({ all: 1, bookings: 0, needsAction: 1, updates: 0 });
     expect(feed.badge).toBe("red");

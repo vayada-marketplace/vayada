@@ -157,7 +157,10 @@ async function authorize(
         organizationId: context.selectedOrganization.organizationId,
         canReadPromos: hasPermission(context, "booking.promos.read"),
         canReadGuestContact: hasPermission(context, "pms.guest_contact.read"),
-        retrySyncDomains: canRunPmsSync(request, propertyId) ? syncRetryDomains : [],
+        retrySyncDomains: canUsePmsSync(request, propertyId, "pms.operations.manage")
+          ? syncRetryDomains
+          : [],
+        canOpenChannelManager: canUsePmsSync(request, propertyId, "pms.operations.read"),
       },
     };
   } catch (error) {
@@ -173,9 +176,13 @@ async function authorize(
   }
 }
 
-/** "Retry sync" posts PMS → Channel manager's own sync command, so it shows only to people that command
- * accepts: the same permission, PMS product and property access. */
-function canRunPmsSync(request: FastifyRequest, propertyId: string): boolean {
+/** "Retry sync" posts PMS → Channel manager's own sync command and "View details" opens that page, so each
+ * shows only to people PMS accepts there: the same permission, PMS product and property access. */
+function canUsePmsSync(
+  request: FastifyRequest,
+  propertyId: string,
+  permission: "pms.operations.read" | "pms.operations.manage",
+): boolean {
   const resource = {
     product: "pms",
     resourceType: "pms_property",
@@ -183,7 +190,7 @@ function canRunPmsSync(request: FastifyRequest, propertyId: string): boolean {
   } as const;
   try {
     enforceRoutePolicy(request, {
-      permission: "pms.operations.manage",
+      permission,
       entitlement: { product: "pms", key: "property-management", resource },
       resource: { ...resource, allowedRelationships: ["owner", "operator", "front_desk"] },
     });

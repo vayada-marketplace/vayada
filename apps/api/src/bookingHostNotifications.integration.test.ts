@@ -30,6 +30,7 @@ describe.skipIf(!TEST_DATABASE_URL)("Booking Admin notifications (runtime login)
     canReadPromos: true,
     canReadGuestContact: true,
     retrySyncDomains: ["ari", "booking"],
+    canOpenChannelManager: true,
   };
   let fixture: HotelSetupOrdinaryLoginFixture;
   let repository: BookingHostNotificationsRepository;

@@ -38,7 +38,12 @@ describe("Booking Admin notification routes", () => {
   it("reads the property's feed for the signed-in person, with what they may see", async () => {
     const repository = repositoryFake();
     app = await routeApp(repository, {
-      permissions: ["booking.reservation.read", "booking.promos.read", "pms.operations.manage"],
+      permissions: [
+        "booking.reservation.read",
+        "booking.promos.read",
+        "pms.operations.manage",
+        "pms.operations.read",
+      ],
       pms: true,
       syncRetryDomains: ["ari"],
     });
@@ -53,6 +58,7 @@ describe("Booking Admin notification routes", () => {
       canReadPromos: true,
       canReadGuestContact: false,
       retrySyncDomains: ["ari"],
+      canOpenChannelManager: true,
     });
     await app.close();
 
@@ -68,6 +74,7 @@ describe("Booking Admin notification routes", () => {
       canReadPromos: false,
       canReadGuestContact: true,
       retrySyncDomains: [],
+      canOpenChannelManager: false,
     });
   });
 

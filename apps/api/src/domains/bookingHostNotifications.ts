@@ -89,6 +89,8 @@ export type HostNotificationSyncAlert = {
   failedAt: string;
   lastSuccessAt: string | null;
   canRetry: boolean;
+  /** Whether the person may open PMS → Channel manager ("View details"). */
+  canViewDetails: boolean;
 };
 
 export type HostNotificationUnread = {
@@ -116,6 +118,8 @@ export type HostNotificationViewer = {
   canReadGuestContact: boolean;
   /** The syncs this person can rerun from the bell: they may, and that sync command is switched on. */
   retrySyncDomains: readonly HostSyncDomain[];
+  /** Whether the person may open PMS → Channel manager. */
+  canOpenChannelManager: boolean;
 };
 
 /** "Mark all read" as the person saw it: items up to `before`, and the sync card they were shown. */
@@ -372,6 +376,7 @@ function syncAlert(
     failedAt: new Date(Math.max(...rows.map((row) => row.lastAttemptAt.getTime()))).toISOString(),
     lastSuccessAt: lastSuccess === null ? null : new Date(lastSuccess).toISOString(),
     canRetry: domains.every((domain) => viewer.retrySyncDomains.includes(domain)),
+    canViewDetails: viewer.canOpenChannelManager,
   };
 }
 
