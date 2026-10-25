@@ -85,4 +85,24 @@ it("drops terms it can't trust and anything from another version", () => {
     places: [],
   });
   expect(parseBookingStay("<!doctype html>")).toEqual({ cancellation: null, places: [] });
+  // A zone this browser doesn't know would break the page's dates.
+  expect(
+    parseBookingStay({
+      ...response,
+      cancellation: { ...response.cancellation, timeZone: "Mars/Base" },
+    }).cancellation,
+  ).toBeNull();
+});
+
+it("reads terms saved without a type as free cancellation, as the server does", () => {
+  const untyped = { kind: "flexible", terms: { freeCancellationDeadlineDays: 3 } };
+  expect(
+    parseBookingStay({
+      ...response,
+      cancellation: {
+        ...response.cancellation,
+        rooms: [{ ...response.cancellation.rooms[0], cancellation: untyped }],
+      },
+    }).cancellation?.rooms[0]?.cancellation,
+  ).toEqual(untyped);
 });

@@ -16,10 +16,14 @@ import CancellationPolicy from "./CancellationPolicy";
 export default function ConfirmationCancellation({
   blocks,
   formatMoney,
+  lineMoney,
   manageHref,
 }: {
   blocks: PolicyBlock[];
+  /** Amounts in the full policy, with the guest's display currency as step 3 shows them. */
   formatMoney: (minor: string) => string;
+  /** The amount in the line itself: the booking's currency only, so no brackets in brackets. */
+  lineMoney: (minor: string) => string;
   manageHref: string;
 }) {
   const t = useTranslations("confirmation");
@@ -46,8 +50,8 @@ export default function ConfirmationCancellation({
   const text = (part: CancellationLinePart) =>
     t(`cancelLine.${part.key}`, {
       date: part.date ? day(part.date) : "",
-      amount: part.amountMinor ? formatMoney(part.amountMinor) : "",
-      rooms: (part.rooms ?? []).filter(Boolean).join(", "),
+      amount: part.amountMinor ? lineMoney(part.amountMinor) : "",
+      rooms: (part.rooms ?? []).filter(Boolean).join(", ") || t("room"),
     });
   const amber = line.tone === "amber";
   const tone = amber

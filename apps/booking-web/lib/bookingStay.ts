@@ -40,6 +40,16 @@ const day = (value: unknown): value is string =>
 const whole = (value: unknown, max: number): value is number =>
   typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= max;
 const words = (value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : null);
+// A zone this browser doesn't know would break the page's dates: the terms are left out instead.
+const zone = (value: unknown): value is string => {
+  if (typeof value !== "string") return false;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: value });
+    return true;
+  } catch {
+    return false;
+  }
+};
 const names = (value: unknown) =>
   Array.isArray(value) ? value.filter((name): name is string => typeof name === "string") : [];
 
@@ -51,7 +61,8 @@ function cancellation(value: unknown): Cancellation | null {
   const tiers = terms.partialRefundTiers ?? [];
   if (
     !whole(terms.freeCancellationDeadlineDays, 3650) ||
-    !["free", "partial_refund"].includes(String(terms.flexibleCancellationType)) ||
+    // Terms saved without a type are free cancellation, as the server reads them.
+    ![undefined, "free", "partial_refund"].includes(terms.flexibleCancellationType as string) ||
     !Array.isArray(tiers) ||
     !tiers.every(
       (tier) =>
@@ -122,7 +133,7 @@ export function parseBookingStay(value: unknown): BookingStay {
     record(terms) &&
     day(terms.checkIn) &&
     typeof terms.currency === "string" &&
-    typeof terms.timeZone === "string" &&
+    zone(terms.timeZone) &&
     minor(terms.totalMinor) &&
     rooms.length > 0 &&
     rooms.every(Boolean);

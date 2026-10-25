@@ -1,7 +1,7 @@
 "use client";
 import ApproximateAmountsNote from "@/components/booking/ApproximateAmountsNote";
 import RoomSelectionSummary from "@/components/booking/RoomSelectionSummary";
-import BookedRoomsList from "@/components/booking/BookedRoomsList";
+import BookedRoomsList, { useBookedRoomLine } from "@/components/booking/BookedRoomsList";
 import ConfirmationCancellation from "@/components/booking/ConfirmationCancellation";
 import ConfirmationHotelCard from "@/components/booking/ConfirmationHotelCard";
 import StayDates from "@/components/booking/StayDates";
@@ -42,6 +42,9 @@ import {
   saveLastBooking,
   toConfirmationBooking,
 } from "@/lib/storage/bookingDraft";
+
+// Stay details are asked for by the booking's id only (VAY-2360), as the API stores it.
+const STAY_ID = /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 
 /** "Waiting for our reply · 17h 59m 58s left"; it ticks on its own so the page doesn't re-render. */
 function PendingStatus({
@@ -226,6 +229,7 @@ export default function BookingConfirmationPageClient({
   const tp = useTranslations("payment");
   const tm = useTranslations("myBooking");
   const th = useTranslations("home");
+  const roomLine = useBookedRoomLine();
   const withdrawTitleId = useId();
   const withdrawDialog = useRef<HTMLDialogElement>(null);
   const { hotel } = useHotel();
@@ -240,7 +244,8 @@ export default function BookingConfirmationPageClient({
   const [changeRequest, setChangeRequest] = useState<BookingChangeRequest | null>(null);
   const [copied, setCopied] = useState(false);
   // VAY-2360: the booked terms and places of this booking (by id), and the hotel's direct-booking perks.
-  const [stay, setStay] = useState<{ id: string; details: BookingStay } | null>(null);
+  // `details` null: the read failed, so the page shows what it did before.
+  const [stay, setStay] = useState<{ id: string; details: BookingStay | null } | null>(null);
   const [benefits, setBenefits] = useState<string[]>([]);
   const confirmationLookup = useRef<Promise<Booking | null> | null>(null);
   const [paypalInfo, setPaypalInfo] = useState<{
@@ -371,14 +376,16 @@ export default function BookingConfirmationPageClient({
   const stayEmail = (booking?.guestEmail || emailParam || "").trim();
   useEffect(() => {
     const id = booking?.id;
-    if (!id || !stayEmail || !/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(id)) return;
+    if (!id || !stayEmail || !STAY_ID.test(id)) return;
     let cancelled = false;
     bookingService
       .stay(slug, id, stayEmail)
       .then((details) => {
         if (!cancelled) setStay({ id, details });
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!cancelled) setStay({ id, details: null });
+      });
     return () => {
       cancelled = true;
     };
@@ -707,9 +714,15 @@ export default function BookingConfirmationPageClient({
     !!booking?.canEditRequest &&
     (!booking.hostResponseDeadline || Date.parse(booking.hostResponseDeadline) > Date.now());
   const details = stay && booking && stay.id === booking.id ? stay.details : null;
+  // The stay details have answered (or can't be asked for): until then no terms show anywhere.
+  const stayKnown = !!booking && (!STAY_ID.test(booking.id) || stay?.id === booking.id);
   // The booked terms, judged against the hotel's date today, as the cancel route does (VAY-2360).
+  // An unpaid PayPal stay is released without its money and can be withdrawn for free: no line.
   const policyBlocks =
-    booking && details?.cancellation && (isPending || isConfirmed)
+    booking &&
+    details?.cancellation &&
+    (isPending || isConfirmed) &&
+    !(isPending && booking.paymentMethod === "paypal")
       ? bookedPolicyBlocks(details.cancellation, {
           today: hotelToday(details.cancellation.timeZone, new Date(serverNow())),
           request: isPending && !isManualPricingPaymentMethod(booking.paymentMethod),
@@ -721,12 +734,21 @@ export default function BookingConfirmationPageClient({
       : [];
   const policyCurrency = details?.cancellation?.currency ?? booking?.currency ?? "";
   const perks = isConfirmed ? directPerks(benefits, (key) => t(`perk.${key}`)) : [];
-  const meal = booking
-    ? bookedMeal(singleRoomMeal(booking), {
-        noMeals: t("noMeals"),
-        meal: (plan) => th(`choice.meal.${plan}`),
-      })
-    : null;
+  // Each room's own terms show whenever the ticket has no cancellation line.
+  const roomTerms = stayKnown && policyBlocks.length === 0;
+  const bookedRoom = booking?.bookedRooms?.length === 1 ? booking.bookedRooms[0] : undefined;
+  const meal = !booking
+    ? null
+    : bookedRoom
+      ? roomLine(bookedRoom, {
+          checkIn: booking.checkIn,
+          timezone: hotel.timezone,
+          terms: roomTerms,
+        }) || null
+      : bookedMeal(singleRoomMeal(booking), {
+          noMeals: t("noMeals"),
+          meal: (plan) => th(`choice.meal.${plan}`),
+        });
 
   const stayDates =
     booking && [booking.checkIn, booking.checkOut].every((date) => /^\d{4}-\d{2}-\d{2}$/.test(date))
@@ -953,7 +975,7 @@ export default function BookingConfirmationPageClient({
                       checkIn={booking.checkIn}
                       timezone={hotel.timezone}
                       labelClass={labelClass}
-                      terms={false}
+                      terms={roomTerms}
                     />
                   ) : (
                     <div className="flex flex-col gap-4 sm:flex-row sm:gap-8">
@@ -1074,6 +1096,13 @@ export default function BookingConfirmationPageClient({
                     blocks={policyBlocks}
                     formatMoney={(minor) =>
                       formatPrice(quoteMoneyAmount(minor, policyCurrency), policyCurrency)
+                    }
+                    lineMoney={(minor) =>
+                      new Intl.NumberFormat("en-GB", {
+                        style: "currency",
+                        currency: policyCurrency,
+                        minimumFractionDigits: 0,
+                      }).format(quoteMoneyAmount(minor, policyCurrency))
                     }
                     manageHref={manageBookingHref}
                   />

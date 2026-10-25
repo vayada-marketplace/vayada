@@ -195,12 +195,12 @@ test("shows each booked room on the confirmation and on My booking", async ({ pa
   const rooms = page.getByTestId("booked-rooms");
   await expect(rooms).toContainText("Your 2 rooms");
   await expect(rooms).toContainText("Room 1 · Deluxe Double Room");
-  // VAY-2360: each room's meal in plain words; the ticket has one line for the cancellation terms.
-  await expect(rooms).toContainText("No meals included");
+  // VAY-2360: each room's meal in plain words, and its terms while the ticket has no line for them
+  // (this booking has no stay details).
+  await expect(rooms).toContainText("No meals included · Free cancellation until 7 Nov");
   await expect(rooms).toContainText("2 Adults");
   await expect(rooms).toContainText("Room 2 · Garden Double Room");
-  await expect(rooms).toContainText("Breakfast included");
-  await expect(rooms).not.toContainText("Free cancellation until 7 Nov");
+  await expect(rooms).toContainText("Breakfast included · No refund if you cancel or don't arrive");
   await expect(rooms).toContainText("1 Adult, 1 Child");
 
   await page.goto(
