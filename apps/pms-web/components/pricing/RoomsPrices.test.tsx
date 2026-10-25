@@ -4,8 +4,10 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ApiErrorResponse } from "@/services/api/client";
 import type { PricingDraft, PricingSnapshot } from "@/services/api/replacementPricingClient";
 import {
+  listPrice,
   lowestBaseMinor,
   RoomPriceSummary,
+  RoomPricesLink,
   RoomsPricesStrip,
   type PropertyPrices,
 } from "./RoomsPrices";
@@ -136,9 +138,13 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-it("shows the property currency and offers no republish while prices are current", async () => {
+it("shows nothing on the Rooms list while prices are current: the subtitle names the currency (VAY-2338)", async () => {
   await mount(props(false));
-  expect(text()).toContain("All prices are in EUR");
+  expect(view.toJSON()).toBeNull();
+});
+it("tells the Rooms list how to start when nothing is published yet", async () => {
+  await mount({ prices: { ...props(false).prices!, publication: null }, error: null, reload });
+  expect(text()).toContain("No prices yet. Open a room's Prices tab");
   expect(button("Save prices again")).toBeUndefined();
 });
 it("republishes a stale publication with every room unchanged; the press declares mandatory charges (VAY-2093)", async () => {
@@ -205,21 +211,37 @@ it("keeps the Rooms list usable when prices cannot be read", async () => {
 it("summarises a room's published rates from its lowest base price and links to its Prices tab", async () => {
   expect(lowestBaseMinor(room)).toBe("9000");
   expect(lowestBaseMinor({ ...room, offers: [room.offers[1]] })).toBeNull();
+  const id = room.roomTypeId.toLowerCase();
   await act(async () => {
     view = create(
-      <RoomPriceSummary
-        roomTypeId={room.roomTypeId.toLowerCase()}
-        publication={publication(false)}
-      />,
+      <>
+        <RoomPriceSummary roomTypeId={id} publication={publication(false)} />
+        <RoomPricesLink roomTypeId={id} publication={publication(false)} />
+      </>,
     );
   });
-  expect(text()).toContain("2 rates · base price from 90.00 EUR");
-  expect(view.root.findByType("a").props.href).toBe(
-    `/rooms/${room.roomTypeId.toLowerCase()}?tab=prices`,
+  expect(text()).toContain(`from ${listPrice("9000", "EUR", "en")}`);
+  expect(text()).toContain("2 rates · per night");
+  expect(view.root.findByType("a").props.href).toBe(`/rooms/${id}?tab=prices`);
+  expect(view.root.findByType("a").children.join("")).toBe("Edit prices");
+  act(() =>
+    view.update(
+      <>
+        <RoomPriceSummary roomTypeId="other" publication={null} />
+        <RoomPricesLink roomTypeId="other" publication={null} />
+      </>,
+    ),
   );
-  act(() => view.update(<RoomPriceSummary roomTypeId="other" publication={null} />));
   expect(text()).toContain("No prices yet");
+  expect(text()).toContain("Guests can't book it yet");
   expect(view.root.findByType("a").children.join("")).toBe("Set prices");
+});
+it("writes list prices with the currency code and grouped digits, without .00 on whole amounts (VAY-2338)", () => {
+  const plain = (value: string) => value.replace(/\s/g, " ");
+  expect(plain(listPrice("87500000", "IDR", "en"))).toBe("IDR 875,000");
+  expect(plain(listPrice("12050", "EUR", "en"))).toBe("EUR 120.50");
+  expect(plain(listPrice("12000", "EUR", "en"))).toBe("EUR 120");
+  expect(plain(listPrice("87500000", "IDR", "de"))).toBe("875.000 IDR");
 });
 it("on a room page shows only a stale publication's republish, or that prices could not be checked", async () => {
   const onSaved = vi.fn();

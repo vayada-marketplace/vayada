@@ -15,7 +15,9 @@ test("room settings opens sign-in for the selected hotel's Airbnb import", async
     route.fulfill({ contentType: "text/html", body: "<h1>Simulated Booking Admin sign-in</h1>" }),
   );
   await page.goto("/rooms");
-  const link = page.getByRole("link", { name: "Import rooms from Airbnb (opens in a new tab)" });
+  // The import sits in Rooms & Rates' ☰ menu (VAY-2338).
+  await page.getByRole("button", { name: "More actions" }).click();
+  const link = page.getByRole("link", { name: /Import from Airbnb/ });
   await expect(link).toBeVisible();
   const href = new URL((await link.getAttribute("href"))!);
   expect(href.origin).toBe("https://admin.booking.localhost:1382");

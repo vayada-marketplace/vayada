@@ -439,6 +439,19 @@ export default function CalendarPage() {
     setReorderMode(true);
   };
 
+  // Rooms & Rates' "Reorder room types" opens the calendar with ?reorder=1 (VAY-2338): once the rooms are read,
+  // start reorder mode and drop the parameter. Only the wide calendar can reorder.
+  const reorderRequestChecked = useRef(false);
+  useEffect(() => {
+    if (reorderRequestChecked.current || !data || isMobileViewport !== false) return;
+    reorderRequestChecked.current = true;
+    if (new URLSearchParams(window.location.search).get("reorder") !== "1") return;
+    window.history.replaceState(null, "", window.location.pathname);
+    enterReorderMode();
+    // enterReorderMode reads the current data; this runs once, when the first data arrives.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, isMobileViewport]);
+
   const cancelReorder = () => {
     setLocalRooms(null);
     setReorderOrderVersion(null);

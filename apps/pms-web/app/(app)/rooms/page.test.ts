@@ -8,6 +8,7 @@ import {
   linkedInventoryGroupsService,
   type RoomType,
 } from "@/services/rooms";
+import LinkedInventoryGroupsPanel from "./LinkedInventoryGroupsPanel";
 import RoomsPage from "./page";
 
 vi.mock("@/lib/i18n", () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
@@ -21,6 +22,9 @@ vi.mock("@/services/api/replacementPricingClient", () => ({
 }));
 vi.mock("@vayada/product-onboarding/PreparedHotelImportPanel", () => ({
   PreparedHotelImportPanel: () => null,
+}));
+vi.mock("@/components/settings/airbnbImportHref", () => ({
+  airbnbImportHref: (propertyId: string) => `https://admin.test/import/${propertyId}`,
 }));
 
 let view: ReactTestRenderer;
@@ -115,8 +119,10 @@ it("shows each room's published prices with a link to its Prices tab (VAY-2093)"
   });
   vi.spyOn(roomsService, "list").mockResolvedValue([room, { ...room, id: "room-2", name: "Loft" }]);
   await mount();
-  expect(text()).toContain("pricing.list.currency");
-  expect(text()).toContain("pricing.list.rates.one · pricing.list.from");
+  // The subtitle carries the currency; each row shows "from …" over its rates (VAY-2338).
+  expect(text()).toContain("rooms.roomTypeCount.other · rooms.roomCount.other · rooms.pricesIn");
+  expect(text()).toContain("pricing.list.from");
+  expect(text()).toContain("pricing.list.rates.one · pricing.list.perNight");
   const links = view.root
     .findAllByType("a")
     .filter((node) => String(node.props.href).endsWith("?tab=prices"));
@@ -124,4 +130,45 @@ it("shows each room's published prices with a link to its Prices tab (VAY-2093)"
     ["/rooms/room-1?tab=prices", "pricing.list.editPrices"],
     ["/rooms/room-2?tab=prices", "pricing.list.setPrices"],
   ]);
+});
+
+it("keeps the setup tools in the ☰ menu and opens Linked inventory in a drawer (VAY-2338)", async () => {
+  vi.stubGlobal("document", { addEventListener: vi.fn(), removeEventListener: vi.fn() });
+  vi.spyOn(roomsService, "list").mockResolvedValue([room]);
+  vi.spyOn(individualRoomsService, "list").mockResolvedValue([
+    { id: "unit-1", roomTypeId: "room-1" },
+    { id: "unit-2", roomTypeId: "room-1" },
+  ] as Awaited<ReturnType<typeof individualRoomsService.list>>);
+  await mount();
+  // No search box and no setup cards above the list.
+  expect(view.root.findAllByType("input")).toHaveLength(0);
+  expect(text()).not.toContain("rooms.menu.importAirbnb");
+  expect(view.root.findAllByType(LinkedInventoryGroupsPanel)).toHaveLength(0);
+
+  await act(async () => view.root.findByProps({ "aria-label": "rooms.menu.label" }).props.onClick());
+  const airbnb = view.root.findByProps({ href: "https://admin.test/import/test-property" });
+  expect(airbnb.props.target).toBe("_blank");
+  expect(view.root.findAllByProps({ href: "/calendar?reorder=1" })).toHaveLength(1);
+  const linked = view.root
+    .findAllByType("button")
+    .find((button) => button.findAll((node) => node.children.includes("rooms.linkedInventory")).length)!;
+  await act(async () => linked.props.onClick());
+  expect(text()).not.toContain("rooms.menu.importAirbnb");
+  expect(view.root.findByProps({ role: "dialog" }).props["aria-labelledby"]).toBe(
+    "linked-inventory-title",
+  );
+  expect(view.root.findAllByType(LinkedInventoryGroupsPanel)).toHaveLength(1);
+  vi.unstubAllGlobals();
+});
+
+it("offers no room reordering with a single room", async () => {
+  vi.stubGlobal("document", { addEventListener: vi.fn(), removeEventListener: vi.fn() });
+  vi.spyOn(roomsService, "list").mockResolvedValue([room]);
+  vi.spyOn(individualRoomsService, "list").mockResolvedValue([
+    { id: "unit-1", roomTypeId: "room-1" },
+  ] as Awaited<ReturnType<typeof individualRoomsService.list>>);
+  await mount();
+  await act(async () => view.root.findByProps({ "aria-label": "rooms.menu.label" }).props.onClick());
+  expect(view.root.findAllByProps({ href: "/calendar?reorder=1" })).toHaveLength(0);
+  vi.unstubAllGlobals();
 });

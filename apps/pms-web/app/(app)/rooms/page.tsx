@@ -1,10 +1,9 @@
 "use client";
 
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import {
   PlusIcon,
-  MagnifyingGlassIcon,
   ChevronDownIcon,
   Cog6ToothIcon,
   DocumentDuplicateIcon,
@@ -24,13 +23,17 @@ import { ApiErrorResponse } from "@/services/api/client";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import {
   RoomPriceSummary,
+  RoomPricesLink,
   RoomsPricesStrip,
   usePropertyPrices,
   type PropertyPrices,
 } from "@/components/pricing/RoomsPrices";
+import { airbnbImportHref } from "@/components/settings/airbnbImportHref";
 import { useTranslation } from "@/lib/i18n";
 import { imageReferenceUrl } from "@/services/upload";
+import LinkedInventoryDrawer from "./LinkedInventoryDrawer";
 import LinkedInventoryGroupsPanel from "./LinkedInventoryGroupsPanel";
+import RoomsMenu from "./RoomsMenu";
 
 const CATEGORY_STYLES: Record<string, string> = {
   suite: "bg-blue-50 text-blue-600 border border-blue-200",
@@ -97,8 +100,20 @@ function RoomTypeCard({
   const categoryStyle = CATEGORY_STYLES[category] || CATEGORY_STYLES["standard"];
 
   const typeRooms = rooms.filter((r) => r.roomTypeId === room.id);
-  const available = typeRooms.filter((r) => r.status === "available").length;
   const thumbnailUrl = imageReferenceUrl(room.images?.[0]);
+  const facts = [
+    t(typeRooms.length === 1 ? "rooms.roomCount.one" : "rooms.roomCount.other", {
+      count: typeRooms.length,
+    }),
+    ...(room.maxOccupancy > 0
+      ? [
+          t(room.maxOccupancy === 1 ? "rooms.guestCount.one" : "rooms.guestCount.other", {
+            count: room.maxOccupancy,
+          }),
+        ]
+      : []),
+    ...(room.size > 0 ? [t("rooms.sizeSqm", { size: room.size })] : []),
+  ];
 
   const handleAddRoom = async () => {
     const trimmed = newRoomNumber.trim();
@@ -215,125 +230,115 @@ function RoomTypeCard({
 
   return (
     <div className="border-b border-gray-100 last:border-b-0">
-      {/* Room Type Header Row */}
+      {/* One line from lg; narrower screens stack the rates and actions under the name (VAY-2338). */}
       <div
-        className="flex items-center px-3 md:px-5 py-3 md:py-4 gap-2 md:gap-3 hover:bg-gray-50/50 transition-colors cursor-pointer"
+        className={`flex cursor-pointer flex-col gap-3 px-3.5 py-3.5 transition-colors lg:flex-row lg:items-center lg:gap-4 lg:px-5 ${expanded ? "bg-gray-50/60" : "hover:bg-gray-50/50"}`}
         onClick={() => setExpanded(!expanded)}
       >
-        {/* Expand arrow */}
-        <ChevronDownIcon
-          className={`w-4 h-4 text-gray-400 transition-transform shrink-0 ${expanded ? "" : "-rotate-90"}`}
-        />
+        <div className="flex min-w-0 flex-1 items-center gap-3 lg:gap-4">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setExpanded(!expanded);
+            }}
+            aria-expanded={expanded}
+            aria-controls={`rooms-of-${room.id}`}
+            aria-label={t(expanded ? "rooms.hideRooms" : "rooms.showRooms", { name: room.name })}
+            className="order-last flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-600 lg:order-first lg:h-6 lg:w-5"
+          >
+            <ChevronDownIcon
+              className={`h-4 w-4 transition-transform ${expanded ? "rotate-180 lg:rotate-0" : "lg:-rotate-90"}`}
+            />
+          </button>
 
-        {/* Room type thumbnail or fallback icon */}
-        {thumbnailUrl ? (
-          <img
-            src={thumbnailUrl}
-            alt={room.name}
-            className="w-9 h-9 md:w-10 md:h-10 rounded-xl object-cover shrink-0"
-          />
-        ) : (
-          <div className="w-9 h-9 md:w-10 md:h-10 bg-blue-50 rounded-xl flex items-center justify-center shrink-0">
-            <svg
-              className="w-4 h-4 md:w-5 md:h-5 text-blue-500"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M3 21V7a2 2 0 0 1 2-2h6v16" />
-              <path d="M13 21V3h6a2 2 0 0 1 2 2v16" />
-              <path d="M3 21h18" />
-              <path d="M7 9h2" />
-              <path d="M7 13h2" />
-              <path d="M15 9h2" />
-              <path d="M15 13h2" />
-            </svg>
-          </div>
-        )}
-
-        {/* Name + info */}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-[14px] font-semibold text-gray-900 truncate">{room.name}</span>
-            <span
-              className={`text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 ${categoryStyle}`}
-            >
-              {room.category || getCategoryLabel(room.name)}
-            </span>
-            {linkedGroup && (
-              <span
-                title={t("rooms.linkedInventoryNamed", { name: linkedGroup.name })}
-                className="shrink-0 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700"
+          {/* Room type thumbnail or fallback icon */}
+          {thumbnailUrl ? (
+            <img
+              src={thumbnailUrl}
+              alt={room.name}
+              className="h-12 w-12 shrink-0 rounded-[10px] object-cover lg:h-14 lg:w-14"
+            />
+          ) : (
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[10px] bg-blue-50 lg:h-14 lg:w-14">
+              <svg
+                className="h-5 w-5 text-blue-500"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
               >
-                {t("rooms.linked")}
-              </span>
-            )}
-          </div>
-          <p className="text-[12px] text-gray-400 mt-0.5 truncate">
-            {typeRooms.length} {t(typeRooms.length === 1 ? "common.room" : "common.rooms")}
-            {room.maxOccupancy > 0 && (
-              <>
-                {" "}
-                &middot; {room.maxOccupancy} {t("rooms.occ")}
-              </>
-            )}
-            {room.size > 0 && <> &middot; {room.size}m&sup2;</>}
-          </p>
-        </div>
-
-        {/* Published prices (md+) */}
-        {prices && (
-          <div className="hidden md:flex flex-col items-end gap-1 shrink-0 mr-2 text-[12px]">
-            <RoomPriceSummary roomTypeId={room.id} publication={prices.publication} />
-          </div>
-        )}
-
-        {/* Count badge */}
-        <span
-          className={`shrink-0 w-6 h-6 rounded-full text-white text-[11px] font-bold flex items-center justify-center ${typeRooms.length > 0 ? "bg-green-500" : "bg-gray-300"}`}
-          title={t("rooms.availableCount", { count: available })}
-        >
-          {typeRooms.length}
-        </span>
-
-        {/* Duplicate + Configure buttons */}
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            void onDuplicate(room.id);
-          }}
-          disabled={duplicating}
-          className="flex items-center justify-center w-8 h-8 md:w-auto md:h-auto md:px-3 md:py-1.5 text-[12px] font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
-          title={duplicating ? t("rooms.duplicatingRoomType") : t("rooms.duplicateRoomType")}
-          aria-label={duplicating ? t("rooms.duplicatingRoomType") : t("rooms.duplicateRoomType")}
-        >
-          <DocumentDuplicateIcon className="w-3.5 h-3.5" />
-        </button>
-        {/* A document navigation, so the room page's unsaved-prices warning also covers the browser's back button. */}
-        <a
-          href={`/rooms/${room.id}`}
-          onClick={(e) => e.stopPropagation()}
-          className="flex items-center justify-center gap-1.5 w-8 h-8 md:w-auto md:h-auto md:px-3 md:py-1.5 text-[12px] font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors shrink-0"
-          title={t("rooms.configure")}
-        >
-          <Cog6ToothIcon className="w-3.5 h-3.5" />
-          <span className="hidden md:inline">{t("rooms.configure")}</span>
-        </a>
-      </div>
-
-      {/* Expanded: Derived Rates + Individual Rooms */}
-      {expanded && (
-        <div className="pl-5 md:pl-16 pr-3 md:pr-5 pb-4">
-          {/* Mobile published prices (header version is hidden < md) */}
-          {prices && (
-            <div className="md:hidden flex flex-wrap items-center gap-2 mb-3 text-[12px]">
-              <RoomPriceSummary roomTypeId={room.id} publication={prices.publication} />
+                <path d="M3 21V7a2 2 0 0 1 2-2h6v16" />
+                <path d="M13 21V3h6a2 2 0 0 1 2 2v16" />
+                <path d="M3 21h18" />
+                <path d="M7 9h2" />
+                <path d="M7 13h2" />
+                <path d="M15 9h2" />
+                <path d="M15 13h2" />
+              </svg>
             </div>
           )}
 
+          {/* Name + facts */}
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span className="text-base font-semibold text-gray-900">{room.name}</span>
+              <span
+                className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${categoryStyle}`}
+              >
+                {room.category || getCategoryLabel(room.name)}
+              </span>
+              {linkedGroup && (
+                <span
+                  title={t("rooms.linkedInventoryNamed", { name: linkedGroup.name })}
+                  className="shrink-0 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700"
+                >
+                  {t("rooms.linked")}
+                </span>
+              )}
+            </div>
+            <p className="mt-0.5 text-sm text-gray-500">{facts.join(" · ")}</p>
+          </div>
+        </div>
+
+        {/* Rates and actions: their own columns from lg, one line under the name below it. */}
+        <div className="flex items-center gap-2 lg:contents">
+          <div className="min-w-0 flex-1 lg:w-[200px] lg:flex-none">
+            {prices && <RoomPriceSummary roomTypeId={room.id} publication={prices.publication} />}
+          </div>
+          <div className="flex shrink-0 items-center justify-end gap-2 lg:w-[200px]">
+            {prices && <RoomPricesLink roomTypeId={room.id} publication={prices.publication} />}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                void onDuplicate(room.id);
+              }}
+              disabled={duplicating}
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-600 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+              title={duplicating ? t("rooms.duplicatingRoomType") : t("rooms.duplicateRoomType")}
+              aria-label={duplicating ? t("rooms.duplicatingRoomType") : t("rooms.duplicateRoomType")}
+            >
+              <DocumentDuplicateIcon className="h-4 w-4" />
+            </button>
+            {/* A document navigation, so the room page's unsaved-prices warning also covers the browser's back button. */}
+            <a
+              href={`/rooms/${room.id}`}
+              onClick={(e) => e.stopPropagation()}
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-600 transition-colors hover:bg-gray-50"
+              title={t("rooms.configure")}
+              aria-label={t("rooms.configureNamed", { name: room.name })}
+            >
+              <Cog6ToothIcon className="h-4 w-4" />
+            </a>
+          </div>
+        </div>
+      </div>
+
+      {/* Expanded: the room type's rooms */}
+      {expanded && (
+        <div id={`rooms-of-${room.id}`} className="bg-gray-50/60 px-3.5 pb-4 lg:pl-32 lg:pr-5">
           {/* Individual rooms */}
           {typeRooms.length > 0 ? (
             typeRooms.map((r) => {
@@ -542,7 +547,6 @@ function RoomTypeCard({
   );
 }
 
-import { AirbnbImportLink } from "@/components/settings/AirbnbImportLink";
 import { PreparedHotelImportPanel } from "@vayada/product-onboarding/PreparedHotelImportPanel";
 import { sharedSetupClient } from "@/services/api/sharedHotelSetupClient";
 import { resolveSelectedPmsPropertyId } from "@/services/api/pmsPropertyClient";
@@ -568,7 +572,8 @@ export default function RoomsPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
   const loadRevision = useRef(0);
-  const [searchQuery, setSearchQuery] = useState("");
+  const [linkedOpen, setLinkedOpen] = useState(false);
+  const menuButton = useRef<HTMLButtonElement>(null);
   const [duplicatingRoomTypeIds, setDuplicatingRoomTypeIds] = useState<Set<string>>(new Set());
   const [duplicateError, setDuplicateError] = useState("");
   const propertyPrices = usePropertyPrices();
@@ -626,47 +631,51 @@ export default function RoomsPage() {
     }
   };
 
-  const filteredRooms = useMemo(() => {
-    if (!searchQuery.trim()) return rooms;
-    const q = searchQuery.toLowerCase();
-    return rooms.filter((r) => r.name.toLowerCase().includes(q));
-  }, [rooms, searchQuery]);
+  // The subtitle carries the counts and the currency (VAY-2338).
+  const publication = propertyPrices.prices?.publication;
+  const summary = [
+    t(rooms.length === 1 ? "rooms.roomTypeCount.one" : "rooms.roomTypeCount.other", {
+      count: rooms.length,
+    }),
+    t(individualRooms.length === 1 ? "rooms.roomCount.one" : "rooms.roomCount.other", {
+      count: individualRooms.length,
+    }),
+    ...(publication ? [t("rooms.pricesIn", { currency: publication.currency })] : []),
+  ].join(" · ");
 
   return (
-    <div className="p-4 md:p-6 pb-0">
+    <div className="p-4 md:p-6">
       {/* Header */}
-      <div className="flex items-start justify-between gap-3 mb-5 md:mb-6">
+      <div className="flex items-start justify-between gap-3 mb-4 md:mb-5">
         <div className="min-w-0">
-          <h1 className="text-2xl md:text-xl font-bold text-gray-900">{t("rooms.title")}</h1>
-          <p className="text-sm text-gray-500 mt-1">{t("rooms.subtitle")}</p>
+          <h1 className="text-2xl md:text-[26px] font-bold tracking-tight text-gray-900">
+            {t("rooms.title")}
+          </h1>
+          {!loading && !(loadFailed && rooms.length === 0) && (
+            <p className="mt-1 text-[13px] md:text-sm text-gray-500">{summary}</p>
+          )}
         </div>
-        <div className="flex items-center gap-2 md:gap-3 shrink-0">
+        <div className="flex items-center gap-2 shrink-0">
           <Link
             href="/rooms/new"
-            className="inline-flex items-center gap-1.5 px-3 md:px-4 py-2 bg-primary-600 text-white text-sm font-semibold rounded-lg hover:bg-primary-700 transition-colors"
+            className="inline-flex h-10 items-center gap-1.5 px-3 md:px-4 bg-primary-600 text-white text-sm font-semibold rounded-lg hover:bg-primary-700 transition-colors"
           >
             <PlusIcon className="w-4 h-4" />
             <span className="hidden md:inline">{t("rooms.addRoomType")}</span>
             <span className="md:hidden">{t("common.add")}</span>
           </Link>
+          {/* Set up once and rarely touched: the Airbnb import, linked inventory and room order (VAY-2338). */}
+          <RoomsMenu
+            buttonRef={menuButton}
+            airbnbHref={importPropertyId ? airbnbImportHref(importPropertyId) : null}
+            canReorder={individualRooms.length > 1}
+            onLinkedInventory={() => setLinkedOpen(true)}
+          />
         </div>
       </div>
 
       <RoomsPricesStrip {...propertyPrices} />
 
-      {importPropertyId && (
-        <AirbnbImportLink key={`airbnb-${importPropertyId}`} propertyId={importPropertyId} />
-      )}
-      {importPropertyId && (
-        <PreparedHotelImportPanel
-          key={`prepared-${importPropertyId}`}
-          client={sharedSetupClient}
-          propertyId={importPropertyId}
-          roomsOnly
-          onSaved={refreshRooms}
-        />
-      )}
-      {/* Search */}
       {loadFailed && (
         <div
           role="alert"
@@ -691,24 +700,14 @@ export default function RoomsPage() {
           {duplicateError}
         </p>
       )}
-      <div className="mb-4 md:mb-5">
-        <div className="relative">
-          <MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <input
-            type="text"
-            placeholder={t("rooms.searchPlaceholder")}
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full md:w-72 pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg bg-white placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
-          />
-        </div>
-      </div>
-
-      {!loading && linkedGroups && (
-        <LinkedInventoryGroupsPanel
-          groups={linkedGroups}
-          roomTypes={rooms}
-          onChange={(update) => setLinkedGroups((groups) => (groups ? update(groups) : groups))}
+      {/* Shown only while an Airbnb import has rooms to review. */}
+      {importPropertyId && (
+        <PreparedHotelImportPanel
+          key={`prepared-${importPropertyId}`}
+          client={sharedSetupClient}
+          propertyId={importPropertyId}
+          roomsOnly
+          onSaved={refreshRooms}
         />
       )}
 
@@ -719,8 +718,7 @@ export default function RoomsPage() {
             <div key={i} className="h-20 bg-gray-50 rounded-xl" />
           ))}
         </div>
-      ) : loadFailed && rooms.length === 0 ? null : filteredRooms.length === 0 &&
-        rooms.length === 0 ? (
+      ) : loadFailed && rooms.length === 0 ? null : rooms.length === 0 ? (
         <div className="bg-white border border-gray-200 rounded-xl p-16 text-center">
           <div className="w-14 h-14 bg-gray-50 rounded-2xl flex items-center justify-center mx-auto mb-4">
             <svg
@@ -746,13 +744,19 @@ export default function RoomsPage() {
             {t("rooms.addRoomType")}
           </Link>
         </div>
-      ) : filteredRooms.length === 0 ? (
-        <div className="py-16 text-center">
-          <p className="text-sm text-gray-400">{t("rooms.noSearchResults")}</p>
-        </div>
       ) : (
         <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-          {filteredRooms.map((room) => (
+          {/* Column labels; each row names its own content, so assistive tech skips them. */}
+          <div
+            aria-hidden="true"
+            className="hidden lg:flex items-center gap-4 border-b border-gray-200 bg-gray-50 px-5 py-3 text-xs font-semibold uppercase tracking-wider text-gray-500"
+          >
+            <span className="w-5 shrink-0" />
+            <span className="flex-1">{t("rooms.columnRoomType")}</span>
+            <span className="w-[200px] shrink-0">{t("rooms.columnRates")}</span>
+            <span className="w-[200px] shrink-0 text-right">{t("rooms.columnActions")}</span>
+          </div>
+          {rooms.map((room) => (
             <RoomTypeCard
               key={room.id}
               room={room}
@@ -765,6 +769,22 @@ export default function RoomsPage() {
             />
           ))}
         </div>
+      )}
+
+      {linkedOpen && (
+        <LinkedInventoryDrawer onClose={() => setLinkedOpen(false)} returnFocus={menuButton}>
+          {linkedGroups ? (
+            <LinkedInventoryGroupsPanel
+              groups={linkedGroups}
+              roomTypes={rooms}
+              onChange={(update) => setLinkedGroups((groups) => (groups ? update(groups) : groups))}
+            />
+          ) : (
+            <p role="status" className="text-sm text-gray-500">
+              {t(loading || refreshing ? "common.loading" : "rooms.loadFailed")}
+            </p>
+          )}
+        </LinkedInventoryDrawer>
       )}
     </div>
   );

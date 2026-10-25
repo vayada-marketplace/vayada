@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { PencilIcon, PlusIcon, TrashIcon, XMarkIcon } from "@heroicons/react/24/outline";
+import { LinkIcon, PencilIcon, PlusIcon, TrashIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import {
   linkedInventoryGroupsService,
   type LinkedInventoryGroup,
@@ -98,27 +98,50 @@ export default function LinkedInventoryGroupsPanel({
     }
   };
 
+  // The drawer around this panel carries its title and description (VAY-2338).
   return (
-    <section className="mb-5 rounded-xl border border-gray-200 bg-white p-4 md:p-5">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h2 className="text-sm font-semibold text-gray-900">{t("rooms.linkedInventory")}</h2>
-          <p className="mt-1 text-xs text-gray-500">{t("rooms.linkedInventoryDescription")}</p>
+    <section aria-labelledby="linked-inventory-title" className="flex flex-1 flex-col">
+      {groups.length === 0 && !draft ? (
+        <div className="flex flex-1 flex-col items-center justify-center px-6 pb-24 text-center">
+          <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary-50">
+            <LinkIcon className="h-6 w-6 text-primary-600" />
+          </span>
+          <p className="mt-3 text-base font-semibold text-gray-900">{t("rooms.linkedEmptyTitle")}</p>
+          <p className="mt-1 max-w-xs text-sm text-gray-500">{t("rooms.linkedEmptyHint")}</p>
+          <button
+            type="button"
+            disabled={saving}
+            onClick={() => edit()}
+            className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-primary-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-primary-700 disabled:opacity-50"
+          >
+            <PlusIcon className="h-4 w-4" /> {t("rooms.linkedAddGroup")}
+          </button>
         </div>
-        <button
-          type="button"
-          disabled={saving}
-          onClick={() => edit()}
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50"
-        >
-          <PlusIcon className="h-4 w-4" /> {t("rooms.linkedAddGroup")}
-        </button>
-      </div>
+      ) : (
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+            {t(groups.length === 1 ? "rooms.linkedGroupCount.one" : "rooms.linkedGroupCount.other", {
+              count: groups.length,
+            })}
+          </p>
+          <button
+            type="button"
+            disabled={saving}
+            onClick={() => edit()}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-gray-300 px-3 py-1.5 text-[13px] font-semibold text-gray-700 hover:bg-gray-50"
+          >
+            <PlusIcon className="h-4 w-4" /> {t("rooms.linkedAddGroup")}
+          </button>
+        </div>
+      )}
 
       {groups.length > 0 && (
-        <div className="mt-4 divide-y divide-gray-100 border-t border-gray-100">
+        <div className="mt-4 space-y-2">
           {groups.map((group) => (
-            <div key={group.groupId} className="flex items-center gap-3 py-3">
+            <div
+              key={group.groupId}
+              className="flex items-center gap-3 rounded-lg border border-gray-200 px-3.5 py-3"
+            >
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium text-gray-900">{group.name}</p>
                 <p className="truncate text-xs text-gray-500">
@@ -175,13 +198,14 @@ export default function LinkedInventoryGroupsPanel({
             </legend>
             {roomTypes.map((roomType) => {
               const selected = draft.memberRoomTypeIds.includes(roomType.id);
-              const unavailable =
-                !selected &&
-                groups.some(
-                  (group) =>
-                    group.groupId !== draft.groupId &&
-                    group.memberRoomTypeIds.includes(roomType.id),
-                );
+              const otherGroup = selected
+                ? undefined
+                : groups.find(
+                    (group) =>
+                      group.groupId !== draft.groupId &&
+                      group.memberRoomTypeIds.includes(roomType.id),
+                  );
+              const unavailable = !!otherGroup;
               return (
                 <label
                   key={roomType.id}
@@ -193,7 +217,12 @@ export default function LinkedInventoryGroupsPanel({
                     disabled={unavailable}
                     onChange={() => toggleMember(roomType.id)}
                   />
-                  {roomType.name}
+                  <span className="flex-1">{roomType.name}</span>
+                  {otherGroup && (
+                    <span className="text-[11px]">
+                      {t("rooms.linkedInGroup", { name: otherGroup.name })}
+                    </span>
+                  )}
                 </label>
               );
             })}
