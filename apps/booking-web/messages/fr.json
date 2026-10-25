@@ -948,5 +948,15 @@
       "requestsYes": "Vous pouvez envoyer des demandes particulières à l’hôtel.",
       "requestsNo": "Les demandes particulières ne peuvent pas être envoyées en ligne. Écrivez plutôt à l’hôtel."
     }
+  },
+  "around": {
+    "back": "Retour à votre réservation",
+    "title": "Autour de {hotel}",
+    "subtitle": "Les adresses que nous recommandons à proximité.",
+    "directions": "Itinéraire vers {hotel}",
+    "mapLabel": "Carte de {hotel} et des adresses que nous recommandons",
+    "listLabel": "Adresses que nous recommandons",
+    "all": "Tout",
+    "empty": "Nous n’avons pas encore ajouté de conseils."
   }
 }

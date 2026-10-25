@@ -949,5 +949,15 @@
       "requestsYes": "Sie können dem Hotel besondere Wünsche senden.",
       "requestsNo": "Besondere Wünsche können nicht online gesendet werden. Schreiben Sie stattdessen dem Hotel."
     }
+  },
+  "around": {
+    "back": "Zurück zu Ihrer Buchung",
+    "title": "Rund um {hotel}",
+    "subtitle": "Orte in der Nähe, die wir empfehlen.",
+    "directions": "Route zu {hotel}",
+    "mapLabel": "Karte von {hotel} und den Orten, die wir empfehlen",
+    "listLabel": "Orte, die wir empfehlen",
+    "all": "Alle",
+    "empty": "Wir haben noch keine Tipps hinzugefügt."
   }
 }

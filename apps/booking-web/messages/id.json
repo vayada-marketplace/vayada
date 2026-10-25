@@ -948,5 +948,15 @@
       "requestsYes": "Anda dapat mengirim permintaan khusus ke hotel.",
       "requestsNo": "Permintaan khusus tidak dapat dikirim secara online. Kirim pesan ke hotel."
     }
+  },
+  "around": {
+    "back": "Kembali ke pemesanan Anda",
+    "title": "Sekitar {hotel}",
+    "subtitle": "Tempat terdekat yang kami rekomendasikan.",
+    "directions": "Petunjuk arah ke {hotel}",
+    "mapLabel": "Peta {hotel} dan tempat yang kami rekomendasikan",
+    "listLabel": "Tempat yang kami rekomendasikan",
+    "all": "Semua",
+    "empty": "Kami belum menambahkan rekomendasi."
   }
 }

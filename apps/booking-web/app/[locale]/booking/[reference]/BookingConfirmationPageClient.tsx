@@ -21,6 +21,7 @@ import {
   type PaymentWay,
 } from "@/lib/confirmationDisplay";
 import { directPerks } from "@/lib/directPerks";
+import { fetchGuestNearby } from "@/lib/nearbyPlaces";
 import { hotelToday } from "@/lib/roomChoices";
 import { serverNow } from "@/lib/serverClock";
 import { resolveLocale } from "@/lib/utils";
@@ -247,6 +248,7 @@ export default function BookingConfirmationPageClient({
   // `details` null: the read failed, so the page shows what it did before.
   const [stay, setStay] = useState<{ id: string; details: BookingStay | null } | null>(null);
   const [benefits, setBenefits] = useState<string[]>([]);
+  const [hasTips, setHasTips] = useState(false);
   const confirmationLookup = useRef<Promise<Booking | null> | null>(null);
   const [paypalInfo, setPaypalInfo] = useState<{
     email: string;
@@ -390,6 +392,16 @@ export default function BookingConfirmationPageClient({
       cancelled = true;
     };
   }, [booking?.id, booking?.status, stayEmail, slug]);
+
+  // The hotel's local tips (our own API, no Google): Directions opens "Around {hotel}" when there are some.
+  useEffect(() => {
+    if (!slug) return;
+    const controller = new AbortController();
+    fetchGuestNearby(slug, controller.signal)
+      .then((nearby) => setHasTips(nearby.places.length > 0))
+      .catch(() => {});
+    return () => controller.abort();
+  }, [slug]);
 
   useEffect(() => {
     if (status !== "confirmed") return;
@@ -1226,6 +1238,9 @@ export default function BookingConfirmationPageClient({
           <ConfirmationHotelCard
             name={hotel.name}
             heroImage={hotel.heroImage}
+            aroundHref={
+              hasTips && !isEnded ? `/booking/${encodeURIComponent(reference)}/around` : undefined
+            }
             places={details?.places ?? []}
             fallback={{
               address:

@@ -78,7 +78,12 @@ const stay = (places: boolean) => ({
     : [],
 });
 
-async function openConfirmation(page: Page, width: number, fields: Record<string, unknown> = {}) {
+async function openConfirmation(
+  page: Page,
+  width: number,
+  fields: Record<string, unknown> = {},
+  nearby?: unknown,
+) {
   await page.setViewportSize({ width, height: width > 600 ? 900 : 844 });
   // Analytics choice already made, so the consent banner doesn't cover the page.
   await page.addInitScript(
@@ -100,6 +105,7 @@ async function openConfirmation(page: Page, width: number, fields: Record<string
       },
     }),
   );
+  if (nearby) await page.route(`${hotelApi}/nearby`, (route) => route.fulfill({ json: nearby }));
   const pending = fields.status === "pending";
   const stayRequests: unknown[] = [];
   await page.route(`${hotelApi}/bookings/${id}/stay`, (route) => {
@@ -193,3 +199,90 @@ test("words a request waiting for the hotel and keeps its exact place for later"
   await expect(hotel).not.toContainText("Bahnhofstrasse");
   await page.screenshot({ path: testInfo.outputPath("confirmation-pending-1440.png") });
 });
+
+// The hotel's local tips (its Nearby places, VAY-2326), around Zermatt.
+const tip = (
+  id: string,
+  name: string,
+  category: string,
+  latitude: number,
+  note: string | null,
+) => ({
+  source: "custom",
+  id,
+  name,
+  address: null,
+  category,
+  latitude,
+  longitude: 7.75,
+  favorite: false,
+  note,
+});
+const NEARBY = {
+  schemaVersion: 1,
+  status: "ready",
+  location: { mode: "exact", latitude: 46.0207, longitude: 7.7491 },
+  places: [
+    tip("p-lake", "Stellisee", "nature", 46.03, "Go early for the Matterhorn's reflection."),
+    tip("p-bakery", "Fuchs bakery", "food", 46.021, "Our favourite breakfast spot."),
+    tip("p-fondue", "Whymper-Stube", "food", 46.022, null),
+  ],
+  categories: [
+    { id: "food", name: null, color: "orange", icon: "cake" },
+    { id: "nature", name: null, color: "teal", icon: "sun" },
+  ],
+};
+
+for (const width of [1440, 390]) {
+  test(`opens the hotel's local tips from Directions (${width})`, async ({ page }, testInfo) => {
+    const google: string[] = [];
+    page.on("request", (request) => {
+      if (/googleapis|gstatic/.test(request.url())) google.push(request.url());
+    });
+    await openConfirmation(page, width, {}, NEARBY);
+    const directions = page
+      .getByTestId("confirmation-hotel")
+      .getByRole("link", { name: "Directions" });
+    await expect(directions).toHaveAttribute(
+      "href",
+      new RegExp(`/booking/${booking.bookingReference}/around$`),
+    );
+    await directions.click();
+
+    await expect(page.getByRole("heading", { name: "Around Hotel Alpenrose" })).toBeVisible();
+    const list = page.getByRole("list", { name: "Places we recommend" });
+    await expect(list.getByRole("button")).toHaveCount(3);
+    await expect(list.getByRole("button").first()).toContainText("1Stellisee");
+    await expect(list.getByRole("button").first()).toContainText("Beach & surf");
+    await expect(list.getByRole("button").first()).toContainText("from the property");
+    // The exact place this booking stays at, as on its confirmation page.
+    await expect(page.getByRole("link", { name: "Directions to Hotel Alpenrose" })).toHaveAttribute(
+      "href",
+      "https://www.google.com/maps/dir/?api=1&destination=46.0207,7.7491",
+    );
+
+    // One filter for the list (and the pins once the map is shown).
+    await page.getByRole("button", { name: "Food & drink", exact: true }).click();
+    await expect(list.getByRole("button")).toHaveCount(2);
+    await page.getByRole("button", { name: "All", exact: true }).click();
+    await expect(list.getByRole("button")).toHaveCount(3);
+
+    await list.getByRole("button", { name: /Fuchs bakery/ }).click();
+    const card = page.getByTestId("nearby-place-card").filter({ visible: true });
+    await expect(card).toContainText("Our favourite breakfast spot.");
+    await expect(card.getByRole("link", { name: /^Directions to Fuchs bakery/ })).toHaveAttribute(
+      "href",
+      "https://www.google.com/maps/dir/?api=1&destination=46.021,7.75",
+    );
+    // No Google request until the guest asks for the map (VAY-2216).
+    await expect(page.getByRole("button", { name: "Show map" })).toBeVisible();
+    expect(google).toEqual([]);
+    await page.screenshot({
+      path: testInfo.outputPath(`around-${width}.png`),
+      fullPage: width < 600,
+    });
+
+    await page.getByRole("link", { name: "Back to your booking" }).click();
+    await expect(page.getByTestId("confirmation-hotel")).toBeVisible();
+  });
+}
