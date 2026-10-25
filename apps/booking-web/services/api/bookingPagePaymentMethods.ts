@@ -162,23 +162,26 @@ export function bookingPageMethodsForArrival(
   });
 }
 
-/** The hotel's methods hidden for this arrival because it is too close (VAY-2145 deadlines, or a
- * VAY-2348 "at least N days" window). Methods hidden because the stay is too far ahead ("within"
- * windows) are just not offered. */
-export function bookingPageMethodsTooSoon(
-  {
-    methods,
-    earliestArrival: earliest,
-    arrivalWindows: windows = {},
-  }: Pick<BookingPagePayment, "methods" | "earliestArrival" | "arrivalWindows">,
-  checkIn: string,
-): PricingPaymentMethod[] {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(checkIn)) return [];
-  return methods.filter((method) => {
-    const from = windows[method]?.from;
-    const manual = method === "bank_transfer" || method === "paypal" ? earliest[method] : undefined;
-    return (!!from && checkIn < from) || (!!manual && checkIn < manual);
-  });
+/** Why no way to pay is left for the chosen rates (VAY-2348 D8). "rates": the hotel takes none of
+ * the ways they allow. "otherRooms": it does, not for these dates, but another rate on offer can be
+ * paid for them. "dates": nothing on offer can be paid for these dates. */
+export type NoWayToPayReason = "rates" | "otherRooms" | "dates";
+
+export function noWayToPayReason(
+  hotelMethods: readonly PricingPaymentMethod[],
+  forTheseDates: readonly PricingPaymentMethod[],
+  chosenRateMethods: readonly PricingPaymentMethod[] | null,
+  /** Every rate on offer's ways; undefined while a rate's ways are unknown. */
+  offeredRateMethods: readonly (readonly PricingPaymentMethod[] | undefined)[],
+): NoWayToPayReason {
+  if (chosenRateMethods && !hotelMethods.some((method) => chosenRateMethods.includes(method)))
+    return "rates";
+  if (!forTheseDates.length) return "dates";
+  return offeredRateMethods.some(
+    (methods) => !methods || methods.some((method) => forTheseDates.includes(method)),
+  )
+    ? "otherRooms"
+    : "dates";
 }
 
 /** Until the guest picks how to pay, the price uses the hotel's ways in this order: paying at the

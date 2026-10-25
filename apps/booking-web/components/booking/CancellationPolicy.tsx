@@ -63,6 +63,7 @@ export default function CancellationPolicy({
     "date" in note
       ? t(`note.${note.kind}`, { date: formatStayDate(note.date, locale) })
       : t(`note.${note.kind}`),
+    policy.bankTransfer ? t("note.bankTransfer") : null,
   ]
     .filter(Boolean)
     .join(" ");

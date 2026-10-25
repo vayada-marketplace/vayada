@@ -337,8 +337,10 @@
     "recoveryInProgress": "Votre réservation est toujours en cours de traitement. Réessayez pour vérifier la même réservation.",
     "termsRequired": "Veuillez accepter les conditions générales avant d'envoyer.",
     "chooseAnotherRoom": "Choisir une autre chambre",
+    "changeDates": "Changer de dates",
     "noWayToPay": "Cet établissement ne propose aucun moyen de paiement pour les chambres choisies. Veuillez choisir d'autres chambres.",
-    "noWayToPayThisSoon": "Les chambres choisies ne peuvent être payées que d'une façon qui n'est pas disponible si près de l'arrivée. Veuillez choisir des dates plus tardives ou d'autres chambres."
+    "noWayToPayTheseDates": "La réservation en ligne n'est pas disponible pour ces dates. Veuillez contacter l'hôtel.",
+    "noWayToPayOnTheseDates": "Les chambres choisies ne peuvent pas être payées pour ces dates. Veuillez choisir d'autres chambres."
   },
   "myBooking": {
     "title": "Ma réservation",
@@ -738,8 +740,8 @@
     "method": {
       "pay_at_property": {
         "title": "Payer à l’hôtel",
-        "summary": "Rien à payer maintenant · vous payez à l’arrivée",
-        "explain": "Vous payez {total} à l’hôtel à votre arrivée. Votre réservation est confirmée immédiatement.",
+        "summary": "Rien à payer maintenant · paiement à l’arrivée",
+        "explain": "Rien n’est débité maintenant. Vous payez {total} à l’hôtel à votre arrivée. Votre réservation est confirmée immédiatement.",
         "explainRequest": "Rien n’est débité maintenant. Si l’hôtel accepte votre demande, vous payez {total} à votre arrivée. L’hôtel répond sous 24 heures.",
         "boxNow": "À payer maintenant",
         "boxLater": "À l’hôtel",
@@ -762,10 +764,10 @@
       },
       "bank_transfer": {
         "title": "Payer par virement bancaire",
-        "summary": "Coordonnées bancaires envoyées par e-mail après la réservation",
-        "explain": "Après la réservation, nous vous envoyons par e-mail les coordonnées bancaires de l’hôtel et votre référence de réservation. Nous gardons votre chambre jusqu’à la date limite de paiement ; votre réservation est confirmée dès réception de votre virement.",
+        "summary": "Paiement sous 48 heures · coordonnées bancaires par e-mail",
+        "explain": "Après la réservation, nous vous envoyons par e-mail les coordonnées bancaires de l’hôtel et votre référence de réservation. Votre virement doit arriver sous 48 heures, sinon la réservation est annulée. Votre réservation est confirmée dès que l’hôtel confirme votre virement.",
         "boxNow": "À payer maintenant",
-        "boxLater": "Par virement",
+        "boxLater": "Virement sous 48 heures",
         "phrase": "par virement bancaire"
       },
       "paypal": {
@@ -798,7 +800,6 @@
       "children": "{count, plural, one {# enfant} other {# enfants}}"
     },
     "checkingPrice": "Vérification du prix…",
-    "tooSoon": "{methods} {count, plural, one {n’est pas disponible} other {ne sont pas disponibles}} si près de l’arrivée.",
     "busyConfirm": "Confirmation de la réservation…",
     "busyRequest": "Envoi de la demande…",
     "editDetails": "Modifier les coordonnées du client"
@@ -843,7 +844,8 @@
         "freeEnded": "Annulation gratuite terminée",
         "nonRefundable": "Non remboursable",
         "noRefund": "Plus de remboursement",
-        "notRefundableOnceAccepted": "Non remboursable une fois accepté par l’hôtel"
+        "notRefundableOnceAccepted": "Non remboursable une fois accepté par l’hôtel",
+        "notRefundableOncePaid": "Non remboursable une fois payé"
       },
       "when": {
         "untilEnd": "Jusqu’à la fin du {date}",
@@ -854,14 +856,21 @@
         "fromBooking": "Dès la réservation",
         "beforeAccept": "Avant l’acceptation de l’hôtel",
         "afterAccept": "Après l’acceptation de l’hôtel",
-        "noShow": "Non-présentation"
+        "noShow": "Non-présentation",
+        "beforeTransfer": "Avant l’arrivée de votre virement",
+        "noTransfer": "Aucun virement sous 48 heures",
+        "paidUntilEnd": "Payé, jusqu’à la fin du {date}",
+        "afterTransfer": "Dès l’arrivée de votre virement"
       },
       "pay": {
         "free": "Gratuit",
         "freeNothingCharged": "Gratuit · rien n’est débité",
         "freeHoldReleased": "Gratuit · blocage de la carte levé",
         "part": "{percent} % ({amount})",
-        "full": "Montant total ({amount})"
+        "full": "Montant total ({amount})",
+        "freeNothingPaid": "Gratuit · rien n’est encore payé",
+        "releasedNothingCharged": "Réservation annulée · rien n’est débité",
+        "fullRefund": "Remboursement intégral"
       },
       "note": {
         "freeUntil": "Annulation gratuite jusqu’à la fin du {date}, heure locale de l’hôtel. Pour annuler, utilisez le lien de votre e-mail de confirmation ou contactez l’hôtel.",
@@ -869,7 +878,11 @@
         "partial": "Le remboursement dépend de la date d’annulation. Après le {date}, ou si vous ne venez pas, vous payez le montant total.",
         "partialEnded": "Les remboursements se sont terminés le {date}. Si vous annulez ou ne venez pas, vous payez le montant total.",
         "nonRefundable": "Ce tarif ne peut être ni annulé ni modifié contre remboursement.",
-        "request": "Vous pouvez retirer votre demande gratuitement tant que l’hôtel n’a pas répondu."
+        "request": "Vous pouvez retirer votre demande gratuitement tant que l’hôtel n’a pas répondu.",
+        "paidFreeUntil": "Remboursement intégral jusqu’à la fin du {date} une fois votre virement arrivé.",
+        "paidFreeEnded": "L’annulation gratuite a pris fin le {date}. Une fois votre virement arrivé, une annulation ou une non-présentation coûte le montant total.",
+        "paidPartialEnded": "Les remboursements ont pris fin le {date}. Une fois votre virement arrivé, une annulation ou une non-présentation coûte le montant total.",
+        "bankTransfer": "Si votre virement n’arrive pas sous 48 heures, la réservation est annulée et rien n’est débité."
       }
     },
     "rules": {

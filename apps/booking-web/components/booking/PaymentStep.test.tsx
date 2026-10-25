@@ -48,7 +48,6 @@ function render(
           method,
           options,
           unavailable: createElement("p", { role: "alert" }, "No way to pay fits these rooms."),
-          tooSoon: null,
           onMethod: () => {},
           showExplanation,
           notice: null,
@@ -98,7 +97,9 @@ it("shows why instead of an empty list when no way is left", () => {
 it("every locale says that no way to pay is left", () => {
   for (const messages of [de, en, es, fr, id]) {
     expect(messages.payment.noWayToPay.trim()).not.toBe("");
-    expect(messages.payment.noWayToPayThisSoon.trim()).not.toBe("");
+    expect(messages.payment.noWayToPayTheseDates.trim()).not.toBe("");
+    expect(messages.payment.noWayToPayOnTheseDates.trim()).not.toBe("");
+    expect(messages.payment.changeDates.trim()).not.toBe("");
     expect(messages.payment.chooseAnotherRoom.trim()).not.toBe("");
   }
 });
