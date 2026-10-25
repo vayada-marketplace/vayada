@@ -6,6 +6,7 @@ import { Link } from "@/i18n/navigation";
 import ApproximateAmountsNote from "@/components/booking/ApproximateAmountsNote";
 import RoomSelectionSummary from "@/components/booking/RoomSelectionSummary";
 import BookedRoomsList from "@/components/booking/BookedRoomsList";
+import { bookedMeal, singleRoomMeal } from "@/lib/bookedMeal";
 import type { BookedRoom } from "@/lib/types";
 import CancelRoomsList from "@/components/booking/CancelRoomsList";
 import { useState, useEffect, useRef } from "react";
@@ -52,6 +53,8 @@ export default function MyBookingPageClient() {
   const locale = useLocale();
   const tc = useTranslations("common");
   const tr = useTranslations("roomSelection");
+  const tconf = useTranslations("confirmation");
+  const th = useTranslations("home");
   const { hotel } = useHotel();
   const { formatPrice } = useCurrency();
   const errorText = useGuestErrorText();
@@ -235,6 +238,14 @@ export default function MyBookingPageClient() {
   // and for no-shows, so a stay whose check-out date has passed gets a neutral name.
   const isPastStay = isConfirmed && !!booking && booking.checkOut < todayIn(hotel.timezone);
 
+  // VAY-2360 D7: the meal in plain words ("No meals included"); a group lists each room's below.
+  const meal = booking
+    ? bookedMeal(singleRoomMeal(booking), {
+        noMeals: tconf("noMeals"),
+        meal: (plan) => th(`choice.meal.${plan}`),
+      })
+    : null;
+
   return (
     <div className="min-h-screen bg-surface flex flex-col">
       {/* Mini Hero */}
@@ -382,9 +393,7 @@ export default function MyBookingPageClient() {
                   {booking.bookedRooms && booking.bookedRooms.length > 1
                     ? bookedRoomSummary(booking.bookedRooms)
                     : `${!booking.roomSelection && booking.numberOfRooms && booking.numberOfRooms > 1 ? `${booking.numberOfRooms}× ` : ""}${booking.roomName}`}
-                  {booking.mealDescription && (
-                    <span className="block text-sm">{booking.mealDescription}</span>
-                  )}
+                  {meal && <span className="block text-sm">{meal}</span>}
                 </span>
               </div>
               <div className="flex justify-between py-3">

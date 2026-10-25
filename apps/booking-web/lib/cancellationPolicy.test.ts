@@ -1,6 +1,13 @@
 import { expect, it } from "vitest";
 import type { PublicBookingQuote } from "@vayada/domain-booking/replacement-pricing";
-import { cancellationPolicy, policyBlocks, roomShares } from "./cancellationPolicy";
+import {
+  bookedPolicyBlocks,
+  cancellationLine,
+  cancellationPolicy,
+  policyBlocks,
+  roomShares,
+  shareTotal,
+} from "./cancellationPolicy";
 
 type Cancellation = PublicBookingQuote["rooms"][number]["cancellation"];
 const free = (days: number) =>
@@ -354,4 +361,128 @@ it("groups rates by the terms that decide the policy and names each kind of room
   expect(blocks).toHaveLength(1);
   expect(blocks[0]!.rooms).toEqual(["Double · Flexible"]);
   expect(blocks[0]!.today).toBe("2026-10-25");
+});
+
+// VAY-2360: the confirmation page words the booked terms the cancel route works from.
+const nonRefundable = { kind: "non_refundable" } as Cancellation;
+const booked = (
+  rooms: Array<{ roomName: string; cancellation: Cancellation; subtotalMinor: string }>,
+  totalMinor = "20000",
+) => ({ checkIn: "2026-11-06", currency: "USD", timeZone: "Asia/Colombo", totalMinor, rooms });
+const mode = { request: false, card: false, bankTransfer: false };
+
+it("shares a booked total by each room's subtotal, as the server does", () => {
+  expect(shareTotal(BigInt(10001), [BigInt(3), BigInt(3), BigInt(3)])).toEqual([
+    BigInt(3334),
+    BigInt(3334),
+    BigInt(3333),
+  ]);
+  const stay = booked([
+    {
+      roomName: "Suite",
+      cancellation: partial([{ minDaysBeforeCheckIn: 7, refundPercent: 50 }]),
+      subtotalMinor: "3",
+    },
+    {
+      roomName: "Garden",
+      cancellation: partial([{ minDaysBeforeCheckIn: 7, refundPercent: 50 }]),
+      subtotalMinor: "1",
+    },
+  ]);
+  const [block] = bookedPolicyBlocks(stay, { today: "2026-10-25", ...mode });
+  expect(block!.rooms).toEqual(["Suite", "Garden"]);
+  expect(block!.policy.rows.at(-1)).toEqual({
+    ...noShow,
+    pay: { kind: "full", amountMinor: "20000" },
+  });
+});
+
+it("words one free cancellation as its deadline and the full amount after it", () => {
+  const blocks = bookedPolicyBlocks(
+    booked([{ roomName: "Suite", cancellation: free(1), subtotalMinor: "20000" }]),
+    { today: "2026-10-25", ...mode },
+  );
+  expect(cancellationLine(blocks)).toEqual({
+    tone: "ok",
+    lead: { key: "freeUntil", date: "2026-11-05" },
+    rest: [{ key: "freeUntilAfter", amountMinor: "20000" }],
+  });
+  // Once the deadline has passed it says so; never "the first night".
+  expect(
+    cancellationLine(
+      bookedPolicyBlocks(
+        booked([{ roomName: "Suite", cancellation: free(1), subtotalMinor: "1" }]),
+        {
+          today: "2026-11-06",
+          ...mode,
+        },
+      ),
+    ),
+  ).toEqual({
+    tone: "amber",
+    lead: { key: "freeEnded", date: "2026-11-05" },
+    rest: [{ key: "payFull", amountMinor: "20000" }],
+  });
+});
+
+it("words refunds, ended refunds and non-refundable rates", () => {
+  const steps = partial([{ minDaysBeforeCheckIn: 10, refundPercent: 50 }]);
+  const line = (cancellation: Cancellation, today: string) =>
+    cancellationLine(
+      bookedPolicyBlocks(booked([{ roomName: "Suite", cancellation, subtotalMinor: "1" }]), {
+        today,
+        ...mode,
+      }),
+    );
+  expect(line(steps, "2026-10-25")).toEqual({
+    tone: "ok",
+    lead: { key: "refundsUntil", date: "2026-10-27" },
+    rest: [{ key: "refundsUntilAfter", amountMinor: "20000" }],
+  });
+  expect(line(steps, "2026-10-30")?.lead).toEqual({ key: "noRefund", date: "2026-10-27" });
+  expect(line(nonRefundable, "2026-10-25")).toEqual({
+    tone: "amber",
+    lead: { key: "nonRefundable" },
+    rest: [{ key: "payFull", amountMinor: "20000" }],
+  });
+});
+
+it("leads a waiting request or bank transfer with what is free until then", () => {
+  const stay = booked([{ roomName: "Suite", cancellation: free(1), subtotalMinor: "1" }]);
+  const today = "2026-10-25";
+  expect(cancellationLine(bookedPolicyBlocks(stay, { today, ...mode, request: true }))).toEqual({
+    tone: "ok",
+    lead: { key: "beforeAccept" },
+    rest: [{ key: "afterAccept.freeUntil", date: "2026-11-05" }],
+  });
+  expect(
+    cancellationLine(bookedPolicyBlocks(stay, { today, ...mode, bankTransfer: true })),
+  ).toEqual({
+    tone: "ok",
+    lead: { key: "beforeTransfer" },
+    rest: [{ key: "afterTransfer.freeUntil", date: "2026-11-05" }],
+  });
+  const none = booked([{ roomName: "Suite", cancellation: nonRefundable, subtotalMinor: "1" }]);
+  expect(
+    cancellationLine(bookedPolicyBlocks(none, { today, ...mode, request: true }))?.rest,
+  ).toEqual([{ key: "afterAccept.none" }]);
+});
+
+it("names each room's terms when the rooms cancel differently", () => {
+  const blocks = bookedPolicyBlocks(
+    booked([
+      { roomName: "Suite", cancellation: free(1), subtotalMinor: "1" },
+      { roomName: "Garden", cancellation: nonRefundable, subtotalMinor: "1" },
+    ]),
+    { today: "2026-10-25", ...mode },
+  );
+  expect(cancellationLine(blocks)).toEqual({
+    tone: "amber",
+    lead: { key: "rooms" },
+    rest: [
+      { key: "room.freeUntil", rooms: ["Suite"], date: "2026-11-05" },
+      { key: "room.nonRefundable", rooms: ["Garden"], date: undefined },
+    ],
+  });
+  expect(cancellationLine([])).toBeNull();
 });

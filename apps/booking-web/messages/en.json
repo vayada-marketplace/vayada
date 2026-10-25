@@ -505,8 +505,55 @@
     "heldOnCard": "Held on your card",
     "refundedToCard": "Refunded to your card",
     "addToCalendar": "Add to calendar",
-    "getDirections": "Get directions",
-    "directionsHint": "Opens our location in Google Maps"
+    "bookedDirect": "Booked direct",
+    "perk": {
+      "welcomeDrink": "Welcome drink on arrival",
+      "spaDiscount": "10% spa discount",
+      "lateCheckOut": "Late check-out (subject to availability)",
+      "earlyCheckIn": "Early check-in (subject to availability)",
+      "airportTransfer": "Free airport transfer",
+      "breakfast": "Daily breakfast included",
+      "upgrade": "Room upgrade (subject to availability)"
+    },
+    "noMeals": "No meals included",
+    "fullPolicy": "Full policy",
+    "close": "Close",
+    "directions": "Directions",
+    "directionsLabel": "Directions to {place}, opens Google Maps",
+    "copyAddress": "Copy address",
+    "addressCopied": "Address copied",
+    "cancelLine": {
+      "freeUntil": "Free cancellation until the end of {date}, hotel time.",
+      "freeUntilAfter": "After that, you pay the full amount ({amount}).",
+      "refundsUntil": "Refunds until the end of {date}, hotel time.",
+      "refundsUntilAfter": "What you get back depends on when you cancel. After that, you pay the full amount ({amount}).",
+      "freeEnded": "Free cancellation ended on {date}.",
+      "noRefund": "Refunds ended on {date}.",
+      "nonRefundable": "Non-refundable.",
+      "payFull": "If you cancel or don't arrive, you pay the full amount ({amount}).",
+      "beforeAccept": "Free to withdraw until we answer.",
+      "afterAccept": {
+        "freeUntil": "Once we accept: free cancellation until the end of {date}, hotel time.",
+        "refundsUntil": "Once we accept: refunds until the end of {date}, hotel time.",
+        "none": "Once we accept, it can't be refunded.",
+        "rooms": "Once we accept, your rooms cancel differently."
+      },
+      "beforeTransfer": "Free to cancel until your transfer arrives.",
+      "afterTransfer": {
+        "freeUntil": "Once it has arrived: free cancellation until the end of {date}, hotel time.",
+        "refundsUntil": "Once it has arrived: refunds until the end of {date}, hotel time.",
+        "none": "Once it has arrived, it can't be refunded.",
+        "rooms": "Once it has arrived, your rooms cancel differently."
+      },
+      "rooms": "Your rooms cancel differently.",
+      "room": {
+        "freeUntil": "{rooms}: free until the end of {date}.",
+        "refundsUntil": "{rooms}: refunds until the end of {date}.",
+        "freeEnded": "{rooms}: free cancellation has ended.",
+        "noRefund": "{rooms}: no refund any more.",
+        "nonRefundable": "{rooms}: non-refundable."
+      }
+    }
   },
   "requestChange": {
     "title": "Request Booking Changes",

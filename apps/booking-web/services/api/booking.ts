@@ -1,3 +1,4 @@
+import { parseBookingStay, type BookingStay } from "@/lib/bookingStay";
 import { Booking, RoomSelection, RoomSelectionSnapshot } from "@/lib/types";
 import { bookingWebPublic } from "./client";
 
@@ -110,6 +111,8 @@ export interface PaymentSettings {
   sameDayBookingCutoffTime?: string | null;
   termsText?: string;
   cancellationPolicyText?: string;
+  /** Book Direct Benefits (VAY-2072), in the hotel's order. */
+  benefits?: string[];
 }
 
 export interface BookingStatus {
@@ -184,6 +187,17 @@ export const bookingService = {
     const params = new URLSearchParams({ reference, email });
     return bookingWebPublic.get(
       `/api/booking-web/hotels/${encodeURIComponent(slug)}/bookings/status?${params}`,
+    );
+  },
+
+  /** VAY-2360: the booked cancellation terms and, once confirmed, where the guest stays. By the booking's id
+   * only. */
+  async stay(slug: string, bookingId: string, guestEmail: string): Promise<BookingStay> {
+    return parseBookingStay(
+      await bookingWebPublic.post(
+        `/api/booking-web/hotels/${encodeURIComponent(slug)}/bookings/${encodeURIComponent(bookingId)}/stay`,
+        { guestEmail },
+      ),
     );
   },
 

@@ -2,6 +2,7 @@ import {
   isManualPricingPaymentMethod,
   type PublicBookingQuote,
 } from "@vayada/domain-booking/replacement-pricing";
+import type { StayCancellation } from "@/lib/bookingStay";
 import { refundSteps, type TermsStay } from "@/lib/checkoutTerms";
 import { freeCancellationUntil } from "@/lib/roomChoices";
 
@@ -224,20 +225,26 @@ export function cancellationPolicy(
  * extras, less its discounts), as the server shares booking-level lines out (largest
  * remainder). */
 export function roomShares(quote: PublicBookingQuote): bigint[] {
-  const total = BigInt(quote.totalMinor);
-  const subtotals = quote.rooms.map((room) =>
-    quote.lines
-      .filter((line) => line.selectionId === room.selectionId)
-      .reduce(
-        (sum, line) =>
-          line.kind === "discount"
-            ? sum - BigInt(line.amountMinor)
-            : sum + BigInt(line.amountMinor),
-        BigInt(0),
-      ),
+  return shareTotal(
+    BigInt(quote.totalMinor),
+    quote.rooms.map((room) =>
+      quote.lines
+        .filter((line) => line.selectionId === room.selectionId)
+        .reduce(
+          (sum, line) =>
+            line.kind === "discount"
+              ? sum - BigInt(line.amountMinor)
+              : sum + BigInt(line.amountMinor),
+          BigInt(0),
+        ),
+    ),
   );
+}
+
+/** `total` shared across rooms in proportion to their subtotals (largest remainder). */
+export function shareTotal(total: bigint, subtotals: readonly bigint[]): bigint[] {
   const sum = subtotals.reduce((a, b) => a + b, BigInt(0));
-  if (sum <= BigInt(0)) return quote.rooms.map((_, index) => (index === 0 ? total : BigInt(0)));
+  if (sum <= BigInt(0)) return subtotals.map((_, index) => (index === 0 ? total : BigInt(0)));
   const shares = subtotals.map((subtotal) => (total * subtotal) / sum);
   let left = total - shares.reduce((a, b) => a + b, BigInt(0));
   const order = subtotals
@@ -272,34 +279,135 @@ export function policyBlocks(
   { today, roomNames }: { today: string; roomNames: Readonly<Record<string, string>> },
 ): PolicyBlock[] {
   const shares = roomShares(quote);
-  const request =
-    quote.acceptanceMode === "request" && !isManualPricingPaymentMethod(quote.paymentMethod);
+  return groupBlocks(
+    quote.rooms.map((room, index) => ({
+      name: roomNames[room.selectionId] ?? "",
+      cancellation: room.cancellation,
+      share: shares[index]!,
+    })),
+    { checkIn: quote.checkIn, today },
+    {
+      request:
+        quote.acceptanceMode === "request" && !isManualPricingPaymentMethod(quote.paymentMethod),
+      card: quote.paymentMethod === "card",
+      bankTransfer: quote.paymentMethod === "bank_transfer",
+    },
+  );
+}
+
+/** A booked stay's policies (VAY-2360), from the terms the cancel route works from. `request`: the hotel has
+ * yet to accept it; `bankTransfer`: its transfer has yet to arrive. */
+export function bookedPolicyBlocks(
+  stay: StayCancellation,
+  { today, ...mode }: { today: string; request: boolean; card: boolean; bankTransfer: boolean },
+): PolicyBlock[] {
+  const shares = shareTotal(
+    BigInt(stay.totalMinor),
+    stay.rooms.map((room) => BigInt(room.subtotalMinor)),
+  );
+  return groupBlocks(
+    stay.rooms.map((room, index) => ({
+      name: room.roomName ?? "",
+      cancellation: room.cancellation,
+      share: shares[index]!,
+    })),
+    { checkIn: stay.checkIn, today },
+    mode,
+  );
+}
+
+function groupBlocks(
+  rooms: ReadonlyArray<{ name: string; cancellation: Cancellation; share: bigint }>,
+  stay: TermsStay,
+  mode: { request: boolean; card: boolean; bankTransfer: boolean },
+): PolicyBlock[] {
   const groups = new Map<
     string,
     { rooms: string[]; shares: bigint[]; cancellation: Cancellation }
   >();
-  quote.rooms.forEach((room, index) => {
+  for (const room of rooms) {
     const key = policyKey(room.cancellation);
     const group = groups.get(key) ?? { rooms: [], shares: [], cancellation: room.cancellation };
-    const name = roomNames[room.selectionId] ?? "";
     // Two rooms of one kind on one rate read once.
-    if (!group.rooms.includes(name)) group.rooms.push(name);
-    group.shares.push(shares[index]!);
+    if (!group.rooms.includes(room.name)) group.rooms.push(room.name);
+    group.shares.push(room.share);
     groups.set(key, group);
-  });
+  }
   return Array.from(groups, ([key, group]) => ({
     key,
     rooms: group.rooms,
-    today,
-    policy: cancellationPolicy(
-      group.cancellation,
-      { checkIn: quote.checkIn, today },
-      group.shares,
-      {
-        request,
-        card: quote.paymentMethod === "card",
-        bankTransfer: quote.paymentMethod === "bank_transfer",
-      },
-    ),
+    today: stay.today,
+    policy: cancellationPolicy(group.cancellation, stay, group.shares, mode),
   }));
+}
+
+/** One part of the confirmation page's cancellation line: a `confirmation.cancelLine` message and its
+ * values. */
+export type CancellationLinePart = {
+  key: string;
+  date?: string;
+  amountMinor?: string;
+  rooms?: string[];
+};
+
+/** The confirmation page's one line about cancelling (VAY-2360): a bold lead and what follows, in the words
+ * of step 3's badges and notes. Green while cancelling is free or refunds something. */
+export function cancellationLine(blocks: readonly PolicyBlock[]): {
+  tone: "ok" | "amber";
+  lead: CancellationLinePart;
+  rest: CancellationLinePart[];
+} | null {
+  const first = blocks[0];
+  if (!first) return null;
+  const date = (badge: PolicyBadge) => ("date" in badge ? badge.date : undefined);
+  const full = (block: PolicyBlock) =>
+    block.policy.rows.flatMap((row) => (row.pay.kind === "full" ? [row.pay.amountMinor] : []))[0];
+  // Free until we accept, or until the transfer arrives: then the rate's terms.
+  const waiting = first.policy.request ? "Accept" : first.policy.bankTransfer ? "Transfer" : null;
+  if (waiting) {
+    const badge = first.policy.badge;
+    return {
+      tone: "ok",
+      lead: { key: `before${waiting}` },
+      rest: [
+        blocks.length > 1
+          ? { key: `after${waiting}.rooms` }
+          : badge.kind === "freeUntil" || badge.kind === "refundsUntil"
+            ? { key: `after${waiting}.${badge.kind}`, date: badge.date }
+            : { key: `after${waiting}.none` },
+      ],
+    };
+  }
+  const tone = blocks.every((block) => block.policy.tone === "ok") ? "ok" : "amber";
+  if (blocks.length > 1)
+    return {
+      tone,
+      lead: { key: "rooms" },
+      rest: blocks.map((block) => ({
+        key: `room.${block.policy.badge.kind}`,
+        rooms: block.rooms,
+        date: date(block.policy.badge),
+      })),
+    };
+  const { badge, note } = first.policy;
+  const amountMinor = full(first);
+  const ended = "date" in note ? note.date : undefined;
+  switch (badge.kind) {
+    case "freeUntil":
+    case "refundsUntil":
+      return {
+        tone,
+        lead: { key: badge.kind, date: badge.date },
+        rest: [{ key: `${badge.kind}After`, amountMinor }],
+      };
+    case "freeEnded":
+    case "noRefund":
+      return {
+        tone,
+        lead: { key: badge.kind, date: ended },
+        rest: [{ key: "payFull", amountMinor }],
+      };
+    default:
+      return { tone, lead: { key: "nonRefundable" }, rest: [{ key: "payFull", amountMinor }] };
+  }
 }

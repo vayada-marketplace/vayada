@@ -504,8 +504,55 @@
     "heldOnCard": "Retenido en tu tarjeta",
     "refundedToCard": "Reembolsado a tu tarjeta",
     "addToCalendar": "Añadir al calendario",
-    "getDirections": "Cómo llegar",
-    "directionsHint": "Abre nuestra ubicación en Google Maps"
+    "bookedDirect": "Reserva directa",
+    "perk": {
+      "welcomeDrink": "Bebida de bienvenida a la llegada",
+      "spaDiscount": "10 % de descuento en el spa",
+      "lateCheckOut": "Salida tardía (según disponibilidad)",
+      "earlyCheckIn": "Llegada anticipada (según disponibilidad)",
+      "airportTransfer": "Traslado gratuito al aeropuerto",
+      "breakfast": "Desayuno diario incluido",
+      "upgrade": "Mejora de habitación (según disponibilidad)"
+    },
+    "noMeals": "Sin comidas incluidas",
+    "fullPolicy": "Política completa",
+    "close": "Cerrar",
+    "directions": "Cómo llegar",
+    "directionsLabel": "Cómo llegar a {place}, abre Google Maps",
+    "copyAddress": "Copiar dirección",
+    "addressCopied": "Dirección copiada",
+    "cancelLine": {
+      "freeUntil": "Cancelación gratuita hasta el final del {date}, hora local del hotel.",
+      "freeUntilAfter": "Después, pagas el importe total ({amount}).",
+      "refundsUntil": "Reembolso hasta el final del {date}, hora local del hotel.",
+      "refundsUntilAfter": "Lo que recuperas depende de cuándo canceles. Después, pagas el importe total ({amount}).",
+      "freeEnded": "La cancelación gratuita terminó el {date}.",
+      "noRefund": "Los reembolsos terminaron el {date}.",
+      "nonRefundable": "No reembolsable.",
+      "payFull": "Si cancelas o no te presentas, pagas el importe total ({amount}).",
+      "beforeAccept": "Puedes retirarla gratis hasta que respondamos.",
+      "afterAccept": {
+        "freeUntil": "Cuando la aceptemos: cancelación gratuita hasta el final del {date}, hora local del hotel.",
+        "refundsUntil": "Cuando la aceptemos: reembolso hasta el final del {date}, hora local del hotel.",
+        "none": "Cuando la aceptemos, no será reembolsable.",
+        "rooms": "Cuando la aceptemos, tus habitaciones tendrán condiciones de cancelación distintas."
+      },
+      "beforeTransfer": "Puedes cancelar gratis hasta que llegue tu transferencia.",
+      "afterTransfer": {
+        "freeUntil": "Cuando llegue: cancelación gratuita hasta el final del {date}, hora local del hotel.",
+        "refundsUntil": "Cuando llegue: reembolso hasta el final del {date}, hora local del hotel.",
+        "none": "Cuando llegue, la reserva no será reembolsable.",
+        "rooms": "Cuando llegue, tus habitaciones tendrán condiciones de cancelación distintas."
+      },
+      "rooms": "Tus habitaciones tienen condiciones de cancelación distintas.",
+      "room": {
+        "freeUntil": "{rooms}: gratis hasta el final del {date}.",
+        "refundsUntil": "{rooms}: reembolso hasta el final del {date}.",
+        "freeEnded": "{rooms}: la cancelación gratuita ha terminado.",
+        "noRefund": "{rooms}: ya no hay reembolso.",
+        "nonRefundable": "{rooms}: no reembolsable."
+      }
+    }
   },
   "refer": {
     "title": "Referir un Huésped",

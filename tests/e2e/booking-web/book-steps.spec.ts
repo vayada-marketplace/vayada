@@ -359,8 +359,8 @@ for (const width of [1440, 390]) {
     await expect(page).toHaveURL(new RegExp(`/booking/${reference}$`));
     // VAY-2307: the long reference reads in groups of four.
     await expect(page.getByText("VAY-6666 6666 6666 4666 8666 6666 6666 6666")).toBeVisible();
-    // The choice keeps the name the steps showed (VAY-2190 plain names).
-    await expect(page.getByText("Deluxe Double Room · Room only")).toBeVisible();
+    // The room by its name: its meal and terms have their own lines (VAY-2360).
+    await expect(page.getByText("Deluxe Double Room", { exact: true })).toBeVisible();
     await expect(page.getByText("Due at the hotel", { exact: true }).locator("..")).toContainText(
       "€370",
     );

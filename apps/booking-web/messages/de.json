@@ -505,8 +505,55 @@
     "heldOnCard": "Auf Ihrer Karte reserviert",
     "refundedToCard": "Auf Ihre Karte erstattet",
     "addToCalendar": "Zum Kalender hinzufügen",
-    "getDirections": "Route planen",
-    "directionsHint": "Öffnet unseren Standort in Google Maps"
+    "bookedDirect": "Direkt gebucht",
+    "perk": {
+      "welcomeDrink": "Begrüßungsgetränk bei Ankunft",
+      "spaDiscount": "10 % Rabatt im Spa",
+      "lateCheckOut": "Später Check-out (nach Verfügbarkeit)",
+      "earlyCheckIn": "Früher Check-in (nach Verfügbarkeit)",
+      "airportTransfer": "Kostenloser Flughafentransfer",
+      "breakfast": "Tägliches Frühstück inklusive",
+      "upgrade": "Zimmer-Upgrade (nach Verfügbarkeit)"
+    },
+    "noMeals": "Ohne Verpflegung",
+    "fullPolicy": "Alle Bedingungen",
+    "close": "Schließen",
+    "directions": "Route",
+    "directionsLabel": "Route zu {place}, öffnet Google Maps",
+    "copyAddress": "Adresse kopieren",
+    "addressCopied": "Adresse kopiert",
+    "cancelLine": {
+      "freeUntil": "Kostenlose Stornierung bis Ende {date}, Ortszeit des Hotels.",
+      "freeUntilAfter": "Danach zahlen Sie den Gesamtbetrag ({amount}).",
+      "refundsUntil": "Erstattung bis Ende {date}, Ortszeit des Hotels.",
+      "refundsUntilAfter": "Wie viel Sie zurückbekommen, hängt davon ab, wann Sie stornieren. Danach zahlen Sie den Gesamtbetrag ({amount}).",
+      "freeEnded": "Die kostenlose Stornierung ist am {date} abgelaufen.",
+      "noRefund": "Die Erstattung ist am {date} abgelaufen.",
+      "nonRefundable": "Nicht erstattbar.",
+      "payFull": "Wenn Sie stornieren oder nicht anreisen, zahlen Sie den Gesamtbetrag ({amount}).",
+      "beforeAccept": "Bis wir antworten, können Sie kostenlos zurückziehen.",
+      "afterAccept": {
+        "freeUntil": "Sobald wir annehmen: kostenlose Stornierung bis Ende {date}, Ortszeit des Hotels.",
+        "refundsUntil": "Sobald wir annehmen: Erstattung bis Ende {date}, Ortszeit des Hotels.",
+        "none": "Sobald wir annehmen, ist sie nicht erstattbar.",
+        "rooms": "Sobald wir annehmen, gelten für Ihre Zimmer unterschiedliche Stornobedingungen."
+      },
+      "beforeTransfer": "Bis Ihre Überweisung eingeht, können Sie kostenlos stornieren.",
+      "afterTransfer": {
+        "freeUntil": "Sobald sie eingegangen ist: kostenlose Stornierung bis Ende {date}, Ortszeit des Hotels.",
+        "refundsUntil": "Sobald sie eingegangen ist: Erstattung bis Ende {date}, Ortszeit des Hotels.",
+        "none": "Sobald sie eingegangen ist, ist die Buchung nicht erstattbar.",
+        "rooms": "Sobald sie eingegangen ist, gelten für Ihre Zimmer unterschiedliche Stornobedingungen."
+      },
+      "rooms": "Für Ihre Zimmer gelten unterschiedliche Stornobedingungen.",
+      "room": {
+        "freeUntil": "{rooms}: kostenlos stornierbar bis Ende {date}.",
+        "refundsUntil": "{rooms}: Erstattung bis Ende {date}.",
+        "freeEnded": "{rooms}: kostenlose Stornierung abgelaufen.",
+        "noRefund": "{rooms}: keine Erstattung mehr.",
+        "nonRefundable": "{rooms}: nicht erstattbar."
+      }
+    }
   },
   "refer": {
     "title": "Gast empfehlen",

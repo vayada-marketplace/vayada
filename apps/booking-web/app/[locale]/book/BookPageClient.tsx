@@ -770,10 +770,9 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     const item = (id: string) => extras?.items.find((current) => current.id === id);
     const context = {
       hotelName: hotel.name,
-      // Each kind of room once: the page puts "2×" in front when more rooms are booked.
-      roomName: Array.from(
-        new Set(summaryRooms.map((room) => `${room.name} · ${room.choice}`)),
-      ).join(", "),
+      // Each kind of room once: the page puts "2×" in front when more rooms are booked. The meal
+      // and the cancellation terms have their own lines there (VAY-2360).
+      roomName: Array.from(new Set(summaryRooms.map((room) => room.name))).join(", "),
       guestFirstName: guest.firstName.trim(),
       guestLastName: guest.lastName.trim(),
       guestEmail: guest.email.trim().toLowerCase(),

@@ -1,26 +1,31 @@
 "use client";
 
 import { useLocale, useTranslations } from "next-intl";
+import { bookedMeal } from "@/lib/bookedMeal";
 import { choiceKeys, choiceText } from "@/lib/roomChoices";
 import type { BookedRoom } from "@/lib/types";
 import { resolveLocale } from "@/lib/utils";
 import type { PricingOffer } from "@/services/api/replacementOffers";
 
 /** VAY-2320: a booking's rooms, each with its own type, guests and terms (confirmation and My
- * booking). */
+ * booking). The meal in plain words, "No meals included" for room only (VAY-2360 D7). */
 export default function BookedRoomsList({
   rooms,
   checkIn,
   timezone,
   labelClass,
+  terms = true,
 }: {
   rooms: BookedRoom[];
   checkIn: string;
   timezone?: string;
   /** The page's small caps label style. */
   labelClass: string;
+  /** Each room's cancellation terms; the confirmation page has its own line for them. */
+  terms?: boolean;
 }) {
   const t = useTranslations("groupRooms");
+  const tc2 = useTranslations("confirmation");
   const th = useTranslations("home");
   const tc = useTranslations("common");
   const locale = useLocale();
@@ -37,20 +42,26 @@ export default function BookedRoomsList({
         <span className={`${labelClass} hidden sm:inline`}>{tc("guests")}</span>
       </div>
       {rooms.map((room, index) => {
-        const rate = room.mealPlan
-          ? choiceText(
-              choiceKeys([
-                {
-                  publicOfferKey: "",
-                  currency: "",
-                  mealPlan: room.mealPlan as PricingOffer["mealPlan"],
-                  ...(room.cancellation && { cancellation: room.cancellation }),
-                },
-              ])[0]!,
-              { checkIn, timezone, formatDate },
-              th,
-            )
-          : null;
+        const rate =
+          terms && room.mealPlan
+            ? choiceText(
+                choiceKeys([
+                  {
+                    publicOfferKey: "",
+                    currency: "",
+                    mealPlan: room.mealPlan as PricingOffer["mealPlan"],
+                    ...(room.cancellation && { cancellation: room.cancellation }),
+                  },
+                ])[0]!,
+                { checkIn, timezone, formatDate },
+                th,
+              )
+            : null;
+        const meal = bookedMeal(room.mealPlan, {
+          noMeals: tc2("noMeals"),
+          meal: (plan) => th(`choice.meal.${plan}`),
+        });
+        const line = [meal, rate?.cancellationTerms].filter(Boolean).join(" · ");
         const guests = [
           tc("adults", { count: room.adults }),
           ...(room.children ? [tc("children", { count: room.children })] : []),
@@ -66,11 +77,7 @@ export default function BookedRoomsList({
                   ? t("roomLine", { number: index + 1, room: room.roomName })
                   : t("roomLabel", { number: index + 1 })}
               </p>
-              {rate && (
-                <p className="text-sm text-gray-600">
-                  {[rate.meal, rate.cancellationTerms].filter(Boolean).join(" · ")}
-                </p>
-              )}
+              {line && <p className="text-sm text-gray-600">{line}</p>}
             </div>
             <p className="text-sm font-semibold text-gray-800 sm:shrink-0 sm:text-right">
               {guests}
