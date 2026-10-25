@@ -1093,6 +1093,41 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
             context("s2"),
           ),
         ).rejects.toMatchObject({ statusCode: 404 });
+        // The exact place only once confirmed, as the email; no terms once a room has started or the
+        // stay has ended.
+        await db.query("SAVEPOINT stay_statuses");
+        await db.query("SET LOCAL session_replication_role=replica");
+        await db.query(
+          "UPDATE booking.guest_bookings SET lifecycle_status='pending_payment' WHERE id=$1",
+          [bookingId],
+        );
+        expect(await adapter.getStay(propertyId, bookingId, guest, context("s4"))).toMatchObject({
+          cancellation: { totalMinor: "108000" },
+          places: [],
+        });
+        await db.query(
+          "UPDATE booking.guest_bookings SET lifecycle_status='confirmed' WHERE id=$1",
+          [bookingId],
+        );
+        await db.query(
+          `UPDATE pms.operational_booking_assignments SET assignment_status='checked_in'
+           WHERE guest_booking_id=$1 AND position=2`,
+          [bookingId],
+        );
+        expect(await adapter.getStay(propertyId, bookingId, guest, context("s5"))).toMatchObject({
+          cancellation: null,
+          places: [{ kind: "property" }],
+        });
+        await db.query(
+          "UPDATE booking.guest_bookings SET lifecycle_status='canceled' WHERE id=$1",
+          [bookingId],
+        );
+        expect(await adapter.getStay(propertyId, bookingId, guest, context("s6"))).toEqual({
+          version: "booking-stay.v1",
+          cancellation: null,
+          places: [],
+        });
+        await db.query("ROLLBACK TO SAVEPOINT stay_statuses");
         // Never by a booking reference: those are what the lookup's limit guards.
         await expect(
           adapter.getStay(propertyId, "VAY-7C2F4A9E1B3D", guest, context("s3")),

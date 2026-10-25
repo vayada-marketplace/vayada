@@ -117,6 +117,7 @@ import {
   cancelAcceptedPricingStay,
   loadPricingBookingCancellation,
   loadPricingBookingCancellationTerms,
+  pricingBookingCancellationOutcome,
   type PricingBookingCancellationTerms,
 } from "../domains/pricingBookingCancellation.js";
 import { loadStayPlaces, type StayPlace } from "../domains/stayPlaces.js";
@@ -2624,7 +2625,7 @@ export function createTargetBookingWebCheckoutAdapter(
     },
     async getStay(slug, bookingId, request, context) {
       return withCommand(slug, context, async () => {
-        if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(bookingId))
+        if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(bookingId))
           throw createHttpError(404, "Booking not found.");
         const property = await resolveTargetHistoricalBookingProperty(pool, slug);
         const booking = await loadTargetBooking(
@@ -2639,18 +2640,11 @@ export function createTargetBookingWebCheckoutAdapter(
         );
         const ids = { propertyId: property.propertyId, guestBookingId: booking.guestBookingId };
         const [terms, places] = await Promise.all([
-          // The terms that still apply: before the stay ends or starts.
+          // The terms that still apply, as the cancel route would apply them now: before the stay ends or
+          // any room starts, and only terms it can work out.
           (status === "pending" || status === "confirmed") &&
           objectValue(booking.bookingMetadata)["targetSource"] === "pricing_quote_draft"
-            ? loadPricingBookingCancellationTerms(pool, {
-                ...ids,
-                stay: {
-                  checkIn: dateOnly(booking.checkIn),
-                  checkOut: dateOnly(booking.checkOut),
-                  roomCount: booking.roomCount,
-                  currency: booking.currency,
-                },
-              })
+            ? loadStayCancellationTerms(pool, ids, booking, context?.occurredAt ?? new Date())
             : null,
           // The exact places, as the confirmation email gives them: once the stay is confirmed.
           ["confirmed", "checked_in", "checked_out"].includes(status)
@@ -4601,8 +4595,36 @@ export function serializeTargetBooking(booking: TargetBookingRow): Record<string
   };
 }
 
-/** The confirmation page's extras (VAY-2360): the booked cancellation terms, as checkout step 3 words them, and
- * where the guest stays. */
+/** The booked terms the cancel route would apply now (VAY-2360), or null once a room has started or when the
+ * route couldn't work them out. */
+async function loadStayCancellationTerms(
+  db: Pick<pg.PoolClient, "query">,
+  ids: { propertyId: string; guestBookingId: string },
+  booking: TargetBookingRow,
+  at: Date,
+): Promise<PricingBookingCancellationTerms | null> {
+  const started = await db.query(
+    `SELECT 1 FROM pms.operational_booking_assignments
+     WHERE property_id=$1::uuid AND guest_booking_id=$2::uuid
+       AND assignment_status IN ('checked_in','in_house','checked_out')
+     LIMIT 1`,
+    [ids.propertyId, ids.guestBookingId],
+  );
+  if (started.rows.length > 0) return null;
+  const terms = await loadPricingBookingCancellationTerms(db, {
+    ...ids,
+    stay: {
+      checkIn: dateOnly(booking.checkIn),
+      checkOut: dateOnly(booking.checkOut),
+      roomCount: booking.roomCount,
+      currency: booking.currency,
+    },
+  });
+  return terms && pricingBookingCancellationOutcome(terms, at) ? terms : null;
+}
+
+/** The confirmation page's extras (VAY-2360), `booking-stay.v1`: the booked cancellation terms (each room's raw
+ * acceptance terms, unlike the lookup's public shape) for checkout step 3's wording, and where the guest stays. */
 function serializeBookingStay(
   booking: TargetBookingRow,
   terms: PricingBookingCancellationTerms | null,

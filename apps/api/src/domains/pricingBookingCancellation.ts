@@ -93,15 +93,21 @@ export async function loadPricingBookingCancellation(
     client as Pick<PoolClient, "query">,
     input,
   );
-  return (
-    terms &&
-    resolveBookedCancellationOutcome({
-      checkIn: terms.checkIn,
-      cancelledOn: localDate(terms.timeZone, input.cancelledAt),
-      totalMinor: terms.totalMinor,
-      rooms: terms.rooms,
-    })
-  );
+  return terms && pricingBookingCancellationOutcome(terms, input.cancelledAt);
+}
+
+/** What the terms refund for a cancellation at `at`, counted in the property's own calendar; null when the
+ * terms can't be trusted (the cancel route then refuses). */
+export function pricingBookingCancellationOutcome(
+  terms: PricingBookingCancellationTerms,
+  at: Date,
+): BookedCancellationOutcome | null {
+  return resolveBookedCancellationOutcome({
+    checkIn: terms.checkIn,
+    cancelledOn: localDate(terms.timeZone, at),
+    totalMinor: terms.totalMinor,
+    rooms: terms.rooms,
+  });
 }
 
 /** Frees a cancelled, declined, expired or withdrawn v2 stay inside the caller's transaction:
