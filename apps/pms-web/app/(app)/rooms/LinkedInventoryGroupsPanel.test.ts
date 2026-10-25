@@ -22,6 +22,8 @@ vi.mock("@/lib/i18n", () => ({
         "rooms.linkedDeleteNamed": "Delete {name}",
         "rooms.linkedSaveGroup": "Save group",
         "common.delete": "Delete",
+        "rooms.linkedInGroup": "In “{name}”",
+        "rooms.linkedEmptyTitle": "No groups yet",
       };
       let value = messages[key] ?? key;
       for (const [name, replacement] of Object.entries(params ?? {})) {
@@ -77,6 +79,8 @@ describe("LinkedInventoryGroupsPanel", () => {
     const checkboxes = inputs.filter((input) => input.props.type === "checkbox");
     const disabled = checkboxes.map((checkbox) => checkbox.props.disabled);
     expect(disabled).toEqual([false, false, true, true]);
+    // A room type taken by another group says which one (VAY-2338).
+    expect(JSON.stringify(view.toJSON()).match(/In “Garden rooms”/g)).toHaveLength(2);
     act(() =>
       inputs
         .find((input) => input.props.type !== "checkbox")!
@@ -92,6 +96,13 @@ describe("LinkedInventoryGroupsPanel", () => {
       group,
       expect.objectContaining({ groupId: "group-2", revision: 1 }),
     ]);
+  });
+
+  it("starts empty with the example and an Add group button (VAY-2338)", () => {
+    const { view } = render([]);
+    expect(JSON.stringify(view.toJSON())).toContain("No groups yet");
+    act(() => button(view, "Add group").props.onClick());
+    expect(view.root.findAllByProps({ type: "checkbox" })).toHaveLength(4);
   });
 
   it("updates state functionally and serializes deletes", async () => {

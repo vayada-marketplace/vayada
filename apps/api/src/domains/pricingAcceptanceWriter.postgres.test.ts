@@ -48,6 +48,7 @@ import {
   createPgBookingLifecycleStore,
   runBookingLifecycleSchedulerJobs,
 } from "../jobs/bookingLifecycle.js";
+import { runBankTransferPaymentReminders } from "../jobs/bankTransferPaymentReminders.js";
 
 vi.mock("./publicPricingAuthority.js", () => ({ lockPublicPricingAuthority: vi.fn() }));
 vi.mock("./currentQuoteInventory.js", () => ({ reserveRevalidatedQuoteInventory: vi.fn() }));
@@ -3288,6 +3289,223 @@ describe.skipIf(!url)("pricing acceptance writer bank transfer and PayPal (Postg
       await fixture.close();
     }
   });
+
+  /** VAY-2348: an unpaid bank transfer with a hotel PMS and a sweep that only counts releases. */
+  async function pendingBankTransfer() {
+    const fixture = await setupFixture(manualQuote("bank_transfer", "instant"), undefined, true);
+    const bank = bankOperations();
+    const pmsPool = new pg.Pool({ connectionString: url, max: 2 });
+    const sweepPool = new pg.Pool({ connectionString: url, max: 2 });
+    const released: unknown[] = [];
+    const store = createPgBookingLifecycleStore({
+      connectionString: url!,
+      pool: sweepPool,
+      inventoryReservationPort: {
+        reserve: async () => null,
+        async release({ reservation }) {
+          released.push(reservation);
+        },
+      },
+    });
+    const pms = createTargetPmsOperationsCommandRepository({
+      connectionString: url!,
+      pool: pmsPool,
+      readRepository: {
+        findReservationByGuestBookingId: async () => ({}),
+      } as unknown as PmsOperationsReadRepository,
+    });
+    mockOwners(fixture);
+    vi.mocked(finishCurrentQuoteAcceptanceTime).mockImplementation(async () =>
+      new Date().toISOString(),
+    );
+    await finance(fixture, "bank_transfer");
+    const pending = await writePricingAcceptance(fixture.pool, fixture.input, undefined, false, {
+      bankTransfers: bank,
+    });
+    if (pending.kind !== "payment_pending" || !("acceptedAt" in pending))
+      throw new Error(`unexpected ${pending.kind}`);
+    const deadline = Date.parse(pending.payment.deadlineAt);
+    return {
+      fixture,
+      pending,
+      deadline,
+      released,
+      sweepPool,
+      /** The sweep just after the deadline; this booking's applied expiries. */
+      sweep: async () =>
+        (
+          await runBookingLifecycleSchedulerJobs(store, {
+            now: new Date(deadline + 1_000),
+            run: ["pendingBookingExpiry"],
+          })
+        ).runs
+          .flatMap((run) => run.mutations)
+          .filter((m) => m.guestBookingId === pending.bookingId && m.applied).length,
+      markPaid: () =>
+        pms.markBookingPaid({
+          propertyId: fixture.propertyId,
+          guestBookingId: pending.bookingId,
+          commandId: randomUUID(),
+          idempotencyKey: randomUUID(),
+          audit: {
+            actor: { kind: "system", service: "apps/api" },
+            requestId: randomUUID(),
+            reason: "Bank transfer received",
+            requestedAt: new Date().toISOString(),
+          },
+        }),
+      state: async () =>
+        (
+          await fixture.observer.query(
+            `SELECT b.lifecycle_status AS status,b.payment_status AS payment,
+              (SELECT count(*)::int FROM finance.payments p WHERE p.guest_booking_id=b.id) AS payments,
+              (SELECT count(*)::int FROM booking.booking_status_events e WHERE e.guest_booking_id=b.id
+                AND e.event_type IN ('guest_booking.expired','guest_booking.payment_received')) AS endings
+             FROM booking.guest_bookings b WHERE b.id=$1`,
+            [pending.bookingId],
+          )
+        ).rows[0],
+      close: async () => {
+        await store.close();
+        await sweepPool.end().catch(() => undefined);
+        await pmsPool.end();
+        await bank.close();
+        await fixture.close();
+      },
+    };
+  }
+
+  it("never both confirms and releases a bank transfer: paid first, swept first, or at once (VAY-2348)", async () => {
+    // Paid before the sweep: the sweep leaves it confirmed and the rooms held.
+    const paidFirst = await pendingBankTransfer();
+    try {
+      await expect(paidFirst.markPaid()).resolves.toMatchObject({ ok: true });
+      await expect(paidFirst.sweep()).resolves.toBe(0);
+      await expect(paidFirst.state()).resolves.toEqual({
+        status: "confirmed",
+        payment: "paid",
+        payments: 1,
+        endings: 1,
+      });
+      expect(paidFirst.released).toEqual([]);
+    } finally {
+      await paidFirst.close();
+    }
+    // Released first: the hotel can no longer mark it paid (D5), nothing is recorded.
+    const sweptFirst = await pendingBankTransfer();
+    try {
+      await expect(sweptFirst.sweep()).resolves.toBe(1);
+      await expect(sweptFirst.markPaid()).resolves.toMatchObject({ ok: false });
+      await expect(sweptFirst.sweep()).resolves.toBe(0);
+      await expect(sweptFirst.state()).resolves.toEqual({
+        status: "expired",
+        payment: "unpaid",
+        payments: 0,
+        endings: 1,
+      });
+      expect(sweptFirst.released).toHaveLength(1);
+    } finally {
+      await sweptFirst.close();
+    }
+    // At the same moment: a held row lock makes both wait, then exactly one of them wins.
+    const racing = await pendingBankTransfer();
+    const lockPool = new pg.Pool({ connectionString: url, max: 2 });
+    const blocker = await lockPool.connect();
+    try {
+      await blocker.query("BEGIN");
+      await blocker.query("SELECT 1 FROM booking.guest_bookings WHERE id=$1 FOR UPDATE", [
+        racing.pending.bookingId,
+      ]);
+      const holder = (await blocker.query("SELECT pg_backend_pid() AS pid")).rows[0].pid;
+      const both = Promise.all([racing.markPaid(), racing.sweep()]);
+      let waiting = 0;
+      for (let attempt = 0; attempt < 200 && waiting < 2; attempt++) {
+        waiting =
+          // The second waiter queues behind the first, so count every lock wait in this database.
+          (
+            await lockPool.query(
+              `SELECT count(*)::int AS n FROM pg_stat_activity
+             WHERE datname = current_database() AND wait_event_type = 'Lock' AND pid <> $1`,
+              [holder],
+            )
+          ).rows[0].n;
+        if (waiting < 2) await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      expect(waiting).toBe(2);
+      await blocker.query("COMMIT");
+      const [paid, expired] = await both;
+      const state = await racing.state();
+      if (paid.ok) {
+        expect(expired).toBe(0);
+        expect(state).toEqual({ status: "confirmed", payment: "paid", payments: 1, endings: 1 });
+        expect(racing.released).toEqual([]);
+      } else {
+        expect(expired).toBe(1);
+        expect(state).toEqual({ status: "expired", payment: "unpaid", payments: 0, endings: 1 });
+        expect(racing.released).toHaveLength(1);
+      }
+    } finally {
+      await blocker.query("ROLLBACK").catch(() => undefined);
+      blocker.release();
+      await lockPool.end();
+      await racing.close();
+    }
+  }, 60_000);
+
+  it("reminds the guest once a day before the bank transfer deadline, never after it ends (VAY-2348)", async () => {
+    const reminders = async (booking: Awaited<ReturnType<typeof pendingBankTransfer>>) =>
+      (
+        await booking.fixture.observer.query(
+          `SELECT payload->>'recipientRole' AS role,
+            (payload->>'requiresBankTransferInstructions')::boolean AS bank,
+            payload->>'paymentDeadlineAt' AS deadline
+           FROM platform.jobs WHERE resource_id=$1 AND job_type='email.booking-payment-reminder'`,
+          [booking.pending.bookingId],
+        )
+      ).rows;
+    const remind = (
+      booking: Awaited<ReturnType<typeof pendingBankTransfer>>,
+      hoursBeforeDeadline: number,
+    ) =>
+      runBankTransferPaymentReminders(booking.sweepPool, {
+        now: new Date(booking.deadline - hoursBeforeDeadline * 3_600_000),
+      });
+    const waiting = await pendingBankTransfer();
+    try {
+      // Booked just now: the reminder waits until 24 hours before the deadline.
+      await remind(waiting, 25);
+      expect(await reminders(waiting)).toEqual([]);
+      // Two runs (two servers) race the first reminder: one is queued.
+      await Promise.all([remind(waiting, 23), remind(waiting, 23)]);
+      const once = [{ role: "guest", bank: true, deadline: waiting.pending.payment.deadlineAt }];
+      expect(await reminders(waiting)).toEqual(once);
+      // Later runs: still one.
+      await remind(waiting, 22);
+      expect(await reminders(waiting)).toEqual(once);
+    } finally {
+      await waiting.close();
+    }
+    // Paid or released bookings get no reminder.
+    const paid = await pendingBankTransfer();
+    try {
+      await expect(paid.markPaid()).resolves.toMatchObject({ ok: true });
+      await remind(paid, 23);
+      expect(await reminders(paid)).toEqual([]);
+    } finally {
+      await paid.close();
+    }
+    const released = await pendingBankTransfer();
+    try {
+      // Less than 2 hours left (after downtime, say): too late to be of use.
+      await remind(released, 1);
+      expect(await reminders(released)).toEqual([]);
+      await expect(released.sweep()).resolves.toBe(1);
+      await remind(released, 23);
+      expect(await reminders(released)).toEqual([]);
+    } finally {
+      await released.close();
+    }
+  }, 60_000);
 
   it("lets the hotel decline an unpaid PayPal booking: rooms released, guest told", async () => {
     const fixture = await setupFixture(manualQuote("paypal", "instant"), undefined, true);

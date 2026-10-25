@@ -15,6 +15,10 @@ import {
 import { createCurrentPricingQuoteStore } from "../domains/currentPricingQuoteStore.js";
 import { lockPricingManualPaymentTerms } from "../domains/pricingManualPayment.js";
 import {
+  paymentWindowArrivalRange,
+  readPaymentMethodWindows,
+} from "../domains/pricingPaymentWindows.js";
+import {
   manualPaymentEarliestArrival,
   readPricingCheckInPlace,
 } from "../domains/pricingManualPaymentLead.js";
@@ -1838,19 +1842,24 @@ export function createTargetBookingWebCheckoutAdapter(
         const row = await loadTargetCheckoutConfig(pool, property.propertyId);
         const methods = bookingPagePaymentMethods(row, config);
         const earliest = await bookingPageManualEarliestArrival(pool, property.propertyId, methods);
+        const windows = await bookingPagePaymentWindows(pool, property.propertyId, methods);
         return {
           propertyId: property.propertyId,
           resourceType: "checkout_config",
           resourceId: property.propertyId,
           body: {
             ...serializeTargetCheckoutConfig(property, row),
-            // Without an earliest arrival date a method cannot be quoted, so /book leaves it out.
-            bookingPagePaymentMethods: earliest
-              ? methods.filter(
-                  (method) => !isManualPricingPaymentMethod(method) || earliest[method],
-                )
-              : methods,
+            // Without an earliest arrival date a method cannot be quoted, so /book leaves it out;
+            // likewise a booking window whose dates can't be worked out (VAY-2348).
+            bookingPagePaymentMethods: methods.filter(
+              (method) =>
+                (!earliest || !isManualPricingPaymentMethod(method) || earliest[method]) &&
+                !windows.unknown.includes(method),
+            ),
             ...(earliest ? { manualPaymentEarliestArrival: earliest } : {}),
+            ...(Object.keys(windows.arrival).length
+              ? { paymentMethodArrivalWindows: windows.arrival }
+              : {}),
           },
         };
       });
@@ -2994,6 +3003,34 @@ async function bookingPageManualEarliestArrival(
     if (date) earliest[method] = date;
   }
   return earliest;
+}
+
+/** VAY-2348: the property-local arrival dates each offered method's booking window allows now, as
+ * `{ from }` (booked at least N days ahead) or `{ through }` (booked within N hours/days), so /book
+ * offers it only for those dates. Methods whose dates can't be worked out are `unknown`. */
+async function bookingPagePaymentWindows(
+  pool: Pick<pg.Pool, "query">,
+  propertyId: string,
+  methods: readonly string[],
+): Promise<{
+  arrival: Record<string, { from: string } | { through: string }>;
+  unknown: string[];
+}> {
+  const windows = await readPaymentMethodWindows(pool, propertyId);
+  const limited = methods.flatMap((method) => {
+    const window = windows[method as keyof typeof windows];
+    return window ? [[method, window] as const] : [];
+  });
+  const arrival: Record<string, { from: string } | { through: string }> = {};
+  const unknown: string[] = [];
+  if (!limited.length) return { arrival, unknown };
+  const read = await readPricingCheckInPlace(pool, propertyId);
+  for (const [method, window] of limited) {
+    const range = read && paymentWindowArrivalRange(window, read.place, read.now);
+    if (range) arrival[method] = range;
+    else unknown.push(method);
+  }
+  return { arrival, unknown };
 }
 
 function serializeTargetCheckoutConfig(

@@ -42,6 +42,7 @@ describe("addressFromGooglePlace", () => {
       countryCode: "DE",
       latitude: 48.1373932,
       longitude: 11.5754485,
+      location: { latitude: 48.1373932, longitude: 11.5754485 },
     });
   });
 
@@ -98,6 +99,8 @@ describe("addressFromGooglePlace", () => {
       countryCode: "DE",
       latitude: null,
       longitude: null,
+      // Still where the road is, so the address map can show it (VAY-2344).
+      location: { latitude: 48.1373932, longitude: 11.5754485 },
     });
   });
 });

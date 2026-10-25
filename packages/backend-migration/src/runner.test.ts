@@ -1351,6 +1351,7 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
         "online_card_readiness",
         "ota_commission_evidence",
         "ota_commission_reporting_evidence",
+        "payment_method_booking_windows",
         "payment_provider_accounts",
         "payment_settings",
         "payments",
