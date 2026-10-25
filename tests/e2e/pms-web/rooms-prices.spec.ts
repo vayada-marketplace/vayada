@@ -233,9 +233,11 @@ test("prices a room in its Prices tab and publishes the other rooms unchanged", 
   );
 
   await page.goto("/rooms");
-  await expect(main(page).getByText("All prices are in EUR.", { exact: false })).toBeVisible();
-  await expect(main(page).getByText("1 rate · base price from 120.00 EUR")).toBeVisible();
-  await expect(main(page).getByText("1 rate · base price from 90.00 EUR")).toBeVisible();
+  // VAY-2338: the subtitle names the currency; each row reads "from EUR 120" over "1 rate · per night".
+  await expect(main(page).getByText(/ · prices in EUR$/)).toBeVisible();
+  await expect(main(page).getByText(/^from EUR\s120$/)).toBeVisible();
+  await expect(main(page).getByText(/^from EUR\s90$/)).toBeVisible();
+  await expect(main(page).getByText("1 rate · per night", { exact: true })).toHaveCount(2);
   await expect(main(page).getByRole("link", { name: "Set prices" })).toHaveAttribute(
     "href",
     `/rooms/${LAKE}?tab=prices`,
