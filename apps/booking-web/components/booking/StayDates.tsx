@@ -51,17 +51,12 @@ export default function StayDates({
   const t = useTranslations("confirmation");
   const tc = useTranslations("common");
   const locale = useLocale();
-  const column = (label: string, date: string, time: string | undefined, corner?: string) => {
+  const column = (label: string, date: string, time: string | undefined) => {
     const { day, year } = dayParts(date, locale);
     return (
       <div className="flex min-w-0 flex-1 flex-col gap-1">
-        <div className="flex h-6 items-center justify-between gap-2">
-          <span className={labelClass}>{label}</span>
-          {corner && (
-            <span className="whitespace-nowrap rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-semibold text-gray-700">
-              {corner}
-            </span>
-          )}
+        <div className="flex h-6 items-center">
+          <span className={`${labelClass} whitespace-nowrap`}>{label}</span>
         </div>
         <span
           data-testid="stay-day"
@@ -76,14 +71,15 @@ export default function StayDates({
     );
   };
   return (
-    <div className="flex items-stretch gap-4 px-[18px] py-[18px] sm:gap-7 sm:px-7 sm:py-[22px]">
+    <div className="relative flex items-stretch gap-4 px-[18px] py-[18px] sm:gap-7 sm:px-7 sm:py-[22px]">
       {column(t("checkIn"), checkIn, checkInTime)}
       <span aria-hidden="true" className="w-px shrink-0 bg-gray-200" />
-      {column(
-        t("checkOut"),
-        checkOut,
-        checkOutTime,
-        nights ? tc("nights", { count: nights }) : undefined,
+      {column(t("checkOut"), checkOut, checkOutTime)}
+      {/* In the block's corner, so it never squeezes a column's label. */}
+      {nights && (
+        <span className="absolute right-[18px] top-[18px] whitespace-nowrap rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-semibold text-gray-700 sm:right-7 sm:top-[22px]">
+          {tc("nights", { count: nights })}
+        </span>
       )}
     </div>
   );
