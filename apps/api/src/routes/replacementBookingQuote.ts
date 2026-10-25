@@ -127,6 +127,12 @@ export function createReplacementBookingQuoteIssuer(
           httpError(422, "This payment method isn't available this close to check-in."),
           { code: "MANUAL_PAYMENT_TOO_SOON" },
         );
+      // VAY-2348: the hotel's booking window for this method doesn't cover this arrival.
+      if (error.code === "denied" && error.reason === "payment_method_window")
+        throw Object.assign(
+          httpError(422, "This payment method isn't available for these dates."),
+          { code: "PAYMENT_METHOD_WINDOW" },
+        );
       // VAY-2205: part now by card, the rest at the property, while deposits are switched off.
       if (error.code === "denied" && error.reason === "card_deposit_unavailable")
         throw Object.assign(

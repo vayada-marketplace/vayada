@@ -14,6 +14,7 @@ const text = (v: unknown): v is string =>
 export type { ReplacementOfferTerms } from "./replacementPricingEvidence.js";
 export * from "./pricingPaidWhenBooking.js";
 export * from "./pricingOfferNames.js";
+export * from "./paymentMethodWindows.js";
 export {
   isManualPricingPaymentMethod,
   isPricingPaymentMethod,

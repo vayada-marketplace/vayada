@@ -90,6 +90,7 @@ import { createPgHotelCatalogStep1Repository } from "./domains/hotelCatalogStep1
 import { createPgFinanceOtaCommissionRuleRepository } from "./domains/financeOtaCommissionRuleRepository.js";
 import { createBankTransferCodec } from "./domains/financeBankTransferCodec.js";
 import { createBankTransferRepository } from "./domains/financeBankTransferRepository.js";
+import { createPaymentMethodWindowsRepository } from "./domains/pricingPaymentWindows.js";
 import { createPgFinanceExpenseCategoryRepository } from "./domains/financeExpenseCategoryRepository.js";
 import { createPgFinanceManualExpenseRepository } from "./domains/financeManualExpenseRepository.js";
 import { createPgFinanceRecurringExpenseRuleRepository } from "./domains/financeRecurringExpenseRuleRepository.js";
@@ -1991,6 +1992,18 @@ const app = buildApp({
   bookingGuestPiiPort,
   financeRepository,
   financeBankTransfer: bankTransferRepository ? { repository: bankTransferRepository } : undefined,
+  // VAY-2348: booking windows per payment method, on the ordinary API login (finance).
+  financePaymentWindows: config.auth
+    ? {
+        repository: createPaymentMethodWindowsRepository(
+          new pg.Pool({
+            connectionString: targetDatabaseUrl,
+            connectionTimeoutMillis: 5_000,
+            max: 2,
+          }),
+        ),
+      }
+    : undefined,
   financeSubscriptionService,
   financeOtaCommissionSettingsRepository,
   financeExpenses: financeExpenseRuntime

@@ -11,6 +11,7 @@ import { lockCurrentPricingQuote } from "./currentPricingQuote.js";
 import { selectedAddonLeadTimesAllow } from "./addonLeadTime.js";
 import { lockPricingManualPaymentTerms } from "./pricingManualPayment.js";
 import { pricingManualLeadTimeAllows } from "./pricingManualPaymentLead.js";
+import { pricingPaymentWindowAllows } from "./pricingPaymentWindows.js";
 import { lockPublicPricingAuthority } from "./publicPricingAuthority.js";
 import { PricingStorageError } from "./replacementPricingStore.js";
 import { selectedRatesTakePaymentMethod } from "./selectedRatePaymentMethods.js";
@@ -133,6 +134,16 @@ export function createCurrentPricingQuoteStore(pool: Pool, lifetimeSeconds: numb
           )
             throw new PricingStorageError("denied", "manual_payment_too_soon");
         }
+        // VAY-2348: the hotel offers this way to pay only to guests booking within its window.
+        if (
+          !(await pricingPaymentWindowAllows(
+            client,
+            scope.propertyId,
+            method,
+            record.quote.stay.checkIn,
+          ))
+        )
+          throw new PricingStorageError("denied", "payment_method_window");
         const inserted = await client.query(
           `INSERT INTO booking.pricing_quotes(id,property_id,organization_id,request_id,request_hash,payload)
           SELECT $1,$2,$3,$4,$5,$6 WHERE $7::timestamptz > clock_timestamp() RETURNING id`,
