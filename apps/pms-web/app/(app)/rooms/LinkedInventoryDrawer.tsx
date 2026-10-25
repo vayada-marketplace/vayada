@@ -13,7 +13,7 @@ export default function LinkedInventoryDrawer({
   children,
 }: {
   onClose: () => void;
-  returnFocus: RefObject<HTMLElement | null>;
+  returnFocus: RefObject<HTMLElement>;
   children: ReactNode;
 }) {
   const { t } = useTranslation();
@@ -23,6 +23,17 @@ export default function LinkedInventoryDrawer({
     const button = returnFocus.current;
     return () => button?.focus();
   }, [returnFocus]);
+  // Escape closes the drawer wherever the focus is (a deleted group's button leaves it on the page), except in a
+  // confirmation opened from the drawer, which closes itself.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      const dialog = (event.target as Element | null)?.closest?.('[role="dialog"]');
+      if (!dialog || dialog === panel.current) onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
@@ -34,7 +45,8 @@ export default function LinkedInventoryDrawer({
         aria-labelledby="linked-inventory-title"
         tabIndex={-1}
         onKeyDown={(event) => {
-          // A confirmation opened in the drawer handles its own keys.
+          // A confirmation opened in the drawer handles its own keys; Escape is handled above.
+          if (event.key === "Escape") return;
           if ((event.target as HTMLElement).closest('[role="dialog"]') !== panel.current) return;
           trapFocus(event, panel.current, onClose);
         }}

@@ -26,7 +26,9 @@ test("room settings opens sign-in for the selected hotel's Airbnb import", async
   const popupPromise = page.waitForEvent("popup");
   await link.click();
   const popup = await popupPromise;
-  await expect(popup.getByRole("heading", { name: "Simulated Booking Admin sign-in" })).toBeVisible();
+  await expect(
+    popup.getByRole("heading", { name: "Simulated Booking Admin sign-in" }),
+  ).toBeVisible();
   expect(new URL(page.url()).pathname).toBe("/rooms");
   await popup.close();
 });

@@ -318,7 +318,9 @@ function RoomTypeCard({
               disabled={duplicating}
               className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-600 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
               title={duplicating ? t("rooms.duplicatingRoomType") : t("rooms.duplicateRoomType")}
-              aria-label={duplicating ? t("rooms.duplicatingRoomType") : t("rooms.duplicateRoomType")}
+              aria-label={
+                duplicating ? t("rooms.duplicatingRoomType") : t("rooms.duplicateRoomType")
+              }
             >
               <DocumentDuplicateIcon className="h-4 w-4" />
             </button>
@@ -700,15 +702,17 @@ export default function RoomsPage() {
           {duplicateError}
         </p>
       )}
-      {/* Shown only while an Airbnb import has rooms to review. */}
+      {/* Shown only while an Airbnb import has rooms to review; the wrapper spaces it like the banners. */}
       {importPropertyId && (
-        <PreparedHotelImportPanel
-          key={`prepared-${importPropertyId}`}
-          client={sharedSetupClient}
-          propertyId={importPropertyId}
-          roomsOnly
-          onSaved={refreshRooms}
-        />
+        <div className="mb-4 empty:hidden [&>section]:my-0">
+          <PreparedHotelImportPanel
+            key={`prepared-${importPropertyId}`}
+            client={sharedSetupClient}
+            propertyId={importPropertyId}
+            roomsOnly
+            onSaved={refreshRooms}
+          />
+        </div>
       )}
 
       {/* Room Type List */}

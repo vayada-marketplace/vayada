@@ -145,13 +145,17 @@ it("keeps the setup tools in the ☰ menu and opens Linked inventory in a drawer
   expect(text()).not.toContain("rooms.menu.importAirbnb");
   expect(view.root.findAllByType(LinkedInventoryGroupsPanel)).toHaveLength(0);
 
-  await act(async () => view.root.findByProps({ "aria-label": "rooms.menu.label" }).props.onClick());
+  await act(async () =>
+    view.root.findByProps({ "aria-label": "rooms.menu.label" }).props.onClick(),
+  );
   const airbnb = view.root.findByProps({ href: "https://admin.test/import/test-property" });
   expect(airbnb.props.target).toBe("_blank");
   expect(view.root.findAllByProps({ href: "/calendar?reorder=1" })).toHaveLength(1);
   const linked = view.root
     .findAllByType("button")
-    .find((button) => button.findAll((node) => node.children.includes("rooms.linkedInventory")).length)!;
+    .find(
+      (button) => button.findAll((node) => node.children.includes("rooms.linkedInventory")).length,
+    )!;
   await act(async () => linked.props.onClick());
   expect(text()).not.toContain("rooms.menu.importAirbnb");
   expect(view.root.findByProps({ role: "dialog" }).props["aria-labelledby"]).toBe(
@@ -168,7 +172,9 @@ it("offers no room reordering with a single room", async () => {
     { id: "unit-1", roomTypeId: "room-1" },
   ] as Awaited<ReturnType<typeof individualRoomsService.list>>);
   await mount();
-  await act(async () => view.root.findByProps({ "aria-label": "rooms.menu.label" }).props.onClick());
+  await act(async () =>
+    view.root.findByProps({ "aria-label": "rooms.menu.label" }).props.onClick(),
+  );
   expect(view.root.findAllByProps({ href: "/calendar?reorder=1" })).toHaveLength(0);
   vi.unstubAllGlobals();
 });

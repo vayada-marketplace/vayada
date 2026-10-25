@@ -22,7 +22,7 @@ export default function RoomsMenu({
   canReorder,
   onLinkedInventory,
 }: {
-  buttonRef: RefObject<HTMLButtonElement | null>;
+  buttonRef: RefObject<HTMLButtonElement>;
   /** Booking Admin's Airbnb import, when it is on. */
   airbnbHref: string | null;
   /** The calendar's reorder mode needs two rooms. */

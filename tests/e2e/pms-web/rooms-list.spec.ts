@@ -102,10 +102,9 @@ test.describe("Rooms & Rates list", () => {
     // The arrow (or a click on the row) still opens a room type's rooms.
     await page.getByRole("button", { name: "Show the rooms of Garden Villa" }).click();
     await expect(main(page).getByText("#201", { exact: false })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Hide the rooms of Garden Villa" })).toHaveAttribute(
-      "aria-expanded",
-      "true",
-    );
+    await expect(
+      page.getByRole("button", { name: "Hide the rooms of Garden Villa" }),
+    ).toHaveAttribute("aria-expanded", "true");
   });
 
   test("the ☰ menu closes on Escape and on a click outside", async ({ page }) => {
@@ -123,7 +122,9 @@ test.describe("Rooms & Rates list", () => {
   });
 
   // No page-health watch: the Rooms list's import panel calls setup APIs this spec does not mock.
-  test("linked inventory opens in a drawer where groups are added and deleted", async ({ page }) => {
+  test("linked inventory opens in a drawer where groups are added and deleted", async ({
+    page,
+  }) => {
     const groups = await openRooms(page);
     await page.getByRole("button", { name: "More actions" }).click();
     await page.getByRole("button", { name: "Linked inventory" }).click();
@@ -143,7 +144,10 @@ test.describe("Rooms & Rates list", () => {
     await drawer.getByRole("button", { name: "Cancel" }).click();
 
     await drawer.getByRole("button", { name: "Delete Villas" }).click();
-    await page.getByRole("dialog", { name: "Delete Villas" }).getByRole("button", { name: "Delete" }).click();
+    await page
+      .getByRole("dialog", { name: "Delete Villas" })
+      .getByRole("button", { name: "Delete" })
+      .click();
     await expect(drawer.getByText("No groups yet")).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(drawer).toHaveCount(0);
@@ -154,7 +158,9 @@ test.describe("Rooms & Rates list", () => {
     await openRooms(page);
     await page.getByRole("button", { name: "More actions" }).click();
     await page.getByRole("link", { name: /Reorder room types/ }).click();
-    await expect.poll(() => new URL(page.url()).pathname + new URL(page.url()).search).toBe("/calendar");
+    await expect
+      .poll(() => new URL(page.url()).pathname + new URL(page.url()).search)
+      .toBe("/calendar");
     await expect(page.getByText("Reordering rooms", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "Save order" })).toBeVisible();
   });
@@ -167,12 +173,16 @@ test.describe("Rooms & Rates list on a phone", () => {
     page,
   }) => {
     await openRooms(page);
-    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      390,
+    );
     await expect(main(page).getByText("Room type", { exact: true })).toBeHidden();
     await page.getByRole("button", { name: "More actions" }).click();
     await expect(page.getByRole("button", { name: "Linked inventory" })).toBeVisible();
     await expect(page.getByRole("link", { name: /Reorder room types/ })).toBeHidden();
-    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      390,
+    );
     await page.getByRole("button", { name: "Linked inventory" }).click();
     const drawer = page.getByRole("dialog", { name: "Linked inventory" });
     expect((await drawer.boundingBox())!.width).toBe(390);

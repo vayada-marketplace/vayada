@@ -108,9 +108,12 @@ export function RoomPriceSummary({
       </>
     );
   const lowest = lowestBaseMinor(room);
-  const rates = t(room.offers.length === 1 ? "pricing.list.rates.one" : "pricing.list.rates.other", {
-    count: room.offers.length,
-  });
+  const rates = t(
+    room.offers.length === 1 ? "pricing.list.rates.one" : "pricing.list.rates.other",
+    {
+      count: room.offers.length,
+    },
+  );
   return (
     <>
       <p className="text-[15px] font-semibold text-gray-900 tabular-nums">
@@ -119,9 +122,7 @@ export function RoomPriceSummary({
           : rates}
       </p>
       {lowest && (
-        <p className="text-[13px] text-gray-500">
-          {rates} · {t("pricing.list.perNight")}
-        </p>
+        <p className="text-[13px] text-gray-500">{`${rates} · ${t("pricing.list.perNight")}`}</p>
       )}
     </>
   );
@@ -143,7 +144,11 @@ export function RoomPricesLink({
       onClick={(event) => event.stopPropagation()}
       className="px-1.5 text-sm font-semibold text-primary-600 hover:text-primary-700"
     >
-      {t(publishedRoom(publication, roomTypeId) ? "pricing.list.editPrices" : "pricing.list.setPrices")}
+      {t(
+        publishedRoom(publication, roomTypeId)
+          ? "pricing.list.editPrices"
+          : "pricing.list.setPrices",
+      )}
     </a>
   );
 }
@@ -243,9 +248,15 @@ export function RoomsPricesStrip({
       type="button"
       disabled={busy}
       onClick={retry ? () => void run() : saveAgain}
-      className={staleOnly ? `mt-3 ${ui.primaryButton}` : `${ui.primaryButton} shrink-0 justify-center py-2 text-sm`}
+      className={
+        staleOnly
+          ? `mt-3 ${ui.primaryButton}`
+          : `${ui.primaryButton} shrink-0 justify-center py-2 text-sm`
+      }
     >
-      {t(busy ? "pricing.editor.saving" : retry ? "pricing.editor.retry" : "pricing.list.saveAgain")}
+      {t(
+        busy ? "pricing.editor.saving" : retry ? "pricing.editor.retry" : "pricing.list.saveAgain",
+      )}
     </button>
   );
   return (

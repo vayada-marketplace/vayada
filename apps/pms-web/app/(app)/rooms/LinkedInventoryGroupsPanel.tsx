@@ -106,7 +106,9 @@ export default function LinkedInventoryGroupsPanel({
           <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary-50">
             <LinkIcon className="h-6 w-6 text-primary-600" />
           </span>
-          <p className="mt-3 text-base font-semibold text-gray-900">{t("rooms.linkedEmptyTitle")}</p>
+          <p className="mt-3 text-base font-semibold text-gray-900">
+            {t("rooms.linkedEmptyTitle")}
+          </p>
           <p className="mt-1 max-w-xs text-sm text-gray-500">{t("rooms.linkedEmptyHint")}</p>
           <button
             type="button"
@@ -120,9 +122,12 @@ export default function LinkedInventoryGroupsPanel({
       ) : (
         <div className="flex items-center justify-between gap-3">
           <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">
-            {t(groups.length === 1 ? "rooms.linkedGroupCount.one" : "rooms.linkedGroupCount.other", {
-              count: groups.length,
-            })}
+            {t(
+              groups.length === 1 ? "rooms.linkedGroupCount.one" : "rooms.linkedGroupCount.other",
+              {
+                count: groups.length,
+              },
+            )}
           </p>
           <button
             type="button"
@@ -192,7 +197,7 @@ export default function LinkedInventoryGroupsPanel({
               className="mt-1 block w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm focus:border-primary-500 focus:outline-none"
             />
           </label>
-          <fieldset className="mt-3 grid gap-2 sm:grid-cols-2">
+          <fieldset className="mt-3 grid gap-2">
             <legend className="mb-2 text-xs font-medium text-gray-700">
               {t("rooms.roomTypes")}
             </legend>
@@ -209,7 +214,7 @@ export default function LinkedInventoryGroupsPanel({
               return (
                 <label
                   key={roomType.id}
-                  className={`flex items-center gap-2 rounded-lg border bg-white px-3 py-2 text-xs ${unavailable ? "cursor-not-allowed text-gray-400" : "cursor-pointer text-gray-700"}`}
+                  className={`flex items-center gap-2.5 rounded-lg border px-3 py-2.5 text-sm ${unavailable ? "cursor-not-allowed bg-gray-50 text-gray-400" : "cursor-pointer bg-white text-gray-800"}`}
                 >
                   <input
                     type="checkbox"
@@ -219,7 +224,7 @@ export default function LinkedInventoryGroupsPanel({
                   />
                   <span className="flex-1">{roomType.name}</span>
                   {otherGroup && (
-                    <span className="text-[11px]">
+                    <span className="shrink-0 text-xs">
                       {t("rooms.linkedInGroup", { name: otherGroup.name })}
                     </span>
                   )}
