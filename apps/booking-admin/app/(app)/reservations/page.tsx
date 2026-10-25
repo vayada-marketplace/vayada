@@ -16,6 +16,7 @@ import {
   type BookingReservationList,
 } from "@/services/api/bookingReservationsClient";
 import { PageHeader, PageLayout } from "@/components/layout/PageLayout";
+import { useNotificationLink } from "@/lib/notificationLinks";
 
 const PAGE_SIZE = 20;
 
@@ -51,6 +52,14 @@ export default function ReservationsPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<BookingReservationListClientError | null>(null);
+
+  // "View booking" from the notifications bell opens the list filtered to that booking (VAY-2349).
+  useNotificationLink({ path: "/reservations", param: "search" }, (reference) => {
+    setSearchDraft(reference);
+    setSearch(reference);
+    setStatus("");
+    setOffset(0);
+  });
 
   useEffect(() => {
     let interval: number | null = null;
