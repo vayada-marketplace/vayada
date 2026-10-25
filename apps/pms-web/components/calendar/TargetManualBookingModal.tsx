@@ -16,6 +16,7 @@ import { useTranslation } from "@/lib/i18n";
 import { NationalitySelect } from "@vayada/locale-ui/NationalitySelect";
 import PhoneNumberInput, { phoneCountryOrEmpty, phoneToE164 } from "@/components/PhoneNumberInput";
 import AdditionalGuestsEditor, {
+  additionalGuestNumber,
   additionalGuestValid,
   type AdditionalGuestDraft,
 } from "@/components/calendar/AdditionalGuestsEditor";
@@ -386,7 +387,9 @@ export default function TargetManualBookingModal({
       );
       setGuestFocus({ key: additionalGuests[invalidGuest]!.key });
       return setMessage(
-        t("calendar.targetManualBooking.additionalGuestInvalid", { number: invalidGuest + 1 }),
+        t("calendar.targetManualBooking.additionalGuestInvalid", {
+          number: additionalGuestNumber(invalidGuest),
+        }),
       );
     }
     if (!retry && (!previewInput || !preview || previewState !== "idle"))

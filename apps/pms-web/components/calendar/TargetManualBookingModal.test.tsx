@@ -548,22 +548,28 @@ describe("target manual booking fields", () => {
     act(() => button("+ Add guest").props.onClick());
     act(() => button("+ Add guest").props.onClick());
     expect(view.root.findAllByProps({ "data-additional-guest": true })).toHaveLength(2);
+    // The booker is guest 1, so added guests start at guest 2 (VAY-2364).
+    expect(
+      view.root
+        .findAllByProps({ "data-additional-guest": true })
+        .map((card) => card.findByType("summary").children.join("")),
+    ).toEqual(["Guest 2", "Guest 3"]);
     // Booker plus two guests is more than the Double room's two places: warn, don't block.
     const markup = JSON.stringify(view.toJSON());
     expect(markup).toContain("3 guests is more than the 2");
     // The stays still say one guest, so pricing and Booking Detail would disagree: hint, don't block.
     expect(markup).toContain("3 people are listed, but the stays have 1 guests");
 
-    type("Guest 1 first name", "Grace");
+    type("Guest 2 first name", "Grace");
     await submit();
     expect(onSubmit).not.toHaveBeenCalled();
-    expect(view.root.findByProps({ role: "alert" }).children.join("")).toContain("Check guest 1");
+    expect(view.root.findByProps({ role: "alert" }).children.join("")).toContain("Check guest 2");
     expect(view.root.findAllByProps({ "data-additional-guest": true })[0]!.props.open).toBe(true);
 
-    type("Guest 1 last name", "Hopper");
-    type("Guest 2 first name", "Alan");
-    type("Guest 2 last name", "Turing");
-    type("Guest 2 email", "alan@example.com");
+    type("Guest 2 last name", "Hopper");
+    type("Guest 3 first name", "Alan");
+    type("Guest 3 last name", "Turing");
+    type("Guest 3 email", "alan@example.com");
     const guestPhone = view.root
       .findAllByProps({ "data-additional-guest": true })[1]!
       .findByProps({ name: "phone" });
@@ -591,7 +597,7 @@ describe("target manual booking fields", () => {
     const button = (label: string) =>
       view.root.findAllByType("button").find((item) => item.children.join("") === label)!;
     act(() => button("+ Add guest").props.onClick());
-    act(() => button("Remove guest 1").props.onClick());
+    act(() => button("Remove guest 2").props.onClick());
     expect(view.root.findAllByProps({ "data-additional-guest": true })).toHaveLength(0);
     await act(async () => {
       await view.root.findByType("form").props.onSubmit({ preventDefault: vi.fn() });
@@ -606,7 +612,7 @@ describe("target manual booking fields", () => {
     const focus = vi.fn();
     let view!: ReactTestRenderer;
     // prettier-ignore
-    await act(async () => { view = create(createElement(TargetManualBookingModal, { roomTypes, rooms, initialCheckIn: "2026-09-10", initialCheckOut: "2026-09-11", onSubmit: vi.fn(), onClose: vi.fn() }), { createNodeMock: (element) => element.props["aria-label"] === "Guest 1 first name" ? { focus } : element.props.role === "dialog" ? { focus: vi.fn(), querySelectorAll: () => [] } : null }); });
+    await act(async () => { view = create(createElement(TargetManualBookingModal, { roomTypes, rooms, initialCheckIn: "2026-09-10", initialCheckOut: "2026-09-11", onSubmit: vi.fn(), onClose: vi.fn() }), { createNodeMock: (element) => element.props["aria-label"] === "Guest 2 first name" ? { focus } : element.props.role === "dialog" ? { focus: vi.fn(), querySelectorAll: () => [] } : null }); });
     const button = (label: string) =>
       view.root.findAllByType("button").find((item) => item.children.join("") === label)!;
     // Room 1 (2 places) for one night, then the Villa (5 places) the next night: capacity is 2, not 7.

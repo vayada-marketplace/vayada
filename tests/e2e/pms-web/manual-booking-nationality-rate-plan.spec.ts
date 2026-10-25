@@ -287,10 +287,10 @@ test("defaults the rate plan, falls back to Custom, and submits nationality as I
 
   // Additional guests are booking-level cards; exceeding room capacity only warns.
   await dialog.getByRole("button", { name: "+ Add guest" }).click();
-  await dialog.getByLabel("Guest 1 first name").fill("Grace");
-  await dialog.getByLabel("Guest 1 last name").fill("Hopper");
-  await dialog.getByText("Guest 1 · Grace Hopper").click();
-  await expect(dialog.getByLabel("Guest 1 first name")).toBeHidden();
+  await dialog.getByLabel("Guest 2 first name").fill("Grace");
+  await dialog.getByLabel("Guest 2 last name").fill("Hopper");
+  await dialog.getByText("Guest 2 · Grace Hopper").click();
+  await expect(dialog.getByLabel("Guest 2 first name")).toBeHidden();
   await createBooking.click();
   await expect.poll(() => createBody).not.toBeNull();
   expect(createBody).toMatchObject({
