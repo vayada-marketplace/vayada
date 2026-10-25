@@ -306,11 +306,12 @@ function RoomTypeCard({
         </div>
 
         {/* Rates and actions: their own columns from lg, one line under the name below it. */}
-        <div className="flex items-center gap-2 lg:contents">
+        {/* A long price keeps its line; the actions then wrap below it. */}
+        <div className="flex flex-wrap items-center gap-2 lg:contents">
           <div className="min-w-0 flex-1 lg:w-[200px] lg:flex-none">
             {prices && <RoomPriceSummary roomTypeId={room.id} publication={prices.publication} />}
           </div>
-          <div className="flex shrink-0 items-center justify-end gap-2 lg:w-[240px]">
+          <div className="ml-auto flex shrink-0 items-center justify-end gap-2 lg:ml-0 lg:w-[240px]">
             <RoomPricesLink roomTypeId={room.id} publication={prices?.publication} />
             <button
               onClick={(e) => {
@@ -650,15 +651,11 @@ export default function RoomsPage() {
   return (
     <div className="p-4 md:p-6">
       {/* Header */}
-      <div className="flex items-start justify-between gap-3 mb-4 md:mb-5">
-        <div className="min-w-0">
-          <h1 className="text-2xl md:text-[26px] font-bold tracking-tight text-gray-900">
-            {t("rooms.title")}
-          </h1>
-          {!loading && !(loadFailed && rooms.length === 0) && (
-            <p className="mt-1 text-[13px] md:text-sm text-gray-500">{summary}</p>
-          )}
-        </div>
+      {/* The subtitle takes its own line, so on phones it doesn't share the width with the buttons. */}
+      <div className="flex flex-wrap items-start justify-between gap-x-3 mb-4 md:mb-5">
+        <h1 className="min-w-0 text-2xl md:text-[26px] font-bold tracking-tight text-gray-900">
+          {t("rooms.title")}
+        </h1>
         <div className="flex items-center gap-2 shrink-0">
           <Link
             href="/rooms/new"
@@ -676,6 +673,9 @@ export default function RoomsPage() {
             onLinkedInventory={() => setLinkedOpen(true)}
           />
         </div>
+        {!loading && !(loadFailed && rooms.length === 0) && (
+          <p className="mt-1 w-full text-[13px] md:text-sm text-gray-500">{summary}</p>
+        )}
       </div>
 
       <RoomsPricesStrip {...propertyPrices} />

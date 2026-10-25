@@ -116,7 +116,7 @@ export function RoomPriceSummary({
   );
   return (
     <>
-      <p className="text-[15px] font-semibold text-gray-900 tabular-nums">
+      <p className="whitespace-nowrap text-sm font-semibold text-gray-900 tabular-nums lg:text-[15px]">
         {lowest
           ? t("pricing.list.from", { price: listPrice(lowest, publication!.currency, locale) })
           : rates}
