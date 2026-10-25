@@ -688,5 +688,17 @@
   "agreements.banner.accepting": "Aceptando…",
   "agreements.banner.failed": "No ha funcionado. Inténtalo de nuevo.",
   "agreements.banner.accepted": "Acuerdo de tratamiento de datos aceptado para {account}.",
-  "agreements.banner.dismiss": "Cerrar"
+  "agreements.banner.dismiss": "Cerrar",
+  "bookings.statusAwaitingPayment": "Pago pendiente",
+  "bookings.payBy": "Pago hasta el {date}",
+  "bookings.hotelTime": "hora del hotel",
+  "bookings.detail.waitingForTransfer": "Esperando la transferencia bancaria",
+  "bookings.detail.waitingForPaypal": "Esperando el pago por PayPal",
+  "bookings.detail.transferDueBy": "Vence el {date}. Si para entonces no marcas el pago como recibido, la reserva se libera automáticamente y la habitación vuelve a estar disponible.",
+  "bookings.detail.confirmTransferReceived": "¿Marcar como recibida la transferencia de {amount} de {guest} (referencia {reference})? La reserva se confirma, el pago se registra y el huésped recibe un correo de confirmación.",
+  "bookings.detail.markReceived": "Marcar como recibido",
+  "bookings.detail.markBankTransferReceived": "Marcar transferencia como recibida",
+  "calendar.awaitingPayment": "pago pendiente",
+  "calendar.awaitingPaymentHeld": "Las habitaciones quedan retenidas hasta entonces y se liberan automáticamente si el pago no se marca como recibido.",
+  "calendar.openBooking": "Abrir reserva"
 }

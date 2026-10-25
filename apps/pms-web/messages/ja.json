@@ -684,5 +684,17 @@
   "agreements.banner.accepting": "同意しています…",
   "agreements.banner.failed": "うまくいきませんでした。もう一度お試しください。",
   "agreements.banner.accepted": "{account}のデータ処理契約に同意しました。",
-  "agreements.banner.dismiss": "閉じる"
+  "agreements.banner.dismiss": "閉じる",
+  "bookings.statusAwaitingPayment": "入金待ち",
+  "bookings.payBy": "支払期限 {date}",
+  "bookings.hotelTime": "ホテル現地時間",
+  "bookings.detail.waitingForTransfer": "銀行振込の入金待ち",
+  "bookings.detail.waitingForPaypal": "PayPalの入金待ち",
+  "bookings.detail.transferDueBy": "期限 {date}。それまでに入金済みにしない場合、予約は自動的に解除され、客室は再び予約可能になります。",
+  "bookings.detail.confirmTransferReceived": "{guest}様からの{amount}の振込（参照番号 {reference}）を入金済みにしますか？予約が確定し、支払いが記録され、ゲストに確認メールが送信されます。",
+  "bookings.detail.markReceived": "入金済みにする",
+  "bookings.detail.markBankTransferReceived": "振込を入金済みにする",
+  "calendar.awaitingPayment": "入金待ち",
+  "calendar.awaitingPaymentHeld": "それまで客室は確保され、入金済みにされない場合は自動的に解除されます。",
+  "calendar.openBooking": "予約を開く"
 }

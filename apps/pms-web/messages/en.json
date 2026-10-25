@@ -463,7 +463,7 @@
   "bookings.detail.dueAtProperty": "Due at property",
   "bookings.detail.depositExceedsTotal": "Deposit exceeds current total by {amount}.",
   "bookings.detail.paymentBeforeRelease": "Payment must be recorded before this reservation is released.",
-  "bookings.detail.markBankTransferReceived": "Mark bank transfer received",
+  "bookings.detail.markBankTransferReceived": "Mark transfer received",
   "bookings.detail.markPayAtHotelReceived": "Mark pay-at-hotel payment received",
   "bookings.detail.markRestPaid": "Mark the rest paid ({amount})",
   "bookings.detail.restDueAtHotel": "The deposit was paid by card when booking. The rest, {amount}, is paid at the hotel.",
@@ -3724,5 +3724,16 @@
   "agreements.banner.accepting": "Accepting…",
   "agreements.banner.failed": "That didn’t work. Please try again.",
   "agreements.banner.accepted": "Data processing agreement accepted for {account}.",
-  "agreements.banner.dismiss": "Close"
+  "agreements.banner.dismiss": "Close",
+  "bookings.statusAwaitingPayment": "Awaiting payment",
+  "bookings.payBy": "Pay by {date}",
+  "bookings.hotelTime": "hotel time",
+  "bookings.detail.waitingForTransfer": "Waiting for the bank transfer",
+  "bookings.detail.waitingForPaypal": "Waiting for the PayPal payment",
+  "bookings.detail.transferDueBy": "Due by {date}. If you don't mark the payment as received by then, the booking is released automatically and the room becomes available again.",
+  "bookings.detail.confirmTransferReceived": "Mark the transfer of {amount} from {guest} (reference {reference}) as received? The booking is confirmed, the payment is recorded and the guest gets a confirmation email.",
+  "bookings.detail.markReceived": "Mark received",
+  "calendar.awaitingPayment": "awaiting payment",
+  "calendar.awaitingPaymentHeld": "The rooms are held until then and released automatically if the payment isn't marked as received.",
+  "calendar.openBooking": "Open booking"
 }

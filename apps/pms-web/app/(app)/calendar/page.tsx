@@ -28,6 +28,7 @@ import BlockDetailModal from "@/components/calendar/BlockDetailModal";
 import RoomShuffleNotice from "@/components/calendar/RoomShuffleNotice";
 import TargetManualBookingModal from "@/components/calendar/TargetManualBookingModal";
 import BookingDetailModal from "@/components/calendar/BookingDetailModal";
+import AwaitingPaymentCard from "@/components/calendar/AwaitingPaymentCard";
 import MiniDatePicker from "@/components/calendar/MiniDatePicker";
 import MobileCalendar, { calendarLaneTop } from "@/components/calendar/MobileCalendar";
 import MonthView from "@/components/calendar/MonthView";
@@ -41,6 +42,12 @@ import {
 } from "@/lib/roomOrdering";
 import { channexService } from "@/services/channex";
 import { getChannelBarColor, normalizeChannelKey } from "@/lib/constants/statusStyles";
+import {
+  AWAITING_PAYMENT_BAR_CLASS,
+  AWAITING_PAYMENT_BAR_STYLE,
+  formatPaymentDeadline,
+  useHotelTimeZone,
+} from "@/lib/awaitingPayment";
 
 const VIEW_DAYS = 21;
 const VIEW_MODE_STORAGE_KEY = "pms.calendar.viewMode";
@@ -110,6 +117,36 @@ export default function CalendarPage() {
     bookingCount: number;
   } | null>(null);
   const [selectedBooking, setSelectedBooking] = useState<CalendarBooking | null>(null);
+  // VAY-2348: a booking waiting for its bank transfer opens its deadline card, not the room tools.
+  const [awaitingBooking, setAwaitingBooking] = useState<CalendarBooking | null>(null);
+  const hotelTimeZone = useHotelTimeZone();
+  const openBooking = useCallback(
+    (booking: CalendarBooking) =>
+      booking.status === "awaiting_payment"
+        ? setAwaitingBooking(booking)
+        : setSelectedBooking(booking),
+    [],
+  );
+  /** The bar's look and hover text: channel colour, or the striped "awaiting payment" hold. */
+  const bookingBar = (b: CalendarBooking, extraTitle = "") => {
+    const name = `${b.guestFirstName} ${b.guestLastName}`.trim();
+    if (b.status !== "awaiting_payment")
+      return {
+        className: `text-white ${getChannelBarColor(b.channel)} hover:brightness-110`,
+        style: undefined,
+        title: `${name} (${b.status})${extraTitle}\n${b.checkIn} → ${b.checkOut}\nChannel: ${b.channel}`,
+        label: name,
+      };
+    const deadline = b.paymentDeadlineAt
+      ? `\n${t("bookings.payBy", { date: formatPaymentDeadline(b.paymentDeadlineAt, locale, hotelTimeZone) })}`
+      : "";
+    return {
+      className: `${AWAITING_PAYMENT_BAR_CLASS} hover:brightness-95`,
+      style: AWAITING_PAYMENT_BAR_STYLE,
+      title: `${name} (${t("bookings.statusAwaitingPayment")})${extraTitle}\n${b.checkIn} → ${b.checkOut}${deadline}`,
+      label: `${name} · ${t("calendar.awaitingPayment")}`,
+    };
+  };
   const [selectedBlock, setSelectedBlock] = useState<CalendarBlock | null>(null);
   // Mobile-only: the date range selected in MobileCalendar before opening
   // either modal. `startDate` and `endDate` follow the desktop convention
@@ -666,6 +703,7 @@ export default function CalendarPage() {
           </div>
         ) : (
           <MobileCalendar
+            hotelTimeZone={hotelTimeZone}
             currentMonth={mobileMonth}
             bookings={allBookings}
             blocks={data?.blocks || []}
@@ -673,7 +711,7 @@ export default function CalendarPage() {
             loading={loading}
             loadError={loadError}
             onMonthChange={handleMobileMonthChange}
-            onSelectBooking={setSelectedBooking}
+            onSelectBooking={openBooking}
             onNewBooking={handleMobileNewBooking}
             onBlockRoom={handleMobileBlockRoom}
             onSelectBlock={(bl) => setSelectedBlock(bl)}
@@ -953,7 +991,7 @@ export default function CalendarPage() {
             blocksByRoom={blocksByRoom}
             legacyBlocksByRoomType={legacyBlocksByRoomType}
             roomIndexInType={roomIndexInType}
-            onSelectBooking={setSelectedBooking}
+            onSelectBooking={openBooking}
             onSelectBlock={(bl) => setSelectedBlock(bl)}
           />
         ) : (
@@ -1208,7 +1246,7 @@ export default function CalendarPage() {
                             {roomBookings.map((b) => {
                               const style = getBarStyle(b.checkIn, b.checkOut);
                               if (!style) return null;
-                              const channelColor = getChannelBarColor(b.channel);
+                              const bar = bookingBar(b);
                               // VAY-403: multi-room reservation spans several rows.
                               const isMultiRoom = b.numberOfRooms > 1;
                               const multiRoomTitle = isMultiRoom
@@ -1222,19 +1260,17 @@ export default function CalendarPage() {
                                 <div
                                   key={`${b.id}-${b.roomPosition}`}
                                   data-bar="booking"
-                                  className={`absolute top-1.5 h-8 rounded-md px-2 text-[11px] font-medium leading-8 truncate cursor-pointer z-[1] text-white ${channelColor} hover:brightness-110 transition-all flex items-center gap-1.5 ${
+                                  className={`absolute top-1.5 h-8 rounded-md px-2 text-[11px] font-medium leading-8 truncate cursor-pointer z-[1] ${bar.className} transition-all flex items-center gap-1.5 ${
                                     isMultiRoom ? "ring-1 ring-inset ring-white/50" : ""
                                   }`}
-                                  style={style}
-                                  title={`${b.guestFirstName} ${b.guestLastName} (${b.status})\n${b.checkIn} → ${b.checkOut}\nChannel: ${b.channel}${multiRoomTitle}`}
-                                  onClick={() => setSelectedBooking(b)}
+                                  style={{ ...style, ...bar.style }}
+                                  title={`${bar.title}${multiRoomTitle}`}
+                                  onClick={() => openBooking(b)}
                                 >
                                   <span className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center text-[9px] font-bold flex-shrink-0">
                                     {getInitials(b.guestFirstName, b.guestLastName)}
                                   </span>
-                                  <span className="truncate">
-                                    {`${b.guestFirstName} ${b.guestLastName}`.trim()}
-                                  </span>
+                                  <span className="truncate">{bar.label}</span>
                                   {isMultiRoom && (
                                     <span className="ml-auto pl-1 text-[9px] font-bold opacity-90 flex-shrink-0">
                                       ×{b.numberOfRooms}
@@ -1289,24 +1325,22 @@ export default function CalendarPage() {
                       {unassignedBookings.map((b, index) => {
                         const style = getBarStyle(b.checkIn, b.checkOut);
                         if (!style) return null;
-                        const channelColor = getChannelBarColor(b.channel);
                         // prettier-ignore
                         const stayLabel = b.numberOfRooms > 1 ? ` · Room ${b.roomPosition + 1} of ${b.numberOfRooms}` : "";
+                        const bar = bookingBar(b, ` - Unassigned${stayLabel}`);
                         return (
                           <div
                             key={`${b.id}-${b.roomPosition}`}
                             data-bar="booking"
-                            className={`absolute top-1.5 h-8 rounded-md px-2 text-[11px] font-medium leading-8 truncate cursor-pointer z-[1] text-white ${channelColor} hover:brightness-110 transition-all flex items-center gap-1.5 opacity-75`}
-                            style={{ ...style, top: `${calendarLaneTop(index)}px` }}
-                            title={`${b.guestFirstName} ${b.guestLastName} (${b.status}) - Unassigned${stayLabel}\n${b.checkIn} → ${b.checkOut}`}
-                            onClick={() => setSelectedBooking(b)}
+                            className={`absolute top-1.5 h-8 rounded-md px-2 text-[11px] font-medium leading-8 truncate cursor-pointer z-[1] ${bar.className} transition-all flex items-center gap-1.5 ${b.status === "awaiting_payment" ? "" : "opacity-75"}`}
+                            style={{ ...style, top: `${calendarLaneTop(index)}px`, ...bar.style }}
+                            title={bar.title}
+                            onClick={() => openBooking(b)}
                           >
                             <span className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center text-[9px] font-bold flex-shrink-0">
                               {getInitials(b.guestFirstName, b.guestLastName)}
                             </span>
-                            <span className="truncate">
-                              {`${b.guestFirstName} ${b.guestLastName}${stayLabel}`.trim()}
-                            </span>
+                            <span className="truncate">{`${bar.label}${stayLabel}`.trim()}</span>
                           </div>
                         );
                       })}
@@ -1452,6 +1486,14 @@ export default function CalendarPage() {
           onSave={handleUpdateBlock}
           onDelete={handleDeleteBlock}
           onClose={() => setSelectedBlock(null)}
+        />
+      )}
+
+      {awaitingBooking && (
+        <AwaitingPaymentCard
+          booking={awaitingBooking}
+          timeZone={hotelTimeZone}
+          onClose={() => setAwaitingBooking(null)}
         />
       )}
 

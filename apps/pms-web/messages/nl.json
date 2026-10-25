@@ -684,5 +684,17 @@
   "agreements.banner.accepting": "Bezig met accepteren…",
   "agreements.banner.failed": "Dat is niet gelukt. Probeer het opnieuw.",
   "agreements.banner.accepted": "Verwerkersovereenkomst geaccepteerd voor {account}.",
-  "agreements.banner.dismiss": "Sluiten"
+  "agreements.banner.dismiss": "Sluiten",
+  "bookings.statusAwaitingPayment": "Wacht op betaling",
+  "bookings.payBy": "Betalen vóór {date}",
+  "bookings.hotelTime": "hoteltijd",
+  "bookings.detail.waitingForTransfer": "Wacht op de bankoverschrijving",
+  "bookings.detail.waitingForPaypal": "Wacht op de PayPal-betaling",
+  "bookings.detail.transferDueBy": "Uiterlijk {date}. Als u de betaling dan niet als ontvangen markeert, wordt de boeking automatisch vrijgegeven en is de kamer weer beschikbaar.",
+  "bookings.detail.confirmTransferReceived": "De overschrijving van {amount} van {guest} (referentie {reference}) als ontvangen markeren? De boeking wordt bevestigd, de betaling geregistreerd en de gast krijgt een bevestigingsmail.",
+  "bookings.detail.markReceived": "Markeren als ontvangen",
+  "bookings.detail.markBankTransferReceived": "Overschrijving als ontvangen markeren",
+  "calendar.awaitingPayment": "wacht op betaling",
+  "calendar.awaitingPaymentHeld": "De kamers blijven tot dan vastgehouden en worden automatisch vrijgegeven als de betaling niet als ontvangen wordt gemarkeerd.",
+  "calendar.openBooking": "Boeking openen"
 }

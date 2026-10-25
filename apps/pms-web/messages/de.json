@@ -461,7 +461,7 @@
   "bookings.detail.dueAtProperty": "In der Unterkunft fällig",
   "bookings.detail.depositExceedsTotal": "Die Anzahlung übersteigt den aktuellen Gesamtbetrag um {amount}.",
   "bookings.detail.paymentBeforeRelease": "Die Zahlung muss erfasst werden, bevor diese Reservierung freigegeben wird.",
-  "bookings.detail.markBankTransferReceived": "Überweisung als eingegangen markieren",
+  "bookings.detail.markBankTransferReceived": "Überweisung als erhalten markieren",
   "bookings.detail.markPayAtHotelReceived": "Zahlung vor Ort als eingegangen markieren",
   "bookings.detail.markRestPaid": "Rest als bezahlt markieren ({amount})",
   "bookings.detail.restDueAtHotel": "Die Anzahlung wurde bei der Buchung per Karte bezahlt. Der Rest von {amount} wird vor Ort bezahlt.",
@@ -3738,5 +3738,16 @@
   "agreements.banner.accepting": "Wird akzeptiert…",
   "agreements.banner.failed": "Das hat nicht funktioniert. Bitte versuchen Sie es erneut.",
   "agreements.banner.accepted": "Auftragsverarbeitungsvertrag für {account} akzeptiert.",
-  "agreements.banner.dismiss": "Schließen"
+  "agreements.banner.dismiss": "Schließen",
+  "bookings.statusAwaitingPayment": "Zahlung ausstehend",
+  "bookings.payBy": "Zahlung bis {date}",
+  "bookings.hotelTime": "Hotelzeit",
+  "bookings.detail.waitingForTransfer": "Warten auf die Banküberweisung",
+  "bookings.detail.waitingForPaypal": "Warten auf die PayPal-Zahlung",
+  "bookings.detail.transferDueBy": "Fällig bis {date}. Wenn Sie die Zahlung bis dahin nicht als erhalten markieren, wird die Buchung automatisch freigegeben und das Zimmer ist wieder verfügbar.",
+  "bookings.detail.confirmTransferReceived": "Die Überweisung von {amount} von {guest} (Referenz {reference}) als erhalten markieren? Die Buchung wird bestätigt, die Zahlung erfasst und der Gast erhält eine Bestätigungs-E-Mail.",
+  "bookings.detail.markReceived": "Als erhalten markieren",
+  "calendar.awaitingPayment": "Zahlung ausstehend",
+  "calendar.awaitingPaymentHeld": "Die Zimmer sind bis dahin reserviert und werden automatisch freigegeben, wenn die Zahlung nicht als erhalten markiert wird.",
+  "calendar.openBooking": "Buchung öffnen"
 }

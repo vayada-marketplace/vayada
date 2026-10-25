@@ -61,7 +61,10 @@ export interface CalendarBooking {
   guestLastName: string;
   checkIn: string;
   checkOut: string;
-  status: "pending" | "confirmed" | "checked_in" | "in_house";
+  /** awaiting_payment: a booking-page bank transfer or PayPal booking, rooms held (VAY-2348). */
+  status: "pending" | "confirmed" | "checked_in" | "in_house" | "awaiting_payment";
+  /** awaiting_payment only: when the hold is released unless the payment is marked received. */
+  paymentDeadlineAt?: string | null;
   roomId: string | null;
   roomNumber: string | null;
   channel: string;
@@ -195,6 +198,8 @@ type PmsOperationalReservation = {
   source: "direct_booking" | "channel" | "manual" | "migration";
   stay: { checkIn: string; checkOut: string };
   primaryGuest: { displayName: string };
+  hostResponseDeadlineAt?: string | null;
+  awaitingHotelPaymentConfirmation?: boolean;
   assignments: Array<{
     assignmentId?: string | null;
     roomTypeId: string;
@@ -479,15 +484,23 @@ function calendarBookingsForReservation(
   roomTypesById: Map<string, PmsOperationsRoomType>,
   range: { start: string; end: string },
 ): CalendarBooking[] {
-  const status = toCalendarStatus(reservation.status);
+  // VAY-2348: a booking waiting for its bank transfer holds its rooms before any room is assigned,
+  // so it is drawn (unassigned, one bar per room) instead of leaving the held rooms looking free.
+  const awaiting =
+    reservation.status === "pending_payment" &&
+    reservation.awaitingHotelPaymentConfirmation === true;
+  const status = awaiting ? "awaiting_payment" : toCalendarStatus(reservation.status);
   if (!status) return [];
 
-  const assignments = reservation.assignments.length > 0 ? reservation.assignments : [null];
   const numberOfRooms = Math.max(reservation.roomCount ?? reservation.assignments.length, 1);
+  const assignments =
+    reservation.assignments.length > 0
+      ? reservation.assignments
+      : Array.from({ length: awaiting ? numberOfRooms : 1 }, () => null);
   const [guestFirstName, guestLastName] = splitGuestName(reservation.primaryGuest.displayName);
   return assignments
     .map((assignment, index): CalendarBooking | null => {
-      const stay = assignment?.stay ?? (numberOfRooms === 1 ? reservation.stay : null);
+      const stay = assignment?.stay ?? (numberOfRooms === 1 || awaiting ? reservation.stay : null);
       if (!stay) return null;
       const roomType = assignment ? roomTypesById.get(assignment.roomTypeId) : undefined;
       return {
@@ -499,6 +512,7 @@ function calendarBookingsForReservation(
         checkIn: stay.checkIn,
         checkOut: stay.checkOut,
         status,
+        ...(awaiting && { paymentDeadlineAt: reservation.hostResponseDeadlineAt ?? null }),
         roomId: assignment?.roomId ?? null,
         roomNumber: assignment?.roomNumber ?? null,
         channel:

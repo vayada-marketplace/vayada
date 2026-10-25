@@ -684,5 +684,17 @@
   "agreements.banner.accepting": "Accettazione…",
   "agreements.banner.failed": "Non ha funzionato. Riprova.",
   "agreements.banner.accepted": "Accordo sul trattamento dei dati accettato per {account}.",
-  "agreements.banner.dismiss": "Chiudi"
+  "agreements.banner.dismiss": "Chiudi",
+  "bookings.statusAwaitingPayment": "In attesa di pagamento",
+  "bookings.payBy": "Pagamento entro {date}",
+  "bookings.hotelTime": "ora dell'hotel",
+  "bookings.detail.waitingForTransfer": "In attesa del bonifico bancario",
+  "bookings.detail.waitingForPaypal": "In attesa del pagamento PayPal",
+  "bookings.detail.transferDueBy": "Scadenza {date}. Se entro quel momento non segni il pagamento come ricevuto, la prenotazione viene rilasciata automaticamente e la camera torna disponibile.",
+  "bookings.detail.confirmTransferReceived": "Segnare come ricevuto il bonifico di {amount} da {guest} (riferimento {reference})? La prenotazione viene confermata, il pagamento registrato e l'ospite riceve un'email di conferma.",
+  "bookings.detail.markReceived": "Segna come ricevuto",
+  "bookings.detail.markBankTransferReceived": "Segna bonifico come ricevuto",
+  "calendar.awaitingPayment": "in attesa di pagamento",
+  "calendar.awaitingPaymentHeld": "Le camere restano bloccate fino ad allora e vengono rilasciate automaticamente se il pagamento non viene segnato come ricevuto.",
+  "calendar.openBooking": "Apri prenotazione"
 }

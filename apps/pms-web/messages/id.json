@@ -688,5 +688,17 @@
   "agreements.banner.accepting": "Menerima…",
   "agreements.banner.failed": "Gagal. Silakan coba lagi.",
   "agreements.banner.accepted": "Perjanjian pemrosesan data diterima untuk {account}.",
-  "agreements.banner.dismiss": "Tutup"
+  "agreements.banner.dismiss": "Tutup",
+  "bookings.statusAwaitingPayment": "Menunggu pembayaran",
+  "bookings.payBy": "Bayar sebelum {date}",
+  "bookings.hotelTime": "waktu hotel",
+  "bookings.detail.waitingForTransfer": "Menunggu transfer bank",
+  "bookings.detail.waitingForPaypal": "Menunggu pembayaran PayPal",
+  "bookings.detail.transferDueBy": "Jatuh tempo {date}. Jika Anda tidak menandai pembayaran sebagai diterima sebelum itu, pemesanan dilepas secara otomatis dan kamar tersedia kembali.",
+  "bookings.detail.confirmTransferReceived": "Tandai transfer {amount} dari {guest} (referensi {reference}) sebagai diterima? Pemesanan dikonfirmasi, pembayaran dicatat, dan tamu menerima email konfirmasi.",
+  "bookings.detail.markReceived": "Tandai diterima",
+  "bookings.detail.markBankTransferReceived": "Tandai transfer diterima",
+  "calendar.awaitingPayment": "menunggu pembayaran",
+  "calendar.awaitingPaymentHeld": "Kamar ditahan sampai saat itu dan dilepas otomatis jika pembayaran tidak ditandai sebagai diterima.",
+  "calendar.openBooking": "Buka pemesanan"
 }

@@ -18,6 +18,7 @@ import {
   ChevronUpIcon,
   TrashIcon,
   PlusIcon,
+  ClockIcon,
 } from "@heroicons/react/24/outline";
 import {
   bookingsService,
@@ -56,6 +57,11 @@ import {
 import { messagingService } from "@/services/messaging";
 import { resolveSelectedPmsPropertyId } from "@/services/api/pmsPropertyClient";
 import { useTranslation } from "@/lib/i18n";
+import {
+  AWAITING_PAYMENT_BADGE_CLASS,
+  formatPaymentDeadline,
+  useHotelTimeZone,
+} from "@/lib/awaitingPayment";
 
 type Translate = ReturnType<typeof useTranslation>["t"];
 
@@ -1243,6 +1249,7 @@ function EditAddOnsModal({
 
 export default function BookingDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { locale, t } = useTranslation();
+  const hotelTimeZone = useHotelTimeZone();
   const { id } = use(params);
   const [booking, setBooking] = useState<Booking | null>(null);
   const [directInboxEligibleBookingId, setDirectInboxEligibleBookingId] = useState<string | null>(
@@ -1480,6 +1487,22 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
       return;
     }
     if (paymentDeadlineExpired) return;
+    // VAY-2348: a booking-page bank transfer: name the money, the guest and the reference.
+    if (booking?.awaitingPaymentConfirmation && booking.paymentMethod === "bank_transfer") {
+      setConfirmDialog({
+        message: t("bookings.detail.confirmTransferReceived", {
+          amount: formatCurrency(booking.totalAmount, booking.currency, 2),
+          guest: `${booking.guestFirstName} ${booking.guestLastName}`.trim(),
+          reference: booking.bookingReference,
+        }),
+        confirmLabel: t("bookings.detail.markReceived"),
+        onConfirm: () => {
+          setConfirmDialog(null);
+          doAction(() => bookingsService.markPaid(id), t("bookings.detail.failedToMarkPaid"));
+        },
+      });
+      return;
+    }
     const methodLabel =
       booking?.paymentMethod === "bank_transfer"
         ? t("bookings.detail.bankTransferLower")
@@ -1495,6 +1518,17 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
       },
     });
   };
+
+  // VAY-2348: the calendar card's "Mark transfer received" opens the confirmation straight away.
+  const confirmFromLink = useRef(false);
+  useEffect(() => {
+    if (confirmFromLink.current || !booking?.awaitingPaymentConfirmation) return;
+    if (new URLSearchParams(window.location.search).get("confirm") !== "payment") return;
+    confirmFromLink.current = true;
+    const deadline = booking.hostResponseDeadline;
+    if (deadline && Date.now() >= new Date(deadline).getTime()) return;
+    handleMarkPaid();
+  }, [booking, handleMarkPaid]);
 
   const handleSaveNote = async () => {
     const body = noteDraft.trim();
@@ -1873,11 +1907,20 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
         <h1 className="text-xl font-bold text-gray-900">
           {t("bookings.detail.title", { reference: booking.bookingReference })}
         </h1>
-        <span
-          className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${BOOKING_STATUS_STYLES[booking.status] || "bg-gray-100 text-gray-600"}`}
-        >
-          {bookingStatusLabel(booking.status, t)}
-        </span>
+        {booking.awaitingPaymentConfirmation ? (
+          <span
+            className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium border ${AWAITING_PAYMENT_BADGE_CLASS}`}
+          >
+            <ClockIcon className="w-3.5 h-3.5" />
+            {t("bookings.statusAwaitingPayment")}
+          </span>
+        ) : (
+          <span
+            className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${BOOKING_STATUS_STYLES[booking.status] || "bg-gray-100 text-gray-600"}`}
+          >
+            {bookingStatusLabel(booking.status, t)}
+          </span>
+        )}
         <div className="ml-auto flex items-center gap-1.5">
           {canMessageGuest && (
             <Link
@@ -1943,8 +1986,33 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
         </div>
       </div>
 
+      {/* VAY-2348: waiting for the guest's bank transfer (or PayPal): the deadline in hotel time. */}
+      {hasDeadline && booking.awaitingPaymentConfirmation && (
+        <div className="mb-4 p-4 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-3">
+          <ClockIcon className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+              <p className="text-sm font-semibold text-amber-800">
+                {t(
+                  booking.paymentMethod === "paypal"
+                    ? "bookings.detail.waitingForPaypal"
+                    : "bookings.detail.waitingForTransfer",
+                )}
+              </p>
+              <CountdownTimer deadline={booking.hostResponseDeadline!} />
+            </div>
+            <p className="mt-1 text-xs text-amber-700">
+              {t("bookings.detail.transferDueBy", {
+                date: `${formatPaymentDeadline(booking.hostResponseDeadline!, locale, hotelTimeZone)}${
+                  hotelTimeZone ? ` (${t("bookings.hotelTime")})` : ""
+                }`,
+              })}
+            </p>
+          </div>
+        </div>
+      )}
       {/* Pending-deadline + change-request banners (carried over) */}
-      {hasDeadline && (
+      {hasDeadline && !booking.awaitingPaymentConfirmation && (
         <div className="mb-4 p-4 bg-amber-50 border border-amber-200 rounded-xl flex items-center justify-between">
           <div>
             <p className="text-sm font-semibold text-amber-800">
