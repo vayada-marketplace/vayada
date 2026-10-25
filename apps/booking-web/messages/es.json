@@ -339,7 +339,8 @@
     "chooseAnotherRoom": "Elegir otra habitación",
     "changeDates": "Cambiar fechas",
     "noWayToPay": "Este alojamiento no ofrece ninguna forma de pago para las habitaciones que elegiste. Elige otras habitaciones.",
-    "noWayToPayTheseDates": "La reserva online no está disponible para estas fechas. Ponte en contacto con el hotel."
+    "noWayToPayTheseDates": "La reserva online no está disponible para estas fechas. Ponte en contacto con el hotel.",
+    "noWayToPayOnTheseDates": "Las habitaciones que elegiste no se pueden pagar para estas fechas. Elige otras habitaciones."
   },
   "myBooking": {
     "title": "Mi Reserva",
@@ -763,10 +764,10 @@
       },
       "bank_transfer": {
         "title": "Pagar por transferencia bancaria",
-        "summary": "Paga en 48 horas · datos bancarios por correo",
-        "explain": "Tras la reserva, te enviamos por correo los datos bancarios del hotel y tu referencia de reserva. Tu transferencia debe llegar en 48 horas o la reserva se libera. Tu reserva se confirma cuando el hotel confirme tu transferencia.",
+        "summary": "Paga en un plazo de 48 horas · datos bancarios por correo",
+        "explain": "Tras la reserva, te enviamos por correo los datos bancarios del hotel y tu referencia de reserva. Tu transferencia debe llegar en un plazo de 48 horas o la reserva se cancela. Tu reserva se confirma cuando el hotel confirme tu transferencia.",
         "boxNow": "A pagar ahora",
-        "boxLater": "Transferencia en 48 horas",
+        "boxLater": "Transferencia en un plazo de 48 horas",
         "phrase": "por transferencia bancaria"
       },
       "paypal": {

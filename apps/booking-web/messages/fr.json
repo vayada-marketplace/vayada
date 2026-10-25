@@ -339,7 +339,8 @@
     "chooseAnotherRoom": "Choisir une autre chambre",
     "changeDates": "Changer de dates",
     "noWayToPay": "Cet établissement ne propose aucun moyen de paiement pour les chambres choisies. Veuillez choisir d'autres chambres.",
-    "noWayToPayTheseDates": "La réservation en ligne n'est pas disponible pour ces dates. Veuillez contacter l'hôtel."
+    "noWayToPayTheseDates": "La réservation en ligne n'est pas disponible pour ces dates. Veuillez contacter l'hôtel.",
+    "noWayToPayOnTheseDates": "Les chambres choisies ne peuvent pas être payées pour ces dates. Veuillez choisir d'autres chambres."
   },
   "myBooking": {
     "title": "Ma réservation",
@@ -764,7 +765,7 @@
       "bank_transfer": {
         "title": "Payer par virement bancaire",
         "summary": "Paiement sous 48 heures · coordonnées bancaires par e-mail",
-        "explain": "Après la réservation, nous vous envoyons par e-mail les coordonnées bancaires de l’hôtel et votre référence de réservation. Votre virement doit arriver sous 48 heures, sinon la réservation est libérée. Votre réservation est confirmée dès que l’hôtel confirme votre virement.",
+        "explain": "Après la réservation, nous vous envoyons par e-mail les coordonnées bancaires de l’hôtel et votre référence de réservation. Votre virement doit arriver sous 48 heures, sinon la réservation est annulée. Votre réservation est confirmée dès que l’hôtel confirme votre virement.",
         "boxNow": "À payer maintenant",
         "boxLater": "Virement sous 48 heures",
         "phrase": "par virement bancaire"

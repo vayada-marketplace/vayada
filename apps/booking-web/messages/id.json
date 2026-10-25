@@ -339,7 +339,8 @@
     "chooseAnotherRoom": "Pilih kamar lain",
     "changeDates": "Ubah tanggal",
     "noWayToPay": "Properti ini tidak menyediakan metode pembayaran untuk kamar yang Anda pilih. Silakan pilih kamar lain.",
-    "noWayToPayTheseDates": "Pemesanan online tidak tersedia untuk tanggal ini. Silakan hubungi hotel."
+    "noWayToPayTheseDates": "Pemesanan online tidak tersedia untuk tanggal ini. Silakan hubungi hotel.",
+    "noWayToPayOnTheseDates": "Kamar yang Anda pilih tidak dapat dibayar untuk tanggal ini. Silakan pilih kamar lain."
   },
   "myBooking": {
     "title": "Pemesanan Saya",
@@ -764,7 +765,7 @@
       "bank_transfer": {
         "title": "Bayar melalui transfer bank",
         "summary": "Bayar dalam 48 jam · rincian bank dikirim lewat email",
-        "explain": "Setelah memesan, kami mengirimkan rincian bank hotel dan kode pemesanan Anda lewat email. Transfer Anda harus diterima dalam 48 jam, atau pemesanan dilepas. Pemesanan Anda dikonfirmasi setelah hotel mengonfirmasi transfer Anda.",
+        "explain": "Setelah memesan, kami mengirimkan rincian bank hotel dan kode pemesanan Anda lewat email. Transfer Anda harus diterima dalam 48 jam, atau pemesanan dibatalkan. Pemesanan Anda dikonfirmasi setelah hotel mengonfirmasi transfer Anda.",
         "boxNow": "Bayar sekarang",
         "boxLater": "Transfer dalam 48 jam",
         "phrase": "melalui transfer bank"

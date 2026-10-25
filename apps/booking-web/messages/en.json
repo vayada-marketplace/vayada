@@ -340,7 +340,8 @@
     "chooseAnotherRoom": "Choose another room",
     "changeDates": "Change dates",
     "noWayToPay": "The rooms you chose can't be paid for in any way this hotel offers. Please choose other rooms.",
-    "noWayToPayTheseDates": "Online booking isn't available for these dates. Please contact the hotel."
+    "noWayToPayTheseDates": "Online booking isn't available for these dates. Please contact the hotel.",
+    "noWayToPayOnTheseDates": "The rooms you chose can't be paid for on these dates. Please choose other rooms."
   },
   "myBooking": {
     "title": "My Booking",

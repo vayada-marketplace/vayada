@@ -100,6 +100,7 @@ it("every locale says that no way to pay is left", () => {
   for (const messages of [de, en, es, fr, id]) {
     expect(messages.payment.noWayToPay.trim()).not.toBe("");
     expect(messages.payment.noWayToPayTheseDates.trim()).not.toBe("");
+    expect(messages.payment.noWayToPayOnTheseDates.trim()).not.toBe("");
     expect(messages.payment.changeDates.trim()).not.toBe("");
     expect(messages.payment.chooseAnotherRoom.trim()).not.toBe("");
   }

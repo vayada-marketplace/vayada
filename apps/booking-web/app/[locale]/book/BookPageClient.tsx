@@ -47,6 +47,7 @@ import {
   bookingPageMethodsForArrival,
   defaultQuoteMethods,
   getBookingPagePayment,
+  noWayToPayReason,
   type BookingPagePayment,
 } from "@/services/api/bookingPagePaymentMethods";
 import ApproximateAmountsNote from "@/components/booking/ApproximateAmountsNote";
@@ -262,13 +263,29 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   const offeredMethods = rateMethods
     ? paymentMethods.filter((method) => rateMethods.includes(method))
     : paymentMethods;
-  // No way the hotel offers fits the chosen rates: no price is asked for, and the steps say so.
-  const noWayToPay = pagePaymentLoaded && !!rateMethods && !offeredMethods.length;
-  // VAY-2348 (D8): the hotel takes a way these rates allow, but not for this arrival (its booking
-  // window or payment deadline): online booking isn't available for these dates.
-  const datesRuleOut =
-    noWayToPay && pagePayment.methods.some((method) => rateMethods!.includes(method));
-  const noWayToPayTitle = tPayment(datesRuleOut ? "noWayToPayTheseDates" : "noWayToPay");
+  // No way the hotel offers fits the chosen rates, or (VAY-2348) none of its ways is open for these
+  // dates: no price is asked for, and the steps say so.
+  const noWayToPay =
+    pagePaymentLoaded &&
+    !offeredMethods.length &&
+    (!!rateMethods || (!!rooms && pagePayment.methods.length > 0));
+  // VAY-2348 (D8): only when nothing on offer can be paid for these dates is online booking
+  // unavailable for them; another rate that can is the way out otherwise.
+  const noWayReason = noWayToPay
+    ? noWayToPayReason(
+        pagePayment.methods,
+        paymentMethods,
+        rateMethods,
+        rooms?.flatMap((room) => room.offers.map((offer) => offer.paymentMethods)) ?? [],
+      )
+    : null;
+  const noWayToPayTitle = tPayment(
+    noWayReason === "dates"
+      ? "noWayToPayTheseDates"
+      : noWayReason === "otherRooms"
+        ? "noWayToPayOnTheseDates"
+        : "noWayToPay",
+  );
   useEffect(() => {
     // A restored choice waits for the hotel's own methods before it is judged.
     if (!pagePaymentLoaded) return;
@@ -825,15 +842,15 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     Date.parse(seenQuote.quote.expiresAt) <= serverNow()
       ? seenQuote.quote
       : undefined);
-  // VAY-2309: when no way to pay fits the chosen rates the steps say so (later dates help when
-  // one they take opens later). A way they don't take is named, in the guest's language, where the
-  // guest can pick another; elsewhere another room is the way out.
+  // VAY-2309: when no way to pay fits the chosen rates the steps say so: other dates when nothing
+  // on offer can be paid for these (VAY-2348), else another room. A way they don't take is named,
+  // in the guest's language, where the guest can pick another.
   const priceNotice = noWayToPay ? (
     <Notice
       tone="red"
       title={noWayToPayTitle}
       action={{
-        label: tPayment(datesRuleOut ? "changeDates" : "chooseAnotherRoom"),
+        label: tPayment(noWayReason === "dates" ? "changeDates" : "chooseAnotherRoom"),
         onClick: backToRooms,
       }}
     >
@@ -849,8 +866,9 @@ function RoomQuoteForm({ slug }: { slug: string }) {
           step === "payment" &&
           offeredMethods.length > 1
             ? tGuestErrors("paymentMethodNotAccepted")
-            : // VAY-2348: the hotel's booking window for this way to pay closed since /book opened.
-              errorCode === "PAYMENT_METHOD_WINDOW"
+            : // VAY-2348: the hotel's booking window (or VAY-2145's payment deadline) for this way
+              // to pay closed since /book opened.
+              errorCode === "PAYMENT_METHOD_WINDOW" || errorCode === "MANUAL_PAYMENT_TOO_SOON"
               ? tGuestErrors(
                   offeredMethods.length > 1 ? "paymentMethodWindow" : "paymentMethodWindowOnly",
                 )

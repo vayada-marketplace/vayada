@@ -162,6 +162,28 @@ export function bookingPageMethodsForArrival(
   });
 }
 
+/** Why no way to pay is left for the chosen rates (VAY-2348 D8). "rates": the hotel takes none of
+ * the ways they allow. "otherRooms": it does, not for these dates, but another rate on offer can be
+ * paid for them. "dates": nothing on offer can be paid for these dates. */
+export type NoWayToPayReason = "rates" | "otherRooms" | "dates";
+
+export function noWayToPayReason(
+  hotelMethods: readonly PricingPaymentMethod[],
+  forTheseDates: readonly PricingPaymentMethod[],
+  chosenRateMethods: readonly PricingPaymentMethod[] | null,
+  /** Every rate on offer's ways; undefined while a rate's ways are unknown. */
+  offeredRateMethods: readonly (readonly PricingPaymentMethod[] | undefined)[],
+): NoWayToPayReason {
+  if (chosenRateMethods && !hotelMethods.some((method) => chosenRateMethods.includes(method)))
+    return "rates";
+  if (!forTheseDates.length) return "dates";
+  return offeredRateMethods.some(
+    (methods) => !methods || methods.some((method) => forTheseDates.includes(method)),
+  )
+    ? "otherRooms"
+    : "dates";
+}
+
 /** Until the guest picks how to pay, the price uses the hotel's ways in this order: paying at the
  * hotel first (nothing is charged now), and only ways the chosen rates take when the catalog names
  * them (VAY-2309), so a card-only or non-refundable rate isn't priced at the hotel first. */

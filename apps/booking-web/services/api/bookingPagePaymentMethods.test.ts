@@ -7,6 +7,7 @@ import {
   bookingPageMethodsForArrival,
   defaultQuoteMethods,
   getBookingPagePayment,
+  noWayToPayReason,
 } from "./bookingPagePaymentMethods";
 
 beforeEach(() => mocks.get.mockReset());
@@ -158,4 +159,26 @@ it("prices first with a way the chosen rates take, paying at the hotel first (VA
   // No way in common: the hotel's own order, so the refusal still tells the guest.
   expect(defaultQuoteMethods(hotel, [])).toEqual(["pay_at_property", "card", "paypal"]);
   expect(defaultQuoteMethods(["card"], ["pay_at_property"])).toEqual(["card"]);
+});
+
+it("says why no way to pay is left: the rates, these dates, or only these rooms (VAY-2348)", () => {
+  const hotel = ["pay_at_property", "bank_transfer"] as const;
+  // The rates take only card, which this hotel doesn't take.
+  expect(noWayToPayReason(hotel, hotel, ["card"], [["card"]])).toBe("rates");
+  // The rate takes only bank transfer, closed for these dates, and nothing else is on offer.
+  expect(noWayToPayReason(hotel, ["pay_at_property"], ["bank_transfer"], [["bank_transfer"]])).toBe(
+    "dates",
+  );
+  // ...but a flexible rate paid at the hotel can be booked for them: another room, not contact.
+  expect(
+    noWayToPayReason(
+      hotel,
+      ["pay_at_property"],
+      ["bank_transfer"],
+      [["bank_transfer"], ["pay_at_property", "bank_transfer"]],
+    ),
+  ).toBe("otherRooms");
+  // Nothing is open for these dates, whatever the rates' ways (or when they're unknown).
+  expect(noWayToPayReason(hotel, [], null, [undefined])).toBe("dates");
+  expect(noWayToPayReason(hotel, [], ["bank_transfer"], [["pay_at_property"]])).toBe("dates");
 });

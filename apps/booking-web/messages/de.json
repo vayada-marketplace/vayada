@@ -340,7 +340,8 @@
     "chooseAnotherRoom": "Anderes Zimmer wählen",
     "changeDates": "Daten ändern",
     "noWayToPay": "Für die gewählten Zimmer bietet diese Unterkunft keine passende Zahlungsart an. Bitte wählen Sie andere Zimmer.",
-    "noWayToPayTheseDates": "Für diese Daten ist keine Online-Buchung möglich. Bitte wenden Sie sich an das Hotel."
+    "noWayToPayTheseDates": "Für diese Daten ist keine Online-Buchung möglich. Bitte wenden Sie sich an das Hotel.",
+    "noWayToPayOnTheseDates": "Die gewählten Zimmer können für diese Daten nicht bezahlt werden. Bitte wählen Sie andere Zimmer."
   },
   "myBooking": {
     "title": "Meine Buchung",
@@ -765,7 +766,7 @@
       "bank_transfer": {
         "title": "Per Banküberweisung bezahlen",
         "summary": "Zahlung innerhalb von 48 Stunden · Bankdaten per E-Mail",
-        "explain": "Nach der Buchung senden wir Ihnen die Bankdaten des Hotels und Ihre Buchungsnummer per E-Mail. Ihre Überweisung muss innerhalb von 48 Stunden eingehen, sonst wird die Buchung freigegeben. Ihre Buchung ist bestätigt, sobald das Hotel Ihre Überweisung bestätigt.",
+        "explain": "Nach der Buchung senden wir Ihnen die Bankdaten des Hotels und Ihre Buchungsnummer per E-Mail. Ihre Überweisung muss innerhalb von 48 Stunden eingehen, sonst verfällt die Buchung. Ihre Buchung ist bestätigt, sobald das Hotel Ihre Überweisung bestätigt.",
         "boxNow": "Jetzt zahlen",
         "boxLater": "Überweisung innerhalb von 48 Stunden",
         "phrase": "per Banküberweisung"
