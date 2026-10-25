@@ -9,6 +9,7 @@ import pg, { type QueryResult, type QueryResultRow } from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import {
+  canPublishBookingPage,
   createPgBookingPublicationCommandRepository,
   type BookingPublicationCommandPool,
 } from "./bookingPublicationCommandRepository.js";
@@ -326,6 +327,63 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Booking publication command safe
       idempotencyKeys: "0",
       outboxEvents: "0",
     });
+  });
+
+  it("checks the member's effective permission like the route does (VAY-2335)", async () => {
+    const granted = ["booking.settings.read", "booking.settings.manage"];
+    const request = await command("effective-permission");
+    // Permission only through a team-role: "Create role" roles sit on hotel_custom, which has
+    // no booking grant rows.
+    await setMemberRole("hotel_custom", { definition: granted });
+    await expect(canPublish()).resolves.toBe(true);
+    const accepted = await repository.requestPublication(request);
+    expect(accepted).toMatchObject({ ok: true, operation: { status: "pending", propertyId } });
+
+    // Permission only through a per-person override; the exact retry re-authorizes.
+    await setMemberRole("hotel_custom", { overrides: { grant: granted, deny: [] } });
+    await expect(canPublish()).resolves.toBe(true);
+    await expect(repository.requestPublication(request)).resolves.toEqual(accepted);
+
+    // The base role's grant rows include it.
+    await setMemberRole("hotel_manager", {});
+    await expect(canPublish()).resolves.toBe(true);
+    await expect(repository.requestPublication(request)).resolves.toEqual(accepted);
+
+    for (const [roleKey, access] of [
+      ["hotel_custom", {}], // without the permission
+      ["hotel_manager", { definition: ["booking.settings.read"] }], // removed by a team-role
+      ["hotel_manager", { bookingAccess: false }], // Booking switched off
+    ] as const) {
+      await setMemberRole(roleKey, access);
+      await expect(canPublish()).resolves.toBe(false);
+      await expect(repository.requestPublication(request)).resolves.toEqual({
+        ok: false,
+        error: { code: "setup_scope_unavailable" },
+      });
+    }
+    await expect(counts()).resolves.toMatchObject({ attempts: "1", idempotencyKeys: "1" });
+  });
+
+  it("checks the republishing user's property access, which no route checked (VAY-2335)", async () => {
+    await setMemberRole("hotel_custom", {
+      definition: ["booking.settings.read", "booking.settings.manage"],
+      assigned: true,
+    });
+    await expect(canPublish()).resolves.toBe(false);
+    // Assignments need the account's canonical Catalog property link.
+    await admin.query(
+      `INSERT INTO identity.organization_resource_links
+         (organization_id, product, resource_type, resource_id, relationship, status)
+       VALUES ($1::uuid, 'hotel_catalog', 'property', $2::uuid::text, 'owner', 'active')`,
+      [organizationId, propertyId],
+    );
+    await admin.query(
+      `INSERT INTO identity.membership_property_assignments (membership_id, property_id)
+       SELECT id, $3::uuid FROM identity.organization_memberships
+       WHERE organization_id = $1::uuid AND user_id = $2::uuid`,
+      [organizationId, actorUserId, propertyId],
+    );
+    await expect(canPublish()).resolves.toBe(true);
   });
 
   it("re-authorizes an exact retry before returning its stored result", async () => {
@@ -1096,6 +1154,54 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Booking publication command safe
     ]);
   });
 
+  function canPublish(): Promise<boolean> {
+    return canPublishBookingPage(
+      { query: (text, values) => admin.query(text, values as unknown[]) },
+      { organizationId, propertyId, actorUserId },
+      new Date("2026-08-02T13:00:00.000Z"),
+    );
+  }
+
+  async function setMemberRole(
+    roleKey: string,
+    access: {
+      definition?: readonly string[];
+      overrides?: unknown;
+      bookingAccess?: boolean;
+      assigned?: boolean;
+    },
+  ): Promise<void> {
+    const definition = access.definition
+      ? await admin.query<{ id: string }>(
+          `INSERT INTO identity.organization_roles
+             (organization_id, name, security_class, base_role_key, default_permissions)
+           VALUES ($1::uuid, $2, 'staff', $3, $4::jsonb)
+           RETURNING id`,
+          [
+            organizationId,
+            `Role ${crypto.randomUUID()}`,
+            roleKey,
+            JSON.stringify(access.definition),
+          ],
+        )
+      : null;
+    await admin.query(
+      `UPDATE identity.organization_memberships
+       SET role_key = $3, role_definition_id = $4::uuid, permission_overrides = $5::jsonb,
+           booking_access_enabled = $6, property_access_mode = $7
+       WHERE organization_id = $1::uuid AND user_id = $2::uuid`,
+      [
+        organizationId,
+        actorUserId,
+        roleKey,
+        definition?.rows[0]!.id ?? null,
+        access.overrides === undefined ? null : JSON.stringify(access.overrides),
+        access.bookingAccess ?? true,
+        access.assigned ? "assigned" : "all",
+      ],
+    );
+  }
+
   async function counts() {
     const result = await admin.query<{
       attempts: string;
@@ -1192,6 +1298,13 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Booking publication command safe
       await admin.query(
         "DELETE FROM identity.organization_memberships WHERE organization_id = $1",
         [secondOrganizationId],
+      );
+      await admin.query("DELETE FROM identity.organization_roles WHERE organization_id = $1", [
+        organizationId,
+      ]);
+      await admin.query(
+        "DELETE FROM identity.membership_property_assignments WHERE property_id = $1",
+        [propertyId],
       );
       await admin.query("DELETE FROM hotel_catalog.properties WHERE id = $1", [propertyId]);
       await admin.query("DELETE FROM identity.organizations WHERE id = $1", [organizationId]);

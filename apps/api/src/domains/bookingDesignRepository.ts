@@ -15,6 +15,8 @@ import {
 } from "@vayada/domain-booking";
 import pg, { type QueryResult, type QueryResultRow } from "pg";
 
+import { lockMemberPermissions } from "./memberPermissions.js";
+
 const OPERATION = "booking.design.upsert";
 const PERMISSION = "booking.settings.manage";
 
@@ -275,16 +277,12 @@ async function lockAuthorizedScope(
        ON membership.organization_id = organization.id
       AND membership.user_id = actor.id
       AND membership.status = 'active'
-     JOIN identity.role_permission_grants permission_grant
-       ON permission_grant.organization_kind = 'hotel_group'
-      AND permission_grant.role_key = membership.role_key
-      AND permission_grant.permission_key = $4
      WHERE property.id = $2::uuid
-     FOR SHARE OF property, organization, resource, actor, membership
-     FOR KEY SHARE OF permission_grant`,
-    [command.organizationId, command.propertyId, command.actorUserId, PERMISSION],
+     FOR SHARE OF property, organization, resource, actor, membership`,
+    [command.organizationId, command.propertyId, command.actorUserId],
   );
   if ((scope.rowCount ?? 0) < 1) return false;
+  if (!(await lockMemberPermissions(client, command))?.includes(PERMISSION)) return false;
   const entitlements = await client.query<{
     status: "active" | "suspended" | "expired";
     resourceProduct: string | null;

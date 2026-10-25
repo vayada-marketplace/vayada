@@ -78,7 +78,7 @@ describe("owner setup reads with a SELECT-only database role", () => {
             rows: [{ status: "active", resourceProduct: null, startsAt: null, expiresAt: null }],
             rowCount: 1,
           };
-        return { rows: [], rowCount: 0 };
+        return ownerPermissionRows(text, "booking.settings.manage");
       },
       release() {},
     };
@@ -96,3 +96,24 @@ describe("owner setup reads with a SELECT-only database role", () => {
     expect(sql.at(-1)).toBe("COMMIT");
   });
 });
+
+// The member's effective permissions (memberPermissions.ts): an owner whose role grants it.
+function ownerPermissionRows(text: string, permission: string) {
+  const rows = text.includes("FROM identity.organization_memberships")
+    ? [
+        {
+          id: "a4000000-0000-4000-8000-000000000004",
+          roleKey: "owner",
+          mode: "all",
+          accessOrigin: "agency",
+          permissionOverrides: null,
+          roleDefinitionId: null,
+          pms: true,
+          booking: true,
+        },
+      ]
+    : text.includes("FROM identity.role_permission_grants")
+      ? [{ permission }]
+      : [];
+  return { rows, rowCount: rows.length };
+}
