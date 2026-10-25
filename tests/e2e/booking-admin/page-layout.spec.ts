@@ -225,3 +225,36 @@ test("a save message appears under the header without moving the title", async (
   expect(await titlePosition(page)).toEqual(before);
   expect((await headerMetrics(page)).sectionGap).toBe(HEADER_GAP);
 });
+
+// VAY-2344: <main> scrolls, the window never does. Screen-reader-only text deep in a page (the
+// nearby places editor on Location) escaped <main> and made the window taller than the screen, so
+// scrolling on past the bottom slid the app up over a white strip.
+for (const viewport of [VIEWPORTS[0]!, VIEWPORTS[2]!]) {
+  test(`the window never scrolls past the app at ${viewport.width}px`, async ({ page }) => {
+    test.setTimeout(180_000);
+    await page.setViewportSize({ width: viewport.width, height: viewport.height });
+    await mockPages(page);
+    for (const route of [...TOP_LEVEL, ...SUB_PAGES]) {
+      await page.goto(route);
+      await expect(page.locator("main h1").first()).toBeVisible();
+      const main = page.locator("main");
+      await main.evaluate((element) => element.scrollTo(0, element.scrollHeight));
+      const box = (await main.boundingBox())!;
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.mouse.wheel(0, 1500);
+      await expect
+        .poll(
+          () =>
+            page.evaluate(() => ({
+              overflow: Math.max(
+                0,
+                document.documentElement.scrollHeight - document.documentElement.clientHeight,
+              ),
+              scrollY: window.scrollY,
+            })),
+          { message: route },
+        )
+        .toEqual({ overflow: 0, scrollY: 0 });
+    }
+  });
+}

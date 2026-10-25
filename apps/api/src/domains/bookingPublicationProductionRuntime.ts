@@ -71,43 +71,64 @@ type BookingPublicationRefreshDependencies = {
   projector: Pick<BookingPublicationProjector, "projectPending">;
 };
 
+// A live page's refresh that meets another publication of the same hotel (a save a moment after
+// another save, ~1 s each) waits for it and asks again, so the later save still reaches guests
+// (VAY-2344). Each retry needs its own key: the conflict is recorded against the first one.
+const LIVE_REFRESH_RETRY_DELAYS_MS = [1_000, 2_000, 4_000];
+const LIVE_REFRESH_RETRIED_CONFLICTS = new Set([
+  "publication_in_progress",
+  "active_content_revision_conflict",
+]);
+
 export function createBookingPublicationRefresh(
   dependencies: BookingPublicationRefreshDependencies,
+  wait: (ms: number) => Promise<void> = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 ): BookingPublicationRefreshPort["refresh"] {
   return async ({ onlyIfLive, ...input }) => {
-    const active = await dependencies.projection.getActive(input.propertyId);
-    // A save never makes the page public; only "Publish booking page" does (VAY-2129).
-    if (onlyIfLive && !active) return null;
-    const readiness = await dependencies.readinessProvider.getBookingReadiness({
-      organizationId: input.organizationId,
-      propertyId: input.propertyId,
-    });
-    if (
-      readiness.outcome !== "evaluated" ||
-      readiness.product !== "booking" ||
-      readiness.status !== "ready"
-    ) {
-      throw new Error("Booking publication readiness is incomplete.");
+    for (let attempt = 0; ; attempt += 1) {
+      const active = await dependencies.projection.getActive(input.propertyId);
+      // A save never makes the page public; only "Publish booking page" does (VAY-2129).
+      if (onlyIfLive && !active) return null;
+      const readiness = await dependencies.readinessProvider.getBookingReadiness({
+        organizationId: input.organizationId,
+        propertyId: input.propertyId,
+      });
+      if (
+        readiness.outcome !== "evaluated" ||
+        readiness.product !== "booking" ||
+        readiness.status !== "ready"
+      ) {
+        throw new Error("Booking publication readiness is incomplete.");
+      }
+      const requested = await dependencies.repository.requestPublication({
+        ...input,
+        idempotencyKey: attempt ? `${input.idempotencyKey}:retry-${attempt}` : input.idempotencyKey,
+        expectedActiveContentRevisionId: active?.revisionId ?? null,
+        readiness: readiness as ReadyBookingPublicationEvidence,
+      });
+      if (!requested.ok) {
+        const delay = LIVE_REFRESH_RETRY_DELAYS_MS[attempt];
+        if (
+          !onlyIfLive ||
+          delay === undefined ||
+          !LIVE_REFRESH_RETRIED_CONFLICTS.has(requested.error.code)
+        )
+          throw new Error(`Booking publication refresh failed: ${requested.error.code}.`);
+        await wait(delay);
+        continue;
+      }
+      await dependencies.projector.projectPending({ propertyId: input.propertyId });
+      const operation = await dependencies.repository.getPublicationStatus({
+        organizationId: input.organizationId,
+        propertyId: input.propertyId,
+        operationId: requested.operation.operationId,
+        actorUserId: input.actorUserId,
+      });
+      if (!operation || operation.status === "failed" || operation.status === "unknown") {
+        throw new Error("Booking publication refresh did not complete.");
+      }
+      return operation;
     }
-    const requested = await dependencies.repository.requestPublication({
-      ...input,
-      expectedActiveContentRevisionId: active?.revisionId ?? null,
-      readiness: readiness as ReadyBookingPublicationEvidence,
-    });
-    if (!requested.ok) {
-      throw new Error(`Booking publication refresh failed: ${requested.error.code}.`);
-    }
-    await dependencies.projector.projectPending({ propertyId: input.propertyId });
-    const operation = await dependencies.repository.getPublicationStatus({
-      organizationId: input.organizationId,
-      propertyId: input.propertyId,
-      operationId: requested.operation.operationId,
-      actorUserId: input.actorUserId,
-    });
-    if (!operation || operation.status === "failed" || operation.status === "unknown") {
-      throw new Error("Booking publication refresh did not complete.");
-    }
-    return operation;
   };
 }
 

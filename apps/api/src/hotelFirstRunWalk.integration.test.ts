@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 
 import type { RequestContext } from "@vayada/backend-auth";
+import { createPgPropertyAccessRepository } from "@vayada/backend-authorization";
 import {
   FIRST_RUN_GUEST_TERMS,
   createBookingDesignReadinessProvider,
@@ -10,8 +11,9 @@ import {
   type ProductReadinessResult,
   type ReadinessProviderFailure,
 } from "@vayada/domain-hotels";
+import Fastify from "fastify";
 import pg from "pg";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { createPgBookingDesignCatalogEvidenceRepository } from "./domains/bookingDesignCatalogEvidenceRepository.js";
 import { createPgBookingDesignRepository } from "./domains/bookingDesignRepository.js";
@@ -64,7 +66,9 @@ import {
   advancePublicProfileRevision,
   createPgSharedHotelSetupStatusRepository,
 } from "./platform/sharedHotelSetupStatusReadModel.js";
+import { createActiveBookingPublicationProfileRepository } from "./routes/activeBookingPublicationProfile.js";
 import { createTargetPlatformAdminDashboardRepository } from "./routes/platform/admin/dashboard/bookingCompatible.js";
+import { registerSharedHotelSetupStatusRoutes } from "./routes/sharedHotelSetupStatus.js";
 
 const url = process.env["TEST_DATABASE_URL"];
 const TIME_ZONE = "Asia/Colombo";
@@ -455,6 +459,9 @@ describe.skipIf(!url)(
           operatingCalendar,
         },
         email: `owner-${suffix}@example.test`,
+        context,
+        // "Publish booking page", and the refresh a save runs on a live page.
+        publish: publication.refresh.bind(publication),
         readiness: () =>
           publication.routes.readinessProvider.getBookingReadiness({ organizationId, propertyId }),
         close,
@@ -583,6 +590,102 @@ describe.skipIf(!url)(
         const again = await h.service().run(h.actor, request, h.email);
         expect(again).toMatchObject({ ok: true, ran: [] });
       } finally {
+        await h.close();
+      }
+    });
+
+    it("a hotel-detail save reaches the live page, also right after another save (VAY-2344)", async () => {
+      const h = await hotel();
+      const closers: Array<() => Promise<unknown>> = [];
+      try {
+        expect(await h.service().run(h.actor, request, h.email)).toMatchObject({ ok: true });
+        const scope = { organizationId: h.organizationId, propertyId: h.propertyId };
+        const audit = (name: string) => ({
+          requestId: `${name}-${h.propertyId}`,
+          correlationId: `${name}-${h.propertyId}`,
+          source: "web",
+        });
+        const refresh = (name: string, onlyIfLive?: boolean) =>
+          h.publish({
+            ...scope,
+            actorUserId: h.actor.userId,
+            idempotencyKey: `${name}-${h.propertyId}`,
+            audit: audit(name),
+            ...(onlyIfLive ? { onlyIfLive } : {}),
+          });
+        expect(await refresh("publish")).toMatchObject({ status: "succeeded" });
+        const { slug } = (
+          await h.admin.query<{ slug: string }>(
+            `SELECT slug FROM hotel_catalog.property_slugs
+             WHERE property_id = $1 AND purpose = 'canonical' AND status = 'active'`,
+            [h.propertyId],
+          )
+        ).rows[0]!;
+        const guests = createActiveBookingPublicationProfileRepository({
+          connectionString: h.connectionString,
+          pool: h.pool,
+        });
+        const page = () => guests.findProfileBySlug(slug);
+        expect(await page()).toMatchObject({ hotel: { location: { city: "Galle" } } });
+
+        // Booking Admin › Location saves through the hotel-setup route, composed as in production:
+        // no target-mode refresher, only the publication refresh. Before, the page kept "Galle".
+        const api = Fastify({ logger: false });
+        closers.push(() => api.close());
+        let requests = 0;
+        api.decorateRequest("authContext", null);
+        api.addHook("onRequest", async (incoming) => {
+          requests += 1;
+          incoming.authContext = {
+            ...h.context,
+            audit: { ...h.context.audit, requestId: `location-${requests}-${h.propertyId}` },
+          } as RequestContext;
+        });
+        const propertyAccess = createPgPropertyAccessRepository({ connectionString: url!, max: 1 });
+        closers.push(async () => propertyAccess.close?.());
+        await api.register(registerSharedHotelSetupStatusRoutes, {
+          prefix: "/api/hotel-setup",
+          repository: createPgSharedHotelSetupStatusRepository({
+            connectionString: h.connectionString,
+          }),
+          trackCommandRepository: createPgHotelSetupTrackCommandRepository({
+            connectionString: h.connectionString,
+          }),
+          propertyAccessRepository: propertyAccess,
+          profileCommand: createOrdinaryHotelSetupProfileCommand(h.pool),
+          bookingPublicationRefresh: { refresh: h.publish },
+        });
+        const current = (await h.ports.profiles.getPropertyProfile(scope))!;
+        const saved = await api.inject({
+          method: "PUT",
+          url: `/api/hotel-setup/properties/${h.propertyId}/profile`,
+          headers: { "idempotency-key": `location-${h.propertyId}` },
+          payload: {
+            expectedProfileRevision: current.profileRevision,
+            patch: { location: { city: "Ahangama", streetAddress: "Welhengoda Road" } },
+          },
+        });
+        expect(saved.statusCode, saved.body).toBe(200);
+        await vi.waitFor(
+          async () =>
+            expect(await page()).toMatchObject({ hotel: { location: { city: "Ahangama" } } }),
+          { timeout: 20_000, interval: 250 },
+        );
+
+        // Two saves a moment apart (General saves the profile, then the settings): the second
+        // refresh meets the first one's publication, waits for it and still lands.
+        await h.admin.query(
+          `UPDATE booking.booking_settings SET hero_subtext = 'Surf, then jungle', updated_at = now()
+           WHERE property_id = $1`,
+          [h.propertyId],
+        );
+        const both = await Promise.all([refresh("profile", true), refresh("settings", true)]);
+        expect(both.map((operation) => operation?.status)).not.toContain(undefined);
+        expect(await page()).toMatchObject({
+          hotel: { location: { city: "Ahangama" }, branding: { heroSubtext: "Surf, then jungle" } },
+        });
+      } finally {
+        for (const close of closers.reverse()) await close().catch(() => undefined);
         await h.close();
       }
     });
