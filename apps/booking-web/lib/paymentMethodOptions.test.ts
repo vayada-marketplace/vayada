@@ -24,9 +24,9 @@ it("words each way to pay, its payment lines and its button (VAY-2347)", () => {
   expect(hotel).toEqual({
     method: "pay_at_property",
     title: "Pay at the hotel",
-    summary: "Nothing to pay now · you pay when you arrive",
+    summary: "Nothing to pay now · pay on arrival",
     explanation:
-      "You pay €240 at the hotel when you arrive. Your booking is confirmed straight away.",
+      "Nothing is charged now. You pay €240 at the hotel when you arrive. Your booking is confirmed straight away.",
     box: [
       { label: "Pay now", value: "€0" },
       { label: "At the hotel", value: "€240" },
@@ -34,10 +34,15 @@ it("words each way to pay, its payment lines and its button (VAY-2347)", () => {
     button: "Confirm booking",
     busy: "Confirming booking…",
   });
+  // VAY-2348: bank transfer names its fixed 48 hours.
   expect(bank!.title).toBe("Pay by bank transfer");
+  expect(bank!.summary).toBe("Pay within 48 hours · bank details sent by email");
+  expect(bank!.explanation).toBe(
+    "After booking, we email you the hotel’s bank details and your booking reference. Your transfer must arrive within 48 hours, or the booking is released. Your booking is confirmed once the hotel confirms your transfer.",
+  );
   expect(bank!.box).toEqual([
     { label: "Pay now", value: "€0" },
-    { label: "By bank transfer", value: "€240" },
+    { label: "Transfer within 48 hours", value: "€240" },
   ]);
   expect(paypal!.button).toBe("Confirm booking");
 });
@@ -54,7 +59,7 @@ it("says nothing is charged until a request is accepted; bank transfer still wai
   expect(hotel!.button).toBe("Send booking request");
   expect(hotel!.busy).toBe("Sending request…");
   expect(bank!.button).toBe("Confirm booking");
-  expect(bank!.explanation).toContain("once your transfer arrives");
+  expect(bank!.explanation).toContain("Your transfer must arrive within 48 hours");
 });
 
 it("words card payments, holds and a part paid at the hotel", () => {

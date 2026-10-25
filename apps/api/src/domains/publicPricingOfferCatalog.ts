@@ -83,12 +83,15 @@ export function createPublicPricingOfferCatalog(
         // The location map switch (VAY-2126) is read live; rooms' pins are sent only while it is on.
         const guestLocation = await readGuestLocation(client, propertyId);
         const locationMap = guestLocation?.map ?? null;
+        const offeredRooms = new Map(offered.map((room) => [room.roomTypeId, room]));
         const rooms = [];
-        for (const room of offered) {
-          const row = content.get(room.roomTypeId);
-          const facts = row && roomFacts(row);
+        // In the hotel's saved room order (Calendar → Reorder rooms, VAY-2315), read live like the
+        // rooms' content, so a new order shows without publishing.
+        for (const row of content.values()) {
+          const room = offeredRooms.get(row.roomTypeId);
+          const facts = roomFacts(row);
           // A room whose saved facts are incomplete is left out; the others stay bookable.
-          if (!row || !facts) continue;
+          if (!room || !facts) continue;
           rooms.push({
             roomTypeId: room.roomTypeId,
             name: facts.name,
@@ -138,6 +141,7 @@ export function createPublicPricingOfferCatalog(
   };
 }
 
+/** The rooms' saved content, in the order the Calendar and Rooms & Rates list room types. */
 async function readRoomContent(
   client: PoolClient,
   propertyId: string,
@@ -168,7 +172,8 @@ async function readRoomContent(
        ON assignment.property_id = room_type.property_id
       AND assignment.room_type_id = room_type.id
      WHERE room_type.property_id = $1::uuid AND room_type.id = ANY($2::uuid[])
-     GROUP BY room_type.property_id, room_type.id`,
+     GROUP BY room_type.property_id, room_type.id
+     ORDER BY room_type.sort_order, room_type.name, room_type.id`,
     [propertyId, rooms.map((room) => room.roomTypeId)],
   );
   return new Map(result.rows.map((row) => [row.roomTypeId, row]));

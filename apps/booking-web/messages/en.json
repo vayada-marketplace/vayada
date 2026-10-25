@@ -338,8 +338,10 @@
     "recoveryInProgress": "Your booking is still being processed. Retry to check the same booking again.",
     "termsRequired": "Please accept the Terms and Conditions before submitting.",
     "chooseAnotherRoom": "Choose another room",
+    "changeDates": "Change dates",
     "noWayToPay": "The rooms you chose can't be paid for in any way this hotel offers. Please choose other rooms.",
-    "noWayToPayThisSoon": "The rooms you chose can only be paid for in a way that isn't available this close to check-in. Please choose later dates or other rooms."
+    "noWayToPayTheseDates": "Online booking isn't available for these dates. Please contact the hotel.",
+    "noWayToPayOnTheseDates": "The rooms you chose can't be paid for on these dates. Please choose other rooms."
   },
   "myBooking": {
     "title": "My Booking",
@@ -739,8 +741,8 @@
     "method": {
       "pay_at_property": {
         "title": "Pay at the hotel",
-        "summary": "Nothing to pay now · you pay when you arrive",
-        "explain": "You pay {total} at the hotel when you arrive. Your booking is confirmed straight away.",
+        "summary": "Nothing to pay now · pay on arrival",
+        "explain": "Nothing is charged now. You pay {total} at the hotel when you arrive. Your booking is confirmed straight away.",
         "explainRequest": "Nothing is charged now. If the hotel accepts your request, you pay {total} when you arrive. The hotel answers within 24 hours.",
         "boxNow": "Pay now",
         "boxLater": "At the hotel",
@@ -763,10 +765,10 @@
       },
       "bank_transfer": {
         "title": "Pay by bank transfer",
-        "summary": "Bank details sent by email after booking",
-        "explain": "After booking, we email you the hotel’s bank details and your booking reference. We hold your room until the payment deadline, and your booking is confirmed once your transfer arrives.",
+        "summary": "Pay within 48 hours · bank details sent by email",
+        "explain": "After booking, we email you the hotel’s bank details and your booking reference. Your transfer must arrive within 48 hours, or the booking is released. Your booking is confirmed once the hotel confirms your transfer.",
         "boxNow": "Pay now",
-        "boxLater": "By bank transfer",
+        "boxLater": "Transfer within 48 hours",
         "phrase": "by bank transfer"
       },
       "paypal": {
@@ -799,7 +801,6 @@
       "children": "{count, plural, one {# child} other {# children}}"
     },
     "checkingPrice": "Checking price…",
-    "tooSoon": "{methods} {count, plural, one {isn’t} other {aren’t}} available this close to check-in.",
     "busyConfirm": "Confirming booking…",
     "busyRequest": "Sending request…",
     "editDetails": "Edit the guest’s details"
@@ -844,7 +845,8 @@
         "freeEnded": "Free cancellation ended",
         "nonRefundable": "Non-refundable",
         "noRefund": "No refund any more",
-        "notRefundableOnceAccepted": "Not refundable once the hotel accepts"
+        "notRefundableOnceAccepted": "Not refundable once the hotel accepts",
+        "notRefundableOncePaid": "Not refundable once paid"
       },
       "when": {
         "untilEnd": "Until the end of {date}",
@@ -855,14 +857,21 @@
         "fromBooking": "From booking",
         "beforeAccept": "Before the hotel accepts",
         "afterAccept": "After the hotel accepts",
-        "noShow": "No-show"
+        "noShow": "No-show",
+        "beforeTransfer": "Before your transfer arrives",
+        "noTransfer": "No transfer within 48 hours",
+        "paidUntilEnd": "Paid, until the end of {date}",
+        "afterTransfer": "Once your transfer arrives"
       },
       "pay": {
         "free": "Free",
         "freeNothingCharged": "Free · nothing charged",
         "freeHoldReleased": "Free · card hold released",
         "part": "{percent}% ({amount})",
-        "full": "Full amount ({amount})"
+        "full": "Full amount ({amount})",
+        "freeNothingPaid": "Free · nothing paid yet",
+        "releasedNothingCharged": "Booking released · nothing charged",
+        "fullRefund": "Full refund"
       },
       "note": {
         "freeUntil": "Free cancellation until the end of {date}, local hotel time. To cancel, use the link in your confirmation email or contact the hotel.",
@@ -870,7 +879,11 @@
         "partial": "What you get back depends on when you cancel. After {date}, or if you don’t arrive, you pay the full amount.",
         "partialEnded": "Refunds ended on {date}. If you cancel or don’t arrive, you pay the full amount.",
         "nonRefundable": "This rate can’t be cancelled or changed for a refund.",
-        "request": "You can withdraw your request for free until the hotel answers."
+        "request": "You can withdraw your request for free until the hotel answers.",
+        "paidFreeUntil": "Full refunds until the end of {date} once your transfer has arrived.",
+        "paidFreeEnded": "Free cancellation ended on {date}. Once your transfer has arrived, cancelling or not arriving costs the full amount.",
+        "paidPartialEnded": "Refunds ended on {date}. Once your transfer has arrived, cancelling or not arriving costs the full amount.",
+        "bankTransfer": "If your transfer doesn’t arrive within 48 hours, the booking is released and nothing is charged."
       }
     },
     "rules": {

@@ -35,6 +35,7 @@ it("dates free cancellation while it is open (VAY-2347)", () => {
     ],
     note: { kind: "freeUntil", date: "2026-11-03" },
     request: false,
+    bankTransfer: false,
   });
 });
 
@@ -155,6 +156,70 @@ it("lets a request be withdrawn for free before the hotel accepts", () => {
     ended: false,
   });
   expect(hotel.rows.filter((row) => row.now)).toHaveLength(1);
+});
+
+// VAY-2348: a bank transfer booking costs nothing until its money arrives, and is released without
+// it; the rate's terms apply to the paid booking.
+it("leads a bank transfer's policy with the time before its money arrives", () => {
+  const bank = { request: false, card: false, bankTransfer: true };
+  const open = cancellationPolicy(
+    free(3),
+    { checkIn: "2026-11-06", today: "2026-10-25" },
+    "17500",
+    bank,
+  );
+  expect(open.badge).toEqual({ kind: "freeUntil", date: "2026-11-03" });
+  expect(open.rows).toEqual([
+    { when: { kind: "beforeTransfer" }, pay: { kind: "freeNothingPaid" }, now: true, ended: false },
+    {
+      when: { kind: "noTransfer" },
+      pay: { kind: "releasedNothingCharged" },
+      now: false,
+      ended: false,
+    },
+    {
+      when: { kind: "paidUntilEnd", date: "2026-11-03" },
+      pay: { kind: "fullRefund" },
+      now: false,
+      ended: false,
+    },
+    { when: { kind: "from", date: "2026-11-04" }, pay: full, now: false, ended: false },
+    noShow,
+  ]);
+  expect(open.note).toEqual({ kind: "paidFreeUntil", date: "2026-11-03" });
+  expect(open.bankTransfer).toBe(true);
+  // The free period has ended: cancelling is still free until the money arrives.
+  const ended = cancellationPolicy(
+    free(3),
+    { checkIn: "2026-10-26", today: "2026-10-25" },
+    "17500",
+    bank,
+  );
+  expect(ended.badge).toEqual({ kind: "notRefundableOncePaid" });
+  expect(ended.rows[0]).toMatchObject({ when: { kind: "beforeTransfer" }, now: true });
+  expect(ended.note).toEqual({ kind: "paidFreeEnded", date: "2026-10-23" });
+  // No free period left: not refundable once paid.
+  const nonRefundable = cancellationPolicy(
+    { kind: "non_refundable" } as unknown as Cancellation,
+    { checkIn: "2026-11-06", today: "2026-10-25" },
+    "17500",
+    bank,
+  );
+  expect(nonRefundable.badge).toEqual({ kind: "notRefundableOncePaid" });
+  expect(nonRefundable.tone).toBe("amber");
+  expect(nonRefundable.rows.map((row) => row.when.kind)).toEqual([
+    "beforeTransfer",
+    "noTransfer",
+    "afterTransfer",
+    "noShow",
+  ]);
+  // A request keeps its own rows: bank transfer never waits for the hotel to accept.
+  expect(
+    cancellationPolicy(free(3), { checkIn: "2026-11-06", today: "2026-10-25" }, "17500", {
+      ...bank,
+      request: true,
+    }).bankTransfer,
+  ).toBe(false);
 });
 
 const quote = (

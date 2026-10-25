@@ -337,8 +337,10 @@
     "recoveryInProgress": "Tu reserva aún se está procesando. Vuelve a intentarlo para comprobar la misma reserva.",
     "termsRequired": "Acepta los términos y condiciones antes de enviar.",
     "chooseAnotherRoom": "Elegir otra habitación",
+    "changeDates": "Cambiar fechas",
     "noWayToPay": "Este alojamiento no ofrece ninguna forma de pago para las habitaciones que elegiste. Elige otras habitaciones.",
-    "noWayToPayThisSoon": "Las habitaciones que elegiste solo se pueden pagar de una forma que no está disponible tan cerca de la llegada. Elige fechas posteriores u otras habitaciones."
+    "noWayToPayTheseDates": "La reserva online no está disponible para estas fechas. Ponte en contacto con el hotel.",
+    "noWayToPayOnTheseDates": "Las habitaciones que elegiste no se pueden pagar para estas fechas. Elige otras habitaciones."
   },
   "myBooking": {
     "title": "Mi Reserva",
@@ -738,8 +740,8 @@
     "method": {
       "pay_at_property": {
         "title": "Pagar en el hotel",
-        "summary": "Nada que pagar ahora · pagas al llegar",
-        "explain": "Pagas {total} en el hotel al llegar. Tu reserva queda confirmada al momento.",
+        "summary": "Nada que pagar ahora · pago al llegar",
+        "explain": "No se cobra nada ahora. Pagas {total} en el hotel al llegar. Tu reserva queda confirmada al momento.",
         "explainRequest": "No se cobra nada ahora. Si el hotel acepta tu solicitud, pagas {total} al llegar. El hotel responde en 24 horas.",
         "boxNow": "A pagar ahora",
         "boxLater": "En el hotel",
@@ -762,10 +764,10 @@
       },
       "bank_transfer": {
         "title": "Pagar por transferencia bancaria",
-        "summary": "Datos bancarios por correo tras la reserva",
-        "explain": "Tras la reserva, te enviamos por correo los datos bancarios del hotel y tu referencia de reserva. Guardamos tu habitación hasta la fecha límite de pago y tu reserva se confirma cuando llegue la transferencia.",
+        "summary": "Paga en un plazo de 48 horas · datos bancarios por correo",
+        "explain": "Tras la reserva, te enviamos por correo los datos bancarios del hotel y tu referencia de reserva. Tu transferencia debe llegar en un plazo de 48 horas o la reserva se cancela. Tu reserva se confirma cuando el hotel confirme tu transferencia.",
         "boxNow": "A pagar ahora",
-        "boxLater": "Por transferencia",
+        "boxLater": "Transferencia en un plazo de 48 horas",
         "phrase": "por transferencia bancaria"
       },
       "paypal": {
@@ -798,7 +800,6 @@
       "children": "{count, plural, one {# niño} other {# niños}}"
     },
     "checkingPrice": "Comprobando el precio…",
-    "tooSoon": "{methods} no {count, plural, one {está disponible} other {están disponibles}} tan cerca de la llegada.",
     "busyConfirm": "Confirmando la reserva…",
     "busyRequest": "Enviando solicitud…",
     "editDetails": "Editar los datos del huésped"
@@ -843,7 +844,8 @@
         "freeEnded": "Cancelación gratuita terminada",
         "nonRefundable": "No reembolsable",
         "noRefund": "Ya no hay reembolso",
-        "notRefundableOnceAccepted": "No reembolsable una vez que el hotel acepte"
+        "notRefundableOnceAccepted": "No reembolsable una vez que el hotel acepte",
+        "notRefundableOncePaid": "No reembolsable una vez pagado"
       },
       "when": {
         "untilEnd": "Hasta el final del {date}",
@@ -854,14 +856,21 @@
         "fromBooking": "Desde la reserva",
         "beforeAccept": "Antes de que el hotel acepte",
         "afterAccept": "Después de que el hotel acepte",
-        "noShow": "No presentarse"
+        "noShow": "No presentarse",
+        "beforeTransfer": "Antes de que llegue tu transferencia",
+        "noTransfer": "Sin transferencia en un plazo de 48 horas",
+        "paidUntilEnd": "Pagado, hasta el final del {date}",
+        "afterTransfer": "Cuando llegue tu transferencia"
       },
       "pay": {
         "free": "Gratis",
         "freeNothingCharged": "Gratis · no se cobra nada",
         "freeHoldReleased": "Gratis · se libera la retención de la tarjeta",
         "part": "{percent} % ({amount})",
-        "full": "Importe total ({amount})"
+        "full": "Importe total ({amount})",
+        "freeNothingPaid": "Gratis · aún no has pagado nada",
+        "releasedNothingCharged": "Reserva cancelada · no se cobra nada",
+        "fullRefund": "Reembolso total"
       },
       "note": {
         "freeUntil": "Cancelación gratuita hasta el final del {date}, hora local del hotel. Para cancelar, usa el enlace del correo de confirmación o contacta con el hotel.",
@@ -869,7 +878,11 @@
         "partial": "Lo que recuperas depende de cuándo canceles. Después del {date}, o si no te presentas, pagas el importe total.",
         "partialEnded": "Los reembolsos terminaron el {date}. Si cancelas o no te presentas, pagas el importe total.",
         "nonRefundable": "Esta tarifa no se puede cancelar ni cambiar con reembolso.",
-        "request": "Puedes retirar tu solicitud gratis hasta que el hotel responda."
+        "request": "Puedes retirar tu solicitud gratis hasta que el hotel responda.",
+        "paidFreeUntil": "Reembolso total hasta el final del {date} una vez que llegue tu transferencia.",
+        "paidFreeEnded": "La cancelación gratuita terminó el {date}. Una vez que llegue tu transferencia, cancelar o no presentarte cuesta el importe total.",
+        "paidPartialEnded": "Los reembolsos terminaron el {date}. Una vez que llegue tu transferencia, cancelar o no presentarte cuesta el importe total.",
+        "bankTransfer": "Si tu transferencia no llega en un plazo de 48 horas, la reserva se cancela y no se cobra nada."
       }
     },
     "rules": {

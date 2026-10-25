@@ -338,8 +338,10 @@
     "recoveryInProgress": "Ihre Buchung wird noch verarbeitet. Versuchen Sie es erneut, um dieselbe Buchung zu prüfen.",
     "termsRequired": "Bitte akzeptieren Sie die Allgemeinen Geschäftsbedingungen vor dem Absenden.",
     "chooseAnotherRoom": "Anderes Zimmer wählen",
+    "changeDates": "Daten ändern",
     "noWayToPay": "Für die gewählten Zimmer bietet diese Unterkunft keine passende Zahlungsart an. Bitte wählen Sie andere Zimmer.",
-    "noWayToPayThisSoon": "Die gewählten Zimmer können nur auf eine Weise bezahlt werden, die so kurz vor der Anreise nicht verfügbar ist. Bitte wählen Sie spätere Daten oder andere Zimmer."
+    "noWayToPayTheseDates": "Für diese Daten ist keine Online-Buchung möglich. Bitte wenden Sie sich an das Hotel.",
+    "noWayToPayOnTheseDates": "Die gewählten Zimmer können für diese Daten nicht bezahlt werden. Bitte wählen Sie andere Zimmer."
   },
   "myBooking": {
     "title": "Meine Buchung",
@@ -739,8 +741,8 @@
     "method": {
       "pay_at_property": {
         "title": "Im Hotel bezahlen",
-        "summary": "Jetzt nichts zahlen · Sie zahlen bei Ankunft",
-        "explain": "Sie zahlen {total} bei Ankunft im Hotel. Ihre Buchung ist sofort bestätigt.",
+        "summary": "Jetzt nichts zahlen · Zahlung bei Ankunft",
+        "explain": "Jetzt wird nichts berechnet. Sie zahlen {total} bei Ankunft im Hotel. Ihre Buchung ist sofort bestätigt.",
         "explainRequest": "Jetzt wird nichts berechnet. Wenn das Hotel Ihre Anfrage annimmt, zahlen Sie {total} bei Ankunft. Das Hotel antwortet innerhalb von 24 Stunden.",
         "boxNow": "Jetzt zahlen",
         "boxLater": "Im Hotel",
@@ -763,10 +765,10 @@
       },
       "bank_transfer": {
         "title": "Per Banküberweisung bezahlen",
-        "summary": "Bankdaten per E-Mail nach der Buchung",
-        "explain": "Nach der Buchung senden wir Ihnen die Bankdaten des Hotels und Ihre Buchungsnummer per E-Mail. Wir halten Ihr Zimmer bis zur Zahlungsfrist frei; Ihre Buchung ist bestätigt, sobald Ihre Überweisung eingegangen ist.",
+        "summary": "Zahlung innerhalb von 48 Stunden · Bankdaten per E-Mail",
+        "explain": "Nach der Buchung senden wir Ihnen die Bankdaten des Hotels und Ihre Buchungsnummer per E-Mail. Ihre Überweisung muss innerhalb von 48 Stunden eingehen, sonst verfällt die Buchung. Ihre Buchung ist bestätigt, sobald das Hotel Ihre Überweisung bestätigt.",
         "boxNow": "Jetzt zahlen",
-        "boxLater": "Per Überweisung",
+        "boxLater": "Überweisung innerhalb von 48 Stunden",
         "phrase": "per Banküberweisung"
       },
       "paypal": {
@@ -799,7 +801,6 @@
       "children": "{count, plural, one {# Kind} other {# Kinder}}"
     },
     "checkingPrice": "Preis wird geprüft …",
-    "tooSoon": "{methods} {count, plural, one {ist} other {sind}} so kurz vor der Anreise nicht möglich.",
     "busyConfirm": "Buchung wird bestätigt …",
     "busyRequest": "Anfrage wird gesendet …",
     "editDetails": "Angaben des Gasts ändern"
@@ -844,7 +845,8 @@
         "freeEnded": "Kostenlose Stornierung abgelaufen",
         "nonRefundable": "Nicht erstattbar",
         "noRefund": "Keine Erstattung mehr",
-        "notRefundableOnceAccepted": "Nicht erstattbar, sobald das Hotel annimmt"
+        "notRefundableOnceAccepted": "Nicht erstattbar, sobald das Hotel annimmt",
+        "notRefundableOncePaid": "Nach der Zahlung nicht erstattbar"
       },
       "when": {
         "untilEnd": "Bis einschließlich {date}",
@@ -855,14 +857,21 @@
         "fromBooking": "Ab Buchung",
         "beforeAccept": "Bevor das Hotel annimmt",
         "afterAccept": "Nachdem das Hotel angenommen hat",
-        "noShow": "Nichterscheinen"
+        "noShow": "Nichterscheinen",
+        "beforeTransfer": "Bevor Ihre Überweisung eingeht",
+        "noTransfer": "Keine Überweisung innerhalb von 48 Stunden",
+        "paidUntilEnd": "Bezahlt, bis einschließlich {date}",
+        "afterTransfer": "Sobald Ihre Überweisung eingegangen ist"
       },
       "pay": {
         "free": "Kostenlos",
         "freeNothingCharged": "Kostenlos · nichts berechnet",
         "freeHoldReleased": "Kostenlos · Kartenautorisierung freigegeben",
         "part": "{percent} % ({amount})",
-        "full": "Gesamtbetrag ({amount})"
+        "full": "Gesamtbetrag ({amount})",
+        "freeNothingPaid": "Kostenlos · noch nichts bezahlt",
+        "releasedNothingCharged": "Buchung verfällt · nichts berechnet",
+        "fullRefund": "Volle Erstattung"
       },
       "note": {
         "freeUntil": "Kostenlose Stornierung bis Ende {date}, Ortszeit des Hotels. Zum Stornieren nutzen Sie den Link in Ihrer Bestätigungs-E-Mail oder kontaktieren das Hotel.",
@@ -870,7 +879,11 @@
         "partial": "Wie viel Sie zurückbekommen, hängt davon ab, wann Sie stornieren. Nach dem {date} oder wenn Sie nicht anreisen, zahlen Sie den Gesamtbetrag.",
         "partialEnded": "Die Erstattung ist am {date} abgelaufen. Wenn Sie stornieren oder nicht anreisen, zahlen Sie den Gesamtbetrag.",
         "nonRefundable": "Dieser Tarif kann nicht gegen Erstattung storniert oder geändert werden.",
-        "request": "Bis das Hotel antwortet, können Sie Ihre Anfrage kostenlos zurückziehen."
+        "request": "Bis das Hotel antwortet, können Sie Ihre Anfrage kostenlos zurückziehen.",
+        "paidFreeUntil": "Volle Erstattung bis Ende {date}, sobald Ihre Überweisung eingegangen ist.",
+        "paidFreeEnded": "Die kostenlose Stornierung ist am {date} abgelaufen. Sobald Ihre Überweisung eingegangen ist, kosten Stornierung oder Nichterscheinen den Gesamtbetrag.",
+        "paidPartialEnded": "Erstattungen waren bis {date} möglich. Sobald Ihre Überweisung eingegangen ist, kosten Stornierung oder Nichterscheinen den Gesamtbetrag.",
+        "bankTransfer": "Geht Ihre Überweisung nicht innerhalb von 48 Stunden ein, verfällt die Buchung und es wird nichts berechnet."
       }
     },
     "rules": {
