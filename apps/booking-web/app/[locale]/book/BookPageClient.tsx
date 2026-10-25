@@ -800,10 +800,10 @@ function RoomQuoteForm({ slug }: { slug: string }) {
           offeredMethods.length > 1
             ? tGuestErrors("paymentMethodNotAccepted")
             : // VAY-2348: the hotel's booking window for this way to pay closed since /book opened.
-              errorCode === "PAYMENT_METHOD_WINDOW" &&
-                step === "payment" &&
-                offeredMethods.length > 1
-              ? tGuestErrors("paymentMethodWindow")
+              errorCode === "PAYMENT_METHOD_WINDOW"
+              ? tGuestErrors(
+                  offeredMethods.length > 1 ? "paymentMethodWindow" : "paymentMethodWindowOnly",
+                )
               : error
         }
         action={

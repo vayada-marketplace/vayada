@@ -7,6 +7,7 @@ import {
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { PaymentMethodWindowsRepository } from "../domains/pricingPaymentWindows.js";
+import { isPostgresLockTimeoutError } from "../platform/postgresRuntime.js";
 import {
   enforceFinancePropertyReadPolicy,
   enforceFinancePropertyWritePolicy,
@@ -87,6 +88,8 @@ export async function registerFinancePaymentWindowsRoutes(
           });
           return body(propertyId, saved);
         } catch (error) {
+          // Another save holds the hotel's lock: the app answers 409 busy_try_again.
+          if (isPostgresLockTimeoutError(error)) throw error;
           request.log.error({ err: error, propertyId }, "Payment method windows unavailable");
           return reply.code(503).send({ code: "payment_windows_unavailable" });
         }

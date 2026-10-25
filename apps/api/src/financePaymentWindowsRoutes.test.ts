@@ -118,6 +118,13 @@ it("saves the whole set with the actor, and refuses invalid or too-short bank tr
     expect(short.statusCode).toBe(422);
     expect(short.json()).toMatchObject({ code: "bank_transfer_window_too_short" });
     expect(repository.replace).toHaveBeenCalledTimes(1);
+    // Another save holds the hotel's lock: rethrown for the app's 409 busy_try_again.
+    repository.replace.mockRejectedValueOnce(
+      Object.assign(new Error("canceling statement due to lock timeout"), { code: "55P03" }),
+    );
+    const busy = await app.inject({ method: "PUT", url: path, payload: { windows: {} } });
+    expect(busy.statusCode).not.toBe(503);
+    expect(busy.json()).not.toEqual({ code: "payment_windows_unavailable" });
     repository.read.mockRejectedValueOnce(new Error("database down"));
     const down = await app.inject({ method: "GET", url: path });
     expect(down.statusCode).toBe(503);

@@ -591,7 +591,8 @@
     "bookingNotChangeable": "This booking can no longer be changed. Look it up again to see its current status.",
     "busyTryAgain": "This booking is being updated right now. Please try again in a moment.",
     "paymentMethodNotAccepted": "The rate you chose can't be paid this way. Please choose another way to pay.",
-    "paymentMethodWindow": "This way to pay isn't available for these dates any more. Please choose another way to pay."
+    "paymentMethodWindow": "This way to pay isn't available for these dates any more. Please choose another way to pay.",
+    "paymentMethodWindowOnly": "This way to pay isn't available for these dates any more. Please choose other dates or contact the hotel."
   },
   "locationMap": {
     "title": "Location",

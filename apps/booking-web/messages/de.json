@@ -591,7 +591,8 @@
     "bookingNotChangeable": "Diese Buchung kann nicht mehr geändert werden. Rufen Sie sie erneut ab, um den aktuellen Status zu sehen.",
     "busyTryAgain": "Diese Buchung wird gerade aktualisiert. Bitte versuchen Sie es gleich noch einmal.",
     "paymentMethodNotAccepted": "Der gewählte Tarif kann nicht auf diese Weise bezahlt werden. Bitte wählen Sie eine andere Zahlungsart.",
-    "paymentMethodWindow": "Diese Zahlungsart ist für diese Daten nicht mehr verfügbar. Bitte wählen Sie eine andere Zahlungsart."
+    "paymentMethodWindow": "Diese Zahlungsart ist für diese Daten nicht mehr verfügbar. Bitte wählen Sie eine andere Zahlungsart.",
+    "paymentMethodWindowOnly": "Diese Zahlungsart ist für diese Daten nicht mehr verfügbar. Bitte wählen Sie andere Daten oder kontaktieren Sie das Hotel."
   },
   "locationMap": {
     "title": "Lage",
