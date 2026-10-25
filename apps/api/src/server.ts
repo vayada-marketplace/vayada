@@ -3107,11 +3107,8 @@ if (platformMediaRuntime) {
   });
 }
 
-// The sweep's pool also sends the bank-transfer payment reminders (VAY-2348).
-const bookingLifecyclePool = new pg.Pool({ connectionString: targetDatabaseUrl });
 const bookingLifecycleStore = createPgBookingLifecycleStore({
   connectionString: targetDatabaseUrl,
-  pool: bookingLifecyclePool,
   inventoryReservationPort: createTargetPmsInventoryReservationPort(),
   stripePaymentProvider: stripeBookingPaymentProvider,
 });
@@ -3129,14 +3126,6 @@ const runBookingLifecycle = () => {
       }
     })
     .catch((error: unknown) => app.log.warn({ err: error }, "Booking lifecycle sweep failed"))
-    .then(() => runBankTransferPaymentReminders(bookingLifecyclePool))
-    .then((result) => {
-      if (result.failed > 0)
-        app.log.warn({ failed: result.failed }, "Bank transfer payment reminders failed");
-    })
-    .catch((error: unknown) =>
-      app.log.warn({ err: error }, "Bank transfer payment reminders failed"),
-    )
     .finally(() => {
       activeBookingLifecycleRun = undefined;
     });
@@ -3144,6 +3133,34 @@ const runBookingLifecycle = () => {
 const bookingLifecycleTimer = setInterval(runBookingLifecycle, 60_000);
 bookingLifecycleTimer.unref();
 runBookingLifecycle();
+
+// VAY-2348: one payment reminder a day before a booking-page bank transfer's deadline, on its own
+// pool and timer so a stuck reminder run never holds up the lifecycle sweep.
+const bankTransferReminderPool = new pg.Pool({
+  connectionString: targetDatabaseUrl,
+  connectionTimeoutMillis: 5_000,
+  max: 2,
+});
+let activeBankTransferReminderRun: Promise<void> | undefined;
+const runBankTransferReminders = () => {
+  if (!config.backgroundWorkersEnabled || activeBankTransferReminderRun) return;
+  activeBankTransferReminderRun = runBankTransferPaymentReminders(bankTransferReminderPool)
+    .then((result) => {
+      if (result.failures.length)
+        app.log.warn(
+          { failures: result.failures },
+          "Bank transfer payment reminders completed with failures",
+        );
+    })
+    .catch((error: unknown) =>
+      app.log.warn({ err: error }, "Bank transfer payment reminders failed"),
+    )
+    .finally(() => {
+      activeBankTransferReminderRun = undefined;
+    });
+};
+const bankTransferReminderTimer = setInterval(runBankTransferReminders, 60_000);
+bankTransferReminderTimer.unref();
 
 // Card refunds of cancelled pricing-v2 stays (VAY-2205): retries Stripe errors and follows refunds
 // still pending at Stripe. Commands exist only once a hotel takes card.
@@ -3260,16 +3277,18 @@ app.addHook("preClose", async () => {
 });
 app.addHook("onClose", async () => {
   clearInterval(bookingLifecycleTimer);
+  clearInterval(bankTransferReminderTimer);
   clearInterval(pricingCardRefundTimer);
   clearInterval(pricingCardReconciliationTimer);
   clearTimeout(pricingCardReconciliationStart);
   if (bookingEmailDeliveryTimer) clearInterval(bookingEmailDeliveryTimer);
   await activeBookingLifecycleRun;
+  await activeBankTransferReminderRun;
   await activePricingCardRefundRun;
   await activePricingCardReconciliation;
   await activeBookingEmailDelivery;
   await bookingLifecycleStore.close();
-  await bookingLifecyclePool.end();
+  await bankTransferReminderPool.end();
   await pmsInboxDeliveryStore?.close();
   await pmsInboxDeliveryPool?.end();
 });

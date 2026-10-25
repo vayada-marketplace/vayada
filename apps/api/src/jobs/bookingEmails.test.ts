@@ -578,7 +578,9 @@ describe("booking lifecycle email jobs", () => {
       .filter((call) => call.text.includes("INSERT INTO platform.jobs"))
       .map((call) => JSON.parse(String(call.values?.[8])));
     expect(guest.text).toContain("We didn't receive your payment by the deadline");
-    expect(guest.text).toContain("If you've already sent the money, please contact the hotel.");
+    expect(guest.text).toContain(
+      "If you've already sent the money, please contact Hotel Alpenrose.",
+    );
     expect(host.text).toContain("its payment didn't arrive by the deadline");
     // VAY-2348 D5: no late confirmation; the hotel refunds or makes a new booking.
     expect(host.text).toContain("refund it or make a new booking for them");
@@ -622,6 +624,10 @@ describe("booking lifecycle email jobs", () => {
     // The deadline in the hotel's own time (Colombo is UTC+5:30).
     expect(guest.text).toMatch(/Payment deadline: Thu, 3 Sept? 2026, 15:30 GMT\+5:30/);
     expect(guest.text).toContain("we haven't received your bank transfer yet");
+    expect(guest.text).toContain(
+      "If your transfer might arrive late, please contact Hotel Alpenrose.",
+    );
+    expect(guest.text).not.toContain("nothing more to do");
     // PayPal keeps its own flow (D10); bookings outside the booking page get none.
     await expect(reminder("paypal")).resolves.toMatchObject({ enqueued: [] });
     await expect(reminder("bank_transfer", "legacy_checkout")).resolves.toMatchObject({

@@ -588,7 +588,7 @@ function emailCopy(input: BookingLifecycleEmailInput) {
         ...(paypalEmail ? [`Please send it by PayPal to ${paypalEmail}.`] : []),
         `Payment deadline: ${deadlineText(input.paymentDeadlineAt, booking.propertyTimeZone)}`,
         `Please add your booking reference to the payment: ${booking.bookingReference}`,
-        "We confirm your booking as soon as your payment arrives. If we don't receive it by the deadline, the booking expires and the room is released.",
+        "The hotel confirms your booking once your payment has arrived. If we don't receive it by the deadline, the booking expires and the room is released.",
       ].join("\n\n"),
     };
   }
@@ -604,7 +604,8 @@ function emailCopy(input: BookingLifecycleEmailInput) {
         `Amount due: ${money(booking.balanceAmount ?? booking.totalAmount, booking.currency)}`,
         `Payment deadline: ${deadlineText(input.paymentDeadlineAt, booking.propertyTimeZone)}`,
         `Please add your booking reference to the payment: ${booking.bookingReference}`,
-        "If you've already sent it, there's nothing more to do: we confirm your booking as soon as it arrives. If we don't receive it by the deadline, the booking is released.",
+        "Please make sure it reaches the hotel before the deadline: bank transfers can take a few days. If it doesn't arrive by then, the booking is released.",
+        `If your transfer might arrive late, please contact ${property}.`,
       ].join("\n\n"),
     };
   }
@@ -699,7 +700,7 @@ function emailCopy(input: BookingLifecycleEmailInput) {
         ...(manualPricingPayment(booking)
           ? [
               "We didn't receive your payment by the deadline, so the room is no longer held.",
-              "If you've already sent the money, please contact the hotel.",
+              `If you've already sent the money, please contact ${property}.`,
             ]
           : []),
         `Booking reference: ${booking.bookingReference}`,

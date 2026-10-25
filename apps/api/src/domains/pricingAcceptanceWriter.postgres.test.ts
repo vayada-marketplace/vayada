@@ -3407,10 +3407,30 @@ describe.skipIf(!url)("pricing acceptance writer bank transfer and PayPal (Postg
     } finally {
       await sweptFirst.close();
     }
-    // At the same moment: exactly one of them wins.
+    // At the same moment: a held row lock makes both wait, then exactly one of them wins.
     const racing = await pendingBankTransfer();
+    const lockPool = new pg.Pool({ connectionString: url, max: 2 });
+    const blocker = await lockPool.connect();
     try {
-      const [paid, expired] = await Promise.all([racing.markPaid(), racing.sweep()]);
+      await blocker.query("BEGIN");
+      await blocker.query("SELECT 1 FROM booking.guest_bookings WHERE id=$1 FOR UPDATE", [
+        racing.pending.bookingId,
+      ]);
+      const holder = (await blocker.query("SELECT pg_backend_pid() AS pid")).rows[0].pid;
+      const both = Promise.all([racing.markPaid(), racing.sweep()]);
+      let waiting = 0;
+      for (let attempt = 0; attempt < 200 && waiting < 2; attempt++) {
+        waiting = (
+          await lockPool.query(
+            "SELECT count(*)::int AS n FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))",
+            [holder],
+          )
+        ).rows[0].n;
+        if (waiting < 2) await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      expect(waiting).toBe(2);
+      await blocker.query("COMMIT");
+      const [paid, expired] = await both;
       const state = await racing.state();
       if (paid.ok) {
         expect(expired).toBe(0);
@@ -3422,6 +3442,9 @@ describe.skipIf(!url)("pricing acceptance writer bank transfer and PayPal (Postg
         expect(racing.released).toHaveLength(1);
       }
     } finally {
+      await blocker.query("ROLLBACK").catch(() => undefined);
+      blocker.release();
+      await lockPool.end();
       await racing.close();
     }
   });
@@ -3449,12 +3472,12 @@ describe.skipIf(!url)("pricing acceptance writer bank transfer and PayPal (Postg
       // Booked just now: the reminder waits until 24 hours before the deadline.
       await remind(waiting, 25);
       expect(await reminders(waiting)).toEqual([]);
-      await remind(waiting, 23);
+      // Two runs (two servers) race the first reminder: one is queued.
+      await Promise.all([remind(waiting, 23), remind(waiting, 23)]);
       const once = [{ role: "guest", bank: true, deadline: waiting.pending.payment.deadlineAt }];
       expect(await reminders(waiting)).toEqual(once);
-      // Again, and twice at once: still one.
+      // Later runs: still one.
       await remind(waiting, 22);
-      await Promise.all([remind(waiting, 21), remind(waiting, 21)]);
       expect(await reminders(waiting)).toEqual(once);
     } finally {
       await waiting.close();
@@ -3470,8 +3493,11 @@ describe.skipIf(!url)("pricing acceptance writer bank transfer and PayPal (Postg
     }
     const released = await pendingBankTransfer();
     try {
-      await expect(released.sweep()).resolves.toBe(1);
+      // Less than 2 hours left (after downtime, say): too late to be of use.
       await remind(released, 1);
+      expect(await reminders(released)).toEqual([]);
+      await expect(released.sweep()).resolves.toBe(1);
+      await remind(released, 23);
       expect(await reminders(released)).toEqual([]);
     } finally {
       await released.close();
