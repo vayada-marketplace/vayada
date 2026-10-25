@@ -98,13 +98,12 @@ for (const [label, skewMs] of [
     await continueToPayment(page, { method: "pay_at_property" });
     await expect(orderTotal(page)).toHaveText("€180");
 
-    const terms = page.getByLabel("I have read the room and rate terms for this price");
-    await expect(terms).toBeEnabled();
-    await terms.check();
-    await expect(page.getByText(/couldn.t verify our guest rules/)).toHaveCount(0);
-    const rules = page.getByLabel("guest rules for this price");
-    await rules.check();
-    await expect(rules).toBeChecked();
+    // VAY-2347: one tick for this price's policy, rules and terms.
+    const agree = page.getByLabel(/^I agree to the cancellation policy/);
+    await expect(agree).toBeEnabled();
+    await expect(page.getByText(/couldn.t check the hotel.s guest rules/)).toHaveCount(0);
+    await agree.check();
+    await expect(agree).toBeChecked();
     await expect(page.getByText("Phone (optional)")).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Confirm booking" })).toBeEnabled();
   });

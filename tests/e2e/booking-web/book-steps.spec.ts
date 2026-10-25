@@ -279,7 +279,7 @@ for (const width of [1440, 390]) {
     // VAY-2347: only the form; the guest rules and terms are read on the next step.
     await expect(page.getByRole("heading", { name: "Who’s staying?" })).toBeVisible();
     await expect(page.getByRole("region", { name: "Guest rules" })).toHaveCount(0);
-    await expect(page.getByRole("region", { name: "Our terms & conditions" })).toHaveCount(0);
+    await expect(page.getByRole("region", { name: "Terms & conditions" })).toHaveCount(0);
     await fillGuestDetails(page);
     await page.getByLabel("Special requests (optional)").fill("A quiet room, please.");
     await page.reload();
@@ -295,67 +295,62 @@ for (const width of [1440, 390]) {
     await page.goForward();
     await page.getByRole("button", { name: "Continue to review" }).click();
 
-    // Payment: pay at the hotel by default, the ticks for this price, then Confirm.
+    // Payment: pay at the hotel by default, one tick for this price, then Confirm (VAY-2347).
     await expect(page.getByRole("heading", { name: "Review & pay" })).toBeVisible();
     await expect(paymentOption(page, "pay_at_property")).toHaveAttribute("aria-checked", "true");
     await expect(orderTotal(page)).toHaveText("€370");
-    await page.getByRole("button", { name: "Read our guest rules" }).click();
+    // Local hotel time with the hotel's country, not a zone's name or IANA id.
+    await expect(page.getByRole("region", { name: "Before you book" })).toContainText(
+      "All times are local hotel time (Switzerland).",
+    );
+    await page.getByRole("button", { name: "Guest rules" }).click();
     await expect(page.getByRole("region", { name: "Guest rules" })).toContainText(
       "Check-in from 15:00 until 22:00",
     );
-    // Local hotel time with the hotel's country, not a zone's name or IANA id (VAY-2347).
-    await expect(page.getByRole("region", { name: "Guest rules" })).toContainText(
-      "All times are local hotel time (Switzerland).",
-    );
-    await page.getByRole("button", { name: "Read our terms & conditions" }).click();
-    await expect(page.getByRole("region", { name: "Our terms & conditions" })).toContainText(
+    await page.getByRole("button", { name: "Terms & conditions" }).click();
+    await expect(page.getByRole("region", { name: "Terms & conditions" })).toContainText(
       "Quiet hours",
     );
     const confirm = page.getByRole("button", { name: "Confirm booking" });
-    const terms = page.getByLabel("I have read the room and rate terms for this price");
-    const rules = page.getByLabel("guest rules for this price");
+    const agree = page.getByLabel(/^I agree to the cancellation policy/);
     const missing = page
       .getByRole("alert")
-      .filter({ hasText: "Read and accept both the room terms and guest rules to book." });
-    // VAY-2306: Confirm before ticking books nothing; it marks both boxes and goes to the first.
+      .filter({ hasText: "Tick the box to agree before you book." });
+    // VAY-2306: Confirm before ticking books nothing; it marks the box and focuses it.
     await confirm.click();
     await expect(missing).toBeVisible();
-    await expect(terms).toHaveAttribute("aria-invalid", "true");
-    await expect(rules).toHaveAttribute("aria-invalid", "true");
-    await expect(terms).toBeFocused();
+    await expect(agree).toHaveAttribute("aria-invalid", "true");
+    await expect(agree).toBeFocused();
     await page.screenshot({
       path: testInfo.outputPath(`payment-missing-ticks-${width}.png`),
       fullPage: true,
     });
-    // Back to the details and on again: the boxes start without the mark until the next press.
+    // Back to the details and on again: the box starts without the mark until the next press.
     await page.getByRole("button", { name: "Edit", exact: true }).click();
     await page.getByRole("button", { name: "Continue to review" }).click();
-    await expect(terms).toBeVisible();
+    await expect(agree).toBeVisible();
     await expect(missing).toHaveCount(0);
-    await expect(terms).not.toHaveAttribute("aria-invalid", "true");
+    await expect(agree).not.toHaveAttribute("aria-invalid", "true");
     await confirm.click();
     await expect(missing).toBeVisible();
-    await expect(terms).toBeFocused();
+    await expect(agree).toBeFocused();
     await page.keyboard.press("Space");
-    await expect(terms).toBeChecked();
-    await expect(terms).not.toHaveAttribute("aria-invalid", "true");
-    await expect(rules).toHaveAttribute("aria-invalid", "true");
+    await expect(agree).toBeChecked();
+    await expect(missing).toHaveCount(0);
     // The whole tile ticks its box, not only the box itself.
-    const tile = rules.locator("xpath=ancestor::div[contains(@class, 'border-2')][1]");
+    await agree.uncheck();
+    const tile = agree.locator("xpath=ancestor::div[contains(@class, 'border-2')][1]");
     const { width: tileWidth } = (await tile.boundingBox())!;
     await tile.click({ position: { x: tileWidth - 12, y: 12 } });
-    await expect(rules).toBeChecked();
-    await expect(missing).toHaveCount(0);
+    await expect(agree).toBeChecked();
     await page.screenshot({ path: testInfo.outputPath(`payment-${width}.png`), fullPage: true });
-    // Another way to pay is a new price: its terms are ticked afresh.
+    // Another way to pay is a new price: its terms are agreed to afresh.
     await paymentOption(page, "card").click();
     await expect(page.getByRole("button", { name: "Continue to card details" })).toBeVisible();
-    await expect(terms).not.toBeChecked();
-    await expect(rules).not.toBeChecked();
+    await expect(agree).not.toBeChecked();
     await expect(missing).toHaveCount(0);
     await paymentOption(page, "pay_at_property").click();
-    await page.getByLabel("I have read the room and rate terms for this price").check();
-    await page.getByLabel("guest rules for this price").check();
+    await page.getByLabel(/^I agree to the cancellation policy/).check();
     await confirm.click();
 
     await expect(page).toHaveURL(new RegExp(`/booking/${reference}$`));

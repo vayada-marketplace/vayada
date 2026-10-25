@@ -92,10 +92,6 @@ test("says what the card pays now and what is left to pay at the hotel", async (
   const summary = page.getByRole("complementary", { name: "Your stay" });
   await expect(summary.getByText("Charged now")).toBeVisible();
   await expect(summary.getByText("At the hotel")).toBeVisible();
-  await page.getByRole("button", { name: "Read the room and rate terms" }).click();
-  await expect(
-    page.getByText("Payment terms: 30% when booking, the rest at the property."),
-  ).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("card-deposit-payment.png"), fullPage: true });
   await assertHealthy();
 });

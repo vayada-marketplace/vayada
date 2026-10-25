@@ -6,25 +6,33 @@ const offerKey = `pricing-offer.v2:${"c".repeat(64)}`;
 const terms = "These are our house terms.\n\n1. Your booking\nWe confirm by email.";
 
 // VAY-2176: /book shows the hotel's own Terms & Conditions where booking accepts them; since
-// VAY-2347 that is the payment step only.
-test("shows the hotel's terms on the payment step and says booking accepts them", async ({
+// VAY-2347 they sit in "Before you book" on the payment step, and the one tick agrees to them.
+test("shows the hotel's terms on the payment step and the tick agrees to them", async ({
   page,
 }) => {
   await openQuote(page, terms);
-  await expect(page.getByRole("region", { name: "Our terms & conditions" })).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "Terms & conditions" })).toHaveCount(0);
   await toPayment(page);
-  await page.getByRole("button", { name: "Read our terms & conditions" }).click();
-  const section = page.getByRole("region", { name: "Our terms & conditions" });
+  await page.getByRole("button", { name: "Terms & conditions" }).click();
+  const section = page.getByRole("region", { name: "Terms & conditions" });
   await expect(section).toContainText("These are our house terms.");
   await expect(section).toContainText("We confirm by email.");
-  await expect(page.getByText("By booking, you agree to our terms & conditions.")).toBeVisible();
+  await expect(
+    page.getByLabel(
+      "I agree to the cancellation policy, guest rules and terms & conditions above.",
+    ),
+  ).toBeVisible();
 });
 
-test("shows no terms section or agreement line when the hotel has no terms", async ({ page }) => {
+test("shows no terms section and agrees to the rest when the hotel has no terms", async ({
+  page,
+}) => {
   await openQuote(page, "  ");
   await toPayment(page);
-  await expect(page.getByRole("button", { name: "Read our terms & conditions" })).toHaveCount(0);
-  await expect(page.getByText("By booking, you agree to our terms & conditions.")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Terms & conditions" })).toHaveCount(0);
+  await expect(
+    page.getByLabel("I agree to the cancellation policy and guest rules above."),
+  ).toBeVisible();
 });
 
 async function openQuote(page: Page, termsText: string) {

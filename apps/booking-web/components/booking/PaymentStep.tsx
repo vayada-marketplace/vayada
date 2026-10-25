@@ -1,13 +1,10 @@
 "use client";
 
-import { useId, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useId, type KeyboardEvent, type ReactNode } from "react";
 import { useTranslations } from "next-intl";
 import type { PricingPaymentMethod } from "@vayada/domain-booking/replacement-pricing";
 import type { PaymentMethodOption } from "@/lib/paymentMethodOptions";
-import BookingPageTerms from "./BookingPageTerms";
 
-const documentIcon =
-  "M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z";
 const icon = (d: string, size = "w-5 h-5 text-gray-700") => (
   <svg className={size} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={d} />
@@ -30,13 +27,10 @@ export default function PaymentStep({
   onMethod,
   showExplanation,
   notice,
-  acknowledgements,
-  cancellation,
+  beforeYouBook,
   confirm,
   onBack,
   locked = false,
-  termsText = null,
-  hasQuote,
 }: {
   guestName: string;
   guestEmail: string;
@@ -52,20 +46,15 @@ export default function PaymentStep({
   /** The current price is for the chosen way, so its explanation's amounts are right. */
   showExplanation: boolean;
   notice: ReactNode;
-  acknowledgements: ReactNode;
-  cancellation: string[];
+  /** What the guest agrees to for this price and the tick (VAY-2347); nothing without a price. */
+  beforeYouBook: ReactNode;
   confirm: ReactNode;
   onBack: () => void;
   /** A booking attempt is open: the way to pay and the details can't change until it settles. */
   locked?: boolean;
-  /** Our terms & conditions, readable here where booking accepts them (VAY-2176). */
-  termsText?: string | null;
-  /** What the guest agrees to belongs to a price: without one there is nothing to accept. */
-  hasQuote: boolean;
 }) {
   const t = useTranslations("reviewPay");
   const id = useId();
-  const [showTerms, setShowTerms] = useState(false);
   const methods = options.map((option) => option.method);
   // The options behave like radio buttons: arrow keys move the choice.
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -169,42 +158,7 @@ export default function PaymentStep({
           </>
         )}
       </section>
-      {/* What the guest agrees to belongs to a price: without one there is nothing to accept. */}
-      {hasQuote && (
-        <section aria-label="Before you book" className={`${card} space-y-3`}>
-          <h2 className="text-base font-bold text-gray-900">Before you book</h2>
-          {acknowledgements}
-          {termsText && (
-            <div className="space-y-2">
-              {/* In the tiles' text column above it (VAY-2306). */}
-              <button
-                type="button"
-                className="flex items-center gap-3 pl-[18px] text-[13px] font-medium text-primary-600"
-                aria-expanded={showTerms}
-                onClick={() => setShowTerms((value) => !value)}
-              >
-                <span className="flex w-5 justify-center">
-                  {icon(documentIcon, "w-4 h-4 text-gray-500")}
-                </span>
-                <span className="underline">
-                  {showTerms ? "Hide our terms & conditions" : "Read our terms & conditions"}
-                </span>
-              </button>
-              {showTerms && <BookingPageTerms text={termsText} />}
-            </div>
-          )}
-        </section>
-      )}
-      {cancellation.length > 0 && (
-        <section aria-label="Cancellation" className={card}>
-          <h2 className="text-base font-bold text-gray-900 mb-2">Cancellation</h2>
-          {cancellation.map((line) => (
-            <p key={line} className="text-sm text-gray-600">
-              {line}
-            </p>
-          ))}
-        </section>
-      )}
+      {beforeYouBook}
       <div className="space-y-4">
         <button
           type="button"

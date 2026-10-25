@@ -139,8 +139,7 @@ async function book(page: Page, { extras = true } = {}) {
   await fillGuestDetails(page);
   await page.getByRole("button", { name: "Continue to review" }).click();
   await expect(page.getByRole("heading", { name: "Review & pay" })).toBeVisible();
-  await page.getByLabel("I have read the room and rate terms for this price").check();
-  await page.getByLabel("guest rules for this price").check();
+  await page.getByLabel(/^I agree to the cancellation policy/).check();
   await page.getByRole("button", { name: "Confirm booking" }).click();
   await expect(page).toHaveURL(new RegExp(`/booking/${reference}$`));
 }

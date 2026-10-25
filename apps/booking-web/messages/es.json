@@ -800,5 +800,91 @@
     "busyConfirm": "Confirmando la reserva…",
     "busyRequest": "Enviando solicitud…",
     "editDetails": "Editar los datos del huésped"
+  },
+  "beforeYouBook": {
+    "title": "Antes de reservar",
+    "checkIn": "Entrada",
+    "checkOut": "Salida",
+    "meals": "Comidas",
+    "children": "Niños",
+    "checkInFrom": "Desde las {time}",
+    "checkInBetween": "De {from} a {until}",
+    "checkInToMidnight": "De {from} a medianoche",
+    "checkOutBy": "Hasta las {time}",
+    "mealsVary": "Según la habitación",
+    "childrenWelcome": "Bienvenidos",
+    "childrenWelcomeAge": "Bienvenidos · desde {age} cuentan como adultos",
+    "childrenNo": "No admitidos",
+    "timesLocal": "Todas las horas son hora local del hotel.",
+    "timesLocalIn": "Todas las horas son hora local del hotel ({country}).",
+    "guestRules": "Normas de la casa",
+    "terms": "Términos y condiciones",
+    "rulesLoading": "Cargando las normas de la casa…",
+    "rulesFailed": "No hemos podido comprobar las normas de la casa para este precio.",
+    "retry": "Reintentar",
+    "roomsMissing": "Los detalles de la habitación no están disponibles. Elige de nuevo tus habitaciones para reservar.",
+    "agree": "Acepto la política de cancelación, las normas de la casa y los términos y condiciones de arriba.",
+    "agreeNoTerms": "Acepto la política de cancelación y las normas de la casa de arriba.",
+    "agreeMissing": "Marca la casilla para aceptar antes de reservar.",
+    "hintDetails": "Completa tus datos para reservar.",
+    "hintAgree": "Acepta las condiciones de arriba para reservar.",
+    "policy": {
+      "title": "Política de cancelación",
+      "titleRooms": "{rooms} · cancelación",
+      "ifYouCancel": "Si cancelas",
+      "youPay": "Pagas",
+      "appliesNow": "se aplica ahora",
+      "ended": "terminado",
+      "badge": {
+        "freeUntil": "Cancelación gratuita hasta el {date}",
+        "refundsUntil": "Reembolso hasta el {date}",
+        "freeEnded": "Cancelación gratuita terminada",
+        "nonRefundable": "No reembolsable",
+        "noRefund": "Ya no hay reembolso",
+        "notRefundableOnceAccepted": "No reembolsable una vez que el hotel acepte"
+      },
+      "when": {
+        "untilEnd": "Hasta el final del {date}",
+        "until": "Hasta el {date}",
+        "between": "Del {from} al final del {until}",
+        "from": "Desde el {date}",
+        "fromNow": "Desde ahora hasta la llegada",
+        "fromBooking": "Desde la reserva",
+        "beforeAccept": "Antes de que el hotel acepte",
+        "afterAccept": "Después de que el hotel acepte",
+        "noShow": "No presentarse"
+      },
+      "pay": {
+        "free": "Gratis",
+        "freeNothingCharged": "Gratis · no se cobra nada",
+        "freeHoldReleased": "Gratis · se libera la retención de la tarjeta",
+        "part": "{percent} % ({amount})",
+        "full": "Importe total ({amount})"
+      },
+      "note": {
+        "freeUntil": "Cancelación gratuita hasta el final del {date}, hora local del hotel. Para cancelar, usa el enlace del correo de confirmación o contacta con el hotel.",
+        "freeEnded": "La cancelación gratuita terminó el {date}. Si cancelas o no te presentas, pagas el importe total.",
+        "partial": "Lo que recuperas depende de cuándo canceles. Después del {date}, o si no te presentas, pagas el importe total.",
+        "partialEnded": "Los reembolsos terminaron el {date}. Si cancelas o no te presentas, pagas el importe total.",
+        "nonRefundable": "Esta tarifa no se puede cancelar ni cambiar con reembolso.",
+        "request": "Puedes retirar tu solicitud gratis hasta que el hotel responda."
+      }
+    },
+    "rules": {
+      "checkIn": "Entrada desde las {time}.",
+      "checkInBetween": "Entrada de {from} a {until}.",
+      "checkInToMidnight": "Entrada desde las {from} hasta la medianoche del día de llegada.",
+      "checkOut": "Salida hasta las {time}.",
+      "checkOutFrom": "Salida desde las {from}, hasta las {time}.",
+      "childrenWelcome": "Los niños son bienvenidos.",
+      "childrenNo": "Los niños no pueden alojarse en este hotel.",
+      "adultsFrom": "Los huéspedes desde {age} años cuentan como adultos.",
+      "phoneRequired": "Se necesita un número de teléfono para cada reserva.",
+      "phoneOptional": "El número de teléfono es opcional.",
+      "arrivalYes": "Puedes indicar al hotel tu hora prevista de llegada.",
+      "arrivalNo": "La hora de llegada no se recoge en línea. Añádela en las peticiones especiales o escribe al hotel.",
+      "requestsYes": "Puedes enviar peticiones especiales al hotel.",
+      "requestsNo": "Las peticiones especiales no se pueden enviar en línea. Escribe al hotel."
+    }
   }
 }
