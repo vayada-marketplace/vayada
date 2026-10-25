@@ -143,6 +143,7 @@
   "layout.header.preview": "Vorschau",
   "layout.header.notifications": "Benachrichtigungen",
   "notifications.bellUnread": "Benachrichtigungen, {count} ungelesen",
+  "notifications.bellSyncFailed": "Benachrichtigungen, Abgleich mit dem Channel Manager fehlgeschlagen",
   "notifications.newCount": "{count} neu",
   "notifications.markAllRead": "Alle als gelesen markieren",
   "notifications.markRead": "Als gelesen markieren",

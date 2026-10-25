@@ -110,7 +110,8 @@ export default function NotificationsBell({
   if (status === "unavailable") return null;
 
   const unread = feed?.unread.all ?? 0;
-  const badge = feed && unread > 0 ? feed.badge : "none";
+  // Red with nothing unread: the sync error was read but is still failing (a dot without a count).
+  const badge = feed?.badge ?? "none";
   const now = new Date();
   const context = { t, locale, timeZone: feed?.timeZone ?? "UTC", now };
   const synced = sync === "succeeded";
@@ -146,7 +147,9 @@ export default function NotificationsBell({
         aria-label={
           unread > 0
             ? t("notifications.bellUnread", { count: unread })
-            : t("layout.header.notifications")
+            : feed?.syncAlert
+              ? t("notifications.bellSyncFailed")
+              : t("layout.header.notifications")
         }
         className={`relative flex rounded-md p-1.5 transition-colors ${
           open ? "bg-gray-100 text-gray-700" : "text-gray-500 hover:bg-gray-50 hover:text-gray-700"
@@ -157,11 +160,15 @@ export default function NotificationsBell({
           <span
             data-testid="notifications-badge"
             data-tone={badge}
-            className={`absolute -right-1 -top-[3px] flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-bold leading-3 text-white ring-2 ring-white ${
+            className={`absolute rounded-full ring-2 ring-white ${
               badge === "red" ? "bg-red-600" : "bg-primary-600"
+            } ${
+              unread > 0
+                ? "-right-1 -top-[3px] flex h-4 min-w-4 items-center justify-center px-1 text-[10px] font-bold leading-3 text-white"
+                : "right-0.5 top-0.5 h-2 w-2"
             }`}
           >
-            {badgeLabel(unread)}
+            {unread > 0 ? badgeLabel(unread) : null}
           </span>
         )}
       </button>

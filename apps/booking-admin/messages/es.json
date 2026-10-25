@@ -143,6 +143,7 @@
   "layout.header.preview": "Vista previa",
   "layout.header.notifications": "Notificaciones",
   "notifications.bellUnread": "Notificaciones, {count} sin leer",
+  "notifications.bellSyncFailed": "Notificaciones, falló la sincronización del channel manager",
   "notifications.newCount": "Nuevas: {count}",
   "notifications.markAllRead": "Marcar todo como leído",
   "notifications.markRead": "Marcar como leído",

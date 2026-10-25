@@ -262,6 +262,31 @@ describe("notification rows (VAY-2349)", () => {
     expect(all.badge).toBe("none");
   });
 
+  it("keeps the badge red while a read sync error is still failing", () => {
+    const syncAlert = {
+      key: "channel-sync:c:ari.1",
+      read: false,
+      domains: ["ari" as const],
+      failedAt: "2026-10-25T11:50:00Z",
+      lastSuccessAt: null,
+      canRetry: true,
+      canViewDetails: true,
+    };
+    const failing = feed({
+      items: [item({})],
+      syncAlert,
+      unread: { all: 2, bookings: 1, needsAction: 1, updates: 0 },
+      badge: "red",
+    });
+    const read = withRead(failing, new Set([syncAlert.key]));
+    expect(read.syncAlert?.read).toBe(true);
+    expect(read.unread).toEqual({ all: 1, bookings: 1, needsAction: 0, updates: 0 });
+    expect(read.badge).toBe("red");
+    const all = withRead(failing, "all");
+    expect(all.unread.all).toBe(0);
+    expect(all.badge).toBe("red");
+  });
+
   it("shows cents only when an amount has them", () => {
     const row = (totalAmount: string) =>
       notificationRow(item({ booking: { ...booking, totalAmount } }), context).amount;

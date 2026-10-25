@@ -268,10 +268,12 @@ test.describe("Booking Admin notifications bell (VAY-2349)", () => {
     await expect
       .poll(() => readAll)
       .toEqual([{ before: NOW.toISOString(), syncAlertKey: syncAlert.key }]);
-    await expect(page.getByTestId("notifications-badge")).toHaveCount(0);
     await expect(panel(page).getByText(/ new$/)).toHaveCount(0);
     await expect(panel(page).getByRole("button", { name: "Mark all read" })).toHaveCount(0);
-    await expect(bell(page)).toHaveAccessibleName("Notifications");
+    // Nothing unread, but the sync is still failing: a red dot without a count until it is fixed.
+    await expect(page.getByTestId("notifications-badge")).toHaveText("");
+    await expect(page.getByTestId("notifications-badge")).toHaveAttribute("data-tone", "red");
+    await expect(bell(page)).toHaveAccessibleName("Notifications, channel manager sync failed");
   });
 
   test("View booking opens Reservations filtered to that booking", async ({ page }, testInfo) => {

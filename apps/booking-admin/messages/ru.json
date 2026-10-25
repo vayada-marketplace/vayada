@@ -143,6 +143,7 @@
   "layout.header.preview": "Предпросмотр",
   "layout.header.notifications": "Уведомления",
   "notifications.bellUnread": "Уведомления, непрочитанных: {count}",
+  "notifications.bellSyncFailed": "Уведомления, ошибка синхронизации с channel manager",
   "notifications.newCount": "Новых: {count}",
   "notifications.markAllRead": "Отметить все как прочитанные",
   "notifications.markRead": "Отметить как прочитанное",
