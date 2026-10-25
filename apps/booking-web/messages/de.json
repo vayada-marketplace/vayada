@@ -62,7 +62,7 @@
     "rooms": "Zimmer",
     "addons": "Extras",
     "details": "Details",
-    "payment": "Zahlung"
+    "payment": "Prüfen & bezahlen"
   },
   "home": {
     "guestCountUnsupported": "Die Online-Suche unterstützt Ihre Gruppe von {count} Gästen nicht. Versuchen Sie es mit weniger Gästen oder kontaktieren Sie uns.",
@@ -688,5 +688,36 @@
     "newSearch": "Neue Suche starten",
     "yourRooms": "Ihre {count} Zimmer",
     "roomLine": "Zimmer {number} · {room}"
+  },
+  "guestDetails": {
+    "title": "Ihre Angaben",
+    "heading": "Wer übernachtet?",
+    "intro": "Dauert etwa 1 Minute. Felder mit * sind Pflichtfelder.",
+    "firstName": "Vorname",
+    "lastName": "Nachname",
+    "email": "E-Mail",
+    "phone": "Telefon",
+    "phoneCountry": "Ländervorwahl",
+    "countryOfResidence": "Wohnsitzland",
+    "noCountry": "Land auswählen",
+    "arrivalTime": "Voraussichtliche Ankunftszeit",
+    "specialRequests": "Besondere Wünsche",
+    "optional": "(optional)",
+    "firstNamePlaceholder": "Max",
+    "lastNamePlaceholder": "Mustermann",
+    "emailPlaceholder": "max.mustermann@example.com",
+    "phonePlaceholder": "151 2345 6789",
+    "specialRequestsPlaceholder": "z. B. späte Ankunft, Flughafentransfer, Ernährungswünsche",
+    "emailHint": "Hierhin senden wir Ihre Bestätigung.",
+    "phoneHint": "Wird nur für Ihren Aufenthalt verwendet.",
+    "specialRequestsHint": "Wünsche hängen von der Verfügbarkeit ab. Das Hotel antwortet per E-Mail.",
+    "errorFirstName": "Geben Sie Ihren Vornamen ein.",
+    "errorLastName": "Geben Sie Ihren Nachnamen ein.",
+    "errorEmail": "Geben Sie eine E-Mail-Adresse wie name@example.com ein.",
+    "errorPhone": "Geben Sie Ihre Telefonnummer ein.",
+    "errorSummary": "{count, plural, one {Bitte prüfen Sie das rot markierte Feld.} other {Bitte prüfen Sie die # rot markierten Felder.}}",
+    "continue": "Weiter zur Übersicht",
+    "backToRooms": "Zurück zu den Zimmern",
+    "backToExtras": "Zurück zu den Extras"
   }
 }

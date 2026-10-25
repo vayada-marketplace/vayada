@@ -1,6 +1,14 @@
 "use client";
 
-import { Suspense, useEffect, useId, useRef, useState, type ReactNode } from "react";
+import {
+  Suspense,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from "react";
 import { flushSync } from "react-dom";
 import { useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
@@ -10,14 +18,12 @@ import { useRouter } from "@/i18n/navigation";
 import BookShell from "./BookShell";
 import ReplacementGuestRules from "@/components/booking/ReplacementGuestRules";
 import ExtrasStep from "@/components/booking/ExtrasStep";
-import DetailsStep from "@/components/booking/DetailsStep";
 import PaymentStep from "@/components/booking/PaymentStep";
 import StaySummary, { type SummaryRoom } from "@/components/booking/StaySummary";
-import {
+import GuestDetailsForm, {
   acceptanceGuest,
   emptyGuest,
   guestComplete,
-  phoneRequired,
   type GuestDetails,
 } from "@/components/booking/GuestDetailsForm";
 import { useQuoteGuestDisclosure } from "@/lib/hooks/useQuoteGuestDisclosure";
@@ -121,6 +127,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   const tAddons = useTranslations("addons");
   const tGuestErrors = useTranslations("guestErrors");
   const tPayment = useTranslations("payment");
+  const tDetails = useTranslations("guestDetails");
   const tGroup = useTranslations("groupRooms");
   const tCommon = useTranslations("common");
   const { hotel } = useHotel();
@@ -685,6 +692,21 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   ]
     .filter(Boolean)
     .join(" · ");
+  // VAY-2347: once the guest pressed Continue with fields missing, they stay marked until fixed.
+  const [detailsTried, setDetailsTried] = useState(false);
+  const continueToReview = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!quote) return;
+    if (!detailsComplete) {
+      const form = event.currentTarget;
+      // Marked before focus lands, so the first wrong field is announced with its message.
+      flushSync(() => setDetailsTried(true));
+      form.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus();
+      return;
+    }
+    trackEvent(slug, "details_completed", {});
+    go(next);
+  };
   // VAY-2195: a made booking opens its confirmation page, as on the old pages. The page shows
   // what the server has for it; the room and extras names come from this booking.
   const openConfirmation = async ({
@@ -884,7 +906,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   const titles: Record<BookStep, string> = {
     rooms: fromPicks ? tGroup("title") : "Choose rooms and get a price",
     extras: "Enhance Your Stay",
-    details: "Guest Information",
+    details: tDetails("title"),
     payment: "Secure Payment",
   };
 
@@ -1278,68 +1300,25 @@ function RoomQuoteForm({ slug }: { slug: string }) {
           </>
         )}
         {settled && step === "details" && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          // VAY-2347: the form, then "Your stay" (below it on a phone), then the buttons. Continue
+          // is always pressable; missing fields are marked and the first one gets focus.
+          <form
+            noValidate
+            className="grid grid-cols-1 gap-6 lg:grid-cols-3 lg:gap-x-8"
+            onSubmit={continueToReview}
+          >
             <div className="lg:col-span-2 space-y-6">
-              <DetailsStep
-                quote={quote}
-                rooms={summaryRooms}
-                stayLine={stayDates}
-                formatMoney={money}
-                guest={guest}
-                onGuestChange={setGuest}
-                disclosure={guestRulesQuote.disclosure}
-                rulesFailed={guestRulesQuote.failed}
-                onRetryRules={guestRulesQuote.retry}
-                termsText={pagePayment.termsText}
-                locked={attemptOpen}
+              <GuestDetailsForm
+                value={guest}
+                onChange={setGuest}
                 rules={knownRules}
-                today={hotelDate}
-                hotelCountry={hotelCountry}
+                locked={attemptOpen}
+                showErrors={detailsTried}
               />
               {!quote && loading && <p role="status">Checking price…</p>}
               {priceNotice}
-              <div className="flex items-center justify-between gap-4 pt-2">
-                <button
-                  type="button"
-                  className="text-sm font-medium text-gray-600 hover:text-gray-900 flex items-center gap-1"
-                  onClick={() => (previous === "rooms" ? backToRooms() : goBack(previous))}
-                >
-                  <svg
-                    className="w-4 h-4"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                    aria-hidden="true"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M15 19l-7-7 7-7"
-                    />
-                  </svg>
-                  {previous === "extras" ? "Back to extras" : "Back to rooms"}
-                </button>
-                <button
-                  type="button"
-                  className={button}
-                  disabled={!detailsComplete || !quote}
-                  onClick={() => {
-                    trackEvent(slug, "details_completed", {});
-                    go(next);
-                  }}
-                >
-                  Continue to payment
-                </button>
-              </div>
-              {!detailsComplete && (
-                <p className="text-sm text-gray-600 text-right">
-                  Fill in your name, email{phoneRequired(knownRules) ? " and phone" : ""} to
-                  continue.
-                </p>
-              )}
             </div>
-            <div className="lg:col-span-1">
+            <div className="lg:col-start-3 lg:row-start-1 lg:row-span-2 lg:self-start">
               {quote && (
                 <StaySummary
                   title="Your Stay"
@@ -1352,7 +1331,51 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                 />
               )}
             </div>
-          </div>
+            <div className="lg:col-span-2 flex flex-col-reverse items-stretch gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <button
+                type="button"
+                className="text-[15px] font-semibold text-gray-800 hover:text-gray-900 flex items-center justify-center gap-1.5"
+                onClick={() => (previous === "rooms" ? backToRooms() : goBack(previous))}
+              >
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M15 19l-7-7 7-7"
+                  />
+                </svg>
+                {previous === "extras" ? tDetails("backToExtras") : tDetails("backToRooms")}
+              </button>
+              <button
+                type="submit"
+                className={`${button} flex items-center justify-center gap-2 px-7 text-[17px]`}
+                disabled={!quote}
+              >
+                {tDetails("continue")}
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M9 5l7 7-7 7"
+                  />
+                </svg>
+              </button>
+            </div>
+          </form>
         )}
         {settled && step === "payment" && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">

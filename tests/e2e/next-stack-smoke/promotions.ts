@@ -66,7 +66,7 @@ export async function runPromotionAcceptance(input: {
         ),
       ).toBe(active);
       await expect(
-        guest.getByRole("heading", { name: "Booking Summary", exact: true }),
+        guest.getByRole("heading", { name: "Who’s staying?", exact: true }),
       ).toBeVisible();
       const label = guest.getByText("Early bird", { exact: true });
       if (active) await expect(label.first()).toBeVisible();
@@ -108,7 +108,7 @@ export async function runPromotionAcceptance(input: {
 
   await waitForOffer(request, slug, stay, 2);
   await guest.goto(`${guestUrl}?${query}`);
-  await expect(guest.getByRole("heading", { name: "Booking Summary", exact: true })).toBeVisible();
+  await expect(guest.getByRole("heading", { name: "Who’s staying?", exact: true })).toBeVisible();
   await expect(guest.getByText("Early bird", { exact: true })).toHaveCount(0);
   const baseline = await publicApi(request).json<Record<string, unknown>>(
     "POST",

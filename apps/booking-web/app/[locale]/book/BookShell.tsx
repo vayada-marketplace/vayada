@@ -41,7 +41,7 @@ export default function BookShell({
       <main className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
         <div className="flex flex-col md:flex-row md:items-center justify-between mb-10 gap-4">
           <div>
-            <h1 className="text-3xl font-heading text-gray-900">{title}</h1>
+            <h1 className="text-[22px] leading-[30px] font-heading text-gray-900">{title}</h1>
             {subtitle && <p className="text-gray-500 mt-1">{subtitle}</p>}
           </div>
           <StepIndicator

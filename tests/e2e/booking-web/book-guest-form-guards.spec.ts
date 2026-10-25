@@ -38,7 +38,7 @@ test("keeps the hotel's guest rules in the form when the price expires", async (
     path: testInfo.outputPath("book-price-current-1440.png"),
     fullPage: true,
   });
-  await page.getByRole("button", { name: "Continue to payment" }).click();
+  await page.getByRole("button", { name: "Continue to review" }).click();
   // VAY-2306: Confirm before ticking marks the boxes; once the price runs out that mark goes.
   const missing = page
     .getByRole("alert")
@@ -68,20 +68,27 @@ test("keeps the hotel's guest rules in the form when the price expires", async (
 
 test("requires the phone while the guest rules can't be loaded", async ({ page }, testInfo) => {
   await openDetails(page, { rulesStatus: 503 });
-  await expect(page.getByText(/couldn.t check our guest rules/)).toBeVisible();
-  await page.screenshot({
-    path: testInfo.outputPath("book-guest-rules-failed-1440.png"),
-    fullPage: true,
-  });
   await expect(page.getByText("Phone (optional)")).toHaveCount(0);
   await expect(page.getByRole("textbox", { name: "Phone", exact: true })).toHaveAttribute(
     "required",
     "",
   );
-  const toPayment = page.getByRole("button", { name: "Continue to payment" });
-  await expect(toPayment).toBeDisabled();
+  // VAY-2347: Continue is always pressable; it marks what's missing and focuses the first field.
+  const toReview = page.getByRole("button", { name: "Continue to review" });
+  const summary = page.getByRole("alert").filter({ hasText: "fields marked in red" });
+  await toReview.click();
+  await expect(summary).toHaveText("Check the 4 fields marked in red.");
+  await expect(page.getByLabel("First name")).toBeFocused();
+  await expect(page.getByLabel("First name")).toHaveAttribute("aria-invalid", "true");
+  await expect(page.getByText("Enter your phone number.")).toBeVisible();
+  await expect(page).toHaveURL(/[?&]step=details/);
+  await page.screenshot({
+    path: testInfo.outputPath("book-details-missing-1440.png"),
+    fullPage: true,
+  });
   await fillGuestDetails(page);
-  await toPayment.click();
+  await expect(summary).toHaveCount(0);
+  await toReview.click();
   await expect(page.getByText(/couldn.t verify our guest rules/)).toBeVisible();
   await expect(page.getByRole("button", { name: "Confirm booking" })).toBeDisabled();
 });
@@ -89,7 +96,7 @@ test("requires the phone while the guest rules can't be loaded", async ({ page }
 async function openQuote(page: Page) {
   await openDetails(page);
   await fillGuestDetails(page);
-  await page.getByRole("button", { name: "Continue to payment" }).click();
+  await page.getByRole("button", { name: "Continue to review" }).click();
   await expect(orderTotal(page)).toHaveText("€240");
 }
 
@@ -178,7 +185,7 @@ async function openDetails(page: Page, { rulesStatus = 200 } = {}) {
   await room.getByLabel(/Adults/).fill("2");
   await page.getByRole("button", { name: "Continue", exact: true }).click();
   await expect(page).toHaveURL(/[?&]step=details/);
-  await expect(page.getByRole("heading", { name: "Guest Information" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Your details" })).toBeVisible();
 }
 
 async function acknowledge(page: Page) {
