@@ -195,10 +195,12 @@ test("shows each booked room on the confirmation and on My booking", async ({ pa
   const rooms = page.getByTestId("booked-rooms");
   await expect(rooms).toContainText("Your 2 rooms");
   await expect(rooms).toContainText("Room 1 · Deluxe Double Room");
-  await expect(rooms).toContainText("Free cancellation until 7 Nov");
+  // VAY-2360: each room's meal in plain words; the ticket has one line for the cancellation terms.
+  await expect(rooms).toContainText("No meals included");
   await expect(rooms).toContainText("2 Adults");
   await expect(rooms).toContainText("Room 2 · Garden Double Room");
-  await expect(rooms).toContainText("Breakfast included · No refund if you cancel or don't arrive");
+  await expect(rooms).toContainText("Breakfast included");
+  await expect(rooms).not.toContainText("Free cancellation until 7 Nov");
   await expect(rooms).toContainText("1 Adult, 1 Child");
 
   await page.goto(
@@ -208,6 +210,12 @@ test("shows each booked room on the confirmation and on My booking", async ({ pa
   await expect(
     page.getByText("1 × Deluxe Double Room + 1 × Garden Double Room", { exact: true }),
   ).toBeVisible();
-  await expect(page.getByTestId("booked-rooms")).toContainText("Room 2 · Garden Double Room");
+  const listed = page.getByTestId("booked-rooms");
+  await expect(listed).toContainText("Room 2 · Garden Double Room");
+  // My booking keeps each room's terms beside its meal.
+  await expect(listed).toContainText("No meals included · Free cancellation until 7 Nov");
+  await expect(listed).toContainText(
+    "Breakfast included · No refund if you cancel or don't arrive",
+  );
   await assertHealthy();
 });
