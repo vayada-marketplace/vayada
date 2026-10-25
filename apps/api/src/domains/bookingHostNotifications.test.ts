@@ -223,7 +223,10 @@ describe("Booking Admin notifications feed (VAY-2349)", () => {
       { ...viewer, retrySyncDomains: [] },
     );
     expect(read.syncAlert).toMatchObject({ read: true, canRetry: false });
-    expect(read.badge).toBe("none");
+    expect(read.unread.all).toBe(0);
+    // Read but still failing: the badge stays red until the sync recovers.
+    expect(read.badge).toBe("red");
+    expect(buildHostNotificationFeed(sources(), viewer).badge).toBe("none");
 
     // A later failure, after another success, is a new item.
     const again = buildHostNotificationFeed(

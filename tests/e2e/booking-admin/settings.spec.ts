@@ -658,6 +658,37 @@ test.describe("booking-admin settings no-legacy guard", () => {
     await assertHealthy();
   });
 
+  test("counts the hotel's main language with Booking's, as the live page does (VAY-2345)", async ({
+    page,
+  }, testInfo) => {
+    test.skip(
+      !PROD,
+      "Requires a production booking-admin build so the authenticated shell hydrates.",
+    );
+
+    const assertHealthy = watchPageHealth(page, testInfo);
+    await mockBookingAdminAuthenticatedSession(page);
+    // Booking offers German only, but the hotel profile is in English: guests can pick both.
+    await mockBookingAdminShellRoutes(page, {
+      propertySettings: {
+        ...defaultBookingAdminPropertySettings,
+        default_language: "de",
+        supported_languages: [],
+      },
+    });
+    await mockBookingAdminDesignSettings(page);
+
+    await page.goto("/design-studio");
+    const language = page.getByRole("switch", { name: "Language selector" });
+    await expect(language).toBeEnabled();
+    await expect(language).toBeChecked();
+    // The live page opens in the hotel's main language.
+    await expect(
+      page.getByLabel("Live booking page preview").getByText("EN", { exact: true }),
+    ).toBeVisible();
+    await assertHealthy();
+  });
+
   test("saves the brand colour and font to the booking design guests see", async ({
     page,
   }, testInfo) => {

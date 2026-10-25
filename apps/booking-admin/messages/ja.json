@@ -143,6 +143,7 @@
   "layout.header.preview": "プレビュー",
   "layout.header.notifications": "通知",
   "notifications.bellUnread": "通知、未読 {count} 件",
+  "notifications.bellSyncFailed": "通知、チャネルマネージャーの同期に失敗しました",
   "notifications.newCount": "新着 {count} 件",
   "notifications.markAllRead": "すべて既読にする",
   "notifications.markRead": "既読にする",

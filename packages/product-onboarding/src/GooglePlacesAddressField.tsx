@@ -12,6 +12,8 @@ export type GooglePlacesAddress = {
   region: string;
   latitude: number | null;
   longitude: number | null;
+  /** Where Google puts the place, also for a road or an area; only an exact address pins it. */
+  location: { latitude: number; longitude: number } | null;
 };
 
 type GoogleAddressComponent = {
@@ -207,6 +209,8 @@ export function addressFromGooglePlace(
   const streetNumber = longText("street_number");
   const postalCode = longText("postal_code");
   const postalCodeSuffix = longText("postal_code_suffix");
+  const latitude = place.location?.lat() ?? null;
+  const longitude = place.location?.lng() ?? null;
 
   return {
     streetAddress:
@@ -223,7 +227,8 @@ export function addressFromGooglePlace(
       longText("administrative_area_level_2"),
     countryCode: (postalAddress?.regionCode || shortText("country")).toUpperCase(),
     region: postalAddress?.administrativeArea || longText("administrative_area_level_1"),
-    latitude: isExactAddress ? (place.location?.lat() ?? null) : null,
-    longitude: isExactAddress ? (place.location?.lng() ?? null) : null,
+    latitude: isExactAddress ? latitude : null,
+    longitude: isExactAddress ? longitude : null,
+    location: latitude !== null && longitude !== null ? { latitude, longitude } : null,
   };
 }

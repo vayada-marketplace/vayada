@@ -143,6 +143,7 @@
   "layout.header.preview": "Pratinjau",
   "layout.header.notifications": "Notifikasi",
   "notifications.bellUnread": "Notifikasi, {count} belum dibaca",
+  "notifications.bellSyncFailed": "Notifikasi, sinkronisasi channel manager gagal",
   "notifications.newCount": "{count} baru",
   "notifications.markAllRead": "Tandai semua sudah dibaca",
   "notifications.markRead": "Tandai sudah dibaca",

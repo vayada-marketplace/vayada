@@ -5,7 +5,7 @@ import type {
   PublicQuoteGuestDisclosure,
 } from "@vayada/domain-booking/replacement-pricing";
 import { serverNow } from "@/lib/serverClock";
-import { formatTimeZoneName } from "@/lib/utils";
+import { checkoutCopy } from "@/lib/checkoutTerms";
 import { getQuoteGuestDisclosure } from "@/services/api/quoteGuestDisclosure";
 import ConsentTile from "./ConsentTile";
 
@@ -16,6 +16,7 @@ export default function ReplacementGuestRules({
   onRulesChange,
   compact = false,
   errorId,
+  hotelCountry,
 }: {
   slug: string;
   quote: PublicBookingQuote;
@@ -26,6 +27,8 @@ export default function ReplacementGuestRules({
   compact?: boolean;
   /** Confirm was pressed before ticking (VAY-2306): the id of the message that says so. */
   errorId?: string;
+  /** The hotel's country by name for the times line, null when it hides its address (VAY-2347). */
+  hotelCountry: string | null;
 }) {
   const [open, setOpen] = useState(false);
   const [disclosure, setDisclosure] = useState<PublicQuoteGuestDisclosure | null>(null);
@@ -90,7 +93,7 @@ export default function ReplacementGuestRules({
   const section = (
     <section aria-label="Guest rules" className="rounded-xl border border-gray-200 p-5 space-y-3">
       <h2 className="text-xl font-semibold">Our guest rules</h2>
-      <p>Times are in {formatTimeZoneName(disclosure.propertyTimeZone)}.</p>
+      <p>{checkoutCopy.allTimesLocal(hotelCountry)}</p>
       <p>
         Check-in from {rules.checkInTime}
         {rules.checkInUntil

@@ -62,7 +62,7 @@
     "rooms": "Habitaciones",
     "addons": "Extras",
     "details": "Detalles",
-    "payment": "Pago"
+    "payment": "Revisar y pagar"
   },
   "home": {
     "guestCountUnsupported": "La búsqueda en línea no admite su grupo de {count} huéspedes. Pruebe con menos huéspedes o contáctenos.",
@@ -568,6 +568,8 @@
     "roomNumber": "Habitación {number}",
     "totalStay": "Total por {nights} noches",
     "freeUntil": "Cancelación gratuita hasta el {date} ({timezone}).",
+    "hotelTime": "hora local del hotel",
+    "hotelTimeIn": "hora local del hotel, {country}",
     "afterDeadline": "Sin reembolso después del plazo o en caso de no presentarse.",
     "termsUnavailable": "Las condiciones de cancelación no están disponibles.",
     "unavailable": "Esta selección ya no está disponible. Busca de nuevo.",
@@ -589,7 +591,9 @@
     "withdrawNotOnline": "Esta solicitud no se puede retirar en línea. Ponte en contacto con el alojamiento.",
     "bookingNotChangeable": "Esta reserva ya no se puede modificar. Vuelve a buscarla para ver su estado actual.",
     "busyTryAgain": "Esta reserva se está actualizando en este momento. Vuelve a intentarlo en un momento.",
-    "paymentMethodNotAccepted": "La tarifa que elegiste no se puede pagar de esta forma. Elige otra forma de pago."
+    "paymentMethodNotAccepted": "La tarifa que elegiste no se puede pagar de esta forma. Elige otra forma de pago.",
+    "paymentMethodWindow": "Esta forma de pago ya no está disponible para estas fechas. Elige otra forma de pago.",
+    "paymentMethodWindowOnly": "Esta forma de pago ya no está disponible para estas fechas. Elige otras fechas o ponte en contacto con el hotel."
   },
   "locationMap": {
     "title": "Ubicación",
@@ -685,5 +689,40 @@
     "newSearch": "Empezar una nueva búsqueda",
     "yourRooms": "Tus {count} habitaciones",
     "roomLine": "Habitación {number} · {room}"
+  },
+  "guestDetails": {
+    "title": "Tus datos",
+    "heading": "¿Quién se aloja?",
+    "intro": "Lleva 1 minuto. Los campos con * son obligatorios.",
+    "firstName": "Nombre",
+    "lastName": "Apellidos",
+    "email": "Correo electrónico",
+    "phone": "Teléfono",
+    "phoneCountry": "Prefijo del país",
+    "countryOfResidence": "País de residencia",
+    "noCountry": "Elige un país",
+    "arrivalTime": "Hora prevista de llegada",
+    "specialRequests": "Peticiones especiales",
+    "optional": "(opcional)",
+    "firstNamePlaceholder": "Juan",
+    "lastNamePlaceholder": "García",
+    "emailPlaceholder": "juan.garcia@example.com",
+    "phonePlaceholder": "151 2345 6789",
+    "specialRequestsPlaceholder": "p. ej., llegada tarde, traslado al aeropuerto, necesidades alimentarias",
+    "emailHint": "Te enviamos aquí la confirmación.",
+    "phoneHint": "Solo se usa para tu estancia.",
+    "specialRequestsHint": "Las peticiones dependen de la disponibilidad. El hotel te responderá por correo electrónico.",
+    "errorFirstName": "Escribe tu nombre.",
+    "errorLastName": "Escribe tus apellidos.",
+    "errorEmail": "Escribe un correo como nombre@example.com.",
+    "errorPhone": "Escribe tu número de teléfono.",
+    "errorSummary": "{count, plural, one {Revisa el campo marcado en rojo.} other {Revisa los # campos marcados en rojo.}}",
+    "continue": "Continuar a la revisión",
+    "backToRooms": "Volver a las habitaciones",
+    "backToExtras": "Volver a los extras",
+    "errorPhoneInvalid": "Escribe un número de teléfono válido.",
+    "errorCountry": "Elige tu país de la lista.",
+    "rulesFailed": "No hemos podido comprobar las normas de la casa para este precio. Puedes seguir rellenando tus datos.",
+    "retry": "Reintentar"
   }
 }

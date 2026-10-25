@@ -240,7 +240,7 @@ export default function EditRequestPage({
                 lines={selectedLines}
                 currency={quote?.currency ?? details.booking.currency}
                 checkIn={input.checkIn}
-                timezone={hotel.timezone}
+                country={hotel.country}
               />
             )}
             <PendingRequestFields

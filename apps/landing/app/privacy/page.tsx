@@ -15,7 +15,7 @@ export default function PrivacyPage() {
           <div className="mb-8">
             <h1 className="text-4xl md:text-5xl font-bold text-primary-800 mb-4">Privacy Policy</h1>
             <p className="text-gray-600">
-              <strong>Effective Date:</strong> October 24, 2026
+              <strong>Effective Date:</strong> October 25, 2026
             </p>
           </div>
 
@@ -537,6 +537,14 @@ export default function PrivacyPage() {
                     booking and to contact you about it (Article 6(1) lit. b GDPR), and keeps it as
                     long as it needs it for your stay and as tax and accounting rules require
                     (Article 6(1) lit. c GDPR).
+                  </li>
+                  <li>
+                    <strong>What you agreed to: </strong>when you book, we keep a record with your
+                    booking of when you agreed and to what: the version of the wording you saw, and
+                    references to the room and rate terms, the hotel&apos;s guest rules and the
+                    hotel&apos;s terms &amp; conditions as they were at that moment. The hotel uses
+                    this record to show what was agreed for your booking (Article 6(1) lit. b and f
+                    GDPR) and keeps it as long as it keeps your booking.
                   </li>
                   <li>
                     <strong>Technical data:</strong> our servers log each request, including your IP

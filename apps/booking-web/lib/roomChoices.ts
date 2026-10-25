@@ -26,14 +26,17 @@ export function freeCancellationUntil(checkIn: string, days: number): string {
   return date.toISOString().slice(0, 10);
 }
 
-/** Today in the hotel's time zone, so every guest sees the hotel's deadline. */
+/** Today in the hotel's time zone (YYYY-MM-DD), so every guest sees the hotel's deadline. Without
+ * a zone it is UTC, as on the server, never the guest's device's. */
 export function hotelToday(timezone?: string, now = new Date()): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: timezone || undefined,
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone || "Etc/UTC",
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
-  }).format(now);
+  }).formatToParts(now);
+  const part = (type: string) => parts.find((p) => p.type === type)?.value;
+  return `${part("year")}-${part("month")}-${part("day")}`;
 }
 
 type Translate = (key: string, values?: Record<string, string | number>) => string;

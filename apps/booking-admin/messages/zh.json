@@ -143,6 +143,7 @@
   "layout.header.preview": "预览",
   "layout.header.notifications": "通知",
   "notifications.bellUnread": "通知，{count} 条未读",
+  "notifications.bellSyncFailed": "通知，渠道管理器同步失败",
   "notifications.newCount": "{count} 条新通知",
   "notifications.markAllRead": "全部标为已读",
   "notifications.markRead": "标为已读",

@@ -15,7 +15,9 @@ test("room settings opens sign-in for the selected hotel's Airbnb import", async
     route.fulfill({ contentType: "text/html", body: "<h1>Simulated Booking Admin sign-in</h1>" }),
   );
   await page.goto("/rooms");
-  const link = page.getByRole("link", { name: "Import rooms from Airbnb (opens in a new tab)" });
+  // The import sits in Rooms & Rates' ☰ menu (VAY-2338).
+  await page.getByRole("button", { name: "More actions" }).click();
+  const link = page.getByRole("link", { name: /Import from Airbnb/ });
   await expect(link).toBeVisible();
   const href = new URL((await link.getAttribute("href"))!);
   expect(href.origin).toBe("https://admin.booking.localhost:1382");
@@ -24,7 +26,9 @@ test("room settings opens sign-in for the selected hotel's Airbnb import", async
   const popupPromise = page.waitForEvent("popup");
   await link.click();
   const popup = await popupPromise;
-  await expect(popup.getByRole("heading", { name: "Simulated Booking Admin sign-in" })).toBeVisible();
+  await expect(
+    popup.getByRole("heading", { name: "Simulated Booking Admin sign-in" }),
+  ).toBeVisible();
   expect(new URL(page.url()).pathname).toBe("/rooms");
   await popup.close();
 });

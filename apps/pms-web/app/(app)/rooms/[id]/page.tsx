@@ -12,7 +12,7 @@ import {
   type PropertyPlan,
   type RoomTypeRetirementImpact,
 } from "@/services/rooms";
-import RoomTypeForm, { type RoomTab } from "@/components/rooms/RoomTypeForm";
+import RoomTypeForm, { RoomTabBar, type RoomTab } from "@/components/rooms/RoomTypeForm";
 import { RoomPricesTab } from "@/components/pricing/RoomPricesTab";
 import { RoomsPricesStrip, usePropertyPrices } from "@/components/pricing/RoomsPrices";
 import ConfirmDialog from "@/components/ConfirmDialog";
@@ -33,6 +33,10 @@ export default function EditRoomPage({ params }: { params: Promise<{ id: string 
   // unsaved prices.
   const [tab, setTab] = useState<RoomTab>(pricesFirst ? "prices" : "details");
   const [pricesOpened, setPricesOpened] = useState(pricesFirst);
+  const showTab = (next: RoomTab) => {
+    setTab(next);
+    if (next === "prices") setPricesOpened(true);
+  };
   const [room, setRoom] = useState<RoomType | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<{ cause: unknown; message: string } | null>(null);
@@ -44,7 +48,7 @@ export default function EditRoomPage({ params }: { params: Promise<{ id: string 
   // What Delete would do, read before the confirmation (VAY-2132).
   const [deleteImpact, setDeleteImpact] = useState<RoomTypeRetirementImpact | null>(null);
   const [checkingDelete, setCheckingDelete] = useState(false);
-  // Shown under the title on every tab: the form's own banner is hidden on the Prices tab.
+  // Shown under the tab bar on every tab: the form's own banner is hidden on the Prices tab.
   const [deleteError, setDeleteError] = useState("");
   const [propertyPlan, setPropertyPlan] = useState<PropertyPlan | null>(null);
   const [pricesNeedPublishing, setPricesNeedPublishing] = useState(false);
@@ -216,6 +220,7 @@ export default function EditRoomPage({ params }: { params: Promise<{ id: string 
         </button>
       </div>
 
+      <RoomTabBar tab={tab} onTabChange={showTab} />
       {deleteError && (
         <p
           role="alert"
@@ -244,10 +249,7 @@ export default function EditRoomPage({ params }: { params: Promise<{ id: string 
         roomTypeId={id}
         propertyPlan={propertyPlan}
         tab={tab}
-        onTabChange={(next) => {
-          setTab(next);
-          if (next === "prices") setPricesOpened(true);
-        }}
+        onTabChange={showTab}
       />
       {pricesOpened && (
         <div hidden={tab !== "prices"}>

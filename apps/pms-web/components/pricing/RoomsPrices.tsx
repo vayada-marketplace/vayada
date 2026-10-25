@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { ExclamationTriangleIcon } from "@heroicons/react/24/outline";
 import { pricingCurrencyScale } from "@vayada/domain-pms/replacement-pricing";
 import { useTranslation } from "@/lib/i18n";
 import { ApiErrorResponse } from "@/services/api/client";
@@ -68,8 +69,28 @@ export function lowestBaseMinor(room: PricingSnapshot["rooms"][number]): string 
     : null;
 }
 
-/** A room's published prices on its Rooms list card, with a link to its Prices tab. The link is a document
- * navigation, so the tab's leave warning also covers the browser's back button. */
+/** A price for the Rooms list: the currency code and the locale's digit grouping, with no ".00" on a whole
+ * amount, e.g. "IDR 875,000" or "EUR 120.50" (VAY-2338). */
+export function listPrice(minor: string, currency: string, locale: string): string {
+  const scale = pricingCurrencyScale(currency)!;
+  const digits = BigInt(minor) % BigInt(10 ** scale) === BigInt(0) ? 0 : scale;
+  return new Intl.NumberFormat(locale, {
+    style: "currency",
+    currency,
+    currencyDisplay: "code",
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  }).format(Number(decimalAmount(minor, scale)));
+}
+
+function publishedRoom(publication: Publication, roomTypeId: string) {
+  return publication?.rooms.find(
+    (value) => value.roomTypeId.toLowerCase() === roomTypeId.toLowerCase(),
+  );
+}
+
+/** A room's published prices in its Rooms list row: "from IDR 875,000" over "2 rates · per night", or that guests
+ * can't book it yet. */
 export function RoomPriceSummary({
   roomTypeId,
   publication,
@@ -77,39 +98,59 @@ export function RoomPriceSummary({
   roomTypeId: string;
   publication: Publication;
 }) {
-  const { t } = useTranslation();
-  const room = publication?.rooms.find(
-    (value) => value.roomTypeId.toLowerCase() === roomTypeId.toLowerCase(),
+  const { t, locale } = useTranslation();
+  const room = publishedRoom(publication, roomTypeId);
+  if (!room)
+    return (
+      <>
+        <p className="text-[15px] font-medium text-gray-500">{t("pricing.list.noPrices")}</p>
+        <p className="text-[13px] text-amber-700">{t("pricing.list.cantBook")}</p>
+      </>
+    );
+  const lowest = lowestBaseMinor(room);
+  const rates = t(
+    room.offers.length === 1 ? "pricing.list.rates.one" : "pricing.list.rates.other",
+    {
+      count: room.offers.length,
+    },
   );
-  const lowest = room && lowestBaseMinor(room);
-  const href = `/rooms/${encodeURIComponent(roomTypeId)}?tab=prices`;
   return (
     <>
-      <span className={room ? "font-medium text-gray-800 tabular-nums" : "text-gray-500"}>
-        {!room
-          ? t("pricing.list.noPrices")
-          : [
-              t(room.offers.length === 1 ? "pricing.list.rates.one" : "pricing.list.rates.other", {
-                count: room.offers.length,
-              }),
-              ...(lowest
-                ? [
-                    t("pricing.list.from", {
-                      amount: decimalAmount(lowest, pricingCurrencyScale(publication!.currency)!),
-                      currency: publication!.currency,
-                    }),
-                  ]
-                : []),
-            ].join(" · ")}
-      </span>
-      <a
-        href={href}
-        onClick={(event) => event.stopPropagation()}
-        className="font-medium text-primary-600 hover:text-primary-700"
-      >
-        {t(room ? "pricing.list.editPrices" : "pricing.list.setPrices")}
-      </a>
+      <p className="whitespace-nowrap text-sm font-semibold text-gray-900 tabular-nums lg:text-[15px]">
+        {lowest
+          ? t("pricing.list.from", { price: listPrice(lowest, publication!.currency, locale) })
+          : rates}
+      </p>
+      {lowest && (
+        <p className="text-[13px] text-gray-500">{`${rates} · ${t("pricing.list.perNight")}`}</p>
+      )}
     </>
+  );
+}
+
+/** "Edit prices", or "Set prices" for a room without published prices: a link to the room's Prices tab. It is a
+ * document navigation, so the tab's leave warning also covers the browser's back button. Until the prices are read
+ * (publication undefined) it says "Edit prices". */
+export function RoomPricesLink({
+  roomTypeId,
+  publication,
+}: {
+  roomTypeId: string;
+  publication: Publication | undefined;
+}) {
+  const { t } = useTranslation();
+  return (
+    <a
+      href={`/rooms/${encodeURIComponent(roomTypeId)}?tab=prices`}
+      onClick={(event) => event.stopPropagation()}
+      className="whitespace-nowrap px-1.5 text-sm font-semibold text-primary-600 hover:text-primary-700"
+    >
+      {t(
+        publication === undefined || publishedRoom(publication, roomTypeId)
+          ? "pricing.list.editPrices"
+          : "pricing.list.setPrices",
+      )}
+    </a>
   );
 }
 
@@ -200,47 +241,54 @@ export function RoomsPricesStrip({
       </div>
     );
   const publication = prices?.publication;
-  if (!prices || (staleOnly && !publication?.stale && !saved && failure === null)) return null;
+  // On the Rooms list the subtitle carries the currency, so current prices show nothing here (VAY-2338).
+  const quiet = !publication?.stale && !saved && failure === null;
+  if (!prices || (quiet && (staleOnly || publication))) return null;
+  const saveButton = (
+    <button
+      type="button"
+      disabled={busy}
+      onClick={retry ? () => void run() : saveAgain}
+      className={
+        staleOnly
+          ? `mt-3 ${ui.primaryButton}`
+          : "inline-flex shrink-0 items-center justify-center rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-50"
+      }
+    >
+      {t(
+        busy ? "pricing.editor.saving" : retry ? "pricing.editor.retry" : "pricing.list.saveAgain",
+      )}
+    </button>
+  );
   return (
     <section
       aria-label={t("pricing.list.label")}
       // On a room page only the warning shows, as a banner like Room Details' messages.
-      className={
-        staleOnly
-          ? "mb-4 text-[11px]"
-          : "mb-4 rounded-xl border border-gray-200 bg-white px-4 py-3 text-[12px] text-gray-700"
-      }
+      className={staleOnly ? "mb-4 text-[11px]" : "mb-4 text-[12px]"}
     >
-      {!staleOnly && (
-        <p>
-          {publication
-            ? t("pricing.list.currency", { currency: publication.currency })
-            : t("pricing.list.none")}
-        </p>
-      )}
-      {publication?.stale && (
-        <div
-          className={`${staleOnly ? "" : "mt-3 "}rounded-lg border border-amber-200 bg-amber-50 p-3 text-[11px] text-amber-800`}
-        >
-          <p className="font-semibold">{t("pricing.list.staleTitle")}</p>
-          <p className="mt-1">{t("pricing.list.staleBody")}</p>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={retry ? () => void run() : saveAgain}
-            className={`mt-3 ${ui.primaryButton}`}
-          >
-            {t(
-              busy
-                ? "pricing.editor.saving"
-                : retry
-                  ? "pricing.editor.retry"
-                  : "pricing.list.saveAgain",
-            )}
-          </button>
-          <p className="mt-2 text-[10px] text-amber-700">{t("pricing.editor.saveDeclaration")}</p>
-        </div>
-      )}
+      {!staleOnly && !publication && <p className={ui.infoBanner}>{t("pricing.list.none")}</p>}
+      {publication?.stale &&
+        (staleOnly ? (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-[11px] text-amber-800">
+            <p className="font-semibold">{t("pricing.list.staleTitle")}</p>
+            <p className="mt-1">{t("pricing.list.staleBody")}</p>
+            {saveButton}
+            <p className="mt-2 text-[10px] text-amber-700">{t("pricing.editor.saveDeclaration")}</p>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-800 sm:flex-row sm:items-center sm:gap-4">
+            <ExclamationTriangleIcon
+              aria-hidden="true"
+              className="hidden h-5 w-5 shrink-0 text-amber-700 sm:block"
+            />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold">{t("pricing.list.staleTitle")}</p>
+              <p className="mt-0.5 text-[13px]">{t("pricing.list.staleBody")}</p>
+              <p className="mt-1 text-xs text-amber-700">{t("pricing.editor.saveDeclaration")}</p>
+            </div>
+            {saveButton}
+          </div>
+        ))}
       {failure !== null && (
         <p role="alert" className={staleOnly ? `mt-2 ${ui.errorBanner}` : "mt-2 text-red-700"}>
           {message(failure)}

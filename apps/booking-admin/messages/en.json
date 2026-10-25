@@ -142,6 +142,7 @@
   "layout.header.preview": "Preview",
   "layout.header.notifications": "Notifications",
   "notifications.bellUnread": "Notifications, {count} unread",
+  "notifications.bellSyncFailed": "Notifications, channel manager sync failed",
   "notifications.newCount": "{count} new",
   "notifications.markAllRead": "Mark all read",
   "notifications.markRead": "Mark as read",

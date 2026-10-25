@@ -143,6 +143,7 @@
   "layout.header.preview": "Voorbeeld",
   "layout.header.notifications": "Meldingen",
   "notifications.bellUnread": "Meldingen, {count} ongelezen",
+  "notifications.bellSyncFailed": "Meldingen, synchronisatie met de channel manager mislukt",
   "notifications.newCount": "{count} nieuw",
   "notifications.markAllRead": "Alles als gelezen markeren",
   "notifications.markRead": "Als gelezen markeren",

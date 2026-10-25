@@ -22,9 +22,11 @@ export type NotificationsStatus = "loading" | "ready" | "failed" | "unavailable"
 /** Marks sent but not yet confirmed by a later read: per key, and "all" while a Mark all read runs. */
 type Pending = { hotelId: string; keys: Map<string, number>; all: number };
 
+/** Red: the channel sync is failing, read or not (it stays red until it is fixed), or a missed payment is
+ * unread. */
 function hasUrgent(feed: HostNotificationFeed): boolean {
   return (
-    (feed.syncAlert !== null && !feed.syncAlert.read) ||
+    feed.syncAlert !== null ||
     feed.items.some((item) => !item.read && item.kind === "payment_not_received")
   );
 }
@@ -59,7 +61,7 @@ export function withRead(
   const next = { ...feed, items, syncAlert, unread };
   // A red badge from an item beyond the 50 rows stays red until the next read.
   const hiddenUrgent = feed.badge === "red" && !hasUrgent(feed) && keys !== "all";
-  const badge = unread.all === 0 ? "none" : hasUrgent(next) || hiddenUrgent ? "red" : "blue";
+  const badge = hasUrgent(next) ? "red" : unread.all === 0 ? "none" : hiddenUrgent ? "red" : "blue";
   return { ...next, badge };
 }
 
