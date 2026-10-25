@@ -881,6 +881,8 @@
         "nonRefundable": "This rate can’t be cancelled or changed for a refund.",
         "request": "You can withdraw your request for free until the hotel answers.",
         "paidFreeUntil": "Full refunds until the end of {date} once your transfer has arrived.",
+        "paidFreeEnded": "Free cancellation ended on {date}. Once your transfer has arrived, cancelling or not arriving costs the full amount.",
+        "paidPartialEnded": "Refunds ended on {date}. Once your transfer has arrived, cancelling or not arriving costs the full amount.",
         "bankTransfer": "If your transfer doesn’t arrive within 48 hours, the booking is released and nothing is charged."
       }
     },

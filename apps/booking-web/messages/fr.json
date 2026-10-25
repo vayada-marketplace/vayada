@@ -880,6 +880,8 @@
         "nonRefundable": "Ce tarif ne peut être ni annulé ni modifié contre remboursement.",
         "request": "Vous pouvez retirer votre demande gratuitement tant que l’hôtel n’a pas répondu.",
         "paidFreeUntil": "Remboursement intégral jusqu’à la fin du {date} une fois votre virement arrivé.",
+        "paidFreeEnded": "L’annulation gratuite a pris fin le {date}. Une fois votre virement arrivé, une annulation ou une non-présentation coûte le montant total.",
+        "paidPartialEnded": "Les remboursements ont pris fin le {date}. Une fois votre virement arrivé, une annulation ou une non-présentation coûte le montant total.",
         "bankTransfer": "Si votre virement n’arrive pas sous 48 heures, la réservation est annulée et rien n’est débité."
       }
     },

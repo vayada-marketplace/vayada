@@ -881,6 +881,8 @@
         "nonRefundable": "Dieser Tarif kann nicht gegen Erstattung storniert oder geändert werden.",
         "request": "Bis das Hotel antwortet, können Sie Ihre Anfrage kostenlos zurückziehen.",
         "paidFreeUntil": "Volle Erstattung bis Ende {date}, sobald Ihre Überweisung eingegangen ist.",
+        "paidFreeEnded": "Die kostenlose Stornierung ist am {date} abgelaufen. Sobald Ihre Überweisung eingegangen ist, kosten Stornierung oder Nichterscheinen den Gesamtbetrag.",
+        "paidPartialEnded": "Erstattungen waren bis {date} möglich. Sobald Ihre Überweisung eingegangen ist, kosten Stornierung oder Nichterscheinen den Gesamtbetrag.",
         "bankTransfer": "Geht Ihre Überweisung nicht innerhalb von 48 Stunden ein, verfällt die Buchung und es wird nichts berechnet."
       }
     },

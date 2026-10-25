@@ -45,7 +45,18 @@ export type PolicyBadge =
         | "notRefundableOncePaid";
     };
 export type PolicyNote =
-  | { kind: "freeUntil" | "paidFreeUntil" | "freeEnded" | "partial" | "partialEnded"; date: string }
+  | {
+      kind:
+        | "freeUntil"
+        | "freeEnded"
+        | "partial"
+        | "partialEnded"
+        // VAY-2348: a bank transfer's terms start once its money has arrived.
+        | "paidFreeUntil"
+        | "paidFreeEnded"
+        | "paidPartialEnded";
+      date: string;
+    }
   | { kind: "nonRefundable" };
 export type Policy = {
   badge: PolicyBadge;
@@ -200,7 +211,10 @@ export function cancellationPolicy(
       })),
     ];
     if (!refundable) badge = { kind: "notRefundableOncePaid" };
+    // Cancelling before the transfer arrives is free, so the notes say "once it has arrived".
     if (note.kind === "freeUntil") note = { kind: "paidFreeUntil", date: note.date };
+    if (note.kind === "freeEnded") note = { kind: "paidFreeEnded", date: note.date };
+    if (note.kind === "partialEnded") note = { kind: "paidPartialEnded", date: note.date };
   }
   const tone = badge.kind === "freeUntil" || badge.kind === "refundsUntil" ? "ok" : "amber";
   return { badge, tone, rows: [...rows, noShow], note, request: mode.request, bankTransfer };

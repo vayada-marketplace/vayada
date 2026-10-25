@@ -880,6 +880,8 @@
         "nonRefundable": "Tarif ini tidak dapat dibatalkan atau diubah dengan pengembalian dana.",
         "request": "Anda dapat menarik permintaan secara gratis sampai hotel menjawab.",
         "paidFreeUntil": "Pengembalian dana penuh hingga akhir {date} setelah transfer Anda diterima.",
+        "paidFreeEnded": "Pembatalan gratis berakhir pada {date}. Setelah transfer Anda diterima, membatalkan atau tidak datang dikenai jumlah penuh.",
+        "paidPartialEnded": "Pengembalian dana berakhir pada {date}. Setelah transfer Anda diterima, membatalkan atau tidak datang dikenai jumlah penuh.",
         "bankTransfer": "Jika transfer Anda tidak diterima dalam 48 jam, pemesanan dibatalkan dan tidak ada biaya."
       }
     },

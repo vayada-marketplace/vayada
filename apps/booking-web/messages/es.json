@@ -880,6 +880,8 @@
         "nonRefundable": "Esta tarifa no se puede cancelar ni cambiar con reembolso.",
         "request": "Puedes retirar tu solicitud gratis hasta que el hotel responda.",
         "paidFreeUntil": "Reembolso total hasta el final del {date} una vez que llegue tu transferencia.",
+        "paidFreeEnded": "La cancelación gratuita terminó el {date}. Una vez que llegue tu transferencia, cancelar o no presentarte cuesta el importe total.",
+        "paidPartialEnded": "Los reembolsos terminaron el {date}. Una vez que llegue tu transferencia, cancelar o no presentarte cuesta el importe total.",
         "bankTransfer": "Si tu transferencia no llega en un plazo de 48 horas, la reserva se cancela y no se cobra nada."
       }
     },

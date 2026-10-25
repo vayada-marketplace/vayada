@@ -262,10 +262,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     : paymentMethods;
   // No way the hotel offers fits the chosen rates, or (VAY-2348) none of its ways is open for these
   // dates: no price is asked for, and the steps say so.
-  const noWayToPay =
-    pagePaymentLoaded &&
-    !offeredMethods.length &&
-    (!!rateMethods || (!!rooms && pagePayment.methods.length > 0));
+  const noWayToPay = pagePaymentLoaded && !offeredMethods.length && (!!rateMethods || !!rooms);
   // VAY-2348 (D8): only when nothing on offer can be paid for these dates is online booking
   // unavailable for them; another rate that can is the way out otherwise.
   const noWayReason = noWayToPay

@@ -188,6 +188,16 @@ it("leads a bank transfer's policy with the time before its money arrives", () =
   ]);
   expect(open.note).toEqual({ kind: "paidFreeUntil", date: "2026-11-03" });
   expect(open.bankTransfer).toBe(true);
+  // The free period has ended: cancelling is still free until the money arrives.
+  const ended = cancellationPolicy(
+    free(3),
+    { checkIn: "2026-10-26", today: "2026-10-25" },
+    "17500",
+    bank,
+  );
+  expect(ended.badge).toEqual({ kind: "notRefundableOncePaid" });
+  expect(ended.rows[0]).toMatchObject({ when: { kind: "beforeTransfer" }, now: true });
+  expect(ended.note).toEqual({ kind: "paidFreeEnded", date: "2026-10-23" });
   // No free period left: not refundable once paid.
   const nonRefundable = cancellationPolicy(
     { kind: "non_refundable" } as unknown as Cancellation,
