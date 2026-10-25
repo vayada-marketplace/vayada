@@ -111,6 +111,8 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
     "repository-complete",
     // VAY-2320: the same room type at two rates in one booking.
     "repository-complete-two-rates",
+    // VAY-2361: booked rooms take the first free unit of their room type.
+    "repository-complete-auto-assign",
     "repository-released",
     "repository-wrong-organization",
     "repository-missing-acceptance",
@@ -283,6 +285,17 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
         SELECT id,$1,id::text,'{"adults":2,"children":1,"total":3}',100,'EUR' FROM unnest($2::uuid[]) id`,
         [propertyId, types],
       );
+      if (scenario === "repository-complete-auto-assign")
+        // Calendar order is sort_order first; a unit out of service or without a verified label
+        // is never assigned automatically.
+        await db.query(
+          `INSERT INTO pms.rooms
+          (property_id,room_type_id,room_number,status,operational_label_status,sort_order)
+          VALUES($1,$2,'Repair','maintenance','verified',0),($1,$2,'Unlabelled','available','unverified',1),
+            ($1,$2,'First','available','verified',2),
+            ($1,$3,'Alpha','available','verified',5),($1,$3,'Zed','available','verified',1)`,
+          [propertyId, types[0], types[1]],
+        );
       // Only calendar upstream audit fixtures bypass FKs; holds and adoption use live constraints.
       await db.query("SET LOCAL session_replication_role=replica");
       await db.query(
@@ -791,6 +804,7 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
           "legacy-amendment",
           "repository-complete",
           "repository-complete-two-rates",
+          "repository-complete-auto-assign",
           "worker-complete",
           "amended-complete",
         ].includes(scenario)
@@ -850,21 +864,39 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
             (b) => b.source_assignment_id && b.source_inventory_reservation_receipt_id === null,
           ),
         ).toBe(true);
-        if (repository)
+        if (repository) {
+          // VAY-2361: the first type's second room finds its only eligible unit taken by the
+          // first room on the same nights, so it stays unassigned.
+          const auto = scenario === "repository-complete-auto-assign";
           expect(
             (
               await db.query(
-                `SELECT position,assignment_status AS status,adults,children
-                 FROM pms.operational_booking_assignments
-                 WHERE property_id=$1 AND guest_booking_id=$2 ORDER BY position`,
+                `SELECT position,assignment_status AS status,adults,children,room.room_number AS room
+                 FROM pms.operational_booking_assignments assignment
+                 LEFT JOIN pms.rooms room ON room.id=assignment.room_id
+                 WHERE assignment.property_id=$1 AND assignment.guest_booking_id=$2
+                 ORDER BY position`,
                 [propertyId, bookingId],
               )
             ).rows,
           ).toEqual([
-            { position: 1, status: "pending", adults: 2, children: 1 },
-            { position: 2, status: "pending", adults: 2, children: 1 },
-            { position: 3, status: "pending", adults: 2, children: 1 },
+            {
+              position: 1,
+              status: auto ? "assigned" : "pending",
+              adults: 2,
+              children: 1,
+              room: auto ? "First" : null,
+            },
+            {
+              position: 2,
+              status: auto ? "assigned" : "pending",
+              adults: 2,
+              children: 1,
+              room: auto ? "Zed" : null,
+            },
+            { position: 3, status: "pending", adults: 2, children: 1, room: null },
           ]);
+        }
         if (scenario === "repository-complete") {
           // VAY-2320: emails and Booking Admin name every booked room type, not the first one,
           // in room order (the names sort the other way round).
