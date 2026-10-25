@@ -839,6 +839,8 @@ jobs:
           src/pmsManualBookingPreviewRoutes.test.ts
           src/pmsManualBookingCreateRoutes.test.ts
           src/domains/bookingGuestPolicyRepository.integration.test.ts
+          src/domains/bookingGuestPolicyScopeAuthorization.integration.test.ts
+          src/domains/memberPermissions.integration.test.ts
           src/domains/bookingGuestTermsStore.integration.test.ts
           src/bookingSettingsPropertyAddress.integration.test.ts
           src/domains/financeOtaCommissionRuleRepository.integration.test.ts
@@ -908,6 +910,7 @@ jobs:
             src/domains/replacementPricingStore.integration.test.ts \
             src/domains/pmsInventoryPublicOfferProjection.integration.test.ts \
             src/domains/replacementPricingCommands.integration.test.ts \
+            src/domains/replacementPricingAuthorization.integration.test.ts \
             src/domains/pricingPaymentRepublish.integration.test.ts \
             src/domains/pricingPaymentRepublishTriggers.integration.test.ts \
             src/domains/pricingRatePayability.integration.test.ts \
