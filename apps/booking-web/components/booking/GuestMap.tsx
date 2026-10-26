@@ -9,7 +9,7 @@ import { NEARBY_CATEGORY_HEX } from "@vayada/product-onboarding/nearbyPlaces";
 import { importGoogleMapsLibrary } from "@vayada/product-onboarding/googleMaps";
 import { onGoogleAuthFailure } from "@/lib/googleMapsFailure";
 import type { GuestNearbyPlace } from "@/lib/nearbyPlaces";
-import { useNearbyCategoryName } from "./NearbyMapLayer";
+import { NearbyNumber, useNearbyCategoryName } from "./NearbyMapLayer";
 
 /** A place on the guest map (VAY-2324): a labelled pill at an exact spot, or a circle with its label for an
  * "Approximate area". */
@@ -92,8 +92,14 @@ export default function GuestMap({
   fitPadding?: number | Padding;
   /** "greedy" where nothing else scrolls, such as a full-screen map: one finger moves the map. */
   gestureHandling?: "cooperative" | "greedy";
-  /** The host's nearby places (VAY-2327): round markers under the pills, in the host's order. */
-  nearby?: { places: GuestNearbyPlace[]; selected: string | null; onSelect: (id: string) => void };
+  /** The host's nearby places (VAY-2327): round markers under the pills, in the host's order; numbered
+   * where a list beside the map numbers them (VAY-2360). */
+  nearby?: {
+    places: GuestNearbyPlace[];
+    selected: string | null;
+    onSelect: (id: string) => void;
+    numbers?: Readonly<Record<string, number>>;
+  };
 }) {
   const t = useTranslations("locationMap");
   const mapRef = useRef<HTMLDivElement>(null);
@@ -390,6 +396,7 @@ export default function GuestMap({
                 place={place}
                 selected={id === selectedNearby}
                 onSelect={() => nearby?.onSelect(id)}
+                number={nearby?.numbers?.[id]}
               />,
               element,
               id,
@@ -406,10 +413,12 @@ function NearbyMarker({
   place,
   selected,
   onSelect,
+  number,
 }: {
   place: GuestNearbyPlace;
   selected: boolean;
   onSelect: () => void;
+  number?: number;
 }) {
   const t = useTranslations("nearbyMap");
   const name = useNearbyCategoryName();
@@ -430,7 +439,11 @@ function NearbyMarker({
       }
     >
       <span className="block rounded-full shadow-[0_2px_6px_rgb(0_0_0_/_28%)] ring-2 ring-white">
-        <NearbyCategoryBadge category={place.category} size={selected ? 36 : 32} />
+        {number ? (
+          <NearbyNumber number={number} place={place} size={selected ? 32 : 28} />
+        ) : (
+          <NearbyCategoryBadge category={place.category} size={selected ? 36 : 32} />
+        )}
       </span>
     </button>
   );

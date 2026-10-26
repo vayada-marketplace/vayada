@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import HotelHeroImage from "@/components/booking/HotelHeroImage";
+import { Link } from "@/i18n/navigation";
 import { bookingImageSizes } from "@/components/booking/imageSizes";
 import { placeAddress, placeDirectionsUrl, type StayPlace } from "@/lib/bookingStay";
 
@@ -26,6 +27,23 @@ function MapTile() {
   );
 }
 
+const DIRECTIONS =
+  "flex h-11 min-w-0 flex-1 items-center justify-center gap-2 rounded-full bg-primary-700 px-4 font-semibold text-white transition-colors hover:bg-primary-800";
+const NAV_ICON = (
+  <svg
+    aria-hidden="true"
+    className="h-4 w-4 shrink-0"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth={2}
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    viewBox="0 0 24 24"
+  >
+    <path d="m3 11 19-9-9 19-2-8-8-2z" />
+  </svg>
+);
+
 /** VAY-2360: the hotel card on the confirmation page: photo, name, the address on one line, a drawn map,
  * Directions and a copy-address button. A confirmed stay shows its exact place (as its email does); otherwise
  * the hotel's public area and pin. Rooms elsewhere get a line each with their own address and directions. */
@@ -34,10 +52,13 @@ export default function ConfirmationHotelCard({
   heroImage,
   places,
   fallback,
+  aroundHref,
 }: {
   name: string;
   heroImage: string | null;
   places: StayPlace[];
+  /** "Around {hotel}" when the hotel has local tips; without them Directions opens Google Maps (D6). */
+  aroundHref?: string;
   /** The hotel's public area and its Directions link, for stays without exact places. */
   fallback: { address: string | null; directionsUrl: string | null };
 }) {
@@ -70,31 +91,27 @@ export default function ConfirmationHotelCard({
       <div className="flex flex-col gap-0.5 px-[18px] pb-[18px] pt-3.5">
         <p className="font-heading text-[22px] font-semibold leading-7 text-gray-900">{name}</p>
         {address && <p className="truncate text-sm text-gray-600">{address}</p>}
-        {(directions || address) && (
+        {(directions || aroundHref || address) && (
           <div className="flex items-center gap-2.5 pt-2">
-            {directions && <MapTile />}
-            {directions && (
-              <a
-                href={directions}
-                target="_blank"
-                rel="noopener noreferrer"
-                aria-label={t("directionsLabel", { place: name })}
-                className="flex h-11 min-w-0 flex-1 items-center justify-center gap-2 rounded-full bg-primary-700 px-4 font-semibold text-white transition-colors hover:bg-primary-800"
-              >
-                <svg
-                  aria-hidden="true"
-                  className="h-4 w-4 shrink-0"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  viewBox="0 0 24 24"
-                >
-                  <path d="m3 11 19-9-9 19-2-8-8-2z" />
-                </svg>
+            {(directions || aroundHref) && <MapTile />}
+            {aroundHref ? (
+              <Link href={aroundHref} className={DIRECTIONS}>
+                {NAV_ICON}
                 {t("directions")}
-              </a>
+              </Link>
+            ) : (
+              directions && (
+                <a
+                  href={directions}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label={t("directionsLabel", { place: name })}
+                  className={DIRECTIONS}
+                >
+                  {NAV_ICON}
+                  {t("directions")}
+                </a>
+              )
             )}
             {address && (
               <button

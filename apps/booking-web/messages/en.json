@@ -949,5 +949,15 @@
       "requestsYes": "You can send the hotel special requests.",
       "requestsNo": "Special requests can’t be sent online. Message the hotel instead."
     }
+  },
+  "around": {
+    "back": "Back to your booking",
+    "title": "Around {hotel}",
+    "subtitle": "Places we recommend nearby.",
+    "directions": "Directions to {hotel}",
+    "mapLabel": "Map of {hotel} and the places we recommend",
+    "listLabel": "Places we recommend",
+    "all": "All",
+    "empty": "We haven't added any tips yet."
   }
 }

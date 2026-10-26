@@ -948,5 +948,15 @@
       "requestsYes": "Puedes enviar peticiones especiales al hotel.",
       "requestsNo": "Las peticiones especiales no se pueden enviar en línea. Escribe al hotel."
     }
+  },
+  "around": {
+    "back": "Volver a tu reserva",
+    "title": "Alrededor de {hotel}",
+    "subtitle": "Lugares cercanos que te recomendamos.",
+    "directions": "Cómo llegar a {hotel}",
+    "mapLabel": "Mapa de {hotel} y los lugares que recomendamos",
+    "listLabel": "Lugares que recomendamos",
+    "all": "Todos",
+    "empty": "Todavía no hemos añadido recomendaciones."
   }
 }
