@@ -35,6 +35,8 @@ import {
 export const CHANNEX_OFFER_ARI_DELIVERY_ENTRY_LIMIT = 100;
 /** Deliveries settled per run; more means the job comes back for the rest. */
 const RECONCILIATION_BATCH = 10;
+/** 4xx answers that are not a refusal of the body: timeout, too early, rate limited. */
+const TRANSIENT_4XX = [408, 425, 429];
 
 type DeliveryRequest = Readonly<{ method: "POST"; path: "/api/v1/restrictions"; body: unknown }>;
 export type ChannexOfferDeliverySkip = Readonly<{ targetId: string; reason: string }>;
@@ -168,7 +170,11 @@ async function reconcileDelivery(
     // The current attempt's own delivery is answered inside its dispatch, never here.
     if (delivery.attemptRunning) return unavailable("delivery_in_flight");
     const released = await settleDelivery(pool, lease, delivery.id, "released", null);
-    return released.kind === "settled" ? { kind: "delivery_released" as const } : released;
+    if (released.kind === "settled" || released.reason === "delivery_unavailable")
+      return { kind: "delivery_released" as const };
+    // A late receipt landed between the read above and the release (0520 refuses the release):
+    // the next turn settles it from that receipt.
+    return released.reason === "delivery_refused" ? unavailable("delivery_in_flight") : released;
   }
   if (receipts.length !== 1) return unavailable("delivery_receipt_conflict");
   const [receipt] = receipts;
@@ -184,7 +190,7 @@ async function reconcileDelivery(
       receipt.httpStatus !== null &&
       receipt.httpStatus >= 400 &&
       receipt.httpStatus < 500 &&
-      ![408, 425, 429].includes(receipt.httpStatus);
+      !TRANSIENT_4XX.includes(receipt.httpStatus);
     const settled = await settleDelivery(pool, lease, delivery.id, "reconciled", {
       schemaVersion: 1,
       completionBasis: rejected ? "provider_rejected" : "unverified",
@@ -193,7 +199,9 @@ async function reconcileDelivery(
       httpStatus: receipt.httpStatus,
       requestSha256: sha256(delivery.request),
     });
-    return settled.kind === "settled" ? { kind: "delivery_reconciled" as const } : settled;
+    return settled.kind === "settled" || settled.reason === "delivery_unavailable"
+      ? { kind: "delivery_reconciled" as const }
+      : settled;
   }
   let observations: unknown[];
   try {
@@ -226,7 +234,10 @@ async function reconcileDelivery(
       .digest("hex"),
     requestSha256: sha256(delivery.request),
   });
-  return settled.kind === "settled" ? { kind: "delivery_reconciled" as const } : settled;
+  // Settled concurrently (delivery_unavailable) counts: the row is no longer unresolved.
+  return settled.kind === "settled" || settled.reason === "delivery_unavailable"
+    ? { kind: "delivery_reconciled" as const }
+    : settled;
 }
 
 /** Moves one unresolved delivery to a terminal state under the current lease and target lock.
@@ -565,10 +576,11 @@ async function prepareDispatch(pool: Pool, lease: ChannexPricingJobLeaseInput, c
       used = true;
       const fresh = await verifyBeforePost(pool, lease, claim);
       if (fresh.kind !== "verified") {
+        // Unsent: release, or leave it for the next reconciliation (both are transient).
         const released = await settleDelivery(pool, lease, claim.deliveryId, "released", null);
         return released.kind === "settled"
           ? unavailable("delivery_stale")
-          : unavailable("delivery_reconciliation_required");
+          : unavailable("delivery_in_flight");
       }
       let response: Response | null = null;
       try {
@@ -595,7 +607,7 @@ async function prepareDispatch(pool: Pool, lease: ChannexPricingJobLeaseInput, c
       const failed =
         response === null
           ? ("transport" as const)
-          : response.status >= 500
+          : response.status >= 500 || TRANSIENT_4XX.includes(response.status)
             ? ("provider_unavailable" as const)
             : null;
       try {
