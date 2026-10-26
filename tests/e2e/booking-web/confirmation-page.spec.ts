@@ -313,6 +313,8 @@ const OFFERED = [
 for (const width of [1440, 390]) {
   test(`asks us for extras after booking (${width})`, async ({ page }, testInfo) => {
     const sent: Array<{ body: unknown; key: string | undefined }> = [];
+    await openConfirmation(page, width, {}, undefined, { offered: OFFERED, request: null });
+    // After openConfirmation: the shared mocks answer everything under the hotel's API with its profile.
     await page.route(`${hotelApi}/bookings/${id}/extras-request`, (route) => {
       sent.push({
         body: route.request().postDataJSON(),
@@ -332,7 +334,6 @@ for (const width of [1440, 390]) {
         },
       });
     });
-    await openConfirmation(page, width, {}, undefined, { offered: OFFERED, request: null });
     const extras = page.getByTestId("confirmation-extras");
     await extras.getByRole("button", { name: "Airport transfer" }).click();
     await extras.getByRole("button", { name: "Breakfast" }).click();
