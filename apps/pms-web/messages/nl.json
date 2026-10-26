@@ -914,5 +914,10 @@
   "settings.checkIn.checkTypes.amount": "Bedrag",
   "settings.checkIn.checkRequired": "Verplicht",
   "settings.checkIn.removeCheck": "{label} verwijderen",
-  "settings.checkIn.addCheck": "Controle toevoegen"
+  "settings.checkIn.addCheck": "Controle toevoegen",
+  "calendar.targetManualBooking.roomCapacity": "Max. gasten: {count}",
+  "calendar.targetManualBooking.guestTally": "Gasten: {count} van {capacity}",
+  "calendar.targetManualBooking.capacityReached": "Maximale capaciteit van de gekozen kamers bereikt. Voeg een kamer toe om meer gasten toe te voegen.",
+  "calendar.targetManualBooking.guestsOverCapacity": "{count} gasten is meer dan de {capacity} die de gekozen kamers toestaan. Verwijder een gast of voeg een kamer toe.",
+  "calendar.targetManualBooking.guestsOverCapacityServer": "De gekozen kamers hebben niet genoeg plek voor alle opgegeven gasten. Verwijder een gast of voeg een kamer toe."
 }

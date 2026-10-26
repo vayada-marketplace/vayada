@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useId, useRef } from "react";
 import { NationalitySelect } from "@vayada/locale-ui/NationalitySelect";
 import PhoneNumberInput, { phoneToE164 } from "@/components/PhoneNumberInput";
 import { useTranslation } from "@/lib/i18n";
@@ -38,7 +38,8 @@ type Props = {
   guests: AdditionalGuestDraft[];
   onChange: (guests: AdditionalGuestDraft[]) => void;
   defaultPhoneCountry: string;
-  /** Lowest nightly maximum occupancy of the selected rooms; exceeding it only warns (VAY-1422 §2.3). */
+  /** The selected rooms' places on their busiest night; 0 until a room is chosen. Adding stops at it
+   * and the booking can't be created above it (VAY-2365/2366). */
   guestCapacity: number;
   /** Adults + children across the stays, which pricing and Booking Detail use. */
   partySize: number;
@@ -59,18 +60,40 @@ export default function AdditionalGuestsEditor({
   labelClass,
 }: Props) {
   const { t } = useTranslation();
+  const capacityHint = useId();
   const nextKey = useRef(1);
   const firstNames = useRef(new Map<number, HTMLInputElement>());
+  // A new guest's first name takes focus, also when the full rooms disable "+ Add guest".
+  const added = useRef<number | null>(null);
   useEffect(() => {
     if (focusGuest) firstNames.current.get(focusGuest.key)?.focus();
   }, [focusGuest]);
+  useEffect(() => {
+    if (added.current === null) return;
+    firstNames.current.get(added.current)?.focus();
+    added.current = null;
+  }, [guests]);
   const update = (key: number, patch: Partial<AdditionalGuestDraft>) =>
     onChange(guests.map((guest) => (guest.key === key ? { ...guest, ...patch } : guest)));
   const totalGuests = guests.length + 1;
+  const full = guestCapacity > 0 && totalGuests >= guestCapacity;
+  const overCapacity = guestCapacity > 0 && totalGuests > guestCapacity;
 
   return (
     <div className="space-y-2">
-      <h4 className="text-xs font-medium text-gray-700">{t("bookings.detail.additionalGuests")}</h4>
+      <div className="flex items-baseline justify-between gap-2">
+        <h4 className="text-xs font-medium text-gray-700">
+          {t("bookings.detail.additionalGuests")}
+        </h4>
+        {guestCapacity > 0 && (
+          <span className="text-xs text-gray-500">
+            {t("calendar.targetManualBooking.guestTally", {
+              count: totalGuests,
+              capacity: guestCapacity,
+            })}
+          </span>
+        )}
+      </div>
       {guests.map((guest, index) => {
         const number = additionalGuestNumber(index);
         const name = `${guest.firstName} ${guest.lastName}`.trim();
@@ -167,8 +190,8 @@ export default function AdditionalGuestsEditor({
           })}
         </p>
       )}
-      {guests.length > 0 && totalGuests > guestCapacity && (
-        <p role="status" className="text-xs text-amber-700">
+      {overCapacity && (
+        <p role="alert" className="text-xs text-red-700">
           {t("calendar.targetManualBooking.guestsOverCapacity", {
             count: totalGuests,
             capacity: guestCapacity,
@@ -177,8 +200,11 @@ export default function AdditionalGuestsEditor({
       )}
       <button
         type="button"
-        disabled={guests.length >= MAX_ADDITIONAL_GUESTS}
-        onClick={() =>
+        disabled={guests.length >= MAX_ADDITIONAL_GUESTS || full}
+        title={full ? t("calendar.targetManualBooking.capacityReached") : undefined}
+        aria-describedby={full && !overCapacity ? capacityHint : undefined}
+        onClick={() => {
+          added.current = nextKey.current;
           onChange([
             ...guests,
             {
@@ -191,12 +217,17 @@ export default function AdditionalGuestsEditor({
               countryCode: "",
               open: true,
             },
-          ])
-        }
+          ]);
+        }}
         className="w-full rounded-lg border border-dashed border-primary-300 px-3 py-2 text-sm font-medium text-primary-700 hover:bg-primary-50 disabled:border-gray-200 disabled:text-gray-400"
       >
         {t("calendar.targetManualBooking.addGuest")}
       </button>
+      {full && !overCapacity && (
+        <p id={capacityHint} className="text-xs text-gray-500">
+          {t("calendar.targetManualBooking.capacityReached")}
+        </p>
+      )}
       {guests.length >= MAX_ADDITIONAL_GUESTS && (
         <p className="text-xs text-gray-500">
           {t("calendar.targetManualBooking.guestLimitReached", { count: MAX_ADDITIONAL_GUESTS })}

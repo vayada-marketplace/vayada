@@ -914,5 +914,10 @@
   "settings.checkIn.checkTypes.amount": "Сумма",
   "settings.checkIn.checkRequired": "Обязательно",
   "settings.checkIn.removeCheck": "Удалить: {label}",
-  "settings.checkIn.addCheck": "Добавить проверку"
+  "settings.checkIn.addCheck": "Добавить проверку",
+  "calendar.targetManualBooking.roomCapacity": "Макс. гостей: {count}",
+  "calendar.targetManualBooking.guestTally": "Гости: {count} из {capacity}",
+  "calendar.targetManualBooking.capacityReached": "Достигнута максимальная вместимость выбранных номеров. Добавьте ещё один номер, чтобы добавить гостей.",
+  "calendar.targetManualBooking.guestsOverCapacity": "Гостей: {count}, а выбранные номера вмещают не более {capacity}. Удалите гостя или добавьте номер.",
+  "calendar.targetManualBooking.guestsOverCapacityServer": "В выбранных номерах не хватает мест для всех указанных гостей. Удалите гостя или добавьте номер."
 }
