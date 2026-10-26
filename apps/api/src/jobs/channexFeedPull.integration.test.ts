@@ -275,14 +275,9 @@ describe.skipIf(!URL)("Channex scheduled booking-feed pull (PostgreSQL)", () => 
         ],
       },
     });
-    // Channex pausing us gives the attempt back; a crashed run gets its next attempt; the hotel
-    // beyond the cap and a stale binding fail at once.
+    // Channex pausing us gives the attempt back.
     resyncPages = [[booking("booking-limited", "rev-limited")]];
     const limited = await resyncJob(OWNED, generation, ":limited");
-    await db.query(
-      "UPDATE platform.jobs SET status = 'running', locked_at = now() - interval '3 hours', locked_by = 'crashed' WHERE id = $1",
-      [retry],
-    );
     expect(await run()).toMatchObject({
       resyncFailed: 1,
       failures: [{ propertyId: OWNED, code: "rate_limited" }],
@@ -293,15 +288,36 @@ describe.skipIf(!URL)("Channex scheduled booking-feed pull (PostgreSQL)", () => 
       later: true,
       code: "rate_limited",
     });
+    await db.query(
+      "UPDATE platform.jobs SET status = 'succeeded', finished_at = now() WHERE id = $1",
+      [limited],
+    );
+    // A run a crashed task left behind gets its next attempt (taken in the same tick here).
+    await db.query(
+      "UPDATE platform.jobs SET status = 'running', locked_at = now() - interval '3 hours', locked_by = 'crashed' WHERE id = $1",
+      [retry],
+    );
+    expect(await run()).toMatchObject({
+      resyncFailed: 1,
+      failures: [{ propertyId: OWNED, code: "rate_limited" }],
+    });
     expect(await jobRow(retry)).toMatchObject({
       status: "pending",
       attempts: 1,
+      code: "rate_limited",
+    });
+    // Out of attempts, a crashed run fails.
+    await db.query(
+      "UPDATE platform.jobs SET status = 'running', attempts_count = 3, locked_at = now() - interval '3 hours', locked_by = 'crashed' WHERE id = $1",
+      [retry],
+    );
+    expect(await run()).toMatchObject({ resynced: 0, resyncFailed: 0 });
+    expect(await jobRow(retry)).toMatchObject({
+      status: "failed",
+      finished: true,
       code: "worker_lease_expired",
     });
-    await db.query(
-      "UPDATE platform.jobs SET status = 'succeeded', finished_at = now() WHERE id = ANY($1::uuid[])",
-      [[retry, limited]],
-    );
+    // The hotel beyond the cap and a stale binding fail at once.
     resyncPages = [[booking("booking-many", "rev-many")]];
     resyncTotal = 5_000;
     const large = await resyncJob(OWNED, generation, ":large");
