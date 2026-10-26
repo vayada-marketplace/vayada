@@ -21,19 +21,24 @@ describe.skipIf(!URL)("Channex scheduled booking-feed pull (PostgreSQL)", () => 
   const db = new pg.Pool({ connectionString: URL ?? "postgresql://disabled", max: 2 });
   const calls: string[] = [];
   let resyncPages: Array<Record<string, unknown>[]> = [];
+  let resyncTotal: number | null = null;
   const fetcher: typeof fetch = async (input, init) => {
     calls.push(`${init?.method ?? "GET"} ${String(input)}`);
     const url = new globalThis.URL(String(input));
     const property = url.searchParams.get("filter[property_id]");
-    if (url.pathname === "/api/v1/bookings")
+    if (url.pathname === "/api/v1/bookings") {
+      const page = Number(url.searchParams.get("pagination[page]"));
+      const total = resyncTotal ?? resyncPages.reduce((sum, rows) => sum + rows.length, 0);
       return Response.json({
-        data: resyncPages[Number(url.searchParams.get("pagination[page]")) - 1] ?? [],
+        data: resyncPages[page - 1] ?? [],
+        meta: { page, total, limit: 100 },
       });
+    }
     if (url.pathname.startsWith("/api/v1/booking_revisions/") && !url.pathname.endsWith("/feed")) {
       const id = url.pathname.split("/").at(-1)!;
-      return id === "rev-gone"
-        ? new Response(null, { status: 404 })
-        : Response.json({ data: revision(id, `booking-${id.slice(4)}`) });
+      if (id === "rev-gone") return new Response(null, { status: 404 });
+      if (id === "rev-limited") return new Response(null, { status: 429 });
+      return Response.json({ data: revision(id, `booking-${id.slice(4)}`) });
     }
     return Response.json({
       data:
@@ -180,12 +185,33 @@ describe.skipIf(!URL)("Channex scheduled booking-feed pull (PostgreSQL)", () => 
           ],
         )
       ).rows[0]!.id;
+    const jobRow = async (id: string) =>
+      (
+        await db.query(
+          `SELECT status, attempts_count AS attempts, run_after > now() AS later, finished_at IS NOT NULL AS finished,
+             payload->>'channexHost' AS host, job_metadata - 'lastErrorCode' AS metadata, job_metadata->>'lastErrorCode' AS code
+           FROM platform.jobs WHERE id=$1`,
+          [id],
+        )
+      ).rows[0];
     const booking = (id: string, revisionId: string, property = OWNED) => ({
       id,
       type: "booking",
-      attributes: { property_id: external(property), revision_id: revisionId, status: "new" },
+      attributes: {
+        property_id: external(property).toUpperCase(),
+        revision_id: revisionId,
+        status: "new",
+      },
     });
-    // Page one is full, so the runner reads page two; another hotel's row is skipped.
+    const run = (extra: Partial<typeof options> = {}) =>
+      runChannexFeedPulls(URL!, {
+        ...options,
+        ownedPropertyIds: [OWNED],
+        resyncPaceMs: 0,
+        ...extra,
+      });
+    // Page one is full, so the runner reads page two; another hotel's row is skipped; the
+    // collection's own ids are compared case-insensitively.
     resyncPages = [
       [
         ...Array.from({ length: 98 }, (_, index) =>
@@ -197,57 +223,104 @@ describe.skipIf(!URL)("Channex scheduled booking-feed pull (PostgreSQL)", () => 
       [booking("booking-r2", "rev-r2")],
     ];
     const job = await resyncJob(OWNED, generation);
-    const counters = await runChannexFeedPulls(URL!, { ...options, ownedPropertyIds: [OWNED] });
-    expect(counters).toMatchObject({ resynced: 1, resyncFailed: 0 });
+    // A canary on the staging host never takes a production hotel's resync.
+    expect(await run({ apiBaseUrl: "https://staging.channex.io" })).toMatchObject({
+      resynced: 0,
+      resyncFailed: 0,
+    });
+    expect((await jobRow(job)).status).toBe("pending");
+    expect(await run()).toMatchObject({ resynced: 1, resyncFailed: 0 });
     const listed = calls.filter((call) => call.includes("/api/v1/bookings?"));
     expect(listed).toEqual([
       `GET ${BOOKINGS}?filter%5Bproperty_id%5D=${external(OWNED)}&filter%5Bdeparture_date%5D%5Bgte%5D=2026-10-09&pagination%5Bpage%5D=1&pagination%5Blimit%5D=100`,
       `GET ${BOOKINGS}?filter%5Bproperty_id%5D=${external(OWNED)}&filter%5Bdeparture_date%5D%5Bgte%5D=2026-10-09&pagination%5Bpage%5D=2&pagination%5Blimit%5D=100`,
     ]);
     expect(calls.filter((call) => call.includes("/booking_revisions/rev-")).length).toBe(100);
-    const done = await db.query(
-      "SELECT status, job_metadata->'bookings' AS bookings, job_metadata->'promoted' AS promoted FROM platform.jobs WHERE id=$1",
-      [job],
-    );
-    expect(done.rows[0]).toEqual({ status: "succeeded", bookings: 100, promoted: 100 });
+    expect(await jobRow(job)).toMatchObject({
+      status: "succeeded",
+      host: "app.channex.io",
+      metadata: { bookings: 100, promoted: 100, skipped: 1 },
+    });
     const ingest = await db.query<{ n: number }>(
       `SELECT count(*)::int AS n FROM platform.jobs WHERE job_type='channex.ingest-booking'
          AND payload->>'propertyId'=$1 AND payload->>'channelBookingId' LIKE 'booking-r%'`,
       [OWNED],
     );
     expect(ingest.rows[0]!.n).toBe(100);
-    // A missing revision fails the resync, which waits for its next attempt; a stale binding is refused.
-    resyncPages = [[booking("booking-gone", "rev-gone")]];
+    // A missing revision and a row without one fail the attempt; the resync waits for its next one.
+    resyncPages = [
+      [
+        booking("booking-gone", "rev-gone"),
+        { id: "booking-bare", attributes: { property_id: external(OWNED) } },
+      ],
+    ];
     const retry = await resyncJob(OWNED, generation, ":retry");
-    expect(
-      await runChannexFeedPulls(URL!, { ...options, ownedPropertyIds: [OWNED] }),
-    ).toMatchObject({
+    expect(await run()).toMatchObject({
       resyncFailed: 1,
       failures: [{ propertyId: OWNED, code: "booking_failed" }],
     });
-    const waiting = await db.query(
-      "SELECT status, attempts_count AS attempts, run_after > now() AS later, job_metadata->'failedBookingIds' AS ids FROM platform.jobs WHERE id=$1",
-      [retry],
-    );
-    expect(waiting.rows[0]).toEqual({
+    expect(await jobRow(retry)).toMatchObject({
       status: "pending",
       attempts: 1,
       later: true,
-      ids: ["booking-gone"],
+      finished: false,
+      code: "booking_failed",
+      metadata: {
+        bookings: 1,
+        promoted: 0,
+        skipped: 0,
+        failedBookings: [
+          { id: "booking-bare", code: "booking_without_revision" },
+          { id: "booking-gone", code: "revision_missing" },
+        ],
+      },
     });
+    // Channex pausing us gives the attempt back; a crashed run gets its next attempt; the hotel
+    // beyond the cap and a stale binding fail at once.
+    resyncPages = [[booking("booking-limited", "rev-limited")]];
+    const limited = await resyncJob(OWNED, generation, ":limited");
+    await db.query(
+      "UPDATE platform.jobs SET status = 'running', locked_at = now() - interval '3 hours', locked_by = 'crashed' WHERE id = $1",
+      [retry],
+    );
+    expect(await run()).toMatchObject({
+      resyncFailed: 1,
+      failures: [{ propertyId: OWNED, code: "rate_limited" }],
+    });
+    expect(await jobRow(limited)).toMatchObject({
+      status: "pending",
+      attempts: 0,
+      later: true,
+      code: "rate_limited",
+    });
+    expect(await jobRow(retry)).toMatchObject({
+      status: "pending",
+      attempts: 1,
+      code: "worker_lease_expired",
+    });
+    await db.query(
+      "UPDATE platform.jobs SET status = 'succeeded', finished_at = now() WHERE id = ANY($1::uuid[])",
+      [[retry, limited]],
+    );
+    resyncPages = [[booking("booking-many", "rev-many")]];
+    resyncTotal = 5_000;
+    const large = await resyncJob(OWNED, generation, ":large");
+    expect(await run()).toMatchObject({
+      resyncFailed: 1,
+      failures: [{ propertyId: OWNED, code: "resync_truncated" }],
+    });
+    expect(await jobRow(large)).toMatchObject({
+      status: "failed",
+      finished: true,
+      metadata: { total: 5_000 },
+    });
+    resyncTotal = null;
     const stale = await resyncJob(OWNED, "00000000-0000-4000-8000-000000000000");
-    await db.query("UPDATE platform.jobs SET max_attempts = 1 WHERE id = $1", [stale]);
-    expect(
-      await runChannexFeedPulls(URL!, { ...options, ownedPropertyIds: [OWNED] }),
-    ).toMatchObject({
+    expect(await run()).toMatchObject({
       resyncFailed: 1,
       failures: [{ propertyId: OWNED, code: "connection_not_owned" }],
     });
-    expect(
-      (await db.query("SELECT status FROM platform.jobs WHERE id=$1", [stale])).rows[0],
-    ).toEqual({
-      status: "failed",
-    });
+    expect(await jobRow(stale)).toMatchObject({ status: "failed", attempts: 1, finished: true });
   });
 
   async function pullJobs() {

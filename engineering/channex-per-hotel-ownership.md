@@ -73,9 +73,14 @@ claimed feed-pull loop runs it on the API login: it lists the hotel's bookings w
 departure from yesterday (UTC) on, fetches each booking's latest revision and queues it exactly
 like a pulled revision; the booking worker persists it through the same room and rate mapping
 and the same inventory lock. The ingest job's own acknowledgement answers 404 for those
-revisions and counts as done. A failed resync waits five minutes and retries while it has
-attempts; a binding that changed since the attach is refused. Full ARI must wait until the
-resync job succeeded, or the rooms look free. Direct bookings from the old booking engine are
+revisions and counts as done. A failed booking spends one of the job's three attempts (five
+minutes apart); Channex rate limiting or a worker shutdown gives the attempt back; a binding
+that changed since the attach, or a hotel with more than 2,000 upcoming bookings, fails the
+job at once and needs its own plan. A crashed run gets its next attempt after two hours. Only
+the production worker takes the job (the payload carries no host until the claim stamps it).
+Stays that departed yesterday local time are copied too and show as past stays. Full ARI must
+wait until the resync job succeeded (`job_metadata.bookings` = `promoted`), or the rooms look
+free. Direct bookings from the old booking engine are
 re-entered as manual bookings in the new PMS (they block the units the same way).
 
 ## Booking intake
