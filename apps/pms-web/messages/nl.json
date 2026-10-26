@@ -129,6 +129,7 @@
   "layout.sidebar.settings": "Instellingen",
   "layout.sidebar.featureHub": "Functiecentrum",
   "layout.sidebar.collapse": "Inklappen",
+  "layout.sidebar.expand": "Uitklappen",
   "search.placeholder": "Zoek reserveringen, gasten, kamers, instellingen, paginas...",
   "search.noResults": "Geen resultaten voor '{query}'",
   "search.startTyping": "Begin met typen om te zoeken...",

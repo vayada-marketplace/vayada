@@ -58,6 +58,7 @@ export function GuestForm({
   rooms,
   lockedFields,
   canReadIdentity,
+  savedFilledFields,
   saving,
   error,
   onSave,
@@ -70,6 +71,8 @@ export function GuestForm({
   /** Name and contact taken from the booking or an OTA import. */
   lockedFields: ReadonlySet<GuestLockableField>;
   canReadIdentity: boolean;
+  /** The registration fields on record; the status uses them when the ID fields are hidden. */
+  savedFilledFields: readonly string[];
   saving: boolean;
   error: string | null;
   onSave: (values: GuestFormValues) => void;
@@ -82,7 +85,7 @@ export function GuestForm({
     setValues((current) => ({ ...current, ...patch }));
   const { status, missing } = guestRegistrationStatus(
     values,
-    filledRegistrationFields(values),
+    canReadIdentity ? filledRegistrationFields(values) : savedFilledFields,
     settings,
   );
   const fieldLabel = (field: CheckinGuestField | "firstName" | "lastName") =>

@@ -138,6 +138,7 @@
   "layout.sidebar.settings": "Settings",
   "layout.sidebar.featureHub": "Feature Hub",
   "layout.sidebar.collapse": "Collapse",
+  "layout.sidebar.expand": "Expand",
   "layout.sidebar.switchError": "We couldn't open that app. Please try again later.",
   "search.placeholder": "Search reservations, guests, rooms, settings, pages...",
   "search.noResults": "No results for \"{query}\"",

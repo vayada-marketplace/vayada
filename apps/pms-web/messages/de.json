@@ -139,6 +139,7 @@
   "layout.sidebar.settings": "Einstellungen",
   "layout.sidebar.featureHub": "Feature-Verwaltung",
   "layout.sidebar.collapse": "Einklappen",
+  "layout.sidebar.expand": "Ausklappen",
   "layout.sidebar.switchError": "Diese App konnte nicht geöffnet werden. Bitte versuchen Sie es später erneut.",
   "search.placeholder": "Reservierungen, Gäste, Zimmer, Einstellungen, Seiten suchen...",
   "search.noResults": "Keine Ergebnisse für '{query}'",

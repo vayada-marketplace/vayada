@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useState } from "react";
+import { Fragment, useRef, useState } from "react";
 import type { CheckinSettings } from "@/services/settings";
 import type { RegistrationGuest } from "@/lib/checkin/registration";
 import type { CheckinRoom, RoomOption } from "@/lib/checkin/rooms";
@@ -48,6 +48,8 @@ export function RoomsGuestsStep({
   const [pickerGroups, setPickerGroups] = useState<RoomGroups | null>(null);
   const [pickerError, setPickerError] = useState<string | null>(null);
   const [moving, setMoving] = useState(false);
+  // Only the latest picker's calendar read may fill it: rooms can have different dates.
+  const pickerRequest = useRef(0);
 
   const unitLabel = (room: CheckinRoom) =>
     room.unit
@@ -61,11 +63,15 @@ export function RoomsGuestsStep({
     setPickerRoom(room.key);
     setPickerGroups(null);
     setPickerError(null);
+    const request = ++pickerRequest.current;
     loadRoomOptions(room)
-      .then(setPickerGroups)
-      .catch((err) =>
-        setPickerError(localizedErrorText(err, t("checkIn.flow.picker.loadError"), t)),
-      );
+      .then((groups) => {
+        if (request === pickerRequest.current) setPickerGroups(groups);
+      })
+      .catch((err) => {
+        if (request === pickerRequest.current)
+          setPickerError(localizedErrorText(err, t("checkIn.flow.picker.loadError"), t));
+      });
   };
   const move = async (room: CheckinRoom, option: RoomOption) => {
     setMoving(true);
@@ -263,6 +269,7 @@ export function RoomsGuestsStep({
                         rooms={rooms}
                         lockedFields={lockedFields(guest)}
                         canReadIdentity={canReadIdentity}
+                        savedFilledFields={guest.registration?.filledFields ?? []}
                         saving={savingGuest}
                         error={guestError}
                         onSave={(values) => void save(guest, values)}
