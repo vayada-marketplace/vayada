@@ -188,6 +188,29 @@ test.describe("arrival popup", () => {
       payment: { method: "card", expectedMethod: "card", status: "partially_paid" },
     };
     await mockReservation(page, () => arrival);
+    // Ada and Grace have their ID and date of birth recorded (VAY-2373); the third adult is unnamed.
+    const documented = ["documentType", "documentNumber", "dateOfBirth"];
+    await page.route(`${base}/guest-registrations`, (route) =>
+      route.fulfill({
+        json: {
+          guestBookingId: PMS_WEB_RESERVATION_ID,
+          canReadIdentity: true,
+          guests: [
+            { guestId: "guest_ada", role: "booker", filledFields: documented },
+            { guestId: grace.guestId, role: "additional_guest", filledFields: documented },
+          ].map((guest) => ({
+            ...guest,
+            assignmentId: null,
+            dateOfBirth: null,
+            documentType: null,
+            documentNumber: null,
+            gender: null,
+            staffNotes: null,
+            updatedAt: null,
+          })),
+        },
+      }),
+    );
     const reservations = `**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/reservations*`;
     await page.unroute(reservations);
     await page.route(reservations, (route) =>
@@ -209,7 +232,9 @@ test.describe("arrival popup", () => {
       .click();
     const popup = page.getByRole("dialog");
     await expect(popup.getByText("2 of 3 guests registered")).toBeVisible();
+    await expect(popup.getByText("Guest 3 has no details yet")).toBeVisible();
     await expect(popup.getByText(/€168(\.00)? due/)).toBeVisible();
+    await expect(popup.getByText(/Card · €72(\.00)? paid so far/)).toBeVisible();
     await expect(popup.getByText(/€240/)).toHaveCount(0);
     await assertHealthy();
   });
