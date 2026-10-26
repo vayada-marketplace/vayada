@@ -10,7 +10,7 @@ import {
 // before 0519 and stays a safe rollback target once 0519 ships.
 const POLICY_DIGESTS = new Set([
   "c0c08b5d01df4b8fa3c1bed72e7a1fcdbfd77731383e63bd986f3d938ec26323",
-  "POST_0519_POLICY_DIGEST",
+  "f9a53a613884875be8387bfb59bf5772038eda202d0f213c32854585d247b7be",
 ]);
 // Shared trigger catalog: through 0473, and after 0474 drops the native hotel-setup triggers
 // (VAY-2056 step 6, PG16 and PG17). Accepting both lets this image start on either side of
@@ -23,7 +23,7 @@ const CATALOG_DIGESTS = new Set([
   "10c6d40b2c7b7c4baacc4adaf468ddac1c3675344c114e40a5f77ba335b27794",
   "739a61d86e2ec4698b47af2c2206a3a3cd60c37e4fb9c0a99886336ef5ab71fd",
   "2d185251ef0a8949b140fe14469c65f5122b7df055f712ffe64e590f64e24ef2",
-  "POST_0519_CATALOG_DIGEST",
+  "48270709c6e36bc4d4c8c1716c8bfa636026bce462fdbc855cf54e410cd4538f",
 ]);
 export const channexManagementWorkerFunctions = [
   "platform.channex_management_worker_scope(text,text,uuid)",

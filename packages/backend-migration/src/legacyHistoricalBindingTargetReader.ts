@@ -16,7 +16,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
 // both lets this image run on either side of 0519, so it stays a safe rollback target.
 const TARGET_SELECT_POLICY_SHA256 = new Set([
   "73ee252f11346c9246610df0d54bf0d93002b82d030f1df246cd6df3a3067388",
-  "POST_0519_READER_DIGEST",
+  "5b6851751ae4311bcb83095845994857c7f12cae65249214ef65a2358c7c7e35",
 ]);
 
 async function assertRestrictedReaderIdentity(client: pg.PoolClient): Promise<void> {
