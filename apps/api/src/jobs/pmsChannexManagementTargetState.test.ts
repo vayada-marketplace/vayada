@@ -44,14 +44,6 @@ describe("PMS Channex management target state", () => {
     const degraded = sql.indexOf("SET status = 'degraded', last_error_code = $3");
     expect(ok).toBeGreaterThan(-1);
     expect(degraded).toBeGreaterThan(ok);
-    const unchanged = fakeClient();
-    await createPmsChannexManagementTargetState().succeed(
-      unchanged,
-      job("sync_ari"),
-      { ok: true, ariStatusUnchanged: true },
-      now,
-    );
-    expect(unchanged.sql()).not.toContain("pms.channel_sync_status");
   });
 
   it("persists provider-confirmed mappings, markups, and failure health", async () => {

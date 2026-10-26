@@ -468,7 +468,12 @@ describe("closed upload worker gates", () => {
         kind: "prepared" as const,
         deliveryId: "delivery",
         targetId: "target",
-        dispatch: async () => ({ kind: "receipt_pending" as const, deliveryId: "delivery", persist }),
+        dispatch: async () => ({
+          kind: "receipt_pending" as const,
+          deliveryId: "delivery",
+          persist,
+          failed: null,
+        }),
       }),
     }).execute(job, { workerId: "worker" });
     expect(persist).toHaveBeenCalledOnce();
