@@ -28,7 +28,7 @@ describe("PMS Channex management worker store", () => {
     const harness = setup({ withJob: true, connectionOnly: true });
     await expect(harness.store.claim({ workerId: "worker-1", now })).resolves.toEqual(job);
     const claim = harness.db.calls.find(({ text }) => text.includes("FOR UPDATE SKIP LOCKED"));
-    expect(claim?.values?.at(-1)).toBe(true);
+    expect(claim?.values?.[7]).toBe(true);
     expect(claim?.text).toContain("payload->>'operationType' = 'enable'");
     // A pending job needs an unbound hotel; a running job may finish its own binding.
     expect(claim?.text).toMatch(

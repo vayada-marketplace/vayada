@@ -366,14 +366,12 @@ describe("PMS Channex management command routes", () => {
       ).statusCode,
     ).toBe(202);
     // VAY-2108 D7: the claimed scope's owned hotels may provision, others may not.
-    await app.close();
     const owned = await testApp({}, mutating, undefined, false, true, "other-property", false, [
       propertyId,
     ]);
-    app = owned.app;
     expect(
       (
-        await app.inject({
+        await owned.app.inject({
           method: "POST",
           url: `/properties/${propertyId}/channex/published-offers/provision`,
           headers: { authorization: "Bearer valid" },
@@ -381,14 +379,13 @@ describe("PMS Channex management command routes", () => {
         })
       ).statusCode,
     ).toBe(202);
-    await app.close();
+    await owned.app.close();
     const foreign = await testApp({}, mutating, undefined, false, true, "other-property", false, [
       "29f39aae-0000-4000-8000-000000000001",
     ]);
-    app = foreign.app;
     expect(
       (
-        await app.inject({
+        await foreign.app.inject({
           method: "POST",
           url: `/properties/${propertyId}/channex/published-offers/provision`,
           headers: { authorization: "Bearer valid" },
@@ -397,8 +394,7 @@ describe("PMS Channex management command routes", () => {
       ).statusCode,
     ).toBe(409);
     expect(foreign.enqueue).not.toHaveBeenCalled();
-    await app.close();
-    app = enabled.app;
+    await foreign.app.close();
     expect(enabled.enqueue).toHaveBeenCalledWith(expect.anything(), propertyId, {
       commandId: payload.commandId,
       idempotencyKey: payload.idempotencyKey,
