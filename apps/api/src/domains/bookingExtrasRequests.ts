@@ -152,10 +152,11 @@ export async function insertExtrasRequest(
   input: { guestBookingId: string; items: ExtraOffer[] },
 ): Promise<ExtrasRequest> {
   const totalMinor = String(input.items.reduce((sum, item) => sum + BigInt(item.amountMinor), 0n));
+  // The clock, not the transaction's start: "newest first" holds even for two requests in one transaction.
   const result = await db.query(
     `INSERT INTO booking.booking_change_requests
-       (guest_booking_id, request_type, requested_by, status, requested_changes)
-     VALUES ($1::uuid, 'addon_change', 'guest', 'pending', $2::jsonb)
+       (guest_booking_id, request_type, requested_by, status, requested_changes, created_at, updated_at)
+     VALUES ($1::uuid, 'addon_change', 'guest', 'pending', $2::jsonb, clock_timestamp(), clock_timestamp())
      RETURNING ${columns("")}`,
     [
       input.guestBookingId,
