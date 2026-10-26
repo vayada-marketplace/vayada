@@ -831,4 +831,35 @@ describe.skipIf(!url)("Channex worker effective permissions", () => {
         ]);
     }
   });
+
+  it("requires the delivery table grants only once ongoing offer delivery is on (VAY-2108 D3)", async () => {
+    const tables = [
+      "pms.channex_offer_ari_deliveries",
+      "pms.channex_offer_ari_delivery_dates",
+      "pms.channex_offer_ari_delivery_receipts",
+    ];
+    const boundary = async (offerDelivery: boolean) => {
+      const client = await pool.connect();
+      try {
+        await assertChannexManagementWorkerBoundary(client, { propertyId: property, offerDelivery });
+      } finally {
+        client.release();
+      }
+    };
+    await boundary(false);
+    await boundary(true);
+    await owner.query(`REVOKE ALL ON ${tables.join(",")} FROM ${role}`);
+    try {
+      // Before the platform's delivery grant mode: an image with delivery off still starts.
+      await boundary(false);
+      await expect(boundary(true)).rejects.toThrow("channex_worker_grant_missing");
+    } finally {
+      for (const table of tables)
+        for (const [kind, columns] of Object.entries(privileges[table]!))
+          await owner.query(
+            `GRANT ${kind}${columns === true ? "" : `(${columns.join(",")})`} ON ${table} TO ${role}`,
+          );
+    }
+    await boundary(true);
+  });
 });
