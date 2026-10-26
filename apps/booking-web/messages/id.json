@@ -504,8 +504,55 @@
     "heldOnCard": "Ditahan di kartu Anda",
     "refundedToCard": "Dikembalikan ke kartu Anda",
     "addToCalendar": "Tambahkan ke kalender",
-    "getDirections": "Petunjuk arah",
-    "directionsHint": "Membuka lokasi kami di Google Maps"
+    "bookedDirect": "Dipesan langsung",
+    "perk": {
+      "welcomeDrink": "Minuman selamat datang saat tiba",
+      "spaDiscount": "Diskon spa 10%",
+      "lateCheckOut": "Check-out lebih lambat (sesuai ketersediaan)",
+      "earlyCheckIn": "Check-in lebih awal (sesuai ketersediaan)",
+      "airportTransfer": "Antar-jemput bandara gratis",
+      "breakfast": "Termasuk sarapan setiap hari",
+      "upgrade": "Upgrade kamar (sesuai ketersediaan)"
+    },
+    "noMeals": "Tidak termasuk makan",
+    "fullPolicy": "Kebijakan lengkap",
+    "close": "Tutup",
+    "directions": "Petunjuk arah",
+    "directionsLabel": "Petunjuk arah ke {place}, membuka Google Maps",
+    "copyAddress": "Salin alamat",
+    "addressCopied": "Alamat tersalin",
+    "cancelLine": {
+      "freeUntil": "Pembatalan gratis hingga akhir {date}, waktu setempat hotel.",
+      "freeUntilAfter": "Setelah itu, Anda membayar jumlah penuh ({amount}).",
+      "refundsUntil": "Pengembalian dana hingga akhir {date}, waktu setempat hotel.",
+      "refundsUntilAfter": "Jumlah yang dikembalikan tergantung kapan Anda membatalkan. Setelah itu, Anda membayar jumlah penuh ({amount}).",
+      "freeEnded": "Pembatalan gratis berakhir pada {date}.",
+      "noRefund": "Pengembalian dana berakhir pada {date}.",
+      "nonRefundable": "Tidak dapat dikembalikan.",
+      "payFull": "Jika Anda membatalkan atau tidak datang, Anda membayar jumlah penuh ({amount}).",
+      "beforeAccept": "Gratis ditarik sampai kami menjawab.",
+      "afterAccept": {
+        "freeUntil": "Setelah kami menerima: pembatalan gratis hingga akhir {date}, waktu setempat hotel.",
+        "refundsUntil": "Setelah kami menerima: pengembalian dana hingga akhir {date}, waktu setempat hotel.",
+        "none": "Setelah kami menerima, tidak dapat dikembalikan.",
+        "rooms": "Setelah kami menerima, kamar Anda memiliki ketentuan pembatalan yang berbeda."
+      },
+      "beforeTransfer": "Gratis dibatalkan sampai transfer Anda diterima.",
+      "afterTransfer": {
+        "freeUntil": "Setelah diterima: pembatalan gratis hingga akhir {date}, waktu setempat hotel.",
+        "refundsUntil": "Setelah diterima: pengembalian dana hingga akhir {date}, waktu setempat hotel.",
+        "none": "Setelah diterima, pemesanan tidak dapat dikembalikan.",
+        "rooms": "Setelah diterima, kamar Anda memiliki ketentuan pembatalan yang berbeda."
+      },
+      "rooms": "Kamar Anda memiliki ketentuan pembatalan yang berbeda.",
+      "room": {
+        "freeUntil": "{rooms}: gratis hingga akhir {date}.",
+        "refundsUntil": "{rooms}: pengembalian dana hingga akhir {date}.",
+        "freeEnded": "{rooms}: pembatalan gratis telah berakhir.",
+        "noRefund": "{rooms}: tidak ada pengembalian dana lagi.",
+        "nonRefundable": "{rooms}: tidak dapat dikembalikan."
+      }
+    }
   },
   "refer": {
     "title": "Referensikan Tamu",

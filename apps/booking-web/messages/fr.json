@@ -504,8 +504,55 @@
     "heldOnCard": "Bloqué sur votre carte",
     "refundedToCard": "Remboursé sur votre carte",
     "addToCalendar": "Ajouter au calendrier",
-    "getDirections": "Itinéraire",
-    "directionsHint": "Ouvre notre emplacement dans Google Maps"
+    "bookedDirect": "Réservé en direct",
+    "perk": {
+      "welcomeDrink": "Boisson de bienvenue à l’arrivée",
+      "spaDiscount": "10 % de réduction au spa",
+      "lateCheckOut": "Départ tardif (selon disponibilité)",
+      "earlyCheckIn": "Arrivée anticipée (selon disponibilité)",
+      "airportTransfer": "Transfert aéroport offert",
+      "breakfast": "Petit-déjeuner quotidien inclus",
+      "upgrade": "Surclassement (selon disponibilité)"
+    },
+    "noMeals": "Aucun repas inclus",
+    "fullPolicy": "Conditions complètes",
+    "close": "Fermer",
+    "directions": "Itinéraire",
+    "directionsLabel": "Itinéraire vers {place}, ouvre Google Maps",
+    "copyAddress": "Copier l’adresse",
+    "addressCopied": "Adresse copiée",
+    "cancelLine": {
+      "freeUntil": "Annulation gratuite jusqu’à la fin du {date}, heure locale de l’hôtel.",
+      "freeUntilAfter": "Ensuite, vous payez le montant total ({amount}).",
+      "refundsUntil": "Remboursement jusqu’à la fin du {date}, heure locale de l’hôtel.",
+      "refundsUntilAfter": "Le remboursement dépend de la date d’annulation. Ensuite, vous payez le montant total ({amount}).",
+      "freeEnded": "L’annulation gratuite s’est terminée le {date}.",
+      "noRefund": "Les remboursements se sont terminés le {date}.",
+      "nonRefundable": "Non remboursable.",
+      "payFull": "Si vous annulez ou ne venez pas, vous payez le montant total ({amount}).",
+      "beforeAccept": "Vous pouvez la retirer gratuitement tant que nous n’avons pas répondu.",
+      "afterAccept": {
+        "freeUntil": "Une fois acceptée : annulation gratuite jusqu’à la fin du {date}, heure locale de l’hôtel.",
+        "refundsUntil": "Une fois acceptée : remboursement jusqu’à la fin du {date}, heure locale de l’hôtel.",
+        "none": "Une fois acceptée, elle n’est plus remboursable.",
+        "rooms": "Une fois acceptée, vos chambres s’annulent selon des conditions différentes."
+      },
+      "beforeTransfer": "Annulation gratuite tant que votre virement n’est pas arrivé.",
+      "afterTransfer": {
+        "freeUntil": "Une fois le virement arrivé : annulation gratuite jusqu’à la fin du {date}, heure locale de l’hôtel.",
+        "refundsUntil": "Une fois le virement arrivé : remboursement jusqu’à la fin du {date}, heure locale de l’hôtel.",
+        "none": "Une fois le virement arrivé, la réservation n’est plus remboursable.",
+        "rooms": "Une fois le virement arrivé, vos chambres s’annulent selon des conditions différentes."
+      },
+      "rooms": "Vos chambres s’annulent selon des conditions différentes.",
+      "room": {
+        "freeUntil": "{rooms} : gratuite jusqu’à la fin du {date}.",
+        "refundsUntil": "{rooms} : remboursement jusqu’à la fin du {date}.",
+        "freeEnded": "{rooms} : l’annulation gratuite est terminée.",
+        "noRefund": "{rooms} : plus de remboursement.",
+        "nonRefundable": "{rooms} : non remboursable."
+      }
+    }
   },
   "refer": {
     "title": "Parrainer un client",

@@ -43,7 +43,8 @@ async function openConfirmation(
 test("adds a confirmed stay to the calendar as one all-day event", async ({ page }) => {
   await openConfirmation(page);
   const add = page.getByRole("button", { name: /^Add to calendar/ });
-  await expect(add).toContainText(/Sat, 12 Sept? 2026 – Tue, 15 Sept? 2026/);
+  // VAY-2360: the dates are on the ticket already.
+  await expect(add).toHaveText("Add to calendar");
   const [download] = await Promise.all([page.waitForEvent("download"), add.click()]);
   expect(download.suggestedFilename()).toBe("VAY-1268.ics");
   const lines = (await readFile(await download.path(), "utf8")).split("\r\n");
@@ -72,7 +73,7 @@ for (const [pin, destination] of [
 ] as const) {
   test(`opens directions to ${destination}`, async ({ page }) => {
     await openConfirmation(page, {}, { mapPin: pin });
-    const directions = page.getByRole("link", { name: /^Get directions/ });
+    const directions = page.getByRole("link", { name: /^Directions to Hotel Alpenrose/ });
     await expect(directions).toHaveAttribute(
       "href",
       `https://www.google.com/maps/dir/?api=1&destination=${destination}`,
@@ -84,5 +85,5 @@ for (const [pin, destination] of [
 test("offers no directions when the hotel hides its location", async ({ page }) => {
   await openConfirmation(page);
   await expect(page.getByRole("button", { name: /^Add to calendar/ })).toBeVisible();
-  await expect(page.getByRole("link", { name: /^Get directions/ })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: /^Directions/ })).toHaveCount(0);
 });
