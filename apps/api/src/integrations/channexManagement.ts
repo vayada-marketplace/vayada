@@ -439,7 +439,14 @@ export function createChannexManagementProvider(config: {
                   await input.onProgress?.();
                   const delivery = await deliveries.prepare(lease);
                   if (delivery.kind === "offer_ari_current")
-                    return { ok: true, skippedOfferTargets: delivery.skipped };
+                    return {
+                      ok: true,
+                      // Activation's own report stays visible: with a changed sibling, D5 does
+                      // not activate the hotel's pending targets either (follow-up in the contract).
+                      skippedOfferTargets: changedTarget
+                        ? [{ targetId: "activation", reason: activated.reason }, ...delivery.skipped]
+                        : delivery.skipped,
+                    };
                   if (delivery.kind !== "prepared")
                     return failure(
                       transientDeliveryReason(delivery.reason)
