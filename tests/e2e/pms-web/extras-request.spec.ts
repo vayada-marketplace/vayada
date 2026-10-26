@@ -4,6 +4,7 @@ import {
   PMS_WEB_RESERVATION_ID,
   mockPmsWebAuthenticatedSession,
   mockPmsWebTargetRoutes,
+  pmsWebReservation,
 } from "../support/pmsWebMocks";
 import { watchPageHealth } from "../support/pageHealth";
 
@@ -33,8 +34,18 @@ const pending = {
   decidedAt: null,
   note: null,
 };
+// An earlier request the hotel accepted: still to charge at check-in, so it stays on the page.
+const earlier = {
+  ...pending,
+  id: "11111111-2222-4333-8444-000000000001",
+  status: "accepted",
+  items: [item("Late check-out", "per_stay", "1000", "1000")],
+  totalMinor: "1000",
+  createdAt: "2026-10-18T09:00:00.000Z",
+  decidedAt: "2026-10-19T09:00:00.000Z",
+};
 
-async function mockExtras(page: Page) {
+async function mockExtras(page: Page, status = "confirmed") {
   const decisions: { decision: string; key: string | undefined; body: unknown }[] = [];
   let current: Record<string, unknown> = pending;
   await mockPmsWebAuthenticatedSession(page);
@@ -42,7 +53,12 @@ async function mockExtras(page: Page) {
   for (const suffix of ["notes", "additional-guests"])
     await page.route(`${base}/${suffix}`, (route) => route.fulfill({ json: { items: [] } }));
   await page.route(`${base}/change-request`, (route) => route.fulfill({ json: null }));
-  await page.route(`${base}/extras-request`, (route) => route.fulfill({ json: current }));
+  await page.route(base, (route) =>
+    route.fulfill({ json: { item: { ...pmsWebReservation, status } } }),
+  );
+  await page.route(`${base}/extras-request`, (route) =>
+    route.fulfill({ json: { version: "booking-extras-requests.v1", items: [current, earlier] } }),
+  );
   await page.route(`${base}/extras-request/${pending.id}/*`, (route) => {
     const decision = new URL(route.request().url()).pathname.split("/").pop()!;
     decisions.push({
@@ -65,7 +81,9 @@ test("accepts the extras a guest asked for, to charge at check-in", async ({ pag
   const decisions = await mockExtras(page);
 
   await page.goto(`/bookings/${PMS_WEB_RESERVATION_ID}`);
-  const card = page.getByTestId("extras-request-card");
+  const cards = page.getByTestId("extras-request-card");
+  await expect(cards).toHaveCount(2);
+  const card = cards.first();
   await expect(card.getByText("Extras requested by the guest")).toBeVisible();
   await expect(card.getByText(/^Ada Lovelace asked for these on the booking page/)).toBeVisible();
   await expect(card.getByText("€18.00 per guest per night · 2 guests · 3 nights")).toBeVisible();
@@ -77,6 +95,9 @@ test("accepts the extras a guest asked for, to charge at check-in", async ({ pag
   await expect(card.getByText(/^Extras accepted on (21 Oct|Oct 21)$/)).toBeVisible();
   await expect(card.getByText("Ada Lovelace got an email. Charge them at check-in.")).toBeVisible();
   await expect(card.getByRole("button")).toHaveCount(0);
+  // The earlier accepted extras are still there to charge.
+  await expect(cards.nth(1).getByText(/^Extras accepted on (19 Oct|Oct 19)$/)).toBeVisible();
+  await expect(cards.nth(1).getByText("Late check-out")).toBeVisible();
   expect(decisions).toEqual([
     {
       decision: "accept",
@@ -92,7 +113,7 @@ test("declines the extras with a reason for the guest", async ({ page }, testInf
   const decisions = await mockExtras(page);
 
   await page.goto(`/bookings/${PMS_WEB_RESERVATION_ID}`);
-  const card = page.getByTestId("extras-request-card");
+  const card = page.getByTestId("extras-request-card").first();
   await card.getByRole("button", { name: "Decline", exact: true }).click();
   await card.getByLabel("Reason for the guest (optional)").fill("Our shuttle is fully booked.");
   await card.getByRole("button", { name: "Decline extras" }).click();
@@ -101,7 +122,8 @@ test("declines the extras with a reason for the guest", async ({ page }, testInf
       /^Extras declined on (21 Oct|Oct 21): Airport transfer, Breakfast\. Ada Lovelace got an email\.$/,
     ),
   ).toBeVisible();
-  await expect(card).toHaveCount(0);
+  // Only the earlier accepted request is still a card.
+  await expect(page.getByTestId("extras-request-card")).toHaveCount(1);
   expect(decisions).toEqual([
     {
       decision: "decline",
@@ -110,4 +132,17 @@ test("declines the extras with a reason for the guest", async ({ page }, testInf
     },
   ]);
   await assertHealthy();
+});
+
+// A cancelled booking page reads more than these mocks answer, so this one checks the cards only.
+test("a cancelled stay's waiting request can't be answered", async ({ page }) => {
+  const decisions = await mockExtras(page, "canceled");
+
+  await page.goto(`/bookings/${PMS_WEB_RESERVATION_ID}`);
+  await expect(page.getByRole("heading", { name: "Booking VAY-ADA" })).toBeVisible();
+  const cards = page.getByTestId("extras-request-card");
+  await expect(cards).toHaveCount(1);
+  await expect(cards.getByText("Late check-out")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Accept extras" })).toHaveCount(0);
+  expect(decisions).toEqual([]);
 });

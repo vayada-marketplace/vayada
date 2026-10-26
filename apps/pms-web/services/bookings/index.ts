@@ -1033,12 +1033,13 @@ export const bookingsService = {
     return normalizeBookingChangeRequest(response)!;
   },
 
-  // VAY-2360 part 3: extras a guest asked for after booking; none answers {status: "none"}.
-  getExtrasRequest: async (id: string): Promise<BookingExtrasRequest | null> => {
-    const response = await pmsOperationsClient.get<
-      BookingExtrasRequest | { status: "none" } | null
-    >(await bookingExtrasRequestEndpoint(id), pmsOperationsRequestOptions);
-    return response && "id" in response ? response : null;
+  // VAY-2360 part 3: every extras request a guest made after booking, newest first.
+  getExtrasRequests: async (id: string): Promise<BookingExtrasRequest[]> => {
+    const response = await pmsOperationsClient.get<{ items?: BookingExtrasRequest[] } | null>(
+      await bookingExtrasRequestEndpoint(id),
+      pmsOperationsRequestOptions,
+    );
+    return Array.isArray(response?.items) ? response.items : [];
   },
 
   decideExtrasRequest: async (

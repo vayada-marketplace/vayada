@@ -1278,7 +1278,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
   const [declineReason, setDeclineReason] = useState("");
   const [decidingChange, setDecidingChange] = useState(false);
   // VAY-2360 part 3: extras the guest asked for after booking.
-  const [extrasRequest, setExtrasRequest] = useState<BookingExtrasRequest | null>(null);
+  const [extrasRequests, setExtrasRequests] = useState<BookingExtrasRequest[]>([]);
   const [decidingExtras, setDecidingExtras] = useState(false);
   const [noteDraft, setNoteDraft] = useState("");
   const [noteDraftOpen, setNoteDraftOpen] = useState(false);
@@ -1346,7 +1346,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
     }
     Promise.all([
       bookingsService.getChangeRequest(id).then(setChangeRequest).catch(console.error),
-      bookingsService.getExtrasRequest(id).then(setExtrasRequest).catch(console.error),
+      bookingsService.getExtrasRequests(id).then(setExtrasRequests).catch(console.error),
       bookingsService
         .listNotes(id)
         .then((r) => setNotes(r.notes))
@@ -1418,18 +1418,23 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
     });
   };
 
-  const handleExtrasDecision = async (decision: "accept" | "decline", reason?: string) => {
-    if (!extrasRequest) return;
+  const handleExtrasDecision = async (
+    requestId: string,
+    decision: "accept" | "decline",
+    reason?: string,
+  ) => {
     setDecidingExtras(true);
     setError("");
     try {
-      setExtrasRequest(
-        await bookingsService.decideExtrasRequest(id, extrasRequest.id, decision, reason),
+      const decided = await bookingsService.decideExtrasRequest(id, requestId, decision, reason);
+      setExtrasRequests((current) =>
+        current.map((request) => (request.id === decided.id ? decided : request)),
       );
     } catch (err) {
       setError(errMessage(err, t("bookings.extras.failed")));
-      // Someone may have answered it already: show what it is now.
-      setExtrasRequest(await bookingsService.getExtrasRequest(id).catch(() => extrasRequest));
+      // Someone may have answered it already, or the stay was cancelled: show what it is now.
+      const now = await bookingsService.getExtrasRequests(id).catch(() => null);
+      if (now) setExtrasRequests(now);
     } finally {
       setDecidingExtras(false);
     }
@@ -2071,14 +2076,23 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
         </div>
       )}
 
-      {extrasRequest && (
-        <ExtrasRequestCard
-          request={extrasRequest}
-          guestName={`${booking.guestFirstName} ${booking.guestLastName}`.trim()}
-          busy={decidingExtras}
-          onDecide={(decision, reason) => void handleExtrasDecision(decision, reason)}
-        />
-      )}
+      {/* VAY-2360: every extra the hotel accepted stays here, to charge at check-in. A waiting request
+          lapses once the stay isn't confirmed (the API refuses an answer then). */}
+      {extrasRequests
+        .filter(
+          (request) =>
+            request.status !== "pending" ||
+            ["confirmed", "checked_in", "in_house", "checked_out"].includes(booking.status),
+        )
+        .map((request) => (
+          <ExtrasRequestCard
+            key={request.id}
+            request={request}
+            guestName={`${booking.guestFirstName} ${booking.guestLastName}`.trim()}
+            busy={decidingExtras}
+            onDecide={(decision, reason) => void handleExtrasDecision(request.id, decision, reason)}
+          />
+        ))}
       {changeRequest?.providerRequest && (
         <AirbnbChangeRequestCard
           amountStatus={booking.amountStatus}
