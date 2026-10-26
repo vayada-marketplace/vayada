@@ -537,7 +537,10 @@ describe("closed upload worker gates", () => {
     }).execute(job, { workerId: "worker" });
     expect(result).toEqual({
       ok: true,
-      skippedOfferTargets: [{ targetId: "target", reason: "active_offer_configuration_changed" }],
+      skippedOfferTargets: [
+        { targetId: "activation", reason: "active_offer_configuration_changed" },
+        { targetId: "target", reason: "active_offer_configuration_changed" },
+      ],
     });
     expect(prepareOfferDelivery).toHaveBeenCalledOnce();
   });
