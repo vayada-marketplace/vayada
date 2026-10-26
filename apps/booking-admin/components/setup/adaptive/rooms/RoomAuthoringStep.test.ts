@@ -396,6 +396,7 @@ describe("RoomAuthoringStep first-visit recovery", () => {
       (node) => node.type === "input" && node.props.id === `room:${roomTypeId}-name`,
     );
     expect(nameInput.props.value).toBe("Garden Suite");
+    expect(document.getElementById).toHaveBeenCalledWith(`room:${roomTypeId}-name`);
     expect(focus).toHaveBeenCalledOnce();
     renderer?.unmount();
   });
