@@ -56,7 +56,7 @@ The worker sends from a full `channex.sync_ari` job, after activation, for owned
   - a transport error, a non-200 answer or an unclear body closes the delivery as `reconciled` with
     `completionBasis` `unverified` (a 4xx answer other than 408/425/429: `provider_rejected`). Its
     dates never count as sent, so the next run sends them again, which is safe because ARI writes
-    are idempotent. A transport error or a 5xx also fails the worker turn (`provider_unavailable`),
+    are idempotent. A transport error, a 5xx or a 408/425/429 also fails the worker turn (`provider_unavailable`),
     so the resend follows the job's backoff and attempt ceiling. A rejected body is not retried
     while the desired body is unchanged (`requestSha256`); the target is skipped and reported
     instead;
@@ -74,7 +74,9 @@ The worker sends from a full `channex.sync_ari` job, after activation, for owned
   listed in the job result (`skippedOfferTargets`), which the worker records as a degraded ARI sync
   status (`offer_targets_skipped`) on the channel manager page. Activation (D5) reports such a
   target for the hotel; with the delivery switch on the run still delivers the other targets,
-  without it the sync fails until the offer is reconfigured. Only a full `channex.sync_ari` job
+  without it the sync fails until the offer is reconfigured. Follow-up: activation (D5) does not
+  activate a hotel's pending targets while a sibling target is changed; the run then reports the
+  activation state under `targetId` `activation`. Only a full `channex.sync_ari` job
   delivers; a provisioning job ends at activation. Opening sales reaches Channex with the next
   scheduled full sync. A target whose offer left the
   publication is closed: every night of its rate plan gets `stop_sell: true` without touching
