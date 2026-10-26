@@ -540,7 +540,7 @@ export default function PrivacyPage() {
                     (Article 6(1) lit. c GDPR).
                   </li>
                   <li>
-                    <strong>Check-in registration (at the hotel):</strong> when you check in, the
+                    <strong>Check-in registration (at the hotel): </strong>when you check in, the
                     hotel&apos;s staff may record your date of birth, the type and number of your
                     identity document, your gender, which room you sleep in and internal notes, for
                     example to meet local guest registration rules (Article 6(1) lit. c GDPR) and to
