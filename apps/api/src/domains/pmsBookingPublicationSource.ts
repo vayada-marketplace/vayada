@@ -1,8 +1,8 @@
 import {
   type BookingLaunchOwnerBlocker,
   type BookingLaunchPmsEvidencePort,
-  type BookingLaunchSourceRevision,
 } from "@vayada/domain-booking";
+import { BOOKING_PUBLICATION_MIN_OPEN_DAYS } from "@vayada/domain-distribution/booking-publication";
 import {
   BOOKING_OWNER_SNAPSHOT_VERSION,
   type BookingPublicationOwnerSnapshotPort,
@@ -10,22 +10,30 @@ import {
 } from "@vayada/domain-distribution/booking-publication-owner-snapshots";
 import type { SourceEntityRevision } from "@vayada/domain-hotels";
 import {
+  PMS_OPERATING_CALENDAR_SOURCE_ENTITY_TYPE,
+  PMS_PRICING_SOURCE_ENTITY_TYPES,
+  parsePropertyPricingCurrencySnapshot,
+  serializePmsPricingSourceEntityRevision,
   type PmsInventoryLaunchReadinessReadPort,
   type PmsOperatingCalendarReadPort,
+  type PmsPricingReadPort,
   type RoomPublicationSnapshotPort,
 } from "@vayada/domain-pms";
 
-import type { ReplacementPricingPublicationReader } from "./replacementPricingPublicationReader.js";
+import type {
+  PricingGap,
+  ReplacementPricingPublicationReader,
+} from "./replacementPricingPublicationReader.js";
 import { buildPmsBookingPublicationContent } from "./pmsBookingPublicationContent.js";
 
 type PmsSource = Omit<SourceEntityRevision, "ownerDomain"> & { ownerDomain: "pms" };
+
 type LoadedPms = {
   sources: PmsSource[];
   rooms: readonly { source: PmsSource; blockers: BookingLaunchOwnerBlocker[] }[];
   pricingSource: PmsSource;
   pricingBlockers: BookingLaunchOwnerBlocker[];
   calendarSource: PmsSource;
-  calendarBindings: BookingLaunchSourceRevision[];
   calendarBlockers: BookingLaunchOwnerBlocker[];
   content: BookingPublicationSnapshotContent["pms"] | null;
 };
@@ -33,6 +41,8 @@ type LoadedPms = {
 export function createPmsBookingPublicationSource(dependencies: {
   rooms: RoomPublicationSnapshotPort;
   pricing: ReplacementPricingPublicationReader;
+  /** Finance binds payment methods to this currency source. */
+  pricingCurrency: Pick<PmsPricingReadPort, "getPropertyPricingCurrency">;
   operatingCalendar: PmsOperatingCalendarReadPort;
   inventory: PmsInventoryLaunchReadinessReadPort;
   now?: () => Date;
@@ -44,7 +54,7 @@ export function createPmsBookingPublicationSource(dependencies: {
     async getBookingLaunchEvidence(request) {
       try {
         const loaded = await load(dependencies, request, now());
-        if (!loaded) return unavailableEvidence();
+        if (typeof loaded === "string") return unavailableEvidence("provider", loaded);
         return deepFreeze({
           outcome: "evidence",
           port: "pms",
@@ -76,16 +86,14 @@ export function createPmsBookingPublicationSource(dependencies: {
               groupId: "booking.calendar",
               owningStepId: "calendar",
               source: loaded.calendarSource,
+              // No binding to the hotel profile revision: the PMS read model reports the only
+              // profile change the calendar uses, a new time zone, as stale (VAY-2150).
               blockers: loaded.calendarBlockers,
-              bindings: loaded.calendarBindings.map((expectedSource) => ({
-                expectedSource,
-                mismatchBlocker: blocker("operating_calendar_source_stale"),
-              })),
             },
           ],
         });
       } catch {
-        return unavailableEvidence("system");
+        return unavailableEvidence("system", "owner_read_failed");
       }
     },
     async getSnapshot(request) {
@@ -102,7 +110,8 @@ export function createPmsBookingPublicationSource(dependencies: {
           ({ ownerDomain }) => ownerDomain === "pms",
         );
         if (
-          !loaded?.content ||
+          typeof loaded === "string" ||
+          !loaded.content ||
           allBlockers(loaded).length ||
           sourceKeys(loaded.sources) !== sourceKeys(expected)
         )
@@ -124,49 +133,76 @@ export function createPmsBookingPublicationSource(dependencies: {
   };
 }
 
+/** Evidence, or the diagnostic code of a state no setup step can fix. */
 async function load(
   dependencies: Parameters<typeof createPmsBookingPublicationSource>[0],
   scope: { organizationId: string; propertyId: string },
   observedAt: Date,
-): Promise<LoadedPms | null> {
+): Promise<LoadedPms | string> {
   const pricing = await dependencies.pricing.getCurrentPricingOffers(scope);
   if (
-    !pricing ||
-    pricing.scope.propertyId !== scope.propertyId ||
-    pricing.scope.organizationId !== scope.organizationId
+    pricing &&
+    (pricing.scope.propertyId !== scope.propertyId ||
+      pricing.scope.organizationId !== scope.organizationId)
   )
-    return null;
+    return "pricing_scope_mismatch";
+  // Missing or outdated prices are fixed by saving prices again (VAY-2134).
+  const pricingGaps: readonly PricingGap[] = pricing
+    ? []
+    : await dependencies.pricing.diagnoseMissingPricing(scope.propertyId);
+  if (!pricing && !pricingGaps.length) return "pricing_publication_unavailable";
   const currentCalendar =
     await dependencies.operatingCalendar.getCurrentOperatingCalendarConfiguration(scope.propertyId);
-  if (!currentCalendar || currentCalendar.configuration.propertyId !== scope.propertyId)
-    return null;
-  const currentLocalDate = localDate(
-    observedAt,
-    currentCalendar.configuration.sourceInputs.propertyTimeZone,
-  );
-  if (!currentLocalDate) return null;
-  const through = addDays(currentLocalDate, 365);
-  const [roomPublication, inventory] = await Promise.all([
+  if (currentCalendar && currentCalendar.configuration.propertyId !== scope.propertyId)
+    return "calendar_scope_mismatch";
+  const currentLocalDate = currentCalendar
+    ? localDate(observedAt, currentCalendar.configuration.sourceInputs.propertyTimeZone)
+    : null;
+  if (currentCalendar && !currentLocalDate) return "calendar_time_zone_invalid";
+  const [roomPublication, inventory, pricingCurrency] = await Promise.all([
     dependencies.rooms.getRoomPublicationSnapshot(scope),
-    dependencies.inventory.getInventoryLaunchReadiness({
-      propertyId: scope.propertyId,
-      requiredCoverage: { from: currentLocalDate, through },
-    }),
+    currentLocalDate
+      ? dependencies.inventory.getInventoryLaunchReadiness({
+          propertyId: scope.propertyId,
+          requiredCoverage: {
+            from: currentLocalDate,
+            // The same 11-month window the publication builder checks (VAY-2150).
+            through: addDays(currentLocalDate, BOOKING_PUBLICATION_MIN_OPEN_DAYS),
+          },
+        })
+      : null,
+    dependencies.pricingCurrency.getPropertyPricingCurrency(scope.propertyId),
   ]);
-  // Independent ports must not hold a pricing lock while acquiring their own connections.
-  const current = await dependencies.pricing.getCurrentPricingOffers(scope);
+  const currency =
+    pricingCurrency === null ? null : parsePropertyPricingCurrencySnapshot(pricingCurrency);
+  // Same identity Finance's payment-methods binding expects (normalized property ID).
+  const currencySource =
+    currency &&
+    serializePmsPricingSourceEntityRevision(
+      PMS_PRICING_SOURCE_ENTITY_TYPES.propertyPricingCurrency,
+      currency.propertyId,
+      currency.pricingCurrencyRevision,
+    );
   if (
-    !current ||
-    current.sourceRevision !== pricing.sourceRevision ||
-    current.scope.propertyId !== scope.propertyId ||
-    current.scope.organizationId !== scope.organizationId ||
+    pricingCurrency !== null &&
+    (!currency || currency.propertyId !== scope.propertyId.toLowerCase() || !currencySource)
+  )
+    return "pricing_currency_invalid";
+  // Independent ports must not hold a pricing lock while acquiring their own connections.
+  const current = pricing ? await dependencies.pricing.getCurrentPricingOffers(scope) : null;
+  if (
+    (pricing &&
+      (!current ||
+        current.sourceRevision !== pricing.sourceRevision ||
+        current.scope.propertyId !== scope.propertyId ||
+        current.scope.organizationId !== scope.organizationId)) ||
     roomPublication.propertyId !== scope.propertyId
   )
-    return null;
+    return "source_changed_during_read";
   const pricingSource = pmsSource(
     "pms_pricing_publication.v2",
     scope.propertyId,
-    pricing.sourceRevision,
+    pricing?.sourceRevision ?? `unavailable:${pricingGaps.join(",")}`,
   );
   const roomEntries = roomPublication.rooms.map((room) => ({
     source: pmsSource("pms_room_publication.v1", room.roomTypeId, room.sourceRevision),
@@ -177,6 +213,9 @@ async function load(
       )
       .map(({ code }) => blocker(code)),
   }));
+  const calendarSource = currentCalendar
+    ? (currentCalendar.configuration.source as PmsSource)
+    : pmsSource(PMS_OPERATING_CALENDAR_SOURCE_ENTITY_TYPE, scope.propertyId, "absent");
   const sources: PmsSource[] = [
     pricingSource,
     ...roomEntries.map(({ source }) => source),
@@ -187,21 +226,35 @@ async function load(
         String(room.sourceRevisions.roomFactsRevision),
       ),
     ),
-    currentCalendar.configuration.source as PmsSource,
+    calendarSource,
+    ...(currencySource ? [currencySource as PmsSource] : []),
   ];
-  const pricingBlockers: BookingLaunchOwnerBlocker[] = [];
+  const pricingBlockers = pricingGaps.map((gap) =>
+    blocker(
+      `pricing_${gap}`,
+      gap === "hotel_setup_in_progress" ? "external_pending" : "user_fixable",
+    ),
+  );
   const inventoryMatches =
+    currentCalendar &&
     inventory?.ready &&
     sourceKey(inventory.snapshot.configuration.source) ===
       sourceKey(currentCalendar.configuration.source);
-  const calendarBlockers: BookingLaunchOwnerBlocker[] = [
-    ...(inventoryMatches ? [] : [blocker("inventory_launch_readiness_incomplete")]),
-    ...(currentCalendar.sourceStatus === "current"
-      ? []
-      : [blocker("operating_calendar_source_stale")]),
-  ];
+  const calendarBlockers: BookingLaunchOwnerBlocker[] = !currentCalendar
+    ? [blocker("operating_calendar_missing")]
+    : [
+        ...(inventoryMatches ? [] : [blocker("inventory_launch_readiness_incomplete")]),
+        ...(currentCalendar.sourceStatus === "current"
+          ? []
+          : [blocker("operating_calendar_source_stale")]),
+      ];
   const content =
-    inventoryMatches && currentCalendar.sourceStatus === "current"
+    pricing &&
+    currentCalendar &&
+    currentLocalDate &&
+    inventory &&
+    inventoryMatches &&
+    currentCalendar.sourceStatus === "current"
       ? buildPmsBookingPublicationContent({
           rooms: roomPublication.rooms,
           offers: pricing.rooms,
@@ -210,15 +263,14 @@ async function load(
           observedAt: currentCalendar.configuration.updatedAt,
         })
       : null;
-  if (inventoryMatches && currentCalendar.sourceStatus === "current" && !content)
+  if (pricing && inventoryMatches && currentCalendar?.sourceStatus === "current" && !content)
     pricingBlockers.push(blocker("public_room_content_incomplete"));
   return {
     sources: uniqueSources(sources),
     rooms: roomEntries,
     pricingSource,
     pricingBlockers,
-    calendarSource: currentCalendar.configuration.source as PmsSource,
-    calendarBindings: [currentCalendar.configuration.sourceInputs.propertyProfile],
+    calendarSource,
     calendarBlockers,
     content,
   };
@@ -230,10 +282,13 @@ const pmsSource = (entityType: string, entityId: string, revision: string): PmsS
   entityId,
   revision,
 });
-const blocker = (code: string): BookingLaunchOwnerBlocker => ({
+const blocker = (
+  code: string,
+  kind: "user_fixable" | "external_pending" = "user_fixable",
+): BookingLaunchOwnerBlocker => ({
   code,
   scope: "launch_configuration",
-  kind: "user_fixable",
+  kind,
 });
 const uniqueSources = (sources: readonly PmsSource[]) =>
   [...new Map(sources.map((source) => [sourceKey(source), source])).values()].sort((a, b) =>
@@ -248,10 +303,11 @@ const sourceKeys = (sources: readonly SourceEntityRevision[]) =>
   sources.map(sourceKey).sort().join("\0");
 const sourceKey = ({ ownerDomain, entityType, entityId, revision }: SourceEntityRevision) =>
   JSON.stringify([ownerDomain, entityType, entityId, revision]);
-const unavailableEvidence = (errorSource: "provider" | "system" = "provider") => ({
+const unavailableEvidence = (errorSource: "provider" | "system", code: string) => ({
   outcome: "unavailable" as const,
   port: "pms" as const,
   errorSource,
+  code,
 });
 const unavailableSnapshot = () => ({ outcome: "unavailable" as const, owner: "pms" as const });
 const localDate = (date: Date, timeZone: string) => {

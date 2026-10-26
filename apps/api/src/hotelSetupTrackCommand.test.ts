@@ -1,6 +1,4 @@
-import { createPgMarketplaceAdminRepository } from "./routes/marketplaceAdmin.js";
-import { createPgMarketplaceOfferIdentityAccessCommandPort } from "./platform/marketplaceOfferIdentityAccess.js";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 
 import pg from "pg";
@@ -13,7 +11,6 @@ import {
   type HotelSetupTrackCommand,
   type HotelSetupTrackCommandRepository,
 } from "./domains/hotelSetupTrackCommandRepository.js";
-import { requireAuthorizedPlatformActor } from "./domains/platformPropertyLifecycleCommandRepository.js";
 import { createPgSharedHotelSetupStatusRepository } from "./platform/sharedHotelSetupStatusReadModel.js";
 
 const TEST_DATABASE_URL = process.env["TEST_DATABASE_URL"];
@@ -49,30 +46,6 @@ describe("stored hotel setup track command results", () => {
     expect(queries[1]?.text).not.toContain("FOR UPDATE");
   });
 
-  it("authorizes runtime admin activation without locking identity rows", async () => {
-    const queries: string[] = [];
-    const client = {
-      async query(text: string) {
-        queries.push(text);
-        return { rows: [{ id: "membership" }], rowCount: 1 };
-      },
-    };
-
-    await requireAuthorizedPlatformActor(
-      client as never,
-      {
-        actorUserId: "22222222-2222-4222-8222-222222222222",
-        organizationId: "33333333-3333-4333-8333-333333333333",
-        requestId: "request-admin-activation",
-        correlationId: "correlation-admin-activation",
-        requestedAt: occurredAt,
-      },
-      { lockRows: false },
-    );
-
-    expect(queries[0]).not.toContain("FOR SHARE");
-  });
-
   it("accepts complete success and conflict results", () => {
     expect(
       parseStoredHotelSetupTrackCommandResult({
@@ -90,12 +63,6 @@ describe("stored hotel setup track command results", () => {
               ],
               allowedActions: ["manage_service"],
             },
-            {
-              track: "creator_marketplace",
-              provisioning: "not_selected",
-              components: [{ product: "marketplace", access: "absent" }],
-              allowedActions: ["add"],
-            },
           ],
         },
       }),
@@ -106,6 +73,21 @@ describe("stored hotel setup track command results", () => {
         error: { code: "track_revision_conflict", currentRevision: 1 },
       }),
     ).not.toBeNull();
+  });
+
+  it("reads a receipt stored before the retired Creator Marketplace track left the response", () => {
+    expect(parseStoredHotelSetupTrackCommandResult(legacyReceipt(retiredTrackStatus()))).toEqual({
+      ok: true,
+      response: operationsResponse(),
+    });
+    for (const retired of [
+      { ...retiredTrackStatus(), provisioning: "active" },
+      { ...retiredTrackStatus(), allowedActions: ["manage_service"] },
+      { ...retiredTrackStatus(), components: [{ product: "pms", access: "absent" }] },
+      { ...retiredTrackStatus(), extra: true },
+    ]) {
+      expect(parseStoredHotelSetupTrackCommandResult(legacyReceipt(retired))).toBeNull();
+    }
   });
 
   it.each([
@@ -165,23 +147,8 @@ describe.skipIf(!TEST_DATABASE_URL)("hotel setup track command repository", () =
           organizationIds,
         ]);
       }
-      for (const table of [
-        "marketplace.marketplace_offer_read_model",
-        "marketplace.offer_creator_requirements",
-        "marketplace.offer_deliverables",
-        "marketplace.offer_compensation_options",
-        "marketplace.marketplace_offers",
-      ]) {
-        await client.query(`DELETE FROM ${table} WHERE property_id = ANY($1::uuid[])`, [
-          propertyIds,
-        ]);
-      }
       await client.query(
         `DELETE FROM booking.booking_settings WHERE property_id = ANY($1::uuid[])`,
-        [propertyIds],
-      );
-      await client.query(
-        `DELETE FROM marketplace.marketplace_hotel_profiles WHERE property_id = ANY($1::uuid[])`,
         [propertyIds],
       );
       await client.query(`DELETE FROM hotel_catalog.properties WHERE id = ANY($1::uuid[])`, [
@@ -221,10 +188,7 @@ describe.skipIf(!TEST_DATABASE_URL)("hotel setup track command repository", () =
     ).toMatchObject({
       trackRevision: 0,
       selectedTracks: [],
-      tracks: [
-        { track: "hotel_operations", provisioning: "not_selected" },
-        { track: "creator_marketplace", provisioning: "not_selected" },
-      ],
+      tracks: [{ track: "hotel_operations", provisioning: "not_selected" }],
     });
 
     const created = await repository.updateTracks(operations);
@@ -242,7 +206,6 @@ describe.skipIf(!TEST_DATABASE_URL)("hotel setup track command repository", () =
               { product: "booking", access: "active" },
             ],
           },
-          { track: "creator_marketplace", provisioning: "not_selected" },
         ],
       },
     });
@@ -312,7 +275,8 @@ describe.skipIf(!TEST_DATABASE_URL)("hotel setup track command repository", () =
 
     const reusedKey = await repository.updateTracks({
       ...operations,
-      selectedTracks: ["hotel_operations", "creator_marketplace"],
+      // The retired Creator Marketplace track (VAY-2270) is not a SetupTrack any more.
+      selectedTracks: ["hotel_operations", "creator_marketplace"] as never,
     });
     expect(reusedKey).toMatchObject({
       ok: false,
@@ -329,7 +293,7 @@ describe.skipIf(!TEST_DATABASE_URL)("hotel setup track command repository", () =
 
     const stale = await repository.updateTracks(
       command(fixture, {
-        selectedTracks: ["hotel_operations", "creator_marketplace"],
+        selectedTracks: ["hotel_operations"],
         expectedRevision: 0,
         idempotencyKey: "setup-stale",
       }),
@@ -339,65 +303,38 @@ describe.skipIf(!TEST_DATABASE_URL)("hotel setup track command repository", () =
       error: { code: "track_revision_conflict", currentRevision: 1 },
     });
 
-    const extended = await repository.updateTracks(
+    // The Creator Marketplace track is retired (VAY-2270): it cannot be added any more.
+    const retired = await repository.updateTracks(
       command(fixture, {
-        selectedTracks: ["hotel_operations", "creator_marketplace"],
+        // The retired Creator Marketplace track (VAY-2270) is not a SetupTrack any more.
+        selectedTracks: ["hotel_operations", "creator_marketplace"] as never,
         expectedRevision: 1,
         idempotencyKey: "setup-both",
       }),
     );
-    expect(extended).toMatchObject({
-      ok: true,
-      response: {
-        trackRevision: 2,
-        selectedTracks: ["hotel_operations", "creator_marketplace"],
-      },
+    expect(retired).toEqual({
+      ok: false,
+      error: { code: "invalid_setup_request", currentRevision: 1 },
     });
-    expect(await activeEntitlementProducts(fixture.organizationId)).toEqual([
-      "booking",
-      "marketplace",
-      "pms",
-    ]);
-    expect(
-      await count("marketplace.marketplace_hotel_profiles", "property_id", fixture.propertyId),
-    ).toBe(1);
+    expect(await activeEntitlementProducts(fixture.organizationId)).toEqual(["booking", "pms"]);
 
     await client.query(
-      `DELETE FROM marketplace.marketplace_hotel_profiles WHERE property_id = $1::uuid`,
-      [fixture.propertyId],
-    );
-    await client.query(
       `DELETE FROM identity.organization_resource_links
-       WHERE organization_id = $1::uuid AND product = 'marketplace'`,
+       WHERE organization_id = $1::uuid AND product = 'booking'`,
       [fixture.organizationId],
     );
     const reconciled = await repository.updateTracks(
       command(fixture, {
-        selectedTracks: ["hotel_operations", "creator_marketplace"],
-        expectedRevision: 2,
+        selectedTracks: ["hotel_operations"],
+        expectedRevision: 1,
         idempotencyKey: "setup-reconcile",
       }),
     );
     expect(reconciled).toMatchObject({
       ok: true,
-      response: { trackRevision: 2 },
+      response: { trackRevision: 1 },
     });
-    expect(await linkedProducts(fixture.organizationId)).toEqual(["booking", "marketplace", "pms"]);
-
-    const removal = await repository.updateTracks(
-      command(fixture, {
-        selectedTracks: ["creator_marketplace"],
-        expectedRevision: 2,
-        idempotencyKey: "setup-remove",
-      }),
-    );
-    expect(removal).toMatchObject({
-      ok: false,
-      error: {
-        code: "track_removal_requires_service_management",
-        currentRevision: 2,
-      },
-    });
+    expect(await linkedProducts(fixture.organizationId)).toEqual(["booking", "pms"]);
   });
 
   it.each([
@@ -434,6 +371,38 @@ describe.skipIf(!TEST_DATABASE_URL)("hotel setup track command repository", () =
       ok: false,
       error: { code: "idempotency_key_conflict" },
     });
+  });
+
+  it("replays a receipt stored while responses still listed the retired track", async () => {
+    const fixture = await createFixture();
+    const request = command(fixture, {
+      selectedTracks: ["hotel_operations"],
+      expectedRevision: 0,
+      idempotencyKey: "setup-legacy-receipt",
+    });
+    const created = await repository.updateTracks(request);
+    expect(created).toMatchObject({ ok: true });
+    if (!created.ok) throw new Error("Expected the track update to succeed");
+    // The receipt as the server before VAY-2270 step 2 stored it.
+    const legacyResponse = {
+      ...created.response,
+      tracks: [...created.response.tracks, retiredTrackStatus()],
+    };
+    await client.query(
+      `UPDATE platform.idempotency_keys
+       SET idempotency_metadata = jsonb_set(idempotency_metadata, '{result,response}', $2::jsonb),
+           response_body_hash = $3
+       WHERE operation_scope = 'hotel_catalog'
+         AND operation = 'hotel_setup.tracks.update'
+         AND organization_id = $1::uuid`,
+      [
+        fixture.organizationId,
+        JSON.stringify(legacyResponse),
+        createHash("sha256").update(canonicalJson(legacyResponse)).digest("hex"),
+      ],
+    );
+
+    await expect(repository.updateTracks(request)).resolves.toEqual(created);
   });
 
   it("records blocked intent without creating either half of Operations", async () => {
@@ -494,10 +463,7 @@ describe.skipIf(!TEST_DATABASE_URL)("hotel setup track command repository", () =
       ok: true,
       response: {
         trackRevision: 1,
-        tracks: [
-          { track: "hotel_operations", provisioning: "active" },
-          { track: "creator_marketplace", provisioning: "not_selected" },
-        ],
+        tracks: [{ track: "hotel_operations", provisioning: "active" }],
       },
     });
     expect(await activeEntitlementProducts(suspended.organizationId)).toEqual(["booking", "pms"]);
@@ -524,10 +490,7 @@ describe.skipIf(!TEST_DATABASE_URL)("hotel setup track command repository", () =
     expect(scheduledOwnSuspensionResult).toMatchObject({
       ok: true,
       response: {
-        tracks: [
-          { track: "hotel_operations", provisioning: "active" },
-          { track: "creator_marketplace", provisioning: "not_selected" },
-        ],
+        tracks: [{ track: "hotel_operations", provisioning: "active" }],
       },
     });
 
@@ -591,10 +554,7 @@ describe.skipIf(!TEST_DATABASE_URL)("hotel setup track command repository", () =
     expect(activeBillingResult).toMatchObject({
       ok: true,
       response: {
-        tracks: [
-          { track: "hotel_operations", provisioning: "active" },
-          { track: "creator_marketplace", provisioning: "not_selected" },
-        ],
+        tracks: [{ track: "hotel_operations", provisioning: "active" }],
       },
     });
     const pmsEntitlements = await client.query<{ entitlementKey: string; source: string }>(
@@ -795,80 +755,6 @@ describe.skipIf(!TEST_DATABASE_URL)("hotel setup track command repository", () =
     ).toMatchObject({ provisioning: "active" });
     expect(await accountScopedProducts(resourceScoped.organizationId)).toEqual(["booking", "pms"]);
     expect(await count("booking.booking_settings", "property_id", secondPropertyId)).toBe(1);
-
-    const profileOwner = await createFixture();
-    await client.query(
-      `INSERT INTO marketplace.marketplace_hotel_profiles (
-         property_id, organization_id, source_system, source_hotel_profile_id
-       )
-       VALUES ($1::uuid, $2::uuid, 'marketplace', $1)`,
-      [profileOwner.propertyId, profileOwner.organizationId],
-    );
-    const profileOperator = await createOrganizationForProperty(profileOwner.propertyId);
-    const profileConflictResult = await repository.updateTracks(
-      command(profileOperator, {
-        selectedTracks: ["creator_marketplace"],
-        expectedRevision: 0,
-        idempotencyKey: "setup-profile-owner-conflict",
-      }),
-    );
-    expect(
-      profileConflictResult.ok
-        ? profileConflictResult.response.tracks.find(
-            (track) => track.track === "creator_marketplace",
-          )
-        : null,
-    ).toMatchObject({
-      provisioning: "blocked",
-      components: [{ product: "marketplace", access: "absent" }],
-    });
-    expect(await activeEntitlementProducts(profileOperator.organizationId)).toEqual([]);
-    expect(await linkedProducts(profileOperator.organizationId)).toEqual([]);
-
-    const strayMarketplaceLink = await createFixture();
-    await client.query(
-      `INSERT INTO identity.organization_resource_links (
-         organization_id, product, resource_type, resource_id, relationship, status
-       )
-       VALUES ($1::uuid, 'marketplace', 'hotel_profile', $2, 'owner', 'active')`,
-      [strayMarketplaceLink.organizationId, randomUUID()],
-    );
-    await expect(
-      repository.updateTracks(
-        command(strayMarketplaceLink, {
-          selectedTracks: ["creator_marketplace"],
-          expectedRevision: 0,
-          idempotencyKey: "setup-stray-marketplace-link",
-        }),
-      ),
-    ).resolves.toMatchObject({ ok: true });
-
-    const mixedMarketplace = await createFixture();
-    const mixedMarketplaceCreated = await repository.updateTracks(
-      command(mixedMarketplace, {
-        selectedTracks: ["creator_marketplace"],
-        expectedRevision: 0,
-        idempotencyKey: "setup-mixed-marketplace",
-      }),
-    );
-    expect(mixedMarketplaceCreated.ok).toBe(true);
-    const conflictedPropertyId = await addProperty(mixedMarketplace.organizationId);
-    const conflictedOwner = await createOrganizationForProperty(conflictedPropertyId);
-    await client.query(
-      `INSERT INTO marketplace.marketplace_hotel_profiles (
-         property_id, organization_id, source_system, source_hotel_profile_id
-       )
-       VALUES ($1::uuid, $2::uuid, 'marketplace', $1)`,
-      [conflictedPropertyId, conflictedOwner.organizationId],
-    );
-    expect(
-      (
-        await repository.getTrackStatus({ organizationId: mixedMarketplace.organizationId })
-      ).tracks.find(({ track }) => track === "creator_marketplace"),
-    ).toMatchObject({
-      provisioning: "blocked",
-      components: [{ product: "marketplace", access: "active" }],
-    });
   });
 
   it("serializes first writes and rolls the whole command back on audit failure", async () => {
@@ -884,9 +770,9 @@ describe.skipIf(!TEST_DATABASE_URL)("hotel setup track command repository", () =
       ),
       repository.updateTracks(
         command(concurrent, {
-          selectedTracks: ["creator_marketplace"],
+          selectedTracks: ["hotel_operations"],
           expectedRevision: 0,
-          idempotencyKey: `${concurrentStale.idempotencyKey}-marketplace`,
+          idempotencyKey: `${concurrentStale.idempotencyKey}-second`,
         }),
       ),
     ]);
@@ -899,48 +785,6 @@ describe.skipIf(!TEST_DATABASE_URL)("hotel setup track command repository", () =
         }),
       }),
     ]);
-
-    const sharedPropertyOwner = await createFixture();
-    const sharedPropertyOperator = await createOrganizationForProperty(
-      sharedPropertyOwner.propertyId,
-    );
-    const marketplaceRace = await Promise.all([
-      repository.updateTracks(
-        command(sharedPropertyOwner, {
-          selectedTracks: ["creator_marketplace"],
-          expectedRevision: 0,
-          idempotencyKey: "setup-marketplace-owner-race",
-        }),
-      ),
-      repository.updateTracks(
-        command(sharedPropertyOperator, {
-          selectedTracks: ["creator_marketplace"],
-          expectedRevision: 0,
-          idempotencyKey: "setup-marketplace-operator-race",
-        }),
-      ),
-    ]);
-    expect(
-      marketplaceRace.map((result) =>
-        result.ok
-          ? result.response.tracks.find((track) => track.track === "creator_marketplace")
-              ?.provisioning
-          : "error",
-      ),
-    ).toEqual(expect.arrayContaining(["active", "blocked"]));
-    const marketplaceProfile = await client.query<{ organizationId: string }>(
-      `SELECT organization_id AS "organizationId"
-       FROM marketplace.marketplace_hotel_profiles
-       WHERE property_id = $1::uuid`,
-      [sharedPropertyOwner.propertyId],
-    );
-    expect(marketplaceProfile.rows).toHaveLength(1);
-    const losingOrganizationId =
-      marketplaceProfile.rows[0]?.organizationId === sharedPropertyOwner.organizationId
-        ? sharedPropertyOperator.organizationId
-        : sharedPropertyOwner.organizationId;
-    expect(await activeEntitlementProducts(losingOrganizationId)).toEqual([]);
-    expect(await linkedProducts(losingOrganizationId)).toEqual([]);
 
     const propertyRace = await createFixture();
     const propertyRepository = createPgSharedHotelSetupStatusRepository({
@@ -1022,153 +866,6 @@ describe.skipIf(!TEST_DATABASE_URL)("hotel setup track command repository", () =
     expect(
       await count("platform.idempotency_keys", "organization_id", rollback.organizationId),
     ).toBe(0);
-  });
-
-  it("lets an authorized admin add Marketplace without publishing or duplicating profiles", async () => {
-    const hotel = await createFixture();
-    await addProperty(hotel.organizationId);
-    await client.query(
-      `INSERT INTO identity.organization_memberships (organization_id, user_id, role_key, access_origin) VALUES ($1, $2, 'hotel_owner', 'agency')`,
-      [hotel.organizationId, hotel.actorUserId],
-    );
-    await repository.updateTracks(
-      command(hotel, {
-        selectedTracks: ["hotel_operations"],
-        expectedRevision: 0,
-        idempotencyKey: "initial-operations",
-      }),
-    );
-    const platformOrganizationId = randomUUID();
-    const adminId = randomUUID();
-    organizationIds.push(platformOrganizationId);
-    userIds.push(adminId);
-    await client.query(`INSERT INTO identity.users (id, email) VALUES ($1, $2)`, [
-      adminId,
-      `${adminId}@example.test`,
-    ]);
-    await client.query(
-      `INSERT INTO identity.organizations (id, kind, name, slug) VALUES ($1::uuid, 'platform', 'Admin', $1::text)`,
-      [platformOrganizationId],
-    );
-    await client.query(
-      `INSERT INTO identity.organization_memberships (organization_id, user_id, role_key, access_origin) VALUES ($1, $2, 'platform_admin', 'agency')`,
-      [platformOrganizationId, adminId],
-    );
-    await client.query(
-      `INSERT INTO identity.organization_resource_links (organization_id, product, resource_type, resource_id, relationship, status) VALUES ($1, 'platform', 'platform', 'vayada', 'operator', 'active')`,
-      [platformOrganizationId],
-    );
-    const activation = {
-      ...command(hotel, {
-        selectedTracks: ["hotel_operations", "creator_marketplace"],
-        expectedRevision: 1,
-        idempotencyKey: "admin-enable",
-      }),
-      actorUserId: adminId,
-      adminActivation: {
-        platformOrganizationId,
-        accountUserId: hotel.actorUserId,
-        actorUserId: adminId,
-      },
-    };
-    const [first, replay] = await Promise.all([
-      repository.updateTracks(activation),
-      repository.updateTracks(activation),
-    ]);
-    expect(first).toEqual(replay);
-    expect(first).toMatchObject({
-      ok: true,
-      response: { tracks: [{ provisioning: "active" }, { provisioning: "active" }] },
-    });
-    const profiles = await client.query(
-      `SELECT marketplace_profile_status FROM marketplace.marketplace_hotel_profiles WHERE organization_id = $1`,
-      [hotel.organizationId],
-    );
-    expect(profiles.rows).toHaveLength(2);
-    expect(profiles.rows.every((row) => row.marketplace_profile_status !== "verified")).toBe(true);
-    const audit = await client.query(
-      `SELECT actor_user_id, audit_metadata FROM platform.product_audit_events WHERE organization_id = $1 AND actor_user_id = $2`,
-      [hotel.organizationId, adminId],
-    );
-    expect(audit.rows).toHaveLength(1);
-    expect(audit.rows[0].audit_metadata.adminActivation.accountUserId).toBe(hotel.actorUserId);
-    const offers = createPgMarketplaceAdminRepository({
-      connectionString: TEST_DATABASE_URL!,
-      identityAccess: createPgMarketplaceOfferIdentityAccessCommandPort(),
-    });
-    try {
-      const scope = {
-        hotelUserId: hotel.actorUserId,
-        authorizationMode: "platform_organization_membership" as const,
-      };
-      await expect(offers.readHotelReviewForUser(scope)).rejects.toMatchObject({ statusCode: 409 });
-      const input = {
-        ...scope,
-        propertyId: hotel.propertyId,
-        idempotencyKey: "draft-retry",
-        request: {
-          title: "Private draft",
-          deliverables: [],
-          compensationOptions: [],
-          creatorRequirements: {
-            platforms: [],
-            targetCountries: [],
-            targetAgeMin: null,
-            targetAgeMax: null,
-            targetAgeGroups: [],
-            creatorTypes: [],
-          },
-        },
-        audit: {
-          actorUserId: adminId,
-          actorOrganizationId: platformOrganizationId,
-          requestId: "draft-test",
-          correlationId: null,
-          source: "web" as const,
-          occurredAt,
-        },
-      };
-      const [draft, retried] = await Promise.all([
-        offers.createOfferForUser(input),
-        offers.createOfferForUser(input),
-      ]);
-      expect(draft?.offerStatus).toBe("draft");
-      expect(retried?.offerId).toBe(draft?.offerId);
-      await expect(
-        offers.createOfferForUser({ ...input, request: { ...input.request, title: "Changed" } }),
-      ).rejects.toMatchObject({ statusCode: 409 });
-      const review = await offers.readHotelReviewForUser({
-        ...scope,
-        propertyId: hotel.propertyId,
-      });
-      expect(review.offers).toHaveLength(1);
-      const discovery = await client.query(
-        `SELECT offer_id FROM marketplace.marketplace_offer_read_model WHERE property_id = $1 AND visibility_status = 'public'`,
-        [hotel.propertyId],
-      );
-      expect(discovery.rows).toHaveLength(0);
-      await expect(
-        offers.verifyOfferForUser({
-          ...scope,
-          propertyId: hotel.propertyId,
-          offerId: draft!.offerId,
-        }),
-      ).rejects.toMatchObject({ statusCode: 422 });
-      const other = await createFixture();
-      expect(
-        await offers.createOfferForUser({ ...input, propertyId: other.propertyId }),
-      ).toBeNull();
-    } finally {
-      await offers.close?.();
-    }
-    // Revoked target membership must deny even an otherwise valid replay.
-    await client.query(
-      `UPDATE identity.organization_memberships SET status = 'suspended' WHERE organization_id = $1`,
-      [hotel.organizationId],
-    );
-    await expect(repository.updateTracks(activation)).rejects.toMatchObject({
-      code: "invalid_platform_scope",
-    });
   });
 
   async function createFixture() {
@@ -1411,4 +1108,48 @@ function assertSafeTestDatabase(url: string): void {
   if (!/(^|[_-])test([_-]|$)/i.test(databaseName)) {
     throw new Error(`Refusing to use non-test database "${databaseName}"`);
   }
+}
+
+function operationsResponse() {
+  return {
+    trackRevision: 1,
+    selectedTracks: ["hotel_operations"],
+    tracks: [
+      {
+        track: "hotel_operations",
+        provisioning: "active",
+        components: [
+          { product: "pms", access: "active" },
+          { product: "booking", access: "active" },
+        ],
+        allowedActions: ["manage_service"],
+      },
+    ],
+  };
+}
+
+function retiredTrackStatus(): Record<string, unknown> {
+  return {
+    track: "creator_marketplace",
+    provisioning: "not_selected",
+    components: [{ product: "marketplace", access: "absent" }],
+    allowedActions: ["add"],
+  };
+}
+
+function legacyReceipt(retired: Record<string, unknown>) {
+  const response = operationsResponse();
+  return { ok: true, response: { ...response, tracks: [...response.tracks, retired] } };
+}
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (typeof value === "object" && value !== null) {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
 }

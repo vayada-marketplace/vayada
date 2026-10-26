@@ -170,7 +170,12 @@ describe("booked cancellation outcome", () => {
       cancelledOn: daysBefore(20),
       totalMinor: "44000",
       rooms: [
-        { selectionId: "a", cancellation: { kind: "non_refundable" }, subtotalMinor: "10000" },
+        {
+          selectionId: "a",
+          roomTypeId: "garden",
+          cancellation: { kind: "non_refundable" },
+          subtotalMinor: "10000",
+        },
         { selectionId: "b", cancellation: tiered([[14, 50]]), subtotalMinor: "30000" },
       ],
     });
@@ -182,6 +187,9 @@ describe("booked cancellation outcome", () => {
         { baseMinor: "33000", refundMinor: "16500" },
       ],
     });
+    // Each room keeps its type when given, so a guest can tell the rooms apart (VAY-2320).
+    expect(outcome?.rooms[0]?.roomTypeId).toBe("garden");
+    expect(outcome?.rooms[1]).not.toHaveProperty("roomTypeId");
     // A promo below the room subtotals, and remainders that must still add up to the total.
     const split = resolveBookedCancellationOutcome({
       checkIn: "2026-12-01",

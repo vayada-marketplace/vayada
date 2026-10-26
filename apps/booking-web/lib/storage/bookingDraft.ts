@@ -1,4 +1,4 @@
-import { Booking, RoomSelection } from "@/lib/types";
+import { BookedRoom, Booking, RoomSelection } from "@/lib/types";
 
 /**
  * Centralizes the sessionStorage keys the checkout flow uses, so we read and
@@ -149,8 +149,10 @@ const PAYMENT_STATUSES = [
   "pending",
   "authorized",
   "captured",
+  "partially_paid",
   "paid",
   "refunded",
+  "waived",
   "failed",
   "cancelled",
 ] as const;
@@ -191,6 +193,10 @@ function nightsBetween(checkIn: string, checkOut: string): number {
 function bookingStatus(value: unknown): Booking["status"] | null {
   if (value === "canceled") return "cancelled";
   if (value === "pending_payment") return "pending";
+  // Migrated legacy rows (VAY-2163): "completed" is a checked-out stay, and a no-show reads as
+  // confirmed, the way the API reports no-shows marked in the PMS.
+  if (value === "completed") return "checked_out";
+  if (value === "no_show") return "confirmed";
   return BOOKING_STATUSES.includes(value as Booking["status"])
     ? (value as Booking["status"])
     : null;
@@ -213,6 +219,39 @@ function nonEmptyStrings(value: unknown): string[] {
   return Array.isArray(value)
     ? value.filter((item): item is string => Boolean(nonEmptyString(item)))
     : [];
+}
+
+/** VAY-2320: the booked rooms when the API sends them whole; anything malformed means none. */
+function bookedRooms(value: unknown): BookedRoom[] | undefined {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 99) return undefined;
+  const rooms: BookedRoom[] = [];
+  for (const room of value as Record<string, unknown>[]) {
+    const c = room?.cancellation as Record<string, unknown> | null | undefined;
+    const cancellation =
+      c?.kind === "non_refundable" || c?.kind === "partial_refund"
+        ? { kind: c.kind }
+        : c?.kind === "free_until_days_before_arrival" &&
+            Number.isInteger(c.days) &&
+            (c.days as number) >= 0
+          ? { kind: c.kind, days: c.days as number }
+          : null;
+    if (
+      !room ||
+      typeof room.roomTypeId !== "string" ||
+      !Number.isInteger(room.adults) ||
+      !Number.isInteger(room.children)
+    )
+      return undefined;
+    rooms.push({
+      roomTypeId: room.roomTypeId,
+      roomName: typeof room.roomName === "string" ? room.roomName : null,
+      mealPlan: typeof room.mealPlan === "string" ? room.mealPlan : null,
+      adults: room.adults as number,
+      children: room.children as number,
+      cancellation: cancellation as BookedRoom["cancellation"],
+    });
+  }
+  return rooms;
 }
 
 /**
@@ -239,6 +278,7 @@ export function toConfirmationBooking(
   return {
     roomSelection: source.roomSelection,
     roomLines: source.roomLines,
+    ...(bookedRooms(source.bookedRooms) && { bookedRooms: bookedRooms(source.bookedRooms)! }),
     canEditRequest: source.canEditRequest ?? context.canEditRequest,
     id:
       nonEmptyString(source.guestBookingId) ??

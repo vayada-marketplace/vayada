@@ -31,7 +31,7 @@ export async function appendChannexNightlyRevenueEvidence(
        FROM hotel_catalog.properties property JOIN hotel_catalog.property_locations location ON location.property_id=property.id
        WHERE property.id=$1 AND EXISTS(SELECT 1 FROM pms.operating_calendar_revisions calendar
          WHERE calendar.property_id=property.id AND calendar.calendar_revision=(SELECT max(calendar_revision) FROM pms.operating_calendar_revisions WHERE property_id=property.id)
-         AND calendar.property_profile_revision=property.profile_revision AND calendar.property_time_zone=location.timezone)
+         AND calendar.property_time_zone=location.timezone)
        FOR SHARE OF property,location`,
         [input.propertyId],
       )

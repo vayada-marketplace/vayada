@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import pg, { type PoolClient } from "pg";
 import { describe, expect, it, vi } from "vitest";
 import { replacementStayKey } from "@vayada/domain-booking";
@@ -41,7 +41,6 @@ describe.skipIf(!url)("PostgreSQL pricing draft composition", () => {
       });
       input.bookingId = randomUUID();
       input.publicReference = `VAY-${randomUUID().replaceAll("-", "").toUpperCase()}`;
-      input.syntheticAffiliateContextId = randomUUID();
       input.current.scope.propertyId = propertyId;
       input.finance.scope.propertyId = propertyId;
       Object.assign(input.current, {
@@ -63,7 +62,8 @@ describe.skipIf(!url)("PostgreSQL pricing draft composition", () => {
                   pricingModel: "per_stay",
                   maxQuantity: 1,
                   maxGuests: null,
-                  leadTime: null,
+                  leadTimeHours: null,
+                  legacyLeadTime: false,
                   ownershipKind: "partner",
                   partnerCommissionRate: "12.5000",
                 },
@@ -104,14 +104,10 @@ describe.skipIf(!url)("PostgreSQL pricing draft composition", () => {
           "INSERT INTO hotel_catalog.properties(id,public_id,display_name) VALUES($1::uuid,($1::uuid)::text,'Synthetic draft')",
           [propertyId],
         );
+        // VAY-2347: the hotel's terms the guest agrees to, kept by hash of the trimmed text.
         await db.query(
-          "INSERT INTO booking.affiliate_click_contexts(id,property_id,synthetic) VALUES($1,$2,TRUE)",
-          [input.syntheticAffiliateContextId, propertyId],
-        );
-        await db.query(
-          `INSERT INTO booking.affiliate_click_admissions
-             (context_id,property_id,click_id,history_position) VALUES($1,$2,$3,1)`,
-          [input.syntheticAffiliateContextId, propertyId, randomUUID()],
+          "INSERT INTO hotel_catalog.property_policy_summaries(property_id,terms_and_conditions) VALUES($1,'  Synthetic terms.\n')",
+          [propertyId],
         );
         if (!missingDefinition)
           await db.query(
@@ -146,25 +142,24 @@ describe.skipIf(!url)("PostgreSQL pricing draft composition", () => {
             booking_metadata: {
               pricingQuoteId: input.current.quote.quoteId,
               pricingSelections: input.current.quote.stay.rooms,
+              consent: {
+                version: "booking-consent.v1",
+                quoteEvidenceId: input.command.acceptance.quoteEvidenceId,
+                guestPolicyEvidenceId: input.command.acceptance.guestPolicyEvidenceId,
+                termsHash:
+                  "sha256:" + createHash("sha256").update("Synthetic terms.").digest("hex"),
+              },
             },
           });
+          // The time of the agreement is the transaction's.
           expect(
             (
               await db.query(
-                `SELECT context_id,history_cutoff,original_public_reference,
-                      original_check_in::text,original_check_out::text,original_currency
-               FROM booking.affiliate_original_booking_bindings WHERE booking_id=$1`,
+                "SELECT (booking_metadata->'consent'->>'acceptedAt')::timestamptz=now() AS same FROM booking.guest_bookings WHERE id=$1",
                 [input.bookingId],
               )
-            ).rows[0],
-          ).toEqual({
-            context_id: input.syntheticAffiliateContextId,
-            history_cutoff: "1",
-            original_public_reference: input.publicReference,
-            original_check_in: input.current.quote.stay.checkIn,
-            original_check_out: input.current.quote.stay.checkOut,
-            original_currency: input.current.quote.stay.currency,
-          });
+            ).rows[0].same,
+          ).toBe(true);
           expect(
             (
               await db.query(
@@ -204,7 +199,6 @@ describe.skipIf(!url)("PostgreSQL pricing draft composition", () => {
           ["guest_bookings", "id"],
           ["booking_guests", "guest_booking_id"],
           ["booking_addon_selections", "guest_booking_id"],
-          ["affiliate_original_booking_bindings", "booking_id"],
         ])
           expect(
             (

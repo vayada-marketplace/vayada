@@ -4,7 +4,6 @@ import { Fragment, useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  BoltIcon,
   BanknotesIcon,
   ChatBubbleLeftRightIcon,
   ChevronLeftIcon,
@@ -29,11 +28,10 @@ import {
   type BrowserAuthSurface,
 } from "@vayada/product-onboarding";
 
-type Product = "booking" | "pms" | "marketplace";
+type Product = "booking" | "pms";
 
 const BOOKING_ADMIN_URL =
   process.env.NEXT_PUBLIC_BOOKING_ADMIN_URL || "https://admin.booking.vayada.com";
-const MARKETPLACE_URL = process.env.NEXT_PUBLIC_MARKETPLACE_URL || "https://app.vayada.com";
 
 interface NavItem {
   labelKey?: string;
@@ -46,12 +44,6 @@ interface NavItem {
 }
 
 const CORE_NAV_ITEMS: Omit<NavItem, "badge">[] = [
-  {
-    labelKey: "layout.sidebar.pricing",
-    href: "/pricing",
-    icon: RoomsIcon,
-    requiredAny: ["pms.rooms_rates.read"],
-  },
   {
     labelKey: "layout.sidebar.dashboard",
     href: "/dashboard",
@@ -309,7 +301,11 @@ export default function Sidebar({
               ...status.organization.tracks.flatMap((track) =>
                 track.components
                   .filter((component) => component.access === "active")
-                  .map((component) => component.product),
+                  .map((component) => component.product)
+                  // VAY-2260: the Marketplace is gone; only the two hotel products switch.
+                  .filter(
+                    (product): product is Product => product === "booking" || product === "pms",
+                  ),
               ),
             ]),
           );
@@ -446,42 +442,6 @@ export default function Sidebar({
                 </div>
               </a>
             )}
-            {enabledProducts.has("marketplace") && (
-              <a
-                href="#"
-                onClick={(e) => {
-                  e.preventDefault();
-                  void switchApp(MARKETPLACE_URL, "marketplace-web", "/marketplace");
-                }}
-                className="flex items-center gap-2.5 px-3 py-2 hover:bg-gray-50 transition-colors"
-              >
-                <div className="w-7 h-7 bg-violet-600 rounded-md flex items-center justify-center shrink-0">
-                  <svg
-                    width="12"
-                    height="12"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="white"
-                    strokeWidth="1.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
-                    <circle cx="9" cy="7" r="4" />
-                    <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
-                    <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-                  </svg>
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-xs font-medium text-gray-900 leading-tight">
-                    {t("layout.sidebar.creatorMarketplace")}
-                  </p>
-                  <p className="text-[10px] text-gray-500 leading-tight">
-                    {t("layout.sidebar.creatorMarketplaceDescription")}
-                  </p>
-                </div>
-              </a>
-            )}
             <button
               onClick={() => setShowSwitcher(false)}
               className="flex items-center gap-2.5 px-3 py-2 hover:bg-gray-50 transition-colors w-full"
@@ -522,7 +482,6 @@ export default function Sidebar({
         {navItems.map((item) => {
           const isActive = pathname.startsWith(item.href);
           const label = item.labelKey ? t(item.labelKey) : item.label || "";
-          const featureHubActive = pathname.startsWith("/settings/feature-hub");
           return (
             <Fragment key={item.href}>
               {item.unavailable ? (
@@ -547,18 +506,7 @@ export default function Sidebar({
               ) : (
                 <Link
                   href={item.href}
-                  onClick={(event) => {
-                    // Document entry lets the pricing editor protect Back/Forward with beforeunload.
-                    if (
-                      item.href === "/pricing" &&
-                      !event.metaKey &&
-                      !event.ctrlKey &&
-                      !event.shiftKey
-                    ) {
-                      event.preventDefault();
-                      window.location.assign(item.href);
-                    } else onNavigate?.();
-                  }}
+                  onClick={() => onNavigate?.()}
                   className={cn(
                     "relative flex items-center gap-2.5 px-2.5 py-2 rounded-md text-[13px] transition-colors",
                     isActive
@@ -587,21 +535,6 @@ export default function Sidebar({
                   {collapsed && item.badge != null && (
                     <span className="absolute top-0.5 right-0.5 w-2 h-2 bg-emerald-600 rounded-full" />
                   )}
-                </Link>
-              )}
-              {item.href === "/settings" && !collapsed && (
-                <Link
-                  href="/settings/feature-hub"
-                  onClick={onNavigate}
-                  className={cn(
-                    "ml-5 flex items-center gap-2 rounded-md px-2.5 py-1.5 text-[12px] transition-colors",
-                    featureHubActive
-                      ? "bg-emerald-50 font-semibold text-emerald-700"
-                      : "text-gray-500 hover:bg-gray-50 hover:text-gray-900",
-                  )}
-                >
-                  <BoltIcon className="h-3.5 w-3.5 shrink-0" />
-                  <span>{t("layout.sidebar.featureHub")}</span>
                 </Link>
               )}
             </Fragment>

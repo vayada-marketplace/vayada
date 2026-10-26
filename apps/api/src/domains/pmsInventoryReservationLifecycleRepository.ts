@@ -14,7 +14,7 @@ import {
   parsePmsInventoryReservationReserveResult,
   parsePmsInventoryReservationStatus,
   parsePmsInventoryReservationStatusRequest,
-  parsePmsOperatingCalendarPropertyProfileEvidence,
+  pmsOperatingCalendarTimeZoneIsCurrent,
   serializePmsInventoryReservationReleaseFingerprint,
   serializePmsInventoryReservationReserveFingerprint,
   type PmsInventoryReservationDayWatermark,
@@ -29,7 +29,6 @@ import {
   type PmsInventoryReservationStatusRequest,
   type PmsOperatingCalendarConfigurationSnapshot,
   type PmsOperatingCalendarPropertyProfileEvidencePort,
-  type PmsOperatingCalendarPropertyProfileEvidenceResult,
   type PmsOperatingCalendarReadPort,
   type RoomCapacityReadPort,
   type RoomFactsCommandAudit,
@@ -193,6 +192,15 @@ type WatermarkRow = {
 };
 
 class InventoryInvariantError extends Error {}
+
+/** VAY-2320: a quote's room types with no free room left on some night (taken, or closed for
+ * sale), so the guest can choose other rooms. Same message as any other unavailable quote for
+ * callers that only match that. */
+export class QuoteRoomsSoldOutError extends Error {
+  constructor(readonly roomTypeIds: readonly string[]) {
+    super("Quote inventory is unavailable");
+  }
+}
 
 export function createPgPmsInventoryReservationLifecycleRepository(
   config: PmsInventoryReservationLifecycleRepositoryConfig,
@@ -377,6 +385,8 @@ export async function reservePmsQuoteInventory(
     );
     if (!claim) return unavailable();
     const receipts: PmsInventoryReservationStatus["receipt"][] = [];
+    // Every room type without a free room is named, so the guest chooses again only once.
+    const soldOut: string[] = [];
     for (const [roomTypeId, roomCount] of lines) {
       const days = await lockInventoryDays(client, propertyId, roomTypeId, checkIn, checkOut);
       const result = await reservePmsInventoryInTransaction(client, {
@@ -410,9 +420,14 @@ export async function reservePmsQuoteInventory(
         idempotencyKey: `pricing-quote:${quoteId}:${roomTypeId}`,
         audit,
       });
+      if (!result.ok && result.error.code === "inventory_unavailable") {
+        soldOut.push(roomTypeId);
+        continue;
+      }
       if (!result.ok || result.status.state !== "reserved") return unavailable();
       receipts.push(result.status.receipt);
     }
+    if (soldOut.length) throw new QuoteRoomsSoldOutError(soldOut);
     const bundle = {
       contractVersion: PMS_INVENTORY_RESERVATION_BUNDLE_VERSION,
       owner: "pms" as const,
@@ -568,7 +583,7 @@ async function executeReserve(
       { propertyId: command.propertyId, expectedProfileRevision: profileRevision },
       async (profileEvidence) => {
         if (
-          !profileEvidenceMatchesConfiguration(
+          !pmsOperatingCalendarTimeZoneIsCurrent(
             profileEvidence,
             immutable,
             config.propertyProfileEvidence,
@@ -2131,20 +2146,6 @@ function propertyProfileRevision(
   const match = /^profile:([1-9]\d*)$/.exec(configuration.sourceInputs.propertyProfile.revision);
   const revision = match?.[1] ? Number(match[1]) : 0;
   return positiveRevision(revision) ? revision : null;
-}
-
-function profileEvidenceMatchesConfiguration(
-  result: PmsOperatingCalendarPropertyProfileEvidenceResult,
-  configuration: PmsOperatingCalendarConfigurationSnapshot,
-  registry: PmsOperatingCalendarPropertyProfileEvidencePort,
-): boolean {
-  if (result.status !== "available") return false;
-  const evidence = parsePmsOperatingCalendarPropertyProfileEvidence(result.evidence, registry);
-  return (
-    evidence !== null &&
-    stableJson(evidence.source) === stableJson(configuration.sourceInputs.propertyProfile) &&
-    evidence.timeZone === configuration.sourceInputs.propertyTimeZone
-  );
 }
 
 function sameConfigurationIdentity(

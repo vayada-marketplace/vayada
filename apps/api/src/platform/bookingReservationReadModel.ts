@@ -7,6 +7,8 @@ export type BookingReservationReadModelRow = {
   roomTypeId: string;
   roomName: string;
   selectedRoomOffer?: unknown;
+  /** VAY-2320: the booking's rooms by type, when it has several types. */
+  assignedRoomLines?: unknown;
   roomMaxOccupancy: number | string;
   guestFirstName: string;
   guestLastName: string;
@@ -63,7 +65,10 @@ export type BookingReservationReadModelRow = {
 export function toBookingReservationReadModel(
   reservation: BookingReservationReadModelRow,
 ): BookingReservationReadModel {
-  const roomLines = projectBookingRoomSelection(reservation.selectedRoomOffer).roomLines;
+  // The PMS rooms' types once it has them (a room can move to another type), else as booked.
+  const roomLines =
+    assignedRoomLines(reservation.assignedRoomLines) ??
+    projectBookingRoomSelection(reservation.selectedRoomOffer).roomLines;
   const checkIn = toDateOnly(reservation.checkIn);
   const checkOut = toDateOnly(reservation.checkOut);
   const numberOfRooms = Math.max(1, reservation.numberOfRooms ?? 1);
@@ -156,6 +161,26 @@ export function toBookingReservationReadModel(
     createdAt: toIsoDateTime(reservation.createdAt),
     updatedAt: toIsoDateTime(reservation.updatedAt),
   };
+}
+
+function assignedRoomLines(value: unknown) {
+  const lines = parseJson<unknown>(value as string | null | undefined, null);
+  if (!Array.isArray(lines)) return undefined;
+  const parsed = lines.flatMap((value) => {
+    const line = (value && typeof value === "object" ? value : {}) as Record<string, unknown>;
+    return typeof line.roomTypeId === "string" &&
+      typeof line.roomName === "string" &&
+      Number.isSafeInteger(Number(line.roomCount))
+      ? [
+          {
+            roomTypeId: line.roomTypeId,
+            roomName: line.roomName,
+            roomCount: Number(line.roomCount),
+          },
+        ]
+      : [];
+  });
+  return parsed.length > 1 ? parsed : undefined;
 }
 
 function parseJson<T>(value: T | string | null | undefined, defaultValue: T): T {

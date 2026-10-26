@@ -9,8 +9,10 @@ import {
 } from "./operatingCalendar.js";
 import {
   planPmsInventoryMaterialization,
+  planPmsInventoryRoomAdditionTail,
   isPmsInventoryDayConsistent,
   type PmsInventoryMaterializationPlannerInput,
+  type PmsInventoryRoomAdditionTailInput,
 } from "./inventoryMaterializationPlanner.js";
 import type { PmsInventoryDaySnapshot } from "./inventoryMaterialization.js";
 
@@ -476,5 +478,191 @@ describe("PMS inventory materialization planner", () => {
     expect(
       planPmsInventoryMaterialization({ ...baseInput, currentDays: [inherited] }),
     ).toMatchObject({ ok: false, error: { code: "current_day_invalid" } });
+  });
+});
+
+describe("PMS inventory room addition tail", () => {
+  const previousConfiguration = {
+    ...configuration,
+    calendarRevision: 1,
+    source: { ...source, revision: "calendar:1" },
+    sourceInputs: {
+      ...configuration.sourceInputs,
+      roomBindings: [configuration.sourceInputs.roomBindings[0]!],
+    },
+  };
+  // An auto-open tail written at the older revision, including one retained booking.
+  const tailDay = (stayDate: string, overrides: Partial<PmsInventoryDaySnapshot> = {}) =>
+    currentDay(ROOM_A, stayDate, {
+      calendarRevision: 1,
+      sourceRevisions: { generated: 1, channel: 0, manual: 0, block: 0, booking: 0 },
+      ...overrides,
+    });
+  const tailDates = ["2027-01-09", "2027-01-10", "2027-01-11", "2027-01-12"];
+  const tailInput = {
+    configuration,
+    previousConfiguration,
+    horizon: { from: "2026-01-10", through: "2027-01-09" },
+    tailThrough: "2027-01-12",
+    currentDays: tailDates.map((date) =>
+      tailDay(date, date === "2027-01-11" ? { assignedCount: 1, availableCount: 7 } : {}),
+    ),
+  } satisfies PmsInventoryRoomAdditionTailInput;
+
+  it("adds only the new rooms' rows from the day after the horizon through the tail", () => {
+    const result = planPmsInventoryRoomAdditionTail(tailInput);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(Object.isFrozen(result.days)).toBe(true);
+    expect(
+      result.days.map(({ roomTypeId, stayDate, operatingStatus, availableCount }) => ({
+        roomTypeId,
+        stayDate,
+        operatingStatus,
+        availableCount,
+      })),
+    ).toEqual([
+      { roomTypeId: ROOM_B, stayDate: "2027-01-10", operatingStatus: "open", availableCount: 2 },
+      { roomTypeId: ROOM_B, stayDate: "2027-01-11", operatingStatus: "closed", availableCount: 0 },
+      { roomTypeId: ROOM_B, stayDate: "2027-01-12", operatingStatus: "closed", availableCount: 0 },
+    ]);
+    expect(result.days[0]).toMatchObject({
+      propertyId: PROPERTY_ID,
+      calendarRevision: 2,
+      inventoryRevision: 1,
+      sourceRevisions: { generated: 2, channel: 0, manual: 0, block: 0, booking: 0 },
+      physicalCapacityCount: 2,
+      generatedSellableLimitCount: 2,
+      assignedCount: 0,
+      linkedStopSell: false,
+    });
+    // No room added: nothing to fill.
+    expect(
+      planPmsInventoryRoomAdditionTail({
+        ...tailInput,
+        previousConfiguration: {
+          ...previousConfiguration,
+          sourceInputs: configuration.sourceInputs,
+        },
+        currentDays: [
+          ...tailInput.currentDays,
+          ...tailDates.map((date) => currentDay(ROOM_B, date, { calendarRevision: 1 })),
+        ].map((day) => ({ ...day, sourceRevisions: { ...day.sourceRevisions, generated: 1 } })),
+      }),
+    ).toEqual({ ok: true, days: [] });
+  });
+
+  it("bounds the whole span by the auto-open maximum", () => {
+    const longInput = (tailThrough: string) => {
+      const dates: string[] = [];
+      for (let day = Date.UTC(2026, 11, 31); ; day += 86_400_000) {
+        dates.push(new Date(day).toISOString().slice(0, 10));
+        if (dates.at(-1) === tailThrough) break;
+      }
+      return {
+        ...tailInput,
+        horizon: { from: "2026-01-01", through: "2026-12-31" },
+        tailThrough,
+        currentDays: dates.map((date) => tailDay(date)),
+      };
+    };
+    // 2026-01-01 through 2028-02-01 is 762 days.
+    expect(planPmsInventoryRoomAdditionTail(longInput("2028-02-01"))).toMatchObject({ ok: true });
+    expect(planPmsInventoryRoomAdditionTail(longInput("2028-02-02"))).toMatchObject({
+      ok: false,
+      error: { code: "horizon_invalid" },
+    });
+  });
+
+  it("fails closed on gaps, partial new rooms, scope, conflicts, and hostile input", () => {
+    const failsWith = (input: unknown, error: Record<string, unknown>) =>
+      expect(
+        planPmsInventoryRoomAdditionTail(input as PmsInventoryRoomAdditionTailInput),
+      ).toMatchObject({ ok: false, error });
+    const without = (date: string) => tailInput.currentDays.filter((d) => d.stayDate !== date);
+
+    failsWith(
+      { ...tailInput, currentDays: without("2027-01-11") },
+      {
+        code: "current_day_coverage_gap",
+        stayDate: "2027-01-11",
+      },
+    );
+    // The last requested day anchors the tail to the horizon.
+    failsWith(
+      { ...tailInput, currentDays: without("2027-01-09") },
+      {
+        code: "current_day_coverage_gap",
+        stayDate: "2027-01-09",
+      },
+    );
+    failsWith(
+      { ...tailInput, currentDays: [...tailInput.currentDays, currentDay(ROOM_B, "2027-01-12")] },
+      { code: "current_day_coverage_gap", stayDate: "2027-01-12" },
+    );
+    failsWith(
+      { ...tailInput, currentDays: [...tailInput.currentDays, tailDay("2027-01-10")] },
+      { code: "current_day_duplicate", stayDate: "2027-01-10" },
+    );
+    for (const outside of [
+      tailDay("2027-01-08"),
+      tailDay("2027-01-13"),
+      { ...tailDay("2027-01-10"), roomTypeId: "a4000000-0000-4000-8000-000000000004" },
+      { ...tailDay("2027-01-10"), propertyId: "a5000000-0000-4000-8000-000000000005" },
+    ]) {
+      failsWith(
+        { ...tailInput, currentDays: [...without(outside.stayDate), outside] },
+        { code: "current_day_scope_invalid" },
+      );
+    }
+    failsWith(
+      {
+        ...tailInput,
+        currentDays: [
+          ...without("2027-01-12"),
+          tailDay("2027-01-12", {
+            calendarRevision: 3,
+            sourceRevisions: { generated: 3, channel: 0, manual: 0, block: 0, booking: 0 },
+          }),
+        ],
+      },
+      { code: "generated_revision_conflict", stayDate: "2027-01-12" },
+    );
+    failsWith(
+      { ...tailInput, currentDays: [{ ...tailDay("2027-01-10"), inventoryRevision: 0 }] },
+      { code: "current_day_invalid", index: 0 },
+    );
+
+    for (const [tailThrough, horizon] of [
+      ["2027-01-09", tailInput.horizon],
+      ["2027-01-12", { from: "2027-01-10", through: "2027-01-09" }],
+      ["2027-02-30", tailInput.horizon],
+    ] as const) {
+      failsWith({ ...tailInput, horizon, tailThrough }, { code: "horizon_invalid" });
+    }
+    failsWith(
+      { ...tailInput, previousConfiguration: configuration },
+      { code: "configuration_scope_mismatch" },
+    );
+    failsWith(
+      {
+        ...tailInput,
+        previousConfiguration: {
+          ...previousConfiguration,
+          sourceInputs: {
+            ...previousConfiguration.sourceInputs,
+            roomBindings: [
+              {
+                ...previousConfiguration.sourceInputs.roomBindings[0]!,
+                roomTypeId: "a6000000-0000-4000-8000-000000000006",
+              },
+            ],
+          },
+        },
+      },
+      { code: "invalid_input" },
+    );
+    failsWith({ ...tailInput, extra: true }, { code: "invalid_input" });
+    failsWith({ ...tailInput, currentDays: Array(1) }, { code: "invalid_input" });
   });
 });

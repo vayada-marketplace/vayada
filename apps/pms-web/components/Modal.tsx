@@ -18,7 +18,7 @@ interface ModalProps {
 }
 
 // prettier-ignore
-function trapFocus(event: KeyboardEvent<HTMLDivElement>, panel: HTMLDivElement | null, close: () => void) { if (event.key === "Escape") return close(); if (event.key !== "Tab") return; const nodes = Array.from(panel?.querySelectorAll<HTMLElement>('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])') ?? []); if (!nodes.length) return event.preventDefault(); const first = nodes[0]!, last = nodes.at(-1)!; if (event.shiftKey && (document.activeElement === first || document.activeElement === panel)) { event.preventDefault(); last.focus(); } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); } }
+export function trapFocus(event: KeyboardEvent<HTMLDivElement>, panel: HTMLDivElement | null, close: () => void) { if (event.key === "Escape") return close(); if (event.key !== "Tab") return; const nodes = Array.from(panel?.querySelectorAll<HTMLElement>('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])') ?? []); if (!nodes.length) return event.preventDefault(); const first = nodes[0]!, last = nodes.at(-1)!; if (event.shiftKey && (document.activeElement === first || document.activeElement === panel)) { event.preventDefault(); last.focus(); } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); } }
 
 // prettier-ignore
 export default function Modal({ onClose, maxWidth = "md", children, footer, ariaLabel }: ModalProps) {

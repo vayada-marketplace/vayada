@@ -21,6 +21,7 @@ import { lockFinanceReplacementPricingReadiness } from "./financeReplacementPric
 import { lockFinanceReplacementPricingSource } from "./financeReplacementPricingSource.js";
 import { createPgPmsManualBookingPlatformOwnerPort } from "./pmsManualBookingCommandEvidence.js";
 import { createPgPmsManualBookingCommandRepository } from "./pmsManualBookingCommandRepository.js";
+import { republishPricingAfterPaymentChange } from "./pricingPaymentRepublish.js";
 import {
   createPgPmsManualBookingBookingOwnerPort,
   createPgPmsManualBookingOperationsOwnerPort,
@@ -163,6 +164,47 @@ describe.skipIf(!url)("manual booking priced from the published offers", () => {
       )
     ).rows[0].assignment_payload;
     expect(payload.pricingOffer).toBeUndefined();
+  });
+
+  it("lets everyone named fit on the busiest night and refuses one more (VAY-2365/2366)", async () => {
+    // Garden rooms have 2 places each: the booker plus one guest fit one room. Two rooms that
+    // share one night fit four, although each other night has one room. Dates no other test uses.
+    const named = (count: number) =>
+      Array.from({ length: count }, (_, index) => ({
+        firstName: "Guest",
+        lastName: String(index + 2),
+        email: null,
+        phoneE164: null,
+        countryCode: null,
+      }));
+    const over = { ...command(null, { checkIn: "2027-11-03" }), additionalGuests: named(2) };
+    await expect(repository().createManualBooking(over)).rejects.toMatchObject({
+      status: 422,
+      body: { code: "guests_over_capacity", field: "additionalGuests" },
+    });
+    expect(
+      (
+        await pool.query("SELECT 1 FROM booking.guest_bookings WHERE source_booking_id=$1", [
+          over.commandId,
+        ])
+      ).rowCount,
+    ).toBe(0);
+    await expect(
+      repository().createManualBooking({
+        ...command(null, { checkIn: "2027-11-03" }),
+        additionalGuests: named(1),
+      }),
+    ).resolves.toMatchObject({ outcome: "created" });
+
+    const pair = command(null, { checkIn: "2027-11-17" });
+    const later = { checkIn: "2027-11-18", checkOut: "2027-11-20" };
+    const stays = [
+      pair.stays[0]!,
+      { ...pair.stays[0]!, ...later, position: 2, roomId: roomIds[1]! },
+    ];
+    await expect(
+      repository().createManualBooking({ ...pair, stays, additionalGuests: named(3) }),
+    ).resolves.toMatchObject({ outcome: "created" });
   });
 
   it("keeps legacy plans while pricing-v2 has only a draft head", async () => {
@@ -521,6 +563,35 @@ describe.skipIf(!url)("manual booking priced from the published offers", () => {
           pool,
         }).getMandatoryChargeConfirmation({ organizationId, propertyId }),
       ).toMatchObject({ outcome: "missing" });
+    });
+
+    // VAY-2304: with payments on again the system publishes the same prices again, carrying the
+    // hotel's charges declaration; they confirm final prices again, at the hotel's own time.
+    it("confirms final prices again after the system re-publishes them", async () => {
+      await pool.query(
+        "UPDATE finance.payment_settings SET payments_enabled=true WHERE property_id=$1",
+        [propertyId],
+      );
+      expect(await republishPricingAfterPaymentChange(pool, propertyId)).toMatchObject({
+        outcome: "republished",
+      });
+      const declared = (
+        await pool.query(
+          `SELECT hotel.created_at FROM pms.pricing_v2_heads head
+          JOIN pms.pricing_v2_revisions revision USING (property_id, revision)
+          JOIN pms.pricing_v2_charge_declarations copy
+            ON copy.id::text = revision.owner_references->>'charges' AND copy.actor_type = 'system'
+          JOIN pms.pricing_v2_charge_declarations hotel ON hotel.id = copy.carried_from
+          WHERE head.property_id = $1`,
+          [propertyId],
+        )
+      ).rows[0]?.created_at as Date;
+      expect(
+        await createPgPmsMandatoryChargeConfirmationReadModel({
+          connectionString: url!,
+          pool,
+        }).getMandatoryChargeConfirmation({ organizationId, propertyId }),
+      ).toMatchObject({ outcome: "available", evidence: { confirmedAt: declared.toISOString() } });
     });
   });
 

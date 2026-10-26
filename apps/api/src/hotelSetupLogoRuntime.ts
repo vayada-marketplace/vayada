@@ -6,7 +6,7 @@ import {
   type PropertyMediaCommandRepository,
 } from "./domains/propertyMediaCommandRepository.js";
 import { lockHotelSetupOwnerAuthority } from "./platform/hotelSetupProfileWriter.js";
-import { syncPropertyOfferReadModels } from "./routes/marketplaceAdmin.js";
+import { projectPropertyPublicProfile } from "./platform/propertyPublicProfileProjection.js";
 import { createPgPlatformMediaRepository } from "./platform/platformMediaRepository.js";
 import { createS3PlatformMediaAdapter } from "./platform/platformMediaS3.js";
 import type { PlatformMediaServingConfig } from "./platform/mediaServing.js";
@@ -215,7 +215,7 @@ export function createOrdinaryHotelSetupLogoRuntime(input: {
           ...scoped,
           serving,
           authorizeTransaction: scoped.authorize,
-          syncReadModels: syncPropertyOfferReadModels,
+          syncReadModels: projectPropertyPublicProfile,
         });
         return await repository.assignLogo(command);
       } finally {

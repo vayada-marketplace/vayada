@@ -41,7 +41,7 @@ describe.skipIf(!url)("prepared import durable binding", () => {
       },
     };
     await db.query(
-      "INSERT INTO marketplace.invite_codes(id,code,invite_type,status,payload,redeemed_by_user_id) VALUES($1::uuid,$1::text,'hotel','redeemed',$2,$3)",
+      "INSERT INTO hotel_catalog.hotel_account_invites(id,code,invite_type,status,payload,redeemed_by_user_id) VALUES($1::uuid,$1::text,'hotel','redeemed',$2,$3)",
       [invite, payload, actor],
     );
   });
@@ -51,7 +51,7 @@ describe.skipIf(!url)("prepared import durable binding", () => {
       await db.query("DELETE FROM hotel_catalog.prepared_import_applications WHERE invite_id=$1", [
         invite,
       ]);
-      await db.query("DELETE FROM marketplace.invite_codes WHERE id=$1", [invite]);
+      await db.query("DELETE FROM hotel_catalog.hotel_account_invites WHERE id=$1", [invite]);
       await db.query("DELETE FROM hotel_catalog.properties WHERE id=ANY($1::uuid[])", [
         [property, other],
       ]);
@@ -67,11 +67,17 @@ describe.skipIf(!url)("prepared import durable binding", () => {
     expect(await repository.find({ ...scope, organizationId: randomUUID() })).toBeNull();
   });
   it.each(["pending", "revoked", "expired"])("does not expose %s invitations", async (status) => {
-    await db.query("UPDATE marketplace.invite_codes SET status=$2 WHERE id=$1", [invite, status]);
+    await db.query("UPDATE hotel_catalog.hotel_account_invites SET status=$2 WHERE id=$1", [
+      invite,
+      status,
+    ]);
     try {
       expect(await repository.find(scope)).toBeNull();
     } finally {
-      await db.query("UPDATE marketplace.invite_codes SET status='redeemed' WHERE id=$1", [invite]);
+      await db.query(
+        "UPDATE hotel_catalog.hotel_account_invites SET status='redeemed' WHERE id=$1",
+        [invite],
+      );
     }
   });
   it("persists target binding through failure before result marking", async () => {

@@ -41,3 +41,37 @@ test("password login lets a hotel user choose a workspace", async ({ page }) => 
   await expect(page.getByLabel("Password", { exact: true })).toHaveValue("");
   expect(submissions).toBe(2);
 });
+
+const NO_HOTEL_MESSAGE = "No active hotel_group organization is available for this surface";
+
+test("password login without a hotel workspace offers hotel setup", async ({ page }) => {
+  await page.route("**/auth/password/login", (route) =>
+    route.fulfill({
+      status: 403,
+      json: {
+        error: "auth_session_rejected",
+        state: "hotel_workspace_required",
+        message: NO_HOTEL_MESSAGE,
+      },
+    }),
+  );
+
+  await page.goto("/login");
+  await page.getByLabel("Email address", { exact: true }).fill("owner@example.test");
+  await page.getByLabel("Password", { exact: true }).fill("test-password");
+  await page.getByRole("button", { name: "Sign In", exact: true }).click();
+  await expect(page.getByText(/isn't connected to a hotel yet/)).toBeVisible();
+  await expect(page.getByText(NO_HOTEL_MESSAGE)).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Set up your hotel" })).toHaveAttribute(
+    "href",
+    /^https?:\/\/[^/]+\/login$/,
+  );
+});
+
+test("Google login without a hotel workspace offers hotel setup", async ({ page }) => {
+  await page.goto(
+    `/login?auth_error=${encodeURIComponent(NO_HOTEL_MESSAGE)}&auth_error_code=hotel_workspace_required`,
+  );
+  await expect(page.getByText(/isn't connected to a hotel yet/)).toBeVisible();
+  await expect(page.getByRole("link", { name: "Set up your hotel" })).toBeVisible();
+});

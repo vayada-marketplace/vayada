@@ -281,25 +281,6 @@ async function removePublicExposure(
   at: Date,
 ): Promise<void> {
   await client.query(
-    `UPDATE marketplace.active_hotel_submission_revisions
-     SET activation_status = 'suspended', status_changed_by_user_id = $2::uuid,
-         status_reason = $3, updated_at = $4::timestamptz
-     WHERE property_id = $1::uuid AND activation_status = 'active'`,
-    [input.propertyId, input.audit.actorUserId, input.reason, at.toISOString()],
-  );
-  await client.query(
-    `UPDATE marketplace.marketplace_hotel_profiles
-     SET marketplace_profile_status = 'suspended', updated_at = $2::timestamptz
-     WHERE property_id = $1::uuid AND marketplace_profile_status <> 'archived'`,
-    [input.propertyId, at.toISOString()],
-  );
-  await client.query(
-    `UPDATE marketplace.marketplace_offer_read_model
-     SET visibility_status = 'disabled', projected_at = $2::timestamptz
-     WHERE property_id = $1::uuid AND visibility_status <> 'disabled'`,
-    [input.propertyId, at.toISOString()],
-  );
-  await client.query(
     `UPDATE distribution.public_hotel_bookability_profiles
      SET profile_status = 'unavailable', freshness_status = 'unavailable',
          updated_at = $2::timestamptz

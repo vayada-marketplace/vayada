@@ -203,7 +203,7 @@ async function enablePlan(
   const result = await pool.query<PropertyRow>(
     `SELECT property.display_name AS title, COALESCE(room.currency, 'EUR') AS currency,
        property.property_type AS "propertyType", location.country_code AS country,
-       location.city, location.street_address AS address, location.postal_code AS "zipCode",
+       location.city, location.street_address AS address, NULLIF(location.postal_code, '') AS "zipCode",
        location.latitude::float8 AS latitude, location.longitude::float8 AS longitude,
        location.timezone
      FROM hotel_catalog.properties property

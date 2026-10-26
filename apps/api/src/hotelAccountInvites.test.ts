@@ -38,10 +38,10 @@ const otherOwnerSession: VerifiedSession = {
   sessionId: "other_owner_session",
   expiresAt: Math.floor(Date.now() / 1000) + 3600,
 };
-const creatorSession: VerifiedSession = {
-  workosUserId: "workos_creator",
-  workosOrgId: "workos_creator_org",
-  sessionId: "creator_session",
+const platformSession: VerifiedSession = {
+  workosUserId: "workos_platform_user",
+  workosOrgId: "workos_platform_org",
+  sessionId: "platform_session",
   expiresAt: Math.floor(Date.now() / 1000) + 3600,
 };
 
@@ -70,7 +70,7 @@ describe("hotel account invite routes", () => {
       identity: { emailHint: "o****@example.test" },
       organization: { displayName: "Alpenrose Hospitality" },
       property: { displayName: "Hotel Alpenrose" },
-      selectedTracks: ["creator_marketplace"],
+      selectedTracks: ["hotel_operations"],
       handoffPath: "/setup",
       expiresAt: "2026-08-20T12:00:00.000Z",
     });
@@ -147,15 +147,15 @@ describe("hotel account invite routes", () => {
       url: "/api/marketplace/hotel-account-invites/redeem",
       payload: { code: INVITE_CODE },
     });
-    const creator = await injectJson(app, {
+    const platform = await injectJson(app, {
       method: "POST",
       url: "/api/marketplace/hotel-account-invites/redeem",
-      headers: { authorization: "Bearer creator-token" },
+      headers: { authorization: "Bearer platform-token" },
       payload: { code: INVITE_CODE },
     });
 
     expect(unauthenticated.statusCode).toBe(401);
-    expect(creator.statusCode).toBe(403);
+    expect(platform.statusCode).toBe(403);
     expect(repository.calls.redeem).toHaveLength(0);
     expect(tracks.calls).toHaveLength(0);
   });
@@ -178,11 +178,7 @@ describe("hotel account invite routes", () => {
     expect(tracks.calls).toHaveLength(0);
   });
 
-  it.each([
-    ["Marketplace", ["creator_marketplace"]],
-    ["Hotel Operations", ["hotel_operations"]],
-    ["combined", ["hotel_operations", "creator_marketplace"]],
-  ] as const)(
+  it.each([["Hotel Operations", ["hotel_operations"]]] as const)(
     "redeems the %s intent only after the canonical track command succeeds",
     async (_, selectedTracks) => {
       const repository = createMemoryInviteRepository({ selectedTracks: [...selectedTracks] });
@@ -253,26 +249,6 @@ describe("hotel account invite routes", () => {
     ]);
   });
 
-  it("does not consume the invitation when the canonical track command conflicts", async () => {
-    const repository = createMemoryInviteRepository({
-      selectedTracks: ["creator_marketplace"],
-    });
-    const tracks = createMemoryTrackCommands({ selectedTracks: ["hotel_operations"] });
-    app = buildInviteApp(repository, tracks.repository);
-
-    const response = await injectJson(app, {
-      method: "POST",
-      url: "/api/marketplace/hotel-account-invites/redeem",
-      headers: { authorization: "Bearer owner-token" },
-      payload: { code: INVITE_CODE },
-    });
-
-    expect(response.statusCode).toBe(409);
-    expect(response.body).toMatchObject({ code: "invite_track_conflict" });
-    expect(repository.status()).toBe("pending");
-    expect(tracks.calls).toHaveLength(0);
-  });
-
   it("rejects a selected hotel organization without the invite-derived durable binding", async () => {
     const repository = createMemoryInviteRepository({
       boundOrganizationId: SECOND_HOTEL_ORGANIZATION_ID,
@@ -306,7 +282,7 @@ describe("hotel account invite routes", () => {
     });
     expect(first.statusCode).toBe(503);
     expect(repository.status()).toBe("pending");
-    expect(tracks.selectedTracks()).toEqual(["creator_marketplace"]);
+    expect(tracks.selectedTracks()).toEqual(["hotel_operations"]);
     expect(tracks.calls).toHaveLength(1);
 
     const retry = await injectJson<HotelAccountInviteRedemptionResponse>(app, {
@@ -685,7 +661,7 @@ function buildInviteApp(
       }
       return {
         userId: "55555555-5555-4555-8555-555555555555",
-        email: "creator@example.test",
+        email: "platform@example.test",
         status: "active",
       };
     },
@@ -711,7 +687,7 @@ function buildInviteApp(
       return {
         organizationId: "66666666-6666-4666-8666-666666666666",
         workosOrgId,
-        kind: "creator_workspace",
+        kind: "platform",
         status: "active",
       };
     },
@@ -719,7 +695,7 @@ function buildInviteApp(
       return {
         membershipId: `membership-${organizationId}`,
         status: "active",
-        roleKey: organizationId === HOTEL_ORGANIZATION_ID ? "hotel_owner" : "creator_owner",
+        roleKey: organizationId === HOTEL_ORGANIZATION_ID ? "hotel_owner" : "platform_admin",
         workosMembershipId: null,
         workosRoleSlugs: [],
       };
@@ -738,7 +714,7 @@ function buildInviteApp(
         new Map([
           ["owner-token", ownerSession],
           ["other-owner-token", otherOwnerSession],
-          ["creator-token", creatorSession],
+          ["platform-token", platformSession],
         ]),
       ),
       repository: identityRepository,
@@ -896,16 +872,16 @@ function setupStatus(selectedTracks: SetupTrack[], trackRevision: number): Updat
   return {
     trackRevision,
     selectedTracks: [...selectedTracks],
-    tracks: ["hotel_operations", "creator_marketplace"].map((track) => ({
-      track: track as SetupTrack,
-      provisioning: selectedTracks.includes(track as SetupTrack) ? "active" : "not_selected",
+    tracks: (["hotel_operations"] as const).map((track) => ({
+      track,
+      provisioning: selectedTracks.includes(track) ? "active" : "not_selected",
       components: [],
-      allowedActions: selectedTracks.includes(track as SetupTrack) ? ["manage_service"] : ["add"],
+      allowedActions: selectedTracks.includes(track) ? ["manage_service"] : ["add"],
     })),
   };
 }
 
-function inviteFixture(selectedTracks: SetupTrack[] = ["creator_marketplace"]): HotelAccountInvite {
+function inviteFixture(selectedTracks: SetupTrack[] = ["hotel_operations"]): HotelAccountInvite {
   return {
     id: "invite-1050",
     contractVersion: "hotel-account-invite.v1",

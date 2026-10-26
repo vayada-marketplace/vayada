@@ -344,12 +344,10 @@ async function lockSelectedRoomMaterializationCurrent(
          FROM pms.operating_calendar_revisions WHERE property_id=$1
        )
        SELECT materialized_calendar.contract_version=current_calendar.contract_version
-          AND materialized_calendar.property_profile_revision=current_calendar.property_profile_revision
           AND materialized_calendar.property_time_zone=current_calendar.property_time_zone
           AND materialized_calendar.schedule_mode=current_calendar.schedule_mode
           AND materialized_calendar.recurring_period_count=current_calendar.recurring_period_count
           AND materialized_calendar.default_minimum_stay_nights=current_calendar.default_minimum_stay_nights
-          AND materialized_binding.source_room_facts_revision=current_binding.source_room_facts_revision
           AND materialized_binding.source_room_units_revision=current_binding.source_room_units_revision
           AND materialized_binding.physical_capacity_count=current_binding.physical_capacity_count
           AND materialized_binding.starting_sellable_limit_count=current_binding.starting_sellable_limit_count

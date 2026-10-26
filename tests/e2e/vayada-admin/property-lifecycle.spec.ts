@@ -80,7 +80,6 @@ test("reviews impact and retires a property without destructive deletion", async
         },
         media: { objects: 6 },
         publicExposure: {
-          marketplaceActive: true,
           distributionStatus: "public",
           bookingRevisionActive: true,
         },
@@ -172,16 +171,19 @@ test("suppresses bound accounts and reuses the provisioning workflow after a los
         ],
       }),
   );
+  const userListQueries: string[] = [];
   await page.route(
     /https:\/\/api\.localhost(?::\d+)?\/api\/identity\/admin\/users(?:\?|$)/,
-    (route) =>
-      fulfillJson(route, pageOrigin, {
+    (route) => {
+      userListQueries.push(new URL(route.request().url()).search);
+      return fulfillJson(route, pageOrigin, {
         users: [
           { id: boundAccountId, name: "Bound Owner", email: "bound@example.test" },
           { id: newAccountId, name: "New Hotel", email: "new@example.test" },
         ],
         total: 2,
-      }),
+      });
+    },
   );
   await page.route(
     /https:\/\/api\.localhost(?::\d+)?\/api\/platform\/admin\/properties\/provision$/,
@@ -194,6 +196,8 @@ test("suppresses bound accounts and reuses the provisioning workflow after a los
   await page.goto(new URL("/dashboard/hotels", adminBaseURL).toString());
   await expect(page.getByText("Already Provisioned")).toBeVisible();
   await expect(page.getByRole("button", { name: "Set Up" })).toHaveCount(1);
+  // VAY-2272: only hotel accounts that provisioning accepts.
+  expect(userListQueries).toContain("?page=1&page_size=100&type=hotel&provisionable=true");
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
     await page.getByRole("button", { name: "Set Up" }).click();
@@ -278,6 +282,99 @@ test("fails closed when canonical property bindings cannot be loaded", async ({
   expect(failedPropertyReads).toBeGreaterThan(0);
   await expect(page.getByRole("button", { name: "Set Up" })).toHaveCount(0);
   await assertNoLegacyCalls();
+});
+
+test("shows hotels in setup without an activation step and reactivates suspended ones", async ({
+  page,
+  baseURL,
+}, testInfo) => {
+  const assertHealthy = watchPageHealth(page, testInfo);
+  const assertNoLegacyCalls = watchNoLegacyCalls(page, testInfo, "vayada-admin-property-lifecycle");
+  const adminBaseURL = baseURL?.startsWith("http://127.0.0.1:3001")
+    ? "http://localhost:3001"
+    : (baseURL ?? "https://admin.localhost");
+  const pageOrigin = new URL(adminBaseURL).origin;
+  const settingUpId = "22222222-2222-4222-8222-222222222222";
+  const suspendedId = "33333333-3333-4333-8333-333333333333";
+  const activeId = "44444444-4444-4444-8444-444444444444";
+  const statusRequests: Record<string, unknown>[] = [];
+
+  await page.addInitScript(() => {
+    window.localStorage.setItem("access_token", "e2e-platform-token");
+    window.localStorage.setItem("token_expires_at", String(Date.now() + 60 * 60 * 1000));
+    window.localStorage.setItem("isLoggedIn", "true");
+    window.localStorage.setItem("userId", "user_platform_admin");
+    window.localStorage.setItem("userEmail", "platform-admin@example.test");
+    window.localStorage.setItem("userStatus", "active");
+    window.localStorage.setItem("isSuperAdmin", "true");
+    window.localStorage.setItem(
+      "user",
+      JSON.stringify({
+        id: "user_platform_admin",
+        email: "platform-admin@example.test",
+        status: "active",
+        is_superadmin: true,
+      }),
+    );
+  });
+  const property = (id: string, name: string, lifecycleStatus: string) => ({
+    id,
+    name,
+    slug: name.toLowerCase().replaceAll(" ", "-"),
+    status: lifecycleStatus === "active" ? "live" : "draft",
+    lifecycleStatus,
+    lifecycleRevision: 3,
+    ownerAccountUserIds: [],
+    createdAt: "2026-10-12T08:00:00.000Z",
+  });
+  await page.route(
+    /https:\/\/api\.localhost(?::\d+)?\/api\/platform\/admin\/growth(?:\?|$)/,
+    (route) =>
+      fulfillJson(route, pageOrigin, {
+        properties: [
+          property(settingUpId, "Hotel Setting Up", "provisioning"),
+          property(suspendedId, "Hotel On Hold", "suspended"),
+          property(activeId, "Hotel Live", "active"),
+        ],
+      }),
+  );
+  await page.route(
+    /https:\/\/api\.localhost(?::\d+)?\/api\/identity\/admin\/users(?:\?|$)/,
+    (route) => fulfillJson(route, pageOrigin, { users: [], total: 0 }),
+  );
+  await page.route(
+    new RegExp(
+      `https://api\\.localhost(?::\\d+)?/api/platform/admin/properties/${suspendedId}/status$`,
+    ),
+    async (route) => {
+      statusRequests.push(route.request().postDataJSON() as Record<string, unknown>);
+      await fulfillJson(route, pageOrigin, {
+        contractVersion: "platform-property-lifecycle.v1",
+        propertyId: suspendedId,
+        lifecycleStatus: "active",
+        lifecycleRevision: 4,
+      });
+    },
+  );
+  page.on("dialog", (dialog) => void dialog.accept("Owner verified"));
+
+  await page.goto(new URL("/dashboard/hotels", adminBaseURL).toString());
+  const row = (name: string) => page.getByRole("row").filter({ hasText: name });
+  await expect(row("Hotel Setting Up").getByText("Setting up", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Activate", exact: true })).toHaveCount(0);
+  // An admin can still hold a hotel during setup; suspended hotels never activate themselves.
+  await expect(row("Hotel Setting Up").getByRole("button", { name: "Suspend" })).toBeVisible();
+  await expect(row("Hotel Setting Up").getByRole("button", { name: "Reactivate" })).toHaveCount(0);
+  await expect(row("Hotel Live").getByRole("button", { name: "Suspend" })).toBeVisible();
+
+  await row("Hotel On Hold").getByRole("button", { name: "Reactivate" }).click();
+  await expect(row("Hotel On Hold").getByText("Active", { exact: true })).toBeVisible();
+  await expect(row("Hotel On Hold").getByRole("button", { name: "Suspend" })).toBeVisible();
+  expect(statusRequests).toEqual([
+    { expectedLifecycleRevision: 3, status: "active", reason: "Owner verified" },
+  ]);
+  await assertNoLegacyCalls();
+  await assertHealthy();
 });
 
 async function fulfillJson(route: Route, origin: string, body: unknown, status = 200) {

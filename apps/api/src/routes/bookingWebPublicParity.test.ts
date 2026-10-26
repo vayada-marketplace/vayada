@@ -8,8 +8,8 @@ import {
   type PublicBookabilityHotelProfile,
   type PublicBookabilityQuoteProjection,
 } from "@vayada/domain-distribution";
-import { createHash } from "node:crypto";
-import type { QueryResultRow } from "pg";
+import { BOOKING_WEB_ANALYTICS_CONSENT_VERSION } from "@vayada/domain-booking";
+import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { buildApp } from "../app.js";
@@ -20,12 +20,6 @@ import {
   type BookingHotelProfileRow,
   type PublicHotelProfileRepository,
 } from "./aiHotels.js";
-import type {
-  BookingWebAffiliateRepository,
-  BookingWebAffiliateHotelResolverPool,
-  BookingWebAffiliateStripeConnectRequest,
-} from "./bookingWebAffiliate.js";
-import { createPgBookingWebAffiliateHotelResolver } from "./bookingWebAffiliate.js";
 import {
   createTargetBookingWebCheckoutAdapter,
   recordTargetCheckoutCommand,
@@ -209,80 +203,6 @@ describe("Booking Web public bootstrap parity", () => {
     expect(checkoutAdapter.close).toBeUndefined();
   });
 
-  it("records affiliate click attribution through the configured sink", async () => {
-    const events: unknown[] = [];
-    const app = buildApp({
-      logger: false,
-      publicHotelProfileRepository: createProfileRepository(legacyHotel, {}),
-      bookingWebCheckoutAdapter: unusedBookingWebCheckoutAdapter,
-      bookingWebPublicNow: () => new Date("2026-06-06T11:00:00.000Z"),
-      bookingWebAttributionSink: {
-        async recordAffiliateClick(event) {
-          events.push(event);
-        },
-        async recordTelemetryEvent() {},
-      },
-    });
-
-    const response = await app.inject({
-      method: "POST",
-      url: "/api/booking-web/hotels/hotel-alpenrose/attribution/clicks",
-      payload: {
-        referralCode: "REF-123",
-        clickId: "click-123",
-        sessionId: "sid_123",
-        landingUrl: "https://hotel-alpenrose.booking.localhost/?ref=REF-123",
-      },
-    });
-
-    expect(response.statusCode).toBe(204);
-    expect(events).toMatchObject([
-      {
-        slug: "hotel-alpenrose",
-        referralCode: "REF-123",
-        clickId: "click-123",
-        sessionId: "sid_123",
-        landingUrl: "https://hotel-alpenrose.booking.localhost/?ref=REF-123",
-      },
-    ]);
-    await app.close();
-  });
-
-  it("rejects malformed click IDs before intake and accepts older callers without one", async () => {
-    const events: unknown[] = [];
-    const app = buildApp({
-      logger: false,
-      publicHotelProfileRepository: createProfileRepository(legacyHotel, {}),
-      bookingWebCheckoutAdapter: unusedBookingWebCheckoutAdapter,
-      bookingWebAttributionSink: {
-        async recordAffiliateClick(event) {
-          events.push(event);
-        },
-        async recordTelemetryEvent() {},
-      },
-    });
-    try {
-      for (const clickId of [null, 12, {}, "", "a b", "a".repeat(129)]) {
-        const response = await app.inject({
-          method: "POST",
-          url: "/api/booking-web/hotels/hotel/attribution/clicks",
-          payload: { referralCode: "A", clickId },
-        });
-        expect(response.statusCode).toBe(400);
-      }
-      expect(events).toEqual([]);
-      const response = await app.inject({
-        method: "POST",
-        url: "/api/booking-web/hotels/hotel/attribution/clicks",
-        payload: { referral_code: "A", session_id: "old-session" },
-      });
-      expect(response.statusCode).toBe(204);
-      expect(events).toMatchObject([{ referralCode: "A", sessionId: "old-session" }]);
-    } finally {
-      await app.close();
-    }
-  });
-
   it("records booking-web telemetry through the configured sink without legacy forwarding", async () => {
     const events: unknown[] = [];
     const app = buildApp({
@@ -291,7 +211,6 @@ describe("Booking Web public bootstrap parity", () => {
       bookingWebCheckoutAdapter: unusedBookingWebCheckoutAdapter,
       bookingWebPublicNow: () => new Date("2026-06-06T11:00:00.000Z"),
       bookingWebAttributionSink: {
-        async recordAffiliateClick() {},
         async recordTelemetryEvent(event) {
           events.push(event);
         },
@@ -300,9 +219,11 @@ describe("Booking Web public bootstrap parity", () => {
 
     for (const consent of [
       {},
-      { analyticsConsent: false, consentVersion: 1 },
-      { analyticsConsent: "true", consentVersion: 1 },
-      { analyticsConsent: true, consentVersion: 2 },
+      { analyticsConsent: false, consentVersion: BOOKING_WEB_ANALYTICS_CONSENT_VERSION },
+      { analyticsConsent: "true", consentVersion: BOOKING_WEB_ANALYTICS_CONSENT_VERSION },
+      // A choice under the earlier consent text (VAY-2213 asks everyone again) or a future one.
+      { analyticsConsent: true, consentVersion: 1 },
+      { analyticsConsent: true, consentVersion: BOOKING_WEB_ANALYTICS_CONSENT_VERSION + 1 },
     ]) {
       const denied = await app.inject({
         method: "POST",
@@ -313,64 +234,282 @@ describe("Booking Web public bootstrap parity", () => {
       expect(events).toEqual([]);
     }
 
-    const response = await app.inject({
-      method: "POST",
-      url: "/api/booking-web/events",
-      payload: {
-        analyticsConsent: true,
-        consentVersion: 1,
-        hotelSlug: "hotel-alpenrose",
-        eventType: "page_visit",
-        eventId: "event_page_visit_001",
-        sessionId: "sid_123",
-        metadata: { locale: "de" },
-      },
-    });
-
-    for (const metadata of [
-      { funnelVersion: 1, funnelSequence: 0 },
-      { funnelVersion: 1, funnelSequence: 2, paymentMethod: "unknown" },
-    ]) {
-      const invalid = await app.inject({
+    // VAY-2197: funnel events only, with each type's allowlisted properties and random ids.
+    const sessionId = "0b6f0f6e-6a1b-4c39-9d1e-5d3c2a1b0f9e";
+    const event = (eventType: string, metadata: unknown, ids = {}) =>
+      app.inject({
         method: "POST",
         url: "/api/booking-web/events",
         payload: {
           analyticsConsent: true,
-          consentVersion: 1,
+          consentVersion: BOOKING_WEB_ANALYTICS_CONSENT_VERSION,
           hotelSlug: "hotel-alpenrose",
-          eventType: "complete_booking_clicked",
-          sessionId: "sid",
+          eventType,
+          eventId: randomUUID(),
+          sessionId,
           metadata,
+          ...ids,
         },
       });
+    const response = await event("page_visit", { funnelVersion: 1, funnelSequence: 1 });
+
+    for (const [eventType, metadata, ids] of [
+      ["page_visit", { funnelVersion: 1, funnelSequence: 0 }],
+      ["page_visit", { locale: "de" }],
+      ["page_visit", { funnelVersion: 1, funnelSequence: 2, email: "guest@example.com" }],
+      [
+        "complete_booking_clicked",
+        { funnelVersion: 1, funnelSequence: 2, paymentMethod: "unknown", mode: "instant" },
+      ],
+      ["searched_dates", { funnelVersion: 1, funnelSequence: 2 }],
+      ["page_visit", { funnelVersion: 1, funnelSequence: 2 }, { sessionId: "sid_123" }],
+      ["page_visit", { funnelVersion: 1, funnelSequence: 2 }, { eventId: undefined }],
+    ] as const) {
+      const invalid = await event(eventType, metadata, ids);
       expect(invalid.statusCode).toBe(400);
     }
-    // Room-detail views stay accepted funnel telemetry although they are no longer a stage.
-    const roomViewed = await app.inject({
-      method: "POST",
-      url: "/api/booking-web/events",
-      payload: {
-        analyticsConsent: true,
-        consentVersion: 1,
-        hotelSlug: "hotel-alpenrose",
-        eventType: "room_viewed",
-        sessionId: "sid_123",
-        metadata: { funnelVersion: 1, funnelSequence: 2 },
-      },
+    const oversized = await event("page_visit", {
+      funnelVersion: 1,
+      funnelSequence: 2,
+      pad: "x".repeat(4096),
     });
-    expect(response.statusCode).toBe(204);
-    expect(roomViewed.statusCode).toBe(204);
+    expect(oversized.statusCode).toBe(413);
+    // Room-detail views, step views and errors are accepted although none is a stage.
+    const roomViewed = await event("room_viewed", {
+      funnelVersion: 1,
+      funnelSequence: 2,
+      roomTypeId: "suite",
+    });
+    const stepViewed = await event("step_viewed", {
+      funnelVersion: 1,
+      funnelSequence: 3,
+      step: "extras",
+    });
+    const failed = await event("booking_error", {
+      funnelVersion: 1,
+      funnelSequence: 4,
+      step: "payment",
+      reason: "booking_unavailable",
+      code: "CARD_PAYMENT_UNAVAILABLE",
+    });
+    expect([response, roomViewed, stepViewed, failed].map((r) => r.statusCode)).toEqual([
+      204, 204, 204, 204,
+    ]);
     expect(events).toMatchObject([
       {
         propertyId: "booking_hotel_alpenrose",
         hotelSlug: "hotel-alpenrose",
         eventType: "page_visit",
-        eventId: "event_page_visit_001",
-        sessionId: "sid_123",
-        metadata: { locale: "de" },
+        sessionId,
+        metadata: { funnelVersion: 1, funnelSequence: 1 },
       },
-      { eventType: "room_viewed", sessionId: "sid_123" },
+      { eventType: "room_viewed", sessionId, metadata: { roomTypeId: "suite" } },
+      { eventType: "step_viewed", metadata: { step: "extras" } },
+      { eventType: "booking_error", metadata: { code: "CARD_PAYMENT_UNAVAILABLE" } },
     ]);
+    for (const recorded of events) {
+      expect(recorded).not.toHaveProperty("ipAddress");
+      expect(recorded).not.toHaveProperty("requestId");
+    }
+    await app.close();
+  });
+
+  it("writes no access log line for funnel events (VAY-2197)", async () => {
+    let logs = "";
+    const app = buildApp({
+      logger: { level: "info", stream: { write: (chunk: string) => (logs += chunk) } },
+      publicHotelProfileRepository: createProfileRepository(legacyHotel, {}),
+      bookingWebCheckoutAdapter: unusedBookingWebCheckoutAdapter,
+      bookingWebAttributionSink: {
+        async recordTelemetryEvent() {},
+      },
+    });
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/booking-web/events",
+      remoteAddress: "203.0.113.7",
+      payload: {
+        analyticsConsent: true,
+        consentVersion: BOOKING_WEB_ANALYTICS_CONSENT_VERSION,
+        hotelSlug: "hotel-alpenrose",
+        eventType: "page_visit",
+        eventId: randomUUID(),
+        sessionId: randomUUID(),
+        metadata: { funnelVersion: 1, funnelSequence: 1 },
+      },
+    });
+    expect(response.statusCode).toBe(204);
+    expect(logs).not.toContain("203.0.113.7");
+    expect(logs).not.toContain("/api/booking-web/events");
+    await app.close();
+  });
+
+  describe("funnel event rate limit (VAY-2214)", () => {
+    const funnelEvent = (sessionId = randomUUID()) => ({
+      analyticsConsent: true,
+      consentVersion: BOOKING_WEB_ANALYTICS_CONSENT_VERSION,
+      hotelSlug: "hotel-alpenrose",
+      eventType: "page_visit",
+      eventId: randomUUID(),
+      sessionId,
+      metadata: { funnelVersion: 1, funnelSequence: 1 },
+    });
+    const limitedApp = (events: unknown[], logs?: { text: string }) =>
+      buildApp({
+        logger: logs
+          ? { level: "info", stream: { write: (chunk: string) => (logs.text += chunk) } }
+          : false,
+        trustProxy: ["10.0.0.1"],
+        publicHotelProfileRepository: createProfileRepository(legacyHotel, {}),
+        bookingWebCheckoutAdapter: unusedBookingWebCheckoutAdapter,
+        bookingWebPublicNow: () => new Date("2026-10-15T12:00:00.000Z"),
+        bookingWebAttributionSink: {
+          async recordTelemetryEvent(event) {
+            events.push(event);
+          },
+        },
+      });
+
+    it("refuses the 61st event a minute from one address, whatever the forwarded-for spoof", async () => {
+      const events: unknown[] = [];
+      const app = limitedApp(events);
+      // Behind the trusted proxy the client is the last untrusted hop; spoofed hops before it
+      // don't make a new bucket.
+      const viaProxy = (i: number) =>
+        app.inject({
+          method: "POST",
+          url: "/api/booking-web/events",
+          remoteAddress: "10.0.0.1",
+          headers: { "x-forwarded-for": `192.0.2.${i % 250}, 203.0.113.9` },
+          payload: funnelEvent(),
+        });
+      for (let i = 0; i < 60; i += 1) expect((await viaProxy(i)).statusCode).toBe(204);
+      const refused = await viaProxy(60);
+      expect(refused.statusCode).toBe(429);
+      expect(refused.headers["retry-after"]).toBe("60");
+      expect(refused.headers["cache-control"]).toBe("no-store");
+      expect(events).toHaveLength(60);
+      const other = await app.inject({
+        method: "POST",
+        url: "/api/booking-web/events",
+        remoteAddress: "198.51.100.7",
+        payload: funnelEvent(),
+      });
+      expect(other.statusCode).toBe(204);
+      await app.close();
+    });
+
+    it("refuses the 31st event a minute from one session", async () => {
+      const events: unknown[] = [];
+      const app = limitedApp(events);
+      const sessionId = randomUUID();
+      const send = (i: number) =>
+        app.inject({
+          method: "POST",
+          url: "/api/booking-web/events",
+          remoteAddress: `198.51.100.${i + 1}`,
+          payload: funnelEvent(sessionId),
+        });
+      for (let i = 0; i < 30; i += 1) expect((await send(i)).statusCode).toBe(204);
+      expect((await send(30)).statusCode).toBe(429);
+      expect(events).toHaveLength(30);
+      await app.close();
+    });
+
+    it("logs a refusal once a minute, without the address", async () => {
+      const logs = { text: "" };
+      const app = limitedApp([], logs);
+      for (let i = 0; i < 63; i += 1)
+        await app.inject({
+          method: "POST",
+          url: "/api/booking-web/events",
+          remoteAddress: "203.0.113.50",
+          payload: funnelEvent(),
+        });
+      expect(logs.text.match(/funnel events rate limited/g)).toHaveLength(1);
+      expect(logs.text).toContain('"limit":"address"');
+      expect(logs.text).not.toContain("203.0.113.50");
+      await app.close();
+    });
+
+    it("accepts a text/plain event from any https booking site, CORS on this route only", async () => {
+      const events: unknown[] = [];
+      const app = limitedApp(events);
+      const origin = "https://www.hotel-example.com";
+      const plain = (payload: string, from = origin) =>
+        app.inject({
+          method: "POST",
+          url: "/api/booking-web/events",
+          headers: { "content-type": "text/plain;charset=UTF-8", origin: from },
+          payload,
+        });
+      const accepted = await plain(JSON.stringify(funnelEvent()));
+      expect(accepted.statusCode).toBe(204);
+      expect(accepted.headers["access-control-allow-origin"]).toBe(origin);
+      expect(accepted.headers["access-control-allow-credentials"]).toBeUndefined();
+      expect(events).toHaveLength(1);
+      expect((await plain("not json")).statusCode).toBe(400);
+      expect((await plain('["page_visit"]')).statusCode).toBe(400);
+      expect((await plain("x".repeat(4096))).statusCode).toBe(413);
+      const insecure = await plain(JSON.stringify(funnelEvent()), "http://www.hotel-example.com");
+      expect(insecure.headers["access-control-allow-origin"]).toBeUndefined();
+      // A preflight from an older JSON client, and the route with a query string, get the same rule.
+      const preflightEvents = await app.inject({
+        method: "OPTIONS",
+        url: "/api/booking-web/events",
+        headers: { origin, "access-control-request-method": "POST" },
+      });
+      expect(preflightEvents.statusCode).toBe(204);
+      expect(preflightEvents.headers["access-control-allow-origin"]).toBe(origin);
+      expect(
+        (
+          await app.inject({
+            method: "POST",
+            url: "/api/booking-web/events?source=test",
+            headers: { "content-type": "text/plain", origin },
+            payload: JSON.stringify(funnelEvent()),
+          })
+        ).headers["access-control-allow-origin"],
+      ).toBe(origin);
+      // Other public routes keep the Vayada booking origins only.
+      const preflight = await app.inject({
+        method: "OPTIONS",
+        url: "/api/booking-web/hotels/hotel-alpenrose",
+        headers: { origin },
+      });
+      expect(preflight.headers["access-control-allow-origin"]).toBeUndefined();
+      await app.close();
+    });
+  });
+
+  it("logs no guest address when storing a funnel event fails (VAY-2214)", async () => {
+    let logs = "";
+    const app = buildApp({
+      logger: { level: "info", stream: { write: (chunk: string) => (logs += chunk) } },
+      publicHotelProfileRepository: createProfileRepository(legacyHotel, {}),
+      bookingWebCheckoutAdapter: unusedBookingWebCheckoutAdapter,
+      bookingWebAttributionSink: {
+        async recordTelemetryEvent() {
+          throw new Error("storage unavailable");
+        },
+      },
+    });
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/booking-web/events",
+      remoteAddress: "203.0.113.77",
+      payload: {
+        analyticsConsent: true,
+        consentVersion: BOOKING_WEB_ANALYTICS_CONSENT_VERSION,
+        hotelSlug: "hotel-alpenrose",
+        eventType: "page_visit",
+        eventId: randomUUID(),
+        sessionId: randomUUID(),
+        metadata: { funnelVersion: 1, funnelSequence: 1 },
+      },
+    });
+    expect(response.statusCode).toBe(500);
+    expect(logs).not.toContain("203.0.113.77");
     await app.close();
   });
 
@@ -381,7 +520,6 @@ describe("Booking Web public bootstrap parity", () => {
       publicHotelProfileRepository: createProfileRepository(legacyHotel, {}),
       bookingWebCheckoutAdapter: unusedBookingWebCheckoutAdapter,
       bookingWebAttributionSink: {
-        async recordAffiliateClick() {},
         async recordTelemetryEvent(event) {
           events.push(event);
         },
@@ -393,34 +531,17 @@ describe("Booking Web public bootstrap parity", () => {
       url: "/api/booking-web/events",
       payload: {
         analyticsConsent: true,
-        consentVersion: 1,
+        consentVersion: BOOKING_WEB_ANALYTICS_CONSENT_VERSION,
         hotelSlug: "unknown-hotel",
         eventType: "page_visit",
+        eventId: randomUUID(),
+        sessionId: randomUUID(),
+        metadata: { funnelVersion: 1, funnelSequence: 1 },
       },
     });
 
     expect(response.statusCode).toBe(404);
     expect(events).toEqual([]);
-    await app.close();
-  });
-
-  it("returns retired for public affiliate registration without a target repository", async () => {
-    const app = buildApp({
-      logger: false,
-      publicHotelProfileRepository: createProfileRepository(legacyHotel, {}),
-      bookingWebCheckoutAdapter: unusedBookingWebCheckoutAdapter,
-    });
-
-    const response = await app.inject({
-      method: "POST",
-      url: "/api/booking-web/hotels/hotel-alpenrose/affiliates",
-      payload: { email: "guest@example.com", fullName: "Guest Example" },
-    });
-
-    expect(response.statusCode).toBe(410);
-    expect(response.json()).toMatchObject({
-      code: "affiliate_enrollment_retired",
-    });
     await app.close();
   });
 
@@ -547,168 +668,6 @@ describe("Booking Web public bootstrap parity", () => {
     await app.close();
   });
 
-  it("retires public enrolment without writes while retaining existing Connect scope checks", async () => {
-    const affiliateRepository = new InMemoryAffiliateRepository();
-    const connect = vi.spyOn(affiliateRepository, "createStripeConnectLink");
-    const app = buildApp({
-      logger: false,
-      publicHotelProfileRepository: createProfileRepository(legacyHotel, {}),
-      bookingWebCheckoutAdapter: unusedBookingWebCheckoutAdapter,
-      bookingWebAffiliateRepository: affiliateRepository,
-    });
-
-    for (const request of [
-      {
-        method: "GET" as const,
-        url: "/api/booking-web/hotels/hotel-alpenrose/affiliates/check-email?email=creator@example.com",
-      },
-      {
-        method: "POST" as const,
-        url: "/api/booking-web/hotels/hotel-alpenrose/affiliates",
-        payload: { fullName: "Creator Example", email: "creator@example.com" },
-      },
-    ]) {
-      const response = await app.inject(request);
-      expect(response.statusCode).toBe(410);
-      expect(response.json()).toMatchObject({ code: "affiliate_enrollment_retired" });
-      expect(response.headers["cache-control"]).toBe("no-store");
-    }
-    expect(connect).not.toHaveBeenCalled();
-    expect(affiliateRepository.identityCount).toBe(0);
-
-    // Seed a pre-existing identity directly; public enrolment is no longer a fixture factory.
-    const affiliate = { id: "aff_existing", email: "creator@example.com", slug: "hotel-alpenrose" };
-    affiliateRepository.seedExisting(affiliate);
-    const firstConnect = await app.inject({
-      method: "POST",
-      url: `/api/booking-web/hotels/hotel-alpenrose/affiliates/${affiliate.id}/stripe/connect`,
-      payload: { email: "creator@example.com" },
-    });
-    const wrongEmailConnect = await app.inject({
-      method: "POST",
-      url: `/api/booking-web/hotels/hotel-alpenrose/affiliates/${affiliate.id}/stripe/connect`,
-      payload: { email: "other@example.com" },
-    });
-    const wrongSlugConnect = await app.inject({
-      method: "POST",
-      url: `/api/booking-web/hotels/legacy-alpenrose/affiliates/${affiliate.id}/stripe/connect`,
-      payload: { email: "creator@example.com" },
-    });
-    const secondConnect = await app.inject({
-      method: "POST",
-      url: `/api/booking-web/hotels/hotel-alpenrose/affiliates/${affiliate.id}/stripe/connect`,
-      payload: { email: "creator@example.com" },
-    });
-
-    expect(wrongEmailConnect.statusCode).toBe(404);
-    expect(wrongSlugConnect.statusCode).toBe(404);
-    expect(firstConnect.statusCode).toBe(503);
-    expect(secondConnect.statusCode).toBe(503);
-    expect(firstConnect.json()).toEqual(secondConnect.json());
-    expect(firstConnect.json()).toEqual({
-      error: "Service Unavailable",
-      message: "Stripe Connect onboarding is not configured.",
-      statusCode: 503,
-    });
-    expect(affiliateRepository.identityCount).toBe(1);
-    expect(affiliateRepository.stripeAccountCount).toBe(0);
-    await app.close();
-  });
-
-  it("mounts target-owned affiliate routes with an explicit target hotel resolver", async () => {
-    const app = buildApp({
-      logger: false,
-      bookingWebAffiliateRepository: new InMemoryAffiliateRepository(),
-      bookingWebAffiliateHotelResolver: createProfileRepository(legacyHotel, {}),
-    });
-
-    const response = await app.inject({
-      method: "GET",
-      url: "/api/booking-web/hotels/hotel-alpenrose/affiliates/check-email?email=creator%40example.com",
-    });
-
-    expect(response.statusCode).toBe(410);
-    expect(response.json()).toMatchObject({ code: "affiliate_enrollment_retired" });
-    await app.close();
-  });
-
-  it("fails public affiliate registration closed when the property module is inactive", async () => {
-    const affiliateRepository = new InMemoryAffiliateRepository();
-    const app = buildApp({
-      logger: false,
-      bookingWebAffiliateRepository: affiliateRepository,
-      bookingWebAffiliateHotelResolver: {
-        async findProfileBySlug() {
-          return { hotel: { capabilities: { referralCodes: false } } };
-        },
-      },
-    });
-
-    const response = await app.inject({
-      method: "POST",
-      url: "/api/booking-web/hotels/hotel-alpenrose/affiliates",
-      payload: { fullName: "Creator Example", email: "creator@example.com" },
-    });
-
-    expect(response.statusCode).toBe(410);
-    expect(affiliateRepository.identityCount).toBe(0);
-    await app.close();
-  });
-
-  it.each([
-    { name: "PMS ownership only", pms: true, booking: false, expected: false },
-    { name: "Booking ownership only", pms: false, booking: true, expected: false },
-    { name: "both ownership links", pms: true, booking: true, expected: true },
-  ])("requires both ownership links in the direct PG resolver: $name", async (ownership) => {
-    let sql = "";
-    const pool: BookingWebAffiliateHotelResolverPool = {
-      async query<Row extends QueryResultRow>(text: string) {
-        sql = text;
-        return {
-          rows: [
-            {
-              referralCodes: ownership.pms && ownership.booking,
-            } as unknown as Row,
-          ],
-        };
-      },
-      async end() {},
-    };
-    const resolver = createPgBookingWebAffiliateHotelResolver({
-      connectionString: "postgresql://unused",
-      pool,
-    });
-
-    await expect(resolver.findProfileBySlug("hotel-alpenrose")).resolves.toEqual({
-      hotel: { capabilities: { referralCodes: ownership.expected } },
-    });
-    expect(sql).toContain("FROM identity.organization_resource_links pms_resource");
-    expect(sql).toContain("pms_resource.product = 'pms'");
-    expect(sql).toContain("pms_resource.resource_type = 'pms_property'");
-    expect(sql).toContain("FROM identity.organization_resource_links booking_resource");
-    expect(sql).toContain("booking_resource.product = 'booking'");
-    expect(sql).toContain("booking_resource.resource_type = 'booking_hotel'");
-  });
-
-  it("fails closed for target-owned affiliate routes without a hotel resolver", async () => {
-    const app = buildApp({
-      logger: false,
-      bookingWebAffiliateRepository: new InMemoryAffiliateRepository(),
-    });
-
-    const response = await app.inject({
-      method: "POST",
-      url: "/api/booking-web/hotels/hotel-alpenrose/affiliates",
-      payload: {
-        fullName: "Creator Example",
-        email: "creator@example.com",
-      },
-    });
-
-    expect(response.statusCode).toBe(404);
-    await app.close();
-  });
-
   it("passes command context through target checkout adapter paths without legacy URLs", async () => {
     const operations: Array<{
       operation: string | undefined;
@@ -719,7 +678,6 @@ describe("Booking Web public bootstrap parity", () => {
       occurredAt: string | undefined;
     }> = [];
     let closed = 0;
-    const lookupAdmissionHashes: string[] = [];
     const record = (context: Parameters<BookingWebCheckoutAdapter["getCheckoutConfig"]>[1]) => {
       operations.push({
         operation: context?.operation,
@@ -731,9 +689,6 @@ describe("Booking Web public bootstrap parity", () => {
       });
     };
     const checkoutAdapter: BookingWebCheckoutAdapter = {
-      async consumeLookupAttempt(clientAddressHash) {
-        lookupAdmissionHashes.push(clientAddressHash);
-      },
       async getCheckoutConfig(_slug, context) {
         record(context);
         return { payAtPropertyEnabled: true, bankTransfer: true, paypalEnabled: false };
@@ -790,6 +745,17 @@ describe("Booking Web public bootstrap parity", () => {
       async getChangeRequest(_slug, _bookingId, _query, context) {
         record(context);
         return { status: "pending" };
+      },
+      async requestExtras(_slug, _bookingId, request, context) {
+        record(context);
+        expect(request).toEqual({ guest_email: "guest@example.com", addonIds: ["a1"] });
+        return { version: "booking-extras-request.v1" };
+      },
+      async getStay(_slug, _bookingId, request, context) {
+        record(context);
+        // The route passes only the guest's email on.
+        expect(request).toEqual({ guest_email: "guest@example.com" });
+        return { version: "booking-stay.v1", cancellation: null, places: [] };
       },
       async getPaymentInstructions(_slug, _handle, context) {
         record(context);
@@ -885,6 +851,16 @@ describe("Booking Web public bootstrap parity", () => {
         url: "/api/booking-web/hotels/hotel-alpenrose/bookings/VAY-TARGET-1/change-request?email=guest%40example.com",
       }),
       app.inject({
+        method: "POST",
+        url: "/api/booking-web/hotels/hotel-alpenrose/bookings/b9fccec2-eb4c-4c35-bfd3-02a748c2e951/stay",
+        payload: { guestEmail: "guest@example.com", expectedCancellationFeeMinor: "100" },
+      }),
+      app.inject({
+        method: "POST",
+        url: "/api/booking-web/hotels/hotel-alpenrose/bookings/b9fccec2-eb4c-4c35-bfd3-02a748c2e951/extras-request",
+        payload: { guestEmail: "guest@example.com", addonIds: ["a1"] },
+      }),
+      app.inject({
         method: "GET",
         url: "/api/booking-web/hotels/hotel-alpenrose/bookings/VAY-TARGET-1/payment-instructions",
       }),
@@ -895,7 +871,7 @@ describe("Booking Web public bootstrap parity", () => {
       }),
     ]);
 
-    expect(responses.map((response) => response.statusCode)).toEqual(Array(16).fill(200));
+    expect(responses.map((response) => response.statusCode)).toEqual(Array(18).fill(200));
     expect(operations.map((entry) => entry.operation)).toEqual(
       expect.arrayContaining([
         "checkout-config",
@@ -910,11 +886,13 @@ describe("Booking Web public bootstrap parity", () => {
         "booking-change-preview",
         "booking-change-submit",
         "booking-change-get",
+        "booking-stay",
+        "booking-extras-request",
         "booking-payment-instructions",
         "promo-validate",
       ]),
     );
-    expect(operations).toHaveLength(16);
+    expect(operations).toHaveLength(18);
     expect(operations.find((entry) => entry.operation === "booking-create")?.idempotencyKey).toBe(
       "guest-create-1",
     );
@@ -932,7 +910,6 @@ describe("Booking Web public bootstrap parity", () => {
       ),
     ).toBe(true);
     expect(operations.every((entry) => entry.idempotencyKey)).toBe(true);
-    expect(lookupAdmissionHashes).toEqual([expect.stringMatching(/^[a-f0-9]{64}$/)]);
     const withdrawContexts = operations.filter((entry) => entry.operation === "booking-withdraw");
     const changePreviewContexts = operations.filter(
       (entry) => entry.operation === "booking-change-preview",
@@ -947,106 +924,54 @@ describe("Booking Web public bootstrap parity", () => {
     expect(closed).toBe(1);
   });
 
-  it("admits five booking lookups per minute per client address", async () => {
-    const auditInserts: Array<{ text: string; values?: readonly unknown[] }> = [];
-    const pool = {
-      async query(text: string, values?: readonly unknown[]) {
-        if (text.includes("count(*)::text AS count")) {
-          return { rows: [{ count: String(auditInserts.length) }] };
-        }
-        if (text.includes("INSERT INTO platform.product_audit_events")) {
-          auditInserts.push({ text, values });
-        }
-        return { rows: [] };
-      },
-      async end() {},
-    };
-    const adapter = createTargetBookingWebCheckoutAdapter({
-      externalChanges: externalBookingChanges,
-      connectionString: "postgres://unused",
-      inventoryReservationPort: createTargetPmsInventoryReservationPort(),
-      pool: pool as never,
-    });
-    const context = (attempt: number) => ({
-      operation: "booking-lookup",
-      requestId: "lookup-restarted-process",
-      correlationId: `lookup-${attempt}`,
-      idempotencyKey: `lookup-${attempt}`,
-      fingerprint: String(attempt).padStart(64, "0"),
-      occurredAt: new Date("2026-09-02T10:00:30.000Z"),
-    });
-
-    for (let attempt = 1; attempt <= 5; attempt += 1) {
-      await expect(
-        adapter.consumeLookupAttempt("client-address-hash", context(attempt)),
-      ).resolves.toBeUndefined();
-    }
-    await expect(adapter.consumeLookupAttempt("client-address-hash", context(6))).rejects.toThrow(
-      "Too many booking lookup attempts",
-    );
-    expect(auditInserts).toHaveLength(5);
-    expect(new Set(auditInserts.map((entry) => entry.values?.[0]))).toHaveLength(5);
-    expect(auditInserts[0]?.text).toContain("'security', 'restricted'");
-    expect(auditInserts[0]?.values).not.toContain("198.51.100.1");
-
-    let lookupCalled = false;
-    const app = buildApp({
-      logger: false,
-      publicHotelProfileRepository: createProfileRepository(legacyHotel, {}),
-      bookingWebCheckoutAdapter: {
-        ...unusedBookingWebCheckoutAdapter,
-        async consumeLookupAttempt() {
-          throw Object.assign(new Error("Too many booking lookup attempts."), { statusCode: 429 });
-        },
-        async lookup() {
-          lookupCalled = true;
-          return {};
-        },
-      },
-    });
-    const limited = await app.inject({
-      method: "POST",
-      url: "/api/booking-web/hotels/hotel-alpenrose/bookings/lookup",
-      payload: { bookingReference: "VAY-ABC123", guestEmail: "guest@example.test" },
-    });
-    expect(limited.statusCode).toBe(429);
-    expect(limited.headers["retry-after"]).toBe("60");
-    expect(lookupCalled).toBe(false);
-    await app.close();
-  });
-
-  it("only trusts forwarding headers from known proxies for booking lookup limits", async () => {
-    const hashes: string[] = [];
+  it("admits five booking lookups per minute per client address, counted in memory", async () => {
+    const lookups: string[] = [];
     const app = buildApp({
       logger: false,
       trustProxy: ["10.0.0.1"],
+      bookingWebPublicNow: () => new Date("2026-09-02T10:00:30.000Z"),
       publicHotelProfileRepository: createProfileRepository(legacyHotel, {}),
+      // The adapter has no lookup-attempt method any more: nothing about the address reaches
+      // the database (VAY-2222).
       bookingWebCheckoutAdapter: {
         ...unusedBookingWebCheckoutAdapter,
-        async consumeLookupAttempt(hash) {
-          hashes.push(hash);
-        },
-        async lookup() {
+        async lookup(_slug, request) {
+          lookups.push(String(request.bookingReference));
           return {};
         },
       },
     });
-    const injectLookup = (remoteAddress: string, forwardedFor: string) =>
+    const injectLookup = (remoteAddress: string, forwardedFor: string, reference: string) =>
       app.inject({
         method: "POST",
         url: "/api/booking-web/hotels/hotel-alpenrose/bookings/lookup",
         remoteAddress,
         headers: { "x-forwarded-for": forwardedFor },
-        payload: { bookingReference: "VAY-ABC123", guestEmail: "guest@example.test" },
+        payload: { bookingReference: reference, guestEmail: "guest@example.test" },
       });
 
-    await injectLookup("198.51.100.44", "192.0.2.1");
-    await injectLookup("198.51.100.44", "192.0.2.2");
-    await injectLookup("10.0.0.1", "198.51.100.1, 203.0.113.9");
+    // An untrusted caller can't spread its tries over made-up forwarded addresses.
+    for (let attempt = 1; attempt <= 5; attempt += 1)
+      expect(
+        (await injectLookup("198.51.100.44", `192.0.2.${attempt}`, `VAY-${attempt}`)).statusCode,
+      ).toBe(200);
+    const limited = await injectLookup("198.51.100.44", "192.0.2.6", "VAY-6");
+    expect(limited.statusCode).toBe(429);
+    expect(limited.headers["retry-after"]).toBe("30");
+    expect(limited.json()).toMatchObject({
+      message: "Too many booking lookup attempts. Please try again later.",
+    });
 
-    const hash = (address: string) =>
-      createHash("sha256").update(`booking-lookup-client:${address}`).digest("hex");
-    expect(hashes).toEqual([hash("198.51.100.44"), hash("198.51.100.44"), hash("203.0.113.9")]);
+    // Behind a trusted proxy each forwarded client has its own bucket, not the proxy's.
+    for (let attempt = 7; attempt <= 11; attempt += 1)
+      expect(
+        (await injectLookup("10.0.0.1", "198.51.100.1, 203.0.113.9", `VAY-${attempt}`)).statusCode,
+      ).toBe(200);
+    expect((await injectLookup("10.0.0.1", "203.0.113.9", "VAY-12")).statusCode).toBe(429);
+    expect((await injectLookup("10.0.0.1", "203.0.113.10", "VAY-13")).statusCode).toBe(200);
+    expect(lookups).toEqual(
+      [1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 13].map((attempt) => `VAY-${attempt}`),
+    );
     await app.close();
   });
 
@@ -1238,12 +1163,10 @@ describe("Booking Web public bootstrap parity", () => {
           fingerprint: "c".repeat(64),
           occurredAt: new Date("2026-09-01T10:00:00.000Z"),
         },
-        "aa29a9d9-9ca4-4931-9ef5-4d41e9a9cc41",
       ),
     ).resolves.toEqual(replayBody);
     expect(calls.some((text) => text.includes("FROM booking.quote_sessions"))).toBe(false);
     expect(calls.some((text) => text.includes("INSERT INTO booking.guest_bookings"))).toBe(false);
-    expect(calls.some((text) => text.includes("booking.affiliate_click_contexts"))).toBe(false);
     expect(calls.some((text) => text.includes("INSERT INTO platform.jobs"))).toBe(false);
   });
 
@@ -1252,9 +1175,43 @@ describe("Booking Web public bootstrap parity", () => {
     let termsText: string | null = "Hotel Alpenrose booking terms.";
     let paypalConfigured = true;
     let paymentsEnabled = true;
+    // VAY-2301: Finance's card readiness, whether the Booking Admin currency matches it (the legacy
+    // checkout's extra gate), and whether the hotel takes payment at the property.
+    let cardReady = false;
+    let currencyMatches = true;
+    let payAtProperty = true;
+    let windows: { method: string; kind: string; amount: number; unit: string }[] = [];
     const pool = {
       async query(text: string) {
         calls.push(text);
+        // VAY-2348: the hotel's booking windows per payment method.
+        if (text.includes("FROM finance.payment_method_booking_windows")) return { rows: windows };
+        // VAY-2145: where and when check-in happens, and the bank-transfer and PayPal terms.
+        if (text.includes('AS "checkInTime"'))
+          return {
+            rows: [
+              {
+                timeZone: "Europe/Vienna",
+                checkInTime: "15:00",
+                now: new Date("2026-10-12T10:00:00Z"),
+              },
+            ],
+          };
+        if (text.includes("SELECT payments_enabled,accepted_methods,deposit_policy"))
+          return {
+            rows: [
+              {
+                payments_enabled: true,
+                accepted_methods: ["bank_transfer", "paypal", "pay_at_property"],
+                deposit_policy: {
+                  paypalEmail: "payments@alpenrose.test",
+                  paypalPaymentWindowHours: 48,
+                },
+              },
+            ],
+          };
+        if (text.includes("SELECT id FROM finance.bank_transfer_destinations"))
+          return { rows: [{ id: "destination-1" }] };
         if (text.includes("FROM hotel_catalog.property_slugs")) {
           return {
             rows: [
@@ -1276,7 +1233,8 @@ describe("Booking Web public bootstrap parity", () => {
                 termsText,
                 cancellationPolicyText: "Free cancellation until seven days before arrival.",
                 paymentsEnabled,
-                onlineCardReady: false,
+                onlineCardReady: cardReady && currencyMatches,
+                bookingPageCardReady: cardReady,
                 acceptedMethods: [
                   "card",
                   "xendit",
@@ -1285,7 +1243,11 @@ describe("Booking Web public bootstrap parity", () => {
                   "bank_transfer",
                   "paypal",
                   "pay_at_property",
-                ].filter((method) => paypalConfigured || method !== "paypal"),
+                ].filter(
+                  (method) =>
+                    (paypalConfigured || method !== "paypal") &&
+                    (payAtProperty || method !== "pay_at_property"),
+                ),
                 bankTransferReady: true,
                 depositPolicy: {
                   bankTransferInstructions: "Bank: Vayada Bank\nIBAN: DE123",
@@ -1347,11 +1309,136 @@ describe("Booking Web public bootstrap parity", () => {
       bankTransfer: true,
       paypalEnabled: true,
       paypalPaymentWindowHours: 48,
+      // VAY-2301: the hotel's card isn't ready and bank transfer and PayPal acceptance is off, so
+      // the booking page offers paying at the property only.
+      bookingPagePaymentMethods: ["pay_at_property"],
     });
+    await expect(adapter.getCheckoutConfig("hotel-alpenrose")).resolves.not.toHaveProperty(
+      "manualPaymentEarliestArrival",
+    );
+    await expect(
+      createTargetBookingWebCheckoutAdapter({
+        externalChanges: externalBookingChanges,
+        connectionString: "postgres://unused",
+        inventoryReservationPort: createTargetPmsInventoryReservationPort(),
+        pool: pool as never,
+        replacementPricingManualPaymentAcceptanceEnabled: true,
+        bankTransfers: {} as never,
+      }).getCheckoutConfig("hotel-alpenrose"),
+    ).resolves.toMatchObject({
+      bookingPagePaymentMethods: ["pay_at_property", "bank_transfer", "paypal"],
+      // 12:00 in Vienna; check-in at 15:00 on the 14th is 51 h away, enough for both windows.
+      manualPaymentEarliestArrival: { bank_transfer: "2026-10-14", paypal: "2026-10-14" },
+    });
+    // Without the bank-details binding bank transfer can't be accepted, so it isn't offered.
+    await expect(
+      createTargetBookingWebCheckoutAdapter({
+        externalChanges: externalBookingChanges,
+        connectionString: "postgres://unused",
+        inventoryReservationPort: createTargetPmsInventoryReservationPort(),
+        pool: pool as never,
+        replacementPricingManualPaymentAcceptanceEnabled: true,
+      }).getCheckoutConfig("hotel-alpenrose"),
+    ).resolves.toMatchObject({ bookingPagePaymentMethods: ["pay_at_property", "paypal"] });
+    // VAY-2301: card is offered only when Finance's card readiness is complete AND card
+    // acceptance is on with a payment provider; neither alone offers it.
+    const cardConfig = {
+      externalChanges: externalBookingChanges,
+      connectionString: "postgres://unused",
+      inventoryReservationPort: createTargetPmsInventoryReservationPort(),
+      pool: pool as never,
+      replacementPricingAcceptanceEnabled: true,
+      replacementPricingCardAcceptanceEnabled: true,
+      stripePaymentProvider: {} as never,
+    };
+    const cardAdapter = createTargetBookingWebCheckoutAdapter(cardConfig);
+    await expect(cardAdapter.getCheckoutConfig("hotel-alpenrose")).resolves.toMatchObject({
+      onlineCardPayment: false,
+      bookingPagePaymentMethods: ["pay_at_property"],
+    });
+    cardReady = true;
+    await expect(cardAdapter.getCheckoutConfig("hotel-alpenrose")).resolves.toMatchObject({
+      onlineCardPayment: true,
+      bookingPagePaymentMethods: ["card", "pay_at_property"],
+    });
+    // The card switch without a payment provider, or without quote acceptance, offers no card.
+    await expect(
+      createTargetBookingWebCheckoutAdapter({
+        ...cardConfig,
+        stripePaymentProvider: undefined,
+      }).getCheckoutConfig("hotel-alpenrose"),
+    ).resolves.toMatchObject({ bookingPagePaymentMethods: ["pay_at_property"] });
+    await expect(
+      createTargetBookingWebCheckoutAdapter({
+        ...cardConfig,
+        replacementPricingAcceptanceEnabled: false,
+      }).getCheckoutConfig("hotel-alpenrose"),
+    ).resolves.toMatchObject({ bookingPagePaymentMethods: ["pay_at_property"] });
+    // Card stays dark while its acceptance switch is off, whatever the hotel set up.
+    await expect(adapter.getCheckoutConfig("hotel-alpenrose")).resolves.toMatchObject({
+      onlineCardPayment: true,
+      bookingPagePaymentMethods: ["pay_at_property"],
+    });
+    // The booking page prices in the publication currency, so the legacy checkout's Booking Admin
+    // currency gate doesn't hide card from it (the offer catalog sells card-only rates meanwhile).
+    currencyMatches = false;
+    await expect(cardAdapter.getCheckoutConfig("hotel-alpenrose")).resolves.toMatchObject({
+      onlineCardPayment: false,
+      bookingPagePaymentMethods: ["card", "pay_at_property"],
+    });
+    currencyMatches = true;
+    // With bank transfer and PayPal acceptance on as well, every ready way, in the page's order.
+    await expect(
+      createTargetBookingWebCheckoutAdapter({
+        ...cardConfig,
+        replacementPricingManualPaymentAcceptanceEnabled: true,
+        bankTransfers: {} as never,
+      }).getCheckoutConfig("hotel-alpenrose"),
+    ).resolves.toMatchObject({
+      bookingPagePaymentMethods: ["card", "pay_at_property", "bank_transfer", "paypal"],
+    });
+    // A hotel that doesn't take payment at the property never has it offered.
+    payAtProperty = false;
+    await expect(cardAdapter.getCheckoutConfig("hotel-alpenrose")).resolves.toMatchObject({
+      payAtPropertyEnabled: false,
+      bookingPagePaymentMethods: ["card"],
+    });
+    await expect(adapter.getCheckoutConfig("hotel-alpenrose")).resolves.toMatchObject({
+      bookingPagePaymentMethods: [],
+    });
+    cardReady = false;
+    payAtProperty = true;
+    await expect(adapter.getCheckoutConfig("hotel-alpenrose")).resolves.not.toHaveProperty(
+      "paymentMethodArrivalWindows",
+    );
+    // VAY-2348: each window as the arrival dates it allows now (12:00 in Vienna, check-in 15:00):
+    // within 48 h ends with the 13th (27 h; the 14th is 51 h), at least 7 days starts on the 19th.
+    windows = [
+      { method: "pay_at_property", kind: "within", amount: 48, unit: "hours" },
+      { method: "bank_transfer", kind: "at_least", amount: 7, unit: "days" },
+    ];
+    await expect(
+      createTargetBookingWebCheckoutAdapter({
+        externalChanges: externalBookingChanges,
+        connectionString: "postgres://unused",
+        inventoryReservationPort: createTargetPmsInventoryReservationPort(),
+        pool: pool as never,
+        replacementPricingManualPaymentAcceptanceEnabled: true,
+        bankTransfers: {} as never,
+      }).getCheckoutConfig("hotel-alpenrose"),
+    ).resolves.toMatchObject({
+      bookingPagePaymentMethods: ["pay_at_property", "bank_transfer", "paypal"],
+      paymentMethodArrivalWindows: {
+        pay_at_property: { through: "2026-10-13" },
+        bank_transfer: { from: "2026-10-19" },
+      },
+    });
+    windows = [];
     paymentsEnabled = false;
     await expect(adapter.getCheckoutConfig("hotel-alpenrose")).resolves.toMatchObject({
       paymentsEnabled: false,
       onlineCardPayment: false,
+      bookingPagePaymentMethods: [],
     });
     paymentsEnabled = true;
     paypalConfigured = false;
@@ -1376,6 +1463,9 @@ describe("Booking Web public bootstrap parity", () => {
     );
     expect(calls.find((call) => call.includes("FROM hotel_catalog.properties p"))).toContain(
       "upper(trim(fs.default_currency)) = upper(trim(bs.default_currency))",
+    );
+    expect(calls.find((call) => call.includes("FROM hotel_catalog.properties p"))).toContain(
+      'COALESCE(readiness.online_card_ready, FALSE) AS "bookingPageCardReady"',
     );
   });
 
@@ -1922,59 +2012,6 @@ function buildParityApp(config: {
     bookingWebCheckoutAdapter: unusedBookingWebCheckoutAdapter,
     bookingWebPublicNow: () => new Date("2026-06-06T11:00:00.000Z"),
   });
-}
-
-class InMemoryAffiliateRepository implements BookingWebAffiliateRepository {
-  private readonly affiliates = new Map<
-    string,
-    {
-      id: string;
-      referralCode: string;
-      email: string;
-      slug: string;
-      stripeAccountId?: string;
-      onboardingUrl?: string;
-    }
-  >();
-
-  get identityCount(): number {
-    return this.affiliates.size;
-  }
-
-  get stripeAccountCount(): number {
-    return Array.from(this.affiliates.values()).filter((affiliate) => affiliate.stripeAccountId)
-      .length;
-  }
-
-  seedExisting(affiliate: { id: string; email: string; slug: string }): void {
-    this.affiliates.set(this.key(affiliate.slug, affiliate.email), {
-      ...affiliate,
-      referralCode: "EXISTING-REFERRAL",
-    });
-  }
-
-  async createStripeConnectLink(
-    slug: string,
-    affiliateId: string,
-    request: BookingWebAffiliateStripeConnectRequest,
-  ): Promise<{ onboardingUrl: string }> {
-    const email = request.email?.toLowerCase() ?? "";
-    const affiliate = Array.from(this.affiliates.values()).find(
-      (item) => item.id === affiliateId && item.email === email && item.slug === slug.toLowerCase(),
-    );
-    if (!affiliate || !email) {
-      throw Object.assign(new Error("Affiliate not found for this hotel and email."), {
-        statusCode: 404,
-      });
-    }
-    throw Object.assign(new Error("Stripe Connect onboarding is not configured."), {
-      statusCode: 503,
-    });
-  }
-
-  private key(slug: string, email: string): string {
-    return `${slug.toLowerCase()}:${email.toLowerCase()}`;
-  }
 }
 
 function changeRequestPayload(): Record<string, unknown> {

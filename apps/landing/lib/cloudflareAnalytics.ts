@@ -1,11 +1,11 @@
-import { readConsent } from "@vayada/marketplace-shared/consent/preferences";
+import { readConsent } from "@/lib/consent/preferences";
 
 const consentKey = "vayada_cookie_consent";
 // Public site identifier, not a credential. Configured only for the Landing build.
 const token = process.env.NEXT_PUBLIC_CLOUDFLARE_ANALYTICS_TOKEN;
 const source = "https://static.cloudflareinsights.com/beacon.min.js";
-// Reviewed 2026-10-05: this beacon uses XHR and sendBeacon only. Vendor changes fail closed.
-const integrity = "sha384-IJ+SAOzs9MgkuZ7AgklnzuCuJygVaKTjPTYXJMvM7piBSj4Q16DQGOWfe2kahIq+";
+// Reviewed 2026-10-15 (beacon 2026.10.1): XHR and sendBeacon only. Vendor changes fail closed.
+const integrity = "sha384-DSBfgE0somecFTMgit0M4sNXN8O0JQ/LGM3DGGPVvgXIPZvW+H1zSYjc6O83LLBv";
 let script: HTMLScriptElement | undefined;
 let revoked = false;
 

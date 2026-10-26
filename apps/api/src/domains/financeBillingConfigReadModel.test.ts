@@ -41,6 +41,32 @@ describe("target Finance billing config read port", () => {
     expect(sql).toContain("percentage_rate = 5");
   });
 
+  it("counts Commission only with a planSelectedAt the acceptance terms accept (VAY-2171)", async () => {
+    const read = (planSelectedAt: string) =>
+      createTargetFinanceBillingConfigReadPort({
+        connectionString: "postgres://unused",
+        pool: {
+          async query() {
+            return {
+              rows: [
+                {
+                  activePlan: "commission",
+                  planSelectedAt,
+                  percentageRate: "5.0000",
+                  ruleMetadata: {},
+                  updatedAt: "2026-08-11T12:00:00.000Z",
+                },
+              ],
+            } as never;
+          },
+        },
+      }).getBillingConfig("property-1");
+    await expect(read("not a date")).resolves.toBeNull();
+    await expect(read("2026-08-11T12:00:00.000Z")).resolves.toMatchObject({
+      activePlan: "commission",
+    });
+  });
+
   it("does not invent commission terms for an unconfigured property", async () => {
     const port = createTargetFinanceBillingConfigReadPort({
       connectionString: "postgres://unused",

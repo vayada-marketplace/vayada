@@ -764,7 +764,6 @@ const bookingSettingsWriteRepository: BookingSettingsWriteRepository = {
           ? bookingHeaderLogoMediaObjectId
           : settings.headerLogoMediaObjectId,
       showContactButton: settings.showContactButton ?? true,
-      showReferAGuestButton: settings.showReferAGuestButton ?? false,
       showLanguageSelector: settings.showLanguageSelector ?? true,
       showCurrencySelector: settings.showCurrencySelector ?? true,
       heroImage: settings.heroImage ?? "https://cdn.vayada.example/alpenrose/booking-hero.jpg",
@@ -2565,6 +2564,7 @@ function targetPublicHotelProfileRow(): QueryResultRow {
     bookingShowLanguageSelector: false,
     bookingShowCurrencySelector: true,
     bookingReferAGuestModuleEnabled: true,
+    bookingPromoCodes: true,
     bookingHeroImage: "https://cdn.vayada.example/hotels/distribution-alpenrose/booking.jpg",
     bookingHeroHeading: "Stay in the heart of the Alps",
     bookingHeroSubtext: "Book direct for our best available rates.",
@@ -2686,6 +2686,7 @@ function buildAuthenticatedApp(
     settingsWriteRepository?: BookingSettingsWriteRepository;
     publicBookabilityPublisher?: PublicBookabilityPublicationCommandPort;
     bookingPublicationRefresh?: BookingPublicationRefreshPort;
+    publicPageRefresh?: (propertyId: string) => Promise<void>;
     pmsInventoryPublicOfferProjector?: PmsInventoryPublicOfferProjectionPort;
     customDomainRepository?: BookingCustomDomainRepository;
     bookingAddonItemsRepository?: BookingAddonItemsRepository;
@@ -2773,6 +2774,7 @@ function buildAuthenticatedApp(
       options.settingsWriteRepository ?? bookingSettingsWriteRepository,
     publicBookabilityPublisher: options.publicBookabilityPublisher,
     bookingPublicationRefresh: options.bookingPublicationRefresh,
+    publicPageRefresh: options.publicPageRefresh,
     pmsInventoryPublicOfferProjector: options.pmsInventoryPublicOfferProjector,
     bookingCustomDomainRepository: options.customDomainRepository ?? bookingCustomDomainRepository,
     bookingPropertyAccessRepository: propertyAccessRepository,
@@ -4601,7 +4603,30 @@ describe("vayada-api", () => {
       propertyId: pmsPropertyId,
       actorUserId: "user_hotel_owner",
       idempotencyKey: expect.any(String),
+      onlyIfLive: false,
     });
+  });
+
+  it("refreshes only a live page when a design save asks for it (VAY-2129)", async () => {
+    const refreshInputs: Parameters<BookingPublicationRefreshPort["refresh"]>[0][] = [];
+    app = buildAuthenticatedApp({
+      bookingPublicationRefresh: {
+        async refresh(input) {
+          refreshInputs.push(input);
+          return null;
+        },
+      },
+    });
+
+    const response = await injectJson(app, {
+      method: "POST",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/public-bookability?when=live",
+      headers: { authorization: "Bearer valid-token" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toEqual({ propertyId: pmsPropertyId, status: "not_live" });
+    expect(refreshInputs).toMatchObject([{ propertyId: pmsPropertyId, onlyIfLive: true }]);
   });
 
   it("returns booking property settings with auth, policy, and the legacy-compatible shape", async () => {
@@ -4654,13 +4679,9 @@ describe("vayada-api", () => {
         authorization: "Bearer valid-token",
       },
       payload: {
-        property_name: "Updated Alpenrose",
         reservation_email: "new-reservations@alpenrose.example",
         phone_number: "+43 1 9999",
         whatsapp_number: "+43 1 8888",
-        address: "Updated street 1",
-        city: "Innsbruck",
-        country: "AT",
         instagram: "https://instagram.com/updated-alpenrose",
         facebook: "https://facebook.com/updated-alpenrose",
         tiktok: "https://tiktok.com/@updated-alpenrose",
@@ -4689,13 +4710,9 @@ describe("vayada-api", () => {
     expect(response.statusCode).toBe(200);
     expect(response.body).toMatchObject({
       id: "booking_hotel_alpenrose",
-      property_name: "Updated Alpenrose",
       reservation_email: "new-reservations@alpenrose.example",
       phone_number: "+43 1 9999",
       whatsapp_number: "+43 1 8888",
-      address: "Updated street 1",
-      city: "Innsbruck",
-      country: "AT",
       instagram: "https://instagram.com/updated-alpenrose",
       facebook: "https://facebook.com/updated-alpenrose",
       tiktok: "https://tiktok.com/@updated-alpenrose",
@@ -4715,6 +4732,36 @@ describe("vayada-api", () => {
       guest_count_enabled: false,
       terms_text: "Updated Alpenrose booking terms.",
       cancellation_policy_text: "Free cancellation until one day before arrival.",
+    });
+  });
+
+  it("refuses the property name and location, which the property profile owns", async () => {
+    app = buildAuthenticatedApp();
+
+    const response = await injectJson(app, {
+      method: "PATCH",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/property",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+      payload: {
+        property_name: "Updated Alpenrose",
+        address: "Updated street 1",
+        city: "Innsbruck",
+        country: "AT",
+        phone_number: "+43 1 9999",
+      },
+    });
+
+    expect(response.statusCode).toBe(422);
+    expect(response.body).toMatchObject({
+      code: "invalid_payload",
+      details: [
+        "property_name is saved through the property profile, not booking settings.",
+        "address is saved through the property profile, not booking settings.",
+        "city is saved through the property profile, not booking settings.",
+        "country is saved through the property profile, not booking settings.",
+      ],
     });
   });
 
@@ -4756,7 +4803,6 @@ describe("vayada-api", () => {
       headerLogo: "https://cdn.vayada.example/alpenrose/header-logo.webp",
       headerLogoMediaObjectId: bookingHeaderLogoMediaObjectId,
       showContactButton: true,
-      showReferAGuestButton: false,
       showLanguageSelector: true,
       showCurrencySelector: true,
       heroImage: "https://cdn.vayada.example/alpenrose/booking-hero.jpg",
@@ -4773,7 +4819,6 @@ describe("vayada-api", () => {
       payload: {
         headerLogoMediaObjectId: bookingHeaderLogoMediaObjectId,
         showContactButton: false,
-        showReferAGuestButton: true,
         showLanguageSelector: false,
         showCurrencySelector: true,
         heroHeading: "Book the mountain directly",
@@ -4786,7 +4831,6 @@ describe("vayada-api", () => {
       headerLogo: "https://cdn.vayada.example/alpenrose/new-logo.webp",
       headerLogoMediaObjectId: bookingHeaderLogoMediaObjectId,
       showContactButton: false,
-      showReferAGuestButton: true,
       showLanguageSelector: false,
       showCurrencySelector: true,
       heroImage: "https://cdn.vayada.example/alpenrose/booking-hero.jpg",
@@ -5143,6 +5187,31 @@ describe("vayada-api", () => {
 
     expect(response.statusCode).toBe(200);
     expect(published).toEqual([pmsPropertyId]);
+  });
+
+  it("refreshes the booking page after a guest-form save without failing the save (VAY-2129)", async () => {
+    const refreshed: string[] = [];
+    let unavailable = false;
+    app = buildAuthenticatedApp({
+      async publicPageRefresh(propertyId) {
+        refreshed.push(propertyId);
+        if (unavailable) throw new Error("projection unavailable");
+      },
+    });
+    const guestForm = settingsWriteCases.find((writeCase) => writeCase.name === "guest-form")!;
+
+    for (const failing of [false, true]) {
+      unavailable = failing;
+      const response = await injectJson(app, {
+        method: "PUT",
+        url: guestForm.url,
+        headers: { authorization: "Bearer valid-token" },
+        payload: guestForm.payload,
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.body).toEqual(guestForm.expected);
+    }
+    await vi.waitFor(() => expect(refreshed).toEqual([pmsPropertyId, pmsPropertyId]));
   });
 
   it("preserves guest-form phoneRequired when older clients save five-field payloads", async () => {
@@ -7382,7 +7451,7 @@ describe("vayada-api", () => {
         branding: {
           logoUrl: "https://cdn.vayada.example/hotels/distribution-alpenrose/header-logo.webp",
           showContactButton: false,
-          showReferAGuestButton: true,
+          showReferAGuestButton: false,
           showLanguageSelector: false,
           showCurrencySelector: true,
           heroImage: "https://cdn.vayada.example/hotels/distribution-alpenrose/booking.jpg",
@@ -7423,17 +7492,6 @@ describe("vayada-api", () => {
     expect(queries[0]?.text).toContain(
       'booking_branding.show_contact_button AS "bookingShowContactButton"',
     );
-    expect(queries[0]?.text).toContain("entitlement.entitlement_key = 'module:affiliates'");
-    expect(queries[0]?.text).toContain(
-      "pms_resource.organization_id = entitlement.organization_id",
-    );
-    expect(queries[0]?.text).toContain("pms_resource.product = 'pms'");
-    expect(queries[0]?.text).toContain("pms_resource.resource_type = 'pms_property'");
-    expect(queries[0]?.text).toContain(
-      "booking_resource.organization_id = entitlement.organization_id",
-    );
-    expect(queries[0]?.text).toContain("booking_resource.product = 'booking'");
-    expect(queries[0]?.text).toContain("booking_resource.resource_type = 'booking_hotel'");
     expect(queries[0]?.text).toContain("booking_branding.header_logo_media_object_id");
     expect(queries[0]?.text).toContain("media.purpose = 'booking.header_logo'");
     expect(queries[0]?.text).toContain('booking_branding.hero_image_url AS "bookingHeroImage"');
@@ -7444,7 +7502,7 @@ describe("vayada-api", () => {
     expect(serializePublicHotelProfileProjection(profile!).hotel.branding).toEqual({
       logoUrl: "https://cdn.vayada.example/hotels/distribution-alpenrose/header-logo.webp",
       showContactButton: false,
-      showReferAGuestButton: true,
+      showReferAGuestButton: false,
       showLanguageSelector: false,
       showCurrencySelector: true,
       heroImage: "https://cdn.vayada.example/hotels/distribution-alpenrose/booking.jpg",
@@ -7675,12 +7733,6 @@ describe("vayada-api", () => {
               },
             ] as unknown as T[],
           };
-        }
-        if (
-          text.includes("FROM marketplace.marketplace_offers offer") &&
-          text.includes('offer.id::text AS "offerId"')
-        ) {
-          return { rows: [] };
         }
         if (text.includes("INSERT INTO hotel_catalog.property_public_profile_read_model")) {
           return { rows: [] };
@@ -7950,13 +8002,9 @@ describe("vayada-api", () => {
         authorization: "Bearer valid-token",
       },
       payload: {
-        property_name: "Target Alpenrose",
         reservation_email: "target@alpenrose.example",
         phone_number: "+43 1 1111",
         whatsapp_number: "+43 1 2222",
-        address: "Target lane 1",
-        city: "Vienna",
-        country: "AT",
         instagram: "https://instagram.com/target-alpenrose",
         facebook: "https://facebook.com/target-alpenrose",
         tiktok: "https://tiktok.com/@target-alpenrose",
@@ -8061,7 +8109,6 @@ describe("vayada-api", () => {
       payload: {
         headerLogoMediaObjectId: bookingHeaderLogoMediaObjectId,
         showContactButton: false,
-        showReferAGuestButton: true,
         showLanguageSelector: false,
         showCurrencySelector: true,
         heroHeading: "Book the mountain directly",
@@ -8074,7 +8121,6 @@ describe("vayada-api", () => {
       headerLogo: "https://cdn.vayada.example/alpenrose/new-logo.webp",
       headerLogoMediaObjectId: bookingHeaderLogoMediaObjectId,
       showContactButton: false,
-      showReferAGuestButton: true,
       showLanguageSelector: false,
       showCurrencySelector: true,
       heroImage: "https://cdn.vayada.example/alpenrose/booking-hero.jpg",
@@ -8108,7 +8154,6 @@ describe("vayada-api", () => {
       JSON.stringify({
         headerLogoMediaObjectId: bookingHeaderLogoMediaObjectId,
         showContactButton: false,
-        showReferAGuestButton: true,
         showLanguageSelector: false,
         showCurrencySelector: true,
         heroHeading: "Book the mountain directly",
@@ -8164,7 +8209,6 @@ describe("vayada-api", () => {
       headerLogo: "https://cdn.vayada.example/alpenrose/new-logo.webp",
       headerLogoMediaObjectId: bookingHeaderLogoMediaObjectId,
       showContactButton: false,
-      showReferAGuestButton: true,
       showLanguageSelector: false,
       showCurrencySelector: true,
       heroImage: "https://cdn.vayada.example/alpenrose/booking-hero.jpg",
@@ -8513,6 +8557,7 @@ describe("vayada-api", () => {
           imageUrl: null,
           photos: [],
           location: null,
+          leadTimeHours: null,
           leadTime: null,
           maxGuests: null,
           maxQuantity: 1,
@@ -15575,6 +15620,75 @@ describe("vayada-api", () => {
     expect(commandRepository.roomTypeUpdates).toHaveLength(0);
   });
 
+  it("saves how guests see a PMS room-type's place and rejects unknown values (VAY-2321)", async () => {
+    const commandRepository = createPmsOperationsCommandRepository(structuredClone(pmsRoomTypes));
+    const server = buildAuthenticatedApp({
+      permissions: ["pms.operations.manage"],
+      entitlements: [
+        {
+          product: "pms",
+          key: "property-management",
+          status: "active",
+          resource: {
+            product: "pms",
+            resourceType: "pms_property",
+            resourceId: pmsPropertyId,
+          },
+        },
+      ],
+      pmsOperationsCommandRepository: commandRepository,
+    });
+    app = server;
+    const patch = (key: string, payload: Record<string, unknown>) =>
+      injectJson(server, {
+        method: "PATCH",
+        url: `/api/pms/properties/${pmsPropertyId}/room-types/${pmsRoomTypes[0].roomTypeId}`,
+        payload: { commandId: `cmd-${key}`, idempotencyKey: key, ...payload },
+        headers: { authorization: "Bearer valid-token" },
+      });
+
+    const saved = await patch("room-type-location-display", {
+      locationSource: "custom",
+      locationPrecision: "approximate",
+      locationArea: "  Ahangama ",
+      showMapInDetails: false,
+    });
+    expect(saved.statusCode).toBe(200);
+    expect(commandRepository.roomTypeUpdates[0]).toMatchObject({
+      attributes: {
+        locationSource: "custom",
+        locationPrecision: "approximate",
+        locationArea: "Ahangama",
+        showMapInDetails: false,
+      },
+    });
+    expect((await patch("room-type-location-area-clear", { locationArea: "" })).statusCode).toBe(
+      200,
+    );
+    expect(commandRepository.roomTypeUpdates[1]).toMatchObject({
+      attributes: { locationArea: null },
+    });
+
+    for (const [payload, message] of [
+      [{ locationSource: "villa" }, "Room type update locationSource must be property or custom."],
+      [{ locationSource: null }, "Room type update locationSource must be property or custom."],
+      [
+        { locationPrecision: "blurred" },
+        "Room type update locationPrecision must be exact or approximate.",
+      ],
+      [
+        { locationArea: "x".repeat(121) },
+        "Room type update locationArea must be text of at most 120 characters, or null.",
+      ],
+      [{ showMapInDetails: "yes" }, "Room type update showMapInDetails must be true or false."],
+    ] as const) {
+      const response = await patch("room-type-location-display-invalid", payload);
+      expect(response.statusCode).toBe(400);
+      expect(response.body).toMatchObject({ code: "invalid_body", message });
+    }
+    expect(commandRepository.roomTypeUpdates).toHaveLength(2);
+  });
+
   it("rejects PMS room-type update fields the command does not save", async () => {
     const commandRepository = createPmsOperationsCommandRepository();
     app = buildAuthenticatedApp({
@@ -16939,6 +17053,187 @@ describe("vayada-api", () => {
     });
   });
 
+  describe("payment breakdown visibility (VAY-2152)", () => {
+    const money = (amountDecimal: string) => ({ amountDecimal, currency: "EUR" });
+    const breakdown = {
+      grossAmount: money("200.00"),
+      stripeFee: money("3.10"),
+      vayadaCommission: money("10.00"),
+      netPayout: money("186.90"),
+    };
+    const paidReservation: PmsOperationalReservation = {
+      ...pmsReservations[1],
+      pricing: { totalAmount: money("200.00"), balanceAmount: money("0.00") },
+      payment: { method: "card", status: "captured", breakdown },
+    };
+    const reservationRepository: PmsOperationsReadRepository = {
+      ...pmsOperationsRepository,
+      async listReservationsByPropertyId() {
+        return { items: [paidReservation], total: 1 };
+      },
+      async listReservationsOverlappingStayRangeByPropertyId() {
+        return { items: [paidReservation], total: 1 };
+      },
+      async findReservationByGuestBookingId() {
+        return paidReservation;
+      },
+    };
+    const reservationsUrl = `/api/pms/properties/${pmsPropertyId}/reservations`;
+
+    it.each([
+      {
+        role: "owner",
+        roleKey: "hotel_owner",
+        permissions: ["pms.reservation.read", "pms.finance.read"] as PermissionKey[],
+        showsBreakdown: true,
+      },
+      {
+        role: "front desk",
+        roleKey: "front_desk",
+        permissions: ["pms.reservation.read", "pms.guest_contact.read"] as PermissionKey[],
+        showsBreakdown: false,
+      },
+      {
+        role: "reservation manager",
+        roleKey: "hotel_custom",
+        permissions: ["pms.reservation.read", "pms.finance.read"] as PermissionKey[],
+        showsBreakdown: true,
+      },
+    ])(
+      "$role reservation reads keep totals and show the breakdown only with Financials read",
+      async (testCase) => {
+        app = buildAuthenticatedApp({
+          permissions: testCase.permissions,
+          roleKey: testCase.roleKey,
+          entitlements: [{ product: "pms", key: "property-management", status: "active" }],
+          pmsOperationsRepository: reservationRepository,
+        });
+
+        const responses = await Promise.all(
+          [
+            reservationsUrl,
+            `${reservationsUrl}?stayFrom=2026-08-15&stayTo=2026-08-18`,
+            `${reservationsUrl}/${paidReservation.guestBookingId}`,
+          ].map((url) =>
+            injectJson(app!, {
+              method: "GET",
+              url,
+              headers: { authorization: "Bearer valid-token" },
+            }),
+          ),
+        );
+        const [list, stayRange, detail] = responses.map((response) => response.body);
+        const items = [
+          (list as PmsOperationsTestReservationListResponse).items[0],
+          (stayRange as PmsOperationsTestReservationListResponse).items[0],
+          (detail as PmsOperationsTestDetailResponse<PmsOperationalReservation>).item,
+        ];
+
+        expect(responses.map((response) => response.statusCode)).toEqual([200, 200, 200]);
+        for (const item of items) {
+          expect(item.pricing).toEqual(paidReservation.pricing);
+          expect(item.payment).toEqual(
+            testCase.showsBreakdown
+              ? paidReservation.payment
+              : { method: "card", status: "captured" },
+          );
+        }
+      },
+    );
+
+    it("refuses housekeeping every reservation read", async () => {
+      app = buildAuthenticatedApp({
+        permissions: ["pms.dashboard.read", "pms.calendar.read", "pms.room_status.read"],
+        roleKey: "housekeeping",
+        entitlements: [{ product: "pms", key: "property-management", status: "active" }],
+        pmsOperationsRepository: reservationRepository,
+      });
+
+      for (const url of [reservationsUrl, `${reservationsUrl}/${paidReservation.guestBookingId}`]) {
+        const response = await injectJson(app, {
+          method: "GET",
+          url,
+          headers: { authorization: "Bearer valid-token" },
+        });
+        expect(response.statusCode, url).toBe(403);
+        expect(JSON.stringify(response.body), url).not.toContain("stripeFee");
+      }
+    });
+
+    it.each([
+      { permissions: ["pms.operations.manage"] as PermissionKey[], showsBreakdown: false },
+      {
+        permissions: ["pms.operations.manage", "pms.finance.read"] as PermissionKey[],
+        showsBreakdown: true,
+      },
+    ])(
+      "command responses show the breakdown only with Financials read ($permissions)",
+      async (testCase) => {
+        const commandRepository = createPmsOperationsCommandRepository();
+        // Every command result carries the paid reservation, as the PostgreSQL repository does.
+        const paidCommandRepository = new Proxy(commandRepository, {
+          get(target, key, receiver) {
+            const value: unknown = Reflect.get(target, key, receiver);
+            if (typeof value !== "function") return value;
+            return async (...args: unknown[]) => {
+              const result = (await value.apply(target, args)) as {
+                ok?: boolean;
+                reservation?: PmsOperationalReservation;
+              };
+              return result?.ok && result.reservation
+                ? {
+                    ...result,
+                    reservation: { ...result.reservation, payment: paidReservation.payment },
+                  }
+                : result;
+            };
+          },
+        });
+        app = buildAuthenticatedApp({
+          permissions: testCase.permissions,
+          entitlements: [{ product: "pms", key: "property-management", status: "active" }],
+          pmsOperationsCommandRepository: paidCommandRepository,
+        });
+        const checkout = pmsCheckOutCases["checkout-charges-and-checkout"]!;
+        const commands = [
+          pmsAssignmentCommandCases["assignment-command-assign"]!,
+          pmsOperationalCommandCases["checkin-command"]!,
+          pmsOperationalCommandCases["operational-status-transition"]!,
+          pmsOperationalCommandCases["no-show-command"]!,
+          {
+            ...checkout,
+            request: {
+              ...checkout.request,
+              body: {
+                ...checkout.request.body,
+                fulfilledAddonSelectionIds: ["F6855600-0000-0000-0000-000000000001"],
+              },
+            },
+          },
+        ];
+
+        for (const commandCase of commands) {
+          const response = await injectJson(app, {
+            method: commandCase.request.method ?? "POST",
+            url: commandCase.request.path,
+            payload: commandCase.request.body,
+            headers: { authorization: "Bearer valid-token" },
+          });
+
+          expect(response.statusCode, commandCase.caseId).toBe(commandCase.expected.status);
+          expect(
+            (response.body as { reservation: PmsOperationalReservation }).reservation.payment,
+            commandCase.caseId,
+          ).toEqual(
+            testCase.showsBreakdown
+              ? paidReservation.payment
+              : { method: "card", status: "captured" },
+          );
+        }
+      },
+    );
+  });
+
   it("returns PMS reservations overlapping the requested stay range for calendar reads", async () => {
     app = buildAuthenticatedApp({
       permissions: ["pms.reservation.read"],
@@ -18022,6 +18317,26 @@ describe("vayada-api", () => {
       { commandId: "cmd-accept-001", audit: { actor: { kind: "user" } } },
       { commandId: "cmd-mark-paid-001", audit: { actor: { kind: "user" } } },
     ]);
+    expect(commandRepository.commands.at(-1)).not.toHaveProperty("settlementMethod");
+
+    // VAY-2373 (D2): at check-in staff say how they took the money; nothing is charged online.
+    const cash = await injectJson(app, {
+      method: "POST",
+      url: `${baseUrl}/mark-paid`,
+      headers: { authorization: "Bearer valid-token" },
+      payload: { commandId: "cmd-cash", idempotencyKey: "idem-cash", settlementMethod: "cash" },
+    });
+    expect(cash.statusCode).toBe(200);
+    expect(commandRepository.commands.at(-1)).toMatchObject({ settlementMethod: "cash" });
+
+    const stripeCard = await injectJson(app, {
+      method: "POST",
+      url: `${baseUrl}/mark-paid`,
+      headers: { authorization: "Bearer valid-token" },
+      payload: { commandId: "cmd-card", idempotencyKey: "idem-card", settlementMethod: "card" },
+    });
+    expect(stripeCard.statusCode).toBe(400);
+    expect(commandRepository.commands.at(-1)).toMatchObject({ commandId: "cmd-cash" });
   });
 
   it("rejects assignment-scoped PMS no-show commands", async () => {
@@ -18222,6 +18537,81 @@ describe("vayada-api", () => {
     });
     expect(readOnlyWrite.statusCode).toBe(403);
     expect(readOnlyWrite.body).toMatchObject({ code: "missing_permission" });
+  });
+
+  it("stores check-in prompts and types and check-out labels, refusing other step fields", async () => {
+    const commandRepository = createPmsOperationsCommandRepository();
+    const server = buildAuthenticatedApp({
+      permissions: ["pms.operations.manage"],
+      entitlements: [{ product: "pms", key: "property-management", status: "active" }],
+      pmsOperationsCommandRepository: commandRepository,
+    });
+    app = server;
+    const write = (suffix: string, idempotencyKey: string, steps: unknown[]) =>
+      injectJson(server, {
+        method: "PUT",
+        url: `/api/pms/properties/${pmsPropertyId}/${suffix}`,
+        payload: { commandId: idempotencyKey, idempotencyKey, steps },
+        headers: { authorization: "Bearer valid-token" },
+      });
+
+    const checkIn = await write("check-in-checklist", "template-fields-check-in", [
+      {
+        stepId: "deposit",
+        label: "Collect deposit",
+        required: true,
+        prompt: " Card ",
+        type: "amount",
+      },
+      { stepId: "ids", label: "Check IDs", required: false, prompt: "", type: "checkbox" },
+    ]);
+    const checkOut = await write("check-out-inspection", "template-fields-check-out", [
+      {
+        stepId: "minibar",
+        label: "Minibar",
+        required: true,
+        okLabel: "Full",
+        negativeLabel: "Used",
+        notePrompt: "Which items?",
+      },
+    ]);
+
+    expect(checkIn.statusCode).toBe(200);
+    expect((checkIn.body as PmsOperationalTemplateCommandResponse).template.steps).toEqual([
+      {
+        stepId: "deposit",
+        label: "Collect deposit",
+        required: true,
+        prompt: "Card",
+        type: "amount",
+      },
+      { stepId: "ids", label: "Check IDs", required: false, type: "checkbox" },
+    ]);
+    expect(checkOut.statusCode).toBe(200);
+    expect((checkOut.body as PmsOperationalTemplateCommandResponse).template.steps).toEqual([
+      {
+        stepId: "minibar",
+        label: "Minibar",
+        required: true,
+        okLabel: "Full",
+        negativeLabel: "Used",
+        notePrompt: "Which items?",
+      },
+    ]);
+
+    const wrongKind = await write("check-out-inspection", "template-fields-wrong-kind", [
+      { stepId: "minibar", label: "Minibar", required: true, prompt: "Count bottles" },
+    ]);
+    expect(wrongKind.statusCode).toBe(400);
+    expect(wrongKind.body).toMatchObject({
+      code: "invalid_body",
+      message: "Template step 1 does not save prompt.",
+    });
+    const badType = await write("check-in-checklist", "template-fields-bad-type", [
+      { stepId: "deposit", label: "Collect deposit", type: "signature" },
+    ]);
+    expect(badType.statusCode).toBe(400);
+    expect(commandRepository.templateUpdates).toHaveLength(2);
   });
 
   it("rejects PMS operations reads with an invalid token", async () => {

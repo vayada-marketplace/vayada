@@ -104,7 +104,7 @@ Do not treat a passing disposable or staging rehearsal as proof of live parity.
 
 The candidate must pass migrations from empty and upgraded databases, Finance
 domain/API/authorization/export tests, PMS Web build and lint, and payment,
-provider, checkout, payout, and affiliate regression suites. Record exact
+provider, checkout, and payout regression suites. Record exact
 commands and CI links. Mocked browser fixtures are separate from real-account
 evidence.
 

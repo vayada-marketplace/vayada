@@ -1,7 +1,27 @@
 import { createPublicPricingOfferCatalog } from "../domains/publicPricingOfferCatalog.js";
+import {
+  activeBookingPublicationGateConfig,
+  hotelAddressSql,
+  publicationServesAddress,
+  visibleActiveBookingPublication,
+} from "../domains/activeBookingPublicationGate.js";
 import { createPublicQuoteGuestDisclosure } from "../domains/publicQuoteGuestDisclosure.js";
 import { createPublicPricingAddonCatalog } from "../domains/publicPricingAddonCatalog.js";
+import { readGuestModuleSwitches } from "../domains/bookingGuestModules.js";
+import {
+  createPublicPricingStayPrices,
+  parseStayPricesQuery,
+} from "../domains/publicPricingStayPrices.js";
 import { createCurrentPricingQuoteStore } from "../domains/currentPricingQuoteStore.js";
+import { lockPricingManualPaymentTerms } from "../domains/pricingManualPayment.js";
+import {
+  paymentWindowArrivalRange,
+  readPaymentMethodWindows,
+} from "../domains/pricingPaymentWindows.js";
+import {
+  manualPaymentEarliestArrival,
+  readPricingCheckInPlace,
+} from "../domains/pricingManualPaymentLead.js";
 import {
   PricingAcceptanceError,
   writePricingAcceptance,
@@ -9,13 +29,16 @@ import {
 import {
   completePricingCardPayment,
   PricingCardPaymentError,
+  voidPricingCardPayment,
 } from "../domains/pricingCardPaymentCompletion.js";
-import { admitAffiliateArrivalForCurrentHost } from "../domains/bookingAffiliateArrivalHost.js";
-import { readBookingAffiliateContextForQuote } from "../domains/bookingAffiliateContextForQuote.js";
 import {
-  bindLiveAffiliateOriginal,
-  lockLiveAffiliateContextForOriginal,
-} from "../domains/bookingAffiliateLiveOriginalBinding.js";
+  executePricingCardRefundSoon,
+  PricingCardRefundError,
+  previewPricingCardRefund,
+  stagePricingCardRefund,
+  type StagedPricingCardRefund,
+} from "../domains/pricingCardRefund.js";
+import { recordPricingRetainedRevenue } from "../domains/pricingRetainedRevenue.js";
 import {
   createReplacementBookingQuoteIssuer,
   requirePublicQuoteKey,
@@ -24,14 +47,18 @@ import type { ExternalChangePresentationPort } from "../domains/booking/external
 import { pmsRoomStayRestrictionReason } from "../domains/pmsRoomSelectionConflicts.js";
 import {
   bestBookingPromotion,
+  BOOKING_WEB_ANALYTICS_CONSENT_VERSION,
   evaluateSameDayBooking,
-  FUNNEL_EVENT_TYPES,
-  FUNNEL_PAYMENT_METHODS,
+  isFunnelId,
+  isManualPricingPaymentMethod,
   parseBookingFlexibleCancellationTerms,
   parseBookingRoomSelection,
+  parseFunnelEventMetadata,
+  publicOfferCancellation,
   SAME_DAY_BOOKING_POLICY_DEFAULTS,
   type AddonEconomicTerms,
   type BookedCancellationOutcome,
+  type ManualPricingPaymentMethod,
 } from "@vayada/domain-booking";
 import { pricingCurrencyScale } from "@vayada/domain-booking/replacement-pricing";
 import {
@@ -46,17 +73,18 @@ import {
 import type { BillingConfigReadModel, BillingConfigReadPort } from "@vayada/domain-finance";
 import { normalizeNationalityCode } from "@vayada/locale-constants";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import pg, { type QueryResult, type QueryResultRow } from "pg";
 import {
   bookedMealDescription,
   projectBookingRoomSelection,
 } from "../domains/bookingRoomSelectionProjection.js";
 import { appendMissingAddonRevenueEvidence } from "../domains/bookingAddonRevenueEvidence.js";
-import { publishAffiliateReservationLifecycle } from "../domains/bookingAffiliateReservationLifecycle.js";
 import type { BankTransferBookingOperations } from "../domains/financeBankTransferBooking.js";
 import { lockPmsInventoryMutationScope } from "../domains/pmsInventoryMutationLock.js";
 import { releaseAbandonedBookingEdits } from "../jobs/pendingBookingEditCleanup.js";
+import { createBookingLookupRateLimit } from "../platform/bookingLookupRateLimit.js";
+import { createBookingWebEventRateLimit } from "../platform/bookingWebEventRateLimit.js";
 import { quoteTargetRoomSelection } from "./bookingWebMixedQuote.js";
 import { pricingRetiredError } from "./pricingRetired.js";
 import { reserveTargetMixedBooking } from "./bookingWebMixedReservation.js";
@@ -88,13 +116,30 @@ import { releasedPmsReservationOfferKeys } from "../domains/pmsInventoryReservat
 import {
   cancelAcceptedPricingStay,
   loadPricingBookingCancellation,
+  loadPricingBookingCancellationTerms,
+  pricingBookingCancellationOutcome,
+  type PricingBookingCancellationTerms,
 } from "../domains/pricingBookingCancellation.js";
-import { enqueueBookingTransitionNotifications } from "../jobs/bookingEmails.js";
+import { loadStayPlaces, type StayPlace } from "../domains/stayPlaces.js";
+import {
+  enqueueBookingLifecycleEmailJob,
+  enqueueBookingTransitionNotifications,
+  loadBookingNotificationSnapshot,
+  normalizeEmail,
+} from "../jobs/bookingEmails.js";
+import {
+  decideExtrasRequest,
+  insertExtrasRequest,
+  loadExtrasRequests,
+  loadOfferedExtras,
+  type ExtrasRequest,
+} from "../domains/bookingExtrasRequests.js";
 import {
   inventoryReservationReceiptFromBookingMetadata,
   type DirectBookingInventoryReservationPort,
   type InventoryReservationReceipt,
 } from "../platform/inventoryReservation.js";
+import type { PlatformMediaServingConfig } from "../platform/mediaServing.js";
 import {
   serializePublicHotelQuoteProjection,
   type PublicHotelQuoteQuery,
@@ -104,13 +149,6 @@ import {
   serializePublicHotelProfileProjection,
   type PublicHotelProfileRepository,
 } from "./aiHotels.js";
-import {
-  registerBookingWebAffiliateRoutes,
-  registerRetiredAffiliateEnrollmentRoutes,
-  type BookingWebAffiliateHotelResolver,
-  type BookingWebAffiliateRepository,
-} from "./bookingWebAffiliate.js";
-
 type BookingWebHostParams = {
   host: string;
 };
@@ -166,6 +204,12 @@ type BookingWebChangeRequest = {
   addonPackageQuantities?: Record<string, number>;
   addonDates?: Record<string, string[]>;
 };
+/** VAY-2360: the extras a booked guest asks the hotel for. */
+type BookingWebExtrasRequest = {
+  guestEmail?: string;
+  guest_email?: string;
+  addonIds?: unknown;
+};
 type BookingWebChangeRequestQuery = {
   email?: string;
 };
@@ -174,17 +218,6 @@ type BookingWebPromoValidationRequest = {
   checkIn?: string;
   roomTypeId?: string;
   bookingTotal?: number;
-};
-type BookingWebAttributionClickRequest = {
-  clickId?: string;
-  referralCode?: string;
-  referral_code?: string;
-  sessionId?: string;
-  session_id?: string;
-  landingUrl?: string;
-  landing_url?: string;
-  referrer?: string;
-  metadata?: Record<string, unknown>;
 };
 type BookingWebTelemetryEventRequest = {
   analyticsConsent?: boolean;
@@ -195,46 +228,25 @@ type BookingWebTelemetryEventRequest = {
   event_type?: string;
   eventId?: string;
   event_id?: string;
-  idempotencyKey?: string;
-  idempotency_key?: string;
   sessionId?: string;
   session_id?: string;
   metadata?: Record<string, unknown>;
 };
-type BookingWebAffiliateRequest = Record<string, unknown>;
-type BookingWebAffiliateParams = BookingWebHotelParams & {
-  affiliateId: string;
-};
 
 export type BookingWebAttributionSink = {
-  recordAffiliateClick(event: BookingWebAffiliateClickEvent): Promise<void>;
   recordTelemetryEvent(event: BookingWebTelemetryEvent): Promise<void>;
 };
 
-export type BookingWebAffiliateClickEvent = {
-  clickId?: string;
-  slug: string;
-  referralCode: string;
-  sessionId?: string;
-  landingUrl?: string;
-  referrer?: string;
-  requestId: string;
-  occurredAt: Date;
-  userAgent?: string;
-  ipAddress?: string;
-  metadata: Record<string, unknown>;
-};
-
+/** No request id or IP address: neither leads back to the guest (VAY-2197). */
 export type BookingWebTelemetryEvent = {
   propertyId: string;
   hotelSlug: string;
   eventType: string;
-  eventId?: string;
-  sessionId?: string;
-  requestId: string;
+  eventId: string;
+  sessionId: string;
   occurredAt: Date;
+  /** Only to tell bots apart; not stored. */
   userAgent?: string;
-  ipAddress?: string;
   metadata: Record<string, unknown>;
 };
 
@@ -262,18 +274,11 @@ export type BookingWebCheckoutCommandContext = {
 };
 
 export type BookingWebCheckoutAdapter = {
-  consumeLookupAttempt(
-    clientAddressHash: string,
-    context: BookingWebCheckoutCommandContext,
-  ): Promise<void>;
   getPricingOffers?(slug: string): Promise<unknown>;
+  getPricingStayPrices?(slug: string, query: unknown): Promise<unknown>;
   getPricingAddons?(slug: string): Promise<unknown>;
   getQuoteGuestDisclosure?(slug: string, quoteId: string): Promise<unknown>;
-  acceptPricingQuote?(
-    slug: string,
-    request: BookingWebCheckoutRequest,
-    affiliateContextCookie?: string,
-  ): Promise<unknown>;
+  acceptPricingQuote?(slug: string, request: BookingWebCheckoutRequest): Promise<unknown>;
   completePricingCardPayment?(slug: string, quoteId: string, requestId: string): Promise<unknown>;
   getCheckoutConfig(slug: string, context?: BookingWebCheckoutCommandContext): Promise<unknown>;
   quoteBooking(
@@ -292,7 +297,6 @@ export type BookingWebCheckoutAdapter = {
     slug: string,
     request: BookingWebCheckoutRequest,
     context?: BookingWebCheckoutCommandContext,
-    affiliateContextCookie?: string,
   ): Promise<unknown>;
   confirmAuthorization(
     slug: string,
@@ -348,6 +352,18 @@ export type BookingWebCheckoutAdapter = {
     slug: string,
     bookingId: string,
     query: BookingWebChangeRequestQuery,
+    context?: BookingWebCheckoutCommandContext,
+  ): Promise<unknown>;
+  getStay(
+    slug: string,
+    bookingId: string,
+    request: BookingWebGuestActionRequest,
+    context?: BookingWebCheckoutCommandContext,
+  ): Promise<unknown>;
+  requestExtras(
+    slug: string,
+    bookingId: string,
+    request: BookingWebExtrasRequest,
     context?: BookingWebCheckoutCommandContext,
   ): Promise<unknown>;
   getPaymentInstructions(
@@ -409,15 +425,17 @@ export type BookingHotelChangeRequestRepository = {
     note: string | null,
     context: BookingHotelChangeDecisionContext,
   ): Promise<unknown>;
-  close?(): Promise<void>;
-};
-
-export type BookingWebAffiliateAdapter = {
-  createStripeConnectLink(
-    slug: string,
-    affiliateId: string,
-    request: BookingWebAffiliateRequest,
+  /** VAY-2360: the booking's extras requests (newest first), and the hotel's answer to a pending one. */
+  findExtrasRequests?(propertyId: string, bookingId: string): Promise<unknown[]>;
+  decideExtrasRequest?(
+    propertyId: string,
+    bookingId: string,
+    requestId: string,
+    decision: "accept" | "decline",
+    note: string | null,
+    context: BookingHotelChangeDecisionContext,
   ): Promise<unknown>;
+  close?(): Promise<void>;
 };
 
 export type BookingWebHostResolution = {
@@ -482,12 +500,6 @@ export type BookingWebPublicRoutesOptions = {
   quoteRepository?: PublicHotelQuoteRepository;
   calendarRepository?: BookingWebCalendarRepository;
   checkoutAdapter: BookingWebCheckoutAdapter;
-  /** Dormant until destination storage, runtime grants, and HTTPS transport are approved. */
-  affiliateContextBindingEnabled?: boolean;
-  affiliateArrival?: { pool: pg.Pool; internalToken: string };
-  affiliateHotelResolver?: BookingWebAffiliateHotelResolver;
-  affiliateRepository?: BookingWebAffiliateRepository;
-  affiliateAdapter?: BookingWebAffiliateAdapter;
   attributionSink?: BookingWebAttributionSink;
   now?: () => Date;
 };
@@ -497,9 +509,9 @@ export async function registerBookingWebPublicRoutes(
   options: BookingWebPublicRoutesOptions,
 ): Promise<void> {
   const now = options.now ?? (() => new Date());
+  const eventRateLimit = createBookingWebEventRateLimit({ now: () => now().getTime() });
+  const lookupRateLimit = createBookingLookupRateLimit({ now: () => now().getTime() });
   const checkoutAdapter = options.checkoutAdapter;
-  const affiliateAdapter =
-    options.affiliateAdapter ?? createUnavailableBookingWebAffiliateAdapter();
 
   app.addHook("onRequest", async (request, reply) => {
     writeBookingWebCorsHeaders(request, reply);
@@ -542,29 +554,6 @@ export async function registerBookingWebPublicRoutes(
     return response;
   });
 
-  if (options.affiliateArrival) {
-    const { pool, internalToken } = options.affiliateArrival;
-    if (!internalToken) throw new Error("Booking affiliate arrival internal token is required");
-    app.post<{
-      Body: { host?: unknown; referenceToken?: unknown; contextId?: unknown };
-    }>("/affiliate/arrivals", { bodyLimit: 1024 }, async (request, reply) => {
-      reply.header("Cache-Control", "no-store");
-      const supplied = request.headers["x-vayada-affiliate-arrival-token"];
-      const expected = Buffer.from(internalToken);
-      const actual = typeof supplied === "string" ? Buffer.from(supplied) : Buffer.alloc(0);
-      if (actual.length !== expected.length || !timingSafeEqual(actual, expected))
-        throw createHttpError(404, "Booking Web arrival unavailable.");
-      const result = await admitBookingWebAffiliateArrival(pool, {
-        host: request.body?.host,
-        referenceToken: request.body?.referenceToken,
-        contextId: request.body?.contextId,
-      });
-      return result.status === "admitted"
-        ? { status: "admitted" as const, contextId: result.contextId }
-        : { status: "unavailable" as const };
-    });
-  }
-
   app.get<{ Params: BookingWebHotelParams }>("/hotels/:slug", async (request, reply) => {
     const profile = await options.profileRepository.findProfileBySlug(request.params.slug);
     if (!profile) {
@@ -586,6 +575,19 @@ export async function registerBookingWebPublicRoutes(
       if (!checkoutAdapter.getPricingOffers)
         throw createHttpError(404, "Pricing offers unavailable.");
       return checkoutAdapter.getPricingOffers(request.params.slug);
+    },
+  );
+
+  // Room cards' read-only stay prices: no quote, no hold (VAY-2190).
+  app.get<{ Params: BookingWebHotelParams; Querystring: Record<string, string> }>(
+    "/hotels/:slug/pricing-offers/stay-prices",
+    async (request, reply) => {
+      reply.header("Cache-Control", "no-store");
+      reply.header("X-Robots-Tag", "noindex");
+      reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-stay-prices-read");
+      if (!checkoutAdapter.getPricingStayPrices)
+        throw createHttpError(404, "Stay prices unavailable.");
+      return checkoutAdapter.getPricingStayPrices(request.params.slug, request.query);
     },
   );
 
@@ -633,16 +635,20 @@ export async function registerBookingWebPublicRoutes(
         body.requestId !== request.headers["idempotency-key"]
       )
         throw createHttpError(400, "Invalid quote acceptance request.");
-      const affiliateContextCookie = options.affiliateContextBindingEnabled
-        ? readAffiliateContextCookie(request.headers.cookie)
-        : null;
-      const response = affiliateContextCookie
-        ? await checkoutAdapter.acceptPricingQuote(
-            request.params.slug,
-            body,
-            affiliateContextCookie,
-          )
-        : await checkoutAdapter.acceptPricingQuote(request.params.slug, body);
+      let response;
+      try {
+        response = await checkoutAdapter.acceptPricingQuote(request.params.slug, body);
+      } catch (error) {
+        // The default error body has no room for which rooms sold out (VAY-2320).
+        if ((error as { code?: unknown }).code !== "ROOMS_SOLD_OUT") throw error;
+        return reply.status(409).send({
+          statusCode: 409,
+          error: "Conflict",
+          code: "ROOMS_SOLD_OUT",
+          message: (error as Error).message,
+          roomTypeIds: (error as { roomTypeIds: readonly string[] }).roomTypeIds,
+        });
+      }
       reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-quote-acceptance");
       return response;
     },
@@ -780,9 +786,6 @@ export async function registerBookingWebPublicRoutes(
         request.params.slug,
         body,
         checkoutCommandContext(request, "booking-create", request.params.slug, body, now),
-        options.affiliateContextBindingEnabled
-          ? (readAffiliateContextCookie(request.headers.cookie) ?? undefined)
-          : undefined,
       );
       reply.header("Cache-Control", "no-store");
       reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-booking-create");
@@ -857,26 +860,19 @@ export async function registerBookingWebPublicRoutes(
   app.post<{ Params: BookingWebHotelParams; Body: BookingWebLookupRequest }>(
     "/hotels/:slug/bookings/lookup",
     async (request, reply) => {
+      // Counted in memory before any database work; nothing about the caller goes to the
+      // database (VAY-2222).
+      const limit = lookupRateLimit(request.ip || "unknown");
+      if (!limit.allowed) {
+        reply.header("Retry-After", String(limit.retryAfterSeconds));
+        throw createHttpError(429, "Too many booking lookup attempts. Please try again later.");
+      }
       const body = request.body ?? {};
-      const context = checkoutCommandContext(
-        request,
-        "booking-lookup",
+      const response = await checkoutAdapter.lookup(
         request.params.slug,
         body,
-        now,
+        checkoutCommandContext(request, "booking-lookup", request.params.slug, body, now),
       );
-      try {
-        await checkoutAdapter.consumeLookupAttempt(
-          bookingLookupClientAddressHash(request),
-          context,
-        );
-      } catch (error) {
-        if (isHttpError(error) && error.statusCode === 429) {
-          reply.header("Retry-After", "60");
-        }
-        throw error;
-      }
-      const response = await checkoutAdapter.lookup(request.params.slug, body, context);
       reply.header("Cache-Control", "no-store");
       reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-booking-lookup");
       reply.header("X-Robots-Tag", "noindex");
@@ -1040,6 +1036,58 @@ export async function registerBookingWebPublicRoutes(
     },
   );
 
+  // VAY-2360: what the confirmation page shows beyond the booking itself. By the booking's id only, never its
+  // reference, so it can't be used to guess bookings past the lookup's limit.
+  app.post<{ Params: BookingWebBookingIdParams; Body: BookingWebGuestActionRequest }>(
+    "/hotels/:slug/bookings/:bookingId/stay",
+    async (request, reply) => {
+      const body = { guest_email: normalizeGuestActionRequest(request.body ?? {}).guest_email };
+      const response = await checkoutAdapter.getStay(
+        request.params.slug,
+        request.params.bookingId,
+        body,
+        checkoutCommandContext(
+          request,
+          "booking-stay",
+          `${request.params.slug}:${request.params.bookingId}`,
+          body,
+          now,
+        ),
+      );
+      reply.header("Cache-Control", "no-store");
+      reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-booking-stay");
+      reply.header("X-Robots-Tag", "noindex");
+      return response;
+    },
+  );
+
+  // VAY-2360 part 3: a booked guest asks the hotel for extras; the hotel answers in the PMS.
+  app.post<{ Params: BookingWebBookingIdParams; Body: BookingWebExtrasRequest }>(
+    "/hotels/:slug/bookings/:bookingId/extras-request",
+    async (request, reply) => {
+      const body = {
+        guest_email: normalizeGuestActionRequest(request.body ?? {}).guest_email,
+        addonIds: request.body?.addonIds,
+      };
+      const response = await checkoutAdapter.requestExtras(
+        request.params.slug,
+        request.params.bookingId,
+        body,
+        checkoutCommandContext(
+          request,
+          "booking-extras-request",
+          `${request.params.slug}:${request.params.bookingId}`,
+          body,
+          now,
+        ),
+      );
+      reply.header("Cache-Control", "no-store");
+      reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-booking-extras-request");
+      reply.header("X-Robots-Tag", "noindex");
+      return response;
+    },
+  );
+
   app.get<{ Params: BookingWebBookingHandleParams }>(
     "/hotels/:slug/bookings/:handle/payment-instructions",
     async (request, reply) => {
@@ -1077,125 +1125,85 @@ export async function registerBookingWebPublicRoutes(
     },
   );
 
-  app.post<{ Params: BookingWebHotelParams; Body: BookingWebAttributionClickRequest }>(
-    "/hotels/:slug/attribution/clicks",
+  // Funnel events only (VAY-2197): each type's own allowlisted properties and random ids, so
+  // nothing a guest typed can be stored. Events are a few hundred bytes.
+  app.post<{ Body: BookingWebTelemetryEventRequest }>(
+    "/events",
+    { bodyLimit: 2048 },
     async (request, reply) => {
-      const referralCode = firstString(request.body?.referralCode, request.body?.referral_code);
-      if (!referralCode) {
-        throw createHttpError(400, "Referral code is required.");
-      }
-      const clickId = request.body?.clickId;
+      // Booking Web posts these straight to next-api as text/plain, a CORS "simple" request with
+      // no preflight, so the API sees the guest's address (VAY-2214). Fastify hands it over as a
+      // string.
+      const body =
+        typeof request.body === "string" ? parseTelemetryEventBody(request.body) : request.body;
       if (
-        clickId !== undefined &&
-        (typeof clickId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(clickId))
+        body?.analyticsConsent !== true ||
+        body?.consentVersion !== BOOKING_WEB_ANALYTICS_CONSENT_VERSION
       ) {
-        throw createHttpError(400, "Invalid click ID.");
+        return reply.header("Cache-Control", "no-store").status(204).send();
+      }
+      const hotelSlug = firstString(body?.hotelSlug, body?.hotel_slug);
+      const eventType = firstString(body?.eventType, body?.event_type);
+      if (!hotelSlug || !eventType) {
+        throw createHttpError(400, "Hotel slug and event type are required.");
+      }
+      const metadata = parseFunnelEventMetadata(eventType, body?.metadata);
+      const eventId = firstString(body?.eventId, body?.event_id);
+      const sessionId = firstString(body?.sessionId, body?.session_id);
+      if (!metadata || !isFunnelId(eventId) || !isFunnelId(sessionId)) {
+        throw createHttpError(400, "Invalid booking funnel event.");
+      }
+      // Per address, session and hotel, before any database read (VAY-2214). Nothing is stored
+      // for a refused event, and the browser ignores the answer.
+      const limit = eventRateLimit({ address: request.ip, sessionId, hotelSlug });
+      if (!limit.allowed) {
+        // No address or session; the slug names the hotel being flooded.
+        if (limit.firstInWindow)
+          request.log.warn(
+            limit.scope === "hotel" ? { limit: limit.scope, hotelSlug } : { limit: limit.scope },
+            "Booking Web funnel events rate limited",
+          );
+        return reply
+          .header("Cache-Control", "no-store")
+          .header("Retry-After", String(limit.retryAfterSeconds))
+          .status(429)
+          .send({
+            statusCode: 429,
+            error: "Too Many Requests",
+            message: "Too many booking funnel events.",
+          });
       }
       if (options.attributionSink) {
-        await options.attributionSink.recordAffiliateClick({
-          clickId,
-          slug: request.params.slug,
-          referralCode,
-          sessionId: firstString(request.body?.sessionId, request.body?.session_id),
-          landingUrl: firstString(request.body?.landingUrl, request.body?.landing_url),
-          referrer: firstString(request.body?.referrer, request.headers.referer),
-          requestId: String(request.id),
+        const profile = await options.profileRepository.findProfileBySlug(hotelSlug);
+        if (!profile) {
+          throw createHttpError(404, "Hotel not found.");
+        }
+        await options.attributionSink.recordTelemetryEvent({
+          propertyId: profile.hotel.propertyId,
+          hotelSlug,
+          eventType,
+          eventId,
+          sessionId,
           occurredAt: now(),
           userAgent: request.headers["user-agent"],
-          ipAddress: request.ip,
-          metadata: recordBody(request.body?.metadata),
+          metadata,
         });
       }
       reply.header("Cache-Control", "no-store");
-      reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-attribution-click");
+      reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-telemetry");
       return reply.status(204).send();
     },
   );
-
-  app.post<{ Body: BookingWebTelemetryEventRequest }>("/events", async (request, reply) => {
-    if (request.body?.analyticsConsent !== true || request.body?.consentVersion !== 1) {
-      return reply.header("Cache-Control", "no-store").status(204).send();
-    }
-    const hotelSlug = firstString(request.body?.hotelSlug, request.body?.hotel_slug);
-    const eventType = firstString(request.body?.eventType, request.body?.event_type);
-    if (!hotelSlug || !eventType) {
-      throw createHttpError(400, "Hotel slug and event type are required.");
-    }
-    const metadata = recordBody(request.body?.metadata);
-    if (metadata["funnelVersion"] === 1) {
-      const sequence = metadata["funnelSequence"];
-      const method = metadata["paymentMethod"];
-      if (
-        !(FUNNEL_EVENT_TYPES as readonly string[]).includes(eventType) ||
-        !firstString(request.body?.sessionId, request.body?.session_id) ||
-        !Number.isSafeInteger(sequence) ||
-        Number(sequence) < 1 ||
-        (["complete_booking_clicked", "payment_authorized", "booking_completed"].includes(
-          eventType,
-        ) &&
-          !(FUNNEL_PAYMENT_METHODS as readonly unknown[]).includes(method))
-      ) {
-        throw createHttpError(400, "Invalid booking funnel event.");
-      }
-    }
-    if (options.attributionSink) {
-      const profile = await options.profileRepository.findProfileBySlug(hotelSlug);
-      if (!profile) {
-        throw createHttpError(404, "Hotel not found.");
-      }
-      await options.attributionSink.recordTelemetryEvent({
-        propertyId: profile.hotel.propertyId,
-        hotelSlug,
-        eventType,
-        eventId: firstString(
-          request.body?.eventId,
-          request.body?.event_id,
-          request.body?.idempotencyKey,
-          request.body?.idempotency_key,
-        ),
-        sessionId: firstString(request.body?.sessionId, request.body?.session_id),
-        requestId: String(request.id),
-        occurredAt: now(),
-        userAgent: request.headers["user-agent"],
-        ipAddress: request.ip,
-        metadata: recordBody(request.body?.metadata),
-      });
-    }
-    reply.header("Cache-Control", "no-store");
-    reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-telemetry");
-    return reply.status(204).send();
-  });
-
-  if (options.affiliateRepository) {
-    await registerBookingWebAffiliateRoutes(app, {
-      hotelResolver: options.affiliateHotelResolver ?? {
-        findProfileBySlug: (slug) => options.profileRepository.findProfileBySlug(slug),
-      },
-      repository: options.affiliateRepository,
-    });
-  } else {
-    registerRetiredAffiliateEnrollmentRoutes(app);
-
-    app.post<{ Params: BookingWebAffiliateParams; Body: BookingWebAffiliateRequest }>(
-      "/hotels/:slug/affiliates/:affiliateId/stripe/connect",
-      async (request, reply) => {
-        const response = await affiliateAdapter.createStripeConnectLink(
-          request.params.slug,
-          request.params.affiliateId,
-          request.body ?? {},
-        );
-        reply.header("Cache-Control", "no-store");
-        reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-affiliate-stripe-connect");
-        reply.header("X-Robots-Tag", "noindex");
-        return response;
-      },
-    );
-  }
 }
 
 function writeBookingWebCorsHeaders(request: FastifyRequest, reply: FastifyReply): void {
   const origin = request.headers.origin;
-  if (!isAllowedBookingWebOrigin(origin)) {
+  // Funnel events come from any hotel's booking site, custom domains included (VAY-2214). The
+  // endpoint is public, takes no credentials and answers with no body, so any https origin may post.
+  const allowed =
+    isAllowedBookingWebOrigin(origin) ||
+    (request.url.split("?", 1)[0] === "/api/booking-web/events" && isHttpsOrigin(origin));
+  if (!allowed || typeof origin !== "string") {
     reply.header("Vary", "Origin");
     return;
   }
@@ -1210,8 +1218,25 @@ function writeBookingWebCorsHeaders(request: FastifyRequest, reply: FastifyReply
   reply.header("Vary", "Origin");
 }
 
-function bookingLookupClientAddressHash(request: FastifyRequest): string {
-  return sha256Hex(`booking-lookup-client:${request.ip || "unknown"}`);
+function isHttpsOrigin(origin: unknown): origin is string {
+  if (typeof origin !== "string") return false;
+  try {
+    return new URL(origin).protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function parseTelemetryEventBody(text: string): BookingWebTelemetryEventRequest {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw createHttpError(400, "Invalid booking funnel event.");
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+    throw createHttpError(400, "Invalid booking funnel event.");
+  return parsed as BookingWebTelemetryEventRequest;
 }
 
 function isAllowedBookingWebOrigin(origin: unknown): origin is string {
@@ -1298,6 +1323,9 @@ type TargetCheckoutConfigRow = QueryResultRow & {
   providerAccountId: string | null;
   providerAccountRef: string | null;
   onlineCardReady: boolean | null;
+  /** Finance's card readiness alone (VAY-2301): the pricing-v2 booking page prices in the
+   * publication currency, which the pricing readiness lock checks against Finance's own. */
+  bookingPageCardReady?: boolean | null;
   bankTransferReady?: boolean;
 };
 
@@ -1327,6 +1355,10 @@ export type TargetBookingRow = QueryResultRow & {
   operationalStatus?: string | null;
   assignedRoomTypeName?: string | null;
   unitNames?: unknown;
+  /** VAY-2320: the accepted quote's terms and priced rooms, and the booked room types' names. */
+  bookedTerms?: unknown;
+  bookedPricedRooms?: unknown;
+  bookedRoomNames?: unknown;
   cancelledAt?: Date | string | null;
   cardBrand?: string | null;
   cardLast4?: string | null;
@@ -1443,10 +1475,18 @@ type TargetChangeRequestRow = QueryResultRow & {
 };
 
 export type PgTargetBookingWebCheckoutAdapterConfig = {
+  /** Public CDN settings for room photos on /pricing-offers; without them rooms show no photos. */
+  mediaServing?: Pick<PlatformMediaServingConfig, "bucketName" | "cdnBaseUrl" | "publicPathPrefix">;
   /** Kill switch; the acceptance writer still requires a current publication. */
   replacementPricingAcceptanceEnabled?: boolean;
   /** Card quotes in acceptance; requires stripePaymentProvider. */
   replacementPricingCardAcceptanceEnabled?: boolean;
+  /** Card quotes that leave the rest to pay at the property: deposits (VAY-2205). */
+  replacementPricingDepositAcceptanceEnabled?: boolean;
+  /** Request-mode pay-at-property quotes in acceptance; the hotel confirms each booking. */
+  replacementPricingRequestAcceptanceEnabled?: boolean;
+  /** Bank-transfer and PayPal quotes in acceptance; the hotel confirms each payment. */
+  replacementPricingManualPaymentAcceptanceEnabled?: boolean;
   externalChanges: ExternalChangePresentationPort;
   /** Register only with the reviewed provider runtime; absent keeps Airbnb actions disabled. */
   airbnbAlterations?: {
@@ -1482,8 +1522,6 @@ const TARGET_CHECKOUT_SUPPORTED_PAYMENT_METHODS = [
 ] as const;
 const TARGET_REQUEST_HOST_RESPONSE_HOURS = 24;
 const BOOKING_CONFIRMATION_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
-const BOOKING_LOOKUP_RATE_LIMIT = 5;
-const BOOKING_LOOKUP_RATE_WINDOW_MS = 60 * 1000;
 
 // prettier-ignore
 type TargetCheckoutCommandReservation = { status: "reserved" } | { status: "replay"; body: unknown };
@@ -1536,11 +1574,41 @@ export function createTargetBookingWebCheckoutAdapter(
       max: config.max,
     });
 
-  const pricingOffers = createPublicPricingOfferCatalog(pool);
+  const pricingOffers = createPublicPricingOfferCatalog(pool, {
+    mediaServing: config.mediaServing,
+    // VAY-2304: only rates guests can pay with what this booking page accepts now.
+    payments: {
+      card:
+        config.replacementPricingAcceptanceEnabled === true &&
+        config.replacementPricingCardAcceptanceEnabled === true &&
+        !!config.stripePaymentProvider,
+      deposits: config.replacementPricingDepositAcceptanceEnabled === true,
+      manual:
+        config.replacementPricingManualPaymentAcceptanceEnabled === true
+          ? ["paypal", ...(config.bankTransfers ? (["bank_transfer"] as const) : [])]
+          : [],
+    },
+  });
   const pricingAddons = createPublicPricingAddonCatalog(pool);
+  // Room cards price every offer for each page view (VAY-2190). A small pool of their own keeps
+  // guests' browsing from using up the booking flow's connections; a busy pool fails fast.
+  const stayPricesPool = ownsPool
+    ? new pg.Pool({
+        connectionString: config.connectionString,
+        max: 2,
+        connectionTimeoutMillis: 2000,
+      })
+    : pool;
+  const stayPrices = createPublicPricingStayPrices(stayPricesPool, pricingOffers);
   const guestDisclosure = createPublicQuoteGuestDisclosure(pool);
   const issueReplacementQuote = createReplacementBookingQuoteIssuer(
     createCurrentPricingQuoteStore(pool, 300),
+    config.replacementPricingManualPaymentAcceptanceEnabled === true
+      ? ["paypal", ...(config.bankTransfers ? ["bank_transfer"] : [])]
+      : [],
+    async (slug) =>
+      readGuestModuleSwitches(pool, (await resolveTargetCheckoutProperty(pool, slug)).propertyId),
+    config.replacementPricingDepositAcceptanceEnabled === true,
   );
   const serializeTargetChangeRequest = (row: TargetChangeRequestRow, enabled = false) =>
     serializeChangeRequest(
@@ -1639,52 +1707,6 @@ export function createTargetBookingWebCheckoutAdapter(
   };
 
   return {
-    async consumeLookupAttempt(clientAddressHash, context) {
-      await withTargetCheckoutTransaction(pool, async (client) => {
-        await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
-          `booking-lookup:${clientAddressHash}`,
-        ]);
-        const attempts = await client.query<{ count: string }>(
-          `SELECT count(*)::text AS count
-             FROM platform.product_audit_events
-            WHERE product = 'booking'
-              AND action = 'booking.guest_lookup.attempt'
-              AND target_resource_product = 'booking'
-              AND target_resource_type = 'lookup_client_address_hash'
-              AND target_resource_id = $1
-              AND occurred_at > $2::timestamptz`,
-          [
-            clientAddressHash,
-            new Date(context.occurredAt.getTime() - BOOKING_LOOKUP_RATE_WINDOW_MS).toISOString(),
-          ],
-        );
-        if (Number(attempts.rows[0]?.count ?? 0) >= BOOKING_LOOKUP_RATE_LIMIT) {
-          throw createHttpError(429, "Too many booking lookup attempts. Please try again later.");
-        }
-        await client.query(
-          `INSERT INTO platform.product_audit_events (
-             audit_key, product, action, occurred_at, tenant_scope,
-             actor_type, target_resource_product, target_resource_type,
-             target_resource_id, correlation_id, causation_id,
-             redacted_payload, private_payload, audit_metadata,
-             retention_class, privacy_scope
-           ) VALUES (
-             $1, 'booking', 'booking.guest_lookup.attempt', $2::timestamptz, 'external',
-             'system', 'booking', 'lookup_client_address_hash', $3, $4, $5,
-             $6::jsonb, '{}'::jsonb, $7::jsonb, 'security', 'restricted'
-           )`,
-          [
-            `booking.guest_lookup.attempt.${randomBytes(16).toString("hex")}`,
-            context.occurredAt.toISOString(),
-            clientAddressHash,
-            context.correlationId,
-            context.requestId,
-            JSON.stringify({ operation: context.operation }),
-            JSON.stringify({ source: "apps/api-booking-web-public" }),
-          ],
-        );
-      });
-    },
     async findLatestChangeRequest(propertyId, bookingId) {
       const result = await loadLatestTargetChangeRequest(pool, propertyId, bookingId);
       return result
@@ -1917,18 +1939,34 @@ export function createTargetBookingWebCheckoutAdapter(
       return withCommand(slug, context, async () => {
         const property = await resolveTargetCheckoutProperty(pool, slug);
         const row = await loadTargetCheckoutConfig(pool, property.propertyId);
+        const methods = bookingPagePaymentMethods(row, config);
+        const earliest = await bookingPageManualEarliestArrival(pool, property.propertyId, methods);
+        const windows = await bookingPagePaymentWindows(pool, property.propertyId, methods);
         return {
           propertyId: property.propertyId,
           resourceType: "checkout_config",
           resourceId: property.propertyId,
-          body: serializeTargetCheckoutConfig(property, row),
+          body: {
+            ...serializeTargetCheckoutConfig(property, row),
+            // Without an earliest arrival date a method cannot be quoted, so /book leaves it out;
+            // likewise a booking window whose dates can't be worked out (VAY-2348).
+            bookingPagePaymentMethods: methods.filter(
+              (method) =>
+                (!earliest || !isManualPricingPaymentMethod(method) || earliest[method]) &&
+                !windows.unknown.includes(method),
+            ),
+            ...(earliest ? { manualPaymentEarliestArrival: earliest } : {}),
+            ...(Object.keys(windows.arrival).length
+              ? { paymentMethodArrivalWindows: windows.arrival }
+              : {}),
+          },
         };
       });
     },
     async editRequest(slug, bookingId, action, request, context) {
       return pendingBookingEdit(pool, config, slug, bookingId, action, request, context);
     },
-    async createBooking(slug, request, context, affiliateContextCookie) {
+    async createBooking(slug, request, context) {
       if (!context) {
         throw createHttpError(400, "Checkout command context is required.");
       }
@@ -1974,11 +2012,6 @@ export function createTargetBookingWebCheckoutAdapter(
         assertTargetCheckoutConfigMatchesQuote(checkoutConfig, quote);
         resolveTargetCheckoutAmountSnapshot(request, quote);
         assertTargetSameDayBookingOpen(property, quote.checkIn, config.now?.() ?? new Date());
-        const affiliateContextLocked = await lockLiveAffiliateContextForOriginal(
-          client,
-          property.propertyId,
-          affiliateContextCookie,
-        );
         const booking = await createTargetGuestBooking(
           client,
           config.inventoryReservationPort,
@@ -1990,11 +2023,6 @@ export function createTargetBookingWebCheckoutAdapter(
           billingConfig,
           checkoutConfig,
         );
-        if (affiliateContextLocked && affiliateContextCookie)
-          await bindLiveAffiliateOriginal(client, {
-            id: booking.guestBookingId,
-            contextId: affiliateContextCookie,
-          });
         if (quote.paymentMethod === "bank_transfer") {
           if (!config.bankTransfers) throw createHttpError(503, "Bank transfer is not configured.");
           await config.bankTransfers.bind(client, property.propertyId, booking.guestBookingId);
@@ -2089,37 +2117,62 @@ export function createTargetBookingWebCheckoutAdapter(
       if (!disclosure) throw createHttpError(404, "Guest rules unavailable.");
       return disclosure;
     },
-    async acceptPricingQuote(slug, request, affiliateContextCookie) {
+    async acceptPricingQuote(slug, request) {
       if (!config.replacementPricingAcceptanceEnabled)
         throw createHttpError(404, "Quote acceptance unavailable.");
       try {
-        let contextId: string | null = null;
-        if (affiliateContextCookie) {
-          try {
-            contextId = await readBookingAffiliateContextForQuote(
-              pool,
-              slug,
-              affiliateContextCookie,
-            );
-          } catch {
-            // Context lookup must not block an otherwise valid booking.
-          }
-        }
         const cardPayments =
           config.replacementPricingCardAcceptanceEnabled && config.stripePaymentProvider
-            ? { provider: config.stripePaymentProvider }
+            ? {
+                provider: config.stripePaymentProvider,
+                deposits: config.replacementPricingDepositAcceptanceEnabled === true,
+              }
             : undefined;
-        return await writePricingAcceptance(
+        const result = await writePricingAcceptance(
           pool,
           { slug, command: request },
-          contextId ? { affiliateContextId: contextId } : undefined,
           cardPayments,
+          config.replacementPricingRequestAcceptanceEnabled === true,
+          config.replacementPricingManualPaymentAcceptanceEnabled
+            ? { bankTransfers: config.bankTransfers }
+            : undefined,
         );
+        if (result.kind !== "payment_pending") return result;
+        // Bank transfer or PayPal: the token lets the guest open the bank details or PayPal email
+        // (POST /bookings/confirmation); a replay gets a fresh one.
+        const { propertyId, ...body } = result;
+        const confirmation = await issueTargetBookingConfirmationToken(
+          pool,
+          { guestBookingId: result.bookingId, propertyId },
+          new Date(),
+        );
+        return {
+          ...body,
+          confirmationToken: confirmation.token,
+          confirmationTokenExpiresAt: confirmation.expiresAt,
+        };
       } catch (error) {
         if (error instanceof PricingAcceptanceError && error.code === "card_unavailable")
           throw Object.assign(createHttpError(404, "Online card payment is unavailable."), {
             code: "CARD_PAYMENT_UNAVAILABLE",
           });
+        if (error instanceof PricingAcceptanceError && error.code === "request_unavailable")
+          throw Object.assign(createHttpError(404, "Online booking requests are unavailable."), {
+            code: "REQUEST_ACCEPTANCE_UNAVAILABLE",
+          });
+        if (error instanceof PricingAcceptanceError && error.code === "manual_unavailable")
+          throw Object.assign(
+            createHttpError(404, "Bank transfer and PayPal bookings are unavailable."),
+            { code: "MANUAL_PAYMENT_UNAVAILABLE" },
+          );
+        // VAY-2320: a chosen room type has no free room left for these dates (another booking
+        // took it, or the hotel closed the dates). Nothing was stored; the guest keeps the other
+        // rooms and chooses again for that one.
+        if (error instanceof PricingAcceptanceError && error.code === "sold_out")
+          throw Object.assign(
+            createHttpError(409, "A room you chose is no longer available for these dates."),
+            { code: "ROOMS_SOLD_OUT", roomTypeIds: error.roomTypeIds },
+          );
         const statusCode =
           error instanceof PricingAcceptanceError
             ? error.code === "conflict"
@@ -2190,6 +2243,20 @@ export function createTargetBookingWebCheckoutAdapter(
       }
       if (!offers) throw createHttpError(404, "Pricing offers unavailable.");
       return offers;
+    },
+    async getPricingStayPrices(slug, query) {
+      const stay = parseStayPricesQuery(query);
+      if (!stay) throw createHttpError(400, "Invalid stay.");
+      let prices;
+      try {
+        prices = await stayPrices.read(slug, stay);
+      } catch (error) {
+        throw Object.assign(new Error("Stay prices temporarily unavailable.", { cause: error }), {
+          statusCode: 503,
+        });
+      }
+      if (!prices) throw createHttpError(404, "Stay prices unavailable.");
+      return prices;
     },
     async quoteBooking(slug, request, context) {
       return issueReplacementQuote(slug, request, context?.idempotencyKey);
@@ -2433,6 +2500,7 @@ export function createTargetBookingWebCheckoutAdapter(
           action: "withdraw",
           eventType: "guest_booking.withdrawn",
         },
+        config.stripePaymentProvider,
       );
     },
     async cancelPreview(slug, bookingId, request, context) {
@@ -2444,13 +2512,52 @@ export function createTargetBookingWebCheckoutAdapter(
           bookingId,
           requireGuestEmail(request.guest_email),
         );
-        assertLifecycleMutationAllowed(booking, "cancel");
+        assertLifecycleMutationAllowed(booking, "cancel", !!config.stripePaymentProvider);
         const occurredAt = context?.occurredAt ?? new Date();
+        const outcome = await loadBookedCancellationOutcome(
+          pool,
+          property.propertyId,
+          booking,
+          occurredAt,
+        );
+        const cardRefund =
+          cardPaid(booking) && outcome
+            ? await previewPricingCardRefund(pool, {
+                propertyId: property.propertyId,
+                guestBookingId: booking.guestBookingId,
+                retainedMinor: outcome.retainedMinor,
+              })
+            : null;
+        // A paid stay whose card can't be refunded here is refused, never shown as "nothing back".
+        if (cardPaid(booking) && !cardRefund)
+          throw createHttpError(
+            409,
+            "This booking's card payment can't be refunded online. Please contact the hotel.",
+            "BOOKING_CANCEL_NOT_ONLINE",
+          );
+        // Several rooms are each named in the preview (VAY-2320).
+        const roomTypeIds =
+          outcome && outcome.rooms.length > 1
+            ? Array.from(new Set(outcome.rooms.flatMap((room) => room.roomTypeId ?? [])))
+            : [];
+        const roomNames = roomTypeIds.length
+          ? new Map(
+              (
+                await pool.query<{ id: string; name: string }>(
+                  `SELECT id::text AS id, name FROM pms.room_types
+                   WHERE property_id=$1::uuid AND id::text = ANY($2::text[])`,
+                  [property.propertyId, roomTypeIds],
+                )
+              ).rows.map((row) => [row.id, row.name] as const),
+            )
+          : undefined;
         const preview = resolveTargetCancellationPreview(
           booking,
           property.timezone,
           occurredAt,
-          await loadBookedCancellationOutcome(pool, property.propertyId, booking, occurredAt),
+          outcome,
+          cardRefund,
+          roomNames,
         );
         return {
           propertyId: property.propertyId,
@@ -2473,6 +2580,7 @@ export function createTargetBookingWebCheckoutAdapter(
           action: "cancel",
           eventType: "guest_booking.canceled",
         },
+        config.stripePaymentProvider,
       );
     },
     async previewChangeRequest(slug, bookingId, request, context) {
@@ -2579,6 +2687,160 @@ export function createTargetBookingWebCheckoutAdapter(
         };
       });
     },
+    async getStay(slug, bookingId, request, context) {
+      return withCommand(slug, context, async () => {
+        if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(bookingId))
+          throw createHttpError(404, "Booking not found.");
+        const property = await resolveTargetHistoricalBookingProperty(pool, slug);
+        const booking = await loadTargetBooking(
+          pool,
+          property.propertyId,
+          bookingId,
+          requireGuestEmail(request.guestEmail ?? request.guest_email),
+        );
+        const status = publicBookingLifecycleStatus(
+          booking.lifecycleStatus,
+          booking.operationalStatus,
+        );
+        const ids = { propertyId: property.propertyId, guestBookingId: booking.guestBookingId };
+        const [terms, places] = await Promise.all([
+          // The terms that still apply, as the cancel route would apply them now: before the stay ends or
+          // any room starts, and only terms it can work out.
+          (status === "pending" || status === "confirmed") &&
+          objectValue(booking.bookingMetadata)["targetSource"] === "pricing_quote_draft"
+            ? loadStayCancellationTerms(pool, ids, booking, context?.occurredAt ?? new Date())
+            : null,
+          // The exact places, as the confirmation email gives them: once the stay is confirmed.
+          ["confirmed", "checked_in", "checked_out"].includes(status)
+            ? loadStayPlaces(pool, ids)
+            : [],
+        ]);
+        return {
+          propertyId: property.propertyId,
+          resourceType: "guest_booking",
+          resourceId: booking.guestBookingId,
+          body: {
+            ...serializeBookingStay(booking, terms, places),
+            extras: await loadStayExtras(pool, ids, booking, status),
+          },
+        };
+      });
+    },
+    async requestExtras(slug, bookingId, request, context) {
+      if (!context) throw createHttpError(400, "Checkout command context is required.");
+      if (!BOOKING_ID.test(bookingId)) throw createHttpError(404, "Booking not found.");
+      const addonIds = Array.isArray(request.addonIds)
+        ? request.addonIds.filter((id): id is string => typeof id === "string")
+        : [];
+      if (
+        addonIds.length === 0 ||
+        addonIds.length > 20 ||
+        addonIds.length !== (request.addonIds as unknown[]).length ||
+        new Set(addonIds).size !== addonIds.length
+      )
+        throw createHttpError(400, "Choose the extras to ask for.");
+      return withTargetCheckoutTransaction(pool, async (client) => {
+        const property = await resolveTargetHistoricalBookingProperty(client, slug);
+        const reservation = await reserveTargetCheckoutCommand(
+          client,
+          property.propertyId,
+          context,
+        );
+        if (reservation.status === "replay") return reservation.body;
+        const booking = await loadTargetBooking(
+          client,
+          property.propertyId,
+          bookingId,
+          requireGuestEmail(request.guestEmail ?? request.guest_email),
+        );
+        const ids = { propertyId: property.propertyId, guestBookingId: booking.guestBookingId };
+        if (
+          publicBookingLifecycleStatus(booking.lifecycleStatus, booking.operationalStatus) !==
+            "confirmed" ||
+          objectValue(booking.bookingMetadata)["targetSource"] !== "pricing_quote_draft"
+        )
+          throw createHttpError(
+            409,
+            "Extras can be asked for on a confirmed booking only.",
+            "EXTRAS_UNAVAILABLE",
+          );
+        // One request at a time: a second press waits for this lock and then finds the first.
+        await lockTargetBookingChangeRequests(client, booking);
+        if ((await loadExtrasRequests(client, ids)).some((item) => item.status === "pending"))
+          throw createHttpError(
+            409,
+            "An extras request is already waiting for an answer.",
+            "EXTRAS_REQUEST_PENDING",
+          );
+        const offered = await loadOfferedExtras(client, stayExtrasInput(ids, booking));
+        const items = addonIds.map((id) => offered.find((offer) => offer.addonId === id));
+        if (items.some((item) => !item))
+          throw createHttpError(
+            409,
+            "These extras can't be asked for any more.",
+            "EXTRAS_NOT_OFFERED",
+          );
+        const created = await insertExtrasRequest(client, {
+          guestBookingId: booking.guestBookingId,
+          items: items as NonNullable<(typeof items)[number]>[],
+        });
+        // The hotel hears about it by email and on the PMS booking page (P4).
+        await enqueueExtrasEmail(client, ids, "host_extras_requested", created, context.occurredAt);
+        const body = { version: "booking-extras-request.v1", request: created };
+        await recordTargetCheckoutCommand(client, {
+          propertyId: property.propertyId,
+          context,
+          resourceType: "booking_change_request",
+          resourceId: created.id,
+          body,
+        });
+        return body;
+      });
+    },
+    async findExtrasRequests(propertyId, bookingId) {
+      if (!BOOKING_ID.test(bookingId)) return [];
+      return loadExtrasRequests(pool, { propertyId, guestBookingId: bookingId });
+    },
+    async decideExtrasRequest(propertyId, bookingId, requestId, decision, note, context) {
+      if (!BOOKING_ID.test(bookingId) || !BOOKING_ID.test(requestId))
+        throw createHttpError(404, "Extras request not found.");
+      const status = decision === "accept" ? "accepted" : "declined";
+      const ids = { propertyId, guestBookingId: bookingId };
+      return withTargetCheckoutTransaction(pool, async (client) => {
+        const decided = await decideExtrasRequest(client, {
+          ...ids,
+          requestId,
+          decision: status,
+          actorUserId: context.actorUserId,
+          note: decision === "decline" ? note : null,
+          at: context.occurredAt,
+        });
+        if (!decided) {
+          // The same answer again gets the same request back; any other is refused, and so is any answer
+          // once the booking isn't confirmed (a cancelled stay's request lapses).
+          const current = (await loadExtrasRequests(client, ids)).find(
+            (item) => item.id === requestId,
+          );
+          if (!current) throw createHttpError(404, "Extras request not found.");
+          if (current.status === status) return current;
+          throw createHttpError(
+            409,
+            current.status === "pending"
+              ? "This booking isn't confirmed any more."
+              : "This extras request has been answered already.",
+          );
+        }
+        await enqueueExtrasEmail(
+          client,
+          ids,
+          decision === "accept" ? "extras_accepted" : "extras_declined",
+          decided,
+          context.occurredAt,
+          context.actorUserId,
+        );
+        return decided;
+      });
+    },
     async getPaymentInstructions(slug, handle, context) {
       return withCommand(slug, context, async () => {
         const property = await resolveTargetHistoricalBookingProperty(pool, slug);
@@ -2635,6 +2897,7 @@ export function createTargetBookingWebCheckoutAdapter(
       if (editCleanupTimer) clearInterval(editCleanupTimer);
       if (ownsPool) {
         await pool.end();
+        await stayPricesPool.end();
       }
     },
   };
@@ -2706,6 +2969,14 @@ export async function resolveTargetCheckoutProperty(
   slug: string,
   requireBookable = false,
 ): Promise<TargetCheckoutPropertyRow> {
+  const gate = activeBookingPublicationGateConfig();
+  if (gate.servesPublications && !requireBookable) {
+    const published = await publishedCheckoutProperty(pool, slug, gate);
+    if (published === "hidden") {
+      throw createHttpError(404, "Booking Web hotel checkout target not found.");
+    }
+    if (published !== "absent") return published;
+  }
   const bookabilityPredicate = requireBookable
     ? `AND profile.freshness_status = 'fresh'
        AND p.lifecycle_status = 'active'
@@ -2777,6 +3048,59 @@ export async function resolveTargetCheckoutProperty(
   return { ...property, ...policy };
 }
 
+/** Once the public site serves setup publications, a hotel that published in setup is the
+ * checkout target exactly while its page is visible; hotels without one still need their
+ * legacy profile (VAY-2134). The legacy card checkout (`requireBookable`) keeps the profile. */
+async function publishedCheckoutProperty(
+  pool: BookingWebQueryExecutor,
+  slug: string,
+  context: { manualPayments: boolean },
+): Promise<TargetCheckoutPropertyRow | "absent" | "hidden"> {
+  const result = await pool.query<
+    TargetCheckoutPropertyRow & { publicContent: unknown; propertyActive: boolean }
+  >(
+    `SELECT
+       p.id::text AS "propertyId",
+       p.display_name AS "displayName",
+       p.default_locale AS "defaultLocale",
+       location.timezone,
+       COALESCE(same_day.enabled, $2::boolean) AS "sameDayBookingsEnabled",
+       CASE WHEN same_day.property_id IS NULL THEN $3::text
+         ELSE same_day.cutoff_local_time END AS "sameDayBookingCutoffTime",
+       revision.public_content AS "publicContent",
+       p.lifecycle_status = 'active' AS "propertyActive"
+     FROM hotel_catalog.property_slugs s
+     JOIN hotel_catalog.properties p ON p.id = s.property_id
+     JOIN hotel_catalog.property_locations location ON location.property_id = p.id
+     JOIN distribution.active_public_booking_revision active ON active.property_id = p.id
+     JOIN distribution.public_booking_content_revisions revision
+       ON revision.id = active.content_revision_id AND revision.property_id = active.property_id
+     LEFT JOIN booking.same_day_booking_policies same_day
+       ON same_day.property_id = p.id
+     WHERE s.slug = $1
+       AND s.locale IS NULL
+       AND ${hotelAddressSql("s")}`,
+    [
+      slug,
+      SAME_DAY_BOOKING_POLICY_DEFAULTS.enabled,
+      SAME_DAY_BOOKING_POLICY_DEFAULTS.cutoffLocalTime,
+    ],
+  );
+  const row = result.rows[0];
+  if (!row) return "absent";
+  const { publicContent, propertyActive, ...property } = row;
+  if (result.rows.length !== 1 || propertyActive !== true) return "hidden";
+  const content = await visibleActiveBookingPublication(
+    pool,
+    { propertyId: row.propertyId, publicContent },
+    context,
+  );
+  return (await publicationServesAddress(pool, row.propertyId, slug, content))
+    ? property
+    : "hidden";
+}
+
+/** Bookings belong to the hotel, so a former address that now redirects still finds them (VAY-2295). */
 export async function resolveTargetHistoricalBookingProperty(
   pool: BookingWebQueryExecutor,
   slug: string,
@@ -2791,9 +3115,7 @@ export async function resolveTargetHistoricalBookingProperty(
      JOIN hotel_catalog.properties p ON p.id = s.property_id
      LEFT JOIN distribution.public_hotel_bookability_profiles profile
        ON profile.property_id = p.id
-     WHERE s.slug = $1
-       AND s.purpose IN ('canonical', 'alias')
-       AND s.status = 'active'
+     WHERE s.slug = $1 AND s.locale IS NULL AND ${hotelAddressSql("s")}
      LIMIT 1`,
     [slug],
   );
@@ -2815,7 +3137,8 @@ export async function loadTargetCheckoutConfig(
        bs.default_currency AS "defaultCurrency",
        bs.benefits,
        bs.last_minute_discount AS "promotionSettings",
-       bs.show_addons_step AS "showAddonsStep",
+       -- VAY-2200: the Feature Hub Add-ons switch hides the step like the page's own choice.
+       (bs.show_addons_step AND bs.addons_enabled) AS "showAddonsStep",
        (SELECT COALESCE(jsonb_agg(jsonb_build_object(
          'id', addon.id::text, 'name', addon.name, 'description', COALESCE(addon.description, ''),
          'price', addon.price_amount, 'currency', addon.currency, 'category', COALESCE(addon.category, 'other'),
@@ -2829,7 +3152,7 @@ export async function loadTargetCheckoutConfig(
        ) ORDER BY COALESCE((addon.metadata ->> 'sortOrder')::int, 0), addon.created_at, addon.id), '[]'::jsonb)
        FROM booking.addon_definitions addon WHERE addon.property_id = p.id
          AND addon.status = 'active' AND addon.public_visible
-         AND COALESCE(bs.show_addons_step, TRUE)) AS "publicAddons",
+         AND COALESCE(bs.show_addons_step AND bs.addons_enabled, TRUE)) AS "publicAddons",
        bs.group_addons_by_category AS "groupAddonsByCategory",
        bs.special_requests_enabled AS "specialRequestsEnabled",
        bs.arrival_time_enabled AS "arrivalTimeEnabled",
@@ -2852,7 +3175,8 @@ export async function loadTargetCheckoutConfig(
          readiness.online_card_ready
          AND upper(trim(fs.default_currency)) = upper(trim(bs.default_currency)),
          FALSE
-       ) AS "onlineCardReady"
+       ) AS "onlineCardReady",
+       COALESCE(readiness.online_card_ready, FALSE) AS "bookingPageCardReady"
      FROM hotel_catalog.properties p
      LEFT JOIN booking.booking_settings bs ON bs.property_id = p.id
      LEFT JOIN hotel_catalog.property_policy_summaries policy ON policy.property_id = p.id
@@ -2879,6 +3203,97 @@ export function targetCheckoutReadyPaymentMethods(row: TargetCheckoutConfigRow |
     if (method === "paypal") return isValidPaymentEmail(depositPolicy["paypalEmail"]);
     return true;
   });
+}
+
+/** The methods the pricing-v2 booking page offers (VAY-2139): the hotel's ready methods, as the
+ * booking page's switches allow. Card needs Finance's card readiness and card acceptance; pay at
+ * the property only needs the hotel to take it (VAY-2301); bank transfer and PayPal need manual
+ * payment acceptance. The same facts and switches decide each rate's own ways to pay
+ * (pricingRatePaymentMethods), so this list always holds every way some offered rate takes. */
+function bookingPagePaymentMethods(
+  row: TargetCheckoutConfigRow | null,
+  config: Pick<
+    PgTargetBookingWebCheckoutAdapterConfig,
+    | "replacementPricingAcceptanceEnabled"
+    | "replacementPricingManualPaymentAcceptanceEnabled"
+    | "replacementPricingCardAcceptanceEnabled"
+    | "stripePaymentProvider"
+    | "bankTransfers"
+  >,
+): string[] {
+  if (row?.paymentsEnabled !== true) return [];
+  // Card readiness without the legacy checkout's currency gate: pricing-v2 prices in the
+  // publication currency, and the pricing readiness lock checks Finance's currency against it.
+  const cardReady = row.bookingPageCardReady ?? row.onlineCardReady;
+  const ready = targetCheckoutReadyPaymentMethods({ ...row, onlineCardReady: cardReady });
+  const cardAcceptance =
+    config.replacementPricingAcceptanceEnabled === true &&
+    config.replacementPricingCardAcceptanceEnabled === true &&
+    !!config.stripePaymentProvider;
+  const manualAcceptance = config.replacementPricingManualPaymentAcceptanceEnabled === true;
+  // Bank transfer needs the bank-details binding (KMS settings) to be accepted.
+  return ["card", "pay_at_property", "bank_transfer", "paypal"].filter(
+    (method) =>
+      ready.includes(method) &&
+      (method !== "card" || cardAcceptance) &&
+      (!isManualPricingPaymentMethod(method) || manualAcceptance) &&
+      (method !== "bank_transfer" || !!config.bankTransfers),
+  );
+}
+
+/** VAY-2145: the first property-local arrival date each offered bank-transfer or PayPal method
+ * can be booked for, so /book hides it for closer stays. Null when neither is offered. */
+async function bookingPageManualEarliestArrival(
+  pool: Pick<pg.Pool, "query">,
+  propertyId: string,
+  methods: readonly string[],
+): Promise<Partial<Record<ManualPricingPaymentMethod, string>> | null> {
+  const manual = methods.filter(isManualPricingPaymentMethod);
+  if (!manual.length) return null;
+  const read = await readPricingCheckInPlace(pool, propertyId);
+  const earliest: Partial<Record<ManualPricingPaymentMethod, string>> = {};
+  for (const method of manual) {
+    const terms = read && (await lockPricingManualPaymentTerms(pool, propertyId, method, false));
+    const date =
+      read && terms
+        ? manualPaymentEarliestArrival({
+            method,
+            paymentWindowHours: terms.paymentWindowHours,
+            place: read.place,
+            now: read.now,
+          })
+        : null;
+    if (date) earliest[method] = date;
+  }
+  return earliest;
+}
+
+/** VAY-2348: the property-local arrival dates each offered method's booking window allows now, as
+ * `{ from }` (booked at least N days ahead) or `{ through }` (booked within N hours/days), so /book
+ * offers it only for those dates. Methods whose dates can't be worked out are `unknown`. */
+async function bookingPagePaymentWindows(
+  pool: Pick<pg.Pool, "query">,
+  propertyId: string,
+  methods: readonly string[],
+): Promise<{
+  arrival: Record<string, { from: string } | { through: string }>;
+  unknown: string[];
+}> {
+  const windows = await readPaymentMethodWindows(pool, propertyId);
+  const limited = methods.flatMap((method) => {
+    const window = windows[method as keyof typeof windows];
+    return window ? [[method, window] as const] : [];
+  });
+  const arrival: Record<string, { from: string } | { through: string }> = {};
+  const unknown: string[] = [];
+  if (!limited.length) return { arrival, unknown };
+  const read = await readPricingCheckInPlace(pool, propertyId);
+  for (const [method, window] of limited) {
+    const range = read && paymentWindowArrivalRange(window, read.place, read.now);
+    if (range) arrival[method] = range;
+    else unknown.push(method);
+  }
+  return { arrival, unknown };
 }
 
 function serializeTargetCheckoutConfig(
@@ -3850,11 +4265,16 @@ async function withGuestLifecycleMutation(
   request: BookingWebGuestActionRequest,
   context: BookingWebCheckoutCommandContext | undefined,
   mutation: { status: string; action: string; eventType: string },
+  /** Withdraw: cancels a pricing-v2 card booking's hold before the booking changes. Cancel:
+   * refunds a paid pricing-v2 card stay what its booked terms give back (VAY-2205). */
+  cardPayments?: StripeBookingPaymentProvider,
 ): Promise<Record<string, unknown>> {
   if (!context) {
     throw createHttpError(400, "Checkout command context is required.");
   }
-  return withTargetCheckoutTransaction(pool, async (client) => {
+  // Set inside the transaction below; a plain `null` initialiser would narrow it to null here.
+  let refund = null as StagedPricingCardRefund | null;
+  const body = await withTargetCheckoutTransaction(pool, async (client) => {
     const property = await resolveTargetHistoricalBookingProperty(client, slug);
     const reservation = await reserveTargetCheckoutCommand(client, property.propertyId, context);
     if (reservation.status === "replay") {
@@ -3866,14 +4286,49 @@ async function withGuestLifecycleMutation(
       bookingId,
       requireGuestEmail(request.guest_email),
     );
-    assertLifecycleMutationAllowed(booking, mutation.action);
+    assertLifecycleMutationAllowed(booking, mutation.action, !!cardPayments);
+    const bookingMetadata = objectValue(booking.bookingMetadata);
+    if (
+      mutation.action === "withdraw" &&
+      bookingMetadata["targetSource"] === "pricing_quote_draft" &&
+      bookingMetadata["paymentMethod"] === "card"
+    ) {
+      // VAY-2099: a withdrawn pricing-v2 card booking cancels its hold first (an authorised
+      // request, or a card payment not made yet). Booking row, inventory, then payment, as the
+      // hotel's decline takes them: every lock is held before Stripe is called, so a lock
+      // conflict can only fail before the hold is cancelled.
+      await client.query(
+        "SELECT 1 FROM booking.guest_bookings WHERE id=$1::uuid AND property_id=$2::uuid FOR NO KEY UPDATE",
+        [booking.guestBookingId, property.propertyId],
+      );
+      await lockPmsInventoryMutationScope(client, property.propertyId);
+      try {
+        await voidPricingCardPayment(client, cardPayments, {
+          propertyId: property.propertyId,
+          guestBookingId: booking.guestBookingId,
+          occurredAt: context.occurredAt,
+          commandKey: context.idempotencyKey,
+        });
+      } catch (error) {
+        if (!(error instanceof PricingCardPaymentError)) throw error;
+        throw createHttpError(
+          409,
+          "This booking's card payment can't be withdrawn online. Please contact the hotel.",
+          "BOOKING_WITHDRAW_NOT_ONLINE",
+        );
+      }
+    }
     let bookedOutcome: BookedCancellationOutcome | null = null;
+    // A paid card stay's money: what was paid and what goes back (VAY-2205).
+    let cardMoney: { paidMinor: bigint; refundMinor: bigint } | null = null;
     if (mutation.action === "cancel") {
       let feeBooking = booking;
       if (objectValue(booking.bookingMetadata)["targetSource"] === "pricing_quote_draft") {
         // Booking row, then inventory, as PMS host actions take them. NO KEY UPDATE stays
         // compatible with PMS adoption, which holds inventory while it references the booking.
-        // Paid stays were refused above, so pricing-v2 card owners (inventory first) never race.
+        // A paid card stay's payment row is locked after both (VAY-2205). Card settlement takes
+        // inventory first: a late duplicate settle of the same stay can deadlock with this, and
+        // PostgreSQL then aborts one side before anything is refunded.
         await client.query(
           "SELECT 1 FROM booking.guest_bookings WHERE id=$1::uuid AND property_id=$2::uuid FOR NO KEY UPDATE",
           [booking.guestBookingId, property.propertyId],
@@ -3886,7 +4341,7 @@ async function withGuestLifecycleMutation(
           bookingId,
           requireGuestEmail(request.guest_email),
         );
-        assertLifecycleMutationAllowed(feeBooking, mutation.action);
+        assertLifecycleMutationAllowed(feeBooking, mutation.action, !!cardPayments);
       }
       bookedOutcome = await loadBookedCancellationOutcome(
         client,
@@ -3907,7 +4362,32 @@ async function withGuestLifecycleMutation(
           throw createHttpError(
             409,
             "The cancellation fee has changed. Review it again before cancelling.",
+            "BOOKING_CANCEL_FEE_CHANGED",
           );
+        // A paid card stay gets back what the terms don't keep; Stripe hears of it after commit.
+        if (cardPaid(feeBooking))
+          try {
+            cardMoney = await previewPricingCardRefund(client, {
+              propertyId: property.propertyId,
+              guestBookingId: feeBooking.guestBookingId,
+              retainedMinor: bookedOutcome.retainedMinor,
+            });
+            refund = await stagePricingCardRefund(client, {
+              propertyId: property.propertyId,
+              guestBookingId: feeBooking.guestBookingId,
+              retainedMinor: bookedOutcome.retainedMinor,
+              requestedBy: "guest",
+              commandKey: context.idempotencyKey,
+              occurredAt: context.occurredAt,
+            });
+          } catch (error) {
+            if (!(error instanceof PricingCardRefundError)) throw error;
+            throw createHttpError(
+              409,
+              "This booking's card payment can't be refunded online. Please contact the hotel.",
+              "BOOKING_CANCEL_NOT_ONLINE",
+            );
+          }
       }
     }
     const result = await client.query<TargetBookingRow>(
@@ -3915,6 +4395,7 @@ async function withGuestLifecycleMutation(
          UPDATE booking.guest_bookings
             SET lifecycle_status = $3,
                 cancellation_reason = COALESCE(cancellation_reason, $4),
+                payment_status = CASE WHEN payment_status = 'authorized' THEN 'failed' ELSE payment_status END,
                 updated_at = $5::timestamptz
           WHERE id = $1::uuid
             AND property_id = $2::uuid
@@ -3980,21 +4461,12 @@ async function withGuestLifecycleMutation(
     );
     const updated = result.rows[0];
     if (!updated) {
-      throw createHttpError(409, "Booking status changed. Please refresh and try again.");
+      throw createHttpError(
+        409,
+        "Booking status changed. Please refresh and try again.",
+        "BOOKING_NOT_CHANGEABLE",
+      );
     }
-    await publishAffiliateReservationLifecycle(client, {
-      source: "booking",
-      eventKey: `booking.affiliate-reservation.${mutation.action}.${updated.guestBookingId}.${context.fingerprint}.v1`,
-      eventType: "booking.affiliate_reservation.canceled",
-      occurredAt: context.occurredAt.toISOString(),
-      propertyId: updated.propertyId,
-      bookingId: updated.guestBookingId,
-      actorType: "user",
-      correlationId: context.correlationId,
-      causationId: context.requestId,
-      idempotencyKeyHash: sha256Hex(context.idempotencyKey),
-      evidence: { sourceEventType: mutation.eventType, lifecycleStatus: updated.lifecycleStatus },
-    });
     await reverseTargetPromoRedemption(
       client,
       updated.propertyId,
@@ -4008,6 +4480,15 @@ async function withGuestLifecycleMutation(
         recognizedOn: targetPropertyDateOnly(property.timezone, context.occurredAt),
         required: true,
       });
+      // What the hotel keeps of a paid card stay stays revenue on its nights (VAY-2205).
+      if (cardMoney)
+        await recordPricingRetainedRevenue(client, {
+          propertyId: updated.propertyId,
+          guestBookingId: updated.guestBookingId,
+          fingerprint: context.fingerprint,
+          keptMinor: cardMoney.paidMinor - cardMoney.refundMinor,
+          paidMinor: cardMoney.paidMinor,
+        });
     }
     await appendMissingAddonRevenueEvidence(client, {
       propertyId: updated.propertyId,
@@ -4048,6 +4529,12 @@ async function withGuestLifecycleMutation(
     });
     return body;
   });
+  // Committed: ask Stripe now. If it can't answer, the refund sweep retries.
+  if (refund && cardPayments) {
+    const { commandId } = refund;
+    await executePricingCardRefundSoon(pool, cardPayments, commandId);
+  }
+  return body;
 }
 
 export async function loadTargetBooking(
@@ -4085,6 +4572,9 @@ export async function loadTargetBooking(
        cancellation.occurred_at AS "cancelledAt",
        card_payment.card_brand AS "cardBrand",
        card_payment.card_last4 AS "cardLast4",
+       booked_quote.terms AS "bookedTerms",
+       booked_quote.rooms AS "bookedPricedRooms",
+       booked_names.names AS "bookedRoomNames",
        b.created_at AS "createdAt",
        (b.lifecycle_status='pending_payment' AND b.payment_status IN ('unpaid','authorized')
         AND b.booking_metadata->>'acceptedPaymentDeadlineAt' IS NULL
@@ -4144,6 +4634,35 @@ export async function loadTargetBooking(
        ORDER BY payment.created_at DESC
        LIMIT 1
      ) card_payment ON TRUE
+     -- VAY-2320: each booked room's terms and meal, from the accepted quote (a date change keeps
+     -- rooms, rates and terms), and the room types' names.
+     LEFT JOIN LATERAL (
+       SELECT (
+                SELECT jsonb_agg(jsonb_build_object('roomTypeId', term->'roomTypeId',
+                  'offerId', term->'offerId', 'cancellation', term->'cancellation'))
+                FROM jsonb_array_elements(acceptance.quote_snapshot->'evidence'->'terms') term
+              ) AS terms,
+              (
+                SELECT jsonb_agg(jsonb_build_object('selectionId', room->'selectionId',
+                  'mealPlan', room->'mealPlan'))
+                FROM jsonb_array_elements(acceptance.quote_snapshot->'rooms') room
+              ) AS rooms
+       FROM booking.pricing_quote_acceptances acceptance
+       WHERE acceptance.guest_booking_id = b.id
+         AND acceptance.property_id = b.property_id
+     ) booked_quote ON TRUE
+     LEFT JOIN LATERAL (
+       SELECT jsonb_object_agg(room_type.id::text, room_type.name) AS names
+       FROM pms.room_types room_type
+       WHERE room_type.property_id = b.property_id
+         AND room_type.id::text IN (
+           SELECT selection->>'roomTypeId'
+           FROM jsonb_array_elements(
+             CASE WHEN jsonb_typeof(b.booking_metadata->'pricingSelections') = 'array'
+               THEN b.booking_metadata->'pricingSelections' ELSE '[]'::jsonb END
+           ) selection
+         )
+     ) booked_names ON TRUE
      WHERE b.property_id = $1::uuid
        AND b.booking_metadata->>'airbnbMoneyStatus' IS DISTINCT FROM 'unverified'
        AND (b.id::text = $2 OR b.public_reference = $2)
@@ -4167,6 +4686,53 @@ export async function loadTargetBooking(
   return booking;
 }
 
+/** VAY-2320: a pricing booking's rooms, in booked order, each with its room type, guests, meal and
+ * cancellation as guests read it. Additive: rooms of several types or rates in one booking. */
+function pricingBookedRooms(booking: TargetBookingRow, metadata: Record<string, unknown>) {
+  const selections = metadata["pricingSelections"];
+  // Only loadTargetBooking reads the rooms' terms and names; other loaders leave the field out.
+  if (
+    metadata["targetSource"] !== "pricing_quote_draft" ||
+    !Array.isArray(selections) ||
+    !("bookedRoomNames" in booking)
+  )
+    return {};
+  const terms = Array.isArray(booking.bookedTerms) ? booking.bookedTerms.map(objectValue) : [];
+  const priced = Array.isArray(booking.bookedPricedRooms)
+    ? booking.bookedPricedRooms.map(objectValue)
+    : [];
+  const names = objectValue(booking.bookedRoomNames);
+  return {
+    bookedRooms: selections.map((value) => {
+      const selection = objectValue(value);
+      const guests = objectValue(selection["guests"]);
+      const term = terms.find(
+        (t) => t["roomTypeId"] === selection["roomTypeId"] && t["offerId"] === selection["offerId"],
+      );
+      const cancellation = term && objectValue(term["cancellation"]);
+      return {
+        roomTypeId: selection["roomTypeId"],
+        roomName: stringValue(names[String(selection["roomTypeId"])]) ?? null,
+        mealPlan:
+          stringValue(
+            priced.find((room) => room["selectionId"] === selection["selectionId"])?.["mealPlan"],
+          ) ?? null,
+        adults: guests["adults"],
+        children: Array.isArray(guests["childAgesAtCheckIn"])
+          ? guests["childAgesAtCheckIn"].length
+          : 0,
+        cancellation:
+          cancellation &&
+          (cancellation["kind"] === "non_refundable" || cancellation["kind"] === "flexible")
+            ? publicOfferCancellation(
+                cancellation as unknown as Parameters<typeof publicOfferCancellation>[0],
+              )
+            : null,
+      };
+    }),
+  };
+}
+
 export function serializeTargetBooking(booking: TargetBookingRow): Record<string, unknown> {
   const metadata = objectValue(booking.bookingMetadata);
   const selectedOffer = objectValue(metadata["selectedOffer"]);
@@ -4176,6 +4742,7 @@ export function serializeTargetBooking(booking: TargetBookingRow): Record<string
   const totalAmount = Number(decimalString(booking.totalAmount));
   return {
     ...projectBookingRoomSelection(selectedOffer),
+    ...pricingBookedRooms(booking, metadata),
     mealDescription: bookedMealDescription(selectedOffer),
     canEditRequest: booking.canEditRequest ?? false,
     id: booking.guestBookingId,
@@ -4217,6 +4784,138 @@ export function serializeTargetBooking(booking: TargetBookingRow): Record<string
     hostResponseDeadline:
       stringValue(metadata["hostResponseDeadlineAt"]) ?? stringValue(metadata["pendingExpiresAt"]),
     createdAt: toIsoDateTime(booking.createdAt),
+  };
+}
+
+// Booking and request ids as the API stores them: lowercase UUIDs.
+const BOOKING_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+function stayExtrasInput(
+  ids: { propertyId: string; guestBookingId: string },
+  booking: TargetBookingRow,
+) {
+  return {
+    ...ids,
+    currency: booking.currency,
+    checkIn: dateOnly(booking.checkIn),
+    nights: dateRangeLength(dateOnly(booking.checkIn), dateOnly(booking.checkOut)),
+    guests: Number(booking.adults) + Number(booking.children),
+  };
+}
+
+/** VAY-2360 part 3: the extras a confirmed pricing stay can still ask for, its latest request and every
+ * extra the hotel accepted; null for other stays, and when they can't be read (never blocking the page). */
+async function loadStayExtras(
+  db: Pick<pg.PoolClient, "query">,
+  ids: { propertyId: string; guestBookingId: string },
+  booking: TargetBookingRow,
+  status: string,
+) {
+  if (
+    objectValue(booking.bookingMetadata)["targetSource"] !== "pricing_quote_draft" ||
+    !["confirmed", "checked_in", "checked_out"].includes(status)
+  )
+    return null;
+  try {
+    const [offered, requests] = await Promise.all([
+      status === "confirmed" ? loadOfferedExtras(db, stayExtrasInput(ids, booking)) : [],
+      loadExtrasRequests(db, ids),
+    ]);
+    return {
+      offered,
+      request: requests[0] ?? null,
+      accepted: requests
+        .filter((request) => request.status === "accepted")
+        .flatMap((request) => request.items),
+    };
+  } catch (error) {
+    console.warn("Stay extras could not be read.", error);
+    return null;
+  }
+}
+
+/** The email for an extras request: the hotel's on a new one, the guest's on the hotel's answer. Without an
+ * address there is no email; the PMS booking page still shows the request. */
+async function enqueueExtrasEmail(
+  client: Pick<pg.PoolClient, "query">,
+  ids: { propertyId: string; guestBookingId: string },
+  kind: "host_extras_requested" | "extras_accepted" | "extras_declined",
+  request: ExtrasRequest,
+  at: Date,
+  actorUserId: string | null = null,
+): Promise<void> {
+  const booking = await loadBookingNotificationSnapshot(client, ids);
+  const role = kind === "host_extras_requested" ? "host" : "guest";
+  // A host address that isn't an email (contact channels aren't validated) gets no email, as on a booking
+  // transition; the PMS booking page still shows the request.
+  const email = normalizeEmail(role === "host" ? booking?.hostEmail : booking?.guestEmail);
+  if (!booking || !email) return;
+  await enqueueBookingLifecycleEmailJob(client, {
+    kind,
+    occurredAt: at.toISOString(),
+    booking,
+    recipient: { role, email },
+    transition: {
+      eventType: "guest_booking.extras_request",
+      toStatus: request.status,
+      revision: request.id,
+    },
+    extras: { items: request.items, totalMinor: request.totalMinor, currency: request.currency },
+    ...(kind === "extras_declined" && request.note ? { guestMessage: request.note } : {}),
+    actor: actorUserId ? { type: "user", userId: actorUserId } : { type: "system" },
+    source: "apps/api-booking-extras-request",
+  });
+}
+
+/** The booked terms the cancel route would apply now (VAY-2360), or null once a room has started or when the
+ * route couldn't work them out. */
+async function loadStayCancellationTerms(
+  db: Pick<pg.PoolClient, "query">,
+  ids: { propertyId: string; guestBookingId: string },
+  booking: TargetBookingRow,
+  at: Date,
+): Promise<PricingBookingCancellationTerms | null> {
+  const started = await db.query(
+    `SELECT 1 FROM pms.operational_booking_assignments
+     WHERE property_id=$1::uuid AND guest_booking_id=$2::uuid
+       AND assignment_status IN ('checked_in','in_house','checked_out')
+     LIMIT 1`,
+    [ids.propertyId, ids.guestBookingId],
+  );
+  if (started.rows.length > 0) return null;
+  const terms = await loadPricingBookingCancellationTerms(db, {
+    ...ids,
+    stay: {
+      checkIn: dateOnly(booking.checkIn),
+      checkOut: dateOnly(booking.checkOut),
+      roomCount: booking.roomCount,
+      currency: booking.currency,
+    },
+  });
+  return terms && pricingBookingCancellationOutcome(terms, at) ? terms : null;
+}
+
+/** The confirmation page's extras (VAY-2360), `booking-stay.v1`: the booked cancellation terms (each room's raw
+ * acceptance terms, unlike the lookup's public shape) for checkout step 3's wording, and where the guest stays. */
+function serializeBookingStay(
+  booking: TargetBookingRow,
+  terms: PricingBookingCancellationTerms | null,
+  places: StayPlace[],
+): Record<string, unknown> {
+  const names = objectValue(booking.bookedRoomNames);
+  return {
+    version: "booking-stay.v1",
+    cancellation: terms && {
+      checkIn: terms.checkIn,
+      currency: terms.currency,
+      timeZone: terms.timeZone,
+      totalMinor: terms.totalMinor,
+      rooms: terms.rooms.map((room) => ({
+        ...room,
+        roomName: stringValue(names[room.roomTypeId ?? ""]) ?? null,
+      })),
+    },
+    places,
   };
 }
 
@@ -4469,6 +5168,17 @@ async function previewTargetDateChange(
   } catch (error) {
     if (isHttpError(error) && (error.statusCode === 404 || error.statusCode === 409)) {
       return blocked("The requested dates are no longer available for this room and rate.");
+    }
+    // The retired checkout quote can't reprice bookings made before pricing v2 (VAY-2110).
+    if (
+      isHttpError(error) &&
+      ["PRICING_RETIRED", "PRICING_UNAVAILABLE"].includes(
+        String((error as { code?: unknown }).code),
+      )
+    ) {
+      return blocked(
+        "The dates of this booking can't be changed online. Cancel and rebook it instead.",
+      );
     }
     throw error;
   }
@@ -4985,26 +5695,6 @@ async function applyAcceptedTargetDateChange(
   );
   const updated = result.rows[0];
   if (!updated) throw createHttpError(409, "Booking change request status changed.");
-  await publishAffiliateReservationLifecycle(pool, {
-    source: "booking",
-    eventKey: `booking.affiliate-reservation.amended.${input.changeRequest.id}.v1`,
-    eventType: "booking.affiliate_reservation.amended",
-    occurredAt: input.context.occurredAt.toISOString(),
-    propertyId: updated.propertyId,
-    bookingId: updated.guestBookingId,
-    actorType: "user",
-    actorUserId: input.context.actorUserId,
-    correlationId: input.context.correlationId,
-    causationId: input.changeRequest.id,
-    idempotencyKeyHash: sha256Hex(input.context.idempotencyKey),
-    evidence: {
-      changeRequestId: input.changeRequest.id,
-      oldCheckIn: input.preview.oldCheckIn,
-      oldCheckOut: input.preview.oldCheckOut,
-      checkIn: input.preview.requestedCheckIn,
-      checkOut: input.preview.requestedCheckOut,
-    },
-  });
   return updated;
 }
 
@@ -5019,6 +5709,13 @@ async function validateTargetPromo(
     occurredAt: Date;
   },
 ): Promise<Record<string, unknown>> {
+  // VAY-2200: the Feature Hub Promos switch; stored codes stay for when it is back on.
+  if (!(await readGuestModuleSwitches(pool, property.propertyId)).promoCodes)
+    return {
+      valid: false,
+      code: code.toUpperCase(),
+      message: "Promo codes aren't available at this hotel.",
+    };
   const promo = await loadTargetPromoDefinition(pool, property.propertyId, code);
   if (!promo) return { valid: false, code: code.toUpperCase(), message: "Invalid promo code." };
   const message = targetPromoValidationMessage(promo, {
@@ -5563,7 +6260,7 @@ export async function reserveTargetCheckoutCommand(
 
   const existing = await findTargetCheckoutCommand(pool, propertyId, context);
   if (existing) return existing;
-  throw createHttpError(409, "Checkout command is already in progress.");
+  throw createHttpError(409, "Checkout command is already in progress.", "busy_try_again");
 }
 
 async function findTargetCheckoutCommand(
@@ -5603,7 +6300,7 @@ async function findTargetCheckoutCommand(
     }
     throw createHttpError(409, "Completed checkout response is unavailable for replay.");
   }
-  throw createHttpError(409, "Checkout command is already in progress.");
+  throw createHttpError(409, "Checkout command is already in progress.", "busy_try_again");
 }
 
 export async function recordTargetCheckoutCommand(
@@ -5789,14 +6486,6 @@ export function resolveTargetCheckoutAmountSnapshot(
   };
 }
 
-export function createUnavailableBookingWebAffiliateAdapter(): BookingWebAffiliateAdapter {
-  return {
-    async createStripeConnectLink() {
-      throw createHttpError(404, "Booking Web affiliate adapter is not configured.");
-    },
-  };
-}
-
 function normalizeGuestActionRequest(request: BookingWebGuestActionRequest): {
   guest_email: string | undefined;
   expected_cancellation_fee_minor?: string;
@@ -5838,12 +6527,6 @@ async function findProfileForHost(config: {
  * The transport route and privacy gate must be added before invoking this
  * with live traffic.
  */
-export async function admitBookingWebAffiliateArrival(
-  pool: pg.Pool,
-  input: { host: unknown; referenceToken: unknown; contextId?: unknown },
-) {
-  return admitAffiliateArrivalForCurrentHost(pool, input);
-}
 
 function serializeHostResolution(
   host: string,
@@ -5985,21 +6668,6 @@ function normalizeHost(value: string): string {
     return decoded.replace(/^\[([^\]]+)\](?::\d+)?$/, "$1");
   }
   return decoded.replace(/:\d+$/, "").replace(/^\.+|\.+$/g, "");
-}
-
-function readAffiliateContextCookie(header: string | undefined): string | null {
-  if (!header) return null;
-  const values = header
-    .split(";")
-    .map((part) => part.trim())
-    .filter((part) => part.startsWith("__Host-vayada_affiliate_context="))
-    .map((part) => part.slice("__Host-vayada_affiliate_context=".length));
-  if (
-    values.length !== 1 ||
-    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(values[0]!)
-  )
-    return null;
-  return values[0]!.toLowerCase();
 }
 
 function slugFromKnownBookingHost(host: string): string | null {
@@ -6162,42 +6830,86 @@ function requireGuestEmail(value: unknown): string {
   return email;
 }
 
-function assertLifecycleMutationAllowed(booking: TargetBookingRow, action: string): void {
+function assertLifecycleMutationAllowed(
+  booking: TargetBookingRow,
+  action: string,
+  cardRefunds = false,
+): void {
   if (booking.lifecycleStatus === "canceled" || booking.lifecycleStatus === "completed") {
-    throw createHttpError(409, "Booking can no longer be changed.");
+    throw createHttpError(409, "Booking can no longer be changed.", "BOOKING_NOT_CHANGEABLE");
   }
   if (action === "withdraw" && booking.lifecycleStatus !== "pending_payment") {
-    throw createHttpError(409, "Only pending bookings can be withdrawn.");
+    throw createHttpError(409, "Only pending bookings can be withdrawn.", "BOOKING_NOT_CHANGEABLE");
   }
   if (action === "cancel" && booking.lifecycleStatus !== "confirmed") {
-    throw createHttpError(409, "Only confirmed bookings can be cancelled.");
+    throw createHttpError(
+      409,
+      "Only confirmed bookings can be cancelled.",
+      "BOOKING_NOT_CHANGEABLE",
+    );
   }
   if (action === "withdraw" || action === "cancel") {
-    assertTargetInventoryReleasePaymentStateSupported(booking, action);
+    assertTargetInventoryReleasePaymentStateSupported(booking, action, cardRefunds);
   }
 }
 
 function assertTargetInventoryReleasePaymentStateSupported(
   booking: TargetBookingRow,
   action: "withdraw" | "cancel",
+  cardRefunds: boolean,
 ): void {
+  // VAY-2099: a pricing-v2 card request the guest authorised can be withdrawn; its hold is
+  // cancelled first, as legacy did.
+  const metadata = objectValue(booking.bookingMetadata);
+  if (
+    action === "withdraw" &&
+    booking.paymentStatus === "authorized" &&
+    metadata["targetSource"] === "pricing_quote_draft" &&
+    metadata["paymentMethod"] === "card" &&
+    metadata["acceptanceMode"] === "request"
+  )
+    return;
+  // VAY-2205: a paid pricing-v2 card stay can be cancelled while card refunds work; its booked
+  // terms decide what goes back to the card.
+  if (
+    action === "cancel" &&
+    cardRefunds &&
+    cardPaid(booking) &&
+    metadata["targetSource"] === "pricing_quote_draft" &&
+    metadata["paymentMethod"] === "card"
+  )
+    return;
   if (booking.paymentStatus !== "unpaid") {
     throw createHttpError(
       409,
       `Paid bookings cannot be ${action === "withdraw" ? "withdrawn" : "cancelled"} online until refund processing is available.`,
+      action === "withdraw" ? "BOOKING_WITHDRAW_NOT_ONLINE" : "BOOKING_CANCEL_NOT_ONLINE",
     );
   }
 }
+
+/** Paid by card when booking: in full, or a deposit with the rest due at the property (VAY-2205). */
+const cardPaid = (booking: Pick<TargetBookingRow, "paymentStatus">) =>
+  booking.paymentStatus === "paid" || booking.paymentStatus === "partially_paid";
 
 export function resolveTargetCancellationPreview(
   booking: TargetBookingRow,
   propertyTimezone: string | undefined,
   occurredAt: Date,
   bookedOutcome?: BookedCancellationOutcome | null,
+  /** A paid card stay's money (VAY-2205): what was paid and what goes back. */
+  cardRefund?: { paidMinor: bigint; refundMinor: bigint } | null,
+  /** Room type names by id, to name each of several rooms (VAY-2320). */
+  roomNames?: ReadonlyMap<string, string>,
 ): Record<string, unknown> {
   const metadata = objectValue(booking.bookingMetadata);
   if (metadata["targetSource"] === "pricing_quote_draft")
-    return pricingCancellationPreview(booking, bookedOutcome ?? null);
+    return pricingCancellationPreview(
+      booking,
+      bookedOutcome ?? null,
+      cardRefund ?? null,
+      roomNames,
+    );
   const selectedOffer = objectValue(metadata["selectedOffer"]);
   const selection = projectBookingRoomSelection(selectedOffer);
   if (selection.roomLines) {
@@ -6249,6 +6961,7 @@ export function resolveTargetCancellationPreview(
     throw createHttpError(
       409,
       "This booked rate is non-refundable and cannot be cancelled online.",
+      "BOOKING_CANCEL_NON_REFUNDABLE",
     );
   }
 
@@ -6265,6 +6978,7 @@ export function resolveTargetCancellationPreview(
     throw createHttpError(
       409,
       "This booking's cancellation policy cannot be verified online. Contact the property.",
+      "BOOKING_CANCEL_NOT_ONLINE",
     );
   }
 
@@ -6288,6 +7002,7 @@ export function resolveTargetCancellationPreview(
     throw createHttpError(
       409,
       "This booking's free-cancellation period has expired. Contact the property.",
+      "BOOKING_CANCEL_DEADLINE_PASSED",
     );
   }
 
@@ -6305,39 +7020,65 @@ export function resolveTargetCancellationPreview(
 
 /** Pricing-v2 stays: the terms frozen at acceptance decide (VAY-2100). Partial-refund terms can be
  * cancelled online in every tier, free cancellation only until its deadline, non-refundable never.
+ * Rooms with different terms (VAY-2320) each follow their own: the stay can be cancelled online
+ * unless every room keeps everything, and each room is listed with what it keeps.
  * Only unpaid stays get here, so no money moves: refund fields stay 0 and what the terms keep is
  * a fee the property may charge, never a refund the guest will receive. */
 function pricingCancellationPreview(
   booking: TargetBookingRow,
   outcome: BookedCancellationOutcome | null,
+  cardRefund: { paidMinor: bigint; refundMinor: bigint } | null,
+  roomNames?: ReadonlyMap<string, string>,
 ): Record<string, unknown> {
   const scale = pricingCurrencyScale(booking.currency);
   if (!outcome || scale === null)
     throw createHttpError(
       409,
       "This booking's cancellation policy cannot be verified online. Contact the property.",
+      "BOOKING_CANCEL_NOT_ONLINE",
     );
   if (outcome.daysBeforeCheckIn < 0)
-    throw createHttpError(409, "This booking's check-in date has passed. Contact the property.");
-  if (outcome.rooms.some((room) => room.rule === "non_refundable"))
+    throw createHttpError(
+      409,
+      "This booking's check-in date has passed. Contact the property.",
+      "BOOKING_CANCEL_CHECK_IN_PASSED",
+    );
+  const keepsAll = (room: BookedCancellationOutcome["rooms"][number]) =>
+    room.rule === "non_refundable" ||
+    (room.rule === "free_until_deadline" && room.refundPercent < 100);
+  if (outcome.rooms.every(keepsAll) && outcome.rooms.some((room) => room.rule === "non_refundable"))
     throw createHttpError(
       409,
       "This booked rate is non-refundable and cannot be cancelled online.",
+      "BOOKING_CANCEL_NON_REFUNDABLE",
     );
-  if (outcome.rooms.some((room) => room.rule === "free_until_deadline" && room.refundPercent < 100))
+  if (outcome.rooms.every(keepsAll))
     throw createHttpError(
       409,
       "This booking's free-cancellation period has expired. Contact the property.",
+      "BOOKING_CANCEL_DEADLINE_PASSED",
     );
+  const paid = cardRefund?.paidMinor ?? 0n,
+    refund = cardRefund?.refundMinor ?? 0n;
   return {
-    amountPaid: 0,
-    refundAmount: 0,
-    refundPercentage: 0,
+    amountPaid: Number(paid) / 10 ** scale,
+    refundAmount: Number(refund) / 10 ** scale,
+    refundPercentage: paid > 0n ? Math.round((Number(refund) / Number(paid)) * 100) : 0,
     cancellationFeeAmount: Number(outcome.retainedMinor) / 10 ** scale,
     freeCancellationDays: Math.max(0, ...outcome.rooms.map((room) => room.matchedTierMinDays ?? 0)),
     daysUntilCheckIn: outcome.daysBeforeCheckIn,
     currency: booking.currency,
     bookedTermsOutcome: outcome,
+    // VAY-2320: several rooms, each with what its own terms give back and keep.
+    ...(outcome.rooms.length > 1 && {
+      rooms: outcome.rooms.map((room) => ({
+        roomName: (room.roomTypeId && roomNames?.get(room.roomTypeId)) || null,
+        rule: room.rule,
+        refundPercent: room.refundPercent,
+        refundAmount: Number(room.refundMinor) / 10 ** scale,
+        keptAmount: Number(room.retainedMinor) / 10 ** scale,
+      })),
+    }),
   };
 }
 
@@ -6360,7 +7101,11 @@ async function loadBookedCancellationOutcome(
       ["checked_in", "in_house", "checked_out"].includes(status),
     )
   )
-    throw createHttpError(409, "This stay has already started. Contact the property.");
+    throw createHttpError(
+      409,
+      "This stay has already started. Contact the property.",
+      "BOOKING_CANCEL_CHECK_IN_PASSED",
+    );
   return loadPricingBookingCancellation(db, {
     propertyId,
     guestBookingId: booking.guestBookingId,
@@ -6397,6 +7142,7 @@ function unverifiableFreeCancellationPeriodError(): Error {
   return createHttpError(
     409,
     "This booking's free-cancellation period cannot be verified online. Contact the property.",
+    "BOOKING_CANCEL_NOT_ONLINE",
   );
 }
 
@@ -6407,6 +7153,7 @@ function targetDateDifference(start: string, end: string): number {
     throw createHttpError(
       409,
       "This booking's cancellation period cannot be verified online. Contact the property.",
+      "BOOKING_CANCEL_NOT_ONLINE",
     );
   }
   return Math.floor((endTime - startTime) / 86_400_000);
@@ -6579,9 +7326,11 @@ export function sha256Hex(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
-export function createHttpError(statusCode: number, message: string): HttpError {
+/** `code` is a stable name booking-web translates for guests (VAY-2308); the message stays English. */
+export function createHttpError(statusCode: number, message: string, code?: string): HttpError {
   const error = new Error(message) as HttpError;
   error.statusCode = statusCode;
+  if (code) error.code = code;
   return error;
 }
 
@@ -6595,6 +7344,7 @@ function isHttpError(error: unknown): error is HttpError {
 
 type HttpError = Error & {
   statusCode: number;
+  code?: string;
 };
 
 // Temporary Booking persistence boundary while the checkout owner is extracted from

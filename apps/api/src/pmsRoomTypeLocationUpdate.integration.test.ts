@@ -83,7 +83,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS room-type location update", () => {
 
   function locationCommand(
     suffix: string,
-    attributes: Record<string, string | number | null>,
+    attributes: Record<string, string | number | boolean | null>,
   ): PmsRoomTypeUpdateCommand {
     const commandId = `pms-room-location-${suffix}-${roomTypeId}`;
     return {
@@ -102,7 +102,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS room-type location update", () => {
     };
   }
 
-  it("keeps the pricing room pin when nothing changed and writes only changed keys", async () => {
+  it("keeps the pricing room pin across location changes and writes only changed keys", async () => {
     const before = await snapshot();
     expect(before.pin).toMatch(/^pms\.pricing\.rooms\.v2:/);
     expect(JSON.parse(before.attributes)).not.toHaveProperty("locationAddress");
@@ -135,11 +135,31 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS room-type location update", () => {
       roomType: { attributes: { locationAddress: "Seestrasse 12, Innsbruck" } },
     });
     const moved = await snapshot();
-    expect(moved.pin).not.toBe(before.pin);
+    // Saved prices pin room types and occupancy only; a location change keeps them current (VAY-2129).
+    expect(moved.pin).toBe(before.pin);
     expect(JSON.parse(moved.attributes)).toEqual({
       ...JSON.parse(before.attributes),
       locationAddress: "Seestrasse 12, Innsbruck",
     });
+  });
+
+  it("stores how guests see the room's place, and a repeated save writes nothing (VAY-2321)", async () => {
+    const display = {
+      locationSource: "custom",
+      locationPrecision: "approximate",
+      locationArea: "Wilten",
+      showMapInDetails: false,
+    };
+    await expect(
+      repository.updateRoomTypeLocation(locationCommand("display", display)),
+    ).resolves.toMatchObject({ ok: true, roomType: { attributes: display } });
+    const saved = await snapshot();
+    expect(JSON.parse(saved.attributes)).toMatchObject(display);
+
+    await expect(
+      repository.updateRoomTypeLocation(locationCommand("display-again", display)),
+    ).resolves.toMatchObject({ ok: true, roomType: { attributes: display } });
+    await expect(snapshot()).resolves.toEqual(saved);
   });
 });
 

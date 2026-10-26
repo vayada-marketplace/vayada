@@ -294,6 +294,23 @@ async function applyPlatformIdentityBootstrap(
       [PLATFORM_ORGANIZATION_ID, PLATFORM_RESOURCE_ID],
     );
 
+    // finance-admin opens the platform Finance routes, e.g. Vayada Admin's Payments tab (VAY-2205).
+    // Added only when missing, as 0505 does: a suspended one (its rollback) stays suspended.
+    await client.query(
+      `INSERT INTO identity.product_entitlements
+         (organization_id, product, entitlement_key, status, resource_product, resource_type, resource_id)
+       VALUES ($1, 'platform', 'finance-admin', 'active', 'platform', 'platform', $2)
+       ON CONFLICT (
+         organization_id,
+         product,
+         entitlement_key,
+         COALESCE(resource_product, ''),
+         COALESCE(resource_type, ''),
+         COALESCE(resource_id, '')
+       ) DO NOTHING`,
+      [PLATFORM_ORGANIZATION_ID, PLATFORM_RESOURCE_ID],
+    );
+
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK");

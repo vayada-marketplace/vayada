@@ -73,7 +73,7 @@ Contract slices:
   membership, permissions, linked resources, entitlements, locale, currency,
   and audit metadata
 - target schema ownership map for identity, hotel catalog, booking, PMS,
-  marketplace, finance, distribution/bookability, jobs, and audit:
+  finance, distribution/bookability, jobs, and audit:
   `engineering/target-schema-ownership-map.md`
 - migration and parity harness design for target rebuilds, source-to-target
   checks, mismatch reports, and explicit SQL migration application:
@@ -90,7 +90,7 @@ Goal: create the smallest useful TypeScript backend surface.
 Output:
 
 - `apps/api` with health and readiness routes
-- route-group structure for marketplace, booking, PMS, platform, and AI
+- route-group structure for booking, PMS, platform, and AI
 - shared packages for config, HTTP, DB, testing, auth, authorization, audit,
   events, and observability as needed
 - build, typecheck, lint, and one HTTP test
@@ -120,7 +120,7 @@ Current status:
 - Booking source-to-target transforms and parity fixtures remain open; the
   merged DDL only establishes the target tables and migration-runner checks.
 - PMS operations is the next open domain DDL slice before finance,
-  marketplace, distribution/bookability, and jobs/events/audit.
+  distribution/bookability, and jobs/events/audit.
 
 ### 5. Domain implementation slices
 
@@ -192,8 +192,7 @@ criteria:
 2. **Define RequestContext contract**
    - Model actor, organization, memberships, permissions, linked resources,
      entitlements, locale, currency, and audit metadata.
-   - Validation: allowed/denied fixture cases for hotel, creator, affiliate,
-     and platform scopes.
+   - Validation: allowed/denied fixture cases for hotel and platform scopes.
 
 3. **Define target schema ownership map**
    - Convert the VAY-605 domain ownership plan into table-level ownership and

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { FormRow, SettingsCard, SettingsSection } from "@vayada/settings-ui";
+import { FormRow, SettingsCard } from "@vayada/settings-ui";
 import {
   OTA_COMMISSION_CHANNELS,
   listOtaCommissionSettings,
@@ -84,11 +84,7 @@ export function OtaCommissionSettingsSection() {
     }
   };
   return (
-    <SettingsSection
-      id="ota-commissions"
-      title={t("settings.navigation.otaCommissions")}
-      description={t("settings.ota.description")}
-    >
+    <div id="ota-commissions" className="space-y-4">
       <SettingsCard>
         {status === "loading" && (
           <p className="text-sm text-gray-600" role="status">
@@ -225,7 +221,7 @@ export function OtaCommissionSettingsSection() {
           </div>
         )}
       </SettingsCard>
-    </SettingsSection>
+    </div>
   );
 }
 const formatDate = (value: string, locale: string) => new Date(value).toLocaleString(locale);

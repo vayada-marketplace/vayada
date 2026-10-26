@@ -1,42 +1,13 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState, ReactNode, Suspense } from "react";
+import { createContext, useContext, useEffect, useState, ReactNode } from "react";
 import { usePathname } from "next/navigation";
-import { AffiliateClickTracker } from "@/components/AffiliateClickTracker";
+import { useTranslations } from "next-intl";
 import { Hotel, Addon } from "@/lib/types";
 import { hotelService } from "@/services/api/hotel";
+import { ApiError } from "@/services/api/client";
 import { generateColorPalette } from "@/lib/utils/colors";
-
-const FONT_PAIRINGS: Record<string, { heading: string; body: string; googleFamilies: string[] }> = {
-  "high-end-serif": {
-    heading: "'Playfair Display', serif",
-    body: "'Source Sans Pro', sans-serif",
-    googleFamilies: [
-      "Playfair+Display:ital,wght@0,400;0,700;1,400",
-      "Source+Sans+Pro:wght@300;400;600;700",
-    ],
-  },
-  "modern-minimalist": {
-    heading: "'Inter', sans-serif",
-    body: "'Inter', sans-serif",
-    googleFamilies: ["Inter:wght@300;400;500;600;700"],
-  },
-  "grand-classic": {
-    heading: "'Lora', serif",
-    body: "'Source Sans Pro', sans-serif",
-    googleFamilies: ["Lora:ital,wght@0,400;0,700;1,400", "Source+Sans+Pro:wght@300;400;600;700"],
-  },
-  "imperial-serif": {
-    heading: "'Cinzel', serif",
-    body: "'Source Sans Pro', sans-serif",
-    googleFamilies: ["Cinzel:wght@400;600;700", "Source+Sans+Pro:wght@300;400;600;700"],
-  },
-  "italiana-serif": {
-    heading: "'Italiana', serif",
-    body: "'Source Sans Pro', sans-serif",
-    googleFamilies: ["Italiana", "Source+Sans+Pro:wght@300;400;600;700"],
-  },
-};
+import { brandFontPairing } from "@vayada/fonts/brand";
 
 // Rooms, availability and prices are served by the room-and-price page (/book); this
 // provider only carries the hotel profile and its add-on catalogue.
@@ -117,19 +88,25 @@ export function HotelProvider({
   const [addons, setAddons] = useState<Addon[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // VAY-2189: no booking page is online for this URL (the hotel request
+  // answered 404, or no slug resolved). Retrying can't help, so the card
+  // says so calmly instead of offering Retry.
+  const [notOnline, setNotOnline] = useState(false);
+  const t = useTranslations("error");
 
   useEffect(() => {
     if (!slugResolved) return;
     if (!slug) {
-      // No slug to fetch — render the empty error UI below. Stop
-      // showing the loading spinner so the user sees a real message.
+      // No slug to fetch — stop showing the loading spinner so the
+      // user sees the not-online message below.
       setLoading(false);
-      setError("No property is configured for this URL.");
+      setNotOnline(true);
       return;
     }
     let canceled = false;
     setLoading(true);
     setError(null);
+    setNotOnline(false);
     Promise.all([
       hotelService.getHotel(slug, locale),
       quoteEntry
@@ -159,7 +136,8 @@ export function HotelProvider({
       })
       .catch((err) => {
         if (canceled) return;
-        setError(err instanceof Error ? err.message : "Failed to load hotel data");
+        if (err instanceof ApiError && err.status === 404) setNotOnline(true);
+        else setError(err instanceof Error ? err.message : "Failed to load hotel data");
         setLoading(false);
       });
     return () => {
@@ -185,30 +163,17 @@ export function HotelProvider({
     }
   }, [hotel?.branding?.accentColor]);
 
-  // Apply branding font pairing as CSS variables + load Google Fonts
+  // Apply the branding font pairing (self-hosted, see packages/fonts) as CSS variables
   useEffect(() => {
-    const pairingId = hotel?.branding?.fontPairing;
-    if (pairingId && FONT_PAIRINGS[pairingId]) {
-      const { heading, body, googleFamilies } = FONT_PAIRINGS[pairingId];
+    const pairing = brandFontPairing(hotel?.branding?.fontPairing);
+    if (pairing) {
       const root = document.documentElement;
-      root.style.setProperty("--font-heading", heading);
-      root.style.setProperty("--font-body", body);
-
-      // Load Google Fonts
-      const linkId = "branding-fonts";
-      let link = document.getElementById(linkId) as HTMLLinkElement | null;
-      if (!link) {
-        link = document.createElement("link");
-        link.id = linkId;
-        link.rel = "stylesheet";
-        document.head.appendChild(link);
-      }
-      const families = googleFamilies.join("&family=");
-      link.href = `https://fonts.googleapis.com/css2?family=${families}&display=swap`;
+      root.style.setProperty("--font-heading", pairing.heading);
+      root.style.setProperty("--font-body", pairing.body);
     }
   }, [hotel?.branding?.fontPairing]);
 
-  if (error) {
+  if (notOnline || error) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
         <div className="bg-white rounded-2xl border border-red-200 shadow-sm p-8 max-w-md w-full text-center">
@@ -227,19 +192,25 @@ export function HotelProvider({
               />
             </svg>
           </div>
-          <h2 className="text-lg font-bold text-gray-900 mb-2">Unable to Load Hotel</h2>
+          <h2 className="text-lg font-bold text-gray-900 mb-2">
+            {notOnline ? t("notOnline") : t("unableToLoad")}
+          </h2>
           <p className="text-sm text-gray-600 mb-4">
-            We couldn&apos;t fetch the hotel data. Please try again later.
+            {notOnline ? t("checkBackLater") : t("tryAgainLater")}
           </p>
-          <div className="bg-red-50 rounded-lg p-3 mb-6">
-            <p className="text-sm text-red-700 font-mono break-all">{error}</p>
-          </div>
-          <button
-            onClick={() => window.location.reload()}
-            className="px-6 py-2.5 bg-gray-900 text-white font-semibold rounded-full hover:bg-gray-800 transition-colors text-sm"
-          >
-            Retry
-          </button>
+          {!notOnline && (
+            <>
+              <div className="bg-red-50 rounded-lg p-3 mb-6">
+                <p className="text-sm text-red-700 font-mono break-all">{error}</p>
+              </div>
+              <button
+                onClick={() => window.location.reload()}
+                className="px-6 py-2.5 bg-gray-900 text-white font-semibold rounded-full hover:bg-gray-800 transition-colors text-sm"
+              >
+                {t("retry")}
+              </button>
+            </>
+          )}
         </div>
       </div>
     );
@@ -265,11 +236,6 @@ export function HotelProvider({
       }}
     >
       {children}
-      {slugResolved && slug && (
-        <Suspense fallback={null}>
-          <AffiliateClickTracker slug={slug} />
-        </Suspense>
-      )}
     </HotelContext.Provider>
   );
 }

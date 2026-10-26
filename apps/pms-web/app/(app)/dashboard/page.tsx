@@ -3,12 +3,20 @@
 import { useState, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
-import { bookingsService, Booking, BookingAdditionalGuest, BookingNote } from "@/services/bookings";
+import {
+  assignedRoomName,
+  bookingsService,
+  Booking,
+  BookingAdditionalGuest,
+  BookingNote,
+} from "@/services/bookings";
 import { calendarService, CalendarInventoryDay } from "@/services/calendar";
 import { pmsSettingsService } from "@/services/settings";
 import { formatCurrency } from "@/lib/formatCurrency";
+import { expectedGuestCount, registeredGuestCount } from "@/lib/guestRegistration";
 import {
   addPropertyDays,
+  canSeeDashboardFinance,
   formatPropertyDate,
   getArrivalsToday,
   getDashboardBookings,
@@ -21,7 +29,14 @@ import {
   isNotCheckedInDeparture,
 } from "@/lib/dashboardBookings";
 import { useTranslation } from "@/lib/i18n";
+import { usePmsAccess } from "@/lib/settings/PmsAccessContext";
 import { pmsSetupExitPropertyId } from "@vayada/product-onboarding";
+import {
+  PmsDashboardSetupBanner,
+  PmsDashboardSetupCard,
+  PmsDashboardSetupChip,
+  usePmsSetupChecklist,
+} from "@/components/dashboard/PmsDashboardSetup";
 
 const AVATAR_COLORS = [
   "bg-blue-500",
@@ -53,7 +68,9 @@ function guestName(b: Booking) {
 function roomLabel(b: Booking) {
   const assigned = b.assignedRooms?.length
     ? b.assignedRooms
-        .map((r) => (r.roomNumber ? `${b.roomName} ${r.roomNumber}` : b.roomName))
+        .map((r) =>
+          r.roomNumber ? `${assignedRoomName(b, r)} ${r.roomNumber}` : assignedRoomName(b, r),
+        )
         .join(", ")
     : b.roomNumber
       ? `${b.roomName} ${b.roomNumber}`
@@ -74,32 +91,13 @@ function isPaid(b: Booking) {
   return ["captured", "paid", "refunded", "partially_refunded"].includes(b.paymentStatus || "");
 }
 
-function expectedAdditionalGuests(b: Booking) {
-  const explicit = b.numberOfGuests ?? b.adults + b.children;
-  return Math.max(0, explicit - 1);
-}
-
-function incompleteGuestCount(b: Booking, guests: BookingAdditionalGuest[]) {
-  const placeholders = Math.max(0, expectedAdditionalGuests(b) - guests.length);
-  return (
-    guests.filter(
-      (g) =>
-        !g.firstName ||
-        !g.lastName ||
-        !g.gender ||
-        !g.nationality ||
-        !g.dateOfBirth ||
-        !g.passportNumber,
-    ).length + placeholders
-  );
-}
-
 const FORECAST_WINDOW_DAYS = 14;
 const FORECAST_MAX_WEEK_OFFSET = 24;
 type InventoryLoadStatus = "loading" | "ready" | "error";
 
 export default function DashboardPage() {
   const { locale, t } = useTranslation();
+  const showFinance = canSeeDashboardFinance(usePmsAccess().permissions);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [forecastInventoryDays, setForecastInventoryDays] = useState<CalendarInventoryDay[]>([]);
   const [tonightInventoryDays, setTonightInventoryDays] = useState<CalendarInventoryDay[]>([]);
@@ -109,11 +107,14 @@ export default function DashboardPage() {
     useState<InventoryLoadStatus>("loading");
   const [tonightInventoryDate, setTonightInventoryDate] = useState<string | null>(null);
   const [now, setNow] = useState(() => new Date());
-  const [hotelCurrency, setHotelCurrency] = useState("EUR");
+  // Null when neither payment settings nor a booking names one; finance figures then show no amount.
+  const [hotelCurrency, setHotelCurrency] = useState<string | null>(null);
   const [hotelTimezone, setHotelTimezone] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [inventoryRefresh, setInventoryRefresh] = useState(0);
   const [incompleteSetupPropertyId, setIncompleteSetupPropertyId] = useState<string | null>(null);
+  // VAY-2247 wave 2: the setup checklist, where the server offers it; else today's banner.
+  const setupChecklist = usePmsSetupChecklist();
   const [weekOffset, setWeekOffset] = useState(0);
   const [arrivalDay, setArrivalDay] = useState<string | null>(null);
   const [departureDay, setDepartureDay] = useState<string | null>(null);
@@ -145,17 +146,27 @@ export default function DashboardPage() {
   useEffect(() => {
     Promise.all([
       bookingsService.listAll(),
-      bookingsService.getPaymentSettings(),
+      // Only the finance figures need the currency, so a failed read never empties the desk lists.
+      showFinance
+        ? bookingsService.getPaymentSettings().catch((error) => {
+            console.error(error);
+            return null;
+          })
+        : null,
       pmsSettingsService.getHotelDetails().catch(() => null),
     ])
       .then(([bookingsList, settingsRes, hotelRes]) => {
         setBookings(bookingsList);
-        setHotelCurrency(settingsRes.paymentSettings.defaultCurrency || "EUR");
+        setHotelCurrency(
+          settingsRes
+            ? settingsRes.paymentSettings.defaultCurrency || "EUR"
+            : (bookingsList.find((booking) => booking.currency)?.currency ?? null),
+        );
         setHotelTimezone(hotelRes?.timezone || null);
       })
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, []);
+  }, [showFinance]);
 
   const forecastStart = addPropertyDays(today, weekOffset * 7);
   const forecastEnd = addPropertyDays(forecastStart, FORECAST_WINDOW_DAYS - 1);
@@ -297,8 +308,10 @@ export default function DashboardPage() {
       <div className="p-4 md:p-6">
         <div className="animate-pulse space-y-4 md:space-y-5">
           <div className="h-8 bg-gray-200 rounded w-40" />
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
-            {[1, 2, 3, 4].map((i) => (
+          <div
+            className={`grid grid-cols-2 ${showFinance ? "md:grid-cols-4" : "md:grid-cols-3"} gap-3 md:gap-4`}
+          >
+            {(showFinance ? [1, 2, 3, 4] : [1, 2, 3]).map((i) => (
               <div key={i} className="h-24 md:h-28 bg-gray-200 rounded-xl" />
             ))}
           </div>
@@ -325,30 +338,27 @@ export default function DashboardPage() {
 
   return (
     <div className="p-4 md:p-6 space-y-4 md:space-y-5 overflow-x-hidden">
-      {incompleteSetupPropertyId && (
-        <div
-          className="flex flex-col gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950 sm:flex-row sm:items-center sm:justify-between"
-          role="status"
-        >
-          <p>{t("dashboard.setupIncomplete")}</p>
-          <Link
-            href={`/setup?entryProduct=pms&returnTo=%2Fdashboard&propertyId=${encodeURIComponent(incompleteSetupPropertyId)}`}
-            className="shrink-0 font-semibold text-amber-950 underline decoration-amber-400 underline-offset-4 hover:decoration-amber-700"
-          >
-            {t("dashboard.resumeSetup")}
-          </Link>
-        </div>
-      )}
+      <PmsDashboardSetupBanner
+        setup={setupChecklist}
+        incompleteSetupPropertyId={incompleteSetupPropertyId}
+      />
       {/* Title */}
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <h1 className="text-2xl md:text-xl font-bold text-gray-900">{t("dashboard.title")}</h1>
           <p className="text-sm text-gray-500 mt-1">{dateLabel}</p>
         </div>
+        <PmsDashboardSetupChip setup={setupChecklist} />
       </div>
+      <PmsDashboardSetupCard
+        setup={setupChecklist}
+        roomCount={tonightOccupancy.sellableUnits || null}
+      />
 
       {/* Stat cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div
+        className={`grid grid-cols-2 ${showFinance ? "md:grid-cols-4" : "md:grid-cols-3"} gap-3`}
+      >
         <StatCard
           label={t("dashboard.occupancyTonight")}
           value={
@@ -396,16 +406,22 @@ export default function DashboardPage() {
           }
           icon={<ArrowUpIcon />}
         />
-        <StatCard
-          label={t("dashboard.revenueThisMonth")}
-          value={
-            bookings.some((b) => b.checkIn >= monthStartStr && b.amountStatus === "unverified")
-              ? t("bookings.detail.amountUnverified")
-              : formatCurrency(revenueThisMonth, hotelCurrency)
-          }
-          sub={t("dashboard.monthToDate")}
-          icon={<DollarIcon />}
-        />
+        {showFinance && (
+          <StatCard
+            label={t("dashboard.revenueThisMonth")}
+            value={
+              hotelCurrency === null
+                ? "—"
+                : bookings.some(
+                      (b) => b.checkIn >= monthStartStr && b.amountStatus === "unverified",
+                    )
+                  ? t("bookings.detail.amountUnverified")
+                  : formatCurrency(revenueThisMonth, hotelCurrency)
+            }
+            sub={t("dashboard.monthToDate")}
+            icon={<DollarIcon />}
+          />
+        )}
       </div>
 
       {/* Arrivals & Departures */}
@@ -656,7 +672,7 @@ export default function DashboardPage() {
         <ForecastChart
           days={forecastDays}
           today={today}
-          currency={hotelCurrency}
+          currency={showFinance ? hotelCurrency : null}
           inventoryStatus={forecastInventoryStatus}
           locale={locale}
           t={t}
@@ -698,8 +714,10 @@ function ArrivalQuickView({
   onClose: () => void;
 }) {
   const { locale, t } = useTranslation();
-  const missingIds = loading ? 0 : incompleteGuestCount(booking, guests);
-  const due = isPaid(booking) ? 0 : booking.totalAmount;
+  const expectedGuests = expectedGuestCount(booking);
+  const registeredGuests = Math.min(expectedGuests, registeredGuestCount(booking, guests));
+  // What is still owed: a deposit or part payment already lowered the balance.
+  const due = isPaid(booking) ? 0 : Math.max(0, booking.balanceAmount);
   const internalNotes = notes.filter((note) => note.body.trim().length > 0);
   const isDeparture = mode === "departure";
   const eventDate = isDeparture ? booking.checkOut : booking.checkIn;
@@ -781,9 +799,12 @@ function ArrivalQuickView({
                     })}
               </span>
             )}
-            {missingIds > 0 && (
+            {!loading && registeredGuests < expectedGuests && (
               <span className="rounded-full bg-orange-100 px-2.5 py-1 text-xs font-semibold text-orange-800">
-                {t("dashboard.guestIdsMissing", { count: missingIds })}
+                {t("dashboard.guestsRegistered", {
+                  registered: registeredGuests,
+                  total: expectedGuests,
+                })}
               </span>
             )}
           </div>
@@ -1000,7 +1021,8 @@ function ForecastChart({
 }: {
   days: ForecastDay[];
   today: string;
-  currency: string;
+  /** Null hides the average daily rate line, axis and legend. */
+  currency: string | null;
   inventoryStatus: InventoryLoadStatus;
   locale: string;
   t: (key: string, params?: Record<string, string | number>) => string;
@@ -1010,7 +1032,7 @@ function ForecastChart({
 
   const rawAdrMax = days.reduce((max, d) => (d.adr != null && d.adr > max ? d.adr : max), 0);
   const adrMax = niceAdrMax(rawAdrMax);
-  const hasAdr = days.some((d) => d.adr != null);
+  const hasAdr = currency !== null && days.some((d) => d.adr != null);
   const adrTicks = [adrMax, adrMax * 0.75, adrMax * 0.5, adrMax * 0.25, 0];
 
   // Build line segments — break the polyline where adr is null so the line gaps over empty days.
@@ -1115,7 +1137,7 @@ function ForecastChart({
                     <div>
                       {t("dashboard.occupancyAxis")}: {occupancyText}
                     </div>
-                    {day.adr != null && (
+                    {currency !== null && day.adr != null && (
                       <div>
                         {t("dashboard.avgPriceAxis")}:{" "}
                         {formatCurrency(Math.round(day.adr), currency)}
@@ -1170,16 +1192,18 @@ function ForecastChart({
         </div>
 
         {/* Right axis (ADR currency) */}
-        <div
-          className="flex flex-col justify-between pl-2 text-[9px] text-blue-400 select-none shrink-0"
-          style={{ height: chartHeight }}
-        >
-          {adrTicks.map((tick, idx) => (
-            <span key={idx} className="leading-none">
-              {formatAdrTick(tick, currency)}
-            </span>
-          ))}
-        </div>
+        {currency !== null && (
+          <div
+            className="flex flex-col justify-between pl-2 text-[9px] text-blue-400 select-none shrink-0"
+            style={{ height: chartHeight }}
+          >
+            {adrTicks.map((tick, idx) => (
+              <span key={idx} className="leading-none">
+                {formatAdrTick(tick, currency)}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Day labels (mirror axis layout to stay aligned with bars) */}
@@ -1202,9 +1226,11 @@ function ForecastChart({
             );
           })}
         </div>
-        <div className="invisible pl-2 text-[9px] select-none shrink-0">
-          <span>{formatAdrTick(adrMax, currency)}</span>
-        </div>
+        {currency !== null && (
+          <div className="invisible pl-2 text-[9px] select-none shrink-0">
+            <span>{formatAdrTick(adrMax, currency)}</span>
+          </div>
+        )}
       </div>
 
       {/* Legend */}
@@ -1217,13 +1243,15 @@ function ForecastChart({
           <span className="inline-block w-3 h-3 rounded-sm bg-blue-300" />
           <span>{t("dashboard.legendLow")}</span>
         </div>
-        <div className="flex items-center gap-1.5">
-          <svg width="18" height="8" viewBox="0 0 18 8" className="shrink-0">
-            <line x1="0" y1="4" x2="18" y2="4" stroke="#60a5fa" strokeWidth="1.5" />
-            <circle cx="9" cy="4" r="2" fill="#ffffff" stroke="#60a5fa" strokeWidth="1.2" />
-          </svg>
-          <span>{t("dashboard.legendAdr", { currency })}</span>
-        </div>
+        {currency !== null && (
+          <div className="flex items-center gap-1.5">
+            <svg width="18" height="8" viewBox="0 0 18 8" className="shrink-0">
+              <line x1="0" y1="4" x2="18" y2="4" stroke="#60a5fa" strokeWidth="1.5" />
+              <circle cx="9" cy="4" r="2" fill="#ffffff" stroke="#60a5fa" strokeWidth="1.2" />
+            </svg>
+            <span>{t("dashboard.legendAdr", { currency })}</span>
+          </div>
+        )}
       </div>
     </div>
   );

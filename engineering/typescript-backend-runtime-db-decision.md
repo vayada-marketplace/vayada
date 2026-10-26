@@ -30,8 +30,8 @@ Fastify is the best fit for a serverful Node.js API on ECS:
   architecture on domain packages.
 - Route validation and response serialization are first-class through JSON
   Schema and Ajv.
-- The plugin model is a good match for route groups such as marketplace,
-  booking, PMS, platform, and AI.
+- The plugin model is a good match for route groups such as booking, PMS,
+  platform, and AI.
 - `fastify.inject()` lets tests exercise routes without binding a real port.
 - It has an established TypeScript story without requiring decorators or a
   framework-specific dependency injection container.

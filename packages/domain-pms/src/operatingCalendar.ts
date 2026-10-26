@@ -584,7 +584,52 @@ export function resolvePmsOperatingCalendarPropertyProfileConflict(
   if (!integer(expectedProfileRevision, 1, 2_147_483_647)) {
     throw new TypeError("PMS operating calendar expected profile revision is invalid");
   }
+  const { currentRevision } = parseProfileEvidenceResult(result, registry);
+  if (currentRevision !== expectedProfileRevision) {
+    return Object.freeze({ code: "property_profile_revision_conflict", currentRevision });
+  }
+  return timeZoneStatusConflict(result);
+}
+
+/**
+ * Whether a saved calendar is still current for the property profile (VAY-2150). The calendar
+ * uses only the property's time zone, so description, photo or name edits that advance the
+ * profile revision keep it current. A changed time zone is reported as a profile revision
+ * conflict that carries the revision which changed it.
+ */
+export function resolvePmsOperatingCalendarTimeZoneConflict(
+  result: PmsOperatingCalendarPropertyProfileEvidenceResult,
+  acceptedTimeZone: string,
+  registry: PmsOperatingCalendarCanonicalTimeZoneRegistry,
+): PmsOperatingCalendarSourceConflict | null {
+  const { currentRevision, timeZone } = parseProfileEvidenceResult(result, registry);
+  if (result.status !== "available") return timeZoneStatusConflict(result);
+  return timeZone === acceptedTimeZone
+    ? null
+    : Object.freeze({ code: "property_profile_revision_conflict", currentRevision });
+}
+
+/** Owner evidence still carries the time zone of this saved calendar (VAY-2150). */
+export function pmsOperatingCalendarTimeZoneIsCurrent(
+  result: PmsOperatingCalendarPropertyProfileEvidenceResult,
+  configuration: PmsOperatingCalendarConfigurationSnapshot,
+  registry: PmsOperatingCalendarCanonicalTimeZoneRegistry,
+): boolean {
+  if (result.status !== "available") return false;
+  const evidence = parsePmsOperatingCalendarPropertyProfileEvidence(result.evidence, registry);
+  return (
+    evidence !== null &&
+    evidence.source.entityId === configuration.propertyId &&
+    evidence.timeZone === configuration.sourceInputs.propertyTimeZone
+  );
+}
+
+function parseProfileEvidenceResult(
+  result: PmsOperatingCalendarPropertyProfileEvidenceResult,
+  registry: PmsOperatingCalendarCanonicalTimeZoneRegistry,
+): { currentRevision: number; timeZone: string | null } {
   let source: PmsOperatingCalendarPropertyProfileSource;
+  let timeZone: string | null = null;
   switch (result.status) {
     case "available": {
       if (!exactRecord(result, ["status", "evidence"])) {
@@ -595,6 +640,7 @@ export function resolvePmsOperatingCalendarPropertyProfileConflict(
         throw new TypeError("PMS operating calendar available profile evidence is invalid");
       }
       source = evidence.source;
+      timeZone = evidence.timeZone;
       break;
     }
     case "timezone_missing":
@@ -616,9 +662,12 @@ export function resolvePmsOperatingCalendarPropertyProfileConflict(
   if (currentRevision === null) {
     throw new TypeError("PMS operating calendar profile evidence source is invalid");
   }
-  if (currentRevision !== expectedProfileRevision) {
-    return Object.freeze({ code: "property_profile_revision_conflict", currentRevision });
-  }
+  return { currentRevision, timeZone };
+}
+
+function timeZoneStatusConflict(
+  result: PmsOperatingCalendarPropertyProfileEvidenceResult,
+): PmsOperatingCalendarSourceConflict | null {
   switch (result.status) {
     case "timezone_missing":
       return Object.freeze({ code: "property_timezone_missing" });

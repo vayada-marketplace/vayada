@@ -4,7 +4,8 @@ Updated: 2026-08-22
 
 ## Active delivery lanes
 
-The coordinated six-service next release builder and publisher are present but
+The coordinated five-service next release builder and publisher (six services until the
+Marketplace removal, VAY-2271) are present but
 remain gated by `COORDINATED_RELEASES_ENABLED` until VAY-2029 installs the
 platform receiver and switches all affected automatic lanes together. See
 [`coordinated-release-publishing.md`](coordinated-release-publishing.md).
@@ -13,18 +14,15 @@ The monorepo keeps deploy workflows only for the production Python APIs and the
 parallel `next-*` validation stack. They are manually dispatchable and also run
 on relevant pushes to `main`.
 
-| Runtime                  | Workflow                                                |
-| ------------------------ | ------------------------------------------------------- |
-| Marketplace API          | `.github/workflows/deploy-marketplace-api.yml`          |
-| Booking API              | `.github/workflows/deploy-booking-api.yml`              |
-| PMS API                  | `.github/workflows/deploy-pms-api.yml`                  |
-| Next TypeScript API      | `.github/workflows/deploy-next-api.yml`                 |
-| Next Marketplace Web     | `.github/workflows/deploy-next-marketplace-web.yml`     |
-| Next Vayada Admin        | `.github/workflows/deploy-next-vayada-admin.yml`        |
-| Next Booking Web         | `.github/workflows/deploy-next-booking-web.yml`         |
-| Next Booking Admin       | `.github/workflows/deploy-next-booking-admin.yml`       |
-| Next PMS Web             | `.github/workflows/deploy-next-pms-web.yml`             |
-| Next Affiliate Dashboard | `.github/workflows/deploy-next-affiliate-dashboard.yml` |
+| Runtime             | Workflow                                          |
+| ------------------- | ------------------------------------------------- |
+| Booking API         | `.github/workflows/deploy-booking-api.yml`        |
+| PMS API             | `.github/workflows/deploy-pms-api.yml`            |
+| Next TypeScript API | `.github/workflows/deploy-next-api.yml`           |
+| Next Vayada Admin   | `.github/workflows/deploy-next-vayada-admin.yml`  |
+| Next Booking Web    | `.github/workflows/deploy-next-booking-web.yml`   |
+| Next Booking Admin  | `.github/workflows/deploy-next-booking-admin.yml` |
+| Next PMS Web        | `.github/workflows/deploy-next-pms-web.yml`       |
 
 ECS-backed workflows publish a SHA-pinned image and send an
 `app-image-published` repository dispatch to `vayada-platform`, which owns the

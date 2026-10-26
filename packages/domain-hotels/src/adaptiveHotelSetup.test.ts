@@ -3,9 +3,11 @@ import { describe, expect, it } from "vitest";
 import {
   ADAPTIVE_HOTEL_SETUP_CONTRACT_VERSION,
   SETUP_TRACK_COMPONENT_PRODUCTS,
+  OFFERED_SETUP_TRACKS,
   SETUP_TRACKS,
   isSetupTrack,
   isSetupTaskLaunchable,
+  normalizeStoredSetupTracks,
   parseAdaptiveHotelSetupStatus,
   parseUpdateTracksRequest,
   type AdaptiveHotelSetupStatus,
@@ -14,10 +16,22 @@ import {
 } from "./adaptiveHotelSetup.js";
 
 describe("adaptive hotel setup contracts", () => {
-  it("exposes only the two owner-facing setup tracks", () => {
-    expect(SETUP_TRACKS).toEqual(["hotel_operations", "creator_marketplace"]);
+  it("exposes Hotel Operations as the only setup track (VAY-2270)", () => {
+    expect(SETUP_TRACKS).toEqual(["hotel_operations"]);
     expect(isSetupTrack("hotel_operations")).toBe(true);
-    expect(isSetupTrack("creator_marketplace")).toBe(true);
+    expect(isSetupTrack("creator_marketplace")).toBe(false);
+  });
+
+  it("offers every setup track and reads the retired Creator Marketplace track as absent", () => {
+    expect(OFFERED_SETUP_TRACKS).toEqual(SETUP_TRACKS);
+    expect(normalizeStoredSetupTracks(["hotel_operations", "creator_marketplace"])).toEqual([
+      "hotel_operations",
+    ]);
+    expect(normalizeStoredSetupTracks(["creator_marketplace"])).toEqual([]);
+    expect(normalizeStoredSetupTracks(["creator_marketplace", "hotel_operations", "pms"])).toEqual([
+      "hotel_operations",
+    ]);
+    expect(normalizeStoredSetupTracks([])).toEqual([]);
   });
 
   it.each(["pms", "booking", "marketplace", "unknown", null, undefined])(
@@ -28,17 +42,13 @@ describe("adaptive hotel setup contracts", () => {
   );
 
   it("maps Hotel Operations to PMS and Booking as one bundle", () => {
-    expect(SETUP_TRACK_COMPONENT_PRODUCTS).toEqual({
-      hotel_operations: ["pms", "booking"],
-      creator_marketplace: ["marketplace"],
-    });
+    expect(SETUP_TRACK_COMPONENT_PRODUCTS).toEqual({ hotel_operations: ["pms", "booking"] });
   });
 
   it("keeps canonical tracks and component mappings immutable at runtime", () => {
     expect(Object.isFrozen(SETUP_TRACKS)).toBe(true);
     expect(Object.isFrozen(SETUP_TRACK_COMPONENT_PRODUCTS)).toBe(true);
     expect(Object.isFrozen(SETUP_TRACK_COMPONENT_PRODUCTS.hotel_operations)).toBe(true);
-    expect(Object.isFrozen(SETUP_TRACK_COMPONENT_PRODUCTS.creator_marketplace)).toBe(true);
 
     expect(() => (SETUP_TRACKS as unknown as string[]).push("booking")).toThrow(TypeError);
     expect(() =>
@@ -50,12 +60,12 @@ describe("adaptive hotel setup contracts", () => {
 
   it("parses and canonicalizes an update request", () => {
     const request = parseUpdateTracksRequest({
-      selectedTracks: ["creator_marketplace", "hotel_operations"],
+      selectedTracks: ["hotel_operations"],
       expectedRevision: 0,
     });
 
     expect(request).toEqual({
-      selectedTracks: ["hotel_operations", "creator_marketplace"],
+      selectedTracks: ["hotel_operations"],
       expectedRevision: 0,
     } satisfies UpdateTracksRequest);
   });
@@ -66,6 +76,8 @@ describe("adaptive hotel setup contracts", () => {
     { selectedTracks: [], expectedRevision: 0 },
     { selectedTracks: ["hotel_operations", "hotel_operations"], expectedRevision: 0 },
     { selectedTracks: ["booking"], expectedRevision: 0 },
+    { selectedTracks: ["creator_marketplace"], expectedRevision: 0 },
+    { selectedTracks: ["hotel_operations", "creator_marketplace"], expectedRevision: 0 },
     { selectedTracks: ["hotel_operations"], expectedRevision: -1 },
     { selectedTracks: ["hotel_operations"], expectedRevision: 0.5 },
     { selectedTracks: ["hotel_operations"], expectedRevision: 2_147_483_647 },
@@ -101,12 +113,6 @@ describe("adaptive hotel setup contracts", () => {
               { product: "booking", access: "active" },
             ],
             allowedActions: ["manage_service"],
-          },
-          {
-            track: "creator_marketplace",
-            provisioning: "not_selected",
-            components: [{ product: "marketplace", access: "absent" }],
-            allowedActions: ["add"],
           },
         ],
       },
@@ -153,12 +159,6 @@ describe("adaptive hotel setup contracts", () => {
             ],
             allowedActions: ["manage_service"],
           },
-          {
-            track: "creator_marketplace",
-            provisioning: "not_selected",
-            components: [{ product: "marketplace", access: "absent" }],
-            allowedActions: ["add"],
-          },
         ],
       },
     },
@@ -180,12 +180,6 @@ describe("adaptive hotel setup contracts", () => {
               { product: "pms", access: "absent" },
               { product: "booking", access: "absent" },
             ],
-            allowedActions: [],
-          },
-          {
-            track: "creator_marketplace",
-            provisioning: "not_selected",
-            components: [{ product: "marketplace", access: "absent" }],
             allowedActions: [],
           },
         ],
@@ -230,12 +224,6 @@ describe("adaptive hotel setup contracts", () => {
               { product: "booking", access: "active" },
             ],
             allowedActions: ["manage_service"],
-          },
-          {
-            track: "creator_marketplace",
-            provisioning: "not_selected",
-            components: [{ product: "marketplace", access: "absent" }],
-            allowedActions: ["add"],
           },
         ],
       },
@@ -323,7 +311,6 @@ describe("adaptive hotel setup contracts", () => {
         launchReadiness: {
           operationsUse: "pending",
           directBookingPublish: "pending",
-          marketplacePublish: "not_applicable",
         },
       },
       updatedAt: "2026-07-26T12:00:00.000Z",
@@ -343,75 +330,107 @@ describe("adaptive hotel setup contracts", () => {
     value.setupPlan.recommendedTaskId = "rooms_rates_availability";
     expect(parseAdaptiveHotelSetupStatus(value)).not.toBeNull();
 
-    value.setupPlan.launchReadiness.marketplacePublish = "ready";
-    expect(parseAdaptiveHotelSetupStatus(value)).toBeNull();
-
-    value.setupPlan.launchReadiness.marketplacePublish = "not_applicable";
+    // The retired Marketplace tasks are unknown task IDs now.
     value.setupPlan.tasks.push({
       ...value.setupPlan.tasks[0]!,
       taskId: "public_profile",
-      track: "creator_marketplace",
     });
     value.setupPlan.ownerProgress.total = 7;
     expect(parseAdaptiveHotelSetupStatus(value)).toBeNull();
   });
 
-  it("accepts a rejected Marketplace task as a correction recommendation", () => {
-    const propertyId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
-    const evaluatedAt = "2026-07-26T12:00:00.000Z";
-    const task = (
-      input: Pick<
-        SetupTask,
-        | "taskId"
-        | "track"
-        | "requirementOwnerDomain"
-        | "destinationRouteKey"
-        | "ownerProgress"
-        | "readiness"
-        | "actionableBy"
-        | "reasonCodes"
-      >,
-    ): SetupTask => ({
-      ...input,
-      propertyId,
-      callerCapability: "allowed",
-      sourceRevision: `${input.taskId}-r1`,
-      freshness: "fresh",
-      evaluatedAt,
-    });
-    const status: AdaptiveHotelSetupStatus = {
+  it("rejects the retired Marketplace track entry the API stopped sending (VAY-2270)", () => {
+    const status = (): Record<string, any> => ({
       contractVersion: ADAPTIVE_HOTEL_SETUP_CONTRACT_VERSION,
       organization: {
         organizationId: "11111111-1111-4111-8111-111111111111",
         displayName: "Alpenrose Hotel Group",
         websiteUrl: null,
-        selectedTracks: ["creator_marketplace"],
+        selectedTracks: ["hotel_operations"],
         trackRevision: 1,
-        canManageTracks: true,
+        canManageTracks: false,
         tracks: [
           {
             track: "hotel_operations",
-            provisioning: "not_selected",
+            provisioning: "active",
             components: [
-              { product: "pms", access: "absent" },
-              { product: "booking", access: "absent" },
+              { product: "pms", access: "active" },
+              { product: "booking", access: "active" },
             ],
-            allowedActions: ["add"],
+            allowedActions: [],
           },
           {
             track: "creator_marketplace",
+            provisioning: "not_selected",
+            components: [{ product: "marketplace", access: "absent" }],
+            allowedActions: [],
+          },
+        ],
+      },
+      propertySelection: {
+        state: "no_property",
+        selectedPropertyId: null,
+        availableProperties: [],
+      },
+      entryDecision: null,
+      setupPlan: null,
+      updatedAt: "2026-07-26T12:00:00.000Z",
+    });
+    const withoutRetiredTrack = status();
+    withoutRetiredTrack.organization.tracks.pop();
+    expect(parseAdaptiveHotelSetupStatus(status())).toBeNull();
+    expect(parseAdaptiveHotelSetupStatus(withoutRetiredTrack)).toEqual(withoutRetiredTrack);
+
+    // Naming the retired track as selected is rejected on its own too.
+    const selected = status();
+    selected.organization.tracks.pop();
+    selected.organization.selectedTracks = ["hotel_operations", "creator_marketplace"];
+    expect(parseAdaptiveHotelSetupStatus(selected)).toBeNull();
+  });
+
+  it("rejects the retired Marketplace launch state the API stopped sending (VAY-2270)", () => {
+    const task = (taskId: string, track: string, owner: string, route: string) => ({
+      taskId,
+      propertyId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      track,
+      requirementOwnerDomain: owner,
+      destinationRouteKey: route,
+      callerCapability: "allowed",
+      ownerProgress: "not_started",
+      readiness: "actionable",
+      actionableBy: "owner",
+      reasonCodes: [],
+      sourceRevision: "1",
+      freshness: "fresh",
+      evaluatedAt: "2026-07-26T12:00:00.000Z",
+    });
+    const value: Record<string, any> = {
+      contractVersion: ADAPTIVE_HOTEL_SETUP_CONTRACT_VERSION,
+      organization: {
+        organizationId: "11111111-1111-4111-8111-111111111111",
+        displayName: "Alpenrose Hotel Group",
+        websiteUrl: null,
+        selectedTracks: ["hotel_operations"],
+        trackRevision: 1,
+        canManageTracks: false,
+        tracks: [
+          {
+            track: "hotel_operations",
             provisioning: "active",
-            components: [{ product: "marketplace", access: "active" }],
-            allowedActions: ["manage_service"],
+            components: [
+              { product: "pms", access: "active" },
+              { product: "booking", access: "active" },
+            ],
+            allowedActions: [],
           },
         ],
       },
       propertySelection: {
         state: "single_property",
-        selectedPropertyId: propertyId,
+        selectedPropertyId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
         availableProperties: [
           {
-            propertyId,
+            propertyId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
             publicId: "hotel-alpenrose",
             displayName: "Hotel Alpenrose",
             locationSummary: "Munich, DE",
@@ -420,64 +439,55 @@ describe("adaptive hotel setup contracts", () => {
       },
       entryDecision: null,
       setupPlan: {
-        propertyId,
-        planRevision: "plan.v2:rejected-correction",
+        propertyId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        planRevision: "tracks:1",
         tasks: [
-          task({
-            taskId: "shared_identity",
-            track: "shared",
-            requirementOwnerDomain: "hotel_catalog",
-            destinationRouteKey: "hotel_catalog.shared_identity",
-            ownerProgress: "owner_complete",
-            readiness: "complete",
-            actionableBy: null,
-            reasonCodes: [],
-          }),
-          task({
-            taskId: "public_profile",
-            track: "creator_marketplace",
-            requirementOwnerDomain: "hotel_catalog",
-            destinationRouteKey: "hotel_catalog.public_profile",
-            ownerProgress: "in_progress",
-            readiness: "rejected",
-            actionableBy: "owner",
-            reasonCodes: ["marketplace_profile_rejected"],
-          }),
-          task({
-            taskId: "creator_offer",
-            track: "creator_marketplace",
-            requirementOwnerDomain: "marketplace",
-            destinationRouteKey: "marketplace.creator_offer",
-            ownerProgress: "not_started",
-            readiness: "blocked",
-            actionableBy: null,
-            reasonCodes: ["public_profile_incomplete"],
-          }),
+          task("shared_identity", "shared", "hotel_catalog", "hotel_catalog.shared_identity"),
+          task(
+            "rooms_rates_availability",
+            "hotel_operations",
+            "pms",
+            "pms.rooms_rates_availability",
+          ),
+          task(
+            "guest_settings_policies",
+            "hotel_operations",
+            "booking",
+            "booking.guest_settings_policies",
+          ),
+          task("billing_plan", "hotel_operations", "finance", "finance.billing_plan"),
+          task("payment", "hotel_operations", "finance", "finance.payment"),
+          task(
+            "direct_booking_publication",
+            "hotel_operations",
+            "distribution",
+            "distribution.direct_booking_publication",
+          ),
         ],
-        recommendedTaskId: "public_profile",
-        ownerProgress: { complete: 1, total: 3 },
+        recommendedTaskId: "shared_identity",
+        ownerProgress: { complete: 0, total: 6 },
         launchReadiness: {
-          operationsUse: "not_applicable",
-          directBookingPublish: "not_applicable",
-          marketplacePublish: "blocked",
+          operationsUse: "pending",
+          directBookingPublish: "pending",
+          marketplacePublish: "not_applicable",
         },
       },
-      updatedAt: evaluatedAt,
+      updatedAt: "2026-07-26T12:00:00.000Z",
     };
+    expect(parseAdaptiveHotelSetupStatus(value)).toBeNull();
 
-    expect(isSetupTaskLaunchable(status.setupPlan!.tasks[1])).toBe(true);
-    expect(parseAdaptiveHotelSetupStatus(status)).toEqual(status);
+    delete value.setupPlan.launchReadiness.marketplacePublish;
+    expect(parseAdaptiveHotelSetupStatus(value)?.setupPlan?.launchReadiness).toEqual({
+      operationsUse: "pending",
+      directBookingPublish: "pending",
+    });
+  });
 
-    const invalid = structuredClone(status);
-    const sharedTask = invalid.setupPlan!.tasks[0]!;
-    sharedTask.ownerProgress = "in_progress";
-    sharedTask.readiness = "rejected";
-    sharedTask.actionableBy = "operator";
-    sharedTask.reasonCodes = ["shared_identity_rejected"];
-    invalid.setupPlan!.ownerProgress.complete = 0;
-    invalid.setupPlan!.recommendedTaskId = "shared_identity";
-
-    expect(isSetupTaskLaunchable(sharedTask)).toBe(false);
-    expect(parseAdaptiveHotelSetupStatus(invalid)).toBeNull();
+  it("recommends only actionable tasks the caller may start", () => {
+    const task = { track: "shared", callerCapability: "allowed", readiness: "actionable" } as const;
+    expect(isSetupTaskLaunchable(task)).toBe(true);
+    expect(isSetupTaskLaunchable({ ...task, readiness: "rejected" })).toBe(false);
+    expect(isSetupTaskLaunchable({ ...task, callerCapability: "ask_owner" })).toBe(false);
+    expect(isSetupTaskLaunchable(null)).toBe(false);
   });
 });

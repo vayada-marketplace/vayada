@@ -18,6 +18,7 @@ describe("production identity entitlements", () => {
       [moduleRow()],
       [
         resource("booking", "booking_hotel"),
+        // VAY-2272: retired Marketplace resources carry no entitlement.
         resource("marketplace", "hotel_profile"),
         resource("pms", "pms_hotel"),
       ],
@@ -26,7 +27,6 @@ describe("production identity entitlements", () => {
     expect(plan.blockers).toEqual([]);
     expect(plan.entitlements.map((row) => row.entitlementKey).sort()).toEqual([
       "booking-engine",
-      "marketplace-hotel-profile",
       "pms-core",
     ]);
   });
@@ -55,7 +55,7 @@ describe("production identity entitlements", () => {
     "lets a source access-ending state close active target access from %s",
     (targetUpdatedAt, expectedUpdatedAt) => {
       const archivedResource = {
-        ...resource("marketplace", "hotel_profile"),
+        ...resource("booking", "booking_hotel"),
         status: "archived" as const,
       };
       const source = planIdentityEntitlements([], [archivedResource]);
@@ -78,7 +78,7 @@ describe("production identity entitlements", () => {
   it.each(["2026-01-15T00:00:00.000Z", UPDATED, "2026-03-01T00:00:00.000Z"])(
     "does not reactivate target access ending at %s",
     (targetUpdatedAt) => {
-      const activeResource = resource("marketplace", "hotel_profile");
+      const activeResource = resource("booking", "booking_hotel");
       const source = planIdentityEntitlements([], [activeResource]);
       const target: ExistingEntitlement = {
         ...source.entitlements[0]!,
@@ -97,7 +97,7 @@ describe("production identity entitlements", () => {
     "preserves an existing access-ending representation from %s",
     (targetUpdatedAt) => {
       const archivedResource = {
-        ...resource("marketplace", "hotel_profile"),
+        ...resource("booking", "booking_hotel"),
         status: "archived" as const,
       };
       const source = planIdentityEntitlements([], [archivedResource]);
@@ -116,7 +116,7 @@ describe("production identity entitlements", () => {
 
   it("still blocks conflicting access-ending entitlement details", () => {
     const archivedResource = {
-      ...resource("marketplace", "hotel_profile"),
+      ...resource("booking", "booking_hotel"),
       status: "archived" as const,
     };
     const source = planIdentityEntitlements([], [archivedResource]);

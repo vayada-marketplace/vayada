@@ -163,7 +163,7 @@ export function ExpensesTab({
     <div className="space-y-5">
       <section className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h2 className="text-base font-semibold text-gray-900">Expense ledger</h2>
+          <h3 className="text-base font-semibold text-gray-900">Expense ledger</h3>
           <p className="mt-1 text-sm text-gray-600">
             Property costs, payment state, and generated charges.
           </p>
@@ -511,7 +511,7 @@ function CategoryDistribution({ data, locale }: { data: FinanceExpensesResponse;
   );
   return (
     <section className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-      <h3 className="text-base font-semibold text-gray-900">Net amount by category this month</h3>
+      <h4 className="text-base font-semibold text-gray-900">Net amount by category this month</h4>
       <p className="mt-1 text-xs text-gray-600">
         Bar widths show magnitude; amounts retain corrections and reversals.
       </p>

@@ -22,6 +22,14 @@ const entitlementMigration = await readFile(
   ),
   "utf8",
 );
+// 0089 re-creates its sync function; 0483 restores the current one for later suites (VAY-2171).
+const entitlementSyncMigration = await readFile(
+  new URL(
+    "../../../../packages/backend-migration/migrations/0483_finance_entitlement_sync_runtime_columns.sql",
+    import.meta.url,
+  ),
+  "utf8",
+);
 
 describe.skipIf(!TEST_DATABASE_URL)("Finance subscription webhook PostgreSQL scoping", () => {
   const pool = new pg.Pool({
@@ -249,6 +257,7 @@ describe.skipIf(!TEST_DATABASE_URL)("Finance subscription webhook PostgreSQL sco
     await expect(readIdentityEntitlement(organizationA)).resolves.toBeNull();
 
     await pool.query(entitlementMigration);
+    await pool.query(entitlementSyncMigration);
 
     await expect(readIdentityEntitlement(organizationA)).resolves.toMatchObject({
       billingLinked: true,

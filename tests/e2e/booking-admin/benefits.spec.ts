@@ -15,7 +15,6 @@ test.describe("booking-admin benefits settings cutover", () => {
       "Requires a production booking-admin build so the authenticated shell hydrates.",
     );
 
-    const assertHealthy = watchPageHealth(page, testInfo);
     const assertNoLegacyCalls = watchNoLegacyCalls(
       page,
       testInfo,
@@ -27,6 +26,7 @@ test.describe("booking-admin benefits settings cutover", () => {
     const typedBenefits = ["Welcome Drink on Arrival", "Complimentary sunset cocktail"];
     const contractRequests: string[] = [];
     const typedWrites: unknown[] = [];
+    let failFirstRead = true;
     await page.route(`**${BOOKING_ADMIN_BENEFITS_SETTINGS_PATH}*`, async (route) => {
       if (route.request().method() === "PUT") {
         const body = route.request().postDataJSON();
@@ -37,14 +37,31 @@ test.describe("booking-admin benefits settings cutover", () => {
 
       contractRequests.push(route.request().url());
       expect(route.request().method()).toBe("GET");
+      if (failFirstRead) {
+        failFirstRead = false;
+        await route.fulfill({ status: 503, json: { message: "Benefits unavailable." } });
+        return;
+      }
       await route.fulfill({ json: { benefits: typedBenefits } });
     });
 
-    await page.goto("/booking-flow");
-    await page.getByRole("button", { name: /^Benefits$/ }).click();
-
+    // Benefits moved from Booking Flow to Settings (VAY-2072); old tab links still land there.
+    await page.goto("/booking-flow?tab=benefits");
+    await expect(page).toHaveURL(/\/settings\/book-direct-benefits$/);
     await expect(page.getByRole("heading", { name: "Book Direct Benefits" })).toBeVisible();
+    // A failed read shows Retry, never an empty list that a Save would write over the perks.
+    await expect(
+      page.getByRole("alert").filter({ hasText: "Failed to load settings" }),
+    ).toBeVisible();
+    await expect(page.getByRole("button", { name: /^Save Benefits$/ })).toHaveCount(0);
+    await page.getByRole("button", { name: "Retry", exact: true }).click();
+    // Watch page health only after the deliberate 503 above.
+    const assertHealthy = watchPageHealth(page, testInfo);
     await expect(page.getByText("Complimentary sunset cocktail")).toBeVisible();
+    await testInfo.attach("settings-book-direct-benefits", {
+      body: await page.screenshot({ fullPage: true }),
+      contentType: "image/png",
+    });
 
     await page.getByRole("button", { name: /^Save Benefits$/ }).click();
 
@@ -53,6 +70,16 @@ test.describe("booking-admin benefits settings cutover", () => {
     expect(contractRequests.length).toBeGreaterThan(0);
     expect(new URL(contractRequests[0]!).pathname).toBe(BOOKING_ADMIN_BENEFITS_SETTINGS_PATH);
     expect(typedWrites).toEqual([{ benefits: typedBenefits }]);
+    await expect(page.getByRole("status").filter({ hasText: "Benefits saved" })).toBeVisible();
+
+    await page.goto("/settings");
+    await page
+      .getByRole("main")
+      .getByRole("link", { name: /^Book Direct Benefits/ })
+      .click();
+    await expect(page).toHaveURL(/\/settings\/book-direct-benefits$/);
+    await page.goto("/booking-flow");
+    await expect(page.getByRole("button", { name: /^Benefits$/ })).toHaveCount(0);
 
     await assertNoLegacyCalls();
     await assertHealthy();

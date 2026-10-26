@@ -327,3 +327,49 @@ describe("cross-room-type move picker", () => {
     view!.unmount();
   });
 });
+
+describe("unassigned room card", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("tags a room still waiting for one as Unassigned and keeps Assign beside the picker", async () => {
+    mocks.get.mockResolvedValue({
+      ...booking,
+      numberOfRooms: 1,
+      roomId: null,
+      roomNumber: null,
+      assignedRooms: [
+        { assignmentId: "a-1", roomId: null, roomNumber: null, position: 0, roomTypeId: "type-1" },
+      ],
+    });
+    let view: ReturnType<typeof create>;
+    await act(async () => {
+      view = create(
+        <BookingDetailModal
+          bookingId="booking-1"
+          onClose={vi.fn()}
+          onStatusChange={vi.fn()}
+          rooms={rooms}
+          bookings={[]}
+        />,
+      );
+    });
+    const tags = view!.root
+      .findAllByType("span")
+      .map((span) => span.children.filter((child) => typeof child === "string").join(""));
+    // VAY-2362: no empty "#" tag for a room without a number.
+    expect(tags).toContain("Unassigned");
+    expect(tags).not.toContain("#");
+    // The picker shrinks to fit long room names, so the button stays inside the card.
+    const picker = view!.root
+      .findAllByType("select")
+      .find(
+        (select) => select.findAllByType("option")[0]!.children.join("") === "Select a room...",
+      )!;
+    expect(picker.props.className).toContain("min-w-0");
+    const assign = view!.root
+      .findAllByType("button")
+      .find((button) => button.children.join("") === "Assign")!;
+    expect(assign.props.className).toContain("shrink-0");
+    view!.unmount();
+  });
+});

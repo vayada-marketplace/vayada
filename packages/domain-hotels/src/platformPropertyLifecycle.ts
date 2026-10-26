@@ -81,7 +81,6 @@ export type PlatformPropertyRetirementImpact = PlatformPropertyLifecycleResult &
   };
   media: { objects: number };
   publicExposure: {
-    marketplaceActive: boolean;
     distributionStatus: string | null;
     bookingRevisionActive: boolean;
   };

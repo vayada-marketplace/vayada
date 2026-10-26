@@ -6,6 +6,7 @@ export const FINANCE_FIXED_PLAN_INTERVAL_MONTHS = 1 as const;
 export type FinanceSubscriptionPlan = "commission" | "fixed";
 
 export type FinanceSubscriptionLifecycleStatus =
+  | "not_selected"
   | "commission"
   | "checkout_pending"
   | "active"
@@ -14,7 +15,8 @@ export type FinanceSubscriptionLifecycleStatus =
 
 export type FinancePlanStatusReadModel = {
   propertyId: string;
-  plan: FinanceSubscriptionPlan;
+  /** Null until the hotel chooses Commission or a Fixed Plan is active: no plan is assumed. */
+  plan: FinanceSubscriptionPlan | null;
   status: FinanceSubscriptionLifecycleStatus;
   currency: string;
   activeRoomCount: number;
@@ -259,6 +261,14 @@ export type StripeFinanceSubscriptionProvider = {
     idempotencyKey: string;
   }): Promise<StripeSubscriptionSnapshot>;
 };
+
+/**
+ * Commission counts as chosen only with a parseable planSelectedAt. Plan status, booking
+ * readiness's billing config and the booking acceptance terms all use this one rule (VAY-2171).
+ */
+export function isFinancePlanSelectedAt(value: unknown): boolean {
+  return typeof value === "string" && Number.isFinite(Date.parse(value));
+}
 
 export function fixedPlanAmountMinor(
   activeRoomCount: number,

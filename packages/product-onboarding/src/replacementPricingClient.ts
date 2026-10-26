@@ -28,6 +28,39 @@ export type PricingTermsInput = Omit<ReplacementOfferTerms, "revision"> & {
   expectedRevision: string | null;
 };
 export type PricingDraftContext = { draftId: string; baseRevision: number };
+/** Whether rates can take card and deposits on the booking page now, for "Paid when booking" (VAY-2205). */
+export type PricingCardReadiness = {
+  card: {
+    ready: boolean;
+    reason: "not_connected" | "currency" | "not_approved" | "switch_off" | null;
+    charge: "at_booking" | "on_accept";
+  };
+  deposits: { ready: boolean };
+};
+/** Why a published rate isn't selling now, and what fixes it (VAY-2304, pricing-rates-not-selling.v1). */
+export const PRICING_RATE_NOT_SELLING_REASONS = [
+  "card_off",
+  "card_not_chosen",
+  "card_setup_incomplete",
+  "deposits_off",
+  "pay_at_property_off",
+  "no_payment_method",
+] as const;
+export const PRICING_RATE_FIXES = [
+  "turn_card_on",
+  "choose_card",
+  "finish_stripe_setup",
+  "allow_pay_at_property",
+  "change_rate_payment",
+  "turn_pay_at_property_on",
+] as const;
+/** A published rate guests can't book now, with its fixes (main fix first). */
+export type PricingRateNotSelling = {
+  roomTypeId: string;
+  offerId: string;
+  reason: (typeof PRICING_RATE_NOT_SELLING_REASONS)[number];
+  fixes: (typeof PRICING_RATE_FIXES)[number][];
+};
 export type PricingSources = { room: string; terms: string; finance: string };
 export type PricingSnapshot = {
   currency: string;
@@ -239,6 +272,76 @@ export function createReplacementPricingClient(
     }
   }
   return {
+    /** Bank transfer and PayPal the rate pickers may offer: their acceptance is on and the hotel
+     * takes them with their details in place (VAY-2139). An API without the read offers none. */
+    async paymentMethods(): Promise<("bank_transfer" | "paypal")[]> {
+      const value = await optionalRead(`${base}/payment-methods`);
+      if (value === missing) return [];
+      if (!exact(value, ["acceptanceEnabled", "readyMethods"])) return bad();
+      const { acceptanceEnabled, readyMethods: methods } = value;
+      if (
+        typeof acceptanceEnabled !== "boolean" ||
+        !Array.isArray(methods) ||
+        methods.some((method) => method !== "bank_transfer" && method !== "paypal") ||
+        new Set(methods).size !== methods.length
+      )
+        return bad();
+      return acceptanceEnabled ? [...(methods as ("bank_transfer" | "paypal")[])] : [];
+    },
+    /** Card and deposits for the rate screens (VAY-2205). An API without the read offers neither. */
+    async cardReadiness(): Promise<PricingCardReadiness> {
+      const value = await optionalRead(`${base}/card-readiness`);
+      if (value === missing)
+        return {
+          card: { ready: false, reason: "switch_off", charge: "at_booking" },
+          deposits: { ready: false },
+        };
+      if (!exact(value, ["card", "deposits"]) || !exact(value.card, ["ready", "reason", "charge"]))
+        return bad();
+      const { ready, reason, charge } = value.card;
+      if (
+        typeof ready !== "boolean" ||
+        !(reason === null
+          ? ready
+          : !ready &&
+            ["not_connected", "currency", "not_approved", "switch_off"].includes(
+              reason as string,
+            )) ||
+        (charge !== "at_booking" && charge !== "on_accept") ||
+        !exact(value.deposits, ["ready"]) ||
+        typeof value.deposits.ready !== "boolean" ||
+        (value.deposits.ready && !ready)
+      )
+        return bad();
+      return structuredClone(value) as PricingCardReadiness;
+    },
+    /** The published rates guests can't book now, and why (VAY-2304); every other rate sells. An API without the read
+     * lists none. */
+    async notSellingRates(): Promise<PricingRateNotSelling[]> {
+      const value = await optionalRead(`${base}/not-selling`);
+      if (value === missing) return [];
+      if (
+        !exact(value, ["version", "publishedRevision", "rates"]) ||
+        value.version !== "pricing-rates-not-selling.v1" ||
+        !(value.publishedRevision === null || rev(value.publishedRevision, 1)) ||
+        !Array.isArray(value.rates)
+      )
+        return bad();
+      return value.rates.map((rate: unknown) => {
+        if (
+          !exact(rate, ["roomTypeId", "offerId", "reason", "fixes"]) ||
+          !uuid(rate.roomTypeId) ||
+          typeof rate.offerId !== "string" ||
+          !rate.offerId ||
+          !(PRICING_RATE_NOT_SELLING_REASONS as readonly unknown[]).includes(rate.reason) ||
+          !Array.isArray(rate.fixes) ||
+          !rate.fixes.length ||
+          rate.fixes.some((fix) => !(PRICING_RATE_FIXES as readonly unknown[]).includes(fix))
+        )
+          return bad();
+        return structuredClone(rate) as PricingRateNotSelling;
+      });
+    },
     termsAction(input: PricingTermsInput, draftContext: PricingDraftContext) {
       const selected = context(draftContext);
       const sent = structuredClone(input);

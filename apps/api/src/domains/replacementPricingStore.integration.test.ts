@@ -96,9 +96,13 @@ describe.skipIf(!url)("replacement pricing PostgreSQL repository", () => {
     expect(await f.store.save(f.scope, command)).toEqual({ revision: 1, replayed: false });
     expect(await f.store.save(f.scope, command)).toEqual({ revision: 1, replayed: true });
     expect(await f.store.read(f.scope)).toMatchObject({ ...command.snapshot, revision: 1, stale: false });
-    for (const table of ["domain_events", "product_audit_events", "outbox_events"]) {
-      expect((await pool.query(`SELECT count(*)::int AS count FROM platform.${table} WHERE property_id=$1`, [f.scope.propertyId])).rows[0].count).toBe(1);
+    for (const [table, count] of [["domain_events", 1], ["product_audit_events", 1], ["outbox_events", 2]]) {
+      expect((await pool.query(`SELECT count(*)::int AS count FROM platform.${table} WHERE property_id=$1`, [f.scope.propertyId])).rows[0].count).toBe(count);
     }
+    // VAY-2123: the public offer days follow every published price change.
+    expect((await pool.query("SELECT destination,event_type FROM platform.outbox_events WHERE property_id=$1 ORDER BY destination", [f.scope.propertyId])).rows).toEqual([
+      { destination: "distribution.inventory-projection", event_type: "pms.inventory.projection_refresh_requested" },
+      { destination: "pricing.v2", event_type: "pricing.v2.revised" }]);
     await expect(f.store.save(f.scope, { ...command, snapshot: { ...command.snapshot, rooms: [] } })).rejects.toMatchObject({ code: "idempotency_conflict" });
   });
   it("serializes competing writes and rolls back a failed effect without moving the head", async () => {
@@ -128,7 +132,7 @@ describe.skipIf(!url)("replacement pricing PostgreSQL repository", () => {
     await expect(f.store.saveDraft(f.scope, { draftId, expectedDraftRevision: 1, baseRevision: 1, sources: f.sources(), snapshot: f.snapshot(2) })).rejects.toMatchObject({ code: "denied" });
     expect(await f.store.read(f.scope)).toMatchObject({ revision: 1, stale: true });
     expect(await f.store.readDraft(f.scope, draftId)).toMatchObject({ revision: 1, baseRevision: 0 });
-    for (const [table, count] of [["domain_events", 2], ["product_audit_events", 2], ["outbox_events", 1]])
+    for (const [table, count] of [["domain_events", 2], ["product_audit_events", 2], ["outbox_events", 2]])
       expect((await pool.query(`SELECT count(*)::int AS count FROM platform.${table} WHERE property_id=$1`, [f.scope.propertyId])).rows[0].count).toBe(count);
     f.revokeAccess();
     await expect(f.store.save(f.scope, command)).rejects.toMatchObject({ code: "denied" });
@@ -217,7 +221,7 @@ describe.skipIf(!url)("replacement pricing PostgreSQL repository", () => {
     for (const snapshot of variants)
       await expect(f.store.save(f.scope, { ...f.command(1), snapshot })).rejects.toMatchObject({ code: "currency_conversion_required" });
     expect((await f.store.read(f.scope))?.revision).toBe(1);
-    expect((await pool.query("SELECT count(*)::int AS count FROM platform.outbox_events WHERE property_id=$1", [f.scope.propertyId])).rows[0].count).toBe(1);
+    expect((await pool.query("SELECT count(*)::int AS count FROM platform.outbox_events WHERE property_id=$1", [f.scope.propertyId])).rows[0].count).toBe(2);
     await f.store.save(f.scope, { ...f.command(1), snapshot: { ...usd, rooms: [...usd.rooms].reverse() } });
     expect((await f.store.read(f.scope))?.rooms).toHaveLength(2);
   });
@@ -235,7 +239,7 @@ describe.skipIf(!url)("replacement pricing PostgreSQL repository", () => {
     expect(await f.store.save(f.scope, command)).toEqual({ revision: 2, replayed: true });
     await expect(f.store.save(f.scope, { ...command, snapshot: { ...usd, ownerReferences: { ...usd.ownerReferences, fx: "changed" } } })).rejects.toMatchObject({ code: "idempotency_conflict" });
     await expect(unpublished.store.save(unpublished.scope, { ...unpublished.command(1), snapshot: converted(unpublished.snapshot(1), rate) })).rejects.toMatchObject({ code: "currency_conversion_required" });
-    expect((await pool.query("SELECT count(*)::int AS count FROM platform.outbox_events WHERE property_id=$1", [f.scope.propertyId])).rows[0].count).toBe(2);
+    expect((await pool.query("SELECT count(*)::int AS count FROM platform.outbox_events WHERE property_id=$1", [f.scope.propertyId])).rows[0].count).toBe(4);
   }, 10_000);
   it("rolls back every publication write if FX expires during the final outbox effect", async () => {
     const f = await fixture(), draftId = randomUUID(); await f.store.save(f.scope, f.command()); f.allowConversion();
@@ -245,7 +249,7 @@ describe.skipIf(!url)("replacement pricing PostgreSQL repository", () => {
     await pool.query(`CREATE FUNCTION platform.${name}() RETURNS trigger LANGUAGE plpgsql AS $$
       BEGIN PERFORM nextval('platform.${name}'); PERFORM pg_sleep(3.1); RETURN NEW; END $$`);
     await pool.query(`CREATE TRIGGER ${name} BEFORE INSERT ON platform.outbox_events
-      FOR EACH ROW WHEN (NEW.property_id='${f.scope.propertyId}'::uuid) EXECUTE FUNCTION platform.${name}()`);
+      FOR EACH ROW WHEN (NEW.property_id='${f.scope.propertyId}'::uuid AND NEW.destination='pricing.v2') EXECUTE FUNCTION platform.${name}()`);
     try {
       const rate = await fx(3), usd = converted(f.snapshot(1), rate);
       await f.store.saveDraft(f.scope, { draftId, expectedDraftRevision: 0, baseRevision: 1, sources: f.sources(), snapshot: usd });
@@ -255,7 +259,7 @@ describe.skipIf(!url)("replacement pricing PostgreSQL repository", () => {
       expect(await f.store.read(f.scope)).toMatchObject({ revision: 1, currency: "EUR" });
       expect(await f.store.readDraft(f.scope, draftId)).toMatchObject({ revision: 1, stale: false, snapshot: usd });
       for (const [schema, table, count] of [["pms", "pricing_v2_revisions", 1], ["pms", "pricing_v2_rooms", 1],
-        ["platform", "domain_events", 2], ["platform", "product_audit_events", 2], ["platform", "outbox_events", 1]])
+        ["platform", "domain_events", 2], ["platform", "product_audit_events", 2], ["platform", "outbox_events", 2]])
         expect((await pool.query(`SELECT count(*)::int AS count FROM ${schema}.${table} WHERE property_id=$1`, [f.scope.propertyId])).rows[0].count).toBe(count);
     } finally {
       await pool.query(`DROP TRIGGER ${name} ON platform.outbox_events`);
@@ -273,7 +277,7 @@ describe.skipIf(!url)("replacement pricing PostgreSQL repository", () => {
     await f.store.saveDraft(f.scope, { ...draft, expectedDraftRevision: 1, baseRevision: 1, snapshot: f.snapshot(2) });
     expect(await f.store.save(f.scope, { ...publish, draft: { ...publish.draft, id: draftId.toUpperCase() } })).toEqual({ revision: 1, replayed: true });
     await expect(f.store.save(f.scope, { ...publish, draft: { id: draftId, revision: 2 } })).rejects.toMatchObject({ code: "idempotency_conflict" });
-    expect((await pool.query("SELECT count(*)::int AS count FROM platform.outbox_events WHERE property_id=$1", [f.scope.propertyId])).rows[0].count).toBe(1);
+    expect((await pool.query("SELECT count(*)::int AS count FROM platform.outbox_events WHERE property_id=$1", [f.scope.propertyId])).rows[0].count).toBe(2);
   });
   it("rejects missing, mismatched, edited and foreign drafts without publication effects", async () => {
     const f = await fixture(), other = await fixture(), draftId = randomUUID();

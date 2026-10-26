@@ -4,24 +4,16 @@ import { describe, expect, it, vi } from "vitest";
 import type { SharedHotelSetupApi } from "./sharedHotelSetupApi";
 
 import Wizard, {
-  blockInlineSetupUnload,
-  canLeaveInlineSetupTask,
   canConfirmLocation,
   createProfileFromDraft,
   draftFromProfile,
   hasMapCoordinates,
   idempotencyKeyForRetry,
-  INLINE_SETUP_STALE_SAVE_MESSAGE,
-  isInlineSetupTaskEditable,
-  isInlineSetupTaskSaveCurrent,
-  isInlineSetupTaskSelectable,
   locationResetForManualAddressEdit,
   mergeTrackSelectionAfterConflict,
   normalizedPhoneNumber,
   phoneWithCountryCallingCode,
-  previousEditableSetupTaskId,
   profileUpdateFromDraft,
-  recommendedInlineSetupTaskId,
   setupErrorMessage,
   validateProfileDraft,
 } from "./SharedFirstRunPropertySetupWizard";
@@ -200,6 +192,29 @@ describe("property profile requests", () => {
     });
   });
 
+  it("keeps a public guest map when only the city and country box changes (VAY-2288)", () => {
+    const profile = createProfileFromDraft(draft);
+    profile.contacts = profile.contacts.map((contact) => ({ ...contact, isPublic: true }));
+    profile.location = {
+      ...profile.location,
+      latitude: 48.1373932,
+      longitude: 11.5754485,
+      geoPublic: true,
+      mapDisplayMode: "exact",
+    };
+    const existing = { propertyId: "property-1", profileRevision: 9, profile };
+    const baseline = draftFromProfile(existing, null, null);
+
+    expect(
+      profileUpdateFromDraft({ ...baseline, localityPublic: !baseline.localityPublic }, existing)
+        ?.patch.location,
+    ).toEqual({ localityPublic: !baseline.localityPublic });
+    expect(
+      profileUpdateFromDraft({ ...baseline, streetAddress: "Marienplatz 2" }, existing)?.patch
+        .location,
+    ).toEqual({ streetAddress: "Marienplatz 2", geoPublic: false, mapDisplayMode: "hidden" });
+  });
+
   it("leaves an existing published contact unchanged when the entered value matches", () => {
     const profile = createProfileFromDraft(draft);
     profile.contacts = profile.contacts.map((contact) => ({ ...contact, isPublic: true }));
@@ -376,7 +391,7 @@ describe("property profile requests", () => {
               organizationId: "organization-1",
               displayName: "Group",
               websiteUrl: null,
-              selectedTracks: ["creator_marketplace"],
+              selectedTracks: ["hotel_operations"],
               trackRevision: 1,
               canManageTracks: true,
               tracks: [],
@@ -420,9 +435,8 @@ describe("property profile requests", () => {
           renderer = create(
             createElement(Wizard, {
               api: api as unknown as SharedHotelSetupApi,
-              entryProduct: "marketplace",
-              onContinue: () => undefined,
-              renderTaskForm: () => null,
+              entryProduct: "booking",
+              renderAfterHotelDetails: () => null,
             }),
           );
         });
@@ -524,7 +538,7 @@ describe("property profile requests", () => {
     });
   });
 
-  it("persists explicit public-locality consent while forcing private geo fields", () => {
+  it("persists explicit public-locality consent; only an address change forces private geo fields", () => {
     expect(createProfileFromDraft({ ...draft, localityPublic: true }).location).toMatchObject({
       localityPublic: true,
       geoPublic: false,
@@ -538,15 +552,23 @@ describe("property profile requests", () => {
       geoPublic: true,
       mapDisplayMode: "exact",
     };
+    // VAY-2288: the box alone publishes no new location detail, so the hotel's map stays as set.
     expect(
       profileUpdateFromDraft(
         { ...draft, localityPublic: true },
+        { propertyId: "property-1", profileRevision: 9, profile: existing },
+      ),
+    ).toEqual({ expectedProfileRevision: 9, patch: { location: { localityPublic: true } } });
+    expect(
+      profileUpdateFromDraft(
+        { ...draft, localityPublic: true, city: "Augsburg" },
         { propertyId: "property-1", profileRevision: 9, profile: existing },
       ),
     ).toEqual({
       expectedProfileRevision: 9,
       patch: {
         location: {
+          city: "Augsburg",
           localityPublic: true,
           geoPublic: false,
           mapDisplayMode: "hidden",
@@ -558,181 +580,18 @@ describe("property profile requests", () => {
 
 describe("mergeTrackSelectionAfterConflict", () => {
   it("preserves the owner’s intent while retaining tracks another session already added", () => {
-    expect(mergeTrackSelectionAfterConflict(["hotel_operations"], ["creator_marketplace"])).toEqual(
-      ["hotel_operations", "creator_marketplace"],
-    );
+    expect(mergeTrackSelectionAfterConflict([], ["hotel_operations"])).toEqual([
+      "hotel_operations",
+    ]);
+    expect(mergeTrackSelectionAfterConflict(["hotel_operations"], [])).toEqual([
+      "hotel_operations",
+    ]);
   });
 
   it("keeps canonical order and removes duplicates", () => {
-    expect(
-      mergeTrackSelectionAfterConflict(
-        ["creator_marketplace", "hotel_operations"],
-        ["hotel_operations"],
-      ),
-    ).toEqual(["hotel_operations", "creator_marketplace"]);
-  });
-});
-
-describe("inline setup task navigation", () => {
-  it("lets an authorized user revisit completed work without reopening blocked work", () => {
-    expect(
-      isInlineSetupTaskEditable({
-        taskId: "public_profile",
-        track: "creator_marketplace",
-        readiness: "complete",
-        callerCapability: "allowed",
-      }),
-    ).toBe(true);
-    expect(
-      isInlineSetupTaskEditable({
-        taskId: "public_profile",
-        track: "creator_marketplace",
-        readiness: "complete",
-        callerCapability: "ask_owner",
-      }),
-    ).toBe(false);
-    expect(
-      isInlineSetupTaskEditable({
-        taskId: "rooms_rates_availability",
-        track: "hotel_operations",
-        readiness: "blocked",
-        callerCapability: "allowed",
-      }),
-    ).toBe(false);
-    expect(
-      isInlineSetupTaskEditable({
-        taskId: "shared_identity",
-        track: "shared",
-        readiness: "complete",
-        callerCapability: "allowed",
-      }),
-    ).toBe(true);
-  });
-
-  it("keeps future ready tasks locked until they become the recommended wizard step", () => {
-    const creatorOffer = inlineTask(
-      "creator_offer",
-      "actionable",
-      "allowed",
-      "creator_marketplace",
-    );
-    const rooms = inlineTask(
-      "rooms_rates_availability",
-      "actionable",
-      "allowed",
+    expect(mergeTrackSelectionAfterConflict(["hotel_operations"], ["hotel_operations"])).toEqual([
       "hotel_operations",
-    );
-    const completedProfile = inlineTask(
-      "public_profile",
-      "complete",
-      "allowed",
-      "creator_marketplace",
-    );
-
-    expect(isInlineSetupTaskSelectable(creatorOffer, "creator_offer")).toBe(true);
-    expect(isInlineSetupTaskSelectable(rooms, "creator_offer")).toBe(false);
-    expect(isInlineSetupTaskSelectable(completedProfile, "creator_offer")).toBe(true);
-  });
-
-  it("backs up to the nearest editable task and skips permission-blocked steps", () => {
-    expect(
-      previousEditableSetupTaskId(
-        [
-          inlineTask("shared_identity", "complete", "allowed", "shared"),
-          inlineTask("public_profile", "blocked", "forbidden", "creator_marketplace"),
-          inlineTask("creator_offer", "complete", "allowed", "creator_marketplace"),
-          inlineTask("rooms_rates_availability", "actionable", "allowed", "hotel_operations"),
-        ],
-        "rooms_rates_availability",
-      ),
-    ).toBe("creator_offer");
-    expect(
-      previousEditableSetupTaskId(
-        [
-          inlineTask("shared_identity", "complete", "allowed", "shared"),
-          inlineTask("public_profile", "blocked", "forbidden", "creator_marketplace"),
-        ],
-        "public_profile",
-      ),
-    ).toBe("shared_identity");
-  });
-
-  it("selects only the authoritative actionable recommendation after a save", () => {
-    const status = {
-      setupPlan: {
-        recommendedTaskId: "creator_offer",
-        tasks: [
-          inlineTask("public_profile", "complete", "allowed", "creator_marketplace"),
-          inlineTask("creator_offer", "actionable", "allowed", "creator_marketplace"),
-        ],
-      },
-    } as Parameters<typeof recommendedInlineSetupTaskId>[0];
-
-    expect(recommendedInlineSetupTaskId(status)).toBe("creator_offer");
-
-    status.setupPlan!.tasks[1]!.readiness = "pending_sync";
-    expect(recommendedInlineSetupTaskId(status)).toBeNull();
-  });
-
-  it("permits a save only while the task and plan revision are still current", () => {
-    const status = inlineStatus("plan-1", "public_profile", [
-      inlineTask("shared_identity", "complete", "allowed", "shared"),
-      inlineTask("public_profile", "actionable", "allowed", "creator_marketplace"),
     ]);
-    const expected = {
-      propertyId: "property-1",
-      taskId: "public_profile" as const,
-      planRevision: "plan-1",
-    };
-
-    expect(isInlineSetupTaskSaveCurrent(status, expected)).toBe(true);
-    expect(
-      isInlineSetupTaskSaveCurrent(
-        { ...status, setupPlan: { ...status.setupPlan!, planRevision: "plan-2" } },
-        expected,
-      ),
-    ).toBe(false);
-    expect(
-      isInlineSetupTaskSaveCurrent(
-        inlineStatus("plan-1", "creator_offer", status.setupPlan!.tasks),
-        expected,
-      ),
-    ).toBe(false);
-    const revisitedStatus = inlineStatus("plan-1", "creator_offer", [
-      inlineTask("public_profile", "complete", "allowed", "creator_marketplace"),
-      inlineTask("creator_offer", "actionable", "allowed", "creator_marketplace"),
-    ]);
-    expect(isInlineSetupTaskSaveCurrent(revisitedStatus, expected)).toBe(true);
-    expect(INLINE_SETUP_STALE_SAVE_MESSAGE).toContain("refreshed the latest step");
-  });
-
-  it("navigates clean forms without prompting and asks before discarding dirty forms", () => {
-    let confirmationCount = 0;
-    const denyDiscard = () => {
-      confirmationCount += 1;
-      return false;
-    };
-
-    expect(canLeaveInlineSetupTask(false, denyDiscard)).toBe(true);
-    expect(confirmationCount).toBe(0);
-    expect(canLeaveInlineSetupTask(true, denyDiscard)).toBe(false);
-    expect(confirmationCount).toBe(1);
-    expect(canLeaveInlineSetupTask(true, () => true)).toBe(true);
-  });
-
-  it("blocks browser unload while the current step has unsaved changes", () => {
-    let prevented = false;
-    const event = {
-      preventDefault: () => {
-        prevented = true;
-      },
-      returnValue: "unchanged",
-    };
-
-    blockInlineSetupUnload(event);
-
-    expect(prevented).toBe(true);
-    expect(event.returnValue).toBe("");
   });
 });
 
@@ -769,7 +628,11 @@ describe("canConfirmLocation", () => {
   };
 
   it("keeps partial Google results editable", () => {
-    expect(canConfirmLocation({ ...completeLocation, postalCode: "" })).toBe(false);
+    expect(canConfirmLocation({ ...completeLocation, streetAddress: "" })).toBe(false);
+  });
+
+  it("confirms an address without a postal code (VAY-2289)", () => {
+    expect(canConfirmLocation({ ...completeLocation, postalCode: "" })).toBe(true);
   });
 
   it("requires a time zone before confirming an address", () => {
@@ -811,6 +674,27 @@ describe("validateProfileDraft", () => {
         logoMediaObjectId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
       }).logo,
     ).toBeUndefined();
+  });
+
+  it("doesn't ask for a postal code (VAY-2289)", () => {
+    const draft = {
+      displayName: "Hotel Alpenrose",
+      propertyType: "hotel",
+      countryCode: "LK",
+      city: "Galle",
+      streetAddress: "Lighthouse Street 1",
+      postalCode: "",
+      timezone: "Asia/Colombo",
+      contactEmail: "owner@alpenrose.example",
+      phone: "+94 77 123 4567",
+      whatsapp: "",
+      localityPublic: true,
+      logoFile: null,
+      logoMediaObjectId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      logoPublicUrl: "",
+    } as Parameters<typeof validateProfileDraft>[0];
+
+    expect(validateProfileDraft(draft)).toEqual({});
   });
 
   it("rejects invalid time zones", () => {
@@ -892,29 +776,58 @@ describe("hasMapCoordinates", () => {
   });
 });
 
-function inlineTask(
-  taskId: Parameters<typeof previousEditableSetupTaskId>[0][number]["taskId"],
-  readiness: Parameters<typeof previousEditableSetupTaskId>[0][number]["readiness"],
-  callerCapability: Parameters<typeof previousEditableSetupTaskId>[0][number]["callerCapability"],
-  track: Parameters<typeof previousEditableSetupTaskId>[0][number]["track"],
-): Parameters<typeof previousEditableSetupTaskId>[0][number] {
-  return { taskId, readiness, callerCapability, track };
-}
-
-function inlineStatus(
-  planRevision: string,
-  recommendedTaskId: Parameters<typeof previousEditableSetupTaskId>[0][number]["taskId"] | null,
-  tasks: Parameters<typeof previousEditableSetupTaskId>[0],
-): Parameters<typeof isInlineSetupTaskSaveCurrent>[0] {
-  return {
-    setupPlan: {
-      propertyId: "property-1",
-      planRevision,
-      recommendedTaskId,
-      tasks: tasks.map((task) => ({
-        ...task,
-        propertyId: "property-1",
-      })),
-    },
-  } as Parameters<typeof isInlineSetupTaskSaveCurrent>[0];
-}
+describe("availableTracks", () => {
+  it.each([
+    [undefined, ["Hotel Operations"]],
+    [["hotel_operations"] as const, ["Hotel Operations"]],
+  ])("offers %j on the track screen", async (availableTracks, labels) => {
+    vi.stubGlobal("document", { addEventListener: vi.fn(), removeEventListener: vi.fn() });
+    vi.stubGlobal("requestAnimationFrame", vi.fn());
+    let renderer: ReactTestRenderer | undefined;
+    try {
+      const api = {
+        getStatus: vi.fn().mockResolvedValue({
+          contractVersion: "adaptive-hotel-setup.v1",
+          organization: {
+            organizationId: "organization-1",
+            displayName: "Group",
+            websiteUrl: null,
+            selectedTracks: [],
+            trackRevision: 0,
+            canManageTracks: true,
+            tracks: [],
+          },
+          propertySelection: {
+            state: "no_property",
+            selectedPropertyId: null,
+            availableProperties: [],
+          },
+          setupPlan: null,
+          entryDecision: null,
+          updatedAt: "2026-10-17T00:00:00Z",
+        }),
+        getPropertyTypes: vi
+          .fn()
+          .mockResolvedValue({ propertyTypes: [{ value: "hotel", label: "Hotel" }] }),
+      };
+      await act(async () => {
+        renderer = create(
+          createElement(Wizard, {
+            api: api as unknown as SharedHotelSetupApi,
+            entryProduct: "booking",
+            renderAfterHotelDetails: () => null,
+            ...(availableTracks ? { availableTracks } : {}),
+          }),
+        );
+      });
+      const trackInputs = renderer!.root
+        .findAllByType("input")
+        .filter((input) => input.props.type === "checkbox")
+        .map((input) => input.props["aria-label"]);
+      expect(trackInputs).toEqual(labels);
+    } finally {
+      act(() => renderer?.unmount());
+      vi.unstubAllGlobals();
+    }
+  });
+});

@@ -76,6 +76,75 @@ describe("Booking launch readiness safety", () => {
     expect(JSON.stringify(result)).not.toContain("password-hunter2");
   });
 
+  it("reports the unavailable owner and its diagnostic code, never owner text", async () => {
+    const events: unknown[] = [];
+    const onUnavailable = (event: unknown) => events.push(event);
+    const unavailable = await provider(
+      readyEvidence(),
+      {
+        finance: {
+          outcome: "unavailable",
+          port: "finance",
+          errorSource: "provider",
+          code: "payment_readiness_invalid",
+        },
+      },
+      undefined,
+      onUnavailable,
+    ).getBookingReadiness({ organizationId, propertyId });
+    await provider(
+      readyEvidence(),
+      {},
+      "database password=hunter2",
+      onUnavailable,
+    ).getBookingReadiness({ organizationId, propertyId });
+    const wrongProperty = readyEvidence();
+    wrongProperty.pms.propertyId = "different-property";
+    await provider(wrongProperty, {}, undefined, onUnavailable).getBookingReadiness({
+      organizationId,
+      propertyId,
+    });
+    const throwingDiagnostics = await provider(
+      readyEvidence(),
+      { finance: { outcome: "unavailable", port: "finance", errorSource: "system" } },
+      undefined,
+      () => {
+        throw new Error("logger down");
+      },
+    ).getBookingReadiness({ organizationId, propertyId });
+
+    expect(unavailable).toMatchObject({
+      outcome: "provider_failure",
+      error: { errorSource: "provider", code: "booking_readiness_owner_unavailable" },
+    });
+    expect(events).toEqual([
+      { propertyId, port: "finance", code: "payment_readiness_invalid", errorSource: "provider" },
+      { propertyId, port: "booking", code: "owner_threw", errorSource: "system" },
+      { propertyId, port: "pms", code: "evidence_invalid", errorSource: "provider" },
+    ]);
+    expect(JSON.stringify(events)).not.toContain("hunter2");
+    expect(throwingDiagnostics).toMatchObject({
+      outcome: "provider_failure",
+      error: { errorSource: "system", code: "booking_readiness_owner_unavailable" },
+    });
+  });
+
+  it("rejects an unavailable result with a malformed diagnostic code", async () => {
+    const result = await provider(readyEvidence(), {
+      finance: {
+        outcome: "unavailable",
+        port: "finance",
+        errorSource: "provider",
+        code: "password=hunter2",
+      },
+    }).getBookingReadiness({ organizationId, propertyId });
+
+    expect(result).toMatchObject({
+      outcome: "provider_failure",
+      error: { code: "booking_readiness_evidence_invalid" },
+    });
+  });
+
   it("freezes a separate authorized request snapshot for every owner", async () => {
     const ownerEvidence = readyEvidence();
     const seen: string[] = [];
@@ -296,6 +365,7 @@ function provider(
   ownerEvidence: ReturnType<typeof readyEvidence>,
   overrides: OwnerOverrides = {},
   throwingMessage?: string,
+  onUnavailable?: (event: unknown) => void,
 ) {
   const port = <Port extends BookingLaunchReadinessPortKey>(
     portKey: Port,
@@ -317,6 +387,7 @@ function provider(
       Object.hasOwn(overrides, "finance") ? overrides.finance! : ownerEvidence.finance,
     ),
     now: fixedNow,
+    ...(onUnavailable ? { onUnavailable } : {}),
   });
 }
 

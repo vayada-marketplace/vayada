@@ -3,9 +3,17 @@ import { apiClient, omitHotelContext, type ApiClient } from "./client";
 type FinanceSubscriptionsApiClient = Pick<ApiClient, "get" | "post">;
 
 export type FinancePlanStatus = {
-  plan: "commission" | "fixed";
-  status: "commission" | "checkout_pending" | "active" | "past_due" | "cancel_at_period_end";
-  currency: "EUR";
+  /** Null until the hotel chooses a plan (VAY-2171). */
+  plan: "commission" | "fixed" | null;
+  status:
+    | "not_selected"
+    | "commission"
+    | "checkout_pending"
+    | "active"
+    | "past_due"
+    | "cancel_at_period_end";
+  /** The hotel's pricing currency: what the Fixed Plan is charged in (EUR, USD, IDR). */
+  currency: string;
   activeRoomCount: number;
   amountMinor: number;
   currentPeriodStart: string | null;
@@ -45,7 +53,7 @@ export async function createFixedPlanCheckout(
     checkout: {
       checkoutSessionId: string;
       checkoutUrl: string;
-      currency: "EUR";
+      currency: string;
       amountMinor: number;
       activeRoomCount: number;
     };

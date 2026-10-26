@@ -18,7 +18,9 @@ export default function BookingFooter() {
           {/* Hotel Info */}
           <div>
             <h3 className="text-lg font-bold mb-2">{hotel.name}</h3>
-            <p className="text-white/80 text-sm leading-relaxed">{hotel.description}</p>
+            {hotel.description?.trim() && (
+              <p className="text-white/80 text-sm leading-relaxed">{hotel.description}</p>
+            )}
           </div>
 
           {/* Contact */}

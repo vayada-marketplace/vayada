@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { affiliateDestinationSafetyLockKey } from "@vayada/domain-booking";
+import { bookingCustomDomainLockKey } from "@vayada/domain-booking";
 
 import {
   runProductionCatalogPrerequisiteTransaction,
@@ -75,12 +75,12 @@ describe("production catalog migration transaction", () => {
       services(log, expected),
     );
 
-    expect(log).toContain(`SAFETY:${affiliateDestinationSafetyLockKey(first)}`);
-    expect(log).toContain(`SAFETY:${affiliateDestinationSafetyLockKey(second)}`);
-    expect(log.indexOf(`SAFETY:${affiliateDestinationSafetyLockKey(first)}`)).toBeLessThan(
-      log.indexOf(`SAFETY:${affiliateDestinationSafetyLockKey(second)}`),
+    expect(log).toContain(`SAFETY:${bookingCustomDomainLockKey(first)}`);
+    expect(log).toContain(`SAFETY:${bookingCustomDomainLockKey(second)}`);
+    expect(log.indexOf(`SAFETY:${bookingCustomDomainLockKey(first)}`)).toBeLessThan(
+      log.indexOf(`SAFETY:${bookingCustomDomainLockKey(second)}`),
     );
-    expect(log.indexOf(`SAFETY:${affiliateDestinationSafetyLockKey(second)}`)).toBeLessThan(
+    expect(log.indexOf(`SAFETY:${bookingCustomDomainLockKey(second)}`)).toBeLessThan(
       log.indexOf("core:complete"),
     );
   });

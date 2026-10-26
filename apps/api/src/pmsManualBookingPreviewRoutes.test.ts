@@ -30,7 +30,7 @@ type State = {
   roomTypeCurrency?: string | null;
 };
 type Auth = Partial<Record<"token" | "permission" | "entitlement" | "link", boolean>> & {
-  organizationKind?: "hotel_group" | "creator_workspace";
+  organizationKind?: "hotel_group" | "platform";
   relationship?: string;
   entitlementResourceId?: string;
   linkResourceId?: string;
@@ -51,7 +51,7 @@ describe("target manual-booking preview", () => {
     ["entitlement_required", { entitlementResourceId: id(99) }],
     ["forbidden", { linkResourceId: id(99) }],
     ["forbidden", { relationship: "viewer" }],
-    ["forbidden", { organizationKind: "creator_workspace" }],
+    ["forbidden", { organizationKind: "platform" }],
   ] as const)("denies %s before query validation or reads", async (code, auth) => {
     const state: State = { reads: [] };
     app = await testApp(state, auth);
@@ -168,6 +168,22 @@ describe("target manual-booking preview", () => {
         ports({ reads: [] }),
       ),
     ).resolves.toMatchObject({ pricingRevision: 7 });
+  });
+
+  it("refuses a create naming more guests than the busiest night holds (VAY-2365/2366)", async () => {
+    // Rooms of 4 places: two share 1 July and two share 2 July, so 8 people fit, not the 4 of
+    // the quietest night. The preview itself sends no guest count and never checks it.
+    const body = { ...command(), addOns: [] };
+    const scope = { propertyId, organizationId };
+    await expect(
+      calculateManualBookingPreview(scope, { ...body, guestCount: 8 }, ports({ reads: [] })),
+    ).resolves.toMatchObject({ pricingRevision: 7 });
+    await expect(
+      calculateManualBookingPreview(scope, { ...body, guestCount: 9 }, ports({ reads: [] })),
+    ).rejects.toMatchObject({
+      status: 422,
+      body: { code: "guests_over_capacity", field: "additionalGuests" },
+    });
   });
 
   it("prices children by age band", async () => {

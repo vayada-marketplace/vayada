@@ -33,7 +33,6 @@ export async function readProductionFinancePrerequisites(
      FROM identity.organization_resource_links
      WHERE (product = 'booking' AND resource_type = 'booking_hotel')
         OR (product = 'pms' AND resource_type = 'pms_hotel')
-        OR (product = 'affiliate' AND resource_type = 'affiliate')
      ORDER BY product, resource_type, resource_id, organization_id`,
   );
   const guestBookings = await client.query<ProductionFinancePrerequisites["guestBookings"][number]>(

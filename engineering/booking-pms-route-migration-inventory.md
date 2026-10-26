@@ -5,6 +5,12 @@ _VAY-762 decision record. Complements
 `marketplace-route-migration-inventory.md`, `booking-pms-coupling-audit.md`,
 and `pms-reservation-integration-contract.md`._
 
+> **Note (VAY-2272, 2026-10-20):** the affiliate program and the Marketplace are gone: the Affiliate
+> Dashboard, the old Python Marketplace API and the `apps/api` affiliate routes are deleted, and
+> migrations 0496-0502 drop their data from the new database. The legacy `pms-api` affiliate
+> routes and payout job stay listed below with no target; the VAY-768 affiliate route decision and
+> vertical A1 are removed.
+
 ## Purpose
 
 Inventory the remaining legacy `booking-api` and `pms-api` route surfaces,
@@ -26,7 +32,7 @@ Consumer abbreviations:
 - BA = `apps/booking-admin`
 - BW = `apps/booking-web`
 - PMS = `apps/pms-web`
-- AD = `apps/affiliate-dashboard`
+- AD = `apps/affiliate-dashboard` (deleted)
 - VA = `apps/vayada-admin`
 - API = `apps/api`
 - EXT = external/webhook/provider surface
@@ -36,20 +42,21 @@ Consumer abbreviations:
 Already implemented in `apps/api`; remaining source-specific compatibility
 behavior is called out per route:
 
-| TypeScript surface                                                                    | Legacy surface covered                                                             | Status                                                                                                                                        |
-| ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET/PUT /api/booking/hotels/:hotelId/settings/addons`                                | Booking admin add-on settings.                                                     | Migrated route shape always reads and writes the target Booking settings projection.                                                          |
-| `GET/PUT /api/booking/hotels/:hotelId/settings/guest-form`                            | Booking/PMS guest-form settings.                                                   | Migrated route shape always reads and writes the target projection; the retired PMS Python client is not called.                              |
-| `GET/PUT /api/booking/hotels/:hotelId/settings/benefits`                              | Booking/PMS benefits.                                                              | Migrated route shape always reads and writes the target Booking settings projection.                                                          |
-| `GET/PUT /api/booking/hotels/:hotelId/settings/localization`                          | Booking localization/currency settings.                                            | Migrated route shape always reads and writes the target Booking settings projection.                                                          |
-| `GET/PUT /api/booking/hotels/:hotelId/settings/room-filters`                          | Booking design/room-filter settings.                                               | Migrated route shape always reads and writes the target Booking settings projection.                                                          |
-| `GET /api/booking/hotels/:hotelId/reservations`                                       | Booking-admin reservation list backed by target Booking/PMS/Finance projections.   | Migrated route and target read model; no legacy PMS database connection.                                                                      |
-| `GET /api/ai/hotels/:slug` and `/api/booking-web/hotels/:slug`                        | Public hotel profile.                                                              | Migrated response contract always uses the target profile or active immutable publication through `TARGET_DATABASE_URL`.                      |
-| `GET /api/ai/hotels/:slug/quote` and `/api/booking-web/hotels/:slug/offers`           | Public room/rate quote.                                                            | Always reads the target projection; target validation/readiness failures retain the contract-valid unavailable response shape.                |
-| `GET /api/booking-web/hotels/:slug/calendar`                                          | Public unavailable dates.                                                          | Always reads the target calendar projection.                                                                                                  |
-| `GET /api/booking-web/hosts/:host`                                                    | Booking host/custom-domain resolution.                                             | Contract uses the selected target profile repository for known subdomains and verified custom domains; the legacy domain selector is removed. |
-| Booking Web checkout, guest command, promo, affiliate routes under `/api/booking-web` | PMS public checkout routes, Booking promo validation, PMS affiliate public routes. | Checkout commands always use target adapters. Affiliate routes retain their separate target-repository availability behavior.                 |
-| `POST /api/booking-web/events` and `/hotels/:slug/attribution/clicks`                 | Booking public telemetry and affiliate click tracking.                             | Target event sink writes platform events/audit rows; legacy telemetry forwarding to `BOOKING_PUBLIC_API_URL /api/events` is retired.          |
+| TypeScript surface                                                             | Legacy surface covered                                                           | Status                                                                                                                                        |
+| ------------------------------------------------------------------------------ | -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET/PUT /api/booking/hotels/:hotelId/settings/addons`                         | Booking admin add-on settings.                                                   | Migrated route shape always reads and writes the target Booking settings projection.                                                          |
+| `GET/PUT /api/booking/hotels/:hotelId/settings/guest-form`                     | Booking/PMS guest-form settings.                                                 | Migrated route shape always reads and writes the target projection; the retired PMS Python client is not called.                              |
+| `GET/PUT /api/booking/hotels/:hotelId/settings/benefits`                       | Booking/PMS benefits.                                                            | Migrated route shape always reads and writes the target Booking settings projection.                                                          |
+| `GET/PUT /api/booking/hotels/:hotelId/settings/localization`                   | Booking localization/currency settings.                                          | Migrated route shape always reads and writes the target Booking settings projection.                                                          |
+| `GET/PUT /api/booking/hotels/:hotelId/settings/room-filters`                   | Booking design/room-filter settings.                                             | Migrated route shape always reads and writes the target Booking settings projection.                                                          |
+| `GET /api/booking/hotels/:hotelId/reservations`                                | Booking-admin reservation list backed by target Booking/PMS/Finance projections. | Migrated route and target read model; no legacy PMS database connection.                                                                      |
+| `GET /api/ai/hotels/:slug` and `/api/booking-web/hotels/:slug`                 | Public hotel profile.                                                            | Migrated response contract always uses the target profile or active immutable publication through `TARGET_DATABASE_URL`.                      |
+| `GET /api/ai/hotels/:slug/quote` and `/api/booking-web/hotels/:slug/offers`    | Public room/rate quote.                                                          | Always reads the target projection; target validation/readiness failures retain the contract-valid unavailable response shape.                |
+| `GET /api/booking-web/hotels/:slug/calendar`                                   | Public unavailable dates.                                                        | Always reads the target calendar projection.                                                                                                  |
+| `GET /api/booking-web/hotels/:slug/exchange-rates`                             | Guest display-only currency rates (legacy `GET /api/exchange-rates`).            | Hotel-scoped (VAY-2114): pricing currency to the profile's display currencies only, with attribution; 6 h single-flight cache, no raw feed.   |
+| `GET /api/booking-web/hosts/:host`                                             | Booking host/custom-domain resolution.                                           | Contract uses the selected target profile repository for known subdomains and verified custom domains; the legacy domain selector is removed. |
+| Booking Web checkout, guest command, and promo routes under `/api/booking-web` | PMS public checkout routes and Booking promo validation.                         | Checkout commands always use target adapters.                                                                                                 |
+| `POST /api/booking-web/events`                                                 | Booking public telemetry.                                                        | Target event sink writes platform events/audit rows; legacy telemetry forwarding to `BOOKING_PUBLIC_API_URL /api/events` is retired.          |
 
 ## booking-api route inventory
 
@@ -61,9 +68,9 @@ behavior is called out per route:
 
 ### Auth and account lifecycle
 
-| Routes                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | Consumers                                                                      | Disposition                                                                                                                                                      |
-| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `POST /auth/register`, `POST /auth/login`, `POST /auth/totp/verify`, `POST /auth/totp/setup`, `POST /auth/totp/confirm`, `POST /auth/totp/recovery-codes/regenerate`, `GET /auth/totp/recovery-codes/count`, `GET /auth/totp/status`, `GET /auth/login-history`, `POST /auth/logout`, `POST /auth/validate-token`, `POST /auth/forgot-password`, `POST /auth/reset-password`, `POST /auth/change-password`, `POST /auth/change-email`, `POST /auth/verify-email-change` | BA, PMS, AD, VA; some marketplace legacy clients still use the same auth shape | **WorkOS/identity track.** Do not port as Booking verticals. Keep only temporary compatibility until each frontend uses AuthKit and identity lifecycle commands. |
+| Routes                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | Consumers   | Disposition                                                                                                                                                      |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /auth/register`, `POST /auth/login`, `POST /auth/totp/verify`, `POST /auth/totp/setup`, `POST /auth/totp/confirm`, `POST /auth/totp/recovery-codes/regenerate`, `GET /auth/totp/recovery-codes/count`, `GET /auth/totp/status`, `GET /auth/login-history`, `POST /auth/logout`, `POST /auth/validate-token`, `POST /auth/forgot-password`, `POST /auth/reset-password`, `POST /auth/change-password`, `POST /auth/change-email`, `POST /auth/verify-email-change` | BA, PMS, VA | **WorkOS/identity track.** Do not port as Booking verticals. Keep only temporary compatibility until each frontend uses AuthKit and identity lifecycle commands. |
 
 ### Booking admin property, setup, domain, and design
 
@@ -106,77 +113,11 @@ behavior is called out per route:
 
 ### Public bookability and direct booking
 
-| Routes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | Consumers                       | apps/api status                                                                                                                     | Disposition                                                                                                                                                                                                                      |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /api/hotels/{slug}/rooms`, `GET /api/hotels/{slug}/unavailable-dates`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | BW, API quote/calendar adapters | Target Distribution quote/offer/calendar projections active; no legacy PMS route is called                                          | Keep the target projections and their Channex/availability freshness contracts.                                                                                                                                                  |
-| `POST /api/hotels/{slug}/bookings`, `POST /api/hotels/{slug}/bookings/{handle}/confirm-authorization`, `POST /api/hotels/{slug}/bookings/{booking_id}/withdraw`, `POST /api/hotels/{slug}/bookings/{booking_id}/cancel-preview`, `POST /api/hotels/{slug}/bookings/{booking_id}/cancel`, `POST /api/hotels/{slug}/bookings/lookup`, `GET /api/hotels/{slug}/bookings/status`, `POST /api/hotels/{slug}/bookings/{booking_id}/change-request/preview`, `POST /api/hotels/{slug}/bookings/{booking_id}/change-request`, `GET /api/hotels/{slug}/bookings/{booking_id}/change-request`, `GET /api/hotels/{slug}/payment-settings` | BW, API checkout adapter        | Target Booking command adapter, lifecycle store, and PMS reservation handoff active                                                 | Keep target idempotency, guest-visible status mapping, payment recovery, audit, and reservation handoff contracts. The legacy public API is not a runtime dependency.                                                            |
-| `GET /api/hotels/{slug}/affiliates/check-email`, `POST /api/hotels/{slug}/affiliates`, `POST /api/hotels/{slug}/affiliates/{referral_code}/click`, `POST /api/hotels/{slug}/affiliates/{affiliate_id}/stripe/connect`, `GET /api/hotels/{slug}/affiliates/{affiliate_id}/stripe/onboarding-link`                                                                                                                                                                                                                                                                                                                               | BW, API affiliate adapter       | `check-email`, `register`, and connect are proxied; click is replaced by API event sink; onboarding-link not exposed by API adapter | Marketplace/affiliate plus finance target ownership behind `AFFILIATE_PUBLIC_SOURCE=target`. Booking Web remains a compatibility facade while `ReferModal` is live; retire only after that public UI/product surface is removed. |
-
-#### VAY-768 affiliate route ownership decision
-
-Booking Web should not own affiliate application, referral identity, or payout
-provider onboarding. The public Booking Web affiliate endpoints remain only as a
-temporary compatibility facade for the existing `ReferModal` guest/creator
-registration flow; they must be backed by marketplace/affiliate and finance
-target services before `PMS_PUBLIC_API_URL` is removed.
-
-Accepted ownership:
-
-- Marketplace/affiliate owns public email availability checks, affiliate
-  application/registration state, referral codes, referral links, and approval
-  lifecycle.
-- Finance owns affiliate payout account/provider setup, including Stripe
-  Connect account creation and onboarding-link issuance.
-- Booking Web owns only the public UI entry point and request/response
-  compatibility shape under `/api/booking-web/hotels/:slug/affiliates...`.
-- Affiliate click attribution remains outside this proxy path and continues to
-  use the target event sink.
-
-Consequences:
-
-- Do not retire the public registration route while Booking Web still renders
-  the referral modal. Route retirement is only acceptable if product removes
-  that public affiliate registration surface and the modal/links are updated in
-  the same slice.
-- The follow-up implementation should introduce
-  `AFFILIATE_PUBLIC_SOURCE=target` backed by `TARGET_DATABASE_URL` and target
-  domain services. It must mount `check-email`, `register`, and Stripe Connect
-  link creation without any PMS HTTP proxy or PMS table writes.
-- Contract tests should prove the public routes work with
-  `PMS_PUBLIC_API_URL` unset and preserve the current browser-facing response
-  shape that Booking Web consumes: `check-email` returns `exists`, registration
-  accepts the current `ReferModal` payload (`fullName`, `email`,
-  `socialMedia`, `userType`, `paymentMethod`, PayPal fields, and bank fields)
-  and returns stable affiliate `id` plus `referralCode`, and Stripe Connect
-  link creation returns the exact `onboardingUrl` field.
-- Public registration should create a marketplace/affiliate application or
-  affiliate resource and emit/audit the event needed by affiliate admin and the
-  affiliate dashboard vertical. Stripe Connect should be delegated to finance
-  and linked back to the affiliate resource by stable target identifiers.
-- Affiliate provisioning must be retry-safe. The
-  `marketplace.affiliate.provision:collaboration:<id>:v1` command/event is
-  idempotent: if the affiliate/application already exists, the target handler is
-  a no-op for side effects and returns the existing affiliate. Public
-  registration retries for the same collaboration/application must always return
-  the same affiliate `id` and `referralCode` instead of allocating a duplicate
-  identity.
-- `POST /api/hotels/{slug}/affiliates/{affiliate_id}/stripe/connect` must be
-  idempotent by explicit idempotency key or by stable dedupe on `affiliate_id`.
-  Repeated requests must not create duplicate Stripe accounts. The public
-  response should return the latest valid `onboardingUrl` for the same
-  `stripe_connect_account_id`; if the previous onboarding link has expired,
-  finance may mint a replacement link for the same account, not a new account.
-- Stripe Connect compensation must cover the partial-failure window where the
-  provider account is created but the target `stripe_connect_account_id` write
-  fails. Finance owns a reconciliation job/audit path that either reattaches the
-  provider account to the affiliate record by provider metadata/idempotency key
-  or marks the orphaned Stripe account for cleanup before another account can be
-  created for the same affiliate.
-- Contract tests for the follow-up implementation must simulate registration
-  retries, Stripe Connect retries, and Stripe provider-success/DB-write-failure
-  recovery. They should assert stable affiliate `id`/`referralCode`,
-  deterministic onboarding URL/account behavior, no duplicate provider accounts,
-  and successful reconciliation of the partial failure.
+| Routes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | Consumers                       | apps/api status                                                                            | Disposition                                                                                                                                                           |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------- | ------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/hotels/{slug}/rooms`, `GET /api/hotels/{slug}/unavailable-dates`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | BW, API quote/calendar adapters | Target Distribution quote/offer/calendar projections active; no legacy PMS route is called | Keep the target projections and their Channex/availability freshness contracts.                                                                                       |
+| `POST /api/hotels/{slug}/bookings`, `POST /api/hotels/{slug}/bookings/{handle}/confirm-authorization`, `POST /api/hotels/{slug}/bookings/{booking_id}/withdraw`, `POST /api/hotels/{slug}/bookings/{booking_id}/cancel-preview`, `POST /api/hotels/{slug}/bookings/{booking_id}/cancel`, `POST /api/hotels/{slug}/bookings/lookup`, `GET /api/hotels/{slug}/bookings/status`, `POST /api/hotels/{slug}/bookings/{booking_id}/change-request/preview`, `POST /api/hotels/{slug}/bookings/{booking_id}/change-request`, `GET /api/hotels/{slug}/bookings/{booking_id}/change-request`, `GET /api/hotels/{slug}/payment-settings` | BW, API checkout adapter        | Target Booking command adapter, lifecycle store, and PMS reservation handoff active        | Keep target idempotency, guest-visible status mapping, payment recovery, audit, and reservation handoff contracts. The legacy public API is not a runtime dependency. |
+| `GET /api/hotels/{slug}/affiliates/check-email`, `POST /api/hotels/{slug}/affiliates`, `POST /api/hotels/{slug}/affiliates/{referral_code}/click`, `POST /api/hotels/{slug}/affiliates/{affiliate_id}/stripe/connect`, `GET /api/hotels/{slug}/affiliates/{affiliate_id}/stripe/onboarding-link`                                                                                                                                                                                                                                                                                                                               | None (BW until VAY-2263)        | Deleted from `apps/api` (VAY-2263)                                                         | No target: the affiliate program is gone.                                                                                                                             |
 
 ### PMS admin property and setup
 
@@ -202,11 +143,11 @@ Consequences:
 
 ### Finance, payments, payouts, and affiliates
 
-| Routes                                                                                                                                                                                                                                                                                                                                                                                                                                                              | Consumers                          | apps/api status                                     | Disposition                                                                                                                                                         |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /admin/payment-settings`, `PATCH /admin/payment-settings`, `PATCH /admin/cancellation-policy`, `POST /admin/stripe/connect-account`, `GET /admin/stripe/connect-onboarding-link`, `POST /admin/xendit/validate-bank-account`, `POST /admin/xendit/reconcile-payouts`                                                                                                                                                                                           | PMS, BW public checkout indirectly | Public payment-settings proxied; admin not migrated | Finance vertical. Payment provider onboarding, payout account validation, cancellation policy, and reconciliation move to finance commands/jobs.                    |
-| `GET /admin/financials/summary`, `GET /admin/financials/invoices`, `GET /admin/financials/invoices/export.csv`, `GET /admin/financials/invoices/{booking_id}`, `POST /admin/financials/invoices/{booking_id}/payments`, `GET /admin/financials/payments`                                                                                                                                                                                                            | PMS                                | Not migrated                                        | Finance read/write vertical. CSV export can be a read-model/export job after invoice/payment contracts land.                                                        |
-| `GET /admin/affiliates/default-commission`, `PATCH /admin/affiliates/default-commission`, `GET /admin/affiliates`, `GET /admin/affiliates/{affiliate_id}`, `PATCH /admin/affiliates/{affiliate_id}/status`, `PATCH /admin/affiliates/{affiliate_id}/commission`, `POST /admin/affiliates/{affiliate_id}/stripe/connect-account`, `GET /admin/affiliates/{affiliate_id}/stripe/connect-onboarding-link`, `POST /admin/affiliates/{affiliate_id}/xendit/bank-details` | PMS                                | Public affiliate pieces proxied; admin not migrated | Marketplace/affiliate plus finance vertical. Commission defaults and payout accounts are finance-owned; affiliate application state is marketplace/affiliate-owned. |
+| Routes                                                                                                                                                                                                                                                                                                                                                                                                                                                              | Consumers                          | apps/api status                                     | Disposition                                                                                                                                      |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `GET /admin/payment-settings`, `PATCH /admin/payment-settings`, `PATCH /admin/cancellation-policy`, `POST /admin/stripe/connect-account`, `GET /admin/stripe/connect-onboarding-link`, `POST /admin/xendit/validate-bank-account`, `POST /admin/xendit/reconcile-payouts`                                                                                                                                                                                           | PMS, BW public checkout indirectly | Public payment-settings proxied; admin not migrated | Finance vertical. Payment provider onboarding, payout account validation, cancellation policy, and reconciliation move to finance commands/jobs. |
+| `GET /admin/financials/summary`, `GET /admin/financials/invoices`, `GET /admin/financials/invoices/export.csv`, `GET /admin/financials/invoices/{booking_id}`, `POST /admin/financials/invoices/{booking_id}/payments`, `GET /admin/financials/payments`                                                                                                                                                                                                            | PMS                                | Not migrated                                        | Finance read/write vertical. CSV export can be a read-model/export job after invoice/payment contracts land.                                     |
+| `GET /admin/affiliates/default-commission`, `PATCH /admin/affiliates/default-commission`, `GET /admin/affiliates`, `GET /admin/affiliates/{affiliate_id}`, `PATCH /admin/affiliates/{affiliate_id}/status`, `PATCH /admin/affiliates/{affiliate_id}/commission`, `POST /admin/affiliates/{affiliate_id}/stripe/connect-account`, `GET /admin/affiliates/{affiliate_id}/stripe/connect-onboarding-link`, `POST /admin/affiliates/{affiliate_id}/xendit/bank-details` | PMS                                | Not migrated                                        | No target: the affiliate program is gone.                                                                                                        |
 
 ### Channex, messaging, uploads, imports, and webhooks
 
@@ -223,17 +164,17 @@ Consequences:
 jobs are not decorated routes, but they mutate the same provider and booking
 state that route cutover depends on:
 
-| Scheduler job                        | Current effect                                                   | Cutover disposition                                                                                                      |
-| ------------------------------------ | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `expire_pending_bookings`            | Expires pending bookings when the host response deadline passes. | Booking/checkout target job with idempotent booking outcome events; legacy job must be disabled during the write freeze. |
-| `cancel_stale_unpaid_bookings`       | Cancels stale unpaid bookings.                                   | Booking/checkout target job; must share cancellation idempotency with guest/admin cancel commands.                       |
-| `cleanup_expired_drafts`             | Deletes expired booking drafts.                                  | Booking/checkout target cleanup job; safe only after target owns draft state.                                            |
-| `process_property_payouts`           | Dispatches Stripe/Xendit hotel payouts.                          | Finance target job; disable legacy before target payout dispatcher starts to avoid duplicate provider transfers.         |
-| `process_affiliate_payouts`          | Dispatches affiliate payouts and notifications monthly.          | Finance/affiliate target job; cut over with affiliate payout ledger and notification audit.                              |
-| `poll_xendit_processing_payouts`     | Polls provider payout state and marks success/failure.           | Finance target reconciliation job with provider idempotency/replay handling.                                             |
-| `poll_channex_bookings`              | Polls Channex booking feed and ingests OTA reservations.         | PMS channel-connectivity target job or provider freeze; cannot run in both legacy and target during cutover.             |
-| `full_channex_ari_sync`              | Pushes full ARI state to Channex.                                | PMS channel-connectivity target job; legacy scheduler must be stopped before target ARI push begins.                     |
-| `advance_calendar_auto_open_windows` | Opens rolling inventory/calendar windows.                        | PMS operations target job; coordinate with room-block/calendar migration and public bookability freshness.               |
+| Scheduler job                        | Current effect                                                     | Cutover disposition                                                                                                      |
+| ------------------------------------ | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| `expire_pending_bookings`            | Expires pending bookings when the host response deadline passes.   | Booking/checkout target job with idempotent booking outcome events; legacy job must be disabled during the write freeze. |
+| `cancel_stale_unpaid_bookings`       | Cancels stale unpaid bookings.                                     | Booking/checkout target job; must share cancellation idempotency with guest/admin cancel commands.                       |
+| `cleanup_expired_drafts`             | Deletes expired booking drafts.                                    | Booking/checkout target cleanup job; safe only after target owns draft state.                                            |
+| `process_property_payouts`           | Dispatches Stripe/Xendit hotel payouts.                            | Finance target job; disable legacy before target payout dispatcher starts to avoid duplicate provider transfers.         |
+| `process_affiliate_payouts`          | Stopped: on the legacy scheduler blocklist (vayada-platform #579). | No target job: the affiliate program is gone.                                                                            |
+| `poll_xendit_processing_payouts`     | Polls provider payout state and marks success/failure.             | Finance target reconciliation job with provider idempotency/replay handling.                                             |
+| `poll_channex_bookings`              | Polls Channex booking feed and ingests OTA reservations.           | PMS channel-connectivity target job or provider freeze; cannot run in both legacy and target during cutover.             |
+| `full_channex_ari_sync`              | Pushes full ARI state to Channex.                                  | PMS channel-connectivity target job; legacy scheduler must be stopped before target ARI push begins.                     |
+| `advance_calendar_auto_open_windows` | Opens rolling inventory/calendar windows.                          | PMS operations target job; coordinate with room-block/calendar migration and public bookability freshness.               |
 
 The Channex/webhook follow-up must include scheduler disable/freeze controls,
 job ownership, idempotency keys, replay policy, and rollback behavior. A route
@@ -242,10 +183,11 @@ controls is not enough for staging rehearsal.
 
 ### Affiliate dashboard and platform/super-admin
 
-| Routes                                                                                                                                                                                                                                                                                                    | Consumers | apps/api status                                                   | Disposition                                                                                                                                                                                   |
-| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /affiliate/me`, `GET /affiliate/properties`, `GET /affiliate/dashboard`, `GET /affiliate/earnings`, `GET /affiliate/activity`, `GET /affiliate/payouts`, `GET /affiliate/payout-settings`, `PATCH /affiliate/payout-settings`, `PATCH /affiliate/me`, `POST /affiliate/xendit/validate-bank-account` | AD        | Auth still uses booking-api; PMS affiliate dashboard not migrated | Marketplace/affiliate plus finance vertical after WorkOS surface cutover. This cannot stay in PMS long term because affiliate identity, earnings, and payout settings are not PMS operations. |
-| `GET /super-admin/bookings`, `GET /super-admin/affiliate-payouts`, `GET /super-admin/affiliate-payouts/{affiliate_id}`, `POST /super-admin/affiliate-payouts/{affiliate_id}/mark-paid`, `GET /platform-admin/growth`, `PATCH /platform-admin/properties/{property_id}/status`                             | VA        | Not migrated                                                      | Platform admin/finance/read-model vertical. Requires platform organization authorization and target admin read models.                                                                        |
+| Routes                                                                                                                                                                                                                                                                                                    | Consumers                                   | apps/api status | Disposition                                                                                                            |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- | --------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `GET /affiliate/me`, `GET /affiliate/properties`, `GET /affiliate/dashboard`, `GET /affiliate/earnings`, `GET /affiliate/activity`, `GET /affiliate/payouts`, `GET /affiliate/payout-settings`, `PATCH /affiliate/payout-settings`, `PATCH /affiliate/me`, `POST /affiliate/xendit/validate-bank-account` | AD                                          | Not migrated    | No target: the affiliate program is gone.                                                                              |
+| `GET /super-admin/bookings`, `GET /platform-admin/growth`, `PATCH /platform-admin/properties/{property_id}/status`                                                                                                                                                                                        | VA                                          | Not migrated    | Platform admin/finance/read-model vertical. Requires platform organization authorization and target admin read models. |
+| `GET /super-admin/affiliate-payouts`, `GET /super-admin/affiliate-payouts/{affiliate_id}`, `POST /super-admin/affiliate-payouts/{affiliate_id}/mark-paid`                                                                                                                                                 | None (VA until the affiliate program ended) | Not migrated    | No target: the affiliate program is gone.                                                                              |
 
 ## Migration vertical order
 
@@ -295,18 +237,13 @@ controls is not enough for staging rehearsal.
    and scheduler freeze ownership are defined in
    [`channex-webhook-cutover-plan.md`](channex-webhook-cutover-plan.md).
 
-9. **A1: Affiliate dashboard and affiliate administration**
-   Move public affiliate registration, affiliate dashboard, affiliate admin,
-   commission, earnings, and payout settings to marketplace/affiliate and
-   finance ownership.
-
-10. **PL1: Platform admin, imports, media, and analytics**
-    Replace platform/super-admin routes, import workflows, media upload routes,
-    Booking dashboards, and telemetry with target read models, platform media,
-    and jobs/events intake. Non-media platform admin, dashboard, import, and
-    contact-intake scope is pinned in
-    [`Platform admin, dashboard, and intake contract`](platform-admin-dashboard-intake-contract.md);
-    platform media remains in the platform media track.
+9. **PL1: Platform admin, imports, media, and analytics**
+   Replace platform/super-admin routes, import workflows, media upload routes,
+   Booking dashboards, and telemetry with target read models, platform media,
+   and jobs/events intake. Non-media platform admin, dashboard, import, and
+   contact-intake scope is pinned in
+   [`Platform admin, dashboard, and intake contract`](platform-admin-dashboard-intake-contract.md);
+   platform media remains in the platform media track.
 
 Auth routes (`/auth/*`) cut over on the WorkOS track and can run in parallel,
 but no product vertical is considered rehearsal-ready until its frontend uses

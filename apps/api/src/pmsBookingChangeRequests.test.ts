@@ -4,22 +4,25 @@ import { requestContextFixtureCases } from "./platform/requestContext.fixtures.j
 import { registerPmsBookingChangeRequestRoutes } from "./routes/pmsBookingChangeRequests.js";
 
 const propertyId = "10000000-0000-4000-8000-000000000001";
+// VAY-2360: guests' extras requests share the change requests' routes and rules.
 it.each(
-  ["read", "accept", "decline"].flatMap((action) =>
-    [
-      "allowed",
-      "read-only",
-      "missing",
-      "permission",
-      "entitlement",
-      "suspended",
-      "resource",
-      "unassigned",
-      "origin",
-      "legacy-only",
-    ].map((mode) => ({ action, mode })),
-  ),
-)("PMS $action with $mode", async ({ action, mode }) => {
+  ["change-request", "extras-request"]
+    .flatMap((kind) => ["read", "accept", "decline"].map((action) => ({ kind, action })))
+    .flatMap(({ kind, action }) =>
+      [
+        "allowed",
+        "read-only",
+        "missing",
+        "permission",
+        "entitlement",
+        "suspended",
+        "resource",
+        "unassigned",
+        "origin",
+        "legacy-only",
+      ].map((mode) => ({ kind, action, mode })),
+    ),
+)("PMS $kind $action with $mode", async ({ kind, action, mode }) => {
   const app = Fastify();
   const context = structuredClone(requestContextFixtureCases[0]!.context);
   context.membership.roleKey = "front_desk";
@@ -73,6 +76,8 @@ it.each(
       findLatestChangeRequest: handler,
       acceptChangeRequest: handler,
       declineChangeRequest: handler,
+      findExtrasRequests: vi.fn(async () => [handler()]),
+      decideExtrasRequest: handler,
     },
     propertyAccessRepository: {
       findMembershipPropertyScope: async () => ({
@@ -86,14 +91,23 @@ it.each(
   });
   const response = await app.inject({
     method: action === "read" ? "GET" : "POST",
-    url: `/api/pms/properties/${propertyId}/reservations/booking/change-request${action === "read" ? "" : `/request/${action}`}`,
+    url: `/api/pms/properties/${propertyId}/reservations/booking/${kind}${action === "read" ? "" : `/request/${action}`}`,
     headers: { origin: mode === "origin" ? "https://wrong.test" : "https://pms.test" },
   });
   const allowed = mode === "allowed" || (mode === "read-only" && action === "read");
   expect(response.statusCode, response.body).toBe(allowed ? 200 : mode === "missing" ? 401 : 403);
   expect(handler).toHaveBeenCalledTimes(allowed ? 1 : 0);
-  if (mode === "read-only" && action === "read")
+  if (mode === "read-only" && action === "read" && kind === "change-request")
     expect(response.json().providerRequest).toEqual({ allowedActions: [], refreshAction: null });
+  if (allowed && kind === "extras-request" && action !== "read")
+    expect(handler).toHaveBeenCalledWith(
+      propertyId,
+      "booking",
+      "request",
+      action,
+      null,
+      expect.objectContaining({ actorUserId: expect.any(String) }),
+    );
   if (allowed) expect(response.headers["access-control-allow-origin"]).toBe("https://pms.test");
   await app.close();
 });

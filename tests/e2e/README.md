@@ -12,7 +12,6 @@ npm run e2e:landing
 npm run e2e:booking-web
 npm run e2e:booking-public-canary
 npm run e2e:booking-admin
-npm run e2e:marketplace-web
 npm run e2e:pms-web
 npm run e2e:vayada-admin
 npm run e2e:next-stack-smoke
@@ -26,7 +25,6 @@ By default local tests expect the apps to already be running through portless:
 - `https://landing.localhost`
 - `https://hotel-alpenrose.booking.localhost`
 - `https://admin.booking.localhost`
-- `https://marketplace.localhost`
 - `https://pms.localhost`
 - `https://admin.localhost`
 
@@ -39,10 +37,10 @@ E2E_START_SERVERS=1 npm run e2e
 ## Deployed Next-stack Smoke
 
 `npm run e2e:next-stack-smoke` is the production-safe browser and API smoke for
-the deployed TypeScript stack. It creates unique synthetic WorkOS identities,
-completes fresh hotel and creator onboarding, verifies Marketplace-to-PMS and
-Marketplace-to-Booking-Admin handoffs, publishes a direct-booking property, and
-exercises both instant and request acceptance with a pay-at-property quote.
+the deployed TypeScript stack. It signs new hotel owners up in Booking Admin
+(the email code is read from WorkOS), creates unique synthetic WorkOS staff and
+platform-admin identities, publishes a direct-booking property, and exercises
+both instant and request acceptance with a pay-at-property quote.
 
 The command is guarded: it accepts only the fixed `next-*.vayada.com` origins
 and requires `NEXT_STACK_SMOKE_ENV=next`. The deployed next API shares the live
@@ -145,7 +143,6 @@ Plain-port server mode uses:
 - `http://127.0.0.1:3006` for landing
 - `http://hotel-alpenrose.booking.localhost:3002` for booking-web
 - `http://127.0.0.1:3003` for booking-admin
-- `http://127.0.0.1:3000` for marketplace-web
 - `http://127.0.0.1:3004` for pms-web
 - `http://127.0.0.1:3001` for vayada-admin
 
@@ -155,10 +152,30 @@ Override URLs when needed:
 E2E_LANDING_BASE_URL=http://localhost:3006 npm run e2e:landing
 E2E_BOOKING_BASE_URL=http://hotel-alpenrose.localhost:3002 npm run e2e:booking-web
 E2E_BOOKING_ADMIN_BASE_URL=http://localhost:3003 npm run e2e:booking-admin
-E2E_MARKETPLACE_BASE_URL=http://localhost:3000 npm run e2e:marketplace-web
 E2E_PMS_BASE_URL=http://localhost:3004 npm run e2e:pms-web
 E2E_VAYADA_ADMIN_BASE_URL=http://localhost:3001 npm run e2e:vayada-admin
 ```
+
+When you start booking-admin yourself (dev or production build), give it the env from its
+`webServer` entry in `playwright.config.ts`. `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=e2e-google-places` lets
+the nearby cards reach the specs' mocked Google SDK. Booking Admin hosts the hotel setup wizard
+itself (VAY-2261): `setup.spec.ts` and the `setup-*.spec.ts` files render it on this origin with
+mocked APIs, so no other app server is needed:
+
+```bash
+NEXT_PUBLIC_AUTHKIT_COMPATIBILITY_TOKEN_ENABLED=true NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=e2e-google-places \
+  NEXT_PUBLIC_PMS_FRONTEND_URL=http://pms.localhost:3004 PORT=3003 npm run dev:booking-admin &
+E2E_BOOKING_ADMIN_BASE_URL=http://127.0.0.1:3003 npm run e2e:booking-admin
+```
+
+The pms-web project's `setup.spec.ts` expects its `/setup` redirect to land on the Booking Admin
+origin the pms-web dev server was started with (`NEXT_PUBLIC_BOOKING_ADMIN_URL`); pass the same value
+to Playwright, or `E2E_SETUP_HOST_BASE_URL`.
+
+Start pms-web with `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=e2e-google-places` and give Playwright the same
+variable: the room Location box then loads Google Maps, which `support/googleMapsFake.ts` answers with a
+fake (the shared pms-web mocks install it for every spec). Without the key, `room-location.spec.ts`
+skips its address-search test.
 
 ## Booking Tenant Smoke
 
@@ -190,18 +207,16 @@ All network calls are mocked via `mockBookingApis`. No seeded backend is require
 
 The smoke tests for `booking-admin`, `pms-web`, and
 `vayada-admin` navigate to `/login` and verify the custom password login shell
-renders without errors. Marketplace smoke covers its custom auth routes
-separately.
+renders without errors.
 
-Focused next signup coverage is tagged `@signup`. It verifies PMS, Booking
-Admin, and Marketplace creator/hotel `/signup` entrypoints render custom signup
-forms instead of redirecting to hosted AuthKit. Vayada Admin keeps public
+Focused next signup coverage is tagged `@signup`. It verifies the PMS and
+Booking Admin `/signup` entrypoints render custom signup forms instead of
+redirecting to hosted AuthKit. Vayada Admin keeps public
 registration closed and its smoke asserts `/register` redirects back to login
 instead of creating a platform-admin self-service signup.
 
 ```bash
 npm run e2e -- \
-  --project=marketplace-web-chromium \
   --project=pms-web-chromium \
   --project=booking-admin-chromium \
   --grep '@signup'
@@ -219,11 +234,11 @@ npm --workspace vayada-api run test -- src/authSession.test.ts
 
 ## First-Party Auth Regressions
 
-`tests/e2e/first-party-auth` is the focused regression suite for the four
-migrated browser surfaces. It covers password login, signup and recovery where
-available, session refresh, CSRF, logout, app-local Google callback state,
-Marketplace signup-to-onboarding, cross-app handoff, stale-cookie cleanup, and
-production routing guards. Chromium runs with third-party-cookie phaseout
+`tests/e2e/first-party-auth` is the focused regression suite for the three
+migrated browser surfaces: Booking Admin, PMS and Vayada Admin. It covers
+password login, signup and recovery where available, session refresh, CSRF,
+logout, app-local Google callback state, cross-app handoff, stale-cookie
+cleanup, and production routing guards. Chromium runs with third-party-cookie phaseout
 enabled, and the browser flows assert that auth requests and cookies stay on
 the current frontend origin.
 
@@ -250,10 +265,10 @@ The deterministic Google cases simulate the external redirect while exercising
 the real frontend login/signup code and exact app-local callback shape. For a
 live WorkOS sandbox check, first start `npm run dev:workos-local` with staging
 WorkOS credentials in `apps/api/.env`. In a second terminal, resolve the same
-worktree-qualified Marketplace origin and pass it to Playwright:
+worktree-qualified Booking Admin origin and pass it to Playwright:
 
 ```bash
-E2E_MARKETPLACE_BASE_URL="$(portless get marketplace)" \
+E2E_BOOKING_ADMIN_BASE_URL="$(portless get admin.booking)" \
   E2E_WORKOS_SANDBOX_GOOGLE=1 npm run e2e:first-party-auth:live -- --headed
 ```
 
@@ -264,11 +279,10 @@ video so provider credentials and session material are not retained in test
 artifacts.
 
 WorkOS must register `<origin returned by portless get>/auth/oauth/google/callback`
-for the active worktree. For a canonical root checkout, the four exact callback
+for the active worktree. For a canonical root checkout, the three exact callback
 URIs are:
 
 ```text
-https://marketplace.localhost/auth/oauth/google/callback
 https://admin.booking.localhost/auth/oauth/google/callback
 https://pms.localhost/auth/oauth/google/callback
 https://admin.localhost/auth/oauth/google/callback
@@ -281,13 +295,12 @@ automated.
 
 ## Shared Hotel Setup Smoke
 
-The focused first-run setup smoke lives in `tests/e2e/pms-web/setup.spec.ts`.
-It enters through PMS at `/setup?entryProduct=pms&returnTo=/dashboard`, mocks an
-empty shared hotel setup status, creates the first property under the resolved
-hotel-group organization, and verifies the flow selects a setup track before
-creating the property. The Hotel Operations track enables PMS and Booking
-Engine together; after track selection, the smoke verifies the adaptive,
-property-scoped setup plan only shows tasks for the selected track.
+The focused setup-entry smoke lives in `tests/e2e/pms-web/setup.spec.ts`. PMS
+no longer hosts setup: the smoke enters at `/setup` and verifies PMS hands off
+to the Booking Admin setup wizard with the entry product and a safe return path
+preserved (defaulting to PMS and `/dashboard`). The setup wizard itself
+is covered by `tests/e2e/booking-admin/setup-adaptive-*.spec.ts`,
+`setup-activation.spec.ts`, and `hotel-account-prerequisites.spec.ts`.
 
 Run just that coverage from the repo root:
 
@@ -310,12 +323,16 @@ Currently covered surface:
 - `booking-admin-benefits-settings` bans legacy production API hosts and
   `/admin/benefits`, plus `X-Hotel-Id` routing scope.
 
-The booking-admin migrated surface specs require a production build:
+The booking-admin migrated surface specs require a production build (`E2E_BOOKING_ADMIN_PROD=1`).
+PR Checks runs the whole booking-admin project that way (VAY-2316), so check a booking-admin
+change against a production build too. Build with the `webServer` env above:
 
 ```bash
-cd apps/booking-admin && npm run build && PORT=3013 npx next start -p 3013 &
+NEXT_PUBLIC_AUTHKIT_COMPATIBILITY_TOKEN_ENABLED=true NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=e2e-google-places \
+  NEXT_PUBLIC_PMS_FRONTEND_URL=http://pms.localhost:3004 npm run build:booking-admin
+(cd apps/booking-admin && npx next start -p 3013) &
 E2E_BOOKING_ADMIN_PROD=1 E2E_BOOKING_ADMIN_BASE_URL=http://127.0.0.1:3013 \
-  npm run e2e:booking-admin -- tests/e2e/booking-admin/benefits.spec.ts
+  NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=e2e-google-places npm run e2e:booking-admin
 ```
 
 ## Debugging

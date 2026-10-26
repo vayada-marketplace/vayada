@@ -33,9 +33,6 @@
       "property.hero_image",
       "property.gallery_image",
       "property.logo",
-      "marketplace.offer.media",
-      "marketplace.creator.profile_image",
-      "marketplace.collaboration_chat.attachment",
       "pms.room_type.media",
       "pms.messaging.attachment",
       "pms.import.source_image"

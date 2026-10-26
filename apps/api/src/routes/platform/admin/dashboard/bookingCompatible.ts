@@ -619,7 +619,8 @@ const TARGET_PLATFORM_PROPERTIES_SQL = `SELECT
   property.display_name AS name,
   COALESCE(slug.slug, property.public_id) AS slug,
   CASE
-    WHEN property.profile_status = 'complete' THEN 'live'
+    -- VAY-2247: a complete profile no longer means live; a hotel being set up stays 'demo'.
+    WHEN property.profile_status = 'complete' AND property.lifecycle_status = 'active' THEN 'live'
     WHEN property.profile_status = 'disabled' THEN 'test'
     ELSE 'demo'
   END AS status,

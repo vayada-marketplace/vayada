@@ -2,6 +2,7 @@ import {
   parsePublicQuoteGuestDisclosure,
   type PublicBookingQuote,
 } from "@vayada/domain-booking/replacement-pricing";
+import { observeServerTime, serverNow } from "@/lib/serverClock";
 import { bookingWebPublic } from "./client";
 
 /** The caller retires this presentation on selection/quote changes and expiry. */
@@ -17,11 +18,10 @@ export async function getQuoteGuestDisclosure(
   );
   signal?.throwIfAborted();
   const disclosure = parsePublicQuoteGuestDisclosure(raw, expected);
-  if (
-    !disclosure ||
-    Date.parse(disclosure.checkedAt) > Date.now() ||
-    Date.parse(disclosure.expiresAt) <= Date.now()
-  )
+  // The rules were checked just now: the check time calibrates the server clock, so a device
+  // clock that is behind or ahead no longer fails a valid answer (VAY-2134).
+  if (disclosure) observeServerTime(disclosure.checkedAt);
+  if (!disclosure || Date.parse(disclosure.expiresAt) <= serverNow())
     throw new Error("Guest policies could not be verified. Refresh your price and try again.");
   return disclosure;
 }

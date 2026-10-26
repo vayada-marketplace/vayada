@@ -1,0 +1,46 @@
+name: Main Unit Suites
+
+# Repeats the PR Checks unit-suite job on main. Two pull requests can each pass on their own and
+# still break each other once both are merged; the nightly run also catches date-dependent drift.
+on:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: "17 3 * * *"
+
+# Queue rather than cancel, so every merge keeps its own result.
+concurrency:
+  group: main-unit-suites-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  unit_suites:
+    name: TypeScript API and Package Unit Suites
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run the unit suites
+        run: npm run test:unit-suites
+
+      - name: Vayada Admin tests
+        if: ${{ !cancelled() }}
+        run: npm --workspace vayada-admin run test

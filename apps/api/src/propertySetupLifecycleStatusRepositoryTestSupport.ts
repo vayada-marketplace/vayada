@@ -13,6 +13,23 @@ export function authorizedLifecycleExecutor(
 ): PropertySetupLifecycleQueryExecutor {
   return new SequencedLifecycleExecutor([
     { rows: [{ id: lifecycleTestScope.propertyId }], rowCount: 1 },
+    // The member's effective permissions (memberPermissions.ts): an owner with the grant row.
+    {
+      rows: [
+        {
+          id: "10000000-0000-4000-8000-000000000004",
+          roleKey: "owner",
+          mode: "all",
+          accessOrigin: "agency",
+          permissionOverrides: null,
+          roleDefinitionId: null,
+          pms: true,
+          booking: true,
+        },
+      ],
+      rowCount: 1,
+    },
+    { rows: [{ permission: "booking.settings.read" }], rowCount: 1 },
     { rows: [row], rowCount: 1 },
   ]);
 }

@@ -1,4 +1,5 @@
 const PMS_SETUP_EXIT_STATUS = "incomplete";
+// Only a base for parsing: relative exit paths pass on every host, absolute ones must match it.
 const PMS_SETUP_EXIT_ORIGIN = "https://pms.vayada.com";
 
 export function pmsSetupExitPath(propertyId?: string | null): string {
@@ -36,3 +37,9 @@ export function pmsSetupExitPropertyId(path: string): string | null {
     return null;
   }
 }
+
+// The exit marker is product-neutral since Booking Admin hosts the wizard (VAY-2261): the hotel's
+// own app reads `setup=incomplete&propertyId` from its dashboard URL and enters that property.
+export const setupExitPath = pmsSetupExitPath;
+export const isSetupExitPath = isPmsSetupExitPath;
+export const setupExitPropertyId = pmsSetupExitPropertyId;

@@ -10,6 +10,7 @@ import {
   type FinancePlatformOnlineCardExecutionEvidenceRepository,
   type RevokeFinanceOnlineCardExecutionEvidenceCommand,
 } from "@vayada/domain-finance";
+import { createHash } from "node:crypto";
 import Fastify from "fastify";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -157,8 +158,6 @@ function acceptBody(overrides: Record<string, unknown> = {}) {
     idempotencyKey: ACCEPT_IDEMPOTENCY_KEY,
     expectedCardCapabilityRevision: 7,
     expectedPropertyReadinessRevision: 1,
-    evidenceFingerprintHash: HASH,
-    executedAt: "2026-08-28T10:00:00.000Z",
     ...overrides,
   };
 }
@@ -169,6 +168,39 @@ describe("Platform Finance online-card execution evidence routes", () => {
   afterEach(async () => {
     await app?.close();
     app = null;
+  });
+
+  it("lets platform finance read a hotel's card state before switching it (VAY-2205)", async () => {
+    const state = {
+      propertyId: PROPERTY_ID,
+      providerAccount: { ready: true, cardCapabilityRevision: 7 },
+      propertyReadinessRevision: 1,
+      paymentSettings: { paymentsOn: true, cardChosen: true, currencyEligible: true },
+      evidence: null,
+      cardReady: false,
+      prices: "current" as const,
+    };
+    const read = vi.fn(async (propertyId: string) => (propertyId === PROPERTY_ID ? state : null));
+    const url = `/finance/platform/properties/${PROPERTY_ID}/online-card-execution-evidence`;
+    const get = (path = url) =>
+      app!.inject({ method: "GET", url: path, headers: { authorization: "Bearer valid" } });
+    app = await testApp({ readOnlineCardExecutionState: read });
+    expect((await get()).json()).toEqual(state);
+    expect(read).toHaveBeenCalledWith(PROPERTY_ID);
+    expect(
+      (await get(`/finance/platform/properties/${EVIDENCE_ID}/online-card-execution-evidence`))
+        .statusCode,
+    ).toBe(404);
+    expect(
+      (await get("/finance/platform/properties/not-a-uuid/online-card-execution-evidence"))
+        .statusCode,
+    ).toBe(400);
+    await app.close();
+    app = await testApp({ readOnlineCardExecutionState: read }, { permissions: [] });
+    expect((await get()).statusCode).toBe(403);
+    await app.close();
+    app = await testApp({});
+    expect((await get()).statusCode).toBe(501);
   });
 
   it("builds a platform-scoped accept command without accepting raw proof material", async () => {
@@ -194,11 +226,59 @@ describe("Platform Finance online-card execution evidence routes", () => {
         payload: {
           expectedCardCapabilityRevision: 7,
           expectedPropertyReadinessRevision: 1,
-          evidenceFingerprintHash: HASH,
-          executedAt: "2026-08-28T10:00:00.000Z",
+          evidenceFingerprintHash: expect.stringMatching(/^[0-9a-f]{64}$/),
+          executedAt: expect.any(String),
         },
       }),
     ]);
+  });
+
+  it("records Vayada's approval at the server's time, with a fingerprint it computes (VAY-2205)", async () => {
+    const repo = repository();
+    app = await testApp(repo.value);
+    const attestation = acceptBody();
+    const result = await app.inject({
+      method: "POST",
+      url: `/finance/platform/properties/${PROPERTY_ID}/online-card-execution-evidence`,
+      headers: { authorization: "Bearer valid" },
+      payload: attestation,
+    });
+    expect(result.statusCode).toBe(200);
+    const command = repo.accepts[0]!;
+    const executedAt = command.payload.executedAt;
+    expect(executedAt).toBe(command.audit.requestedAt);
+    expect(command.audit.reason).toBe(
+      "Vayada finance operator approves card payments (attestation)",
+    );
+    expect(command.payload.evidenceFingerprintHash).toBe(
+      createHash("sha256")
+        .update(
+          [
+            "vayada-card-approval.v1",
+            PROPERTY_ID,
+            "card-capability:7",
+            "property-readiness:1",
+            `operator:${USER_ID}`,
+            executedAt,
+          ].join("\n"),
+        )
+        .digest("hex"),
+    );
+    // Proof from a run is refused until something verifies it: the server records both.
+    for (const proof of [
+      { executedAt: "2026-08-28T10:00:00.000Z" },
+      { evidenceFingerprintHash: HASH },
+      { executedAt: "2026-08-28T10:00:00.000Z", evidenceFingerprintHash: HASH },
+    ]) {
+      const refused = await app.inject({
+        method: "POST",
+        url: `/finance/platform/properties/${PROPERTY_ID}/online-card-execution-evidence`,
+        headers: { authorization: "Bearer valid" },
+        payload: { ...attestation, ...proof },
+      });
+      expect(refused.statusCode).toBe(400);
+    }
+    expect(repo.accepts).toHaveLength(1);
   });
 
   it("builds an exact property-scoped one-way revocation command", async () => {

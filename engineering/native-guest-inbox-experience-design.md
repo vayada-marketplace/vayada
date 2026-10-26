@@ -14,8 +14,6 @@ The Inbox is an operational workspace, not a dashboard. The conversation is
 the visual focus. Queue state stays visible, booking context is quieter, and AI
 only prepares editable content for a human to review and send.
 
-Marketplace collaboration chat remains a separate product and data model.
-
 ## Proven patterns combined for Vayada
 
 | Source pattern                                                                                | Vayada adaptation                                                                               |
@@ -394,5 +392,5 @@ Build one coherent workflow in reviewable slices:
 
 The implementation must use `native-guest-inbox.v2` routes rather than reviving
 the rolled-back VAY-657 UI or unsupported messaging service methods. It must not
-add Marketplace chat, WhatsApp, SMS, social, voice, automations, autonomous
-sending, cross-property queues, SLA/analytics, or journeys.
+add WhatsApp, SMS, social, voice, automations, autonomous sending,
+cross-property queues, SLA/analytics, or journeys.
