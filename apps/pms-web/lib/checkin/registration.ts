@@ -35,7 +35,8 @@ function filled(value: string | null | undefined): boolean {
   return Boolean(value && value.trim());
 }
 
-function evaluate(
+/** A guest's status from their names and contact, and the registration fields on record. */
+export function guestRegistrationStatus(
   values: {
     firstName: string;
     lastName: string;
@@ -43,14 +44,14 @@ function evaluate(
     phone: string;
     nationality: string;
   },
-  registration: GuestRegistration | null,
+  filledFields: readonly string[],
   settings: Pick<CheckinSettings, "guestFields">,
 ): Pick<RegistrationGuest, "status" | "missing"> {
   const has = (field: CheckinGuestField): boolean => {
     if (field === "email") return filled(values.email);
     if (field === "phone") return filled(values.phone);
     if (field === "nationality") return filled(values.nationality);
-    return Boolean(registration?.filledFields.includes(field));
+    return filledFields.includes(field);
   };
   const missing: RegistrationGuest["missing"] = [];
   if (!filled(values.firstName)) missing.push("firstName");
@@ -81,7 +82,7 @@ export function registrationGuests(input: {
     firstName: booking.guestFirstName,
     lastName: booking.guestLastName,
     registration: bookerRegistration,
-    ...evaluate(
+    ...guestRegistrationStatus(
       {
         firstName: booking.guestFirstName,
         lastName: booking.guestLastName,
@@ -89,7 +90,7 @@ export function registrationGuests(input: {
         phone: booking.guestPhone,
         nationality: booking.guestCountry,
       },
-      bookerRegistration,
+      bookerRegistration?.filledFields ?? [],
       settings,
     ),
   };
@@ -102,7 +103,7 @@ export function registrationGuests(input: {
       firstName: guest.firstName,
       lastName: guest.lastName,
       registration,
-      ...evaluate(guest, registration, settings),
+      ...guestRegistrationStatus(guest, registration?.filledFields ?? [], settings),
     };
   });
   const expected = expectedRegistrations(booking, settings);

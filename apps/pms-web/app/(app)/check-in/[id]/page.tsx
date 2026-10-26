@@ -2,94 +2,60 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { NationalitySelect } from "@/components/NationalitySelect";
+import { ArrowLeftIcon } from "@heroicons/react/24/outline";
 import ConfirmDialog from "@/components/ConfirmDialog";
-import { nationalityLabel } from "@vayada/locale-constants";
 import { useParams, useSearchParams } from "next/navigation";
 import {
   Booking,
   BookingAdditionalGuest,
-  BookingAdditionalGuestPayload,
   BookingNote,
   CheckinStepResult,
+  GuestRegistration,
   bookingsService,
 } from "@/services/bookings";
-import { CheckinChecklistStep, settingsService } from "@/services/settings";
+import { calendarService } from "@/services/calendar";
+import { CheckinChecklistStep, CheckinSettings, settingsService } from "@/services/settings";
 import { formatCurrency } from "@/lib/formatCurrency";
-import BookingStaySummary, {
+import {
+  bookingAmountDue,
   bookingSettlementLabel,
   expectedPaymentMethodLabel,
 } from "@/components/bookings/BookingStaySummary";
 import { useTranslation } from "@/lib/i18n";
 import { localizedErrorText } from "@/lib/i18n/localizedErrorText";
 import { localizeBuiltInCheckinStep } from "@/lib/settings/checklistCopy";
-import { expectedGuestCount, guestRegistered } from "@/lib/guestRegistration";
-
-type GuestDraft = BookingAdditionalGuestPayload & { id?: string; position: number };
+import { DEFAULT_CHECKIN_SETTINGS } from "@/lib/settings/checkinSettings";
+import { bookingChannelLabel } from "@/lib/bookings/channelLabel";
+import {
+  expectedRegistrations,
+  registrationGuests,
+  registrationSummary,
+  type RegistrationGuest,
+} from "@/lib/checkin/registration";
+import { checkinRooms, guestsByRoom, roomMoveOptions, type CheckinRoom } from "@/lib/checkin/rooms";
+import { bookingArrivalTime, countLabel, stayRangeLabel } from "@/lib/checkin/labels";
+import { formatPropertyDate, getPropertyToday } from "@/lib/dashboardBookings";
+import {
+  CheckinPhoneHeader,
+  CheckinStepBar,
+  type CheckinStepItem,
+} from "@/components/checkin/CheckinStepBar";
+import { CheckinBookingSummary } from "@/components/checkin/CheckinBookingSummary";
+import { ArrivalStep } from "@/components/checkin/ArrivalStep";
+import { RoomsGuestsStep } from "@/components/checkin/RoomsGuestsStep";
+import type { GuestFormValues, GuestLockableField } from "@/components/checkin/GuestForm";
+import { nationalityLabel } from "@vayada/locale-constants";
+import {
+  CheckinStepCard,
+  checkinPrimaryButton,
+  checkinSecondaryButton,
+} from "@/components/checkin/CheckinStepCard";
 
 const primaryActionClass =
   "rounded-lg bg-primary-600 px-4 py-2 text-sm font-semibold text-white hover:bg-primary-700 disabled:opacity-60";
 
-type GuestRegistrationDraft = Pick<
-  BookingAdditionalGuestPayload,
-  | "firstName"
-  | "lastName"
-  | "email"
-  | "phone"
-  | "gender"
-  | "nationality"
-  | "dateOfBirth"
-  | "passportNumber"
->;
-
 function guestName(b: Booking) {
   return `${b.guestFirstName} ${b.guestLastName}`.trim();
-}
-
-function expectedAdditionalGuests(b: Booking) {
-  return Math.max(0, expectedGuestCount(b) - 1);
-}
-
-function totalRoomCapacity(b: Booking) {
-  return Math.max(
-    1,
-    b.totalRoomCapacity ?? (b.roomMaxOccupancy || 1) * Math.max(1, b.numberOfRooms || 1),
-  );
-}
-
-function additionalGuestCapacity(b: Booking) {
-  return Math.max(0, totalRoomCapacity(b) - 1);
-}
-
-function roomUnit(b: Booking): string | null {
-  if (b.assignedRooms?.length) {
-    const numbers = b.assignedRooms.map((r) => r.roomNumber).filter(Boolean);
-    return numbers.length ? numbers.join(", ") : null;
-  }
-  return b.roomNumber || null;
-}
-
-function shortDateRange(checkIn: string, checkOut: string, locale: string) {
-  const ci = new Date(`${checkIn}T12:00:00`);
-  const co = new Date(`${checkOut}T12:00:00`);
-  const mon = (d: Date) => d.toLocaleDateString(locale, { month: "short" });
-  if (ci.getMonth() === co.getMonth() && ci.getFullYear() === co.getFullYear()) {
-    return `${ci.getDate()}–${co.getDate()} ${mon(ci)}`;
-  }
-  return `${ci.getDate()} ${mon(ci)} – ${co.getDate()} ${mon(co)}`;
-}
-
-function guestsLabel(
-  b: Booking,
-  t: (key: string, params?: Record<string, string | number>) => string,
-) {
-  const parts: string[] = [];
-  if (b.adults > 0)
-    parts.push(t(b.adults === 1 ? "checkIn.adult" : "checkIn.adults", { count: b.adults }));
-  if (b.children > 0)
-    parts.push(t(b.children === 1 ? "checkIn.child" : "checkIn.children", { count: b.children }));
-  const count = expectedGuestCount(b);
-  return parts.join(", ") || t(count === 1 ? "checkIn.guest" : "checkIn.guests", { count });
 }
 
 function isPaid(b: Booking) {
@@ -115,35 +81,6 @@ function markPaidOffer(b: Booking): MarkPaidOffer | null {
   if (b.paymentMethod === "bank_transfer") return "transfer";
   if (b.paymentMethod === "pay_at_property") return "atProperty";
   return null;
-}
-
-function normalizeGuests(booking: Booking, guests: BookingAdditionalGuest[]): GuestDraft[] {
-  const rows: GuestDraft[] = guests.map((g) => ({ ...g }));
-  const expectedRows = Math.min(
-    expectedAdditionalGuests(booking),
-    additionalGuestCapacity(booking),
-  );
-  for (let idx = rows.length; idx < expectedRows; idx += 1) {
-    rows.push({ position: idx + 1, roomPosition: rows[0]?.roomPosition ?? 0 });
-  }
-  return rows;
-}
-
-function bookerDraftFromBooking(booking: Booking): GuestRegistrationDraft {
-  return {
-    firstName: booking.guestFirstName || "",
-    lastName: booking.guestLastName || "",
-    email: booking.guestEmail || "",
-    phone: booking.guestPhone || "",
-    gender: booking.guestGender || "",
-    nationality: booking.guestCountry || "",
-    dateOfBirth: booking.guestDateOfBirth || null,
-    passportNumber: booking.guestPassportNumber || "",
-  };
-}
-
-function guestHasData(g: GuestRegistrationDraft) {
-  return Boolean(g.firstName || g.lastName || g.email || g.phone || g.nationality);
 }
 
 function formatDateTime(iso: string, locale: string): string {
@@ -172,6 +109,10 @@ function customStepValueForRecord(step: CheckinChecklistStep, value: string | bo
   return typeof value === "string" ? value : "";
 }
 
+const STEP_KEYS = ["arrival", "rooms", "payment", "keys"] as const;
+
+/** VAY-2373: the 4-step check-in, as approved in Paper (VAY-2372-2374 Check-in, p-16-0). Steps 1
+ * and 2 are the new ones; 3 and 4 keep today's payment, notes and checklist until part 6. */
 export default function CheckInPage() {
   const { locale, t } = useTranslation();
   const params = useParams<{ id: string }>();
@@ -179,14 +120,17 @@ export default function CheckInPage() {
   const searchParams = useSearchParams();
   const nextAfterCheckin = searchParams.get("next");
   const [booking, setBooking] = useState<Booking | null>(null);
-  const [booker, setBooker] = useState<GuestRegistrationDraft | null>(null);
-  const [guests, setGuests] = useState<GuestDraft[]>([]);
+  const [additionalGuests, setAdditionalGuests] = useState<BookingAdditionalGuest[]>([]);
+  const [registrations, setRegistrations] = useState<GuestRegistration[]>([]);
+  const [registrationsUnavailable, setRegistrationsUnavailable] = useState(false);
+  const [canReadIdentity, setCanReadIdentity] = useState(false);
+  const [settings, setSettings] = useState<CheckinSettings>(DEFAULT_CHECKIN_SETTINGS);
   const [notes, setNotes] = useState<BookingNote[]>([]);
   const [noteDraft, setNoteDraft] = useState("");
   const [loading, setLoading] = useState(true);
-  const [savingGuest, setSavingGuest] = useState<string | null>(null);
-  const [removingGuest, setRemovingGuest] = useState<string | null>(null);
-  const [confirmRemoveIndex, setConfirmRemoveIndex] = useState<number | null>(null);
+  const [step, setStep] = useState(0);
+  const [requestRead, setRequestRead] = useState(false);
+  const [movedFrom, setMovedFrom] = useState<Record<string, string>>({});
   const [confirmMarkPaid, setConfirmMarkPaid] = useState(false);
   const [savingNote, setSavingNote] = useState(false);
   const [error, setError] = useState("");
@@ -201,13 +145,22 @@ export default function CheckInPage() {
     Promise.all([
       bookingsService.get(id),
       bookingsService.listAdditionalGuests(id),
+      bookingsService.listGuestRegistrations(id).catch(() => null),
+      // Settings → Check-in shapes every step; its defaults when it can't be read.
+      settingsService
+        .getCheckinSettings()
+        .then((response) => response.settings)
+        .catch(() => DEFAULT_CHECKIN_SETTINGS),
       settingsService.getCheckinChecklist().catch(() => ({ steps: [] })),
       bookingsService.listNotes(id).catch(() => ({ notes: [] })),
     ])
-      .then(([bookingRes, guestRes, checklistRes, noteRes]) => {
+      .then(([bookingRes, guestRes, registrationRes, settingsRes, checklistRes, noteRes]) => {
         setBooking(bookingRes);
-        setBooker(bookerDraftFromBooking(bookingRes));
-        setGuests(normalizeGuests(bookingRes, guestRes.guests));
+        setAdditionalGuests(guestRes.guests);
+        setRegistrations(registrationRes?.guests ?? []);
+        setRegistrationsUnavailable(!registrationRes);
+        setCanReadIdentity(registrationRes?.canReadIdentity ?? false);
+        setSettings(settingsRes);
         setChecklistSteps(checklistRes.steps || []);
         setNotes(noteRes.notes || []);
       })
@@ -218,10 +171,10 @@ export default function CheckInPage() {
   const pendingChecklistSteps = useMemo(
     () =>
       checklistSteps
-        .filter((step) => step.required && !customStepDone(step, checklistValues[step.id]))
-        .map((step) => ({
-          stepId: step.id,
-          label: localizeBuiltInCheckinStep(step, t).label,
+        .filter((item) => item.required && !customStepDone(item, checklistValues[item.id]))
+        .map((item) => ({
+          stepId: item.id,
+          label: localizeBuiltInCheckinStep(item, t).label,
         })),
     [checklistSteps, checklistValues, t],
   );
@@ -229,61 +182,22 @@ export default function CheckInPage() {
     () => pendingChecklistSteps.map((flag) => flag.label),
     [pendingChecklistSteps],
   );
-  const completedGuests =
-    guests.filter(guestRegistered).length + (booker && guestRegistered(booker) ? 1 : 0);
-  const ota = channelIsOta(booking?.channel);
-  const paymentOffer = booking ? markPaidOffer(booking) : null;
-  const maxGuests = booking ? totalRoomCapacity(booking) : 1;
-  const remainingGuestSlots = booking ? Math.max(0, maxGuests - (guests.length + 1)) : 0;
-  const overCapacityBy = booking ? Math.max(0, guests.length + 1 - maxGuests) : 0;
-  const capacityReached = remainingGuestSlots === 0;
 
-  const updateBooker = (patch: Partial<GuestRegistrationDraft>) => {
-    setBooker((prev) => (prev ? { ...prev, ...patch } : prev));
-  };
-
-  const updateGuest = (index: number, patch: Partial<GuestDraft>) => {
-    setGuests((prev) => prev.map((g, idx) => (idx === index ? { ...g, ...patch } : g)));
-  };
+  const rooms = useMemo(() => (booking ? checkinRooms(booking) : []), [booking]);
+  const guests = useMemo(
+    () =>
+      booking ? registrationGuests({ booking, additionalGuests, registrations, settings }) : [],
+    [booking, additionalGuests, registrations, settings],
+  );
+  const placement = useMemo(() => guestsByRoom(guests, rooms), [guests, rooms]);
+  const registration = registrationSummary(
+    guests,
+    booking ? expectedRegistrations(booking, settings) : 1,
+  );
 
   const updateCustomValue = (stepId: string, value: string | boolean) => {
     setRequiredWarning(false);
     setChecklistValues((prev) => ({ ...prev, [stepId]: value }));
-  };
-
-  const addGuest = () => {
-    if (capacityReached) return;
-    setGuests((prev) => [
-      ...prev,
-      { position: prev.length + 1, roomPosition: prev[0]?.roomPosition ?? 0 },
-    ]);
-  };
-
-  const removeGuest = async (index: number, confirmed = false) => {
-    if (!booking) return;
-    const draft = guests[index];
-    if (!draft) return;
-    setConfirmRemoveIndex(null);
-    if (guestHasData(draft) && !confirmed) {
-      setConfirmRemoveIndex(index);
-      return;
-    }
-    setRemovingGuest(`guest-${index}`);
-    setError("");
-    try {
-      if (draft.id) {
-        await bookingsService.deleteAdditionalGuest(booking.id, draft.id);
-      }
-      setGuests((prev) =>
-        prev
-          .filter((_, idx) => idx !== index)
-          .map((guest, idx) => ({ ...guest, position: guest.id ? guest.position : idx + 1 })),
-      );
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t("checkIn.removeGuestError"));
-    } finally {
-      setRemovingGuest(null);
-    }
   };
 
   const saveNote = async () => {
@@ -303,49 +217,106 @@ export default function CheckInPage() {
     }
   };
 
-  const saveGuest = async (index: number) => {
+  /** The booker's name and contact come from the booking (only the nationality can be corrected);
+   * other guests are saved to the guest list; then their registration, when staff may see IDs. */
+  const saveGuest = async (guest: RegistrationGuest, values: GuestFormValues) => {
     if (!booking) return;
-    setSavingGuest(`guest-${index}`);
-    setError("");
-    try {
-      const draft = guests[index];
-      const payload: BookingAdditionalGuestPayload = {
-        firstName: draft.firstName || "",
-        lastName: draft.lastName || "",
-        email: draft.email || "",
-        phone: draft.phone || "",
-        nationality: draft.nationality || "",
+    let guestId = guest.guestId;
+    if (guest.role === "booker") {
+      if (values.nationality && values.nationality !== booking.guestCountry) {
+        const correction = await bookingsService.correctPrimaryGuestNationality(
+          booking.id,
+          values.nationality,
+        );
+        setBooking((current) => (current ? { ...current, ...correction } : current));
+      }
+    } else {
+      const payload = {
+        firstName: values.firstName.trim(),
+        lastName: values.lastName.trim(),
+        email: values.email.trim(),
+        phone: values.phone.trim(),
+        nationality: values.nationality,
       };
-      const saved = draft.id
-        ? await bookingsService.updateAdditionalGuest(booking.id, draft.id, payload)
+      const saved = guestId
+        ? await bookingsService.updateAdditionalGuest(booking.id, guestId, payload)
         : await bookingsService.createAdditionalGuest(booking.id, payload);
-      setGuests((prev) => prev.map((g, idx) => (idx === index ? { ...saved } : g)));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t("checkIn.saveGuestError"));
-    } finally {
-      setSavingGuest(null);
+      guestId = saved.id;
+      setAdditionalGuests((current) =>
+        current.some((entry) => entry.id === saved.id)
+          ? current.map((entry) => (entry.id === saved.id ? saved : entry))
+          : [...current, saved],
+      );
     }
+    if (!canReadIdentity || !guestId) return;
+    const saved = await bookingsService.saveGuestRegistration(booking.id, guestId, {
+      assignmentId: values.assignmentId,
+      dateOfBirth: values.dateOfBirth || null,
+      documentType: values.documentType || null,
+      documentNumber: values.documentNumber.trim() || null,
+      gender: values.gender || null,
+      staffNotes: values.staffNotes.trim() || null,
+    });
+    setRegistrations((current) => [
+      ...current.filter((entry) => entry.guestId !== saved.guestId),
+      saved,
+    ]);
   };
 
-  // The booker's name, email and phone come from the booking; only the nationality can be
-  // corrected here, the same correction the booking page makes.
-  const saveBookerNationality = async () => {
-    if (!booking || !booker?.nationality) return;
-    setSavingGuest("booker");
-    setError("");
-    try {
-      const correction = await bookingsService.correctPrimaryGuestNationality(
-        booking.id,
-        booker.nationality,
-      );
-      const updated = { ...booking, ...correction };
-      setBooking(updated);
-      setBooker(bookerDraftFromBooking(updated));
-    } catch (err) {
-      setError(localizedErrorText(err, t("bookings.detail.failedToSaveNationality"), t));
-    } finally {
-      setSavingGuest(null);
+  const formInitial = (guest: RegistrationGuest): GuestFormValues => {
+    const listed = additionalGuests.find((entry) => entry.id === guest.guestId);
+    const booker = guest.role === "booker" && booking;
+    const saved = guest.registration;
+    const room = rooms.find((entry) =>
+      (placement.get(entry.key) ?? []).some((placed) => placed.key === guest.key),
+    );
+    return {
+      firstName: guest.firstName,
+      lastName: guest.lastName,
+      email: booker ? booking.guestEmail : (listed?.email ?? ""),
+      phone: booker ? booking.guestPhone : (listed?.phone ?? ""),
+      nationality: booker ? booking.guestCountry : (listed?.nationality ?? ""),
+      dateOfBirth: saved?.dateOfBirth ?? "",
+      documentType: saved?.documentType ?? "",
+      documentNumber: saved?.documentNumber ?? "",
+      gender: saved?.gender ?? "",
+      staffNotes: saved?.staffNotes ?? "",
+      assignmentId: saved?.assignmentId ?? room?.assignmentId ?? null,
+    };
+  };
+
+  const ota = channelIsOta(booking?.channel);
+  const lockedFields = (guest: RegistrationGuest) => {
+    if (guest.role === "booker")
+      return new Set<GuestLockableField>(["firstName", "lastName", "email", "phone"]);
+    const listed = additionalGuests.find((entry) => entry.id === guest.guestId);
+    const locked = new Set<GuestLockableField>();
+    // An OTA import's values stay as supplied; empty ones can still be filled.
+    if (ota && listed) {
+      for (const name of ["firstName", "lastName", "email", "phone"] as const)
+        if (listed[name]) locked.add(name);
+      if (listed.nationality && nationalityLabel(listed.nationality)) locked.add("nationality");
     }
+    return locked;
+  };
+
+  const loadRoomOptions = async (room: CheckinRoom) => {
+    if (!booking) return [];
+    const calendar = await calendarService.getCalendarData(room.checkIn, room.checkOut);
+    return roomMoveOptions(room, booking, calendar);
+  };
+
+  const moveRoom = async (room: CheckinRoom, option: { roomId: string }) => {
+    if (!booking) return;
+    const updated = await bookingsService.moveRoom(
+      booking.id,
+      option.roomId,
+      room.assignmentId ? { assignmentId: room.assignmentId } : { position: room.position },
+      "preserve",
+    );
+    setBooking(updated);
+    if (room.unit)
+      setMovedFrom((current) => ({ ...current, [room.key]: current[room.key] ?? room.unit! }));
   };
 
   const markPaid = async () => {
@@ -363,7 +334,7 @@ export default function CheckInPage() {
   };
 
   const completeCheckIn = async () => {
-    if (!booking || !booker || actionLoading) return;
+    if (!booking || actionLoading) return;
     const carriedFlags = [...flags];
     if (pendingChecklistSteps.length > 0 && !requiredWarning) {
       setRequiredWarning(true);
@@ -372,43 +343,15 @@ export default function CheckInPage() {
     setActionLoading("completeCheckIn");
     setError("");
     try {
-      // Flush any unsaved guest drafts that have data
-      const flushResults = await Promise.allSettled(
-        guests.map(async (draft, index) => {
-          if (index >= additionalGuestCapacity(booking)) return draft;
-          if (!guestHasData(draft)) return draft;
-          const payload: BookingAdditionalGuestPayload = {
-            firstName: draft.firstName || "",
-            lastName: draft.lastName || "",
-            email: draft.email || "",
-            phone: draft.phone || "",
-            nationality: draft.nationality || "",
-          };
-          const saved = draft.id
-            ? await bookingsService.updateAdditionalGuest(booking.id, draft.id, payload)
-            : await bookingsService.createAdditionalGuest(booking.id, payload);
-          return { ...draft, ...saved };
-        }),
-      );
-      const flushedGuests = guests.map((draft, index) => {
-        const result = flushResults[index];
-        return result.status === "fulfilled" ? result.value : draft;
-      });
-      setGuests(flushedGuests);
-
-      if (flushResults.some((result) => result.status === "rejected")) {
-        throw new Error(t("checkIn.guestDraftsSaveError"));
-      }
-
       const completedAt = new Date().toISOString();
-      const checklistResults: CheckinStepResult[] = checklistSteps.map((step) => {
-        const value = checklistValues[step.id];
-        const done = customStepDone(step, value);
+      const checklistResults: CheckinStepResult[] = checklistSteps.map((item) => {
+        const value = checklistValues[item.id];
+        const done = customStepDone(item, value);
         return {
-          stepId: step.id,
-          label: step.label,
-          type: step.type,
-          value: customStepValueForRecord(step, value),
+          stepId: item.id,
+          label: item.label,
+          type: item.type,
+          value: customStepValueForRecord(item, value),
           completedAt: done ? completedAt : null,
         };
       });
@@ -431,7 +374,7 @@ export default function CheckInPage() {
     return <div className="p-4 md:p-6 text-sm text-gray-500">{t("checkIn.loading")}</div>;
   }
 
-  if (!booking || !booker) {
+  if (!booking) {
     return (
       <div className="p-4 md:p-6">
         <p className="text-sm text-red-600">{error || t("checkIn.bookingNotFound")}</p>
@@ -487,52 +430,115 @@ export default function CheckInPage() {
     );
   }
 
+  const paymentOffer = markPaidOffer(booking);
+  const { due } = bookingAmountDue(booking);
+  const request =
+    settings.showSpecialRequest && booking.specialRequests.trim() ? booking.specialRequests : null;
+  const arrivalReady = !request || !settings.confirmSpecialRequest || requestRead;
+  const guestsReady = settings.allowIncompleteGuests || registration.incomplete.length === 0;
+  const today = getPropertyToday();
+  const arrivalLabel =
+    booking.checkIn <= today
+      ? t("dashboard.popup.arrivingToday", { time: bookingArrivalTime(booking) })
+      : t("dashboard.popup.arrivesOn", {
+          date: formatPropertyDate(booking.checkIn, { month: "short", day: "numeric" }, locale),
+        });
+  const registered = t("checkIn.flow.registered", {
+    registered: registration.registered,
+    total: registration.total,
+  });
+  const balance =
+    booking.amountStatus === "unverified"
+      ? t("dashboard.popup.amountUnverified")
+      : due > 0
+        ? t("dashboard.popup.amountDue", { amount: formatCurrency(due, booking.currency) })
+        : t("dashboard.popup.nothingToPay");
+  const checksDone = checklistSteps.filter((item) =>
+    customStepDone(item, checklistValues[item.id]),
+  ).length;
+  const summaries = [
+    !request
+      ? t("checkIn.flow.arrival.noRequest")
+      : !settings.confirmSpecialRequest
+        ? t("checkIn.flow.arrival.requestShown")
+        : requestRead
+          ? t("checkIn.flow.arrival.requestDone")
+          : t("checkIn.flow.arrival.requestOpen"),
+    `${countLabel(t, "rooms", rooms.length)} · ${registered}`,
+    balance,
+    checklistSteps.length
+      ? t("checkIn.flow.keys.checks", { done: checksDone, total: checklistSteps.length })
+      : t("checkIn.ready"),
+  ];
+  const steps: CheckinStepItem[] = STEP_KEYS.map((key, index) => ({
+    title: t(`checkIn.flow.${key}.title`),
+    summary: summaries[index]!,
+    state: index < step ? "done" : index === step ? "current" : "todo",
+  }));
+  // Forward only past a confirmed request, and past incomplete guests when the hotel allows it.
+  const reachable = (index: number) =>
+    index <= step || ((index < 1 || arrivalReady) && (index < 2 || guestsReady));
+  const goTo = (index: number) => {
+    if (!reachable(index)) return;
+    setStep(index);
+    window.scrollTo({ top: 0 });
+  };
+  const continueButton = (disabled = false) => (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={() => goTo(step + 1)}
+      className={checkinPrimaryButton}
+    >
+      {t("checkIn.flow.continue")}
+    </button>
+  );
+  const unitList = new Intl.ListFormat(locale, { type: "conjunction" }).format(
+    rooms.map((room) =>
+      room.unit ? t("dashboard.popup.roomNumber", { number: room.unit }) : room.type,
+    ),
+  );
+
   return (
     <div className="overflow-x-clip p-4 md:p-6">
+      <CheckinPhoneHeader
+        name={guestName(booking)}
+        arrival={arrivalLabel}
+        steps={steps}
+        backHref="/dashboard"
+      />
       <div className="max-w-7xl space-y-5">
-        <header className="flex items-start justify-between gap-3">
-          <div className="flex min-w-0 items-start gap-3">
-            <Link
-              href="/dashboard"
-              className="mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
-              aria-label={t("checkIn.backToDashboard")}
-            >
-              ←
-            </Link>
-            <div className="min-w-0">
-              <p className="text-sm text-gray-500">{t("checkIn.breadcrumb")}</p>
-              <h1 className="flex flex-wrap items-center gap-x-2 gap-y-1 text-2xl font-bold text-gray-950 md:text-3xl">
-                {t("checkIn.title", { guest: guestName(booking) })}
-                <span className="rounded-full bg-green-100 px-2.5 py-1 text-xs font-semibold text-green-700">
-                  {t("checkIn.arrivingToday")}
-                </span>
-              </h1>
-              {ota && (
-                <div className="mt-1">
-                  <span className="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-semibold text-blue-700">
-                    {t("checkIn.otaFieldsLocked")}
-                  </span>
-                </div>
-              )}
-            </div>
+        <header className="hidden items-center gap-4 md:flex">
+          <Link
+            href="/dashboard"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
+            aria-label={t("checkIn.flow.toDashboard")}
+          >
+            <ArrowLeftIcon className="h-5 w-5" aria-hidden="true" />
+          </Link>
+          <div className="min-w-0">
+            <p className="text-sm text-gray-600">{t("checkIn.flow.breadcrumb")}</p>
+            <h1 className="flex flex-wrap items-center gap-x-3 gap-y-1 text-3xl font-extrabold text-gray-900">
+              {guestName(booking)}
+              <span className="rounded-full bg-green-100 px-2.5 py-1 text-xs font-semibold text-green-700">
+                {arrivalLabel}
+              </span>
+            </h1>
           </div>
         </header>
+        <h1 className="sr-only md:hidden">{guestName(booking)}</h1>
+
+        <CheckinStepBar steps={steps} onSelect={goTo} />
 
         {error && (
           <p className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
             {error}
           </p>
         )}
-        {confirmRemoveIndex !== null && (
-          <ConfirmDialog
-            title={t("checkIn.guestNumber", { number: confirmRemoveIndex + 2 })}
-            message={t("checkIn.removeGuestConfirm", { number: confirmRemoveIndex + 2 })}
-            confirmLabel={t("checkIn.remove")}
-            cancelLabel={t("common.cancel")}
-            variant="danger"
-            onConfirm={() => void removeGuest(confirmRemoveIndex, true)}
-            onCancel={() => setConfirmRemoveIndex(null)}
-          />
+        {registrationsUnavailable && (
+          <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+            {t("dashboard.popup.registrationUnavailable")}
+          </p>
         )}
         {confirmMarkPaid && paymentOffer && (
           <ConfirmDialog
@@ -556,455 +562,272 @@ export default function CheckInPage() {
           />
         )}
 
-        {booking.specialRequests.trim() && (
-          <section className="rounded-xl border border-amber-200 bg-amber-50 p-4">
-            <h2 className="text-xs font-semibold uppercase tracking-wide text-amber-800">
-              {t("dashboard.specialRequest")}
-            </h2>
-            <p className="mt-1 whitespace-pre-wrap text-sm text-amber-950">
-              {booking.specialRequests}
-            </p>
-          </section>
-        )}
+        <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_340px]">
+          {step === 0 && (
+            <CheckinStepCard
+              step={1}
+              total={4}
+              title={steps[0]!.title}
+              subtitle={t("checkIn.flow.arrival.subtitle")}
+              hint={arrivalReady ? undefined : t("checkIn.flow.arrival.readFirst")}
+              primary={continueButton(!arrivalReady)}
+            >
+              <ArrivalStep
+                facts={[
+                  {
+                    label: t("checkIn.flow.arrival.arrival"),
+                    value:
+                      booking.checkIn <= today
+                        ? t("checkIn.flow.arrival.todayAt", { time: bookingArrivalTime(booking) })
+                        : formatPropertyDate(
+                            booking.checkIn,
+                            { weekday: "short", month: "short", day: "numeric" },
+                            locale,
+                          ),
+                  },
+                  {
+                    label: t("checkIn.flow.arrival.stay"),
+                    value: `${stayRangeLabel(locale, booking.checkIn, booking.checkOut)} · ${countLabel(t, "nights", booking.nights)}`,
+                  },
+                  {
+                    label: t("checkIn.flow.arrival.guests"),
+                    value: [
+                      countLabel(t, "adults", booking.adults),
+                      ...(booking.children ? [countLabel(t, "children", booking.children)] : []),
+                      countLabel(t, "rooms", rooms.length),
+                    ].join(" · "),
+                  },
+                  {
+                    label: t("checkIn.flow.arrival.source"),
+                    value: bookingChannelLabel(booking.channel, t),
+                  },
+                ]}
+                request={request}
+                confirmRequest={settings.confirmSpecialRequest}
+                requestRead={requestRead}
+                onRequestRead={setRequestRead}
+              />
+            </CheckinStepCard>
+          )}
 
-        {completedGuests < expectedGuestCount(booking) && (
-          <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
-            {t("checkIn.missingRegistration", {
-              missing: expectedGuestCount(booking) - completedGuests,
-              total: expectedGuestCount(booking),
-            })}
-          </div>
-        )}
-
-        <section className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
-          <div className="space-y-4">
-            <Card title={t("checkIn.stay")}>
-              {booking.numberOfRooms > 1 && (
-                <BookingStaySummary
-                  amountStatus={booking.amountStatus}
-                  stays={booking.stays}
-                  expectedCount={booking.numberOfRooms}
-                />
+          {step === 1 && (
+            <CheckinStepCard
+              step={2}
+              total={4}
+              title={steps[1]!.title}
+              subtitle={t(
+                settings.allowIncompleteGuests
+                  ? "checkIn.flow.rooms.subtitle"
+                  : "checkIn.flow.rooms.subtitleStrict",
               )}
-              <div hidden={booking.numberOfRooms > 1} className="grid gap-3 text-sm md:grid-cols-3">
-                <Info
-                  label={t("bookings.tableRoom")}
-                  value={booking.roomName}
-                  secondary={roomUnit(booking) ?? undefined}
-                />
-                <Info
-                  label={t("bookings.detail.nightsLabel")}
-                  value={t(booking.nights === 1 ? "checkIn.night" : "checkIn.nights", {
-                    count: booking.nights,
-                  })}
-                  secondary={shortDateRange(booking.checkIn, booking.checkOut, locale)}
-                />
-                <Info label={t("bookings.detail.guests")} value={guestsLabel(booking, t)} />
-              </div>
-            </Card>
+              onBack={() => goTo(0)}
+              hint={
+                registration.incomplete.length === 0
+                  ? undefined
+                  : t(
+                      `checkIn.flow.rooms.${settings.allowIncompleteGuests ? "incompleteLater" : "incompleteBlocked"}${registration.incomplete.length === 1 ? "One" : "Many"}`,
+                      { count: registration.incomplete.length },
+                    )
+              }
+              primary={continueButton(!guestsReady)}
+            >
+              <RoomsGuestsStep
+                rooms={rooms}
+                guests={guests}
+                placement={placement}
+                settings={settings}
+                canReadIdentity={canReadIdentity}
+                movedFrom={movedFrom}
+                formInitial={formInitial}
+                lockedFields={lockedFields}
+                onSaveGuest={saveGuest}
+                loadRoomOptions={loadRoomOptions}
+                onMoveRoom={moveRoom}
+              />
+            </CheckinStepCard>
+          )}
 
-            <Card
-              title={t("checkIn.guestRegister")}
-              action={t("checkIn.registrationProgress", {
-                completed: completedGuests,
-                total: guests.length + 1,
-              })}
+          {step === 2 && (
+            <CheckinStepCard
+              step={3}
+              total={4}
+              title={steps[2]!.title}
+              subtitle={t("checkIn.flow.payment.subtitle")}
+              onBack={() => goTo(1)}
+              primary={continueButton()}
             >
               <div className="space-y-3">
+                {/* prettier-ignore */}
+                <p className="text-sm text-gray-600">{t("checkIn.expectedMethod")}: <span className="font-semibold text-gray-900">{expectedPaymentMethodLabel(booking.expectedPaymentMethod, t)}</span></p>
+                {booking.depositRequired && (
+                  <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 text-sm">
+                    <p className="font-semibold text-gray-900">
+                      {t("checkIn.deposit", {
+                        amount: formatCurrency(booking.depositAmount, booking.currency),
+                      })}
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      {booking.paymentStatus === "captured"
+                        ? t("bookings.balancePaid")
+                        : t("bookings.statusPending")}{" "}
+                      {t("checkIn.beforeArrival")}
+                    </p>
+                  </div>
+                )}
                 <div
-                  className={`rounded-xl border p-3 text-sm ${
-                    overCapacityBy > 0
-                      ? "border-red-200 bg-red-50 text-red-800"
-                      : capacityReached
-                        ? "border-amber-200 bg-amber-50 text-amber-900"
-                        : "border-blue-200 bg-blue-50 text-blue-900"
-                  }`}
+                  className={`rounded-xl border p-4 ${isPaid(booking) ? "border-green-200 bg-green-50" : "border-amber-200 bg-amber-50"}`}
                 >
-                  {overCapacityBy > 0
-                    ? t("checkIn.overCapacity", { count: overCapacityBy, max: maxGuests })
-                    : capacityReached
-                      ? t("checkIn.capacityReached", { max: maxGuests })
-                      : t("checkIn.additionalGuestsAllowed", { count: remainingGuestSlots })}
-                </div>
-                <GuestRegistrationCard
-                  title={guestName(booking) || t("checkIn.booker")}
-                  badge={t("checkIn.bookerBadge")}
-                  guest={booker}
-                  complete={guestRegistered(booker)}
-                  ota={ota}
-                  onChange={updateBooker}
-                  onSave={saveBookerNationality}
-                  saving={savingGuest === "booker"}
-                  saveDisabled={!booker.nationality || booker.nationality === booking.guestCountry}
-                  saveLabel={t("bookings.detail.saveNationality")}
-                  bookerContact
-                />
-
-                {guests.map((guest, index) => {
-                  const complete = guestRegistered(guest);
-                  return (
-                    <GuestRegistrationCard
-                      key={guest.id || `new-${index}`}
-                      title={t("checkIn.guestNumber", { number: index + 2 })}
-                      guest={guest}
-                      complete={complete}
-                      ota={ota}
-                      onChange={(patch) => updateGuest(index, patch)}
-                      onSave={() => saveGuest(index)}
-                      saving={savingGuest === `guest-${index}`}
-                      onRemove={() => removeGuest(index)}
-                      removing={removingGuest === `guest-${index}`}
-                    />
-                  );
-                })}
-
-                <button
-                  type="button"
-                  onClick={addGuest}
-                  disabled={capacityReached}
-                  className="w-full rounded-xl border border-dashed border-gray-300 py-3 text-sm font-medium text-gray-500 hover:border-gray-400 hover:text-gray-700 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-gray-100 disabled:text-gray-400"
-                >
-                  {capacityReached
-                    ? t("checkIn.capacityReached", { max: maxGuests })
-                    : t("checkIn.addGuest")}
-                </button>
-              </div>
-            </Card>
-
-            <Card title={t("bookings.detail.payment")}>
-              {/* prettier-ignore */}
-              <div className="mb-3 text-sm"><Info label={t("checkIn.expectedMethod")} value={expectedPaymentMethodLabel(booking.expectedPaymentMethod, t)} /></div>
-              {booking.depositRequired && (
-                <div className="mb-3 rounded-xl border border-gray-200 bg-gray-50 p-3 text-sm">
-                  <p className="font-semibold text-gray-900">
-                    {t("checkIn.deposit", {
-                      amount: formatCurrency(booking.depositAmount, booking.currency),
-                    })}
+                  <p
+                    className={`font-semibold ${isPaid(booking) ? "text-green-800" : "text-amber-950"}`}
+                  >
+                    {bookingSettlementLabel(booking, t)}
                   </p>
-                  <p className="text-xs text-gray-500">
-                    {booking.paymentStatus === "captured"
-                      ? t("bookings.balancePaid")
-                      : t("bookings.statusPending")}{" "}
-                    {t("checkIn.beforeArrival")}
-                  </p>
-                </div>
-              )}
-              <div
-                className={`rounded-xl border p-4 ${isPaid(booking) ? "border-green-200 bg-green-50" : "border-amber-200 bg-amber-50"}`}
-              >
-                <p
-                  className={`font-semibold ${isPaid(booking) ? "text-green-800" : "text-amber-950"}`}
-                >
-                  {bookingSettlementLabel(booking, t)}
-                </p>
-                {paymentOffer && (
-                  <div className="mt-3">
-                    <button
-                      type="button"
-                      onClick={() => setConfirmMarkPaid(true)}
-                      disabled={actionLoading !== null}
-                      className={primaryActionClass}
-                    >
-                      {actionLoading === "markPaid"
-                        ? t("common.saving")
-                        : paymentOffer === "cardRest"
-                          ? t("bookings.detail.markRestPaid", {
-                              amount: formatCurrency(booking.balanceAmount, booking.currency, 2),
-                            })
-                          : paymentOffer === "transfer"
-                            ? t("bookings.detail.markBankTransferReceived")
-                            : t("bookings.detail.markPayAtHotelReceived")}
-                    </button>
-                  </div>
-                )}
-              </div>
-            </Card>
-
-            <Card title={t("checkIn.notes")}>
-              <div className="space-y-4">
-                {notes.length > 0 && (
-                  <div className="space-y-3">
-                    {notes.map((note) => (
-                      <div key={note.id} className="rounded-lg border border-gray-200 p-3">
-                        <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500">
-                          <span className="font-medium text-gray-700">
-                            {note.authorName || t("checkIn.unknown")}
-                          </span>
-                          <span>{formatDateTime(note.createdAt, locale)}</span>
-                          {note.source === "check-in" && (
-                            <span className="rounded-full bg-blue-50 px-2 py-0.5 font-medium text-blue-700">
-                              {t("bookings.detail.checkIn")}
-                            </span>
-                          )}
-                        </div>
-                        <p className="mt-1.5 whitespace-pre-wrap text-sm text-gray-900">
-                          {note.body}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                <textarea
-                  value={noteDraft}
-                  onChange={(e) => setNoteDraft(e.target.value)}
-                  placeholder={t("checkIn.notePlaceholder")}
-                  rows={3}
-                  className="w-full resize-none rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-950 placeholder:text-gray-400 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-100"
-                />
-                <button
-                  type="button"
-                  onClick={saveNote}
-                  disabled={savingNote || !noteDraft.trim()}
-                  className={primaryActionClass}
-                >
-                  {savingNote ? t("common.saving") : t("checkIn.saveNote")}
-                </button>
-              </div>
-            </Card>
-          </div>
-
-          <aside className="lg:sticky lg:top-6 lg:self-start">
-            <Card title={t("checkIn.checklist")}>
-              <div className="space-y-3">
-                {checklistSteps.length === 0 && (
-                  <div className="rounded-lg border border-dashed border-gray-300 p-3 text-sm text-gray-500">
-                    {t("checkIn.noSteps")}
-                  </div>
-                )}
-                {checklistSteps.map((step) => (
-                  <CustomChecklistItem
-                    key={step.id}
-                    step={step}
-                    value={checklistValues[step.id]}
-                    currency={booking.currency}
-                    onChange={(value) => updateCustomValue(step.id, value)}
-                  />
-                ))}
-              </div>
-              {requiredWarning && pendingChecklistSteps.length > 0 && (
-                <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-                  {t(
-                    pendingChecklistSteps.length === 1
-                      ? "checkIn.requiredStepIncomplete"
-                      : "checkIn.requiredStepsIncomplete",
-                    { count: pendingChecklistSteps.length },
+                  {paymentOffer && (
+                    <div className="mt-3">
+                      <button
+                        type="button"
+                        onClick={() => setConfirmMarkPaid(true)}
+                        disabled={actionLoading !== null}
+                        className={primaryActionClass}
+                      >
+                        {actionLoading === "markPaid"
+                          ? t("common.saving")
+                          : paymentOffer === "cardRest"
+                            ? t("bookings.detail.markRestPaid", {
+                                amount: formatCurrency(booking.balanceAmount, booking.currency, 2),
+                              })
+                            : paymentOffer === "transfer"
+                              ? t("bookings.detail.markBankTransferReceived")
+                              : t("bookings.detail.markPayAtHotelReceived")}
+                      </button>
+                    </div>
                   )}
                 </div>
-              )}
-              <button
-                type="button"
-                onClick={completeCheckIn}
-                disabled={actionLoading !== null}
-                className={`${primaryActionClass} mt-5 w-full py-3`}
-              >
-                {actionLoading === "completeCheckIn"
-                  ? t("checkIn.completing")
-                  : t("checkIn.complete")}
-              </button>
-              <p className="mt-3 text-center text-sm text-gray-500">
-                {flags.length === 0
+              </div>
+            </CheckinStepCard>
+          )}
+
+          {step === 3 && (
+            <CheckinStepCard
+              step={4}
+              total={4}
+              title={steps[3]!.title}
+              subtitle={t("checkIn.flow.keys.subtitle")}
+              onBack={() => goTo(2)}
+              hint={
+                flags.length === 0
                   ? t("checkIn.ready")
                   : t(flags.length === 1 ? "checkIn.pendingItem" : "checkIn.pendingItems", {
                       count: flags.length,
-                    })}
-              </p>
-            </Card>
-          </aside>
-        </section>
-      </div>
-    </div>
-  );
-}
-
-function GuestRegistrationCard({
-  title,
-  badge,
-  guest,
-  complete,
-  ota,
-  onChange,
-  onSave,
-  saving,
-  onRemove,
-  removing,
-  saveLabel,
-  saveDisabled = false,
-  bookerContact = false,
-}: {
-  title: string;
-  badge?: string;
-  guest: GuestRegistrationDraft;
-  complete: boolean;
-  ota: boolean;
-  onChange: (patch: Partial<GuestRegistrationDraft>) => void;
-  onSave: () => void;
-  saving: boolean;
-  onRemove?: () => void;
-  removing?: boolean;
-  saveLabel?: string;
-  saveDisabled?: boolean;
-  /** The booker: name, email and phone come from the booking; only the nationality is editable. */
-  bookerContact?: boolean;
-}) {
-  const { t } = useTranslation();
-  const contactLocked = (value: string | null | undefined) =>
-    bookerContact || (ota && Boolean(value));
-
-  return (
-    <div
-      className={`rounded-xl border p-4 ${
-        complete ? "border-green-200 bg-green-50" : "border-amber-200 bg-white"
-      }`}
-    >
-      <div className="mb-3 flex items-start justify-between gap-3">
-        <div>
-          <p className="font-semibold text-gray-950">
-            {complete ? "✓" : "!"} {title}{" "}
-            {badge && (
-              <span className="ml-2 rounded-full bg-white px-2 py-0.5 text-xs text-green-700">
-                {badge}
-              </span>
-            )}
-          </p>
-          <p className={`text-sm ${complete ? "text-green-700" : "text-amber-700"}`}>
-            {complete ? t("checkIn.registrationComplete") : t("checkIn.nameRequired")}
-          </p>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          {ota && (
-            <span className="text-right text-xs font-medium text-gray-500">
-              {t("checkIn.importedFieldsLocked")}
-            </span>
-          )}
-          {onRemove && (
-            <button
-              type="button"
-              onClick={onRemove}
-              disabled={removing}
-              className="rounded-lg border border-red-200 px-2.5 py-1 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:opacity-60"
+                    })
+              }
+              primary={
+                <button
+                  type="button"
+                  onClick={completeCheckIn}
+                  disabled={actionLoading !== null}
+                  className={checkinPrimaryButton}
+                >
+                  {actionLoading === "completeCheckIn"
+                    ? t("checkIn.completing")
+                    : t("checkIn.complete")}
+                </button>
+              }
             >
-              {removing ? t("checkIn.removing") : t("checkIn.remove")}
-            </button>
+              <div className="space-y-6">
+                <section className="space-y-3">
+                  <h3 className="text-lg font-bold text-gray-900">{t("checkIn.checklist")}</h3>
+                  {checklistSteps.length === 0 && (
+                    <div className="rounded-lg border border-dashed border-gray-300 p-3 text-sm text-gray-500">
+                      {t("checkIn.noSteps")}
+                    </div>
+                  )}
+                  {checklistSteps.map((item) => (
+                    <CustomChecklistItem
+                      key={item.id}
+                      step={item}
+                      value={checklistValues[item.id]}
+                      currency={booking.currency}
+                      onChange={(value) => updateCustomValue(item.id, value)}
+                    />
+                  ))}
+                  {requiredWarning && pendingChecklistSteps.length > 0 && (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                      {t(
+                        pendingChecklistSteps.length === 1
+                          ? "checkIn.requiredStepIncomplete"
+                          : "checkIn.requiredStepsIncomplete",
+                        { count: pendingChecklistSteps.length },
+                      )}
+                    </div>
+                  )}
+                </section>
+                <section className="space-y-4">
+                  <h3 className="text-lg font-bold text-gray-900">{t("checkIn.notes")}</h3>
+                  {notes.map((note) => (
+                    <div key={note.id} className="rounded-lg border border-gray-200 p-3">
+                      <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500">
+                        <span className="font-medium text-gray-700">
+                          {note.authorName || t("checkIn.unknown")}
+                        </span>
+                        <span>{formatDateTime(note.createdAt, locale)}</span>
+                        {note.source === "check-in" && (
+                          <span className="rounded-full bg-blue-50 px-2 py-0.5 font-medium text-blue-700">
+                            {t("bookings.detail.checkIn")}
+                          </span>
+                        )}
+                      </div>
+                      <p className="mt-1.5 whitespace-pre-wrap text-sm text-gray-900">
+                        {note.body}
+                      </p>
+                    </div>
+                  ))}
+                  <textarea
+                    value={noteDraft}
+                    onChange={(e) => setNoteDraft(e.target.value)}
+                    placeholder={t("checkIn.notePlaceholder")}
+                    rows={3}
+                    className="w-full resize-none rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-950 placeholder:text-gray-400 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-100"
+                  />
+                  <button
+                    type="button"
+                    onClick={saveNote}
+                    disabled={savingNote || !noteDraft.trim()}
+                    className={checkinSecondaryButton}
+                  >
+                    {savingNote ? t("common.saving") : t("checkIn.saveNote")}
+                  </button>
+                </section>
+              </div>
+            </CheckinStepCard>
           )}
+
+          <CheckinBookingSummary
+            reference={booking.bookingReference}
+            rows={[
+              {
+                label: t("checkIn.flow.summary.stay"),
+                value: stayRangeLabel(locale, booking.checkIn, booking.checkOut),
+              },
+              { label: t("checkIn.flow.summary.rooms"), value: unitList },
+              { label: t("checkIn.flow.summary.guests"), value: registered },
+              { label: t("checkIn.flow.summary.balance"), value: balance },
+              {
+                label: t("checkIn.flow.summary.addons"),
+                value: booking.addonNames.length
+                  ? t("checkIn.flow.summary.addonsBooked", { count: booking.addonNames.length })
+                  : t("checkIn.flow.summary.none"),
+              },
+            ]}
+            booker={{
+              name: guestName(booking),
+              email: booking.guestEmail,
+              phone: booking.guestPhone,
+            }}
+          />
         </div>
       </div>
-      <div className="grid gap-3 md:grid-cols-2">
-        <Field
-          label={t("calendar.newBookingModal.firstNameLabel")}
-          value={guest.firstName || ""}
-          disabled={contactLocked(guest.firstName)}
-          onChange={(v) => onChange({ firstName: v })}
-        />
-        <Field
-          label={t("calendar.newBookingModal.lastNameLabel")}
-          value={guest.lastName || ""}
-          disabled={contactLocked(guest.lastName)}
-          onChange={(v) => onChange({ lastName: v })}
-        />
-        <Field
-          label={t("bookings.detail.email")}
-          type="email"
-          value={guest.email || ""}
-          disabled={contactLocked(guest.email)}
-          onChange={(v) => onChange({ email: v })}
-        />
-        <Field
-          label={t("bookings.detail.phone")}
-          type="tel"
-          value={guest.phone || ""}
-          disabled={contactLocked(guest.phone)}
-          onChange={(v) => onChange({ phone: v })}
-        />
-        <NationalitySelect
-          value={guest.nationality || ""}
-          disabled={
-            !bookerContact &&
-            ota &&
-            Boolean(guest.nationality) &&
-            Boolean(nationalityLabel(guest.nationality))
-          }
-          onChange={(v) => onChange({ nationality: v })}
-        />
-      </div>
-      <p className="mt-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-500">
-        {t("checkIn.unsupportedGuestFields")}
-      </p>
-      {bookerContact && (
-        <p className="mt-3 text-xs text-gray-500">{t("checkIn.bookerContactFromBooking")}</p>
-      )}
-      <button
-        type="button"
-        onClick={onSave}
-        disabled={saving || saveDisabled}
-        className={`${primaryActionClass} mt-3`}
-      >
-        {saving ? t("common.saving") : (saveLabel ?? t("checkIn.saveGuest"))}
-      </button>
     </div>
-  );
-}
-
-function Card({
-  title,
-  action,
-  children,
-}: {
-  title: string;
-  action?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <h2 className="text-sm font-semibold text-gray-950">{title}</h2>
-        {action && (
-          <span className="rounded-full bg-gray-100 px-2.5 py-1 text-xs font-semibold text-gray-700">
-            {action}
-          </span>
-        )}
-      </div>
-      {children}
-    </section>
-  );
-}
-
-function Info({ label, value, secondary }: { label: string; value: string; secondary?: string }) {
-  return (
-    <div>
-      <p className="text-xs font-medium uppercase tracking-wide text-gray-500">{label}</p>
-      <p className="mt-1 font-semibold text-gray-950">{value}</p>
-      {secondary && <p className="mt-0.5 text-xs text-gray-400">{secondary}</p>}
-    </div>
-  );
-}
-
-function Field({
-  label,
-  value,
-  onChange,
-  type = "text",
-  placeholder,
-  disabled,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  type?: string;
-  placeholder?: string;
-  disabled?: boolean;
-}) {
-  return (
-    <label className="block">
-      <span className="text-xs font-medium text-gray-600">{label}</span>
-      <input
-        type={type}
-        value={value}
-        placeholder={placeholder}
-        disabled={disabled}
-        onChange={(e) => onChange(e.target.value)}
-        className="mt-1 h-10 w-full rounded-lg border border-gray-200 px-3 text-sm text-gray-950 disabled:bg-gray-100 disabled:text-gray-500"
-      />
-    </label>
   );
 }
 
