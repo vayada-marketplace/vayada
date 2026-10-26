@@ -239,7 +239,7 @@ describe("Booking design routes", () => {
       { propertyScope: { mode: "assigned", assignedPropertyIds: [propertyId] } },
       201,
     ],
-    ["wrong organization", { organizationKind: "creator_workspace" }, 403],
+    ["wrong organization", { organizationKind: "platform" }, 403],
     ["inactive membership", { membershipStatus: "inactive" }, 403],
     ["missing permission", { permissions: [] }, 403],
     ["missing entitlement", { entitlements: [] }, 403],

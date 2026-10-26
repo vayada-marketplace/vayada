@@ -13,6 +13,31 @@ const SESSION = "20820000-0000-4000-8000-000000000001";
 const LEGACY_SESSION = "20820000-0000-4000-8000-000000000002";
 const MEDIA = "20820000-0000-4000-8000-000000000003";
 const IDS = [SESSION, LEGACY_SESSION, MEDIA].map((id) => `'${id}'`).join(",");
+// VAY-2272 retired-media purge fixtures.
+const id = (n: number) => `22720000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+const [CREATOR_ORG, HOTEL_ORG, CREATOR_USER, DUAL_USER, CREATED_AS_CREATOR, PROPERTY] = [
+  1, 2, 3, 4, 5, 6,
+].map(id);
+const [CREATOR_PHOTO, CHAT_FILE, LEGACY_TYPE_PHOTO, DUAL_PHOTO, HOTEL_USED, EXTERNAL, MARKED] = [
+  11, 12, 13, 14, 15, 16, 17,
+].map(id);
+// Each in the set through one branch only: owner workspace, creator membership (also the removed
+// creator's own avatar); a kept user's avatar and a hotel add-on photo stay in use.
+const [OWNED_ONLY, CREATED_ONLY, KEPT_AVATAR, ADDON_PHOTO] = [18, 19, 20, 21].map(id);
+const PURGE_MEDIA = [
+  CREATOR_PHOTO,
+  CHAT_FILE,
+  LEGACY_TYPE_PHOTO,
+  DUAL_PHOTO,
+  HOTEL_USED,
+  EXTERNAL,
+  MARKED,
+  OWNED_ONLY,
+  CREATED_ONLY,
+  KEPT_AVATAR,
+  ADDON_PHOTO,
+];
+const PURGE_IDS = PURGE_MEDIA.map((value) => `'${value}'`).join(",");
 // Dated long before any other suite's rows, so these runs select only their own. A cleanup run
 // from another suite at a later "now" would select these rows, so CI runs this file on its own.
 const EXPIRES_AT = "2001-01-01T00:00:00.000Z";
@@ -32,10 +57,12 @@ describe.skipIf(!URL)("PostgreSQL platform media cleanup", () => {
   beforeAll(async () => {
     await admin.connect();
     await cleanup();
+    await cleanupPurge();
   });
 
   afterAll(async () => {
     await cleanup();
+    await cleanupPurge();
     await store.close();
     await admin.end();
   });
@@ -89,8 +116,8 @@ describe.skipIf(!URL)("PostgreSQL platform media cleanup", () => {
          (id, bucket, storage_key, visibility, purpose, resource_product, resource_type, resource_id,
           lifecycle_status, retained_until)
        VALUES ($1::uuid, 'test-private', 'private/chat/' || $1 || '.webp', 'private',
-               'marketplace.collaboration_chat.attachment', 'marketplace', 'collaboration',
-               'collaboration-vay2082', 'active', $2::timestamptz)`,
+               'pms.messaging.attachment', 'pms', 'message_thread',
+               'thread-vay2082', 'active', $2::timestamptz)`,
       [MEDIA, EXPIRES_AT],
     );
     const denied = Object.assign(new Error("not authorized to perform s3:DeleteObject"), {
@@ -133,9 +160,9 @@ describe.skipIf(!URL)("PostgreSQL platform media cleanup", () => {
           const late = await failing.recordCleanupFailure(
             {
               mediaObjectId: MEDIA,
-              resourceProduct: "marketplace",
-              resourceType: "collaboration",
-              resourceId: "collaboration-vay2082",
+              resourceProduct: "pms",
+              resourceType: "message_thread",
+              resourceId: "thread-vay2082",
               lifecycleStatus: "active",
               retainedUntil: EXPIRES_AT,
             },
@@ -266,6 +293,274 @@ describe.skipIf(!URL)("PostgreSQL platform media cleanup", () => {
       },
     ]);
   });
+
+  it("purges retired Marketplace and creator media files and leaves everything else (VAY-2272)", async () => {
+    await seedRetiredMedia();
+    const deleteRetired = vi.fn(
+      async (_input: { bucket: string; storageKey: string }) => undefined,
+    );
+    const invalidatePublicObjects = vi.fn(async (_keys: readonly string[]) => ({
+      invalidationId: "IPURGETEST",
+    }));
+    const purging = createPgPlatformMediaCleanupStore({
+      connectionString: URL!,
+      objectDeleter: { deleteObject: deleteRetired },
+      cdnInvalidator: { invalidatePublicObjects, close: vi.fn() },
+    });
+    const purge = () =>
+      runPlatformMediaCleanupJobs(purging, {
+        now: NOW,
+        limit: 500,
+        run: ["retiredMarketplacePurge"],
+      });
+
+    try {
+      const first = await purge();
+      const rerun = await purge();
+
+      const applied = (run: typeof first) =>
+        run.runs[0]!.mutations.filter((mutation) => mutation.applied).map((m) => m.resourceId);
+      expect(first.runs[0]!.failures).toEqual([]);
+      expect(applied(first)).toEqual(
+        expect.arrayContaining([
+          CREATOR_PHOTO,
+          CHAT_FILE,
+          LEGACY_TYPE_PHOTO,
+          OWNED_ONLY,
+          CREATED_ONLY,
+        ]),
+      );
+      for (const kept of [DUAL_PHOTO, HOTEL_USED, EXTERNAL, MARKED, KEPT_AVATAR, ADDON_PHOTO])
+        expect(applied(first)).not.toContain(kept);
+      expect(first.runs[0]!.blocked).toEqual(
+        expect.arrayContaining([HOTEL_USED, KEPT_AVATAR, ADDON_PHOTO]),
+      );
+      const reselected = rerun.runs[0]!.mutations.map((mutation) => mutation.resourceId);
+      for (const purged of [CREATOR_PHOTO, CHAT_FILE, LEGACY_TYPE_PHOTO, OWNED_ONLY, CREATED_ONLY])
+        expect(reselected).not.toContain(purged);
+
+      const deletedKeys = deleteRetired.mock.calls.map(([input]) => input.storageKey);
+      expect(deletedKeys).toEqual(
+        expect.arrayContaining([
+          `private/media/${CREATOR_PHOTO}/original/image.jpg`,
+          `public/media/${CREATOR_PHOTO}/original_safe/v1.webp`,
+          `public/media/${CREATOR_PHOTO}/thumbnail/v1.webp`,
+          `private/media/${CHAT_FILE}/original/file.pdf`,
+          `private/media/${LEGACY_TYPE_PHOTO}/original/image.jpg`,
+        ]),
+      );
+      for (const kept of [DUAL_PHOTO, HOTEL_USED, MARKED, KEPT_AVATAR, ADDON_PHOTO])
+        expect(deletedKeys.filter((key) => key.includes(kept))).toEqual([]);
+      expect(invalidatePublicObjects.mock.calls.map(([keys]) => keys)).toContainEqual([
+        `public/media/${CREATOR_PHOTO}/original_safe/v1.webp`,
+        `public/media/${CREATOR_PHOTO}/thumbnail/v1.webp`,
+      ]);
+
+      const rows = await admin.query<{
+        id: string;
+        lifecycle_status: string;
+        visibility: string;
+        purged_at: string | null;
+        invalidation_id: string | null;
+      }>(
+        `SELECT id::text, lifecycle_status, visibility,
+                source_metadata ->> 'retiredPurgeCompletedAt' AS purged_at,
+                source_metadata ->> 'retiredPurgeInvalidationId' AS invalidation_id
+         FROM platform.media_objects WHERE id IN (${PURGE_IDS}) ORDER BY id`,
+      );
+      expect(rows.rows).toEqual([
+        {
+          id: CREATOR_PHOTO,
+          lifecycle_status: "active",
+          visibility: "public",
+          purged_at: NOW.toISOString(),
+          invalidation_id: "IPURGETEST",
+        },
+        {
+          id: CHAT_FILE,
+          lifecycle_status: "active",
+          visibility: "private",
+          purged_at: NOW.toISOString(),
+          invalidation_id: null,
+        },
+        {
+          id: LEGACY_TYPE_PHOTO,
+          lifecycle_status: "active",
+          visibility: "private",
+          purged_at: NOW.toISOString(),
+          invalidation_id: null,
+        },
+        {
+          id: DUAL_PHOTO,
+          lifecycle_status: "active",
+          visibility: "private",
+          purged_at: null,
+          invalidation_id: null,
+        },
+        {
+          id: HOTEL_USED,
+          lifecycle_status: "active",
+          visibility: "private",
+          purged_at: null,
+          invalidation_id: null,
+        },
+        {
+          id: EXTERNAL,
+          lifecycle_status: "external_reference",
+          visibility: "private",
+          purged_at: null,
+          invalidation_id: null,
+        },
+        {
+          id: MARKED,
+          lifecycle_status: "active",
+          visibility: "private",
+          purged_at: "2001-01-01T00:00:00.000Z",
+          invalidation_id: null,
+        },
+        ...[OWNED_ONLY, CREATED_ONLY].map((purged) => ({
+          id: purged,
+          lifecycle_status: "active",
+          visibility: "private",
+          purged_at: NOW.toISOString(),
+          invalidation_id: null,
+        })),
+        ...[KEPT_AVATAR, ADDON_PHOTO].map((inUse) => ({
+          id: inUse,
+          lifecycle_status: "active",
+          visibility: "private",
+          purged_at: null,
+          invalidation_id: null,
+        })),
+      ]);
+      expect(
+        (
+          await admin.query(
+            `SELECT DISTINCT job_type, status, tenant_scope, organization_id, property_id
+             FROM platform.jobs WHERE queue_name = $1 AND resource_id IN (${PURGE_IDS})`,
+            [PLATFORM_MEDIA_CLEANUP_QUEUE],
+          )
+        ).rows,
+      ).toEqual([
+        {
+          job_type: "platform.media.cleanup.retired-marketplace-purge",
+          status: "succeeded",
+          tenant_scope: "platform",
+          organization_id: null,
+          property_id: null,
+        },
+      ]);
+    } finally {
+      await purging.close();
+    }
+  });
+
+  async function seedRetiredMedia() {
+    // Constraints and checks apply; replica mode only skips the triggers of unrelated domains.
+    await admin.query(`BEGIN; SET LOCAL session_replication_role=replica;
+      INSERT INTO identity.organizations (id, kind, name, slug) VALUES
+        ('${CREATOR_ORG}', 'creator_workspace', 'VAY-2272 creator', 'vay-2272-creator'),
+        ('${HOTEL_ORG}', 'hotel_group', 'VAY-2272 hotel', 'vay-2272-hotel');
+      INSERT INTO identity.users (id, email) VALUES
+        ('${CREATOR_USER}', 'vay-2272-creator@example.test'),
+        ('${DUAL_USER}', 'vay-2272-dual@example.test'),
+        ('${CREATED_AS_CREATOR}', 'vay-2272-legacy-type@example.test');
+      INSERT INTO identity.organization_memberships
+        (organization_id, user_id, role_key, access_origin, property_access_mode) VALUES
+        ('${CREATOR_ORG}', '${CREATOR_USER}', 'creator_owner', 'agency', 'all'),
+        ('${CREATOR_ORG}', '${DUAL_USER}', 'creator_owner', 'agency', 'all'),
+        ('${HOTEL_ORG}', '${DUAL_USER}', 'hotel_owner', 'agency', 'all');
+      INSERT INTO identity.auth_reconciliation_events (event_type, provider, user_id, payload) VALUES
+        ('identity.user.created', 'workos', '${CREATED_AS_CREATOR}',
+         '{"payload": {"legacyUserType": "creator"}}'::jsonb);
+      INSERT INTO hotel_catalog.properties (id, public_id, display_name, creation_organization_id)
+        VALUES ('${PROPERTY}', '${PROPERTY}', 'VAY-2272 hotel', '${HOTEL_ORG}');
+      INSERT INTO platform.media_objects
+        (id, bucket, storage_key, storage_kind, visibility, purpose, owner_organization_id,
+         property_id, resource_product, resource_type, resource_id, lifecycle_status,
+         public_approved, source_url, created_by_user_id, source_metadata, created_at) VALUES
+        ('${CREATOR_PHOTO}', 'test-media', 'private/media/${CREATOR_PHOTO}/original/image.jpg',
+         'vayada_managed', 'public', 'marketplace.creator.profile_image', '${CREATOR_ORG}', NULL,
+         'marketplace', 'creator_profile', 'creator-vay2272', 'active', TRUE, NULL, NULL, '{}',
+         '2000-12-31T00:00:00Z'),
+        ('${CHAT_FILE}', 'test-media', 'private/media/${CHAT_FILE}/original/file.pdf',
+         'vayada_managed', 'private', 'marketplace.collaboration_chat.attachment', NULL, NULL,
+         'marketplace', 'collaboration', 'collaboration-vay2272', 'active', FALSE, NULL,
+         '${CREATOR_USER}', '{}', '2000-12-31T00:00:00Z'),
+        ('${LEGACY_TYPE_PHOTO}', 'test-media', 'private/media/${LEGACY_TYPE_PHOTO}/original/image.jpg',
+         'vayada_managed', 'private', 'identity.user.profile_image', NULL, NULL,
+         'platform', 'user', '${CREATED_AS_CREATOR}', 'active', FALSE, NULL,
+         '${CREATED_AS_CREATOR}', '{}', '2000-12-31T00:00:00Z'),
+        ('${DUAL_PHOTO}', 'test-media', 'private/media/${DUAL_PHOTO}/original/image.jpg',
+         'vayada_managed', 'private', 'identity.user.profile_image', '${HOTEL_ORG}', NULL,
+         'platform', 'user', '${DUAL_USER}', 'active', FALSE, NULL, '${DUAL_USER}', '{}',
+         '2000-12-31T00:00:00Z'),
+        ('${HOTEL_USED}', 'test-media', 'private/media/${HOTEL_USED}/original/image.jpg',
+         'vayada_managed', 'private', 'marketplace.offer.media', '${CREATOR_ORG}', '${PROPERTY}',
+         'marketplace', 'marketplace_offer', 'offer-vay2272', 'active', FALSE, NULL, NULL, '{}',
+         '2000-12-31T00:00:00Z'),
+        ('${EXTERNAL}', NULL, NULL, 'external_reference', 'private', 'marketplace.offer.media',
+         '${CREATOR_ORG}', NULL, 'marketplace', 'marketplace_offer', 'offer-vay2272-legacy',
+         'external_reference', FALSE, 'https://legacy.example.test/offer.jpg', NULL, '{}',
+         '2000-12-31T00:00:00Z'),
+        ('${OWNED_ONLY}', 'test-media', 'private/media/${OWNED_ONLY}/original/image.jpg',
+         'vayada_managed', 'private', 'identity.user.profile_image', '${CREATOR_ORG}', NULL,
+         'platform', 'user', 'owned-only-vay2272', 'active', FALSE, NULL, NULL, '{}',
+         '2000-12-31T00:00:00Z'),
+        ('${CREATED_ONLY}', 'test-media', 'private/media/${CREATED_ONLY}/original/image.jpg',
+         'vayada_managed', 'private', 'identity.user.profile_image', NULL, NULL,
+         'platform', 'user', '${CREATOR_USER}', 'active', FALSE, NULL, '${CREATOR_USER}', '{}',
+         '2000-12-31T00:00:00Z'),
+        ('${KEPT_AVATAR}', 'test-media', 'private/media/${KEPT_AVATAR}/original/image.jpg',
+         'vayada_managed', 'private', 'identity.user.profile_image', '${CREATOR_ORG}', NULL,
+         'platform', 'user', '${DUAL_USER}', 'active', FALSE, NULL, '${DUAL_USER}', '{}',
+         '2000-12-31T00:00:00Z'),
+        ('${ADDON_PHOTO}', 'test-media', 'private/media/${ADDON_PHOTO}/original/image.jpg',
+         'vayada_managed', 'private', 'booking.addon.image', '${CREATOR_ORG}', '${PROPERTY}',
+         'booking', 'addon', 'addon-vay2272', 'active', FALSE, NULL, NULL, '{}',
+         '2000-12-31T00:00:00Z'),
+        ('${MARKED}', 'test-media', 'private/media/${MARKED}/original/image.jpg',
+         'vayada_managed', 'private', 'marketplace.offer.media', '${CREATOR_ORG}', NULL,
+         'marketplace', 'marketplace_offer', 'offer-vay2272-marked', 'active', FALSE, NULL, NULL,
+         '{"retiredPurgeCompletedAt": "2001-01-01T00:00:00.000Z"}', '2000-12-31T00:00:00Z');
+      INSERT INTO platform.media_variants
+        (media_object_id, variant_name, visibility, storage_key, content_type, size_bytes, public_cdn_url) VALUES
+        ('${CREATOR_PHOTO}', 'original_safe', 'public', 'public/media/${CREATOR_PHOTO}/original_safe/v1.webp',
+         'image/webp', 10, 'https://cdn.example.test/media/${CREATOR_PHOTO}/original_safe/v1.webp'),
+        ('${CREATOR_PHOTO}', 'thumbnail', 'public', 'public/media/${CREATOR_PHOTO}/thumbnail/v1.webp',
+         'image/webp', 10, 'https://cdn.example.test/media/${CREATOR_PHOTO}/thumbnail/v1.webp');
+      UPDATE identity.users SET profile_picture_media_object_id = upper('${KEPT_AVATAR}')
+        WHERE id = '${DUAL_USER}';
+      UPDATE identity.users SET profile_picture_media_object_id = upper('${CREATED_ONLY}')
+        WHERE id = '${CREATOR_USER}';
+      INSERT INTO booking.addon_definitions (property_id, name, pricing_model, currency, metadata)
+        VALUES ('${PROPERTY}', 'VAY-2272 breakfast', 'per_stay', 'EUR',
+                '{"photos": [{"mediaObjectId": "${ADDON_PHOTO}", "imageUrl": "x", "isCover": true}]}');
+      INSERT INTO hotel_catalog.property_media
+        (property_id, media_type, url, source_system, platform_media_object_id) VALUES
+        ('${PROPERTY}', 'gallery_image', 'https://cdn.example.test/hotel.webp', 'platform', '${HOTEL_USED}');
+      COMMIT`);
+  }
+
+  async function cleanupPurge() {
+    await admin.query(`BEGIN; SET LOCAL session_replication_role=replica;
+      DELETE FROM platform.product_audit_events WHERE target_resource_id IN (${PURGE_IDS});
+      DELETE FROM platform.dead_letter_events WHERE resource_id IN (${PURGE_IDS});
+      DELETE FROM platform.job_attempts WHERE job_id IN
+        (SELECT id FROM platform.jobs WHERE queue_name='${PLATFORM_MEDIA_CLEANUP_QUEUE}' AND resource_id IN (${PURGE_IDS}));
+      DELETE FROM platform.jobs WHERE queue_name='${PLATFORM_MEDIA_CLEANUP_QUEUE}' AND resource_id IN (${PURGE_IDS});
+      DELETE FROM platform.domain_events WHERE source_system='platform' AND resource_id IN (${PURGE_IDS});
+      DELETE FROM platform.idempotency_keys WHERE response_resource_id IN (${PURGE_IDS});
+      DELETE FROM hotel_catalog.property_media WHERE property_id = '${PROPERTY}';
+      DELETE FROM booking.addon_definitions WHERE property_id = '${PROPERTY}';
+      DELETE FROM platform.media_variants WHERE media_object_id IN (${PURGE_IDS});
+      DELETE FROM platform.media_objects WHERE id IN (${PURGE_IDS});
+      DELETE FROM hotel_catalog.properties WHERE id = '${PROPERTY}';
+      DELETE FROM identity.auth_reconciliation_events WHERE user_id = '${CREATED_AS_CREATOR}';
+      DELETE FROM identity.organization_memberships WHERE organization_id IN ('${CREATOR_ORG}', '${HOTEL_ORG}');
+      DELETE FROM identity.users WHERE id IN ('${CREATOR_USER}', '${DUAL_USER}', '${CREATED_AS_CREATOR}');
+      DELETE FROM identity.organizations WHERE id IN ('${CREATOR_ORG}', '${HOTEL_ORG}'); COMMIT`);
+  }
 
   async function cleanup() {
     await admin.query(`BEGIN; SET LOCAL session_replication_role=replica;

@@ -40,7 +40,10 @@ export async function readPricingPublicationFreshness(
         continue;
       }
       const current = {
-        room: await lockPmsReplacementPricingRoomSource(client, id),
+        room: await lockPmsReplacementPricingRoomSource(client, id, {
+          revision: stored.revision,
+          roomTypeIds: stored.rooms.map((room) => room.roomTypeId),
+        }),
         terms: await lockBookingPricingTermsSource(client, id),
         finance: await lockFinanceReplacementPricingSource(client, id),
       };
@@ -96,6 +99,7 @@ export function createPricingPublicationFreshnessAlert(options: {
       subject: string;
       text: string;
       idempotencyKey: string;
+      emailProduct?: "platform";
     }): Promise<void>;
   };
   now?: () => Date;
@@ -109,6 +113,7 @@ export function createPricingPublicationFreshnessAlert(options: {
     const lines = [
       `The hourly pricing check on ${day} found ${summary.problems} published price list(s) that need attention.`,
       'Guests cannot see offers or book online at these hotels until someone opens PMS > Pricing and presses "Save prices".',
+      "Once a hotel is live, every save reaches its booking page by itself; no republishing is needed.",
       "",
       ...(summary.stale > 0 ? ["Stale (property id: changed sources):"] : []),
       ...summary.staleProperties.map((row) => `- ${row.propertyId}: ${row.stale.join(", ")}`),
@@ -127,6 +132,8 @@ export function createPricingPublicationFreshnessAlert(options: {
       subject: `Vayada: ${summary.problems} published price list(s) need "Save prices"`,
       text,
       idempotencyKey: `pricing-publication-freshness:${day}:${createHash("sha256").update(text).digest("hex").slice(0, 32)}`,
+      // VAY-2293: the Resend webhook acknowledges platform events instead of retrying them.
+      emailProduct: "platform",
     });
     lastSentAt = now.getTime();
     return true;

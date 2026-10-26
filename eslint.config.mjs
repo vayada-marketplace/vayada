@@ -24,6 +24,22 @@ const eslintConfig = defineConfig([
       "react-hooks/preserve-manual-memoization": "off",
       "react-hooks/purity": "off",
       "react-hooks/set-state-in-effect": "off",
+      // Fonts are self-hosted, so no build or browser contacts Google (VAY-2243, VAY-2225).
+      "no-restricted-imports": [
+        "error",
+        { paths: [{ name: "next/font/google", message: "Use the self-hosted fonts package." }] },
+      ],
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "Literal[value=/fonts\\.(googleapis|gstatic)\\.com/]",
+          message: "Use the self-hosted fonts package, not Google Fonts.",
+        },
+        {
+          selector: "TemplateElement[value.raw=/fonts\\.(googleapis|gstatic)\\.com/]",
+          message: "Use the self-hosted fonts package, not Google Fonts.",
+        },
+      ],
     },
   },
   globalIgnores([

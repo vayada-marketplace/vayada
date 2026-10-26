@@ -1,11 +1,8 @@
-import path from "node:path";
-
 import {
   expect,
   test,
   type APIRequestContext,
   type BrowserContext,
-  type Page,
   type TestInfo,
 } from "@playwright/test";
 
@@ -19,11 +16,10 @@ import {
   fillSecret,
   futureStay,
   loadSmokeEnvironment,
-  login,
   numberField,
-  readAuthSession,
   record,
   recordField,
+  signUpSyntheticHotelOwner,
   smokeRecoveryReceipt,
   stringField,
   targetApi,
@@ -376,21 +372,15 @@ test("cleanup refreshes hotel authentication before PMS fallback", async () => {
   } as unknown as APIRequestContext;
 
   try {
-    const errors = await cleanupSmokeResources(
-      request,
-      environment,
-      [decoy, owner],
-      [booking],
-      {
-        api: {
-          async json() {
-            throw new Error("Expired hotel API must not be reused.");
-          },
-        } as unknown as JsonApi,
-        ownerWorkosUserId: owner.id,
-        propertyId: "property-1",
-      },
-    );
+    const errors = await cleanupSmokeResources(request, environment, [decoy, owner], [booking], {
+      api: {
+        async json() {
+          throw new Error("Expired hotel API must not be reused.");
+        },
+      } as unknown as JsonApi,
+      ownerWorkosUserId: owner.id,
+      propertyId: "property-1",
+    });
     expect(errors).toEqual([]);
   } finally {
     globalThis.fetch = originalFetch;
@@ -510,7 +500,7 @@ test("ordinary cleanup reconciles an untracked synthetic booking before retireme
 });
 
 smokeTest(
-  "fresh hotel and creator onboarding reaches every next-stack handoff and safe checkout",
+  "fresh hotel onboarding reaches every next-stack handoff and safe checkout",
   async ({ browser, request, smokeResources }, testInfo) => {
     smokeTest.skip(
       process.env.E2E_NEXT_STACK_SMOKE !== "1",
@@ -577,13 +567,6 @@ smokeTest(
     } finally {
       await hotelContext.close();
     }
-
-    const creatorContext = await browser.newContext();
-    try {
-      await runCreatorFlow(creatorContext, request, environment, users);
-    } finally {
-      await creatorContext.close();
-    }
   },
 );
 
@@ -599,31 +582,13 @@ async function runHotelFlow(
   registerHotel: (resource: HotelResource, retirementPropertyId?: string) => void,
 ): Promise<HotelFlowResource> {
   const page = await context.newPage();
-  const user = await test.step("create a unique verified hotel identity", async () => {
-    const created = await createSyntheticUser(request, environment, "hotel");
-    users.push(created);
-    return created;
-  });
-
-  const session = await test.step("complete hotel account onboarding in Marketplace", async () => {
-    await login(page, user, environment.password);
-    await acceptNecessaryCookies(page);
-    await expect(
-      page.getByRole("heading", { name: "Welcome to vayada — what brings you here?" }),
-    ).toBeVisible();
-    await page.getByRole("radio", { name: /i manage a hotel/i }).click();
-    await page.getByRole("button", { name: "Continue", exact: true }).click();
-    await page.getByLabel("First name").fill(user.firstName);
-    await page.getByLabel("Last name").fill(user.lastName);
-    await page.getByLabel("Phone number").fill("+49 30 5550102");
-    await page.getByRole("button", { name: "Continue to hotel setup" }).click();
-    await expect(page.getByRole("heading", { name: "Your profile is ready" })).toBeVisible();
-    await page.getByRole("button", { name: "Set up my first hotel" }).click();
-    await expect(page.getByRole("heading", { name: "Choose how you’ll use vayada" })).toBeVisible();
-    const result = await readAuthSession(page);
-    expect(result.organizationKind).toBe("hotel_group");
-    return result;
-  });
+  const { user, session } =
+    await test.step("sign a new hotel owner up in Booking Admin", async () => {
+      const result = await signUpSyntheticHotelOwner(page, request, environment);
+      users.push(result.user);
+      expect(result.session.organizationKind).toBe("hotel_group");
+      return result;
+    });
 
   let api = targetApi(request, session.accessToken);
   const hotelName = `QA Next Hotel ${environment.runId}`;
@@ -633,7 +598,7 @@ async function runHotelFlow(
         "PUT",
         "/api/hotel-setup/tracks",
         {
-          selectedTracks: ["hotel_operations", "creator_marketplace"],
+          selectedTracks: ["hotel_operations"],
           expectedRevision: 0,
         },
         { "Idempotency-Key": `next-smoke:${environment.runId}:tracks` },
@@ -851,21 +816,21 @@ async function runHotelFlow(
     const publicPage = await context.newPage();
     await publicPage.goto(publication.canonicalUrl);
     await expect(publicPage.getByRole("heading", { name: hotelName }).first()).toBeVisible();
-    await expect(publicPage.getByRole("heading", { name: "Unable to Load Hotel" })).toHaveCount(0);
+    await expect(
+      publicPage.getByRole("heading", { name: /Unable to Load Hotel|isn't online/ }),
+    ).toHaveCount(0);
     await publicPage.close();
 
-    await page.goto(`${NEXT_STACK_ORIGINS.marketplace}/marketplace`);
-    await expect(
-      page.getByRole("heading", { name: "vayada Marketplace", exact: true }),
-    ).toBeVisible();
-    await assertMarketplaceHandoff(page, "Property Manager", NEXT_STACK_ORIGINS.pms, hotelName);
-    await page.goto(`${NEXT_STACK_ORIGINS.marketplace}/marketplace`);
-    await assertMarketplaceHandoff(
-      page,
-      "Booking Engine",
-      NEXT_STACK_ORIGINS.bookingAdmin,
-      hotelName,
+    // The owner signed up in Booking Admin, so its dashboard opens on the new hotel.
+    await page.goto(`${NEXT_STACK_ORIGINS.bookingAdmin}/dashboard`);
+    await page.waitForURL(
+      (url) => url.origin === NEXT_STACK_ORIGINS.bookingAdmin && url.pathname === "/dashboard",
+      { timeout: 45_000 },
     );
+    await expect(page.getByRole("main")).toBeVisible();
+    await expect(page.getByText(hotelName, { exact: true }).first()).toBeVisible({
+      timeout: 45_000,
+    });
   });
 
   const resource = {
@@ -984,20 +949,14 @@ async function runForeignHotelFlow(
   users: SyntheticUser[],
 ): Promise<ForeignHotelResource> {
   const page = await context.newPage();
-  const user = await createSyntheticUser(request, environment, "hotel", "foreign");
+  const { user, session } = await signUpSyntheticHotelOwner(
+    page,
+    request,
+    environment,
+    "foreign",
+    "+49 30 5550199",
+  );
   users.push(user);
-  await login(page, user, environment.password);
-  await acceptNecessaryCookies(page);
-  await page.getByRole("radio", { name: /i manage a hotel/i }).click();
-  await page.getByRole("button", { name: "Continue", exact: true }).click();
-  await page.getByLabel("First name").fill(user.firstName);
-  await page.getByLabel("Last name").fill(user.lastName);
-  await page.getByLabel("Phone number").fill("+49 30 5550199");
-  await page.getByRole("button", { name: "Continue to hotel setup" }).click();
-  await expect(page.getByRole("heading", { name: "Your profile is ready" })).toBeVisible();
-  await page.getByRole("button", { name: "Set up my first hotel" }).click();
-  await expect(page.getByRole("heading", { name: "Choose how you’ll use vayada" })).toBeVisible();
-  const session = await readAuthSession(page);
   expect(session.organizationKind).toBe("hotel_group");
   const api = targetApi(request, session.accessToken);
   await api.json(
@@ -1032,90 +991,6 @@ async function runForeignHotelFlow(
     { "Idempotency-Key": `next-smoke:${environment.runId}:foreign-property` },
   );
   return { accessToken: session.accessToken, propertyId: stringField(property, "propertyId") };
-}
-
-async function runCreatorFlow(
-  context: BrowserContext,
-  request: APIRequestContext,
-  environment: SmokeEnvironment,
-  users: SyntheticUser[],
-): Promise<void> {
-  const page = await context.newPage();
-  const user = await test.step("create a unique verified creator identity", async () => {
-    const created = await createSyntheticUser(request, environment, "creator");
-    users.push(created);
-    return created;
-  });
-
-  await test.step("complete creator onboarding, submit review and enter Marketplace", async () => {
-    await login(page, user, environment.password);
-    await acceptNecessaryCookies(page);
-    await page.getByRole("radio", { name: /i’m a creator/i }).click();
-    await page.getByRole("button", { name: "Continue", exact: true }).click();
-    await page.getByLabel("First name").fill(user.firstName);
-    await page.getByLabel("Last name").fill(user.lastName);
-    await page.getByLabel("Phone number").fill("+49 30 5550103");
-    const chooserPromise = page.waitForEvent("filechooser");
-    await page.getByRole("button", { name: "Upload profile photo" }).click();
-    const chooser = await chooserPromise;
-    await chooser.setFiles(path.resolve("apps/marketplace-web/public/creator-category-travel.jpg"));
-    await page.getByRole("button", { name: "Continue to creator profile" }).click();
-    await expect(page.getByRole("heading", { name: "Your profile is ready" })).toBeVisible();
-    const session = await readAuthSession(page);
-    expect(session.organizationKind).toBe("creator_workspace");
-
-    await page.getByRole("button", { name: "Create my public creator profile" }).click();
-    await page.getByRole("button", { name: /^Lifestyle/ }).click();
-    await page.getByRole("button", { name: "Continue" }).click();
-    await page.getByLabel("Location").fill("Berlin, Germany");
-    await page
-      .getByLabel("Creator bio")
-      .fill("I create practical city guides for independent travelers and small hotels.");
-    await page.getByLabel("Portfolio link").fill("https://example.com/qa-next-creator");
-    await page.getByRole("button", { name: "Continue" }).click();
-    await page.getByRole("button", { name: "Enter Instagram account manually" }).click();
-    await page.getByPlaceholder("@ username").fill(`@qa_next_${environment.runId.slice(-8)}`);
-    await page.getByPlaceholder("0", { exact: true }).fill("1500");
-    await page.getByPlaceholder("0.00").fill("4.20");
-    await page.getByRole("button", { name: "Submit for review" }).click();
-    await expect(page.getByRole("heading", { name: "Your profile is complete" })).toBeVisible();
-    await page.getByRole("button", { name: "Open marketplace" }).click();
-    await expect(page).toHaveURL(/\/marketplace$/);
-    await expect(
-      page.getByRole("heading", { name: "vayada Marketplace", exact: true }),
-    ).toBeVisible();
-  });
-}
-
-async function assertMarketplaceHandoff(
-  page: Page,
-  label: string,
-  expectedOrigin: string,
-  hotelName: string,
-) {
-  await expect(page).toHaveURL(`${NEXT_STACK_ORIGINS.marketplace}/marketplace`);
-  const switcher = page
-    .locator("aside")
-    .getByRole("button", { name: /^(?:Switch app|Marketplace Creator collaborations)$/ });
-  try {
-    await switcher.click();
-  } catch (error) {
-    throw new Error(`Marketplace app switcher is unavailable at ${new URL(page.url()).pathname}.`, {
-      cause: error,
-    });
-  }
-  await page.getByRole("link", { name: new RegExp(label) }).click();
-  await page.waitForURL((url) => url.origin === expectedOrigin && url.pathname === "/dashboard", {
-    timeout: 45_000,
-  });
-  await expect(page.getByRole("main")).toBeVisible();
-  await expect(page.getByRole("link", { name: "Dashboard", exact: true }).first()).toBeVisible();
-  await expect(page.getByText(hotelName, { exact: true }).first()).toBeVisible({ timeout: 45_000 });
-}
-
-async function acceptNecessaryCookies(page: Page): Promise<void> {
-  const button = page.getByRole("button", { name: "Necessary only" });
-  if (await button.isVisible()) await button.click();
 }
 
 function errorMessage(error: unknown): string {

@@ -18,7 +18,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { enforcePropertyRoutePolicy, enforceRoutePolicy } from "./policy.js";
 
 type PropertyParams = { propertyId: string };
-type AuthorizedScope = {
+export type AuthorizedScope = {
   context: Awaited<ReturnType<typeof enforcePropertyRoutePolicy>>;
   propertyId: string;
 };

@@ -14,6 +14,7 @@ export function PlanCard({
   benefits,
   current,
   disabled,
+  actionLabel = "Switch now",
   onSwitch,
 }: {
   title: string;
@@ -24,6 +25,8 @@ export function PlanCard({
   benefits: string[];
   current: boolean;
   disabled?: boolean;
+  /** "Choose this plan" while the hotel has none (VAY-2171). */
+  actionLabel?: string;
   onSwitch: () => void;
 }) {
   return (
@@ -61,7 +64,7 @@ export function PlanCard({
         onClick={onSwitch}
         className={`${current ? disabledButton : primaryButton} mt-6 w-full justify-center`}
       >
-        {current ? "Your current plan" : disabled ? "Unavailable" : "Switch now"}
+        {current ? "Your current plan" : disabled ? "Unavailable" : actionLabel}
       </button>
     </div>
   );

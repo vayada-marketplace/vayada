@@ -37,24 +37,40 @@ import {
 const KIND = {
   admin: "platform",
   hotel: "hotel_group",
-  creator: "creator_workspace",
-  affiliate: "affiliate_partner",
 } as const;
 export function planIdentityOwnership(
   rows: IdentitySourceRow[],
   users: PlannedIdentityUser[],
   existing: ExistingOwnershipState = { organizations: [], memberships: [], resourceLinks: [] },
   sourceHorizonAt?: string,
+  retiredUserIds: Iterable<string> = [],
 ): IdentityOwnershipPlan {
   const parsed = parseIdentityOwnershipRows(rows);
+  const retired = new Set(retiredUserIds);
   const blockers = [...parsed.blockers];
+  // VAY-2272: a Marketplace hotel profile is no longer ownership evidence. A hotel user who had
+  // nothing else needs another owner source (VAY-1362), so they get their own blocker.
+  const marketplaceOnlyOwners = new Set(
+    rows
+      .filter((row) => row.sourceDatabase === "marketplace" && row.sourceTable === "hotel_profiles")
+      .map((row) => String(row.data["user_id"] ?? "").toLowerCase()),
+  );
   const usersById = new Map(users.map((user) => [user.id, user]));
   const groups = new Map<string, IdentityOwnershipSource[]>();
   const quarantineGroups = new Map<string, IdentityOwnershipSource[]>();
   for (const owner of parsed.owners) {
     const user = usersById.get(owner.userId);
     if (!user) {
-      if (hasFutureOperationalBooking(rows, owner, sourceHorizonAt))
+      // A creator or affiliate who is not migrated owns their hotel like an owner of the wrong type.
+      if (hasFutureOperationalBooking(rows, owner, sourceHorizonAt) && retired.has(owner.userId))
+        block(
+          blockers,
+          "OWNER_TYPE_MISMATCH_WITH_FUTURE_BOOKING",
+          owner.source,
+          owner.sourceId,
+          "Incompatible owner type has a future operational booking and requires reviewed reassignment",
+        );
+      else if (hasFutureOperationalBooking(rows, owner, sourceHorizonAt))
         block(
           blockers,
           "ORPHAN_PRODUCT_USER_WITH_FUTURE_BOOKING",
@@ -83,7 +99,17 @@ export function planIdentityOwnership(
     const kind = KIND[user.type];
     if (kind === "platform" || user.isSuperadmin)
       groups.set(`${user.id}:platform`, groups.get(`${user.id}:platform`) ?? []);
-    if (kind !== "platform" && user.status === "active" && !groups.has(`${user.id}:${kind}`))
+    if (kind === "platform" || user.status !== "active" || groups.has(`${user.id}:${kind}`))
+      continue;
+    if (marketplaceOnlyOwners.has(user.id))
+      block(
+        blockers,
+        "MARKETPLACE_ONLY_HOTEL_OWNER",
+        "auth.users",
+        user.id,
+        "Active hotel user's only legacy hotel is a retired Marketplace profile",
+      );
+    else
       block(
         blockers,
         "ACTIVE_USER_WITHOUT_OWNERSHIP",

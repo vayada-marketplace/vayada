@@ -1,5 +1,6 @@
 import { createPgTeamRoleRepository } from "./teamRoles.js";
 import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import pg from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -19,6 +20,7 @@ import {
   createPgStaffInvitationRepository,
   enqueueInboxAssignmentReconciliation,
 } from "./staffInvitations.js";
+import { createPgStaffInvitationJoinRepository } from "./staffInvitationJoin.js";
 import { createStaffRemovalCoordinator, type StaffRemovalProvider } from "./staffRemoval.js";
 import { createPgStaffRemovalJobRepository } from "./staffRemovalJobs.js";
 import type {
@@ -29,6 +31,10 @@ import type {
 } from "./lifecycle.js";
 
 const TEST_DATABASE_URL = process.env["TEST_DATABASE_URL"];
+const readyMadeRoles = new URL(
+  "../../backend-migration/fixtures/ready-made-team-roles.sql",
+  import.meta.url,
+);
 const org = "11111111-1111-4111-8111-111111111111";
 const otherOrg = "22222222-2222-4222-8222-222222222222";
 const owner = "33333333-3333-4333-8333-333333333333";
@@ -274,6 +280,8 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
               'staff@example.com', true)
       ON CONFLICT (id) DO UPDATE SET provider_user_id = EXCLUDED.provider_user_id;
     `);
+    // New accounts no longer get the ready-made staff roles (VAY-2276); these fixtures are older accounts.
+    await client.query(await readFile(readyMadeRoles, "utf8"), [[org, otherOrg]]);
   });
 
   beforeEach(async () => {
@@ -1868,7 +1876,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
     );
     const coordinator = createStaffInvitationDeliveryCoordinator({
       repository: deliveryRepository,
-      provider: { sendInvitation },
+      provider: { sendInvitation, revokeInvitation: vi.fn(async () => "revoked" as const) },
     });
 
     const outcomes = await Promise.all([
@@ -1913,7 +1921,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
       .mockRejectedValue(new Error("ambiguous provider failure"));
     const coordinator = createStaffInvitationDeliveryCoordinator({
       repository: deliveryRepository,
-      provider: { sendInvitation },
+      provider: { sendInvitation, revokeInvitation: vi.fn(async () => "revoked" as const) },
     });
 
     await expect(coordinator.deliver(failed.invitationId)).resolves.toMatchObject({
@@ -1940,7 +1948,10 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
   it("does not claim revoked, inactive, or ambiguous identity context", async () => {
     const created = await repository.persist(command());
     if (created.outcome !== "created") throw new Error("expected invitation creation");
-    const provider = { sendInvitation: vi.fn<StaffInvitationProvider["sendInvitation"]>() };
+    const provider = {
+      sendInvitation: vi.fn<StaffInvitationProvider["sendInvitation"]>(),
+      revokeInvitation: vi.fn<StaffInvitationProvider["revokeInvitation"]>(),
+    };
     const coordinator = createStaffInvitationDeliveryCoordinator({
       repository: deliveryRepository,
       provider,
@@ -2015,6 +2026,145 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
     );
     return { ...created, providerInvitationId };
   }
+
+  it("shows the invitee only the current invitation, with catalog hotel names", async () => {
+    const join = createPgStaffInvitationJoinRepository({ connectionString: TEST_DATABASE_URL! });
+    try {
+      const assigned = await deliveredInvitation();
+      const current = { providerInvitationId: assigned.providerInvitationId };
+      await expect(
+        join.findCurrent({ ...current, workosOrganizationId: "org_staff_delivery" }),
+      ).resolves.toEqual({
+        email: "staff@example.com",
+        inviteeName: "Staff Example",
+        inviterName: "Owner Example",
+        roleKey: "front_desk",
+        roleName: null,
+        hotelNames: ["Owner Property"],
+      });
+      await expect(
+        join.findCurrent({ ...current, workosOrganizationId: "org_other" }),
+      ).resolves.toBeNull();
+      await client.query(
+        "UPDATE identity.staff_invitations SET expires_at = now() - interval '1 minute' WHERE id = $1",
+        [assigned.invitationId],
+      );
+      await expect(
+        join.findCurrent({ ...current, workosOrganizationId: "org_staff_delivery" }),
+      ).resolves.toBeNull();
+      await client.query("UPDATE identity.staff_invitations SET status = 'revoked' WHERE id = $1", [
+        assigned.invitationId,
+      ]);
+
+      const allProperties = await deliveredInvitation(2, undefined, "all");
+      await expect(
+        join.findCurrent({
+          providerInvitationId: allProperties.providerInvitationId,
+          workosOrganizationId: "org_staff_delivery",
+        }),
+      ).resolves.toMatchObject({ hotelNames: ["Owner Property", "Second Property"] });
+      await client.query("UPDATE identity.organizations SET status = 'suspended' WHERE id = $1", [
+        org,
+      ]);
+      await expect(
+        join.findCurrent({
+          providerInvitationId: allProperties.providerInvitationId,
+          workosOrganizationId: "org_staff_delivery",
+        }),
+      ).resolves.toBeNull();
+    } finally {
+      await client.query("UPDATE identity.organizations SET status = 'active' WHERE id = $1", [
+        org,
+      ]);
+      await join.close();
+    }
+  });
+
+  it("verifies a joining WorkOS identity only for its own address", async () => {
+    const join = createPgStaffInvitationJoinRepository({ connectionString: TEST_DATABASE_URL! });
+    const verified = async () =>
+      (
+        await client.query<{ verified: boolean }>(
+          "SELECT provider_email_verified AS verified FROM identity.external_identities WHERE id = $1",
+          [staffIdentity],
+        )
+      ).rows[0]?.verified;
+    try {
+      await client.query(
+        "UPDATE identity.external_identities SET provider_email_verified = false WHERE id = $1",
+        [staffIdentity],
+      );
+      await join.markProviderEmailVerified({
+        workosUserId: "user_staff_acceptance",
+        email: "other@example.com",
+      });
+      expect(await verified()).toBe(false);
+      await join.markProviderEmailVerified({
+        workosUserId: "user_staff_acceptance",
+        email: " Staff@Example.com ",
+      });
+      expect(await verified()).toBe(true);
+    } finally {
+      await client.query(
+        "UPDATE identity.external_identities SET provider_email_verified = true WHERE id = $1",
+        [staffIdentity],
+      );
+      await join.close();
+    }
+  });
+
+  it("claims a replaced invitation's WorkOS revoke until it is confirmed", async () => {
+    const first = await deliveredInvitation(1);
+    const resent = await deliveredInvitation(2);
+    const replaced = {
+      invitationId: first.invitationId,
+      providerInvitationId: first.providerInvitationId,
+    };
+
+    // Right after delivery: exactly the invitation this one replaced.
+    await expect(
+      deliveryRepository.claimReplacedRevocations({ replacedBy: resent.invitationId }),
+    ).resolves.toEqual([replaced]);
+    await expect(
+      deliveryRepository.claimReplacedRevocations({ replacedBy: first.invitationId }),
+    ).resolves.toEqual([]);
+    // A claim is a five-minute lease: no second attempt meanwhile, from any worker.
+    await expect(deliveryRepository.claimReplacedRevocations({})).resolves.toEqual([]);
+    await client.query(
+      `UPDATE identity.staff_invitations
+       SET provider_revoke_attempted_at = now() - interval '6 minutes' WHERE id = $1`,
+      [first.invitationId],
+    );
+    await expect(deliveryRepository.claimReplacedRevocations({})).resolves.toEqual([replaced]);
+
+    // Confirmed revoked: never claimed again.
+    await deliveryRepository.markProviderRevoked(replaced);
+    await client.query(
+      `UPDATE identity.staff_invitations
+       SET provider_revoke_attempted_at = now() - interval '6 minutes' WHERE id = $1`,
+      [first.invitationId],
+    );
+    await expect(deliveryRepository.claimReplacedRevocations({})).resolves.toEqual([]);
+
+    // Not before the replacement was delivered, and not once the old invitation has expired.
+    const third = await repository.persist(
+      command({ commandId: "c-3", idempotencyKey: "k-3", revision: 3 }),
+    );
+    if (third.outcome !== "created") throw new Error("expected invitation creation");
+    await expect(deliveryRepository.claimReplacedRevocations({})).resolves.toEqual([]);
+    await client.query(
+      `UPDATE identity.staff_invitations
+       SET delivery_state = 'delivered', delivery_attempted_at = now(),
+           provider_invitation_id = 'invitation_third', expires_at = now() + interval '7 days'
+       WHERE id = $1`,
+      [third.invitationId],
+    );
+    await client.query(
+      "UPDATE identity.staff_invitations SET expires_at = now() - interval '1 minute' WHERE id = $1",
+      [resent.invitationId],
+    );
+    await expect(deliveryRepository.claimReplacedRevocations({})).resolves.toEqual([]);
+  });
 
   it("validates invitation property links without assignment update privilege", async () => {
     const invitation = await deliveredInvitation();
@@ -2224,7 +2374,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
     );
     const delivery = createStaffInvitationDeliveryCoordinator({
       repository: deliveryRepository,
-      provider: { sendInvitation },
+      provider: { sendInvitation, revokeInvitation: vi.fn(async () => "revoked" as const) },
     });
     expect(await delivery.deliver(created.invitationId)).toMatchObject({ outcome: "delivered" });
     expect(sendInvitation).toHaveBeenCalledWith(

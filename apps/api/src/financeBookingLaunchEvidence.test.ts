@@ -5,7 +5,7 @@ import {
 } from "@vayada/domain-finance";
 import { isBookingLaunchOwnerEvidenceValid } from "@vayada/domain-booking";
 import { PMS_PRICING_CONTRACT_VERSION } from "@vayada/domain-pms";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { createFinanceBookingLaunchEvidenceAdapter } from "./domains/financeBookingLaunchEvidence.js";
 
@@ -34,16 +34,100 @@ function snapshot(
   });
 }
 
-function adapter(value: FinancePaymentReadinessSnapshot | null) {
+type BillingPlanPort = Parameters<
+  typeof createFinanceBookingLaunchEvidenceAdapter
+>[0]["billingPlan"];
+/** A hotel with a usable billing plan; the config's contents don't matter to readiness. */
+const planChosen: BillingPlanPort = { getBillingConfig: async () => ({}) as never };
+
+function adapter(
+  value: FinancePaymentReadinessSnapshot | null,
+  options: {
+    manualMethods?: readonly ("bank_transfer" | "paypal")[];
+    inScope?: boolean;
+    billingPlan?: BillingPlanPort;
+  } = {},
+) {
+  const { manualMethods, inScope, billingPlan = planChosen } = options;
   const financeReadPort: FinancePaymentReadinessReadPort = {
     async getPaymentReadiness() {
       return value;
     },
   };
-  return createFinanceBookingLaunchEvidenceAdapter({ financeReadPort });
+  return createFinanceBookingLaunchEvidenceAdapter({
+    financeReadPort,
+    billingPlan,
+    ...(manualMethods ? { manualPayments: { readyMethods: async () => manualMethods } } : {}),
+    ...(inScope === undefined ? {} : { scope: { hasPaymentReadinessScope: async () => inScope } }),
+  });
 }
 
 describe("createFinanceBookingLaunchEvidenceAdapter", () => {
+  it("asks for a billing plan until the hotel has one (VAY-2171)", async () => {
+    const noPlan = { getBillingConfig: vi.fn(async () => null) };
+    const codes = async (value: FinancePaymentReadinessSnapshot | null) => {
+      const result = await adapter(value, { billingPlan: noPlan }).getBookingLaunchEvidence(
+        request,
+      );
+      if (result.outcome !== "evidence") throw new Error(result.outcome);
+      expect(isBookingLaunchOwnerEvidenceValid(result, request, "finance")).toBe(true);
+      return result.entities[0]!.blockers.map(({ code, kind }) => `${code}:${kind}`);
+    };
+    // Ready payments, no plan: guests could not book, so the page can't publish.
+    expect(await codes(snapshot(["pay_at_property"]))).toEqual([
+      "billing_plan_not_selected:user_fixable",
+    ]);
+    // The hotel's own organization: a plan another organization chose doesn't let guests book.
+    expect(noPlan.getBillingConfig).toHaveBeenCalledWith(propertyId, organizationId);
+    // A brand-new hotel sees both to-dos in Payments.
+    expect(await codes(null)).toEqual([
+      "payment_methods_not_configured:user_fixable",
+      "billing_plan_not_selected:user_fixable",
+    ]);
+    const failing = adapter(snapshot(["pay_at_property"]), {
+      billingPlan: {
+        getBillingConfig: async () => {
+          throw new Error("connection refused");
+        },
+      },
+    });
+    await expect(failing.getBookingLaunchEvidence(request)).resolves.toEqual({
+      outcome: "unavailable",
+      port: "finance",
+      errorSource: "system",
+      code: "billing_plan_read_failed",
+    });
+  });
+
+  it("counts a bank-transfer or PayPal hotel only while their acceptance is on (VAY-2139)", async () => {
+    const blockers = async (manual?: readonly ("bank_transfer" | "paypal")[]) => {
+      const result = await adapter(snapshot([]), {
+        manualMethods: manual,
+      }).getBookingLaunchEvidence(request);
+      if (result.outcome !== "evidence") throw new Error(result.outcome);
+      return result.entities[0]!.blockers.map(({ code }) => code);
+    };
+    expect(await blockers()).toEqual(["ready_payment_method_missing"]);
+    expect(await blockers([])).toEqual(["ready_payment_method_missing"]);
+    expect(await blockers(["bank_transfer"])).toEqual([]);
+    expect(await blockers(["paypal"])).toEqual([]);
+    const failing = createFinanceBookingLaunchEvidenceAdapter({
+      financeReadPort: { getPaymentReadiness: async () => snapshot([]) },
+      billingPlan: planChosen,
+      manualPayments: {
+        readyMethods: async () => {
+          throw new Error("database unavailable");
+        },
+      },
+    });
+    await expect(failing.getBookingLaunchEvidence(request)).resolves.toEqual({
+      outcome: "unavailable",
+      port: "finance",
+      errorSource: "system",
+      code: "payment_readiness_read_failed",
+    });
+  });
+
   it("emits one canonical Finance source with the accepted PMS currency binding", async () => {
     const result = await adapter(snapshot(["pay_at_property"])).getBookingLaunchEvidence(request);
 
@@ -167,19 +251,80 @@ describe("createFinanceBookingLaunchEvidenceAdapter", () => {
     });
   });
 
-  it("returns explicit unavailable results for missing, invalid, or failed Finance reads", async () => {
-    await expect(adapter(null).getBookingLaunchEvidence(request)).resolves.toEqual({
+  it("asks the hotel to choose payment methods when none are versioned yet (VAY-2134)", async () => {
+    const result = await adapter(null).getBookingLaunchEvidence(request);
+    const source = {
+      ownerDomain: "finance",
+      entityType: "finance_payment_methods.v1",
+      entityId: propertyId,
+      revision: "absent",
+    };
+
+    expect(result).toEqual({
+      outcome: "evidence",
+      port: "finance",
+      organizationId,
+      propertyId,
+      sources: [source],
+      entities: [
+        {
+          groupId: "booking.payments",
+          owningStepId: "payments",
+          source,
+          blockers: [
+            {
+              code: "payment_methods_not_configured",
+              scope: "launch_configuration",
+              kind: "user_fixable",
+            },
+          ],
+        },
+      ],
+    });
+    expect(isBookingLaunchOwnerEvidenceValid(result, request, "finance")).toBe(true);
+    await expect(
+      adapter(null, { inScope: true }).getBookingLaunchEvidence(request),
+    ).resolves.toEqual(result);
+  });
+
+  it("keeps a property outside the Finance scope unavailable instead of asking for payments", async () => {
+    await expect(
+      adapter(null, { inScope: false }).getBookingLaunchEvidence(request),
+    ).resolves.toEqual({
       outcome: "unavailable",
       port: "finance",
       errorSource: "provider",
+      code: "payment_scope_unavailable",
     });
+    const failing = createFinanceBookingLaunchEvidenceAdapter({
+      financeReadPort: { getPaymentReadiness: async () => null },
+      billingPlan: planChosen,
+      scope: {
+        async hasPaymentReadinessScope() {
+          throw new Error("connection refused");
+        },
+      },
+    });
+    await expect(failing.getBookingLaunchEvidence(request)).resolves.toEqual({
+      outcome: "unavailable",
+      port: "finance",
+      errorSource: "system",
+      code: "payment_scope_read_failed",
+    });
+  });
 
+  it("returns explicit unavailable results for invalid or failed Finance reads", async () => {
     const poisoned = {
       ...snapshot(["pay_at_property"]),
       providerSecret: "must-not-cross-booking-boundary",
     } as unknown as FinancePaymentReadinessSnapshot;
     const invalid = await adapter(poisoned).getBookingLaunchEvidence(request);
-    expect(invalid).toEqual({ outcome: "unavailable", port: "finance", errorSource: "provider" });
+    expect(invalid).toEqual({
+      outcome: "unavailable",
+      port: "finance",
+      errorSource: "provider",
+      code: "payment_readiness_invalid",
+    });
     expect(JSON.stringify(invalid)).not.toContain("must-not-cross-booking-boundary");
 
     const failed = createFinanceBookingLaunchEvidenceAdapter({
@@ -188,11 +333,13 @@ describe("createFinanceBookingLaunchEvidenceAdapter", () => {
           throw new Error("provider secret must stay private");
         },
       },
+      billingPlan: planChosen,
     });
     await expect(failed.getBookingLaunchEvidence(request)).resolves.toEqual({
       outcome: "unavailable",
       port: "finance",
       errorSource: "system",
+      code: "payment_readiness_read_failed",
     });
   });
 

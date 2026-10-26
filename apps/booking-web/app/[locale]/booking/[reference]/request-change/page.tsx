@@ -1,16 +1,19 @@
 "use client";
 
 import { useState, useEffect, useMemo, use } from "react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
-import Image from "next/image";
+import HotelHeroImage from "@/components/booking/HotelHeroImage";
 import BookingNavigation from "@/components/layout/BookingNavigation";
 import BookingFooter from "@/components/layout/BookingFooter";
 import { bookingImageSizes } from "@/components/booking/imageSizes";
 import { useHotel, useSlug } from "@/contexts/HotelContext";
 import { useCurrency } from "@/contexts/CurrencyContext";
+import ApproximateAmountsNote from "@/components/booking/ApproximateAmountsNote";
+import StayRange from "@/components/booking/StayRange";
 import { Booking } from "@/lib/types";
 import { readLastBooking } from "@/lib/storage/bookingDraft";
+import { useGuestErrorText } from "@/lib/guestError";
 import { bookingService, ChangeRequestPreview } from "@/services/api/booking";
 
 export default function RequestChangePage({
@@ -23,10 +26,12 @@ export default function RequestChangePage({
   const { reference } = use(params);
   const { email: emailParam } = use(searchParams);
   const t = useTranslations("requestChange");
+  const locale = useLocale();
   const { hotel } = useHotel();
   const { slug } = useSlug();
   const { formatPrice } = useCurrency();
   const router = useRouter();
+  const errorText = useGuestErrorText();
 
   const [booking, setBooking] = useState<Booking | null>(null);
   const [loading, setLoading] = useState(true);
@@ -83,7 +88,7 @@ export default function RequestChangePage({
       })
       .catch((err) => {
         if (cancelled) return;
-        setLoadError(err.message || t("loadError") || "Could not load this booking.");
+        setLoadError(errorText(err, t("loadError")));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -91,7 +96,7 @@ export default function RequestChangePage({
     return () => {
       cancelled = true;
     };
-  }, [reference, guestEmail, emailResolved, slug, t]);
+  }, [reference, guestEmail, emailResolved, slug, t, errorText]);
 
   // Debounced preview fetch whenever the form changes.
   useEffect(() => {
@@ -120,9 +125,7 @@ export default function RequestChangePage({
       } catch (err: unknown) {
         if (!cancelled) {
           setPreview(null);
-          setPreviewError(
-            err instanceof Error && err.message ? err.message : t("previewUnavailable"),
-          );
+          setPreviewError(errorText(err, t("previewUnavailable")));
         }
       } finally {
         if (!cancelled) setPreviewing(false);
@@ -132,7 +135,7 @@ export default function RequestChangePage({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [booking, hasPending, slug, guestEmail, checkIn, checkOut, t]);
+  }, [booking, hasPending, slug, guestEmail, checkIn, checkOut, t, errorText]);
 
   const handleSubmit = async () => {
     if (!booking) return;
@@ -149,7 +152,7 @@ export default function RequestChangePage({
       });
       router.push(`/booking/${reference}`);
     } catch (err: unknown) {
-      setSubmitError(err instanceof Error && err.message ? err.message : t("submitError"));
+      setSubmitError(errorText(err, t("submitError")));
     } finally {
       setSubmitting(false);
     }
@@ -167,14 +170,7 @@ export default function RequestChangePage({
     return (
       <div className="min-h-screen bg-surface flex flex-col">
         <div className="relative h-32 w-full">
-          <Image
-            src={hotel.heroImage}
-            alt={hotel.name}
-            fill
-            className="object-cover"
-            priority
-            sizes={bookingImageSizes.hero}
-          />
+          <HotelHeroImage src={hotel.heroImage} alt={hotel.name} sizes={bookingImageSizes.hero} />
           <div className="absolute inset-0 bg-gradient-to-b from-black/40 to-black/60" />
           <BookingNavigation />
         </div>
@@ -189,14 +185,7 @@ export default function RequestChangePage({
   return (
     <div className="min-h-screen bg-surface flex flex-col">
       <div className="relative h-32 w-full">
-        <Image
-          src={hotel.heroImage}
-          alt={hotel.name}
-          fill
-          className="object-cover"
-          priority
-          sizes={bookingImageSizes.hero}
-        />
+        <HotelHeroImage src={hotel.heroImage} alt={hotel.name} sizes={bookingImageSizes.hero} />
         <div className="absolute inset-0 bg-gradient-to-b from-black/40 to-black/60" />
         <BookingNavigation />
       </div>
@@ -260,16 +249,20 @@ export default function RequestChangePage({
                 {t("summary") || "Summary"}
               </h2>
               <div className="space-y-2 text-sm">
-                <div className="flex justify-between">
+                <div className="flex justify-between gap-4">
                   <span className="text-gray-500">{t("currentDates") || "Current dates"}</span>
-                  <span className="font-medium text-gray-900">
-                    {booking.checkIn} → {booking.checkOut}
+                  <span className="text-right font-medium text-gray-900">
+                    <StayRange
+                      checkIn={booking.checkIn}
+                      checkOut={booking.checkOut}
+                      locale={locale}
+                    />
                   </span>
                 </div>
-                <div className="flex justify-between">
+                <div className="flex justify-between gap-4">
                   <span className="text-gray-500">{t("requestedDates") || "Requested dates"}</span>
-                  <span className="font-medium text-gray-900">
-                    {checkIn} → {checkOut}
+                  <span className="text-right font-medium text-gray-900">
+                    <StayRange checkIn={checkIn} checkOut={checkOut} locale={locale} />
                   </span>
                 </div>
                 <div className="flex justify-between pt-2 border-t border-gray-100">
@@ -299,6 +292,7 @@ export default function RequestChangePage({
                   </span>
                 </div>
               </div>
+              <ApproximateAmountsNote currency={preview?.currency ?? booking.currency} />
               {preview?.blocked && preview.blockReason && (
                 <p className="mt-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg p-3">
                   {preview.blockReason}

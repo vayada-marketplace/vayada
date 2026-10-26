@@ -10,6 +10,7 @@ import {
   parseRoomTypeFactsSnapshot,
   resolvePmsOperatingCalendarPropertyProfileConflict,
   serializePmsOperatingCalendarProposalFingerprint,
+  type PmsOperatingCalendarCanonicalTimeZoneRegistry,
   type PmsOperatingCalendarCommandError,
   type PmsOperatingCalendarConfigurationSnapshot,
   type PmsOperatingCalendarImpact,
@@ -211,7 +212,7 @@ export function createPgPmsOperatingCalendarImpactService(
       }
       let sources: LockedSources;
       try {
-        sources = await readLockedSources(input, input.acceptedAt);
+        sources = await readLockedSources(input, input.acceptedAt, config.propertyProfileEvidence);
       } catch (error) {
         if (error instanceof ImpactSourceNotCurrentError) {
           return failure("impact_confirmation_stale");
@@ -330,6 +331,7 @@ async function previewLocked(
             currentConfiguration,
           },
           generatedAt,
+          config.propertyProfileEvidence,
         );
         const proposalFingerprint = sha256(
           serializePmsOperatingCalendarProposalFingerprint(command),
@@ -375,31 +377,23 @@ async function previewLocked(
 async function readLockedSources(
   input: PmsOperatingCalendarLockedImpactInput,
   generatedAt: Date,
+  registry: PmsOperatingCalendarCanonicalTimeZoneRegistry,
 ): Promise<LockedSources> {
   const coverage = await readCoverage(input.client, input.proposal.propertyId);
   if (coverage && normalizeUuid(coverage.organizationId) !== input.proposal.organizationId) {
     throw new ImpactSourceInvariantError("Inventory coverage escaped organization scope");
   }
-  const currentCalendarRevision = input.currentConfiguration?.calendarRevision ?? 0;
-  if (
-    (currentCalendarRevision === 0 && coverage !== null) ||
-    (currentCalendarRevision > 0 &&
-      (!coverage ||
-        positiveInteger(coverage.calendarRevision) !== currentCalendarRevision ||
-        positiveInteger(coverage.materializedRevision) !== currentCalendarRevision))
-  ) {
-    throw new ImpactSourceNotCurrentError("Inventory materialization is not current");
-  }
-  const currentBindings = input.currentConfiguration?.sourceInputs.roomBindings ?? [];
-  const inventoryBindings = coverage ? currentBindings : input.roomBindings;
+  const materialized = await readMaterializedConfiguration(input, coverage, registry);
+  const materializedBindings = materialized?.sourceInputs.roomBindings ?? [];
+  const inventoryBindings = coverage ? materializedBindings : input.roomBindings;
   const days = await readInventoryDays(
     input.client,
     input.proposal.propertyId,
     coverage,
     inventoryBindings,
   );
-  const currentCapacityByRoom = new Map(
-    currentBindings.map(({ roomTypeId, physicalCapacityCount }) => [
+  const materializedCapacityByRoom = new Map(
+    materializedBindings.map(({ roomTypeId, physicalCapacityCount }) => [
       roomTypeId,
       physicalCapacityCount,
     ]),
@@ -407,12 +401,9 @@ async function readLockedSources(
   if (
     days.some(
       (day) =>
-        day.totalCount !== currentCapacityByRoom.get(day.roomTypeId) ||
+        day.totalCount !== materializedCapacityByRoom.get(day.roomTypeId) ||
         day.status !==
-          (input.currentConfiguration &&
-          scheduleOpen(input.currentConfiguration.schedule, day.stayDate)
-            ? "open"
-            : "closed"),
+          (materialized && scheduleOpen(materialized.schedule, day.stayDate) ? "open" : "closed"),
     )
   ) {
     throw new ImpactSourceNotCurrentError("Inventory materialization evidence is stale");
@@ -434,8 +425,42 @@ async function readLockedSources(
   return Object.freeze({
     sourceRevisions,
     sourceFingerprint,
-    impact: computeImpact(input.proposal, input.currentConfiguration, days, reservations),
+    impact: computeImpact(input.proposal, materialized, days, reservations),
   });
+}
+
+/**
+ * The calendar guests can book now: the saved revision once its availability is prepared,
+ * otherwise the last fully prepared revision (or none). A saved revision that was never
+ * prepared and whose hotel or room sources moved since can never be prepared, so previewing
+ * only against it would block every later save (VAY-2134).
+ */
+async function readMaterializedConfiguration(
+  input: PmsOperatingCalendarLockedImpactInput,
+  coverage: CoverageRow | null,
+  registry: PmsOperatingCalendarCanonicalTimeZoneRegistry,
+): Promise<PmsOperatingCalendarConfigurationSnapshot | null> {
+  if (!coverage) return null;
+  const savedRevision = input.currentConfiguration?.calendarRevision ?? 0;
+  const materializedRevision = positiveInteger(coverage.materializedRevision);
+  if (
+    savedRevision === 0 ||
+    positiveInteger(coverage.calendarRevision) !== materializedRevision ||
+    materializedRevision > savedRevision
+  ) {
+    throw new ImpactSourceNotCurrentError("Inventory materialization is not current");
+  }
+  if (materializedRevision === savedRevision) return input.currentConfiguration;
+  const configuration = await loadPmsOperatingCalendarConfigurationByRevision(
+    input.client,
+    input.proposal.propertyId,
+    materializedRevision,
+    registry,
+  );
+  if (!configuration) {
+    throw new ImpactSourceInvariantError("Materialized operating calendar disappeared");
+  }
+  return configuration;
 }
 
 function buildSourceRevisions(

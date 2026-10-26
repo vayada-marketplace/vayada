@@ -1,4 +1,8 @@
-import type { BillingConfigReadModel, BillingConfigReadPort } from "@vayada/domain-finance";
+import {
+  isFinancePlanSelectedAt,
+  type BillingConfigReadModel,
+  type BillingConfigReadPort,
+} from "@vayada/domain-finance";
 import pg, { type QueryResult, type QueryResultRow } from "pg";
 
 type FinanceBillingQueryExecutor = {
@@ -10,25 +14,36 @@ type FinanceBillingQueryExecutor = {
 
 type BillingConfigRow = QueryResultRow & {
   activePlan: string | null;
+  /** Only the reader selects it; acceptance applies the same rule to its own row. */
+  planSelectedAt?: string | null;
   percentageRate: string | number | null;
   ruleMetadata: unknown;
   updatedAt: Date | string;
+};
+
+/** Booking readiness reads the plan of the hotel's own organization, as acceptance does. */
+export type BillingPlanReadPort = {
+  getBillingConfig(
+    propertyId: string,
+    organizationId: string,
+  ): Promise<BillingConfigReadModel | null>;
 };
 
 export function createTargetFinanceBillingConfigReadPort(config: {
   connectionString: string;
   max?: number;
   pool?: FinanceBillingQueryExecutor & { end?(): Promise<void> };
-}): BillingConfigReadPort & { close?(): Promise<void> } {
+}): BillingConfigReadPort & BillingPlanReadPort & { close?(): Promise<void> } {
   const ownsPool = !config.pool;
   const pool =
     config.pool ?? new pg.Pool({ connectionString: config.connectionString, max: config.max ?? 3 });
 
   return {
-    async getBillingConfig(propertyId) {
+    async getBillingConfig(propertyId: string, organizationId?: string) {
       const result = await pool.query<BillingConfigRow>(
         `SELECT
            COALESCE(entitlement.plan_key, 'commission') AS "activePlan",
+           entitlement.plan_selected_at AS "planSelectedAt",
            commission.percentage_rate AS "percentageRate",
            commission.rule_metadata AS "ruleMetadata",
            GREATEST(
@@ -37,9 +52,11 @@ export function createTargetFinanceBillingConfigReadPort(config: {
            ) AS "updatedAt"
          FROM hotel_catalog.properties property
          JOIN LATERAL (
-           SELECT plan_key, updated_at
+           SELECT plan_key, updated_at,
+             entitlement_metadata ->> 'planSelectedAt' AS plan_selected_at
            FROM finance.billing_entitlements
            WHERE property_id = property.id
+             AND ($2::uuid IS NULL OR organization_id = $2::uuid)
              AND product = 'booking'
              AND entitlement_key = 'direct-booking-finance'
              AND billing_status IN ('trialing', 'active')
@@ -62,6 +79,7 @@ export function createTargetFinanceBillingConfigReadPort(config: {
            SELECT percentage_rate, rule_metadata, updated_at
            FROM finance.commission_rules
            WHERE property_id = property.id
+             AND (organization_id IS NULL OR $2::uuid IS NULL OR organization_id = $2::uuid)
              AND product = 'booking'
              AND source_system = 'finance'
              AND source_rule_id = 'onboarding-booking:' || property.id::text
@@ -75,9 +93,13 @@ export function createTargetFinanceBillingConfigReadPort(config: {
            FOR SHARE
          ) commission ON TRUE
          WHERE property.id = $1::uuid`,
-        [propertyId],
+        [propertyId, organizationId ?? null],
       );
-      return result.rows[0] ? toBillingConfig(propertyId, result.rows[0]) : null;
+      const row = result.rows[0];
+      // The SQL prefilter only drops empty values; the shared rule decides (VAY-2171).
+      if (!row || (row.activePlan !== "fixed" && !isFinancePlanSelectedAt(row.planSelectedAt)))
+        return null;
+      return toBillingConfig(propertyId, row);
     },
     async close() {
       if (ownsPool) await pool.end?.();

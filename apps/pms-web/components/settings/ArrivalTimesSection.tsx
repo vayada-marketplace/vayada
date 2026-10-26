@@ -127,30 +127,28 @@ export function ArrivalTimesSection() {
 
   return (
     <SettingsCard>
-      <h3 className="text-sm font-medium text-gray-900">Arrival and departure</h3>
       {loading ? (
-        <p className="mt-2 text-sm" role="status">
+        <p className="text-sm" role="status">
           Loading arrival times…
         </p>
       ) : (
-        <>
+        <div className="space-y-3">
           {error && (
-            <p className="mt-2 text-sm text-red-700" role="alert">
+            <p className="text-sm text-red-700" role="alert">
               {localizedErrorText(loadError, error, t)}
             </p>
           )}
           {saved && (
-            <p className="mt-2 text-sm text-green-700" role="status">
-              Arrival times saved. Review and publish your booking page to show the updated policy
-              to guests.
+            <p className="text-sm text-green-700" role="status">
+              Arrival times saved. Guests see them on your booking page within a minute.
             </p>
           )}
           {!choices ? (
-            <p className="mt-2 text-sm">
+            <p className="text-sm">
               Arrival times are unavailable. Retry loading your property settings.
             </p>
           ) : (
-            <form onSubmit={submit} className="mt-3 space-y-4">
+            <form onSubmit={submit} className="space-y-4">
               <p className="text-xs text-gray-500">
                 Times use your property timezone
                 {preview
@@ -343,12 +341,12 @@ export function ArrivalTimesSection() {
             <button
               type="button"
               onClick={() => setReload((value) => value + 1)}
-              className="mt-2 text-sm underline"
+              className="text-sm underline"
             >
               Retry
             </button>
           )}
-        </>
+        </div>
       )}
     </SettingsCard>
   );

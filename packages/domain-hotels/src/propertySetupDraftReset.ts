@@ -1,5 +1,6 @@
 import {
   PROPERTY_SETUP_STEP_DEFINITIONS,
+  getPropertySetupBaseRevisionKeys,
   type PropertySetupBaseRevisions,
   type PropertySetupStepId,
 } from "./propertySetupDraft.js";
@@ -59,7 +60,6 @@ export type PropertySetupDraftResetRequestResult =
   | { ok: false; error: PropertySetupDraftResetRequestError };
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const BASE_REVISION_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const MAX_REVISION = 2_147_483_646;
 const REQUEST_KEYS = [
   "sessionId",
@@ -78,6 +78,10 @@ export function parseResetPropertySetupDraftRequest(
     ({ stepId }) => stepId === value["stepId"],
   );
   const baseRevisions = value["expectedBaseRevisions"];
+  // A calendar draft saved before VAY-2198 is discarded with its legacy manifest.
+  const baseRevisionKeys = definition
+    ? getPropertySetupBaseRevisionKeys(definition.stepId, baseRevisions)
+    : null;
   if (
     !definition ||
     typeof value["sessionId"] !== "string" ||
@@ -86,8 +90,7 @@ export function parseResetPropertySetupDraftRequest(
     !isPositiveRevision(value["expectedSessionRevision"]) ||
     !isPositiveRevision(value["expectedDraftRevision"]) ||
     !isRecord(baseRevisions) ||
-    !hasExactKeys(baseRevisions, definition.baseRevisionKeys) ||
-    !Object.values(baseRevisions).every(isBaseRevision)
+    !baseRevisionKeys
   ) {
     return invalidRequest();
   }
@@ -101,7 +104,7 @@ export function parseResetPropertySetupDraftRequest(
       expectedSessionRevision: value["expectedSessionRevision"],
       expectedDraftRevision: value["expectedDraftRevision"],
       expectedBaseRevisions: Object.fromEntries(
-        definition.baseRevisionKeys.map((key) => [key, baseRevisions[key]]),
+        baseRevisionKeys.map((key) => [key, baseRevisions[key]]),
       ),
     } as ResetPropertySetupDraftRequest,
   };
@@ -109,10 +112,6 @@ export function parseResetPropertySetupDraftRequest(
 
 function isPositiveRevision(value: unknown): value is number {
   return Number.isSafeInteger(value) && (value as number) >= 1 && (value as number) <= MAX_REVISION;
-}
-
-function isBaseRevision(value: unknown): value is string {
-  return typeof value === "string" && BASE_REVISION_PATTERN.test(value);
 }
 
 function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {

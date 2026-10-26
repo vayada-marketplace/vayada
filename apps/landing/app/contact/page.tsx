@@ -95,8 +95,7 @@ export default function ContactPage() {
               <div>
                 <h1 className="text-5xl font-bold text-gray-900 mb-4">Get in touch with vayada</h1>
                 <p className="text-lg text-gray-600">
-                  Tell us a little about your property or creator profile, and we'll get back to you
-                  shortly.
+                  Tell us a little about your property, and we'll get back to you shortly.
                 </p>
               </div>
 
@@ -115,7 +114,7 @@ export default function ContactPage() {
                     <CheckIcon className="w-6 h-6 text-primary-600" />
                   </div>
                   <p className="text-gray-700 text-lg">
-                    We connect you with creators who inspire real travelers
+                    We help you run rooms, rates and reservations in one place
                   </p>
                 </div>
                 <div className="flex items-start gap-3">
@@ -140,7 +139,7 @@ export default function ContactPage() {
               {/* Social Links */}
               <div className="flex items-center gap-6 pt-8">
                 <a
-                  href="mailto:hello@vayada.com"
+                  href="mailto:t.schreyer@vayada.com"
                   className="flex items-center gap-2 text-gray-700 hover:text-primary-600 transition-colors"
                 >
                   <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -151,7 +150,7 @@ export default function ContactPage() {
                       d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
                     />
                   </svg>
-                  <span>hello@vayada.com</span>
+                  <span>t.schreyer@vayada.com</span>
                 </a>
                 <a
                   href={siteConfig.links.instagram}
@@ -258,7 +257,6 @@ export default function ContactPage() {
                   >
                     <option value="">Select...</option>
                     <option value="hotel">Hotel Owner/Manager</option>
-                    <option value="creator">Content Creator</option>
                     <option value="other">Other</option>
                   </select>
                 </div>
@@ -272,7 +270,7 @@ export default function ContactPage() {
                     onChange={handleChange}
                     required
                     rows={5}
-                    placeholder="Tell us about your property or creator profile..."
+                    placeholder="Tell us about your property..."
                   />
                 </div>
 

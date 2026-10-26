@@ -37,6 +37,7 @@ export type SharedHotelLoginFormProps = {
   password: string;
   isSubmitting: boolean;
   submitError: string;
+  submitErrorAction?: { label: string; href: string };
   organizations?: SharedHotelLoginOrganization[] | null;
   signupHref?: string;
   forgotPasswordHref?: string;
@@ -81,6 +82,7 @@ export default function SharedHotelLoginForm({
   password,
   isSubmitting,
   submitError,
+  submitErrorAction,
   organizations = null,
   signupHref = "/signup",
   forgotPasswordHref,
@@ -163,7 +165,8 @@ export default function SharedHotelLoginForm({
                     </div>
                   </>
                 )}
-                <form onSubmit={onSubmit} className="space-y-5">
+                {/* POST: a click before the page hydrates must not put the email and password in the URL. */}
+                <form method="post" onSubmit={onSubmit} className="space-y-5">
                   <div>
                     <label
                       htmlFor="email"
@@ -233,6 +236,14 @@ export default function SharedHotelLoginForm({
                   {submitError && (
                     <div className="rounded-lg border border-red-200 bg-red-50 p-4">
                       <p className="text-sm font-medium text-red-800">{submitError}</p>
+                      {submitErrorAction && (
+                        <a
+                          href={submitErrorAction.href}
+                          className="mt-2 inline-block text-sm font-semibold text-primary-600 hover:text-primary-700"
+                        >
+                          {submitErrorAction.label}
+                        </a>
+                      )}
                     </div>
                   )}
                   <button

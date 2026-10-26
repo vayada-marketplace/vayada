@@ -8,6 +8,11 @@ export type PricingAddon = {
   pricingModel: "per_stay" | "per_night" | "per_guest" | "per_guest_night";
   maxQuantity: number;
   maxGuests: number | null;
+  /** VAY-2232: the notice the hotel asks for, in hours; null for none. */
+  leadTimeHours: number | null;
+  /** The first property-local check-in date the add-on can be added for; null when it needs no
+   * notice or the hotel's time zone is unknown. */
+  bookableFrom: string | null;
 };
 const object = (v: unknown): v is Record<string, unknown> =>
   !!v && typeof v === "object" && !Array.isArray(v);
@@ -28,6 +33,9 @@ export async function getReplacementAddons(
     throw new Error("Extra options could not be verified.");
   const ids = new Set<string>();
   return raw.addons.map((addon) => {
+    // Older APIs send neither: then the add-on needs no notice.
+    const leadTimeHours = object(addon) ? (addon.leadTimeHours ?? null) : null,
+      bookableFrom = object(addon) ? (addon.bookableFrom ?? null) : null;
     if (
       !object(addon) ||
       typeof addon.id !== "string" ||
@@ -42,7 +50,12 @@ export async function getReplacementAddons(
       ) ||
       !limit(addon.maxQuantity) ||
       addon.maxQuantity > 99 ||
-      !(addon.maxGuests === null || limit(addon.maxGuests))
+      !(addon.maxGuests === null || limit(addon.maxGuests)) ||
+      !(leadTimeHours === null || (limit(leadTimeHours) && leadTimeHours <= 8760)) ||
+      !(
+        bookableFrom === null ||
+        (typeof bookableFrom === "string" && /^\d{4}-\d{2}-\d{2}$/.test(bookableFrom))
+      )
     )
       throw new Error("Extra options could not be verified.");
     ids.add(addon.id);
@@ -53,6 +66,8 @@ export async function getReplacementAddons(
       pricingModel: addon.pricingModel as PricingAddon["pricingModel"],
       maxQuantity: addon.maxQuantity,
       maxGuests: addon.maxGuests,
+      leadTimeHours,
+      bookableFrom,
     };
   });
 }

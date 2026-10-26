@@ -31,6 +31,8 @@ const state: NearbyCurationState = {
   savedProfileRevision: 1,
   choices: [],
   customPlaces: [],
+  customCategories: [],
+  categoryNames: {},
 };
 const permissions: PermissionKey[] = [
   "hotel_catalog.setup.read",
@@ -411,12 +413,16 @@ describe("protected nearby discovery routes", () => {
       (await app.inject({ method: "GET", url: path.replace("/curation", ""), headers })).statusCode,
     ).toBe(200);
   });
-  it("maps completion failures, stale revisions and revoked links without leaking provider errors", async () => {
+  it("maps completion failures, moved pins and revoked links without leaking provider errors", async () => {
     for (const [completed, status] of [
       [null, 403],
       [
         { schemaVersion: 1, profileRevision: 2, status: "stale", places: [], retryAfter: null },
         409,
+      ],
+      [
+        { schemaVersion: 1, profileRevision: 2, status: "ready", places: [], retryAfter: null },
+        200,
       ],
       [
         { schemaVersion: 1, profileRevision: 1, status: "timeout", places: [], retryAfter: null },

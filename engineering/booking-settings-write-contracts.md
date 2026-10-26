@@ -349,7 +349,7 @@ from the five full-replacement contracts above:
 | Promo-code CRUD                  | Typed Booking promo-code routes and Booking Admin client                     |
 | Last-minute configuration        | `GET`/`PUT /api/booking/hotels/:hotelId/settings/last-minute`                |
 | Header default-currency switcher | Target property-settings patch route                                         |
-| Shared setup wizard              | Shared marketplace setup flow, outside this Booking settings route family    |
+| Shared setup wizard              | Booking Admin hotel setup flow, outside this Booking settings route family   |
 | Hero/branding design settings    | Target Booking settings design route; canonical revisions use Booking design |
 
 Retiring old Python endpoints still requires an audit of consumers outside this

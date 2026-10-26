@@ -1,10 +1,11 @@
 "use client";
 
 import { ArrowPathIcon, BuildingLibraryIcon, CreditCardIcon } from "@heroicons/react/24/outline";
-import { SettingsCard, SettingsLayout, SettingsSection } from "@vayada/settings-ui";
+import { SettingsCard, SettingsSection } from "@vayada/settings-ui";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 
 import Modal from "@/components/Modal";
+import { SettingsSubPage } from "@/components/settings/SettingsSubPage";
 import {
   BillingSkeleton,
   Field,
@@ -18,8 +19,6 @@ import {
 import { formatBillingAmount, formatInvoiceDate } from "@/lib/settings/billing";
 import { useTranslation } from "@/lib/i18n";
 import { localizedErrorText } from "@/lib/i18n/localizedErrorText";
-import { getPmsSettingsSections } from "@/lib/settings/navigation";
-import { usePmsAccess } from "@/lib/settings/PmsAccessContext";
 import {
   activateFixedPlanByCard,
   activateFixedPlanByInvoice,
@@ -27,6 +26,7 @@ import {
   openBillingPortal,
   saveBillingDetails,
   savePaymentMethod,
+  selectCommissionPlan,
   switchToCommissionNow,
   type BillingOverview,
   type BillingPaymentMethod,
@@ -34,7 +34,6 @@ import {
 } from "@/services/api/financeBillingClient";
 
 export default function BillingSettingsPage() {
-  const access = usePmsAccess();
   const { t } = useTranslation();
   const [billing, setBilling] = useState<BillingOverview | null>(null);
   const [loading, setLoading] = useState(true);
@@ -77,6 +76,10 @@ export default function BillingSettingsPage() {
     void load();
   }, [load]);
 
+  // No plan until the hotel chooses one: bookings are refused without it (VAY-2171).
+  const notChosen = billing?.planStatus.plan === null;
+  const pendingPlanName = pendingPlan === "fixed" ? "Fixed Fee" : "Commission";
+
   const confirmPlanSwitch = async () => {
     if (!pendingPlan || !billing) return;
     setSwitchingPlan(true);
@@ -96,6 +99,13 @@ export default function BillingSettingsPage() {
         hydrate(await activateFixedPlanByCard());
         setPendingPlan(null);
         setNotice("Your Fixed Fee plan is active. Future direct bookings use the 0% rate.");
+        return;
+      }
+      if (notChosen) {
+        await selectCommissionPlan();
+        setPendingPlan(null);
+        setNotice("Your Commission plan is active. Direct bookings use the 5% rate.");
+        await load();
         return;
       }
       await switchToCommissionNow();
@@ -160,11 +170,9 @@ export default function BillingSettingsPage() {
   };
 
   return (
-    <SettingsLayout
-      title={t("settings.title")}
-      description="Manage your property, operations, and account preferences."
-      sections={getPmsSettingsSections(false, t, access)}
-      activeId="billing"
+    <SettingsSubPage
+      title={t("settings.navigation.billing")}
+      description={t("settings.cards.billing.description")}
     >
       {error && (
         <div
@@ -192,6 +200,11 @@ export default function BillingSettingsPage() {
             title="Plan"
             description="Choose how you pay for vayada. Switch any time."
           >
+            {notChosen && (
+              <p className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                You haven’t chosen a plan yet. Guests can’t book on your booking page until you do.
+              </p>
+            )}
             <div className="grid gap-4 lg:grid-cols-2">
               <PlanCard
                 title="Commission"
@@ -206,6 +219,7 @@ export default function BillingSettingsPage() {
                   "Charged with each payout",
                 ]}
                 current={billing.planStatus.plan === "commission"}
+                actionLabel={notChosen ? "Choose this plan" : undefined}
                 onSwitch={() => setPendingPlan("commission")}
               />
               <PlanCard
@@ -226,6 +240,7 @@ export default function BillingSettingsPage() {
                   )} monthly direct revenue`,
                 ]}
                 current={billing.planStatus.plan === "fixed"}
+                actionLabel={notChosen ? "Choose this plan" : undefined}
                 disabled={!billing.planStatus.fixedPlanAvailable}
                 onSwitch={() => setPendingPlan("fixed")}
               />
@@ -377,13 +392,19 @@ export default function BillingSettingsPage() {
           onClose={() => !switchingPlan && setPendingPlan(null)}
         >
           <h2 className="text-lg font-semibold text-gray-900">
-            Switch to the {pendingPlan === "fixed" ? "Fixed Fee" : "Commission"} plan?
+            {notChosen ? "Choose" : "Switch to"} the {pendingPlanName} plan?
           </h2>
-          <p className="mt-3 text-sm leading-6 text-gray-600">
-            Your new billing cycle starts today. Stripe applies a prorated adjustment when
-            applicable, and future direct-booking commission becomes{" "}
-            {pendingPlan === "fixed" ? "0%" : "5%"}.
-          </p>
+          {notChosen && pendingPlan === "commission" ? (
+            <p className="mt-3 text-sm leading-6 text-gray-600">
+              You pay 5% per direct booking. No monthly fee. You can switch plans anytime.
+            </p>
+          ) : (
+            <p className="mt-3 text-sm leading-6 text-gray-600">
+              Your new billing cycle starts today. Stripe applies a prorated adjustment when
+              applicable, and future direct-booking commission becomes{" "}
+              {pendingPlan === "fixed" ? "0%" : "5%"}.
+            </p>
+          )}
           {pendingPlan === "fixed" && (
             <p className="mt-3 text-sm text-gray-600">
               {selectedMethod === "bank_transfer"
@@ -406,12 +427,18 @@ export default function BillingSettingsPage() {
               onClick={() => void confirmPlanSwitch()}
               className={primaryButton}
             >
-              {switchingPlan ? "Switching…" : "Confirm switch"}
+              {switchingPlan
+                ? notChosen
+                  ? "Saving…"
+                  : "Switching…"
+                : notChosen
+                  ? `Choose ${pendingPlanName}`
+                  : "Confirm switch"}
             </button>
           </div>
         </Modal>
       )}
-    </SettingsLayout>
+    </SettingsSubPage>
   );
 }
 

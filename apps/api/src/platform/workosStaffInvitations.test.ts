@@ -5,6 +5,7 @@ import { createWorkOSStaffInvitationProvider } from "./workosStaffInvitations.js
 const workosMocks = vi.hoisted(() => ({
   WorkOS: vi.fn(),
   sendInvitation: vi.fn(),
+  revokeInvitation: vi.fn(),
 }));
 
 vi.mock("@workos-inc/node", () => ({ WorkOS: workosMocks.WorkOS }));
@@ -13,8 +14,14 @@ describe("createWorkOSStaffInvitationProvider", () => {
   beforeEach(() => {
     workosMocks.WorkOS.mockReset();
     workosMocks.sendInvitation.mockReset();
+    workosMocks.revokeInvitation.mockReset();
     workosMocks.WorkOS.mockImplementation(function WorkOS() {
-      return { userManagement: { sendInvitation: workosMocks.sendInvitation } };
+      return {
+        userManagement: {
+          sendInvitation: workosMocks.sendInvitation,
+          revokeInvitation: workosMocks.revokeInvitation,
+        },
+      };
     });
   });
 
@@ -84,5 +91,24 @@ describe("createWorkOSStaffInvitationProvider", () => {
         expiresInDays: 7,
       }),
     ).rejects.toThrow("WorkOS staff invitation response is not delivery-bindable");
+  });
+
+  it("revokes a replaced invitation and treats one that is no longer pending as done", async () => {
+    const provider = createWorkOSStaffInvitationProvider({ apiKey: "sk_test" });
+    workosMocks.revokeInvitation.mockResolvedValueOnce({ id: "invitation_old", state: "revoked" });
+    await expect(provider.revokeInvitation("invitation_old")).resolves.toBe("revoked");
+    expect(workosMocks.revokeInvitation).toHaveBeenCalledWith("invitation_old");
+
+    workosMocks.revokeInvitation.mockRejectedValueOnce(
+      Object.assign(new Error("Invitation is accepted"), { status: 400 }),
+    );
+    await expect(provider.revokeInvitation("invitation_used")).resolves.toBe("not_pending");
+
+    workosMocks.revokeInvitation.mockRejectedValueOnce(
+      Object.assign(new Error("Service unavailable"), { status: 503 }),
+    );
+    await expect(provider.revokeInvitation("invitation_old")).rejects.toThrow(
+      "Service unavailable",
+    );
   });
 });

@@ -28,7 +28,7 @@ export type AuthOrganizationOption = {
   organizationId: string;
   workosOrganizationId: string;
   displayName: string;
-  kind: "platform" | "hotel_group" | "creator_workspace" | "affiliate_partner";
+  kind: "platform" | "hotel_group";
 };
 
 export type AuthOrganizationSelectionResponse = {

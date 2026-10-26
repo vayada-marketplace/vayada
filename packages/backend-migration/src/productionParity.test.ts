@@ -4,7 +4,6 @@ import type { ProductionBookingMigrationReport } from "./productionBookingMigrat
 import type { ProductionCatalogMigrationReport } from "./productionCatalogMigration.js";
 import type { ProductionFinanceMigrationReport } from "./productionFinanceMigration.js";
 import type { ProductionIdentityMigrationReport } from "./productionIdentityMigration.js";
-import type { ProductionMarketplaceMigrationReport } from "./productionMarketplaceMigration.js";
 import {
   formatProductionParityText,
   runProductionParity,
@@ -30,7 +29,6 @@ describe("production migration parity", () => {
       "catalog",
       "booking",
       "pms",
-      "marketplace",
       "finance",
     ]);
     expect(report.reportChecksumSha256).toMatch(/^[0-9a-f]{64}$/);
@@ -420,7 +418,6 @@ function domainReports(): {
   catalog: ProductionCatalogMigrationReport;
   booking: ProductionBookingMigrationReport;
   pms: ProductionPmsMigrationReport;
-  marketplace: ProductionMarketplaceMigrationReport;
   finance: ProductionFinanceMigrationReport;
 } {
   const reconciliationCounts = {
@@ -442,6 +439,9 @@ function domainReports(): {
         users: 1,
         preservedNewerUsers: 0,
         retiredDuplicateUsers: 0,
+        retiredProductUsers: 0,
+        retiredProductUsersInTarget: 0,
+        retiredProductUserRows: 0,
         quarantinedUsers: 0,
         quarantinedOrganizations: 0,
         quarantinedResourceLinks: 0,
@@ -459,6 +459,7 @@ function domainReports(): {
         retiredAuthRows: 0,
       },
       retiredAuthRows: {},
+      retiredProductUserRows: {},
       blockers: [],
     },
     catalog: {
@@ -546,26 +547,6 @@ function domainReports(): {
       },
       blockers: [],
     },
-    marketplace: {
-      sourceRunId: RUN_ID,
-      mode: "dry-run",
-      applied: false,
-      checksum: SHA,
-      counts: {
-        ...reconciliationCounts,
-        quarantinedValues: 0,
-        quarantinedSourceRows: 0,
-      },
-      quarantineCountsByReason: {},
-      parity: {
-        sourceTableCounts: { "marketplace.creator_profiles": 1 },
-        targetTableCounts: { "marketplace.creator_profiles": 1 },
-        sourceCountsByProperty: {},
-        targetCountsByProperty: {},
-        preferenceDraftsByProperty: {},
-      },
-      blockers: [],
-    },
     finance: {
       sourceRunId: RUN_ID,
       mode: "dry-run",
@@ -628,7 +609,6 @@ function services(
       catalog: async () => structuredClone(reports.catalog),
       booking: async () => structuredClone(reports.booking),
       pms: async () => structuredClone(reports.pms),
-      marketplace: async () => structuredClone(reports.marketplace),
       finance: async () => structuredClone(reports.finance),
     },
     now: () => times.shift() ?? "2026-08-30T00:02:00.000Z",

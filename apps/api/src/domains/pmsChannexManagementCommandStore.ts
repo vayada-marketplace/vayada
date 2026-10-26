@@ -2,7 +2,6 @@ import {
   assertStagingAlertApproval,
   type StagingAlertApproval,
 } from "./channexStagingAlertRecovery.js";
-import { replaceStayRestrictions } from "./pmsStayRestrictions.js";
 import type { RequestContext } from "@vayada/backend-auth";
 import { buildChannexManagementJobKey } from "@vayada/domain-pms-channex";
 import { createHash } from "node:crypto";
@@ -162,7 +161,6 @@ async function enqueue(
         return { ok: false, code: "invalid_inventory_rules", message: error };
       }
     }
-    if (input.restrictions) await replaceStayRestrictions(client, propertyId, input.restrictions);
     const job = await client.query<PmsChannexManagementJobRow>(
       `INSERT INTO platform.jobs (
          job_key, queue_name, job_type, status, max_attempts, tenant_scope, property_id,
@@ -185,8 +183,7 @@ async function enqueue(
         keyHash,
         JSON.stringify({
           ...input,
-          restrictions: undefined,
-          restrictionsOnly: Boolean(input.restrictions),
+          restrictionsOnly: false,
           actorUserId: context.actor.internalUserId,
         }),
         fingerprint,
@@ -218,18 +215,6 @@ async function enqueue(
   } catch (error) {
     if (transactionClient) throw error;
     await client.query("ROLLBACK");
-    if (error instanceof Error && error.message === "stay_restriction_scope_not_found")
-      return {
-        ok: false,
-        code: "stay_restriction_scope_not_found",
-        message: "Room or rate plan not found.",
-      };
-    if (input.restrictions && error instanceof pg.DatabaseError && error.code === "23514")
-      return {
-        ok: false,
-        code: "invalid_stay_restrictions",
-        message: "Conflicting stay restrictions.",
-      };
     throw error;
   } finally {
     if (!transactionClient) client.release();
@@ -320,7 +305,6 @@ function fingerprintPayload(input: PmsChannexManagementCommandInput) {
   return {
     operationType: input.operationType,
     ...(input.inventoryRules ? { inventoryRules: input.inventoryRules } : {}),
-    ...(input.restrictions ? { restrictions: input.restrictions } : {}),
     ...(input.recoveryAlertId ? { recoveryAlertId: input.recoveryAlertId } : {}),
     ...(input.publishedOffer ? { publishedOffer: input.publishedOffer } : {}),
     markups: input.markups

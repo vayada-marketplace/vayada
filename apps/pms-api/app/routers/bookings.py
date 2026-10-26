@@ -1,6 +1,7 @@
 import logging
+from urllib.parse import quote
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, EmailStr
 
 from app.database import Database
@@ -23,6 +24,7 @@ from app.services.booking_change_service import (
     submit_change as submit_booking_change,
 )
 from app.services.booking_service import (
+    BookingNotFoundError,
     confirm_payment_authorized,
     create_booking_request,
     get_booking_status,
@@ -36,7 +38,26 @@ from app.utils import get_hotel_id_by_slug
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/hotels", tags=["bookings"])
+
+def _require_canonical_path(request: Request) -> None:
+    """Serve a path only in its canonical spelling.
+
+    The ALB answers 410 for migrated slugs by matching the raw path, while
+    routing here sees the decoded one. An encoded spelling such as ``%6D``
+    for ``m`` would get past that rule and still resolve to the hotel.
+    """
+    raw_path = request.scope.get("raw_path")
+    if raw_path is not None and raw_path.split(b"?", 1)[0] != quote(
+        request.scope["path"], safe="/"
+    ).encode("ascii"):
+        raise HTTPException(status_code=404, detail="Not Found")
+
+
+router = APIRouter(
+    prefix="/api/hotels",
+    tags=["bookings"],
+    dependencies=[Depends(_require_canonical_path)],
+)
 
 
 class GuestActionRequest(BaseModel):
@@ -96,7 +117,9 @@ async def post_confirm_authorization(slug: str, handle: str):
     layer dispatches based on which one matches.
     """
     try:
-        result = await confirm_payment_authorized(handle)
+        result = await confirm_payment_authorized(slug, handle)
+    except BookingNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -109,7 +132,9 @@ async def post_confirm_authorization(slug: str, handle: str):
 async def post_withdraw(slug: str, booking_id: str, data: GuestActionRequest):
     """Guest withdraws a pending booking request."""
     try:
-        await guest_withdraw_booking(booking_id, data.guest_email)
+        await guest_withdraw_booking(slug, booking_id, data.guest_email)
+    except BookingNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -122,7 +147,9 @@ async def post_withdraw(slug: str, booking_id: str, data: GuestActionRequest):
 async def post_cancel_preview(slug: str, booking_id: str, data: GuestActionRequest):
     """Preview cancellation refund details without actually cancelling."""
     try:
-        result = await get_cancellation_preview(booking_id, data.guest_email)
+        result = await get_cancellation_preview(slug, booking_id, data.guest_email)
+    except BookingNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -135,7 +162,9 @@ async def post_cancel_preview(slug: str, booking_id: str, data: GuestActionReque
 async def post_cancel(slug: str, booking_id: str, data: GuestActionRequest):
     """Guest cancels a confirmed booking (applies cancellation policy)."""
     try:
-        await handle_guest_cancellation(booking_id, data.guest_email)
+        await handle_guest_cancellation(slug, booking_id, data.guest_email)
+    except BookingNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:

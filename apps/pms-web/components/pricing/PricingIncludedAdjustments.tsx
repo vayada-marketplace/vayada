@@ -14,6 +14,8 @@ import {
 } from "./IncludedPricing";
 import { useTranslation } from "@/lib/i18n";
 import { decimalAmount, errorText, PricingError } from "./pricingAmounts";
+import { PricingSection } from "./PricingSection";
+import * as ui from "./pricingStyles";
 
 type Offer = PricingConfiguration["offers"][number];
 export function changeIncludedAdjustments(
@@ -80,10 +82,11 @@ export function PricingIncludedAdjustments({
     onPending(false);
   };
   return (
-    <details className="sm:col-span-2 text-sm">
-      <summary className="cursor-pointer">
-        {t("pricing.includedAdjustments.summary", { label })}
-      </summary>
+    <PricingSection
+      title={t("pricing.includedAdjustments.section")}
+      label={t("pricing.includedAdjustments.summary", { label })}
+      keepOpen={!!entry}
+    >
       <p className="mt-2">
         {t("pricing.includedAdjustments.intro", {
           count: base.baseGuests,
@@ -95,7 +98,7 @@ export function PricingIncludedAdjustments({
       {!entry ? (
         <button
           type="button"
-          className="mt-3 rounded border px-3 py-2 disabled:opacity-50"
+          className={ui.secondaryButton}
           disabled={disabled || blocked}
           onClick={() => {
             if (disabled || blocked) return;
@@ -121,7 +124,7 @@ export function PricingIncludedAdjustments({
           <div className="flex gap-3">
             <button
               type="button"
-              className="rounded border px-3 py-2 disabled:opacity-50"
+              className={ui.secondaryButton}
               disabled={disabled}
               onClick={() => {
                 if (disabled) return;
@@ -137,7 +140,7 @@ export function PricingIncludedAdjustments({
             </button>
             <button
               type="button"
-              className="rounded border px-3 py-2 disabled:opacity-50"
+              className={ui.secondaryButton}
               disabled={disabled}
               onClick={cancel}
             >
@@ -148,10 +151,10 @@ export function PricingIncludedAdjustments({
         </div>
       )}
       {error && (
-        <p role="alert" className="mt-2 text-red-700">
+        <p role="alert" className={ui.errorText}>
           {error}
         </p>
       )}
-    </details>
+    </PricingSection>
   );
 }

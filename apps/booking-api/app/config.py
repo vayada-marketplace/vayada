@@ -12,9 +12,9 @@ class Settings(BaseSettings):
     # Database Configuration
     DATABASE_URL: str = Field(..., description="PostgreSQL connection string")
     AUTH_DATABASE_URL: str = Field(..., description="Auth PostgreSQL connection string")
-    MARKETPLACE_DATABASE_URL: str = Field(
-        default="", description="Marketplace PostgreSQL connection string (optional, for pre-fill)"
-    )
+    # VAY-2259: the old Marketplace database is retired and no longer read. The setting stays
+    # so existing .env files that still set it keep booting.
+    MARKETPLACE_DATABASE_URL: str = Field(default="", description="Ignored (retired)")
     DATABASE_POOL_MIN_SIZE: int = 2
     DATABASE_POOL_MAX_SIZE: int = 10
     DATABASE_COMMAND_TIMEOUT: int = 60

@@ -52,7 +52,6 @@ export interface PropertySettings {
   special_requests_enabled?: boolean;
   arrival_time_enabled?: boolean;
   guest_count_enabled?: boolean;
-  refer_a_guest_enabled?: boolean;
   free_cancellation_days: number;
   email_notifications: boolean;
   new_booking_alerts: boolean;
@@ -105,7 +104,6 @@ export interface DesignSettings {
   header_logo: string;
   header_logo_media_object_id: string | null;
   show_contact_button: boolean;
-  show_refer_a_guest_button: boolean;
   show_language_selector: boolean;
   show_currency_selector: boolean;
   hero_image: string;
@@ -121,7 +119,6 @@ type BookingDesignSettings = {
   headerLogo: string;
   headerLogoMediaObjectId: string | null;
   showContactButton: boolean;
-  showReferAGuestButton: boolean;
   showLanguageSelector: boolean;
   showCurrencySelector: boolean;
   heroImage: string;
@@ -138,7 +135,6 @@ function toDesignSettings(branding: BookingDesignSettings): DesignSettings {
     header_logo: branding.headerLogo,
     header_logo_media_object_id: branding.headerLogoMediaObjectId,
     show_contact_button: branding.showContactButton,
-    show_refer_a_guest_button: branding.showReferAGuestButton,
     show_language_selector: branding.showLanguageSelector,
     show_currency_selector: branding.showCurrencySelector,
     hero_image: branding.heroImage,
@@ -153,7 +149,6 @@ function toBrandingDesignUpdate(data: DesignSettingsUpdate): BookingDesignSettin
   return {
     headerLogoMediaObjectId: data.header_logo_media_object_id,
     showContactButton: data.show_contact_button,
-    showReferAGuestButton: data.show_refer_a_guest_button,
     showLanguageSelector: data.show_language_selector,
     showCurrencySelector: data.show_currency_selector,
     heroImage: data.hero_image,
@@ -331,6 +326,9 @@ export interface AddonItem {
   imageMediaObjectId?: string | null;
   photos?: AddonPhoto[];
   maxQuantity?: number;
+  /** VAY-2232: the notice guests must give, in hours. */
+  leadTimeHours?: number;
+  /** A lead time typed as free text before VAY-2232, until it is converted. */
   leadTime?: string;
   duration?: string;
   perPerson?: boolean;
@@ -338,6 +336,8 @@ export interface AddonItem {
   sortOrder?: number;
   ownershipKind: "property" | "partner";
   partnerCommissionRate: string | null;
+  /** Shown to guests on the booking engine (active and publicly visible). */
+  live?: boolean;
   location?: string;
   maxGuests?: string;
   highlights?: string[];

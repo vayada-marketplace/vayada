@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@vayada/domain-hotels": "*",
+    "@vayada/fonts": "*",
     "@vayada/product-onboarding": "*",
     "@heroicons/react": "^2.2.0",
     "@stripe/react-stripe-js": "^2.4.0",

@@ -153,20 +153,6 @@ const hotelContext = contextFor({
   linkedResources: [linkedResource("booking", "booking_hotel", "booking_hotel_alpenrose")],
 });
 
-const creatorContext = contextFor({
-  kind: "creator_workspace",
-  roleKey: "creator_owner",
-  permissions: ["marketplace.profile.manage"],
-  linkedResources: [linkedResource("marketplace", "creator_profile", "creator_profile_lina")],
-});
-
-const affiliateContext = contextFor({
-  kind: "affiliate_partner",
-  roleKey: "affiliate_owner",
-  permissions: ["affiliate.payout.manage"],
-  linkedResources: [linkedResource("affiliate", "affiliate", "affiliate_partner_bali")],
-});
-
 const platformContext = contextFor({
   kind: "platform",
   roleKey: "platform_admin",
@@ -271,7 +257,7 @@ describe("resolveMembershipRolePermissions", () => {
       ok: false,
       issueCodes: ["malformed_permission_override"],
     });
-    const baseline = resolveMembershipRolePermissions(creatorContext, grants);
+    const baseline = resolveMembershipRolePermissions(platformContext, grants);
     expect(baseline).toEqual({ ok: true, permissions: [...grants] });
     if (baseline.ok) baseline.permissions.length = 0;
     expect(grants).toEqual(["pms.calendar.manage", "hotel_catalog.property_manifest.read"]);
@@ -436,13 +422,13 @@ describe("createAuthorizationResolver", () => {
     expect(resolution.permissions).toEqual(["identity.staff.manage"]);
   });
 
-  it("does not require hotel product flags in a creator workspace", async () => {
+  it("does not require hotel product flags outside a hotel group", async () => {
     const resolution = await createAuthorizationResolver(
-      { findPermissionsForRole: async () => ["marketplace.profile.manage"] },
+      { findPermissionsForRole: async () => ["platform.user.suspend"] },
       undefined,
       undefined,
-    )(creatorContext);
-    expect(resolution.permissions).toEqual(["marketplace.profile.manage"]);
+    )(platformContext);
+    expect(resolution.permissions).toEqual(["platform.user.suspend"]);
   });
 
   it.each([
@@ -666,7 +652,8 @@ describe.skipIf(!TEST_DATABASE_URL)("createPgRolePermissionRepository", () => {
          VALUES
            ('hotel_group', 'hotel_owner', 'booking.settings.manage'),
            ('hotel_group', 'hotel_owner', 'pms.booking.update'),
-           ('creator_workspace', 'creator_owner', 'marketplace.profile.manage')`,
+           ('hotel_group', 'front_desk', 'pms.reservation.read'),
+           ('platform', 'hotel_owner', 'pms.reservation.read')`,
       );
     } finally {
       await client.end();
@@ -984,7 +971,7 @@ describe("authorization helpers", () => {
         linkedResources: [
           {
             ...linkedResource("booking", "booking_hotel", "booking_hotel_alpenrose"),
-            relationship: "promotes",
+            relationship: "billing_account",
           },
         ],
       }),
@@ -1037,40 +1024,6 @@ describe("authorization helpers", () => {
         "c2c3d4e5-0000-0000-0000-000000000001",
         ["owner", "operator"],
       ),
-      false,
-    ],
-    [
-      "allows creator owner with profile permission and creator profile link",
-      creatorContext,
-      requirement(
-        "marketplace.profile.manage",
-        "marketplace",
-        "creator_profile",
-        "creator_profile_lina",
-      ),
-      true,
-    ],
-    [
-      "denies creator owner without hotel collaboration permission",
-      creatorContext,
-      requirement(
-        "marketplace.collaboration.review",
-        "marketplace",
-        "creator_profile",
-        "creator_profile_lina",
-      ),
-      false,
-    ],
-    [
-      "allows affiliate owner with payout permission and affiliate link",
-      affiliateContext,
-      requirement("affiliate.payout.manage", "affiliate", "affiliate", "affiliate_partner_bali"),
-      true,
-    ],
-    [
-      "denies affiliate owner without implicit hotel finance permission",
-      affiliateContext,
-      requirement("pms.finance.read", "pms", "pms_hotel", "pms_hotel_alpenrose"),
       false,
     ],
     [

@@ -31,10 +31,19 @@ export async function registerPublicNearbyRoute(
     if (snapshot.needsRefresh && options.apiKey?.trim()) {
       const claim = await options.discovery.claim(snapshot.scope, snapshot.revision);
       if (claim.status === "claimed") {
+        // Same lines as the editor refresh, so every paid lookup shows in the API logs.
+        request.log.info(
+          { propertyId, profileRevision: claim.profileRevision, source: "public" },
+          "Nearby discovery started",
+        );
         const result = await (options.discover ?? discoverGoogleNearby)({
           apiKey: options.apiKey,
           origin: claim.origin,
         });
+        request.log.info(
+          { propertyId, status: result.status, source: "public" },
+          "Nearby discovery completed",
+        );
         await options.discovery.complete(
           snapshot.scope,
           claim.token,

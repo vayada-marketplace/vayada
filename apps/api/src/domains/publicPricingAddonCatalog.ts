@@ -3,6 +3,8 @@ import type { Pool } from "pg";
 import { lockPublicPricingPublication } from "./publicPricingPublication.js";
 import { lockPublicPricingAuthority } from "./publicPricingAuthority.js";
 import { lockReplacementAddons } from "./replacementAddons.js";
+import { addonLeadTimeEarliestArrival, type AddonLeadTimeHours } from "./addonLeadTime.js";
+import { readPricingCheckInPlace } from "./pricingManualPaymentLead.js";
 
 /** Current, explicitly public Booking definitions. Unpriced discovery only;
  * selected people/dates, availability and amounts are validated by the quote owner. */
@@ -23,12 +25,13 @@ export function createPublicPricingAddonCatalog(pool: Pool) {
         ]);
         const settings = (
           await client.query(
-            "SELECT show_addons_step FROM booking.booking_settings WHERE property_id=$1 FOR SHARE",
+            "SELECT show_addons_step, addons_enabled FROM booking.booking_settings WHERE property_id=$1 FOR SHARE",
             [propertyId],
           )
         ).rows[0];
         const ids =
-          settings?.show_addons_step === false
+          // VAY-2200: the Feature Hub Add-ons switch hides the list like the page's own choice.
+          settings?.show_addons_step === false || settings?.addons_enabled === false
             ? []
             : (
                 await client.query(
@@ -49,13 +52,27 @@ export function createPublicPricingAddonCatalog(pool: Pool) {
           if (!current) return null;
           addons.push(...current.addons);
         }
+        const place = addons.some((addon) => addon.leadTimeHours !== null)
+          ? await readPricingCheckInPlace(client, propertyId)
+          : null;
+        // One date per lead time: there are only five.
+        const bookableFrom = new Map<number, string | null>();
+        const firstDate = (hours: AddonLeadTimeHours) => {
+          if (!place) return null;
+          if (!bookableFrom.has(hours))
+            bookableFrom.set(
+              hours,
+              addonLeadTimeEarliestArrival({ hours, place: place.place, now: place.now }),
+            );
+          return bookableFrom.get(hours)!;
+        };
         const confirmed = await lockPublicPricingAuthority(client, slug);
         if (!confirmed || !isDeepStrictEqual(confirmed, owner.scope)) return null;
         return {
           version: "public-pricing-addons.v1" as const,
-          // The current quote evaluator deliberately rejects nonempty lead-time rules.
+          // Free-text lead times from before VAY-2232 stay hidden until they are converted.
           addons: addons
-            .filter((addon) => !addon.leadTime?.trim())
+            .filter((addon) => !addon.legacyLeadTime)
             .map((addon) => ({
               id: addon.id,
               name: addon.name,
@@ -63,6 +80,10 @@ export function createPublicPricingAddonCatalog(pool: Pool) {
               pricingModel: addon.pricingModel,
               maxQuantity: Math.min(addon.maxQuantity, 99),
               maxGuests: addon.maxGuests,
+              leadTimeHours: addon.leadTimeHours,
+              // The first property-local check-in date the quote accepts it for; null when it
+              // needs no notice, or when that date is unknown (then it can't be added).
+              bookableFrom: addon.leadTimeHours === null ? null : firstDate(addon.leadTimeHours),
             })),
         };
       } finally {

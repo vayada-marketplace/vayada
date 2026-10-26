@@ -6,7 +6,7 @@ import type {
   SetupTrack,
 } from "@vayada/domain-hotels";
 import { PROPERTY_SETUP_STEP_DEFINITIONS } from "@vayada/domain-hotels";
-import { corsHeaders, fulfillCorsPreflight } from "../marketplace-web/utils/cors";
+import { corsHeaders, fulfillCorsPreflight } from "./cors";
 
 const organizationId = "11111111-1111-4111-8111-111111111111";
 const sessionId = "22222222-2222-4222-8222-222222222222";
@@ -123,18 +123,16 @@ export async function mockPropertySetupRoute(
 
 function activeStepIds(selectedTracks: SetupTrack[]): PropertySetupStepId[] {
   const hotelOperations = selectedTracks.includes("hotel_operations");
-  const creatorMarketplace = selectedTracks.includes("creator_marketplace");
   return [
     "present_hotel",
-    ...(creatorMarketplace ? (["marketplace_preferences"] as const) : []),
     ...(hotelOperations
       ? ([
           "booking_design",
           "rooms",
+          "payments",
           "pricing",
           "calendar",
           "guest_experience",
-          "payments",
         ] as const)
       : []),
     "review",
@@ -143,13 +141,11 @@ function activeStepIds(selectedTracks: SetupTrack[]): PropertySetupStepId[] {
 
 function ownerDomainFor(
   stepId: PropertySetupStepId,
-): "hotel_catalog" | "marketplace" | "booking" | "pms" | "finance" | "distribution" {
+): "hotel_catalog" | "booking" | "pms" | "finance" | "distribution" {
   switch (stepId) {
     case "present_hotel":
     case "review":
       return "hotel_catalog";
-    case "marketplace_preferences":
-      return "marketplace";
     case "booking_design":
     case "guest_experience":
       return "booking";

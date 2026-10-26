@@ -14,6 +14,10 @@
     "./replacement-pricing": {
       "types": "./dist/replacementPricingBrowser.d.ts",
       "default": "./dist/replacementPricingBrowser.js"
+    },
+    "./conversion-funnel": {
+      "types": "./dist/conversionFunnel.d.ts",
+      "default": "./dist/conversionFunnel.js"
     }
   },
   "scripts": {

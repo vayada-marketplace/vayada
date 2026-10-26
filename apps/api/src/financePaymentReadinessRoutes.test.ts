@@ -17,7 +17,7 @@ import {
 import { PMS_PRICING_CONTRACT_VERSION } from "@vayada/domain-pms";
 import Fastify from "fastify";
 import { request as httpRequest } from "node:http";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   registerFinancePaymentReadinessRoutes,
@@ -208,6 +208,59 @@ describe("Finance payment readiness routes", () => {
     });
   });
 
+  it("tells the owner whether bank transfer and PayPal can be used yet (VAY-2139)", async () => {
+    const get = (target: Awaited<ReturnType<typeof testApp>>, headers = true) =>
+      injectJson(target, {
+        method: "GET",
+        url: `/finance/properties/${propertyId}/manual-payment-methods`,
+        headers: headers ? { authorization: "Bearer valid-token" } : {},
+      });
+    app = await testApp(fakePorts());
+    await expect(get(app)).resolves.toMatchObject({
+      statusCode: 200,
+      body: { acceptanceEnabled: false, readyMethods: [] },
+    });
+    await app.close();
+
+    const asked: string[] = [];
+    let fail = false;
+    // Added onto the fake itself: its read answers from its own `readValue`.
+    const ports: FakePorts = Object.assign(fakePorts(), {
+      manualPayments: {
+        async acceptedMethods(request: { propertyId: string }) {
+          asked.push(request.propertyId);
+          if (fail) throw new Error("private read failure");
+          return ["bank_transfer" as const];
+        },
+      },
+    });
+    app = await testApp(ports);
+    await expect(get(app)).resolves.toMatchObject({
+      statusCode: 200,
+      body: { acceptanceEnabled: true, readyMethods: ["bank_transfer"] },
+    });
+    expect(asked).toEqual([propertyId]);
+    expect(ports.reads).toEqual([{ organizationId, propertyId }]);
+    // A hotel Finance does not know yet has none ready.
+    ports.readValue = null;
+    await expect(get(app)).resolves.toMatchObject({
+      statusCode: 200,
+      body: { acceptanceEnabled: true, readyMethods: [] },
+    });
+    expect(asked).toEqual([propertyId]);
+    ports.readValue = paymentReadiness();
+    fail = true;
+    await expect(get(app)).resolves.toMatchObject({
+      statusCode: 500,
+      body: { code: "finance_payment_readiness_port_contract_violation" },
+    });
+    await expect(get(app, false)).resolves.toMatchObject({ statusCode: 401 });
+    await app.close();
+    app = await testApp(ports, { links: [link("owner", "active", otherPropertyId)] });
+    await expect(get(app)).resolves.toMatchObject({ statusCode: 403 });
+    expect(asked).toEqual([propertyId, propertyId]);
+  });
+
   it("builds canonical commands and returns created then updated", async () => {
     const ports = fakePorts();
     app = await testApp(ports);
@@ -230,6 +283,32 @@ describe("Finance payment readiness routes", () => {
         requestedAt: now,
       },
     });
+  });
+
+  it("republishes a live page as the saving user after a payment-method save (VAY-2344)", async () => {
+    const ports = fakePorts();
+    const refresh = vi.fn(async () => null);
+    const refreshPublicPage = vi.fn(async (_propertyId: string) => undefined);
+    app = await testApp({ ...ports, refreshPublicPage, bookingPublicationRefresh: { refresh } });
+    expect((await put(app)).statusCode).toBe(201);
+    await vi.waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+    expect(refresh).toHaveBeenCalledWith({
+      organizationId,
+      propertyId,
+      actorUserId,
+      idempotencyKey: "request-1",
+      audit: expect.objectContaining({ requestId: "request-1" }),
+      onlyIfLive: true,
+    });
+    // A refused save changes nothing for guests.
+    ports.result = {
+      ok: false,
+      error: { code: "payment_methods_revision_conflict", currentRevision: 2 },
+    };
+    expect((await put(app, body(), "second-key")).statusCode).toBe(409);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(refreshPublicPage).not.toHaveBeenCalled();
   });
 
   it.each([

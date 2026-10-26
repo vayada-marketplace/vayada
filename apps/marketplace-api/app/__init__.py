@@ -1,3 +1,0 @@
-# vayada Backend Application
-
-

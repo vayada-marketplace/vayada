@@ -16,8 +16,6 @@ import type {
 export const OWNER_ROLE: Record<OrganizationKind, string> = {
   platform: "platform_admin",
   hotel_group: "hotel_owner",
-  creator_workspace: "creator_owner",
-  affiliate_partner: "affiliate_owner",
 };
 
 export function mergePlannedOrganizations(

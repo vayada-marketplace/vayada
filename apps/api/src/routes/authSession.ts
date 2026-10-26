@@ -14,6 +14,10 @@ import type {
   PermissionKey,
   Product,
   ResourceType,
+  StaffInvitationAcceptanceEvent,
+  StaffInvitationAcceptanceResult,
+  StaffInvitationJoinDetails,
+  StaffInvitationJoinRepository,
   TokenVerifier,
 } from "@vayada/backend-auth";
 import { membershipPropertyAccessModeForProvisioning } from "@vayada/backend-auth";
@@ -22,8 +26,13 @@ import {
   type PropertyAccessContext,
   type PropertyAccessRepository,
 } from "@vayada/backend-authorization";
+import {
+  isCurrentHotelAccountAgreements,
+  type HotelAccountAgreementVersions,
+} from "@vayada/domain-hotels";
 import type { FastifyInstance, FastifyPluginAsync, FastifyReply, FastifyRequest } from "fastify";
 
+import type { HotelAccountAgreementsRepository } from "../domains/hotelAccountAgreementsRepository.js";
 import { mapWorkOSAuthError, type VayadaAuthStateResponse } from "../platform/workosAuthState.js";
 import type {
   AuthHandoffRoutingHints,
@@ -55,6 +64,27 @@ export type AuthKitSession = {
   sessionId?: string;
 };
 
+export type AuthKitInvitation = {
+  id: string;
+  email: string;
+  state: "pending" | "accepted" | "expired" | "revoked";
+  organizationId: string | null;
+  acceptedUserId: string | null;
+  expiresAt: string;
+};
+
+// WorkOS creates the invitee's user, unverified and without a password, when an invitation is
+// sent. `signupFlow` is the auth_flow metadata every account Vayada creates carries.
+export type AuthKitInvitee = {
+  id: string;
+  email: string;
+  emailVerified: boolean;
+  lastSignInAt: string | null;
+  externalId: string | null;
+  signupFlow: string | null;
+  createdAt: string;
+};
+
 export type AuthKitClient = {
   getAuthorizationUrl(input: {
     provider: "GoogleOAuth";
@@ -70,6 +100,7 @@ export type AuthKitClient = {
   authenticateWithPassword(input: {
     email: string;
     password: string;
+    invitationToken?: string;
     ipAddress?: string;
     userAgent?: string;
   }): Promise<AuthKitSession>;
@@ -88,10 +119,23 @@ export type AuthKitClient = {
   createUser(input: {
     email: string;
     password: string;
+    firstName?: string;
+    lastName?: string;
+    emailVerified?: boolean;
     ipAddress?: string;
     userAgent?: string;
     metadata?: Record<string, string>;
   }): Promise<AuthKitUser>;
+  findInvitationByToken(input: { token: string }): Promise<AuthKitInvitation>;
+  getInvitation(input: { invitationId: string }): Promise<AuthKitInvitation>;
+  findUserByEmail(input: { email: string }): Promise<AuthKitInvitee | null>;
+  listInvitationCreatedAts(input: { email: string }): Promise<string[]>;
+  activateInvitedUser(input: {
+    userId: string;
+    password: string;
+    firstName: string;
+    lastName?: string;
+  }): Promise<void>;
   resendVerificationEmail(input: { emailVerificationId: string }): Promise<{ email: string }>;
   createPasswordReset(input: { email: string }): Promise<void>;
   resetPassword(input: { token: string; newPassword: string }): Promise<AuthKitUser>;
@@ -140,14 +184,13 @@ export type ProductAuditSink = {
   record(event: ProductAuditEvent): Promise<void>;
 };
 
-export type AuthSurface =
-  | "platform-admin"
-  | "booking-admin"
-  | "pms-web"
-  | "affiliate-dashboard"
-  | "marketplace-web";
+export type AuthSurface = "platform-admin" | "booking-admin" | "pms-web";
 
-export type AuthSignupIntent = "admin" | "hotel" | "creator";
+export type AuthSignupIntent = "admin" | "hotel";
+
+// VAY-2260: creator sign-ups are closed on every surface while the Marketplace is removed.
+export const CREATOR_SIGNUP_CLOSED_MESSAGE =
+  "Creator sign-ups are closed. The vayada Marketplace is no longer available.";
 
 export type RequiredResourceLink = {
   product: Product;
@@ -182,12 +225,19 @@ export type AuthSessionRouteOptions = {
   oauthStateSecret: string;
   cookieSecure: boolean;
   cookieDomain?: string;
-  legacyMarketplaceJwtSecret?: string;
   profileImageMediaRepository?: ApprovedPublicProfileImageRepository;
   hotelAccountInviteOnboarding?: Pick<HotelAccountInviteRepository, "resolveForOnboarding">;
+  /** VAY-2246: records the sign-up tickbox's acceptance of the hotel terms and the DPA. */
+  hotelAccountAgreements?: Pick<HotelAccountAgreementsRepository, "accept">;
   handoffRepository?: AuthSessionHandoffRepository;
   propertyAccessRepository?: PropertyAccessRepository;
   adminTransfer?: AdminTransferCoordinator;
+  staffInvitationJoin?: {
+    repository: StaffInvitationJoinRepository;
+    acceptance: {
+      reconcile(input: StaffInvitationAcceptanceEvent): Promise<StaffInvitationAcceptanceResult>;
+    };
+  };
 };
 
 const SESSION_COOKIE = "vayada_workos_session";
@@ -200,6 +250,9 @@ const DEFAULT_SURFACE: AuthSurface = "platform-admin";
 const EMAIL_SEND_COOLDOWN_MS = 60_000;
 const EMAIL_SEND_COOLDOWN_MESSAGE = "Please wait before requesting another email.";
 const AUTH_HANDOFF_TTL_MS = 60_000;
+const AGREEMENTS_OUTDATED = "agreements_outdated";
+const AGREEMENTS_OUTDATED_MESSAGE =
+  "Our terms have been updated. Reload the page, read them and accept them again.";
 
 type AuthSignupOrganizationContext = {
   workosOrganizationId: string;
@@ -228,6 +281,7 @@ type PasswordSignupVerificationState = {
   email: string;
   surface: AuthSurface;
   intent?: AuthSignupIntent;
+  acceptedAgreements?: HotelAccountAgreementVersions;
 };
 
 type AuthOrganizationCandidate = {
@@ -252,8 +306,9 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
 ) => {
   const emailSendCooldowns = new Map<string, number>();
 
-  // WorkOS-hosted invitations and password recovery still return here. Exchange
-  // the one-time code, then use Vayada's first-party login for PMS.
+  // WorkOS-hosted password recovery, and invitation emails sent before the invitation URL pointed
+  // at PMS /invite, still return here. Exchange the one-time code, then use Vayada's first-party
+  // login for PMS.
   app.get("/workos/callback", async (request, reply) => {
     reply.header("Cache-Control", "private, no-store").header("Referrer-Policy", "no-referrer");
     const pmsOrigin = options.surfacePolicies?.["pms-web"]?.publicOrigin;
@@ -285,6 +340,222 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
       }
     }
     return reply.redirect(returnUrl.toString());
+  });
+
+  // VAY-2274: the PMS /invite page. WorkOS stays the authority: it checks the invitation token
+  // and accepts the invitation during sign-in. Access then comes from the same reconciler the
+  // invitation.accepted webhook runs, so the new member lands in the hotel without waiting for it.
+  app.post("/invitations/preview", async (request, reply) => {
+    reply.header("Cache-Control", "private, no-store");
+    if (!writeCorsHeaders(request, reply, options)) {
+      return reply.code(403).send({
+        state: "auth_failed",
+        message: "Authentication request origin is not allowed.",
+      });
+    }
+    const parsed = parseInvitationJoinBody(request.body, false);
+    if (!parsed.ok) return reply.code(400).send(parsed.error);
+    const join = options.staffInvitationJoin;
+    if (!join) return reply.code(503).send(INVITATION_JOIN_UNAVAILABLE);
+    try {
+      const found = await findJoinableInvitation(options, join.repository, parsed.invitationToken);
+      if (!found.ok) return reply.code(410).send(invitationUnavailable(found.reason));
+      const invitee = await options.authKitClient.findUserByEmail({ email: found.details.email });
+      const placeholder = await invitationPlaceholder(options, invitee, found.details.email);
+      return reply.send({
+        state: "invitation_ready",
+        email: found.details.email,
+        accountExists: Boolean(invitee) && !placeholder,
+        hotelNames: found.details.hotelNames,
+        inviterName: found.details.inviterName,
+        inviteeName: found.details.inviteeName,
+        roleKey: found.details.roleKey,
+        roleName: found.details.roleName,
+      });
+    } catch (error) {
+      request.log.warn({ workos: workosErrorDiagnostics(error) }, "Invitation preview failed");
+      return reply.code(502).send(INVITATION_JOIN_UNAVAILABLE);
+    }
+  });
+
+  app.post("/invitations/accept", async (request, reply) => {
+    reply.header("Cache-Control", "private, no-store");
+    if (!writeCorsHeaders(request, reply, options)) {
+      return reply.code(403).send({
+        state: "auth_failed",
+        message: "Authentication request origin is not allowed.",
+      });
+    }
+    const parsed = parseInvitationJoinBody(request.body, true);
+    if (!parsed.ok) return reply.code(400).send(parsed.error);
+    const join = options.staffInvitationJoin;
+    if (!join) return reply.code(503).send(INVITATION_JOIN_UNAVAILABLE);
+    const surfacePolicy = getSurfacePolicy("pms-web", options);
+    const client = options.authKitClient;
+
+    let found: Awaited<ReturnType<typeof findJoinableInvitation>>;
+    let invitee: AuthKitInvitee | null;
+    let placeholder: AuthKitInvitee | null;
+    try {
+      found = await findJoinableInvitation(options, join.repository, parsed.invitationToken);
+      if (!found.ok) return reply.code(410).send(invitationUnavailable(found.reason));
+      invitee = await client.findUserByEmail({ email: found.details.email });
+      placeholder = await invitationPlaceholder(options, invitee, found.details.email);
+    } catch (error) {
+      request.log.warn({ workos: workosErrorDiagnostics(error) }, "Invitation lookup failed");
+      return reply.code(502).send(INVITATION_JOIN_UNAVAILABLE);
+    }
+    const { invitation, details } = found;
+
+    const accountExists = Boolean(invitee) && !placeholder;
+    if (!accountExists) {
+      if (!parsed.name) {
+        return reply
+          .code(400)
+          .send({ state: "auth_failed", code: "name_required", message: "Enter your name." });
+      }
+      try {
+        // The token came to this mailbox, so the address is proven like a verification code, and
+        // the password is set as a reset would. Only a never-used placeholder is set up this way.
+        if (placeholder) {
+          await client.activateInvitedUser({
+            userId: placeholder.id,
+            password: parsed.password,
+            ...splitPersonName(parsed.name),
+          });
+          // WorkOS now has the address verified. Mirror it before the sign-in, so an
+          // invitation.accepted webhook that beats this request can already join the user.
+          await join.repository
+            .markProviderEmailVerified({ workosUserId: placeholder.id, email: details.email })
+            .catch((error: unknown) =>
+              request.log.warn(safeErrorLog(error), "Invitee identity verification sync failed"),
+            );
+        } else {
+          await client.createUser({
+            email: details.email,
+            password: parsed.password,
+            ...splitPersonName(parsed.name),
+            emailVerified: true,
+            ipAddress: request.ip,
+            userAgent: request.headers["user-agent"],
+            metadata: { auth_flow: "invitation", surface: "pms-web" },
+          });
+        }
+      } catch (error) {
+        // A parallel request may have created the account; the sign-in below decides.
+        if (!isEmailTakenError(error)) {
+          request.log.warn({ workos: workosErrorDiagnostics(error) }, "Invitation signup failed");
+          return reply.code(400).send(
+            workosErrorDiagnostics(error).code === "password_strength_error"
+              ? {
+                  state: "auth_failed",
+                  code: "password_too_weak",
+                  message:
+                    "This password isn't strong enough. Try several unrelated words or generate a unique password with a password manager.",
+                }
+              : {
+                  state: "auth_failed",
+                  message: "We could not create your account. Please check your details.",
+                },
+          );
+        }
+      }
+    }
+
+    let session: AuthKitSession;
+    try {
+      session = await client.authenticateWithPassword({
+        email: details.email,
+        password: parsed.password,
+        invitationToken: parsed.invitationToken,
+        ipAddress: request.ip,
+        userAgent: request.headers["user-agent"],
+      });
+    } catch (error) {
+      const mapped = mapWorkOSAuthError(error);
+      await recordPasswordLoginFailure(options, request, "pms-web", mapped.state);
+      if (mapped.state === "auth_failed") {
+        request.log.error({ workos: workosErrorDiagnostics(error) }, "Invitation sign-in failed");
+      }
+      // Pending tokens would continue a sign-in without the invitation; send only the state.
+      return reply
+        .code(statusForPasswordAuthFailure(mapped.state))
+        .send({ state: mapped.state, message: mapped.message });
+    }
+
+    const notJoined = { state: "auth_failed", code: "invitation_not_joined", message: NOT_JOINED };
+    if (session.organizationId !== invitation.organizationId) {
+      request.log.error("Invitation sign-in returned a session outside the invited organization");
+      return reply.code(403).send(notJoined);
+    }
+    try {
+      const accepted = await client.getInvitation({ invitationId: invitation.id });
+      if (
+        accepted.state !== "accepted" ||
+        accepted.acceptedUserId !== session.user.id ||
+        accepted.organizationId !== invitation.organizationId
+      ) {
+        request.log.error({ state: accepted.state }, "WorkOS did not accept the invitation");
+        return reply.code(403).send(notJoined);
+      }
+      const { user, created } = await findOrCreateIdentityUser(session, request, options);
+      if (created) {
+        await client.updateUserExternalId({
+          workosUserId: session.user.id,
+          externalId: user.userId,
+        });
+      } else if (session.user.emailVerified) {
+        // The user.updated webhook may lag behind; WorkOS has just confirmed the address.
+        await join.repository.markProviderEmailVerified({
+          workosUserId: session.user.id,
+          email: details.email,
+        });
+      }
+      const result = await join.acceptance.reconcile({
+        providerEventId: `vayada-invite-accept:${invitation.id}`,
+        providerInvitationId: invitation.id,
+        providerUserId: session.user.id,
+        providerOrganizationId: invitation.organizationId,
+        invitationEmail: details.email,
+      });
+      if (result.outcome !== "accepted" && result.outcome !== "idempotent_replay") {
+        request.log.error({ result }, "Invitation acceptance was not reconciled");
+        return reply.code(403).send(notJoined);
+      }
+      const access = await resolveOrganizationAccess(session, user, options, surfacePolicy, {
+        ...organizationAccessOptionsFromRequest(request, surfacePolicy),
+        explicitOrganizationSelection: true,
+      });
+      await options.productAuditSink.record({
+        action: "auth.login",
+        authFlow: accountExists ? "login" : "signup",
+        actorUserId: user.userId,
+        organizationId: access.organizationId,
+        surface: "pms-web",
+        workosUserId: session.user.id,
+        workosOrgId: access.session.organizationId,
+        workosSessionId: access.session.sessionId,
+        requestId: request.id,
+        occurredAt: new Date().toISOString(),
+      });
+      const csrfToken = randomBytes(24).toString("base64url");
+      reply.headers({
+        "set-cookie": authSessionCookieHeaders(access.session, csrfToken, surfacePolicy, options),
+      });
+      return reply.send(
+        toSessionResponse(
+          access.session,
+          user,
+          csrfToken,
+          access.organizationId,
+          access.organizationKind,
+          access.resourceScope,
+        ),
+      );
+    } catch (error) {
+      request.log.error(safeErrorLog(error), "Invitation join failed after WorkOS sign-in");
+      return reply.code(403).send(notJoined);
+    }
   });
 
   if (options.adminTransfer) {
@@ -410,10 +681,8 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
     "/session",
     "/session/refresh",
     "/logout",
-    "/compat/marketplace-admin-token",
     "/compat/booking-admin-token",
     "/compat/pms-web-token",
-    "/compat/affiliate-dashboard-token",
     "/profile",
   ]) {
     app.options(path, async (request, reply) => {
@@ -443,6 +712,7 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
       flow: parsed.flow,
       surface: parsed.surface,
       intent: parsed.intent,
+      ...(parsed.acceptedAgreements ? { acceptedAgreements: parsed.acceptedAgreements } : {}),
       returnTo: parsed.returnTo,
       errorReturnTo: parsed.errorReturnTo,
     });
@@ -518,11 +788,7 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
         session.user.id,
       );
       if (existingUser) {
-        return redirectWithOAuthError(
-          reply,
-          state.value,
-          "This email already has a vayada account. Sign in instead.",
-        );
+        return redirectWithOAuthError(reply, state.value, ACCOUNT_EXISTS_MESSAGE, ACCOUNT_EXISTS);
       }
       if (state.value.intent) {
         try {
@@ -599,6 +865,7 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
         reply,
         state.value,
         error instanceof Error ? error.message : "Google sign-in failed. Please try again.",
+        error instanceof HotelWorkspaceRequiredError ? HOTEL_WORKSPACE_REQUIRED : undefined,
       );
     }
 
@@ -615,6 +882,13 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
       requestId: request.id,
       occurredAt: new Date().toISOString(),
     });
+    await recordSignupAgreements(
+      request,
+      options,
+      resolution,
+      signupContext?.intent,
+      state.value.acceptedAgreements,
+    );
 
     const csrfToken = randomBytes(24).toString("base64url");
     reply.headers({
@@ -726,7 +1000,13 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
         workosSessionId: session.sessionId,
       });
       request.log.warn({ err: error }, "Password login identity resolution failed");
-      return reply.code(403).send(toAuthError(error));
+      return reply
+        .code(403)
+        .send(
+          error instanceof HotelWorkspaceRequiredError
+            ? { ...toAuthError(error), state: HOTEL_WORKSPACE_REQUIRED }
+            : toAuthError(error),
+        );
     }
 
     if (parsed.organizationId && resolution.session.organizationId !== parsed.organizationId) {
@@ -796,11 +1076,8 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
         { workos: workosErrorDiagnostics(error), surface: parsed.surface },
         "WorkOS password signup failed",
       );
-      if (isConflictError(error)) {
-        return reply.code(409).send({
-          state: "auth_failed",
-          message: "This email already has a vayada account. Sign in instead.",
-        });
+      if (isEmailTakenError(error)) {
+        return reply.code(409).send({ state: ACCOUNT_EXISTS, message: ACCOUNT_EXISTS_MESSAGE });
       }
       return reply.code(400).send({
         state: "auth_failed",
@@ -832,6 +1109,7 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
           email: createdUser.email,
           surface: parsed.surface,
           intent: parsed.intent,
+          ...(parsed.acceptedAgreements ? { acceptedAgreements: parsed.acceptedAgreements } : {}),
         });
       }
       return reply
@@ -913,6 +1191,13 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
       requestId: request.id,
       occurredAt: new Date().toISOString(),
     });
+    await recordSignupAgreements(
+      request,
+      options,
+      resolution,
+      parsed.intent,
+      parsed.acceptedAgreements,
+    );
 
     const csrfToken = randomBytes(24).toString("base64url");
     reply.headers({
@@ -1064,6 +1349,13 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
       requestId: request.id,
       occurredAt: new Date().toISOString(),
     });
+    await recordSignupAgreements(
+      request,
+      options,
+      resolution,
+      signupContext?.intent,
+      signupVerification?.acceptedAgreements,
+    );
 
     const csrfToken = randomBytes(24).toString("base64url");
     reply.headers({
@@ -1174,7 +1466,9 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
 
   app.get("/session", async (request, reply) => {
     const query = request.query as { surface?: string };
-    const surfacePolicy = getSurfacePolicy(parseSurface(query.surface), options);
+    const surface = parseSurfaceOrNull(query.surface);
+    if (!surface) return sendUnsupportedSurface(reply);
+    const surfacePolicy = getSurfacePolicy(surface, options);
     if (!writeCorsHeaders(request, reply, options)) {
       return reply.code(403).send({ error: "origin_rejected" });
     }
@@ -1250,7 +1544,9 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
       return reply.code(403).send({ error: "origin_rejected" });
     }
     const body = request.body as { organizationId?: string; surface?: string } | undefined;
-    const surfacePolicy = getSurfacePolicy(parseSurface(body?.surface), options);
+    const surface = parseSurfaceOrNull(body?.surface);
+    if (!surface) return sendUnsupportedSurface(reply);
+    const surfacePolicy = getSurfacePolicy(surface, options);
     if (!passesCsrfCheck(request, options, surfacePolicy)) {
       return reply.code(403).send({ error: "csrf_rejected" });
     }
@@ -1674,7 +1970,7 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
           source: "web",
           requestId: request.id,
           correlationId: session.sessionId,
-          reason: "Marketplace self-service onboarding",
+          reason: "Hotel self-service onboarding",
           requestedAt: new Date().toISOString(),
         },
         payload: {
@@ -1854,7 +2150,9 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
       return reply.code(403).send({ error: "origin_rejected" });
     }
     const body = request.body as { surface?: string; return_to?: string } | undefined;
-    const surfacePolicy = getSurfacePolicy(parseSurface(body?.surface), options);
+    const surface = parseSurfaceOrNull(body?.surface);
+    if (!surface) return sendUnsupportedSurface(reply);
+    const surfacePolicy = getSurfacePolicy(surface, options);
     if (!passesCsrfCheck(request, options, surfacePolicy)) {
       return reply.code(403).send({ error: "csrf_rejected" });
     }
@@ -1910,11 +2208,7 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
       .send({ logoutUrl });
   });
 
-  registerCompatibilityTokenRoute(app, options, {
-    path: "/compat/marketplace-admin-token",
-    surface: "platform-admin",
-    userType: "admin",
-  });
+  // VAY-2259: the platform-admin bridge to the retired Python Marketplace API is gone.
   registerCompatibilityTokenRoute(app, options, {
     path: "/compat/booking-admin-token",
     surface: "booking-admin",
@@ -1924,11 +2218,6 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
     path: "/compat/pms-web-token",
     surface: "pms-web",
     userType: "hotel",
-  });
-  registerCompatibilityTokenRoute(app, options, {
-    path: "/compat/affiliate-dashboard-token",
-    surface: "affiliate-dashboard",
-    userType: "affiliate",
   });
 };
 
@@ -1955,16 +2244,33 @@ function sendEmailSendCooldownResponse(reply: FastifyReply, retryAfterSeconds: n
 
 function parseSurface(value: string | undefined): AuthSurface {
   if (!value) return DEFAULT_SURFACE;
-  if (
-    value === "platform-admin" ||
-    value === "booking-admin" ||
-    value === "pms-web" ||
-    value === "affiliate-dashboard" ||
-    value === "marketplace-web"
-  ) {
+  if (value === "platform-admin" || value === "booking-admin" || value === "pms-web") {
     return value;
   }
   throw new Error(`Unsupported AuthKit surface: ${value}`);
+}
+
+// VAY-2271: a retired surface (marketplace-web, affiliate-dashboard) or a typo is a client
+// error, not a server failure.
+function parseSurfaceOrNull(value: string | undefined): AuthSurface | null {
+  try {
+    return parseSurface(value);
+  } catch {
+    return null;
+  }
+}
+
+function sendUnsupportedSurface(reply: FastifyReply) {
+  return reply.code(400).send({ error: "invalid_surface", message: "Unsupported auth surface." });
+}
+
+// VAY-2271: every first-party client names its surface; the retired Marketplace app was the
+// only one that left it out.
+function parseRequiredSurface(value: unknown): AuthSurface {
+  if (typeof value !== "string" || !value) {
+    throw new Error("AuthKit surface is required");
+  }
+  return parseSurface(value);
 }
 
 function parseHandoffCreateBody(body: unknown):
@@ -2092,6 +2398,7 @@ type GoogleOAuthState = {
   flow: GoogleOAuthFlow;
   surface: AuthSurface;
   intent?: AuthSignupIntent;
+  acceptedAgreements?: HotelAccountAgreementVersions;
   returnTo: string;
   errorReturnTo: string;
   nonce: string;
@@ -2107,6 +2414,7 @@ function parseGoogleOAuthStartQuery(
       flow: GoogleOAuthFlow;
       surface: AuthSurface;
       intent?: AuthSignupIntent;
+      acceptedAgreements?: HotelAccountAgreementVersions;
       returnTo: string;
       errorReturnTo: string;
       loginHint?: string;
@@ -2120,6 +2428,8 @@ function parseGoogleOAuthStartQuery(
     return_to?: unknown;
     error_return_to?: unknown;
     login_hint?: unknown;
+    accepted_terms?: unknown;
+    accepted_dpa?: unknown;
   };
   const flow = query.flow === "signup" ? "signup" : "login";
   let surface: AuthSurface;
@@ -2129,17 +2439,25 @@ function parseGoogleOAuthStartQuery(
   } catch {
     return { ok: false, error: { error: "invalid_surface", message: "Unsupported auth surface." } };
   }
+  let acceptedAgreements: HotelAccountAgreementVersions | undefined;
   if (flow === "signup") {
     const rawIntent = typeof query.type === "string" ? query.type : query.intent;
     try {
-      if (surface !== "marketplace-web" || typeof rawIntent === "string") {
-        intent = parseSignupIntent(surface, typeof rawIntent === "string" ? rawIntent : undefined);
-      }
+      intent = parseSignupIntent(surface, typeof rawIntent === "string" ? rawIntent : undefined);
     } catch {
       return {
         ok: false,
         error: { error: "invalid_signup", message: "Unsupported Google signup request." },
       };
+    }
+    if (query.accepted_terms !== undefined || query.accepted_dpa !== undefined) {
+      const accepted = { termsVersion: query.accepted_terms, dpaVersion: query.accepted_dpa };
+      if (!isCurrentHotelAccountAgreements(accepted))
+        return {
+          ok: false,
+          error: { error: AGREEMENTS_OUTDATED, message: AGREEMENTS_OUTDATED_MESSAGE },
+        };
+      acceptedAgreements = accepted;
     }
   }
   const surfaceOrigin = options.surfacePolicies?.[surface]?.publicOrigin;
@@ -2156,6 +2474,7 @@ function parseGoogleOAuthStartQuery(
     flow,
     surface,
     intent,
+    acceptedAgreements,
     returnTo,
     errorReturnTo,
     loginHint: typeof query.login_hint === "string" ? query.login_hint : undefined,
@@ -2339,9 +2658,15 @@ function isPasswordSignupVerificationState(
   );
 }
 
-function redirectWithOAuthError(reply: FastifyReply, state: GoogleOAuthState, message: string) {
+function redirectWithOAuthError(
+  reply: FastifyReply,
+  state: GoogleOAuthState,
+  message: string,
+  code?: string,
+) {
   const url = new URL(state.errorReturnTo);
   url.searchParams.set("auth_error", message);
+  if (code) url.searchParams.set("auth_error_code", code);
   return reply.redirect(url.toString());
 }
 
@@ -2460,6 +2785,7 @@ function parsePasswordSignupBody(body: unknown):
       password: string;
       surface: AuthSurface;
       intent?: AuthSignupIntent;
+      acceptedAgreements?: HotelAccountAgreementVersions;
     }
   | {
       ok: false;
@@ -2477,6 +2803,7 @@ function parsePasswordSignupBody(body: unknown):
     surface?: unknown;
     type?: unknown;
     intent?: unknown;
+    acceptedAgreements?: unknown;
   };
   const email = typeof input.email === "string" ? input.email.trim() : "";
   const password = typeof input.password === "string" ? input.password : "";
@@ -2486,13 +2813,15 @@ function parsePasswordSignupBody(body: unknown):
       error: { state: "auth_failed", message: "Email and password are required." },
     };
   }
+  // VAY-2246: the sign-up tickbox's versions; anything but the current ones was read on an old page.
+  if (
+    input.acceptedAgreements !== undefined &&
+    !isCurrentHotelAccountAgreements(input.acceptedAgreements)
+  ) {
+    return { ok: false, error: { state: "auth_failed", message: AGREEMENTS_OUTDATED_MESSAGE } };
+  }
   try {
-    const surface = parseSurface(
-      typeof input.surface === "string" ? input.surface : "marketplace-web",
-    );
-    if (surface === "marketplace-web") {
-      return { ok: true, email, password, surface };
-    }
+    const surface = parseRequiredSurface(input.surface);
     const rawIntent = typeof input.type === "string" ? input.type : input.intent;
     return {
       ok: true,
@@ -2500,11 +2829,16 @@ function parsePasswordSignupBody(body: unknown):
       password,
       surface,
       intent: parseSignupIntent(surface, typeof rawIntent === "string" ? rawIntent : undefined),
+      ...(input.acceptedAgreements
+        ? { acceptedAgreements: input.acceptedAgreements as HotelAccountAgreementVersions }
+        : {}),
     };
   } catch {
     return { ok: false, error: { state: "auth_failed", message: "Unsupported signup request." } };
   }
 }
+
+const INVITE_ONBOARDING_SURFACES: readonly AuthSurface[] = ["booking-admin"];
 
 function parseOnboardingBody(
   body: unknown,
@@ -2524,21 +2858,23 @@ function parseOnboardingBody(
     inviteCode?: unknown;
   };
   try {
-    const surface = parseSurface(
-      typeof input.surface === "string" ? input.surface : "marketplace-web",
-    );
+    const surface = parseRequiredSurface(input.surface);
     const rawIntent = typeof input.type === "string" ? input.type : input.intent;
-    if (rawIntent !== "creator" && rawIntent !== "hotel") {
+    if (rawIntent === "creator") {
+      return { ok: false, error: { state: "auth_failed", message: CREATOR_SIGNUP_CLOSED_MESSAGE } };
+    }
+    if (rawIntent !== "hotel") {
       return {
         ok: false,
-        error: { state: "auth_failed", message: "Choose creator or hotel to continue." },
+        error: { state: "auth_failed", message: "Choose hotel to continue." },
       };
     }
     const intent = parseSignupIntent(surface, rawIntent);
     const hasInviteCode = Object.prototype.hasOwnProperty.call(input, "inviteCode");
     if (!hasInviteCode) return { ok: true, surface, intent };
+    // VAY-2262: Booking Admin hosts the hotel invite page.
     if (
-      surface !== "marketplace-web" ||
+      !INVITE_ONBOARDING_SURFACES.includes(surface) ||
       intent !== "hotel" ||
       typeof input.inviteCode !== "string" ||
       Object.keys(input).some((key) => !["surface", "type", "intent", "inviteCode"].includes(key))
@@ -2592,9 +2928,7 @@ function parseProfileBody(body: unknown):
     };
   }
   try {
-    const surface = parseSurface(
-      typeof input.surface === "string" ? input.surface : "marketplace-web",
-    );
+    const surface = parseRequiredSurface(input.surface);
     const hasFirstName = Object.prototype.hasOwnProperty.call(input, "firstName");
     const hasLastName = Object.prototype.hasOwnProperty.call(input, "lastName");
     const hasName = hasFirstName || hasLastName;
@@ -2719,9 +3053,7 @@ function parseEmailVerificationConfirmBody(body: unknown):
   }
 
   try {
-    const surface = parseSurface(
-      typeof input.surface === "string" ? input.surface : "marketplace-web",
-    );
+    const surface = parseRequiredSurface(input.surface);
     const flow = input.flow === "signup" ? "signup" : "login";
     const intent =
       flow === "signup" && typeof input.intent === "string"
@@ -2845,11 +3177,8 @@ function signupIntentsForSurface(surface: AuthSurface): readonly AuthSignupInten
       return [];
     case "booking-admin":
     case "pms-web":
+      // VAY-2260: the Marketplace is closing; creator sign-ups are refused on every surface.
       return ["hotel"];
-    case "marketplace-web":
-      return ["creator", "hotel"];
-    case "affiliate-dashboard":
-      return [];
   }
 }
 
@@ -2908,13 +3237,6 @@ function signupOrganizationTemplate(
         name: displayName ? `${displayName} Hotel Group` : "New Hotel Group",
         roleKey: "hotel_owner",
       };
-    case "creator":
-      return {
-        externalId: `vayada-signup:${surface}:creator:${externalIdSuffix}`,
-        kind: "creator_workspace",
-        name: displayName ? `${displayName} Workspace` : "New Creator Workspace",
-        roleKey: "creator_owner",
-      };
   }
 }
 
@@ -2950,8 +3272,6 @@ function findSurfacePolicy(
   const defaultPlatformPolicy: AuthSurfacePolicy = {
     requiredOrganizationKind: options.requiredOrganizationKind,
     logoutReturnUrl: options.logoutReturnUrl,
-    legacyJwtSecret: options.legacyMarketplaceJwtSecret,
-    legacyJwtUserType: "admin",
     requiredMembershipRoleKey: "platform_admin",
   };
   if (surface === DEFAULT_SURFACE) {
@@ -2994,7 +3314,7 @@ async function selectSignupOrganizationSession(
 function registerCompatibilityTokenRoute(
   app: FastifyInstance,
   options: AuthSessionRouteOptions,
-  route: { path: string; surface: AuthSurface; userType?: string },
+  route: { path: string; surface: AuthSurface; userType: string },
 ): void {
   app.post(route.path, async (request, reply) => {
     if (!writeCorsHeaders(request, reply, options)) {
@@ -3058,10 +3378,7 @@ function registerCompatibilityTokenRoute(
         {
           sub: resolution.user.userId,
           email: resolution.user.email,
-          type:
-            surfacePolicy.legacyJwtUserType ??
-            route.userType ??
-            legacyUserTypeForOrganizationKind(resolution.organizationKind),
+          type: surfacePolicy.legacyJwtUserType ?? route.userType,
           org: resolution.organizationId,
           surface: route.surface,
           resources: resourceScope,
@@ -3075,13 +3392,6 @@ function registerCompatibilityTokenRoute(
   });
 }
 
-function legacyUserTypeForOrganizationKind(kind: OrganizationKind | undefined): string {
-  if (kind === "creator_workspace") return "creator";
-  if (kind === "hotel_group") return "hotel";
-  if (kind === "affiliate_partner") return "affiliate";
-  return "admin";
-}
-
 async function resolveOrCreateIdentity(
   session: AuthKitSession,
   request: FastifyRequest,
@@ -3090,46 +3400,12 @@ async function resolveOrCreateIdentity(
   accessOptions: OrganizationAccessOptions = {},
   signupContext?: AuthSignupContext,
 ): Promise<IdentityResolution> {
-  let user = await options.identityRepository.findUserByProviderUserId("workos", session.user.id);
-  const shouldSyncExternalId = !user || Boolean(signupContext);
-  if (!user) {
-    const result = await options.lifecycleCommandBus.execute({
-      commandType: "identity.user.create",
-      commandId: randomUUID(),
-      idempotencyKey: `workos-jit:${session.user.id}`,
-      audit: {
-        actor: { kind: "system", service: "apps/api-authkit" },
-        source: "web",
-        requestId: request.id,
-        correlationId: session.sessionId,
-        reason: "AuthKit SSO/JIT first arrival",
-        requestedAt: new Date().toISOString(),
-      },
-      payload: {
-        email: session.user.email,
-        name: session.user.name ?? undefined,
-        initialStatus: "active",
-        ...(signupContext
-          ? {
-              legacyUserType: signupContext.intent,
-            }
-          : {}),
-        providerIdentity: {
-          provider: "workos",
-          providerUserId: session.user.id,
-          providerEmailVerified: session.user.emailVerified,
-        },
-      },
-    });
-    if (signupContext) {
-      user = await options.identityRepository.findUserByProviderUserId("workos", session.user.id);
-      if (!user) {
-        throw new Error("Identity lifecycle command did not create a resolvable signup user");
-      }
-    } else {
-      user = await findUserAfterLifecycle(options.identityRepository, session, result);
-    }
-  }
+  const { user, created } = await findOrCreateIdentityUser(
+    session,
+    request,
+    options,
+    signupContext,
+  );
   if (signupContext) {
     if (!isMatchingSignupIdentity(user, session.user)) {
       throw new Error("Signup identity conflicts with the existing account.");
@@ -3152,7 +3428,7 @@ async function resolveOrCreateIdentity(
       },
     });
   }
-  if (shouldSyncExternalId) {
+  if (created || signupContext) {
     await options.authKitClient.updateUserExternalId({
       workosUserId: session.user.id,
       externalId: user.userId,
@@ -3166,6 +3442,90 @@ async function resolveOrCreateIdentity(
     accessOptions,
   );
   return { user, ...access };
+}
+
+async function findOrCreateIdentityUser(
+  session: AuthKitSession,
+  request: FastifyRequest,
+  options: AuthSessionRouteOptions,
+  signupContext?: AuthSignupContext,
+): Promise<{ user: IdentityUser; created: boolean }> {
+  const existing = await options.identityRepository.findUserByProviderUserId(
+    "workos",
+    session.user.id,
+  );
+  if (existing) return { user: existing, created: false };
+  const result = await options.lifecycleCommandBus.execute({
+    commandType: "identity.user.create",
+    commandId: randomUUID(),
+    idempotencyKey: `workos-jit:${session.user.id}`,
+    audit: {
+      actor: { kind: "system", service: "apps/api-authkit" },
+      source: "web",
+      requestId: request.id,
+      correlationId: session.sessionId,
+      reason: "AuthKit SSO/JIT first arrival",
+      requestedAt: new Date().toISOString(),
+    },
+    payload: {
+      email: session.user.email,
+      name: session.user.name ?? undefined,
+      initialStatus: "active",
+      ...(signupContext
+        ? {
+            legacyUserType: signupContext.intent,
+          }
+        : {}),
+      providerIdentity: {
+        provider: "workos",
+        providerUserId: session.user.id,
+        providerEmailVerified: session.user.emailVerified,
+      },
+    },
+  });
+  if (!signupContext) {
+    return {
+      user: await findUserAfterLifecycle(options.identityRepository, session, result),
+      created: true,
+    };
+  }
+  const user = await options.identityRepository.findUserByProviderUserId("workos", session.user.id);
+  if (!user) {
+    throw new Error("Identity lifecycle command did not create a resolvable signup user");
+  }
+  return { user, created: true };
+}
+
+/** VAY-2246: the sign-up tickbox accepts the hotel terms and the DPA for the new hotel account. A failure
+ * only logs: the account admin's banner asks again. */
+async function recordSignupAgreements(
+  request: FastifyRequest,
+  options: AuthSessionRouteOptions,
+  resolution: IdentityResolution,
+  intent: AuthSignupIntent | undefined,
+  accepted: HotelAccountAgreementVersions | undefined,
+): Promise<void> {
+  if (!accepted || intent !== "hotel" || !options.hotelAccountAgreements) return;
+  if (resolution.organizationKind !== "hotel_group" || !resolution.organizationId) return;
+  if (!isCurrentHotelAccountAgreements(accepted)) return;
+  try {
+    const recorded = await options.hotelAccountAgreements.accept({
+      organizationId: resolution.organizationId,
+      userId: resolution.user.userId,
+      source: "signup",
+      versions: accepted,
+    });
+    if (!recorded)
+      request.log.warn(
+        { organizationId: resolution.organizationId },
+        "Sign-up agreements not recorded: the new user is not the account admin",
+      );
+  } catch (error) {
+    request.log.error(
+      { err: error, organizationId: resolution.organizationId },
+      "Sign-up agreements could not be recorded",
+    );
+  }
 }
 
 function isMatchingSignupIdentity(user: IdentityUser, workosUser: AuthKitUser): boolean {
@@ -3555,6 +3915,14 @@ class AuthAuthorizationError extends Error {
   }
 }
 
+// The account signed in but has no hotel workspace yet. Login pages offer hotel setup.
+const HOTEL_WORKSPACE_REQUIRED = "hotel_workspace_required";
+// Sign-up with an email that already has an account; the sign-up pages offer to sign in instead.
+const ACCOUNT_EXISTS = "account_exists";
+const ACCOUNT_EXISTS_MESSAGE = "This email already has a vayada account. Sign in instead.";
+
+class HotelWorkspaceRequiredError extends AuthAuthorizationError {}
+
 function isTerminalHandoffAuthorizationError(error: unknown): boolean {
   return (
     error instanceof AuthAuthorizationError || error instanceof OrganizationSelectionRequiredError
@@ -3619,11 +3987,18 @@ async function resolveSelectableOrganization(
     return { session };
   }
 
-  throw new AuthAuthorizationError(
-    `No active ${requiredOrganizationKindLabel(
-      surfacePolicy.requiredOrganizationKind,
-    )} organization is available for this surface`,
-  );
+  const message = `No active ${requiredOrganizationKindLabel(
+    surfacePolicy.requiredOrganizationKind,
+  )} organization is available for this surface`;
+  if (surfacePolicy.requiredOrganizationKind === "hotel_group") {
+    // Only accounts that never belonged to a hotel get the setup offer; removed staff do not.
+    const memberships =
+      (await options.identityRepository.listMembershipOrganizations?.(user.userId)) ?? [];
+    if (!memberships.some((membership) => membership.kind === "hotel_group")) {
+      throw new HotelWorkspaceRequiredError(message);
+    }
+  }
+  throw new AuthAuthorizationError(message);
 }
 
 function shouldRequireOrganizationSelection(
@@ -3727,10 +4102,151 @@ function sendOrganizationSelectionResponse(
   });
 }
 
-function isConflictError(error: unknown): boolean {
+const INVITATION_JOIN_UNAVAILABLE = {
+  state: "auth_failed",
+  message: "Invitations are temporarily unavailable. Please try again.",
+};
+const NOT_JOINED =
+  "We could not finish joining this team. Ask the person who invited you to send a new invitation.";
+
+type InvitationUnavailableReason = "invalid" | "expired" | "accepted" | "revoked" | "replaced";
+
+function invitationUnavailable(reason: InvitationUnavailableReason) {
+  return {
+    state: "invitation_unavailable",
+    reason,
+    message: "This invitation link no longer works.",
+  };
+}
+
+function parseInvitationJoinBody(
+  body: unknown,
+  requirePassword: boolean,
+):
+  | { ok: true; invitationToken: string; password: string; name?: string }
+  | { ok: false; error: { state: "auth_failed"; message: string } } {
+  const input = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
+  const invitationToken =
+    typeof input.invitationToken === "string" ? input.invitationToken.trim() : "";
+  const password = typeof input.password === "string" ? input.password : "";
+  const name = typeof input.name === "string" ? input.name.trim().replace(/\s+/g, " ") : "";
+  if (input.surface !== "pms-web" || !invitationToken || invitationToken.length > 512) {
+    return {
+      ok: false,
+      error: { state: "auth_failed", message: "This invitation link is not valid." },
+    };
+  }
+  if (requirePassword && (!password || password.length > 1024)) {
+    return { ok: false, error: { state: "auth_failed", message: "Enter your password." } };
+  }
+  if (name.length > 200) {
+    return { ok: false, error: { state: "auth_failed", message: "Your name is too long." } };
+  }
+  return { ok: true, invitationToken, password, ...(name ? { name } : {}) };
+}
+
+// Only the current pending invitation of an active hotel group can be joined. WorkOS answers for
+// the token; Vayada answers for whether that provider invitation is still the current intent.
+async function findJoinableInvitation(
+  options: AuthSessionRouteOptions,
+  repository: StaffInvitationJoinRepository,
+  token: string,
+): Promise<
+  | {
+      ok: true;
+      invitation: AuthKitInvitation & { organizationId: string };
+      details: StaffInvitationJoinDetails;
+    }
+  | { ok: false; reason: InvitationUnavailableReason }
+> {
+  let invitation: AuthKitInvitation;
+  try {
+    invitation = await options.authKitClient.findInvitationByToken({ token });
+  } catch (error) {
+    const status = workosErrorDiagnostics(error).status;
+    if (status === 400 || status === 404 || status === 422) return { ok: false, reason: "invalid" };
+    throw error;
+  }
+  if (invitation.state === "accepted" || invitation.state === "revoked") {
+    return { ok: false, reason: invitation.state };
+  }
+  if (invitation.state === "expired" || !(Date.parse(invitation.expiresAt) > Date.now())) {
+    return { ok: false, reason: "expired" };
+  }
+  const organizationId = invitation.organizationId;
+  if (invitation.state !== "pending" || !organizationId) return { ok: false, reason: "invalid" };
+  const details = await repository.findCurrent({
+    providerInvitationId: invitation.id,
+    workosOrganizationId: organizationId,
+  });
+  if (!details) return { ok: false, reason: "replaced" };
+  if (details.email !== invitation.email.trim().toLowerCase()) {
+    return { ok: false, reason: "invalid" };
+  }
+  return { ok: true, invitation: { ...invitation, organizationId }, details };
+}
+
+const PLACEHOLDER_CREATION_SKEW_MS = 5_000;
+
+// The WorkOS API does not say whether a password is set. A user that signed in has lastSignInAt
+// and an externalId, and every account Vayada creates carries auth_flow metadata. One with none of
+// these, still unverified, and created in the same request as an invitation to its address (WorkOS
+// stamps both with the same time) is the placeholder WorkOS made for it. Anything else logs in.
+async function invitationPlaceholder(
+  options: AuthSessionRouteOptions,
+  invitee: AuthKitInvitee | null,
+  email: string,
+): Promise<AuthKitInvitee | null> {
+  const unused = unusedInvitee(invitee, email);
+  if (!unused) return null;
+  const createdAt = Date.parse(unused.createdAt);
+  if (!Number.isFinite(createdAt)) return null;
+  const invitedAt = await options.authKitClient.listInvitationCreatedAts({ email });
+  return invitedAt.some(
+    (at) => Math.abs(Date.parse(at) - createdAt) <= PLACEHOLDER_CREATION_SKEW_MS,
+  )
+    ? unused
+    : null;
+}
+
+// Error messages can carry addresses or SQL; log the error's kind and code only.
+function safeErrorLog(error: unknown) {
+  const code = (error as { code?: unknown } | null)?.code;
+  return {
+    errorName: error instanceof Error ? error.name : typeof error,
+    errorCode: typeof code === "string" && /^[A-Za-z0-9_]{1,40}$/.test(code) ? code : undefined,
+    workos: workosErrorDiagnostics(error),
+  };
+}
+
+function unusedInvitee(invitee: AuthKitInvitee | null, email: string): AuthKitInvitee | null {
+  const unused =
+    invitee !== null &&
+    invitee.email.trim().toLowerCase() === email &&
+    !invitee.emailVerified &&
+    !invitee.lastSignInAt &&
+    !invitee.externalId &&
+    !invitee.signupFlow;
+  return unused ? invitee : null;
+}
+
+function splitPersonName(name: string): { firstName: string; lastName?: string } {
+  const [firstName = name, ...rest] = name.split(" ");
+  const lastName = rest.join(" ");
+  return lastName ? { firstName, lastName } : { firstName };
+}
+
+function isEmailTakenError(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
-  const candidate = error as { status?: unknown; name?: unknown };
-  return candidate.status === 409 || candidate.name === "ConflictException";
+  const { status, name, code, errors } = error as Record<string, unknown>;
+  if (status === 409 || name === "ConflictException") return true;
+  // WorkOS answers a taken email with 400 user_creation_error and names the reason in `errors`,
+  // never with 409 (VAY-2250).
+  return (
+    code === "user_creation_error" &&
+    Array.isArray(errors) &&
+    errors.some((detail) => (detail as { code?: unknown } | null)?.code === "email_not_available")
+  );
 }
 
 function organizationAccessOptionsFromRequest(

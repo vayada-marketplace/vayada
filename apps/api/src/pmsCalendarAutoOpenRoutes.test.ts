@@ -208,7 +208,7 @@ describe("PMS calendar auto-open routes", () => {
           },
         },
       ],
-      ["organization kind", headers(), { kind: "affiliate_partner" }],
+      ["organization kind", headers(), { kind: "platform" }],
     ];
     for (const [name, requestHeaders, auth] of cases) {
       const test = await testApp(auth);
