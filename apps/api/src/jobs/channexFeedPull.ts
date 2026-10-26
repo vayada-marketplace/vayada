@@ -6,10 +6,16 @@ import { promotePulledChannexBookingRevision } from "../routes/providerWebhooks.
 // scope (engineering/channex-per-hotel-ownership.md). Legacy acknowledges what it pulls, so a hotel
 // is owned, and pulled, only after its handover, which requires legacy's disable for it. Pulled
 // revisions become ordinary revision_feed ingest jobs; that worker persists and acknowledges them.
+// The same loop runs the one-off resync the attach executor queues: the hotel's upcoming bookings,
+// which legacy already acknowledged, read from the bookings collection instead of the feed.
 const QUEUE = "pms.channex.webhooks";
 const TYPE = "channex.pull-booking-feed";
+const RESYNC_TYPE = "channex.resync-bookings";
 const BUCKET_MS = 5 * 60_000;
 const PAGE_SIZE = 100;
+/** A resync reads at most this many upcoming bookings; a larger hotel is split by hand. */
+const RESYNC_MAX_BOOKINGS = 2_000;
+const RESYNC_RETRY_MS = 5 * 60_000;
 
 type Options = {
   apiBaseUrl: string;
@@ -89,7 +95,7 @@ export async function runChannexFeedPulls(connectionString: string, options: Opt
     max: 2,
     channexExcludedIds: options.excludedIds,
   });
-  const counters = { queued: 0, pulled: 0, failed: 0, revisions: 0 };
+  const counters = { queued: 0, pulled: 0, failed: 0, revisions: 0, resynced: 0, resyncFailed: 0 };
   const failures: Array<{ propertyId: string; code: string }> = [];
   try {
     counters.queued = await enqueueChannexFeedPulls(pool, {
@@ -127,6 +133,25 @@ export async function runChannexFeedPulls(connectionString: string, options: Opt
         counters.failed += 1;
       }
     }
+    // One resync per tick: it reads every upcoming booking of the hotel.
+    const resync = options.signal?.aborted ? null : await claim(pool, options, RESYNC_TYPE);
+    if (resync) {
+      try {
+        const result = await resyncBookings(pool, store, resync, options);
+        await finish(pool, resync, options, "succeeded", result);
+        counters.resynced += 1;
+      } catch (error) {
+        const failure = error instanceof PullFailure ? error : new PullFailure("resync_failed");
+        await finish(pool, resync, options, "failed", {
+          lastErrorCode: failure.message,
+          ...(failure.revisionIds.length
+            ? { failedBookingIds: failure.revisionIds.slice(0, 20) }
+            : {}),
+        });
+        failures.push({ propertyId: resync.propertyId, code: failure.message });
+        counters.resyncFailed += 1;
+      }
+    }
     return { ...counters, failures };
   } finally {
     await Promise.all([pool.end(), store.close?.()]);
@@ -142,22 +167,25 @@ class PullFailure extends Error {
   }
 }
 
-async function claim(pool: pg.Pool, options: Options): Promise<PullJob | null> {
+async function claim(pool: pg.Pool, options: Options, type = TYPE): Promise<PullJob | null> {
+  // Pulls carry the Channex host; the attach executor queues a resync without one, so the
+  // production worker (never a canary, which lists other hotels) takes it for its owned hotel.
   const row = (
     await pool.query<{ id: string; payload: Record<string, unknown> }>(
       `UPDATE platform.jobs SET status = 'running', attempts_count = attempts_count + 1,
          locked_at = now(), locked_by = $3, updated_at = now()
        WHERE id = (SELECT id FROM platform.jobs WHERE queue_name = $1 AND job_type = $2
          AND status = 'pending' AND run_after <= now() AND property_id::text = ANY($4::text[])
-         AND payload->>'channexHost' = $5
+         AND ($2::text = $6::text OR payload->>'channexHost' = $5::text)
          ORDER BY run_after DESC, created_at DESC FOR UPDATE SKIP LOCKED LIMIT 1)
        RETURNING id::text, payload`,
       [
         QUEUE,
-        TYPE,
+        type,
         options.workerId,
         [...options.ownedPropertyIds],
         new URL(options.apiBaseUrl).host,
+        RESYNC_TYPE,
       ],
     )
   ).rows[0];
@@ -170,7 +198,7 @@ async function claim(pool: pg.Pool, options: Options): Promise<PullJob | null> {
   };
 }
 
-async function readFeed(pool: pg.Pool, job: PullJob, options: Options) {
+async function assertOwned(pool: pg.Pool, job: PullJob, options: Options) {
   // The binding must still be owned, and be the same binding the job was queued for.
   const owned = await pool.query(
     `SELECT 1 FROM pms.channel_connections c
@@ -183,6 +211,102 @@ async function readFeed(pool: pg.Pool, job: PullJob, options: Options) {
     [job.propertyId, job.providerPropertyId, job.bindingGeneration, [...options.excludedIds]],
   );
   if (!owned.rowCount) throw new PullFailure("connection_not_owned");
+}
+
+/**
+ * The switch-day copy: every booking of the hotel still in house or arriving, as its latest
+ * revision, queued like a pulled revision. Legacy acknowledged these, so the feed never shows them.
+ */
+async function resyncBookings(
+  pool: pg.Pool,
+  store: ReturnType<typeof createPgProviderWebhookStore>,
+  job: PullJob,
+  options: Options,
+) {
+  await assertOwned(pool, job, options);
+  // Yesterday in UTC covers every hotel timezone for in-house stays.
+  const since = new Date((options.now?.() ?? new Date()).getTime() - 24 * 60 * 60_000)
+    .toISOString()
+    .slice(0, 10);
+  const bookings: Array<{ id: string; revisionId: string }> = [];
+  for (let page = 1; page <= RESYNC_MAX_BOOKINGS / PAGE_SIZE; page += 1) {
+    const url = new URL("/api/v1/bookings", `${options.apiBaseUrl}/`);
+    url.searchParams.set("filter[property_id]", job.providerPropertyId);
+    url.searchParams.set("filter[departure_date][gte]", since);
+    url.searchParams.set("pagination[page]", String(page));
+    url.searchParams.set("pagination[limit]", String(PAGE_SIZE));
+    const data = await read(url, options);
+    for (const item of data) {
+      const attributes = record(item["attributes"]) ?? {};
+      // The collection filter is not documented for property_id: refuse another hotel's rows.
+      if (String(attributes["property_id"] ?? "") !== job.providerPropertyId) continue;
+      const revisionId = String(attributes["revision_id"] ?? "");
+      if (!revisionId) throw new PullFailure("booking_without_revision", [String(item["id"])]);
+      bookings.push({ id: String(item["id"]), revisionId });
+    }
+    if (data.length < PAGE_SIZE) break;
+  }
+  const failedBookingIds: string[] = [];
+  let promoted = 0;
+  for (const booking of bookings) {
+    if (options.signal?.aborted) throw new PullFailure("worker_shutdown");
+    try {
+      const url = new URL(
+        `/api/v1/booking_revisions/${encodeURIComponent(booking.revisionId)}`,
+        `${options.apiBaseUrl}/`,
+      );
+      const revision = (await read(url, options, false))[0];
+      if (!revision) throw new PullFailure("revision_missing");
+      await promotePulledChannexBookingRevision({
+        store,
+        propertyId: job.propertyId,
+        providerPropertyId: job.providerPropertyId,
+        revision,
+      });
+      promoted += 1;
+    } catch {
+      failedBookingIds.push(booking.id);
+    }
+  }
+  if (failedBookingIds.length) throw new PullFailure("booking_failed", failedBookingIds);
+  return { bookings: bookings.length, promoted };
+}
+
+/** One Channex GET; `data` is a list (collections) or one object (a single revision). */
+async function read(url: URL, options: Options, list = true) {
+  let response: Response;
+  try {
+    const timeout = AbortSignal.timeout(30_000);
+    response = await (options.fetch ?? fetch)(url, {
+      method: "GET",
+      headers: { "user-api-key": options.apiKey },
+      signal: options.signal ? AbortSignal.any([options.signal, timeout]) : timeout,
+    });
+  } catch {
+    throw new PullFailure("provider_unavailable");
+  }
+  if (!response.ok)
+    throw new PullFailure(
+      response.status === 429
+        ? "rate_limited"
+        : response.status >= 500
+          ? "provider_unavailable"
+          : "provider_rejected",
+    );
+  const data = ((await response.json().catch(() => null)) as { data?: unknown } | null)?.data;
+  const items = list ? data : [data];
+  if (!Array.isArray(items)) throw new PullFailure("invalid_feed");
+  return items.filter((item): item is Record<string, unknown> => record(item) !== null);
+}
+
+function record(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+async function readFeed(pool: pg.Pool, job: PullJob, options: Options) {
+  await assertOwned(pool, job, options);
   const url = new URL("/api/v1/booking_revisions/feed", `${options.apiBaseUrl}/`);
   url.searchParams.set("filter[property_id]", job.providerPropertyId);
   url.searchParams.set("order[inserted_at]", "asc");
@@ -221,10 +345,17 @@ async function finish(
   status: "succeeded" | "failed",
   metadata: Record<string, unknown>,
 ) {
+  // A failed resync waits for another attempt while it has one; pulls never retry in place.
   await pool.query(
-    `UPDATE platform.jobs SET status = $2, finished_at = now(), locked_at = NULL, locked_by = NULL,
-       updated_at = now(), job_metadata = job_metadata || $3::jsonb
+    `UPDATE platform.jobs SET
+       status = CASE WHEN $2 = 'failed' AND job_type = $5 AND attempts_count < max_attempts
+         THEN 'pending' ELSE $2 END,
+       run_after = CASE WHEN $2 = 'failed' AND job_type = $5 AND attempts_count < max_attempts
+         THEN now() + ($6::bigint * interval '1 millisecond') ELSE run_after END,
+       finished_at = CASE WHEN $2 = 'failed' AND job_type = $5 AND attempts_count < max_attempts
+         THEN NULL ELSE now() END,
+       locked_at = NULL, locked_by = NULL, updated_at = now(), job_metadata = job_metadata || $3::jsonb
      WHERE id = $1::uuid AND locked_by = $4`,
-    [job.id, status, JSON.stringify(metadata), options.workerId],
+    [job.id, status, JSON.stringify(metadata), options.workerId, RESYNC_TYPE, RESYNC_RETRY_MS],
   );
 }

@@ -15,13 +15,26 @@ const PROPERTIES = [OWNED, UNLISTED, REVOKED, REBOUND];
 const external = (property: string) => `chx-pull-${property.slice(-1)}`;
 const NOW = new Date("2026-10-10T10:02:00.000Z");
 const FEED = "https://app.channex.io/api/v1/booking_revisions/feed";
+const BOOKINGS = "https://app.channex.io/api/v1/bookings";
 
 describe.skipIf(!URL)("Channex scheduled booking-feed pull (PostgreSQL)", () => {
   const db = new pg.Pool({ connectionString: URL ?? "postgresql://disabled", max: 2 });
   const calls: string[] = [];
+  let resyncPages: Array<Record<string, unknown>[]> = [];
   const fetcher: typeof fetch = async (input, init) => {
     calls.push(`${init?.method ?? "GET"} ${String(input)}`);
-    const property = new globalThis.URL(String(input)).searchParams.get("filter[property_id]");
+    const url = new globalThis.URL(String(input));
+    const property = url.searchParams.get("filter[property_id]");
+    if (url.pathname === "/api/v1/bookings")
+      return Response.json({
+        data: resyncPages[Number(url.searchParams.get("pagination[page]")) - 1] ?? [],
+      });
+    if (url.pathname.startsWith("/api/v1/booking_revisions/")) {
+      const id = url.pathname.split("/").at(-1)!;
+      return id === "rev-gone"
+        ? new Response(null, { status: 404 })
+        : Response.json({ data: revision(id, `booking-${id.slice(4)}`) });
+    }
     return Response.json({
       data:
         property === external(OWNED)
@@ -141,6 +154,100 @@ describe.skipIf(!URL)("Channex scheduled booking-feed pull (PostgreSQL)", () => 
       { booking: "booking-1", source: "revision_feed", pull: false },
       { booking: "booking-2", source: "revision_feed", pull: false },
     ]);
+  });
+
+  it("copies the upcoming bookings the attach executor asked for, once per binding", async () => {
+    calls.length = 0;
+    const generation = (
+      await db.query<{ generation: string }>(
+        "SELECT binding_generation::text AS generation FROM pms.channel_connections WHERE property_id=$1",
+        [OWNED],
+      )
+    ).rows[0]!.generation;
+    const resyncJob = async (property: string, bindingGeneration: string, suffix = "") =>
+      (
+        await db.query<{ id: string }>(
+          `INSERT INTO platform.jobs (job_key, queue_name, job_type, tenant_scope, property_id, resource_product,
+             resource_type, resource_id, max_attempts, payload)
+           VALUES ($1, 'pms.channex.webhooks', 'channex.resync-bookings', 'property', $2, 'pms', 'channel_connection', $2::text, 3,
+             jsonb_build_object('propertyId', $2::text, 'providerPropertyId', $3, 'bindingGeneration', $4))
+           RETURNING id::text`,
+          [
+            `channex.resync-bookings:${property}:${bindingGeneration}${suffix}`,
+            property,
+            external(property),
+            bindingGeneration,
+          ],
+        )
+      ).rows[0]!.id;
+    const booking = (id: string, revisionId: string, property = OWNED) => ({
+      id,
+      type: "booking",
+      attributes: { property_id: external(property), revision_id: revisionId, status: "new" },
+    });
+    // Page one is full, so the runner reads page two; another hotel's row is skipped.
+    resyncPages = [
+      [
+        ...Array.from({ length: 98 }, (_, index) =>
+          booking(`booking-r${index + 10}`, `rev-r${index + 10}`),
+        ),
+        booking("booking-elsewhere", "rev-elsewhere", UNLISTED),
+        booking("booking-r1", "rev-r1"),
+      ],
+      [booking("booking-r2", "rev-r2")],
+    ];
+    const job = await resyncJob(OWNED, generation);
+    const counters = await runChannexFeedPulls(URL!, { ...options, ownedPropertyIds: [OWNED] });
+    expect(counters).toMatchObject({ resynced: 1, resyncFailed: 0 });
+    const listed = calls.filter((call) => call.includes("/api/v1/bookings?"));
+    expect(listed).toEqual([
+      `GET ${BOOKINGS}?filter%5Bproperty_id%5D=${external(OWNED)}&filter%5Bdeparture_date%5D%5Bgte%5D=2026-10-09&pagination%5Bpage%5D=1&pagination%5Blimit%5D=100`,
+      `GET ${BOOKINGS}?filter%5Bproperty_id%5D=${external(OWNED)}&filter%5Bdeparture_date%5D%5Bgte%5D=2026-10-09&pagination%5Bpage%5D=2&pagination%5Blimit%5D=100`,
+    ]);
+    expect(calls.filter((call) => call.includes("/booking_revisions/rev-")).length).toBe(100);
+    const done = await db.query(
+      "SELECT status, job_metadata->'bookings' AS bookings, job_metadata->'promoted' AS promoted FROM platform.jobs WHERE id=$1",
+      [job],
+    );
+    expect(done.rows[0]).toEqual({ status: "succeeded", bookings: 100, promoted: 100 });
+    const ingest = await db.query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM platform.jobs WHERE job_type='channex.ingest-booking'
+         AND payload->>'propertyId'=$1 AND payload->>'channelBookingId' LIKE 'booking-r%'`,
+      [OWNED],
+    );
+    expect(ingest.rows[0]!.n).toBe(100);
+    // A missing revision fails the resync, which waits for its next attempt; a stale binding is refused.
+    resyncPages = [[booking("booking-gone", "rev-gone")]];
+    const retry = await resyncJob(OWNED, generation, ":retry");
+    expect(
+      await runChannexFeedPulls(URL!, { ...options, ownedPropertyIds: [OWNED] }),
+    ).toMatchObject({
+      resyncFailed: 1,
+      failures: [{ propertyId: OWNED, code: "booking_failed" }],
+    });
+    const waiting = await db.query(
+      "SELECT status, attempts_count AS attempts, run_after > now() AS later, job_metadata->'failedBookingIds' AS ids FROM platform.jobs WHERE id=$1",
+      [retry],
+    );
+    expect(waiting.rows[0]).toEqual({
+      status: "pending",
+      attempts: 1,
+      later: true,
+      ids: ["booking-gone"],
+    });
+    const stale = await resyncJob(OWNED, "00000000-0000-4000-8000-000000000000");
+    await db.query("UPDATE platform.jobs SET max_attempts = 1 WHERE id = $1", [stale]);
+    expect(
+      await runChannexFeedPulls(URL!, { ...options, ownedPropertyIds: [OWNED] }),
+    ).toMatchObject({
+      resyncFailed: 1,
+      failures: [{ propertyId: OWNED, code: "connection_not_owned" }],
+    });
+    expect(
+      (await db.query("SELECT status FROM platform.jobs WHERE id=$1", [stale])).rows[0],
+    ).toEqual({
+      status: "failed",
+    });
   });
 
   async function pullJobs() {
