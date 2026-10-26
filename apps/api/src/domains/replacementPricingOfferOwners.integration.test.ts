@@ -9580,10 +9580,14 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
   });
   it("resends after a transport failure, stops on a provider rejection and releases a lost claim", async () => {
     const f = await deliveryFixture();
-    // Transport failure: the receipt is retained, the delivery closes as unverified, and the
-    // same body goes out again on the next turn.
+    // Transport failure: the receipt is retained but the turn fails (the worker retries with
+    // backoff); the delivery closes as unverified, and the same body goes out again next time.
     const lost = await f.send(null);
-    expect(lost.result).toMatchObject({ kind: "retained" });
+    expect(lost.result).toEqual({
+      kind: "delivery_failed",
+      deliveryId: lost.deliveryId,
+      reason: "transport",
+    });
     expect(await f.reconcile()).toEqual({ kind: "pending_deliveries_reconciled", count: 1 });
     expect((await f.deliveries()).rows[0]).toMatchObject({
       state: "reconciled",
