@@ -29,7 +29,7 @@ describe.skipIf(!URL)("Channex scheduled booking-feed pull (PostgreSQL)", () => 
       return Response.json({
         data: resyncPages[Number(url.searchParams.get("pagination[page]")) - 1] ?? [],
       });
-    if (url.pathname.startsWith("/api/v1/booking_revisions/")) {
+    if (url.pathname.startsWith("/api/v1/booking_revisions/") && !url.pathname.endsWith("/feed")) {
       const id = url.pathname.split("/").at(-1)!;
       return id === "rev-gone"
         ? new Response(null, { status: 404 })
@@ -169,8 +169,8 @@ describe.skipIf(!URL)("Channex scheduled booking-feed pull (PostgreSQL)", () => 
         await db.query<{ id: string }>(
           `INSERT INTO platform.jobs (job_key, queue_name, job_type, tenant_scope, property_id, resource_product,
              resource_type, resource_id, max_attempts, payload)
-           VALUES ($1, 'pms.channex.webhooks', 'channex.resync-bookings', 'property', $2, 'pms', 'channel_connection', $2::text, 3,
-             jsonb_build_object('propertyId', $2::text, 'providerPropertyId', $3, 'bindingGeneration', $4))
+           VALUES ($1, 'pms.channex.webhooks', 'channex.resync-bookings', 'property', $2::uuid, 'pms', 'channel_connection', $2::uuid::text, 3,
+             jsonb_build_object('propertyId', $2::uuid::text, 'providerPropertyId', $3::text, 'bindingGeneration', $4::text))
            RETURNING id::text`,
           [
             `channex.resync-bookings:${property}:${bindingGeneration}${suffix}`,
