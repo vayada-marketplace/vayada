@@ -766,6 +766,8 @@
   "calendar.awaitingPaymentHeld": "それまで客室は確保され、入金済みにされない場合は自動的に解除されます。",
   "calendar.paymentDeadlinePassed": "お支払い期限を過ぎたため、受領済みにすることはできません。予約は自動的に解除されます。",
   "calendar.openBooking": "予約を開く",
+  "dashboard.guestsRegistered": "{total}名中{registered}名のゲストが登録済み",
+  "checkIn.bookerContactFromBooking": "氏名、メール、電話番号は予約情報から取得されます。",
   "calendar.targetManualBooking.roomCapacity": "最大宿泊人数: {count}名",
   "calendar.targetManualBooking.guestTally": "宿泊者: {count} / {capacity}名",
   "calendar.targetManualBooking.capacityReached": "選択した部屋の定員に達しました。宿泊者を追加するには部屋を追加してください。",

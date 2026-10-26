@@ -766,6 +766,8 @@
   "calendar.awaitingPaymentHeld": "Le camere restano bloccate fino ad allora e vengono rilasciate automaticamente se il pagamento non viene segnato come ricevuto.",
   "calendar.paymentDeadlinePassed": "La scadenza del pagamento è passata, quindi il pagamento non può più essere segnato come ricevuto. La prenotazione viene rilasciata automaticamente.",
   "calendar.openBooking": "Apri prenotazione",
+  "dashboard.guestsRegistered": "{registered} ospiti registrati su {total}",
+  "checkIn.bookerContactFromBooking": "Nome, email e telefono provengono dalla prenotazione.",
   "calendar.targetManualBooking.roomCapacity": "Ospiti max.: {count}",
   "calendar.targetManualBooking.guestTally": "Ospiti: {count} su {capacity}",
   "calendar.targetManualBooking.capacityReached": "Capacità massima raggiunta per le camere selezionate. Aggiungi un'altra camera per aggiungere altri ospiti.",

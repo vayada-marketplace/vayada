@@ -1,37 +1,51 @@
 "use client";
 import ApproximateAmountsNote from "@/components/booking/ApproximateAmountsNote";
 import RoomSelectionSummary from "@/components/booking/RoomSelectionSummary";
-import BookedRoomsList from "@/components/booking/BookedRoomsList";
+import BookedRoomsList, { useBookedRoomLine } from "@/components/booking/BookedRoomsList";
+import ConfirmationCancellation from "@/components/booking/ConfirmationCancellation";
+import ConfirmationHotelCard from "@/components/booking/ConfirmationHotelCard";
+import StayDates from "@/components/booking/StayDates";
 import StayRange from "@/components/booking/StayRange";
+import { isManualPricingPaymentMethod } from "@vayada/domain-booking/replacement-pricing";
 
 import { formatCheckInTime, formatCheckOutTime } from "@/lib/arrivalTimes";
+import { bookedMeal, singleRoomMeal } from "@/lib/bookedMeal";
+import type { BookingStay } from "@/lib/bookingStay";
 import { stayCalendarFile } from "@/lib/calendarFile";
+import { bookedPolicyBlocks } from "@/lib/cancellationPolicy";
+import { hotelCountryName } from "@/lib/checkoutTerms";
 import {
   directionsUrl,
   groupReference,
   paymentLine,
   type PaymentWay,
 } from "@/lib/confirmationDisplay";
-import { formatStayDate, resolveLocale } from "@/lib/utils";
+import { directPerks } from "@/lib/directPerks";
+import { fetchGuestNearby } from "@/lib/nearbyPlaces";
+import { hotelToday } from "@/lib/roomChoices";
+import { serverNow } from "@/lib/serverClock";
+import { resolveLocale } from "@/lib/utils";
 import { useState, useEffect, useId, useRef, type ReactNode } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { paymentMethodLabelKey, type PaymentMethodLabelKey } from "@vayada/locale-constants";
 import { Link, useRouter } from "@/i18n/navigation";
 import BookingNavigation from "@/components/layout/BookingNavigation";
 import BookingFooter from "@/components/layout/BookingFooter";
-import HotelHeroImage from "@/components/booking/HotelHeroImage";
-import { bookingImageSizes } from "@/components/booking/imageSizes";
 import { useHotel, useSlug } from "@/contexts/HotelContext";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { Booking } from "@/lib/types";
 import { bookingService, type BookingChangeRequest } from "@/services/api/booking";
 import { ApiError } from "@/services/api/client";
+import { quoteMoneyAmount } from "@/services/api/replacementOffers";
 import {
   readGuestDetails,
   readLastBooking,
   saveLastBooking,
   toConfirmationBooking,
 } from "@/lib/storage/bookingDraft";
+
+// Stay details are asked for by the booking's id only (VAY-2360), as the API stores it.
+const STAY_ID = /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 
 /** "Waiting for our reply · 17h 59m 58s left"; it ticks on its own so the page doesn't re-render. */
 function PendingStatus({
@@ -116,7 +130,6 @@ const ICONS = {
     "M16.5 6v.75m0 3v.75m0 3v.75m0 3V18m-9-5.25h5.25M7.5 15h3M3.375 5.25c-.621 0-1.125.504-1.125 1.125v3.026a2.999 2.999 0 0 1 0 5.198v3.026c0 .621.504 1.125 1.125 1.125h17.25c.621 0 1.125-.504 1.125-1.125v-3.026a2.999 2.999 0 0 1 0-5.198V6.375c0-.621-.504-1.125-1.125-1.125H3.375Z",
   home: "m2.25 12 8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25",
   cross: "M6 18 18 6M6 6l12 12",
-  pin: "M15 10.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0ZM19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1 1 15 0Z",
   calendar:
     "M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5",
 } as const;
@@ -216,6 +229,8 @@ export default function BookingConfirmationPageClient({
   const tc = useTranslations("common");
   const tp = useTranslations("payment");
   const tm = useTranslations("myBooking");
+  const th = useTranslations("home");
+  const roomLine = useBookedRoomLine();
   const withdrawTitleId = useId();
   const withdrawDialog = useRef<HTMLDialogElement>(null);
   const { hotel } = useHotel();
@@ -229,6 +244,11 @@ export default function BookingConfirmationPageClient({
   const [hydrateError, setHydrateError] = useState(false);
   const [changeRequest, setChangeRequest] = useState<BookingChangeRequest | null>(null);
   const [copied, setCopied] = useState(false);
+  // VAY-2360: the booked terms and places of this booking (by id), and the hotel's direct-booking perks.
+  // `details` null: the read failed, so the page shows what it did before.
+  const [stay, setStay] = useState<{ id: string; details: BookingStay | null } | null>(null);
+  const [benefits, setBenefits] = useState<string[]>([]);
+  const [hasTips, setHasTips] = useState(false);
   const confirmationLookup = useRef<Promise<Booking | null> | null>(null);
   const [paypalInfo, setPaypalInfo] = useState<{
     email: string;
@@ -352,6 +372,50 @@ export default function BookingConfirmationPageClient({
       cancelled = true;
     };
   }, [booking?.id, booking?.guestEmail, emailParam, slug]);
+
+  // VAY-2360: what the ticket and the hotel card add, for a booking known by its id; a status change (the
+  // hotel accepts) reloads it. Extras only: without them the page shows what it did before.
+  const stayEmail = (booking?.guestEmail || emailParam || "").trim();
+  useEffect(() => {
+    const id = booking?.id;
+    if (!id || !stayEmail || !STAY_ID.test(id)) return;
+    let cancelled = false;
+    bookingService
+      .stay(slug, id, stayEmail)
+      .then((details) => {
+        if (!cancelled) setStay({ id, details });
+      })
+      .catch(() => {
+        if (!cancelled) setStay({ id, details: null });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [booking?.id, booking?.status, stayEmail, slug]);
+
+  // The hotel's local tips (our own API, no Google): Directions opens "Around {hotel}" when there are some.
+  useEffect(() => {
+    if (!slug) return;
+    const controller = new AbortController();
+    fetchGuestNearby(slug, controller.signal)
+      .then((nearby) => setHasTips(nearby.places.length > 0))
+      .catch(() => {});
+    return () => controller.abort();
+  }, [slug]);
+
+  useEffect(() => {
+    if (status !== "confirmed") return;
+    let cancelled = false;
+    bookingService
+      .getPaymentSettings(slug)
+      .then((settings) => {
+        if (!cancelled) setBenefits(Array.isArray(settings.benefits) ? settings.benefits : []);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [status, slug]);
 
   // Poll for status updates every 30s when pending
   useEffect(() => {
@@ -479,9 +543,6 @@ export default function BookingConfirmationPageClient({
   const guestEmail = (booking?.guestEmail || emailParam || "").trim();
   const guestName = booking?.guestFirstName?.trim();
   const manageBookingHref = `/my-booking?reference=${encodeURIComponent(reference)}`;
-  const requestChangesHref = guestEmail
-    ? `/booking/${encodeURIComponent(reference)}/request-change`
-    : null;
   const paymentMethodLabels: Record<PaymentMethodLabelKey, string> = {
     card: t("manualCard"),
     creditCard: t("creditCard"),
@@ -661,7 +722,42 @@ export default function BookingConfirmationPageClient({
     isPending &&
     !!booking?.canEditRequest &&
     (!booking.hostResponseDeadline || Date.parse(booking.hostResponseDeadline) > Date.now());
-  const datesClass = `font-heading text-xl leading-tight lining-nums sm:text-[28px] sm:leading-[34px] ${isEnded ? "text-gray-500 line-through" : "text-gray-900"}`;
+  const details = stay && booking && stay.id === booking.id ? stay.details : null;
+  // The stay details have answered (or can't be asked for): until then no terms show anywhere.
+  const stayKnown = !!booking && (!STAY_ID.test(booking.id) || stay?.id === booking.id);
+  // The booked terms, judged against the hotel's date today, as the cancel route does (VAY-2360).
+  // An unpaid PayPal stay is released without its money and can be withdrawn for free: no line.
+  const policyBlocks =
+    booking &&
+    details?.cancellation &&
+    (isPending || isConfirmed) &&
+    !(isPending && booking.paymentMethod === "paypal")
+      ? bookedPolicyBlocks(details.cancellation, {
+          today: hotelToday(details.cancellation.timeZone, new Date(serverNow())),
+          request: isPending && !isManualPricingPaymentMethod(booking.paymentMethod),
+          card: booking.paymentMethod === "card",
+          bankTransfer:
+            booking.paymentMethod === "bank_transfer" &&
+            !["paid", "partially_paid"].includes(booking.paymentStatus ?? ""),
+        })
+      : [];
+  const policyCurrency = details?.cancellation?.currency ?? booking?.currency ?? "";
+  const perks = isConfirmed ? directPerks(benefits, (key) => t(`perk.${key}`)) : [];
+  // Each room's own terms show whenever the ticket has no cancellation line.
+  const roomTerms = stayKnown && policyBlocks.length === 0;
+  const bookedRoom = booking?.bookedRooms?.length === 1 ? booking.bookedRooms[0] : undefined;
+  const meal = !booking
+    ? null
+    : bookedRoom
+      ? roomLine(bookedRoom, {
+          checkIn: booking.checkIn,
+          timezone: hotel.timezone,
+          terms: roomTerms,
+        }) || null
+      : bookedMeal(singleRoomMeal(booking), {
+          noMeals: t("noMeals"),
+          meal: (plan) => th(`choice.meal.${plan}`),
+        });
 
   const stayDates =
     booking && [booking.checkIn, booking.checkOut].every((date) => /^\d{4}-\d{2}-\d{2}$/.test(date))
@@ -765,33 +861,10 @@ export default function BookingConfirmationPageClient({
     steps = (
       <>
         {isConfirmed && stayDates && (
-          <StepRow
-            icon="calendar"
-            title={t("addToCalendar")}
-            hint={`${formatStayDate(stayDates.checkIn, locale)} – ${formatStayDate(stayDates.checkOut, locale)}`}
-            onClick={addToCalendar}
-          />
-        )}
-        {isConfirmed && hotel.mapPin && (
-          <StepRow
-            icon="pin"
-            title={t("getDirections")}
-            hint={t("directionsHint")}
-            href={directionsUrl(hotel.mapPin, hotel.name, hotel.location)}
-          />
+          <StepRow icon="calendar" title={t("addToCalendar")} onClick={addToCalendar} />
         )}
         {contact}
-        {isConfirmed &&
-          booking &&
-          requestChangesHref &&
-          (!changeRequest || changeRequest.status !== "pending") && (
-            <StepRow
-              icon="pencil"
-              title={t("requestChanges")}
-              hint={t("requestChangesHint")}
-              href={requestChangesHref}
-            />
-          )}
+        {/* No "Request changes": guest date changes can't be repriced online yet (VAY-2110). */}
         <StepRow
           icon="ticket"
           title={isConfirmed ? t("manageOrCancel") : t("manageBooking")}
@@ -806,27 +879,55 @@ export default function BookingConfirmationPageClient({
     <div className="flex min-h-screen flex-col bg-accent">
       <BookingNavigation solid />
 
-      <main className="mx-auto grid w-full max-w-6xl flex-1 items-start gap-8 px-4 py-8 sm:px-6 sm:py-12 lg:grid-cols-[minmax(0,1fr)_24rem] lg:gap-12 lg:px-8 lg:py-16">
-        <div className="flex min-w-0 flex-col gap-7 sm:gap-8">
+      {/* VAY-2360: one 1440×900 screen on a desktop; on a phone the ticket, then the hotel and next steps. */}
+      <main className="mx-auto grid w-full max-w-[1104px] flex-1 items-start gap-6 px-4 py-6 sm:px-6 sm:py-10 lg:grid-cols-[minmax(0,1fr)_20rem] lg:grid-rows-[auto_1fr] lg:gap-x-10 lg:gap-y-5 lg:px-8 lg:py-9">
+        <div className="flex min-w-0 flex-col gap-5">
           {/* Status */}
           {!heading && <h1 className="sr-only">{t("bookingReference")}</h1>}
           {(statusPill || heading) && (
             <div className="flex flex-col gap-3">
-              {statusPill && (
-                <p
-                  className={`flex items-center gap-2 self-start rounded-full px-3 py-1 text-[13px] font-semibold tracking-[0.02em] ${statusPill.tone}`}
-                >
-                  <span aria-hidden="true" className={`h-2 w-2 rounded-full ${statusPill.dot}`} />
-                  {statusPill.text}
-                </p>
+              {(statusPill || perks.length > 0) && (
+                <div className="flex flex-wrap items-center gap-2">
+                  {statusPill && (
+                    <p
+                      className={`flex items-center gap-2 rounded-full px-3 py-1 text-[13px] font-semibold tracking-[0.02em] ${statusPill.tone}`}
+                    >
+                      <span
+                        aria-hidden="true"
+                        className={`h-2 w-2 rounded-full ${statusPill.dot}`}
+                      />
+                      {statusPill.text}
+                    </p>
+                  )}
+                  {perks.length > 0 && (
+                    <p
+                      className="flex items-start gap-1.5 rounded-[14px] border border-success-200 bg-success-50 px-3 py-[5px] text-[13px] font-semibold leading-[18px] text-success-800 sm:rounded-full"
+                      data-testid="direct-perks"
+                    >
+                      <svg
+                        aria-hidden="true"
+                        className="mt-0.5 h-3.5 w-3.5 shrink-0"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth={2.2}
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        viewBox="0 0 24 24"
+                      >
+                        <path d="m4.5 12.75 6 6 9-13.5" />
+                      </svg>
+                      <span>{[t("bookedDirect"), ...perks].join(" · ")}</span>
+                    </p>
+                  )}
+                </div>
               )}
               {heading && (
-                <h1 className="font-heading text-4xl font-medium tracking-[-0.02em] text-gray-900 sm:text-5xl lg:text-[52px] lg:leading-[60px]">
+                <h1 className="font-heading text-[34px] font-bold leading-10 tracking-[-0.02em] text-gray-900 sm:text-5xl lg:text-[48px] lg:leading-[56px]">
                   {heading}
                 </h1>
               )}
               {subtitle && (
-                <p className="max-w-xl text-base text-gray-600 sm:text-lg sm:leading-7">
+                <p className="text-base text-gray-600 sm:text-[17px] sm:leading-[26px]">
                   {subtitle}
                 </p>
               )}
@@ -843,44 +944,29 @@ export default function BookingConfirmationPageClient({
               </p>
             ) : (
               <>
-                <div className="flex items-start gap-3 px-5 py-5 sm:items-center sm:gap-6 sm:px-9 sm:py-8">
-                  <div className="flex min-w-0 flex-1 flex-col gap-1">
-                    <span className={labelClass}>{t("checkIn")}</span>
-                    <span className={datesClass}>
-                      {booking.checkIn ? formatStayDate(booking.checkIn, locale) : "—"}
-                    </span>
-                    {checkInTime && (
-                      <span className="text-sm text-gray-600 sm:text-[15px]">
-                        {hotel.checkInUntil ? checkInTime : t("fromTime", { time: checkInTime })}
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex w-16 shrink-0 flex-col items-center gap-1.5 pt-6 sm:w-28 sm:pt-0">
-                    {displayedNights && (
-                      <span className="whitespace-nowrap text-[13px] font-semibold text-primary-700 sm:text-sm">
-                        {tc("nights", { count: displayedNights })}
-                      </span>
-                    )}
-                    <span aria-hidden="true" className="flex w-full items-center">
-                      <span className="h-1.5 w-1.5 rounded-full bg-primary-700" />
-                      <span className="h-px flex-1 bg-primary-200" />
-                      <span className="h-1.5 w-1.5 rounded-full border border-primary-700" />
-                    </span>
-                  </div>
-                  <div className="flex min-w-0 flex-1 flex-col items-end gap-1 text-right">
-                    <span className={labelClass}>{t("checkOut")}</span>
-                    <span className={datesClass}>
-                      {booking.checkOut ? formatStayDate(booking.checkOut, locale) : "—"}
-                    </span>
-                    {checkOutTime && (
-                      <span className="text-sm text-gray-600 sm:text-[15px]">
-                        {hotel.checkOutFrom ? checkOutTime : t("untilTime", { time: checkOutTime })}
-                      </span>
-                    )}
-                  </div>
-                </div>
+                <StayDates
+                  checkIn={booking.checkIn}
+                  checkOut={booking.checkOut}
+                  checkInTime={
+                    checkInTime
+                      ? hotel.checkInUntil
+                        ? checkInTime
+                        : t("fromTime", { time: checkInTime })
+                      : undefined
+                  }
+                  checkOutTime={
+                    checkOutTime
+                      ? hotel.checkOutFrom
+                        ? checkOutTime
+                        : t("untilTime", { time: checkOutTime })
+                      : undefined
+                  }
+                  nights={displayedNights}
+                  ended={isEnded}
+                  labelClass={labelClass}
+                />
 
-                <div className="flex flex-col gap-4 border-t border-dashed border-gray-300 px-5 py-5 sm:px-9 sm:py-6">
+                <div className="flex flex-col gap-4 border-t border-dashed border-gray-300 px-[18px] py-4 sm:px-7 sm:py-[18px]">
                   {/* VAY-2320: a group's rooms, each with its own guests and terms. */}
                   {booking.bookedRooms && booking.bookedRooms.length > 1 ? (
                     <BookedRoomsList
@@ -888,19 +974,16 @@ export default function BookingConfirmationPageClient({
                       checkIn={booking.checkIn}
                       timezone={hotel.timezone}
                       labelClass={labelClass}
+                      terms={roomTerms}
                     />
                   ) : (
                     <div className="flex flex-col gap-4 sm:flex-row sm:gap-8">
                       <div className="flex min-w-0 flex-1 flex-col gap-1">
                         <span className={labelClass}>{t("room")}</span>
-                        <span className="font-semibold text-gray-900 sm:text-[17px]">
+                        <span className="truncate font-semibold text-gray-900 sm:text-base">
                           {`${!booking.roomSelection && displayedRooms > 1 ? `${displayedRooms}× ` : ""}${booking.roomName || t("room")}`}
                         </span>
-                        {booking.mealDescription && (
-                          <span className="text-sm text-gray-600 sm:text-[15px]">
-                            {booking.mealDescription}
-                          </span>
-                        )}
+                        {meal && <span className="text-sm text-gray-600">{meal}</span>}
                       </div>
                       <div className="flex flex-col gap-1 sm:w-44 sm:shrink-0">
                         <span className={labelClass}>{t("guests")}</span>
@@ -909,9 +992,11 @@ export default function BookingConfirmationPageClient({
                             ? `${tc("adults", { count: displayedAdults })}${displayedChildren > 0 ? `, ${tc("children", { count: displayedChildren })}` : ""}`
                             : "—"}
                         </span>
-                        <span className="text-sm text-gray-600 sm:text-[15px]">
-                          {tc("room", { count: displayedRooms })}
-                        </span>
+                        {displayedRooms > 1 && (
+                          <span className="text-sm text-gray-600">
+                            {tc("room", { count: displayedRooms })}
+                          </span>
+                        )}
                       </div>
                     </div>
                   )}
@@ -946,7 +1031,7 @@ export default function BookingConfirmationPageClient({
                   )}
                 </div>
 
-                <div className="flex flex-col gap-3 border-t border-gray-100 px-5 py-5 sm:px-9 sm:py-6">
+                <div className="flex flex-col gap-3 border-t border-gray-100 px-[18px] py-4 sm:px-7 sm:py-[18px]">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
                     <div className="flex items-baseline justify-between gap-3 sm:order-last sm:flex-col sm:items-end sm:gap-0.5">
                       <span className={labelClass}>{amountLabel}</span>
@@ -1005,10 +1090,26 @@ export default function BookingConfirmationPageClient({
                   )}
                   <ApproximateAmountsNote currency={booking.currency} />
                 </div>
+                {policyBlocks.length > 0 && (
+                  <ConfirmationCancellation
+                    blocks={policyBlocks}
+                    formatMoney={(minor) =>
+                      formatPrice(quoteMoneyAmount(minor, policyCurrency), policyCurrency)
+                    }
+                    lineMoney={(minor) =>
+                      new Intl.NumberFormat("en-GB", {
+                        style: "currency",
+                        currency: policyCurrency,
+                        minimumFractionDigits: 0,
+                      }).format(quoteMoneyAmount(minor, policyCurrency))
+                    }
+                    manageHref={manageBookingHref}
+                  />
+                )}
               </>
             )}
 
-            <div className="flex items-end gap-3 border-t border-dashed border-gray-300 bg-gray-50 px-5 py-4 sm:items-center sm:gap-4 sm:px-9 sm:py-5">
+            <div className="flex items-end gap-3 border-t border-dashed border-gray-300 bg-gray-50 px-[18px] py-3.5 sm:items-center sm:gap-4 sm:px-7">
               <div className="flex min-w-0 flex-1 flex-col gap-1">
                 <span className={labelClass}>{t("bookingReference")}</span>
                 <span className="break-words text-base font-semibold tabular-nums tracking-[0.06em] text-primary-700 sm:text-lg">
@@ -1118,32 +1219,27 @@ export default function BookingConfirmationPageClient({
               </p>
             </div>
           )}
-
-          {!isEnded && (
-            <Link
-              href="/"
-              className="flex items-center gap-2 self-start pl-1 font-semibold text-primary-700 hover:underline"
-            >
-              <svg
-                aria-hidden="true"
-                className="h-4 w-4"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={2}
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18"
-                />
-              </svg>
-              {t("backToHotel", { property: hotel.name })}
-            </Link>
-          )}
         </div>
 
-        <aside className="flex min-w-0 flex-col gap-6">
+        <aside className="flex min-w-0 flex-col gap-5 lg:col-start-2 lg:row-span-2 lg:row-start-1">
+          <ConfirmationHotelCard
+            name={hotel.name}
+            heroImage={hotel.heroImage}
+            aroundHref={
+              hasTips && !isEnded ? `/booking/${encodeURIComponent(reference)}/around` : undefined
+            }
+            places={details?.places ?? []}
+            fallback={{
+              address:
+                [hotel.location, hotelCountryName(hotel.country, locale)]
+                  .filter(Boolean)
+                  .join(", ") || null,
+              directionsUrl:
+                !isEnded && hotel.mapPin
+                  ? directionsUrl(hotel.mapPin, hotel.name, hotel.location)
+                  : null,
+            }}
+          />
           <div className="flex flex-col gap-2">
             <h2 className={`${labelClass} px-1 pb-1`}>{t("nextSteps")}</h2>
             <div className="flex flex-col divide-y divide-gray-100 overflow-hidden rounded-2xl border border-gray-200 bg-white py-1.5 lg:rounded-[20px]">
@@ -1155,23 +1251,29 @@ export default function BookingConfirmationPageClient({
               )}
             </div>
           </div>
-
-          <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white lg:order-first lg:rounded-[20px]">
-            <div className="relative aspect-[16/9]">
-              <HotelHeroImage
-                src={hotel.heroImage}
-                alt={hotel.name}
-                sizes={bookingImageSizes.confirmationHotel}
-              />
-            </div>
-            <div className="flex flex-col gap-0.5 px-5 py-4">
-              <p className="font-heading text-xl font-semibold text-gray-900 sm:text-[22px]">
-                {hotel.name}
-              </p>
-              {hotel.location && <p className="text-sm text-gray-600">{hotel.location}</p>}
-            </div>
-          </div>
         </aside>
+        {!isEnded && (
+          <Link
+            href="/"
+            className="flex items-center gap-2 self-start pl-1 font-semibold text-primary-700 hover:underline lg:col-start-1 lg:row-start-2"
+          >
+            <svg
+              aria-hidden="true"
+              className="h-4 w-4"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18"
+              />
+            </svg>
+            {t("backToHotel", { property: hotel.name })}
+          </Link>
+        )}
       </main>
 
       {/* Withdraw asks first, like My Booking (VAY-2163) */}

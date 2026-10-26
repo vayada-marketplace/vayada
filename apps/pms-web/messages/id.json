@@ -770,6 +770,8 @@
   "calendar.awaitingPaymentHeld": "Kamar ditahan sampai saat itu dan dilepas otomatis jika pembayaran tidak ditandai sebagai diterima.",
   "calendar.paymentDeadlinePassed": "Batas waktu pembayaran telah lewat, jadi pembayaran tidak dapat lagi ditandai sebagai diterima. Pemesanan dilepas secara otomatis.",
   "calendar.openBooking": "Buka pemesanan",
+  "dashboard.guestsRegistered": "{registered} dari {total} tamu terdaftar",
+  "checkIn.bookerContactFromBooking": "Nama, email, dan telepon diambil dari pemesanan.",
   "calendar.targetManualBooking.roomCapacity": "Maks. tamu: {count}",
   "calendar.targetManualBooking.guestTally": "Tamu: {count} dari {capacity}",
   "calendar.targetManualBooking.capacityReached": "Kapasitas maksimum kamar yang dipilih sudah tercapai. Tambahkan kamar lain untuk menambah tamu.",

@@ -73,9 +73,10 @@ test("finds a booking from the shared footer on mobile", async ({ page }) => {
   await expect(page.getByText("2× Alpine Suite")).toBeVisible();
   // VAY-2361: guests see the room type, never the room the hotel assigned (it can still change).
   await expect(page.getByText("Suite 204, Suite 205")).toHaveCount(0);
-  // Stay dates read as days, not as raw YYYY-MM-DD.
-  await expect(page.getByText(/^Sat, 12 Sept? 2026$/)).toBeVisible();
-  await expect(page.getByText(/^Tue, 15 Sept? 2026$/)).toBeVisible();
+  // Stay dates read as days, not as raw YYYY-MM-DD; the year sits under them (VAY-2360).
+  await expect(page.getByText(/^Sat, 12 Sept?$/)).toBeVisible();
+  await expect(page.getByText(/^Tue, 15 Sept?$/)).toBeVisible();
+  await expect(page.getByText(/^2026 · from 15:00$/)).toBeVisible();
   await expect(page.getByText("Paid with Visa •••• 4242", { exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: "Email", exact: true })).toHaveAttribute(
     "href",
@@ -89,10 +90,8 @@ test("finds a booking from the shared footer on mobile", async ({ page }) => {
     "href",
     /email=/,
   );
-  await expect(page.getByRole("link", { name: /^Request changes/ })).not.toHaveAttribute(
-    "href",
-    /email=/,
-  );
+  // Guest date changes can't be repriced online yet, so there's no "Request changes" (VAY-2110).
+  await expect(page.getByRole("link", { name: /^Request changes/ })).toHaveCount(0);
   expect(lookupBody).toEqual({
     bookingReference: "VAY-1268",
     guestEmail: "ada@example.test",

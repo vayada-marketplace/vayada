@@ -344,6 +344,63 @@ describe("RoomAuthoringStep first-visit recovery", () => {
     renderer?.unmount();
   });
 
+  // The suite runs animation frames at once, before React re-renders: the order that left the
+  // field unfocused in the merge queue (VAY-2367).
+  it("focuses the room Review asked for once its form is on the page", async () => {
+    const roomTypeId = "33333333-3333-4333-8333-333333333333";
+    mocks.loadWorkspace.mockResolvedValue([
+      {
+        draftRoomId: `room:${roomTypeId}`,
+        roomTypeId,
+        roomFactsRevision: 1,
+        roomUnitsRevision: 1,
+        roomMediaRevision: 0,
+        roomAmenitiesRevision: 0,
+        facts: {
+          name: "Garden Suite",
+          description: "",
+          category: null,
+          occupancy: { maxGuests: 2, maxAdults: 2, maxChildren: 0 },
+          beds: [{ type: "king", quantity: 1 }],
+          bedrooms: null,
+          bathrooms: null,
+          bathroomType: "private",
+          size: null,
+        },
+        activeUnitCount: 4,
+        photos: [],
+        amenityKeys: [],
+        amenitiesReviewed: false,
+      },
+    ]);
+    let renderer: ReactTestRenderer | undefined;
+    const focus = vi.fn();
+    // Like the browser, the lookup finds only a field the renderer has committed.
+    vi.mocked(document.getElementById).mockImplementation((id) =>
+      renderer?.root.findAll((node) => node.type === "input" && node.props.id === id).length
+        ? ({ focus } as unknown as HTMLElement)
+        : null,
+    );
+
+    await act(async () => {
+      renderer = create(
+        createElement(RoomAuthoringStep, {
+          ...context(routeWithRoomsDraft(null)),
+          sessionStore: {},
+          requestedEntityId: roomTypeId,
+        }),
+      );
+    });
+
+    const nameInput = renderer!.root.find(
+      (node) => node.type === "input" && node.props.id === `room:${roomTypeId}-name`,
+    );
+    expect(nameInput.props.value).toBe("Garden Suite");
+    expect(document.getElementById).toHaveBeenCalledWith(`room:${roomTypeId}-name`);
+    expect(focus).toHaveBeenCalledOnce();
+    renderer?.unmount();
+  });
+
   it("activates a fresh room draft after safely removing the last saved room", async () => {
     const saved = {
       ...completeRoomWithoutPhotos(),

@@ -746,6 +746,11 @@ describe("Booking Web public bootstrap parity", () => {
         record(context);
         return { status: "pending" };
       },
+      async requestExtras(_slug, _bookingId, request, context) {
+        record(context);
+        expect(request).toEqual({ guest_email: "guest@example.com", addonIds: ["a1"] });
+        return { version: "booking-extras-request.v1" };
+      },
       async getStay(_slug, _bookingId, request, context) {
         record(context);
         // The route passes only the guest's email on.
@@ -851,6 +856,11 @@ describe("Booking Web public bootstrap parity", () => {
         payload: { guestEmail: "guest@example.com", expectedCancellationFeeMinor: "100" },
       }),
       app.inject({
+        method: "POST",
+        url: "/api/booking-web/hotels/hotel-alpenrose/bookings/b9fccec2-eb4c-4c35-bfd3-02a748c2e951/extras-request",
+        payload: { guestEmail: "guest@example.com", addonIds: ["a1"] },
+      }),
+      app.inject({
         method: "GET",
         url: "/api/booking-web/hotels/hotel-alpenrose/bookings/VAY-TARGET-1/payment-instructions",
       }),
@@ -861,7 +871,7 @@ describe("Booking Web public bootstrap parity", () => {
       }),
     ]);
 
-    expect(responses.map((response) => response.statusCode)).toEqual(Array(17).fill(200));
+    expect(responses.map((response) => response.statusCode)).toEqual(Array(18).fill(200));
     expect(operations.map((entry) => entry.operation)).toEqual(
       expect.arrayContaining([
         "checkout-config",
@@ -877,11 +887,12 @@ describe("Booking Web public bootstrap parity", () => {
         "booking-change-submit",
         "booking-change-get",
         "booking-stay",
+        "booking-extras-request",
         "booking-payment-instructions",
         "promo-validate",
       ]),
     );
-    expect(operations).toHaveLength(17);
+    expect(operations).toHaveLength(18);
     expect(operations.find((entry) => entry.operation === "booking-create")?.idempotencyKey).toBe(
       "guest-create-1",
     );
@@ -1164,6 +1175,11 @@ describe("Booking Web public bootstrap parity", () => {
     let termsText: string | null = "Hotel Alpenrose booking terms.";
     let paypalConfigured = true;
     let paymentsEnabled = true;
+    // VAY-2301: Finance's card readiness, whether the Booking Admin currency matches it (the legacy
+    // checkout's extra gate), and whether the hotel takes payment at the property.
+    let cardReady = false;
+    let currencyMatches = true;
+    let payAtProperty = true;
     let windows: { method: string; kind: string; amount: number; unit: string }[] = [];
     const pool = {
       async query(text: string) {
@@ -1217,7 +1233,8 @@ describe("Booking Web public bootstrap parity", () => {
                 termsText,
                 cancellationPolicyText: "Free cancellation until seven days before arrival.",
                 paymentsEnabled,
-                onlineCardReady: false,
+                onlineCardReady: cardReady && currencyMatches,
+                bookingPageCardReady: cardReady,
                 acceptedMethods: [
                   "card",
                   "xendit",
@@ -1226,7 +1243,11 @@ describe("Booking Web public bootstrap parity", () => {
                   "bank_transfer",
                   "paypal",
                   "pay_at_property",
-                ].filter((method) => paypalConfigured || method !== "paypal"),
+                ].filter(
+                  (method) =>
+                    (paypalConfigured || method !== "paypal") &&
+                    (payAtProperty || method !== "pay_at_property"),
+                ),
                 bankTransferReady: true,
                 depositPolicy: {
                   bankTransferInstructions: "Bank: Vayada Bank\nIBAN: DE123",
@@ -1288,8 +1309,9 @@ describe("Booking Web public bootstrap parity", () => {
       bankTransfer: true,
       paypalEnabled: true,
       paypalPaymentWindowHours: 48,
-      // The booking page keeps its fixed choice until bank transfer and PayPal acceptance is on.
-      bookingPagePaymentMethods: ["card", "pay_at_property"],
+      // VAY-2301: the hotel's card isn't ready and bank transfer and PayPal acceptance is off, so
+      // the booking page offers paying at the property only.
+      bookingPagePaymentMethods: ["pay_at_property"],
     });
     await expect(adapter.getCheckoutConfig("hotel-alpenrose")).resolves.not.toHaveProperty(
       "manualPaymentEarliestArrival",
@@ -1318,6 +1340,74 @@ describe("Booking Web public bootstrap parity", () => {
         replacementPricingManualPaymentAcceptanceEnabled: true,
       }).getCheckoutConfig("hotel-alpenrose"),
     ).resolves.toMatchObject({ bookingPagePaymentMethods: ["pay_at_property", "paypal"] });
+    // VAY-2301: card is offered only when Finance's card readiness is complete AND card
+    // acceptance is on with a payment provider; neither alone offers it.
+    const cardConfig = {
+      externalChanges: externalBookingChanges,
+      connectionString: "postgres://unused",
+      inventoryReservationPort: createTargetPmsInventoryReservationPort(),
+      pool: pool as never,
+      replacementPricingAcceptanceEnabled: true,
+      replacementPricingCardAcceptanceEnabled: true,
+      stripePaymentProvider: {} as never,
+    };
+    const cardAdapter = createTargetBookingWebCheckoutAdapter(cardConfig);
+    await expect(cardAdapter.getCheckoutConfig("hotel-alpenrose")).resolves.toMatchObject({
+      onlineCardPayment: false,
+      bookingPagePaymentMethods: ["pay_at_property"],
+    });
+    cardReady = true;
+    await expect(cardAdapter.getCheckoutConfig("hotel-alpenrose")).resolves.toMatchObject({
+      onlineCardPayment: true,
+      bookingPagePaymentMethods: ["card", "pay_at_property"],
+    });
+    // The card switch without a payment provider, or without quote acceptance, offers no card.
+    await expect(
+      createTargetBookingWebCheckoutAdapter({
+        ...cardConfig,
+        stripePaymentProvider: undefined,
+      }).getCheckoutConfig("hotel-alpenrose"),
+    ).resolves.toMatchObject({ bookingPagePaymentMethods: ["pay_at_property"] });
+    await expect(
+      createTargetBookingWebCheckoutAdapter({
+        ...cardConfig,
+        replacementPricingAcceptanceEnabled: false,
+      }).getCheckoutConfig("hotel-alpenrose"),
+    ).resolves.toMatchObject({ bookingPagePaymentMethods: ["pay_at_property"] });
+    // Card stays dark while its acceptance switch is off, whatever the hotel set up.
+    await expect(adapter.getCheckoutConfig("hotel-alpenrose")).resolves.toMatchObject({
+      onlineCardPayment: true,
+      bookingPagePaymentMethods: ["pay_at_property"],
+    });
+    // The booking page prices in the publication currency, so the legacy checkout's Booking Admin
+    // currency gate doesn't hide card from it (the offer catalog sells card-only rates meanwhile).
+    currencyMatches = false;
+    await expect(cardAdapter.getCheckoutConfig("hotel-alpenrose")).resolves.toMatchObject({
+      onlineCardPayment: false,
+      bookingPagePaymentMethods: ["card", "pay_at_property"],
+    });
+    currencyMatches = true;
+    // With bank transfer and PayPal acceptance on as well, every ready way, in the page's order.
+    await expect(
+      createTargetBookingWebCheckoutAdapter({
+        ...cardConfig,
+        replacementPricingManualPaymentAcceptanceEnabled: true,
+        bankTransfers: {} as never,
+      }).getCheckoutConfig("hotel-alpenrose"),
+    ).resolves.toMatchObject({
+      bookingPagePaymentMethods: ["card", "pay_at_property", "bank_transfer", "paypal"],
+    });
+    // A hotel that doesn't take payment at the property never has it offered.
+    payAtProperty = false;
+    await expect(cardAdapter.getCheckoutConfig("hotel-alpenrose")).resolves.toMatchObject({
+      payAtPropertyEnabled: false,
+      bookingPagePaymentMethods: ["card"],
+    });
+    await expect(adapter.getCheckoutConfig("hotel-alpenrose")).resolves.toMatchObject({
+      bookingPagePaymentMethods: [],
+    });
+    cardReady = false;
+    payAtProperty = true;
     await expect(adapter.getCheckoutConfig("hotel-alpenrose")).resolves.not.toHaveProperty(
       "paymentMethodArrivalWindows",
     );
@@ -1348,6 +1438,7 @@ describe("Booking Web public bootstrap parity", () => {
     await expect(adapter.getCheckoutConfig("hotel-alpenrose")).resolves.toMatchObject({
       paymentsEnabled: false,
       onlineCardPayment: false,
+      bookingPagePaymentMethods: [],
     });
     paymentsEnabled = true;
     paypalConfigured = false;
@@ -1372,6 +1463,9 @@ describe("Booking Web public bootstrap parity", () => {
     );
     expect(calls.find((call) => call.includes("FROM hotel_catalog.properties p"))).toContain(
       "upper(trim(fs.default_currency)) = upper(trim(bs.default_currency))",
+    );
+    expect(calls.find((call) => call.includes("FROM hotel_catalog.properties p"))).toContain(
+      'COALESCE(readiness.online_card_ready, FALSE) AS "bookingPageCardReady"',
     );
   });
 

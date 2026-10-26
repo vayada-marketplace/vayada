@@ -242,7 +242,12 @@ export default function CheckOutPage() {
     setAddingCharge(true);
     setError("");
     try {
-      const saved = await bookingsService.addCheckoutCharge(booking.id, chargeLabel.trim(), amount);
+      const saved = await bookingsService.addCheckoutCharge(
+        booking.id,
+        chargeLabel.trim(),
+        amount,
+        booking.currency,
+      );
       setCharges((prev) => [...prev, saved]);
       setChargeLabel("");
       setChargeAmount("");

@@ -375,6 +375,11 @@ export async function mockBookingApis(page: Page, options: MockBookingApisOption
     },
   );
 
+  // A booking's stay details (VAY-2360): none unless a test gives some.
+  await page.route(`**/api/booking-web/hotels/${SEEDED_BOOKING_SLUG}/bookings/*/stay`, (route) =>
+    route.fulfill({ json: { version: "booking-stay.v1", cancellation: null, places: [] } }),
+  );
+
   // The host's nearby places (VAY-2327): none unless a test gives some.
   await page.route(`**/api/booking-web/hotels/${SEEDED_BOOKING_SLUG}/nearby`, (route) =>
     route.fulfill({

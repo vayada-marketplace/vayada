@@ -27,9 +27,14 @@ export type NearbyReference = {
 
 /** The host's nearby places on a guest map (VAY-2327): loaded once the guest asked for the map (VAY-2216), with
  * the categories the guest turned off (for this tab) and the selected place. */
-export function useNearbyLayer(slug: string | null | undefined, active: boolean) {
+export function useNearbyLayer(
+  slug: string | null | undefined,
+  active: boolean,
+  /** false: a filter of its own, neither read from nor kept for the booking page's maps (VAY-2360). */
+  remember = true,
+) {
   const [nearby, setNearby] = useState<GuestNearby>({ places: [], categories: [] });
-  const [hidden, setHidden] = useState<string[]>(hiddenNearbyCategories);
+  const [hidden, setHidden] = useState<string[]>(() => (remember ? hiddenNearbyCategories() : []));
   const [selectedId, setSelectedId] = useState<string | null>(null);
   useEffect(() => {
     if (!active || !slug) return;
@@ -42,6 +47,8 @@ export function useNearbyLayer(slug: string | null | undefined, active: boolean)
   }, [active, slug]);
   const visible = nearby.places.filter(({ category }) => !hidden.includes(category.id));
   return {
+    /** Every place, in the host's order, whatever the filter (VAY-2360 numbers them by it). */
+    places: nearby.places,
     categories: nearby.categories,
     hidden,
     visible,
@@ -51,9 +58,40 @@ export function useNearbyLayer(slug: string | null | undefined, active: boolean)
     toggle: (id: string) => {
       const next = hidden.includes(id) ? hidden.filter((other) => other !== id) : [...hidden, id];
       setHidden(next);
-      hideNearbyCategories(next);
+      if (remember) hideNearbyCategories(next);
+    },
+    /** One category alone, or every category with null (VAY-2360's filter chips). */
+    only: (id: string | null) => {
+      const next = id === null ? [] : nearby.categories.map((c) => c.id).filter((c) => c !== id);
+      setHidden(next);
+      if (remember) hideNearbyCategories(next);
     },
   };
+}
+
+/** A nearby place's number in its category's colour (VAY-2360): the same on the list and the map. */
+export function NearbyNumber({
+  number,
+  place,
+  size = 26,
+}: {
+  number: number;
+  place: GuestNearbyPlace;
+  size?: number;
+}) {
+  return (
+    <span
+      aria-hidden="true"
+      className="flex shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
+      style={{
+        width: size,
+        height: size,
+        backgroundColor: NEARBY_CATEGORY_HEX[place.category.color],
+      }}
+    >
+      {number}
+    </span>
+  );
 }
 export type NearbyLayer = ReturnType<typeof useNearbyLayer>;
 

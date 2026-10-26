@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { PoolClient } from "pg";
+import type { PoolClient, QueryResultRow } from "pg";
 import { parseAddonEconomicTerms, type AddonEconomicTerms } from "@vayada/domain-booking";
 import { pricingAmountStep, pricingCurrencyScale, pricingObject } from "@vayada/domain-pms";
 import { pricingDecimalMinor } from "./pricingDecimalMinor.js";
@@ -68,48 +68,13 @@ export async function lockReplacementAddons(
   ).rows;
   const addons: Addon[] = [];
   for (const id of ids) {
-    const row = rows.find((r) => r.id === id);
-    if (
-      !row ||
-      row.status !== "active" ||
-      row.public_visible !== true ||
-      row.currency !== currency ||
-      !models.includes(row.pricing_model) ||
-      typeof row.name !== "string" ||
-      !row.name.trim() ||
-      !pricingObject(row.metadata)
-    )
-      return null;
-    const amountMinor = pricingDecimalMinor(row.amount, scale);
-    const terms = parseAddonEconomicTerms({
-      ownershipKind: row.ownership_kind,
-      partnerCommissionRate: row.commission,
-    });
-    const maxQuantity = row.metadata.maxQuantity === undefined ? 1 : row.metadata.maxQuantity;
-    const maxGuests = row.metadata.maxGuests === undefined ? null : row.metadata.maxGuests;
-    const leadTime = readAddonLeadTime(row.metadata);
-    if (
-      amountMinor === null ||
-      // Whole rupiah for IDR (VAY-2085); other currencies step by one minor unit.
-      BigInt(amountMinor) % BigInt(pricingAmountStep(currency)) !== 0n ||
-      !terms ||
-      !limit(maxQuantity) ||
-      (maxGuests !== null && !limit(maxGuests)) ||
-      !leadTime
-    )
-      return null;
-    addons.push({
-      id,
-      name: row.name,
-      amountMinor,
+    const addon = parseAddonDefinition(
+      rows.find((r) => r.id === id),
       currency,
-      pricingModel: row.pricing_model,
-      maxQuantity,
-      maxGuests,
-      leadTimeHours: leadTime.hours,
-      legacyLeadTime: leadTime.legacy !== null,
-      ...terms,
-    });
+      scale,
+    );
+    if (!addon) return null;
+    addons.push(addon);
   }
   return {
     addons,
@@ -119,4 +84,75 @@ export async function lockReplacementAddons(
         .update(JSON.stringify({ propertyId, currency, rows: rows.map((r) => r.source) }))
         .digest("hex"),
   };
+}
+
+/** One booking.addon_definitions row (with `amount` and `commission` as text) as a current, public add-on in
+ * `currency`, or null when it isn't one or its terms can't be trusted. */
+function parseAddonDefinition(
+  row: QueryResultRow | undefined,
+  currency: string,
+  scale: number,
+): Addon | null {
+  if (
+    !row ||
+    row.status !== "active" ||
+    row.public_visible !== true ||
+    row.currency !== currency ||
+    !models.includes(row.pricing_model) ||
+    typeof row.name !== "string" ||
+    !row.name.trim() ||
+    !pricingObject(row.metadata)
+  )
+    return null;
+  const amountMinor = pricingDecimalMinor(row.amount, scale);
+  const terms = parseAddonEconomicTerms({
+    ownershipKind: row.ownership_kind,
+    partnerCommissionRate: row.commission,
+  });
+  const maxQuantity = row.metadata.maxQuantity === undefined ? 1 : row.metadata.maxQuantity;
+  const maxGuests = row.metadata.maxGuests === undefined ? null : row.metadata.maxGuests;
+  const leadTime = readAddonLeadTime(row.metadata);
+  if (
+    amountMinor === null ||
+    // Whole rupiah for IDR (VAY-2085); other currencies step by one minor unit.
+    BigInt(amountMinor) % BigInt(pricingAmountStep(currency)) !== 0n ||
+    !terms ||
+    !limit(maxQuantity) ||
+    (maxGuests !== null && !limit(maxGuests)) ||
+    !leadTime
+  )
+    return null;
+  return {
+    id: row.id,
+    name: row.name,
+    amountMinor,
+    currency,
+    pricingModel: row.pricing_model,
+    maxQuantity,
+    maxGuests,
+    leadTimeHours: leadTime.hours,
+    legacyLeadTime: leadTime.legacy !== null,
+    ...terms,
+  };
+}
+
+/** The hotel's current public add-ons in `currency` with their unit prices, read without locks (VAY-2360:
+ * extras a booked guest can ask for; the hotel confirms each request, so nothing here prices a quote). Rows
+ * the quote owner would refuse are left out one by one. */
+export async function readCurrentPublicAddons(
+  client: Pick<PoolClient, "query">,
+  input: { propertyId: string; currency: string },
+): Promise<Addon[]> {
+  const scale = pricingCurrencyScale(input.currency);
+  if (scale === null) return [];
+  const rows = (
+    await client.query(
+      `SELECT a.*, price_amount::text AS amount, partner_commission_rate::text AS commission
+       FROM booking.addon_definitions a
+       WHERE property_id=$1::uuid AND status='active' AND public_visible=true AND currency=$2
+       ORDER BY name, id`,
+      [input.propertyId, input.currency],
+    )
+  ).rows;
+  return rows.flatMap((row) => parseAddonDefinition(row, input.currency, scale) ?? []);
 }
