@@ -354,6 +354,7 @@ async function read(url: URL, options: Options, list = true) {
   } catch {
     throw new PullFailure("provider_unavailable");
   }
+  if (!list && response.status === 404) throw new PullFailure("revision_missing");
   if (!response.ok)
     throw new PullFailure(
       response.status === 429
