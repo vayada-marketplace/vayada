@@ -90,10 +90,8 @@ test("finds a booking from the shared footer on mobile", async ({ page }) => {
     "href",
     /email=/,
   );
-  await expect(page.getByRole("link", { name: /^Request changes/ })).not.toHaveAttribute(
-    "href",
-    /email=/,
-  );
+  // Guest date changes can't be repriced online yet, so there's no "Request changes" (VAY-2110).
+  await expect(page.getByRole("link", { name: /^Request changes/ })).toHaveCount(0);
   expect(lookupBody).toEqual({
     bookingReference: "VAY-1268",
     guestEmail: "ada@example.test",
