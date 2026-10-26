@@ -30,6 +30,8 @@ export type PmsChannexManagementRoutesOptions = {
   datePrices?: ChannelDatePricesPort;
   publishedOfferProvisioningEnabled?: boolean;
   publishedOfferProvisioningPropertyId?: string;
+  /** VAY-2108 D7: the claimed scope's owned hotels may provision their published offers. */
+  publishedOfferProvisioningPropertyIds?: readonly string[];
 };
 
 export async function registerPmsChannexManagementRoutes(
@@ -284,7 +286,10 @@ export async function registerPmsChannexManagementRoutes(
       if (
         options.capabilityModes.provisioning !== "mutating" ||
         !options.publishedOfferProvisioningEnabled ||
-        request.params.propertyId !== options.publishedOfferProvisioningPropertyId
+        !(
+          request.params.propertyId === options.publishedOfferProvisioningPropertyId ||
+          options.publishedOfferProvisioningPropertyIds?.includes(request.params.propertyId)
+        )
       )
         return reply.code(409).send({ code: "channex_capability_not_mutating" });
       if (!options.commandPort)

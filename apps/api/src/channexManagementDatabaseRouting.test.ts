@@ -66,6 +66,32 @@ describe("Channex management database routing", () => {
     });
   });
 
+  it("routes the claimed ARI scope's management consumers and schedules the owned hotels", () => {
+    const owned = ["29f39aae-0000-4000-8000-000000000001"];
+    const routing = resolveChannexManagementDatabaseRouting({
+      config: config({
+        scope: "claimed",
+        ownedPropertyIds: owned,
+        capabilityModes: {
+          ...config().capabilityModes,
+          connection: "observe_only",
+          provisioning: "mutating",
+          ariSync: "mutating",
+          bookingSync: "mutating",
+        },
+      }),
+      commandsMutating: true,
+    });
+    expect(routing).toEqual({
+      bookingRevisionStore: undefined,
+      plans: "postgresql://channex_worker@db/app",
+      reconciliation: "postgresql://channex_worker@db/app",
+      availabilityInventory: "postgresql://channex_worker@db/app",
+      workerStore: "postgresql://channex_worker@db/app",
+      scheduler: { connectionString: "postgresql://channex_worker@db/app", propertyIds: owned },
+    });
+  });
+
   it("routes every selected-offer management consumer to the dedicated credential", () => {
     const connectionString = "postgresql://channex_worker@db/app";
     expect(

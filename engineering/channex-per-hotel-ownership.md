@@ -69,8 +69,17 @@ and message jobs that retry and then dead-letter.
    This setting exists only on next-api. The legacy variable of the same name freezes legacy
    polling for every hotel and is never set during a wave.
 3. Per hotel: legacy disable and readback, then `activate`, then the first pull within minutes.
-4. ARI and published offers: a claimed worker scope (new RLS helper, the pinned scope functions
-   untouched, digests re-pinned) plus platform grant/preflight. Then the initial offer ARI with
-   `stop_sell=true`, and activation at a quiet time.
+4. ARI and published offers (D7): `PMS_CHANNEX_ARI_SYNC_MODE` and `PMS_CHANNEX_PROVISIONING_MODE`
+   turn `mutating` together under the claimed scope, on top of booking sync. The worker then runs
+   under the claimed DB scope (0519: new RLS helper, the pinned scope functions untouched, digests
+   re-pinned) after the platform's claimed grant and preflight. It claims `sync_ari` and
+   `provision` jobs only for the owned hotels that pass the gate, plus unbound `enable` jobs.
+   Provisioning creates the missing Channex room types of a hotel that pressed "Enable
+   connection" (adopted rooms of a taken-over hotel are left alone); rate plans come only from
+   published offers, which the owned hotels may provision through the published-offer route. The
+   ARI schedule enqueues a full sync for each owned, claimed hotel whenever its pricing, rooms,
+   mappings, inventory or closures change, or the local date moves. Then the initial offer ARI
+   with `stop_sell=true`, activation, and ongoing delivery
+   (`engineering/channex-ongoing-offer-ari.md`) once `PMS_CHANNEX_OFFER_ARI_DELIVERY_ENABLED` is on.
 
 Kill switches: modes back to `observe_only` stop every hotel; `revoke` stops one.

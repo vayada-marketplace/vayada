@@ -19,8 +19,15 @@ const sourceTables = [
   "booking.same_day_booking_policies",
 ];
 
-export function createPgChannexAriSchedule(connectionString: string, propertyId?: string) {
+export function createPgChannexAriSchedule(
+  connectionString: string,
+  scope?: string | Readonly<{ propertyIds: readonly string[] }>,
+) {
   const pool = new pg.Pool({ connectionString, max: 1 });
+  // One staging property, or (VAY-2108 D7) the claimed scope's owned hotels: those are scheduled
+  // only while the target owns them (an active claim on the connected binding).
+  const propertyId = typeof scope === "string" ? scope : null;
+  const propertyIds = typeof scope === "object" ? [...scope.propertyIds] : null;
   return {
     async enqueue(now = new Date()) {
       // ponytail: one source scan per minute; replace with source-owned outbox
@@ -44,6 +51,11 @@ export function createPgChannexAriSchedule(connectionString: string, propertyId?
         LEFT JOIN hotel_catalog.property_locations location ON location.property_id=connection.property_id
         WHERE connection.provider='channex'
           AND ($2::uuid IS NULL OR connection.property_id=$2::uuid)
+          AND ($3::uuid[] IS NULL OR (connection.property_id=ANY($3::uuid[])
+            AND EXISTS (SELECT 1 FROM pms.channel_binding_claims claim
+              WHERE claim.property_id=connection.property_id AND claim.provider='channex'
+                AND claim.claim_state='active'
+                AND claim.external_property_id=connection.external_property_id)))
       ), changed AS (
         INSERT INTO pms.channex_ari_schedule_sources(property_id,fingerprint)
         SELECT property_id,fingerprint FROM fingerprints
@@ -65,7 +77,7 @@ export function createPgChannexAriSchedule(connectionString: string, propertyId?
         WHERE connection.connection_status IN ('connected','degraded')
           AND connection.external_property_id IS NOT NULL
         RETURNING id`,
-        [now.toISOString(), propertyId ?? null],
+        [now.toISOString(), propertyId, propertyIds],
       );
       return result.rows.length;
     },

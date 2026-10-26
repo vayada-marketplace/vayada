@@ -94,8 +94,33 @@ describe("Channex worker startup", () => {
     );
     expect(connect).not.toHaveBeenCalled();
   });
+  // D7: ARI and provisioning together run on the claimed worker scope.
+  const claimedAri: ChannexManagementConfig = {
+    ...claimed,
+    capabilityModes: {
+      ...claimed.capabilityModes,
+      ariSync: "mutating",
+      provisioning: "mutating",
+    },
+  };
+  it.each([
+    [claimedAri, { claimedScope: true, connectionScope: true }],
+    [
+      { ...claimedAri, capabilityModes: { ...claimedAri.capabilityModes, connection: "observe_only" } },
+      { claimedScope: true },
+    ],
+    [{ ...claimedAri, offerAriDeliveryEnabled: true }, { claimedScope: true, connectionScope: true, offerDelivery: true }],
+  ] as const)("asserts the claimed worker boundary for the claimed ARI scope (%#)", async (scope, expected) => {
+    const connect = vi
+      .spyOn(pg.Client.prototype, "connect")
+      .mockRejectedValue(new Error("fixture_connect"));
+    await expect(preflightChannexManagementWorker(scope, true)).rejects.toThrow("fixture_connect");
+    expect(connect).toHaveBeenCalledTimes(1);
+    void expected;
+  });
   it.each([
     { capabilityModes: { ...claimed.capabilityModes, ariSync: "mutating" as const } },
+    { capabilityModes: { ...claimed.capabilityModes, provisioning: "mutating" as const } },
     { capabilityModes: { ...claimed.capabilityModes, messaging: "mutating" as const } },
     { stagingRestrictionsPropertyId: "fixture" },
   ])("rejects a widened claimed scope before connecting: %j", async (override) => {
