@@ -3,6 +3,7 @@ import type pg from "pg";
 import {
   CHANNEX_MANAGEMENT_WORKER_ROLE,
   channexManagementWorkerPrivileges,
+  optionalChannexDeliveryRelations,
 } from "./channexManagementWorkerPrivileges.js";
 
 // Worker policy catalog through 0473, and with the VAY-2108 claimed scope (0519), both checked on
@@ -46,6 +47,10 @@ export async function assertChannexManagementWorkerBoundary(
     propertyId?: string;
     connectionScope?: boolean;
     claimedScope?: boolean;
+    /** VAY-2108 D3: ongoing offer delivery is on, so the delivery tables must be granted and
+     * row-secured (migration D3a plus the platform's delivery grant). Off: they may still be
+     * ungranted and without policies. */
+    offerDelivery?: boolean;
   } = {},
 ): Promise<void> {
   const role = CHANNEX_MANAGEMENT_WORKER_ROLE;
@@ -166,14 +171,16 @@ export async function assertChannexManagementWorkerBoundary(
       fail("column_privileges");
   }
   for (const [name, privileges] of Object.entries(channexManagementWorkerPrivileges)) {
+    const deliveryPending = optionalChannexDeliveryRelations.has(name) && !options.offerDelivery;
     if (
       name !== "platform.channex_management_worker_properties" &&
       name !== "platform.channex_management_worker_operations" &&
       name !== "finance.online_card_readiness" &&
+      !deliveryPending &&
       !relations.find((row) => row.name === name)?.rls
     )
       fail("rls_disabled");
-    if (options.allowMissingGrants) continue;
+    if (options.allowMissingGrants || deliveryPending) continue;
     for (const [privilege, columns] of Object.entries(privileges)) {
       if (
         columns === true
@@ -254,6 +261,7 @@ functions AS (
     'platform.channex_management_worker_scope(text,text,uuid)',
     'platform.channex_management_worker_connection_scope(text,text)',
     'platform.channex_management_worker_claimed_scope(text,text)',
+    'platform.channex_management_worker_delivery_source(text,text)',
     'platform.channex_management_worker_source(text,text,uuid)',
     'platform.tenant_scope_key(text,uuid,uuid)',
     'platform.valid_tenant_scope(text,uuid,uuid)',

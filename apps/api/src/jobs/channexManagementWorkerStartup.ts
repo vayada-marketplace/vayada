@@ -26,12 +26,12 @@ export async function preflightChannexManagementWorker(
       login.session_user !== CHANNEX_MANAGEMENT_WORKER_ROLE
     )
       throw new Error("channex_worker_login_mismatch");
-    await assertChannexManagementWorkerBoundary(
-      client,
-      connectionOnly
+    await assertChannexManagementWorkerBoundary(client, {
+      ...(connectionOnly
         ? { connectionScope: true }
-        : { propertyId: config.stagingRestrictionsPropertyId },
-    );
+        : { propertyId: config.stagingRestrictionsPropertyId }),
+      ...(config.offerAriDeliveryEnabled ? { offerDelivery: true } : {}),
+    });
   } finally {
     await client.end();
   }
