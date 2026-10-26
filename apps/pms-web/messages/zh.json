@@ -767,5 +767,10 @@
   "calendar.paymentDeadlinePassed": "付款期限已过，无法再将付款标记为已收到。预订将自动释放。",
   "calendar.openBooking": "打开预订",
   "dashboard.guestsRegistered": "{total} 位客人中已登记 {registered} 位",
-  "checkIn.bookerContactFromBooking": "姓名、邮箱和电话来自预订信息。"
+  "checkIn.bookerContactFromBooking": "姓名、邮箱和电话来自预订信息。",
+  "calendar.targetManualBooking.roomCapacity": "最多入住：{count} 人",
+  "calendar.targetManualBooking.guestTally": "入住人数：{count} / {capacity}",
+  "calendar.targetManualBooking.capacityReached": "已达到所选房间的最大入住人数。如需添加更多客人，请再添加一个房间。",
+  "calendar.targetManualBooking.guestsOverCapacity": "{count} 位客人超过了所选房间允许的 {capacity} 位。请删除一位客人或添加一个房间。",
+  "calendar.targetManualBooking.guestsOverCapacityServer": "所选房间无法容纳列出的所有客人。请删除一位客人或添加一个房间。"
 }

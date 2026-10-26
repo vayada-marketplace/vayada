@@ -165,6 +165,7 @@ export default function TargetManualBookingModal({
   const [phoneCountry, setPhoneCountry] = useState("");
   const [additionalGuests, setAdditionalGuests] = useState<AdditionalGuestDraft[]>([]);
   const [guestFocus, setGuestFocus] = useState<{ key: number } | null>(null);
+  const [capacityBlocked, setCapacityBlocked] = useState(false);
   const [showPreviewSpinner, setShowPreviewSpinner] = useState(false);
   const [previewMessage, setPreviewMessage] = useState("");
   const [previewCanRetry, setPreviewCanRetry] = useState(false);
@@ -262,7 +263,8 @@ export default function TargetManualBookingModal({
   }, [addonPackages, addons, conflicts, roomTypes, rooms, stays]);
   const previewKey = previewInput ? JSON.stringify(previewInput) : null;
   const preview = previewEvidence?.key === previewKey ? previewEvidence.result : null;
-  // Capacity is the tightest night, so split or back-to-back stays are not double counted.
+  // Capacity is the busiest night: everyone named fits on the night the most rooms are booked, so a
+  // second room for the same nights adds its places and a room move does not (VAY-2365/2366).
   const stayCapacity = (stay: StayDraft) =>
     roomTypes.find((type) => type.id === rooms.find((room) => room.id === stay.roomId)?.roomTypeId)
       ?.maxOccupancy ?? 0;
@@ -271,7 +273,7 @@ export default function TargetManualBookingModal({
     for (let date = stay.checkIn; date && date < stay.checkOut; date = addDay(date))
       nights.add(date);
   const guestCapacity = nights.size
-    ? Math.min(
+    ? Math.max(
         ...Array.from(nights, (date) =>
           stays
             .filter((stay) => stay.checkIn <= date && date < stay.checkOut)
@@ -280,6 +282,7 @@ export default function TargetManualBookingModal({
       )
     : stays.reduce((sum, stay) => sum + stayCapacity(stay), 0);
   const partySize = stays.reduce((sum, stay) => sum + stay.adults + stay.children, 0);
+  const overCapacity = guestCapacity > 0 && additionalGuests.length + 1 > guestCapacity;
   const customRatePending = stays.some(
     (stay) => stay.ratePlanId === "custom" && amount(stay.nightlyRate) === null,
   );
@@ -380,6 +383,8 @@ export default function TargetManualBookingModal({
       return setMessage(t("calendar.targetManualBooking.phoneInvalid"));
     if (!retry && isoCountry && !/^[A-Z]{2}$/.test(isoCountry))
       return setMessage(t("calendar.targetManualBooking.countryValidation"));
+    // Shown by the form while it lasts, so removing a guest or adding a room clears it.
+    if (!retry && overCapacity) return setCapacityBlocked(true);
     const invalidGuest = additionalGuests.findIndex((guest) => !additionalGuestValid(guest));
     if (!retry && invalidGuest >= 0) {
       setAdditionalGuests((current) =>
@@ -416,6 +421,11 @@ export default function TargetManualBookingModal({
       if (error instanceof PmsManualBookingServiceError && error.code === "pricing_changed") {
         setPricingNotice(t("calendar.targetManualBooking.pricingChanged"));
         setPreviewRetry((value) => value + 1);
+        return;
+      }
+      // The rooms changed under the form (e.g. a room type's limit): same rule as above.
+      if (error instanceof PmsManualBookingServiceError && error.code === "guests_over_capacity") {
+        setMessage(t("calendar.targetManualBooking.guestsOverCapacityServer"));
         return;
       }
       const detail = errorDetails(error, t("calendar.targetManualBooking.createFailure"), stays);
@@ -571,11 +581,16 @@ export default function TargetManualBookingModal({
                             })}
                             aria-invalid={conflict || serverError?.field === "roomId"}
                             aria-describedby={
-                              conflict
-                                ? `stay-conflict-${stay.key}`
-                                : serverError?.field === "roomId"
-                                  ? `stay-server-${stay.key}`
-                                  : undefined
+                              [
+                                conflict
+                                  ? `stay-conflict-${stay.key}`
+                                  : serverError?.field === "roomId"
+                                    ? `stay-server-${stay.key}`
+                                    : null,
+                                roomType?.maxOccupancy ? `stay-capacity-${stay.key}` : null,
+                              ]
+                                .filter(Boolean)
+                                .join(" ") || undefined
                             }
                             value={stay.roomId}
                             onChange={(event) => changeRoom(index, event.target.value)}
@@ -596,6 +611,16 @@ export default function TargetManualBookingModal({
                               </optgroup>
                             ))}{" "}
                           </select>{" "}
+                          {!!roomType?.maxOccupancy && (
+                            <span
+                              id={`stay-capacity-${stay.key}`}
+                              className="block font-normal text-gray-500"
+                            >
+                              {t("calendar.targetManualBooking.roomCapacity", {
+                                count: roomType.maxOccupancy,
+                              })}
+                            </span>
+                          )}
                         </label>
                         <label className={labelClass}>
                           {" "}
@@ -1186,6 +1211,17 @@ export default function TargetManualBookingModal({
               className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"
             >
               {pricingNotice}
+            </p>
+          )}
+          {capacityBlocked && overCapacity && (
+            <p
+              role="alert"
+              className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
+            >
+              {t("calendar.targetManualBooking.guestsOverCapacity", {
+                count: additionalGuests.length + 1,
+                capacity: guestCapacity,
+              })}
             </p>
           )}
           {message && (

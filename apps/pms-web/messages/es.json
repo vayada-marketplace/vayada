@@ -771,5 +771,10 @@
   "calendar.paymentDeadlinePassed": "El plazo de pago ha vencido, así que ya no se puede marcar el pago como recibido. La reserva se libera automáticamente.",
   "calendar.openBooking": "Abrir reserva",
   "dashboard.guestsRegistered": "{registered} de {total} huéspedes registrados",
-  "checkIn.bookerContactFromBooking": "El nombre, el correo electrónico y el teléfono vienen de la reserva."
+  "checkIn.bookerContactFromBooking": "El nombre, el correo electrónico y el teléfono vienen de la reserva.",
+  "calendar.targetManualBooking.roomCapacity": "Máx. huéspedes: {count}",
+  "calendar.targetManualBooking.guestTally": "Huéspedes: {count} de {capacity}",
+  "calendar.targetManualBooking.capacityReached": "Se alcanzó la capacidad máxima de las habitaciones seleccionadas. Añade otra habitación para añadir más huéspedes.",
+  "calendar.targetManualBooking.guestsOverCapacity": "{count} huéspedes son más que los {capacity} que permiten las habitaciones seleccionadas. Quita un huésped o añade una habitación.",
+  "calendar.targetManualBooking.guestsOverCapacityServer": "Las habitaciones seleccionadas no tienen espacio para todos los huéspedes indicados. Quita un huésped o añade una habitación."
 }
