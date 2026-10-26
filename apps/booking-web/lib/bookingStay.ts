@@ -48,7 +48,13 @@ export type StayExtrasRequest = {
   currency: string;
   createdAt: string;
 };
-export type StayExtras = { offered: StayExtra[]; request: StayExtrasRequest | null };
+/** What's still offered (not what's waiting or accepted), the latest request, and every extra we accepted:
+ * the guest pays those at the hotel. */
+export type StayExtras = {
+  offered: StayExtra[];
+  request: StayExtrasRequest | null;
+  accepted: StayExtra[];
+};
 
 export type BookingStay = {
   cancellation: StayCancellation | null;
@@ -143,7 +149,11 @@ function extrasRequest(value: unknown): StayExtrasRequest | null {
 
 function extras(value: unknown): StayExtras | null {
   if (!record(value) || !Array.isArray(value.offered)) return null;
-  return { offered: value.offered.flatMap(extra), request: extrasRequest(value.request) };
+  return {
+    offered: value.offered.flatMap(extra),
+    request: extrasRequest(value.request),
+    accepted: Array.isArray(value.accepted) ? value.accepted.flatMap(extra) : [],
+  };
 }
 
 /** The request an extras-request answer carries, or null. */

@@ -248,6 +248,8 @@ export default function BookingConfirmationPageClient({
   // VAY-2360: the booked terms and places of this booking (by id), and the hotel's direct-booking perks.
   // `details` null: the read failed, so the page shows what it did before.
   const [stay, setStay] = useState<{ id: string; details: BookingStay | null } | null>(null);
+  // Bumped to read the stay again, e.g. when an extras request was refused as out of date.
+  const [stayReads, setStayReads] = useState(0);
   const [benefits, setBenefits] = useState<string[]>([]);
   const [hasTips, setHasTips] = useState(false);
   const confirmationLookup = useRef<Promise<Booking | null> | null>(null);
@@ -392,7 +394,7 @@ export default function BookingConfirmationPageClient({
     return () => {
       cancelled = true;
     };
-  }, [booking?.id, booking?.status, stayEmail, slug]);
+  }, [booking?.id, booking?.status, stayEmail, slug, stayReads]);
 
   // The hotel's local tips (our own API, no Google): Directions opens "Around {hotel}" when there are some.
   useEffect(() => {
@@ -1172,6 +1174,7 @@ export default function BookingConfirmationPageClient({
                     : `${Date.now()}-${Math.random().toString(16).slice(2)}`,
                 )
               }
+              onStale={() => setStayReads((reads) => reads + 1)}
             />
           )}
 

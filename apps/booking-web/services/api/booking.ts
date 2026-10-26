@@ -207,7 +207,7 @@ export const bookingService = {
   },
 
   /** VAY-2360 part 3: asks the hotel for these extras; it confirms by email, nothing is charged
-   * online. One key per attempt, so a retried press doesn't ask twice. */
+   * online. One key per attempt; a second request while one waits is refused (409), never stored twice. */
   async requestExtras(
     slug: string,
     bookingId: string,

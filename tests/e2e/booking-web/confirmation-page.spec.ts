@@ -367,9 +367,18 @@ for (const width of [1440, 390]) {
   });
 }
 
+const waitingFor = (item: (typeof OFFERED)[number]) => ({
+  id: "e1000000-0000-4000-8000-000000000002",
+  status: "pending",
+  items: [item],
+  totalMinor: item.amountMinor,
+  currency: "EUR",
+  createdAt: new Date().toISOString(),
+});
+
 test("shows the extras we confirmed and offers the rest", async ({ page }) => {
   await openConfirmation(page, 1440, {}, undefined, {
-    offered: OFFERED,
+    offered: OFFERED.slice(1),
     request: {
       id: "e1000000-0000-4000-8000-000000000001",
       status: "accepted",
@@ -378,9 +387,57 @@ test("shows the extras we confirmed and offers the rest", async ({ page }) => {
       currency: "EUR",
       createdAt: new Date().toISOString(),
     },
+    accepted: OFFERED.slice(0, 1),
   });
   const extras = page.getByTestId("confirmation-extras");
   await expect(extras).toContainText("Confirmed: Airport transfer. You pay €25 at the hotel.");
   await expect(extras.getByRole("button", { name: "Airport transfer" })).toHaveCount(0);
   await expect(extras.getByRole("button", { name: "Breakfast" })).toBeEnabled();
+});
+
+test("keeps what we confirmed listed while a new request waits", async ({ page }) => {
+  await openConfirmation(page, 1440, {}, undefined, {
+    offered: OFFERED.slice(1, 2),
+    request: waitingFor(OFFERED[2]!),
+    accepted: OFFERED.slice(0, 1),
+  });
+  const extras = page.getByTestId("confirmation-extras");
+  await expect(extras).toContainText("Confirmed: Airport transfer. You pay €25 at the hotel.");
+  await expect(extras).toContainText("We'll confirm by email; you pay at the hotel.");
+  await expect(extras.getByRole("button", { name: "Late check-out · requested" })).toBeDisabled();
+  await expect(extras.getByRole("button", { name: "Breakfast" })).toBeDisabled();
+  await expect(extras.getByRole("button", { name: "Airport transfer" })).toHaveCount(0);
+});
+
+test("reads the stay again when another tab asked first", async ({ page }) => {
+  await openConfirmation(page, 1440, {}, undefined, {
+    offered: OFFERED,
+    request: null,
+    accepted: [],
+  });
+  const extras = page.getByTestId("confirmation-extras");
+  await extras.getByRole("button", { name: "Late check-out" }).click();
+  // Meanwhile another tab asked for it: the API refuses this one, and the stay now has that request.
+  await page.route(`${hotelApi}/bookings/${id}/extras-request`, (route) =>
+    route.fulfill({
+      status: 409,
+      json: {
+        code: "EXTRAS_REQUEST_PENDING",
+        message: "An extras request is already waiting for an answer.",
+      },
+    }),
+  );
+  await page.route(`${hotelApi}/bookings/${id}/stay`, (route) =>
+    route.fulfill({
+      json: stay(true, {
+        offered: OFFERED.slice(0, 2),
+        request: waitingFor(OFFERED[2]!),
+        accepted: [],
+      }),
+    }),
+  );
+  await extras.getByRole("button", { name: "Send request" }).click();
+  await expect(extras.getByRole("button", { name: "Late check-out · requested" })).toBeDisabled();
+  await expect(extras).toContainText("We'll confirm by email; you pay at the hotel.");
+  await expect(extras).not.toContainText("Please try again");
 });

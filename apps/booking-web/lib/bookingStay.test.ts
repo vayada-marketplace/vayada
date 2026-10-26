@@ -67,7 +67,7 @@ it("reads the booked terms and places of a stay (VAY-2360)", () => {
   );
 });
 
-it("reads the extras a stay can ask for and its latest request (VAY-2360 part 3)", () => {
+it("reads the extras a stay can ask for, its latest request and what we accepted (VAY-2360 part 3)", () => {
   const offer = {
     addonId: "a1",
     name: "Breakfast",
@@ -88,11 +88,17 @@ it("reads the extras a stay can ask for and its latest request (VAY-2360 part 3)
         currency: "EUR",
         createdAt: "2026-10-25T10:00:00.000Z",
       },
+      accepted: [{ ...offer, addonId: "a3", name: "Airport transfer" }, { name: "broken" }],
     },
   });
   expect(stay.extras?.offered).toEqual([offer]);
   expect(stay.extras?.request).toMatchObject({ id: "r1", status: "pending", items: [offer] });
+  expect(stay.extras?.accepted).toEqual([{ ...offer, addonId: "a3", name: "Airport transfer" }]);
   expect(parseBookingStay(response).extras).toBeNull();
+  // An older API without the accepted list reads as nothing accepted.
+  expect(
+    parseBookingStay({ ...response, extras: { offered: [offer], request: null } }).extras,
+  ).toEqual({ offered: [offer], request: null, accepted: [] });
 });
 
 it("drops terms it can't trust and anything from another version", () => {

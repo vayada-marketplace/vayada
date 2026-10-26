@@ -28,15 +28,18 @@ function Glyph({ d }: { d: string }) {
 
 /** VAY-2360 part 3: "Add to your stay" under the ticket. The guest picks extras and sends one request; we
  * confirm or decline it by email, and the guest pays at the hotel (nothing is charged online). One request
- * waits at a time. */
+ * waits at a time; what we accepted stays listed. A refused send (409: another tab asked first, or an extra
+ * is no longer offered) reloads the stay instead of asking again. */
 export default function ConfirmationExtras({
   extras,
   formatMoney,
   onRequest,
+  onStale,
 }: {
   extras: StayExtras;
   formatMoney: (minor: string, currency: string) => string;
   onRequest: (addonIds: string[]) => Promise<StayExtrasRequest | null>;
+  onStale: () => void;
 }) {
   const t = useTranslations("confirmation.extras");
   const locale = useLocale();
@@ -46,32 +49,44 @@ export default function ConfirmationExtras({
   const [sent, setSent] = useState<StayExtrasRequest | null>(null);
   const request = sent ?? extras.request;
   const waiting = request?.status === "pending";
-  const requested = new Set(waiting ? request.items.map((item) => item.addonId) : []);
-  const accepted = request?.status === "accepted" ? request.items.map((item) => item.addonId) : [];
-  const offered = extras.offered.filter((offer) => !accepted.includes(offer.addonId));
-  if (offered.length === 0 && !request) return null;
+  const waitingItems = waiting ? request.items : [];
+  const requested = new Set(waitingItems.map((item) => item.addonId));
+  const accepted = extras.accepted;
+  const taken = new Set([...waitingItems, ...accepted].map((item) => item.addonId));
+  const offered = extras.offered.filter((offer) => !taken.has(offer.addonId));
+  const chips = [...waitingItems, ...offered];
+  if (chips.length === 0 && !request && accepted.length === 0) return null;
   const picked = offered.filter((offer) => selected.includes(offer.addonId));
   const unit = (offer: StayExtra) =>
     offer.pricingModel === "per_stay"
       ? null
       : t(`unit.${offer.pricingModel}`, { amount: formatMoney(offer.unitMinor, offer.currency) });
   const names = (items: StayExtra[]) => items.map((item) => item.name).join(", ");
-  const status =
-    request?.status === "pending"
-      ? t("pending", {
-          date: new Date(request.createdAt).toLocaleDateString(resolveLocale(locale), {
-            day: "numeric",
-            month: "short",
-          }),
-        })
-      : request?.status === "accepted"
-        ? t("accepted", {
-            names: names(request.items),
-            amount: formatMoney(request.totalMinor, request.currency),
-          })
-        : request?.status === "declined"
-          ? t("declined", { names: names(request.items) })
-          : null;
+  const lines = [
+    accepted.length > 0 && {
+      tone: "text-green-800",
+      text: t("accepted", {
+        names: names(accepted),
+        amount: formatMoney(
+          String(accepted.reduce((sum, item) => sum + BigInt(item.amountMinor), BigInt(0))),
+          accepted[0]!.currency,
+        ),
+      }),
+    },
+    request?.status === "pending" && {
+      tone: "text-gray-600",
+      text: t("pending", {
+        date: new Date(request.createdAt).toLocaleDateString(resolveLocale(locale), {
+          day: "numeric",
+          month: "short",
+        }),
+      }),
+    },
+    request?.status === "declined" && {
+      tone: "text-gray-600",
+      text: t("declined", { names: names(request.items) }),
+    },
+  ].filter((line): line is { tone: string; text: string } => line !== false);
   const send = async () => {
     setSending(true);
     setFailed(false);
@@ -80,8 +95,9 @@ export default function ConfirmationExtras({
       if (!created) throw new Error("No request came back.");
       setSent(created);
       setSelected([]);
-    } catch {
-      setFailed(true);
+    } catch (error) {
+      if ((error as { status?: unknown } | null)?.status === 409) onStale();
+      else setFailed(true);
     } finally {
       setSending(false);
     }
@@ -98,7 +114,7 @@ export default function ConfirmationExtras({
           {t("title")}
         </h2>
         <div className="flex flex-wrap gap-2">
-          {offered.map((offer) => {
+          {chips.map((offer) => {
             const asked = requested.has(offer.addonId);
             const on = selected.includes(offer.addonId);
             return (
@@ -162,13 +178,14 @@ export default function ConfirmationExtras({
           {t("failed")}
         </p>
       )}
-      {status && (
-        <p
-          role="status"
-          className={`text-sm ${request?.status === "accepted" ? "text-green-800" : "text-gray-600"}`}
-        >
-          {status}
-        </p>
+      {lines.length > 0 && (
+        <div role="status" className="flex flex-col gap-1">
+          {lines.map((line) => (
+            <p key={line.text} className={`text-sm ${line.tone}`}>
+              {line.text}
+            </p>
+          ))}
+        </div>
       )}
     </section>
   );
