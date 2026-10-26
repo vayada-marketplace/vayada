@@ -308,6 +308,14 @@ export async function mockPmsWebTargetRoutes(page: Page): Promise<void> {
         ? route.fulfill({ json: checkinSettingsResponse() })
         : route.fallback(),
     );
+  // The check-in offers desk add-ons from the catalog (VAY-2373 D3): none unless a spec says so.
+  await page
+    .context()
+    .route("**/api/pms/properties/*/manual-bookings/addons", (route) =>
+      route.request().method() === "GET"
+        ? route.fulfill({ json: { contractVersion: "pms-manual-booking.v1", addOns: [] } })
+        : route.fallback(),
+    );
   await page
     .context()
     .route("**/api/pms/properties/*/reservations/*/guest-registrations", (route) =>

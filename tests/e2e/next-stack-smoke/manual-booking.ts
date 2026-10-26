@@ -395,13 +395,13 @@ export async function runManualBookingAcceptance(args: Args): Promise<void> {
       .click();
     await expect(checkIn.getByRole("combobox", { name: "Nationality" })).toHaveValue("Netherlands");
     await checkIn.getByRole("button", { name: "Cancel", exact: true }).last().click();
-    // Step 3: the expected method and the recorded payment.
+    // Step 3: the bank transfer is recorded, so nothing is due at the desk.
     await page
       .getByRole("navigation", { name: "Check-in steps" })
       .getByRole("button", { name: /^Add-ons & payment/ })
       .click();
-    await expect(page.getByText("Bank Transfer", { exact: true })).toBeVisible();
-    await expect(page.getByText("Payment recorded", { exact: true })).toBeVisible();
+    await expect(checkIn.getByText("Nothing to pay: the stay is paid in full.")).toBeVisible();
+    await expect(checkIn.getByRole("radio")).toHaveCount(0);
     await page.screenshot({
       path: testInfo.outputPath("manual-booking-check-in.png"),
       fullPage: true,

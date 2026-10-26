@@ -170,3 +170,121 @@ test("follows Settings → Check-in: no room changes, every guest complete first
   await expect(main(page).getByText("Step 2 of 4")).toBeVisible();
   await assertHealthy();
 });
+
+// VAY-2373 part 6: steps 3 and 4 and the done screen.
+const stepBar = (page: Page) => page.getByRole("navigation", { name: "Check-in steps" });
+
+async function toPayment(page: Page) {
+  await page.goto(`/check-in/${PMS_WEB_RESERVATION_ID}`);
+  await main(page).getByRole("checkbox", { name: "I have read the request" }).check();
+  await main(page).getByRole("button", { name: "Continue" }).click();
+  await main(page).getByRole("button", { name: "Continue" }).click();
+  await expect(main(page).getByText("Step 3 of 4")).toBeVisible();
+}
+
+test("adds breakfast at the desk, takes the balance in cash, hands over a key and checks in", async ({
+  page,
+}, testInfo) => {
+  const assertHealthy = watchPageHealth(page, testInfo);
+  const writes = await mockCheckinFlow(page);
+  await toPayment(page);
+
+  // Breakfast for 2 guests × 2 nights + 2 guests × 4 nights = 12 guest-nights at €8.
+  await expect(
+    main(page).getByText(/^€8(\.00)? per guest per night · 12 guest-nights$/),
+  ).toBeVisible();
+  await main(page).getByRole("button", { name: "Add Breakfast" }).click();
+  await expect(main(page).getByText(/^Breakfast \(added now\)$/)).toBeVisible();
+  const dueNow = main(page).getByText("Due now").locator("..");
+  await expect(dueNow).toContainText("€696");
+  // Settings → Check-in requires a choice before Continue.
+  const proceed = main(page).getByRole("button", { name: "Continue" });
+  await expect(proceed).toBeDisabled();
+  await main(page)
+    .getByRole("radio", { name: /Collect now/ })
+    .click();
+  await main(page).getByRole("button", { name: "Cash", exact: true }).click();
+  await expect(main(page).getByText(/Records €696(\.00)? as paid by Cash/)).toBeVisible();
+  await proceed.click();
+
+  await expect(main(page).getByText("Step 4 of 4")).toBeVisible();
+  expect(writes.charges).toEqual([
+    expect.objectContaining({ label: "Breakfast", amountDecimal: "96.00", currency: "EUR" }),
+  ]);
+  expect(writes.markPaid).toEqual([expect.objectContaining({ settlementMethod: "cash" })]);
+  expect(writes.chargePaid).toHaveLength(1);
+  await expect(main(page).getByText(/€696(\.00)? · Cash, recorded/)).toBeVisible();
+
+  // One key handed over; the other key and the missing guests stay open on the reservation.
+  await main(page)
+    .getByRole("checkbox", { name: /Room 104 · key handed over/ })
+    .check();
+  await expect(main(page).getByText("2 open items stay on the reservation")).toBeVisible();
+  await main(page).getByRole("button", { name: "Check in 4 guests" }).click();
+
+  await expect(page.getByRole("heading", { name: "Ada Lovelace is checked in" })).toBeVisible();
+  await expect(page.getByText("3 guests still need registration details")).toBeVisible();
+  await expect(page.getByText("Key for Room 101 not handed over")).toBeVisible();
+  expect(writes.checkIn).toHaveLength(1);
+  expect(writes.checkIn[0]).toMatchObject({
+    pendingFlags: [
+      expect.stringMatching(/^Registration details missing: Grace Hopper \(ID missing\)/),
+      "Key for Room 101 not handed over",
+    ],
+    stepResults: expect.arrayContaining([
+      expect.objectContaining({ stepId: "key:assignment_1", value: true }),
+      expect.objectContaining({ stepId: "key:assignment_2", value: false }),
+      expect.objectContaining({ stepId: "payment", value: expect.stringMatching(/^recorded: /) }),
+    ]),
+  });
+  await assertHealthy();
+});
+
+test("goes straight on when there is nothing to pay, and can leave the balance for check-out", async ({
+  page,
+}, testInfo) => {
+  const assertHealthy = watchPageHealth(page, testInfo);
+  const writes = await mockCheckinFlow(
+    page,
+    { keyHandover: "none" },
+    {
+      pricing: {
+        totalAmount: { amountDecimal: "600.00", currency: "EUR" },
+        balanceAmount: { amountDecimal: "0.00", currency: "EUR" },
+      },
+      payment: { method: "pay_at_property", expectedMethod: "pay_at_property", status: "paid" },
+    },
+  );
+  await toPayment(page);
+  await expect(main(page).getByText("Nothing to pay: the stay is paid in full.")).toBeVisible();
+  await expect(main(page).getByRole("radio")).toHaveCount(0);
+
+  // An add-on added now is due; it can stay open until check-out.
+  await main(page).getByRole("button", { name: "More: Scooter rental" }).click();
+  await main(page).getByRole("button", { name: "More: Scooter rental" }).click();
+  await expect(main(page).getByText("Due now").locator("..")).toContainText("€80");
+  await main(page)
+    .getByRole("radio", { name: /At check-out/ })
+    .click();
+  await main(page).getByRole("button", { name: "Continue" }).click();
+  await expect(main(page).getByText("Step 4 of 4")).toBeVisible();
+  expect(writes.charges).toEqual([
+    expect.objectContaining({ label: "Scooter rental × 2", amountDecimal: "80.00" }),
+  ]);
+  expect(writes.markPaid).toHaveLength(0);
+  expect(writes.chargePaid).toHaveLength(0);
+  // No key step in Settings → Check-in: no key boxes.
+  await expect(main(page).getByRole("checkbox", { name: /key handed over/ })).toHaveCount(0);
+  await expect(main(page).getByText(/^€80(\.00)? at check-out$/)).toBeVisible();
+
+  // Back to step 3 and remove the scooters: the charge is waived on Continue.
+  await stepBar(page)
+    .getByRole("button", { name: /^Add-ons & payment/ })
+    .click();
+  await main(page).getByRole("button", { name: "Fewer: Scooter rental" }).click();
+  await main(page).getByRole("button", { name: "Fewer: Scooter rental" }).click();
+  await main(page).getByRole("button", { name: "Continue" }).click();
+  await expect(main(page).getByText("Step 4 of 4")).toBeVisible();
+  expect(writes.chargeWaived).toHaveLength(1);
+  await assertHealthy();
+});

@@ -33,6 +33,8 @@ export interface CheckinRoom {
   departsEarlier: boolean;
   /** The average recorded price a night, when every night has one. */
   nightlyRate: number | null;
+  /** The rate plan the room was booked on, when named. */
+  ratePlan: string | null;
   currency: string | null;
 }
 
@@ -60,6 +62,7 @@ export function checkinRooms(booking: Booking): CheckinRoom[] {
               ? priced.reduce((sum, night) => sum + (night.appliedAmount ?? 0), 0) / priced.length
               : null,
           currency: priced[0]?.currency ?? null,
+          ratePlan: stay.ratePlanName,
         };
       })
     : [
@@ -76,6 +79,7 @@ export function checkinRooms(booking: Booking): CheckinRoom[] {
           guests: booking.adults + booking.children,
           nightlyRate: null,
           currency: null,
+          ratePlan: null,
         },
       ];
   const lastCheckOut = rooms.reduce(

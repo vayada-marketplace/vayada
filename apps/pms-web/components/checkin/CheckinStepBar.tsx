@@ -4,7 +4,8 @@ import Link from "next/link";
 import { ArrowLeftIcon, CheckIcon } from "@heroicons/react/24/outline";
 import { useTranslation } from "@/lib/i18n";
 
-export type CheckinStepState = "done" | "current" | "todo";
+/** "warn": passed with open items (guests incomplete, money still due). */
+export type CheckinStepState = "done" | "warn" | "current" | "todo";
 
 export interface CheckinStepItem {
   title: string;
@@ -41,7 +42,13 @@ export function CheckinStepBar({
                 <span className="block truncate text-[15px] font-bold text-gray-900">
                   {step.title}
                 </span>
-                <span className="block truncate text-sm text-gray-600">{step.summary}</span>
+                <span
+                  className={`block truncate text-sm ${
+                    step.state === "warn" ? "text-amber-700" : "text-gray-600"
+                  }`}
+                >
+                  {step.summary}
+                </span>
               </span>
             </button>
           </li>
@@ -52,6 +59,15 @@ export function CheckinStepBar({
 }
 
 function StepDot({ index, state }: { index: number; state: CheckinStepState }) {
+  if (state === "warn")
+    return (
+      <span
+        aria-hidden="true"
+        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-amber-100 text-sm font-bold text-amber-700"
+      >
+        !
+      </span>
+    );
   if (state === "done")
     return (
       <span
@@ -114,9 +130,11 @@ export function CheckinPhoneHeader({
             className={`h-1 rounded-full ${
               step.state === "done"
                 ? "bg-green-600"
-                : step.state === "current"
-                  ? "bg-primary-600"
-                  : "bg-gray-200"
+                : step.state === "warn"
+                  ? "bg-amber-500"
+                  : step.state === "current"
+                    ? "bg-primary-600"
+                    : "bg-gray-200"
             }`}
           />
         ))}
