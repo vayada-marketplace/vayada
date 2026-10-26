@@ -44,7 +44,10 @@ export const bookingSettlementLabel = (
           : ["captured", "paid", "refunded", "partially_refunded"].includes(
               booking.paymentStatus || "",
             ),
-        booking.depositRequired ? booking.balanceAmount : booking.totalAmount,
+        // A card deposit (partially_paid, VAY-2205) already lowered what is still owed.
+        booking.depositRequired || booking.paymentStatus === "partially_paid"
+          ? booking.balanceAmount
+          : booking.totalAmount,
         booking.currency,
         t,
       );

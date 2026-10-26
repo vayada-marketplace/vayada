@@ -765,5 +765,7 @@
   "calendar.awaitingPayment": "待付款",
   "calendar.awaitingPaymentHeld": "在此之前房间会被保留；如果付款未标记为已收到，房间将自动释放。",
   "calendar.paymentDeadlinePassed": "付款期限已过，无法再将付款标记为已收到。预订将自动释放。",
-  "calendar.openBooking": "打开预订"
+  "calendar.openBooking": "打开预订",
+  "dashboard.guestsRegistered": "{total} 位客人中已登记 {registered} 位",
+  "checkIn.bookerContactFromBooking": "姓名、邮箱和电话来自预订信息。"
 }
