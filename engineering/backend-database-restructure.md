@@ -4,6 +4,14 @@ _VAY-605 decision record. Inputs: VAY-600 WorkOS identity architecture,
 VAY-601 Ask Intelligence architecture, VAY-602 target TypeScript backend
 structure, VAY-604 AI-agent bookability, and the VAY-605 schema audit._
 
+> **Note (VAY-2259, 2026-10-19):** `apps/marketplace-api`, the old Python Marketplace API, is switched
+> off (api.vayada.com answers 410) and its source is deleted. Paths into it below refer to its last
+> source at commit `897d64c6e`.
+
+> **Note (VAY-2272, 2026-10-20):** migrations 0496–0502 removed the target `marketplace` schema, the
+> affiliate program and the creator accounts. The Marketplace tables below describe the old source
+> database only.
+
 > **Retirement update:** VAY-601 is a historical input only. Migration `0090`
 > removes the retired Ask Intelligence schema and data. Any future hotel
 > employee agent starts from VAY-1091 with a new design and storage model.
@@ -92,11 +100,10 @@ should consume typed services, read models, or events.
 | Domain                          | Owns                                                                                                                                                        | Big-bang target posture                                                                                                                                      |
 | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Identity and authorization      | Internal users, WorkOS identity mappings, organizations, memberships, permissions, resource links, product entitlements, product audit events.              | Model in the new target schema first. Keep `users.id` stable as migrated internal principal IDs; map WorkOS IDs through `external_identities`.               |
-| Hotel/property catalog          | Canonical internal property identity, organization links to booking/PMS/marketplace resources, normalized public/private profile attributes.                | Create canonical property tables and migrated links from legacy `booking_hotels`, PMS `hotels`, and marketplace `hotel_profiles`/`hotel_listings`.           |
+| Hotel/property catalog          | Canonical internal property identity, organization links to booking/PMS resources, normalized public/private profile attributes.                            | Create canonical property tables and migrated links from legacy `booking_hotels`, PMS `hotels`, and marketplace `hotel_profiles`.                            |
 | Booking and direct checkout     | Quote sessions, checkout context, booking lifecycle contract, guest booking records, booking status, cancellation/change flows.                             | Move guest booking records and quote/checkout state into the target booking domain at cutover. Preserve public booking references and lifecycle semantics.   |
 | PMS operations                  | Rooms, room types, inventory, room blocks, operational booking assignment, check-in/out, notes, housekeeping-style facts, channel manager sync state.       | Migrate operational PMS tables into the target PMS domain with cleaner ownership and explicit external-channel mappings.                                     |
-| Marketplace                     | Creators, creator platforms, hotel listings for collaborations, collaboration offers, deliverables, ratings, negotiation/chat.                              | Migrate creator, listing, collaboration, deliverable, and chat records into marketplace-owned target tables linked through organizations/resources.          |
-| Finance                         | Payment settings, payments, payouts, commissions, affiliate payout settings, billing/pricing configuration, audit of rate/commission changes.               | Define finance-owned target tables before cutover; migrate payments/payouts/commissions without changing external provider identifiers.                      |
+| Finance                         | Payment settings, payments, payouts, commissions, billing/pricing configuration, audit of rate/commission changes.                                          | Define finance-owned target tables before cutover; migrate payments/payouts/commissions without changing external provider identifiers.                      |
 | Distribution and AI bookability | Public hotel bookability profile, quote read model, freshness metadata, typed unavailable reasons, deep-link context, external API clients and rate limits. | Build as first-class target tables/read models, not as later patches on old booking/PMS shapes. Public and read-only for external agents.                    |
 | Jobs/events/audit               | Durable side-effect jobs, idempotency keys, retries, dead-letter visibility, product audit correlation.                                                     | Include job/event/audit tables in the target schema so cutover does not carry forward untracked fire-and-forget side effects as the default operating model. |
 
@@ -108,17 +115,17 @@ schema and loaded by migration scripts during rehearsals and final cutover.
 
 Recommended tables:
 
-| Table                             | Purpose                                                                                                                                                                               |
-| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `external_identities`             | Maps WorkOS users and other future providers to `users.id`. Stores provider user ID, provider email cache, verification state, raw profile metadata, first/last seen timestamps.      |
-| `organizations`                   | Internal tenant/business container. Kinds should include `platform`, `hotel_group`, `creator_workspace`, and `affiliate_partner`. Stores WorkOS organization mapping when applicable. |
-| `organization_memberships`        | Internal membership for `user_id` and `organization_id`, linked to WorkOS membership when applicable. Stores status, role slug, timestamps, and invite/deprovision state.             |
-| `permission_catalog`              | Stable product permission keys such as `pms.booking.update`, `booking.settings.manage`, `marketplace.collaboration.review`, and `platform.user.suspend`.                              |
-| `role_permission_grants`          | Maps internal role slugs to permission keys, scoped by organization kind and product.                                                                                                 |
-| `membership_permission_overrides` | Optional explicit grants/denies for edge cases. This can wait until role grants are insufficient.                                                                                     |
-| `organization_resource_links`     | Links an organization to product resources such as `booking_hotel`, `pms_hotel`, `hotel_profile`, `hotel_listing`, `creator_profile`, `affiliate`, and payout/billing accounts.       |
-| `product_entitlements`            | Product/module access and limits for the organization or linked resource. Supports plan, enabled modules, active/suspended state, and expiry.                                         |
-| `product_audit_events`            | Application audit trail for actor, organization, target resource, action, before/after metadata, request metadata, and WorkOS event correlation.                                      |
+| Table                             | Purpose                                                                                                                                                                                |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `external_identities`             | Maps WorkOS users and other future providers to `users.id`. Stores provider user ID, provider email cache, verification state, raw profile metadata, first/last seen timestamps.       |
+| `organizations`                   | Internal tenant/business container. Kinds are `platform` and `hotel_group`; closed creator and affiliate rows keep their old kind. Stores WorkOS organization mapping when applicable. |
+| `organization_memberships`        | Internal membership for `user_id` and `organization_id`, linked to WorkOS membership when applicable. Stores status, role slug, timestamps, and invite/deprovision state.              |
+| `permission_catalog`              | Stable product permission keys such as `pms.booking.update`, `booking.settings.manage`, and `platform.user.suspend`.                                                                   |
+| `role_permission_grants`          | Maps internal role slugs to permission keys, scoped by organization kind and product.                                                                                                  |
+| `membership_permission_overrides` | Optional explicit grants/denies for edge cases. This can wait until role grants are insufficient.                                                                                      |
+| `organization_resource_links`     | Links an organization to product resources such as `booking_hotel`, `pms_hotel`, and payout/billing accounts.                                                                          |
+| `product_entitlements`            | Product/module access and limits for the organization or linked resource. Supports plan, enabled modules, active/suspended state, and expiry.                                          |
+| `product_audit_events`            | Application audit trail for actor, organization, target resource, action, before/after metadata, request metadata, and WorkOS event correlation.                                       |
 
 Rules:
 
@@ -183,12 +190,12 @@ future hotel employee agent implementation begins.
 
 - `users.id` as the stable internal principal.
 - Existing product resource IDs for `booking_hotels`, PMS `hotels`,
-  marketplace `hotel_profiles`/`hotel_listings`, `creators`, `affiliates`,
-  bookings, payments, payouts, rooms, room types, and channel mappings.
+  marketplace `hotel_profiles`, bookings, payments, payouts, rooms, room types,
+  and channel mappings.
 - Current guest checkout and booking lifecycle semantics.
 - Public booking URLs through redirects or compatibility adapters.
-- Channex, Stripe, Xendit, Lodgify cleanup state, email, affiliate, and
-  marketplace integration behavior until each integration is explicitly moved.
+- Channex, Stripe, Xendit, Lodgify cleanup state, and email integration
+  behavior until each integration is explicitly moved.
 - Consent history and GDPR request linkage.
 
 ### Redesign in the target schema
@@ -229,16 +236,12 @@ future hotel employee agent implementation begins.
 
 - `external_identities` from existing `users` once WorkOS users are created or
   linked.
-- `organizations` from current hotel/admin/creator/affiliate ownership:
-  platform organization for Vayada staff, hotel-group organizations for hotel
-  businesses, creator-workspace organizations for creators, and
-  affiliate-partner organizations for affiliates.
+- `organizations` from current hotel/admin ownership: platform organization
+  for Vayada staff and hotel-group organizations for hotel businesses.
 - `organization_memberships` from existing `users.type`, `is_superadmin`, and
   owner/admin associations.
 - `organization_resource_links` from `booking_hotels.user_id`, PMS
-  `hotels.user_id`, marketplace `hotel_profiles.user_id`, marketplace
-  `creators.user_id`, PMS `affiliates.user_id`, and any explicit setup handoff
-  mappings.
+  `hotels.user_id`, and any explicit setup handoff mappings.
 - `product_entitlements` from booking pricing configuration, platform status,
   PMS `property_module_activations`, billing plans, enabled modules, and
   payment/setup state.
@@ -261,8 +264,8 @@ future hotel employee agent implementation begins.
 
 - Design the full target schema as DDL in a new database/schema namespace.
 - Include identity/resource links, canonical property tables, booking/PMS
-  operational tables, marketplace tables, finance tables, bookability tables,
-  and jobs/audit tables.
+  operational tables, finance tables, bookability tables, and jobs/audit
+  tables.
 - Define stable IDs, foreign keys, uniqueness, status enums, nullable
   migration fields, PII classifications, indexes, retention rules, and audit
   requirements.
@@ -295,8 +298,7 @@ future hotel employee agent implementation begins.
 
 - Run full migration rehearsals on production-like snapshots in staging.
 - Compare source and target row counts, totals, status distributions, public
-  booking quote outputs, authorization decisions, payment/payout totals,
-  and marketplace collaboration states.
+  booking quote outputs, authorization decisions, and payment/payout totals.
 - Run application smoke tests against the target schema only.
 - Record every mismatch with an owner and block cutover until critical
   mismatches are resolved or explicitly accepted.
@@ -317,8 +319,7 @@ future hotel employee agent implementation begins.
 - Keep source databases read-only and retained for rollback/audit during the
   agreed retention window.
 - Monitor parity-sensitive flows: login/session resolution, hotel selection,
-  booking creation, payment capture/refund, Channex sync, affiliate attribution,
-  marketplace collaboration changes, and AI quote output.
+  booking creation, payment capture/refund, Channex sync, and AI quote output.
 - Fix target-schema data issues with forward migrations or targeted data repair
   scripts, not by reviving legacy writes.
 
@@ -380,8 +381,7 @@ For every big-bang rewrite implementation ticket:
 - Validate PII classification and public/private exposure for every target
   table and public read model.
 - Add contract tests for RequestContext resource resolution, quote output,
-  payment/payout reconciliation, marketplace state, or evidence output
-  depending on the domain.
+  payment/payout reconciliation, or evidence output depending on the domain.
 - Include staging rehearsal instructions, cutover gates, and rollback notes.
 - For production auth DB changes, remember that auth migrations do not
   auto-run in production today. The big-bang cutover needs an explicit reviewed
@@ -412,8 +412,7 @@ production table ownership changes.
 
 2. **Design the target database schema**
    - Scope: create the full target schema ERD/DDL for identity, hotel catalog,
-     booking, PMS operations, marketplace, finance, distribution/bookability,
-     and jobs/audit.
+     booking, PMS operations, finance, distribution/bookability, and jobs/audit.
    - Validation: schema review covers ownership, FKs, indexes, status enums,
      PII classification, retention, and source-table mappings.
 
@@ -425,21 +424,18 @@ production table ownership changes.
 
 4. **Define WorkOS identity and organization transforms**
    - Scope: map existing `users`, `users.type`, `is_superadmin`,
-     `booking_hotels.user_id`, PMS `hotels.user_id`, marketplace
-     `hotel_profiles.user_id`, marketplace `creators.user_id`, and PMS
-     `affiliates.user_id` into target `external_identities`, `organizations`,
-     memberships, permissions, resource links, and entitlements.
+     `booking_hotels.user_id`, and PMS `hotels.user_id` into target
+     `external_identities`, `organizations`, memberships, permissions, resource
+     links, and entitlements.
    - Validation: fixture tests for platform staff, one hotel owner with
-     multiple hotels, creator workspace, affiliate partner, and ambiguous
-     ownership.
+     multiple hotels, and ambiguous ownership.
 
 5. **Define RequestContext target contract**
    - Scope: define the query contract that resolves provider identity,
      internal user, selected organization, permissions, linked resource, and
      entitlement. Include compatibility inputs for current JWT and
      `X-Hotel-Id`.
-   - Validation: unit tests for allowed/denied hotel, creator, affiliate, and
-     platform scopes.
+   - Validation: unit tests for allowed/denied hotel and platform scopes.
 
 6. **Define public bookability profile and quote schema**
    - Scope: specify target tables/read models for public profile, quote

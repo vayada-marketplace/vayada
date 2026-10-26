@@ -235,6 +235,7 @@ export default function BookingDetailModal({
   const movingStay = booking?.stays.find((stay) => stay.position === movingAssignment?.position);
   const moveCheckIn = movingStay?.checkIn ?? booking?.checkIn ?? "";
   const moveCheckOut = movingStay?.checkOut ?? booking?.checkOut ?? "";
+  const placedRooms = booking?.assignedRooms.filter((room) => room.roomId) ?? [];
 
   // Candidate rooms for the "Move to another room" / "Assign room" picker:
   // every operational room except the current room. Two states per room:
@@ -1436,10 +1437,11 @@ export default function BookingDetailModal({
                 </p>
                 {/* VAY-403: list every assigned room, not just the first.
                       A multi-room booking with fewer assigned rooms than its
-                      quantity flags the unassigned remainder for staff. */}
+                      quantity flags the unassigned remainder for staff. A room
+                      still waiting for one has no number (VAY-2362). */}
                 <div className="flex flex-wrap gap-1 mt-1">
-                  {booking.assignedRooms.length > 0 ? (
-                    booking.assignedRooms
+                  {placedRooms.length > 0 ? (
+                    placedRooms
                       .slice()
                       .sort((a, b) => a.position - b.position)
                       .map((r) => (
@@ -1455,14 +1457,13 @@ export default function BookingDetailModal({
                       {t("calendar.unassigned")}
                     </span>
                   )}
-                  {booking.assignedRooms.length > 0 &&
-                    booking.assignedRooms.length < booking.numberOfRooms && (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-700">
-                        {t("calendar.bookingDetail.unassignedCount", {
-                          count: booking.numberOfRooms - booking.assignedRooms.length,
-                        })}
-                      </span>
-                    )}
+                  {placedRooms.length > 0 && placedRooms.length < booking.numberOfRooms && (
+                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-700">
+                      {t("calendar.bookingDetail.unassignedCount", {
+                        count: booking.numberOfRooms - placedRooms.length,
+                      })}
+                    </span>
+                  )}
                 </div>
               </div>
               <div className="text-right text-sm text-gray-600">
@@ -1501,7 +1502,7 @@ export default function BookingDetailModal({
                   <select
                     value={selectedRoomId}
                     onChange={(e) => setSelectedRoomId(e.target.value)}
-                    className="flex-1 text-sm border border-gray-300 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    className="min-w-0 flex-1 text-sm border border-gray-300 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary-500"
                   >
                     <option value="">{t("bookings.modal.selectRoom")}</option>
                     {availableRooms.map((r) => (
@@ -1516,7 +1517,7 @@ export default function BookingDetailModal({
                   <button
                     onClick={handleAssignRoom}
                     disabled={!selectedRoomId || assigningRoom}
-                    className="px-3 py-1.5 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="shrink-0 px-3 py-1.5 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {assigningRoom ? t("bookings.modal.assigning") : t("bookings.modal.assign")}
                   </button>

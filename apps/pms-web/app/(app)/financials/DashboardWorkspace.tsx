@@ -99,11 +99,10 @@ export function DashboardWorkspace({ canManage }: { canManage: boolean }) {
     );
 
   return (
-    <div className="mx-auto max-w-7xl p-4 md:p-6">
+    <div>
       <div className="flex flex-col gap-4 border-b border-gray-200 pb-5 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p className="text-sm font-medium text-blue-700">Financials</p>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight text-gray-900">
+          <h2 className="text-lg font-semibold text-gray-900">
             {tab === "dashboard"
               ? "Dashboard"
               : tab === "revenue"
@@ -111,7 +110,7 @@ export function DashboardWorkspace({ canManage }: { canManage: boolean }) {
                 : tab === "expenses"
                   ? "Expenses"
                   : "Profit & Loss"}
-          </h1>
+          </h2>
           <p className="mt-1 text-sm text-gray-600">
             {tab === "dashboard"
               ? "Revenue, costs, and upcoming property transactions."
@@ -217,9 +216,9 @@ function Dashboard({ data, locale }: { data: FinanceDashboardResponse; locale: s
       {isZero ? (
         <section className="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-8 text-center">
           <ChartBarIcon className="mx-auto h-8 w-8 text-gray-400" aria-hidden="true" />
-          <h2 className="mt-3 text-base font-semibold text-gray-900">
+          <h3 className="mt-3 text-base font-semibold text-gray-900">
             No financial activity for this period
-          </h2>
+          </h3>
           <p className="mt-1 text-sm text-gray-600">
             Transactions will appear here once this property has recorded activity.
           </p>
@@ -289,7 +288,7 @@ function DailyChart({
   return (
     <section className="overflow-x-auto rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
       <div>
-        <h2 className="text-base font-semibold text-gray-900">Last 14 days</h2>
+        <h3 className="text-base font-semibold text-gray-900">Last 14 days</h3>
         <p className="mt-1 text-sm text-gray-600">Revenue and expenses in property currency.</p>
       </div>
       <div
@@ -335,7 +334,7 @@ function UpcomingTransactions({
 }) {
   return (
     <section className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-      <h2 className="text-base font-semibold text-gray-900">Upcoming transactions</h2>
+      <h3 className="text-base font-semibold text-gray-900">Upcoming transactions</h3>
       <div className="mt-4 max-h-[30rem] space-y-3 overflow-y-auto pr-1">
         {data.upcoming.length ? (
           data.upcoming.map((entry) => (
@@ -406,7 +405,7 @@ function StatusPanel({
   return (
     <section className="mt-6 rounded-xl border border-gray-200 bg-white p-8 text-center">
       <ExclamationTriangleIcon className="mx-auto h-8 w-8 text-gray-400" aria-hidden="true" />
-      <h2 className="mt-3 text-base font-semibold text-gray-900">{copy[0]}</h2>
+      <h3 className="mt-3 text-base font-semibold text-gray-900">{copy[0]}</h3>
       <p className="mx-auto mt-1 max-w-md text-sm text-gray-600">{copy[1]}</p>
       {kind === "error" && (
         <button

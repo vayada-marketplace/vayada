@@ -1,11 +1,15 @@
 import Fastify from "fastify";
+import { handleApiError } from "./app.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RequestContext } from "@vayada/backend-auth";
 import type { PropertyProfileResponse, PreparedHotelImport } from "@vayada/domain-hotels";
 import { registerPreparedHotelImportRoutes } from "./routes/preparedHotelImports.js";
 import type { PreparedImportSource } from "./domains/preparedHotelImportRepository.js";
 import type { PmsRoomFactsRoutesOptions } from "./routes/pmsRoomFacts.js";
-import { parseHotelAccountInviteCreateRequest } from "./routes/marketplaceAdmin.js";
+import {
+  parseHotelAccountInviteCreateRequest,
+  storedHotelAccountInviteTracks,
+} from "./routes/hotelAccountInviteCodes.js";
 const room = {
   id: "suite",
   name: "Suite",
@@ -83,6 +87,7 @@ async function fixture(
   const bind = vi.fn(async () => (overrides.bound ? { roomTypeId: "room-existing" } : null));
   const list = vi.fn(async () => []);
   const app = Fastify();
+  app.setErrorHandler(handleApiError);
   apps.push(app);
   app.decorateRequest("authContext", null);
   app.addHook("onRequest", async (request) => {
@@ -94,7 +99,7 @@ async function fixture(
         status: "active",
         permissions: overrides.permissions ?? [
           "hotel_catalog.setup.manage",
-          "marketplace.profile.manage",
+          "booking.settings.manage",
           "pms.operations.manage",
         ],
       },
@@ -212,6 +217,21 @@ describe("prepared import routes", () => {
     expect(f.apply).not.toHaveBeenCalled();
   });
 
+  it("answers busy, try again while another run of the import holds its lock (VAY-2247)", async () => {
+    const f = await fixture();
+    f.apply.mockRejectedValueOnce(
+      Object.assign(new Error("canceling statement due to lock timeout"), { code: "55P03" }),
+    );
+    const response = await f.post({ ...data, rooms: [] });
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toMatchObject({ code: "busy_try_again", retryAfterSeconds: 3 });
+    // Any other failure keeps its answer.
+    f.apply.mockRejectedValueOnce(new Error("socket hang up"));
+    expect((await f.post({ ...data, rooms: [] })).json()).toEqual({
+      code: "import_temporarily_unavailable",
+    });
+  });
+
   it("denies missing setup permission before source lookup", async () => {
     const f = await fixture({ permissions: [] });
     expect(
@@ -249,7 +269,7 @@ describe("prepared import routes", () => {
     expect((await f.post()).statusCode).toBe(403);
     expect(f.apply).not.toHaveBeenCalled();
   });
-  it("allows marketplace hotel fields without PMS access", async () => {
+  it("allows hotel profile fields without PMS access", async () => {
     const f = await fixture({ pms: false });
     expect(
       (await f.post({ ...data, rooms: [] }))
@@ -306,20 +326,23 @@ describe("invite preparation contract", () => {
     identity: { email: "owner@example.test" },
     organization: { displayName: "Group" },
     property: { displayName: "Hotel" },
-    selectedTracks: ["creator_marketplace"],
+    selectedTracks: ["hotel_operations"],
   };
   it("keeps old invitations valid", () =>
     expect(typeof parseHotelAccountInviteCreateRequest(invite)).toBe("object"));
-  it("rejects rooms on marketplace-only invites", () =>
-    expect(parseHotelAccountInviteCreateRequest({ ...invite, preparedData: data })).toBe(
-      "rooms_require_hotel_operations",
-    ));
-  it("accepts prepared operations invites", () =>
+  it("reads a stored Creator Marketplace invite as Hotel Operations (VAY-2270)", () =>
     expect(
-      typeof parseHotelAccountInviteCreateRequest({
+      parseHotelAccountInviteCreateRequest({
         ...invite,
-        selectedTracks: ["hotel_operations"],
-        preparedData: data,
+        selectedTracks: storedHotelAccountInviteTracks(["creator_marketplace"]),
       }),
-    ).toBe("object"));
+    ).toMatchObject({ selectedTracks: ["hotel_operations"] }));
+  it("rejects the retired Creator Marketplace track on new invites", () =>
+    expect(
+      parseHotelAccountInviteCreateRequest({ ...invite, selectedTracks: ["creator_marketplace"] }),
+    ).toBe("invalid_selected_tracks"));
+  it("accepts prepared operations invites", () =>
+    expect(typeof parseHotelAccountInviteCreateRequest({ ...invite, preparedData: data })).toBe(
+      "object",
+    ));
 });

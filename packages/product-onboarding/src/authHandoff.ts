@@ -1,11 +1,6 @@
 import { isSafeRelativeReturnTo } from "./returnTo";
 
-export type BrowserAuthSurface =
-  | "platform-admin"
-  | "booking-admin"
-  | "pms-web"
-  | "affiliate-dashboard"
-  | "marketplace-web";
+export type BrowserAuthSurface = "platform-admin" | "booking-admin" | "pms-web";
 
 export type BrowserAuthHandoffRoutingHints = {
   hotelId?: string;

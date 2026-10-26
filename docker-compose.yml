@@ -12,10 +12,8 @@
 #   docker compose down -v         # stop and remove volumes
 #
 # Ports:
-#   8000  Marketplace backend API
 #   8001  Booking engine backend API
 #   8002  PMS backend API
-#   5432  Marketplace PostgreSQL
 #   5434  Booking engine PostgreSQL
 #   5435  Auth PostgreSQL (shared)
 #   5436  PMS PostgreSQL
@@ -25,25 +23,6 @@
 
 services:
   # ─── Databases ─────────────────────────────────────────────────────────
-
-  marketplace-postgres:
-    image: postgres:15-alpine
-    container_name: vayada-marketplace-postgres
-    environment:
-      POSTGRES_USER: vayada_user
-      POSTGRES_PASSWORD: vayada_password
-      POSTGRES_DB: vayada_db
-    ports:
-      - "5432:5432"
-    volumes:
-      - marketplace_postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U vayada_user -d vayada_db"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - vayada-network
 
   booking-postgres:
     image: postgres:15-alpine
@@ -123,7 +102,7 @@ services:
       - vayada-network
     restart: "no"
 
-  # ─── Object Storage (Marketplace) ─────────────────────────────────────
+  # ─── Object Storage ───────────────────────────────────────────────────
 
   minio:
     image: minio/minio:latest
@@ -172,48 +151,6 @@ services:
     networks:
       - vayada-network
 
-  # ─── Marketplace Backend ───────────────────────────────────────────────
-
-  marketplace-backend:
-    build:
-      context: ./apps/marketplace-api
-      dockerfile: Dockerfile
-    container_name: vayada-marketplace-backend
-    ports:
-      - "8000:8000"
-    depends_on:
-      marketplace-postgres:
-        condition: service_healthy
-      auth-postgres:
-        condition: service_healthy
-      pms-postgres:
-        condition: service_healthy
-      minio:
-        condition: service_healthy
-      auth-db-migrate:
-        condition: service_completed_successfully
-    env_file:
-      - path: ./apps/marketplace-api/.env
-        required: false
-    environment:
-      DATABASE_URL: postgresql://vayada_user:vayada_password@marketplace-postgres:5432/vayada_db
-      AUTH_DATABASE_URL: postgresql://vayada_auth_user:vayada_auth_password@auth-postgres:5432/vayada_auth_db
-      PMS_DATABASE_URL: postgresql://vayada_pms_user:vayada_pms_password@pms-postgres:5432/vayada_pms_db
-      CORS_ORIGINS: http://localhost:3000,http://localhost:3001,http://localhost:3003
-      S3_BUCKET_NAME: vayada-uploads
-      AWS_REGION: us-east-1
-      AWS_ACCESS_KEY_ID: minioadmin
-      AWS_SECRET_ACCESS_KEY: minioadmin
-      S3_ENDPOINT_URL: http://minio:9000
-      S3_PUBLIC_URL: http://localhost:9000
-      S3_USE_PUBLIC_URLS: "true"
-    volumes:
-      - ./apps/marketplace-api/app:/app/app
-      - ./apps/marketplace-api/scripts:/app/scripts
-    restart: unless-stopped
-    networks:
-      - vayada-network
-
   # ─── Booking Engine Backend ────────────────────────────────────────────
 
   booking-backend:
@@ -228,14 +165,11 @@ services:
         condition: service_healthy
       auth-postgres:
         condition: service_healthy
-      marketplace-postgres:
-        condition: service_healthy
       auth-db-migrate:
         condition: service_completed_successfully
     environment:
       DATABASE_URL: postgresql://vayada_booking_user:vayada_booking_password@booking-postgres:5432/vayada_booking_db
       AUTH_DATABASE_URL: postgresql://vayada_auth_user:vayada_auth_password@auth-postgres:5432/vayada_auth_db
-      MARKETPLACE_DATABASE_URL: postgresql://vayada_user:vayada_password@marketplace-postgres:5432/vayada_db
       INTERNAL_API_KEY: ${INTERNAL_API_KEY:-}
       JWT_SECRET_KEY: your-secret-key-change-in-production
       JWT_ALGORITHM: HS256
@@ -296,7 +230,6 @@ services:
       - vayada-network
 
 volumes:
-  marketplace_postgres_data:
   booking_postgres_data:
   auth_postgres_data:
   pms_postgres_data:

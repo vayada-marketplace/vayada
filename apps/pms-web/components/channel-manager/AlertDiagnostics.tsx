@@ -42,7 +42,7 @@ export function AlertDiagnostics({
       {open && (
         <div className="mt-2 space-y-2 break-words">
           <p>
-            Historical Vayada records. These do not confirm current delivery to the booking website.
+            Historical vayada records. These do not confirm current delivery to the booking website.
           </p>
           {error ? (
             <p role="status">
@@ -88,7 +88,7 @@ export function AlertDiagnostics({
               {data.recovery.map((job) => (
                 <div key={job.jobId} className="border-l-2 border-gray-200 pl-3">
                   <p>
-                    Source: Vayada recovery job ·{" "}
+                    Source: vayada recovery job ·{" "}
                     {
                       {
                         booking_import: "Booking processing",

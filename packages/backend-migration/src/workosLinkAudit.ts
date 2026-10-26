@@ -47,7 +47,6 @@ const BLOCKING_METRICS = [
   "memberships_active_missing_workos_link",
   "hotel_group_orgs_with_active_members_missing_booking_hotel_link",
   "hotel_group_orgs_with_active_members_missing_pms_property_link",
-  "affiliate_partner_orgs_with_active_members_missing_affiliate_link",
 ] as const;
 
 const REQUIRED_NONZERO_METRICS = [
@@ -182,14 +181,6 @@ export async function runWorkosLinkAudit(config: {
         organizationKind: "hotel_group",
         product: "pms",
         resourceType: "pms_property",
-      }),
-    );
-    summary.push(
-      await missingResourceMetric(pool, {
-        metric: "affiliate_partner_orgs_with_active_members_missing_affiliate_link",
-        organizationKind: "affiliate_partner",
-        product: "affiliate",
-        resourceType: "affiliate",
       }),
     );
 

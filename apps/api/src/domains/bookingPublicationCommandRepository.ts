@@ -21,6 +21,7 @@ import {
   type BookingPublicationOperationRow,
 } from "./bookingPublicationCommandEnvelope.js";
 import { lockBookingPublication } from "./bookingPublicationLock.js";
+import { lockMemberPermissions } from "./memberPermissions.js";
 
 const OPERATION = "booking.publication.request";
 const PERMISSION = "booking.settings.manage";
@@ -295,12 +296,24 @@ export function createPgBookingPublicationCommandRepository(config: {
   };
 }
 
+/** Whether this user may publish the hotel's booking page now. Read-only, takes no locks
+ * (VAY-2295: an operator's address change republishes as the user who made the page live).
+ * No route checked this user, so their access to the property is checked here. */
+export async function canPublishBookingPage(
+  client: Pick<CommandClient, "query">,
+  scope: AuthorizedScopeInput,
+  at: Date,
+): Promise<boolean> {
+  return (await lockAuthorizedScope(client as CommandClient, scope, at, true, true, true)) !== null;
+}
+
 async function lockAuthorizedScope(
   client: CommandClient,
   command: AuthorizedScopeInput,
   at: Date,
   requireActive = false,
   readOnly = false,
+  checkPropertyAccess = false,
 ): Promise<number | null> {
   const scope = await client.query<{ lifecycleRevision: number | string }>(
     `SELECT property.lifecycle_revision AS "lifecycleRevision"
@@ -323,22 +336,18 @@ async function lockAuthorizedScope(
        ON membership.organization_id = organization.id
       AND membership.user_id = actor.id
       AND membership.status = 'active'
-     JOIN identity.role_permission_grants permission_grant
-       ON permission_grant.organization_kind = 'hotel_group'
-      AND permission_grant.role_key = membership.role_key
-      AND permission_grant.permission_key = $4
      WHERE property.id = $2::uuid
-       AND ($5::boolean = false OR property.lifecycle_status = 'active')
-     ${
-       readOnly
-         ? ""
-         : `FOR SHARE OF property, organization, resource, actor, membership
-     FOR KEY SHARE OF permission_grant`
-     }`,
-    [command.organizationId, command.propertyId, command.actorUserId, PERMISSION, requireActive],
+       AND ($4::boolean = false OR property.lifecycle_status = 'active')
+     ${readOnly ? "" : "FOR SHARE OF property, organization, resource, actor, membership"}`,
+    [command.organizationId, command.propertyId, command.actorUserId, requireActive],
   );
   const lifecycleRevision = Number(scope.rows[0]?.lifecycleRevision);
   if (!Number.isSafeInteger(lifecycleRevision) || lifecycleRevision < 1) return null;
+  const permissions = await lockMemberPermissions(client, command, {
+    readOnly,
+    ...(checkPropertyAccess ? { propertyId: command.propertyId } : {}),
+  });
+  if (!permissions?.includes(PERMISSION)) return null;
 
   const entitlements = await client.query<{
     status: "active" | "suspended" | "expired";

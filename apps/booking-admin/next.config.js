@@ -9,6 +9,19 @@ const authPublicHostname = (() => {
 })();
 const nextConfig = {
   reactStrictMode: true,
+  // Provider callback queries contain a single-use correlation token (Airbnb import, VAY-2262).
+  logging: { incomingRequests: { ignore: [/^\/setup\/airbnb-return(?:\/|\?|$)/] } },
+  async headers() {
+    return [
+      {
+        source: "/setup/airbnb-return/:path*",
+        headers: [
+          { key: "Referrer-Policy", value: "no-referrer" },
+          { key: "Cache-Control", value: "private, no-store" },
+        ],
+      },
+    ];
+  },
   allowedDevOrigins: [
     "127.0.0.1",
     "admin.booking.localhost",

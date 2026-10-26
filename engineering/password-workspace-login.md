@@ -2,13 +2,14 @@
 
 Prepared hotel invitations can give an existing hotel owner a second organization.
 WorkOS then requires organization selection before issuing a password session.
-Marketplace must show the provider-offered workspaces and complete the selected
-workspace login; session refresh cannot complete authentication before cookies exist.
+Booking Admin and PMS must show the provider-offered workspaces and complete the
+selected workspace login; session refresh cannot complete authentication before
+cookies exist.
 
-Marketplace retains the submitted credentials only in a component ref while the
+The login page keeps the submitted credentials only in component state while the
 workspace chooser is open. Selecting a workspace retries password authentication
-with its ID. Successful authentication, changing account, and unmounting clear the
-ref. Credentials and pending authentication tokens are never persisted.
+with its ID. Changing account clears them, and leaving the page drops them. This
+flow never persists credentials or pending authentication tokens.
 
 The API accepts a requested workspace only when offered by WorkOS for the current
 password authentication, and checks that both the provider session and resolved

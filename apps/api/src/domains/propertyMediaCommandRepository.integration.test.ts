@@ -9,7 +9,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import type { PlatformMediaServingConfig } from "../platform/mediaServing.js";
 import { createPgHotelMediaResolutionPort } from "../platform/hotelMediaResolver.js";
 import { PROJECT_CANONICAL_PUBLIC_PROPERTY_PROFILE } from "../platform/publicBookabilityPublication.js";
-import { syncPropertyOfferReadModels } from "../routes/marketplaceAdmin.js";
+import { projectPropertyPublicProfile } from "../platform/propertyPublicProfileProjection.js";
 import { createPgS3PropertyMediaCommandRepository } from "./propertyMediaCommandRepository.js";
 
 const TEST_DATABASE_URL = process.env["TEST_DATABASE_URL"];
@@ -43,7 +43,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL property media publication saga"
     serving,
     max: 6,
     publisher: { copyToPublic, deletePublic },
-    syncReadModels: syncPropertyOfferReadModels,
+    syncReadModels: projectPropertyPublicProfile,
   });
   const mediaResolver = createPgHotelMediaResolutionPort({
     connectionString: TEST_DATABASE_URL ?? "postgresql://integration-test-disabled",

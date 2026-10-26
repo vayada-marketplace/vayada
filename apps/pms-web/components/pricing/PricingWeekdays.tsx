@@ -3,6 +3,8 @@ import { useState } from "react";
 import { parsePricingConfiguration, pricingCurrencyScale, type PricingConfiguration } from "@vayada/domain-pms/replacement-pricing";
 import { useTranslation } from "@/lib/i18n";
 import { decimalAmount, errorText, parseAdjustmentInput, PricingError } from "./pricingAmounts";
+import { PricingSection } from "./PricingSection";
+import * as ui from "./pricingStyles";
 
 type Offer = PricingConfiguration["offers"][number];
 export function changeWeekdayPrice(room: PricingConfiguration, offerId: string, day: string, input: { kind: string; value: string } | null, replace = false): PricingConfiguration {
@@ -37,29 +39,29 @@ export function PricingWeekdays({ room, offer, label, disabled, onChange, onPend
     try { onChange(changeWeekdayPrice(room, offer.id, day, input, editing)); if (input) reset(); else setError(""); }
     catch (cause) { setError(errorText(cause, t, "pricing.weekdays.changeFailed")); }
   };
-  return <details className="sm:col-span-2 text-sm"><summary className="cursor-pointer">{t("pricing.weekdays.summary", { label })}</summary>
-    <p className="mt-2 text-gray-600">{t("pricing.weekdays.intro")}</p>
-    <ul className="my-3 space-y-2">{offer.price.calendar.weekdays.map(({ day, adjustment }) => <li key={day} className="flex flex-wrap items-center gap-3">
+  return <PricingSection title={t("pricing.weekdays.section")} label={t("pricing.weekdays.summary", { label })} keepOpen={pending}>
+    <p className={ui.help}>{t("pricing.weekdays.intro")}</p>
+    <ul className="space-y-1.5">{offer.price.calendar.weekdays.map(({ day, adjustment }) => <li key={day} className={ui.entry}>
       <span>{t(`pricing.weekday.${day}`)}: {adjustment.kind === "percentage" ? `${adjustment.basisPoints / 100}%` : `${adjustment.deltaMinor.startsWith("-") ? "−" : "+"}${decimalAmount(adjustment.deltaMinor.replace(/^-/, ""), pricingCurrencyScale(room.currency)!)} ${room.currency}`}</span>
-      <button type="button" className="rounded border px-3 py-1 disabled:opacity-50" disabled={disabled || pending} aria-label={t("pricing.weekdays.editAria", { day: t(`pricing.weekday.${day}`), label })} onClick={() => {
+      <button type="button" className={ui.secondaryButton} disabled={disabled || pending} aria-label={t("pricing.weekdays.editAria", { day: t(`pricing.weekday.${day}`), label })} onClick={() => {
         if (disabled || pending) return;
         const minor = adjustment.kind === "fixed" ? adjustment.deltaMinor : String(adjustment.basisPoints);
         setEditing(true); update({ day: String(day), kind: adjustment.kind, value: `${minor.startsWith("-") ? "-" : ""}${decimalAmount(minor.replace(/^-/, ""), adjustment.kind === "fixed" ? pricingCurrencyScale(room.currency)! : 2)}` });
       }}>{t("pricing.weekdays.edit")}</button>
-      <button type="button" className="rounded border px-3 py-1 disabled:opacity-50" disabled={disabled || pending} aria-label={t("pricing.weekdays.clearAria", { day: t(`pricing.weekday.${day}`), label })} onClick={() => apply(String(day), null)}>{t("pricing.weekdays.clear")}</button>
+      <button type="button" className={ui.secondaryButton} disabled={disabled || pending} aria-label={t("pricing.weekdays.clearAria", { day: t(`pricing.weekday.${day}`), label })} onClick={() => apply(String(day), null)}>{t("pricing.weekdays.clear")}</button>
     </li>)}</ul>
     <div className="flex flex-wrap items-end gap-3">
-      <label>{t("pricing.weekdays.weekday")}<select aria-label={t("pricing.weekdays.weekdayAria", { label })} className="mt-1 block rounded border px-3 py-2" disabled={disabled || editing} value={entry.day} onChange={(event) => { if (!disabled && !editing) update({ ...entry, day: event.target.value }); }}>
+      <label className={ui.fieldLabel}>{t("pricing.weekdays.weekday")}<select aria-label={t("pricing.weekdays.weekdayAria", { label })} className={`mt-1.5 block ${ui.field}`} disabled={disabled || editing} value={entry.day} onChange={(event) => { if (!disabled && !editing) update({ ...entry, day: event.target.value }); }}>
         <option value="">{t("pricing.choose")}</option>{Array.from({ length: 7 }, (_, day) => <option key={day} value={day}>{t(`pricing.weekday.${day}`)}</option>)}
       </select></label>
-      <label>{t("pricing.adjustmentType")}<select aria-label={t("pricing.weekdays.typeAria", { label })} className="mt-1 block rounded border px-3 py-2" disabled={disabled} value={entry.kind} onChange={(event) => update({ ...entry, kind: event.target.value, value: "" })}>
+      <label className={ui.fieldLabel}>{t("pricing.adjustmentType")}<select aria-label={t("pricing.weekdays.typeAria", { label })} className={`mt-1.5 block ${ui.field}`} disabled={disabled} value={entry.kind} onChange={(event) => update({ ...entry, kind: event.target.value, value: "" })}>
         <option value="">{t("pricing.choose")}</option><option value="fixed">{t("pricing.amountIn", { currency: room.currency })}</option><option value="percentage">{t("pricing.percentage")}</option>
       </select></label>
-      <label>{t("pricing.adjustmentWithUnit", { unit: entry.kind === "percentage" ? "%" : room.currency })}<input aria-label={t("pricing.weekdays.amountAria", { label })} className="mt-1 block w-36 rounded border px-3 py-2" disabled={disabled} value={entry.value} onChange={(event) => update({ ...entry, value: event.target.value })} /></label>
-      <button type="button" className="rounded border px-3 py-2 disabled:opacity-50" disabled={disabled} onClick={() => apply(entry.day, entry)}>{editing ? t("pricing.weekdays.apply") : t("pricing.weekdays.add")}</button>
-      {pending && <button type="button" className="rounded border px-3 py-2 disabled:opacity-50" disabled={disabled} onClick={reset}>{t("pricing.weekdays.cancel")}</button>}
+      <label className={ui.fieldLabel}>{t("pricing.adjustmentWithUnit", { unit: entry.kind === "percentage" ? "%" : room.currency })}<input aria-label={t("pricing.weekdays.amountAria", { label })} className={`mt-1.5 block w-36 ${ui.field}`} disabled={disabled} value={entry.value} onChange={(event) => update({ ...entry, value: event.target.value })} /></label>
+      <button type="button" className={ui.secondaryButton} disabled={disabled} onClick={() => apply(entry.day, entry)}>{editing ? t("pricing.weekdays.apply") : t("pricing.weekdays.add")}</button>
+      {pending && <button type="button" className={ui.secondaryButton} disabled={disabled} onClick={reset}>{t("pricing.weekdays.cancel")}</button>}
     </div>
     {pending && <p className="mt-2">{editing ? t("pricing.weekdays.pendingApply") : t("pricing.weekdays.pendingAdd")}</p>}
-    {error && <p role="alert" className="mt-2 text-red-700">{error}</p>}
-  </details>;
+    {error && <p role="alert" className={ui.errorText}>{error}</p>}
+  </PricingSection>;
 }

@@ -21,12 +21,6 @@ const RUN = "vay1351-105500000000000000000001";
 const HOTEL = "10550000-0000-4000-a000-000000000021";
 const PROPERTY = "10550000-0000-4000-a000-000000000022";
 const ORGANIZATION = "10550000-0000-4000-a000-000000000023";
-const CREATOR = "10550000-0000-4000-a000-000000000024";
-const CREATOR_USER = "10550000-0000-4000-a000-000000000025";
-const HOTEL_USER = "10550000-0000-4000-a000-000000000026";
-const CREATOR_ORGANIZATION = "10550000-0000-4000-a000-000000000027";
-const COLLABORATION = "10550000-0000-4000-a000-000000000028";
-const MESSAGE = "10550000-0000-4000-a000-000000000029";
 const ADDON = "10550000-0000-4000-a000-000000000030";
 
 describe.skipIf(!URL)("production media migration (PostgreSQL)", () => {
@@ -61,16 +55,14 @@ describe.skipIf(!URL)("production media migration (PostgreSQL)", () => {
       [RUN],
     );
     await client.query(
-      "DELETE FROM identity.organization_resource_links WHERE organization_id=ANY($1::uuid[])",
-      [[ORGANIZATION, CREATOR_ORGANIZATION]],
+      "DELETE FROM identity.organization_resource_links WHERE organization_id=$1",
+      [ORGANIZATION],
     );
     await client.query("DELETE FROM hotel_catalog.property_source_links WHERE property_id=$1", [
       PROPERTY,
     ]);
     await client.query("DELETE FROM hotel_catalog.properties WHERE id=$1", [PROPERTY]);
-    await client.query("DELETE FROM identity.organizations WHERE id=ANY($1::uuid[])", [
-      [ORGANIZATION, CREATOR_ORGANIZATION],
-    ]);
+    await client.query("DELETE FROM identity.organizations WHERE id=$1", [ORGANIZATION]);
     await client.query("DELETE FROM platform.source_extraction_runs WHERE run_id=$1", [RUN]);
     await client.end();
   });
@@ -99,7 +91,7 @@ describe.skipIf(!URL)("production media migration (PostgreSQL)", () => {
     expect(first.blockers.map((blocker) => blocker.code)).toEqual(["MEDIA_SOURCE_MISSING"]);
     expect(first).toMatchObject({
       applied: false,
-      counts: { completed: 2, missing: 1, quarantined: 1 },
+      counts: { completed: 1, missing: 1, quarantined: 1 },
       quarantines: [
         expect.objectContaining({
           sourceRowId: `${ADDON}:image`,
@@ -107,17 +99,17 @@ describe.skipIf(!URL)("production media migration (PostgreSQL)", () => {
         }),
       ],
     });
-    expect(importedIds).toHaveLength(2);
+    expect(importedIds).toHaveLength(1);
 
     failGallery = false;
     const resumed = await runProductionMediaMigration(config(), services);
     expect(resumed).toMatchObject({
       applied: true,
-      counts: { completed: 3, missing: 0, corrupt: 0, failed: 0, quarantined: 1 },
+      counts: { completed: 2, missing: 0, corrupt: 0, failed: 0, quarantined: 1 },
       blockers: [],
     });
-    expect(importedIds).toHaveLength(3);
-    expect(new Set(importedIds).size).toBe(3);
+    expect(importedIds).toHaveLength(2);
+    expect(new Set(importedIds).size).toBe(2);
 
     const evidence = await client.query<{
       status: string;
@@ -128,9 +120,6 @@ describe.skipIf(!URL)("production media migration (PostgreSQL)", () => {
       quarantineRedacted: boolean;
       objects: number;
       variants: number;
-      chatOwner: string;
-      chatRetainedUntil: string;
-      chatMigrationCase: string;
     }>(
       `SELECT run.status,
               run.planned_count AS planned,
@@ -147,32 +136,22 @@ describe.skipIf(!URL)("production media migration (PostgreSQL)", () => {
                 WHERE source_metadata ->> 'migrationRunId'=$1) AS objects,
               (SELECT count(*)::int FROM platform.media_variants variant
                 JOIN platform.media_objects media ON media.id=variant.media_object_id
-               WHERE media.source_metadata ->> 'migrationRunId'=$1) AS variants,
-              (SELECT owner_organization_id::text FROM platform.media_objects
-                WHERE source_metadata ->> 'migrationRunId'=$1
-                  AND purpose='marketplace.collaboration_chat.attachment') AS "chatOwner",
-              (SELECT retained_until::text FROM platform.media_objects
-                WHERE source_metadata ->> 'migrationRunId'=$1
-                  AND purpose='marketplace.collaboration_chat.attachment') AS "chatRetainedUntil",
-              (SELECT source_metadata ->> 'migrationCase' FROM platform.media_objects
-                WHERE source_metadata ->> 'migrationRunId'=$1
-                  AND purpose='marketplace.collaboration_chat.attachment') AS "chatMigrationCase"
+               WHERE media.source_metadata ->> 'migrationRunId'=$1) AS variants
          FROM platform.production_media_migration_runs run
         WHERE run.source_run_id=$1`,
       [RUN],
     );
     expect(evidence.rows[0]).toEqual({
       status: "completed",
-      planned: 3,
-      completed: 3,
+      planned: 2,
+      completed: 2,
       quarantined: 1,
       quarantineRows: 1,
       quarantineRedacted: true,
-      objects: 3,
-      variants: 9,
-      chatOwner: CREATOR_ORGANIZATION,
-      chatRetainedUntil: "2028-08-01 00:00:00+00",
-      chatMigrationCase: "media-url-migration",
+      objects: 2,
+      // Two public Booking images with four variants each. A legacy Marketplace hotel picture
+      // needs a Marketplace owner link, which 0500 deleted and 0501 refuses (VAY-2272).
+      variants: 8,
     });
 
     await expect(
@@ -243,39 +222,6 @@ function sourceRows(quarantinedValue: string): IdentitySourceRow[] {
         updated_at: "2026-08-30T00:00:00Z",
       },
     },
-    {
-      sourceDatabase: "marketplace",
-      sourceTable: "hotel_profiles",
-      rowOrdinal: 3,
-      data: { id: HOTEL, user_id: HOTEL_USER },
-    },
-    {
-      sourceDatabase: "marketplace",
-      sourceTable: "creators",
-      rowOrdinal: 4,
-      data: { id: CREATOR, user_id: CREATOR_USER },
-    },
-    {
-      sourceDatabase: "marketplace",
-      sourceTable: "collaborations",
-      rowOrdinal: 5,
-      data: { id: COLLABORATION, hotel_id: HOTEL, creator_id: CREATOR },
-    },
-    {
-      sourceDatabase: "marketplace",
-      sourceTable: "chat_messages",
-      rowOrdinal: 6,
-      data: {
-        id: MESSAGE,
-        collaboration_id: COLLABORATION,
-        sender_id: CREATOR_USER,
-        message_type: "image",
-        content: "https://legacy-media-test.s3.amazonaws.com/chat/private.jpg",
-        metadata: {},
-        created_at: "2026-08-01T00:00:00Z",
-        updated_at: "2026-08-30T00:00:00Z",
-      },
-    },
   ];
 }
 
@@ -329,9 +275,8 @@ async function seed(client: pg.Client): Promise<void> {
   );
   await client.query(
     `INSERT INTO identity.organizations(id, kind, name, slug)
-     VALUES ($1, 'hotel_group', 'VAY-1055 integration', 'vay-1055-integration'),
-            ($2, 'creator_workspace', 'VAY-1055 creator', 'vay-1055-creator')`,
-    [ORGANIZATION, CREATOR_ORGANIZATION],
+     VALUES ($1, 'hotel_group', 'VAY-1055 integration', 'vay-1055-integration')`,
+    [ORGANIZATION],
   );
   await client.query(
     `INSERT INTO hotel_catalog.properties(id, public_id, display_name)
@@ -341,22 +286,14 @@ async function seed(client: pg.Client): Promise<void> {
   await client.query(
     `INSERT INTO hotel_catalog.property_source_links
        (property_id, source_system, source_table, source_id, relationship, metadata)
-     VALUES ($1, 'marketplace', 'hotel_profiles', $2, 'profile_input', $3::jsonb)`,
-    [PROPERTY, HOTEL, JSON.stringify({ migrationRunId: RUN })],
-  );
-  await client.query(
-    `INSERT INTO hotel_catalog.property_source_links
-       (property_id, source_system, source_table, source_id, relationship, metadata)
      VALUES ($1, 'booking', 'booking_hotels', $2, 'canonical_input', $3::jsonb)`,
     [PROPERTY, HOTEL, JSON.stringify({ migrationRunId: RUN })],
   );
   await client.query(
     `INSERT INTO identity.organization_resource_links
-       (organization_id, product, resource_type, resource_id, relationship)
-     VALUES ($1, 'booking', 'booking_hotel', $3, 'owner'),
-            ($1, 'marketplace', 'hotel_profile', $3, 'owner'),
-            ($2, 'marketplace', 'creator_profile', $4, 'owner')`,
-    [ORGANIZATION, CREATOR_ORGANIZATION, HOTEL, CREATOR],
+       (organization_id, product, resource_type, resource_id, relationship, status)
+     VALUES ($1, 'booking', 'booking_hotel', $2, 'owner', 'active')`,
+    [ORGANIZATION, HOTEL],
   );
 }
 

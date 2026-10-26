@@ -4,12 +4,21 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "@/lib/i18n";
 import { formatCurrency, formatNumber } from "@/lib/utils";
 import { settingsService, type PropertySettings } from "@/services/settings";
+import { BookingPageStatusCard } from "@/components/dashboard/BookingPageStatusCard";
+import { ResumeSetupBanner } from "@/components/dashboard/ResumeSetupBanner";
+import {
+  DashboardSetupChecklistCard,
+  DashboardSetupChecklistChip,
+  useDashboardSetupChecklist,
+} from "@/components/dashboard/DashboardSetupChecklist";
 import { ConversionFunnelCard } from "@/components/dashboard/ConversionFunnelCard";
 import { SummaryCard } from "@/components/dashboard/SummaryCard";
+import { PageHeader, PageLayout } from "@/components/layout/PageLayout";
 import { compareRate, compareSummary, type SummaryChange } from "@/lib/utils/dashboardSummary";
 import {
   dashboardService,
   rangeQuery,
+  TIME_RANGES,
   type DashboardStats,
   type BookingsBySource,
   type ConversionFunnel,
@@ -75,6 +84,9 @@ export default function DashboardPage() {
   const [sparklines, setSparklines] = useState<Sparklines | null>(null);
   const [currency, setCurrency] = useState("EUR");
   const [propertyTimeZone, setPropertyTimeZone] = useState<string | null>(null);
+  const [hotelName, setHotelName] = useState("");
+  // VAY-2247 wave 2: the setup checklist, where the server offers it.
+  const setupChecklist = useDashboardSetupChecklist();
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [loading, setLoading] = useState(true);
   const [pageViewsModalOpen, setPageViewsModalOpen] = useState(false);
@@ -86,6 +98,7 @@ export default function DashboardPage() {
       .then((settings: PropertySettings) => {
         if (settings.default_currency) setCurrency(settings.default_currency);
         setPropertyTimeZone(settings.time_zone || null);
+        setHotelName(settings.property_name || "");
       })
       .catch(() => setPropertyTimeZone(null))
       .finally(() => setSettingsLoaded(true));
@@ -212,21 +225,24 @@ export default function DashboardPage() {
     : [];
 
   return (
-    <div className="p-4 md:p-6 max-w-7xl mx-auto space-y-3 md:space-y-4">
-      {/* Header */}
-      <div>
-        <h1 className="text-xl md:text-2xl font-bold text-gray-900">{t("dashboard.title")}</h1>
-      </div>
+    <PageLayout className="space-y-3 md:space-y-4">
+      <PageHeader
+        title={t("dashboard.title")}
+        actions={<DashboardSetupChecklistChip setup={setupChecklist} />}
+      />
+
+      <ResumeSetupBanner hidden={setupChecklist.state.kind === "ready"} />
+
+      <BookingPageStatusCard />
+
+      <DashboardSetupChecklistCard setup={setupChecklist} hotelName={hotelName} />
 
       {/* Time Range Tabs */}
       <div className="flex gap-1 bg-gray-100 rounded-lg p-1 w-full sm:w-fit">
-        {[
-          { key: "today" as TimeRange, label: t("dashboard.timeRange.today") },
-          { key: "week" as TimeRange, label: t("dashboard.timeRange.week") },
-          { key: "month" as TimeRange, label: t("dashboard.timeRange.month") },
-        ].map(({ key, label }) => (
+        {TIME_RANGES.map(([key, label]) => (
           <button
             key={key}
+            aria-pressed={timeRange === key}
             onClick={() => selectTimeRange(key)}
             className={`flex-1 sm:flex-initial px-4 py-1.5 rounded-md text-[13px] font-medium transition-colors ${
               timeRange === key
@@ -234,7 +250,7 @@ export default function DashboardPage() {
                 : "text-gray-500 hover:text-gray-700"
             }`}
           >
-            {label}
+            {t(label)}
           </button>
         ))}
       </div>
@@ -404,9 +420,11 @@ export default function DashboardPage() {
           locale={locale}
           t={t}
           exportFileName={funnelExportFileName}
+          timeRange={timeRange}
+          onTimeRangeChange={selectTimeRange}
         />
       </div>
-    </div>
+    </PageLayout>
   );
 }
 

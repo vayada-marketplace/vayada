@@ -23,7 +23,6 @@ The global capability modes stay as kill switches; they never select hotels.
 | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------- |
 | Webhook routing (booking, message, alert, alteration), active claim only | `platform/providerWebhooks.ts` `resolveChannexPropertyId`                             |
 | Booking persistence (webhook hint and pulled revisions)                  | `jobs/channexBookings.ts` `persist`                                                   |
-| Daily full ARI producer                                                  | `jobs/pmsChannexManagementWorkerStore.ts` `claim`                                     |
 | Management plans (sync_bookings, ARI, provisioning)                      | `integrations/channexManagementPlans.ts` `activeExternalPropertyId` (already refuses) |
 
 Known exceptions, outside the gate until a later slice: review ingestion resolves a property by

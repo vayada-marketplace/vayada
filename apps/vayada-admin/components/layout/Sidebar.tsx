@@ -3,17 +3,15 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { HotelIcon } from "@vayada/product-onboarding/HotelIcon";
 import { authService } from "@/services/auth";
 
 const navItems = [
   { label: "Dashboard", href: "/dashboard/kpis", icon: DashboardIcon },
   { label: "Users", href: "/dashboard", icon: UsersIcon },
-  { label: "Hotels", href: "/dashboard/hotels", icon: HotelsIcon },
+  { label: "Hotels", href: "/dashboard/hotels", icon: HotelIcon },
   { label: "Bookings", href: "/dashboard/bookings", icon: BookingsIcon },
-  { label: "Marketplace", href: "/dashboard/marketplace", icon: MarketplaceIcon },
-  { label: "Collaborations", href: "/dashboard/collaborations", icon: CollaborationsIcon },
   { label: "Invite Codes", href: "/dashboard/invite-codes", icon: InviteCodesIcon },
-  { label: "Affiliate Payouts", href: "/dashboard/affiliate-payouts", icon: AffiliatePayoutsIcon },
   { label: "Settings", href: "/dashboard/settings", icon: SettingsIcon },
 ];
 
@@ -131,61 +129,6 @@ function UsersIcon({ className }: { className?: string }) {
   );
 }
 
-function HotelsIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M3 21h18" />
-      <path d="M5 21V7l8-4v18" />
-      <path d="M19 21V11l-6-4" />
-      <path d="M9 9h1" />
-      <path d="M9 13h1" />
-      <path d="M9 17h1" />
-    </svg>
-  );
-}
-
-function MarketplaceIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M6 2L3 7v13a2 2 0 002 2h14a2 2 0 002-2V7l-3-5z" />
-      <path d="M3 7h18" />
-      <path d="M16 11a4 4 0 01-8 0" />
-    </svg>
-  );
-}
-
-function CollaborationsIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
-    </svg>
-  );
-}
-
 function InviteCodesIcon({ className }: { className?: string }) {
   return (
     <svg
@@ -237,22 +180,6 @@ function BookingsIcon({ className }: { className?: string }) {
       <rect x="3" y="5" width="18" height="16" rx="2" />
       <path d="M8 3v4M16 3v4M3 10h18" />
       <path d="M8 14h4" />
-    </svg>
-  );
-}
-
-function AffiliatePayoutsIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M12 2v20M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6" />
     </svg>
   );
 }

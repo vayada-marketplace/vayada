@@ -19,7 +19,7 @@ describe("browser auth handoff", () => {
     await expect(
       createBrowserAuthHandoff({
         csrfToken: "csrf-token",
-        sourceSurface: "marketplace-web",
+        sourceSurface: "booking-admin",
         targetPath: "/dashboard",
         targetSurface: "booking-admin",
         fetcher,
@@ -95,7 +95,7 @@ describe("browser auth handoff", () => {
       () =>
         createBrowserAuthHandoff({
           csrfToken: "csrf-token",
-          sourceSurface: "marketplace-web",
+          sourceSurface: "booking-admin",
           targetPath: "/dashboard",
           targetSurface: "booking-admin",
           fetcher: async () => new Response("truncated", { status: 200 }),

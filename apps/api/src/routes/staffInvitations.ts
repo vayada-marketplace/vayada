@@ -483,6 +483,12 @@ export async function registerStaffInvitationRoutes(
     } catch {
       return reply.status(500).send({ code: "staff_invitation_delivery_failed" });
     }
+    if ("replacedRevocation" in delivery && delivery.replacedRevocation === "failed") {
+      request.log.warn(
+        { invitationId: result.invitationId },
+        "The WorkOS invitation this one replaced is not revoked yet; the worker retries",
+      );
+    }
     return reply.status(result.outcome === "created" ? 201 : 200).send({
       outcome: result.outcome,
       invitationId: result.invitationId,

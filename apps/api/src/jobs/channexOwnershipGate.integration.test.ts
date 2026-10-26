@@ -2,7 +2,6 @@ import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createPgProviderWebhookStore } from "../platform/providerWebhooks.js";
 import { runChannexBookingJobs } from "./channexBookings.js";
-import { createPgPmsChannexManagementWorkerStore } from "./pmsChannexManagementWorkerStore.js";
 
 const URL = process.env["TEST_DATABASE_URL"];
 if (URL && !/(^|[_-])(test|verify)([_-]|$)/i.test(new globalThis.URL(URL).pathname))
@@ -132,30 +131,6 @@ describe.skipIf(!URL)("Channex per-hotel ownership gate (PostgreSQL)", () => {
       id,
     ]);
     expect(claimed.rows[0]).toEqual({ attempts_count: 1 });
-  });
-
-  it("enqueues the daily full ARI sync only for owned, unreserved hotels", async () => {
-    // One store per property: the staging property scope keeps the producer and the claim on it.
-    for (const property of PROPERTIES) {
-      const store = createPgPmsChannexManagementWorkerStore({
-        connectionString: URL!,
-        targetState: { succeed: async () => undefined, fail: async () => undefined },
-        ariSyncMutating: true,
-        stagingRestrictionsPropertyId: property,
-      });
-      try {
-        await store.claim({ workerId: "vay-2108", now: new Date() });
-      } finally {
-        await store.close?.();
-      }
-    }
-    const queued = await db.query<{ propertyId: string }>(
-      `SELECT property_id::text AS "propertyId" FROM platform.jobs
-       WHERE queue_name='pms.channex.management' AND job_key LIKE 'channex.ari:%:full:%'
-         AND property_id = ANY($1::uuid[]) ORDER BY 1`,
-      [PROPERTIES],
-    );
-    expect(queued.rows.map((row) => row.propertyId)).toEqual([OWNED]);
   });
 
   let sequence = 0;

@@ -1,3 +1,4 @@
+import { isFinancePlanSelectedAt } from "@vayada/domain-finance";
 import type { PoolClient } from "pg";
 import { lockPublicPricingAuthority } from "./publicPricingAuthority.js";
 import { toBillingConfig } from "./financeBillingConfigReadModel.js";
@@ -62,8 +63,7 @@ export async function lockFinancePricingAcceptanceTerms(client: PoolClient, slug
   if (entitlement.plan_key === "fixed") {
     if (!["trialing", "active"].includes(entitlement.provider_subscription_status)) return null;
   } else {
-    const selected = entitlement.entitlement_metadata.planSelectedAt;
-    if (typeof selected !== "string" || !Number.isFinite(Date.parse(selected))) return null;
+    if (!isFinancePlanSelectedAt(entitlement.entitlement_metadata.planSelectedAt)) return null;
   }
   for (const key of ["channelManagerFeePercent", "affiliatePlatformFeePercent"])
     if (Object.hasOwn(commission.rule_metadata, key) && !percent(commission.rule_metadata[key]))

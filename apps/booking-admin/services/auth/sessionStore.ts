@@ -22,7 +22,7 @@ export type AuthOrganizationOption = {
   organizationId: string;
   workosOrganizationId: string;
   displayName: string;
-  kind: "platform" | "hotel_group" | "creator_workspace" | "affiliate_partner";
+  kind: "platform" | "hotel_group";
 };
 
 export type AuthOrganizationSelectionResponse = {
@@ -158,6 +158,10 @@ export function getAuthKitAccessToken(): string | null {
 
 export function getAuthSessionUser(): AuthUser | null {
   return authKitSession?.user ?? null;
+}
+
+export function getAuthOrganizationId(): string | null {
+  return authKitSession?.organizationId ?? null;
 }
 
 export function getAuthWorkosOrganizationId(): string | null {

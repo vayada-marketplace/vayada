@@ -26,15 +26,6 @@ export interface PropertySettings {
 
 export type PropertySettingsUpdate = Partial<PropertySettings>;
 
-export type BookingAcceptanceMode = "instant" | "request";
-
-export interface BookingAcceptanceSettings {
-  contractVersion: "booking-acceptance.v1";
-  propertyId: string;
-  acceptanceMode: BookingAcceptanceMode;
-  instantBook: boolean;
-}
-
 export interface SameDayBookingSettings {
   contractVersion: "same-day-booking-policy.v1";
   propertyId: string;
@@ -86,6 +77,11 @@ interface PmsOperationsTemplateStep {
   stepId: string;
   label: string;
   required: boolean;
+  prompt?: string;
+  type?: CheckinChecklistStepType;
+  okLabel?: string;
+  negativeLabel?: string;
+  notePrompt?: string;
 }
 
 interface PmsOperationsTemplateResponse {
@@ -108,13 +104,24 @@ function commandId(prefix: string): string {
   return `${prefix}:${id}`;
 }
 
-function toOperationsSteps(
-  steps: Array<{ id: string; label: string; required: boolean }>,
-): PmsOperationsTemplateStep[] {
+function toCheckinOperationsSteps(steps: CheckinChecklistStep[]): PmsOperationsTemplateStep[] {
   return steps.map((step) => ({
     stepId: step.id,
     label: step.label,
     required: step.required,
+    ...(step.prompt?.trim() ? { prompt: step.prompt } : {}),
+    type: step.type,
+  }));
+}
+
+function toCheckoutOperationsSteps(steps: CheckoutInspectionStep[]): PmsOperationsTemplateStep[] {
+  return steps.map((step) => ({
+    stepId: step.id,
+    label: step.label,
+    required: step.required,
+    okLabel: step.okLabel,
+    negativeLabel: step.negativeLabel,
+    notePrompt: step.notePrompt,
   }));
 }
 
@@ -123,8 +130,8 @@ function toCheckinTemplate(response: PmsOperationsTemplateResponse): CheckinChec
     steps: response.template.steps.map((step, position) => ({
       id: step.stepId,
       label: step.label,
-      prompt: "",
-      type: "checkbox",
+      prompt: step.prompt ?? "",
+      type: step.type ?? "checkbox",
       required: step.required,
       system: false,
       position,
@@ -139,9 +146,9 @@ function toCheckoutTemplate(response: PmsOperationsTemplateResponse): CheckoutIn
     steps: response.template.steps.map((step, position) => ({
       id: step.stepId,
       label: step.label,
-      okLabel: "OK",
-      negativeLabel: "Issue",
-      notePrompt: "Add details...",
+      okLabel: step.okLabel ?? "OK",
+      negativeLabel: step.negativeLabel ?? "Issue",
+      notePrompt: step.notePrompt ?? "Add details...",
       required: step.required,
       position,
     })),
@@ -180,23 +187,6 @@ export const pmsSettingsService = {
 };
 
 export const settingsService = {
-  getBookingAcceptance: async () => {
-    const propertyId = await resolveSelectedPmsPropertyId("loading booking acceptance settings");
-    return pmsOperationsClient.get<BookingAcceptanceSettings>(
-      propertyTemplateEndpoint(propertyId, "booking-acceptance"),
-      pmsOperationsRequestOptions,
-    );
-  },
-
-  updateBookingAcceptance: async (acceptanceMode: BookingAcceptanceMode) => {
-    const propertyId = await resolveSelectedPmsPropertyId("saving booking acceptance settings");
-    return pmsOperationsClient.put<BookingAcceptanceSettings>(
-      propertyTemplateEndpoint(propertyId, "booking-acceptance"),
-      { acceptanceMode },
-      pmsOperationsRequestOptions,
-    );
-  },
-
   getSameDayBooking: async () => {
     const propertyId = await resolveSelectedPmsPropertyId("loading same-day booking settings");
     return pmsOperationsClient.get<SameDayBookingSettings>(
@@ -225,7 +215,7 @@ export const settingsService = {
     toCheckinTemplate(await getOperationsTemplate("check-in-checklist")),
 
   updateCheckinChecklist: (steps: CheckinChecklistStep[]) =>
-    updateOperationsTemplate("check-in-checklist", toOperationsSteps(steps)).then(
+    updateOperationsTemplate("check-in-checklist", toCheckinOperationsSteps(steps)).then(
       toCheckinTemplate,
     ),
 
@@ -233,7 +223,7 @@ export const settingsService = {
     getOperationsTemplate("check-out-inspection").then(toCheckoutTemplate),
 
   updateCheckoutInspection: (steps: CheckoutInspectionStep[]) =>
-    updateOperationsTemplate("check-out-inspection", toOperationsSteps(steps)).then(
+    updateOperationsTemplate("check-out-inspection", toCheckoutOperationsSteps(steps)).then(
       toCheckoutTemplate,
     ),
 };

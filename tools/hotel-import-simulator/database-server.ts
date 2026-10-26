@@ -17,7 +17,12 @@ import { createPgAirbnbImportSourceRepository } from "../../apps/api/src/domains
 import { createPgAirbnbImportApplicationRepository } from "../../apps/api/src/domains/airbnbImportApplicationRepository.js";
 import { listings } from "./client.js";
 
-const importOrigins = ["https://pms.localhost:1380", "https://marketplace.localhost:1382"];
+// The Marketplace origin stays until the Airbnb database spec moves with the Airbnb pages (VAY-2262).
+const importOrigins = [
+  "https://pms.localhost:1380",
+  "https://admin.booking.localhost:1382",
+  "https://marketplace.localhost:1382",
+];
 
 async function main() {
   // Deliberately fixed isolated endpoint; never accepts a production DSN or provider key.
@@ -85,7 +90,7 @@ async function main() {
     [organization, propertyId],
   );
   await db.query(
-    `INSERT INTO marketplace.invite_codes(id,code,invite_type,status,payload,redeemed_by_user_id)
+    `INSERT INTO hotel_catalog.hotel_account_invites(id,code,invite_type,status,payload,redeemed_by_user_id)
  VALUES ($1::uuid,$1::text,'hotel','redeemed',$2,$3) ON CONFLICT DO NOTHING`,
     [
       source,
@@ -125,7 +130,6 @@ async function main() {
         status: "active",
         permissions: [
           "hotel_catalog.setup.manage",
-          "marketplace.profile.manage",
           "pms.operations.manage",
           "pms.rooms_rates.read",
           "pms.room_status.read",
@@ -186,7 +190,7 @@ async function main() {
     createLink: async (_binding, attempt) => {
       const url = new URL(
         `/setup/airbnb-return/${propertyId}/${attempt.sourceId}`,
-        "https://marketplace.localhost:1382",
+        "https://admin.booking.localhost:1382",
       );
       url.search = new URLSearchParams({
         success: "true",

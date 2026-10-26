@@ -218,6 +218,16 @@ describe("property setup draft request parsing", () => {
       expectedBaseRevisions: {
         "pms.operating_calendar": "calendar:1",
         "pms.inventory": "inventory:1",
+        "pms.room_units": "units:1",
+        "hotel_catalog.time_zone": "time-zone:1",
+      },
+    };
+
+    const legacyCalendarRequest = {
+      ...calendarRequest,
+      expectedBaseRevisions: {
+        "pms.operating_calendar": "calendar:1",
+        "pms.inventory": "inventory:1",
         "pms.room_types": "types:1",
         "hotel_catalog.location": "location:1",
       },
@@ -225,6 +235,14 @@ describe("property setup draft request parsing", () => {
 
     expect(parseSavePropertySetupDraftRequest(roomsRequest).ok).toBe(true);
     expect(parseSavePropertySetupDraftRequest(pricingRequest).ok).toBe(true);
-    expect(parseSavePropertySetupDraftRequest(calendarRequest).ok).toBe(true);
+    expect(parseSavePropertySetupDraftRequest(calendarRequest)).toMatchObject({
+      ok: true,
+      value: { expectedBaseRevisions: calendarRequest.expectedBaseRevisions },
+    });
+    // A tab opened before VAY-2198 still saves with the legacy calendar manifest.
+    expect(parseSavePropertySetupDraftRequest(legacyCalendarRequest)).toMatchObject({
+      ok: true,
+      value: { expectedBaseRevisions: legacyCalendarRequest.expectedBaseRevisions },
+    });
   });
 });

@@ -36,6 +36,22 @@ describe("resolveBookingSetupGuard", () => {
     });
   });
 
+  it("redirects to this app's own /setup when no base URL is given", async () => {
+    const api = {
+      getStatus: vi.fn(async () =>
+        status({ decision: "setup_required", reasonCode: "product_access_pending" }),
+      ),
+    };
+
+    await expect(
+      resolveBookingSetupGuard("/dashboard", api, memoryStorage()),
+    ).resolves.toMatchObject({
+      action: "redirect_to_setup",
+      redirectPath:
+        "/setup?entryProduct=booking&returnProduct=booking&returnTo=%2Fdashboard&propertyId=property-1",
+    });
+  });
+
   it("enters Booking solely from the server entry decision, regardless of launch tasks", async () => {
     const api = {
       getStatus: vi.fn(async () =>
@@ -56,6 +72,34 @@ describe("resolveBookingSetupGuard", () => {
       redirectPath: null,
     });
     expect(storage.getItem("selectedSharedPropertyId")).toBe("property-2");
+  });
+
+  it("verifies the property named by a setup-exit marker instead of the stored one", async () => {
+    const api = {
+      getStatus: vi.fn(async () =>
+        status({
+          propertyId: "property-3",
+          decision: "enter",
+          destinationRouteKey: "booking.workspace",
+        }),
+      ),
+    };
+    const storage = memoryStorage({ selectedSharedPropertyId: "property-1" });
+
+    await expect(
+      resolveBookingSetupGuard(
+        "/dashboard?setup=incomplete&propertyId=property-3",
+        api,
+        storage,
+        undefined,
+        { propertyId: "property-3" },
+      ),
+    ).resolves.toMatchObject({ action: "enter_product", propertyId: "property-3" });
+    expect(api.getStatus).toHaveBeenCalledWith({
+      entryProduct: "booking",
+      propertyId: "property-3",
+    });
+    expect(storage.getItem("selectedSharedPropertyId")).toBe("property-3");
   });
 
   it("does not enter Booking when the server marks it unavailable", async () => {
@@ -108,12 +152,6 @@ function status(input: {
           ],
           allowedActions: ["manage_service"],
         },
-        {
-          track: "creator_marketplace",
-          provisioning: "not_selected",
-          components: [{ product: "marketplace", access: "absent" }],
-          allowedActions: ["add"],
-        },
       ],
     },
     propertySelection: {
@@ -162,7 +200,6 @@ function status(input: {
       launchReadiness: {
         operationsUse: "ready",
         directBookingPublish: input.withIncompleteTask ? "pending" : "ready",
-        marketplacePublish: "not_applicable",
       },
     },
     updatedAt: "2026-07-26T10:00:00.000Z",

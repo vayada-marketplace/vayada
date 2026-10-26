@@ -257,7 +257,7 @@ async function persist(pool:pg.Pool,job:Job,revision:Revision,rawRevision:unknow
           JOIN hotel_catalog.property_locations location ON location.property_id=property.id
           WHERE property.id=$1::uuid AND EXISTS(SELECT 1 FROM pms.operating_calendar_revisions calendar
             WHERE calendar.property_id=property.id AND calendar.calendar_revision=(SELECT max(calendar_revision) FROM pms.operating_calendar_revisions WHERE property_id=property.id)
-              AND calendar.property_profile_revision=property.profile_revision AND calendar.property_time_zone=location.timezone)`,[job.propertyId])).rows.length>0);
+              AND calendar.property_time_zone=location.timezone)`,[job.propertyId])).rows.length>0);
       await appendChannexNightlyRevenueEvidence(client,{propertyId:job.propertyId,bookingId:guestBookingId,providerBookingId:job.channelBookingId,revisionId:revision.id,revisionAt:revision.insertedAt!,canceled:revision.status==="canceled",retainedCharges:isAirbnb?[]:revision.retainedCharges,rooms:isAirbnb?revision.rooms.map(room=>({...room,days:null})):revision.rooms,captureEconomics,captureRetainedEconomics:!isAirbnb});
     }
     if(revision.roomCount)await client.query(

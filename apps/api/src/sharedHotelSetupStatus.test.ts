@@ -64,7 +64,7 @@ type TrackAuthorizationCase = {
   given: {
     authentication: "missing" | "invalid" | "valid";
     permissions: PermissionKey[];
-    organizationKind: "hotel_group" | "creator_workspace";
+    organizationKind: "hotel_group" | "platform";
     revokePermissionBeforeExactRetry?: boolean;
   };
   expected: {
@@ -204,7 +204,7 @@ describe("shared hotel setup status route", () => {
 
   it("rejects non-hotel organizations for the property-type catalog", async () => {
     app = buildSharedSetupApp({
-      organizationKind: "creator_workspace",
+      organizationKind: "platform",
       linkedResources: [],
       repository: repositoryWith([]),
     });
@@ -434,25 +434,6 @@ describe("shared hotel setup status route", () => {
         "direct_booking_publication",
       ],
     ],
-    [
-      "marketplace",
-      ["creator_marketplace"],
-      ["shared_identity", "public_profile", "creator_offer"],
-    ],
-    [
-      "both",
-      ["hotel_operations", "creator_marketplace"],
-      [
-        "shared_identity",
-        "public_profile",
-        "creator_offer",
-        "rooms_rates_availability",
-        "guest_settings_policies",
-        "billing_plan",
-        "payment",
-        "direct_booking_publication",
-      ],
-    ],
   ] as const)(
     "filters setup tasks for %s selected tracks",
     async (_name, selectedTracks, expectedTaskIds) => {
@@ -483,14 +464,14 @@ describe("shared hotel setup status route", () => {
               ownerProgress: "owner_complete",
               readiness: "complete",
             }),
-            creator_offer: taskFact("creator_offer", {
+            payment: taskFact("payment", {
               readiness: "pending_review",
               ownerProgress: "owner_complete",
             }),
           }),
         }),
       ]),
-      trackCommandRepository: trackRepository(["creator_marketplace"]),
+      trackCommandRepository: trackRepository(["hotel_operations"]),
     });
 
     const response = await injectJson<AdaptiveHotelSetupStatus>(app, {
@@ -502,58 +483,18 @@ describe("shared hotel setup status route", () => {
     expect(response.body.setupPlan?.tasks).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          taskId: "public_profile",
+          taskId: "rooms_rates_availability",
           callerCapability: "ask_owner",
-          actionableBy: "owner",
+          actionableBy: "operator",
         }),
         expect.objectContaining({
-          taskId: "creator_offer",
+          taskId: "payment",
           callerCapability: "waiting",
           actionableBy: "support",
         }),
       ]),
     );
     expect(response.body.setupPlan?.recommendedTaskId).toBeNull();
-  });
-
-  it("recommends a rejected Marketplace task for an allowed owner to correct", async () => {
-    app = buildSharedSetupApp({
-      permissions: [
-        "hotel_catalog.setup.read",
-        "hotel_catalog.setup.manage",
-        "marketplace.profile.manage",
-      ],
-      repository: repositoryWith([
-        adaptiveProperty(propertyId, {
-          taskFacts: taskFacts({
-            shared_identity: completedTaskFact("shared_identity"),
-            public_profile: taskFact("public_profile", {
-              ownerProgress: "in_progress",
-              readiness: "rejected",
-              reasonCodes: ["marketplace_profile_rejected"],
-            }),
-          }),
-        }),
-      ]),
-      trackCommandRepository: trackRepository(["creator_marketplace"]),
-    });
-
-    const response = await injectJson<AdaptiveHotelSetupStatus>(app, {
-      method: "GET",
-      url: "/api/hotel-setup/status",
-      headers: { authorization: "Bearer valid-token" },
-    });
-
-    expect(response.body.setupPlan?.recommendedTaskId).toBe("public_profile");
-    expect(
-      response.body.setupPlan?.tasks.find(({ taskId }) => taskId === "public_profile"),
-    ).toMatchObject({
-      callerCapability: "allowed",
-      ownerProgress: "in_progress",
-      readiness: "rejected",
-      actionableBy: "owner",
-      reasonCodes: ["marketplace_profile_rejected"],
-    });
   });
 
   it("keeps publication repair actionable only after its true dependencies are complete", async () => {
@@ -895,12 +836,6 @@ describe("shared hotel setup status route", () => {
               ],
               allowedActions: ["manage_service"],
             },
-            {
-              track: "creator_marketplace",
-              provisioning: "not_selected",
-              components: [{ product: "marketplace", access: "absent" }],
-              allowedActions: ["add"],
-            },
           ],
         };
       },
@@ -949,7 +884,6 @@ describe("shared hotel setup status route", () => {
   it.each([
     ["booking", "hotel_operations", "booking", "booking_hotel"],
     ["pms", "hotel_operations", "pms", "pms_property"],
-    ["marketplace", "creator_marketplace", "marketplace", "hotel_profile"],
   ] as const)(
     "does not enter %s with only an active entitlement and resource link",
     async (entryProduct, selectedTrack, product, resourceType) => {
@@ -976,53 +910,23 @@ describe("shared hotel setup status route", () => {
     },
   );
 
-  it("sends a blocked track to service management instead of an unresolvable setup loop", async () => {
+  it("rejects the retired marketplace entry product before any data read", async () => {
     app = buildSharedSetupApp({
       linkedResources: [propertyLink(propertyId)],
       repository: repositoryWith([adaptiveProperty(propertyId)]),
-      trackCommandRepository: {
-        async updateTracks() {
-          throw new Error("setup track writes are not used by this test");
-        },
-        async getTrackStatus() {
-          return {
-            trackRevision: 1,
-            selectedTracks: ["creator_marketplace"],
-            tracks: [
-              {
-                track: "hotel_operations",
-                provisioning: "not_selected",
-                components: [
-                  { product: "pms", access: "absent" },
-                  { product: "booking", access: "absent" },
-                ],
-                allowedActions: ["add"],
-              },
-              {
-                track: "creator_marketplace",
-                provisioning: "blocked",
-                components: [{ product: "marketplace", access: "absent" }],
-                allowedActions: ["manage_service"],
-              },
-            ],
-          };
-        },
-        async close() {},
-      },
+      trackCommandRepository: unusedTrackCommandRepository(),
     });
 
-    const response = await injectJson<AdaptiveHotelSetupStatus>(app, {
+    const response = await injectJson<{ code: string; detail: string }>(app, {
       method: "GET",
       url: "/api/hotel-setup/status?entryProduct=marketplace",
       headers: { authorization: "Bearer valid-token" },
     });
 
-    expect(response.body.entryDecision).toEqual({
-      requestedProduct: "marketplace",
-      propertyId,
-      decision: "unavailable",
-      destinationRouteKey: null,
-      reasonCode: "service_management_required",
+    expect(response.statusCode).toBe(422);
+    expect(response.body).toEqual({
+      code: "invalid_entry_product",
+      detail: "entryProduct must be booking or pms.",
     });
   });
 
@@ -1073,7 +977,6 @@ describe("shared hotel setup status route", () => {
     expect(response.body.setupPlan?.launchReadiness).toEqual({
       operationsUse: "ready",
       directBookingPublish: "blocked",
-      marketplacePublish: "not_applicable",
     });
   });
 
@@ -1081,7 +984,7 @@ describe("shared hotel setup status route", () => {
     const calls: HotelSetupTrackCommand[] = [];
     const responseBody: UpdateTracksResponse = {
       trackRevision: 3,
-      selectedTracks: ["hotel_operations", "creator_marketplace"],
+      selectedTracks: ["hotel_operations"],
       tracks: [
         {
           track: "hotel_operations",
@@ -1090,12 +993,6 @@ describe("shared hotel setup status route", () => {
             { product: "pms", access: "active" },
             { product: "booking", access: "active" },
           ],
-          allowedActions: [],
-        },
-        {
-          track: "creator_marketplace",
-          provisioning: "active",
-          components: [{ product: "marketplace", access: "active" }],
           allowedActions: [],
         },
       ],
@@ -1121,7 +1018,7 @@ describe("shared hotel setup status route", () => {
         "idempotency-key": "  setup-tracks-001  ",
       },
       payload: {
-        selectedTracks: ["creator_marketplace", "hotel_operations"],
+        selectedTracks: ["hotel_operations"],
         expectedRevision: 2,
       },
     });
@@ -1130,7 +1027,7 @@ describe("shared hotel setup status route", () => {
     expect(response.body).toEqual(responseBody);
     expect(calls).toEqual([
       {
-        selectedTracks: ["hotel_operations", "creator_marketplace"],
+        selectedTracks: ["hotel_operations"],
         expectedRevision: 2,
         idempotencyKey: "setup-tracks-001",
         actorUserId: "user_hotel_owner",
@@ -1168,6 +1065,18 @@ describe("shared hotel setup status route", () => {
           "idempotency-key": "invalid-payload",
         },
         payload: { selectedTracks: ["booking"], expectedRevision: 0 },
+      },
+      {
+        // The Creator Marketplace track is retired (VAY-2270).
+        name: "retired track",
+        headers: {
+          authorization: "Bearer valid-token",
+          "idempotency-key": "retired-track",
+        },
+        payload: {
+          selectedTracks: ["hotel_operations", "creator_marketplace"],
+          expectedRevision: 0,
+        },
       },
       {
         name: "missing key",
@@ -1822,7 +1731,7 @@ describe("shared hotel setup status route", () => {
       permissions: [
         "hotel_catalog.setup.read",
         "hotel_catalog.setup.manage",
-        "marketplace.profile.manage",
+        "booking.settings.manage",
       ],
       repository: profileRepository(profiles),
     });
@@ -1863,6 +1772,54 @@ describe("shared hotel setup status route", () => {
         },
         contacts: minimalHotelInput().contacts,
       },
+    });
+  });
+
+  it("keeps, sets and checks the area and arrival directions of a property's address (VAY-2322)", async () => {
+    const stored = profileResponse(propertyId, minimalHotelInput(), 7);
+    stored.profile.location = {
+      ...stored.profile.location,
+      area: "Altstadt",
+      arrivalDirections: "Walk through the blue gate.",
+    };
+    const profiles = new Map<string, SharedPropertyProfile>([[propertyId, stored]]);
+    const server = buildSharedSetupApp({
+      permissions: [
+        "hotel_catalog.setup.read",
+        "hotel_catalog.setup.manage",
+        "booking.settings.manage",
+      ],
+      repository: profileRepository(profiles),
+    });
+    app = server;
+    const put = (revision: number, location: Record<string, unknown>) =>
+      injectJson<SharedPropertyProfile & { fields?: Record<string, string[]> }>(server, {
+        method: "PUT",
+        url: "/api/hotel-setup/properties/" + propertyId + "/profile",
+        headers: { authorization: "Bearer valid-token" },
+        payload: { expectedProfileRevision: revision, patch: { location } },
+      });
+
+    // A client that doesn't know the fields (the setup wizard) leaves them as they are.
+    const kept = await put(7, { streetAddress: "Marienplatz 2" });
+    expect(kept.statusCode).toBe(200);
+    expect(kept.body.profile.location).toMatchObject({
+      streetAddress: "Marienplatz 2",
+      area: "Altstadt",
+      arrivalDirections: "Walk through the blue gate.",
+    });
+
+    const changed = await put(8, { area: "  Lehel ", arrivalDirections: "" });
+    expect(changed.statusCode).toBe(200);
+    expect(changed.body.profile.location).toMatchObject({ area: "Lehel" });
+    // An empty field is left out, as clients from before these fields expect.
+    expect(changed.body.profile.location).not.toHaveProperty("arrivalDirections");
+
+    const tooLong = await put(9, { area: "x".repeat(121), arrivalDirections: "y".repeat(1001) });
+    expect(tooLong.statusCode).toBe(422);
+    expect(tooLong.body.fields).toMatchObject({
+      "location.area": ["location.area is too long."],
+      "location.arrivalDirections": ["location.arrivalDirections is too long."],
     });
   });
 
@@ -2040,7 +1997,7 @@ describe("shared hotel setup status route", () => {
     });
   });
 
-  it("allows Marketplace owners to read and sparsely update the public property profile", async () => {
+  it("allows setup managers to read and sparsely update the public property profile", async () => {
     const current = publicProfileResponse(4);
     const updated = {
       ...current,
@@ -2059,7 +2016,7 @@ describe("shared hotel setup status route", () => {
       permissions: [
         "hotel_catalog.setup.read",
         "hotel_catalog.setup.manage",
-        "marketplace.profile.manage",
+        "booking.settings.manage",
       ],
       repository: {
         ...unusedStatusMethods(),
@@ -2108,7 +2065,7 @@ describe("shared hotel setup status route", () => {
       permissions: [
         "hotel_catalog.setup.read",
         "hotel_catalog.setup.manage",
-        "marketplace.profile.manage",
+        "booking.settings.manage",
       ],
       repository: {
         ...unusedStatusMethods(),
@@ -2167,7 +2124,7 @@ describe("shared hotel setup status route", () => {
       permissions: [
         "hotel_catalog.setup.read",
         "hotel_catalog.setup.manage",
-        "marketplace.profile.manage",
+        "booking.settings.manage",
       ],
       repository: {
         ...unusedStatusMethods(),
@@ -2221,7 +2178,7 @@ describe("shared hotel setup status route", () => {
       permissions: [
         "hotel_catalog.setup.read",
         "hotel_catalog.setup.manage",
-        "marketplace.profile.manage",
+        "booking.settings.manage",
       ],
       repository: {
         ...unusedStatusMethods(),
@@ -2367,7 +2324,7 @@ describe("shared hotel setup status route", () => {
     expect(publicUpdateResponse.body.code).toBe("missing_property_resource_link");
   });
 
-  it("reads and writes launch settings for a creator-only property without Booking access", async () => {
+  it("reads and writes launch settings for a property without Booking access", async () => {
     const stored = {
       id: propertyId,
       propertyId,
@@ -2384,10 +2341,7 @@ describe("shared hotel setup status route", () => {
     const updatePropertySettingsByHotelId = vi.fn(async () => stored);
     app = buildSharedSetupApp({
       permissions: ["hotel_catalog.setup.read", "hotel_catalog.setup.manage"],
-      linkedResources: [
-        propertyLink(propertyId),
-        productLink("marketplace", "hotel_profile", propertyId),
-      ],
+      linkedResources: [propertyLink(propertyId)],
       repository: repositoryWith([]),
       launchSettingsRepository: {
         findPropertySettingsByHotelId,
@@ -2481,7 +2435,7 @@ describe("shared hotel setup status route", () => {
     };
     const owner = () =>
       buildSharedSetupApp({
-        permissions: ["hotel_catalog.setup.manage", "marketplace.profile.manage"],
+        permissions: ["hotel_catalog.setup.manage", "booking.settings.manage"],
         linkedResources: [propertyLink(propertyId)],
         repository: ordinary,
         profileCommand: command,
@@ -2507,7 +2461,7 @@ describe("shared hotel setup status route", () => {
     for (const denied of [
       {
         roleKey: "hotel_manager",
-        permissions: ["hotel_catalog.setup.manage", "marketplace.profile.manage"],
+        permissions: ["hotel_catalog.setup.manage", "booking.settings.manage"],
       },
       { roleKey: "hotel_owner", permissions: ["hotel_catalog.setup.read"] },
     ] as const) {
@@ -2525,6 +2479,110 @@ describe("shared hotel setup status route", () => {
     expect(getPropertyProfile).not.toHaveBeenCalled();
     expect(updatePropertyProfile).not.toHaveBeenCalled();
     app = owner();
+  });
+
+  it("republishes a live page as the hotel user after a hotel-detail save (VAY-2344)", async () => {
+    // Production serves setup publications: the target-mode refresher is never built there.
+    const publicPageRefresh = vi.fn(async (_propertyId: string) => undefined);
+    const refresh = vi.fn(async () => null);
+    const command = vi
+      .fn<import("./routes/sharedHotelSetupStatus.js").HotelSetupPropertyProfileUpdate>()
+      .mockResolvedValue({
+        status: "updated",
+        profile: profileResponse(propertyId, minimalHotelInput()),
+      });
+    const server = buildSharedSetupApp({
+      permissions: ["hotel_catalog.setup.manage", "booking.settings.manage"],
+      linkedResources: [propertyLink(propertyId)],
+      repository: repositoryWith([]),
+      profileCommand: command,
+      publicPageRefresh,
+      bookingPublicationRefresh: { refresh },
+    });
+    app = server;
+    const save = (idempotencyKey: string) =>
+      injectJson(server, {
+        method: "PUT",
+        url: `/api/hotel-setup/properties/${propertyId}/profile`,
+        headers: { authorization: "Bearer valid-token", "idempotency-key": idempotencyKey },
+        payload: { expectedProfileRevision: 1, patch: { location: { city: "Ahangama" } } },
+      });
+
+    expect((await save("save-address")).statusCode).toBe(200);
+    await vi.waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+    expect(refresh).toHaveBeenCalledWith({
+      organizationId,
+      propertyId,
+      actorUserId: "user_hotel_owner",
+      idempotencyKey: expect.any(String),
+      audit: expect.objectContaining({ requestId: expect.any(String) }),
+      onlyIfLive: true,
+    });
+
+    // A refused save changes nothing for guests, and its 422 is the only reply sent.
+    command.mockResolvedValueOnce({ status: "invalid", fields: { city: ["City is required."] } });
+    const refused = await save("save-invalid");
+    expect(refused.statusCode).toBe(422);
+    expect(refused.body).toMatchObject({ fields: { city: ["City is required."] } });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(refresh).toHaveBeenCalledTimes(1);
+    // A failing refresh is only logged: the save still succeeds.
+    refresh.mockRejectedValueOnce(new Error("Booking publication refresh failed: x."));
+    expect((await save("save-again")).statusCode).toBe(200);
+    await vi.waitFor(() => expect(refresh).toHaveBeenCalledTimes(2));
+    expect(publicPageRefresh).not.toHaveBeenCalled();
+  });
+
+  it("creates and edits a hotel without a postal code (VAY-2289)", async () => {
+    const input = minimalHotelInput();
+    input.location.postalCode = "";
+    const createPropertyProfile = vi.fn(
+      async ({ profile }: { profile: SharedPropertyProfileInput }) =>
+        profileResponse(propertyId, profile),
+    );
+    app = buildSharedSetupApp({
+      linkedResources: [],
+      permissions: ["hotel_catalog.setup.read", "hotel_catalog.setup.manage"],
+      repository: {
+        ...unusedStatusMethods(),
+        ...unusedPropertyProfileMethods(),
+        createPropertyProfile,
+      },
+    });
+    const locationWithoutPostalCode: Record<string, unknown> = { ...input.location };
+    delete locationWithoutPostalCode["postalCode"];
+    const created = await injectJson<SharedPropertyProfile>(app, {
+      method: "POST",
+      url: "/api/hotel-setup/properties",
+      headers: { authorization: "Bearer valid-token", "idempotency-key": "create-no-postcode" },
+      payload: { ...input, location: locationWithoutPostalCode },
+    });
+    expect(created.statusCode).toBe(201);
+    expect(createPropertyProfile).toHaveBeenCalledWith(expect.objectContaining({ profile: input }));
+    await app.close();
+
+    const command = vi
+      .fn<import("./routes/sharedHotelSetupStatus.js").HotelSetupPropertyProfileUpdate>()
+      .mockResolvedValue({ status: "updated", profile: profileResponse(propertyId, input) });
+    app = buildSharedSetupApp({
+      permissions: ["hotel_catalog.setup.manage", "booking.settings.manage"],
+      linkedResources: [propertyLink(propertyId)],
+      repository: repositoryWith([]),
+      profileCommand: command,
+    });
+    const edited = await injectJson(app, {
+      method: "PUT",
+      url: `/api/hotel-setup/properties/${propertyId}/profile`,
+      headers: { authorization: "Bearer valid-token", "idempotency-key": "tick-locality" },
+      payload: { expectedProfileRevision: 1, patch: { location: { localityPublic: true } } },
+    });
+    expect(edited.statusCode).toBe(200);
+    // A stored hotel without a postal code can still save other location changes.
+    const { merge } = command.mock.calls[0]![2];
+    expect(merge(input)).toEqual({
+      expectedProfileRevision: 1,
+      profile: { ...input, location: { ...input.location, localityPublic: true } },
+    });
   });
 
   it("saves launch settings through the Owner-only ordinary command, never the broad writer", async () => {
@@ -2698,206 +2756,6 @@ describe("shared hotel setup status route", () => {
     ]);
   });
 
-  it("merges canonical profile completeness and Marketplace lifecycle into one public-profile fact", async () => {
-    for (const [marketplaceProfileStatus, readiness, ownerProgress, reasonCodes] of [
-      [null, "actionable", "in_progress", ["marketplace_profile_not_started"]],
-      ["pending", "pending_review", "owner_complete", ["marketplace_profile_pending"]],
-      ["rejected", "rejected", "in_progress", ["marketplace_profile_rejected"]],
-      ["suspended", "blocked", "in_progress", ["marketplace_profile_suspended"]],
-      ["verified", "complete", "owner_complete", []],
-    ] as const) {
-      const query = vi.fn(async (text: string) => {
-        if (text.includes("FROM identity.organizations")) {
-          return { rows: [{ displayName: "Alpenrose Hotel Group", websiteUrl: null }] };
-        }
-        return {
-          rows: [
-            adaptiveStatusRow({
-              marketplaceProfileStatus,
-              marketplaceProfileComplete: marketplaceProfileStatus !== null,
-              marketplaceProfileDescriptionInSync: marketplaceProfileStatus !== null,
-            }),
-          ],
-        };
-      });
-      const repository = createPgSharedHotelSetupStatusRepository({
-        connectionString: "postgresql://target-db",
-        pool: {
-          query: async <T extends QueryResultRow = QueryResultRow>(text: string) => {
-            const result = await query(text);
-            return { rows: result.rows as unknown as T[] };
-          },
-          end: vi.fn(async () => undefined),
-        },
-      });
-
-      const status = await repository.getHotelSetupStatus({
-        organizationId,
-        propertyIds: [propertyId],
-      });
-      expect(status.properties[0]!.taskFacts.public_profile).toMatchObject({
-        readiness,
-        ownerProgress,
-        reasonCodes,
-      });
-      expect(query.mock.calls[1]![0]).not.toMatch(/legacy_/i);
-    }
-  });
-
-  it("reopens a complete public profile when the Catalog description changes before Marketplace syncs", async () => {
-    let catalogDescriptionUpdatedAt = "2026-07-26T12:00:00.000Z";
-    let marketplaceProfileDescriptionInSync = true;
-    const query = vi.fn(async (text: string) => {
-      if (text.includes("FROM identity.organizations")) {
-        return { rows: [{ displayName: "Alpenrose Hotel Group", websiteUrl: null }] };
-      }
-      return {
-        rows: [
-          adaptiveStatusRow({
-            profileUpdatedAt: catalogDescriptionUpdatedAt,
-            marketplaceProfileStatus: "verified",
-            marketplaceProfileComplete: true,
-            marketplaceProfileDescriptionInSync,
-            marketplaceProfileUpdatedAt: "2026-07-26T12:00:00.000Z",
-          }),
-        ],
-      };
-    });
-    const repository = createPgSharedHotelSetupStatusRepository({
-      connectionString: "postgresql://target-db",
-      pool: {
-        query: async <T extends QueryResultRow = QueryResultRow>(text: string) => {
-          const result = await query(text);
-          return { rows: result.rows as unknown as T[] };
-        },
-        end: vi.fn(async () => undefined),
-      },
-    });
-
-    const complete = (
-      await repository.getHotelSetupStatus({ organizationId, propertyIds: [propertyId] })
-    ).properties[0]!.taskFacts.public_profile;
-    expect(complete).toMatchObject({
-      readiness: "complete",
-      ownerProgress: "owner_complete",
-      reasonCodes: [],
-    });
-
-    catalogDescriptionUpdatedAt = "2026-07-27T12:00:00.000Z";
-    marketplaceProfileDescriptionInSync = false;
-    const outOfSync = (
-      await repository.getHotelSetupStatus({ organizationId, propertyIds: [propertyId] })
-    ).properties[0]!.taskFacts.public_profile;
-
-    expect(outOfSync).toMatchObject({
-      readiness: "actionable",
-      ownerProgress: "in_progress",
-      reasonCodes: ["marketplace_profile_description_out_of_sync"],
-      sourceRevision: JSON.stringify(["2026-07-27T12:00:00.000Z", "verified", true, [], false]),
-    });
-    expect(outOfSync.sourceRevision).not.toBe(complete.sourceRevision);
-
-    const factsSql = query.mock.calls[3]![0];
-    expect(factsSql).toContain("public_profile.normalized_description");
-    expect(factsSql).toContain("BTRIM(profile.short_description)");
-    expect(factsSql).toContain("BTRIM(profile.long_description)");
-    expect(factsSql).toContain("BTRIM(marketplace_profile.host_summary)");
-  });
-
-  it("requires a fresh creator projection, supported checkout method, and ready booking setup", async () => {
-    const query = vi.fn(async (text: string, _values?: readonly unknown[]) => {
-      if (text.includes("FROM identity.organizations")) {
-        return { rows: [{ displayName: "Alpenrose Hotel Group", websiteUrl: null }] };
-      }
-      return {
-        rows: [
-          adaptiveStatusRow({
-            marketplaceOfferStatus: "verified",
-            marketplaceOfferHasTitle: true,
-            marketplaceOfferHasDeliverable: true,
-            marketplaceOfferHasCompensation: true,
-            marketplaceOfferHasRequirement: true,
-            marketplaceOfferPublic: true,
-            marketplaceOfferProjectionFresh: false,
-            hasAcceptedPaymentMethod: true,
-            hasEffectivePaymentMethod: false,
-            bookabilitySetupReady: false,
-            bookabilityMissingEmpty: false,
-          }),
-        ],
-      };
-    });
-    const repository = createPgSharedHotelSetupStatusRepository({
-      connectionString: "postgresql://target-db",
-      pool: {
-        query: async <T extends QueryResultRow = QueryResultRow>(
-          text: string,
-          values?: readonly unknown[],
-        ) => {
-          const result = await query(text, values);
-          return { rows: result.rows as unknown as T[] };
-        },
-        end: vi.fn(async () => undefined),
-      },
-    });
-
-    const facts = (
-      await repository.getHotelSetupStatus({ organizationId, propertyIds: [propertyId] })
-    ).properties[0]!.taskFacts;
-    expect(facts.creator_offer).toMatchObject({ readiness: "pending_sync", freshness: "stale" });
-    expect(facts.payment).toMatchObject({
-      readiness: "actionable",
-      reasonCodes: ["no_supported_checkout_payment_method"],
-    });
-    const factsSql = query.mock.calls.find(([text]) =>
-      text.includes("hasEffectivePaymentMethod"),
-    )?.[0];
-    expect(factsSql).toContain("FROM finance.bank_transfer_destinations destination");
-    expect(factsSql).toContain(
-      "destination.property_id=payment.property_id AND destination.enabled",
-    );
-    expect(factsSql).toContain("payment.deposit_policy ->> 'paypalEmail'");
-    expect(facts.direct_booking_publication).toMatchObject({
-      readiness: "actionable",
-      ownerProgress: "in_progress",
-    });
-  });
-
-  it("blocks a verified creator offer whose projection is private", async () => {
-    const repository = createPgSharedHotelSetupStatusRepository({
-      connectionString: "postgresql://target-db",
-      pool: {
-        async query<T extends QueryResultRow = QueryResultRow>(text: string) {
-          const rows = text.includes("FROM identity.organizations")
-            ? [{ displayName: "Alpenrose Hotel Group", websiteUrl: null }]
-            : [
-                adaptiveStatusRow({
-                  marketplaceOfferStatus: "verified",
-                  marketplaceOfferHasTitle: true,
-                  marketplaceOfferHasDeliverable: true,
-                  marketplaceOfferHasCompensation: true,
-                  marketplaceOfferHasRequirement: true,
-                  marketplaceOfferPublic: false,
-                  marketplaceOfferProjectionFresh: false,
-                }),
-              ];
-          return { rows: rows as unknown as T[] };
-        },
-        end: vi.fn(async () => undefined),
-      },
-    });
-
-    const fact = (
-      await repository.getHotelSetupStatus({ organizationId, propertyIds: [propertyId] })
-    ).properties[0]!.taskFacts.creator_offer;
-
-    expect(fact).toMatchObject({
-      readiness: "blocked",
-      reasonCodes: ["creator_offer_not_public"],
-      freshness: "stale",
-    });
-  });
-
   it("makes publication actionable before its first distribution projection exists", async () => {
     const query = vi.fn(async (text: string, _values?: readonly unknown[]) => {
       if (text.includes("FROM identity.organizations")) {
@@ -3005,7 +2863,7 @@ describe("shared hotel setup status route", () => {
     const sql = query.mock.calls[1]![0];
     expect(sql).toContain("FROM unnest($2::uuid[])");
     expect(sql).toContain("hotel_catalog.properties");
-    expect(sql).toContain("marketplace.marketplace_hotel_profiles");
+    expect(sql).not.toContain("marketplace.");
     expect(sql).toContain("pms.room_types");
     expect(sql).toContain("finance.payment_settings");
     expect(sql).toContain("finance.payment_provider_accounts");
@@ -3022,19 +2880,6 @@ describe("shared hotel setup status route", () => {
     expect(sql).toContain("distribution.public_hotel_bookability_profiles");
     expect(sql).not.toContain("identity.product_entitlements");
     expect(sql).toContain("property_public_profile_read_model");
-    expect(sql).toContain("catalog_public_profile.projected_at");
-    expect(sql).toContain("offer.offer_status <> 'archived'");
-    expect(sql).toContain("AND candidate.is_public");
-    expect(sql).toContain("AND candidate.projection_fresh");
-    expect(sql).toContain("WHEN candidate.offer_status = 'pending'");
-    expect(sql).toContain("WHEN candidate.offer_status = 'rejected'");
-    expect(sql).toContain("candidate.updated_at DESC");
-    expect(sql.indexOf("THEN 0")).toBeLessThan(sql.indexOf("THEN 1"));
-    expect(sql.indexOf("THEN 1")).toBeLessThan(sql.indexOf("THEN 2"));
-    expect(sql.indexOf("THEN 2")).toBeLessThan(sql.indexOf("THEN 3"));
-    expect(sql.indexOf("THEN 3")).toBeLessThan(sql.indexOf("THEN 4"));
-    expect(sql.indexOf("THEN 4")).toBeLessThan(sql.indexOf("THEN 5"));
-    expect(sql.indexOf("THEN 5")).toBeLessThan(sql.indexOf("ELSE 6"));
     expect(query.mock.calls[1]![1]).toEqual([organizationId, [propertyId]]);
   });
 
@@ -3076,43 +2921,6 @@ describe("shared hotel setup status route", () => {
     expect(sql).not.toContain(") rooms ON TRUE");
     expect(sql).not.toContain(") rate_plans ON TRUE");
     expect(sql).not.toContain(") inventory ON TRUE");
-  });
-
-  it("requires explicit locality consent before public-profile readiness completes", async () => {
-    let localityPublic = false;
-    const repository = createPgSharedHotelSetupStatusRepository({
-      connectionString: "postgresql://target-db",
-      pool: {
-        async query<T extends QueryResultRow = QueryResultRow>(text: string) {
-          const rows = text.includes("FROM identity.organizations")
-            ? [{ displayName: "Alpenrose Hotel Group", websiteUrl: null }]
-            : [
-                adaptiveStatusRow({
-                  localityPublic,
-                  marketplaceProfileStatus: "verified",
-                  marketplaceProfileComplete: true,
-                  marketplaceProfileDescriptionInSync: true,
-                }),
-              ];
-          return { rows: rows as unknown as T[] };
-        },
-        end: vi.fn(async () => undefined),
-      },
-    });
-
-    const privateFacts = (
-      await repository.getHotelSetupStatus({ organizationId, propertyIds: [propertyId] })
-    ).properties[0]!.taskFacts.public_profile;
-    expect(privateFacts).toMatchObject({
-      readiness: "actionable",
-      reasonCodes: ["missing_public_locality_consent"],
-    });
-
-    localityPublic = true;
-    const publicFacts = (
-      await repository.getHotelSetupStatus({ organizationId, propertyIds: [propertyId] })
-    ).properties[0]!.taskFacts.public_profile;
-    expect(publicFacts).toMatchObject({ readiness: "complete", reasonCodes: [] });
   });
 
   it("reads the nested canonical profile revision and explicit contact metadata", async () => {
@@ -3329,6 +3137,21 @@ describe("shared hotel setup status route", () => {
       if (text.includes("INSERT INTO hotel_catalog.properties")) {
         return { rows: [{ propertyId }] };
       }
+      // VAY-2247 1.5: creation reserves the booking-page address and projects the public profile.
+      if (text.includes('canonical_slug.slug AS "canonicalSlug"')) {
+        return {
+          rows: [
+            {
+              propertyId,
+              publicId: "pub-1",
+              displayName: "Alpenrose",
+              defaultLocale: "en",
+              canonicalSlug: "alpenrose",
+            },
+          ],
+        };
+      }
+      if (text.includes("WITH canonical_slug AS")) return { rows: [] };
       return { rows: [profileRow()] };
     });
     const repository = createPgSharedHotelSetupStatusRepository({
@@ -3376,7 +3199,7 @@ describe("shared hotel setup status route", () => {
         text.includes("enabled_products"),
     );
     const defaultsIndex = query.mock.calls.findIndex(([text]) =>
-      text.includes("INSERT INTO marketplace.marketplace_hotel_profiles"),
+      text.includes("INSERT INTO booking.booking_settings (property_id"),
     );
     expect(createIndex).toBeGreaterThanOrEqual(0);
     expect(catalogIndex).toBeGreaterThan(createIndex);
@@ -3388,12 +3211,11 @@ describe("shared hotel setup status route", () => {
     expect(createSql).not.toContain("INSERT INTO identity.organization_resource_links");
     expect(linkSql).toContain("WHEN 'booking' THEN 'booking_hotel'");
     expect(linkSql).toContain("WHEN 'pms' THEN 'pms_property'");
-    expect(linkSql).toContain("WHEN 'marketplace' THEN 'hotel_profile'");
-    expect(linkSql).not.toContain("INSERT INTO marketplace.marketplace_hotel_profiles");
+    expect(linkSql).not.toContain("marketplace");
     expect(linkSql).not.toContain("INSERT INTO booking.booking_settings");
     const [defaultsSql, defaultsValues] = query.mock.calls[defaultsIndex]!;
     expect(defaultsSql).toContain("FROM identity.organization_resource_links");
-    expect(defaultsSql).toContain("INSERT INTO marketplace.marketplace_hotel_profiles");
+    expect(defaultsSql).not.toContain("marketplace");
     expect(defaultsSql).toContain("INSERT INTO booking.booking_settings (property_id)");
     expect(defaultsValues).toEqual([organizationId, propertyId]);
     expect(linkSql).toContain("contact_input.purpose");
@@ -3499,13 +3321,17 @@ function buildSharedSetupApp(options: {
   propertyAccessRepository?: PropertyAccessRepository;
   permissions?: PermissionKey[];
   linkedResources?: LinkedResource[];
-  organizationKind?: "hotel_group" | "creator_workspace" | "affiliate_partner" | "platform";
+  organizationKind?: "hotel_group" | "platform";
   membershipStatus?: RequestContext["membership"]["status"];
   roleKey?: string;
   includePropertyManifestPermission?: boolean;
+  publicPageRefresh?: (propertyId: string) => Promise<void>;
+  bookingPublicationRefresh?: import("./domains/bookingPublicationProductionRuntime.js").BookingPublicationRefreshPort;
 }): FastifyInstance {
   return buildApp({
     logger: false,
+    publicPageRefresh: options.publicPageRefresh,
+    bookingPublicationRefresh: options.bookingPublicationRefresh,
     sharedHotelSetupStatusRepository: options.repository,
     propertyLaunchSettingsRepository: options.launchSettingsRepository,
     hotelSetupProfileCommand: options.profileCommand,
@@ -3590,7 +3416,7 @@ function unusedTrackCommandRepository(): HotelSetupTrackCommandRepository {
 
 function identityRepository(options: {
   linkedResources?: LinkedResource[];
-  organizationKind?: "hotel_group" | "creator_workspace" | "affiliate_partner" | "platform";
+  organizationKind?: "hotel_group" | "platform";
   membershipStatus?: RequestContext["membership"]["status"];
   roleKey?: string;
 }): IdentityRepository {
@@ -3625,7 +3451,6 @@ function identityRepository(options: {
           propertyLink(propertyId),
           productLink("booking", "booking_hotel", propertyId),
           productLink("pms", "pms_property", propertyId),
-          productLink("marketplace", "hotel_profile", propertyId),
         ]
       );
     },
@@ -3852,20 +3677,6 @@ function adaptiveStatusRow(overrides: Record<string, unknown> = {}): Record<stri
     localityPublic: true,
     profileUpdatedAt: "2026-07-26T12:00:00.000Z",
     mediaUpdatedAt: "2026-07-26T12:00:00.000Z",
-    marketplaceProfileStatus: null,
-    marketplaceProfileComplete: false,
-    marketplaceProfileDescriptionInSync: false,
-    marketplaceProfileUpdatedAt: null,
-    marketplaceOfferStatus: null,
-    marketplaceOfferHasTitle: false,
-    marketplaceOfferHasDeliverable: false,
-    marketplaceOfferHasCompensation: false,
-    marketplaceOfferHasRequirement: false,
-    marketplaceOfferPublic: false,
-    marketplaceOfferProjectionFresh: true,
-    marketplaceOfferUpdatedAt: null,
-    marketplaceOfferChildrenUpdatedAt: null,
-    marketplaceOfferProjectedAt: null,
     hasActiveRoomType: true,
     hasNonRetiredRoom: true,
     hasActiveRatePlan: true,
@@ -3970,8 +3781,6 @@ function taskFacts(
   const defaults = Object.fromEntries(
     [
       "shared_identity",
-      "public_profile",
-      "creator_offer",
       "rooms_rates_availability",
       "guest_settings_policies",
       "billing_plan",
@@ -4018,13 +3827,10 @@ function trackRepository(
   const tracks: TrackStatus[] = selectedTracks.map((track) => ({
     track,
     provisioning: "active",
-    components:
-      track === "hotel_operations"
-        ? [
-            { product: "pms", access: "active" },
-            { product: "booking", access: "active" },
-          ]
-        : [{ product: "marketplace", access: "active" }],
+    components: [
+      { product: "pms", access: "active" },
+      { product: "booking", access: "active" },
+    ],
     allowedActions: ["manage_service"],
   }));
   return {
@@ -4049,8 +3855,8 @@ function propertyLink(resourceId: string): LinkedResource {
 }
 
 function productLink(
-  product: "booking" | "pms" | "marketplace",
-  resourceType: "booking_hotel" | "pms_property" | "hotel_profile",
+  product: "booking" | "pms",
+  resourceType: "booking_hotel" | "pms_property",
   resourceId: string,
 ): LinkedResource {
   return { product, resourceType, resourceId, relationship: "owner", status: "active" };

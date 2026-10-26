@@ -6,6 +6,8 @@ import {
 } from "@vayada/domain-booking";
 import { isMinorAmount } from "@vayada/domain-pms";
 import { lockReplacementAddons } from "./replacementAddons.js";
+import { addonLeadTimeAllows } from "./addonLeadTime.js";
+import { readPricingCheckInPlace } from "./pricingManualPaymentLead.js";
 
 /** Caller must already own authorization and validated room allocation in this transaction.
  * Computes requested extras only; not a grand total, inventory or quote acceptance. */
@@ -40,15 +42,31 @@ export async function lockReplacementAddonAmounts(client: PoolClient, value: unk
   );
   const lines = [];
   let total = 0n;
+  let place: Awaited<ReturnType<typeof readPricingCheckInPlace>> | undefined;
   for (const selected of stay.addons) {
     const definition = owner.addons.find((a) => a.id === selected.id.toLowerCase());
     if (
       !definition ||
       selected.version !== "addon-selection.v2" ||
-      definition.leadTime?.trim() ||
+      definition.legacyLeadTime ||
       selected.quantity > definition.maxQuantity
     )
       return null;
+    // VAY-2232: check-in must be at least the add-on's notice away, now (the database clock).
+    // Acceptance runs this again, so a quote can't be accepted once the notice has passed.
+    if (definition.leadTimeHours !== null) {
+      if (place === undefined) place = await readPricingCheckInPlace(client, stay.propertyId);
+      if (
+        !place ||
+        !addonLeadTimeAllows({
+          hours: definition.leadTimeHours,
+          checkIn: stay.checkIn,
+          place: place.place,
+          now: place.now,
+        })
+      )
+        return null;
+    }
     const perPerson =
       definition.pricingModel === "per_guest" || definition.pricingModel === "per_guest_night";
     const perNight =

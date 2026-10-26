@@ -3,15 +3,13 @@
 import { useState, useRef, useEffect } from "react";
 import { PhotoIcon, XMarkIcon, ArrowPathIcon } from "@heroicons/react/24/outline";
 import { bookingSettingsService } from "@/services/booking";
+import { BRAND_FONT_PAIRINGS } from "@vayada/fonts/brand";
 import { COLOR_PRESETS, FONT_PAIRINGS } from "@/lib/constants/booking";
 import {
   hasPropertyHero,
   isPropertyHeroPublicationConfirmed,
   propertyHeroService,
 } from "@/services/api/propertyHero";
-
-const GOOGLE_FONTS_URL =
-  "https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Source+Sans+Pro:wght@300;400;600;700&family=Inter:wght@300;400;500;600;700&family=Lora:ital,wght@0,400;0,700;1,400&family=Italiana&display=swap";
 
 const AVAILABLE_FILTERS = [
   { key: "includeBreakfast", label: "Include Breakfast" },
@@ -272,12 +270,15 @@ export default function DesignStudioSection({ hotelId }: { hotelId: string }) {
     { id: "filters" as const, label: "Filters", icon: FiltersIcon },
   ];
 
-  const currentFont = FONT_PAIRINGS.find((f) => f.id === selectedFont) || FONT_PAIRINGS[0];
+  const fontPairing = FONT_PAIRINGS.find((f) => f.id === selectedFont) || FONT_PAIRINGS[0];
+  const currentFont = {
+    headingFamily: BRAND_FONT_PAIRINGS[fontPairing.id].heading,
+    bodyFamily: BRAND_FONT_PAIRINGS[fontPairing.id].body,
+  };
 
   if (loading) {
     return (
       <div className="h-full flex items-center justify-center">
-        <link rel="stylesheet" href={GOOGLE_FONTS_URL} />
         <div className="w-6 h-6 border-2 border-primary-500 border-t-transparent rounded-full animate-spin" />
       </div>
     );
@@ -286,7 +287,6 @@ export default function DesignStudioSection({ hotelId }: { hotelId: string }) {
   return (
     <div className="h-full flex flex-col">
       {}
-      <link rel="stylesheet" href={GOOGLE_FONTS_URL} />
 
       {/* Feedback banner */}
       {feedback && (
@@ -564,7 +564,7 @@ export default function DesignStudioSection({ hotelId }: { hotelId: string }) {
                       </div>
                       <span
                         className="text-sm text-gray-600"
-                        style={{ fontFamily: pairing.headingFamily }}
+                        style={{ fontFamily: BRAND_FONT_PAIRINGS[pairing.id].heading }}
                       >
                         {pairing.preview}
                       </span>

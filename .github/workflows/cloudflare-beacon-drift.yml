@@ -1,0 +1,53 @@
+name: Cloudflare Beacon Drift
+
+# apps/landing pins the SRI hash of Cloudflare's Web Analytics beacon, and Cloudflare cannot
+# version-pin it, so each Cloudflare release turns analytics off on vayada.com until the pin is
+# updated. This compares the live file with the pin every day. On a mismatch it opens or updates
+# one issue and prepares one pull request with the new pin (the run then fails); it closes both
+# once they match again. A person reviews and merges; merging deploys the landing site. See
+# engineering/cloudflare-beacon-pin-runbook.md.
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+    inputs:
+      expected_integrity:
+        description: "Compare with this sha384-… instead of the pin (tests the issue path)"
+        required: false
+        default: ""
+
+permissions:
+  # Writes go only to the fix branch, automation/cloudflare-beacon-pin-<base>, never to main.
+  contents: write
+  pull-requests: write
+  issues: write
+  # Pushes and pull requests made with GITHUB_TOKEN start no workflows; workflow_dispatch does,
+  # so the job dispatches PR Checks on the fix branch.
+  actions: write
+
+concurrency:
+  group: cloudflare-beacon-drift
+  cancel-in-progress: false
+
+jobs:
+  drift:
+    name: Compare the live beacon with the pin
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version-file: .nvmrc
+
+      - name: Compare and report
+        run: node scripts/ci/cloudflare-beacon-drift.mjs
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          EXPECTED_INTEGRITY: ${{ inputs.expected_integrity }}

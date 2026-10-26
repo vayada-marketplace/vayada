@@ -11,9 +11,40 @@ const organizationId = "11111111-1111-4111-8111-111111111111";
 const propertyId = "22222222-2222-4222-8222-222222222222";
 const actorUserId = "33333333-3333-4333-8333-333333333333";
 
+/** A hotel with a usable billing plan; the config's contents don't matter to setup. */
+const planChosen = { getBillingConfig: async () => ({}) as never };
+
 describe("property setup Finance owner state", () => {
+  it("keeps Payments open until the hotel chooses a billing plan (VAY-2171)", async () => {
+    const fact = async (
+      readiness: ReturnType<typeof paymentReadiness>,
+      plan: "chosen" | "missing",
+    ) => {
+      const result = await createPropertySetupFinanceStateProvider({
+        scope: authorizedScope(),
+        finance: { getPaymentReadiness: vi.fn(async () => readiness) },
+        pricing: { getPropertyPricingCurrency: vi.fn(async () => pricingCurrency(4)) },
+        billingPlan: plan === "chosen" ? planChosen : { getBillingConfig: async () => null },
+      }).getOwnerState(request());
+      if (result.outcome !== "found") throw new Error(result.outcome);
+      const { state, blockers } = result.facts[0]!;
+      return { state, blockers: blockers.map(({ code, message }) => `${code}: ${message}`) };
+    };
+    expect(await fact(paymentReadiness(2, 4), "chosen")).toEqual({
+      state: "complete",
+      blockers: [],
+    });
+    expect(await fact(paymentReadiness(2, 4), "missing")).toEqual({
+      state: "blocked",
+      blockers: ["billing_plan_not_selected: Choose your vayada plan."],
+    });
+    // Before any payment save the step is simply not started; the plan waits with it.
+    expect(await fact(null as never, "missing")).toEqual({ state: "not_started", blockers: [] });
+  });
+
   it("returns exact current payment-method and pricing manifests", async () => {
     const provider = createPropertySetupFinanceStateProvider({
+      billingPlan: planChosen,
       scope: authorizedScope(),
       finance: { getPaymentReadiness: vi.fn(async () => paymentReadiness(2, 4)) },
       pricing: { getPropertyPricingCurrency: vi.fn(async () => pricingCurrency(4)) },
@@ -35,8 +66,25 @@ describe("property setup Finance owner state", () => {
     });
   });
 
+  it("completes a bank-transfer or PayPal hotel only while their acceptance is on (VAY-2139)", async () => {
+    const state = async (manual?: readonly ("bank_transfer" | "paypal")[]) => {
+      const result = await createPropertySetupFinanceStateProvider({
+        billingPlan: planChosen,
+        scope: authorizedScope(),
+        finance: { getPaymentReadiness: vi.fn(async () => paymentReadiness(2, 4, [])) },
+        pricing: { getPropertyPricingCurrency: vi.fn(async () => pricingCurrency(4)) },
+        ...(manual ? { manualPayments: { readyMethods: async () => manual } } : {}),
+      }).getOwnerState(request());
+      return result.outcome === "found" ? result.facts[0]!.state : result.outcome;
+    };
+    expect(await state()).toBe("saved");
+    expect(await state([])).toBe("saved");
+    expect(await state(["paypal"])).toBe("complete");
+  });
+
   it("represents truthful first-visit owner state without creating a draft", async () => {
     const provider = createPropertySetupFinanceStateProvider({
+      billingPlan: planChosen,
       scope: authorizedScope(),
       finance: { getPaymentReadiness: vi.fn(async () => null) },
       pricing: { getPropertyPricingCurrency: vi.fn(async () => pricingCurrency(4)) },
@@ -88,6 +136,7 @@ describe("property setup Finance owner state", () => {
       },
     ] as const) {
       const provider = createPropertySetupFinanceStateProvider({
+        billingPlan: planChosen,
         scope: authorizedScope(),
         finance: {
           getPaymentReadiness: vi.fn(async () =>
@@ -121,6 +170,7 @@ describe("property setup Finance owner state", () => {
 
   it("fails closed when card readiness changes between the confirmation reads", async () => {
     const provider = createPropertySetupFinanceStateProvider({
+      billingPlan: planChosen,
       scope: authorizedScope(),
       finance: {
         getPaymentReadiness: vi
@@ -139,16 +189,19 @@ describe("property setup Finance owner state", () => {
   it("fails closed on pricing mismatches, malformed facts, and revision races", async () => {
     const cases = [
       createPropertySetupFinanceStateProvider({
+        billingPlan: planChosen,
         scope: authorizedScope(),
         finance: { getPaymentReadiness: vi.fn(async () => paymentReadiness(2, 3)) },
         pricing: { getPropertyPricingCurrency: vi.fn(async () => pricingCurrency(4)) },
       }),
       createPropertySetupFinanceStateProvider({
+        billingPlan: planChosen,
         scope: authorizedScope(),
         finance: { getPaymentReadiness: vi.fn(async () => ({ unsafe: true }) as never) },
         pricing: { getPropertyPricingCurrency: vi.fn(async () => pricingCurrency(4)) },
       }),
       createPropertySetupFinanceStateProvider({
+        billingPlan: planChosen,
         scope: authorizedScope(),
         finance: {
           getPaymentReadiness: vi
@@ -168,6 +221,7 @@ describe("property setup Finance owner state", () => {
     const deniedFinance = vi.fn(async () => null);
     const deniedPricing = vi.fn(async () => pricingCurrency(4));
     const denied = createPropertySetupFinanceStateProvider({
+      billingPlan: planChosen,
       scope: { hasPaymentOwnerScope: vi.fn(async () => false) },
       finance: { getPaymentReadiness: deniedFinance },
       pricing: { getPropertyPricingCurrency: deniedPricing },

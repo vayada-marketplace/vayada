@@ -2,6 +2,7 @@ import {
   readBankTransferDestination,
   type SavedBankTransferDestination,
 } from "@vayada/product-onboarding/bankTransferDestination";
+import type { PaymentMethodBookingWindows } from "@vayada/domain-booking";
 import { ApiErrorResponse, apiClient, omitHotelContext, type ApiClient } from "./client";
 
 export type FinanceRoutePaymentProvider =
@@ -70,6 +71,8 @@ export interface BookingAdminPaymentSettingsDraft {
   defaultCurrency: string;
   requiresManualReview?: boolean;
   commandPrefix?: string;
+  /** Setup saved plain Pay at Hotel and the page still shows Cash and Card: send it back unchanged. */
+  keepPlainPayAtHotel?: boolean;
 }
 
 export interface FinancePaymentSettingsPatchResponse {
@@ -109,13 +112,47 @@ export interface FinancePaymentSettingsResponse {
   };
 }
 
+// Setup's Payments step saves plain pay_at_property, meaning guests pay cash or card at the
+// hotel (VAY-2185). That, and no saved choice at all, shows as both.
 export function payAtHotelMethodsFromFinance(
   acceptedMethods: readonly FinanceRoutePaymentMethod[],
 ): string[] {
-  return [
+  const methods = [
     ...(acceptedMethods.includes("cash") ? ["cash"] : []),
     ...(acceptedMethods.includes("manual_card") ? ["card"] : []),
   ];
+  return methods.length ? methods : ["cash", "card"];
+}
+
+export function isPlainPayAtHotel(acceptedMethods: readonly FinanceRoutePaymentMethod[]): boolean {
+  return (
+    acceptedMethods.includes("pay_at_property") &&
+    !acceptedMethods.includes("cash") &&
+    !acceptedMethods.includes("manual_card")
+  );
+}
+
+export type PaymentSettingsField = "payAtHotelMethods" | "paypalEmail" | "acceptedMethods";
+
+export class PaymentSettingsValidationError extends Error {
+  field: PaymentSettingsField;
+
+  constructor(field: PaymentSettingsField, message: string) {
+    super(message);
+    this.name = "PaymentSettingsValidationError";
+    this.field = field;
+  }
+}
+
+// Finance refuses plain pay_at_property on a row setup never bound (old imported rows).
+const PAY_AT_HOTEL_CHOICE_REQUIRED = "Pay at Hotel requires cash, card, or both.";
+
+export function needsExplicitPayAtHotelChoice(error: unknown): boolean {
+  return (
+    error instanceof FinancePaymentSettingsClientError &&
+    error.statusCode === 400 &&
+    error.detail === PAY_AT_HOTEL_CHOICE_REQUIRED
+  );
 }
 
 export interface FinanceStripeProviderAccountResponse {
@@ -200,6 +237,44 @@ export async function getFinancePaymentSettings(
       input.propertyId,
     );
     return { ...response, bankDestination };
+  } catch (error) {
+    throw toFinancePaymentSettingsClientError(error);
+  }
+}
+
+export interface PaymentMethodWindowsResponse {
+  propertyId: string;
+  /** Bank transfer's fixed payment deadline (48 hours). */
+  paymentDeadlineHours: number;
+  windows: PaymentMethodBookingWindows;
+}
+
+/** VAY-2348: when each payment method is offered, by how long before arrival the guest books. */
+export async function getPaymentMethodWindows(
+  input: { propertyId: string },
+  client: FinancePaymentSettingsReadApiClient = apiClient,
+): Promise<PaymentMethodWindowsResponse> {
+  try {
+    return await client.get<PaymentMethodWindowsResponse>(
+      `${buildFinancePaymentSettingsBaseEndpoint(input)}/payment-windows`,
+      omitHotelContext,
+    );
+  } catch (error) {
+    throw toFinancePaymentSettingsClientError(error);
+  }
+}
+
+/** Replaces every window: a method left out has no limit. Changes no price. */
+export async function savePaymentMethodWindows(
+  input: { propertyId: string; windows: PaymentMethodBookingWindows },
+  client: Pick<ApiClient, "put"> = apiClient,
+): Promise<PaymentMethodWindowsResponse> {
+  try {
+    return await client.put<PaymentMethodWindowsResponse>(
+      `${buildFinancePaymentSettingsBaseEndpoint(input)}/payment-windows`,
+      { windows: input.windows },
+      omitHotelContext,
+    );
   } catch (error) {
     throw toFinancePaymentSettingsClientError(error);
   }
@@ -302,17 +377,30 @@ export async function reconcileFinanceStripeProviderAccount(
 export function buildFinancePaymentSettingsBody(
   draft: BookingAdminPaymentSettingsDraft,
 ): UpdateFinancePaymentSettingsBody {
-  if (draft.payAtPropertyEnabled && !draft.payAtHotelMethods?.length) {
-    throw new Error("Choose cash, card, or both for Pay at Hotel.");
+  if (
+    draft.payAtPropertyEnabled &&
+    !draft.keepPlainPayAtHotel &&
+    !draft.payAtHotelMethods?.length
+  ) {
+    throw new PaymentSettingsValidationError(
+      "payAtHotelMethods",
+      "Choose cash, card, or both for Pay at Hotel.",
+    );
   }
   if (draft.paypalEnabled && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed(draft.paypalEmail) ?? "")) {
-    throw new Error("PayPal email must be a valid email address.");
+    throw new PaymentSettingsValidationError(
+      "paypalEmail",
+      "PayPal email must be a valid email address.",
+    );
   }
   const commandId = newFinanceCommandId(draft.commandPrefix ?? "finance-payment-settings");
   const defaultCurrency = normalizeCurrencyCode(draft.defaultCurrency);
   const acceptedMethods = buildAcceptedPaymentMethods(draft);
   if (acceptedMethods.length === 0) {
-    throw new Error("Choose at least one payment method.");
+    throw new PaymentSettingsValidationError(
+      "acceptedMethods",
+      "Choose at least one payment method.",
+    );
   }
   const paymentSettings: FinancePaymentSettingsPatchPayload = {
     paymentsEnabled: acceptedMethods.length > 0,
@@ -360,8 +448,12 @@ function buildAcceptedPaymentMethods(
   const methods = new Set<FinanceRoutePaymentMethod>();
   if (draft.payAtPropertyEnabled) {
     methods.add("pay_at_property");
-    if (draft.payAtHotelMethods?.includes("cash")) methods.add("cash");
-    if (draft.payAtHotelMethods?.includes("card")) methods.add("manual_card");
+    // Adding cash/manual_card to setup's plain choice would change the saved list, which
+    // makes the hotel's saved prices stale.
+    if (!draft.keepPlainPayAtHotel) {
+      if (draft.payAtHotelMethods?.includes("cash")) methods.add("cash");
+      if (draft.payAtHotelMethods?.includes("card")) methods.add("manual_card");
+    }
   }
   if (draft.onlineCardPayment) {
     methods.add(draft.paymentProvider === "xendit" ? "xendit" : "card");
@@ -418,7 +510,8 @@ function toFinancePaymentSettingsClientError(error: unknown): FinancePaymentSett
 
   return new FinancePaymentSettingsClientError({
     statusCode: 500,
-    code: "write_model_unavailable",
+    // fetch rejects with a TypeError when the API can't be reached.
+    code: error instanceof TypeError ? "network_unavailable" : "write_model_unavailable",
     category: "write_model",
     detail: error instanceof Error ? error.message : "Finance payment settings are unavailable.",
   });

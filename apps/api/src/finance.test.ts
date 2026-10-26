@@ -9,9 +9,6 @@ import { injectJson } from "@vayada/backend-test";
 import type { PropertyAccessRepository } from "@vayada/backend-authorization";
 import type {
   CancellationPolicy,
-  FinanceAffiliatePayoutSettingsPatchCommand,
-  FinanceAffiliatePayoutSettingsPatchResult,
-  FinanceAffiliatePayoutSettingsReadModel,
   FinancePaymentSettingsPatchCommand,
   FinancePaymentSettingsPatchResult,
   FinancePaymentSettingsReadModel,
@@ -43,13 +40,13 @@ import { agencyPropertyAccessRepository } from "./testAuthorization.js";
 import type { PublicHotelProfileRepository } from "./routes/aiHotels.js";
 import { unusedBookingWebCheckoutAdapter } from "./routes/bookingWebPublic.fixtures.js";
 import {
+  cardSwitchPrices,
   createTargetFinancePropertySettingsRepository,
   type FinanceXenditBankValidator,
   type FinancePublicHotelPropertyResolver,
 } from "./routes/finance.js";
 
 const propertyId = "f3000000-0000-0000-0000-000000000686";
-const affiliateId = "affiliate_finance_partner_686";
 const affiliateOrganizationId = "f2000000-0000-0000-0000-000000000686";
 const futureExpiry = Math.floor(Date.now() / 1000) + 3600;
 
@@ -138,28 +135,6 @@ const cancellationPolicy: CancellationPolicy = {
   updatedAt: "2026-06-12T10:00:00.000Z",
 };
 
-const affiliatePayoutSettings: FinanceAffiliatePayoutSettingsReadModel = {
-  affiliateId,
-  marketplaceOrganizationId: affiliateOrganizationId,
-  payoutsEnabled: true,
-  payoutProvider: "stripe",
-  payoutCurrency: "EUR",
-  payoutSchedule: "monthly",
-  payoutThresholdAmount: null,
-  providerAccount: {
-    providerAccountId: "acct_affiliate_target",
-    provider: "stripe",
-    status: "active",
-    onboardingStatus: "completed",
-    payoutsEnabled: true,
-  },
-  sourceFreshness: {
-    finance: "target",
-    status: "fresh",
-  },
-  updatedAt: "2026-06-12T10:00:00.000Z",
-};
-
 const sourceFreshness = {
   finance: {
     status: "fresh",
@@ -191,30 +166,6 @@ const payoutItems: FinancePayout[] = [
     failedAt: "2026-06-12T11:30:00.000Z",
     failureCode: "bank_account_restricted",
     retryCount: 2,
-  },
-];
-
-const affiliatePayoutItems: FinancePayout[] = [
-  {
-    payoutId: "affiliate_payout_2026_06",
-    ownerScope: "organization",
-    propertyId: null,
-    organizationId: affiliateOrganizationId,
-    relatedPropertyId: propertyId,
-    guestBookingId: payoutGuestBookingId,
-    paymentId: payoutPaymentId,
-    payoutStatus: "scheduled",
-    amount: "350.00",
-    feeAmount: "0.00",
-    netAmount: "350.00",
-    currency: "EUR",
-    provider: "stripe",
-    providerPayoutId: null,
-    scheduledAt: "2026-06-30T09:00:00.000Z",
-    paidAt: null,
-    failedAt: null,
-    failureCode: null,
-    retryCount: 0,
   },
 ];
 
@@ -419,7 +370,7 @@ describe("finance route contracts", () => {
     }
   });
 
-  it("passes F1f Stripe property and affiliate onboarding fixture cases without duplicate accounts", async () => {
+  it("passes F1f Stripe property onboarding fixture cases without duplicate accounts", async () => {
     const propertyRepository = stripeProviderAccountRepository();
     app = buildFinanceApp({
       repository: propertyRepository,
@@ -453,31 +404,6 @@ describe("finance route contracts", () => {
     assertIncludes(first.body, propertyCase!.expected.mustInclude ?? [], propertyCase!.caseId);
     assertExcludes(first.body, propertyCase!.expected.mustExclude ?? [], propertyCase!.caseId);
     expect(propertyRepository.providerCreateCount).toBe(1);
-    await app.close();
-    app = null;
-
-    const affiliateRepository = stripeProviderAccountRepository();
-    app = buildAffiliateFinanceApp({ repository: affiliateRepository });
-    const affiliateCase = financeContractCases.cases.find(
-      (candidate) => candidate.caseId === "stripe-affiliate-onboarding-boundary",
-    );
-    expect(affiliateCase).toBeDefined();
-
-    const affiliateResponse = await injectJson<Record<string, unknown>>(app, {
-      method: "POST",
-      url: affiliateCase!.request.path,
-      payload: affiliateCase!.request.body,
-      headers: { authorization: "Bearer valid-token" },
-    });
-
-    expect(affiliateResponse.statusCode).toBe(affiliateCase!.expected.status);
-    expect(affiliateResponse.body.providerAccountId).toBe(
-      affiliateCase!.expected.providerAccountId,
-    );
-    expect(JSON.stringify(affiliateResponse.body)).not.toMatch(
-      /referralCode|booking_web_affiliates|stripeSecretKey/,
-    );
-    expect(affiliateRepository.providerCreateCount).toBe(1);
   });
 
   it("authorizes the exact property before issuing Marketplace Stripe onboarding links", async () => {
@@ -500,9 +426,9 @@ describe("finance route contracts", () => {
       method: "POST",
       url: `/api/finance/properties/${propertyId}/provider-accounts/${providerAccountId}/onboarding-link`,
       payload: {
-        commandId: "cmd-stripe-marketplace-return",
-        idempotencyKey: "key-stripe-marketplace-return",
-        returnSurface: "marketplace",
+        commandId: "cmd-stripe-setup-return",
+        idempotencyKey: "key-stripe-setup-return",
+        returnSurface: "booking_admin_setup",
         propertyId: foreignPropertyId,
         returnUrl: "https://attacker.test/setup",
       },
@@ -513,10 +439,31 @@ describe("finance route contracts", () => {
     expect(commands).toHaveLength(1);
     expect(commands[0]).toMatchObject({
       propertyId,
-      payload: { providerAccountId, returnSurface: "marketplace" },
+      payload: { providerAccountId, returnSurface: "booking_admin_setup" },
     });
     expect(commands[0]!.payload).not.toHaveProperty("propertyId");
     expect(commands[0]!.payload).not.toHaveProperty("returnUrl");
+
+    // Booking Admin's payment settings ask for their own return surface; unknown values (such as
+    // the retired Marketplace host, VAY-2270) fall back to the provider default.
+    for (const [returnSurface, expected] of [
+      ["booking_admin", "booking_admin"],
+      ["marketplace", undefined],
+    ] as const) {
+      const answered = await injectJson<Record<string, unknown>>(app, {
+        method: "POST",
+        url: `/api/finance/properties/${propertyId}/provider-accounts/${providerAccountId}/onboarding-link`,
+        payload: {
+          commandId: `cmd-stripe-${returnSurface}-return`,
+          idempotencyKey: `key-stripe-${returnSurface}-return`,
+          returnSurface,
+        },
+        headers: { authorization: "Bearer valid-token" },
+      });
+      expect(answered.statusCode).toBe(200);
+      expect(commands.at(-1)!.payload.returnSurface).toBe(expected);
+    }
+    expect(commands).toHaveLength(3);
 
     await app.close();
     app = buildFinanceApp({
@@ -539,7 +486,7 @@ describe("finance route contracts", () => {
       payload: {
         commandId: "cmd-stripe-foreign-return",
         idempotencyKey: "key-stripe-foreign-return",
-        returnSurface: "marketplace",
+        returnSurface: "booking_admin_setup",
       },
       headers: { authorization: "Bearer valid-token" },
     });
@@ -547,28 +494,7 @@ describe("finance route contracts", () => {
     expect(denied.statusCode).toBe(403);
     expect(denied.body.code).toBe("missing_resource_access");
     expect(JSON.stringify(denied.body)).not.toContain(foreignPropertyId);
-    expect(commands).toHaveLength(1);
-  });
-
-  it("preserves the VAY-774 affiliate onboarding-link facade shape", async () => {
-    const repository = stripeProviderAccountRepository();
-    repository.seedAffiliateProviderAccount();
-    app = buildAffiliateFinanceApp({ repository });
-
-    const response = await injectJson<Record<string, unknown>>(app, {
-      method: "POST",
-      url: `/api/finance/affiliates/${affiliateId}/provider-accounts/f7100000-0000-0000-0000-000000000686/onboarding-link`,
-      payload: {
-        commandId: "cmd-stripe-affiliate-link-001",
-        idempotencyKey: "finance-stripe-affiliate-link-686",
-      },
-      headers: { authorization: "Bearer valid-token" },
-    });
-
-    expect(response.statusCode).toBe(200);
-    expect(response.body).toEqual({
-      onboardingUrl: "https://connect.stripe.test/onboard/acct_affiliate_686/2",
-    });
+    expect(commands).toHaveLength(3);
   });
 
   it("creates a no-store Stripe dashboard link from the authorized property only", async () => {
@@ -1018,13 +944,21 @@ describe("finance route contracts", () => {
     expect(provider.createAccountCount).toBe(0);
   });
 
-  it("keeps ONB-25A acceptance unreachable until a sanctioned attestation verifier exists", () => {
+  it("says whether a hotel's prices must be saved again after a card change (VAY-2205)", () => {
+    expect(cardSwitchPrices([])).toBe("not_published");
+    expect(cardSwitchPrices([{ propertyId, revision: 3, stale: [] }])).toBe("current");
+    expect(cardSwitchPrices([{ propertyId, revision: 3, stale: ["finance"] }])).toBe("save_needed");
+    expect(cardSwitchPrices([{ propertyId, error: "lock_timeout" }])).toBeUndefined();
+  });
+
+  it("wires ONB-25A acceptance next to the revoke: a Vayada finance operator's attestation (VAY-2205 D3)", () => {
     const repository = createTargetFinancePropertySettingsRepository({
       connectionString: "postgresql://finance-target",
       pool: targetStripeProviderAccountPool().pool,
     });
 
-    expect(repository.acceptOnlineCardExecutionEvidence).toBeUndefined();
+    expect(repository.readOnlineCardExecutionState).toEqual(expect.any(Function));
+    expect(repository.acceptOnlineCardExecutionEvidence).toEqual(expect.any(Function));
     expect(repository.revokeOnlineCardExecutionEvidence).toEqual(expect.any(Function));
   });
 
@@ -1357,65 +1291,6 @@ describe("finance route contracts", () => {
     expect(failed.calls.map(({ text }) => text)).toEqual(
       expect.arrayContaining(["BEGIN", "ROLLBACK"]),
     );
-  });
-
-  it("passes F1i affiliate payout settings and payout ledger fixtures in target mode", async () => {
-    app = buildAffiliateFinanceApp({ repository: financeRepository });
-
-    for (const caseId of [
-      "affiliate-payout-settings-read",
-      "affiliate-payout-settings-update",
-      "affiliate-payout-list-read",
-    ]) {
-      const contractCase = financeContractCases.cases.find(
-        (candidate) => candidate.caseId === caseId,
-      );
-      expect(contractCase, caseId).toBeDefined();
-      const method = (contractCase!.request.method ?? "GET") as "GET" | "PATCH";
-
-      const response = await injectJson<Record<string, unknown>>(app, {
-        method,
-        url: contractCase!.request.path,
-        query: queryStrings(contractCase!.request.query),
-        payload: contractCase!.request.body,
-        headers: { authorization: "Bearer valid-token" },
-      });
-
-      expect(response.statusCode, caseId).toBe(contractCase!.expected.status);
-      if (contractCase!.expected.itemCount !== undefined) {
-        expect(response.body.payouts, caseId).toHaveLength(contractCase!.expected.itemCount);
-      }
-      if (caseId === "affiliate-payout-settings-read") {
-        expect(response.body.marketplaceOrganizationId).toBe(affiliateOrganizationId);
-      }
-      if (caseId === "affiliate-payout-list-read") {
-        expect(response.body.payouts).toEqual([
-          expect.objectContaining({ organizationId: affiliateOrganizationId }),
-        ]);
-      }
-      assertIncludes(response.body, contractCase!.expected.mustInclude ?? [], caseId);
-      assertExcludes(response.body, contractCase!.expected.mustExclude ?? [], caseId);
-      expect(JSON.stringify(response.body), caseId).not.toMatch(
-        /referralCode|affiliateProfileEmail|accountNumber|stripeSecretKey|providerSecret|xenditApiKey/,
-      );
-    }
-  });
-
-  it("denies affiliate payout settings without the affiliate resource link", async () => {
-    app = buildFinanceApp({
-      permissions: ["affiliate.payout.manage"],
-      entitlements: [affiliatePayoutEntitlement()],
-      linkedAffiliateId: null,
-    });
-
-    const response = await injectJson<Record<string, unknown>>(app, {
-      method: "GET",
-      url: `/api/finance/affiliates/${affiliateId}/payout-settings`,
-      headers: { authorization: "Bearer valid-token" },
-    });
-
-    expect(response.statusCode).toBe(403);
-    expect(response.body.code).toBe("missing_resource_access");
   });
 
   it("passes the F1g Xendit bank validation fixture without leaking raw bank data", async () => {
@@ -2786,123 +2661,6 @@ describe("finance route contracts", () => {
     );
   });
 
-  it("updates affiliate payout settings through finance tables without PMS or marketplace writes", async () => {
-    const calls: QueryCall[] = [];
-    const repository = createTargetFinancePropertySettingsRepository({
-      connectionString: "postgresql://finance-target",
-      pool: {
-        async query<T extends QueryResultRow = QueryResultRow>(
-          text: string,
-          values?: readonly unknown[],
-        ) {
-          calls.push({ text, values });
-          if (text === "BEGIN" || text === "COMMIT" || text === "ROLLBACK") {
-            return { rows: [] as T[], rowCount: 0 };
-          }
-          if (text.includes("thresholdPending") && text.includes("AS blocked")) {
-            expect(values).toContain("EUR");
-            return { rows: [{ blocked: false }] as unknown as T[], rowCount: 1 };
-          }
-          if (
-            text.includes("SELECT id FROM finance.payout_settings") &&
-            text.includes("FOR UPDATE")
-          ) {
-            expect(values).toContain(affiliateId);
-            return { rows: [{ id: "settings_1" }] as unknown as T[], rowCount: 1 };
-          }
-          if (text.includes("FROM identity.organization_resource_links link")) {
-            expect(text).toContain("link.product = 'affiliate'");
-            expect(text).toContain("link.resource_type = 'affiliate'");
-            if (text.includes("finance.payout_settings settings")) {
-              return {
-                rows: [
-                  {
-                    affiliateId,
-                    marketplaceOrganizationId: "a6000000-0000-0000-0000-000000000686",
-                    payoutsEnabled: true,
-                    payoutProvider: "stripe",
-                    payoutCurrency: "EUR",
-                    payoutSchedule: { type: "monthly" },
-                    payoutPreferences: {},
-                    payoutThresholdAmount: null,
-                    updatedAt: "2026-06-13T10:00:00.000Z",
-                    providerAccountId: "acct_affiliate_target",
-                    provider: "stripe",
-                    providerStatus: "active",
-                    providerOnboardingStatus: "completed",
-                    providerPayoutsEnabled: true,
-                    sourceFreshness: { finance: "target" },
-                  },
-                ] as unknown as T[],
-                rowCount: 1,
-              };
-            }
-            return {
-              rows: [{ organizationId: "a6000000-0000-0000-0000-000000000686" }] as unknown as T[],
-              rowCount: 1,
-            };
-          }
-          if (text.includes("INSERT INTO platform.idempotency_keys")) {
-            expect(text).toContain("'affiliate_payout_settings_update'");
-            expect(text).toMatch(/'organization',\s+\$3::uuid,\s+NULL/);
-            return {
-              rows: [
-                { status: "completed", requestFingerprintHash: values?.[1], inserted: true },
-              ] as unknown as T[],
-              rowCount: 1,
-            };
-          }
-          if (text.includes("INSERT INTO finance.payout_settings")) {
-            expect(text).toContain("owner_scope");
-            expect(text).toContain("'organization'");
-            return { rows: [] as T[], rowCount: 1 };
-          }
-          if (text.includes("WITH current_settings AS MATERIALIZED")) {
-            expect(text).toContain("affiliate_payout_payment_evidence_items");
-            expect(text).toContain("job.attempts_count>0 OR attempt.job_id IS NOT NULL");
-            expect(text).toContain("INSERT INTO platform.jobs");
-            return { rows: [] as T[], rowCount: 0 };
-          }
-          if (text.includes("INSERT INTO platform.product_audit_events")) {
-            expect(text).toContain("'finance.affiliate_payout_settings.updated'");
-            expect(text).toMatch(/'organization',\s+\$3::uuid,\s+NULL/);
-            return { rows: [] as T[], rowCount: 1 };
-          }
-          throw new Error(`Unexpected SQL: ${text}`);
-        },
-        async end() {},
-      },
-    });
-
-    await expect(
-      repository.updateAffiliatePayoutSettings!(
-        affiliatePayoutSettingsPatchCommand({
-          requestedAt: "2026-06-13T10:00:00.000Z",
-        }),
-      ),
-    ).resolves.toMatchObject({
-      ok: true,
-      settings: {
-        affiliateId,
-        payoutProvider: "stripe",
-        payoutSchedule: "monthly",
-      },
-      commandMeta: {
-        sideEffects: ["payout_job", "audit_event"],
-        jobs: [],
-      },
-    });
-    const queryTexts = calls.map((call) => call.text);
-    expect(queryTexts).not.toEqual(
-      expect.arrayContaining([
-        expect.stringMatching(/INSERT\s+INTO\s+pms\./i),
-        expect.stringMatching(/UPDATE\s+pms\./i),
-        expect.stringMatching(/INSERT\s+INTO\s+marketplace\./i),
-        expect.stringMatching(/UPDATE\s+marketplace\./i),
-      ]),
-    );
-  });
-
   it("passes the Finance property read denial matrix", async () => {
     const cases: Array<{
       name: string;
@@ -3382,7 +3140,6 @@ function targetStripeProviderAccountPool(
                 accountScope: "property",
                 propertyId,
                 organizationId: null,
-                affiliateId: null,
               } as unknown as T,
             ]
           : [];
@@ -3995,38 +3752,6 @@ function propertyPayoutDispatchCommand(
   };
 }
 
-function affiliatePayoutSettingsPatchCommand(
-  options: {
-    requestedAt?: string;
-    payload?: Partial<FinanceAffiliatePayoutSettingsPatchCommand["payload"]>;
-  } = {},
-): FinanceAffiliatePayoutSettingsPatchCommand {
-  return {
-    commandType: "finance.affiliate_payout_settings.update",
-    commandId: "cmd-affiliate-payout-settings-001",
-    idempotencyKey: "finance-affiliate-payout-settings-686-001",
-    affiliateId,
-    audit: {
-      actor: {
-        kind: "user",
-        userId: "f1000000-0000-0000-0000-000000000686",
-        organizationId: "a6000000-0000-0000-0000-000000000686",
-      },
-      requestId: "req_affiliate_payout_settings_target",
-      correlationId: "corr_affiliate_payout_settings_target",
-      reason: "Affiliate payout settings target test",
-      requestedAt: options.requestedAt ?? "2026-06-13T10:00:00.000Z",
-    },
-    payload: {
-      payoutsEnabled: true,
-      payoutProvider: "stripe",
-      payoutCurrency: "EUR",
-      payoutSchedule: "monthly",
-      ...options.payload,
-    },
-  };
-}
-
 function buildFinanceApp(
   options: {
     propertyAccessRepository?: PropertyAccessRepository;
@@ -4034,7 +3759,6 @@ function buildFinanceApp(
     entitlements?: ProductEntitlement[];
     linkedPropertyId?: string | null;
     linkedResourceType?: "pms_property" | "property";
-    linkedAffiliateId?: string | null;
     repository?: FinancePropertyReadRepository;
     xenditBankValidator?: FinanceXenditBankValidator;
     publicHotelProfileRepository?: PublicHotelProfileRepository | null;
@@ -4058,7 +3782,6 @@ function buildFinanceApp(
       repository: identityRepository({
         linkedPropertyId: options.linkedPropertyId,
         linkedResourceType: options.linkedResourceType,
-        linkedAffiliateId: options.linkedAffiliateId,
       }),
       propertyAccessRepository: options.propertyAccessRepository ?? agencyPropertyAccessRepository,
       rolePermissionRepository: {
@@ -4069,41 +3792,6 @@ function buildFinanceApp(
       entitlementRepository: {
         async findEntitlementsForContext() {
           return options.entitlements ?? [pmsFinanceEntitlement()];
-        },
-      },
-    },
-  });
-}
-
-function buildAffiliateFinanceApp(options: {
-  repository: FinancePropertyReadRepository;
-}): ReturnType<typeof buildApp> {
-  return buildApp({
-    logger: false,
-    financeRepository: options.repository,
-    auth: {
-      verifier: createFakeVerifier(new Map([["valid-token", session]])),
-      repository: affiliateIdentityRepository(),
-      propertyAccessRepository: agencyPropertyAccessRepository,
-      rolePermissionRepository: {
-        async findPermissionsForRole() {
-          return ["affiliate.payout.manage"];
-        },
-      },
-      entitlementRepository: {
-        async findEntitlementsForContext() {
-          return [
-            {
-              product: "affiliate",
-              key: "affiliate-payouts",
-              status: "active",
-              resource: {
-                product: "affiliate",
-                resourceType: "affiliate",
-                resourceId: affiliateId,
-              },
-            },
-          ];
         },
       },
     },
@@ -4138,35 +3826,6 @@ const financeRepository: FinancePropertyReadRepository = {
       offset: query.offset,
       sourceFreshness,
     };
-  },
-  async getAffiliatePayoutSettings(requestedAffiliateId, requestedOrganizationId) {
-    return requestedAffiliateId === affiliateId &&
-      requestedOrganizationId === affiliateOrganizationId
-      ? affiliatePayoutSettings
-      : null;
-  },
-  async listAffiliatePayouts(requestedAffiliateId, query, requestedOrganizationId) {
-    if (requestedAffiliateId !== affiliateId || requestedOrganizationId !== affiliateOrganizationId)
-      return null;
-    const filtered = filterAffiliatePayouts(query);
-    return {
-      payouts: filtered.slice(query.offset, query.offset + query.limit),
-      total: filtered.length,
-      limit: query.limit,
-      offset: query.offset,
-      sourceFreshness,
-    };
-  },
-  async updateAffiliatePayoutSettings(command) {
-    if (command.affiliateId !== affiliateId) {
-      return {
-        ok: false,
-        statusCode: 404,
-        code: "affiliate_not_found",
-        message: "Affiliate finance resource was not found.",
-      };
-    }
-    return affiliatePayoutSettingsPatchResult(command, "updated");
   },
   async listReconciliationItems(requestedPropertyId, view, query) {
     const filtered =
@@ -4219,22 +3878,15 @@ function paymentSettingsWriteRepository(): FinancePropertyReadRepository & {
 
 function stripeProviderAccountRepository(): FinancePropertyReadRepository & {
   providerCreateCount: number;
-  seedAffiliateProviderAccount(): void;
 } {
   const accounts = new Map<string, FinanceProviderAccountCommandResult & { ok: true }>();
   const repository: FinancePropertyReadRepository & {
     providerCreateCount: number;
-    seedAffiliateProviderAccount(): void;
   } = {
     ...financeRepository,
     providerCreateCount: 0,
-    seedAffiliateProviderAccount() {
-      const command = stripeAffiliateCommand();
-      const result = stripeProviderAccountResult(command, "f7100000-0000-0000-0000-000000000686");
-      accounts.set("affiliate", result);
-    },
     async createStripeProviderAccount(command) {
-      const ownerKey = "propertyId" in command ? "property" : "affiliate";
+      const ownerKey = "property";
       const existing = accounts.get(ownerKey);
       if (existing) {
         return {
@@ -4256,7 +3908,7 @@ function stripeProviderAccountRepository(): FinancePropertyReadRepository & {
       return result;
     },
     async issueStripeOnboardingLink(command) {
-      const ownerKey = "propertyId" in command ? "property" : "affiliate";
+      const ownerKey = "property";
       const existing = accounts.get(ownerKey);
       if (!existing || existing.response.providerAccountId !== command.payload.providerAccountId) {
         return {
@@ -4317,7 +3969,7 @@ function stripeProviderAccountResult(
   command: CreateStripeProviderAccountCommand,
   providerAccountId: string,
 ): FinanceProviderAccountCommandResult & { ok: true } {
-  const providerAccountRef = "propertyId" in command ? "acct_property_686" : "acct_affiliate_686";
+  const providerAccountRef = "acct_property_686";
   return {
     ok: true,
     status: "created",
@@ -4372,30 +4024,6 @@ function stripeProviderAccountReconciliationResult(
         outboxEvents: [],
         jobs: [],
       },
-    },
-  };
-}
-
-function stripeAffiliateCommand(): CreateStripeProviderAccountCommand {
-  return {
-    commandType: "finance.provider_account.stripe.create",
-    commandId: "cmd-stripe-affiliate-001",
-    idempotencyKey: "finance-stripe-affiliate-686",
-    affiliateId,
-    organizationId: affiliateOrganizationId,
-    audit: {
-      actor: {
-        kind: "user",
-        userId: "user_affiliate",
-        organizationId: affiliateOrganizationId,
-      },
-      requestId: "req_stripe_affiliate",
-      requestedAt: "2026-06-12T12:00:00.000Z",
-      reason: "Affiliate Stripe Connect test",
-    },
-    payload: {
-      email: "affiliate@example.test",
-      country: "AT",
     },
   };
 }
@@ -4536,34 +4164,6 @@ function propertyPayoutDispatchResult(
   };
 }
 
-function affiliatePayoutSettingsPatchResult(
-  command: FinanceAffiliatePayoutSettingsPatchCommand,
-  status: "updated" | "idempotent_replay",
-): FinanceAffiliatePayoutSettingsPatchResult & { ok: true } {
-  return {
-    ok: true,
-    status,
-    settings: {
-      ...affiliatePayoutSettings,
-      payoutsEnabled: command.payload.payoutsEnabled ?? affiliatePayoutSettings.payoutsEnabled,
-      payoutProvider: command.payload.payoutProvider ?? affiliatePayoutSettings.payoutProvider,
-      payoutCurrency: command.payload.payoutCurrency ?? affiliatePayoutSettings.payoutCurrency,
-      payoutSchedule: command.payload.payoutSchedule ?? affiliatePayoutSettings.payoutSchedule,
-      payoutThresholdAmount:
-        command.payload.payoutThresholdAmount !== undefined
-          ? command.payload.payoutThresholdAmount
-          : affiliatePayoutSettings.payoutThresholdAmount,
-    },
-    commandMeta: {
-      commandId: command.commandId,
-      idempotencyKey: command.idempotencyKey,
-      sideEffects: ["audit_event"],
-      outboxEvents: [],
-      jobs: [],
-    },
-  };
-}
-
 function paymentSettingsPatchResult(
   command: FinancePaymentSettingsPatchCommand,
   status: "updated" | "idempotent_replay",
@@ -4631,14 +4231,6 @@ function filterPayouts(query: FinancePayoutListQuery): FinancePayout[] {
   });
 }
 
-function filterAffiliatePayouts(query: FinancePayoutListQuery): FinancePayout[] {
-  return affiliatePayoutItems.filter((payout) => {
-    if (query.status && payout.payoutStatus !== query.status) return false;
-    if (query.provider && payout.provider !== query.provider) return false;
-    return true;
-  });
-}
-
 function filterReconciliationItems(
   view: FinanceReconciliationViewKind,
   query: FinanceReconciliationViewQuery,
@@ -4693,26 +4285,10 @@ function directBookingFinanceEntitlement(
   };
 }
 
-function affiliatePayoutEntitlement(
-  status: ProductEntitlement["status"] = "active",
-): ProductEntitlement {
-  return {
-    product: "affiliate",
-    key: "affiliate-payouts",
-    status,
-    resource: {
-      product: "affiliate",
-      resourceType: "affiliate",
-      resourceId: affiliateId,
-    },
-  };
-}
-
 function identityRepository(
   options: {
     linkedPropertyId?: string | null;
     linkedResourceType?: "pms_property" | "property";
-    linkedAffiliateId?: string | null;
   } = {},
 ): IdentityRepository {
   return {
@@ -4767,56 +4343,7 @@ function identityRepository(
           status: "active",
         });
       }
-      if (options.linkedAffiliateId !== null) {
-        resources.push({
-          product: "affiliate",
-          resourceType: "affiliate",
-          resourceId: options.linkedAffiliateId ?? affiliateId,
-          relationship: "owner",
-          status: "active",
-        });
-      }
       return [...resources];
-    },
-  };
-}
-
-function affiliateIdentityRepository(): IdentityRepository {
-  return {
-    async findUserByProviderUserId() {
-      return {
-        userId: "user_affiliate",
-        email: "affiliate@example.test",
-        status: "active",
-      };
-    },
-    async findOrganizationByWorkosOrgId() {
-      return {
-        organizationId: affiliateOrganizationId,
-        workosOrgId: "workos_finance_org",
-        kind: "affiliate_partner",
-        status: "active",
-      };
-    },
-    async findActiveMembership() {
-      return {
-        membershipId: "membership_affiliate",
-        status: "active",
-        roleKey: "affiliate_owner",
-        workosMembershipId: "membership_workos_affiliate",
-        workosRoleSlugs: ["affiliate_owner"],
-      };
-    },
-    async findLinkedResources() {
-      return [
-        {
-          product: "affiliate",
-          resourceType: "affiliate",
-          resourceId: affiliateId,
-          relationship: "owner",
-          status: "active",
-        },
-      ];
     },
   };
 }

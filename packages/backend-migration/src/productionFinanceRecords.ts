@@ -39,8 +39,6 @@ export function buildFinanceRecords(context: FinanceBuildContext): FinanceTarget
   for (const row of sourceRows(context, "pms", "hotel_payment_settings"))
     validatePmsPaymentSettingsCoverage(context, row);
   collect(context, records, "booking", "booking_hotels", propertyPaymentRecords);
-  collect(context, records, "pms", "affiliates", affiliateProviderRecords);
-  collect(context, records, "pms", "affiliate_payout_settings", affiliatePayoutSettingRecords);
   collect(context, records, "booking", "booking_hotels", bookingHotelFinanceRecords);
   finalizeBookingHotelProjectionQuarantines(context, records);
   collect(context, records, "pms", "payments", paymentRecords);
@@ -92,7 +90,7 @@ function collect(
       // Quarantine only this projection when another target projection from the
       // same source row already survived; keep unrelated blockers from earlier rows.
       context.blockers.splice(blockerStart);
-      const id = safeId(row, row.sourceTable === "affiliate_payout_settings" ? "user_id" : "id");
+      const id = safeId(row);
       const otherProjectionSurvives = records.some(
         (record) =>
           record.sourceDatabase === row.sourceDatabase &&
@@ -163,14 +161,6 @@ function quarantineInvalidRelatedRows(context: FinanceBuildContext): void {
         if (indexed === row) context.pmsSettingsByProperty.delete(propertyId);
     }
   }
-  for (const row of sourceRows(context, "pms", "affiliates")) {
-    try {
-      validateAffiliateProviderRow(row);
-    } catch (error) {
-      context.quarantinedSourceRows.add(row);
-      blockRow(context, row, error);
-    }
-  }
 }
 
 function validateBookingHotelFinanceRow(row: IdentitySourceRow): void {
@@ -224,20 +214,6 @@ function validatePmsPaymentSettingsRow(row: IdentitySourceRow): void {
     bool(row.data[field], field, false);
   for (const field of ["stripe_billing_amount_cents", "stripe_billing_room_count"])
     if (row.data[field] != null) integer(row.data[field], field);
-  iso(row.data["created_at"], "created_at");
-  iso(row.data["updated_at"], "updated_at");
-}
-
-function validateAffiliateProviderRow(row: IdentitySourceRow): void {
-  sourceId(row);
-  if (row.data["user_id"]) uuid(row.data["user_id"], "user_id");
-  if (row.data["hotel_id"]) uuid(row.data["hotel_id"], "hotel_id");
-  const reference = optionalText(
-    row.data["stripe_connect_account_id"],
-    "stripe_connect_account_id",
-  );
-  if (!reference) return;
-  bool(row.data["stripe_connect_onboarded"], "stripe_connect_onboarded", false);
   iso(row.data["created_at"], "created_at");
   iso(row.data["updated_at"], "updated_at");
 }
@@ -504,127 +480,6 @@ function propertyPaymentRecords(
     ),
   );
   return result;
-}
-
-function affiliateProviderRecords(
-  context: FinanceBuildContext,
-  row: IdentitySourceRow,
-): FinanceTargetRecord[] {
-  const affiliateId = sourceId(row);
-  const reference = optionalText(
-    row.data["stripe_connect_account_id"],
-    "stripe_connect_account_id",
-  );
-  if (!reference) return [];
-  const organizationId = organizationFor(context, "affiliate", "affiliate", affiliateId);
-  const ownerActive =
-    resourceStatusFor(context, "affiliate", "affiliate", affiliateId) === "active";
-  const providerId = affiliateProviderId(organizationId, reference);
-  const onboarded = bool(row.data["stripe_connect_onboarded"], "stripe_connect_onboarded", false);
-  return [
-    record(row, "payment_provider_accounts", providerId, {
-      id: providerId,
-      propertyId: null,
-      organizationId,
-      accountScope: "organization",
-      provider: "stripe",
-      providerAccountId: reference,
-      status: !ownerActive ? "disabled" : onboarded ? "active" : "setup_incomplete",
-      onboardingStatus: onboarded ? "completed" : "not_started",
-      chargesEnabled: false,
-      payoutsEnabled: ownerActive && onboarded,
-      defaultCurrency: null,
-      capabilities: onboarded ? ["transfers"] : [],
-      accountMetadata: { legacySource: "pms.affiliates", affiliateId },
-      sensitiveConfigRef: null,
-      createdAt: iso(row.data["created_at"], "created_at"),
-      updatedAt: iso(row.data["updated_at"], "updated_at"),
-    }),
-  ];
-}
-
-function affiliatePayoutSettingRecords(
-  context: FinanceBuildContext,
-  row: IdentitySourceRow,
-): FinanceTargetRecord[] {
-  const userId = uuid(row.data["user_id"], "user_id");
-  const affiliates = context.pmsAffiliatesByUserId.get(userId) ?? [];
-  if (affiliates.length !== 1)
-    throw new Error(`user_id resolves to ${affiliates.length} affiliates; exactly one is required`);
-  const affiliate = affiliates[0]!;
-  const affiliateId = sourceId(affiliate);
-  const organizationId = organizationFor(context, "affiliate", "affiliate", affiliateId);
-  const ownerActive =
-    resourceStatusFor(context, "affiliate", "affiliate", affiliateId) === "active";
-  const method = payoutMethod(row.data["payment_method"]);
-  const providerReference = optionalText(
-    affiliate.data["stripe_connect_account_id"],
-    "stripe_connect_account_id",
-  );
-  const candidateProviderAccountId =
-    method === "stripe" && providerReference
-      ? affiliateProviderId(organizationId, providerReference)
-      : null;
-  const providerAccountId =
-    candidateProviderAccountId &&
-    isPlannedTarget(context, "payment_provider_accounts", candidateProviderAccountId)
-      ? candidateProviderAccountId
-      : null;
-  const affiliateHotelId = uuid(affiliate.data["hotel_id"], "hotel_id");
-  const affiliatePropertyId = propertyFor(context, "pms", "hotels", affiliateHotelId);
-  const affiliateCurrency = bookingHotelForProperty(context, affiliatePropertyId).currency;
-  const sensitive = sensitivePayoutFields(row);
-  if (sensitive.length)
-    disposition(context, row, {
-      sourceId: userId,
-      sourceField: "payout_destination",
-      sourceValue: sensitive,
-      reasonCode: "SENSITIVE_PAYOUT_DESTINATION_REENTRY_REQUIRED",
-      disposition: "target_reentry_required",
-      targetTable: "payout_settings",
-      targetId: deterministicUuid("production-finance", "affiliate-payout-setting", userId),
-    });
-  const id = deterministicUuid("production-finance", "affiliate-payout-setting", userId);
-  if (candidateProviderAccountId && !providerAccountId)
-    disposition(context, row, {
-      sourceId: userId,
-      sourceField: "organization_provider_account_dependency",
-      sourceValue: providerReference,
-      reasonCode: "FINANCE_PARENT_RECORD_QUARANTINED",
-      disposition: "disabled_configuration",
-      targetTable: "payout_settings",
-      targetId: id,
-    });
-  return [
-    record(row, "payout_settings", id, {
-      id,
-      propertyId: null,
-      organizationId,
-      propertyProviderAccountId: null,
-      organizationProviderAccountId: providerAccountId,
-      ownerScope: "organization",
-      payoutMethod: method,
-      destinationCountryCode: country(row.data["bank_country"]),
-      defaultCurrency: affiliateCurrency,
-      status: !ownerActive
-        ? "disabled"
-        : sensitive.length
-          ? "setup_incomplete"
-          : providerAccountId
-            ? "active"
-            : "setup_incomplete",
-      schedule: {},
-      payoutPreferences: {
-        legacyDestinationFingerprint: sensitive.length ? sha256(sensitive) : null,
-        destinationRequiresReentry: sensitive.length > 0,
-      },
-      sensitiveDestinationRef: null,
-      sourceSystem: "pms",
-      sourceSettingsId: userId,
-      createdAt: iso(row.data["created_at"], "created_at"),
-      updatedAt: iso(row.data["updated_at"], "updated_at"),
-    }),
-  ];
 }
 
 function paymentRecords(
@@ -957,6 +812,16 @@ function payoutRecords(
   row: IdentitySourceRow,
 ): FinanceTargetRecord[] {
   const id = sourceId(row);
+  // VAY-2272: the affiliate program is retired; its payouts stay in the legacy snapshot only.
+  if (requiredText(row.data["recipient_type"], "recipient_type").toLowerCase() === "affiliate") {
+    disposition(context, row, {
+      sourceField: "*",
+      sourceValue: row.data,
+      reasonCode: "RETIRED_AFFILIATE_PROGRAM",
+      disposition: "omitted_row",
+    });
+    return [];
+  }
   const bookingId = uuid(row.data["booking_id"], "booking_id");
   const legacyBooking = context.pmsBookingById.get(bookingId);
   const guestBooking = context.guestBookingByPmsId.get(bookingId);
@@ -986,26 +851,6 @@ function payoutRecords(
     payoutSettingId = isPlannedTarget(context, "payout_settings", candidatePayoutSettingId)
       ? candidatePayoutSettingId
       : null;
-  } else if (recipientType === "affiliate") {
-    ownerScope = "organization";
-    organizationId = organizationFor(context, "affiliate", "affiliate", recipientId);
-    const affiliate = context.pmsAffiliateById.get(recipientId);
-    if (!affiliate) throw new Error(`affiliate ${recipientId} is missing`);
-    const userId = affiliate.data["user_id"] ? uuid(affiliate.data["user_id"], "user_id") : null;
-    const candidatePayoutSettingId = userId
-      ? deterministicUuid("production-finance", "affiliate-payout-setting", userId)
-      : null;
-    payoutSettingExpected = Boolean(
-      userId &&
-      sourceRows(context, "pms", "affiliate_payout_settings").some(
-        (settings) => settings.data["user_id"] === userId,
-      ),
-    );
-    payoutSettingId =
-      candidatePayoutSettingId &&
-      isPlannedTarget(context, "payout_settings", candidatePayoutSettingId)
-        ? candidatePayoutSettingId
-        : null;
   } else throw new Error(`recipient_type ${recipientType} is unsupported`);
   const providerIds = [
     optionalText(row.data["stripe_transfer_id"], "stripe_transfer_id"),
@@ -1049,14 +894,6 @@ function payoutRecords(
       `payout currency ${payoutCurrency} disagrees with booking currency ${guestBooking.currency}`,
     );
   const status = payoutStatus(row.data["status"]);
-  if (recipientType === "affiliate" && status === "paid")
-    block(
-      context,
-      "AFFILIATE_PAYOUT_EVIDENCE_REQUIRED",
-      "pms.payouts",
-      id,
-      "Completed affiliate payout has no immutable command, idempotency, actor, and item evidence",
-    );
   const completedAt = optionalIso(row.data["completed_at"], "completed_at");
   if (status === "paid" && !completedAt)
     block(
@@ -1224,7 +1061,6 @@ function bookingHotelFinanceRecords(
       },
       createdAt,
       updatedAt,
-      affiliateId: null,
       otaChannel: null,
       revision: 1,
     }),
@@ -1523,7 +1359,7 @@ function record(
   row: Record<string, unknown>,
   override?: { sourceChecksum?: string; sourceUpdatedAt?: string },
 ): FinanceTargetRecord {
-  const fallback = source.sourceTable === "affiliate_payout_settings" ? "user_id" : "id";
+  const fallback = "id";
   return {
     targetProduct: "finance",
     targetTable,
@@ -1653,16 +1489,6 @@ function stripeReferenceIsSharedAcrossProperties(
   return properties.size > 1;
 }
 
-function affiliateProviderId(organizationId: string, reference: string): string {
-  return deterministicUuid(
-    "production-finance",
-    "affiliate-provider",
-    organizationId,
-    "stripe",
-    reference,
-  );
-}
-
 function bookingPayoutSettingId(propertyId: string): string {
   return deterministicUuid("production-finance", "property-payout-setting", propertyId);
 }
@@ -1741,16 +1567,6 @@ function paymentKind(value: unknown): string {
   return mapped[purpose];
 }
 
-function payoutMethod(value: unknown): string {
-  const method = requiredText(value, "payment_method").toLowerCase();
-  const normalized = method === "bank" ? "bank_account" : method;
-  if (
-    !["paypal", "stripe", "xendit", "bank_account", "wallet", "manual", "none"].includes(normalized)
-  )
-    throw new Error(`payment_method ${method} is unsupported`);
-  return normalized;
-}
-
 function paymentMetadata(
   row: IdentitySourceRow,
   normalized: {
@@ -1811,29 +1627,6 @@ function optionalBigint(value: unknown): string | null {
   if (!/^\d+$/.test(text) || BigInt(text) > 9_223_372_036_854_775_807n)
     throw new Error("stripe_refund_amount_minor must be a non-negative bigint");
   return BigInt(text).toString();
-}
-
-function country(value: unknown): string | null {
-  const text = optionalText(value, "bank_country");
-  if (!text) return null;
-  const result = text.toUpperCase();
-  if (!/^[A-Z]{2}$/.test(result)) throw new Error("bank_country must be an ISO alpha-2 code");
-  return result;
-}
-
-function sensitivePayoutFields(row: IdentitySourceRow): string[] {
-  return [
-    "paypal_email",
-    "bank_iban",
-    "bank_account_holder",
-    "bank_swift_bic",
-    "bank_name",
-    "xendit_channel_code",
-    "xendit_account_number",
-    "xendit_account_holder_name",
-  ]
-    .map((field) => row.data[field])
-    .filter((value): value is string => typeof value === "string" && value.trim().length > 0);
 }
 
 function sensitiveBookingPayoutFields(row: IdentitySourceRow): string[] {

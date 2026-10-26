@@ -1,12 +1,32 @@
+import pg from "pg";
 import { describe, expect, it, vi } from "vitest";
 
 import { createPgPropertySetupPmsOwnerRepository } from "./domains/propertySetupPmsOwnerRepository.js";
+import { installPostgresPoolRuntime } from "./platform/postgresRuntime.js";
 
 const organizationId = "11111111-1111-4111-8111-111111111111";
 const propertyId = "22222222-2222-4222-8222-222222222222";
 const roomTypeId = "33333333-3333-4333-8333-333333333333";
 
 describe("property setup PMS owner repository", () => {
+  it("shares the API's general pool instead of a one-connection pool of its own (VAY-2247 incident)", async () => {
+    const OriginalPool = pg.Pool;
+    const pools = installPostgresPoolRuntime(pg);
+    try {
+      const general = new pg.Pool({ connectionString: "postgresql://example/target" });
+      createPgPropertySetupPmsOwnerRepository({ connectionString: "postgresql://example/target" });
+      expect(pools.snapshot()).toMatchObject({ physicalPoolCount: 1, maxConnections: 8 });
+      await general.end();
+    } finally {
+      await pools.close();
+      Object.defineProperty(pg, "Pool", {
+        configurable: true,
+        writable: true,
+        value: OriginalPool,
+      });
+    }
+  });
+
   it("reads exact canonical room and inventory revisions in the authorized scope", async () => {
     const query = vi
       .fn()
@@ -55,8 +75,8 @@ describe("property setup PMS owner repository", () => {
       calendarRevision: 4,
       materializedRevision: 4,
     });
-    for (const [, parameters] of query.mock.calls) {
-      expect(parameters).toEqual([organizationId, propertyId]);
+    for (const [config] of query.mock.calls) {
+      expect(config).toMatchObject({ values: [organizationId, propertyId], query_timeout: 5_000 });
     }
   });
 

@@ -140,8 +140,7 @@ Proposed slices:
 5. Run route tests, frontend build, and browser smoke.
 
 After this pattern is accepted, repeat for broader booking-flow settings, PMS
-calendar, payments, marketplace collaborations, WorkOS auth/session, and Ask
-Intelligence.
+calendar, payments, WorkOS auth/session, and Ask Intelligence.
 
 ## Following Vertical
 

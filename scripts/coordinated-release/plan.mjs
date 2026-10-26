@@ -138,7 +138,7 @@ if (!gitSucceeds(["cat-file", "-e", `${targetSha}^{commit}`])) {
 
 const serviceConfig = JSON.parse(readFileSync(servicesPath, "utf8"));
 if (Object.keys(serviceConfig).sort().join("\0") !== [...SERVICE_KEYS].sort().join("\0")) {
-  throw new Error("service config must define exactly the six managed services");
+  throw new Error("service config must define exactly the managed services");
 }
 
 const { baseline, reason: baselineReason } = loadBaseline(options.get("baseline"), targetSha);

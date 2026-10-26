@@ -528,7 +528,7 @@ describe("target manual booking fields", () => {
     expect(dialCode().props.value).toBe("");
   });
 
-  it("adds booking-level guests, warns over capacity, and submits them in order", async () => {
+  it("adds booking-level guests and submits them in order", async () => {
     vi.spyOn(calendarService, "previewManualBooking").mockResolvedValue(preview);
     const onSubmit = vi.fn().mockResolvedValue({});
     let view!: ReactTestRenderer;
@@ -545,25 +545,34 @@ describe("target manual booking fields", () => {
         await view.root.findByType("form").props.onSubmit({ preventDefault: vi.fn() });
       });
 
+    // The Villa has 5 places, so the booker and two guests fit.
+    act(() => field("Room 1 room").props.onChange({ target: { value: "room-2" } }));
+    await settlePreview();
     act(() => button("+ Add guest").props.onClick());
     act(() => button("+ Add guest").props.onClick());
     expect(view.root.findAllByProps({ "data-additional-guest": true })).toHaveLength(2);
-    // Booker plus two guests is more than the Double room's two places: warn, don't block.
+    // The booker is guest 1, so added guests start at guest 2 (VAY-2364).
+    expect(
+      view.root
+        .findAllByProps({ "data-additional-guest": true })
+        .map((card) => card.findByType("summary").children.join("")),
+    ).toEqual(["Guest 2", "Guest 3"]);
     const markup = JSON.stringify(view.toJSON());
-    expect(markup).toContain("3 guests is more than the 2");
+    expect(markup).toContain("Guests: 3 of 5");
+    expect(markup).not.toContain("the selected rooms allow");
     // The stays still say one guest, so pricing and Booking Detail would disagree: hint, don't block.
     expect(markup).toContain("3 people are listed, but the stays have 1 guests");
 
-    type("Guest 1 first name", "Grace");
+    type("Guest 2 first name", "Grace");
     await submit();
     expect(onSubmit).not.toHaveBeenCalled();
-    expect(view.root.findByProps({ role: "alert" }).children.join("")).toContain("Check guest 1");
+    expect(view.root.findByProps({ role: "alert" }).children.join("")).toContain("Check guest 2");
     expect(view.root.findAllByProps({ "data-additional-guest": true })[0]!.props.open).toBe(true);
 
-    type("Guest 1 last name", "Hopper");
-    type("Guest 2 first name", "Alan");
-    type("Guest 2 last name", "Turing");
-    type("Guest 2 email", "alan@example.com");
+    type("Guest 2 last name", "Hopper");
+    type("Guest 3 first name", "Alan");
+    type("Guest 3 last name", "Turing");
+    type("Guest 3 email", "alan@example.com");
     const guestPhone = view.root
       .findAllByProps({ "data-additional-guest": true })[1]!
       .findByProps({ name: "phone" });
@@ -591,7 +600,7 @@ describe("target manual booking fields", () => {
     const button = (label: string) =>
       view.root.findAllByType("button").find((item) => item.children.join("") === label)!;
     act(() => button("+ Add guest").props.onClick());
-    act(() => button("Remove guest 1").props.onClick());
+    act(() => button("Remove guest 2").props.onClick());
     expect(view.root.findAllByProps({ "data-additional-guest": true })).toHaveLength(0);
     await act(async () => {
       await view.root.findByType("form").props.onSubmit({ preventDefault: vi.fn() });
@@ -599,32 +608,110 @@ describe("target manual booking fields", () => {
     expect(onSubmit.mock.calls[0]![0]).not.toHaveProperty("additionalGuests");
   });
 
-  it("uses the tightest night for capacity and focuses the guest that needs fixing", async () => {
+  it("caps guests at the rooms' places and blocks a booking above them", async () => {
+    vi.spyOn(calendarService, "previewManualBooking").mockResolvedValue(preview);
+    const onSubmit = vi.fn().mockResolvedValue({});
+    let view!: ReactTestRenderer;
+    // prettier-ignore
+    await act(async () => { view = create(createElement(TargetManualBookingModal, { roomTypes, rooms, initialCheckIn: "2026-09-10", initialCheckOut: "2026-09-11", onSubmit, onClose: vi.fn() })); });
+    await settlePreview();
+    const button = (label: string) =>
+      view.root.findAllByType("button").find((item) => item.children.join("") === label)!;
+    const room = (value: string) =>
+      act(() =>
+        view.root
+          .findByProps({ "aria-label": "Room 1 room" })
+          .props.onChange({ target: { value } }),
+      );
+    const markup = () => JSON.stringify(view.toJSON());
+
+    // VAY-2366: each room shows its places. The Double has 2: the booker and one guest fill it.
+    expect(markup()).toContain("Max. guests: 2");
+    act(() => button("+ Add guest").props.onClick());
+    expect(button("+ Add guest").props.disabled).toBe(true);
+    expect(button("+ Add guest").props.title).toBe(
+      "Maximum capacity reached for the selected rooms. Add another room to add more guests.",
+    );
+    expect(markup()).toContain("Guests: 2 of 2");
+
+    // The Villa has 5; back in the Double, 4 people are above its 2 places and nothing is saved.
+    room("room-2");
+    expect(markup()).toContain("Max. guests: 5");
+    expect(button("+ Add guest").props.disabled).toBe(false);
+    act(() => button("+ Add guest").props.onClick());
+    act(() => button("+ Add guest").props.onClick());
+    room("room-1");
+    await settlePreview();
+    const over =
+      "4 guests is more than the 2 the selected rooms allow. Remove a guest or add a room.";
+    expect(markup()).toContain(over);
+    await act(async () => {
+      await view.root.findByType("form").props.onSubmit({ preventDefault: vi.fn() });
+    });
+    expect(onSubmit).not.toHaveBeenCalled();
+    const alerts = () =>
+      view.root
+        .findAllByProps({ role: "alert" })
+        .filter((node) => node.children.join("").trim() === over);
+    expect(alerts()).toHaveLength(2);
+    // Back within the Double's places, both messages go.
+    act(() => button("Remove guest 4").props.onClick());
+    act(() => button("Remove guest 3").props.onClick());
+    expect(markup()).not.toContain("the selected rooms allow");
+    expect(alerts()).toHaveLength(0);
+  });
+
+  it("explains a server refusal of too many guests", async () => {
+    vi.spyOn(calendarService, "previewManualBooking").mockResolvedValue(preview);
+    const refusal = new PmsManualBookingServiceError(
+      "validation",
+      "guests_over_capacity",
+      422,
+      "guests over capacity.",
+      "additionalGuests",
+    );
+    const onSubmit = vi.fn().mockRejectedValue(refusal);
+    let view!: ReactTestRenderer;
+    // prettier-ignore
+    await act(async () => { view = create(createElement(TargetManualBookingModal, { roomTypes, rooms, initialCheckIn: "2026-09-10", initialCheckOut: "2026-09-11", onSubmit, onClose: vi.fn() })); });
+    await settlePreview();
+    await act(async () => {
+      await view.root.findByType("form").props.onSubmit({ preventDefault: vi.fn() });
+    });
+    expect(onSubmit).toHaveBeenCalledOnce();
+    expect(view.root.findByProps({ role: "alert" }).children.join("")).toContain(
+      "The selected rooms don't have space for everyone listed. Remove a guest or add a room.",
+    );
+  });
+
+  it("uses the busiest night for capacity and focuses the guest that needs fixing", async () => {
     vi.spyOn(calendarService, "previewManualBooking").mockImplementation(async (input) =>
       previewFor(input),
     );
     const focus = vi.fn();
     let view!: ReactTestRenderer;
     // prettier-ignore
-    await act(async () => { view = create(createElement(TargetManualBookingModal, { roomTypes, rooms, initialCheckIn: "2026-09-10", initialCheckOut: "2026-09-11", onSubmit: vi.fn(), onClose: vi.fn() }), { createNodeMock: (element) => element.props["aria-label"] === "Guest 1 first name" ? { focus } : element.props.role === "dialog" ? { focus: vi.fn(), querySelectorAll: () => [] } : null }); });
+    await act(async () => { view = create(createElement(TargetManualBookingModal, { roomTypes, rooms, initialCheckIn: "2026-09-10", initialCheckOut: "2026-09-11", onSubmit: vi.fn(), onClose: vi.fn() }), { createNodeMock: (element) => element.props["aria-label"] === "Guest 2 first name" ? { focus } : element.props.role === "dialog" ? { focus: vi.fn(), querySelectorAll: () => [] } : null }); });
     const button = (label: string) =>
       view.root.findAllByType("button").find((item) => item.children.join("") === label)!;
-    // Room 1 (2 places) for one night, then the Villa (5 places) the next night: capacity is 2, not 7.
+    const date = (label: string, value: string) =>
+      act(() =>
+        view.root.findByProps({ "aria-label": label }).props.onChange({ target: { value } }),
+      );
+    // Room 1 (2 places) for one night, then the Villa (5 places) the next night: 5 people fit.
     await act(async () => button("+ Add another room").props.onClick());
-    act(() =>
-      view.root
-        .findByProps({ "aria-label": "Room 2 check-in" })
-        .props.onChange({ target: { value: "2026-09-11" } }),
-    );
-    act(() =>
-      view.root
-        .findByProps({ "aria-label": "Room 2 check-out" })
-        .props.onChange({ target: { value: "2026-09-12" } }),
-    );
+    date("Room 2 check-in", "2026-09-11");
+    date("Room 2 check-out", "2026-09-12");
     act(() => button("+ Add guest").props.onClick());
     act(() => button("+ Add guest").props.onClick());
     await settlePreview();
-    expect(JSON.stringify(view.toJSON())).toContain("3 guests is more than the 2");
+    expect(JSON.stringify(view.toJSON())).toContain("Guests: 3 of 5");
+    expect(JSON.stringify(view.toJSON())).not.toContain("the selected rooms allow");
+    // Both rooms on the first night: their places add up (VAY-2366).
+    date("Room 2 check-in", "2026-09-10");
+    expect(JSON.stringify(view.toJSON())).toContain("Guests: 3 of 7");
+    // Adding a guest focuses its first name; this checks the validation focus alone.
+    focus.mockClear();
     await act(async () => {
       await view.root.findByType("form").props.onSubmit({ preventDefault: vi.fn() });
     });

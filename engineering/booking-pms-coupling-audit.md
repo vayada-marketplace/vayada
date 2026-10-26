@@ -4,9 +4,18 @@ _VAY-642 audit record. This document inventories existing Booking, PMS,
 Marketplace, Auth, and Channex coupling so the TypeScript rewrite can preserve
 the intended product split without copying legacy integration shortcuts._
 
+> **Note (VAY-2259, 2026-10-19):** `apps/marketplace-api`, the old Python Marketplace API, is switched
+> off (api.vayada.com answers 410) and its source is deleted. Paths into it below refer to its last
+> source at commit `897d64c6e`.
+
+> **Note (VAY-2272, 2026-10-20):** the Marketplace and the affiliate program are gone as well:
+> `@vayada/domain-marketplace` is deleted, Booking API no longer reads the Marketplace database, and
+> migrations 0496-0502 drop their data from the new database. The Marketplace couplings below
+> (C06, C07, removal step 7 and VAY-653) are history.
+
 ## Purpose
 
-Vayada wants Booking Engine, PMS, Marketplace, and related platform domains to
+Vayada wants Booking Engine, PMS, and related platform domains to
 stay interchangeable. Vayada PMS must be one PMS implementation behind stable
 contracts, not the private backend for Vayada Booking Engine.
 

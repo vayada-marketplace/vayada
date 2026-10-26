@@ -4,6 +4,9 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": new URL(".", import.meta.url).pathname,
+      // Components with self-hosted fonts import next/font/local, which needs Next's compiler.
+      "next/font/local": new URL("../../packages/fonts/src/vitestNextFontLocal.ts", import.meta.url)
+        .pathname,
     },
   },
   test: {
@@ -12,6 +15,7 @@ export default defineConfig({
       "app/**/*.test.ts",
       "services/**/*.test.ts",
       "lib/**/*.test.ts",
+      "components/**/*.test.ts",
       "components/**/*.test.tsx",
     ],
   },

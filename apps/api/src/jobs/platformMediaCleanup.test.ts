@@ -12,6 +12,7 @@ import {
   distinctPlatformMediaStorageKeys,
   platformMediaCleanupFailureLogEntries,
   platformMediaCleanupRetry,
+  platformMediaRetiredPurgeRetry,
   runPlatformMediaCleanupJobs,
   type PlatformMediaCleanupAction,
   type PlatformMediaCleanupCandidate,
@@ -164,10 +165,10 @@ describe("platform media cleanup jobs", () => {
     const store = new MemoryPlatformMediaCleanupStore([
       {
         mediaObjectId,
-        resourceProduct: "marketplace",
-        resourceType: "collaboration",
-        resourceId: "collaboration_expired",
-        purpose: "marketplace.collaboration_chat.attachment",
+        resourceProduct: "pms",
+        resourceType: "message_thread",
+        resourceId: "thread_expired",
+        purpose: "pms.messaging.attachment",
         visibility: "private",
         lifecycleStatus: "active",
         bucket: "vayada-media-local",
@@ -191,13 +192,13 @@ describe("platform media cleanup jobs", () => {
     ]);
   });
 
-  it("rechecks retention under lock before deleting a selected chat attachment", async () => {
+  it("rechecks retention under lock before deleting a selected private attachment", async () => {
     const retainedUntil = "2026-06-20T00:00:00.000Z";
     const query = vi.fn(async (statement: string) => {
       if (statement === "BEGIN" || statement === "COMMIT") return { rows: [] };
       if (statement.includes("FOR UPDATE")) {
         expect(statement).toContain("media.retained_until <= $2::timestamptz");
-        expect(statement).toContain("marketplace.collaboration_chat.attachment");
+        expect(statement).toContain("pms.messaging.attachment");
         return { rows: [] };
       }
       throw new Error(`Unexpected cleanup query: ${statement}`);
@@ -218,10 +219,10 @@ describe("platform media cleanup jobs", () => {
       const result = await store.applyCleanupMutation(
         {
           mediaObjectId: "00000000-0000-0000-0000-000000000304",
-          resourceProduct: "marketplace",
-          resourceType: "collaboration",
-          resourceId: "collaboration_claimed_during_cleanup",
-          purpose: "marketplace.collaboration_chat.attachment",
+          resourceProduct: "pms",
+          resourceType: "message_thread",
+          resourceId: "thread_claimed_during_cleanup",
+          purpose: "pms.messaging.attachment",
           visibility: "private",
           lifecycleStatus: "active",
           bucket: "vayada-media-local",
@@ -445,10 +446,10 @@ describe("platform media cleanup jobs", () => {
     });
     const candidate: PlatformMediaCleanupCandidate = {
       mediaObjectId,
-      resourceProduct: "marketplace",
-      resourceType: "collaboration",
-      resourceId: "collaboration_failing_cleanup",
-      purpose: "marketplace.collaboration_chat.attachment",
+      resourceProduct: "pms",
+      resourceType: "message_thread",
+      resourceId: "thread_failing_cleanup",
+      purpose: "pms.messaging.attachment",
       visibility: "private",
       lifecycleStatus: "active",
       bucket: "vayada-media-local",
@@ -523,6 +524,7 @@ describe("platform media cleanup jobs", () => {
 type FixtureResource = PlatformMediaCleanupCandidate & {
   deletedAt?: string;
   rollbackCleanupStatus?: string;
+  retiredPurgeCompletedAt?: string;
 };
 
 type FixtureJob = {
@@ -541,6 +543,206 @@ type FixtureJobAttempt = {
   errorType?: string;
   errorMessage?: string;
 };
+
+describe("retired Marketplace media purge (VAY-2272)", () => {
+  const retired = (id: string, overrides: Partial<PlatformMediaCleanupCandidate> = {}) => ({
+    mediaObjectId: id,
+    resourceProduct: "marketplace",
+    resourceType: "creator_profile",
+    resourceId: `creator_${id}`,
+    purpose: "marketplace.creator.profile_image",
+    visibility: "private" as const,
+    lifecycleStatus: "active",
+    bucket: "vayada-media-local",
+    storageKey: `private/media/${id}/original/image.jpg`,
+    ...overrides,
+  });
+
+  it("never dead-letters a purge item and retries it daily after the usual back-off", () => {
+    const now = new Date("2026-10-20T00:00:00.000Z");
+    const minutesLater = (attempt: number) =>
+      (platformMediaRetiredPurgeRetry(attempt, now).runAfter.getTime() - now.getTime()) / 60_000;
+
+    expect([1, 2, 3, 4, 5, 50].map(minutesLater)).toEqual([15, 60, 240, 1440, 1440, 1440]);
+    expect(platformMediaRetiredPurgeRetry(50, now).deadLettered).toBe(false);
+    expect(platformMediaCleanupRetry(5, now).deadLettered).toBe(true);
+  });
+
+  it("deletes nothing when a public object would need the missing CDN invalidator", async () => {
+    const mediaObjectId = "00000000-0000-0000-0000-000000000505";
+    const query = vi.fn(async (statement: string) => {
+      if (["BEGIN", "ROLLBACK"].includes(statement)) return { rows: [] };
+      if (statement.includes("FOR UPDATE")) {
+        return {
+          rows: [
+            {
+              bucket: "vayada-media-local",
+              storageKey: `private/media/${mediaObjectId}/original/image.jpg`,
+              variantStorageKeys: [`public/media/${mediaObjectId}/thumbnail/v1.webp`],
+              rollbackBucket: null,
+              rollbackStorageKey: null,
+            },
+          ],
+        };
+      }
+      throw new Error(`Unexpected purge query: ${statement}`);
+    });
+    const connect = vi
+      .spyOn(pg.Pool.prototype, "connect")
+      .mockResolvedValue({ query, release: vi.fn() } as never);
+    const end = vi.spyOn(pg.Pool.prototype, "end").mockResolvedValue(undefined);
+    const objectDeleter = { deleteObject: vi.fn(async () => undefined) };
+    const store = createPgPlatformMediaCleanupStore({
+      connectionString: "postgresql://purge.invalid/vayada",
+      objectDeleter,
+    });
+
+    try {
+      await expect(
+        store.applyCleanupMutation(
+          retired(mediaObjectId, { visibility: "public" }),
+          {
+            action: "purge-retired-marketplace-media",
+            runName: "retiredMarketplacePurge",
+            jobType: "platform.media.cleanup.retired-marketplace-purge",
+            eventType: "platform_media.retired_marketplace.purged",
+            auditAction: "platform_media.cleanup.retired_marketplace_media_purged",
+            deadlineOrWindow: "retired-marketplace",
+          },
+          {
+            now: new Date("2026-10-20T00:00:00.000Z"),
+            correlationId: "purge-test",
+            workerId: "purge-test",
+          },
+        ),
+      ).rejects.toThrow("needs the CDN invalidator");
+      expect(objectDeleter.deleteObject).not.toHaveBeenCalled();
+    } finally {
+      await store.close();
+      connect.mockRestore();
+      end.mockRestore();
+    }
+  });
+
+  it("is not one of the default cleanup runs", async () => {
+    const store = new MemoryPlatformMediaCleanupStore([
+      retired("00000000-0000-0000-0000-000000000501"),
+    ]);
+
+    const result = await runPlatformMediaCleanupJobs(store, { now: new Date() });
+
+    expect(result.runs.map((run) => run.name)).not.toContain("retiredMarketplacePurge");
+    expect(store.storageDeletes).toEqual([]);
+  });
+
+  it("reports objects a hotel still uses and purges the others", async () => {
+    const purged = "00000000-0000-0000-0000-000000000502";
+    const inUse = "00000000-0000-0000-0000-000000000503";
+    const store = new MemoryPlatformMediaCleanupStore([
+      retired(purged),
+      retired(inUse, { blockedByKeptReference: true }),
+    ]);
+
+    const result = await runPlatformMediaCleanupJobs(store, {
+      now: new Date("2026-10-20T00:00:00.000Z"),
+      run: ["retiredMarketplacePurge"],
+    });
+
+    expect(result.runs[0]).toMatchObject({
+      name: "retiredMarketplacePurge",
+      scanned: 2,
+      applied: 1,
+      skipped: 1,
+      failed: 0,
+      blocked: [inUse],
+    });
+    expect(store.media(purged)).toMatchObject({
+      lifecycleStatus: "active",
+      retiredPurgeCompletedAt: "2026-10-20T00:00:00.000Z",
+    });
+    expect(store.media(inUse)?.retiredPurgeCompletedAt).toBeUndefined();
+    expect(store.storageDeletes.map((entry) => entry.key)).toEqual([
+      `private/media/${purged}/original/image.jpg`,
+    ]);
+  });
+
+  it("writes no marker when the CDN invalidation fails after the files were deleted", async () => {
+    const mediaObjectId = "00000000-0000-0000-0000-000000000504";
+    const statements: string[] = [];
+    const query = vi.fn(async (statement: string) => {
+      statements.push(statement);
+      if (["BEGIN", "ROLLBACK"].includes(statement)) return { rows: [] };
+      if (statement.includes("FOR UPDATE")) {
+        expect(statement).toContain("retiredPurgeCompletedAt");
+        expect(statement).toContain("hotel_catalog.property_media");
+        return {
+          rows: [
+            {
+              bucket: "vayada-media-local",
+              storageKey: `private/media/${mediaObjectId}/original/image.jpg`,
+              variantStorageKeys: [
+                `public/media/${mediaObjectId}/original_safe/v1.webp`,
+                `public/media/${mediaObjectId}/thumbnail/v1.webp`,
+              ],
+              rollbackBucket: null,
+              rollbackStorageKey: null,
+            },
+          ],
+        };
+      }
+      throw new Error(`Unexpected purge query: ${statement}`);
+    });
+    const connect = vi
+      .spyOn(pg.Pool.prototype, "connect")
+      .mockResolvedValue({ query, release: vi.fn() } as never);
+    const end = vi.spyOn(pg.Pool.prototype, "end").mockResolvedValue(undefined);
+    const objectDeleter = { deleteObject: vi.fn(async () => undefined) };
+    const cdnInvalidator = {
+      invalidatePublicObjects: vi.fn(async () => Promise.reject(new Error("Throttling"))),
+      close: vi.fn(),
+    };
+    const store = createPgPlatformMediaCleanupStore({
+      connectionString: "postgresql://purge.invalid/vayada",
+      objectDeleter,
+      cdnInvalidator,
+    });
+
+    try {
+      await expect(
+        store.applyCleanupMutation(
+          retired(mediaObjectId, { visibility: "public" }),
+          {
+            action: "purge-retired-marketplace-media",
+            runName: "retiredMarketplacePurge",
+            jobType: "platform.media.cleanup.retired-marketplace-purge",
+            eventType: "platform_media.retired_marketplace.purged",
+            auditAction: "platform_media.cleanup.retired_marketplace_media_purged",
+            deadlineOrWindow: "retired-marketplace",
+          },
+          {
+            now: new Date("2026-10-20T00:00:00.000Z"),
+            correlationId: "purge-test",
+            workerId: "purge-test",
+          },
+        ),
+      ).rejects.toThrow("Throttling");
+      expect(objectDeleter.deleteObject).toHaveBeenCalledTimes(3);
+      expect(cdnInvalidator.invalidatePublicObjects).toHaveBeenCalledWith([
+        `public/media/${mediaObjectId}/original_safe/v1.webp`,
+        `public/media/${mediaObjectId}/thumbnail/v1.webp`,
+      ]);
+      expect(statements.at(-1)).toBe("ROLLBACK");
+      expect(
+        statements.some((statement) => statement.includes("UPDATE platform.media_objects")),
+      ).toBe(false);
+    } finally {
+      await store.close();
+      expect(cdnInvalidator.close).toHaveBeenCalledOnce();
+      connect.mockRestore();
+      end.mockRestore();
+    }
+  });
+});
 
 function createFixtureStore(): MemoryPlatformMediaCleanupStore {
   return new MemoryPlatformMediaCleanupStore(
@@ -638,7 +840,7 @@ class MemoryPlatformMediaCleanupStore implements PlatformMediaCleanupStore {
       .filter(
         (resource) =>
           resource.visibility === "private" &&
-          ["marketplace.collaboration_chat.attachment", "pms.messaging.attachment"].includes(
+          ["pms.messaging.attachment", "finance.expense.receipt"].includes(
             resource.purpose ?? "",
           ) &&
           ["active", "retained", "delete_requested"].includes(resource.lifecycleStatus) &&
@@ -658,6 +860,18 @@ class MemoryPlatformMediaCleanupStore implements PlatformMediaCleanupStore {
           Boolean(resource.rollbackWindowEndsAt) &&
           new Date(resource.rollbackWindowEndsAt!) <= now &&
           resource.rollbackCleanupStatus !== "completed",
+      )
+      .slice(0, limit);
+  }
+
+  async findRetiredMarketplacePurgeCandidates(
+    _now: Date,
+    limit: number,
+  ): Promise<PlatformMediaCleanupCandidate[]> {
+    return this.resources
+      .filter(
+        (resource) =>
+          (resource.purpose ?? "").startsWith("marketplace.") && !resource.retiredPurgeCompletedAt,
       )
       .slice(0, limit);
   }
@@ -689,6 +903,15 @@ class MemoryPlatformMediaCleanupStore implements PlatformMediaCleanupStore {
 
     if (mutation.action === "abandoned-staging-upload") {
       resource.lifecycleStatus = "expired";
+    } else if (mutation.action === "purge-retired-marketplace-media") {
+      resource.retiredPurgeCompletedAt = context.now.toISOString();
+      if (resource.storageKey) {
+        this.storageDeletes.push({
+          kind: "object",
+          bucket: resource.bucket ?? null,
+          key: resource.storageKey,
+        });
+      }
     } else if (mutation.action === "cleanup-rollback-window-object") {
       resource.rollbackCleanupStatus = "completed";
       if (resource.rollbackStorageKey) {
@@ -823,5 +1046,7 @@ function deadlineOrWindowForFixture(
       return candidate.retainedUntil!;
     case "rollbackWindowCleanup":
       return candidate.rollbackWindowEndsAt!;
+    case "retiredMarketplacePurge":
+      return "retired-marketplace";
   }
 }

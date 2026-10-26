@@ -67,6 +67,67 @@ describe("booking email delivery", () => {
     },
   );
 
+  // VAY-2348: a reminder for a booking that was paid or released meanwhile is not sent and not retried.
+  it.each([
+    ["before the bank details are read", false, false],
+    ["while it is being sent", true, false],
+  ])("cancels a payment reminder no longer due %s", async (_when, dueFirst, dueWhenSending) => {
+    const queries: string[] = [];
+    const pool = {
+      query: vi.fn(async (text: string) => {
+        queries.push(text);
+        if (text.includes("RETURNING job.id::text AS id"))
+          return {
+            rows: [
+              {
+                id: "22222222-2222-4222-8222-222222222222",
+                jobKey: "email.booking-payment-reminder:booking-1:v1",
+                attemptsCount: 1,
+                workerId: "worker-1",
+                payload: {
+                  to: "guest@example.test",
+                  subject: "Reminder: your bank transfer is due - B-1",
+                  text: "We haven't received your bank transfer yet.",
+                  notificationType: "payment_reminder",
+                  requiresBankTransferInstructions: true,
+                  paymentDeadlineAt: "2026-10-27T13:30:00.000Z",
+                },
+              },
+            ],
+          };
+        if (text.includes("FOR SHARE OF booking"))
+          return { rows: [{ unverified: false, due: dueWhenSending }] };
+        if (text.includes("AS due")) return { rows: [{ due: dueFirst }] };
+        if (text.includes("RETURNING id::text AS id")) return { rows: [{ id: "audit-1" }] };
+        return { rows: [] };
+      }),
+    };
+    const send = vi.fn(async () => undefined);
+    const email = vi.fn(async () => "IBAN: DE89370400440532013000");
+    await expect(
+      runBookingEmailDeliveryJobs(
+        "postgres://unused",
+        { send },
+        {
+          pool: {
+            ...pool,
+            connect: async () => ({ query: pool.query, release: vi.fn() }),
+          } as never,
+          limit: 1,
+          workerId: "worker-1",
+          bankTransfers: { email } as never,
+        },
+      ),
+    ).resolves.toEqual({ processed: 1, failed: 0 });
+    expect(send).not.toHaveBeenCalled();
+    expect(email).toHaveBeenCalledTimes(dueFirst ? 1 : 0);
+    expect(queries.some((sql) => sql.includes("SET status = 'canceled'"))).toBe(true);
+    expect(queries.some((sql) => sql.includes("'booking.notification.delivery_skipped'"))).toBe(
+      true,
+    );
+    expect(queries.some((sql) => sql.includes("status = 'succeeded'"))).toBe(false);
+  });
+
   it("retries or dead-letters provider failures", async () => {
     const queries: string[] = [];
     const queryValues: (readonly unknown[])[] = [];

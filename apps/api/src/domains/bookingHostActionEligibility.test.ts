@@ -30,6 +30,23 @@ describe("host Booking action eligibility", () => {
     ).toBeNull();
     expect(hostBookingActionConflict("reject", booking)?.code).toBe("invalid_lifecycle");
   });
+  it("declines an unpaid booking-page PayPal booking but never changes a paid one (VAY-2139)", () => {
+    const legacy = { ...booking, lifecycleStatus: "pending_payment", paymentMethod: "paypal" };
+    // Legacy-checkout PayPal bookings keep their rules.
+    expect(hostBookingActionConflict("reject", legacy)?.code).toBe("invalid_lifecycle");
+    const pending = { ...legacy, pricingQuoteBooking: true };
+    expect(hostBookingActionConflict("reject", pending)).toBeNull();
+    expect(hostBookingActionConflict("reject", { ...pending, paymentStatus: "paid" })?.code).toBe(
+      "payment_adjustment_required",
+    );
+    expect(
+      hostBookingActionConflict("cancel", {
+        ...booking,
+        paymentMethod: "paypal",
+        paymentStatus: "paid",
+      })?.code,
+    ).toBe("payment_adjustment_required");
+  });
   it.each(["draft", "pending_payment", "declined", "canceled", "completed", "expired"])(
     "cannot cancel or edit a %s booking",
     (lifecycleStatus) => {
@@ -55,6 +72,30 @@ describe("host Booking action eligibility", () => {
       ).toBe("payment_adjustment_required");
     },
   );
+  it("cancels a paid pricing-v2 card stay only while card refunds can run (VAY-2205)", () => {
+    const paid = {
+      ...booking,
+      paymentStatus: "paid",
+      paymentMethod: "card",
+      pricingQuoteBooking: true,
+      cardRefunds: true,
+    };
+    expect(hostBookingActionConflict("cancel", paid)).toBeNull();
+    // A card deposit, the rest due at the property, refunds the same way.
+    expect(
+      hostBookingActionConflict("cancel", { ...paid, paymentStatus: "partially_paid" }),
+    ).toBeNull();
+    for (const changed of [
+      { cardRefunds: false },
+      { pricingQuoteBooking: false },
+      { paymentStatus: "authorized" },
+      { paymentMethod: "bank_transfer" },
+    ])
+      expect(hostBookingActionConflict("cancel", { ...paid, ...changed })?.code).toBe(
+        "payment_adjustment_required",
+      );
+    expect(hostBookingActionConflict("edit_dates", paid)?.code).toBe("payment_adjustment_required");
+  });
   it("permits Finance to void an authorized card request before rejection", () => {
     expect(
       hostBookingActionConflict("reject", {

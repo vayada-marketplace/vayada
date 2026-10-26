@@ -2,7 +2,6 @@ import { loadAirbnbImportConfig } from "./airbnbImportRuntime.js";
 import { CHANNEX_RESERVED_TEST_IDS } from "./domains/channexOwnershipGate.js";
 import { loadServerConfig } from "@vayada/backend-config";
 import { createHmac } from "node:crypto";
-import pg from "pg";
 import { z } from "zod";
 
 import {
@@ -17,12 +16,7 @@ export type ApiAuthConfig = {
   workosAudience: string;
 };
 
-export type ApiAuthSurface =
-  | "platform-admin"
-  | "booking-admin"
-  | "pms-web"
-  | "affiliate-dashboard"
-  | "marketplace-web";
+export type ApiAuthSurface = "platform-admin" | "booking-admin" | "pms-web";
 
 export type ApiAuthSessionConfig = {
   workosClientId: string;
@@ -37,18 +31,13 @@ export type ApiAuthSessionConfig = {
   authFirstPartySurfaces: ApiAuthSurface[];
   authCookieSecure: boolean;
   authCookieDomain?: string;
-  authLegacyMarketplaceJwtSecret?: string;
   authBookingAdminLogoutUrl?: string;
   authLegacyBookingJwtSecret?: string;
   authPmsWebLogoutUrl?: string;
   authLegacyPmsJwtSecret?: string;
-  authAffiliateDashboardLogoutUrl?: string;
-  authLegacyAffiliatePmsJwtSecret?: string;
-  authMarketplaceWebLogoutUrl?: string;
 };
 
 export type PublicHotelProfileSource = "target" | "active_publication";
-export type MarketplaceAdminSource = "disabled" | "target";
 export type PmsOperationsSource = "disabled" | "target";
 export type FinanceSource = "legacy" | "target";
 export type FinanceFolioRecipientKmsConfig = {
@@ -58,10 +47,6 @@ export type FinanceFolioRecipientKmsConfig = {
   region: string;
 };
 export type BookingWebEventSink = "disabled" | "target";
-export type AffiliateCaptureConfig = {
-  databaseUrl: string;
-  internalToken: string;
-};
 export type ProviderWebhookIntakeMode = "observe_only" | "mutating" | "ack_only_with_receipt";
 export type ApiRuntime = "legacy" | "next";
 
@@ -157,11 +142,6 @@ export type BookingEmailDeliveryConfig = {
   from: string;
 };
 
-export type MarketplaceCommunicationUnsubscribeConfig = {
-  currentKeyVersion: string;
-  keys: Readonly<Record<string, string>>;
-};
-
 export function stripeSubscriptionRuntimeEnabled(
   config: Pick<ApiConfig, "financeSource" | "providerWebhooks" | "stripeSubscriptions">,
 ): boolean {
@@ -173,40 +153,6 @@ export function stripeSubscriptionRuntimeEnabled(
   );
 }
 
-export type CreatorPlatformConnectionsConfig = {
-  callbackBaseUrl: string;
-  webReturnUrl: string;
-  sync: {
-    enabled: boolean;
-    pollIntervalMs: number;
-    recurringIntervalMs: number;
-    batchSize: number;
-    maxAttempts: number;
-    minimumSpacingMs: { meta: number; tiktok: number; google: number };
-  };
-  credentialVault:
-    | { provider: "aws-secrets-manager"; secretPrefix: string; region?: string }
-    | { provider: "memory"; secretPrefix: string };
-  instagram?: {
-    clientId: string;
-    clientSecret: string;
-    apiVersion: string;
-  };
-  facebook?: {
-    clientId: string;
-    clientSecret: string;
-    apiVersion: string;
-  };
-  tiktok?: {
-    clientKey: string;
-    clientSecret: string;
-  };
-  youtube?: {
-    clientId: string;
-    clientSecret: string;
-  };
-};
-
 export type ApiConfig = {
   host: string;
   port: number;
@@ -216,10 +162,10 @@ export type ApiConfig = {
   authSession?: ApiAuthSessionConfig;
   targetDatabaseUrl?: string;
   publicHotelProfileSource: PublicHotelProfileSource;
-  marketplaceAdminSource: MarketplaceAdminSource;
-  marketplaceAdminLegacySuperadminFallbackEnabled: boolean;
   pmsOperationsSource: PmsOperationsSource;
   pmsRoomClosureEnabled: boolean;
+  /** Properties whose room type Delete also does the cleanup (VAY-2132); [] is off, "all" every property. */
+  pmsRoomTypeDeleteCleanupPropertyIds: readonly string[] | "all";
   pmsInboxSendingEnabled: boolean;
   financeSource: FinanceSource;
   financeExpenseWorker?: { databaseUrl: string; propertyId: string };
@@ -231,11 +177,10 @@ export type ApiConfig = {
   };
   financeFolioRecipientKms?: FinanceFolioRecipientKmsConfig;
   financeBankTransferKms?: { currentKeyArn: string; allowedKeyArns: string[]; region: string };
-  marketplaceDiscoveryAllowedOrigins: string[];
-  affiliatePublicSource?: "target";
-  affiliateCapture?: AffiliateCaptureConfig;
-  affiliatePublicRedirectEnabled: boolean;
-  affiliateBookingBindingEnabled: boolean;
+  /** Browser origins allowed on the identity privacy routes. */
+  identityPrivacyAllowedOrigins: string[];
+  /** Browser origins allowed to post the public contact form (VAY-2286: vayada.com). */
+  contactIntakeAllowedOrigins: string[];
   pmsOperationsAllowedOrigins: string[];
   financialsActivationPropertyIds: string[];
   bookingWebEventSink: BookingWebEventSink;
@@ -245,13 +190,32 @@ export type ApiConfig = {
   /** Card quotes in public acceptance (Stripe). Off until confirmation, webhook and expiry
    * handling for these bookings are live. */
   replacementPricingCardAcceptanceEnabled: boolean;
+  /** Request-mode pay-at-property quotes in public acceptance: the hotel confirms each booking.
+   * Off until host accept, decline and expiry handle these bookings. */
+  replacementPricingRequestAcceptanceEnabled: boolean;
+  /** Deposit quotes in public acceptance: a share by card when booking, the rest at the property
+   * (VAY-2205). Needs card acceptance too. Off until a deposit booking is checked on the test hotel. */
+  replacementPricingDepositAcceptanceEnabled: boolean;
+  /** Bank-transfer and PayPal quotes in public acceptance: the guest pays the hotel directly and
+   * the hotel confirms receipt. Off until acceptance, payment confirmation, decline and expiry
+   * handle these bookings (VAY-2139). */
+  replacementPricingManualPaymentAcceptanceEnabled: boolean;
+  /** VAY-2247: mounts GET/POST /api/hotel-setup/properties/:id/first-run for the new setup. Off by default. */
+  hotelFirstRunEnabled: boolean;
   bookingHostBase?: string;
   platformMediaServing?: PlatformMediaServingConfig;
   platformMediaCleanupEnabled: boolean;
   platformMediaCleanupIntervalMs: number;
+  /** VAY-2272: the one-time purge of retired Marketplace and creator media runs with the cleanup
+   * while set, clearing the images.vayada.com distribution for deleted public files. Off by default. */
+  platformMediaRetiredPurge?: { cdnDistributionId: string };
   propertySetupDraftRetentionEnabled: boolean;
   propertySetupDraftRetentionIntervalMs: number;
   propertySetupDraftRetentionBatchSize: number;
+  /** Deletes booking-page analytics older than 13 months (VAY-2212); on by default. */
+  bookingWebEventRetentionEnabled: boolean;
+  bookingWebEventRetentionIntervalMs: number;
+  bookingWebEventRetentionBatchSize: number;
   pmsInventoryPublicOfferRetryEnabled: boolean;
   pmsInventoryPublicOfferRetryIntervalMs: number;
   /** Kill switch for the hourly calendar auto-open producer (VAY-2066); on by default. */
@@ -262,14 +226,18 @@ export type ApiConfig = {
   pricingPublicationFreshnessIntervalMs: number;
   /** Recipient of the at-most-daily stale-pricing email; unset sends none (log line only). */
   pricingPublicationFreshnessAlertEmail?: string;
-  creatorPlatformConnections?: CreatorPlatformConnectionsConfig;
+  /** Kill switch for re-publishing prices after a payment change (VAY-2304): right after each
+   * payment write, and a sweep a minute after start and then every interval. On by default. */
+  pricingPaymentRepublishEnabled: boolean;
+  pricingPaymentRepublishIntervalMs: number;
+  /** VAY-2286: vayada.com contact-form messages are emailed here (Reply-To: the visitor). */
+  contactNotificationRecipient?: string;
   providerWebhooks: ProviderWebhookConfig;
   airbnbImport?: ReturnType<typeof loadAirbnbImportConfig>;
   airbnbAlterations?: { propertyIds: readonly string[] };
   channexManagement: ChannexManagementConfig;
   stripeSubscriptions: StripeSubscriptionConfig;
   bookingEmailDelivery?: BookingEmailDeliveryConfig;
-  marketplaceCommunicationUnsubscribe?: MarketplaceCommunicationUnsubscribeConfig;
   xenditSecretKey?: string;
 };
 
@@ -285,6 +253,27 @@ type NextRuntimeSourceRequirement = {
   allowedValues?: readonly string[];
   allowExplicitDisabled?: boolean;
 };
+
+function loadPlatformMediaRetiredPurgeConfig(
+  env: NodeJS.ProcessEnv,
+  input: { platformMediaServing: boolean; targetDatabaseWithAuth: boolean },
+): ApiConfig["platformMediaRetiredPurge"] {
+  if (!readBooleanEnv(env, "PLATFORM_MEDIA_RETIRED_PURGE_ENABLED")) return undefined;
+  const cdnDistributionId = readOptionalEnv(env, "PLATFORM_MEDIA_CDN_DISTRIBUTION_ID");
+  // The purge runs in the media runtime, which needs the target database and auth. Tasks
+  // without background workers share the service environment and simply skip it.
+  if (!cdnDistributionId || !input.platformMediaServing || !input.targetDatabaseWithAuth) {
+    throw new Error(
+      "PLATFORM_MEDIA_RETIRED_PURGE_ENABLED requires PLATFORM_MEDIA_CDN_DISTRIBUTION_ID, complete PLATFORM_MEDIA_* config, TARGET_DATABASE_URL and complete auth config",
+    );
+  }
+  if (!readBooleanEnv(env, "PLATFORM_MEDIA_CLEANUP_ENABLED", true)) {
+    throw new Error(
+      "PLATFORM_MEDIA_RETIRED_PURGE_ENABLED runs with the media cleanup; PLATFORM_MEDIA_CLEANUP_ENABLED must stay on",
+    );
+  }
+  return { cdnDistributionId };
+}
 
 function readOptionalEnv(env: NodeJS.ProcessEnv, key: string): string | undefined {
   const value = env[key]?.trim();
@@ -410,38 +399,6 @@ function readPropertyIdAllowlistEnv(env: NodeJS.ProcessEnv, key: string): string
   return ids;
 }
 
-function loadMarketplaceCommunicationUnsubscribeConfig(
-  env: NodeJS.ProcessEnv,
-): MarketplaceCommunicationUnsubscribeConfig | undefined {
-  const currentKeyVersion = readOptionalEnv(
-    env,
-    "MARKETPLACE_COMMUNICATION_UNSUBSCRIBE_CURRENT_KEY_VERSION",
-  );
-  const encodedKeys = readOptionalEnv(env, "MARKETPLACE_COMMUNICATION_UNSUBSCRIBE_KEYS_JSON");
-  if (!currentKeyVersion && !encodedKeys) return undefined;
-  if (!currentKeyVersion || !encodedKeys) {
-    throw new Error("Incomplete Marketplace communication unsubscribe signing config");
-  }
-  let value: unknown;
-  try {
-    value = JSON.parse(encodedKeys);
-  } catch {
-    throw new Error("Marketplace communication unsubscribe signing keys must be valid JSON");
-  }
-  if (
-    !value ||
-    typeof value !== "object" ||
-    Array.isArray(value) ||
-    Object.getPrototypeOf(value) !== Object.prototype ||
-    Object.keys(value).length === 0 ||
-    Object.values(value).some((key) => typeof key !== "string") ||
-    !Object.hasOwn(value, currentKeyVersion)
-  ) {
-    throw new Error("Marketplace communication unsubscribe signing keys are invalid");
-  }
-  return { currentKeyVersion, keys: value as Record<string, string> };
-}
-
 const KMS_KEY_ARN =
   /^arn:(aws(?:-[a-z]+)?):kms:([a-z0-9-]+):(\d{12}):key\/([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})$/;
 
@@ -515,8 +472,6 @@ const AUTH_SURFACE_ORIGIN_KEYS = {
   "platform-admin": "AUTH_PLATFORM_ADMIN_ORIGIN",
   "booking-admin": "AUTH_BOOKING_ADMIN_ORIGIN",
   "pms-web": "AUTH_PMS_WEB_ORIGIN",
-  "affiliate-dashboard": "AUTH_AFFILIATE_DASHBOARD_ORIGIN",
-  "marketplace-web": "AUTH_MARKETPLACE_WEB_ORIGIN",
 } as const satisfies Record<ApiAuthSurface, string>;
 
 const AUTH_SURFACES = Object.keys(AUTH_SURFACE_ORIGIN_KEYS) as ApiAuthSurface[];
@@ -589,11 +544,11 @@ function readCalendarAutoOpenSchedulerIntervalEnv(env: NodeJS.ProcessEnv): numbe
 }
 
 // One recipient; the email goes through the booking email provider and sender.
-function readPricingPublicationFreshnessAlertEmail(
+function readSingleRecipientEnv(
   env: NodeJS.ProcessEnv,
+  key: "PRICING_PUBLICATION_FRESHNESS_ALERT_EMAIL" | "CONTACT_NOTIFICATION_RECIPIENT",
   emailConfigured: boolean,
 ): string | undefined {
-  const key = "PRICING_PUBLICATION_FRESHNESS_ALERT_EMAIL";
   const value = readOptionalEnv(env, key);
   if (!value) return undefined;
   if (!/^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+$/.test(value)) {
@@ -611,6 +566,15 @@ function readPricingPublicationFreshnessIntervalEnv(env: NodeJS.ProcessEnv): num
   return value;
 }
 
+// Every five minutes by default, never more than once a minute: each run locks every published
+// property in turn, briefly.
+function readPricingPaymentRepublishIntervalEnv(env: NodeJS.ProcessEnv): number {
+  const key = "PRICING_PAYMENT_REPUBLISH_INTERVAL_MS";
+  const value = readTimerIntervalEnv(env, key, 5 * 60 * 1000);
+  if (value < 60_000) throw new Error(`${key} must be at least 60000`);
+  return value;
+}
+
 function readSourceEnv<T extends string>(
   env: NodeJS.ProcessEnv,
   key: string,
@@ -620,52 +584,6 @@ function readSourceEnv<T extends string>(
   const value = readOptionalEnv(env, key) ?? defaultValue;
   if ((allowed as readonly string[]).includes(value)) return value as T;
   throw new Error(`${key} must be one of: ${allowed.join(", ")}`);
-}
-
-function loadAffiliatePublicSource(env: NodeJS.ProcessEnv): "target" | undefined {
-  const value = readOptionalEnv(env, "AFFILIATE_PUBLIC_SOURCE");
-  if (!value) {
-    return undefined;
-  }
-  if (value !== "target") {
-    throw new Error("Unsupported AFFILIATE_PUBLIC_SOURCE; expected target");
-  }
-  if (!readOptionalEnv(env, "TARGET_DATABASE_URL")) {
-    throw new Error("AFFILIATE_PUBLIC_SOURCE=target requires TARGET_DATABASE_URL");
-  }
-  return "target";
-}
-
-function loadAffiliateCaptureConfig(
-  env: NodeJS.ProcessEnv,
-  otherDatabaseUrls: readonly (string | undefined)[],
-): AffiliateCaptureConfig | undefined {
-  const enabled = readBooleanEnv(env, "AFFILIATE_CAPTURE_ENABLED", false);
-  if (!enabled) return undefined;
-  const databaseUrl = readOptionalPgConnectionEnv(env, "AFFILIATE_CAPTURE_DATABASE_URL");
-  const internalToken = readOptionalEnv(env, "BOOKING_WEB_AFFILIATE_ARRIVAL_INTERNAL_TOKEN");
-  if (!databaseUrl || !internalToken) {
-    throw new Error(
-      "AFFILIATE_CAPTURE_ENABLED requires AFFILIATE_CAPTURE_DATABASE_URL and BOOKING_WEB_AFFILIATE_ARRIVAL_INTERNAL_TOKEN",
-    );
-  }
-  if (Buffer.byteLength(internalToken, "utf8") < 32) {
-    throw new Error("BOOKING_WEB_AFFILIATE_ARRIVAL_INTERNAL_TOKEN must be at least 32 bytes");
-  }
-  const identity = pgConnectionIdentity(databaseUrl);
-  if (!identity || identity.username !== "vayada_next_affiliate_capture") {
-    throw new Error(
-      "AFFILIATE_CAPTURE_DATABASE_URL must use the exact vayada_next_affiliate_capture PostgreSQL login",
-    );
-  }
-  if (
-    otherDatabaseUrls.some(
-      (other) => other && new pg.Client({ connectionString: other }).user === identity.username,
-    )
-  ) {
-    throw new Error("AFFILIATE_CAPTURE_DATABASE_URL must use a distinct PostgreSQL user");
-  }
-  return { databaseUrl, internalToken };
 }
 
 function loadAuthSessionConfig(env: NodeJS.ProcessEnv): ApiAuthSessionConfig | undefined {
@@ -740,14 +658,10 @@ function loadAuthSessionConfig(env: NodeJS.ProcessEnv): ApiAuthSessionConfig | u
     authFirstPartySurfaces,
     authCookieSecure,
     authCookieDomain: readOptionalEnv(env, "AUTH_COOKIE_DOMAIN"),
-    authLegacyMarketplaceJwtSecret: readOptionalEnv(env, "AUTH_LEGACY_MARKETPLACE_JWT_SECRET"),
     authBookingAdminLogoutUrl: readOptionalEnv(env, "AUTH_BOOKING_ADMIN_LOGOUT_URL"),
     authLegacyBookingJwtSecret: readOptionalEnv(env, "AUTH_LEGACY_BOOKING_JWT_SECRET"),
     authPmsWebLogoutUrl: readOptionalEnv(env, "AUTH_PMS_WEB_LOGOUT_URL"),
     authLegacyPmsJwtSecret: readOptionalEnv(env, "AUTH_LEGACY_PMS_JWT_SECRET"),
-    authAffiliateDashboardLogoutUrl: readOptionalEnv(env, "AUTH_AFFILIATE_DASHBOARD_LOGOUT_URL"),
-    authLegacyAffiliatePmsJwtSecret: readOptionalEnv(env, "AUTH_LEGACY_AFFILIATE_PMS_JWT_SECRET"),
-    authMarketplaceWebLogoutUrl: readOptionalEnv(env, "AUTH_MARKETPLACE_WEB_LOGOUT_URL"),
   };
 }
 
@@ -1019,86 +933,6 @@ function loadStripeSubscriptionConfig(env: NodeJS.ProcessEnv): StripeSubscriptio
   };
 }
 
-function loadCreatorPlatformConnectionsConfig(
-  env: NodeJS.ProcessEnv,
-): CreatorPlatformConnectionsConfig | undefined {
-  const instagram = readCompleteConfigGroup(env, "Instagram creator platform", {
-    clientId: "INSTAGRAM_CLIENT_ID",
-    clientSecret: "INSTAGRAM_CLIENT_SECRET",
-    apiVersion: "INSTAGRAM_API_VERSION",
-  });
-  const facebook = readCompleteConfigGroup(env, "Facebook creator platform", {
-    clientId: "FACEBOOK_CLIENT_ID",
-    clientSecret: "FACEBOOK_CLIENT_SECRET",
-    apiVersion: "FACEBOOK_GRAPH_API_VERSION",
-  });
-  const tiktok = readCompleteConfigGroup(env, "TikTok creator platform", {
-    clientKey: "TIKTOK_CLIENT_KEY",
-    clientSecret: "TIKTOK_CLIENT_SECRET",
-  });
-  const youtube = readCompleteConfigGroup(env, "YouTube creator platform", {
-    clientId: "GOOGLE_YOUTUBE_CLIENT_ID",
-    clientSecret: "GOOGLE_YOUTUBE_CLIENT_SECRET",
-  });
-
-  if (!instagram && !facebook && !tiktok && !youtube) return undefined;
-
-  const callbackBaseUrl = readOptionalEnv(env, "CREATOR_PLATFORM_CALLBACK_BASE_URL");
-  const webReturnUrl = readOptionalEnv(env, "CREATOR_PLATFORM_WEB_RETURN_URL");
-  const secretPrefix = readOptionalEnv(env, "CREATOR_PLATFORM_SECRET_PREFIX");
-  const vaultProvider =
-    readOptionalEnv(env, "CREATOR_PLATFORM_CREDENTIAL_VAULT") ?? "aws-secrets-manager";
-  const missing = [
-    !callbackBaseUrl && "CREATOR_PLATFORM_CALLBACK_BASE_URL",
-    !webReturnUrl && "CREATOR_PLATFORM_WEB_RETURN_URL",
-    !secretPrefix && "CREATOR_PLATFORM_SECRET_PREFIX",
-  ].filter(Boolean);
-  if (missing.length > 0) {
-    throw new Error(`Incomplete creator platform connection config; missing ${missing.join(", ")}`);
-  }
-  assertOAuthUrl(callbackBaseUrl!, "CREATOR_PLATFORM_CALLBACK_BASE_URL", env);
-  assertOAuthUrl(webReturnUrl!, "CREATOR_PLATFORM_WEB_RETURN_URL", env);
-  if (vaultProvider !== "aws-secrets-manager" && vaultProvider !== "memory") {
-    throw new Error("CREATOR_PLATFORM_CREDENTIAL_VAULT must be aws-secrets-manager or memory");
-  }
-  if (vaultProvider === "memory" && env.NODE_ENV === "production") {
-    throw new Error("CREATOR_PLATFORM_CREDENTIAL_VAULT=memory is not allowed in production");
-  }
-
-  return {
-    callbackBaseUrl: callbackBaseUrl!.replace(/\/$/, ""),
-    webReturnUrl: webReturnUrl!,
-    sync: {
-      enabled: readBooleanEnv(env, "CREATOR_PLATFORM_SYNC_ENABLED", true),
-      pollIntervalMs: readTimerIntervalEnv(env, "CREATOR_PLATFORM_SYNC_POLL_INTERVAL_MS", 60_000),
-      recurringIntervalMs: readPositiveIntegerEnv(
-        env,
-        "CREATOR_PLATFORM_SYNC_INTERVAL_MS",
-        24 * 60 * 60_000,
-      ),
-      batchSize: readPositiveIntegerEnv(env, "CREATOR_PLATFORM_SYNC_BATCH_SIZE", 10),
-      maxAttempts: readPositiveIntegerEnv(env, "CREATOR_PLATFORM_SYNC_MAX_ATTEMPTS", 5),
-      minimumSpacingMs: {
-        meta: readTimerIntervalEnv(env, "CREATOR_PLATFORM_META_MINIMUM_SPACING_MS", 1_000),
-        tiktok: readTimerIntervalEnv(env, "CREATOR_PLATFORM_TIKTOK_MINIMUM_SPACING_MS", 2_000),
-        google: readTimerIntervalEnv(env, "CREATOR_PLATFORM_GOOGLE_MINIMUM_SPACING_MS", 1_000),
-      },
-    },
-    credentialVault:
-      vaultProvider === "memory"
-        ? { provider: "memory", secretPrefix: secretPrefix! }
-        : {
-            provider: "aws-secrets-manager",
-            secretPrefix: secretPrefix!,
-            region: readOptionalEnv(env, "AWS_REGION"),
-          },
-    ...(instagram ? { instagram } : {}),
-    ...(facebook ? { facebook } : {}),
-    ...(tiktok ? { tiktok } : {}),
-    ...(youtube ? { youtube } : {}),
-  };
-}
-
 function loadBookingEmailDeliveryConfig(
   env: NodeJS.ProcessEnv,
 ): BookingEmailDeliveryConfig | undefined {
@@ -1128,20 +962,6 @@ function readCompleteConfigGroup<T extends Record<string, string>>(
   };
 }
 
-function assertOAuthUrl(value: string, key: string, env: NodeJS.ProcessEnv): void {
-  let url: URL;
-  try {
-    url = new URL(value);
-  } catch {
-    throw new Error(`${key} must be an absolute URL`);
-  }
-  const localHttp =
-    url.protocol === "http:" && ["localhost", "127.0.0.1", "::1"].includes(url.hostname);
-  if (url.protocol !== "https:" && !(env.NODE_ENV !== "production" && localHttp)) {
-    throw new Error(`${key} must use HTTPS`);
-  }
-}
-
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
   assertRemovedLegacyPythonIntegrationEnv(env);
 
@@ -1156,12 +976,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     "PUBLIC_HOTEL_PROFILE_SOURCE",
     ["target", "active_publication"],
     "target",
-  );
-  const marketplaceAdminSource = readSourceEnv(
-    env,
-    "MARKETPLACE_ADMIN_SOURCE",
-    ["disabled", "target"],
-    "disabled",
   );
   const pmsOperationsSource = readSourceEnv(
     env,
@@ -1181,27 +995,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     "disabled",
   );
   const auth = loadAuthConfig(env);
-  const affiliateCapture = loadAffiliateCaptureConfig(env, [targetDatabaseUrl, auth?.databaseUrl]);
-  const affiliatePublicRedirectEnabled = readBooleanEnv(
-    env,
-    "AFFILIATE_PUBLIC_REDIRECT_ENABLED",
-    false,
-  );
-  if (affiliatePublicRedirectEnabled && !affiliateCapture) {
-    throw new Error("AFFILIATE_PUBLIC_REDIRECT_ENABLED requires affiliate capture");
-  }
-  const affiliateBookingBindingEnabled = readBooleanEnv(
-    env,
-    "AFFILIATE_BOOKING_BINDING_ENABLED",
-    false,
-  );
-  if (affiliateBookingBindingEnabled && (!affiliateCapture || !targetDatabaseUrl)) {
-    throw new Error(
-      "AFFILIATE_BOOKING_BINDING_ENABLED requires affiliate capture and TARGET_DATABASE_URL",
-    );
-  }
   const authSession = loadAuthSessionConfig(env);
-  const creatorPlatformConnections = loadCreatorPlatformConnectionsConfig(env);
   const bookingEmailDelivery = loadBookingEmailDeliveryConfig(env);
   const platformMediaServing = loadPlatformMediaServingConfig(env, {
     incomplete: targetDatabaseUrl && auth ? "error" : "disabled",
@@ -1212,12 +1006,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     pmsOperationsSource,
     financeSource,
   });
-  if (marketplaceAdminSource === "target" && !targetDatabaseUrl) {
-    throw new Error("TARGET_DATABASE_URL is required when MARKETPLACE_ADMIN_SOURCE=target");
-  }
-  if (marketplaceAdminSource === "target" && !auth) {
-    throw new Error("MARKETPLACE_ADMIN_SOURCE=target requires complete auth config");
-  }
   if (pmsOperationsSource === "target" && !targetDatabaseUrl) {
     throw new Error("TARGET_DATABASE_URL is required when PMS_OPERATIONS_SOURCE=target");
   }
@@ -1229,14 +1017,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
   }
   if (targetDatabaseUrl && auth && !platformMediaServing) {
     throw new Error(
-      "Target Marketplace with complete auth requires complete PLATFORM_MEDIA_* config because creator profile photos are required",
+      "Target database with complete auth requires complete PLATFORM_MEDIA_* config because hotel profile photos are required",
     );
   }
-  if (creatorPlatformConnections && (!targetDatabaseUrl || !auth)) {
-    throw new Error(
-      "Creator platform connections require TARGET_DATABASE_URL and complete auth config",
-    );
-  }
+  const platformMediaRetiredPurge = loadPlatformMediaRetiredPurgeConfig(env, {
+    platformMediaServing: Boolean(platformMediaServing),
+    targetDatabaseWithAuth: Boolean(targetDatabaseUrl && auth),
+  });
   if (env.NODE_ENV === "production" && !bookingEmailDelivery) {
     throw new Error(
       "Target booking checkout requires RESEND_API_KEY and BOOKING_EMAIL_FROM in production",
@@ -1424,31 +1211,33 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     authSession,
     targetDatabaseUrl,
     publicHotelProfileSource,
-    marketplaceAdminSource,
-    marketplaceAdminLegacySuperadminFallbackEnabled: readBooleanEnv(
-      env,
-      "MARKETPLACE_ADMIN_LEGACY_SUPERADMIN_FALLBACK_ENABLED",
-    ),
     pmsOperationsSource,
     financeSource,
     financeExpenseWorker,
     financeExportWorker,
     financeFolioRecipientKms,
     pmsRoomClosureEnabled: readBooleanEnv(env, "PMS_ROOM_CLOSURE_ENABLED", false),
+    pmsRoomTypeDeleteCleanupPropertyIds:
+      readOptionalEnv(env, "PMS_ROOM_TYPE_DELETE_CLEANUP_PROPERTY_IDS") === "*"
+        ? "all"
+        : readPropertyIdAllowlistEnv(env, "PMS_ROOM_TYPE_DELETE_CLEANUP_PROPERTY_IDS"),
     pmsInboxSendingEnabled: readBooleanEnv(env, "PMS_INBOX_SENDING_ENABLED", true),
     financeBankTransferKms: loadBankTransferKms(env),
-    marketplaceDiscoveryAllowedOrigins: readOptionalCsvEnv(
+    // VAY-2270: the list has its own name; the old Terraform variable is still read until the
+    // platform renames it.
+    identityPrivacyAllowedOrigins: readOptionalCsvEnv(
       env,
-      "MARKETPLACE_DISCOVERY_ALLOWED_ORIGINS",
+      "IDENTITY_PRIVACY_ALLOWED_ORIGINS",
+      readOptionalCsvEnv(env, "MARKETPLACE_DISCOVERY_ALLOWED_ORIGINS"),
     ),
-    affiliatePublicSource: loadAffiliatePublicSource(env),
-    affiliateCapture,
-    affiliatePublicRedirectEnabled,
-    affiliateBookingBindingEnabled,
+    // VAY-2286: its own list, so the landing origin stays out of the identity and app CORS lists.
+    contactIntakeAllowedOrigins: readOptionalCsvEnv(env, "CONTACT_INTAKE_ALLOWED_ORIGINS", [
+      "https://landing.localhost",
+      "http://localhost:3006",
+    ]),
     pmsOperationsAllowedOrigins: readOptionalCsvEnv(env, "PMS_OPERATIONS_ALLOWED_ORIGINS", [
       "https://pms.localhost",
       "https://admin.booking.localhost",
-      "https://marketplace.localhost",
     ]),
     financialsActivationPropertyIds: readPropertyIdAllowlistEnv(
       env,
@@ -1464,6 +1253,19 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       env,
       "REPLACEMENT_PRICING_CARD_ACCEPTANCE_ENABLED",
     ),
+    replacementPricingRequestAcceptanceEnabled: readBooleanEnv(
+      env,
+      "REPLACEMENT_PRICING_REQUEST_ACCEPTANCE_ENABLED",
+    ),
+    replacementPricingDepositAcceptanceEnabled: readBooleanEnv(
+      env,
+      "REPLACEMENT_PRICING_DEPOSIT_ACCEPTANCE_ENABLED",
+    ),
+    replacementPricingManualPaymentAcceptanceEnabled: readBooleanEnv(
+      env,
+      "REPLACEMENT_PRICING_MANUAL_PAYMENT_ACCEPTANCE_ENABLED",
+    ),
+    hotelFirstRunEnabled: readBooleanEnv(env, "HOTEL_FIRST_RUN_ENABLED"),
     bookingHostBase: readOptionalEnv(env, "BOOKING_HOST_BASE"),
     platformMediaServing,
     platformMediaCleanupEnabled: readBooleanEnv(env, "PLATFORM_MEDIA_CLEANUP_ENABLED", true),
@@ -1472,6 +1274,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       "PLATFORM_MEDIA_CLEANUP_INTERVAL_MS",
       15 * 60 * 1000,
     ),
+    platformMediaRetiredPurge,
     propertySetupDraftRetentionEnabled: readBooleanEnv(
       env,
       "PROPERTY_SETUP_DRAFT_RETENTION_ENABLED",
@@ -1486,6 +1289,21 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       env,
       "PROPERTY_SETUP_DRAFT_RETENTION_BATCH_SIZE",
       100,
+    ),
+    bookingWebEventRetentionEnabled: readBooleanEnv(
+      env,
+      "BOOKING_WEB_EVENT_RETENTION_ENABLED",
+      true,
+    ),
+    bookingWebEventRetentionIntervalMs: readTimerIntervalEnv(
+      env,
+      "BOOKING_WEB_EVENT_RETENTION_INTERVAL_MS",
+      24 * 60 * 60 * 1000,
+    ),
+    bookingWebEventRetentionBatchSize: readPositiveIntegerEnv(
+      env,
+      "BOOKING_WEB_EVENT_RETENTION_BATCH_SIZE",
+      1_000,
     ),
     pmsInventoryPublicOfferRetryEnabled: readBooleanEnv(
       env,
@@ -1509,18 +1327,24 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       true,
     ),
     pricingPublicationFreshnessIntervalMs: readPricingPublicationFreshnessIntervalEnv(env),
-    pricingPublicationFreshnessAlertEmail: readPricingPublicationFreshnessAlertEmail(
+    pricingPaymentRepublishEnabled: readBooleanEnv(env, "PRICING_PAYMENT_REPUBLISH_ENABLED", true),
+    pricingPaymentRepublishIntervalMs: readPricingPaymentRepublishIntervalEnv(env),
+    pricingPublicationFreshnessAlertEmail: readSingleRecipientEnv(
       env,
+      "PRICING_PUBLICATION_FRESHNESS_ALERT_EMAIL",
       Boolean(bookingEmailDelivery),
     ),
-    creatorPlatformConnections,
+    contactNotificationRecipient: readSingleRecipientEnv(
+      env,
+      "CONTACT_NOTIFICATION_RECIPIENT",
+      Boolean(bookingEmailDelivery),
+    ),
     providerWebhooks: prospectiveConfig.providerWebhooks,
     channexManagement,
     airbnbImport: loadAirbnbImportConfig(env),
     airbnbAlterations,
     stripeSubscriptions: prospectiveConfig.stripeSubscriptions,
     bookingEmailDelivery,
-    marketplaceCommunicationUnsubscribe: loadMarketplaceCommunicationUnsubscribeConfig(env),
     xenditSecretKey: readOptionalEnv(env, "XENDIT_SECRET_KEY"),
   };
 }

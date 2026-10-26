@@ -1,19 +1,38 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import Image from "next/image";
-import { ChevronDownIcon, EyeIcon, EyeSlashIcon } from "@heroicons/react/24/outline";
+import {
+  ChevronDownIcon,
+  ExclamationCircleIcon,
+  EyeIcon,
+  EyeSlashIcon,
+} from "@heroicons/react/24/outline";
+import {
+  CURRENT_HOTEL_ACCOUNT_AGREEMENTS,
+  type HotelAccountAgreementVersions,
+} from "@vayada/domain-hotels";
+
+import { fillTemplate } from "./fillTemplate";
 
 export type SharedSignupPageProps = {
   translate?: (key: string, params?: Record<string, string | number>) => string;
   isSubmitting: boolean;
   submitError: string;
+  /** A next step shown under the error, such as signing in when the email already has an account. */
+  submitErrorAction?: { label: string; href: string };
   onErrorClear: () => void;
-  onSubmit: (input: { email: string; password: string }) => Promise<void>;
+  /** acceptedAgreements: the hotel terms and DPA versions the required tickbox accepted (VAY-2246). */
+  onSubmit: (input: {
+    email: string;
+    password: string;
+    acceptedAgreements: HotelAccountAgreementVersions;
+  }) => Promise<void>;
   loginHref?: string;
   termsUrl?: string;
+  dpaUrl?: string;
   privacyUrl?: string;
-  onGoogleSignup?: () => void;
+  onGoogleSignup?: (acceptedAgreements: HotelAccountAgreementVersions) => void;
 };
 
 const MARKETING_BASE_URL = process.env.NEXT_PUBLIC_MARKETING_URL || "https://vayada.com";
@@ -23,10 +42,12 @@ export default function SharedSignupPage({
   translate,
   isSubmitting,
   submitError,
+  submitErrorAction,
   onErrorClear,
   onSubmit,
   loginHref = "/login",
   termsUrl = `${MARKETING_BASE_URL}/terms`,
+  dpaUrl = `${MARKETING_BASE_URL}/terms/dpa`,
   privacyUrl = `${MARKETING_BASE_URL}/privacy`,
   onGoogleSignup,
 }: SharedSignupPageProps) {
@@ -43,6 +64,19 @@ export default function SharedSignupPage({
   const [showPassword, setShowPassword] = useState(false);
   const [emailError, setEmailError] = useState("");
   const [passwordError, setPasswordError] = useState("");
+  // VAY-2246: both ways to sign up accept the hotel terms and the DPA for the new hotel account.
+  const [agreementsAccepted, setAgreementsAccepted] = useState(false);
+  const [agreementsError, setAgreementsError] = useState(false);
+  const agreementsBox = useRef<HTMLInputElement>(null);
+
+  /** Without the tick nothing is sent: the box says why and takes the focus. */
+  function agreementsMissing(): boolean {
+    if (agreementsAccepted) return false;
+    setAgreementsError(true);
+    agreementsBox.current?.focus();
+    agreementsBox.current?.scrollIntoView?.({ block: "center" });
+    return true;
+  }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -65,7 +99,13 @@ export default function SharedSignupPage({
       return;
     }
 
-    await onSubmit({ email, password });
+    if (agreementsMissing()) return;
+
+    await onSubmit({
+      email,
+      password,
+      acceptedAgreements: { ...CURRENT_HOTEL_ACCOUNT_AGREEMENTS },
+    });
   }
 
   return (
@@ -93,7 +133,10 @@ export default function SharedSignupPage({
               <>
                 <button
                   type="button"
-                  onClick={onGoogleSignup}
+                  onClick={() => {
+                    if (!agreementsMissing())
+                      onGoogleSignup({ ...CURRENT_HOTEL_ACCOUNT_AGREEMENTS });
+                  }}
                   disabled={isSubmitting}
                   className="mb-5 flex w-full items-center justify-center gap-2 rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-medium text-gray-900 transition-colors hover:bg-gray-50 disabled:opacity-60"
                 >
@@ -108,7 +151,7 @@ export default function SharedSignupPage({
               </>
             )}
 
-            <form onSubmit={handleSubmit} className="space-y-5" noValidate>
+            <form method="post" onSubmit={handleSubmit} className="space-y-5" noValidate>
               <div>
                 <label htmlFor="email" className="mb-1.5 block text-sm font-medium text-gray-700">
                   {t("signup.emailAddress")}
@@ -199,9 +242,86 @@ export default function SharedSignupPage({
                 </details>
               </div>
 
+              <div>
+                <div className="flex items-start gap-2.5">
+                  <input
+                    ref={agreementsBox}
+                    id="accept-agreements"
+                    type="checkbox"
+                    name="acceptAgreements"
+                    required
+                    checked={agreementsAccepted}
+                    onChange={(event) => {
+                      setAgreementsAccepted(event.target.checked);
+                      if (event.target.checked) setAgreementsError(false);
+                    }}
+                    aria-invalid={agreementsError}
+                    aria-describedby={agreementsError ? "accept-agreements-error" : undefined}
+                    className={`mt-0.5 h-[18px] w-[18px] shrink-0 cursor-pointer accent-primary-600 ${
+                      agreementsError ? "outline outline-2 outline-offset-1 outline-red-600" : ""
+                    }`}
+                  />
+                  <label
+                    htmlFor="accept-agreements"
+                    className="text-[13px] leading-5 text-gray-700"
+                  >
+                    {fillTemplate(t("signup.acceptAgreements"), {
+                      terms: (
+                        <a
+                          href={termsUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="font-medium text-primary-600 hover:text-primary-700"
+                        >
+                          {t("signup.terms")}
+                        </a>
+                      ),
+                      dpa: (
+                        <a
+                          href={dpaUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="font-medium text-primary-600 hover:text-primary-700"
+                        >
+                          {t("signup.dataProcessingAgreement")}
+                        </a>
+                      ),
+                      privacy: (
+                        <a
+                          href={privacyUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="font-medium text-primary-600 hover:text-primary-700"
+                        >
+                          {t("signup.privacyPolicy")}
+                        </a>
+                      ),
+                    })}
+                  </label>
+                </div>
+                {agreementsError && (
+                  <p
+                    id="accept-agreements-error"
+                    role="alert"
+                    className="mt-2 flex items-start gap-1.5 pl-7 text-[13px] leading-[18px] text-red-600"
+                  >
+                    <ExclamationCircleIcon className="mt-px h-4 w-4 shrink-0" aria-hidden="true" />
+                    {t("signup.acceptAgreementsRequired")}
+                  </p>
+                )}
+              </div>
+
               {submitError && (
                 <div role="alert" className="rounded-lg border-2 border-red-300 bg-red-50 p-4">
                   <p className="text-sm font-semibold text-red-800">{submitError}</p>
+                  {submitErrorAction && (
+                    <a
+                      href={submitErrorAction.href}
+                      className="mt-2 inline-block text-sm font-semibold text-primary-600 hover:text-primary-700"
+                    >
+                      {submitErrorAction.label}
+                    </a>
+                  )}
                 </div>
               )}
 
@@ -227,17 +347,6 @@ export default function SharedSignupPage({
             </form>
           </div>
         </div>
-        <p className="pb-8 text-center text-xs leading-5 text-gray-500">
-          {t("signup.byContinuingYouAgreeToOur")}{" "}
-          <a href={termsUrl} className="font-medium text-primary-600 hover:text-primary-700">
-            {t("signup.terms")}
-          </a>{" "}
-          {t("signup.andAcknowledgeOur")}{" "}
-          <a href={privacyUrl} className="font-medium text-primary-600 hover:text-primary-700">
-            {t("signup.privacyPolicy")}
-          </a>
-          .
-        </p>
       </div>
       <div
         className="relative hidden min-h-screen flex-1 overflow-hidden bg-cover bg-center lg:block"
@@ -298,8 +407,11 @@ export const SharedSignupPageMessages = {
   "signup.createAccount": "Create account",
   "signup.alreadyHaveAnAccount": "Already have an account?",
   "signup.signIn": "Sign in",
-  "signup.byContinuingYouAgreeToOur": "By continuing, you agree to our",
+  "signup.acceptAgreements":
+    "I accept the {terms} and the {dpa} for my hotel and acknowledge the {privacy}.",
   "signup.terms": "Terms",
-  "signup.andAcknowledgeOur": "and acknowledge our",
+  "signup.dataProcessingAgreement": "Data Processing Agreement",
   "signup.privacyPolicy": "Privacy Policy",
+  "signup.acceptAgreementsRequired":
+    "Tick the box to accept the Terms and the Data Processing Agreement first.",
 };

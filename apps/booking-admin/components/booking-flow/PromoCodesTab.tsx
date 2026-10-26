@@ -1,20 +1,19 @@
 "use client";
 import { useTranslation } from "@/lib/i18n";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { createPortal } from "react-dom";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import {
   AdjustmentsHorizontalIcon,
   ChevronDownIcon,
   MagnifyingGlassIcon,
   PencilSquareIcon,
-  PlusIcon,
   TicketIcon,
   TrashIcon,
-  XMarkIcon,
 } from "@heroicons/react/24/outline";
-import { Button, FeedbackAlert, Input, ToggleSwitch } from "@/components/ui";
+import { Input, PrimaryActionButton } from "@/components/ui";
+import { PageHeader } from "@/components/layout/PageLayout";
 import type { BookingPromoCode } from "@/services/api/bookingPromoCodesClient";
+import { ChoiceCard, EditorModal, EditorSectionHeading } from "./EditorModal";
 
 export interface PromoRoomType {
   roomTypeId: string;
@@ -44,6 +43,9 @@ interface PromoCodesTabProps {
   onUpdatePromoCode: (promoCodeId: string, values: PromoCodeFormValues) => Promise<void>;
   onDeletePromoCode: (promoCodeId: string) => Promise<void>;
   onTogglePromoCode: (promoCode: BookingPromoCode) => Promise<void>;
+  /** A promo code to open in the editor, from the notifications bell's "Extend" or "Raise limit" (VAY-2349). */
+  openPromoCodeId?: string | null;
+  onPromoCodeOpened?: () => void;
 }
 
 function emptyDraft(): PromoCodeFormValues {
@@ -79,6 +81,15 @@ function toDraft(promo: BookingPromoCode): PromoCodeFormValues {
 }
 
 type PromoStatus = "Active" | "Inactive" | "Expired" | "Exhausted";
+
+/** The field a validation error belongs to; it gets a red border next to the error message. */
+type PromoField =
+  | "code"
+  | "discountValue"
+  | "minBookingValue"
+  | "maxUses"
+  | "validUntil"
+  | "stayDateUntil";
 
 function promoStatus(promo: BookingPromoCode, propertyTimeZone: string): PromoStatus {
   if (!promo.isActive) return "Inactive";
@@ -117,6 +128,8 @@ export default function PromoCodesTab({
   onUpdatePromoCode,
   onDeletePromoCode,
   onTogglePromoCode,
+  openPromoCodeId = null,
+  onPromoCodeOpened,
 }: PromoCodesTabProps) {
   const { t, locale } = useTranslation();
   function dateLabel(value: string | null): string {
@@ -160,8 +173,7 @@ export default function PromoCodesTab({
   const [savingPromo, setSavingPromo] = useState(false);
   const [busyPromoId, setBusyPromoId] = useState<string | null>(null);
   const [promoError, setPromoError] = useState<string | null>(null);
-  const dialogRef = useRef<HTMLFormElement | null>(null);
-  const lastFocusRef = useRef<HTMLElement | null>(null);
+  const [errorField, setErrorField] = useState<PromoField | null>(null);
 
   const filteredPromoCodes = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -174,64 +186,32 @@ export default function PromoCodesTab({
   }, [promoCodes, propertyTimeZone, search, t]);
 
   const openEditor = (promo: BookingPromoCode | null) => {
-    lastFocusRef.current =
-      document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setEditingPromo(promo);
     setDraft(promo ? toDraft(promo) : emptyDraft());
     setPromoError(null);
+    setErrorField(null);
     setIsEditorOpen(true);
   };
+
+  useEffect(() => {
+    if (!openPromoCodeId) return;
+    const promo = promoCodes.find((item) => item.promoCodeId === openPromoCodeId);
+    if (promo) openEditor(promo);
+    onPromoCodeOpened?.();
+    // Opens once per link; the editor's own state takes over from there.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openPromoCodeId]);
 
   const closeEditor = useCallback(() => {
     if (savingPromo) return;
     setIsEditorOpen(false);
     setEditingPromo(null);
     setPromoError(null);
-    lastFocusRef.current?.focus();
+    setErrorField(null);
   }, [savingPromo]);
 
-  useEffect(() => {
-    if (!isEditorOpen) return;
-    dialogRef.current?.querySelector<HTMLElement>("#promo-code")?.focus();
-    const previousBodyOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-
-    return () => {
-      document.body.style.overflow = previousBodyOverflow;
-    };
-  }, [isEditorOpen]);
-
-  useEffect(() => {
-    if (!isEditorOpen) return;
-    const dialog = dialogRef.current;
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        closeEditor();
-        return;
-      }
-      if (event.key !== "Tab" || !dialog) return;
-      const focusable = Array.from(
-        dialog.querySelectorAll<HTMLElement>(
-          'button, input, select, summary, [tabindex]:not([tabindex="-1"])',
-        ),
-      ).filter((element) => !element.hasAttribute("disabled"));
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last?.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first?.focus();
-      }
-    };
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [closeEditor, isEditorOpen]);
+  const invalidClass = (field: PromoField) =>
+    errorField === field ? "!border-red-400 focus:!ring-red-500" : "";
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -240,35 +220,39 @@ export default function PromoCodesTab({
     const minBookingValue = draft.minBookingValue.trim();
     const maxUses = Number(draft.maxUses);
 
+    const invalid = (field: PromoField, message: string) => {
+      setPromoError(message);
+      setErrorField(field);
+    };
     if (!/^[A-Z0-9_-]{2,40}$/.test(code)) {
-      setPromoError(t("admin.use240LettersNumbersHyphensOrUnderscoresForThe"));
+      invalid("code", t("admin.use240LettersNumbersHyphensOrUnderscoresForThe"));
       return;
     }
     if (!Number.isFinite(discountValue) || discountValue <= 0) {
-      setPromoError(t("admin.discountValueMustBeGreaterThanZero"));
+      invalid("discountValue", t("admin.discountValueMustBeGreaterThanZero"));
       return;
     }
     if (draft.discountType === "percentage" && discountValue > 100) {
-      setPromoError(t("admin.percentageDiscountsCannotExceed100"));
+      invalid("discountValue", t("admin.percentageDiscountsCannotExceed100"));
       return;
     }
     if (
       minBookingValue &&
       (!Number.isFinite(Number(minBookingValue)) || Number(minBookingValue) <= 0)
     ) {
-      setPromoError(t("admin.minimumBookingValueMustBeGreaterThanZero"));
+      invalid("minBookingValue", t("admin.minimumBookingValueMustBeGreaterThanZero"));
       return;
     }
     if (!Number.isInteger(maxUses) || maxUses <= 0) {
-      setPromoError(t("admin.usageLimitMustBeAWholeNumberGreaterThanZero"));
+      invalid("maxUses", t("admin.usageLimitMustBeAWholeNumberGreaterThanZero"));
       return;
     }
     if (draft.validFrom && draft.validUntil && draft.validUntil < draft.validFrom) {
-      setPromoError(t("admin.validUntilMustBeOnOrAfterValidFrom"));
+      invalid("validUntil", t("admin.validUntilMustBeOnOrAfterValidFrom"));
       return;
     }
     if (draft.stayDateFrom && draft.stayDateUntil && draft.stayDateUntil < draft.stayDateFrom) {
-      setPromoError(t("admin.stayUntilMustBeOnOrAfterStayFrom"));
+      invalid("stayDateUntil", t("admin.stayUntilMustBeOnOrAfterStayFrom"));
       return;
     }
 
@@ -281,12 +265,12 @@ export default function PromoCodesTab({
     };
     setSavingPromo(true);
     setPromoError(null);
+    setErrorField(null);
     try {
       if (editingPromo) await onUpdatePromoCode(editingPromo.promoCodeId, normalized);
       else await onCreatePromoCode(normalized);
       setIsEditorOpen(false);
       setEditingPromo(null);
-      lastFocusRef.current?.focus();
     } catch {
       setPromoError(t("admin.failedToSavePromoCode"));
     } finally {
@@ -320,24 +304,15 @@ export default function PromoCodesTab({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-gray-950">
-            {t("bookingFlow.tabs.promos")}
-          </h1>
-          <p className="mt-1 text-sm text-gray-500">
-            {t("admin.targetedDiscountsGuestsUnlockByEnteringACodeAtCheckout")}
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={() => openEditor(null)}
-          className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-primary-600 px-4 text-sm font-medium text-white hover:bg-primary-700"
-        >
-          <PlusIcon className="h-4 w-4" />
-          {t("admin.newPromoCode")}
-        </button>
-      </div>
+      <PageHeader
+        title={t("bookingFlow.tabs.promos")}
+        subtitle={t("admin.targetedDiscountsGuestsUnlockByEnteringACodeAtCheckout")}
+        actions={
+          <PrimaryActionButton onClick={() => openEditor(null)}>
+            {t("admin.newPromoCode")}
+          </PrimaryActionButton>
+        }
+      />
 
       {promoError && !isEditorOpen && (
         <div
@@ -497,385 +472,257 @@ export default function PromoCodesTab({
       </div>
 
       {isEditorOpen && (
-        <ModalOverlay
-          className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/45 p-0 sm:p-4"
-          role="presentation"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) closeEditor();
-          }}
+        <EditorModal
+          idPrefix="promo-editor"
+          title={editingPromo ? t("admin.editPromoCode") : t("admin.createPromoCode")}
+          description={t("admin.guestsEnterThisCodeInTheBookingEngineDiscountsUse2", {
+            currency: propertyCurrency,
+          })}
+          icon={TicketIcon}
+          initialFocusId="promo-code"
+          busy={savingPromo}
+          error={promoError}
+          active={draft.isActive}
+          activeDescription={t("admin.turnOffToPauseTheCodeWithoutDeletingIt")}
+          onActiveChange={() =>
+            setDraft((current) => ({ ...current, isActive: !current.isActive }))
+          }
+          closeLabel={t("admin.closePromoCodeEditor")}
+          submitLabel={
+            savingPromo
+              ? t("addons.editor.saving")
+              : editingPromo
+                ? t("admin.saveChanges")
+                : t("admin.createPromoCode")
+          }
+          onClose={closeEditor}
+          onSubmit={handleSubmit}
         >
-          <form
-            ref={dialogRef}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="promo-editor-title"
-            aria-describedby={`promo-editor-description${promoError ? " promo-editor-error" : ""}`}
-            onSubmit={handleSubmit}
-            className="flex h-[100dvh] w-full max-w-[920px] flex-col overflow-hidden bg-white shadow-2xl sm:h-auto sm:max-h-[92dvh] sm:rounded-2xl"
-          >
-            <div className="flex shrink-0 items-start justify-between gap-4 border-b border-gray-200 px-5 py-5 sm:px-7">
-              <div className="flex min-w-0 items-start gap-3.5">
-                <span className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary-50 text-primary-700 sm:flex">
-                  <TicketIcon className="h-5 w-5" />
-                </span>
-                <div>
-                  <h2 id="promo-editor-title" className="text-xl font-semibold text-gray-950">
-                    {editingPromo ? t("admin.editPromoCode") : t("admin.createPromoCode")}
-                  </h2>
-                  <p id="promo-editor-description" className="mt-1 max-w-2xl text-sm text-gray-600">
-                    {t("admin.guestsEnterThisCodeInTheBookingEngineDiscountsUse2", {
-                      currency: propertyCurrency,
-                    })}
-                  </p>
+          {/* Both cards share the grid rows (subgrid), so fields line up row by row. */}
+          <div className="grid gap-5 md:grid-cols-2">
+            <section aria-labelledby="promo-details-heading" className={sectionClass}>
+              <EditorSectionHeading id="promo-details-heading" icon={TicketIcon}>
+                {t("admin.promoDetails")}
+              </EditorSectionHeading>
+              <Field
+                id="promo-code"
+                label={t("affiliates.allAffiliates.code")}
+                helper={t("promos.codeHint")}
+              >
+                <Input
+                  id="promo-code"
+                  aria-describedby="promo-code-helper"
+                  aria-invalid={errorField === "code" || undefined}
+                  autoComplete="off"
+                  required
+                  maxLength={40}
+                  value={draft.code}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      code: event.target.value.toUpperCase().replace(/[^A-Z0-9_-]/g, ""),
+                    }))
+                  }
+                  placeholder={t("admin.eGSUMMER20")}
+                  className={`${inputClass} ${invalidClass("code")}`}
+                />
+              </Field>
+
+              <fieldset className="min-w-0">
+                <legend className="text-sm font-medium text-gray-800">
+                  {t("admin.discountType")}
+                </legend>
+                <div className="mt-2 grid grid-cols-2 gap-3">
+                  {(["percentage", "fixed"] as const).map((type) => (
+                    <ChoiceCard
+                      key={type}
+                      name="discountType"
+                      value={type}
+                      describedBy="promo-discount-type-helper"
+                      checked={draft.discountType === type}
+                      onChange={() => setDraft((current) => ({ ...current, discountType: type }))}
+                      label={type === "fixed" ? t("admin.fixedAmount") : t("admin.percentage")}
+                      unit={type === "fixed" ? propertyCurrency : "%"}
+                    />
+                  ))}
                 </div>
-              </div>
-              <button
-                type="button"
-                onClick={closeEditor}
-                disabled={savingPromo}
-                aria-label={t("admin.closePromoCodeEditor")}
-                className="-mr-2 shrink-0 rounded-lg p-2 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                <p id="promo-discount-type-helper" className="mt-2 text-xs text-gray-600">
+                  {t("admin.chooseHowTheDiscountIsCalculated")}
+                </p>
+              </fieldset>
+
+              <Field
+                id="promo-discount-value"
+                label={t("admin.discountValue")}
+                helper={
+                  draft.discountType === "fixed"
+                    ? t("admin.usesYourPropertyCurrencyCurrency", { currency: propertyCurrency })
+                    : t("admin.percentageRange")
+                }
               >
-                <XMarkIcon className="h-5 w-5" />
-              </button>
-            </div>
+                <div className="relative">
+                  <Input
+                    id="promo-discount-value"
+                    aria-describedby="promo-discount-value-helper"
+                    aria-invalid={errorField === "discountValue" || undefined}
+                    required
+                    type="number"
+                    min="0.01"
+                    max={draft.discountType === "percentage" ? "100" : undefined}
+                    step="0.01"
+                    value={draft.discountValue}
+                    onChange={(event) =>
+                      setDraft((current) => ({ ...current, discountValue: event.target.value }))
+                    }
+                    className={`${inputClass} pr-14 ${invalidClass("discountValue")}`}
+                  />
+                  <span className="pointer-events-none absolute right-3 top-3 text-sm text-gray-600">
+                    {draft.discountType === "percentage" ? "%" : propertyCurrency}
+                  </span>
+                </div>
+              </Field>
 
-            <div className="min-h-0 flex-1 overflow-y-auto bg-gray-50/70 px-4 py-5 sm:px-7 sm:py-6">
-              <div className="grid gap-5 md:grid-cols-2 md:items-start">
-                <section
-                  aria-labelledby="promo-details-heading"
-                  className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm sm:p-5"
-                >
-                  <div className="mb-5 flex items-center gap-2.5 border-b border-gray-100 pb-4">
-                    <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary-50 text-primary-700">
-                      <TicketIcon className="h-4 w-4" />
+              <DateRangeFields
+                id="promo-valid"
+                legend={t("admin.validity")}
+                helper={t("promos.validityHint")}
+                fromLabel={t("admin.validFrom")}
+                untilLabel={t("admin.validUntil")}
+                from={draft.validFrom}
+                until={draft.validUntil}
+                untilInvalid={errorField === "validUntil"}
+                onFrom={(value) => setDraft((current) => ({ ...current, validFrom: value }))}
+                onUntil={(value) => setDraft((current) => ({ ...current, validUntil: value }))}
+              />
+            </section>
+
+            <section aria-labelledby="promo-rules-heading" className={sectionClass}>
+              <EditorSectionHeading id="promo-rules-heading" icon={AdjustmentsHorizontalIcon}>
+                {t("admin.rulesRestrictions")}
+              </EditorSectionHeading>
+              <Field
+                id="promo-min-booking-value"
+                label={t("admin.minimumBookingValue")}
+                helper={t("promos.minimumHint")}
+              >
+                <div className="relative">
+                  <Input
+                    id="promo-min-booking-value"
+                    aria-describedby="promo-min-booking-value-helper"
+                    aria-invalid={errorField === "minBookingValue" || undefined}
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    value={draft.minBookingValue}
+                    onChange={(event) =>
+                      setDraft((current) => ({ ...current, minBookingValue: event.target.value }))
+                    }
+                    placeholder={t("admin.eG500")}
+                    className={`${inputClass} pr-14 ${invalidClass("minBookingValue")}`}
+                  />
+                  <span className="pointer-events-none absolute right-3 top-3 text-sm text-gray-600">
+                    {propertyCurrency}
+                  </span>
+                </div>
+              </Field>
+
+              <Field id="promo-max-uses" label={t("admin.maxUses")} helper={t("promos.usageHint")}>
+                <Input
+                  id="promo-max-uses"
+                  aria-describedby="promo-max-uses-helper"
+                  aria-invalid={errorField === "maxUses" || undefined}
+                  required
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={draft.maxUses}
+                  onChange={(event) =>
+                    setDraft((current) => ({ ...current, maxUses: event.target.value }))
+                  }
+                  className={`${inputClass} ${invalidClass("maxUses")}`}
+                />
+              </Field>
+
+              <div className="min-w-0">
+                <p id="promo-rooms-label" className="text-sm font-medium text-gray-800">
+                  {t("admin.applicableRooms")}
+                </p>
+                <details className="group mt-2 rounded-lg border border-gray-300 bg-white">
+                  <summary
+                    aria-labelledby="promo-rooms-label promo-rooms-value"
+                    aria-describedby="promo-rooms-helper"
+                    className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-sm text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2"
+                  >
+                    <span id="promo-rooms-value">
+                      {draft.applicableRoomIds.length === 0
+                        ? t("admin.allRooms")
+                        : t("admin.selectedRoomsCount", { count: draft.applicableRoomIds.length })}
                     </span>
-                    <h3 id="promo-details-heading" className="text-sm font-semibold text-gray-950">
-                      {t("admin.promoDetails")}
-                    </h3>
-                  </div>
-                  <div className="space-y-5">
-                    <Field
-                      id="promo-code"
-                      label={t("affiliates.allAffiliates.code")}
-                      helper={t("promos.codeHint")}
-                    >
-                      <Input
-                        id="promo-code"
-                        aria-describedby="promo-code-helper"
-                        autoComplete="off"
-                        required
-                        maxLength={40}
-                        value={draft.code}
-                        onChange={(event) =>
-                          setDraft((current) => ({
-                            ...current,
-                            code: event.target.value.toUpperCase().replace(/[^A-Z0-9_-]/g, ""),
-                          }))
-                        }
-                        placeholder={t("admin.eGSUMMER20")}
-                        className={inputClass}
-                      />
-                    </Field>
-
-                    <fieldset>
-                      <legend className="text-sm font-medium text-gray-800">
-                        {t("admin.discountType")}
-                      </legend>
-                      <p
-                        id="promo-discount-type-helper"
-                        className="mb-2 mt-1 text-xs text-gray-600"
-                      >
-                        {t("admin.chooseHowTheDiscountIsCalculated")}
+                    <ChevronDownIcon className="h-4 w-4 shrink-0 text-gray-500 transition-transform group-open:rotate-180" />
+                  </summary>
+                  <div className="max-h-40 space-y-1 overflow-y-auto border-t border-gray-200 p-2">
+                    {roomTypes.length === 0 ? (
+                      <p className="px-2 py-1 text-xs text-gray-500">
+                        {t("admin.noRoomTypesAvailable")}
                       </p>
-                      <div className="grid grid-cols-2 gap-3">
-                        {(["percentage", "fixed"] as const).map((type) => (
-                          <label
-                            key={type}
-                            className={`cursor-pointer rounded-lg border p-3 transition-colors focus-within:outline-none focus-within:ring-2 focus-within:ring-primary-500 focus-within:ring-offset-2 ${draft.discountType === type ? "border-primary-600 bg-primary-50/60" : "border-gray-200 hover:border-gray-300"}`}
-                          >
-                            <input
-                              className="sr-only"
-                              type="radio"
-                              name="discountType"
-                              value={type}
-                              aria-describedby="promo-discount-type-helper"
-                              checked={draft.discountType === type}
-                              onChange={() =>
-                                setDraft((current) => ({ ...current, discountType: type }))
-                              }
-                            />
-                            <span className="block text-sm font-medium capitalize text-gray-900">
-                              {type === "fixed" ? t("admin.fixedAmount") : t("admin.percentage")}
-                            </span>
-                            <span className="mt-0.5 block text-xs text-gray-600">
-                              {type === "fixed"
-                                ? t("admin.currencyOffTheTotal", { currency: propertyCurrency })
-                                : t("bookingFlow.promoCodes.percentageOff")}
-                            </span>
-                          </label>
-                        ))}
-                      </div>
-                    </fieldset>
-
-                    <Field
-                      id="promo-discount-value"
-                      label={t("admin.discountValue")}
-                      helper={
-                        draft.discountType === "fixed"
-                          ? t("admin.usesYourPropertyCurrencyCurrency", {
-                              currency: propertyCurrency,
-                            })
-                          : t("admin.percentageRange")
-                      }
-                    >
-                      <div className="relative">
-                        <Input
-                          id="promo-discount-value"
-                          aria-describedby="promo-discount-value-helper"
-                          required
-                          type="number"
-                          min="0.01"
-                          max={draft.discountType === "percentage" ? "100" : undefined}
-                          step="0.01"
-                          value={draft.discountValue}
-                          onChange={(event) =>
-                            setDraft((current) => ({
-                              ...current,
-                              discountValue: event.target.value,
-                            }))
-                          }
-                          className={`${inputClass} pr-14`}
-                        />
-                        <span className="pointer-events-none absolute right-3 top-3 text-sm text-gray-600">
-                          {draft.discountType === "percentage" ? "%" : propertyCurrency}
-                        </span>
-                      </div>
-                    </Field>
-
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      <Field
-                        id="promo-valid-from"
-                        label={t("admin.validFrom")}
-                        helper={t("promos.immediateHint")}
-                      >
-                        <Input
-                          id="promo-valid-from"
-                          aria-describedby="promo-valid-from-helper"
-                          type="date"
-                          value={draft.validFrom}
-                          onChange={(event) =>
-                            setDraft((current) => ({ ...current, validFrom: event.target.value }))
-                          }
-                          className={inputClass}
-                        />
-                      </Field>
-                      <Field
-                        id="promo-valid-until"
-                        label={t("admin.validUntil")}
-                        helper={t("promos.expiryHint")}
-                      >
-                        <Input
-                          id="promo-valid-until"
-                          aria-describedby="promo-valid-until-helper"
-                          type="date"
-                          value={draft.validUntil}
-                          onChange={(event) =>
-                            setDraft((current) => ({ ...current, validUntil: event.target.value }))
-                          }
-                          className={inputClass}
-                        />
-                      </Field>
-                    </div>
-
-                    <ToggleSwitch
-                      size="sm"
-                      enabled={draft.isActive}
-                      onChange={() =>
-                        setDraft((current) => ({ ...current, isActive: !current.isActive }))
-                      }
-                      label={t("promos.status.Active")}
-                      description={t("admin.turnOffToPauseTheCodeWithoutDeletingIt")}
-                    />
-                  </div>
-                </section>
-
-                <section
-                  aria-labelledby="promo-rules-heading"
-                  className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm sm:p-5"
-                >
-                  <div className="mb-5 flex items-center gap-2.5 border-b border-gray-100 pb-4">
-                    <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary-50 text-primary-700">
-                      <AdjustmentsHorizontalIcon className="h-4 w-4" />
-                    </span>
-                    <h3 id="promo-rules-heading" className="text-sm font-semibold text-gray-950">
-                      {t("admin.rulesRestrictions")}
-                    </h3>
-                  </div>
-                  <div className="space-y-5">
-                    <Field
-                      id="promo-min-booking-value"
-                      label={t("admin.minimumBookingValue")}
-                      helper={t("promos.minimumHint")}
-                    >
-                      <div className="relative">
-                        <Input
-                          id="promo-min-booking-value"
-                          aria-describedby="promo-min-booking-value-helper"
-                          type="number"
-                          min="0.01"
-                          step="0.01"
-                          value={draft.minBookingValue}
-                          onChange={(event) =>
-                            setDraft((current) => ({
-                              ...current,
-                              minBookingValue: event.target.value,
-                            }))
-                          }
-                          placeholder={t("admin.eG500")}
-                          className={`${inputClass} pr-14`}
-                        />
-                        <span className="pointer-events-none absolute right-3 top-3 text-sm text-gray-600">
-                          {propertyCurrency}
-                        </span>
-                      </div>
-                    </Field>
-
-                    <Field
-                      id="promo-max-uses"
-                      label={t("admin.maxUses")}
-                      helper={t("promos.usageHint")}
-                    >
-                      <Input
-                        id="promo-max-uses"
-                        aria-describedby="promo-max-uses-helper"
-                        required
-                        type="number"
-                        min="1"
-                        step="1"
-                        value={draft.maxUses}
-                        onChange={(event) =>
-                          setDraft((current) => ({ ...current, maxUses: event.target.value }))
-                        }
-                        className={inputClass}
-                      />
-                    </Field>
-
-                    <div>
-                      <p id="promo-rooms-label" className="text-sm font-medium text-gray-800">
-                        {t("admin.applicableRooms")}
-                      </p>
-                      <p id="promo-rooms-helper" className="mb-2 mt-1 text-xs text-gray-600">
-                        {t("admin.leaveAsAllRoomsToApplyToAnyBookingOr")}
-                      </p>
-                      <details className="group rounded-lg border border-gray-300 bg-white">
-                        <summary
-                          aria-labelledby="promo-rooms-label promo-rooms-value"
-                          aria-describedby="promo-rooms-helper"
-                          className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-sm text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2"
+                    ) : (
+                      roomTypes.map((room) => (
+                        <label
+                          key={room.roomTypeId}
+                          className="flex items-center gap-2 rounded px-2 py-2 text-sm text-gray-700 hover:bg-gray-50"
                         >
-                          <span id="promo-rooms-value">
-                            {draft.applicableRoomIds.length === 0
-                              ? t("admin.allRooms")
-                              : t("admin.selectedRoomsCount", {
-                                  count: draft.applicableRoomIds.length,
-                                })}
-                          </span>
-                          <ChevronDownIcon className="h-4 w-4 shrink-0 text-gray-500 transition-transform group-open:rotate-180" />
-                        </summary>
-                        <div className="max-h-40 space-y-1 overflow-y-auto border-t border-gray-200 p-2">
-                          {roomTypes.length === 0 ? (
-                            <p className="px-2 py-1 text-xs text-gray-500">
-                              {t("admin.noRoomTypesAvailable")}
-                            </p>
-                          ) : (
-                            roomTypes.map((room) => (
-                              <label
-                                key={room.roomTypeId}
-                                className="flex items-center gap-2 rounded px-2 py-2 text-sm text-gray-700 hover:bg-gray-50"
-                              >
-                                <input
-                                  type="checkbox"
-                                  checked={draft.applicableRoomIds.includes(room.roomTypeId)}
-                                  onChange={(event) =>
-                                    setDraft((current) => ({
-                                      ...current,
-                                      applicableRoomIds: event.target.checked
-                                        ? [...current.applicableRoomIds, room.roomTypeId]
-                                        : current.applicableRoomIds.filter(
-                                            (id) => id !== room.roomTypeId,
-                                          ),
-                                    }))
-                                  }
-                                  className="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                                />
-                                {room.name}
-                              </label>
-                            ))
-                          )}
-                        </div>
-                      </details>
-                    </div>
-
-                    <DateRangeFields
-                      legend={t("promos.stayDates")}
-                      helper={t("promos.stayDatesHint")}
-                      from={draft.stayDateFrom}
-                      until={draft.stayDateUntil}
-                      onFrom={(value) =>
-                        setDraft((current) => ({ ...current, stayDateFrom: value }))
-                      }
-                      onUntil={(value) =>
-                        setDraft((current) => ({ ...current, stayDateUntil: value }))
-                      }
-                    />
+                          <input
+                            type="checkbox"
+                            checked={draft.applicableRoomIds.includes(room.roomTypeId)}
+                            onChange={(event) =>
+                              setDraft((current) => ({
+                                ...current,
+                                applicableRoomIds: event.target.checked
+                                  ? [...current.applicableRoomIds, room.roomTypeId]
+                                  : current.applicableRoomIds.filter(
+                                      (id) => id !== room.roomTypeId,
+                                    ),
+                              }))
+                            }
+                            className="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                          />
+                          {room.name}
+                        </label>
+                      ))
+                    )}
                   </div>
-                </section>
+                </details>
+                <p id="promo-rooms-helper" className="mt-2 text-xs text-gray-600">
+                  {t("admin.leaveAsAllRoomsToApplyToAnyBookingOr")}
+                </p>
               </div>
-            </div>
 
-            {promoError && (
-              <div id="promo-editor-error" role="alert" className="shrink-0 px-5 pt-4 sm:px-7">
-                <FeedbackAlert type="error" message={promoError} />
-              </div>
-            )}
-            <div className="flex shrink-0 flex-col-reverse gap-3 border-t border-gray-200 bg-white px-5 py-4 sm:flex-row sm:items-center sm:justify-end sm:px-7">
-              <Button
-                type="button"
-                variant="outline"
-                size="lg"
-                onClick={closeEditor}
-                disabled={savingPromo}
-                className="h-11 w-full sm:w-auto"
-              >
-                {t("settings.totp.cancel")}
-              </Button>
-              <Button
-                type="submit"
-                size="lg"
-                disabled={savingPromo}
-                className="h-11 w-full sm:w-auto"
-              >
-                {savingPromo
-                  ? t("addons.editor.saving")
-                  : editingPromo
-                    ? t("admin.saveChanges")
-                    : t("admin.createPromoCode")}
-              </Button>
-            </div>
-          </form>
-        </ModalOverlay>
+              <DateRangeFields
+                id="promo-stay"
+                legend={t("promos.stayDates")}
+                helper={t("promos.stayDatesHint")}
+                fromLabel={t("admin.staysFrom")}
+                untilLabel={t("admin.staysUntil")}
+                from={draft.stayDateFrom}
+                until={draft.stayDateUntil}
+                untilInvalid={errorField === "stayDateUntil"}
+                onFrom={(value) => setDraft((current) => ({ ...current, stayDateFrom: value }))}
+                onUntil={(value) => setDraft((current) => ({ ...current, stayDateUntil: value }))}
+              />
+            </section>
+          </div>
+        </EditorModal>
       )}
     </div>
   );
 }
 
 const inputClass = "h-11 !text-sm placeholder:text-gray-500";
+// Header + four field rows; on md+ both cards take the same rows of the parent grid.
+const sectionClass =
+  "grid min-w-0 gap-5 rounded-xl border border-gray-200 bg-white p-4 shadow-sm sm:p-5 md:row-span-5 md:grid-rows-subgrid";
 
-function ModalOverlay(props: React.ComponentProps<"div">) {
-  return createPortal(<div {...props} />, document.body);
-}
-
+/** Label, then the control, then help text, so controls in a row line up across both cards. */
 function Field({
   id,
   label,
@@ -888,48 +735,52 @@ function Field({
   children: React.ReactNode;
 }) {
   return (
-    <div>
-      <label htmlFor={id} className="text-sm font-medium text-gray-800">
+    <div className="min-w-0">
+      <label htmlFor={id} className="block text-sm font-medium text-gray-800">
         {label}
       </label>
-      <p id={`${id}-helper`} className="mb-2 mt-1 text-xs text-gray-600">
+      <div className="mt-2">{children}</div>
+      <p id={`${id}-helper`} className="mt-2 text-xs text-gray-600">
         {helper}
       </p>
-      {children}
     </div>
   );
 }
 
 function DateRangeFields({
+  id,
   legend,
   helper,
+  fromLabel,
+  untilLabel,
   from,
   until,
+  untilInvalid,
   onFrom,
   onUntil,
 }: {
+  id: string;
   legend: string;
   helper: string;
+  fromLabel: string;
+  untilLabel: string;
   from: string;
   until: string;
+  untilInvalid: boolean;
   onFrom: (value: string) => void;
   onUntil: (value: string) => void;
 }) {
-  const { t } = useTranslation();
   return (
-    <fieldset>
+    <fieldset className="min-w-0">
       <legend className="text-sm font-medium text-gray-800">{legend}</legend>
-      <p id="promo-stay-dates-helper" className="mb-2 mt-1 text-xs text-gray-600">
-        {helper}
-      </p>
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="mt-2 grid gap-4 sm:grid-cols-2">
         <div>
-          <label htmlFor="promo-stay-from" className="text-xs font-medium text-gray-600">
-            {t("admin.staysFrom")}
+          <label htmlFor={`${id}-from`} className="text-xs font-medium text-gray-600">
+            {fromLabel}
           </label>
           <Input
-            id="promo-stay-from"
-            aria-describedby="promo-stay-dates-helper"
+            id={`${id}-from`}
+            aria-describedby={`${id}-helper`}
             type="date"
             value={from}
             onChange={(event) => onFrom(event.target.value)}
@@ -937,19 +788,23 @@ function DateRangeFields({
           />
         </div>
         <div>
-          <label htmlFor="promo-stay-until" className="text-xs font-medium text-gray-600">
-            {t("admin.staysUntil")}
+          <label htmlFor={`${id}-until`} className="text-xs font-medium text-gray-600">
+            {untilLabel}
           </label>
           <Input
-            id="promo-stay-until"
-            aria-describedby="promo-stay-dates-helper"
+            id={`${id}-until`}
+            aria-describedby={`${id}-helper`}
+            aria-invalid={untilInvalid || undefined}
             type="date"
             value={until}
             onChange={(event) => onUntil(event.target.value)}
-            className={`${inputClass} mt-1`}
+            className={`${inputClass} mt-1 ${untilInvalid ? "!border-red-400 focus:!ring-red-500" : ""}`}
           />
         </div>
       </div>
+      <p id={`${id}-helper`} className="mt-2 text-xs text-gray-600">
+        {helper}
+      </p>
     </fieldset>
   );
 }

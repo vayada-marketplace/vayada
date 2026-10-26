@@ -90,7 +90,7 @@ export function RevenueTab({
     <div className="space-y-6">
       <section className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h2 className="text-base font-semibold text-gray-900">Revenue by channel</h2>
+          <h3 className="text-base font-semibold text-gray-900">Revenue by channel</h3>
           <p className="mt-1 text-sm text-gray-600">Gross, commission, and net room revenue.</p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -230,7 +230,7 @@ function Revenue({
       </section>
       <section className="overflow-x-auto rounded-xl border border-gray-200 bg-white shadow-sm">
         <div className="p-4">
-          <h2 className="text-base font-semibold text-gray-900">Direct sources</h2>
+          <h3 className="text-base font-semibold text-gray-900">Direct sources</h3>
           <p className="mt-1 text-sm text-gray-600">Revenue from direct booking sources.</p>
         </div>
         <table className="min-w-[30rem] w-full text-left text-sm">
@@ -281,7 +281,7 @@ function Revenue({
         />
         <section className="overflow-x-auto rounded-xl border border-gray-200 bg-white shadow-sm">
           <div className="p-4">
-            <h2 className="text-base font-semibold text-gray-900">Revenue by room type</h2>
+            <h3 className="text-base font-semibold text-gray-900">Revenue by room type</h3>
             <p className="mt-1 text-sm text-gray-600">Nights, revenue, and average daily rate.</p>
           </div>
           <table className="min-w-[34rem] w-full text-left text-sm">
@@ -344,7 +344,7 @@ function BreakdownList({
 }) {
   return (
     <section className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-      <h2 className="text-base font-semibold text-gray-900">{title}</h2>
+      <h3 className="text-base font-semibold text-gray-900">{title}</h3>
       <p className="mt-1 text-sm text-gray-600">{description}</p>
       {rows.length ? (
         <dl className="mt-4 divide-y divide-gray-100">
@@ -425,7 +425,7 @@ function RevenueStatus({
         : ["Revenue could not load", "Choose a valid date range and try again."];
   return (
     <section className="rounded-xl border border-gray-200 bg-white p-8 text-center">
-      <h2 className="text-base font-semibold text-gray-900">{copy[0]}</h2>
+      <h3 className="text-base font-semibold text-gray-900">{copy[0]}</h3>
       <p className="mx-auto mt-1 max-w-md text-sm text-gray-600">{copy[1]}</p>
       {kind === "error" && (
         <button

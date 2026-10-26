@@ -24,10 +24,11 @@ keys are refused locally. Keep the local/staging login UI aligned by copying
 the production AuthKit branding into the staging WorkOS environment. Disable
 AuthKit's built-in public "Sign up" control for the staging/local environment in
 the WorkOS dashboard; Vayada signups must start from product-specific `/signup`
-routes so the callback carries a `creator` or `hotel` organization intent.
+routes so the callback carries the `hotel` organization intent (creator sign-ups
+are refused since VAY-2260).
 
-The launcher registers an exact Google callback for Vayada Admin, Marketplace,
-Booking Admin and PMS, plus the temporary `api.localhost`
+The launcher registers an exact Google callback for Vayada Admin, Booking Admin
+and PMS, plus the temporary `api.localhost`
 compatibility callback. Portless review ports and worktree-qualified hosts are
 preserved. Each authenticated frontend receives these server-only settings:
 
@@ -36,10 +37,10 @@ AUTH_PUBLIC_ORIGIN=https://<that-frontend-origin>
 AUTH_GATEWAY_UPSTREAM_ORIGIN=http://127.0.0.1:8003
 ```
 
-Browser auth uses the literal relative `/auth` path on all four migrated
+Browser auth uses the literal relative `/auth` path on all three migrated
 frontends. `NEXT_PUBLIC_AUTH_API_URL` continues to point at
 `api.localhost` for existing non-auth TypeScript API consumers; do not repoint
-it to a frontend. The launcher enables all four values in
+it to a frontend. The launcher enables all three values in
 `AUTH_FIRST_PARTY_SURFACES` by default; override the variable only when testing
 a deliberate compatibility scenario.
 
@@ -78,30 +79,17 @@ To stop the Docker backend services started by the script:
 ./scripts/dev-portless.sh --stop
 ```
 
-## `run_migration.sh`
-
-Run database migrations against the production AWS RDS instance for a given
-service. Temporarily opens the RDS security group to your public IP, runs the
-service's `scripts/run_migrations.py`, then revokes the ingress rule on exit.
-
-```sh
-./scripts/run_migration.sh <pms|booking|marketplace|auth>
-```
-
-Requires AWS CLI credentials and Python 3 with `asyncpg`. DB passwords are stored in AWS SSM under `/vayada/prod/`.
-
 ## Seed scripts
 
 Populate local databases with mock data for development. All seed scripts
 default to `localhost` Postgres URLs; override via `DATABASE_URL`,
 `AUTH_DATABASE_URL`, `PMS_DATABASE_URL` env vars.
 
-| Script                | Purpose                                                                                                            |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `seed_users.py`       | Seeds the shared auth DB with the admin user and mock hotel/creator accounts. **Run this first.**                  |
-| `seed_marketplace.py` | Seeds the marketplace DB with profiles, listings, collaborations, chats, and reviews.                              |
-| `seed_booking.py`     | Seeds the booking-engine DB (hotel properties, translations) and the PMS DB (hotels, room types, sample bookings). |
-| `seed_all.py`         | Runs the three above in order (`users → marketplace → booking`) and prints credentials at the end.                 |
+| Script            | Purpose                                                                                                            |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `seed_users.py`   | Seeds the shared auth DB with the admin user and mock hotel/creator accounts. **Run this first.**                  |
+| `seed_booking.py` | Seeds the booking-engine DB (hotel properties, translations) and the PMS DB (hotels, room types, sample bookings). |
+| `seed_all.py`     | Runs the two above in order (`users → booking`) and prints credentials at the end.                                 |
 
 ```sh
 npm run seed:test-data

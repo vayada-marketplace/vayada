@@ -1,4 +1,4 @@
-import { validOptionalPricingPaymentMethods } from "./pricingPaymentMethods.js";
+import { validOptionalPricingPaymentMethods, type PricingPaymentMethod } from "./pricingPaymentMethods.js";
 import { validPricingAddonPeople, type PricingAddonSelection } from "./pricingAddonSelection.js";
 import { createHash } from "node:crypto";
 import { parseFlexibleCancellationTerms, type FlexibleCancellationTerms, isMinorAmount, isPositiveMinor, pricingCurrencyScale, pricingDate, pricingInteger,
@@ -25,7 +25,7 @@ export type ReplacementPromotionPolicy = Readonly<{
 export type ReplacementOfferTerms = Readonly<{
   roomTypeId: string; offerId: string; revision: string;
   cancellation: { kind: "non_refundable" } | { kind: "flexible"; terms: FlexibleCancellationTerms };
-  payment: ({ kind: "full" } | { kind: "deposit"; basisPoints: number; balanceDaysBeforeArrival: number }) & { acceptedMethods?: readonly ("card" | "pay_at_property")[] };
+  payment: ({ kind: "full" } | { kind: "deposit"; basisPoints: number; balanceDaysBeforeArrival: number }) & { acceptedMethods?: readonly PricingPaymentMethod[] };
 }>;
 export type ReplacementAddon = Readonly<{ id: string; amountMinor: string;
   unit: "booking" | "night" | "person" | "person_night"; childBandAmountsMinor: readonly string[] | null }>;

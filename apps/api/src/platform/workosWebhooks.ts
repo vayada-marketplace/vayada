@@ -24,8 +24,14 @@ type PgWorkosWebhookStoreConfig = {
 
 type WorkosOrganizationRow = {
   id: string;
-  kind: WorkosOrganizationPayload["kind"];
+  // Rows may still carry a retired creator or affiliate kind until migration 0500 (VAY-2272).
+  kind: string;
 };
+
+// Organizations WorkOS events may change; every other kind is retired and left alone.
+function isActiveOrganizationKind(kind: string): kind is WorkosOrganizationPayload["kind"] {
+  return kind === "platform" || kind === "hotel_group";
+}
 
 export function mapWorkosMembershipRoleKey(input: {
   organizationKind: WorkosOrganizationPayload["kind"];
@@ -43,9 +49,7 @@ export function mapWorkosMembershipRoleKey(input: {
   ) {
     return input.existingRoleKey;
   }
-  if (input.organizationKind === "platform") return "platform_admin";
-  if (input.organizationKind === "hotel_group") return "hotel_owner";
-  return input.roleKey;
+  return input.organizationKind === "platform" ? "platform_admin" : "hotel_owner";
 }
 
 export function createWorkosWebhookVerifier(config: {
@@ -511,7 +515,7 @@ async function findOrganizationByWorkosOrgId(
   return result.rows[0] ?? null;
 }
 
-async function upsertWorkosUser(pool: pg.Pool, input: WorkosUserPayload): Promise<string> {
+async function upsertWorkosUser(pool: pg.Pool, input: WorkosUserPayload): Promise<string | null> {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -519,18 +523,23 @@ async function upsertWorkosUser(pool: pg.Pool, input: WorkosUserPayload): Promis
     const existingUserId = await findUserIdByWorkosUserId(client, input.workosUserId);
     if (existingUserId) {
       await assertNotBootstrapProtectedUser(client, existingUserId);
-      await client.query(
+      const updated = await client.query(
         `UPDATE identity.users
          SET email = $1,
              name = COALESCE($2, name),
              status = CASE
-               WHEN status IN ('suspended', 'deleted') AND $3 = 'active' THEN status
+               WHEN status = 'suspended' AND $3 = 'active' THEN status
                ELSE $3
              END,
              updated_at = now()
-         WHERE id = $4`,
+         WHERE id = $4 AND status <> 'deleted'`,
         [input.email, input.name ?? null, input.status, existingUserId],
       );
+      // A deleted account keeps its blanked details: late WorkOS events change nothing (VAY-2272).
+      if (updated.rowCount === 0) {
+        await client.query("COMMIT");
+        return null;
+      }
       await client.query(
         `UPDATE identity.external_identities
          SET provider_email = $1,
@@ -577,10 +586,13 @@ async function upsertWorkosUser(pool: pg.Pool, input: WorkosUserPayload): Promis
 async function upsertWorkosOrganization(
   pool: pg.Pool,
   input: WorkosOrganizationPayload,
-): Promise<string> {
-  const existing = await findOrganizationIdByWorkosOrgId(pool, input.workosOrgId);
+): Promise<string | null> {
+  const stored = await findOrganizationByWorkosOrgId(pool, input.workosOrgId);
+  // A closed creator or affiliate workspace keeps its blanked name and slug (VAY-2272).
+  if (stored && !isActiveOrganizationKind(stored.kind)) return null;
+  const existing = stored?.id;
   if (existing) {
-    await pool.query(
+    const updated = await pool.query(
       `UPDATE identity.organizations
        SET name = $1,
            slug = $2,
@@ -590,10 +602,10 @@ async function upsertWorkosOrganization(
            END,
            workos_external_id = COALESCE($4, workos_external_id),
            updated_at = now()
-       WHERE id = $5`,
+       WHERE id = $5 AND kind IN ('platform', 'hotel_group')`,
       [input.name, input.slug, input.status, input.externalId ?? null, existing],
     );
-    return existing;
+    return updated.rowCount === 0 ? null : existing;
   }
 
   const created = await pool.query<{ id: string }>(
@@ -611,10 +623,16 @@ async function upsertWorkosOrganization(
 async function upsertWorkosMembership(
   pool: pg.Pool,
   input: WorkosMembershipPayload,
-): Promise<{ userId: string; organizationId: string }> {
-  const userId = await findUserIdByWorkosUserId(pool, input.workosUserId);
+): Promise<{ userId: string; organizationId: string } | null> {
   const organization = await findOrganizationByWorkosOrgId(pool, input.workosOrgId);
-  if (!userId || !organization) {
+  if (!organization) {
+    throw new Error("WorkOS membership references an unknown user or organization");
+  }
+  // No membership in a retired creator or affiliate workspace is written again (VAY-2272),
+  // also when migration 0500 already removed the member.
+  if (!isActiveOrganizationKind(organization.kind)) return null;
+  const userId = await findUserIdByWorkosUserId(pool, input.workosUserId);
+  if (!userId) {
     throw new Error("WorkOS membership references an unknown user or organization");
   }
   const existingMembership = await pool.query<{ role_key: string }>(

@@ -76,6 +76,10 @@ describe.skipIf(!url)("public nearby live PostgreSQL gates", () => {
       [propertyId, revisionId, userId],
     );
     await admin.query(
+      "INSERT INTO booking.booking_settings(property_id,nearby_places_enabled) VALUES ($1,true)",
+      [propertyId],
+    );
+    await admin.query(
       `INSERT INTO hotel_catalog.property_nearby_curation(property_id,revision,saved_profile_revision,choices,custom_places)
       VALUES ($1,1,1,$2,$3)`,
       [
@@ -111,15 +115,19 @@ describe.skipIf(!url)("public nearby live PostgreSQL gates", () => {
     await admin.query("ROLLBACK");
     await admin.end();
   });
-  it("projects only public precision and saved choices", async () => {
+  it("projects only public precision and the host's own places", async () => {
     const result = await read();
     expect(result?.public.location).toEqual({
       mode: "approximate",
       latitude: -1.13,
       longitude: 1.01,
     });
-    expect(result?.public.places).toHaveLength(2);
-    expect(result?.public.places[0]).toMatchObject({ name: "Our beach", favorite: true });
+    // Guests get only the host's own places in v1 (VAY-2326), not the Google suggestion "cafe".
+    expect(result?.public).toMatchObject({
+      status: "ready",
+      places: [{ source: "custom", name: "Our beach", favorite: true }],
+    });
+    expect(result?.needsRefresh).toBe(false);
     const payload = JSON.stringify(result?.public);
     for (const forbidden of [
       propertyId,
@@ -127,6 +135,7 @@ describe.skipIf(!url)("public nearby live PostgreSQL gates", () => {
       "-1.125",
       "1.005",
       "hidden-beach",
+      "cafe",
       "profileRevision",
       "retryAfter",
     ])
@@ -161,15 +170,55 @@ describe.skipIf(!url)("public nearby live PostgreSQL gates", () => {
     await admin.query(sql);
     expect(await read()).toBeNull();
   });
-  it("expires discovery without removing custom choices and pauses stale curation", async () => {
+  it("never asks for a Google lookup, and pauses the host's places after a move until saved again", async () => {
     await admin.query(
-      "UPDATE hotel_catalog.property_nearby_discovery SET valid_until=now()-interval '1 second'",
+      "UPDATE hotel_catalog.property_nearby_discovery SET valid_until=now()-interval '1 second' WHERE property_id=$1",
+      [propertyId],
     );
+    expect(await read()).toMatchObject({ needsRefresh: false, public: { status: "ready" } });
     expect((await read())?.public.places).toHaveLength(1);
-    expect((await read())?.needsRefresh).toBe(true);
     await admin.query("UPDATE hotel_catalog.properties SET profile_revision=2 WHERE id=$1", [
       propertyId,
     ]);
-    expect((await read())?.public.places).toEqual([]);
+    expect(await read()).toMatchObject({
+      needsRefresh: false,
+      public: { status: "empty", places: [] },
+    });
+  });
+  it.each([
+    "UPDATE booking.booking_settings SET nearby_places_enabled=false WHERE property_id=$1",
+    "DELETE FROM booking.booking_settings WHERE property_id=$1",
+  ])("shows guests no places while Show nearby places is off (VAY-2326): %s", async (sql) => {
+    await admin.query(sql, [propertyId]);
+    expect(await read()).toMatchObject({
+      needsRefresh: false,
+      public: { status: "hidden", location: null, places: [], categories: [] },
+    });
+  });
+  it("lists the host's places in the host's order with their categories (VAY-2326)", async () => {
+    const music = { id: randomUUID(), name: "Live music", color: "pink", icon: "musical-note" };
+    const jazz = {
+      ...custom,
+      id: randomUUID(),
+      name: "Jazz club",
+      category: music.id,
+      favorite: false,
+    };
+    await admin.query(
+      `UPDATE hotel_catalog.property_nearby_curation
+       SET custom_places=$2, custom_categories=$3, category_names='{"food":"Street food"}' WHERE property_id=$1`,
+      [propertyId, JSON.stringify([jazz, custom]), JSON.stringify([music])],
+    );
+    const nearby = (await read())?.public;
+    expect(
+      nearby?.places.map((place) => (place.source === "custom" ? place.name : place.placeId)),
+    ).toEqual(["Jazz club", "Our beach"]);
+    expect(nearby?.categories).toEqual([
+      { id: "food", name: "Street food", color: "orange", icon: "cake" },
+      { id: "nature", name: null, color: "teal", icon: "sun" },
+      { id: "activities", name: null, color: "purple", icon: "camera" },
+      { id: "transport", name: null, color: "slate", icon: "map" },
+      music,
+    ]);
   });
 });

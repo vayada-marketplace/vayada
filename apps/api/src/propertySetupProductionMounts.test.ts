@@ -23,10 +23,6 @@ describe("adaptive property setup production mounts", () => {
         repository: { getState: ownerPort, close } as never,
         mediaCommands: { replacePresentation: ownerPort } as never,
       },
-      marketplaceHotelCollaborationPreferences: {
-        commandPort: { replaceHotelCollaborationPreferences: ownerPort },
-        readPort: { getHotelCollaborationPreferences: ownerPort },
-      },
       bookingDesign: {
         commandPort: { upsertDesign: ownerPort },
         propertyAccessRepository,
@@ -43,6 +39,7 @@ describe("adaptive property setup production mounts", () => {
           getPublicationStatus: ownerPort,
         },
         readinessProvider: { getBookingReadiness: ownerPort },
+        publicSiteServesPublications: true,
       },
       pmsRoomPublication: {
         mediaCommandPort: { assignRoomTypeMedia: ownerPort },
@@ -54,10 +51,9 @@ describe("adaptive property setup production mounts", () => {
     for (const url of [
       `/api/hotel-setup/properties/${propertyId}/route`,
       `/api/hotel-setup/properties/${propertyId}/steps/present-hotel`,
-      `/api/marketplace/properties/${propertyId}/hotel-collaboration-preferences`,
       `/api/booking/properties/${propertyId}/booking-design`,
       `/api/booking/properties/${propertyId}/booking-design/readiness`,
-      `/api/hotel-setup/properties/${propertyId}/publications/booking/${propertyId}`,
+      `/api/hotel-setup/properties/${propertyId}/publications/booking`,
       `/api/pms/properties/${propertyId}/room-publication-snapshot`,
     ]) {
       const response = await app.inject({ method: "GET", url });

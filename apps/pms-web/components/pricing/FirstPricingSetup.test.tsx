@@ -2,6 +2,7 @@ import React from "react";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, expect, it, vi } from "vitest";
 import { FirstPricingSetup, firstPricingInput } from "./FirstPricingSetup";
+import { defaultPricingFormLook, FirstPricingSetup as SharedFirstPricingSetup } from "@vayada/product-onboarding/FirstPricingSetup";
 const id = "61000000-0000-4000-8000-000000000001";
 const room = { roomTypeId: id, name: "Double", capacity: { total: 2, adults: 2, children: 1 } };
 const values = { mode: "flat", occupancy: [], included: { adults: "", adjustments: [] }, methods: ["pay_at_property"] as ("card" | "pay_at_property")[], room: id, currency: "EUR", base: "123.45", adultAge: "12", childPrice: "0", countChildren: "yes", minimum: "1", maximum: "", cancellation: "flexible", freeDays: "7", payment: "full" };
@@ -13,6 +14,16 @@ it("builds exact explicit configuration without borrowing old prices or policies
   expect(terms).toMatchObject({ expectedRevision: null, payment: { kind: "full", acceptedMethods: ["pay_at_property"] }, cancellation: { terms: { freeCancellationDeadlineDays: 7 } } });
   for (const invalid of [{ base: "0" }, { base: "1.001" }, { adultAge: "19" }, { countChildren: "" }, { payment: "" }, { methods: [] }, { freeDays: "366" }, { minimum: "" }, { currency: "BAD" }])
     expect(() => firstPricingInput(id, room, id, { ...values, ...invalid })).toThrow();
+});
+it("writes a rate's Paid when booking choice from the ticked ways to pay (VAY-2205)", () => {
+  const both = { ...values, methods: ["pay_at_property", "card"] as ("card" | "pay_at_property")[] };
+  expect(firstPricingInput(id, room, id, { ...both, payment: "nothing" }).terms.payment).toEqual({ kind: "full", acceptedMethods: ["pay_at_property"] });
+  expect(firstPricingInput(id, room, id, { ...both, payment: "full_stay" }).terms.payment).toEqual({ kind: "full", acceptedMethods: ["card"] });
+  expect(firstPricingInput(id, room, id, { ...both, payment: "full" }).terms.payment).toEqual({ kind: "full", acceptedMethods: ["pay_at_property", "card"] });
+  expect(() => firstPricingInput(id, room, id, { ...values, payment: "full_stay" })).toThrow();
+  expect(() => firstPricingInput(id, room, id, { ...both, methods: ["card"], payment: "nothing" })).toThrow();
+  expect(() => firstPricingInput(id, room, id, { ...both, cancellation: "non_refundable", freeDays: "", payment: "nothing" })).toThrow();
+  expect(firstPricingInput(id, room, id, { ...both, cancellation: "non_refundable", freeDays: "", payment: "full_stay" }).terms.payment).toEqual({ kind: "full", acceptedMethods: ["card"] });
 });
 it("starts without policy defaults, requires input, and disables every control while pending", async () => {
   vi.stubGlobal("React", React); const onCreate = vi.fn(), onDirty = vi.fn(); let view!: ReactTestRenderer;
@@ -64,4 +75,16 @@ it("validates included-adult setup before returning a policy command", () => {
   const result = firstPricingInput(id, three, id, { ...values, mode: "included_guests", base: "130", included });
   expect(result.configuration.offers[0].price).toMatchObject({ calendar: { base: { mode: "included_guests", baseGuests: 2, adjustments: [{ deltaMinor: "-3000" }, { deltaMinor: "0" }, { basisPoints: 2500 }] } } });
   expect(() => firstPricingInput(id, three, id, { ...values, mode: "included_guests", included: { adults: "2", adjustments: [] } })).toThrow();
+});
+it("uses the Room Details look in PMS and keeps onboarding's look by default (VAY-2122)", async () => {
+  vi.stubGlobal("React", React); let view!: ReactTestRenderer;
+  const props = { propertyId: id, rooms: [room], disabled: false, onCreate: vi.fn(), onDirty: vi.fn() };
+  await act(async () => { view = create(<FirstPricingSetup {...props} />); });
+  expect(view.root.findByType("button").props.className).toContain("bg-primary-600");
+  expect(view.root.findByProps({ "aria-label": "Room type" }).props.className).toContain("bg-gray-50");
+  act(() => view.unmount());
+  await act(async () => { view = create(<SharedFirstPricingSetup {...props} t={(key: string) => key} />); });
+  expect(view.root.findByType("button").props.className).toBe(defaultPricingFormLook.button);
+  expect(defaultPricingFormLook.button).toContain("bg-emerald-700");
+  act(() => view.unmount());
 });

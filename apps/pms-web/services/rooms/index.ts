@@ -92,6 +92,11 @@ export interface RoomType {
   locationAddress: string;
   latitude: number | null;
   longitude: number | null;
+  /** How guests see the room's place (VAY-2321); undefined until the host chooses (see roomLocationSource). */
+  locationSource?: RoomLocationSource;
+  locationPrecision?: RoomLocationPrecision;
+  locationArea?: string;
+  showMapInDetails?: boolean;
   amenities: string[];
   images: RoomImageReference[];
   roomMediaRevision: number;
@@ -144,6 +149,10 @@ export interface RoomTypeCreate {
   locationAddress?: string;
   latitude?: number | null;
   longitude?: number | null;
+  locationSource?: RoomLocationSource;
+  locationPrecision?: RoomLocationPrecision;
+  locationArea?: string;
+  showMapInDetails?: boolean;
   amenities?: string[];
   images?: RoomImageReference[];
   bedType?: string;
@@ -326,10 +335,23 @@ export interface RoomTypeRetirementImpact {
       | "active_reservations"
       | "active_physical_units"
       | "future_inventory"
-      | "active_publication";
+      | "active_publication"
+      // What still stops a Delete that does the cleanup (VAY-2132).
+      | "channel_mapping"
+      | "last_room_type"
+      | "calendar_not_current"
+      | "protected_inventory"
+      | "unavailable_units";
     affectedCount: number;
     action: string;
   }>;
+  /** Present where Delete also retires the rooms, closes the future nights and leaves the calendar. */
+  cleanup?: {
+    physicalUnits: number;
+    futureNights: number;
+    roomBlocks: number;
+    linkedGroups: number;
+  };
 }
 
 export interface RoomCreate {
@@ -457,6 +479,7 @@ function toRoomType(propertyId: string, roomType: PmsOperationsRoomType): RoomTy
     locationAddress: asString(roomType.attributes.locationAddress),
     latitude: asNullableNumber(roomType.attributes.latitude),
     longitude: asNullableNumber(roomType.attributes.longitude),
+    ...roomLocationDisplay(roomType.attributes),
     amenities: roomAmenityLabels(roomType.amenities),
     images: roomType.media.map((image) =>
       image.altText === undefined
@@ -622,7 +645,7 @@ export const roomsService = {
 
   create: async (data: RoomTypeCreate) => {
     const propertyId = await resolveSelectedPmsPropertyId("creating room type");
-    // The same room-facts command as hotel setup; prices are published from PMS → Pricing.
+    // The same room-facts command as hotel setup; prices are published from the room's Prices tab.
     const facts = roomTypeFactsFromForm(data);
     const amenities = roomAmenityKeys(data.amenities ?? []);
     const location = roomTypeUpdatePayload(data);
@@ -653,7 +676,11 @@ export const roomsService = {
           }
           throw error;
         }
-        if (location.locationAddress || location.latitude != null || location.longitude != null) {
+        if (
+          Object.values(location).some(
+            (value) => value !== undefined && value !== null && value !== "",
+          )
+        ) {
           await pmsOperationsRoomsReadService.updateRoomType(propertyId, roomTypeId, location);
         }
         // Confirming, even an empty list, marks the amenities reviewed for room publication.
@@ -752,9 +779,17 @@ export const roomsService = {
     return { roomType: current, pricesNeedPublishing: facts !== null || location !== null };
   },
 
-  delete: async (id: string) => {
+  /** What Delete would do, and what still stops it, for the confirmation. */
+  deleteImpact: async (id: string) => {
     const propertyId = await resolveSelectedPmsPropertyId("retiring room type");
-    const impact = await pmsOperationsRoomsReadService.inspectRoomTypeRetirement(propertyId, id);
+    return pmsOperationsRoomsReadService.inspectRoomTypeRetirement(propertyId, id);
+  },
+
+  /** Retires the room type; `shown` is the impact a confirmation already read (VAY-2132). */
+  delete: async (id: string, shown?: RoomTypeRetirementImpact) => {
+    const propertyId = await resolveSelectedPmsPropertyId("retiring room type");
+    const impact =
+      shown ?? (await pmsOperationsRoomsReadService.inspectRoomTypeRetirement(propertyId, id));
     if (!impact.canRetire) throw new RoomTypeRetirementBlockedError(impact);
     await runRoomTypeLifecycleCommand(
       ["retire", propertyId, id, impact.version],
@@ -893,6 +928,14 @@ function changedRoomLocation(next: RoomTypeUpdate, saved: RoomType): RoomTypeUpd
   }
   if ((next.latitude ?? null) !== saved.latitude) location.latitude = next.latitude ?? null;
   if ((next.longitude ?? null) !== saved.longitude) location.longitude = next.longitude ?? null;
+  // Only choices that change what is saved: a default shown, or a choice made and undone, is not written, so
+  // room_attributes (which older published prices fingerprint) stays as it was (VAY-2321).
+  for (const key of ROOM_LOCATION_DISPLAY_KEYS) {
+    const effective = (room: RoomTypeUpdate) => room[key] ?? ROOM_LOCATION_DISPLAY_DEFAULTS[key];
+    if (next[key] !== undefined && effective(next) !== effective(saved)) {
+      Object.assign(location, { [key]: next[key] });
+    }
+  }
   return Object.keys(location).length > 0 ? location : null;
 }
 
@@ -1363,7 +1406,40 @@ function roomTypeUpdatePayload(data: RoomTypeUpdate) {
   if (Object.hasOwn(data, "locationAddress")) payload.locationAddress = data.locationAddress;
   if (Object.hasOwn(data, "latitude")) payload.latitude = data.latitude ?? null;
   if (Object.hasOwn(data, "longitude")) payload.longitude = data.longitude ?? null;
+  for (const key of ROOM_LOCATION_DISPLAY_KEYS) {
+    if (data[key] !== undefined) Object.assign(payload, { [key]: data[key] });
+  }
   return payload;
+}
+
+export type RoomLocationSource = "property" | "custom";
+export type RoomLocationPrecision = "exact" | "approximate";
+const ROOM_LOCATION_DISPLAY_KEYS = [
+  "locationSource",
+  "locationPrecision",
+  "locationArea",
+  "showMapInDetails",
+] as const;
+// What a key the host never chose means. A missing locationSource is derived from the pin (the field restores
+// it to undefined when the host goes back to the derived choice), so it has no default here.
+const ROOM_LOCATION_DISPLAY_DEFAULTS = {
+  locationSource: undefined,
+  locationPrecision: "exact",
+  locationArea: "",
+  showMapInDetails: true,
+} as const;
+
+/** The VAY-2321 choices as saved; a key the host never chose stays undefined, so a save leaves it unwritten. */
+function roomLocationDisplay(attributes: Record<string, unknown>): Partial<RoomType> {
+  const { locationSource, locationPrecision, locationArea, showMapInDetails } = attributes;
+  return {
+    ...(locationSource === "property" || locationSource === "custom" ? { locationSource } : {}),
+    ...(locationPrecision === "exact" || locationPrecision === "approximate"
+      ? { locationPrecision }
+      : {}),
+    ...(typeof locationArea === "string" ? { locationArea } : {}),
+    ...(typeof showMapInDetails === "boolean" ? { showMapInDetails } : {}),
+  };
 }
 
 export function roomTypeUpdateForm(r: RoomType): RoomTypeUpdate {

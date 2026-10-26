@@ -9,6 +9,8 @@ import {
 import { parsePropertyPricingCurrencySnapshot, type PmsPricingReadPort } from "@vayada/domain-pms";
 
 import type { PropertySetupFinanceOwnerScopePort } from "../domains/propertySetupFinanceOwnerScope.js";
+import type { BillingPlanReadPort } from "../domains/financeBillingConfigReadModel.js";
+import type { FinanceManualPaymentReadinessReadPort } from "../domains/financeManualPaymentReadiness.js";
 import type {
   PropertySetupOwnerStateProviderPort,
   PropertySetupOwnerStateRequest,
@@ -19,9 +21,13 @@ export type PropertySetupFinanceStateOptions = Readonly<{
   scope: PropertySetupFinanceOwnerScopePort;
   finance: FinancePaymentReadinessReadPort;
   pricing: Pick<PmsPricingReadPort, "getPropertyPricingCurrency">;
+  /** Bank transfer and PayPal, only while their acceptance is on (VAY-2139). */
+  manualPayments?: FinanceManualPaymentReadinessReadPort;
+  /** Null until the hotel has a usable billing plan; Payments isn't done without one (VAY-2171). */
+  billingPlan: BillingPlanReadPort;
 }>;
 
-const EXTERNAL_PENDING_BLOCKERS = new Set<FinancePaymentReadinessBlocker>([
+const EXTERNAL_PENDING_BLOCKERS = new Set<SetupPaymentBlockerCode>([
   "online_card_execution_unavailable",
   "provider_capability_lost",
   "bank_transfer_contract_unavailable",
@@ -32,9 +38,13 @@ const PAYMENT_BLOCKER_MESSAGES: Partial<Record<SetupPaymentBlockerCode, string>>
     "Online card payments are waiting for verified execution evidence.",
   provider_capability_lost: "The payment provider withdrew card capability.",
   bank_transfer_contract_unavailable: "Bank transfer is waiting for a completed payout contract.",
+  billing_plan_not_selected: "Choose your vayada plan.",
 };
 
-type SetupPaymentBlockerCode = FinancePaymentReadinessBlocker | "ready_payment_method_missing";
+type SetupPaymentBlockerCode =
+  | FinancePaymentReadinessBlocker
+  | "ready_payment_method_missing"
+  | "billing_plan_not_selected";
 
 export function createPropertySetupFinanceStateProvider(
   options: PropertySetupFinanceStateOptions,
@@ -47,23 +57,31 @@ export function createPropertySetupFinanceStateProvider(
         const confirmed = await snapshot(options, request);
         if (!first || !confirmed || first.identity !== confirmed.identity) return failure();
         const sourceRevision = `payment-methods:${first.paymentMethodsRevision}`;
+        const paymentState =
+          first.paymentMethodsRevision === 0
+            ? "not_started"
+            : first.selectedMethodCount === 0
+              ? first.manualPaymentReady
+                ? "complete"
+                : "saved"
+              : first.bookingPaymentReady
+                ? "complete"
+                : "blocked";
+        // A step with saved payments still waits for the plan; earlier states carry no blockers.
+        const codes =
+          first.planChosen || (paymentState !== "complete" && paymentState !== "blocked")
+            ? first.blockingCodes
+            : [...first.blockingCodes, "billing_plan_not_selected" as const];
         return found({
           organizationId: request.organizationId,
           propertyId: request.propertyId,
           stepId: "payments",
           product: "finance",
           ownerDomain: "finance",
-          state:
-            first.paymentMethodsRevision === 0
-              ? "not_started"
-              : first.selectedMethodCount === 0
-                ? "saved"
-                : first.bookingPaymentReady
-                  ? "complete"
-                  : "blocked",
+          state: codes.length > 0 ? "blocked" : paymentState,
           sourceRevision,
           currentBaseRevisions: first.currentBaseRevisions,
-          blockers: first.blockingCodes.map((code) => paymentBlocker(code, sourceRevision)),
+          blockers: codes.map((code) => paymentBlocker(code, sourceRevision)),
         });
       } catch {
         return failure();
@@ -110,10 +128,21 @@ async function snapshot(
     "finance.payment_methods": `payment-methods:${paymentMethodsRevision}`,
     "pms.pricing_settings": `pricing:${pricingRevision}`,
   });
+  // A hotel paid only by bank transfer or PayPal selects neither readiness method.
+  const manualPaymentReady =
+    !!finance &&
+    !finance.bookingPaymentReady &&
+    finance.selectedMethodCount === 0 &&
+    !!options.manualPayments &&
+    (await options.manualPayments.readyMethods({ propertyId: request.propertyId })).length > 0;
   const payload = {
+    planChosen:
+      (await options.billingPlan.getBillingConfig(request.propertyId, request.organizationId)) !==
+      null,
     paymentMethodsRevision,
     selectedMethodCount: finance?.selectedMethodCount ?? 0,
     bookingPaymentReady: finance?.bookingPaymentReady ?? false,
+    manualPaymentReady,
     blockingCodes: blockingPaymentCodes(finance),
     currentBaseRevisions,
   };
