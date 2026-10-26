@@ -90,6 +90,7 @@ test("accepts the extras a guest asked for, to charge at check-in", async ({ pag
   await expect(card.getByText("€108.00")).toBeVisible();
   await expect(card.getByText("To charge at check-in")).toBeVisible();
   await expect(card.getByText("€133.00")).toBeVisible();
+  await card.screenshot({ path: testInfo.outputPath("extras-pending-1440.png") });
 
   await card.getByRole("button", { name: "Accept extras" }).click();
   await expect(card.getByText(/^Extras accepted on (21 Oct|Oct 21)$/)).toBeVisible();
@@ -98,6 +99,10 @@ test("accepts the extras a guest asked for, to charge at check-in", async ({ pag
   // The earlier accepted extras are still there to charge.
   await expect(cards.nth(1).getByText(/^Extras accepted on (19 Oct|Oct 19)$/)).toBeVisible();
   await expect(cards.nth(1).getByText("Late check-out")).toBeVisible();
+  await cards
+    .first()
+    .locator("xpath=..")
+    .screenshot({ path: testInfo.outputPath("extras-accepted-1440.png") });
   expect(decisions).toEqual([
     {
       decision: "accept",
@@ -108,7 +113,9 @@ test("accepts the extras a guest asked for, to charge at check-in", async ({ pag
   await assertHealthy();
 });
 
+// On a phone, where the card spans the screen.
 test("declines the extras with a reason for the guest", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
   const assertHealthy = watchPageHealth(page, testInfo);
   const decisions = await mockExtras(page);
 
@@ -116,6 +123,7 @@ test("declines the extras with a reason for the guest", async ({ page }, testInf
   const card = page.getByTestId("extras-request-card").first();
   await card.getByRole("button", { name: "Decline", exact: true }).click();
   await card.getByLabel("Reason for the guest (optional)").fill("Our shuttle is fully booked.");
+  await card.screenshot({ path: testInfo.outputPath("extras-declining-390.png") });
   await card.getByRole("button", { name: "Decline extras" }).click();
   await expect(
     page.getByText(
