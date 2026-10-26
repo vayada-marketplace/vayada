@@ -704,7 +704,8 @@ describe.skipIf(!url)("Channex worker effective permissions", () => {
     // connection_scope, so a jobs policy that read them back would recurse without end.
     const enabling = randomUUID(),
       enableJob = randomUUID(),
-      bare = randomUUID();
+      bare = randomUUID(),
+      bareExternal = randomUUID();
     await owner.query(
       "INSERT INTO hotel_catalog.properties(id,public_id,display_name) VALUES($1::uuid,$1::text,'Enabling'),($2::uuid,$2::text,'Bare')",
       [enabling, bare],
@@ -712,7 +713,7 @@ describe.skipIf(!url)("Channex worker effective permissions", () => {
     // An owned claim without a connection row: the worker must not be able to add one.
     await owner.query(
       "INSERT INTO pms.channel_binding_claims(property_id,provider,external_property_id,claim_state,claim_source) VALUES($1,'channex',$2,'active','repair')",
-      [bare, randomUUID()],
+      [bare, bareExternal],
     );
     await owner.query(
       `INSERT INTO platform.jobs(id,job_key,queue_name,job_type,tenant_scope,property_id,resource_product,resource_type,resource_id,payload)
@@ -809,9 +810,11 @@ describe.skipIf(!url)("Channex worker effective permissions", () => {
       };
       expect(await attempt(insertClaim(enabling))).toBe("allowed");
       expect(await attempt(insertClaim(unclaimed))).toMatch(/row-level security/);
+      // The connection names the claim's own external id: 0128's binding trigger (a BEFORE
+      // trigger, so ahead of the row-security check) accepts it, and row security must refuse.
       expect(
         await attempt(
-          `INSERT INTO pms.channel_connections(property_id,provider,connection_status,external_property_id) VALUES('${bare}','channex','connected','${randomUUID()}')`,
+          `INSERT INTO pms.channel_connections(property_id,provider,connection_status,external_property_id) VALUES('${bare}','channex','connected','${bareExternal}')`,
         ),
       ).toMatch(/row-level security/);
     } finally {
