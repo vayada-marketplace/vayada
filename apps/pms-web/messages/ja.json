@@ -777,6 +777,7 @@
   "settings.checkIn.save": "変更を保存",
   "settings.checkIn.loading": "チェックイン設定を読み込み中…",
   "settings.checkIn.readOnly": "この設定は閲覧できます。変更できるのは設定へのアクセス権を持つオーナーとマネージャーのみです。",
+  "settings.checkIn.checksReadOnly": "追加確認を変更できるのは、運用を管理できるスタッフのみです。",
   "settings.checkIn.overview": "チェックインの手順",
   "settings.checkIn.step1.title": "到着",
   "settings.checkIn.step1.description": "チェックイン開始時にスタッフが最初に見る内容。",

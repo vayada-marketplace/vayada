@@ -781,6 +781,7 @@
   "settings.checkIn.save": "Guardar cambios",
   "settings.checkIn.loading": "Cargando ajustes de check-in…",
   "settings.checkIn.readOnly": "Puedes ver estos ajustes; solo los propietarios y gerentes con acceso a ajustes pueden cambiarlos.",
+  "settings.checkIn.checksReadOnly": "Solo el personal que puede gestionar las operaciones puede cambiar las comprobaciones extra.",
   "settings.checkIn.overview": "Pasos del check-in",
   "settings.checkIn.step1.title": "Llegada",
   "settings.checkIn.step1.description": "Lo primero que ve el equipo al empezar un check-in.",

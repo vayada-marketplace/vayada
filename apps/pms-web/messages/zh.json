@@ -777,6 +777,7 @@
   "settings.checkIn.save": "保存更改",
   "settings.checkIn.loading": "正在加载入住设置…",
   "settings.checkIn.readOnly": "你可以查看这些设置；只有拥有设置权限的业主和经理可以更改。",
+  "settings.checkIn.checksReadOnly": "只有可管理运营的员工才能更改额外检查。",
   "settings.checkIn.overview": "入住步骤",
   "settings.checkIn.step1.title": "到达",
   "settings.checkIn.step1.description": "员工开始入住时首先看到的内容。",

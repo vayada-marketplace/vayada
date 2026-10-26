@@ -1289,6 +1289,7 @@
   "settings.checkIn.save": "Änderungen speichern",
   "settings.checkIn.loading": "Check-in-Einstellungen werden geladen…",
   "settings.checkIn.readOnly": "Sie können diese Einstellungen sehen; ändern können sie nur Inhaber und Manager mit Zugriff auf die Einstellungen.",
+  "settings.checkIn.checksReadOnly": "Die zusätzlichen Prüfungen können nur Mitarbeitende mit Betriebsrechten ändern.",
   "settings.checkIn.overview": "Check-in-Schritte",
   "settings.checkIn.step1.title": "Ankunft",
   "settings.checkIn.step1.description": "Was Ihr Team zuerst sieht, wenn es einen Check-in beginnt.",
