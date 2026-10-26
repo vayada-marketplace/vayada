@@ -850,6 +850,13 @@ function loadChannexManagementConfig(env: NodeJS.ProcessEnv): ChannexManagementC
     );
   if (offerAriDeliveryEnabled && scope === "claimed" && !claimedAri)
     throw new Error("PMS_CHANNEX_OFFER_ARI_DELIVERY_ENABLED needs the claimed ARI scope");
+  // Delivery only runs after activation, which needs the published-offer bundle; without it the
+  // switch would be inert while the worker boundary demanded the delivery grants.
+  if (offerAriDeliveryEnabled && !stagingInventoryEnabled && !claimedAri) {
+    throw new Error(
+      "PMS_CHANNEX_OFFER_ARI_DELIVERY_ENABLED requires the published-offer activation bundle",
+    );
+  }
   const legacyBookingMode = (
     readOptionalEnv(env, "CHANNEX_ADMIN_MANUAL_BOOKING_SYNC_MODE") ?? "legacy-owned"
   )

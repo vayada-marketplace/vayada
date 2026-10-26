@@ -163,7 +163,13 @@ export function createChannexManagementProvider(config: {
           ) => Promise<Response>,
         ): Promise<
           | { kind: "retained"; deliveryId: string }
-          | { kind: "receipt_pending"; deliveryId: string; persist: () => Promise<unknown> }
+          | { kind: "delivery_failed"; deliveryId: string; reason: string }
+          | {
+              kind: "receipt_pending";
+              deliveryId: string;
+              persist: () => Promise<unknown>;
+              failed: string | null;
+            }
           | { kind: "unavailable"; reason: string }
         >;
       }
@@ -232,17 +238,17 @@ export function createChannexManagementProvider(config: {
         config.prepareRoomAvailability,
       ];
       // VAY-2108 D6: restrictions live in the published configuration and reach Channex through
-      // the ongoing offer delivery of a full sync. A restriction-only job (the retired 0167/0177
+      // the published-offer bundle of a full sync. A restriction-only job (the retired 0167/0177
       // trigger shape, VAY-2208) has nothing of its own to send once that bundle exists; it must
-      // never reach the legacy plan, which has no pricing.
+      // never reach the legacy plan, which has no pricing. It sent nothing, so it leaves the ARI
+      // status alone.
       if (
         job.input.operationType === "sync_ari" &&
         job.input.restrictionsOnly &&
         ariContinuationHooks.every(Boolean) &&
-        config.reconcileOfferDeliveries &&
-        config.prepareOfferDelivery
+        config.activatePublishedOffers
       )
-        return { ok: true };
+        return { ok: true, ariStatusUnchanged: true };
       if (
         job.input.publishedOffer &&
         (job.input.operationType !== "provision" ||
@@ -415,27 +421,40 @@ export function createChannexManagementProvider(config: {
             if (prepared.kind === "room_availability_current") {
               if (config.activatePublishedOffers) {
                 const activated = await config.activatePublishedOffers(lease);
-                if (activated.kind === "all_targets_active") {
-                  if (!config.reconcileOfferDeliveries || !config.prepareOfferDelivery)
-                    return { ok: true };
-                  // VAY-2108 D3: after activation, keep every active rate plan current.
-                  const delivered = await config.reconcileOfferDeliveries(lease, readClosedUpload);
+                // VAY-2108 D3: after activation, keep every active rate plan current. A target
+                // whose configuration or binding changed (D5) does not block the others: the
+                // delivery step skips and reports it per target. Only a full sync_ari job
+                // delivers; a provisioning job's work ends at activation (0520 guard).
+                const deliveries =
+                  job.input.operationType === "sync_ari" &&
+                  config.reconcileOfferDeliveries &&
+                  config.prepareOfferDelivery
+                    ? {
+                        reconcile: config.reconcileOfferDeliveries,
+                        prepare: config.prepareOfferDelivery,
+                      }
+                    : null;
+                const changedTarget =
+                  activated.kind === "unavailable" &&
+                  (activated.reason === "active_offer_configuration_changed" ||
+                    activated.reason === "active_offer_binding_changed");
+                if (activated.kind === "all_targets_active" || (changedTarget && deliveries)) {
+                  if (!deliveries) return { ok: true };
+                  const delivered = await deliveries.reconcile(lease, readClosedUpload);
                   if (delivered.kind !== "pending_deliveries_reconciled")
                     return failure(
-                      delivered.reason === "delivery_reconciliation_batch_pending" ||
-                        delivered.reason === "delivery_task_observation_unavailable" ||
-                        delivered.reason === "delivery_contention"
+                      transientDeliveryReason(delivered.reason)
                         ? "provider_unavailable"
                         : "invalid_state",
                       new Error("Saved Channex offer deliveries still require reconciliation."),
                     );
                   await input.onProgress?.();
-                  const delivery = await config.prepareOfferDelivery(lease);
+                  const delivery = await deliveries.prepare(lease);
                   if (delivery.kind === "offer_ari_current")
                     return { ok: true, skippedOfferTargets: delivery.skipped };
                   if (delivery.kind !== "prepared")
                     return failure(
-                      delivery.reason === "delivery_contention"
+                      transientDeliveryReason(delivery.reason)
                         ? "provider_unavailable"
                         : "invalid_state",
                       new Error("Channex offer delivery is unavailable."),
@@ -453,6 +472,11 @@ export function createChannexManagementProvider(config: {
                     });
                   });
                   if (sent.kind === "receipt_pending") await sent.persist();
+                  if (sent.kind === "delivery_failed" || (sent.kind === "receipt_pending" && sent.failed))
+                    return failure(
+                      "provider_unavailable",
+                      new Error("Channex offer delivery was not accepted."),
+                    );
                   if (sent.kind === "retained" || sent.kind === "receipt_pending")
                     return {
                       ok: false,
@@ -460,9 +484,7 @@ export function createChannexManagementProvider(config: {
                       attemptId: sent.deliveryId,
                     };
                   return failure(
-                    sent.reason === "delivery_stale" || sent.reason === "delivery_contention"
-                      ? "provider_unavailable"
-                      : "invalid_state",
+                    transientDeliveryReason(sent.reason) ? "provider_unavailable" : "invalid_state",
                     new Error("Channex offer delivery dispatch is unavailable."),
                   );
                 }
@@ -475,8 +497,9 @@ export function createChannexManagementProvider(config: {
                   );
                 // VAY-2108 D6: a hotel without published offer targets yet has sent its room
                 // availability and has no rates to deliver; the legacy plan has nothing for it.
-                if (config.reconcileOfferDeliveries && config.prepareOfferDelivery)
-                  return { ok: true };
+                // This holds with or without the delivery switch, so an owned hotel's scheduled
+                // sync never dead-letters before its first offer.
+                return { ok: true };
               }
             } else if (prepared.kind === "prepared") {
               const result = await prepared.dispatch(async (request, signal) => {
@@ -1138,6 +1161,24 @@ function requiredUrl(value: string): string {
 }
 
 const channexUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** VAY-2108 D3: delivery outcomes the next turn may clear on its own (contention, a moved lease
+ * or publication, a readback that is not final yet); everything else is a state the operator
+ * must look at. */
+function transientDeliveryReason(reason: string): boolean {
+  return [
+    "delivery_reconciliation_batch_pending",
+    "delivery_task_observation_unavailable",
+    "delivery_contention",
+    "delivery_stale",
+    "delivery_in_flight",
+    "lease_unavailable",
+    "sources_stale",
+    "owner_unavailable",
+    "target_unavailable",
+    "publication_missing",
+  ].includes(reason);
+}
 
 function allowedChannexReconciliationRead(url: URL, apiBaseUrl: string): boolean {
   if (url.origin !== new URL(apiBaseUrl).origin || url.hash || url.username || url.password)

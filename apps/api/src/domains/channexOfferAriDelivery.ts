@@ -178,11 +178,13 @@ async function reconcileDelivery(
     !receipt.hasWarnings &&
     receipt.taskIds.length > 0;
   if (!accepted) {
+    // A definitive provider refusal (any 4xx body shape) parks this body; 408/425/429 are
+    // transient like a 5xx or a transport error and are simply sent again.
     const rejected =
-      receipt.outcome === "complete_json" &&
       receipt.httpStatus !== null &&
       receipt.httpStatus >= 400 &&
-      receipt.httpStatus < 500;
+      receipt.httpStatus < 500 &&
+      ![408, 425, 429].includes(receipt.httpStatus);
     const settled = await settleDelivery(pool, lease, delivery.id, "reconciled", {
       schemaVersion: 1,
       completionBasis: rejected ? "provider_rejected" : "unverified",
@@ -587,12 +589,23 @@ async function prepareDispatch(pool: Pool, lease: ChannexPricingJobLeaseInput, c
       const persist = await (response === null
         ? prepareChannexOfferDeliveryTransportFailurePersistence(pool, correlation)
         : prepareChannexOfferDeliveryReceiptPersistence(pool, correlation, response));
+      // A transport failure or a 5xx is reported as a failed turn, so the worker retries with
+      // its backoff and attempt ceiling instead of re-sending every second; the receipt stays and
+      // the next reconciliation closes the delivery as unverified before the resend.
+      const failed =
+        response === null
+          ? ("transport" as const)
+          : response.status >= 500
+            ? ("provider_unavailable" as const)
+            : null;
       try {
         await persist();
-        return { kind: "retained" as const, deliveryId: claim.deliveryId };
       } catch {
-        return { kind: "receipt_pending" as const, persist, deliveryId: claim.deliveryId };
+        return { kind: "receipt_pending" as const, persist, deliveryId: claim.deliveryId, failed };
       }
+      return failed
+        ? { kind: "delivery_failed" as const, deliveryId: claim.deliveryId, reason: failed }
+        : { kind: "retained" as const, deliveryId: claim.deliveryId };
     },
   };
 }
@@ -651,6 +664,8 @@ async function withSerializable<T>(pool: Pool, run: (client: PoolClient) => Prom
     const code = (error as { code?: unknown })?.code;
     if (code === "55P03" || code === "40001" || code === "40P01" || code === "57014")
       return unavailable("delivery_contention");
+    // The 0520 guard refused the write (a lease or identity that moved under the claim).
+    if (code === "23514") return unavailable("delivery_refused");
     throw error;
   } finally {
     if (!committed) {

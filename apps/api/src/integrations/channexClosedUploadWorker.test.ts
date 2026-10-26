@@ -490,6 +490,83 @@ describe("closed upload worker gates", () => {
     expect(result).toMatchObject({ ok: false, code });
     expect(prepareOfferDelivery).not.toHaveBeenCalled();
   });
+  it("reports a transport failure or a 5xx as a retryable failed turn, never a continuation", async () => {
+    const f = setup();
+    for (const reason of ["transport", "provider_unavailable"]) {
+      const result = await createChannexManagementProvider({
+        ...f.config,
+        ...current,
+        reconcileOfferDeliveries: async () => ({
+          kind: "pending_deliveries_reconciled" as const,
+          count: 0,
+        }),
+        prepareOfferDelivery: async () => ({
+          kind: "prepared" as const,
+          deliveryId: "delivery",
+          targetId: "target",
+          dispatch: async () => ({ kind: "delivery_failed" as const, deliveryId: "delivery", reason }),
+        }),
+      }).execute(job, { workerId: "worker" });
+      expect(result).toMatchObject({ ok: false, code: "provider_unavailable" });
+    }
+  });
+  it("delivers the other targets when activation reports a changed one", async () => {
+    const f = setup(),
+      prepareOfferDelivery = vi.fn(async () => ({
+        kind: "offer_ari_current" as const,
+        targetCount: 2,
+        skipped: [{ targetId: "target", reason: "active_offer_configuration_changed" }],
+      }));
+    const result = await createChannexManagementProvider({
+      ...f.config,
+      ...current,
+      activatePublishedOffers: async () => ({
+        kind: "unavailable" as const,
+        reason: "active_offer_configuration_changed",
+      }),
+      reconcileOfferDeliveries: async () => ({
+        kind: "pending_deliveries_reconciled" as const,
+        count: 0,
+      }),
+      prepareOfferDelivery,
+    }).execute(job, { workerId: "worker" });
+    expect(result).toEqual({
+      ok: true,
+      skippedOfferTargets: [{ targetId: "target", reason: "active_offer_configuration_changed" }],
+    });
+    expect(prepareOfferDelivery).toHaveBeenCalledOnce();
+  });
+  it("ends a provisioning job at activation; only a full sync delivers", async () => {
+    const f = setup(),
+      prepareOfferDelivery = vi.fn();
+    const result = await createChannexManagementProvider({
+      ...f.config,
+      ...current,
+      reconcileOfferDeliveries: async () => ({
+        kind: "pending_deliveries_reconciled" as const,
+        count: 0,
+      }),
+      prepareOfferDelivery,
+      bootstrapPublishedOffer: async () => ({ kind: "ready" as const }),
+    }).execute(
+      {
+        ...job,
+        input: {
+          ...job.input,
+          operationType: "provision",
+          publishedOffer: {
+            roomTypeId: "room",
+            offerId: "flex",
+            publicationRevision: 1,
+            primaryOccupancy: 1,
+          },
+        },
+      },
+      { workerId: "worker" },
+    );
+    expect(result).toEqual({ ok: true });
+    expect(prepareOfferDelivery).not.toHaveBeenCalled();
+  });
   it("needs both delivery hooks and otherwise finishes at activation", async () => {
     const f = setup();
     const result = await createChannexManagementProvider({
@@ -516,17 +593,17 @@ describe("closed upload worker gates", () => {
       skipped: [],
     }),
   };
-  it("completes a restriction-only job without provider work when the bundle delivers", async () => {
+  it("completes a restriction-only job without provider work when the bundle activates", async () => {
     const f = setup();
     const result = await createChannexManagementProvider({
       ...f.config,
-      ...delivering,
+      activatePublishedOffers: current.activatePublishedOffers,
     }).execute({ ...job, input: { ...job.input, restrictionsOnly: true } }, { workerId: "worker" });
-    expect(result).toEqual({ ok: true });
+    expect(result).toEqual({ ok: true, ariStatusUnchanged: true });
     expect(f.reconcileClosedUploads).not.toHaveBeenCalled();
     expect(f.plan).not.toHaveBeenCalled();
   });
-  it("still fails a restriction-only job closed without the delivery hooks", async () => {
+  it("still fails a restriction-only job closed without the activation bundle", async () => {
     const f = setup();
     f.plan.mockRejectedValue(
       Object.assign(new Error("Pricing is unavailable"), { code: "PRICING_UNAVAILABLE" }),
@@ -538,12 +615,15 @@ describe("closed upload worker gates", () => {
     expect(result).toMatchObject({ ok: false });
     expect(f.plan).toHaveBeenCalledOnce();
   });
-  it("finishes a hotel without published targets after its availability, not in the legacy plan", async () => {
+  it.each([
+    ["with the delivery hooks", delivering],
+    ["before the delivery switch is on", {}],
+  ])("finishes a hotel without published targets after its availability, not in the legacy plan (%s)", async (_label, hooks) => {
     const f = setup();
     const result = await createChannexManagementProvider({
       ...f.config,
       ...current,
-      ...delivering,
+      ...hooks,
       activatePublishedOffers: async () => ({ kind: "no_targets" as const }),
     }).execute(job, { workerId: "worker" });
     expect(result).toEqual({ ok: true });
