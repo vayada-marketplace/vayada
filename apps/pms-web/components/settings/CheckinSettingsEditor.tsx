@@ -435,13 +435,13 @@ function RoomsAndGuestsSection({
       </Row>
       {/* Scrolls sideways inside its own box on a phone; relative keeps sr-only labels inside. */}
       <div className="relative overflow-x-auto border-t border-gray-200">
-        <table className="w-full min-w-[30rem] text-left text-sm">
+        <table className="w-full min-w-[20rem] text-left text-sm">
           <thead className="bg-gray-50 text-xs font-bold uppercase tracking-wide text-gray-500">
             <tr>
               <th scope="col" className="px-4 py-2.5 md:px-6">
                 {t("settings.checkIn.fieldColumn")}
               </th>
-              <th scope="col" className="w-20 px-2 py-2.5">
+              <th scope="col" className="w-16 px-2 py-2.5 md:w-20">
                 {t("settings.checkIn.showColumn")}
               </th>
               <th scope="col" className="w-24 px-2 py-2.5 pr-4 md:pr-6">
@@ -457,7 +457,7 @@ function RoomsAndGuestsSection({
                     {t(`settings.checkIn.field.${locked}`)}
                     <LockClosedIcon className="h-3.5 w-3.5 text-gray-500" aria-hidden="true" />
                   </span>
-                  <span className="text-xs text-gray-500">
+                  <span className="hidden text-xs text-gray-500 md:block">
                     {t("settings.checkIn.alwaysCollected")}
                   </span>
                 </th>
@@ -486,7 +486,7 @@ function RoomsAndGuestsSection({
                   <th scope="row" className="px-4 py-3 font-normal md:px-6">
                     <span className="font-semibold text-gray-900">{label}</span>
                     {(entry.field === "email" || entry.field === "phone") && (
-                      <span className="block text-xs text-gray-500">
+                      <span className="hidden text-xs text-gray-500 md:block">
                         {t("settings.checkIn.prefilledFromBooking")}
                       </span>
                     )}

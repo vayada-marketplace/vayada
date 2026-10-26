@@ -168,7 +168,12 @@ for (const [width, height] of [
     await expect(page.locator("main").getByRole("textbox").first()).toHaveValue(
       "City tax collected",
     );
-    // The guest fields table scrolls inside its own box; the page never does (sr-only labels too).
+    // Both guest-field columns fit, as on the approved 390 board; the page never scrolls sideways
+    // (sr-only labels too).
+    const tableOverflow = await page
+      .locator("main table")
+      .evaluate((table) => table.parentElement!.scrollWidth - table.parentElement!.clientWidth);
+    expect(tableOverflow).toBeLessThanOrEqual(0);
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
     );
