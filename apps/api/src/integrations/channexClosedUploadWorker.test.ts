@@ -516,17 +516,17 @@ describe("closed upload worker gates", () => {
       skipped: [],
     }),
   };
-  it("completes a restriction-only job without provider work when the bundle delivers", async () => {
+  it("completes a restriction-only job without provider work when the bundle activates", async () => {
     const f = setup();
     const result = await createChannexManagementProvider({
       ...f.config,
-      ...delivering,
+      activatePublishedOffers: current.activatePublishedOffers,
     }).execute({ ...job, input: { ...job.input, restrictionsOnly: true } }, { workerId: "worker" });
-    expect(result).toEqual({ ok: true });
+    expect(result).toEqual({ ok: true, ariStatusUnchanged: true });
     expect(f.reconcileClosedUploads).not.toHaveBeenCalled();
     expect(f.plan).not.toHaveBeenCalled();
   });
-  it("still fails a restriction-only job closed without the delivery hooks", async () => {
+  it("still fails a restriction-only job closed without the activation bundle", async () => {
     const f = setup();
     f.plan.mockRejectedValue(
       Object.assign(new Error("Pricing is unavailable"), { code: "PRICING_UNAVAILABLE" }),
@@ -538,12 +538,15 @@ describe("closed upload worker gates", () => {
     expect(result).toMatchObject({ ok: false });
     expect(f.plan).toHaveBeenCalledOnce();
   });
-  it("finishes a hotel without published targets after its availability, not in the legacy plan", async () => {
+  it.each([
+    ["with the delivery hooks", delivering],
+    ["before the delivery switch is on", {}],
+  ])("finishes a hotel without published targets after its availability, not in the legacy plan (%s)", async (_label, hooks) => {
     const f = setup();
     const result = await createChannexManagementProvider({
       ...f.config,
       ...current,
-      ...delivering,
+      ...hooks,
       activatePublishedOffers: async () => ({ kind: "no_targets" as const }),
     }).execute(job, { workerId: "worker" });
     expect(result).toEqual({ ok: true });
