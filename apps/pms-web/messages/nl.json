@@ -819,6 +819,7 @@
   "settings.checkIn.save": "Wijzigingen opslaan",
   "settings.checkIn.loading": "Check-in-instellingen laden…",
   "settings.checkIn.readOnly": "Je kunt deze instellingen bekijken; alleen eigenaren en managers met toegang tot instellingen kunnen ze wijzigen.",
+  "settings.checkIn.checksReadOnly": "Alleen medewerkers die de operatie mogen beheren, kunnen de extra controles wijzigen.",
   "settings.checkIn.overview": "Check-in-stappen",
   "settings.checkIn.step1.title": "Aankomst",
   "settings.checkIn.step1.description": "Wat medewerkers als eerste zien bij het starten van een check-in.",

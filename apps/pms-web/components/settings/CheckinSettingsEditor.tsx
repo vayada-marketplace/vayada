@@ -14,6 +14,7 @@ import type { BookingAddon } from "@/services/bookings";
 import { formatCurrency } from "@/lib/formatCurrency";
 import { useTranslation } from "@/lib/i18n";
 import { localizedErrorText } from "@/lib/i18n/localizedErrorText";
+import { usePmsAccess } from "@/lib/settings/PmsAccessContext";
 import {
   CHECKIN_SETTLEMENT_OPTIONS,
   checkinStepSummaries,
@@ -59,6 +60,10 @@ export function CheckinSettingsEditor() {
   const [canManage, setCanManage] = useState(false);
   const [catalog, setCatalog] = useState<BookingAddon[]>([]);
   const [checks, setChecks] = useState<CheckinChecklistStep[]>([]);
+  const [savedChecks, setSavedChecks] = useState<CheckinChecklistStep[]>([]);
+  const { permissions } = usePmsAccess();
+  // The extra checks are the check-in checklist, which takes operations access to change.
+  const canEditChecks = canManage && permissions.includes("pms.operations.manage");
   const [checkErrors, setCheckErrors] = useState<Record<string, string>>({});
   const [loadError, setLoadError] = useState("");
   const [error, setError] = useState("");
@@ -75,6 +80,7 @@ export function CheckinSettingsEditor() {
         setSettings(response.settings);
         setCanManage(response.canManage);
         setChecks(checklist.steps || []);
+        setSavedChecks(checklist.steps || []);
         setCatalog(addons);
       })
       .catch((err) =>
@@ -108,16 +114,24 @@ export function CheckinSettingsEditor() {
     setSuccess("");
     if (Object.keys(errors).length > 0) return;
     setSaving(true);
+    const ordered = (list: CheckinChecklistStep[]) =>
+      list.map((check, position) => ({ ...check, label: check.label.trim(), position }));
     try {
+      // The checks first, and only when they changed: if they are refused, nothing has changed.
+      // Both writes replace a whole object, so saving again after a failure is safe.
+      if (
+        canEditChecks &&
+        JSON.stringify(ordered(checks)) !== JSON.stringify(ordered(savedChecks))
+      ) {
+        const checklist = await settingsService.updateCheckinChecklist(ordered(checks));
+        setChecks(checklist.steps || []);
+        setSavedChecks(checklist.steps || []);
+      }
       const saved = await settingsService.updateCheckinSettings(settings);
-      const savedChecks = await settingsService.updateCheckinChecklist(
-        checks.map((check, position) => ({ ...check, label: check.label.trim(), position })),
-      );
       setSettings(saved.settings);
-      setChecks(savedChecks.steps || []);
       setSuccess(t("settings.checkIn.saved"));
     } catch (err) {
-      setError(humanizeApiError(err, t("settings.checkIn.saveError")));
+      setError(localizedErrorText(err, humanizeApiError(err, t("settings.checkIn.saveError")), t));
     } finally {
       setSaving(false);
     }
@@ -166,6 +180,7 @@ export function CheckinSettingsEditor() {
             settings={settings}
             onChange={update}
             checks={checks}
+            canEditChecks={canEditChecks}
             checkErrors={checkErrors}
             onChecksChange={(next) => {
               setSuccess("");
@@ -319,7 +334,7 @@ function OptionCards<T extends string>({
         return (
           <label
             key={option.value}
-            className={`flex cursor-pointer flex-col rounded-xl p-3 ${
+            className={`flex cursor-pointer flex-col rounded-xl p-3 focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-primary-500 ${
               selected
                 ? "bg-primary-50 ring-2 ring-inset ring-primary-600"
                 : "border border-gray-200 bg-white"
@@ -689,12 +704,14 @@ function KeysSection({
   settings,
   onChange,
   checks,
+  canEditChecks,
   checkErrors,
   onChecksChange,
 }: {
   settings: CheckinSettings;
   onChange: (next: CheckinSettings) => void;
   checks: CheckinChecklistStep[];
+  canEditChecks: boolean;
   checkErrors: Record<string, string>;
   onChecksChange: (next: CheckinChecklistStep[]) => void;
 }) {
@@ -722,72 +739,79 @@ function KeysSection({
           {t("settings.checkIn.extraChecks")}
         </h3>
         <p className="text-sm text-gray-600">{t("settings.checkIn.extraChecksHint")}</p>
-        <ul className="mt-3 space-y-2">
-          {checks.map((check) => (
-            <li key={check.id} className="rounded-xl border border-gray-200 p-3">
-              <div className="flex flex-wrap items-center gap-2">
-                <label className="min-w-0 flex-[1_1_14rem]">
-                  <span className="sr-only">{t("settings.checkIn.checkLabel")}</span>
-                  <input
-                    value={check.label}
-                    onChange={(event) => updateCheck(check.id, { label: event.target.value })}
-                    placeholder={t("settings.checkIn.checkLabelPlaceholder")}
-                    aria-invalid={Boolean(checkErrors[check.id])}
-                    className="h-10 w-full rounded-lg border border-gray-300 px-3 text-sm text-gray-900 placeholder:text-gray-400"
-                  />
-                </label>
-                <label>
-                  <span className="sr-only">{t("settings.checkIn.checkType")}</span>
-                  <select
-                    value={check.type}
-                    onChange={(event) =>
-                      updateCheck(check.id, {
-                        type: event.target.value as CheckinChecklistStepType,
-                      })
-                    }
-                    className="h-10 rounded-lg border border-gray-300 bg-white px-2 text-sm text-gray-900"
+        <fieldset disabled={!canEditChecks} className="min-w-0">
+          {!canEditChecks && (
+            <p className="mt-2 text-sm text-gray-600">{t("settings.checkIn.checksReadOnly")}</p>
+          )}
+          <ul className="mt-3 space-y-2">
+            {checks.map((check) => (
+              <li key={check.id} className="rounded-xl border border-gray-200 p-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <label className="min-w-0 flex-[1_1_14rem]">
+                    <span className="sr-only">{t("settings.checkIn.checkLabel")}</span>
+                    <input
+                      value={check.label}
+                      onChange={(event) => updateCheck(check.id, { label: event.target.value })}
+                      placeholder={t("settings.checkIn.checkLabelPlaceholder")}
+                      aria-invalid={Boolean(checkErrors[check.id])}
+                      className="h-10 w-full rounded-lg border border-gray-300 px-3 text-sm text-gray-900 placeholder:text-gray-400"
+                    />
+                  </label>
+                  <label>
+                    <span className="sr-only">{t("settings.checkIn.checkType")}</span>
+                    <select
+                      value={check.type}
+                      onChange={(event) =>
+                        updateCheck(check.id, {
+                          type: event.target.value as CheckinChecklistStepType,
+                        })
+                      }
+                      className="h-10 rounded-lg border border-gray-300 bg-white px-2 text-sm text-gray-900"
+                    >
+                      {(["checkbox", "text", "amount"] as const).map((type) => (
+                        <option key={type} value={type}>
+                          {t(`settings.checkIn.checkTypes.${type}`)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="flex items-center gap-2 text-sm text-gray-700">
+                    <input
+                      type="checkbox"
+                      checked={check.required}
+                      onChange={(event) =>
+                        updateCheck(check.id, { required: event.target.checked })
+                      }
+                      className="h-4 w-4 rounded border-gray-300"
+                    />
+                    {t("settings.checkIn.checkRequired")}
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => onChecksChange(checks.filter((item) => item.id !== check.id))}
+                    aria-label={t("settings.checkIn.removeCheck", { label: check.label || "…" })}
+                    className="flex h-10 w-10 items-center justify-center rounded-lg text-red-700 hover:bg-red-50"
                   >
-                    {(["checkbox", "text", "amount"] as const).map((type) => (
-                      <option key={type} value={type}>
-                        {t(`settings.checkIn.checkTypes.${type}`)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="flex items-center gap-2 text-sm text-gray-700">
-                  <input
-                    type="checkbox"
-                    checked={check.required}
-                    onChange={(event) => updateCheck(check.id, { required: event.target.checked })}
-                    className="h-4 w-4 rounded border-gray-300"
-                  />
-                  {t("settings.checkIn.checkRequired")}
-                </label>
-                <button
-                  type="button"
-                  onClick={() => onChecksChange(checks.filter((item) => item.id !== check.id))}
-                  aria-label={t("settings.checkIn.removeCheck", { label: check.label || "…" })}
-                  className="flex h-10 w-10 items-center justify-center rounded-lg text-red-700 hover:bg-red-50"
-                >
-                  <XMarkIcon className="h-5 w-5" aria-hidden="true" />
-                </button>
-              </div>
-              {checkErrors[check.id] && (
-                <p role="alert" className="mt-1 text-xs font-medium text-red-700">
-                  {checkErrors[check.id]}
-                </p>
-              )}
-            </li>
-          ))}
-        </ul>
-        <button
-          type="button"
-          onClick={() => onChecksChange([...checks, newCheck(checks.length)])}
-          className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-dashed border-gray-300 px-3 py-2 text-sm font-semibold text-gray-700 hover:border-gray-400"
-        >
-          <PlusIcon className="h-4 w-4" aria-hidden="true" />
-          {t("settings.checkIn.addCheck")}
-        </button>
+                    <XMarkIcon className="h-5 w-5" aria-hidden="true" />
+                  </button>
+                </div>
+                {checkErrors[check.id] && (
+                  <p role="alert" className="mt-1 text-xs font-medium text-red-700">
+                    {checkErrors[check.id]}
+                  </p>
+                )}
+              </li>
+            ))}
+          </ul>
+          <button
+            type="button"
+            onClick={() => onChecksChange([...checks, newCheck(checks.length)])}
+            className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-dashed border-gray-300 px-3 py-2 text-sm font-semibold text-gray-700 hover:border-gray-400"
+          >
+            <PlusIcon className="h-4 w-4" aria-hidden="true" />
+            {t("settings.checkIn.addCheck")}
+          </button>
+        </fieldset>
       </Row>
     </Section>
   );

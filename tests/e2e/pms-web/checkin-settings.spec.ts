@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import {
+  PMS_WEB_OWNER_PERMISSIONS,
   PMS_WEB_PROPERTY_ID,
   mockPmsWebAuthenticatedSession,
   mockPmsWebTargetRoutes,
@@ -135,6 +136,53 @@ test("edits the check-in and saves it as one object, extra checks included", asy
       }),
     ],
   ]);
+  await assertHealthy();
+});
+
+test("leaves the extra checks alone when only a setting changed", async ({ page }, testInfo) => {
+  const assertHealthy = watchPageHealth(page, testInfo);
+  const writes = await mockCheckinSettings(page);
+  await page.goto("/settings/check-in");
+  const main = page.locator("main");
+  await expect(main.getByRole("textbox").first()).toHaveValue("City tax collected");
+  await main.getByRole("switch", { name: "Show special request" }).click();
+  await page.getByRole("button", { name: "Save changes" }).click();
+  await expect(
+    page.getByRole("status").filter({ hasText: "Check-in settings saved." }),
+  ).toBeVisible();
+  expect(writes.settings).toHaveLength(1);
+  expect(writes.checklist).toHaveLength(0);
+  await assertHealthy();
+});
+
+test("keeps the extra checks read-only without operations access", async ({ page }, testInfo) => {
+  const assertHealthy = watchPageHealth(page, testInfo);
+  const writes = await mockCheckinSettings(page);
+  // Settings access but not operations: the checks are the check-in checklist, which needs it.
+  await page.route("**/api/identity/staff/self-access", (route) =>
+    route.fulfill({
+      json: {
+        membershipId: "pms-manager-membership",
+        roleKey: "hotel_manager",
+        permissions: PMS_WEB_OWNER_PERMISSIONS.filter(
+          (permission) => permission !== "pms.operations.manage",
+        ),
+      },
+    }),
+  );
+  await page.goto("/settings/check-in");
+  const main = page.locator("main");
+  await expect(
+    main.getByText("Only staff who can manage operations can change the extra checks."),
+  ).toBeVisible();
+  await expect(main.getByRole("button", { name: "Add check" })).toBeDisabled();
+  await main.getByRole("switch", { name: "Show special request" }).click();
+  await page.getByRole("button", { name: "Save changes" }).click();
+  await expect(
+    page.getByRole("status").filter({ hasText: "Check-in settings saved." }),
+  ).toBeVisible();
+  expect(writes.settings).toHaveLength(1);
+  expect(writes.checklist).toHaveLength(0);
   await assertHealthy();
 });
 

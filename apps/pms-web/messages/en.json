@@ -1282,6 +1282,7 @@
   "settings.checkIn.save": "Save changes",
   "settings.checkIn.loading": "Loading check-in settings…",
   "settings.checkIn.readOnly": "You can see these settings; only owners and managers with settings access can change them.",
+  "settings.checkIn.checksReadOnly": "Only staff who can manage operations can change the extra checks.",
   "settings.checkIn.overview": "Check-in steps",
   "settings.checkIn.step1.title": "Arrival",
   "settings.checkIn.step1.description": "What staff see first when they start a check-in.",
