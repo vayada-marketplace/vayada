@@ -50,12 +50,13 @@ async function mockExtras(page: Page, status = "confirmed") {
   let current: Record<string, unknown> = pending;
   await mockPmsWebAuthenticatedSession(page);
   await mockPmsWebTargetRoutes(page);
-  for (const suffix of ["notes", "additional-guests"])
-    await page.route(`${base}/${suffix}`, (route) => route.fulfill({ json: { items: [] } }));
-  await page.route(`${base}/change-request`, (route) => route.fulfill({ json: null }));
+  // First, so the routes below win for the reservation's own paths.
   await page.route(base, (route) =>
     route.fulfill({ json: { item: { ...pmsWebReservation, status } } }),
   );
+  for (const suffix of ["notes", "additional-guests"])
+    await page.route(`${base}/${suffix}`, (route) => route.fulfill({ json: { items: [] } }));
+  await page.route(`${base}/change-request`, (route) => route.fulfill({ json: null }));
   await page.route(`${base}/extras-request`, (route) =>
     route.fulfill({ json: { version: "booking-extras-requests.v1", items: [current, earlier] } }),
   );
